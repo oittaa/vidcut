@@ -52,6 +52,9 @@ where
 {
     let mut damaged = 0;
     let mut drain = |decoder: &mut ffmpeg::decoder::Opened, frame: &mut F| loop {
+        // The same flag the export frame loop loads, so a client that left
+        // stops a measurement between frames.
+        crate::cancel::stop()?;
         match decoder.receive_frame(frame) {
             Ok(()) => {
                 damaged = 0;
@@ -73,6 +76,7 @@ where
         }
     };
     for (s, packet) in input.packets() {
+        crate::cancel::stop()?;
         if s.index() == index {
             send_packet(decoder, &packet)?;
             drain(decoder, frame)?;
@@ -513,6 +517,7 @@ impl VideoReader {
         let first = self.first_pts.unwrap_or(i64::MIN);
         let mut back = 0i64;
         loop {
+            crate::cancel::stop()?;
             let ts = target.saturating_sub(back);
             let at_start = ts <= first
                 || back > 3600 * one_second
@@ -565,6 +570,7 @@ impl VideoReader {
     fn decode_one(&mut self) -> Result<Option<frame::Video>> {
         let mut damaged = 0;
         loop {
+            crate::cancel::stop()?;
             let mut frame = frame::Video::empty();
             match self.decoder.receive_frame(&mut frame) {
                 Ok(()) => {
@@ -592,6 +598,7 @@ impl VideoReader {
                 return Ok(None);
             }
             loop {
+                crate::cancel::stop()?;
                 let mut packet = ffmpeg::Packet::empty();
                 match packet.read(&mut self.input) {
                     Ok(()) if packet.stream() == self.stream => {

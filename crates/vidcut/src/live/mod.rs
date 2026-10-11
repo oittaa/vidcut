@@ -266,16 +266,24 @@ impl Handle {
     }
 
     /// Runs a request and waits for its answer. `progress` receives progress
-    /// notifications and returns false to cancel.
+    /// notifications (`Some`) and returns false to cancel. `None` only asks
+    /// whether the client is still there: a closed connection then sets the
+    /// same flag a failed progress write sets, so work that never reports
+    /// progress (a frame, a storyboard, an analysis, the loudness measure
+    /// before an export) stops too.
     pub fn call(
         &self,
         envelope: Envelope,
         origin: Origin,
         project: Option<PathBuf>,
-        progress: &mut dyn FnMut(Value) -> bool,
+        progress: &mut dyn FnMut(Option<Value>) -> bool,
     ) -> Result<Response> {
         let (tx, rx) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
+        // Already gone: the worker sees the flag before it starts.
+        if !progress(None) {
+            cancel.store(true, Ordering::Relaxed);
+        }
         self.tx
             .send(Msg::Request {
                 envelope,
@@ -288,14 +296,21 @@ impl Handle {
             })
             .map_err(|_| Error::no_instance("the vidcut GUI is shutting down"))?;
         loop {
-            match rx.recv() {
+            match rx.recv_timeout(CLIENT_POLL) {
                 Ok(ReplyEvent::Progress(v)) => {
-                    if !progress(v) {
+                    if !progress(Some(v)) {
                         cancel.store(true, Ordering::Relaxed);
                     }
                 }
                 Ok(ReplyEvent::Done(r)) => return r,
-                Err(_) => return Err(Error::no_instance("the vidcut GUI is shutting down")),
+                Err(RecvTimeoutError::Timeout) => {
+                    if !progress(None) {
+                        cancel.store(true, Ordering::Relaxed);
+                    }
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err(Error::no_instance("the vidcut GUI is shutting down"));
+                }
             }
         }
     }
@@ -515,6 +530,10 @@ struct Wait {
 
 /// How long a request may wait for frames or captures.
 const WAIT_LIMIT: Duration = Duration::from_secs(10);
+
+/// How often an IPC call checks that its client is still connected, when the
+/// work itself is not sending progress.
+const CLIENT_POLL: Duration = Duration::from_millis(50);
 
 /// Finished jobs kept for `jobs.list` and the jobs panel.
 const JOBS_KEPT: usize = 50;
@@ -1146,9 +1165,17 @@ impl Live {
             Step::Task(task) => self.spawn_task(Job { rev: None, ..job }, task),
             Step::Measure(measure, then) => {
                 let tx = self.tx.clone();
+                // The same flag a closed connection sets. Measuring is the
+                // slow part of an edit that analyzes; it stops with the client.
+                let cancel = job
+                    .reply
+                    .as_ref()
+                    .map(|r| r.cancel.clone())
+                    .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
                 let _ = std::thread::Builder::new()
                     .name("vidcut-measure".into())
                     .spawn(move || {
+                        let _guard = vidcut_av::cancel::Guard::set(&cancel);
                         let result = measure();
                         let _ = tx.send(Msg::Measured {
                             job,

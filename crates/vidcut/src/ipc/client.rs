@@ -16,8 +16,11 @@ use vidcut_core::{Envelope, Error, ErrorCode, Response, Result};
 /// project the GUI has open.
 ///
 /// Setting `cancel` closes the connection: the wait ends with `CANCELLED`,
-/// and the GUI stops a foreground export once it can't report progress. A
-/// flag already set when the call starts sends nothing, so nothing ran.
+/// and the GUI stops the call. A foreground export notices when its progress
+/// write fails; a frame, a storyboard, an analysis and the loudness measure
+/// before an export notice the closed connection itself. A background export
+/// job is not stopped this way. A flag already set when the call starts sends
+/// nothing, so nothing ran.
 pub fn call(
     socket: &Path,
     envelope: &Envelope,
