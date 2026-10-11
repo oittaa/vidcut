@@ -3590,6 +3590,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "typed-path"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e28f89b80c87b8fb0cf04ab448d5dd0dd0ade2f8891bae878de66a75a28600e"
+
+[[package]]
 name = "uds_windows"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3698,6 +3704,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "crc32fast",
  "ctrlc",
  "eframe",
  "egui_kittest",
@@ -3716,6 +3723,7 @@ dependencies = [
  "vidcut-core",
  "vidcut-mpv",
  "winit",
+ "zip",
 ]
 
 [[package]]
@@ -4660,6 +4668,20 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "zip"
+version = "9.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e49ade69c4434c55dd651d36fe05f38e0578db948b773cbc01c48c4b5e560692"
+dependencies = [
+ "crc32fast",
+ "flate2",
+ "indexmap",
+ "memchr",
+ "nix",
+ "typed-path",
 ]
 
 [[package]]

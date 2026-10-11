@@ -423,7 +423,16 @@ impl Workspace {
                     .add_enabled(open, egui::Button::new("Export Timeline (OTIO)…"))
                     .clicked()
                 {
-                    self.export_timeline(ui.ctx());
+                    self.export_timeline(ui.ctx(), false);
+                }
+                if ui
+                    .add_enabled(
+                        open,
+                        egui::Button::new("Export Timeline with Media (OTIOZ)…"),
+                    )
+                    .clicked()
+                {
+                    self.export_timeline(ui.ctx(), true);
                 }
                 ui.separator();
                 if ui

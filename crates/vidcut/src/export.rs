@@ -1,5 +1,6 @@
 //! Export as the session runs it: presets, outputs, plans, encoder cache.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
@@ -9,11 +10,13 @@ use vidcut_av::export::{self as engine, Progress, Report};
 use vidcut_core::export::{
     Container, EncoderChoice, ExportSettings, Preset, apply_overrides, builtin_presets, validate,
 };
+use vidcut_core::otio::{self, Locations};
 use vidcut_core::render::{self, RenderPlan, VideoPiece};
 use vidcut_core::request::ExportParams;
 use vidcut_core::time::{TimeContext, TimeSpec};
 use vidcut_core::{Error, ErrorCode, Project, Result};
 
+use crate::bundle;
 use crate::paths::{cache_dir, config_dir};
 
 /// Built-in presets plus user presets from `~/.config/vidcut/presets/*.toml`.
@@ -157,23 +160,68 @@ pub fn delete_preset(name: &str, dry_run: bool) -> Result<Value> {
     Ok(json!({ "deleted": name, "path": path }))
 }
 
-/// Whether `output` is an OpenTimelineIO file: the edit, not media.
+/// A timeline for other editors (deviation X9), as an output's extension
+/// names one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimelineFormat {
+    /// `.otio`: the edit.
+    Otio,
+    /// `.otioz` or `.otiod`: the edit with its media.
+    Bundle(bundle::Kind),
+}
+
+impl TimelineFormat {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Otio => "otio",
+            Self::Bundle(kind) => kind.name(),
+        }
+    }
+}
+
+/// The timeline format `output` names, if it names one.
+pub fn timeline_format(output: &Path) -> Option<TimelineFormat> {
+    match bundle::Kind::of(output) {
+        Some(kind) => Some(TimelineFormat::Bundle(kind)),
+        None => is_otio(output).then_some(TimelineFormat::Otio),
+    }
+}
+
+/// Whether `output` is an `.otio` file: the edit alone, written at once.
 pub fn is_otio(output: &Path) -> bool {
     output
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("otio"))
 }
 
-/// An `.otio` export (deviation X9): the timeline, or `range` of it, as
-/// OpenTimelineIO. Unlike media exports it ignores the In/Out marks (they
-/// travel inside the file). `write: false` only describes it.
-pub fn otio(
+/// The name a timeline export gives the timeline: the project file's.
+pub fn timeline_name(project_path: &Path) -> String {
+    project_path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// Cancellation and byte progress for writing a bundle.
+pub struct Writing<'a> {
+    pub cancel: &'a AtomicBool,
+    /// Called with bytes written and their total.
+    pub progress: &'a mut dyn FnMut(u64, u64),
+}
+
+/// A timeline export (deviation X9): `.otio` (the edit), `.otioz` or
+/// `.otiod` (the edit and its media, in a bundle). Unlike media exports it
+/// covers the whole timeline unless given a range: the In/Out marks travel
+/// inside the file. Without `write` it only describes the export.
+pub fn timeline(
     p: &Project,
     name: &str,
     params: &ExportParams,
     playhead: Option<i64>,
-    write: bool,
+    write: Option<Writing>,
 ) -> Result<Value> {
+    let format =
+        timeline_format(&params.output).ok_or_else(|| Error::internal("not a timeline export"))?;
     if params.per_clip
         || params.audio_only
         || params.preset.is_some()
@@ -182,41 +230,83 @@ pub fn otio(
         || params.encoder.is_some()
         || params.name.is_some()
     {
-        return Err(Error::usage(
-            "an .otio export writes the edit, not media: it takes only a range and overwrite",
-        ));
+        return Err(Error::usage(format!(
+            "an .{} export writes the edit, not rendered media: it takes only a range and \
+             overwrite",
+            format.name()
+        )));
     }
-    let span = match &params.range {
-        Some(r) => Some(p.time_context(playhead).range(r)?),
-        None => None,
-    };
-    let doc = vidcut_core::otio::export(p, name, span)?;
-    let (a, b) = span.unwrap_or((0, p.end()));
-    let clips = doc["tracks"]["children"][0]["children"]
-        .as_array()
-        .map_or(0, |items| {
-            items
-                .iter()
-                .filter(|i| i["OTIO_SCHEMA"] == "Clip.2")
-                .count()
-        });
-    let summary = json!({
-        "path": params.output, "format": "otio", "range": [a, b], "frames": b - a, "clips": clips,
-    });
-    if !write {
-        return Ok(json!({ "preset": null, "format": "otio", "outputs": [summary] }));
-    }
+    // As media exports do: checked when planned, so a job doesn't start
+    // only to fail.
     if params.output.exists() && !params.overwrite {
         return Err(Error::invalid(format!(
             "{} exists; pass overwrite to replace it",
             params.output.display()
         )));
     }
-    let text = serde_json::to_string_pretty(&doc).map_err(|e| Error::internal(e.to_string()))?;
-    let part = params.output.with_extension("otio.part");
-    std::fs::write(&part, text + "\n")
-        .and_then(|()| std::fs::rename(&part, &params.output))
-        .map_err(|e| Error::usage(format!("{}: {e}", params.output.display())))?;
+    let span = match &params.range {
+        Some(r) => Some(p.time_context(playhead).range(r)?),
+        None => None,
+    };
+    let (a, b) = span.unwrap_or((0, p.end()));
+    let ids = otio::used_media(p, span);
+    // Source ranges count from each media's timecode, which media probed
+    // before vidcut kept them don't have yet.
+    let mut project = p.clone();
+    crate::env::fill_timecodes(&mut project, &ids);
+    let items = match format {
+        TimelineFormat::Otio => Vec::new(),
+        TimelineFormat::Bundle(_) => bundle::plan(&project, &ids)?,
+    };
+    let names: HashMap<String, String> = items
+        .iter()
+        .map(|i| (i.media.clone(), i.location.clone()))
+        .collect();
+    let locations = match format {
+        TimelineFormat::Otio => Locations::Absolute,
+        TimelineFormat::Bundle(_) => Locations::Bundle(&names),
+    };
+    let doc = otio::export(&project, name, span, locations)?;
+    let clips = p
+        .tracks
+        .iter()
+        .flat_map(|t| &t.clips)
+        .filter(|c| {
+            (c.video && c.start.max(a) < c.end().min(b))
+                || c.audio_range().is_some_and(|(s, e)| s.max(a) < e.min(b))
+        })
+        .count();
+    let mut summary = json!({
+        "path": params.output, "format": format.name(), "range": [a, b], "frames": b - a,
+        "clips": clips,
+    });
+    if let TimelineFormat::Bundle(_) = format {
+        summary["media"] = json!(items.len());
+        summary["files"] = json!(items.iter().map(|i| i.files.len()).sum::<usize>());
+        summary["bytes"] = json!(items.iter().map(|i| i.bytes).sum::<u64>());
+    }
+    let Some(writing) = write else {
+        return Ok(json!({ "preset": null, "format": format.name(), "outputs": [summary] }));
+    };
+    let text =
+        serde_json::to_string_pretty(&doc).map_err(|e| Error::internal(e.to_string()))? + "\n";
+    match format {
+        TimelineFormat::Otio => {
+            let part = vidcut_av::export::partial_path(&params.output);
+            std::fs::write(&part, text)
+                .and_then(|()| std::fs::rename(&part, &params.output))
+                .map_err(|e| Error::usage(format!("{}: {e}", params.output.display())))?;
+        }
+        TimelineFormat::Bundle(kind) => bundle::write(
+            kind,
+            &params.output,
+            &text,
+            &items,
+            params.overwrite,
+            writing.cancel,
+            writing.progress,
+        )?,
+    }
     Ok(json!({ "outputs": [summary] }))
 }
 
@@ -295,6 +385,17 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
         (Some(s), None) => (s.clone(), None),
         (None, Some(name)) => (preset(name)?.settings, Some(name.clone())),
         (None, None) => {
+            let ext = params.output.extension().and_then(|e| e.to_str());
+            if !params.per_clip
+                && let Some(ext) = ext.filter(|e| Container::from_extension(e).is_none())
+            {
+                return Err(Error::usage(format!(
+                    "{}: vidcut doesn't export .{ext} files; name the file .mp4, .mov, .mkv, \
+                     .webm, .m4a, .mp3, .flac, .wav or .ogg (or .otio, .otioz or .otiod for a \
+                     timeline), or give a preset",
+                    params.output.display()
+                )));
+            }
             let name = if params.per_clip {
                 "h264-master"
             } else {

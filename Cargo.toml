@@ -58,6 +58,11 @@ notify = { version = "8.2", default-features = false }
 rfd = "0.17"
 # Shell quoting for the commands the GUI shows ("the same export from a shell").
 shlex = "2.0"
+# OpenTimelineIO bundles (.otioz) are zip files: stored media, a deflated
+# timeline. Pure Rust (zlib-rs), MIT.
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+# Checks media already unpacked from a bundle against its CRC-32.
+crc32fast = "1.5"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

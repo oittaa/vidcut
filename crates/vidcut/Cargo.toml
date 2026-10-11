@@ -26,6 +26,8 @@ libc.workspace = true
 notify.workspace = true
 rfd.workspace = true
 shlex.workspace = true
+zip.workspace = true
+crc32fast.workspace = true
 
 [dev-dependencies]
 egui_kittest.workspace = true

@@ -577,10 +577,10 @@ fn otio_round_trips_frame_exactly() {
     // Moved media: an error naming the files, unless found by name.
     let fixtures = a.parent().unwrap();
     let moved = sb.dir.join("moved.otio");
-    let text = std::fs::read_to_string(&cut).unwrap().replace(
-        &format!("file://{}/", s(fixtures)),
-        "file:///nonexistent/footage/",
-    );
+    // (Media are named by plain path, as Resolve names them.)
+    let text = std::fs::read_to_string(&cut)
+        .unwrap()
+        .replace(&format!("\"{}/", s(fixtures)), "\"/nonexistent/footage/");
     std::fs::write(&moved, text).unwrap();
     let third = sb.dir.join("r.vidcut");
     sb.ok(&["new", s(&third)]);
@@ -597,6 +597,221 @@ fn otio_round_trips_frame_exactly() {
     sb.ok_in(&third, &["import", s(&moved), "--search", s(above)]);
     assert_eq!(
         timeline_shape(&sb, &third),
+        timeline_shape(&sb, &sb.project())
+    );
+}
+
+/// A Python with OpenTimelineIO (`VIDCUT_OTIO_PYTHON`, else `python3`), to
+/// check files against the reference implementation.
+fn otio_python() -> Option<String> {
+    let python = std::env::var("VIDCUT_OTIO_PYTHON").unwrap_or_else(|_| "python3".into());
+    let ok = Command::new(&python)
+        .args(["-c", "import opentimelineio"])
+        .output()
+        .is_ok_and(|o| o.status.success());
+    ok.then_some(python)
+}
+
+/// Runs `script` with OpenTimelineIO's Python library; its stdout.
+fn python(python: &str, dir: &Path, script: &str) -> String {
+    let out = Command::new(python)
+        .current_dir(dir)
+        .args(["-c", script])
+        .output()
+        .expect("run python");
+    assert!(
+        out.status.success(),
+        "python failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout).unwrap()
+}
+
+/// The same pictures at `frames` in two projects.
+fn same_frames(sb: &Sandbox, a: &Path, b: &Path, frames: &[&str]) {
+    for at in frames {
+        let (x, y) = (sb.dir.join("x.png"), sb.dir.join("y.png"));
+        sb.ok_in(a, &["frame", "--at", at, "-o", s(&x)]);
+        sb.ok_in(b, &["frame", "--at", at, "-o", s(&y)]);
+        assert_eq!(
+            std::fs::read(&x).unwrap(),
+            std::fs::read(&y).unwrap(),
+            "frame {at}"
+        );
+    }
+}
+
+#[test]
+fn otio_bundles_and_timecode() {
+    // Deviation X9: `.otioz` and `.otiod` bundles carry the media along;
+    // source ranges count from the media's timecode, as Resolve reads them.
+    let sb = Sandbox::new("otioz");
+    let tc = fixture(
+        FixtureSpec::new(VideoCodec::H264, Container::Mov, 320, 180, (25, 1), 75)
+            .timecode("10:00:00:00"),
+    );
+    let plain = fixture(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (25, 1),
+        75,
+    ));
+    sb.cmd(&["new"]).arg(sb.project()).output().unwrap();
+    let r = sb.ok(&["media", "add", s(&tc), s(&plain)]);
+    assert_eq!(r["result"]["media"], serde_json::json!(["m1", "m2"]));
+    let m1 = sb.ok(&["media", "show", "m1"]);
+    assert_eq!(
+        m1["result"]["info"]["timecode"],
+        serde_json::json!({"count": 900_000, "rate": "25"}),
+        "{m1}"
+    );
+    assert_eq!(m1["result"]["timecode"], "10:00:00:00");
+    sb.ok(&["edit", "append", "m1", "--range", "10f..40f"]);
+    sb.ok(&["edit", "append", "m2", "--range", "5f..35f"]);
+    sb.ok(&["edit", "append", "m1", "--range", "50f..70f"]);
+    sb.ok(&["edit", "audio-roll", "c1", "--tail", "--by", "3f"]);
+    sb.ok(&["clip", "set", "c2", "--gain", "-4"]);
+
+    // .otio: plain paths, sources from 10:00:00:00.
+    let cut = sb.dir.join("cut.otio");
+    sb.ok(&["export", s(&cut)]);
+    let doc: Value = serde_json::from_str(&std::fs::read_to_string(&cut).unwrap()).unwrap();
+    let first = &doc["tracks"]["children"][0]["children"][0];
+    let reference = &first["media_references"]["DEFAULT_MEDIA"];
+    assert_eq!(reference["target_url"], s(&tc));
+    assert_eq!(
+        reference["available_range"]["start_time"]["value"],
+        900_000.0
+    );
+    assert_eq!(first["source_range"]["start_time"]["value"], 900_010.0);
+
+    // .otioz: planned, then written as OpenTimelineIO's adapter lays it out.
+    let bundle = sb.dir.join("cut.otioz");
+    let plan = sb.ok(&["--dry-run", "export", s(&bundle)]);
+    let o = &plan["result"]["outputs"][0];
+    assert_eq!(
+        (o["format"].as_str(), o["files"].as_u64()),
+        (Some("otioz"), Some(2))
+    );
+    let bytes = std::fs::metadata(&tc).unwrap().len() + std::fs::metadata(&plain).unwrap().len();
+    assert_eq!(o["bytes"].as_u64(), Some(bytes));
+    assert!(!bundle.exists());
+    sb.ok(&["export", s(&bundle)]);
+    sb.fails(4, &["export", s(&bundle)]);
+    sb.ok(&["export", s(&bundle), "--overwrite"]);
+    let names = |zip: &Path| -> Vec<String> {
+        let mut z = zip::ZipArchive::new(std::fs::File::open(zip).unwrap()).unwrap();
+        (0..z.len())
+            .map(|i| z.by_index(i).unwrap().name().unwrap().into_owned())
+            .collect()
+    };
+    let file_name = |p: &Path| p.file_name().unwrap().to_str().unwrap().to_string();
+    assert_eq!(
+        names(&bundle),
+        [
+            "version.txt".to_string(),
+            "content.otio".into(),
+            format!("media/{}", file_name(&tc)),
+            format!("media/{}", file_name(&plain)),
+        ]
+    );
+
+    // Imported elsewhere: the media unpack next to the bundle.
+    let away = sb.dir.join("away");
+    std::fs::create_dir_all(&away).unwrap();
+    let moved = away.join("cut.otioz");
+    std::fs::copy(&bundle, &moved).unwrap();
+    let other = away.join("q.vidcut");
+    sb.ok(&["new", s(&other)]);
+    let dry = sb.ok_in(&other, &["--dry-run", "import", s(&moved)]);
+    assert_eq!(dry["result"]["bundle"]["unpacked"], false);
+    assert!(!away.join("cut").exists(), "a dry run unpacks nothing");
+    let r = sb.ok_in(&other, &["import", s(&moved)]);
+    assert_eq!(r["result"]["warnings"], serde_json::json!([]), "{r}");
+    assert_eq!(r["result"]["bundle"]["folder"], s(&away.join("cut")));
+    let pool = sb.ok_in(&other, &["media", "list"]);
+    assert!(
+        pool["result"].as_array().unwrap().iter().all(|m| m["path"]
+            .as_str()
+            .unwrap()
+            .starts_with(s(&away.join("cut/media")))),
+        "{pool}"
+    );
+    assert_eq!(
+        timeline_shape(&sb, &other),
+        timeline_shape(&sb, &sb.project())
+    );
+    same_frames(
+        &sb,
+        &sb.project(),
+        &other,
+        &["0f", "29f", "30f", "59f", "60f", "79f"],
+    );
+    // Again: the unpacked media are the bundle's, and stay.
+    sb.ok_in(&other, &["import", s(&moved), "--replace"]);
+    // Or unpacked where asked.
+    let third = sb.dir.join("r.vidcut");
+    sb.ok(&["new", s(&third)]);
+    let fast = sb.dir.join("fast");
+    sb.ok_in(&third, &["import", s(&moved), "--unpack", s(&fast)]);
+    assert!(fast.join("media").join(file_name(&plain)).is_file());
+
+    // .otiod: the same as a folder.
+    let folder = sb.dir.join("cut.otiod");
+    sb.ok(&["export", s(&folder)]);
+    assert!(folder.join("content.otio").is_file());
+    let fourth = sb.dir.join("s.vidcut");
+    sb.ok(&["new", s(&fourth)]);
+    sb.ok_in(&fourth, &["import", s(&folder)]);
+    assert_eq!(
+        timeline_shape(&sb, &fourth),
+        timeline_shape(&sb, &sb.project())
+    );
+
+    // Not a timeline nor a container vidcut knows: an error, not an MP4
+    // under that name.
+    sb.fails(2, &["export", s(&sb.dir.join("cut.xyz"))]);
+    assert!(!sb.dir.join("cut.xyz").exists());
+
+    // The reference implementation reads all three, and its own bundles of
+    // our timeline import frame-exactly.
+    let Some(py) = otio_python() else {
+        eprintln!(
+            "skipping the OpenTimelineIO interop part: no Python with opentimelineio \
+             (pip install opentimelineio; or set VIDCUT_OTIO_PYTHON)"
+        );
+        return;
+    };
+    let out = python(
+        &py,
+        &sb.dir,
+        r#"
+import opentimelineio as otio
+for f in ["cut.otio", "cut.otioz", "cut.otiod"]:
+    tl = otio.adapters.read_from_file(f)
+    c = tl.find_clips()[0]
+    print(f, len(tl.find_clips()), c.source_range.start_time.value,
+          c.available_range().start_time.value, c.range_in_parent().start_time.value)
+tl = otio.adapters.read_from_file("cut.otio")
+otio.adapters.write_to_file(tl, "py.otioz")
+"#,
+    );
+    assert_eq!(
+        out.lines().collect::<Vec<_>>(),
+        [
+            "cut.otio 6 900010.0 900000.0 0.0",
+            "cut.otioz 6 900010.0 900000.0 0.0",
+            "cut.otiod 6 900010.0 900000.0 0.0"
+        ]
+    );
+    let fifth = sb.dir.join("t.vidcut");
+    sb.ok(&["new", s(&fifth)]);
+    let r = sb.ok_in(&fifth, &["import", s(&sb.dir.join("py.otioz"))]);
+    assert_eq!(r["result"]["warnings"], serde_json::json!([]), "{r}");
+    assert_eq!(
+        timeline_shape(&sb, &fifth),
         timeline_shape(&sb, &sb.project())
     );
 }
@@ -927,6 +1142,64 @@ fn stills_and_sequences_edit_and_export() {
     want.extend((10..30).map(Some));
     want.extend([Some(77); 5]);
     assert_eq!(barcodes(&out), want);
+    // Through an .otioz bundle (deviation X9): the still, and the sequence's
+    // pictures in a folder of their own; back, the same pictures.
+    let bundle = sb.dir.join("pictures.otioz");
+    sb.ok(&["export", s(&bundle)]);
+    let other = sb.dir.join("q.vidcut");
+    sb.ok(&["new", s(&other)]);
+    let r = sb.ok_in(&other, &["import", s(&bundle)]);
+    assert_eq!(r["result"]["warnings"], serde_json::json!([]), "{r}");
+    let m = sb.ok_in(&other, &["media", "show", "m2"])["result"].clone();
+    assert_eq!(m["sequence"]["count"], 60, "{m}");
+    assert!(
+        m["path"]
+            .as_str()
+            .unwrap()
+            .starts_with(s(&sb.dir.join("pictures/media/"))),
+        "{m}"
+    );
+    let back = sb.dir.join("back.mkv");
+    sb.ok_in(
+        &other,
+        &[
+            "export",
+            s(&back),
+            "--set",
+            "video.quality=0",
+            "--set",
+            "video.speed=ultrafast",
+            "--encoder",
+            "cpu",
+        ],
+    );
+    assert_eq!(barcodes(&back), want);
+    if let Some(py) = otio_python() {
+        let out = python(
+            &py,
+            &sb.dir,
+            r#"
+import opentimelineio as otio
+tl = otio.adapters.read_from_file("pictures.otioz")
+for c in tl.find_clips():
+    r = c.media_reference
+    print(type(r).__name__, getattr(r, "target_url_base", None) or r.target_url)
+print(tl.find_clips()[1].media_reference.target_url_for_image_number(0))
+"#,
+        );
+        let name = |p: &Path| p.file_name().unwrap().to_str().unwrap().to_string();
+        let (picture, folder) = (name(&still[0]), name(seq[0].parent().unwrap()));
+        assert_eq!(
+            out.lines().collect::<Vec<_>>(),
+            [
+                format!("ExternalReference media/{picture}"),
+                format!("ImageSequenceReference media/{folder}/"),
+                format!("ExternalReference media/{picture}"),
+                format!("media/{folder}/{}", name(&seq[0])),
+            ],
+            "{out}"
+        );
+    }
     // A file of the sequence without --sequence is a still of its own.
     let r = sb.ok(&["media", "add", s(&seq[0])]);
     assert_eq!(r["changes"]["created"], serde_json::json!(["m3"]));

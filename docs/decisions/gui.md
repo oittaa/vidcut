@@ -187,7 +187,7 @@ A seek or load ("motion") is shown after two steps:
   - A job still running after that is stuck in a decoder or an encoder. The session removes its partial files itself, and the process ends without it.
   - A job plans its files (`JobPlanned`) before it writes them, and once cancelled starts none. So only a file whose creation began before the cancel and is still blocked (on a hung network share, say) can appear afterwards.
   - A client waiting for such a job, or for its plan, hears that the GUI closed.
-- `.otio` exports write a small file at once and aren't jobs.
+- `.otio` exports write a small file at once and aren't jobs. `.otioz` and `.otiod` bundles copy whole media files, so they are jobs like media exports.
 
 **The windows only send requests:**
 - **Quick Export** (p. 788) lists the presets marked `quick_export`; Export… asks for a file name, then starts a background export and opens its progress window.
@@ -196,7 +196,7 @@ A seek or load ("motion") is shown after two steps:
 - **Asking the session:** windows that need answers (presets, plans, starting an export, imports) call `Handle::call` on a helper thread and poll the result each frame (`Ask`), so the UI never waits. These lookups are left out of the command log, and their errors show in the window instead of the status bar.
 - **File dialogs** run on helper threads behind a `Dialogs` trait; tests answer them directly.
 - **Placement:** windows open near the middle and stay anchored at their top-left, so they don't move while their content changes size.
-- **Timeline interchange** (deviation X9): File > Import Timeline asks Append or Replace when the timeline has clips, and asks for a folder when media aren't found (p. 529). Import warnings show in a window.
+- **Timeline interchange** (deviation X9): File > Import Timeline (`.otio` or `.otioz`; an `.otiod` through its `content.otio`) asks Append or Replace when the timeline has clips, and asks for a folder when media aren't found (p. 529). Import warnings show in a window. An `.otioz` import unpacks its media on a worker first (`Step::Measure`), so the session keeps answering meanwhile. File > Export Timeline writes `.otio`; File > Export Timeline with Media writes an `.otioz` as a job, as Resolve's export offers both (p. 4160).
 - **`gui.show`** opens any of these windows (or the log, or the Mixer) for the person at the GUI, e.g. after an agent prepared an export.
 
 ## 10. Automatic tools (M7)

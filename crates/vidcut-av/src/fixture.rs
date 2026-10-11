@@ -207,6 +207,9 @@ pub struct FixtureSpec {
     /// white is SDR reference white (203 nits in PQ, 75% in HLG), which an
     /// SDR player that doesn't convert shows gray.
     pub hdr: Option<vidcut_core::model::Hdr>,
+    /// A start timecode (`HH:MM:SS:FF`, `;` for drop-frame) as a camera
+    /// records it: MP4 and MOV get a `tmcd` track.
+    pub timecode: Option<String>,
 }
 
 /// 10-bit codes (limited range) of SDR reference white in HDR: 203 nits in
@@ -263,7 +266,14 @@ impl FixtureSpec {
             rotation: 0,
             top_field_first: None,
             hdr: None,
+            timecode: None,
         }
+    }
+
+    /// Records `tc` as the start timecode (`01:00:00:00`).
+    pub fn timecode(mut self, tc: &str) -> Self {
+        self.timecode = Some(tc.to_string());
+        self
     }
 
     /// 10-bit HDR with this transfer (needs [`VideoCodec::Hevc10`]).
@@ -377,7 +387,15 @@ impl FixtureSpec {
             None => "",
             Some(vidcut_core::model::Hdr::Pq) => "pq",
             Some(vidcut_core::model::Hdr::Hlg) => "hlg",
-        };
+        } + &self
+            .timecode
+            .as_ref()
+            .map(|tc| {
+                let digits: String = tc.chars().filter(char::is_ascii_digit).collect();
+                let drop = if tc.contains(';') { "d" } else { "" };
+                format!("tc{digits}{drop}")
+            })
+            .unwrap_or_default();
         format!(
             "{content}{v}_{codec}_{w}x{h}{rot}_{n}-{d}{vfr}_g{g}b{b}_{f}f_{audio}_o{o}.{ext}",
             v = GENERATOR_VERSION,
@@ -693,6 +711,11 @@ pub fn generate(spec: &FixtureSpec, path: &Path) -> Result<()> {
         )?),
         None => None,
     };
+    if let Some(tc) = &spec.timecode {
+        let mut tags = ffmpeg::Dictionary::new();
+        tags.set("timecode", tc);
+        octx.set_metadata(tags);
+    }
     octx.write_header().ctx(|| "writing header".into())?;
     if let Some(v) = video.as_mut() {
         v.stream_tb = octx.stream(0).expect("video stream").time_base();
@@ -819,6 +842,10 @@ impl VideoTrack {
             .ctx(|| format!("opening {name}"))?;
         ost.set_parameters(&encoder);
         ost.set_time_base(tb);
+        if spec.timecode.is_some() {
+            // The MOV muxer counts a timecode track's frames at this rate.
+            ost.set_avg_frame_rate(ffmpeg::Rational(spec.fps.0 as i32, spec.fps.1 as i32));
+        }
         if spec.rotation != 0 {
             unsafe {
                 let par = &mut *(*ost.as_mut_ptr()).codecpar;
