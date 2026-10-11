@@ -554,7 +554,7 @@ impl Workspace {
                     "Jobs".to_string()
                 };
                 ui.toggle_value(&mut self.export.show_jobs, jobs)
-                    .on_hover_text("Exports, with progress");
+                    .on_hover_text("Exports and proxy encodes, with progress");
                 if let Some(e) = &self.snap.preview_error {
                     ui.label(RichText::new("no preview").color(theme::ERROR))
                         .on_hover_text(e);

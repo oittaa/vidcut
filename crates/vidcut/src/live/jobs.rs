@@ -1,5 +1,5 @@
-//! Export jobs of the running GUI: what `jobs.*` report and the jobs panel
-//! shows (docs/decisions/gui.md §9).
+//! Jobs of the running GUI, exports and proxy encodes: what `jobs.*` report
+//! and the jobs panel shows (docs/decisions/gui.md §9).
 
 use std::path::PathBuf;
 use std::time::{Instant, SystemTime};
@@ -25,18 +25,19 @@ pub struct JobOutput {
     pub frames: i64,
 }
 
-/// One export.
+/// One export or proxy encode.
 #[derive(Debug, Clone, Serialize)]
 pub struct JobInfo {
     /// `j<N>`, counted per GUI session.
     pub id: String,
-    /// `export` (the only kind so far).
+    /// `export` or `proxy`.
     pub kind: &'static str,
-    /// What it writes: a file name, or a folder for per-clip exports.
+    /// What it writes: a file name, or a folder for per-clip exports; for
+    /// proxies, the media they are made for.
     pub title: String,
     /// Who started it: `gui` or `ipc`.
     pub origin: &'static str,
-    /// The `export.start` params.
+    /// The `export.start` or `proxy.generate` params.
     pub params: Value,
     pub state: JobState,
     /// The files, once planned.
@@ -55,7 +56,7 @@ pub struct JobInfo {
     /// Unix times in seconds.
     pub started: f64,
     pub finished: Option<f64>,
-    /// The `export.start` result, when done.
+    /// The request's result, when done.
     pub result: Option<Value>,
     pub error: Option<Error>,
     #[serde(skip)]
@@ -99,6 +100,16 @@ impl JobInfo {
             result: None,
             error: None,
             clock: Instant::now(),
+        }
+    }
+
+    /// A `proxy.generate` encode. Its files are known only as it writes
+    /// them, so progress counts the file being written.
+    pub(crate) fn proxies(id: String, origin: &'static str, params: Value, title: String) -> Self {
+        Self {
+            kind: "proxy",
+            title,
+            ..Self::new(id, origin, params)
         }
     }
 

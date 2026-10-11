@@ -1,6 +1,7 @@
 //! Proxy encodes (decision D41) run beside the session, not in it: the GUI's
 //! core thread keeps answering while one encodes, progress comes as an
-//! export's does, and a cancelled encode leaves no file and records nothing.
+//! export's does, each encode is a job the Jobs window and `jobs.*` show and
+//! cancel, and a cancelled encode leaves no file and records nothing.
 //! Headless, the encode happens before the project is locked. No players
 //! and no display.
 
@@ -44,6 +45,22 @@ fn ok(h: &live::Handle, method: &str, params: Value) -> Value {
     call(h, method, params.clone())
         .unwrap_or_else(|e| panic!("{method} {params}: {e}"))
         .result
+}
+
+/// The newest proxy job once `ready` accepts it, polling.
+fn proxy_job(h: &live::Handle, ready: impl Fn(&Value) -> bool) -> Value {
+    let wait = Instant::now();
+    loop {
+        let jobs = ok(h, "jobs.list", json!({}));
+        if let Some(j) = jobs.as_array().unwrap().last()
+            && j["kind"] == "proxy"
+            && ready(j)
+        {
+            return j.clone();
+        }
+        assert!(wait.elapsed() < Duration::from_secs(60), "{jobs:#}");
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 
 /// Files under `dir`, recursively.
@@ -148,8 +165,16 @@ fn proxies_encode_beside_the_session() {
     r.unwrap_or_else(|e| panic!("proxy.generate: {e}"));
     let last = events.last().unwrap();
     assert_eq!(
-        (&last["frames"], &last["total"]),
-        (&json!(900), &json!(900))
+        (&last["frames"], &last["total"], &last["job"]),
+        (&json!(900), &json!(900), &json!("j1"))
+    );
+    // It was a job, titled by its media.
+    let name = ok(&h, "media.get", json!({ "media": "m1" }))["name"].clone();
+    let job = proxy_job(&h, |_| true);
+    assert_eq!(
+        (&job["id"], &job["state"], &job["title"], &job["origin"]),
+        (&json!("j1"), &json!("done"), &name, &json!("ipc")),
+        "{job:#}"
     );
     let proxy = ok(&h, "media.get", json!({ "media": "m1" }))["proxy"].clone();
     let file = PathBuf::from(proxy["path"].as_str().unwrap());
@@ -170,10 +195,31 @@ fn proxies_encode_beside_the_session() {
     assert_eq!(e.code, ErrorCode::Cancelled, "{e}");
     assert!(ok(&h, "media.get", json!({ "media": "m1" }))["proxy"].is_null());
     assert!(files(&proxies).is_empty(), "{:?}", files(&proxies));
+    assert_eq!(proxy_job(&h, |_| true)["state"], "cancelled");
+
+    // 3. From the GUI, whose requests get no answer: the job shows the
+    // progress, and its Cancel (`jobs.cancel`) stops the encode the same way.
+    h.request("proxy.generate", json!({ "media": "m1" }));
+    let job = proxy_job(&h, |j| j["id"] == "j3" && j["frames"].as_i64() > Some(0));
+    assert_eq!(
+        (&job["state"], &job["origin"]),
+        (&json!("running"), &json!("gui"))
+    );
+    ok(&h, "jobs.cancel", json!({ "job": "j3" }));
+    let e = call(&h, "jobs.wait", json!({ "job": "j3" })).unwrap_err();
+    assert_eq!(e.code, ErrorCode::Cancelled, "{e}");
+    assert!(ok(&h, "media.get", json!({ "media": "m1" }))["proxy"].is_null());
+    assert!(files(&proxies).is_empty(), "{:?}", files(&proxies));
+    // Left to finish, it records the proxy, and `jobs.wait` sees it done.
+    h.request("proxy.generate", json!({ "media": "m1" }));
+    proxy_job(&h, |j| j["id"] == "j4");
+    assert_eq!(ok(&h, "jobs.wait", json!({ "job": "j4" }))["state"], "done");
+    assert!(!ok(&h, "media.get", json!({ "media": "m1" }))["proxy"].is_null());
+    ok(&h, "proxy.remove", json!({ "media": "m1" }));
     h.shutdown();
     let _ = session.join();
 
-    // 3. Headless: progress goes to the hooks, and the cancel flag stops the
+    // 4. Headless: progress goes to the hooks, and the cancel flag stops the
     // encode the same way.
     let cancel = Arc::new(AtomicBool::new(false));
     let mut frames = 0;

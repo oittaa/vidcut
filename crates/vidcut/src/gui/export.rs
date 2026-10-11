@@ -1231,7 +1231,7 @@ impl Workspace {
             .show(ctx, |ui| {
                 if jobs.is_empty() {
                     ui.label(dim(
-                        "No exports yet. Exports from vidcut CLI commands show here too.",
+                        "No exports or proxy encodes yet. Those from vidcut CLI commands show here too.",
                     ));
                 }
                 egui::ScrollArea::vertical()
@@ -1239,6 +1239,8 @@ impl Workspace {
                     .show(ui, |ui| {
                         for j in jobs.iter().rev() {
                             ui.group(|ui| {
+                                // Every job's box as wide as the window.
+                                ui.set_min_width(ui.available_width());
                                 ui.horizontal(|ui| {
                                     ui.label(RichText::new(&j.title).strong());
                                     ui.label(dim(format!("{} · from {}", j.id, j.origin)));
@@ -1503,13 +1505,13 @@ impl Workspace {
         }
         egui::Modal::new(egui::Id::new("quit-while-exporting")).show(ctx, |ui| {
             ui.label(format!(
-                "{running} export(s) still running. Quitting cancels them."
+                "{running} job(s) still running. Quitting cancels them."
             ));
             ui.horizontal(|ui| {
-                if ui.button("Keep Exporting").clicked() {
+                if ui.button("Keep Running").clicked() {
                     self.export.confirm_quit = false;
                 }
-                if ui.button("Cancel Exports and Quit").clicked() {
+                if ui.button("Cancel Jobs and Quit").clicked() {
                     self.export.confirm_quit = false;
                     self.export.quit_confirmed = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -1566,7 +1568,11 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, closable: bool, send: impl Fn(&str, 
             closed = closable && ui.button("Close").clicked();
         }
         JobState::Cancelled => {
-            ui.label(dim("Cancelled; nothing was written"));
+            ui.label(dim(if j.kind == "proxy" {
+                "Cancelled; no proxy was recorded"
+            } else {
+                "Cancelled; nothing was written"
+            }));
             closed = closable && ui.button("Close").clicked();
         }
         JobState::Failed => {

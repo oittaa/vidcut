@@ -737,6 +737,8 @@ impl Workspace {
             }
             if m.info.video.is_some() && !m.is_still() && ui.button("Generate Proxy").clicked() {
                 self.send("proxy.generate", json!({ "media": m.id }));
+                // The encode is a job: its progress and Cancel are there.
+                self.export.show_jobs = true;
                 ui.close();
             }
             if m.proxy.is_some() && ui.button("Remove Proxy").clicked() {

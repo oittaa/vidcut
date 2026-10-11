@@ -180,7 +180,7 @@ A seek or load ("motion") is shown after two steps:
 
 ## 9. Export windows and jobs (M5)
 
-**Jobs.** Every media export in a running GUI is a job (`live/jobs.rs`), whoever started it:
+**Jobs.** Every media export and proxy encode in a running GUI is a job (`live/jobs.rs`), whoever started it:
 - **A thread per job** prepares the export from a copy of the project (§2), reports its files and their lengths (`JobPlanned`), then encodes, sending progress about ten times a second. The session keeps each job's state for `jobs.*` and the snapshot.
 - **Foreground** (an IPC client without `background`): progress notifications carry the job id, the reply comes when the job ends, and a closed connection cancels it, as in M3. That same closed connection cancels a `frame.render`, a storyboard, an analysis and the loudness measure before the export, which send no progress of their own. A background job is cancelled only by `jobs.cancel`.
 - **Background** (`background: true`, and every GUI export): the reply comes once the files are planned, so mistakes (an unknown preset, an existing file) still fail the request itself. The job goes on without the client.
@@ -191,6 +191,7 @@ A seek or load ("motion") is shown after two steps:
   - A job plans its files (`JobPlanned`) before it writes them, and once cancelled starts none. So only a file whose creation began before the cancel and is still blocked (on a hung network share, say) can appear afterwards.
   - A client waiting for such a job, or for its plan, hears that the GUI closed.
 - `.otio` exports write a small file at once and aren't jobs. `.otioz` and `.otiod` bundles copy whole media files, so they are jobs like media exports.
+- **Proxy encodes** (`proxy.generate`, spec D41) are jobs too (`kind: "proxy"`, titled by their media), so the person at the GUI sees progress and can cancel. The encode runs on a copy of the project; the request then runs in the session and records the files. A client is answered when the job ends, with progress on the way, and leaving cancels it, as for a foreground export. The GUI's own request is logged when the job ends, with the change it made. Each proxy file reports its own frames, so the job's progress is the file being written.
 
 **The windows only send requests:**
 - **Quick Export** (p. 788) lists the presets marked `quick_export`; Export… asks for a file name, then starts a background export and opens its progress window.

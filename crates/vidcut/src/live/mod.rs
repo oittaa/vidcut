@@ -167,11 +167,13 @@ pub(crate) enum Msg {
         job: Job,
         result: Result<Response>,
     },
-    /// What a request needed is measured: now it runs.
+    /// What a request needed is measured: now it runs. `encode` is the job
+    /// a proxy encode ran as.
     Measured {
         job: Job,
         envelope: Envelope,
         result: Result<()>,
+        encode: Option<String>,
     },
     FileChanged,
     Thumbs {
@@ -740,6 +742,15 @@ impl Live {
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
             {
                 Ok(Msg::JobDone { id, result }) => self.job_done(id, result),
+                // A proxy encode stopped: nothing is recorded.
+                Ok(Msg::Measured {
+                    job,
+                    encode: Some(id),
+                    ..
+                }) => {
+                    self.job_cancels.remove(&id);
+                    reply(job.reply, Err(Error::no_instance("the vidcut GUI closed")));
+                }
                 // Only noted (the files of a job that gets stuck): its
                 // client hears that the GUI closed, not that it started.
                 Ok(Msg::JobPlanned { id, outputs }) => {
@@ -820,17 +831,24 @@ impl Live {
                 job,
                 envelope,
                 result,
-            } => match result {
-                Err(e) => self.finish(job, Err(e)),
-                Ok(()) => {
-                    // The project may have changed meanwhile; this request's
-                    // change is measured from now.
-                    let rev = self.project.as_ref().map(|p| p.project().rev);
-                    let job = Job { rev, ..job };
-                    let result = self.edit(envelope, job.origin);
-                    self.finish(job, result);
+                encode,
+            } => {
+                let (job, result) = match result {
+                    Err(e) => (job, Err(e)),
+                    Ok(()) => {
+                        // The project may have changed meanwhile; this
+                        // request's change is measured from now.
+                        let rev = self.project.as_ref().map(|p| p.project().rev);
+                        let job = Job { rev, ..job };
+                        let result = self.edit(envelope, job.origin);
+                        (job, result)
+                    }
+                };
+                if let Some(id) = encode {
+                    self.job_ended(&id, &result);
                 }
-            },
+                self.finish(job, result);
+            }
             Msg::FileChanged => {
                 let refreshed = match self.project.as_mut().map(OpenProject::reload) {
                     Some(Ok(changed)) => changed,
@@ -1207,38 +1225,20 @@ impl Live {
                     .as_ref()
                     .map(|r| r.cancel.clone())
                     .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
-                // Work that reports progress (proxy encodes) shows it to the
-                // client as an export does.
-                let progress = job.reply.as_ref().map(|r| r.tx.clone());
                 let _ = std::thread::Builder::new()
                     .name("vidcut-measure".into())
                     .spawn(move || {
                         let _guard = vidcut_av::cancel::Guard::set(cancel);
-                        let _report = progress.map(|tx| {
-                            let mut last = Instant::now() - Duration::from_secs(1);
-                            vidcut_av::progress::Guard::set(Box::new(
-                                move |out: &Path, p: vidcut_av::export::Progress| {
-                                    if p.frames == p.total
-                                        || last.elapsed() >= Duration::from_millis(200)
-                                    {
-                                        last = Instant::now();
-                                        let _ = tx.send(ReplyEvent::Progress(json!({
-                                            "output": 0, "outputs": 1, "path": out,
-                                            "frames": p.frames, "total": p.total,
-                                            "elapsed": p.elapsed.as_secs_f64(),
-                                        })));
-                                    }
-                                },
-                            ))
-                        });
                         let result = measure();
                         let _ = tx.send(Msg::Measured {
                             job,
                             envelope: *then,
                             result,
+                            encode: None,
                         });
                     });
             }
+            Step::Encode(encode, then, title) => self.start_encode(job, encode, *then, title),
         }
     }
 
@@ -1310,26 +1310,13 @@ impl Live {
             .filter(|_| !background)
             .map(|r| r.tx.clone());
         let info = JobInfo::new(id.clone(), job.origin.name(), job.params.clone());
-        let jobs = Arc::make_mut(&mut self.jobs);
-        jobs.push(info);
-        // Keep running jobs and the most recent finished ones.
-        let finished = jobs.iter().filter(|j| !j.running()).count();
-        if finished > JOBS_KEPT {
-            let mut drop = finished - JOBS_KEPT;
-            jobs.retain(|j| {
-                let gone = drop > 0 && !j.running();
-                drop -= usize::from(gone);
-                !gone
-            });
-        }
-        self.job_cancels.insert(id.clone(), cancel.clone());
+        self.add_job(info, cancel.clone());
         if job.reply.is_some() {
             self.job_replies.insert(id.clone(), (job, background));
         } else {
             // GUI requests: logged now, the job shows the rest.
             self.finish(job, Ok(answer(json!({ "job": id }))));
         }
-        self.dirty = true;
         let tx = self.tx.clone();
         let _ = std::thread::Builder::new()
             .name(format!("vidcut-{id}"))
@@ -1374,6 +1361,93 @@ impl Live {
             });
     }
 
+    /// Lists a new job, keeping running jobs and the most recent finished
+    /// ones; `cancel` stops it.
+    fn add_job(&mut self, info: JobInfo, cancel: Arc<AtomicBool>) {
+        self.job_cancels.insert(info.id.clone(), cancel);
+        let jobs = Arc::make_mut(&mut self.jobs);
+        jobs.push(info);
+        let finished = jobs.iter().filter(|j| !j.running()).count();
+        if finished > JOBS_KEPT {
+            let mut drop = finished - JOBS_KEPT;
+            jobs.retain(|j| {
+                let gone = drop > 0 && !j.running();
+                drop -= usize::from(gone);
+                !gone
+            });
+        }
+        self.dirty = true;
+    }
+
+    /// `proxy.generate`: the encode runs on its own thread as a job, so the
+    /// Jobs window and `jobs.*` show its progress and can cancel it, as they
+    /// do an export's (decision D41). A client is answered when it ends,
+    /// with progress on the way, and leaving cancels it; the GUI's own
+    /// request is logged when it ends. The edit that records the proxies
+    /// runs here once the files are written.
+    fn start_encode(&mut self, job: Job, encode: Measure, then: Envelope, title: String) {
+        let id = format!("j{}", self.next_job);
+        self.next_job += 1;
+        let cancel = job
+            .reply
+            .as_ref()
+            .map(|r| r.cancel.clone())
+            .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+        let info = JobInfo::proxies(id.clone(), job.origin.name(), job.params.clone(), title);
+        self.add_job(info, cancel.clone());
+        let progress = job.reply.as_ref().map(|r| r.tx.clone());
+        let tx = self.tx.clone();
+        let _ = std::thread::Builder::new()
+            .name(format!("vidcut-{id}"))
+            .spawn(move || {
+                let _guard = vidcut_av::cancel::Guard::set(cancel);
+                let _report = {
+                    let (tx, id) = (tx.clone(), id.clone());
+                    let mut last = Instant::now() - Duration::from_secs(1);
+                    // Each proxy file reports its own frames; the job shows
+                    // the one being written.
+                    let mut file: Option<PathBuf> = None;
+                    let mut output = 0;
+                    vidcut_av::progress::Guard::set(Box::new(
+                        move |out: &Path, p: vidcut_av::export::Progress| {
+                            match &file {
+                                Some(f) if f == out => {}
+                                Some(_) => {
+                                    output += 1;
+                                    file = Some(out.to_path_buf());
+                                }
+                                None => file = Some(out.to_path_buf()),
+                            }
+                            if p.frames != p.total && last.elapsed() < Duration::from_millis(100) {
+                                return;
+                            }
+                            last = Instant::now();
+                            let _ = tx.send(Msg::JobProgress {
+                                id: id.clone(),
+                                output,
+                                frames: p.frames,
+                                total: p.total,
+                            });
+                            if let Some(ptx) = &progress {
+                                let _ = ptx.send(ReplyEvent::Progress(json!({
+                                    "job": id, "output": output, "path": out,
+                                    "frames": p.frames, "total": p.total,
+                                    "elapsed": p.elapsed.as_secs_f64(),
+                                })));
+                            }
+                        },
+                    ))
+                };
+                let result = encode();
+                let _ = tx.send(Msg::Measured {
+                    job,
+                    envelope: then,
+                    result,
+                    encode: Some(id),
+                });
+            });
+    }
+
     fn job_planned(&mut self, id: String, outputs: Vec<(PathBuf, i64)>) {
         if let Some(j) = Arc::make_mut(&mut self.jobs)
             .iter_mut()
@@ -1390,28 +1464,34 @@ impl Live {
     }
 
     fn job_done(&mut self, id: String, result: Result<Response>) {
-        self.job_cancels.remove(&id);
-        let mut gui = false;
-        if let Some(j) = Arc::make_mut(&mut self.jobs)
-            .iter_mut()
-            .find(|j| j.id == id)
-        {
-            j.ended(&result);
-            gui = j.origin == Origin::Gui { drag: false }.name();
-        }
-        if gui {
-            match &result {
-                Ok(_) => self.notice(format!("export {id} finished"), false),
-                Err(e) if e.code == vidcut_core::ErrorCode::Cancelled => {
-                    self.notice(format!("export {id} cancelled"), false)
-                }
-                Err(e) => self.notice(format!("export {id} failed: {}", e.message), true),
-            }
-        }
+        self.job_ended(&id, &result);
         if let Some((job, _)) = self.job_replies.remove(&id) {
             self.finish(job, result);
         }
+    }
+
+    /// A job ended: its state, and a notice when the GUI started it.
+    fn job_ended(&mut self, id: &str, result: &Result<Response>) {
+        self.job_cancels.remove(id);
         self.dirty = true;
+        let Some(j) = Arc::make_mut(&mut self.jobs)
+            .iter_mut()
+            .find(|j| j.id == id)
+        else {
+            return;
+        };
+        j.ended(result);
+        if j.origin != (Origin::Gui { drag: false }).name() {
+            return;
+        }
+        let kind = j.kind;
+        match result {
+            Ok(_) => self.notice(format!("{kind} {id} finished"), false),
+            Err(e) if e.code == vidcut_core::ErrorCode::Cancelled => {
+                self.notice(format!("{kind} {id} cancelled"), false)
+            }
+            Err(e) => self.notice(format!("{kind} {id} failed: {}", e.message), true),
+        }
     }
 
     fn job_json(&self, id: &str) -> Result<Value> {
@@ -1733,6 +1813,7 @@ impl Live {
                     return Step::Now(Err(no_project()));
                 };
                 let (project, path) = (open.project().clone(), open.store.path().to_path_buf());
+                let title = proxies_title(&project, &envelope.request);
                 let copy = envelope.clone();
                 let encode = move || {
                     let env = AvEnv::for_project(&path);
@@ -1740,7 +1821,7 @@ impl Live {
                         .apply(copy, &env, None)
                         .map(drop)
                 };
-                Step::Measure(Box::new(encode), Box::new(envelope))
+                Step::Encode(Box::new(encode), Box::new(envelope), title)
             }
             // An `.otioz` bundle's media are unpacked on a worker first; the
             // edit then finds them there.
@@ -2876,6 +2957,9 @@ enum Step {
     /// Measure media (or unpack a bundle's) on a worker, then run the
     /// request here (docs/decisions/agents.md §3).
     Measure(Measure, Box<Envelope>),
+    /// Encode proxies on a worker as a job titled so (gui.md §9), then run
+    /// the request here.
+    Encode(Measure, Box<Envelope>, String),
 }
 
 /// Slow work on media that a request needs, done before it runs:
@@ -2885,6 +2969,26 @@ type Measure = Box<dyn FnOnce() -> Result<()> + Send>;
 fn reply(reply: Option<Reply>, result: Result<Response>) {
     if let Some(r) = reply {
         let _ = r.tx.send(ReplyEvent::Done(result));
+    }
+}
+
+/// What a `proxy.generate` job is titled: the pool item's name, or how
+/// many it names.
+fn proxies_title(project: &Project, request: &Request) -> String {
+    let Request::ProxyGenerate { media, .. } = request else {
+        return String::new();
+    };
+    match media
+        .as_ref()
+        .map(|m| m.to_vec())
+        .unwrap_or_default()
+        .as_slice()
+    {
+        [] => "proxies for the media pool".into(),
+        [id] => project
+            .media(id)
+            .map_or_else(|| id.clone(), |m| m.name.clone()),
+        ids => format!("proxies for {} media", ids.len()),
     }
 }
 
