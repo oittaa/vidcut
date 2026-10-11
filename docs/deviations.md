@@ -118,7 +118,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 ## X11. Dynamic Trim and Ripple Delete Silence, simplified
 - **Resolve:** Dynamic Trim trims while the program plays, with sound, in a dynamically updating timeline (pp. 730–731). Ripple Delete Silence can crossfade the remaining audio (p. 773).
 - **vidcut:**
-  - **Dynamic Trim:** J/L run the trim at shuttle speed while the two-up shows the frames on both sides as the trim leaves them, without sound. The timeline changes once, when K stops it (spec D32).
+  - **Dynamic Trim:** J/L run the trim at shuttle speed while the two-up shows the frames on both sides as the trim leaves them, without sound. The timeline draws the trim as it runs, but the project changes once, when K stops it (spec D32).
   - **Ripple Delete Silence:** there is no crossfade option. Its cuts get the 3 ms de-click fades every vidcut cut gets in export.
 - **Why:** the preview plays the timeline as one EDL, so changing the cut on every frame of a run would mean reloading it many times a second. The two-up shows exactly what the trim will make (the export engine renders those frames), and one change at the end is one undo step that agents and the command log can follow. Crossfades would need overlapping audio, which the track model doesn't have (spec D14); the de-click fades already keep cuts silent.
 

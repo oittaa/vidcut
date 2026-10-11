@@ -187,6 +187,11 @@ impl Workspace {
         self.timeline.layout.clone()
     }
 
+    /// The frame of the selected edit, if one is selected (for tests).
+    pub fn selected_edit(&self) -> Option<i64> {
+        self.timeline.edit.map(|e| e.at)
+    }
+
     /// Timeline Options (for tests and settings).
     pub fn timeline_options_mut(&mut self) -> &mut super::timeline::Options {
         &mut self.timeline.options
@@ -1191,6 +1196,18 @@ impl Workspace {
             self.timeline.dynamic = None;
         }
         self.timeline.tracks = tracks;
+        // An undo or someone else's edit can take the selected cut away:
+        // the selection, and a Dynamic Trim of it, end with it.
+        let rev = self.project().map_or(0, |p| p.rev);
+        if rev != self.timeline.rev {
+            self.timeline.rev = rev;
+            if let (Some(e), Some(p)) = (self.timeline.edit, self.project())
+                && !crate::gui::timeline::edit_exists(p, &e)
+            {
+                self.timeline.edit = None;
+                self.timeline.dynamic = None;
+            }
+        }
         let title = match &self.snap.project {
             Some(p) => format!(
                 "{} — vidcut",

@@ -58,6 +58,18 @@ pub(crate) fn audio_edit_outgoing(t: &Track, at: i64) -> Option<String> {
     })
 }
 
+/// Whether the cut `e` selects is still on its track: an undo or someone
+/// else's edit can take it away.
+pub(crate) fn edit_exists(p: &Project, e: &EditSel) -> bool {
+    let Some(t) = p.track(&e.track.id()) else {
+        return false;
+    };
+    match e.side {
+        Side::Audio => audio_edit_outgoing(t, e.at).is_some(),
+        _ => t.clips.iter().any(|c| c.start == e.at || c.end() == e.at),
+    }
+}
+
 /// Timeline frame of the audio edit on the picture cut at `picture`.
 /// `picture` itself when the clips that meet there have no audio.
 pub(crate) fn audio_at_cut(t: &Track, picture: i64) -> i64 {
@@ -188,6 +200,10 @@ pub struct TimelineView {
     pub layout: Option<Layout>,
     /// How many tracks the project had in the last frame.
     pub tracks: usize,
+    /// The project revision of the last frame.
+    pub rev: u64,
+    /// The Dynamic Trim K just sent, until it lands.
+    pub sent_trim: Option<tools::SentTrim>,
 }
 
 impl Default for TimelineView {
@@ -207,6 +223,8 @@ impl Default for TimelineView {
             dynamic: None,
             layout: None,
             tracks: 0,
+            rev: 0,
+            sent_trim: None,
         }
     }
 }
@@ -350,7 +368,16 @@ impl Workspace {
         };
         self.timeline.layout = Some(layout.clone());
 
-        // Draw.
+        // Draw. While Dynamic Trim runs, the clips are drawn as the trim
+        // leaves them, so the cut moves as it runs; K sends it (spec D32).
+        let trimmed = match self.dynamic_drawn(&p) {
+            Some(t) => Some(t),
+            None => self.sent_trim(&p),
+        };
+        let (drawn, edit_at) = match &trimmed {
+            Some((q, at)) => (q, *at),
+            None => (&p, None),
+        };
         let thumbs = std::mem::take(&mut self.thumbs);
         let waveforms = self.snap.waveforms.clone();
         let assets = Assets {
@@ -358,13 +385,13 @@ impl Workspace {
             waveforms: &waveforms,
         };
         let look = self.look();
-        let smart = (end > 0).then(|| ops::nearest_edit(&p, playhead));
+        let smart = (end > 0).then(|| ops::nearest_edit(drawn, playhead));
         let selected = self.snap.selection.clips.clone();
         {
             let painter = ui.painter_at(upper_rect);
-            paint::ruler(&painter, upper_ruler, &upper_scale, &p, smart, true);
+            paint::ruler(&painter, upper_ruler, &upper_scale, drawn, smart, true);
             for row in &layout.upper.rows {
-                let Some(t) = p.track(&row.track) else {
+                let Some(t) = drawn.track(&row.track) else {
                     continue;
                 };
                 let compact = Look {
@@ -378,15 +405,15 @@ impl Workspace {
                     &painter,
                     &row.rect,
                     &upper_scale,
-                    &p,
+                    drawn,
                     t,
                     &selected,
                     &assets,
                     compact,
                 );
             }
-            self.paint_boring(&painter, &layout.upper, &upper_scale, &p);
-            self.paint_silence(&painter, &layout.upper, &upper_scale, &p);
+            self.paint_boring(&painter, &layout.upper, &upper_scale, drawn);
+            self.paint_silence(&painter, &layout.upper, &upper_scale, drawn);
             paint::playhead(
                 &painter,
                 upper_scale.xf(playhead),
@@ -414,9 +441,9 @@ impl Workspace {
                 );
                 painter.rect_filled(band, 2.0, theme::PANEL);
             }
-            paint::ruler(&painter, lower_ruler, &lower_scale, &p, smart, false);
+            paint::ruler(&painter, lower_ruler, &lower_scale, drawn, smart, false);
             for row in &layout.lower.rows {
-                let Some(t) = p.track(&row.track) else {
+                let Some(t) = drawn.track(&row.track) else {
                     continue;
                 };
                 let look = Look {
@@ -429,7 +456,7 @@ impl Workspace {
                     &painter,
                     &row.rect,
                     &lower_scale,
-                    &p,
+                    drawn,
                     t,
                     &selected,
                     &assets,
@@ -439,7 +466,7 @@ impl Workspace {
             if let Some(e) = self.timeline.edit
                 && let Some(v1) = layout.lower.get(&e.track.id())
             {
-                let x = lower_scale.xf(e.at);
+                let x = lower_scale.xf(edit_at.unwrap_or(e.at));
                 let (a, b) = match e.side {
                     Side::Out => (x - 6.0, x),
                     Side::In => (x, x + 6.0),
@@ -457,7 +484,7 @@ impl Workspace {
                     Color32::from_rgb(90, 200, 90),
                 );
             }
-            self.paint_silence(&painter, &layout.lower, &lower_scale, &p);
+            self.paint_silence(&painter, &layout.lower, &lower_scale, drawn);
             paint::playhead(
                 &painter,
                 lower_scale.xf(playhead),

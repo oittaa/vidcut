@@ -236,6 +236,11 @@ fn tools_send_one_request_each() {
     harness.key_press(egui::Key::W);
     harness.step();
     assert!(!has(&harness, "Dynamic Trim +"), "W leaves");
+    assert_eq!(
+        harness.state().selected_edit(),
+        Some(shot3 + by),
+        "the edit followed the trim"
+    );
 
     // 4. The Boring Detector's settings are view options, not edits.
     menu_item(&mut harness, "Options", "Analyze Timeline Edits…");
@@ -253,6 +258,16 @@ fn tools_send_one_request_each() {
             .unwrap()
             .len(),
         undo0 + 3
+    );
+
+    // Undoing the Dynamic Trim takes its cut back where it was: no cut is
+    // left where the selection was, so the selection goes too.
+    call(&h, "history.undo", json!({ "steps": 1 }));
+    settle(&h, &mut harness);
+    assert_eq!(
+        harness.state().selected_edit(),
+        None,
+        "nothing selected where no cut is"
     );
 
     drop(harness);
