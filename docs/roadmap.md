@@ -38,5 +38,5 @@ Moving an edit between vidcut and Resolve, in either direction and between compu
 
 - **Candidates, roughly in this order:**
   - **Interchange with Resolve:** the list above.
-  - **Smaller items** from [gui.md §12](decisions/gui.md): a render queue, per-channel meters, Source Tape marks across clips, dragging bins into bins.
+  - **Smaller items** from [gui.md §12](decisions/gui.md): a render queue, Source Tape marks across clips.
   - **macOS and Windows.**

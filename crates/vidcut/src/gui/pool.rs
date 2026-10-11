@@ -13,11 +13,11 @@ use super::workspace::{PoolView, Workspace, dim, fit};
 
 const TILE: egui::Vec2 = egui::Vec2::new(176.0, 99.0);
 
-/// The pool's bins: where dragged media can be dropped, the order media are
-/// shown in, and a bin being renamed.
+/// The pool's bins: where a dragged clip or bin can be dropped, the order
+/// media are shown in, and a bin being renamed.
 #[derive(Default)]
 pub(super) struct BinsUi {
-    /// Places a clip dragged from the pool can be dropped into a bin.
+    /// Folder rows and path levels a clip or bin can be dropped on.
     pub(super) targets: Vec<(Rect, String)>,
     /// The media shown, in order (Shift-click selects ranges of it).
     order: Vec<String>,
@@ -52,6 +52,27 @@ fn join(bin: &str, name: &str) -> String {
 /// Whether `bin` is `path` or inside it.
 fn within(bin: &str, path: &str) -> bool {
     path.is_empty() || bin == path || bin.starts_with(&format!("{path}/"))
+}
+
+/// The bin drawn at `pos`: a folder row or a level of the path.
+/// First match wins, the same order a clip drop uses.
+fn bin_at(targets: &[(Rect, String)], pos: Pos2) -> Option<&str> {
+    targets
+        .iter()
+        .find(|(rect, _)| rect.contains(pos))
+        .map(|(_, bin)| bin.as_str())
+}
+
+/// Where dropping bin `from` onto `onto` moves it (`bins.rename`'s `to`).
+///
+/// `None` when the drop would not move the bin: onto itself, onto a bin
+/// inside it, or onto its current parent.
+fn bin_drop_to(from: &str, onto: &str) -> Option<String> {
+    if from.is_empty() || within(onto, from) || onto == parent(from) {
+        None
+    } else {
+        Some(join(onto, leaf(from)))
+    }
 }
 
 /// "Bin N" in `bin`, with the next number not taken (p. 656).
@@ -297,14 +318,43 @@ impl Workspace {
             .is_some_and(|d| matches!(d.drag.gesture, Gesture::Media { .. }))
     }
 
-    /// Makes `rect` a place to drop dragged clips into `bin`, and shows it
-    /// while one is over it.
+    /// The bin being dragged, if the pointer is carrying one.
+    fn dragged_bin(&self) -> Option<&str> {
+        let Gesture::Bin { path } = &self.timeline.drag.as_ref()?.drag.gesture else {
+            return None;
+        };
+        Some(path.as_str())
+    }
+
+    /// The bin under `pos`, if the pointer is over a folder or a path level.
+    pub(super) fn bin_target_at(&self, pos: Pos2) -> Option<String> {
+        bin_at(&self.bins.targets, pos).map(str::to_string)
+    }
+
+    /// `bins.rename`'s `to` when bin `from` is dropped at `pos`, if that
+    /// drop moves it.
+    pub(super) fn bin_rename_to(&self, from: &str, pos: Pos2) -> Option<String> {
+        bin_drop_to(from, bin_at(&self.bins.targets, pos)?)
+    }
+
+    /// The label that follows the pointer while a bin is dragged.
+    pub(super) fn bin_drag_label(&self) -> Option<String> {
+        self.dragged_bin().map(|path| elide(leaf(path), 30))
+    }
+
+    /// Makes `rect` a place to drop a dragged clip or bin into `bin`, and
+    /// shows it while a drop that would move something is over it.
     fn drop_highlight(&mut self, ui: &egui::Ui, rect: Rect, bin: &str) {
         self.bins.targets.push((rect, bin.to_string()));
         let over = ui
             .input(|i| i.pointer.latest_pos())
             .is_some_and(|p| rect.contains(p));
-        if over && self.dragging_media() {
+        let show = if let Some(from) = self.dragged_bin() {
+            bin_drop_to(from, bin).is_some()
+        } else {
+            self.dragging_media()
+        };
+        if over && show {
             ui.painter().rect_stroke(
                 rect.expand(1.0),
                 CornerRadius::same(3),
@@ -314,10 +364,11 @@ impl Workspace {
         }
     }
 
-    /// A bin in the pool: double-click opens it, and clips dropped on it
-    /// move into it (p. 655).
+    /// A bin in the pool: double-click opens it, dragging it onto another
+    /// bin moves it, and clips dropped on it move into it (p. 655).
     fn folder_tile(&mut self, ui: &mut egui::Ui, p: &Project, path: &str) {
-        let (rect, resp) = ui.allocate_exact_size(vec2(TILE.x, TILE.y + 30.0), Sense::click());
+        let (rect, resp) =
+            ui.allocate_exact_size(vec2(TILE.x, TILE.y + 30.0), Sense::click_and_drag());
         let picture = Rect::from_min_size(rect.min, TILE);
         let painter = ui.painter_at(rect);
         painter.rect_filled(picture, CornerRadius::same(3), theme::TRACK);
@@ -341,12 +392,22 @@ impl Workspace {
         }
         self.drop_highlight(ui, picture, path);
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, leaf(path)));
-        let resp = resp.on_hover_text(format!("{path}\nDouble-click opens the bin"));
+        let resp = resp.on_hover_text(format!(
+            "{path}\nDouble-click opens the bin; drag it onto another bin to move it"
+        ));
         self.bin_interaction(&resp, path);
     }
 
-    /// Double-click opens a bin; its menu renames or removes it.
+    /// Double-click opens a bin; dragging it onto another bin moves it;
+    /// its menu renames or removes it.
     fn bin_interaction(&mut self, resp: &egui::Response, path: &str) {
+        if resp.drag_started()
+            && let Some(press) = resp.ctx.input(|i| i.pointer.press_origin())
+        {
+            self.start_bin_drag(path, press);
+            resp.ctx.request_repaint();
+            return;
+        }
         if resp.double_clicked() {
             self.send("pool.set", json!({ "bin": path }));
         }
@@ -548,7 +609,10 @@ impl Workspace {
                 for b in folders {
                     let r = ui
                         .selectable_label(false, format!("📁 {}", elide(leaf(b), 38)))
-                        .on_hover_text(format!("{b}\nDouble-click opens the bin"));
+                        .interact(Sense::drag())
+                        .on_hover_text(format!(
+                            "{b}\nDouble-click opens the bin; drag it onto another bin to move it"
+                        ));
                     self.drop_highlight(ui, r.rect, b);
                     self.bin_interaction(&r, b);
                     let count = p.media.iter().filter(|m| within(&m.bin, b)).count();
@@ -810,5 +874,85 @@ pub(super) fn elide(s: &str, n: usize) -> String {
     } else {
         let head: String = s.chars().take(n.saturating_sub(1)).collect();
         format!("{head}…")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use eframe::egui::pos2;
+
+    use super::*;
+
+    /// Master, two folders, and a bin inside the first. Points sit in the rects.
+    fn targets() -> Vec<(Rect, String)> {
+        vec![
+            (
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(48.0, 16.0)),
+                String::new(),
+            ),
+            (
+                Rect::from_min_max(pos2(0.0, 24.0), pos2(96.0, 40.0)),
+                "Bin 1".into(),
+            ),
+            (
+                Rect::from_min_max(pos2(0.0, 44.0), pos2(96.0, 60.0)),
+                "Bin 2".into(),
+            ),
+            (
+                Rect::from_min_max(pos2(0.0, 64.0), pos2(120.0, 80.0)),
+                "Bin 1/Inner".into(),
+            ),
+        ]
+    }
+
+    #[test]
+    fn bin_drop_to_names_the_moved_bin() {
+        assert_eq!(
+            bin_drop_to("Day 1", "Interviews").as_deref(),
+            Some("Interviews/Day 1")
+        );
+        assert_eq!(bin_drop_to("A/B", "C").as_deref(), Some("C/B"));
+        // A nested bin dropped on Master goes to the top level under its own name.
+        assert_eq!(bin_drop_to("Hold/Inner", "").as_deref(), Some("Inner"));
+        assert_eq!(
+            bin_drop_to("Bin 1", "Bin 2").as_deref(),
+            Some("Bin 2/Bin 1")
+        );
+    }
+
+    #[test]
+    fn bin_drop_to_rejects_self_descendant_and_parent() {
+        assert_eq!(bin_drop_to("A", "A"), None, "onto itself");
+        assert_eq!(bin_drop_to("A", "A/Child"), None, "into a descendant");
+        assert_eq!(
+            bin_drop_to("A/B", "A/B/C"),
+            None,
+            "into a nested descendant"
+        );
+        assert_eq!(bin_drop_to("A/B", "A"), None, "onto its parent");
+        assert_eq!(bin_drop_to("Top", ""), None, "a top-level bin onto Master");
+        assert_eq!(bin_drop_to("", "A"), None, "Master is not a bin to drag");
+    }
+
+    #[test]
+    fn bin_at_is_the_folder_or_path_level_under_the_pointer() {
+        let t = targets();
+        assert_eq!(bin_at(&t, pos2(8.0, 8.0)), Some(""));
+        assert_eq!(bin_at(&t, pos2(10.0, 32.0)), Some("Bin 1"));
+        assert_eq!(bin_at(&t, pos2(200.0, 8.0)), None);
+        // Onto its parent (Master): no request. Onto Bin 1: Bin 1/Bin 2.
+        assert_eq!(
+            bin_drop_to("Bin 2", bin_at(&t, pos2(8.0, 8.0)).unwrap()),
+            None
+        );
+        assert_eq!(
+            bin_drop_to("Bin 2", bin_at(&t, pos2(10.0, 32.0)).unwrap()).as_deref(),
+            Some("Bin 1/Bin 2")
+        );
+        // Onto a bin inside the one being dragged.
+        assert_eq!(
+            bin_drop_to("Bin 1", bin_at(&t, pos2(10.0, 72.0)).unwrap()),
+            None
+        );
     }
 }

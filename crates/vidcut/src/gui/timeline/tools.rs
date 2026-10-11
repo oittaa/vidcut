@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use vidcut_core::model::Project;
 use vidcut_core::ops;
 
-use super::{EditSel, Side, TrackRef};
+use super::{EditSel, Side, TrackRef, audio_edit_outgoing};
 use crate::gui::export::{Ask, near_center};
 use crate::gui::theme;
 use crate::gui::timeline::geometry::{Rows, Scale};
@@ -113,6 +113,15 @@ pub fn dynamic_preview(
 ) -> vidcut_core::Result<(i64, i64)> {
     match target {
         DynamicTarget::Edit(e) => {
+            if e.side == Side::Audio {
+                let id = p
+                    .track(&e.track.id())
+                    .and_then(|t| audio_edit_outgoing(t, e.at))
+                    .ok_or_else(|| vidcut_core::Error::not_found("no audio edit"))?;
+                ops::audio_roll(p, &id, ops::Edge::Tail, by)?;
+                let at = e.at + by;
+                return Ok((at - 1, at));
+            }
             let t = p
                 .track(&e.track.id())
                 .ok_or_else(|| vidcut_core::Error::not_found(format!("no {}", e.track.id())))?;

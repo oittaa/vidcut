@@ -148,6 +148,7 @@ A seek or load ("motion") is shown after two steps:
 
 **Gestures are pure functions** (`gui/timeline/geometry.rs`, `gesture.rs`):
 - What the pointer is over picks the operation: edge, edit center, slip handle, audio edit, body.
+- A click on the audio edit selects that J/L handle. `,` and `.` then send `edit.audio_roll` for its offset (spec D20).
 - While dragging, a `Preview` says what the release would do. The timeline draws it: the target, the moved block, the snap line, a tooltip.
 - The release sends that one request. Scrubs only seek.
 - **Clock.** Gesture timing (the 0.8 s hover, Safe Edit's 0.6 s) uses egui's clock, so tests drive it.
@@ -164,16 +165,16 @@ A seek or load ("motion") is shown after two steps:
 - **Destination row:** a drag's destination is the row under the pointer, and the strips above and below the rows stand for a new track (spec D18). `gesture.rs` turns the destination into the request (`track`, D25), and its unit tests cover the rows.
 
 **Mixer and meters (M6, `gui/mixer.rs`).**
-- **Strips:** the Mixer panel (top bar, or `gui.show mixer`) has a strip per track with sound: meter, fader, M and S. The mix gets a meter too.
+- **Strips:** the Mixer panel (top bar, or `gui.show mixer`) has a strip per track with sound: one meter bar per channel, a fader, M and S. The mix gets the same per-channel meter.
 - **One request per fader drag:** the fader sends `track.set` once, when it's let go, so a drag is one undo step. Double-click resets it to 0 dB.
-- **Meters** read the cached waveforms at the playhead (spec D28). That way they need no audio tap in mpv, work while paused and while scrubbing, and apply the same gains, mutes and solos as the export. Peak holds last 1.5 s.
-- **Viewer:** a meter beside the viewer shows what it plays, and its speaker button is `player.mute`.
+- **Meters** are one bar per project channel (spec D28), with a 1.5 s peak hold on each bar. They read the cached waveforms at the playhead, playing or not, so they need no audio tap in mpv, work while paused and while scrubbing, and apply the same gains, mutes and solos as the export. The waveforms' channel envelopes are mixed to the project's channels by the export's resampler, so they are measured again when that count changes.
+- **Viewer:** a meter beside the viewer shows what it plays, one bar per channel, and its speaker button is `player.mute`. That mute silences the viewer meter. In source modes the meter is the source media at the source playhead.
 
 **Bins (M6).**
 - **Pool view:** the pool shows the open bin (`pool.set`: bin, sort, direction). That view lives in the session, not the project, so Source Tape and agents see the same order. It follows a renamed bin, and moves to the parent bin when its own is removed.
-- **Drops:** clips dragged from the pool onto a bin (a folder, or a level of the path) send `media.move`. The pool records where the bins are drawn each frame and the drag's release checks them.
-- **One undo step:** Create Bin With Selected Clips is one `apply` batch (`bins.add` and `media.move`).
-- **Tests:** `tests/gui_tracks.rs` (egui_kittest) covers the target track, a drag onto a new track, Place On Top, a fader drag, solo, New Bin and a drop into a bin. Each sends exactly one request.
+- **Drops:** the pool records where bins are drawn each frame (a folder, or a level of the path) and the drag's release checks them. A clip drop sends `media.move`. A bin drop sends one `bins.rename`, from the dragged bin to `<target>/<name>`. Nothing is sent when the target is the bin itself, a bin inside it, or its current parent. If the name is taken, `bins.rename` fails and the status bar shows the error, the same as other pool actions. The open bin follows a renamed bin, as any rename does.
+- **One undo step:** Create Bin With Selected Clips is one `apply` batch (`bins.add` and `media.move`). A bin drag is the one `bins.rename`.
+- **Tests:** `tests/gui_tracks.rs` (egui_kittest) covers the target track, a drag onto a new track, Place On Top, a fader drag, solo, New Bin, a clip dropped into a bin, and a bin dropped into another bin. Each sends exactly one request. Which bin drops move is unit-tested in `gui/pool.rs`.
 
 ## 9. Export windows and jobs (M5)
 
@@ -222,5 +223,4 @@ A seek or load ("motion") is shown after two steps:
 
 - **A render queue.** Jobs run side by side; several big exports at once compete for the encoder. Past NVENC's few sessions, `auto` exports move on to VAAPI or the CPU (export.md §5), and ones asking for `nvenc` fail. Resolve's Deliver page queues renders instead.
 - **Source Tape marks spanning several clips** (decision D17 limits marks to one clip).
-- **Per-channel meters** and meters that tap the player's actual output (spec D28).
-- **Dragging a bin into another bin** in the pool (`bins.rename` does it now).
+- **Meters that tap the player's actual output** (spec D28): they read the waveforms instead.
