@@ -74,7 +74,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
   - Drag clips onto a bin (or onto a level of the path) to move them into it. A clip's menu offers Move to Bin and Create Bin With Selected Clips ("Bin N", p. 656).
   - Imports go into the open bin (p. 377).
   - Source Tape strings together the open bin's clips and its bins' clips, in the sort order (pp. 680, 696).
-  - Removing a bin keeps its clips (deviation X6). Dragging a bin into another bin is `bins.rename` (later in the GUI).
+  - Removing a bin keeps its clips (deviation X6). Dragging a bin onto another bin (a folder, or a level of the path) moves it and everything inside it with `bins.rename`, keeping its name. Dropping it on itself, on a bin inside it, or on its current parent does nothing.
 - **Clip color (later)** (pp. 667–668).
 - **Interaction:**
   - **Click:** selects. In Source Clip mode the Viewer shows the clip; in Source Tape mode the playhead jumps to the clip's first frame (pp. 680, 704).

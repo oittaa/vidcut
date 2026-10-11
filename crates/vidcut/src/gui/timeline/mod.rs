@@ -934,9 +934,24 @@ impl Workspace {
             self.timeline.drag = Some(d);
             return;
         };
+        // A bin dropped on a folder or a path level. Self, a descendant
+        // and the current parent send nothing (spec §3).
+        if let Gesture::Bin { path } = &d.drag.gesture {
+            let path = path.clone();
+            if released {
+                if let Some(to) = self.bin_rename_to(&path, pos) {
+                    self.send("bins.rename", json!({ "path": path, "to": to }));
+                }
+                self.timeline.snap_flipped = false;
+            } else {
+                self.timeline.drag = Some(d);
+                ui.ctx().request_repaint();
+            }
+            return;
+        }
         if released
             && let Gesture::Media { media, .. } = &d.drag.gesture
-            && let Some((_, bin)) = self.bins.targets.iter().find(|(r, _)| r.contains(pos))
+            && let Some(bin) = self.bin_target_at(pos)
         {
             // Dropped on a bin in the pool: the clips move into it (p. 655).
             let ids = if self.snap.selection.media.contains(media) {
@@ -944,7 +959,6 @@ impl Workspace {
             } else {
                 vec![media.clone()]
             };
-            let bin = bin.clone();
             self.send("media.move", json!({ "media": ids, "bin": bin }));
             self.timeline.snap_flipped = false;
             return;
@@ -1247,6 +1261,24 @@ impl Workspace {
 
     // ---------------------------------------------------------------- media drags
 
+    /// Starts dragging a bin onto another bin in the pool (spec §3).
+    pub(crate) fn start_bin_drag(&mut self, path: &str, press: Pos2) {
+        if path.is_empty() {
+            return;
+        }
+        self.timeline.snap_flipped = false;
+        self.timeline.drag = Some(ActiveDrag {
+            drag: Drag::new(
+                Gesture::Bin {
+                    path: path.to_string(),
+                },
+                press,
+            ),
+            upper: false,
+            preview: Preview::default(),
+        });
+    }
+
     /// Starts dragging media from the pool (or the source viewer) towards the
     /// timeline (spec §7.3).
     pub(crate) fn start_media_drag(&mut self, media: &str, range: (i64, i64), press: Pos2) {
@@ -1269,8 +1301,26 @@ impl Workspace {
         });
     }
 
-    /// While media is being dragged anywhere: its label follows the pointer.
+    /// While media or a bin is being dragged anywhere: its label follows
+    /// the pointer.
     pub(crate) fn media_drag_overlay(&self, ctx: &egui::Context) {
+        if let Some(text) = self.bin_drag_label()
+            && let Some(pos) = ctx.input(|i| i.pointer.latest_pos())
+        {
+            let painter = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Tooltip,
+                egui::Id::new("bin-drag"),
+            ));
+            let galley = painter.layout_no_wrap(text, FontId::proportional(12.0), Color32::WHITE);
+            let at = pos + vec2(12.0, 10.0);
+            painter.rect_filled(
+                Rect::from_min_size(at - vec2(4.0, 2.0), galley.size() + vec2(8.0, 4.0)),
+                3.0,
+                theme::CLIP,
+            );
+            painter.galley(at, galley, Color32::WHITE);
+            return;
+        }
         let Some(d) = &self.timeline.drag else { return };
         let Gesture::Media { media, range, .. } = &d.drag.gesture else {
             return;

@@ -401,6 +401,38 @@ fn track_gestures_send_one_request_each() {
     assert_eq!(state["source"]["content"], "source_tape", "{state:#}");
     assert_eq!(state["source"]["media"], "m2", "{state:#}");
 
+    // Dragging a bin onto another is one bins.rename (spec §3).
+    call(&h, "pool.set", json!({ "bin": "" }));
+    settle(&h, &mut harness);
+    harness.get_by_label("File").click();
+    harness.step();
+    harness.get_by_label("New Bin").click();
+    harness.step();
+    settle(&h, &mut harness);
+    let (m, p) = last(&h);
+    assert_eq!((m.as_str(), &p["path"]), ("bins.add", &json!("Bin 2")));
+    let from = harness.get_by_label("📁 Bin 2").rect().center();
+    let onto = harness.get_by_label("📁 Bin 1").rect().center();
+    let before = gui_edits(&h).len();
+    drag(&mut harness, from, onto);
+    settle(&h, &mut harness);
+    let edits = gui_edits(&h);
+    assert_eq!(edits.len(), before + 1, "one request for a bin drag");
+    let (m, p) = edits.last().unwrap();
+    assert_eq!(
+        (m.as_str(), &p["path"], &p["to"]),
+        ("bins.rename", &json!("Bin 2"), &json!("Bin 1/Bin 2"))
+    );
+    assert_eq!(
+        call(&h, "project.summary", json!({})).result["bins"],
+        json!(["Bin 1", "Bin 1/Bin 2"])
+    );
+    assert_eq!(bin_of(&h, "m2"), json!("Bin 1"));
+    assert!(
+        harness.query_by_label("📁 Bin 2").is_none(),
+        "moved out of Master"
+    );
+
     // 6. An edit picked on V2 stays on V2 (spec D36): with V1 cut at the same
     // frame, `.` rolls the V2 edit, and so does Dynamic Trim, where `,` waits
     // for K (D32).
@@ -596,8 +628,8 @@ fn track_gestures_send_one_request_each() {
     // (as are the two source marks, three overwrites, the track removal
     // and the audio roll this test made over IPC).
     let edits = gui_edits(&h);
-    assert_eq!(edits.len() - edits0, 11, "{edits:#?}");
-    assert_eq!(undo_steps(&h), undo0 + 11 + 2 + 2 + 2 + 1);
+    assert_eq!(edits.len() - edits0, 13, "{edits:#?}");
+    assert_eq!(undo_steps(&h), undo0 + 13 + 2 + 2 + 2 + 1);
 
     drop(harness);
     h.shutdown();
