@@ -248,8 +248,9 @@ pub enum Hit {
 const ROLL: f32 = 3.0;
 /// Pixels from a clip edge that resize it.
 const EDGE: f32 = 10.0;
-/// Pixels from the audio edit that make a J/L cut.
-const AUDIO_EDIT: f32 = 7.0;
+/// Pixels from the audio edit that make a J/L cut. Wider than an edge's:
+/// nothing marks the audio edit until the pointer is near it.
+const AUDIO_EDIT: f32 = 12.0;
 /// Half the slip handle's width.
 const SLIP: f32 = 9.0;
 
@@ -534,14 +535,19 @@ mod tests {
         );
         assert_eq!(at(195.0, 30.0), Hit::Edge("c1".into(), Edge::Tail));
         assert_eq!(at(206.0, 30.0), Hit::Edge("c2".into(), Edge::Head));
-        // The audio edit sits 10 frames later (x = 220), in the audio band.
-        assert_eq!(
-            at(221.0, 85.0),
-            Hit::AudioEdit {
-                outgoing: "c1".into(),
-                incoming: "c2".into()
-            }
-        );
+        // The audio edit sits 10 frames later (x = 220), in the audio band,
+        // and can be grabbed 12 px either side.
+        for x in [221.0, 208.0, 232.0] {
+            assert_eq!(
+                at(x, 85.0),
+                Hit::AudioEdit {
+                    outgoing: "c1".into(),
+                    incoming: "c2".into()
+                },
+                "x = {x}"
+            );
+        }
+        assert_eq!(at(233.0, 85.0), Hit::Clip("c2".into()));
         // Clip bodies, the slip handle at the top center, gaps.
         assert_eq!(at(60.0, 50.0), Hit::Clip("c1".into()));
         assert_eq!(at(100.0, 10.0), Hit::Slip("c1".into()));

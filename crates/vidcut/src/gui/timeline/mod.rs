@@ -455,7 +455,22 @@ impl Workspace {
             && let Some(pos) = ui.input(|i| i.pointer.hover_pos())
         {
             for (rows, scale) in [(&layout.upper, &upper_scale), (&layout.lower, &lower_scale)] {
-                let icon = match hit_rows(&p, rows, scale, pos).1 {
+                let (track, what) = hit_rows(&p, rows, scale, pos);
+                // The audio edit has no mark of its own: light it up while it
+                // can be grabbed, so a J/L cut is found without guessing.
+                if let Hit::AudioEdit { outgoing, .. } = &what
+                    && let Some(row) = track.as_deref().and_then(|t| rows.get(t))
+                    && let Some(c) = p.clip(outgoing)
+                {
+                    let x = scale.xf(c.end() + c.audio.as_ref().map_or(0, |a| a.tail));
+                    let band = egui::Rangef::new(row.rect.audio_top, row.rect.rect.bottom());
+                    ui.painter().rect_filled(
+                        Rect::from_x_y_ranges(x - 3.0..=x + 3.0, band),
+                        1.0,
+                        Color32::from_rgb(255, 210, 60),
+                    );
+                }
+                let icon = match what {
                     Hit::Edge(..) => Some(egui::CursorIcon::ResizeHorizontal),
                     Hit::Roll { .. } => Some(egui::CursorIcon::ResizeColumn),
                     Hit::AudioEdit { .. } => Some(egui::CursorIcon::ResizeColumn),
