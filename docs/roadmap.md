@@ -1,6 +1,6 @@
 # Roadmap
 
-What vidcut is for, and what comes next. Finished milestones are listed in the [README](../README.md#milestones).
+What vidcut is for, and what comes next.
 
 ## Use cases
 
@@ -27,8 +27,6 @@ Moving an edit between vidcut and Resolve, in either direction and between compu
 
 What is still open is in [docs/todo/](todo/), one file per item.
 
-## Milestones
-
-- **Proxies** are in (decision D41, deviation X18). `vidcut proxy generate` writes an H.264 proxy on demand for any video or image sequence — it does not detect which codecs the GPU cannot play. The default longest side is 960. `vidcut set --proxies true` (or the Media Pool switch) plays a proxy in the preview when the source file still matches it. Export, frames, analysis and OTIO always read the originals. Proxy frames keep the source's timestamps, so the preview stays frame-exact, including image sequences that were too slow to decode as pictures. Stills are left as originals. Files live in `proxies/` beside the project.
+## Order
 
 Open work is in [docs/todo/](todo/), one file per item, each saying when it is wanted. Roughly: the interchange with Resolve first, then the smaller items, then macOS and Windows.

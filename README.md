@@ -2,20 +2,9 @@
 
 A simple, fully scriptable video cutting tool for Linux, modeled on DaVinci Resolve's **Cut page**.
 
-> **Status: early development.**
-> - Done:
->   - **M0:** spikes proved frame-exact decoding and mpv preview.
->   - **M1:** the project model, Cut-page edit operations and the headless CLI.
->   - **M2:** frame-exact export with presets, GPU encoding, ranges, per-clip and audio-only output.
->   - **M3:** the GUI shell. It has the media pool, the viewer (Source Clip, Source Tape, Timeline), transport and marks, the edit buttons and an overview timeline. It also has live control: CLI commands and agents drive the running GUI.
->   - **M4:** timeline editing with the mouse. The dual timeline has filmstrips and waveforms. You can drag and drop from the pool, move, trim, roll, slip and make J/L cuts, with snapping, Safe Edit, markers and the Trim Editor.
->   - **M5:** exporting from the GUI: Quick Export, an Export dialog with every setting, and a Jobs window with progress and cancel. Timelines move to and from other editors as OpenTimelineIO.
->   - **M6:** several tracks: B-roll above Track 1 that follows its edits, music on audio tracks, Place On Top, a mixer with meters, mute and solo, and bins in the media pool.
->   - **M7:** for agents and for speed: an MCP server, Ripple Delete Silence, scene and black detection, the Boring Detector, Dynamic Trim, storyboards and loudness-normalized export.
->   - **M8:** media from phones and broadcast: rotation metadata, interlaced sources and HDR, tone-mapped or exported as HDR.
->   - **M9:** stills (photos, title cards) and image sequences (numbered frames from renders and scans), in the pool, the viewer, the timeline, export and OpenTimelineIO.
+**Status:** early development. It works, but expect rough edges.
 
-## What it will do
+## What it does
 
 - **Cut-page editing:**
   - a media pool with bins, and a source/timeline viewer (Source Clip, Source Tape, Timeline)
@@ -66,22 +55,90 @@ Everything you do is listed in the **Command log** (top right) as the request it
 
 **Preferences.** **File > Preferences** (Ctrl+,) holds settings for vidcut as a whole, kept in `~/.config/vidcut/preferences.toml`. The pool's thumbnails are kept on disk (`~/.cache/vidcut/thumbs`, 512 MB by default), so a project opens with its thumbnails shown instead of decoding every clip again; you can change the limit or turn the cache off, which empties it. `vidcut preferences` shows and changes the same settings.
 
-| Keys | |
+### Keys
+
+**Playing and moving around**
+
+| Key | Does |
 |---|---|
-| Space, J / K / L | play/stop, shuttle (repeat J/L for speed; hold K and tap J/L to step) |
-| ← / →, Shift+← / → | one frame, one second |
-| ↑ / ↓, Shift+↑ / ↓, Home / End | previous/next edit, previous/next marker, start/end |
-| I / O, Alt+X, Shift+I / O | mark In/Out (source, timeline, or the pool clip under the pointer), clear, go to |
-| Q | Viewer: Timeline ↔ last source mode |
-| = / + / − | type a timecode (absolute or relative); digits fill from the right, so 100 is 1 second |
-| F9, Shift+F12, Shift+F10, F10, F12 | Smart Insert, Append, Ripple Overwrite, Overwrite, Place On Top |
-| Ctrl+\\, Delete, Alt+Delete | split at the playhead, ripple delete (or the In–Out range), lift |
-| Ctrl+C / X / V, Ctrl+Z / Ctrl+Shift+Z | copy, cut, paste at the playhead; undo, redo |
-| M, Alt+M, D | add marker (or edit the one at the playhead), remove marker, disable clip |
-| V, U, `,` / `.` | select the nearest edit, cycle Out/In/both, trim it a frame (Shift: a second) |
-| N, Ctrl+D | snapping on/off (only for the current drag if pressed mid-drag), change clip duration |
-| Ctrl+I, Shift+Ctrl+N | import media (into the open bin), new bin |
-| W | Dynamic Trim: J/K/L trim the selected edit instead of playing; K applies it |
+| Space | Play or stop |
+| L | Play forward (press again to go faster) |
+| J | Play backward (press again to go faster) |
+| K | Stop |
+| K held, then J or L | Step one frame back or forward |
+| ← | Back one frame |
+| → | Forward one frame |
+| Shift+← | Back one second |
+| Shift+→ | Forward one second |
+| ↑ | Previous edit |
+| ↓ | Next edit |
+| Shift+↑ | Previous marker |
+| Shift+↓ | Next marker |
+| Home | Start of the timeline |
+| End | End of the timeline |
+| = | Go to a timecode you type |
+| + | Go forward by the time you type |
+| − | Go back by the time you type |
+| Q | Switch the viewer between Timeline and the last source |
+
+Typed timecodes fill from the right: 100 is 1 second, 10000 is 1 minute.
+
+**Marks**
+
+| Key | Does |
+|---|---|
+| I | Mark In (in the viewer, or on the pool clip under the pointer) |
+| O | Mark Out |
+| Shift+I | Go to the In mark |
+| Shift+O | Go to the Out mark |
+| Alt+X | Clear In and Out |
+
+**Edit buttons**
+
+| Key | Does |
+|---|---|
+| F9 | Smart Insert |
+| Shift+F12 | Append |
+| Shift+F10 | Ripple Overwrite |
+| F10 | Overwrite |
+| F12 | Place On Top |
+
+**Timeline**
+
+| Key | Does |
+|---|---|
+| Ctrl+\\ | Split at the playhead |
+| Delete | Delete the selected clips and close the gap (with In and Out set: delete that range) |
+| Alt+Delete | Delete the selected clips and leave the gap (lift) |
+| Ctrl+C | Copy |
+| Ctrl+X | Cut |
+| Ctrl+V | Paste at the playhead |
+| Ctrl+Z | Undo |
+| Ctrl+Shift+Z | Redo |
+| Ctrl+A | Select all clips |
+| Ctrl+Shift+A | Select nothing |
+| Alt+Shift+V | Select the clips under the playhead |
+| D | Disable or enable the selected clips |
+| Ctrl+D | Change the selected clip's duration |
+| M | Add a marker (on a marker: edit it) |
+| Alt+M | Remove the marker at the playhead |
+| V | Select the edit nearest the playhead |
+| U | Switch the selected edit between both sides, its Out and its In |
+| , | Trim the selected edit one frame left |
+| . | Trim the selected edit one frame right |
+| Shift+, | Trim the selected edit one second left |
+| Shift+. | Trim the selected edit one second right |
+| N | Snapping on or off (during a drag: for that drag only) |
+| W | Dynamic Trim: J, K and L trim the selected edit instead of playing, and K applies the trim |
+| Ctrl+mouse wheel | Zoom the lower timeline |
+
+**Other**
+
+| Key | Does |
+|---|---|
+| Ctrl+I | Import media (into the open bin) |
+| Ctrl+Shift+N | New bin |
+| Ctrl+, | Preferences |
 
 **The timeline** follows the Cut page:
 - The upper timeline shows the whole program; the lower one is a zoomed detail view (Ctrl+wheel) whose playhead stays in the middle.
@@ -149,22 +206,9 @@ claude mcp add vidcut -- vidcut mcp -p /path/to/talk.vidcut
 
 Agents can look at their work: frames, screenshots and storyboards come back as images. AGENTS.md has the details.
 
-## Milestones
+## What's next
 
-| | |
-|---|---|
-| M0 | Scaffold; spikes for mpv preview and frame-exact decoding |
-| M1 | Project model, Cut-page edit operations, headless CLI |
-| M2 | Export engine (presets, GPU, range, per-clip, audio-only) |
-| M3 | GUI shell, viewer, media pool, live control over a socket |
-| M4 | Timeline editing (dual timeline, trimming, snapping, markers) |
-| M5 | Export UI (Quick Export, Export dialog, jobs), OpenTimelineIO import/export |
-| M6 | Multi-track (B-roll, music, Place On Top, mixer) |
-| M7 | Agent extras (MCP server, Ripple Delete Silence, scene detection, Boring Detector, Dynamic Trim, storyboards, loudness) |
-| M8 | Media coverage: rotation metadata, interlaced sources, HDR (tone mapping and HDR export) |
-| M9 | Stills and image sequences |
-
-What comes next, and the use cases behind it, is in [docs/roadmap.md](docs/roadmap.md); the open items are in [docs/todo/](docs/todo/), one file each.
+The use cases vidcut is for, and what comes next, are in [docs/roadmap.md](docs/roadmap.md). Open items are in [docs/todo/](docs/todo/), one file each.
 
 ## Contributing
 
