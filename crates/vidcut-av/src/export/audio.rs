@@ -148,7 +148,7 @@ const DECODE_AHEAD: i64 = 1;
 impl SourceAudio {
     fn open(path: &Path, ordinal: u32, start: f64, rate: u32, channels: u16) -> Result<Self> {
         crate::init();
-        let mut input = format::input(path).ctx(|| format!("opening {}", path.display()))?;
+        let input = format::input(path).ctx(|| format!("opening {}", path.display()))?;
         let (index, tb, tick, stream_start, params) = {
             let stream = input
                 .streams()
@@ -170,7 +170,7 @@ impl SourceAudio {
         discard_others(&input, index);
         // Duration is a length on the packet clock, not an end at zero, and
         // a missing duration does not mean the file goes on forever.
-        let end = crate::decode::container_end(&mut input, index, stream_start, tick);
+        let end = crate::decode::container_end(&input, stream_start, tick);
         let decoder = codec::context::Context::from_parameters(params)
             .and_then(|mut c| {
                 // Without the packet time base, FFmpeg can't shift a frame's

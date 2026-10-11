@@ -32,10 +32,10 @@ pub(crate) const DAMAGED_IN_A_ROW: u32 = 100;
 ///
 /// `start` and `duration` are the container's (`None` when unset).
 /// `duration` is a length. A known start places it at `start + duration`.
-/// With no start, `origin` does (the stream's start, or the first packet's
-/// timestamp): counting the length from zero puts an offset clock past the
-/// end, a real gap is dropped, and later audio shifts early. No positive
-/// duration means the end is unknown.
+/// With no start, `origin` does (the stream's start): counting the length
+/// from zero puts an offset clock past the end, a real gap is dropped, and
+/// later audio shifts early. No positive duration, or no start at all, means
+/// the end is unknown.
 pub(crate) fn file_end(
     start: Option<f64>,
     duration: Option<f64>,
@@ -74,63 +74,13 @@ fn opt_av_time(ts: i64) -> Option<f64> {
     (ts != ffmpeg::ffi::AV_NOPTS_VALUE).then_some(ts as f64 / f64::from(ffmpeg::ffi::AV_TIME_BASE))
 }
 
-fn io_seekable(input: &format::context::Input) -> bool {
-    unsafe {
-        let ctx = &*input.as_ptr();
-        !ctx.pb.is_null() && ((*ctx.pb).seekable & ffmpeg::ffi::AVIO_SEEKABLE_NORMAL) != 0
-    }
-}
-
-fn rewind(input: &mut format::context::Input) -> bool {
-    unsafe {
-        ffmpeg::ffi::avformat_seek_file(input.as_mut_ptr(), -1, i64::MIN, i64::MIN, i64::MIN, 0)
-            >= 0
-    }
-}
-
-/// First timestamp (s) on `stream`, then back to the start of the file.
-/// Nothing is read when the input can't be rewound. `None` when no early
-/// packet carries a timestamp. A failed rewind also returns `None`: the
-/// demuxer is left where the scan stopped, so the length is not placed on
-/// a read that no longer starts at the beginning.
-fn first_packet_time(input: &mut format::context::Input, stream: usize, tick: f64) -> Option<f64> {
-    if !io_seekable(input) {
-        return None;
-    }
-    let mut found = None;
-    let mut seen = 0u32;
-    let mut scanned = 0u32;
-    for (s, packet) in input.packets() {
-        scanned += 1;
-        // The first timestamp is near the start. Don't read the whole file
-        // looking for one that isn't there.
-        if scanned > 4096 {
-            break;
-        }
-        if s.index() != stream {
-            continue;
-        }
-        seen += 1;
-        if let Some(pts) = packet.pts() {
-            found = Some(pts as f64 * tick);
-            break;
-        }
-        if seen >= 32 {
-            break;
-        }
-    }
-    if rewind(input) { found } else { None }
-}
-
 /// [`file_end`] for an open input.
 ///
 /// `stream_start` is that stream's `start_time` (stream time base) and
 /// `tick` its time base in seconds. When the container has a duration but
-/// no start, the length is placed on the stream's clock, or on the first
-/// packet's timestamp if the stream doesn't say.
+/// no start, the length is placed on the stream's clock.
 pub(crate) fn container_end(
-    input: &mut format::context::Input,
-    stream: usize,
+    input: &format::context::Input,
     stream_start: i64,
     tick: f64,
 ) -> Option<f64> {
@@ -138,12 +88,7 @@ pub(crate) fn container_end(
         let ctx = &*input.as_ptr();
         (opt_av_time(ctx.start_time), opt_av_time(ctx.duration))
     };
-    let origin = if start.is_none() && duration.is_some_and(|d| d > 0.0) {
-        stream_origin(stream_start, tick).or_else(|| first_packet_time(input, stream, tick))
-    } else {
-        None
-    };
-    file_end(start, duration, origin)
+    file_end(start, duration, stream_origin(stream_start, tick))
 }
 
 /// Sends `packet` to `decoder`. A damaged packet, one the decoder can't

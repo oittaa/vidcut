@@ -30,7 +30,7 @@ pub fn audio_levels(path: &Path, ordinal: u32, per_second: u32) -> Result<AudioL
     let tick = f64::from(tb);
     discard_others(&input, index);
     // Same end as export: a past-end timestamp is not a hole in the levels.
-    let file_end = crate::decode::container_end(&mut input, index, start_pts, tick);
+    let file_end = crate::decode::container_end(&input, start_pts, tick);
     let mut decoder = codec::context::Context::from_parameters(params)
         .and_then(|mut c| {
             unsafe { (*c.as_mut_ptr()).pkt_timebase = tb.into() };

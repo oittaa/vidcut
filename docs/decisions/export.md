@@ -61,7 +61,7 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
   - The silence is made a second at a time as it is read, so a jump in the timestamps costs no memory.
   - Audio that starts after a piece's start (a stream that begins after the picture, or a lost first packet) is silent until it does. Starting it at once put it early by that much.
   - A frame stamped past the file's end has a broken timestamp: it plays in order, with no gap. Otherwise one bad timestamp would silence the rest of the piece.
-  - That end is the container's start plus its duration. The duration is a length. When the start is missing, the length is added to the audio stream's start, or to the first packet's timestamp if the stream has none — not counted from zero. Timestamps on an offset clock would otherwise look past the end, a real gap would be dropped, and later audio would shift early.
+  - That end is the container's start plus its duration. The duration is a length. When the start is missing, the length is added to the audio stream's start, not counted from zero; with no start at all, the end counts as unknown (below). Timestamps on an offset clock would otherwise look past the end, a real gap would be dropped, and later audio would shift early.
   - When the duration is missing or not positive, a jump of more than a second plays in order too. A shorter one is still silence. Filling the whole jump would silence the rest of the piece, a second at a time, for as long as the timestamp says.
   - Smaller differences are timestamp rounding (Matroska keeps milliseconds).
   - Audio levels and waveforms count gaps the same way, so silence found in a measurement is where the export has it.
