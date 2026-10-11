@@ -24,11 +24,13 @@ pub(super) struct BinsUi {
     rename: Option<Rename>,
 }
 
-/// The Rename Bin window: the bin and the name typed so far.
+/// The window naming a bin: the bin and the name typed so far. `new`: the
+/// bin isn't made yet (New Bin), and naming it makes it.
 struct Rename {
     path: String,
     name: String,
     focus: bool,
+    new: bool,
 }
 
 /// The last name in a bin path.
@@ -443,6 +445,7 @@ impl Workspace {
                     path: path.to_string(),
                     name: leaf(path).to_string(),
                     focus: true,
+                    new: false,
                 });
                 ui.close();
             }
@@ -457,34 +460,49 @@ impl Workspace {
         });
     }
 
-    /// The Rename Bin window.
+    /// The window naming a bin, new or renamed. The name starts selected,
+    /// so typing replaces it; Enter applies, Escape cancels.
     fn rename_bin_window(&mut self, ctx: &egui::Context) {
         let Some(r) = &mut self.bins.rename else {
             return;
         };
         let mut open = true;
         let mut apply = false;
-        let mut cancel = false;
-        egui::Window::new("Rename Bin")
+        let mut cancel = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        egui::Window::new(if r.new { "New Bin" } else { "Rename Bin" })
             .collapsible(false)
             .resizable(false)
             .default_pos(super::export::near_center(ctx, 260.0, 90.0))
             .open(&mut open)
             .show(ctx, |ui| {
-                let edit = ui.add(egui::TextEdit::singleline(&mut r.name).desired_width(240.0));
+                let output = egui::TextEdit::singleline(&mut r.name)
+                    .desired_width(240.0)
+                    .show(ui);
+                let edit = output.response;
                 if r.focus {
                     edit.request_focus();
+                    let mut state = output.state;
+                    let all = egui::text::CCursorRange::two(
+                        egui::text::CCursor::new(0),
+                        egui::text::CCursor::new(r.name.chars().count()),
+                    );
+                    state.cursor.set_char_range(Some(all));
+                    state.store(ui.ctx(), edit.id);
                     r.focus = false;
                 }
                 let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 ui.horizontal(|ui| {
-                    apply = ui.button("Rename").clicked() || enter;
-                    cancel = ui.button("Cancel").clicked();
+                    let label = if r.new { "Create" } else { "Rename" };
+                    apply = ui.button(label).clicked() || enter;
+                    cancel |= ui.button("Cancel").clicked();
                 });
             });
-        if apply {
-            let to = join(parent(&r.path), r.name.trim());
-            if to != r.path {
+        let name = r.name.trim();
+        if apply && !name.is_empty() {
+            let to = join(parent(&r.path), name);
+            if r.new {
+                self.send("bins.add", json!({ "path": to }));
+            } else if to != r.path {
                 let path = r.path.clone();
                 self.send("bins.rename", json!({ "path": path, "to": to }));
             }
@@ -494,11 +512,17 @@ impl Workspace {
         }
     }
 
-    /// File > New Bin (Shift+Ctrl+N): a bin in the open bin.
+    /// File > New Bin (Shift+Ctrl+N): names a new bin in the open bin, then
+    /// makes it. The name offered is the next free `Bin N`.
     pub(super) fn new_bin(&mut self) {
         if let Some(p) = self.project() {
             let path = new_bin(p, &self.snap.pool.bin);
-            self.send("bins.add", json!({ "path": path }));
+            self.bins.rename = Some(Rename {
+                name: leaf(&path).to_string(),
+                path,
+                focus: true,
+                new: true,
+            });
         }
     }
 

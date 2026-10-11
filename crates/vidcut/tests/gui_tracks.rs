@@ -409,15 +409,25 @@ fn track_gestures_send_one_request_each() {
     gestures += 2;
     assert_eq!(gui_edits(&h).len() - edits0, gestures, "step 4");
 
-    // 5. Bins: File > New Bin, then a pool clip dropped on it
-    // moves into it.
+    // 5. Bins: File > New Bin asks for a name (offering the next free
+    // "Bin N", selected so typing replaces it), then a pool clip dropped on
+    // the bin moves into it.
     harness.get_by_label("File").click();
     harness.step();
     harness.get_by_label("New Bin").click();
+    // The window is measured in its first frame and placed in the next.
+    harness.step();
+    harness.step();
+    assert!(
+        harness.query_by_label("Create").is_some(),
+        "the naming window"
+    );
+    harness.event(egui::Event::Text("Clips".into()));
+    harness.key_press(egui::Key::Enter);
     harness.step();
     settle(&h, &mut harness);
     let (m, p) = last(&h);
-    assert_eq!((m.as_str(), &p["path"]), ("bins.add", &json!("Bin 1")));
+    assert_eq!((m.as_str(), &p["path"]), ("bins.add", &json!("Clips")));
     harness.get_by_label("List").click();
     harness.step();
     let name = call(&h, "media.get", json!({ "media": "m2" })).result["name"]
@@ -430,26 +440,26 @@ fn track_gestures_send_one_request_each() {
         name
     };
     let row = harness.get_by_label(&label).rect().center();
-    let bin = harness.get_by_label("📁 Bin 1").rect().center();
+    let bin = harness.get_by_label("📁 Clips").rect().center();
     drag(&mut harness, row, bin);
     settle(&h, &mut harness);
     let (m, p) = last(&h);
     assert_eq!(
         (m.as_str(), &p["media"], &p["bin"]),
-        ("media.move", &json!(["m2"]), &json!("Bin 1"))
+        ("media.move", &json!(["m2"]), &json!("Clips"))
     );
     let bin_of = |h: &live::Handle, id: &str| {
         call(h, "media.get", json!({ "media": id })).result["bin"].clone()
     };
-    assert_eq!(bin_of(&h, "m2"), json!("Bin 1"));
+    assert_eq!(bin_of(&h, "m2"), json!("Clips"));
     assert!(harness.query_by_label(&label).is_none(), "gone from Master");
     // Opening the bin shows it, and Source Tape follows.
-    harness.get_by_label("📁 Bin 1").click_secondary();
+    harness.get_by_label("📁 Clips").click_secondary();
     harness.step();
     harness.get_by_label("Open").click();
     harness.step();
     settle(&h, &mut harness);
-    assert_eq!(call(&h, "pool.set", json!({})).result["bin"], "Bin 1");
+    assert_eq!(call(&h, "pool.set", json!({})).result["bin"], "Clips");
     assert!(harness.query_by_label(&label).is_some(), "shown in its bin");
     call(&h, "viewer.set", json!({ "mode": "source_tape" }));
     let state = call(&h, "player.state", json!({})).result;
@@ -463,11 +473,14 @@ fn track_gestures_send_one_request_each() {
     harness.step();
     harness.get_by_label("New Bin").click();
     harness.step();
+    harness.step();
+    harness.key_press(egui::Key::Enter);
+    harness.step();
     settle(&h, &mut harness);
     let (m, p) = last(&h);
-    assert_eq!((m.as_str(), &p["path"]), ("bins.add", &json!("Bin 2")));
-    let from = harness.get_by_label("📁 Bin 2").rect().center();
-    let onto = harness.get_by_label("📁 Bin 1").rect().center();
+    assert_eq!((m.as_str(), &p["path"]), ("bins.add", &json!("Bin 1")));
+    let from = harness.get_by_label("📁 Bin 1").rect().center();
+    let onto = harness.get_by_label("📁 Clips").rect().center();
     let before = gui_edits(&h).len();
     drag(&mut harness, from, onto);
     settle(&h, &mut harness);
@@ -476,15 +489,15 @@ fn track_gestures_send_one_request_each() {
     let (m, p) = edits.last().unwrap();
     assert_eq!(
         (m.as_str(), &p["path"], &p["to"]),
-        ("bins.rename", &json!("Bin 2"), &json!("Bin 1/Bin 2"))
+        ("bins.rename", &json!("Bin 1"), &json!("Clips/Bin 1"))
     );
     assert_eq!(
         call(&h, "project.summary", json!({})).result["bins"],
-        json!(["Bin 1", "Bin 1/Bin 2"])
+        json!(["Clips", "Clips/Bin 1"])
     );
-    assert_eq!(bin_of(&h, "m2"), json!("Bin 1"));
+    assert_eq!(bin_of(&h, "m2"), json!("Clips"));
     assert!(
-        harness.query_by_label("📁 Bin 2").is_none(),
+        harness.query_by_label("📁 Bin 1").is_none(),
         "moved out of Master"
     );
 
