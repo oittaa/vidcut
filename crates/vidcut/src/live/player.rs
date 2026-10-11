@@ -65,6 +65,54 @@ pub fn mpv_options(audio: bool) -> Vec<(String, String)> {
     o
 }
 
+/// Whether `path` is on a network file system (NFS, SMB/CIFS, Ceph, AFS,
+/// 9P, or FUSE, as GNOME's mounted shares and sshfs are). Can block while a
+/// share doesn't answer: call it off the session thread.
+pub fn on_network(path: &std::path::Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    let mut fs: libc::statfs = unsafe { std::mem::zeroed() };
+    unsafe { libc::statfs(c.as_ptr(), &mut fs) == 0 && network_fs(fs.f_type as i64) }
+}
+
+#[cfg(test)]
+mod storage_tests {
+    use super::network_fs;
+
+    #[test]
+    fn network_file_systems_are_known_by_their_magic() {
+        assert!(network_fs(0x6969), "NFS");
+        assert!(network_fs(0xfe53_4d42), "SMB2");
+        assert!(
+            network_fs(0xfe53_4d42_u32 as i32 as i64),
+            "SMB2, sign-extended"
+        );
+        assert!(network_fs(0x6573_5546), "FUSE");
+        assert!(!network_fs(0xef53), "ext4");
+        assert!(!network_fs(0x9123_683e), "btrfs");
+        assert!(!network_fs(0x0102_1994), "tmpfs");
+    }
+}
+
+/// Whether a `statfs` file system type is a network one.
+fn network_fs(f_type: i64) -> bool {
+    const NETWORK: [i64; 9] = [
+        0x6969,      // NFS
+        0x517b,      // SMB
+        0xff53_4d42, // CIFS
+        0xfe53_4d42, // SMB2
+        0x564c,      // NCP
+        0x00c3_6400, // Ceph
+        0x5346_414f, // AFS
+        0x0102_1997, // 9P
+        0x6573_5546, // FUSE
+    ];
+    // Some C libraries sign-extend the 32-bit magic.
+    NETWORK.contains(&f_type) || NETWORK.contains(&(f_type & 0xffff_ffff))
+}
+
 /// Stepped reverse playback (J): exact seeks backwards at the shuttle speed,
 /// one in flight at a time (docs/decisions/preview.md §7).
 #[derive(Debug, Clone, Copy)]
@@ -241,6 +289,11 @@ impl Player {
         // this file only.
         if let Some(graph) = self.loaded.as_ref().and_then(|p| p.audio_graph.as_ref()) {
             options.push_str(&format!(",lavfi-complex=%{}%{graph}", graph.len()));
+        }
+        // Network shares: read ahead, and keep what was read for seeking back
+        // and forth (mpv's cache stays off for local files).
+        if self.loaded.as_ref().is_some_and(|p| p.read_ahead) {
+            options.push_str(",cache=yes,demuxer-max-back-bytes=150MiB");
         }
         let id = self.command(&["loadfile", &path, "replace", "-1", &options]);
         self.tracking = self.speed > 0.0;

@@ -487,6 +487,51 @@ fn live_session() {
     assert_eq!(s.result["muted"], true);
     assert_eq!(h.ok("project.summary", json!({})).rev, rev);
 
+    step("Many cuts: a seek waits only for the checks near its frame");
+    // 120 clips of 4 frames from all over a long fixture, appended at once:
+    // 120 tail checks, those nearest the playhead (the end, decision D15)
+    // first. The seek there doesn't wait for the rest (gui.md §4).
+    let long = fixture_file(1600);
+    let added = h.ok("media.add", json!({ "paths": [long] }));
+    let media = added.changes.created[0].clone();
+    let commands: Vec<Value> = (0..120)
+        .map(|k| {
+            json!({ "method": "edit.append",
+                    "params": { "media": media, "range": format!("{}f..+4f", 13 * k + 5) } })
+        })
+        .collect();
+    h.ok("apply", json!({ "commands": commands }));
+    let total = h.ok("project.summary", json!({})).result["duration"]
+        .as_i64()
+        .unwrap();
+    let first = total - 4 * 120;
+    let started = Instant::now();
+    let seek = h.ok(
+        "player.seek",
+        json!({ "at": total - 3, "viewer": "timeline" }),
+    );
+    eprintln!(
+        "first seek after 120 cuts: {:?}, {} tail checks still running",
+        started.elapsed(),
+        seek.result["preview_pending"]
+    );
+    assert_eq!(h.shown(&dir), Some(13 * 119 + 5 + 1));
+    let all = h.wait_for("every tail checked", |_| {
+        h.ok("player.state", json!({})).result["preview_pending"] == 0
+    });
+    eprintln!("all tail checks done {all:?} later");
+    for k in [0, 1, 37, 118, 119] {
+        let at = first + 4 * k;
+        for (t, want) in [(at, 13 * k + 5), (at + 3, 13 * k + 8)] {
+            h.ok("player.seek", json!({ "at": t, "viewer": "timeline" }));
+            assert_eq!(
+                h.shown(&dir),
+                Some(want as u32),
+                "clip {k}, timeline frame {t}"
+            );
+        }
+    }
+
     drop(h);
     let _ = std::fs::remove_dir_all(&dir);
 }

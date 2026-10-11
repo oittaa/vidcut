@@ -181,6 +181,11 @@ pub(crate) enum Msg {
         source: PathBuf,
         result: std::result::Result<PathBuf, String>,
     },
+    /// Whether a media file is on a network file system.
+    Storage {
+        path: PathBuf,
+        network: bool,
+    },
     /// A tail check finished: the earliest timestamp mpv would drop, if any.
     TailChecked {
         key: TailKey,
@@ -381,7 +386,9 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         waveforms_wanted: HashSet::new(),
         fillers: HashMap::new(),
         remux: HashMap::new(),
+        network: HashMap::new(),
         tails: HashMap::new(),
+        tail_spots: [Vec::new(), Vec::new()],
         workers: Workers::new(2),
         jobs: Arc::new(Vec::new()),
         job_cancels: HashMap::new(),
@@ -455,6 +462,10 @@ enum Until {
     Shown { player: PlayerId, motion: u64 },
     /// Job `id` ended (`jobs.wait`).
     Job { id: String },
+    /// `player` shows its latest motion with no tail patch pending near it;
+    /// then the viewer is captured to `out` (a reload in flight, such as a
+    /// patch arriving after a seek returned, may draw black for a moment).
+    Settled { player: PlayerId, out: PathBuf },
     /// Capture `id` arrives; then it is written to `out`. For a viewer
     /// capture, `player` is the player shown.
     Capture {
@@ -559,7 +570,13 @@ struct Live {
     /// Filler media by format (`None`: generating them failed).
     fillers: HashMap<FillerKey, Option<Fillers>>,
     remux: HashMap<PathBuf, RemuxState>,
+    /// Media files on network file systems (true) or not, asked on a worker:
+    /// a share that doesn't answer must not stall the session.
+    network: HashMap<PathBuf, bool>,
     tails: HashMap<TailKey, TailState>,
+    /// Where each player's segments end (frames in what it plays) and the
+    /// tail that ends there: a seek waits only for checks near its frame.
+    tail_spots: [Vec<(i64, TailKey)>; 2],
     workers: Workers,
     /// Export jobs, oldest first.
     jobs: Arc<Vec<JobInfo>>,
@@ -732,6 +749,15 @@ impl Live {
                 }
                 Err(e) => self.notice(format!("thumbnails for {media}: {e}"), true),
             },
+            Msg::Storage { path, network } => {
+                self.network.insert(path, network);
+                if network {
+                    self.schedule_timeline();
+                    self.refresh_source();
+                } else {
+                    changed = false;
+                }
+            }
             Msg::Remuxed { source, result } => {
                 match result {
                     Ok(p) => {
@@ -811,19 +837,33 @@ impl Live {
         // Requests waiting for frames or captures.
         let mut i = 0;
         while i < self.waits.len() {
+            let settled = match &self.waits[i].until {
+                Until::Settled { player, .. } if self.settled(*player) => Some(*player),
+                _ => None,
+            };
+            if let Some(player) = settled {
+                let id = self.capture_viewer(player);
+                if let Until::Settled { out, .. } = &mut self.waits[i].until {
+                    let out = std::mem::take(out);
+                    self.waits[i].until = Until::Capture {
+                        id,
+                        out,
+                        player: Some(player),
+                    };
+                }
+            }
             let w = &self.waits[i];
-            let pending = self.tails_pending();
             let outcome = match w.until {
                 Until::Shown { player, motion } => {
                     // The latest motion counts too: a preview reload (say, a
                     // tail patch arriving) replaces what was asked for.
                     let p = &self.players[player.index()];
-                    (p.shown >= motion.max(p.motion) && pending == 0).then(|| match &p.error {
+                    (p.shown >= motion && self.settled(player)).then(|| match &p.error {
                         Some(e) => Err(Error::media(format!("preview: {e}"))),
                         None => Ok(self.state_response()),
                     })
                 }
-                Until::Capture { .. } => None,
+                Until::Capture { .. } | Until::Settled { .. } => None,
                 Until::Job { ref id } => self
                     .jobs
                     .iter()
@@ -841,6 +881,9 @@ impl Live {
                     Until::Capture { .. } => Err(Error::internal(
                         "timed out waiting for the picture (target=window needs a visible \
                          window; target=viewer works while it is hidden)",
+                    )),
+                    Until::Settled { .. } => Err(Error::internal(
+                        "timed out waiting for the viewer to settle",
                     )),
                     // Time is up: the job as it is now (still running).
                     Until::Job { id } => self.job_json(id).map(answer),
@@ -1370,26 +1413,36 @@ impl Live {
                 self.set_selection(clips, media)
                     .map(|()| answer(json!(self.selection))),
             ),
-            Request::GuiScreenshot { out, target } => {
-                let id = self.next_capture;
-                self.next_capture += 1;
-                let tx = self.tx.clone();
-                let done: Capture = Box::new(move |result| {
-                    let _ = tx.send(Msg::Captured { id, result });
-                });
-                let player = match target {
-                    ScreenshotTarget::Viewer => {
-                        let p = PlayerId::of(self.viewer);
-                        self.renderer.capture_viewer(p, done);
-                        Some(p)
+            Request::GuiScreenshot { out, target } => match target {
+                // The picture as shown once the player has settled (a seek
+                // already waited for that; a reload may still be on its way).
+                ScreenshotTarget::Viewer => {
+                    let player = PlayerId::of(self.viewer);
+                    if self.settled(player) {
+                        let id = self.capture_viewer(player);
+                        Step::Wait(Until::Capture {
+                            id,
+                            out,
+                            player: Some(player),
+                        })
+                    } else {
+                        Step::Wait(Until::Settled { player, out })
                     }
-                    ScreenshotTarget::Window => {
-                        self.renderer.capture_window(done);
-                        None
-                    }
-                };
-                Step::Wait(Until::Capture { id, out, player })
-            }
+                }
+                ScreenshotTarget::Window => {
+                    let id = self.next_capture;
+                    self.next_capture += 1;
+                    let tx = self.tx.clone();
+                    self.renderer.capture_window(Box::new(move |result| {
+                        let _ = tx.send(Msg::Captured { id, result });
+                    }));
+                    Step::Wait(Until::Capture {
+                        id,
+                        out,
+                        player: None,
+                    })
+                }
+            },
             Request::GuiLog { since, limit } => {
                 let since = since.unwrap_or(0);
                 let entries: Vec<&LogEntry> = self.log.iter().filter(|e| e.seq > since).collect();
@@ -1679,6 +1732,14 @@ impl Live {
                     let _ = tx.send(Msg::Waveform { media: id, result });
                 });
             }
+            if !self.network.contains_key(&m.path) {
+                self.network.insert(m.path.clone(), false);
+                let (tx, path) = (self.tx.clone(), m.path.clone());
+                self.workers.run(move || {
+                    let network = player::on_network(&path);
+                    let _ = tx.send(Msg::Storage { path, network });
+                });
+            }
             if vidcut_av::remux::needs_index(&m.info.format) && !self.remux.contains_key(&m.path) {
                 self.remux.insert(m.path.clone(), RemuxState::Pending);
                 let tx = self.tx.clone();
@@ -1735,10 +1796,16 @@ impl Live {
         }
     }
 
-    /// The plan mpv plays: media it can't seek exactly swapped for their
-    /// remuxes, and segment tails it would cut short replaced by patches
-    /// (starting the checks and renders that are still missing).
-    fn preview_plan(&mut self, mut plan: RenderPlan) -> RenderPlan {
+    /// The plan `player` plays: media mpv can't seek exactly swapped for
+    /// their remuxes, and segment tails it would cut short replaced by
+    /// patches. Starts the checks still missing, those nearest `position`
+    /// first.
+    fn preview_plan(
+        &mut self,
+        mut plan: RenderPlan,
+        player: PlayerId,
+        position: i64,
+    ) -> RenderPlan {
         let swap = |remux: &HashMap<PathBuf, RemuxState>, path: &mut PathBuf| {
             if let Some(RemuxState::Ready(p)) = remux.get(path.as_path()) {
                 *path = p.clone();
@@ -1752,7 +1819,11 @@ impl Live {
             }
         }
         let mut video = Vec::with_capacity(plan.video.len());
+        let mut spots = Vec::new();
+        let mut checks = Vec::new();
+        let mut at = 0;
         for mut piece in std::mem::take(&mut plan.video) {
+            at += piece.frames();
             let render::VideoPiece::Source {
                 media,
                 path,
@@ -1772,6 +1843,7 @@ impl Live {
                 plan.width,
                 plan.height,
             );
+            spots.push((at, key.clone()));
             match self.tails.get(&key) {
                 Some(TailState::Ready {
                     path: patch,
@@ -1797,17 +1869,21 @@ impl Live {
                 Some(_) => video.push(piece),
                 None => {
                     self.tails.insert(key.clone(), TailState::Checking);
-                    let (tx, origin, fps) = (self.tx.clone(), *origin, plan.fps);
-                    let end = origin + fps.frames_to_secs(key.1) - fps.frames_to_secs(1) / 2.0;
-                    self.workers.run(move || {
-                        let lost =
-                            vidcut_av::tails::lost_before(&key.0, end).map_err(|e| e.to_string());
-                        let _ = tx.send(Msg::TailChecked { key, origin, lost });
-                    });
+                    checks.push((at, key, *origin));
                     video.push(piece);
                 }
             }
         }
+        checks.sort_by_key(|(end, ..)| (end - position).abs());
+        for (_, key, origin) in checks {
+            let (tx, fps) = (self.tx.clone(), plan.fps);
+            let end = origin + fps.frames_to_secs(key.1) - fps.frames_to_secs(1) / 2.0;
+            self.workers.run(move || {
+                let lost = vidcut_av::tails::lost_before(&key.0, end).map_err(|e| e.to_string());
+                let _ = tx.send(Msg::TailChecked { key, origin, lost });
+            });
+        }
+        self.tail_spots[player.index()] = spots;
         plan.video = video;
         plan
     }
@@ -1858,12 +1934,29 @@ impl Live {
         });
     }
 
-    /// EDL for `plan`, or `None` while fillers are being made.
-    fn edl(&mut self, plan: RenderPlan) -> Option<preview::Preview> {
+    /// EDL for `plan` as `player` plays it from `position`, or `None` while
+    /// fillers are being made.
+    fn edl(
+        &mut self,
+        plan: RenderPlan,
+        player: PlayerId,
+        position: i64,
+    ) -> Option<preview::Preview> {
         let p = self.project.as_ref()?.project().clone();
         let fillers = self.fillers(&p)?;
-        let plan = self.preview_plan(plan);
-        Some(preview::build(&plan, &fillers))
+        let plan = self.preview_plan(plan, player, position);
+        let network = |path: &PathBuf| self.network.get(path).copied().unwrap_or(false);
+        let read_ahead = plan.video.iter().any(|v| match v {
+            render::VideoPiece::Source { path, .. } => network(path),
+            render::VideoPiece::Black { .. } => false,
+        }) || plan.audio.iter().flatten().any(|a| match a {
+            render::AudioPiece::Source { path, .. } => network(path),
+            render::AudioPiece::Silence { .. } => false,
+        });
+        Some(preview::Preview {
+            read_ahead,
+            ..preview::build(&plan, &fillers)
+        })
     }
 
     /// Reloads the timeline soon: at once if the last reload was a while
@@ -1892,9 +1985,9 @@ impl Live {
                 return None;
             }
         };
-        let edl = self.edl(plan)?;
-        self.timeline_loaded_at = Some(Instant::now());
         let position = self.players[TIMELINE].position;
+        let edl = self.edl(plan, PlayerId::Timeline, position)?;
+        self.timeline_loaded_at = Some(Instant::now());
         self.players[TIMELINE].load(edl, end, p.settings.fps, position)
     }
 
@@ -1943,7 +2036,7 @@ impl Live {
             }
         };
         let frames = plan.frames;
-        let edl = self.edl(plan)?;
+        let edl = self.edl(plan, PlayerId::Source, position)?;
         self.source_content = Some(want);
         self.players[SOURCE].load(edl, frames, p.settings.fps, position)
     }
@@ -2194,7 +2287,42 @@ impl Live {
         );
     }
 
-    /// Tail checks and patches still running (seeks wait for them).
+    /// Whether `player` shows its latest motion (seek or load), with no tail
+    /// check or patch pending that could still change that frame.
+    fn settled(&self, player: PlayerId) -> bool {
+        let p = &self.players[player.index()];
+        p.shown >= p.motion && !self.tail_near(player, p.position)
+    }
+
+    /// Asks the renderer for a picture of `player`; the answer comes as
+    /// `Msg::Captured` with the returned id.
+    fn capture_viewer(&mut self, player: PlayerId) -> u64 {
+        let id = self.next_capture;
+        self.next_capture += 1;
+        let tx = self.tx.clone();
+        self.renderer.capture_viewer(
+            player,
+            Box::new(move |result| {
+                let _ = tx.send(Msg::Captured { id, result });
+            }),
+        );
+        id
+    }
+
+    /// Whether a tail check or patch still running could change `player`'s
+    /// frame at `position`: a patch replaces at most [`MAX_TAIL`] frames
+    /// before the end of its segment.
+    fn tail_near(&self, player: PlayerId, position: i64) -> bool {
+        self.tail_spots[player.index()].iter().any(|(end, key)| {
+            (end - MAX_TAIL..*end).contains(&position)
+                && matches!(
+                    self.tails.get(key),
+                    Some(TailState::Checking | TailState::Rendering)
+                )
+        })
+    }
+
+    /// Tail checks and patches still running.
     fn tails_pending(&self) -> usize {
         self.tails
             .values()

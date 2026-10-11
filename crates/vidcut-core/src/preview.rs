@@ -60,6 +60,10 @@ pub struct Preview {
     pub edl: String,
     /// `lavfi-complex` for the file, if its audio needs mixing or gain.
     pub audio_graph: Option<String>,
+    /// Sources on slow storage (a network share): the player reads ahead
+    /// and keeps what it read for seeking back. Set by the host, which can
+    /// ask the file system.
+    pub read_ahead: bool,
 }
 
 /// The EDL and audio graph that play `plan` in mpv.
@@ -67,6 +71,7 @@ pub fn build(plan: &RenderPlan, fillers: &Fillers) -> Preview {
     Preview {
         edl: edl(plan, fillers),
         audio_graph: audio_graph(plan),
+        read_ahead: false,
     }
 }
 

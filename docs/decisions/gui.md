@@ -67,7 +67,7 @@ A seek or load ("motion") is shown after two steps:
 
 `tests/live.rs` ("A late renderer") stalls the render thread for 500 ms when a seek's frame arrives, and the seek still returns with that frame on screen.
 
-**More waiting.** A seek also waits for the player's newest motion (a preview reload replaces what was asked for) and for pending tail patches (preview.md §9). Seek-then-screenshot is therefore exact without sleeps. Over IPC it takes about 10–15 ms.
+**More waiting.** A seek also waits for the player's newest motion (a preview reload replaces what was asked for) and for the tail checks and patches (preview.md §9) that could change its frame: those of cuts at most 64 frames (the longest patch) after it. Checks start nearest the playhead first, so a timeline with many cuts doesn't hold up the first seek until every cut is checked. Seek-then-screenshot is therefore exact without sleeps. Over IPC it takes about 10–15 ms.
 
 **Seeks while loading.** mpv rejects seeks until a freshly loaded file is open. A seek in that window opens the file again at the new position instead.
 

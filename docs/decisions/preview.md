@@ -88,6 +88,11 @@ keep-open=always idle=yes pause=yes video-timing-offset=0
 
 For single-file sources, also `rebase-start-time=no`.
 
+**Network shares read ahead.** When a source of the EDL is on a network file system, the file loads with `cache=yes,demuxer-max-back-bytes=150MiB`. That covers NFS, SMB/CIFS, Ceph, AFS, 9P, and FUSE, which GNOME's mounted shares and sshfs use. mpv then reads ahead during playback and keeps what it read, so scrubbing back over it doesn't go to the share again.
+- **Local files keep the cache off**, so a reload after every edit doesn't read ahead needlessly.
+- **The check (`statfs`) runs on a worker** when media are added: a share that doesn't answer would block the session thread.
+- **Frame-exactness:** the live and preview tests pass with the cache forced on for every file.
+
 ## 6. OpenGL embedding (eframe glow, GNOME Wayland, NVIDIA)
 
 Found with eframe 0.35 in M0 and unchanged with 0.36: `tests/gui.rs` (`--features vidcut/gui-tests`) compares the viewer's GL picture with `vidcut frame`.
@@ -152,7 +157,7 @@ Found with eframe 0.35 in M0 and unchanged with 0.36: `tests/gui.rs` (`--feature
 2. **Patch.** If frames would be lost, render the segment's last frames with the export engine itself (`render_patch`): lossless FFV1, all-intra, Matroska, timestamps from 0, the project's size. Patches are cached in `~/.cache/vidcut/tails/`.
 3. **Splice.** The EDL plays the segment shortened by the patch's length, then the patch. Preview equals export by construction.
 
-**Waiting.** Seeks wait until pending checks and patches are done ([gui.md](gui.md) §4), and the state reports them as `preview_pending`.
+**Waiting.** A seek waits until the checks and patches that could change its frame are done: those of cuts at most 64 frames after it ([gui.md](gui.md) §4). Checks start nearest the playhead first. The state reports all that are still running as `preview_pending`.
 
 **Evidence:**
 - `crates/vidcut-av/tests/tails.rs`: frames 88–89 are lost before keyframe 90 and patched exactly.
