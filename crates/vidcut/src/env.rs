@@ -63,6 +63,14 @@ impl Env for AvEnv {
             .map_err(|e| Error::media(format!("{}: {e}", path.display())))?;
         let meta = std::fs::metadata(&canonical)
             .map_err(|e| Error::media(format!("{}: {e}", path.display())))?;
+        // Media are files. A device or a pipe (which an imported timeline
+        // could name) might never end, or block the probe for good.
+        if !meta.is_file() {
+            return Err(Error::media(format!(
+                "{}: not a regular file",
+                path.display()
+            )));
+        }
         let mtime_ns = meta
             .modified()
             .ok()
@@ -211,6 +219,15 @@ fn convert(info: &vidcut_av::probe::MediaInfo) -> Result<MediaInfo> {
 #[cfg(test)]
 mod tests {
     use super::frame_rate;
+    use vidcut_core::Env;
+
+    #[test]
+    fn only_regular_files_are_media() {
+        for path in ["/dev/null", "/tmp"] {
+            let e = super::AvEnv.probe(std::path::Path::new(path)).unwrap_err();
+            assert!(e.message.contains("not a regular file"), "{path}: {e}");
+        }
+    }
 
     #[test]
     fn frame_rates_from_stream_fields() {
