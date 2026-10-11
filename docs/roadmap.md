@@ -23,8 +23,6 @@ These guide what gets built and what gets tested.
 
 Moving an edit between vidcut and Resolve, in either direction and between computers, should take no fixing by hand.
 
-**Done** (deviation X9, decision D40): `.otio`, `.otioz` and `.otiod` both ways; plain paths and timecode source ranges as Resolve writes them; link groups keeping audio with its video; Resolve's clip volume, channel map, track lock and solo, clip markers and offline media read; relative paths and a project folder moved with its timeline found by themselves; files checked against OpenTimelineIO's Python library.
-
 What is still open is in [docs/todo/](todo/), one file per item.
 
 ## Order
