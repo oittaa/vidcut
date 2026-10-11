@@ -17,6 +17,7 @@ use crate::ffmpeg::{self, codec, filter, format, frame, media, software::scaling
 /// only): the largest absolute sample of any channel in each
 /// `1 / per_second` of a second.
 pub fn audio_levels(path: &Path, ordinal: u32, per_second: u32) -> Result<AudioLevels> {
+    crate::cancel::stop()?;
     crate::init();
     let mut input = format::input(path).ctx(|| format!("opening {}", path.display()))?;
     let stream = input
@@ -101,6 +102,7 @@ const MEASURE: (u32, u32) = (96, 54);
 /// (0..100), or its change from the previous difference if smaller, so a
 /// steady pan doesn't read as a cut.
 pub fn picture_stats(source: &crate::decode::Input) -> Result<PictureStats> {
+    crate::cancel::stop()?;
     let path = source.path();
     let mut input = source.open()?;
     let stream = input
@@ -204,6 +206,11 @@ pub fn loudness(plan: &RenderPlan) -> Result<Loudness> {
     )
 }
 
+/// The export's own flag, or the one installed on this thread for an analysis.
+fn stopped(cancel: Option<&AtomicBool>) -> bool {
+    crate::cancel::cancelled() || cancel.is_some_and(|c| c.load(Ordering::Relaxed))
+}
+
 /// Loudness of `total` samples of `lanes` mixed at `rate` into `channels`
 /// (the export's own mix, before any normalization). `cancel` stops it.
 pub fn mix_loudness(
@@ -214,6 +221,11 @@ pub fn mix_loudness(
     total: i64,
     cancel: Option<&AtomicBool>,
 ) -> Result<Loudness> {
+    // The export passes its flag; an analysis relies on the thread's guard.
+    // Either one stopping the client stops the measure.
+    if stopped(cancel) {
+        return Err(Error::Invalid(crate::export::CANCELLED.into()));
+    }
     crate::init();
     let channels = channels.max(1);
     let mut mix = AudioMix::new(lanes, rate, channels, declick_ms);
@@ -284,7 +296,7 @@ pub fn mix_loudness(
     let ch = usize::from(channels);
     let mut done = 0i64;
     while done < total {
-        if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
+        if stopped(cancel) {
             return Err(Error::Invalid(crate::export::CANCELLED.into()));
         }
         let n = (total - done).min(4096) as usize;

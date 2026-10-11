@@ -11,9 +11,10 @@ use serde_json::{Value, json};
 use vidcut_core::{Envelope, Error, Response, Result};
 
 /// Answers one request. `project` is the project the client expects to be
-/// open. `progress` sends a notification to the client and returns false once
-/// the client is gone, so long requests can cancel.
-pub type Handler = dyn Fn(Envelope, Option<PathBuf>, &mut dyn FnMut(Value) -> bool) -> Result<Response>
+/// open. `progress(Some(params))` sends a notification and returns false once
+/// the client is gone. `progress(None)` only checks that, so a request that
+/// reports no progress can still be cancelled.
+pub type Handler = dyn Fn(Envelope, Option<PathBuf>, &mut dyn FnMut(Option<Value>) -> bool) -> Result<Response>
     + Send
     + Sync;
 
@@ -142,6 +143,46 @@ fn serve(stream: UnixStream, handler: &Handler, max_line: u64) {
     }
 }
 
+/// Whether the peer has closed `stream`. Does not read: a later request on
+/// this connection stays in the buffer.
+fn peer_gone(stream: &UnixStream) -> bool {
+    use std::os::fd::AsRawFd;
+    let fd = stream.as_raw_fd();
+    let mut pfd = libc::pollfd {
+        fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // SAFETY: `pfd` describes this socket, and the timeout is zero so this
+    // returns at once.
+    let rc = unsafe { libc::poll(&mut pfd, 1, 0) };
+    if rc <= 0 {
+        return false;
+    }
+    let mut buf = [0u8; 1];
+    // SAFETY: peek one byte without taking it. Zero is EOF (the client
+    // closed); a positive count is data still waiting to be read.
+    let n = unsafe {
+        libc::recv(
+            fd,
+            buf.as_mut_ptr().cast(),
+            1,
+            libc::MSG_PEEK | libc::MSG_DONTWAIT,
+        )
+    };
+    if n > 0 {
+        return false;
+    }
+    if n == 0 {
+        return true;
+    }
+    let err = std::io::Error::last_os_error().raw_os_error();
+    if err == Some(libc::EAGAIN) || err == Some(libc::EWOULDBLOCK) {
+        return pfd.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0;
+    }
+    true
+}
+
 fn send(writer: &mut UnixStream, v: &Value) -> std::io::Result<()> {
     let mut line = v.to_string();
     line.push('\n');
@@ -164,7 +205,13 @@ fn answer(line: &str, handler: &Handler, writer: &mut UnixStream) -> (Value, Res
         Ok(e) => e,
         Err(e) => return (id, Err(Error::usage(e))),
     };
-    let mut progress = |params: Value| {
+    let mut progress = |params: Option<Value>| {
+        if peer_gone(writer) {
+            return false;
+        }
+        let Some(params) = params else {
+            return true;
+        };
         send(
             writer,
             &json!({ "jsonrpc": "2.0", "method": "progress", "params": params }),
