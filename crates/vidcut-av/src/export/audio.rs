@@ -126,6 +126,13 @@ struct SourceAudio {
     /// the index (in output samples from it) of the next sample `read` gives.
     t0: f64,
     at: i64,
+    /// Raw time (s) where the next decoded frame should start. One that
+    /// starts later follows a gap (a damaged packet, or one the file lacks):
+    /// it waits in `held` while `gap` samples of silence go first, so what
+    /// follows stays where its timestamps put it.
+    next_in: Option<f64>,
+    gap: usize,
+    held: Option<frame::Audio>,
     eof: bool,
 }
 
@@ -172,6 +179,9 @@ impl SourceAudio {
             skip: 0,
             t0: start,
             at: 0,
+            next_in: None,
+            gap: 0,
+            held: None,
             eof: false,
         };
         s.seek(start)?;
@@ -226,6 +236,7 @@ impl SourceAudio {
             self.skip = 0;
             self.eof = false;
             self.resampler = None;
+            (self.next_in, self.gap, self.held) = (None, 0, None);
             let Some(first) = self.decode()? else {
                 // Nothing at all after the seek: silence.
                 self.eof = true;
@@ -239,7 +250,7 @@ impl SourceAudio {
             }
             self.skip = ((start - t0) * f64::from(self.rate)).round().max(0.0) as usize;
             (self.t0, self.at) = (t0, self.skip as i64);
-            self.push(&first)?;
+            self.push(first)?;
             return Ok(());
         }
     }
@@ -253,6 +264,8 @@ impl SourceAudio {
                 Err(ffmpeg::Error::Other {
                     errno: ffmpeg::util::error::EAGAIN,
                 }) => {}
+                // A damaged frame: on to the next.
+                Err(ffmpeg::Error::InvalidData) => continue,
                 Err(e) => {
                     return Err(Error::Ffmpeg {
                         context: "decoding audio".into(),
@@ -264,8 +277,7 @@ impl SourceAudio {
                 let mut packet = ffmpeg::Packet::empty();
                 match packet.read(&mut self.input) {
                     Ok(()) if packet.stream() == self.stream => {
-                        // Corrupt packets are skipped rather than failing the export.
-                        let _ = self.decoder.send_packet(&packet);
+                        crate::decode::send_packet(&mut self.decoder, &packet)?;
                         break;
                     }
                     Ok(()) => {}
@@ -284,7 +296,25 @@ impl SourceAudio {
         }
     }
 
-    fn push(&mut self, f: &frame::Audio) -> Result<()> {
+    /// Takes a decoded frame: converts it, or holds it back behind a gap.
+    fn push(&mut self, f: frame::Audio) -> Result<()> {
+        let start = f.timestamp().map(|t| t as f64 * self.tick);
+        let end = start.map(|t| t + f.samples() as f64 / f64::from(f.rate().max(1)));
+        if let (Some(t), Some(next)) = (start, std::mem::replace(&mut self.next_in, end))
+            && t - next > crate::decode::AUDIO_GAP
+        {
+            // The samples before the gap first, all of them.
+            if let Some(mut r) = self.resampler.take() {
+                r.convert(None, &mut self.pending)?;
+            }
+            self.gap = ((t - next) * f64::from(self.rate)).round() as usize;
+            self.held = Some(f);
+            return Ok(());
+        }
+        self.convert(&f)
+    }
+
+    fn convert(&mut self, f: &frame::Audio) -> Result<()> {
         if self.resampler.as_ref().is_none_or(|r| !r.matches(f)) {
             if let Some(mut old) = self.resampler.take() {
                 old.convert(None, &mut self.pending)?;
@@ -319,6 +349,17 @@ impl SourceAudio {
                 }
                 return Ok(());
             }
+            if self.gap > 0 {
+                // Silence for a gap, a second at a time however long it is.
+                let fill = self.gap.min(self.rate as usize);
+                self.pending.resize(self.pending.len() + fill * ch, 0.0);
+                self.gap -= fill;
+                continue;
+            }
+            if let Some(f) = self.held.take() {
+                self.convert(&f)?;
+                continue;
+            }
             if self.eof {
                 let take = if self.skip == 0 { available.min(n) } else { 0 };
                 out.extend_from_slice(&self.pending[self.cursor..self.cursor + take * ch]);
@@ -327,7 +368,7 @@ impl SourceAudio {
                 return Ok(());
             }
             match self.decode()? {
-                Some(f) => self.push(&f)?,
+                Some(f) => self.push(f)?,
                 None => {
                     if let Some(r) = self.resampler.as_mut() {
                         r.convert(None, &mut self.pending)?;

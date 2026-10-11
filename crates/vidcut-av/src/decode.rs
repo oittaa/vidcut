@@ -11,6 +11,68 @@ use std::path::Path;
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, codec, filter, format, frame, media, software::scaling};
 
+/// An audio frame that starts later than the frame before it ended, by more
+/// than this (s), follows a gap: a damaged packet, or one the file lacks.
+/// Smaller differences are timestamp rounding (Matroska keeps ms).
+pub(crate) const AUDIO_GAP: f64 = 0.002;
+
+/// Sends `packet` to `decoder`. A damaged packet, one the decoder can't
+/// read, is skipped as players skip it: the picture before it stays, and
+/// audio keeps to its timestamps across the gap.
+pub(crate) fn send_packet(
+    decoder: &mut ffmpeg::decoder::Opened,
+    packet: &ffmpeg::Packet,
+) -> Result<()> {
+    match decoder.send_packet(packet) {
+        Ok(()) | Err(ffmpeg::Error::InvalidData) => Ok(()),
+        Err(e) => Err(Error::Ffmpeg {
+            context: "sending packet to decoder".into(),
+            source: e,
+        }),
+    }
+}
+
+/// Decodes stream `index` of `input` to its end, handing `each` every
+/// frame (decoded into `frame`). Damaged packets and frames are skipped,
+/// as [`send_packet`] skips them.
+pub(crate) fn decode_stream<F>(
+    input: &mut format::context::Input,
+    index: usize,
+    decoder: &mut ffmpeg::decoder::Opened,
+    frame: &mut F,
+    mut each: impl FnMut(&F) -> Result<()>,
+) -> Result<()>
+where
+    F: std::ops::DerefMut<Target = frame::Frame>,
+{
+    let mut drain = |decoder: &mut ffmpeg::decoder::Opened, frame: &mut F| loop {
+        match decoder.receive_frame(frame) {
+            Ok(()) => each(frame)?,
+            Err(ffmpeg::Error::InvalidData) => {}
+            Err(
+                ffmpeg::Error::Eof
+                | ffmpeg::Error::Other {
+                    errno: ffmpeg::util::error::EAGAIN,
+                },
+            ) => return Ok(()),
+            Err(e) => {
+                return Err(Error::Ffmpeg {
+                    context: "decoding".into(),
+                    source: e,
+                });
+            }
+        }
+    };
+    for (s, packet) in input.packets() {
+        if s.index() == index {
+            send_packet(decoder, &packet)?;
+            drain(decoder, frame)?;
+        }
+    }
+    decoder.send_eof().ctx(|| "flushing decoder".into())?;
+    drain(decoder, frame)
+}
+
 /// Decodes the primary video stream of a file in presentation order.
 pub struct VideoReader {
     path: std::path::PathBuf,
@@ -425,6 +487,8 @@ impl VideoReader {
                 Err(ffmpeg::Error::Other {
                     errno: ffmpeg::util::error::EAGAIN,
                 }) => {}
+                // A damaged frame: on to the next.
+                Err(ffmpeg::Error::InvalidData) => continue,
                 Err(e) => {
                     return Err(Error::Ffmpeg {
                         context: "decoding video".into(),
@@ -439,9 +503,7 @@ impl VideoReader {
                 let mut packet = ffmpeg::Packet::empty();
                 match packet.read(&mut self.input) {
                     Ok(()) if packet.stream() == self.stream => {
-                        self.decoder
-                            .send_packet(&packet)
-                            .ctx(|| "sending packet to decoder".into())?;
+                        send_packet(&mut self.decoder, &packet)?;
                         break;
                     }
                     Ok(()) => continue,

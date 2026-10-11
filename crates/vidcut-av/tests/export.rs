@@ -6,7 +6,7 @@ use std::sync::atomic::AtomicBool;
 
 use vidcut_av::decode::{VideoReader, read_barcode};
 use vidcut_av::export::{self, encode::Availability};
-use vidcut_av::fixture::{self, AudioCodec, Container, FixtureSpec, VideoCodec};
+use vidcut_av::fixture::{self, AudioCodec, Container, FixtureSpec, Spoil, VideoCodec};
 use vidcut_core::export::{
     AudioCodec as ACodec, AudioSettings, Container as OutContainer, EncoderChoice, ExportSettings,
     VideoCodec as VCodec, VideoSettings,
@@ -563,6 +563,114 @@ fn a_failed_rename_leaves_no_part_file() {
         vec![std::ffi::OsString::from("taken.mkv")],
         "only the folder"
     );
+}
+
+#[test]
+fn audio_after_a_lost_packet_keeps_its_time() {
+    // An AAC packet before the 2 s beep is gone (damaged files lose some,
+    // and the decoder skips packets it can't read): the beep stays at 2 s,
+    // and the gap is silent.
+    let fps = Rational::new(30, 1).unwrap();
+    let s = src(
+        FixtureSpec::new(VideoCodec::H264, Container::Mkv, 320, 180, (30, 1), 90).with_audio(
+            AudioCodec::Aac,
+            48_000,
+            2,
+        ),
+    );
+    let info = vidcut_av::probe::probe(&s.path).unwrap();
+    let audio = info.audio[0].index;
+    // AAC packets are 1024 samples: number 80 starts at 1.7 s.
+    let dir = out_dir("lost");
+    let lossy = dir.join("lossy.mkv");
+    fixture::spoil(&s.path, &lossy, audio, 80, Spoil::Drop).unwrap();
+    let gapped = Src {
+        path: lossy,
+        origin: s.origin,
+    };
+    let p = plan(
+        fps,
+        320,
+        180,
+        vec![v(&gapped, 0, 90)],
+        vec![vec![a(&gapped, fps, 48_000, 0, 90)]],
+    );
+    let out = dir.join("out.mkv");
+    render(&p, &lossless(), &out);
+    let mono = audio_mono(&out);
+    assert_eq!(mono.len() as i64, p.samples(), "sample count");
+    let onsets = vidcut_av::beep::onsets(&mono, 0.1, 4800);
+    let expect = [0.0, 1.0, 2.0];
+    assert_eq!(onsets.len(), expect.len(), "beeps at {onsets:?}");
+    for (got, want) in onsets.iter().zip(expect) {
+        let t = *got as f64 / 48_000.0;
+        assert!((t - want).abs() < 0.001, "beep at {t:.4}, want {want:.4}");
+    }
+}
+
+#[test]
+fn a_damaged_video_packet_is_skipped() {
+    // A ProRes frame whose data is zeros: the decoder rejects it, and the
+    // export goes on as players do. The next frame shows in its place (the
+    // sampling rule).
+    let fps = Rational::new(30, 1).unwrap();
+    let s = src(FixtureSpec::new(
+        VideoCodec::ProRes422Hq,
+        Container::Mov,
+        320,
+        180,
+        (30, 1),
+        30,
+    ));
+    let video = vidcut_av::probe::probe(&s.path)
+        .unwrap()
+        .video
+        .unwrap()
+        .index;
+    let dir = out_dir("damaged");
+    let damaged = dir.join("damaged.mov");
+    fixture::spoil(&s.path, &damaged, video, 10, Spoil::Zero).unwrap();
+    let d = Src {
+        path: damaged,
+        origin: s.origin,
+    };
+    let p = plan(fps, 320, 180, vec![v(&d, 0, 30)], vec![]);
+    let out = dir.join("out.mkv");
+    render(&p, &lossless(), &out);
+    let mut want: Vec<Option<u32>> = (0..30).map(Some).collect();
+    want[10] = Some(11);
+    assert_eq!(barcodes(&out), want);
+
+    // H.264 with a damaged packet in its second second (keyframes every
+    // second, B-frames): what refers to it shows whatever the decoder makes
+    // of it, and the seconds before and after are exact.
+    let s = src(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mkv,
+        320,
+        180,
+        (30, 1),
+        90,
+    ));
+    let video = vidcut_av::probe::probe(&s.path)
+        .unwrap()
+        .video
+        .unwrap()
+        .index;
+    let damaged = dir.join("damaged.mkv");
+    fixture::spoil(&s.path, &damaged, video, 40, Spoil::Zero).unwrap();
+    let d = Src {
+        path: damaged,
+        origin: s.origin,
+    };
+    let p = plan(fps, 320, 180, vec![v(&d, 0, 90)], vec![]);
+    let out = dir.join("out-h264.mkv");
+    render(&p, &lossless(), &out);
+    let codes = barcodes(&out);
+    assert_eq!(codes.len(), 90);
+    let exact = |r: std::ops::Range<u32>| r.map(Some).collect::<Vec<_>>();
+    assert_eq!(codes[..30], exact(0..30));
+    assert_eq!(codes[60..], exact(60..90));
 }
 
 #[test]

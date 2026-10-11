@@ -459,6 +459,62 @@ pub fn ensure_in(dir: &Path, spec: &FixtureSpec) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// What [`spoil`] does to a packet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Spoil {
+    /// Leaves it out, as a file that lost it.
+    Drop,
+    /// Overwrites its data with zeros, as a damaged file.
+    Zero,
+}
+
+/// Copies `src` to `out` (the container from `out`'s extension, packets
+/// and timestamps unchanged) with packet `n` of stream `index`, counting
+/// from 0 in file order, spoiled.
+pub fn spoil(src: &Path, out: &Path, index: usize, n: usize, how: Spoil) -> Result<()> {
+    crate::init();
+    let mut input = format::input(src).ctx(|| format!("opening {}", src.display()))?;
+    let mut output = format::output(out).ctx(|| format!("creating {}", out.display()))?;
+    for s in input.streams() {
+        let mut o = output
+            .add_stream(encoder::find(codec::Id::None))
+            .ctx(|| "adding stream".into())?;
+        o.set_parameters(s.parameters());
+        unsafe { (*o.parameters().as_mut_ptr()).codec_tag = 0 };
+    }
+    output.write_header().ctx(|| "writing header".into())?;
+    let mut seen = 0;
+    for (s, mut packet) in input.packets() {
+        if s.index() == index {
+            seen += 1;
+            if seen == n + 1 {
+                match how {
+                    Spoil::Drop => continue,
+                    Spoil::Zero => unsafe {
+                        if ffmpeg::ffi::av_packet_make_writable(ffmpeg::packet::Mut::as_mut_ptr(
+                            &mut packet,
+                        )) < 0
+                        {
+                            return Err(Error::Invalid("packet not writable".into()));
+                        }
+                        if let Some(data) = packet.data_mut() {
+                            data.fill(0);
+                        }
+                    },
+                }
+            }
+        }
+        let tb = output.stream(s.index()).expect("copied").time_base();
+        packet.rescale_ts(s.time_base(), tb);
+        packet.set_position(-1);
+        packet
+            .write_interleaved(&mut output)
+            .ctx(|| "writing packet".into())?;
+    }
+    output.write_trailer().ctx(|| "writing trailer".into())?;
+    Ok(())
+}
+
 /// Writes the fixture for `spec` to `path`.
 pub fn generate(spec: &FixtureSpec, path: &Path) -> Result<()> {
     crate::init();

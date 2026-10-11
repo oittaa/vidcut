@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use vidcut_av::analysis;
-use vidcut_av::fixture::{self, Container, FixtureSpec, Picture, Sound, VideoCodec};
+use vidcut_av::fixture::{self, Container, FixtureSpec, Picture, Sound, Spoil, VideoCodec};
 use vidcut_core::render::{AudioPiece, RenderPlan};
 use vidcut_core::time::Rational;
 
@@ -31,6 +31,34 @@ fn levels_show_the_beeps_and_nothing_else() {
         .iter()
         .fold(0f32, |m, &p| m.max(p));
     assert!(quiet < 0.01, "{quiet}");
+}
+
+#[test]
+fn levels_keep_time_across_a_lost_packet() {
+    // An AAC packet before the 2 s beep is missing (1024 samples, 21 ms):
+    // the beep stays at 2 s, as export keeps it.
+    let path = fixture::ensure(&FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mkv,
+        320,
+        180,
+        (30, 1),
+        90,
+    ))
+    .unwrap();
+    let audio = vidcut_av::probe::probe(&path).unwrap().audio[0].index;
+    let dir = std::env::temp_dir().join(format!("vidcut-levels-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let lossy = dir.join("lossy.mkv");
+    fixture::spoil(&path, &lossy, audio, 80, Spoil::Drop).unwrap();
+    let l = analysis::audio_levels(&lossy, 0, 1000).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    let at = |secs: f64| ((secs - l.start) * 1000.0).round() as usize;
+    for s in 0..3 {
+        let i = at(f64::from(s));
+        let peak = l.peaks[i..i + 2].iter().fold(0f32, |m, &p| m.max(p));
+        assert!(peak > 0.3, "beep at {s} s: {peak}");
+    }
 }
 
 #[test]

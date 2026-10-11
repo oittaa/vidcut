@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use vidcut_core::analysis::{AudioLevels, Loudness, PictureStats};
 use vidcut_core::render::{AudioPiece, RenderPlan};
 
+use crate::decode::{AUDIO_GAP, decode_stream};
 use crate::error::{Context, Error, Result};
 use crate::export::audio::{AudioMix, Resampler, discard_others};
 use crate::ffmpeg::{self, codec, filter, format, frame, media, software::scaling};
@@ -38,9 +39,11 @@ pub fn audio_levels(path: &Path, ordinal: u32, per_second: u32) -> Result<AudioL
     let mut peaks: Vec<f32> = Vec::new();
     let (mut n, mut current) = (0u64, 0f32);
     let mut start: Option<f64> = None;
-    let mut handle = |f: &frame::Audio| -> Result<()> {
+    let mut next_in: Option<f64> = None;
+    let handle = |f: &frame::Audio| -> Result<()> {
+        let t = f.timestamp().map(|t| t as f64 * tick);
         if start.is_none() {
-            start = f.timestamp().map(|t| t as f64 * tick);
+            start = t;
         }
         if resampler.as_ref().is_none_or(|(r, _, _)| !r.matches(f)) {
             let channels = f.channels().max(1);
@@ -51,6 +54,14 @@ pub fn audio_levels(path: &Path, ordinal: u32, per_second: u32) -> Result<AudioL
             ));
         }
         let (r, rate, channels) = resampler.as_mut().expect("set");
+        // A gap (a damaged or missing packet) lasts as its timestamps say,
+        // as in export.
+        let end = t.map(|t| t + f.samples() as f64 / f64::from(*rate));
+        if let (Some(t), Some(next)) = (t, std::mem::replace(&mut next_in, end))
+            && t - next > AUDIO_GAP
+        {
+            n += ((t - next) * f64::from(*rate)).round() as u64;
+        }
         samples.clear();
         r.convert(Some(f), &mut samples)?;
         for frame in samples.chunks_exact(*channels) {
@@ -64,22 +75,13 @@ pub fn audio_levels(path: &Path, ordinal: u32, per_second: u32) -> Result<AudioL
         }
         Ok(())
     };
-    let mut f = frame::Audio::empty();
-    for (s, packet) in input.packets() {
-        if s.index() != index {
-            continue;
-        }
-        if decoder.send_packet(&packet).is_err() {
-            continue; // a broken packet: skip it
-        }
-        while decoder.receive_frame(&mut f).is_ok() {
-            handle(&f)?;
-        }
-    }
-    let _ = decoder.send_eof();
-    while decoder.receive_frame(&mut f).is_ok() {
-        handle(&f)?;
-    }
+    decode_stream(
+        &mut input,
+        index,
+        &mut decoder,
+        &mut frame::Audio::empty(),
+        handle,
+    )?;
     if n > 0 {
         peaks.push(current);
     }
@@ -126,7 +128,7 @@ pub fn picture_stats(path: &Path) -> Result<PictureStats> {
     let mut stats = PictureStats::default();
     let mut prev: Option<Vec<u8>> = None;
     let mut prev_mafd = 0f64;
-    let mut handle = |decoded: &frame::Video| -> Result<()> {
+    let handle = |decoded: &frame::Video| -> Result<()> {
         let scaler = match &mut scaler {
             Some(s) if s.input().format == decoded.format() => s,
             _ => scaler.insert(
@@ -179,22 +181,13 @@ pub fn picture_stats(path: &Path) -> Result<PictureStats> {
         prev = Some(luma);
         Ok(())
     };
-    let mut f = frame::Video::empty();
-    for (s, packet) in input.packets() {
-        if s.index() != index {
-            continue;
-        }
-        if decoder.send_packet(&packet).is_err() {
-            continue;
-        }
-        while decoder.receive_frame(&mut f).is_ok() {
-            handle(&f)?;
-        }
-    }
-    let _ = decoder.send_eof();
-    while decoder.receive_frame(&mut f).is_ok() {
-        handle(&f)?;
-    }
+    decode_stream(
+        &mut input,
+        index,
+        &mut decoder,
+        &mut frame::Video::empty(),
+        handle,
+    )?;
     Ok(stats)
 }
 

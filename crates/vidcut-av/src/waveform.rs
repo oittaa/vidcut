@@ -3,6 +3,7 @@
 
 use std::path::Path;
 
+use crate::decode::{AUDIO_GAP, decode_stream};
 use crate::error::{Context, Error, Result};
 use crate::export::audio::{Resampler, discard_others};
 use crate::ffmpeg::{codec, format, frame, media};
@@ -86,13 +87,23 @@ pub fn waveform(path: &Path, ordinal: u32, per_second: u32) -> Result<Waveform> 
     let mut mono = Vec::new();
     let mut acc = Accumulator::new(per_second);
     let mut start: Option<f64> = None;
-    let mut handle = |f: &frame::Audio, acc: &mut Accumulator| -> Result<()> {
+    let mut next_in: Option<f64> = None;
+    let handle = |f: &frame::Audio| -> Result<()> {
+        let t = f.timestamp().map(|t| t as f64 * tick);
         if start.is_none() {
-            start = f.timestamp().map(|t| t as f64 * tick);
+            start = t;
         }
         if resampler.as_ref().is_none_or(|r| !r.matches(f)) {
             resampler = Some(Resampler::new(f, f.rate(), 1)?);
             acc.rate = f.rate();
+        }
+        // A gap (a damaged or missing packet) lasts as its timestamps say,
+        // as in export.
+        let end = t.map(|t| t + f.samples() as f64 / f64::from(f.rate().max(1)));
+        if let (Some(t), Some(next)) = (t, std::mem::replace(&mut next_in, end))
+            && t - next > AUDIO_GAP
+        {
+            acc.n += ((t - next) * f64::from(acc.rate)).round() as u64;
         }
         mono.clear();
         resampler
@@ -102,22 +113,13 @@ pub fn waveform(path: &Path, ordinal: u32, per_second: u32) -> Result<Waveform> 
         acc.push(&mono);
         Ok(())
     };
-    let mut f = frame::Audio::empty();
-    for (s, packet) in input.packets() {
-        if s.index() != index {
-            continue;
-        }
-        if decoder.send_packet(&packet).is_err() {
-            continue; // a broken packet: skip it
-        }
-        while decoder.receive_frame(&mut f).is_ok() {
-            handle(&f, &mut acc)?;
-        }
-    }
-    let _ = decoder.send_eof();
-    while decoder.receive_frame(&mut f).is_ok() {
-        handle(&f, &mut acc)?;
-    }
+    decode_stream(
+        &mut input,
+        index,
+        &mut decoder,
+        &mut frame::Audio::empty(),
+        handle,
+    )?;
     Ok(Waveform {
         per_second,
         start: start.unwrap_or(0.0),

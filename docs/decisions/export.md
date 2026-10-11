@@ -29,6 +29,11 @@
 
 **Output:** goes to a hidden `.<name>.part` file, renamed into place on success. Errors and cancellation delete it.
 
+**Damaged sources:** a packet the decoder rejects as invalid data is skipped, as players and the `ffmpeg` tool skip it, and the export goes on.
+- Video shows the next frame in its place (the sampling rule, §2). Frames that refer to it show what the decoder makes of them, up to the next keyframe.
+- Audio has silence there (§3).
+- Any other decoder error still fails the export. Audio levels, scene measurements and waveforms decode by the same rule (`decode::decode_stream`).
+
 ## 2. Sampling rule (preview and export)
 
 Output frame `k` of a source piece shows the **first source frame whose timestamp is at least `origin + (source_frame + k)/fps − ½ frame`**.
@@ -47,6 +52,11 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
 **Reading:**
 - Each source piece is read sample-exactly: seek before the start, decode, find the first frame's timestamp, and drop samples up to the start time.
 - Decoders get the packet time base (`pkt_timebase`). Without it, FFmpeg can't shift timestamps past skipped priming samples, and audio was found to start 6.5 ms late (Opus pre-skip, AAC priming).
+- **Gaps follow the timestamps.** A frame that starts more than 2 ms after the one before it ended follows a gap: a packet the file lacks, or one the decoder rejected.
+  - The gap becomes silence, so what follows stays in sync with the picture. Counting samples instead put everything after a lost AAC packet 21 ms early.
+  - The silence is made a second at a time as it is read, so a jump in the timestamps costs no memory.
+  - Smaller differences are timestamp rounding (Matroska keeps milliseconds).
+  - Audio levels and waveforms count gaps the same way, so silence found in a measurement is where the export has it.
 
 **Conversion and mixing:**
 - libswresample converts to interleaved `f32` at the export rate and layout: mono is upmixed, 5.1 is downmixed. vidcut sizes the output buffers itself; ffmpeg-next's wrapper can truncate when upsampling.
