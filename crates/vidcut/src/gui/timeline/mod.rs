@@ -239,7 +239,9 @@ const UPPER_OTHER: f32 = 9.0;
 /// Preferred lower timeline row heights: Track 1, other video, audio.
 const LOWER_ROWS: [f32; 3] = [100.0, 60.0, 46.0];
 const LOWER_RULER: f32 = 22.0;
-const HEADER: f32 = 58.0;
+/// The track header column: wide enough for the L, A and V buttons side by
+/// side, which must not reach into the timeline.
+const HEADER: f32 = 80.0;
 
 fn options_path() -> std::path::PathBuf {
     crate::paths::config_dir().join("timeline.json")
@@ -817,6 +819,9 @@ impl Workspace {
                 pos2(lower_rect.left() + HEADER - 4.0, r.bottom()),
             );
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+            // Nothing in a header reaches past it, to be hovered or clicked
+            // over a clip.
+            child.set_clip_rect(rect.intersect(child.clip_rect()));
             let is_target = self.target.as_deref() == Some(t.id.as_str())
                 || (self.target.is_none() && t.id == MAIN);
             let label = t.name.clone().unwrap_or_else(|| t.id.clone());
