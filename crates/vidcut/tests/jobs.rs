@@ -271,7 +271,25 @@ fn export_jobs() {
         frames
     );
 
+    // 7. Quitting while an export runs leaves no partial file.
+    let mut slow = quick(&dir.join("h.mkv"));
+    slow["set"] = json!([
+        "video.width=3840",
+        "video.height=2160",
+        "video.speed=veryslow"
+    ]);
+    slow["background"] = json!(true);
+    ok(&h, "export.start", slow);
+    let part = dir.join(".h.mkv.part");
+    for _ in 0..500 {
+        if part.exists() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(part.exists(), "the export started writing");
     h.shutdown();
     let _ = session.join();
+    assert!(!part.exists() && !dir.join("h.mkv").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }

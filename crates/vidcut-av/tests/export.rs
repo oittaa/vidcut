@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
 use vidcut_av::decode::{VideoReader, read_barcode};
-use vidcut_av::export::{self, encode::Availability};
+use vidcut_av::export::{
+    self,
+    encode::{Availability, EncoderStatus},
+};
 use vidcut_av::fixture::{self, AudioCodec, Container, FixtureSpec, Spoil, VideoCodec};
 use vidcut_core::export::{
     AudioCodec as ACodec, AudioSettings, Container as OutContainer, EncoderChoice, ExportSettings,
@@ -822,6 +825,62 @@ fn cancelling_leaves_no_files() {
         0,
         "no output or .part left"
     );
+    // Cancelled before it starts: it makes nothing at all.
+    let err = export::run(
+        &p,
+        &settings,
+        &out,
+        &Availability::default(),
+        &cancel,
+        &mut |_| {},
+    )
+    .unwrap_err();
+    assert!(export::is_cancelled(&err), "{err}");
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+}
+
+#[test]
+fn auto_moves_on_from_a_gpu_encoder_that_wont_open() {
+    // A GPU encoder that tested fine can fail to open when an export starts
+    // (NVENC allows a few sessions at a time). Here the VAAPI render node is
+    // gone: `auto` encodes on the CPU instead.
+    let fps = Rational::new(30, 1).unwrap();
+    let s = src(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (30, 1),
+        30,
+    ));
+    let p = plan(fps, 320, 180, vec![v(&s, 0, 30)], vec![]);
+    let mut settings = lossless();
+    settings.audio = None;
+    settings.video.as_mut().unwrap().encoder = EncoderChoice::Auto;
+    let available = Availability {
+        encoders: vec![EncoderStatus {
+            encoder: "h264_vaapi".into(),
+            kind: EncoderChoice::Vaapi,
+            device: Some("/dev/dri/renderD999".into()),
+            pixel: "nv12".into(),
+            ok: true,
+            error: None,
+        }],
+    };
+    let first = export::encode::resolve_video(settings.video.as_ref().unwrap(), &available);
+    assert_eq!(first.unwrap().name, "h264_vaapi");
+    let out = out_dir("fallback").join("out.mkv");
+    let report = export::run(
+        &p,
+        &settings,
+        &out,
+        &available,
+        &AtomicBool::new(false),
+        &mut |_| {},
+    )
+    .unwrap();
+    assert_eq!(report.video_encoder.as_deref(), Some("libx264"));
+    assert_eq!(barcodes(&out), (0..30).map(Some).collect::<Vec<_>>());
 }
 
 #[test]

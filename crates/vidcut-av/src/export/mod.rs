@@ -99,11 +99,12 @@ pub fn run(
 ) -> Result<Report> {
     crate::init();
     validate(settings).map_err(|e| Error::Invalid(e.message))?;
-    let name = output
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "export".into());
-    let part = output.with_file_name(format!(".{name}.part"));
+    // Nothing is made once cancelled: a GUI that quit without waiting for
+    // a job removes only the partial files of what it heard was started.
+    if cancel.load(Ordering::Relaxed) {
+        return Err(Error::Invalid(CANCELLED.into()));
+    }
+    let part = partial_path(output);
     let result = encode(plan, settings, &part, output, available, cancel, progress);
     match result {
         Ok(report) => match std::fs::rename(&part, output) {
@@ -118,6 +119,15 @@ pub fn run(
             Err(e)
         }
     }
+}
+
+/// The hidden file an export of `output` is written to, renamed into place
+/// once it succeeds.
+pub fn partial_path(output: &Path) -> PathBuf {
+    let name = output
+        .file_name()
+        .map_or_else(|| "export".into(), |n| n.to_string_lossy().into_owned());
+    output.with_file_name(format!(".{name}.part"))
 }
 
 /// Fade length at cuts when de-clicking (the export setting `declick`).
@@ -258,12 +268,20 @@ fn encode(
 
     let mut video = match &settings.video {
         Some(v) => {
-            let enc = encode::resolve_video(v, available)?;
             let (w, h) = (
                 v.width.unwrap_or(plan.width),
                 v.height.unwrap_or(plan.height),
             );
-            let (encoder, vaapi) = encode::open_video(&enc, w, h, fps, global_header)?;
+            // The first encoder that opens.
+            let mut choices = encode::video_encoders(v, available)?.into_iter().peekable();
+            let (enc, (encoder, vaapi)) = loop {
+                let enc = choices.next().expect("at least one encoder");
+                match encode::open_video(&enc, w, h, fps, global_header) {
+                    Ok(opened) => break (enc, opened),
+                    Err(_) if choices.peek().is_some() => {}
+                    Err(e) => return Err(e),
+                }
+            };
             let mut ost = octx
                 .add_stream(encoder::find_by_name(&enc.name))
                 .ctx(|| "adding video stream".into())?;

@@ -97,6 +97,8 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
 
 **`auto` encoder:**
 - Picks NVENC if a test encode works, then VAAPI, then the CPU encoder.
+- An export takes the first of these that opens (`encode::video_encoders`). A GPU encoder that tested fine can still fail to open when an export starts: NVENC allows a few sessions at a time, and other exports may hold them. The report names the encoder used; the plan (`--dry-run`) names the first choice.
+- An encoder asked for by name (`nvenc`, `vaapi`, `cpu`) fails the export if it won't open.
 - Detection test-encodes every GPU encoder × pixel format × VAAPI render node (~2 s) and is cached in `~/.cache/vidcut/encoders.json`.
 - The cache is keyed by FFmpeg versions, the NVIDIA driver, the kernel and the render nodes.
 

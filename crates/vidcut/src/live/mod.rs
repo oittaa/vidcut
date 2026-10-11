@@ -671,8 +671,19 @@ impl Live {
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
             {
                 Ok(Msg::JobDone { id, result }) => self.job_done(id, result),
+                Ok(Msg::JobPlanned { id, outputs }) => self.job_planned(id, outputs),
                 Ok(_) => {}
                 Err(_) => break,
+            }
+        }
+        // A job still running is stuck in a decoder or an encoder, and the
+        // process won't wait for it: its partial files go now. Cancelled
+        // jobs start no file, so what one writes was planned by now.
+        for job in self.jobs.iter() {
+            if self.job_cancels.contains_key(&job.id) {
+                for o in &job.outputs {
+                    let _ = std::fs::remove_file(vidcut_av::export::partial_path(&o.path));
+                }
             }
         }
         for w in std::mem::take(&mut self.waits) {

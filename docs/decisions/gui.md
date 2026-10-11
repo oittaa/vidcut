@@ -171,6 +171,8 @@ A seek or load ("motion") is shown after two steps:
 - **`jobs.wait`** is a wait-list entry like a seek's (§2), without the 10 s limit unless given a `timeout`; it fails the way the job failed. `jobs.cancel` sets the job's cancel flag, and the engine removes partial files.
 - **Kept:** running jobs and the 50 most recent finished ones.
 - **Closing:** quitting the window while jobs run asks first (`gui.quit` doesn't). The session cancels running jobs on shutdown and waits up to 3 s for them to clean up.
+  - A job still running after that is stuck in a decoder or an encoder. The session removes its partial files itself, and the process ends without it.
+  - The engine starts no file once cancelled, so every file such a job writes was planned (`JobPlanned`) before the wait began.
 - `.otio` exports write a small file at once and aren't jobs.
 
 **The windows only send requests:**
@@ -204,7 +206,7 @@ A seek or load ("motion") is shown after two steps:
 
 ## 12. Still open
 
-- **A render queue.** Jobs run side by side; several big exports at once compete for the encoder (NVENC allows a few sessions). Resolve's Deliver page queues renders instead.
+- **A render queue.** Jobs run side by side; several big exports at once compete for the encoder. Past NVENC's few sessions, `auto` exports move on to VAAPI or the CPU (export.md §5), and ones asking for `nvenc` fail. Resolve's Deliver page queues renders instead.
 - **Source Tape marks spanning several clips** (decision D17 limits marks to one clip).
 - **Per-channel meters** and meters that tap the player's actual output (spec D28).
 - **Dragging a bin into another bin** in the pool (`bins.rename` does it now).

@@ -97,9 +97,18 @@ fn opt(k: &str, v: impl ToString) -> (String, String) {
     (k.to_string(), v.to_string())
 }
 
-/// Resolves video settings to an encoder, preferring a working GPU encoder
-/// for `auto` (NVENC, then VAAPI), else the CPU encoder.
+/// Resolves video settings to the encoder an export starts with: for
+/// `auto`, a working GPU encoder (NVENC, then VAAPI), else the CPU encoder.
 pub fn resolve_video(v: &VideoSettings, available: &Availability) -> Result<VideoEncoder> {
+    Ok(video_encoders(v, available)?.remove(0))
+}
+
+/// The encoders that may encode `v`, in order: the one asked for, or for
+/// `auto` every working GPU encoder (NVENC, then VAAPI) and then the CPU
+/// encoder. An export takes the first that opens: a GPU encoder can fail
+/// to at that moment (NVENC allows a few sessions at a time, and other
+/// exports may hold them).
+pub fn video_encoders(v: &VideoSettings, available: &Availability) -> Result<Vec<VideoEncoder>> {
     let ten = ten_bit(v);
     let kinds: Vec<EncoderChoice> = match v.encoder {
         EncoderChoice::Auto => vec![
@@ -109,9 +118,15 @@ pub fn resolve_video(v: &VideoSettings, available: &Availability) -> Result<Vide
         ],
         k => vec![k],
     };
+    let mut found = Vec::new();
     for kind in kinds {
         if kind == EncoderChoice::Cpu {
-            return cpu_video(v, ten);
+            match cpu_video(v, ten) {
+                Ok(e) => found.push(e),
+                Err(e) if found.is_empty() => return Err(e),
+                Err(_) => {}
+            }
+            continue;
         }
         let Some(name) = gpu_name(v.codec, kind) else {
             continue;
@@ -163,7 +178,7 @@ pub fn resolve_video(v: &VideoSettings, available: &Availability) -> Result<Vide
                 }
             }
         }
-        return Ok(VideoEncoder {
+        found.push(VideoEncoder {
             name: name.into(),
             kind,
             pixel,
@@ -172,7 +187,10 @@ pub fn resolve_video(v: &VideoSettings, available: &Availability) -> Result<Vide
             hdr: v.hdr,
         });
     }
-    Err(Error::Invalid(format!("no encoder for {:?}", v.codec)))
+    if found.is_empty() {
+        return Err(Error::Invalid(format!("no encoder for {:?}", v.codec)));
+    }
+    Ok(found)
 }
 
 fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
