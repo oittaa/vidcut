@@ -125,6 +125,9 @@ fn open_sequence(pattern: &Path, first: u64, rate: (i32, i32)) -> Result<format:
     let mut options = ffmpeg::Dictionary::new();
     options.set("pattern_type", "sequence");
     options.set("start_number", &first.to_string());
+    // The default range is 5: a missing first file is skipped when any of
+    // the next four numbers exists, and picture 0 is that later file.
+    options.set("start_number_range", "1");
     options.set("framerate", &format!("{}/{}", rate.0, rate.1));
     let path = std::ffi::CString::new(pattern.as_os_str().as_encoded_bytes())
         .map_err(|_| Error::Invalid(format!("{}: a NUL in the name", pattern.display())))?;

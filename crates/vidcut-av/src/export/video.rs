@@ -209,6 +209,8 @@ struct Source {
     current: Option<(frame::Video, f64)>,
     /// `current`, normalized.
     normalized: Option<frame::Video>,
+    /// A still: its one picture is kept, and the file is never sought.
+    still: bool,
 }
 
 /// How far past the current frame (seconds) a later piece of the same file
@@ -219,7 +221,17 @@ impl Source {
     /// Opens `path` with `current` at the first frame for `target`. The
     /// decoding up to there is most of the cost of starting a piece, so the
     /// next file opens on another thread while this one encodes.
-    fn open(input: &Input, origin: f64, source_frame: i64, target: f64) -> Result<Source> {
+    ///
+    /// A still's picture is already decoded by [`VideoReader::open_input`].
+    /// Seeking would reopen the file and decode it again; a still is never
+    /// sought.
+    fn open(
+        input: &Input,
+        origin: f64,
+        source_frame: i64,
+        target: f64,
+        still: bool,
+    ) -> Result<Source> {
         let reader = VideoReader::open_input(input)?;
         let tb = reader.time_base();
         let mut source = Source {
@@ -230,9 +242,14 @@ impl Source {
             target,
             current: None,
             normalized: None,
+            still,
         };
-        source.seek(target)?;
-        source.advance(target)?;
+        if still {
+            source.advance(target)?;
+        } else {
+            source.seek(target)?;
+            source.advance(target)?;
+        }
         Ok(source)
     }
 
@@ -245,8 +262,10 @@ impl Source {
     }
 
     /// Moves `current` to the first frame at or after `target` (1 µs of slack
-    /// for float noise); past the end of the stream, it stays on the last
-    /// frame. Returns whether it moved.
+    /// for float noise). Past the end of a file it stays on the last frame,
+    /// which is how a still keeps its one picture. An image sequence fails
+    /// instead: a missing file ends the run, and repeating the last picture
+    /// would hide the hole. Returns whether it moved.
     fn advance(&mut self, target: f64) -> Result<bool> {
         self.target = target;
         let mut changed = false;
@@ -261,7 +280,13 @@ impl Source {
                     self.current = Some((f, t));
                     changed = true;
                 }
-                None if self.current.is_some() => break,
+                // A file (a still, or video that runs a little long) keeps
+                // its last picture. A sequence's end is a missing file.
+                None if self.current.is_some()
+                    && !matches!(self.reader.input(), Input::Sequence { .. }) =>
+                {
+                    break;
+                }
                 None => {
                     return Err(Error::Invalid(format!(
                         "{} ends before {target:.3} s",
@@ -274,10 +299,14 @@ impl Source {
     }
 
     /// Readies the file for another piece starting at `target`: a piece that
-    /// starts a little ahead decodes on to it, any other seeks.
+    /// starts a little ahead decodes on to it, any other seeks. A still is
+    /// never sought; its one picture already stands in for every frame.
     fn reposition(&mut self, origin: f64, source_frame: i64, target: f64) -> Result<()> {
         self.origin = origin;
         self.source_frame = source_frame;
+        if self.still {
+            return Ok(());
+        }
         let ahead = self
             .current
             .as_ref()
@@ -356,10 +385,10 @@ impl VideoFrames {
                 } => {
                     // A still's one picture serves every frame: it is never
                     // sought (an image file has nothing past it).
-                    let still = image == Some(Image::Still);
+                    let still = matches!(image, Some(Image::Still));
                     if k == 0 {
                         let from = if still { 0 } else { source_frame };
-                        self.start_piece(&input_of(&path, image.as_ref()), origin, from)?;
+                        self.start_piece(&input_of(&path, image.as_ref()), origin, from, still)?;
                     }
                     self.source_frame(if still { 0 } else { k }).map(Some)
                 }
@@ -385,7 +414,13 @@ impl VideoFrames {
     /// Readies the current piece's file: the open one if it is the same
     /// file, the one opened ahead for this piece, or a new one. Then starts
     /// opening the next file.
-    fn start_piece(&mut self, input: &Input, origin: f64, source_frame: i64) -> Result<()> {
+    fn start_piece(
+        &mut self,
+        input: &Input,
+        origin: f64,
+        source_frame: i64,
+        still: bool,
+    ) -> Result<()> {
         let target = self.target(origin, source_frame);
         let source = match self.source.take() {
             Some(mut s) if s.reader.input() == input => {
@@ -394,7 +429,7 @@ impl VideoFrames {
             }
             _ => match self.ahead.take(self.piece) {
                 Some(opened) => opened?,
-                None => Source::open(input, origin, source_frame, target)?,
+                None => Source::open(input, origin, source_frame, target, still)?,
             },
         };
         self.source = Some(source);
@@ -419,15 +454,13 @@ impl VideoFrames {
                     image,
                     ..
                 } if *frames > 0 => {
-                    let from = match image {
-                        Some(Image::Still) => 0,
-                        _ => *source_frame,
-                    };
-                    Some((i, input_of(path, image.as_ref()), *origin, from))
+                    let still = matches!(image, Some(Image::Still));
+                    let from = if still { 0 } else { *source_frame };
+                    Some((i, input_of(path, image.as_ref()), *origin, from, still))
                 }
                 _ => None,
             });
-        let Some((i, input, origin, source_frame)) = next else {
+        let Some((i, input, origin, source_frame, still)) = next else {
             return;
         };
         if &input == current {
@@ -435,7 +468,7 @@ impl VideoFrames {
         }
         let target = self.target(origin, source_frame);
         self.ahead.start(i, move || {
-            Source::open(&input, origin, source_frame, target)
+            Source::open(&input, origin, source_frame, target, still)
         });
     }
 

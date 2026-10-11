@@ -117,8 +117,14 @@ pub fn probe(path: &Path) -> Result<MediaInfo> {
     probe_input(&Input::File(path.to_path_buf()))
 }
 
-/// Probes an image sequence: the files `pattern` names, `count` of them
-/// from the number `first`, shown at `rate` (numerator, denominator).
+/// Probes an image sequence: the files `pattern` names from the number
+/// `first`, shown at `rate` (numerator, denominator). `count` is how many
+/// the caller expects.
+///
+/// The frame count and duration are the contiguous run image2 opened
+/// (its stream duration, in frames), and at most `count` when that run is
+/// longer. A missing file ends the run, so a short prefix is not reported
+/// as the requested count.
 pub fn probe_sequence(
     pattern: &Path,
     first: u64,
@@ -130,15 +136,55 @@ pub fn probe_sequence(
         first,
         rate,
     })?;
-    let secs = count as f64 * f64::from(rate.1) / f64::from(rate.0);
+    let opened = sequence_frames(&info, rate).ok_or_else(|| {
+        Error::Invalid(format!(
+            "{}: image2 did not report how many frames it opened from {first}",
+            pattern.display()
+        ))
+    })?;
+    let frames = opened.min(count);
+    let secs = frames as f64 * f64::from(rate.1) / f64::from(rate.0);
     info.duration = Some(secs);
     if let Some(v) = info.video.as_mut() {
-        v.frames = Some(count as i64);
+        v.frames = Some(frames as i64);
         v.duration_secs = Some(secs);
+        if v.time_base == (rate.1, rate.0) {
+            v.duration_pts = Some(frames as i64);
+        }
         v.avg_frame_rate = rate;
         v.r_frame_rate = rate;
     }
     Ok(info)
+}
+
+/// Frames in the contiguous run image2 opened.
+///
+/// With a time base of one frame, the stream duration is that count:
+/// `last − first + 1` from image2's search, which stops at the first
+/// missing file.
+fn sequence_frames(info: &MediaInfo, rate: (i32, i32)) -> Option<u64> {
+    let v = info.video.as_ref()?;
+    if rate.0 <= 0 || rate.1 <= 0 {
+        return None;
+    }
+    if let Some(dur) = v.duration_pts.filter(|d| *d > 0) {
+        let tb = v.time_base;
+        if tb == (rate.1, rate.0) {
+            return Some(dur as u64);
+        }
+        if tb.0 > 0 && tb.1 > 0 {
+            let frames = dur as f64 * f64::from(tb.0) / f64::from(tb.1) * f64::from(rate.0)
+                / f64::from(rate.1);
+            if frames >= 1.0 {
+                return Some(frames.round() as u64);
+            }
+        }
+    }
+    v.duration_secs
+        .filter(|s| *s > 0.0)
+        .or(info.duration.filter(|s| *s > 0.0))
+        .map(|s| (s * f64::from(rate.0) / f64::from(rate.1)).round() as u64)
+        .filter(|n| *n >= 1)
 }
 
 fn probe_input(source: &Input) -> Result<MediaInfo> {
