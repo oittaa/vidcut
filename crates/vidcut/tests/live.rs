@@ -183,6 +183,41 @@ impl Drop for Harness {
     }
 }
 
+/// The luma (green) of a PNG screenshot.
+fn image(png: &Path) -> (usize, usize, Vec<u8>) {
+    let mut r = vidcut_av::decode::VideoReader::open(png).unwrap();
+    let f = r.next_frame().unwrap().unwrap();
+    let rgb = f.data(0);
+    let (w, h, stride) = (f.width() as usize, f.height() as usize, f.stride(0));
+    let bpp = rgb.len() / (stride * h).max(1) * stride / w.max(1);
+    let bpp = bpp.clamp(1, 4);
+    let mut out = Vec::with_capacity(w * h);
+    for y in 0..h {
+        for x in 0..w {
+            out.push(rgb[y * stride + x * bpp + bpp.min(2) - 1]);
+        }
+    }
+    (w, h, out)
+}
+
+/// Mean difference between each row of the top eighth and the average of
+/// its neighbors: large where woven fields differ.
+fn combing((w, h, y): &(usize, usize, Vec<u8>)) -> f64 {
+    let rows = h / 8;
+    let mut sum = 0.0;
+    for r in 1..rows - 1 {
+        for x in 0..*w {
+            let (a, b, c) = (
+                f64::from(y[(r - 1) * w + x]),
+                f64::from(y[r * w + x]),
+                f64::from(y[(r + 1) * w + x]),
+            );
+            sum += (b - (a + c) / 2.0).abs();
+        }
+    }
+    sum / ((rows - 2) * w) as f64
+}
+
 fn fixture_file(frames: u32) -> PathBuf {
     fixture::ensure(&FixtureSpec::new(
         VideoCodec::H264,
@@ -486,6 +521,42 @@ fn live_session() {
     let s = h.ok("player.mute", json!({}));
     assert_eq!(s.result["muted"], true);
     assert_eq!(h.ok("project.summary", json!({})).rev, rev);
+
+    step("Interlaced sources are deinterlaced");
+    // Both fields show the frame's barcode; in the top eighth a block moves
+    // each field, so a frame shown woven combs there (M8).
+    let interlaced = fixture::ensure(
+        &FixtureSpec::new(
+            VideoCodec::H264,
+            Container::Mkv,
+            W as u32,
+            H as u32,
+            (30, 1),
+            60,
+        )
+        .interlaced(true)
+        .no_audio(),
+    )
+    .unwrap();
+    let added = h.ok("media.add", json!({ "paths": [interlaced] }));
+    let media = added.changes.created[0].clone();
+    let end = h.ok("project.summary", json!({})).result["duration"]
+        .as_i64()
+        .unwrap();
+    h.ok(
+        "edit.append",
+        json!({ "media": media, "range": "10f..+20f" }),
+    );
+    for (t, want) in [(end, 10), (end + 7, 17), (end + 19, 29)] {
+        h.ok("player.seek", json!({ "at": t, "viewer": "timeline" }));
+        assert_eq!(
+            h.shown(&dir),
+            Some(want),
+            "interlaced clip, timeline frame {t}"
+        );
+        let shot = image(&dir.join("shot.png"));
+        assert!(combing(&shot) < 10.0, "frame {t} shows woven fields");
+    }
 
     step("Many cuts: a seek waits only for the checks near its frame");
     // 120 clips of 4 frames from all over a long fixture, appended at once:

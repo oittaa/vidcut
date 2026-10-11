@@ -377,6 +377,57 @@ fn rotated_sources_export_upright() {
     assert!(bad.is_empty(), "frames differing from the plan: {bad:?}");
 }
 
+/// Mean difference between each luma row of the top eighth and the average
+/// of its neighbors: near 0 for a progressive picture, large for woven
+/// fields that differ.
+fn combing(f: &vidcut_av::ffmpeg::frame::Video) -> f64 {
+    let (w, h, stride) = (f.width() as usize, f.height() as usize / 8, f.stride(0));
+    let y = f.data(0);
+    let mut sum = 0.0;
+    for r in 1..h - 1 {
+        for x in 0..w {
+            let (a, b, c) = (
+                f64::from(y[(r - 1) * stride + x]),
+                f64::from(y[r * stride + x]),
+                f64::from(y[(r + 1) * stride + x]),
+            );
+            sum += (b - (a + c) / 2.0).abs();
+        }
+    }
+    sum / ((h - 2) * w) as f64
+}
+
+#[test]
+fn interlaced_sources_are_deinterlaced() {
+    // Both fields of frame k show barcode k, and in the top eighth a block
+    // moves 40 px each field: woven, it combs there. Deinterlaced (bwdif,
+    // one frame per frame), it doesn't, and the frames stay exact.
+    let fps = Rational::new(25, 1).unwrap();
+    let mut pieces = Vec::new();
+    let mut want: Vec<Option<u32>> = Vec::new();
+    for top in [true, false] {
+        let spec = FixtureSpec::new(VideoCodec::H264, Container::Mkv, 320, 180, (25, 1), 50)
+            .interlaced(top)
+            .no_audio();
+        let s = src(spec);
+        let info = vidcut_av::probe::probe(&s.path).unwrap().video.unwrap();
+        assert_eq!(info.top_field_first, Some(top), "probed field order");
+        pieces.push(v(&s, 5, 20));
+        want.extend((5..25).map(Some));
+    }
+    let p = plan(fps, 320, 180, pieces, vec![]);
+    let out = out_dir("interlaced").join("out.mkv");
+    render(&p, &lossless(), &out);
+    let mut r = VideoReader::open(&out).unwrap();
+    let mut codes = Vec::new();
+    while let Some(f) = r.next_frame().unwrap() {
+        let c = combing(&f);
+        assert!(c < 10.0, "frame {} combs: {c:.1}", codes.len());
+        codes.push(read_barcode(&f).unwrap());
+    }
+    assert_eq!(codes, want);
+}
+
 #[test]
 fn other_rates_are_resampled_by_nearest_frame() {
     // A 25 fps source on a 30 fps timeline: 5 source frames per 6 output frames.

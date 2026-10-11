@@ -310,7 +310,8 @@ The preview findings and the time-mapping rules are in [docs/decisions/preview.m
 - **MPEG-TS and other index-less containers can't be seeked exactly by mpv.** Preview uses an MKV remux (`vidcut_av::remux`); export reads the original.
 - **Set packet durations explicitly when muxing** from delayed encoders (x264 with B-frames). Otherwise MP4 edit lists drop the last frame.
 - **Set `pkt_timebase` on every decoder** (`codec_ctx.pkt_timebase = stream.time_base`). Without it, FFmpeg can't adjust timestamps when it skips priming samples, and audio drifts by the codec delay.
-- **Not handled in export yet:** interlaced sources, HDR (see docs/decisions/export.md §4). Rotation metadata is applied everywhere (spec D33).
+- **Not handled in export yet:** HDR (see docs/decisions/export.md §4). Rotation metadata is applied everywhere (spec D33).
+- **Interlaced sources are deinterlaced inside `VideoReader`** (`bwdif`, one frame per frame), before frames are picked. The preview adds the same filter per file (preview.md §5); mpv's own `deinterlace` makes one frame per field, which breaks frame-exact seeks.
 - **mpv's software renderer aborts on rotated video** (an assertion in `mp_image_crop`). The GUI renders with OpenGL, which rotates on the GPU, so `tests/live.rs` (software rendering) leaves rotated clips to `tests/gui.rs`.
 - **GPUs on the dev machine:**
   - NVIDIA on `renderD128`: NVENC works, VAAPI doesn't.

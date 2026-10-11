@@ -1964,8 +1964,16 @@ impl Live {
             render::AudioPiece::Source { path, .. } => network(path),
             render::AudioPiece::Silence { .. } => false,
         });
+        let deinterlace = plan.video.iter().any(|v| match v {
+            render::VideoPiece::Source { media, .. } => p
+                .media(media)
+                .and_then(|m| m.info.video.as_ref())
+                .is_some_and(|v| v.fields.is_some()),
+            render::VideoPiece::Black { .. } => false,
+        });
         Some(preview::Preview {
             read_ahead,
+            deinterlace,
             ..preview::build(&plan, &fillers)
         })
     }

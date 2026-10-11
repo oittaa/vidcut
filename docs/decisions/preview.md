@@ -88,6 +88,10 @@ keep-open=always idle=yes pause=yes video-timing-offset=0
 
 For single-file sources, also `rebase-start-time=no`.
 
+**Interlaced sources** load with `vf=bwdif=mode=send_frame:deint=interlaced`, as a per-file option, whenever the plan has an interlaced clip (spec D34).
+- **Why not mpv's own deinterlacer:** `deinterlace=yes` makes one frame per field, and the half-frame bias of every seek (§1) would land on the previous frame's second field.
+- **Cost:** the software filter takes the whole file. With hardware decoding, every frame of a timeline holding an interlaced clip goes through system memory; timelines without one are unaffected.
+
 **Network shares read ahead.** When a source of the EDL is on a network file system, the file loads with `cache=yes,demuxer-max-back-bytes=150MiB`. That covers NFS, SMB/CIFS, Ceph, AFS, 9P, and FUSE, which GNOME's mounted shares and sshfs use. mpv then reads ahead during playback and keeps what it read, so scrubbing back over it doesn't go to the share again.
 - **Local files keep the cache off**, so a reload after every edit doesn't read ahead needlessly.
 - **The check (`statfs`) runs on a worker** when media are added: a share that doesn't answer would block the session thread.

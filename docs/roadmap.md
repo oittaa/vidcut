@@ -36,7 +36,7 @@ Moving an edit between vidcut and Resolve, in either direction and between compu
 
 ## Milestones
 
-- **M8, in progress:** rotation metadata (done), interlaced sources, HDR.
+- **M8, in progress:** rotation metadata and interlaced sources (done), HDR.
 - **Candidates, roughly in this order:**
   - **Stills and image sequences.**
     - Resolve gives a still the "standard still duration", 5 s by default (p. 114).

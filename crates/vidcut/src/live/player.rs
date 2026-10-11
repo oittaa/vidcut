@@ -319,6 +319,12 @@ impl Player {
         if self.loaded.as_ref().is_some_and(|p| p.read_ahead) {
             options.push_str(",cache=yes,demuxer-max-back-bytes=150MiB");
         }
+        // Interlaced sources: one frame per frame, as export makes them.
+        // (mpv's own deinterlacer makes one per field, and the half-frame
+        // bias of seeks would land on the previous frame's second field.)
+        if self.loaded.as_ref().is_some_and(|p| p.deinterlace) {
+            options.push_str(",vf=bwdif=mode=send_frame:deint=interlaced");
+        }
         let id = self.command(&["loadfile", &path, "replace", "-1", &options]);
         self.tracking = self.speed > 0.0;
         if self.mpv.is_some() {

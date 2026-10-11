@@ -61,8 +61,11 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
 - Each source frame goes through a libavfilter graph: `scale` (fit inside the output keeping the display aspect, honoring the sample aspect ratio), `pad` (black, centered), `setsar=1`, `format=<encoder pixel format>`.
 - The fit is computed in Rust (`export::video::fit`, unit-tested).
 - **Rotation** (spec D33): a stream's display matrix (phones store portrait video sideways with one) turns the picture upright first: `transpose=clock` or `cclock`, or `hflip,vflip` for 180°. The fit then uses the shown aspect. Thumbnails turn their pictures the same way.
+- **Interlaced sources** (spec D34): `VideoReader` deinterlaces streams flagged interlaced, in decode order and before the sampling rule picks frames, so `bwdif` sees each frame's real neighbors.
+  - It runs `bwdif=mode=send_frame:deint=interlaced`: one frame per frame, with the first field kept, and progressive frames passing through.
+  - A seek starts it over, and frames decoded on the way to the target feed it. `bwdif` halves its output time base, so timestamps are rescaled back to the stream's.
+  - Thumbnails aren't deinterlaced: at pool size, combing barely shows.
 - **Not yet handled:**
-  - Interlaced sources: need deinterlacing (`bwdif`).
   - HDR: needs tone mapping or passthrough decisions.
 
   These follow when real-world media tests need them; they are tracked in AGENTS.md.

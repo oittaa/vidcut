@@ -9,7 +9,7 @@
 use std::path::Path;
 
 use crate::error::{Context, Error, Result};
-use crate::ffmpeg::{self, codec, format, frame, media, software::scaling};
+use crate::ffmpeg::{self, codec, filter, format, frame, media, software::scaling};
 
 /// Decodes the primary video stream of a file in presentation order.
 pub struct VideoReader {
@@ -31,6 +31,129 @@ pub struct VideoReader {
     rotation: u16,
     /// What the first decodable frame says about fields and color.
     first_props: Option<FrameProps>,
+    /// For interlaced streams: every decoded frame goes through it.
+    deinterlacer: Option<Deinterlacer>,
+}
+
+/// `bwdif` over a stream's frames in order: one progressive frame for each
+/// interlaced one, made from both its fields with the frames around it
+/// (send_frame); progressive frames pass through. Holds one frame back.
+struct Deinterlacer {
+    graph: Option<filter::Graph>,
+    /// The stream's time base, and the parameters the graph was built for.
+    time_base: ffmpeg::Rational,
+    input: (u32, u32, format::Pixel),
+    /// The end was sent to the graph.
+    flushed: bool,
+    /// The graph has given its last frame.
+    done: bool,
+}
+
+impl Deinterlacer {
+    fn new(time_base: ffmpeg::Rational) -> Self {
+        Self {
+            graph: None,
+            time_base,
+            input: (0, 0, format::Pixel::None),
+            flushed: false,
+            done: false,
+        }
+    }
+
+    fn build(&mut self, f: &frame::Video) -> Result<()> {
+        let sar = f.aspect_ratio();
+        let args = format!(
+            "video_size={}x{}:pix_fmt={}:time_base={}/{}:pixel_aspect={}/{}",
+            f.width(),
+            f.height(),
+            ffmpeg::ffi::AVPixelFormat::from(f.format()) as i32,
+            self.time_base.numerator(),
+            self.time_base.denominator(),
+            sar.numerator().max(1),
+            sar.denominator().max(1)
+        );
+        let mut graph = filter::Graph::new();
+        let find = |name: &str| {
+            filter::find(name).ok_or_else(|| Error::Invalid(format!("no {name} filter")))
+        };
+        graph
+            .add(&find("buffer")?, "in", &args)
+            .ctx(|| "creating deinterlacer source".into())?;
+        graph
+            .add(&find("buffersink")?, "out", "")
+            .ctx(|| "creating deinterlacer sink".into())?;
+        let spec = "bwdif=mode=send_frame:parity=auto:deint=interlaced";
+        graph
+            .output("in", 0)
+            .and_then(|p| p.input("out", 0))
+            .and_then(|p| p.parse(spec))
+            .ctx(|| format!("building {spec}"))?;
+        graph.validate().ctx(|| format!("configuring {spec}"))?;
+        self.graph = Some(graph);
+        self.input = (f.width(), f.height(), f.format());
+        Ok(())
+    }
+
+    /// Feeds the next decoded frame, or the end of the stream (`None`).
+    fn push(&mut self, f: Option<&frame::Video>) -> Result<()> {
+        let Some(f) = f else {
+            if let Some(g) = self.graph.as_mut() {
+                g.get("in")
+                    .expect("source")
+                    .source()
+                    .flush()
+                    .ctx(|| "flushing the deinterlacer".into())?;
+            } else {
+                self.done = true;
+            }
+            self.flushed = true;
+            return Ok(());
+        };
+        if self.graph.is_none() || self.input != (f.width(), f.height(), f.format()) {
+            // A new size or format starts over (losing one frame of context).
+            self.build(f)?;
+        }
+        self.graph
+            .as_mut()
+            .expect("built")
+            .get("in")
+            .expect("source")
+            .source()
+            .add(f)
+            .ctx(|| "deinterlacing".into())
+    }
+
+    /// The next progressive frame, if one is ready.
+    fn pull(&mut self) -> Result<Option<frame::Video>> {
+        let Some(g) = self.graph.as_mut() else {
+            return Ok(None);
+        };
+        let mut sink = g.get("out").expect("sink");
+        let mut out = frame::Video::empty();
+        match sink.sink().frame(&mut out) {
+            Ok(()) => {
+                // bwdif halves the time base (for field rates): back to the
+                // stream's.
+                let tb = sink.sink().time_base();
+                let pts = out.pts().map(|p| unsafe {
+                    ffmpeg::ffi::av_rescale_q(p, tb.into(), self.time_base.into())
+                });
+                out.set_pts(pts);
+                Ok(Some(out))
+            }
+            Err(ffmpeg::Error::Eof) => {
+                self.done = true;
+                Ok(None)
+            }
+            Err(ffmpeg::Error::Other {
+                errno: ffmpeg::util::error::EAGAIN,
+            }) => Ok(None),
+            Err(e) => Err(Error::Ffmpeg {
+                context: "deinterlacing".into(),
+                source: e,
+            }),
+        }
+    }
 }
 
 /// Facts carried by a decoded frame rather than the stream.
@@ -84,6 +207,26 @@ impl VideoReader {
         reader.pending = reader.decode_one()?;
         reader.first_pts = reader.pending.as_ref().and_then(|f| f.pts());
         reader.first_props = reader.pending.as_ref().map(FrameProps::of);
+        // Interlaced by the stream's field order or the first frame's flags.
+        use ffmpeg::ffi::AVFieldOrder as F;
+        let field_order = unsafe {
+            (*reader
+                .input
+                .stream(reader.stream)
+                .expect("found")
+                .parameters()
+                .as_ptr())
+            .field_order
+        };
+        let interlaced = matches!(
+            field_order,
+            F::AV_FIELD_TT | F::AV_FIELD_BB | F::AV_FIELD_TB | F::AV_FIELD_BT
+        ) || reader
+            .first_props
+            .is_some_and(|p| p.top_field_first.is_some());
+        if interlaced {
+            reader.deinterlacer = Some(Deinterlacer::new(reader.time_base));
+        }
         Ok(reader)
     }
 
@@ -125,6 +268,7 @@ impl VideoReader {
             first_pts: None,
             rotation,
             first_props: None,
+            deinterlacer: None,
         })
     }
 
@@ -162,11 +306,9 @@ impl VideoReader {
     /// The frame's pts is its best-effort timestamp.
     pub fn next_frame(&mut self) -> Result<Option<frame::Video>> {
         loop {
-            let frame = match self.pending.take() {
-                Some(f) => Some(f),
-                None => self.decode_one()?,
+            let Some(frame) = self.next_progressive()? else {
+                return Ok(None);
             };
-            let Some(frame) = frame else { return Ok(None) };
             match (self.min_pts, frame.pts()) {
                 (Some(min), Some(pts)) if pts < min => continue,
                 _ => return Ok(Some(frame)),
@@ -174,9 +316,42 @@ impl VideoReader {
         }
     }
 
+    /// The next decoded frame in presentation order, deinterlaced when the
+    /// stream is interlaced.
+    fn next_progressive(&mut self) -> Result<Option<frame::Video>> {
+        if self.deinterlacer.is_none() {
+            return match self.pending.take() {
+                Some(f) => Ok(Some(f)),
+                None => self.decode_one(),
+            };
+        }
+        loop {
+            let d = self.deinterlacer.as_mut().expect("interlaced");
+            if let Some(f) = d.pull()? {
+                return Ok(Some(f));
+            }
+            if d.done || d.flushed {
+                // After the end was sent, nothing more is coming.
+                d.done = true;
+                return Ok(None);
+            }
+            let frame = match self.pending.take() {
+                Some(f) => Some(f),
+                None => self.decode_one()?,
+            };
+            let d = self.deinterlacer.as_mut().expect("interlaced");
+            d.push(frame.as_ref())?;
+        }
+    }
+
     /// Positions the reader so the next frame returned is the first one with
     /// `pts >= target` (in [`time_base`](Self::time_base) units).
     pub fn seek(&mut self, target: i64) -> Result<()> {
+        // Frames around the new position are another stretch: the
+        // deinterlacer starts over.
+        if self.deinterlacer.is_some() {
+            self.deinterlacer = Some(Deinterlacer::new(self.time_base));
+        }
         // Seek to a keyframe at or before the target. Demuxers without an index
         // (e.g. MPEG-TS) may land after it, so back off until the first decoded
         // frame is not past the target. Targets before the first frame, or

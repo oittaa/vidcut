@@ -446,3 +446,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - **Applying it:** K stops the run and applies it as one request (`edit.trim`, `edit.roll`, `edit.slip` or `edit.slide`). K held with a tap of J or L applies one frame. W also applies what is pending before leaving.
   - **Play around:** Space plays from 2 s before the selection to 2 s after it.
 - **D33. Rotation metadata** (M8). The manual doesn't say. Media show as players show them: the rotation in a file's display matrix is applied in the preview, export, frames, thumbnails and storyboards. Phones store portrait video sideways with one. A portrait clip that sets the project format makes a portrait project, and `media.get` reports the size as shown, with the rotation. Mirrored display matrices are taken as rotations only.
+- **D34. Interlaced sources** (M8; Deinterlace Quality, p. 741).
+  - **Detection:** a stream is interlaced if its field order says so, or if its first frame is flagged interlaced. `media.get` reports the field shown first as `fields`.
+  - **Deinterlacing:** frames flagged interlaced are deinterlaced everywhere (export, frames, storyboards, the preview), one progressive frame per frame. The first field (in time) is kept and the second rebuilt from it and the neighboring frames (`bwdif`). Like the Cut page's playback, which always uses Normal quality, there is one method (deviation X13).
+  - **Rates:** output is never interlaced, and an interlaced clip in a project at twice its frame rate shows each frame twice (no field-rate output).

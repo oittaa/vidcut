@@ -198,6 +198,11 @@ pub struct FixtureSpec {
     /// pictures are stored turned the other way, so they show upright only
     /// when a player applies it; `width`×`height` is the upright size.
     pub rotation: u16,
+    /// Interlaced H.264 with the top field first (`Some(true)`) or the bottom
+    /// one. Both fields of frame `k` show barcode `k`; in the top eighth,
+    /// which the barcode reader doesn't sample, a white block moves 40 px
+    /// each field, as a camera would see it. Not deinterlaced, it combs.
+    pub top_field_first: Option<bool>,
 }
 
 /// VFR frame durations in quarter-frame ticks (average 4 = one nominal frame).
@@ -247,7 +252,14 @@ impl FixtureSpec {
             picture: Picture::Barcode,
             sound: Sound::Beep,
             rotation: 0,
+            top_field_first: None,
         }
+    }
+
+    /// Interlaced fields, the top (`true`) or the bottom one first.
+    pub fn interlaced(mut self, top_first: bool) -> Self {
+        self.top_field_first = Some(top_first);
+        self
     }
 
     /// Stores the pictures turned against `degrees` (clockwise: 90, 180 or
@@ -341,6 +353,10 @@ impl FixtureSpec {
         let rot = match self.rotation {
             0 => String::new(),
             r => format!("r{r}"),
+        } + match self.top_field_first {
+            None => "",
+            Some(true) => "itff",
+            Some(false) => "ibff",
         };
         format!(
             "{content}{v}_{codec}_{w}x{h}{rot}_{n}-{d}{vfr}_g{g}b{b}_{f}f_{audio}_o{o}.{ext}",
@@ -438,6 +454,9 @@ pub fn generate(spec: &FixtureSpec, path: &Path) -> Result<()> {
     if spec.rotation != 0 && !matches!(spec.container, Container::Mp4 | Container::Mov) {
         return Err(Error::Invalid("rotation needs MP4 or MOV".into()));
     }
+    if spec.top_field_first.is_some() && spec.video != VideoCodec::H264 {
+        return Err(Error::Invalid("interlaced fixtures are H.264".into()));
+    }
     let mut octx = format::output_as(path, spec.container.muxer())
         .ctx(|| format!("creating {}", path.display()))?;
     let global_header = octx.format().flags().contains(format::Flags::GLOBAL_HEADER);
@@ -528,14 +547,31 @@ impl VideoTrack {
         enc.set_frame_rate(Some(ffmpeg::Rational(spec.fps.0 as i32, spec.fps.1 as i32)));
         enc.set_gop(spec.gop);
         enc.set_max_b_frames(spec.bframes as usize);
+        let mut flags = codec::Flags::empty();
         if global_header {
-            enc.set_flags(codec::Flags::GLOBAL_HEADER);
+            flags |= codec::Flags::GLOBAL_HEADER;
         }
+        if let Some(top) = spec.top_field_first {
+            flags |= codec::Flags::INTERLACED_DCT | codec::Flags::INTERLACED_ME;
+            unsafe {
+                (*enc.as_mut_ptr()).field_order = if top {
+                    ffmpeg::ffi::AVFieldOrder::AV_FIELD_TT
+                } else {
+                    ffmpeg::ffi::AVFieldOrder::AV_FIELD_BB
+                };
+            }
+        }
+        enc.set_flags(flags);
         let mut opts = ffmpeg::Dictionary::new();
         match spec.video {
             VideoCodec::H264 => {
                 opts.set("preset", "veryfast");
-                opts.set("x264-params", "scenecut=0");
+                let fields = match spec.top_field_first {
+                    None => "",
+                    Some(true) => ":tff=1",
+                    Some(false) => ":bff=1",
+                };
+                opts.set("x264-params", &format!("scenecut=0{fields}"));
             }
             VideoCodec::Hevc10 => {
                 opts.set("preset", "ultrafast");
@@ -608,6 +644,20 @@ impl VideoTrack {
         let (coded_w, coded_h) = spec.coded_size();
         let mut frame = frame::Video::new(pixel, coded_w, coded_h);
         match spec.picture {
+            Picture::Barcode if spec.top_field_first.is_some() => {
+                crate::barcode::paint(k, &mut self.luma8, w, h, w);
+                // The moving block, at its place in each field's time.
+                let first_even = spec.top_field_first == Some(true);
+                let block = w / 8;
+                for y in 0..h / 8 {
+                    let second = (y % 2 == 0) != first_even;
+                    let field = 2 * k as usize + usize::from(second);
+                    let x0 = (field * 40) % (w - block);
+                    let row = &mut self.luma8[y * w..(y + 1) * w];
+                    row.fill(16);
+                    row[x0..x0 + block].fill(235);
+                }
+            }
             Picture::Barcode => crate::barcode::paint(k, &mut self.luma8, w, h, w),
             Picture::Black => self.luma8.fill(16),
             Picture::Shots { frames } => {
@@ -665,6 +715,15 @@ impl VideoTrack {
             }
             for p in 1..frame.planes() {
                 frame.data_mut(p).fill(128);
+            }
+        }
+        if let Some(top) = spec.top_field_first {
+            unsafe {
+                let f = &mut *frame.as_mut_ptr();
+                f.flags |= ffmpeg::ffi::AV_FRAME_FLAG_INTERLACED;
+                if top {
+                    f.flags |= ffmpeg::ffi::AV_FRAME_FLAG_TOP_FIELD_FIRST;
+                }
             }
         }
         let pts = self.offset + spec.frame_pts(k);

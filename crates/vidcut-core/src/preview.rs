@@ -64,6 +64,9 @@ pub struct Preview {
     /// and keeps what it read for seeking back. Set by the host, which can
     /// ask the file system.
     pub read_ahead: bool,
+    /// Interlaced sources: the player deinterlaces flagged frames, one
+    /// frame per frame as export does. Set by the host.
+    pub deinterlace: bool,
 }
 
 /// The EDL and audio graph that play `plan` in mpv.
@@ -72,6 +75,7 @@ pub fn build(plan: &RenderPlan, fillers: &Fillers) -> Preview {
         edl: edl(plan, fillers),
         audio_graph: audio_graph(plan),
         read_ahead: false,
+        deinterlace: false,
     }
 }
 

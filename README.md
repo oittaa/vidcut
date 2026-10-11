@@ -158,7 +158,7 @@ Agents can look at their work: frames, screenshots and storyboards come back as 
 | M5 | Export UI (Quick Export, Export dialog, jobs), OpenTimelineIO import/export |
 | M6 | Multi-track (B-roll, music, Place On Top, mixer) |
 | M7 | Agent extras (MCP server, Ripple Delete Silence, scene detection, Boring Detector, Dynamic Trim, storyboards, loudness) |
-| M8 | Media coverage, in progress: rotation metadata (done), interlaced sources, HDR |
+| M8 | Media coverage, in progress: rotation metadata, interlaced sources (both done), HDR |
 
 What comes next, and the use cases behind it, is in [docs/roadmap.md](docs/roadmap.md).
 
