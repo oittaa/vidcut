@@ -428,7 +428,7 @@ impl Workspace {
                 };
                 // The J/L handle lives in the audio band (D20).
                 let y = if e.side == Side::Audio {
-                    v1.rect.audio_top..=v1.rect.rect.bottom()
+                    egui::Rangef::new(v1.rect.audio_top, v1.rect.rect.bottom())
                 } else {
                     v1.rect.rect.y_range()
                 };
