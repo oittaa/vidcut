@@ -56,6 +56,41 @@ fn the_smart_indicator_is_red_without_media_past_the_edit() {
 }
 
 #[test]
+fn the_smart_indicator_ignores_a_higher_track_on_its_first_or_last_frame() {
+    // D36: the indicator is Track 1 only. A V2 clip on its first or last
+    // frame leaves the edit green, including where V1 has no edge at all.
+    let mut f = three_clips();
+    // Edit 100 is green on V1. V2 ends there on m2's last frame.
+    f.ok(req(
+        "edit.overwrite",
+        json!({"media": "m2", "range": "0f..100f", "at": 0, "track": "V2"}),
+    ));
+    // Edit 150 is green on V1. V2 starts there on m3's first frame.
+    f.ok(req(
+        "edit.overwrite",
+        json!({"media": "m3", "range": "0f..40f", "at": 150, "track": "V2"}),
+    ));
+    // No V1 edge at 300 or 500: V2 alone starts on m3's first frame and ends
+    // on its last.
+    f.ok(req(
+        "edit.overwrite",
+        json!({"media": "m3", "range": "0f..200f", "at": 300, "track": "V2"}),
+    ));
+    assert_eq!(
+        f.track("V2"),
+        vec![
+            row("c4", 0, 100, 0),
+            row("c5", 150, 40, 0),
+            row("c6", 300, 200, 0)
+        ]
+    );
+    let p = f.editor.project();
+    for e in [100, 150, 300, 500] {
+        assert!(crate::ops::edit_has_handles(p, e), "edit {e} stays green");
+    }
+}
+
+#[test]
 fn smart_insert_uses_the_nearest_edit() {
     // p. 696–697: Smart Insert inserts at the edit point nearest the playhead
     // and ripples Track 1.
