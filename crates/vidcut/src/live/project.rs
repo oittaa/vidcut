@@ -20,6 +20,9 @@ pub struct OpenProject {
     pub editor: Editor,
     /// The file's text when last read or written.
     disk: String,
+    /// Why the undo history couldn't be saved with the latest edit, until
+    /// the session shows it.
+    pub history_error: Option<String>,
     _watcher: Option<notify::RecommendedWatcher>,
 }
 
@@ -38,6 +41,7 @@ impl OpenProject {
             store,
             editor,
             disk,
+            history_error: None,
             _watcher: watcher,
         })
     }
@@ -96,7 +100,10 @@ impl OpenProject {
         let committed = self.editor.project().rev != rev;
         if committed {
             match self.store.save(&self.editor) {
-                Ok(text) => self.disk = text,
+                Ok(saved) => {
+                    self.disk = saved.text;
+                    self.history_error = saved.history_error;
+                }
                 Err(e) => return (Err(e), true),
             }
         }

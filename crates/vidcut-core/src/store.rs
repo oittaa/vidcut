@@ -52,6 +52,17 @@ struct Sidecar {
     redo: Vec<Entry>,
 }
 
+/// What [`Store::save`] wrote.
+#[derive(Debug, Clone)]
+pub struct Saved {
+    /// The project file's new text.
+    pub text: String,
+    /// Why the undo history couldn't be written, if so. The edit is saved
+    /// all the same, and the history on disk stays as it was: the next load
+    /// sees the edit as an outside change, one undo step.
+    pub history_error: Option<String>,
+}
+
 /// A project file and its sidecar.
 #[derive(Debug, Clone)]
 pub struct Store {
@@ -149,21 +160,26 @@ impl Store {
     }
 
     /// Runs `f` on the project under an exclusive lock and saves the result if
-    /// the project changed.
-    pub fn transact<T>(&self, f: impl FnOnce(&mut Editor) -> Result<T>) -> Result<T> {
+    /// the project changed. Also gives [`Saved::history_error`], if any.
+    pub fn transact<T>(
+        &self,
+        f: impl FnOnce(&mut Editor) -> Result<T>,
+    ) -> Result<(T, Option<String>)> {
         let _lock = self.lock()?;
         let mut editor = self.load()?;
         let before = editor.project().clone();
         let out = f(&mut editor)?;
-        if editor.project() != &before {
-            self.save(&editor)?;
-        }
-        Ok(out)
+        let history_error = if editor.project() != &before {
+            self.save(&editor)?.history_error
+        } else {
+            None
+        };
+        Ok((out, history_error))
     }
 
-    /// Writes the project and its history; returns the project file's new
-    /// text. Callers hold the [`lock`](Self::lock).
-    pub fn save(&self, editor: &Editor) -> Result<String> {
+    /// Writes the project and its history. Callers hold the
+    /// [`lock`](Self::lock).
+    pub fn save(&self, editor: &Editor) -> Result<Saved> {
         let text = to_json(editor.project())?;
         let sidecar = Sidecar {
             project_path: self.path.clone(),
@@ -174,15 +190,19 @@ impl Store {
         // The sidecar goes first: whoever sees the new project file (a file
         // watcher, say) then also finds the history that matches it, instead
         // of mistaking the change for an external edit.
+        // Failing to save the history must not lose the edit. A failed write
+        // leaves the old sidecar whole (`write_atomic`).
         let dir = self.history_path.parent().expect("history dir");
-        // History is a convenience: failing to save it must not lose the edit.
-        if std::fs::create_dir_all(dir).is_ok() {
-            let json =
-                serde_json::to_string(&sidecar).map_err(|e| Error::internal(e.to_string()))?;
-            let _ = write_atomic(&self.history_path, &json);
-        }
+        let json = serde_json::to_string(&sidecar).map_err(|e| Error::internal(e.to_string()))?;
+        let history_error = std::fs::create_dir_all(dir)
+            .and_then(|()| write_atomic(&self.history_path, &json))
+            .err()
+            .map(|e| format!("{}: {e}", self.history_path.display()));
         write_atomic(&self.path, &text).map_err(|e| io(&self.path, e))?;
-        Ok(text)
+        Ok(Saved {
+            text,
+            history_error,
+        })
     }
 
     /// Takes the project's write lock (released when the returned file is
@@ -281,7 +301,9 @@ mod tests {
     }
 
     fn apply(store: &Store, env: &dyn Env, req: serde_json::Value) -> Result<crate::Response> {
-        store.transact(|ed| ed.apply(Envelope::from_json(req).map_err(Error::usage)?, env, None))
+        store
+            .transact(|ed| ed.apply(Envelope::from_json(req).map_err(Error::usage)?, env, None))
+            .map(|(r, _)| r)
     }
 
     #[test]
@@ -371,6 +393,22 @@ mod tests {
             .is_err()
         );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+
+        // A history that can't be written (a folder sits where it goes)
+        // doesn't lose the edit, and says why.
+        let other =
+            Store::create(&dir.join("q.vidcut"), &Project::new(Settings::default())).unwrap();
+        std::fs::create_dir_all(&other.history_path).unwrap();
+        let (_, history_error) = other
+            .transact(|ed| {
+                let e = Envelope::from_json(
+                    json!({"method": "media.add", "params": {"paths": ["/m.mp4"]}}),
+                );
+                ed.apply(e.unwrap(), &env, None)
+            })
+            .unwrap();
+        assert!(history_error.is_some_and(|e| e.contains(".json")));
+        assert_eq!(other.load().unwrap().project().media.len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

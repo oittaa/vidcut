@@ -124,7 +124,12 @@ pub fn run_with(
         _ => {
             let store = open(project)?;
             if envelope.request.is_mutation() {
-                store.transact(|editor| editor.apply(envelope, &AvEnv, None))?
+                let (r, history_error) =
+                    store.transact(|editor| editor.apply(envelope, &AvEnv, None))?;
+                if let Some(e) = history_error {
+                    eprintln!("vidcut: warning: {}", history_unsaved(&e));
+                }
+                r
             } else {
                 store.load()?.apply(envelope, &AvEnv, None)?
             }
@@ -233,6 +238,14 @@ pub fn export_media(
     let mut r = answer(json!({ "outputs": reports }));
     r.rev = p.rev;
     Ok(r)
+}
+
+/// Says that the undo history wasn't saved with an edit, and what follows.
+pub fn history_unsaved(error: &str) -> String {
+    format!(
+        "the undo history wasn't saved ({error}); undo will take this edit back as an \
+         outside change"
+    )
 }
 
 fn answer(result: Value) -> Response {

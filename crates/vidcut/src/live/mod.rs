@@ -1662,6 +1662,9 @@ impl Live {
         };
         let request = envelope.request.clone();
         let (result, changed) = open.apply(envelope, &AvEnv, Some(playhead));
+        if let Some(e) = open.history_error.take() {
+            self.notice(crate::session::history_unsaved(&e), true);
+        }
         if changed
             && let Request::BinsRename { path, to } = &request
             && let Some(rest) = self.pool.bin.strip_prefix(path.as_str())
