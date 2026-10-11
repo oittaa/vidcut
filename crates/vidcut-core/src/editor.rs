@@ -82,16 +82,75 @@ pub trait Env {
     /// How loud `plan`'s audio is, mixed as an export would mix it.
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness>;
 
-    /// Reads a text file (an `.otio` file to import).
-    fn read_text(&self, path: &Path) -> Result<String> {
-        std::fs::read_to_string(path).map_err(|e| {
-            let message = format!("{}: {e}", path.display());
-            match e.kind() {
-                std::io::ErrorKind::NotFound => Error::not_found(message),
-                _ => Error::usage(message),
-            }
-        })
+    /// Opens a timeline file to import: an `.otio` file, or an `.otiod`
+    /// bundle folder (its `content.otio`). `.otioz` bundles (zip files) need
+    /// the media layer, which unpacks their media into `unpack` (default: a
+    /// folder named after the bundle, next to it) unless `write` is false.
+    fn open_timeline(
+        &self,
+        path: &Path,
+        unpack: Option<&Path>,
+        write: bool,
+    ) -> Result<TimelineFile> {
+        let _ = (unpack, write);
+        if is_otioz(path) {
+            return Err(Error::usage(format!(
+                "{}: .otioz bundles are read by the vidcut program",
+                path.display()
+            )));
+        }
+        read_timeline_file(path)
     }
+}
+
+/// A timeline file opened for import ([`Env::open_timeline`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TimelineFile {
+    /// The OTIO document.
+    pub text: String,
+    /// The folder relative media paths count from.
+    pub base: PathBuf,
+    /// For an `.otioz` bundle: where its media go.
+    pub bundle: Option<Unpacked>,
+}
+
+/// Where an `.otioz` bundle's media are unpacked.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct Unpacked {
+    pub folder: PathBuf,
+    /// Files and bytes of media in the bundle.
+    pub files: usize,
+    pub bytes: u64,
+    /// All of them are there (false in a dry run that would unpack).
+    pub unpacked: bool,
+}
+
+/// Whether `path` names an `.otioz` bundle.
+pub fn is_otioz(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("otioz"))
+}
+
+/// Reads an `.otio` file, or the `content.otio` of an `.otiod` folder.
+pub fn read_timeline_file(path: &Path) -> Result<TimelineFile> {
+    let (file, base) = if path.is_dir() {
+        (path.join("content.otio"), path.to_path_buf())
+    } else {
+        let base = path.parent().unwrap_or(Path::new("")).to_path_buf();
+        (path.to_path_buf(), base)
+    };
+    let text = std::fs::read_to_string(&file).map_err(|e| {
+        let message = format!("{}: {e}", file.display());
+        match e.kind() {
+            std::io::ErrorKind::NotFound => Error::not_found(message),
+            _ => Error::usage(message),
+        }
+    })?;
+    Ok(TimelineFile {
+        text,
+        base,
+        bundle: None,
+    })
 }
 
 /// One undo step: the project as it was before a change.
@@ -162,7 +221,7 @@ impl Editor {
         }
         let label = label_of(&request);
         let mut working = self.project.clone();
-        let result = mutate(&mut working, &request, env, playhead)?;
+        let result = mutate(&mut working, &request, env, playhead, dry_run)?;
         let problems = validate::violations(&working);
         if !problems.is_empty() {
             return Err(Error::internal(format!(
@@ -413,11 +472,14 @@ fn need(at: Option<i64>, what: &str) -> Result<i64> {
 }
 
 /// Applies a mutation to `p` and returns its method-specific result.
+/// `dry_run` only keeps it from writing files (an `.otioz` import unpacks
+/// media).
 fn mutate(
     p: &mut Project,
     request: &Request,
     env: &dyn Env,
     playhead: Option<i64>,
+    dry_run: bool,
 ) -> Result<Value> {
     Ok(match request {
         Request::ProjectSet(set) => {
@@ -901,7 +963,19 @@ fn mutate(
             otio,
             replace,
             search,
-        } => import_timeline(p, path.as_deref(), otio.as_ref(), *replace, search, env)?,
+            unpack,
+        } => import_timeline(
+            p,
+            &Import {
+                path: path.as_deref(),
+                doc: otio.as_ref(),
+                replace: *replace,
+                search,
+                unpack: unpack.as_deref(),
+                write: !dry_run,
+            },
+            env,
+        )?,
         Request::Apply { commands, .. } => {
             let mut results = Vec::new();
             for (i, cmd) in commands.iter().enumerate() {
@@ -917,7 +991,7 @@ fn mutate(
                     )));
                 }
                 let r = if cmd.is_mutation() {
-                    mutate(p, cmd, env, playhead)
+                    mutate(p, cmd, env, playhead, dry_run)
                 } else {
                     query(p, &History::default(), cmd, env, playhead)
                 };
@@ -999,31 +1073,51 @@ fn rescale(f: i64, from: Rational, to: Rational) -> i64 {
     (2 * n + d).div_euclid(2 * d) as i64
 }
 
-/// `timeline.import`: an OpenTimelineIO timeline onto V1 ([`otio`]).
-fn import_timeline(
-    p: &mut Project,
-    path: Option<&Path>,
-    doc: Option<&Value>,
+/// What `timeline.import` reads, and how.
+struct Import<'a> {
+    path: Option<&'a Path>,
+    doc: Option<&'a Value>,
     replace: bool,
-    search: &[PathBuf],
-    env: &dyn Env,
-) -> Result<Value> {
-    let read;
-    let doc = match (path, doc) {
+    search: &'a [PathBuf],
+    unpack: Option<&'a Path>,
+    /// False in a dry run: a bundle's media aren't unpacked.
+    write: bool,
+}
+
+/// `timeline.import`: an OpenTimelineIO timeline onto V1 ([`otio`]).
+fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Value> {
+    let Import {
+        path,
+        doc,
+        replace,
+        search,
+        unpack,
+        write,
+    } = *import;
+    let (doc, file) = match (path, doc) {
         (Some(path), None) => {
-            read = serde_json::from_str::<Value>(&env.read_text(path)?).map_err(|e| {
+            let file = env.open_timeline(path, unpack, write)?;
+            let doc = serde_json::from_str::<Value>(&file.text).map_err(|e| {
                 Error::usage(format!("{}: not an OTIO (JSON) file: {e}", path.display()))
             })?;
-            &read
+            (doc, Some(file))
         }
-        (None, Some(doc)) => doc,
+        (None, Some(doc)) => (doc.clone(), None),
         _ => {
             return Err(Error::usage(
                 "timeline.import needs exactly one of `path` and `otio`",
             ));
         }
     };
-    let t = otio::import(doc)?;
+    let t = otio::import(&doc, file.as_ref().map(|f| f.base.as_path()))?;
+    // Resolve writes no timeline names: the file's then.
+    let name = match (t.name.as_str(), path) {
+        ("", Some(path)) => path
+            .file_stem()
+            .map_or(String::new(), |s| s.to_string_lossy().into_owned()),
+        (name, _) => name.to_string(),
+    };
+    let bundle = file.as_ref().and_then(|f| f.bundle.clone());
     if t.clips.is_empty() {
         return Err(Error::invalid(format!(
             "nothing to import: the timeline has no clips with media files{}",
@@ -1035,51 +1129,78 @@ fn import_timeline(
         )));
     }
     let mut warnings = t.warnings.clone();
+    // A dry run doesn't unpack a bundle, so its media can't be probed: say
+    // what the import would read.
+    if let Some(b) = bundle.as_ref().filter(|b| !b.unpacked) {
+        warnings.push(format!(
+            "the media weren't probed: a dry run doesn't unpack the bundle's {} file(s) into {}",
+            b.files,
+            b.folder.display()
+        ));
+        return Ok(json!({
+            "name": name,
+            "fps": t.fps,
+            "clips": [],
+            "media": [],
+            "markers": [],
+            "clips_in_file": t.clips.len(),
+            "bundle": b,
+            "warnings": warnings,
+        }));
+    }
 
-    // Media: each file probed once, looked for by name in `search` (and
-    // subfolders) if it isn't where the file says.
-    let mut ids: HashMap<PathBuf, String> = HashMap::new();
+    // Media: each file probed once where the file says (or near it), else
+    // looked for by name in `search` (and subfolders), and in a bundle's
+    // media folder.
+    let mut dirs = search.to_vec();
+    if let Some(b) = &bundle {
+        dirs.push(b.folder.clone());
+    }
+    // By how the file names them: an image sequence and a still of its
+    // first picture are named alike.
+    let key = |m: &otio::MediaRef| (m.url.clone(), m.sequence.is_some());
+    let mut ids: HashMap<(String, bool), String> = HashMap::new();
     let mut media = Vec::new();
-    let mut missing: Vec<&Path> = Vec::new();
+    let mut missing: Vec<&str> = Vec::new();
     for c in &t.clips {
-        if ids.contains_key(&c.path) || missing.contains(&c.path.as_path()) {
+        let m = &c.media;
+        if ids.contains_key(&key(m)) || missing.contains(&m.shown.as_str()) {
             continue;
         }
         // An image sequence is probed as one, at its rate.
-        let probe = |path: &Path| match c.sequence {
+        let probe = |path: &Path| match m.sequence {
             Some(rate) => env.probe_sequence(path, rate),
             None => env.probe(path),
         };
-        let probed = probe(&c.path).or_else(|e| {
-            c.path
-                .file_name()
-                .and_then(|name| {
-                    env.find_file(search, name)
-                        .iter()
-                        .find_map(|p| probe(p).ok())
-                })
-                .ok_or(e)
-        });
+        let probed = m
+            .paths
+            .iter()
+            .find_map(|path| probe(path).ok())
+            .or_else(|| {
+                (!m.file_name.is_empty())
+                    .then(|| {
+                        env.find_file(&dirs, std::ffi::OsStr::new(&m.file_name))
+                            .iter()
+                            .find_map(|path| probe(path).ok())
+                    })
+                    .flatten()
+            });
         match probed {
-            Ok(m) => {
-                let id = add_media(p, m);
+            Some(probed) => {
+                let id = add_media(p, probed);
                 if !media.contains(&id) {
                     media.push(id.clone());
                 }
-                ids.insert(c.path.clone(), id);
+                ids.insert(key(m), id);
             }
-            Err(_) => missing.push(&c.path),
+            None => missing.push(&m.shown),
         }
     }
     if !missing.is_empty() {
         return Err(Error::media(format!(
             "{} media file(s) not found: {}{}",
             missing.len(),
-            missing
-                .iter()
-                .map(|m| m.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", "),
+            missing.join(", "),
             if search.is_empty() {
                 "; pass `search` folders to look for them by name (subfolders too)"
             } else {
@@ -1104,7 +1225,7 @@ fn import_timeline(
             && let Some(v) = t
                 .clips
                 .iter()
-                .find_map(|c| p.media(&ids[&c.path])?.info.video.clone())
+                .find_map(|c| p.media(&ids[&key(&c.media)])?.info.video.clone())
         {
             adopt_size(p, &v);
         }
@@ -1156,12 +1277,18 @@ fn import_timeline(
 
     let mut clips = Vec::new();
     for c in &t.clips {
-        let m = p.media(&ids[&c.path]).expect("added").clone();
+        let m = p.media(&ids[&key(&c.media)]).expect("added").clone();
         let frames = p.media_limit(&m);
         let label = if c.name.is_empty() { &m.name } else { &c.name };
         let mut start = offset + conv(c.start);
         let end = offset + conv(c.end());
-        let mut source_in = conv(c.source_in);
+        // A source range in the media's timecode (no available range said
+        // where the media start) counts from the media's first frame here.
+        let tc = match (c.timecoded, m.info.timecode) {
+            (true, Some(tc)) if m.sequence.is_none() => tc.frames_at(from).round() as i64,
+            _ => 0,
+        };
+        let mut source_in = conv(c.source_in - tc);
         if c.video && m.info.video.is_none() {
             warnings.push(format!("{label}: {} has no video; left out", m.name));
             continue;
@@ -1227,10 +1354,8 @@ fn import_timeline(
         if let Some(a) = &audio {
             floors.insert(c.track.clone(), start + duration + a.tail);
         }
-        let name = (!c.name.is_empty()
-            && c.name != m.name
-            && Some(c.name.as_str()) != c.path.file_name().and_then(|n| n.to_str()))
-        .then(|| c.name.clone());
+        let name = (!c.name.is_empty() && c.name != m.name && c.name != c.media.file_name)
+            .then(|| c.name.clone());
         let id = p.alloc_clip_id();
         clips.push(id.clone());
         let track = p.track_mut(&c.track).expect("made above");
@@ -1266,14 +1391,18 @@ fn import_timeline(
             };
         }
     }
-    Ok(json!({
-        "name": t.name,
+    let mut result = json!({
+        "name": name,
         "fps": p.settings.fps,
         "clips": clips,
         "media": media,
         "markers": markers,
         "warnings": warnings,
-    }))
+    });
+    if let Some(b) = bundle {
+        result["bundle"] = json!(b);
+    }
+    Ok(result)
 }
 
 fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
@@ -1743,6 +1872,16 @@ fn media_json(p: &Project, m: &Media) -> Value {
         v["sequence"] = json!({
             "pattern": s.pattern, "first": s.first, "count": s.count,
         });
+    }
+    // The file's own start timecode, as `HH:MM:SS:FF` in its frames (or,
+    // for sound with a time of day, at the project rate).
+    if let Some(tc) = m.info.timecode {
+        let fps = match &m.info.video {
+            Some(v) if v.fps == tc.rate => v.fps,
+            _ => p.settings.fps,
+        };
+        let frames = tc.frames_at(fps).round() as i64;
+        v["timecode"] = json!(format_timecode(frames, fps, 0));
     }
     v
 }
