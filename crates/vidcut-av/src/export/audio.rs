@@ -89,8 +89,11 @@ impl Resampler {
             let room = ffi::swr_get_out_samples(self.swr, in_count).max(0) as usize + 32;
             let start = out.len();
             out.resize(start + room * self.channels, 0.0);
-            let dst = out[start..].as_mut_ptr() as *mut u8;
-            let n = ffi::swr_convert(self.swr, &dst, room as i32, inp, in_count);
+            let mut dst = out[start..].as_mut_ptr() as *mut u8;
+            // FFmpeg 7+ declares these `uint8_t * const *` and
+            // `const uint8_t * const *`; FFmpeg 6 declares `uint8_t **` and
+            // `const uint8_t **`. `&mut` and `cast_mut` typecheck for both.
+            let n = ffi::swr_convert(self.swr, &mut dst, room as i32, inp.cast_mut(), in_count);
             if n < 0 {
                 out.truncate(start);
                 return Err(Error::Ffmpeg {

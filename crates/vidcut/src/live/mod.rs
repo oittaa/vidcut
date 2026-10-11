@@ -1855,7 +1855,9 @@ impl Live {
             }
             if !m.info.audio.is_empty() && self.waveforms_wanted.insert(m.id.clone()) {
                 let (tx, id, path) = (self.tx.clone(), m.id.clone(), m.path.clone());
-                let cache = paths::media_cache("waveforms", &m, "peaks");
+                // `chpeaks` superseded the mono `peaks` cache: those files have
+                // no per-channel envelopes, so they are left unread.
+                let cache = paths::media_cache("waveforms", &m, "chpeaks");
                 self.workers.run(move || {
                     let cached = std::fs::read(&cache)
                         .ok()
