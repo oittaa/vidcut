@@ -33,8 +33,19 @@ pub fn call(
     let mut line = super::request_json(1, envelope, project)?.to_string();
     line.push('\n');
     let lost = |e: std::io::Error| Error::no_instance(format!("lost the vidcut GUI: {e}"));
-    stream.write_all(line.as_bytes()).map_err(lost)?;
-    stream.flush().map_err(lost)?;
+    if let Err(e) = stream
+        .write_all(line.as_bytes())
+        .and_then(|()| stream.flush())
+    {
+        // The GUI may have turned the connection away, or refused a line too
+        // long, and closed it before reading the rest: the write fails, and
+        // its answer is still there to read.
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+        return match read_answer(BufReader::new(stream), progress) {
+            Err(answer) if answer.code == ErrorCode::NoInstance => Err(lost(e)),
+            answer => answer,
+        };
+    }
     let watched = match cancel {
         Some(c) => Some((c, stream.try_clone().map_err(lost)?)),
         None => None,

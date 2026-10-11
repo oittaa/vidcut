@@ -323,7 +323,10 @@ mod tests {
         // Sends a line on a new connection and reads one line back.
         let ask = |line: &[u8]| {
             let mut s = UnixStream::connect(&socket).unwrap();
-            s.write_all(line).unwrap();
+            // A server at its limit turns the connection away without
+            // reading it and may close first: the write then fails, and the
+            // refusal is still there to read.
+            let _ = s.write_all(line);
             let mut reader = BufReader::new(s.try_clone().unwrap());
             let mut reply = String::new();
             reader.read_line(&mut reply).unwrap();
@@ -394,6 +397,51 @@ mod tests {
         let e = refused.expect("served").unwrap_err();
         assert_eq!(e.code, ErrorCode::Usage, "{e}");
         assert!(e.message.contains("limited to 100 bytes"), "{e}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_refusal_is_the_answer_even_when_the_request_is_cut_short() {
+        // A GUI at its connection limit turns a connection away without
+        // reading it. A request bigger than the socket buffer is still being
+        // written when the GUI closes, so the write fails: the refusal is
+        // the answer all the same, not a lost GUI.
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+        use std::sync::Arc;
+        let dir = std::env::temp_dir().join(format!("vidcut-ipc-refused-{}", std::process::id()));
+        let socket = dir.join("test.sock");
+        let handler = Arc::new(
+            |_: Envelope, _: Option<PathBuf>, _: &mut dyn FnMut(Value) -> bool| {
+                Ok(vidcut_core::Response {
+                    rev: 1,
+                    changes: Default::default(),
+                    result: json!("ok"),
+                    dry_run: false,
+                    via: "gui:1".into(),
+                })
+            },
+        );
+        let limits = server::Limits {
+            line: 64 << 20,
+            connections: 1,
+        };
+        server::start_limited(&socket, handler, limits).unwrap();
+        // Hold the one place: served, and still open.
+        let mut held = UnixStream::connect(&socket).unwrap();
+        held.write_all(b"{\"method\": \"project.get\"}\n").unwrap();
+        let mut reply = String::new();
+        BufReader::new(held.try_clone().unwrap())
+            .read_line(&mut reply)
+            .unwrap();
+        assert!(reply.contains("\"ok\""), "{reply}");
+        let path = format!("/{}.mp4", "x".repeat(4 << 20));
+        let add = Envelope::from_json(json!({"method": "media.add", "params": {"paths": [path]}}))
+            .unwrap();
+        let e = client::call(&socket, &add, None, &mut |_| {}, None).unwrap_err();
+        assert_eq!(e.code, ErrorCode::Usage, "{e}");
+        assert!(e.message.contains("connections already"), "{e}");
+        drop(held);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
