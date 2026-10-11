@@ -161,7 +161,9 @@ pub struct Player {
     pub position: i64,
     /// The frame the latest seek or load asked for, and whether exactly (a
     /// fast seek shows a keyframe near it). Playback leaves it alone, so a
-    /// waiting seek is overtaken only by another seek or load.
+    /// waiting seek is overtaken only by another seek or load. A reload that
+    /// still opens at this frame keeps it. Reopening the file is exact:
+    /// `loadfile`'s `start=` is not a keyframe seek.
     pub target: (i64, bool),
     /// The playhead follows mpv's `time-pos` (playing) rather than the last
     /// requested frame (paused after a seek).
@@ -286,12 +288,24 @@ impl Player {
         let position = position.clamp(0, frames);
         if self.loaded.as_ref() == Some(&preview) && self.fps == fps {
             self.frames = frames;
-            return (position != self.position).then(|| self.seek(position, false));
+            // Same picture. The sampled playhead is not a new seek when it
+            // is the frame already requested: while playing, that sample is
+            // `time-pos`, which has moved off the seek.
+            if position == self.position || position == self.target.0 {
+                return None;
+            }
+            return Some(self.seek(position, false));
         }
+        // A reload that still shows the requested frame keeps that request,
+        // exact or not. The first open, and a reload that shows somewhere
+        // else, are exact: `loadfile` uses `start=<frame>`, not a keyframe.
+        let keep_target = self.loaded.is_some() && position == self.target.0;
         self.fps = fps;
         self.frames = frames;
         self.position = position;
-        self.target = (position, true);
+        if !keep_target {
+            self.target = (position, true);
+        }
         self.reverse = None;
         if self.mpv.is_some() {
             let tmp = self.edl_path.with_extension("edl.tmp");
@@ -369,7 +383,8 @@ impl Player {
     }
 
     /// Moves the playhead to `frame` (clamped to the content). `fast` seeks
-    /// to a keyframe (scrubbing). Returns the motion id.
+    /// to a keyframe (scrubbing), except while a file is still opening:
+    /// reopening it lands on `frame`. Returns the motion id.
     pub fn seek(&mut self, frame: i64, fast: bool) -> u64 {
         if self.loaded.is_none() {
             // Remembered for the next load (which clamps it).
@@ -379,12 +394,14 @@ impl Player {
         }
         let frame = frame.clamp(0, self.frames.max(0));
         self.position = frame;
-        self.target = (frame, !fast);
         if self.loading.is_some() {
-            // mpv rejects seeks while it opens the file: open it again at the
-            // new position instead.
+            // mpv rejects seeks while it opens the file, so open it again.
+            // `loadfile`'s `start=` is this frame, not a keyframe seek, so an
+            // exact wait for the same frame still matches.
+            self.target = (frame, true);
             return self.loadfile();
         }
+        self.target = (frame, !fast);
         if self.reverse.is_none() && self.speed != 0.0 {
             // A seek while playing keeps playing from there.
             self.tracking = true;
@@ -570,5 +587,95 @@ fn int(v: &Value) -> Option<i64> {
     match v {
         Value::Int(i) => Some(*i),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use vidcut_core::preview::Preview;
+    use vidcut_core::time::Rational;
+
+    use crate::live::snapshot::PlayerId;
+
+    use super::*;
+
+    fn preview(edl: &str) -> Preview {
+        Preview {
+            edl: edl.into(),
+            audio_graph: None,
+            read_ahead: false,
+            deinterlace: false,
+            images: false,
+        }
+    }
+
+    fn player() -> Player {
+        Player::new(PlayerId::Timeline, None, PathBuf::from("timeline.edl"))
+    }
+
+    fn fps() -> Rational {
+        Rational::new(30, 1).unwrap()
+    }
+
+    #[test]
+    fn a_fast_seek_while_loading_is_exact() {
+        let mut p = player();
+        p.load(preview("a"), 300, fps(), 0).unwrap();
+        // `loadfile` sets this while mpv is opening the file. This player
+        // has no mpv, so the test arms it.
+        p.loading = Some(1);
+        p.seek(100, true);
+        assert_eq!(p.target, (100, true));
+        assert_eq!(p.position, 100);
+    }
+
+    #[test]
+    fn a_fast_seek_asks_for_a_keyframe_and_an_exact_one_does_not() {
+        let mut p = player();
+        p.load(preview("a"), 300, fps(), 0).unwrap();
+        p.seek(100, true);
+        assert_eq!(p.target, (100, false));
+        p.seek(100, false);
+        assert_eq!(p.target, (100, true));
+    }
+
+    #[test]
+    fn a_reload_at_the_requested_frame_keeps_the_target() {
+        let mut p = player();
+        p.load(preview("a"), 300, fps(), 0).unwrap();
+        p.seek(40, true);
+        // Playback's time-pos has moved the playhead off the seek.
+        p.position = 80;
+        assert_eq!(p.target, (40, false));
+        // Same picture: not a seek back to the request.
+        assert!(p.load(preview("a"), 300, fps(), 40).is_none());
+        assert_eq!(p.target, (40, false));
+        assert_eq!(p.position, 80);
+        // The EDL changed, still opening at the frame the seek asked for.
+        p.load(preview("b"), 300, fps(), 40).unwrap();
+        assert_eq!(p.target, (40, false));
+        assert_eq!(p.position, 40);
+    }
+
+    #[test]
+    fn a_reload_at_another_frame_is_a_new_exact_target() {
+        let mut p = player();
+        p.load(preview("a"), 300, fps(), 0).unwrap();
+        p.seek(40, true);
+        p.position = 80;
+        p.load(preview("b"), 300, fps(), 80).unwrap();
+        assert_eq!(p.target, (80, true));
+        assert_eq!(p.position, 80);
+    }
+
+    #[test]
+    fn the_first_open_is_exact_even_at_a_remembered_fast_seek() {
+        let mut p = player();
+        p.seek(10, true);
+        assert_eq!(p.target, (10, false));
+        p.load(preview("a"), 300, fps(), 10).unwrap();
+        assert_eq!(p.target, (10, true));
     }
 }

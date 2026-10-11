@@ -266,16 +266,24 @@ impl Handle {
     }
 
     /// Runs a request and waits for its answer. `progress` receives progress
-    /// notifications and returns false to cancel.
+    /// notifications (`Some`) and returns false to cancel. `None` only asks
+    /// whether the client is still there: a closed connection then sets the
+    /// same flag a failed progress write sets, so work that never reports
+    /// progress (a frame, a storyboard, an analysis, the loudness measure
+    /// before an export) stops too.
     pub fn call(
         &self,
         envelope: Envelope,
         origin: Origin,
         project: Option<PathBuf>,
-        progress: &mut dyn FnMut(Value) -> bool,
+        progress: &mut dyn FnMut(Option<Value>) -> bool,
     ) -> Result<Response> {
         let (tx, rx) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
+        // Already gone: the worker sees the flag before it starts.
+        if !progress(None) {
+            cancel.store(true, Ordering::Relaxed);
+        }
         self.tx
             .send(Msg::Request {
                 envelope,
@@ -288,14 +296,21 @@ impl Handle {
             })
             .map_err(|_| Error::no_instance("the vidcut GUI is shutting down"))?;
         loop {
-            match rx.recv() {
+            match rx.recv_timeout(CLIENT_POLL) {
                 Ok(ReplyEvent::Progress(v)) => {
-                    if !progress(v) {
+                    if !progress(Some(v)) {
                         cancel.store(true, Ordering::Relaxed);
                     }
                 }
                 Ok(ReplyEvent::Done(r)) => return r,
-                Err(_) => return Err(Error::no_instance("the vidcut GUI is shutting down")),
+                Err(RecvTimeoutError::Timeout) => {
+                    if !progress(None) {
+                        cancel.store(true, Ordering::Relaxed);
+                    }
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err(Error::no_instance("the vidcut GUI is shutting down"));
+                }
             }
         }
     }
@@ -516,6 +531,10 @@ struct Wait {
 /// How long a request may wait for frames or captures.
 const WAIT_LIMIT: Duration = Duration::from_secs(10);
 
+/// How often an IPC call checks that its client is still connected, when the
+/// work itself is not sending progress.
+const CLIENT_POLL: Duration = Duration::from_millis(50);
+
 /// Finished jobs kept for `jobs.list` and the jobs panel.
 const JOBS_KEPT: usize = 50;
 
@@ -541,12 +560,19 @@ fn filmstrip(media: &vidcut_core::model::Media) -> std::result::Result<Filmstrip
     let (images, times) = match cached {
         Some(strip) => strip,
         None => {
-            let strip = vidcut_av::thumbs::filmstrip(
-                &crate::env::input_of(media),
-                THUMBS,
-                THUMB_SIZE.0,
-                THUMB_SIZE.1,
-            )
+            let input = crate::env::input_of(media);
+            // image2 would read every numbered file after the first. A
+            // sequence is only its own count, even when more files follow.
+            let strip = match media.sequence.as_ref().map(|s| s.count) {
+                Some(pictures) => vidcut_av::thumbs::filmstrip_pictures(
+                    &input,
+                    pictures,
+                    THUMBS,
+                    THUMB_SIZE.0,
+                    THUMB_SIZE.1,
+                ),
+                None => vidcut_av::thumbs::filmstrip(&input, THUMBS, THUMB_SIZE.0, THUMB_SIZE.1),
+            }
             .map_err(|e| e.to_string())?;
             if prefs.disk_cache && !strip.0.is_empty() {
                 crate::thumbcache::store(
@@ -965,7 +991,15 @@ impl Live {
                             p.target.0
                         ))))
                     } else {
-                        (p.shown >= motion && self.settled(player)).then(|| match &p.error {
+                        // `frame` is what the seek asked for; while playing,
+                        // `position` has moved on from it.
+                        let ready = seek_may_reply(
+                            p.shown >= p.motion && p.shown >= motion,
+                            p.playing(),
+                            frame,
+                            |f| self.tail_near(player, f),
+                        );
+                        ready.then(|| match &p.error {
                             Some(e) => Err(Error::media(format!("preview: {e}"))),
                             None => Ok(self.state_response()),
                         })
@@ -1146,9 +1180,17 @@ impl Live {
             Step::Task(task) => self.spawn_task(Job { rev: None, ..job }, task),
             Step::Measure(measure, then) => {
                 let tx = self.tx.clone();
+                // The same flag a closed connection sets. Measuring is the
+                // slow part of an edit that analyzes; it stops with the client.
+                let cancel = job
+                    .reply
+                    .as_ref()
+                    .map(|r| r.cancel.clone())
+                    .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
                 let _ = std::thread::Builder::new()
                     .name("vidcut-measure".into())
                     .spawn(move || {
+                        let _guard = vidcut_av::cancel::Guard::set(cancel);
                         let result = measure();
                         let _ = tx.send(Msg::Measured {
                             job,
@@ -1743,9 +1785,13 @@ impl Live {
             return Err(no_project());
         };
         let request = envelope.request.clone();
-        let (result, changed) = open.apply(envelope, &AvEnv, Some(playhead));
+        let (mut result, changed) = open.apply(envelope, &AvEnv, Some(playhead));
         if let Some(e) = open.history_error.take() {
-            self.notice(crate::session::history_unsaved(&e), true);
+            let warning = crate::session::history_unsaved(&e);
+            self.notice(warning.clone(), true);
+            if let Ok(r) = result.as_mut() {
+                r.warnings.push(warning);
+            }
         }
         if changed
             && let Request::BinsRename { path, to } = &request
@@ -2261,6 +2307,12 @@ impl Live {
     }
 
     fn refresh_timeline(&mut self) -> Option<u64> {
+        self.refresh_timeline_at(None)
+    }
+
+    /// Reloads the timeline. `at` is a seek loading at its own frame; other
+    /// reloads sample the playhead, which while playing is `time-pos`.
+    fn refresh_timeline_at(&mut self, at: Option<i64>) -> Option<u64> {
         let p = self.project.as_ref()?.project().clone();
         let end = p.end();
         if end == 0 {
@@ -2274,7 +2326,10 @@ impl Live {
                 return None;
             }
         };
-        let position = self.players[TIMELINE].position;
+        let position = match at {
+            Some(frame) => frame,
+            None => self.preview_frame(PlayerId::Timeline, self.players[TIMELINE].position),
+        };
         let edl = self.edl(plan, PlayerId::Timeline, position)?;
         self.timeline_loaded_at = Some(Instant::now());
         self.players[TIMELINE].load(edl, end, p.settings.fps, position)
@@ -2316,7 +2371,9 @@ impl Live {
         };
         let position = if self.source_content.as_ref() == Some(&want) {
             // Same content (perhaps changed media): stay where we are.
-            self.players[SOURCE].position
+            // While playing, that playhead is time-pos; a seek still owed
+            // its frame keeps that frame instead.
+            self.preview_frame(PlayerId::Source, self.players[SOURCE].position)
         } else {
             self.stash_source_position();
             match &want {
@@ -2423,8 +2480,11 @@ impl Live {
     fn seek(&mut self, id: PlayerId, frame: i64, fast: bool) -> u64 {
         if id == PlayerId::Timeline && self.timeline_due.take().is_some() {
             // A reload is pending: do it now, loading at the new position.
-            self.players[TIMELINE].position = frame.max(0);
-            if let Some(motion) = self.refresh_timeline() {
+            // This frame is the request. A continuation reload must not
+            // substitute the previous target for it.
+            let frame = frame.max(0);
+            self.players[TIMELINE].position = frame;
+            if let Some(motion) = self.refresh_timeline_at(Some(frame)) {
                 return motion;
             }
         }
@@ -2594,10 +2654,30 @@ impl Live {
     }
 
     /// Whether `player` shows its latest motion (seek or load), with no tail
-    /// check or patch pending that could still change that frame.
+    /// check or patch pending that could still change the frame on screen.
+    /// Screenshots use the playhead; a seek waits by [`seek_may_reply`].
     fn settled(&self, player: PlayerId) -> bool {
         let p = &self.players[player.index()];
         p.shown >= p.motion && !self.tail_near(player, p.position)
+    }
+
+    /// Frame a continuation reload should open at. A seek writes its frame
+    /// into the playhead itself and does not come through here.
+    fn preview_frame(&self, id: PlayerId, sampled: i64) -> i64 {
+        let p = &self.players[id.index()];
+        let (latest_shown, target) = (p.shown >= p.motion, p.target.0);
+        let waiter_holding = self.waits.iter().any(|w| {
+            matches!(
+                w.until,
+                Until::Shown {
+                    player,
+                    at: (frame, _),
+                    ..
+                } if player == id && frame == target
+            )
+        });
+        let keep = reload_keeps_target(latest_shown, waiter_holding);
+        reload_frame(sampled, target, keep)
     }
 
     /// Asks the renderer for a picture of `player`; the answer comes as
@@ -2723,6 +2803,7 @@ fn answer(result: Value) -> Response {
         result,
         dry_run: false,
         via: String::new(),
+        warnings: Vec::new(),
     }
 }
 
@@ -2731,6 +2812,37 @@ fn job_answer(j: &JobInfo) -> Result<Response> {
     match &j.error {
         Some(e) => Err(Error::new(e.code, format!("job {}: {}", j.id, e.message))),
         None => Ok(answer(j.to_json())),
+    }
+}
+
+/// Whether a waiting seek may reply: its motion is on screen, and, paused,
+/// no tail check, patch or retry could still change `asked`, the frame it
+/// asked for. Playing, playback has moved on from that frame, so tail work
+/// on it no longer bears on what the seek showed.
+fn seek_may_reply(
+    latest_shown: bool,
+    playing: bool,
+    asked: i64,
+    tail_near: impl Fn(i64) -> bool,
+) -> bool {
+    latest_shown && (playing || !tail_near(asked))
+}
+
+/// Whether a continuation reload should keep the frame a seek asked for
+/// rather than the playhead sample (`time-pos` while playing): until that
+/// frame is on screen and the seek has replied. After that the reload
+/// follows playback; going back to the frame would jump playback back.
+fn reload_keeps_target(latest_shown: bool, waiter_holding: bool) -> bool {
+    !latest_shown || waiter_holding
+}
+
+/// Frame a continuation reload opens at. When the requested frame is still
+/// owed, a `time-pos` sample does not replace it.
+fn reload_frame(sampled: i64, target: i64, keep: bool) -> i64 {
+    if keep && sampled != target {
+        target
+    } else {
+        sampled
     }
 }
 
@@ -2789,5 +2901,40 @@ fn remove_stale_runtime_dirs() {
         if gone {
             let _ = std::fs::remove_dir_all(e.path());
         }
+    }
+}
+
+#[cfg(test)]
+mod seek_wait_tests {
+    use super::{reload_frame, reload_keeps_target, seek_may_reply};
+
+    // Cuts lose at most MAX_TAIL frames. The window is what `tail_near` tests.
+    fn near_cut(frame: i64) -> bool {
+        (100 - super::MAX_TAIL..100).contains(&frame)
+    }
+
+    #[test]
+    fn a_paused_seek_waits_for_tail_work_on_its_frame_and_a_playing_one_does_not() {
+        let asked = 90;
+        assert!(near_cut(asked));
+        // Paused: the frame is on screen, but a retry still covers it.
+        assert!(!seek_may_reply(true, false, asked, near_cut));
+        assert!(seek_may_reply(true, false, asked, |_| false));
+        // Playing: its frame showed, and playback has moved on.
+        assert!(seek_may_reply(true, true, asked, near_cut));
+        assert!(!seek_may_reply(false, true, asked, |_| false));
+    }
+
+    #[test]
+    fn a_reload_keeps_the_requested_frame_until_the_seek_is_answered() {
+        // time-pos has moved to 140; the seek asked for 40.
+        assert_eq!(reload_frame(140, 40, true), 40);
+        assert_eq!(reload_frame(140, 40, false), 140);
+        assert_eq!(reload_frame(40, 40, true), 40);
+        // Not on screen yet, or the reply hasn't gone out: keep it. After
+        // that, follow playback.
+        assert!(reload_keeps_target(false, false));
+        assert!(reload_keeps_target(true, true));
+        assert!(!reload_keeps_target(true, false));
     }
 }

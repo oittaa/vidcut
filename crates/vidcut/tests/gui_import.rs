@@ -37,6 +37,8 @@ impl live::Renderer for NoRenderer {
 /// A file dialog that picks whatever the test put in `files`.
 struct FakeDialogs {
     files: Arc<Mutex<Vec<PathBuf>>>,
+    /// How many times the dialog was opened.
+    picks: Arc<Mutex<u32>>,
 }
 
 impl Dialogs for FakeDialogs {
@@ -50,6 +52,7 @@ impl Dialogs for FakeDialogs {
         None
     }
     fn pick_files(&self, _: &str, _: &[(&str, &[&str])]) -> Vec<PathBuf> {
+        *self.picks.lock().unwrap() += 1;
         self.files.lock().unwrap().clone()
     }
 }
@@ -149,9 +152,11 @@ fn numbered_images_are_asked_about() {
         socket: None,
     });
     let picked = Arc::new(Mutex::new(Vec::new()));
+    let picks = Arc::new(Mutex::new(0));
     let mut ws = Workspace::new(h.clone());
     ws.set_dialogs(Arc::new(FakeDialogs {
         files: picked.clone(),
+        picks: picks.clone(),
     }));
     let mut harness = Harness::builder()
         .with_size(egui::vec2(1600.0, 1000.0))
@@ -213,6 +218,74 @@ fn numbered_images_are_asked_about() {
     harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::I);
     until(&mut harness, "the request", |_| gui_edits(&h).len() == 3);
     assert!(!has(&harness, "Numbered images"));
+
+    // 4. With the question up, timeline shortcuts do nothing. Escape cancels
+    // like the Cancel button: nothing is imported.
+    *picked.lock().unwrap() = vec![frames[8].clone(), frames[9].clone()];
+    harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::I);
+    until(&mut harness, "the question", |h| has(h, "Numbered images"));
+    harness.step();
+    let edits_before = gui_edits(&h).len();
+    let media_before = media_count(&h);
+    let picks_before = *picks.lock().unwrap();
+    // A lone video: if Ctrl+I still opens the dialog, this imports at once.
+    *picked.lock().unwrap() = vec![video.clone()];
+    harness.key_press(egui::Key::I);
+    harness.step();
+    harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::I);
+    harness.step();
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_millis(400) {
+        std::thread::sleep(Duration::from_millis(5));
+        harness.step();
+    }
+    assert!(has(&harness, "Numbered images"));
+    assert_eq!(gui_edits(&h).len(), edits_before, "I set a mark");
+    assert_eq!(media_count(&h), media_before);
+    assert_eq!(
+        *picks.lock().unwrap(),
+        picks_before,
+        "Ctrl+I opened a dialog"
+    );
+    harness.key_press(egui::Key::Escape);
+    harness.step();
+    assert!(!has(&harness, "Numbered images"));
+    assert_eq!(media_count(&h), media_before);
+    assert_eq!(gui_edits(&h).len(), edits_before);
+
+    // 5. Separate stills imports even when the rate field is empty. Importing
+    // as sequences first must refuse that field, so the test knows it is empty.
+    *picked.lock().unwrap() = vec![frames[10].clone(), frames[11].clone()];
+    harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::I);
+    until(&mut harness, "the question", |h| has(h, "Numbered images"));
+    harness.step();
+    harness.query_all_by_value("30").next().unwrap().focus();
+    harness.step();
+    harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::A);
+    harness.step();
+    harness.key_press(egui::Key::Backspace);
+    harness.step();
+    harness.query_all_by_label("Import").last().unwrap().click();
+    until(&mut harness, "the rate error", |h| {
+        has(h, "isn't a frame rate")
+    });
+    assert_eq!(media_count(&h), media_before);
+    harness.get_by_label("Separate stills").click();
+    harness.step();
+    harness.query_all_by_label("Import").last().unwrap().click();
+    until(&mut harness, "the import", |_| {
+        media_count(&h) == media_before + 2
+    });
+    let (method, params) = gui_edits(&h).last().cloned().unwrap();
+    assert_eq!(method, "media.add");
+    assert_eq!(params["sequence"], json!(false));
+    assert!(params.get("fps").is_none() || params["fps"].is_null());
+    let listed = call(&h, "media.list", json!({})).result;
+    let id = listed.as_array().unwrap().last().unwrap()["id"]
+        .as_str()
+        .unwrap();
+    let media = call(&h, "media.get", json!({ "media": id })).result;
+    assert_eq!(media["still"], true);
 
     drop(harness);
     h.shutdown();

@@ -39,7 +39,7 @@ fn measured<T>(
     let value = match std::fs::read(&file).ok().and_then(|b| from_bytes(&b)) {
         Some(v) => v,
         None => {
-            let v = measure().map_err(|e| Error::media(e.to_string()))?;
+            let v = measure().map_err(av_error)?;
             if let Some(dir) = file.parent()
                 && std::fs::create_dir_all(dir).is_ok()
             {
@@ -57,6 +57,10 @@ fn measured<T>(
 }
 
 /// How `m`'s pictures are read: its file, or its image sequence.
+///
+/// The sequence's `count` is not given here. image2 reads every numbered
+/// file after the first; filmstrips and picture measurements stop at
+/// `count` themselves.
 pub fn input_of(m: &Media) -> vidcut_av::decode::Input {
     use vidcut_av::decode::Input;
     match (&m.sequence, &m.info.video) {
@@ -134,17 +138,34 @@ impl Env for AvEnv {
     }
 
     fn picture_stats(&self, media: &Media) -> Result<Arc<PictureStats>> {
+        // The count is part of the cache name: a prefix of a longer numbered
+        // run is not the same measurement as that run.
+        let pictures = media.sequence.as_ref().map(|s| s.count);
+        let key = match pictures {
+            Some(n) => format!("pictures-{n}"),
+            None => "pictures".to_string(),
+        };
         measured(
             &PICTURES,
-            paths::media_cache("analysis", media, "pictures"),
-            || vidcut_av::analysis::picture_stats(&input_of(media)),
+            paths::media_cache("analysis", media, &key),
+            || vidcut_av::analysis::picture_stats(&input_of(media), pictures),
             PictureStats::to_bytes,
             PictureStats::from_bytes,
         )
     }
 
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness> {
-        vidcut_av::analysis::loudness(plan).map_err(|e| Error::media(e.to_string()))
+        vidcut_av::analysis::loudness(plan).map_err(av_error)
+    }
+}
+
+/// A measurement's failure. Cancellation uses the same flag as an export, so
+/// it is `CANCELLED` and not a media error.
+fn av_error(e: vidcut_av::error::Error) -> Error {
+    if vidcut_av::export::is_cancelled(&e) {
+        Error::new(vidcut_core::ErrorCode::Cancelled, "cancelled")
+    } else {
+        Error::media(e.to_string())
     }
 }
 

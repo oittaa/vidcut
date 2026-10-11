@@ -1,26 +1,27 @@
 //! Runs requests: headless against a project file (M1), live in the GUI (M3).
 
 use std::path::Path;
-use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::{Value, json};
 use vidcut_av::export::Progress;
 use vidcut_core::store::{Store, state_dir};
-use vidcut_core::{Editor, Envelope, Error, Project, Request, Response, Result};
+use vidcut_core::{Editor, Envelope, Error, ErrorCode, Project, Request, Response, Result};
 
 use crate::env::AvEnv;
 use crate::export;
 
 /// Cancellation and progress for long-running requests (exports).
 pub struct Hooks<'a> {
-    pub cancel: &'a AtomicBool,
+    pub cancel: &'a Arc<AtomicBool>,
     /// Called as `(output index, output count, output path, progress)`.
     pub progress: &'a mut dyn FnMut(usize, usize, &Path, Progress),
 }
 
 /// Runs one request headless with no progress reporting.
 pub fn run(project: Option<&Path>, envelope: Envelope) -> Result<Response> {
-    let cancel = AtomicBool::new(false);
+    let cancel = Arc::new(AtomicBool::new(false));
     run_with(
         project,
         envelope,
@@ -107,7 +108,11 @@ pub fn run_with(
         Request::ExportPlan(_)
         | Request::ExportStart(_)
         | Request::FrameRender { .. }
-        | Request::StoryboardRender { .. } => {
+        | Request::StoryboardRender { .. }
+        | Request::AnalyzeSilence { .. }
+        | Request::AnalyzeScenes { .. }
+        | Request::AnalyzeBlack { .. }
+        | Request::AnalyzeLoudness { .. } => {
             let store = open(project)?;
             let editor = store.load()?;
             envelope.check_rev(editor.project().rev)?;
@@ -124,10 +129,10 @@ pub fn run_with(
         _ => {
             let store = open(project)?;
             if envelope.request.is_mutation() {
-                let (r, history_error) =
+                let (mut r, history_error) =
                     store.transact(|editor| editor.apply(envelope, &AvEnv, None))?;
                 if let Some(e) = history_error {
-                    eprintln!("vidcut: warning: {}", history_unsaved(&e));
+                    r.warnings.push(history_unsaved(&e));
                 }
                 r
             } else {
@@ -148,6 +153,13 @@ pub fn render(
     envelope: &Envelope,
     hooks: &mut Hooks<'_>,
 ) -> Result<Response> {
+    // Publishing the flag lets decoders on this thread (and storyboard
+    // workers, which copy it) stop when the client leaves, the way the
+    // export frame loop loads the same flag.
+    let _guard = vidcut_av::cancel::Guard::set(hooks.cancel.clone());
+    if watches_cancel(&envelope.request) && hooks.cancel.load(Ordering::Relaxed) {
+        return Err(Error::new(ErrorCode::Cancelled, "cancelled"));
+    }
     let mut r = match &envelope.request {
         Request::ExportPlan(params) | Request::ExportStart(params)
             if export::is_otio(&params.output) =>
@@ -257,6 +269,21 @@ pub fn history_unsaved(error: &str) -> String {
     )
 }
 
+/// Work that keeps running after the client is gone unless it loads the
+/// cancel flag: it reports no progress, so a failed progress write never
+/// happens. A foreground export watches the same flag in its frame loop.
+fn watches_cancel(request: &Request) -> bool {
+    matches!(
+        request,
+        Request::FrameRender { .. }
+            | Request::StoryboardRender { .. }
+            | Request::AnalyzeSilence { .. }
+            | Request::AnalyzeScenes { .. }
+            | Request::AnalyzeBlack { .. }
+            | Request::AnalyzeLoudness { .. }
+    )
+}
+
 fn answer(result: Value) -> Response {
     Response {
         rev: 0,
@@ -264,6 +291,7 @@ fn answer(result: Value) -> Response {
         result,
         dry_run: false,
         via: String::new(),
+        warnings: Vec::new(),
     }
 }
 
@@ -336,7 +364,8 @@ pub fn doctor() -> Value {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
-    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     use serde_json::json;
     use vidcut_core::model::Settings;
@@ -347,7 +376,7 @@ mod tests {
     fn render_req(req: serde_json::Value) -> vidcut_core::Result<vidcut_core::Response> {
         let project = Project::new(Settings::default());
         let envelope = Envelope::from_json(req).unwrap();
-        let cancel = AtomicBool::new(false);
+        let cancel = Arc::new(AtomicBool::new(false));
         render(
             &project,
             Path::new("p.vidcut"),
@@ -377,5 +406,51 @@ mod tests {
             assert_eq!(err.code, ErrorCode::Internal);
             assert!(err.message.contains("project.set"), "{err}");
         }
+    }
+
+    #[test]
+    fn a_set_cancel_flag_stops_frames_storyboards_and_analysis() {
+        let project = Project::new(Settings::default());
+        let path = Path::new("not-saved.vidcut");
+        let cancel = Arc::new(AtomicBool::new(true));
+        let calls = [
+            ("frame.render", json!({ "at": "0f", "out": "f.png" })),
+            ("storyboard.render", json!({ "out": "board.png" })),
+            ("analyze.silence", json!({})),
+            ("analyze.scenes", json!({})),
+            ("analyze.black", json!({})),
+            ("analyze.loudness", json!({})),
+        ];
+        for (method, params) in calls {
+            let envelope =
+                Envelope::from_json(json!({ "method": method, "params": params })).unwrap();
+            let err = render(
+                &project,
+                path,
+                &envelope,
+                &mut Hooks {
+                    cancel: &cancel,
+                    progress: &mut |_, _, _, _| {},
+                },
+            )
+            .unwrap_err();
+            assert_eq!(err.code, ErrorCode::Cancelled, "{method}: {err}");
+        }
+        // A clear flag is not a cancellation: an empty timeline has nothing
+        // to measure, and that is the error.
+        cancel.store(false, Ordering::Relaxed);
+        let envelope =
+            Envelope::from_json(json!({ "method": "analyze.loudness", "params": {} })).unwrap();
+        let err = render(
+            &project,
+            path,
+            &envelope,
+            &mut Hooks {
+                cancel: &cancel,
+                progress: &mut |_, _, _, _| {},
+            },
+        )
+        .unwrap_err();
+        assert_ne!(err.code, ErrorCode::Cancelled, "{err}");
     }
 }

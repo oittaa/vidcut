@@ -2,6 +2,7 @@ use std::io::IsTerminal;
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use clap::Parser;
@@ -179,7 +180,7 @@ fn execute(cli: &Cli, envelope: Envelope) -> Result<Response> {
     };
     let show = std::io::stderr().is_terminal() && !cli.json;
     let mut bar = ProgressBar::new(show);
-    static CANCEL: AtomicBool = AtomicBool::new(false);
+    static CANCEL: LazyLock<Arc<AtomicBool>> = LazyLock::new(Arc::default);
     if envelope.request.method() == "export.start" {
         // First Ctrl-C cancels a headless export cleanly (no partial files);
         // a GUI's export stops when this process ends.

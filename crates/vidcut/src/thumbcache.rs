@@ -19,10 +19,17 @@ pub fn dir() -> PathBuf {
 /// The cache file of `media`'s filmstrip of `count` pictures fitted in
 /// `size`: the layout is part of the name, so another layout never reads it.
 fn file(media: &Media, count: usize, size: (u32, u32)) -> PathBuf {
+    // A sequence's length is part of the name: the same first file with a
+    // shorter count is a different strip (image2 would otherwise read on).
+    let pictures = media
+        .sequence
+        .as_ref()
+        .map(|s| format!("-{}", s.count))
+        .unwrap_or_default();
     paths::media_cache(
         "thumbs",
         media,
-        &format!("{count}-{}x{}.thumbs", size.0, size.1),
+        &format!("{count}-{}x{}{pictures}.thumbs", size.0, size.1),
     )
 }
 
