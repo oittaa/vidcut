@@ -32,7 +32,7 @@ pub fn run(project: Option<&Path>, envelope: Envelope) -> Result<Response> {
 }
 
 /// Runs one request headless. Project-less requests (`schema`, `doctor`,
-/// `probe`, `presets.*`, `encoders.list`) ignore `project`.
+/// `probe`, `presets.*`, `encoders.list`, `preferences.*`) ignore `project`.
 pub fn run_with(
     project: Option<&Path>,
     envelope: Envelope,
@@ -92,9 +92,12 @@ pub fn run_with(
             from: from.as_deref(),
             set,
             overwrite: *overwrite,
+            dry_run: envelope.dry_run,
         })?),
-        Request::PresetsDelete { name } => answer(export::delete_preset(name)?),
+        Request::PresetsDelete { name } => answer(export::delete_preset(name, envelope.dry_run)?),
         Request::EncodersList { refresh } => answer(json!(export::availability(*refresh))),
+        Request::PreferencesGet {} => answer(crate::preferences::get()?),
+        Request::PreferencesSet(patch) => answer(crate::preferences::set(patch, envelope.dry_run)?),
         Request::ExportStart(params) if params.background => {
             return Err(Error::no_instance(
                 "background exports run in a vidcut GUI (they would stop with this \

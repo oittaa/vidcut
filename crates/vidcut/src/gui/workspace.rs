@@ -108,6 +108,8 @@ pub struct Workspace {
     /// The Mixer panel is open (p. 649), and its meters' state.
     pub(super) show_mixer: bool,
     pub(super) mixer: super::mixer::Mixer,
+    /// File > Preferences.
+    pub(super) preferences: super::preferences::PreferencesUi,
     pub(super) dialogs: Arc<dyn super::export::Dialogs>,
 }
 
@@ -144,6 +146,7 @@ impl Workspace {
             export: Default::default(),
             show_mixer: false,
             mixer: Default::default(),
+            preferences: Default::default(),
             dialogs: Arc::new(super::export::RfdDialogs),
         }
     }
@@ -165,6 +168,7 @@ impl Workspace {
             GuiPanel::Jobs => self.export.show_jobs = true,
             GuiPanel::Log => self.show_log = true,
             GuiPanel::Mixer => self.show_mixer = true,
+            GuiPanel::Preferences => self.open_preferences(ctx),
         }
     }
 
@@ -430,6 +434,13 @@ impl Workspace {
                     self.open_export(ui.ctx());
                 }
                 ui.separator();
+                if ui
+                    .add(egui::Button::new("Preferences…").shortcut_text("Ctrl+,"))
+                    .clicked()
+                {
+                    self.open_preferences(ui.ctx());
+                }
+                ui.separator();
                 if ui.button("Quit").clicked() {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                 }
@@ -674,7 +685,13 @@ impl Workspace {
 
     /// Keyboard shortcuts (spec §11). Ignored while a text field has focus.
     fn keys(&mut self, ctx: &egui::Context) {
-        if ctx.egui_wants_keyboard_input() || self.snap.project.is_none() {
+        if ctx.egui_wants_keyboard_input() {
+            return;
+        }
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(Key::Comma)) {
+            self.open_preferences(ctx);
+        }
+        if self.snap.project.is_none() {
             return;
         }
         let input = ctx.input(|i| i.clone());
@@ -1066,6 +1083,7 @@ impl Workspace {
         self.sync_textures(&ctx);
         self.keys(&ctx);
         self.export_windows(&ctx);
+        self.preferences_window(&ctx);
         egui::Panel::top("top")
             .frame(egui::Frame::new().fill(theme::BG).inner_margin(4))
             .show(ui, |ui| self.top_bar(ui));

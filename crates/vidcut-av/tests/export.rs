@@ -256,6 +256,85 @@ fn same_rate_cuts_are_frame_and_sample_exact() {
 }
 
 #[test]
+fn pieces_of_one_file_read_on_seek_back_and_open_ahead() {
+    // Export keeps a file open from piece to piece: a piece a little ahead
+    // decodes on, one behind or far ahead seeks, and a piece of another file
+    // was opened while the one before it encoded. Every way lands exactly.
+    let fps = Rational::new(30, 1).unwrap();
+    let a1 = src(
+        FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 300).with_audio(
+            AudioCodec::PcmS16,
+            48_000,
+            2,
+        ),
+    );
+    let b1 = src(
+        FixtureSpec::new(VideoCodec::Hevc10, Container::Mkv, 320, 180, (30, 1), 90).with_audio(
+            AudioCodec::Flac,
+            48_000,
+            2,
+        ),
+    );
+    let parts: [(&Src, i64, i64); 9] = [
+        (&a1, 100, 30), // opens a1
+        (&a1, 10, 30),  // behind: seeks
+        (&a1, 45, 15),  // 5 frames ahead: decodes on
+        (&a1, 59, 11),  // repeats the frame before
+        (&a1, 0, 5),    // stands for 5 frames of black and silence
+        (&a1, 200, 10), // far ahead: seeks
+        (&b1, 20, 20),  // another file, opened ahead
+        (&a1, 210, 10), // back to a1, opened ahead
+        (&a1, 220, 10), // right after: reads on
+    ];
+    let mut pieces = Vec::new();
+    let mut lane = Vec::new();
+    let mut want: Vec<Option<u32>> = Vec::new();
+    for (i, &(s, from, n)) in parts.iter().enumerate() {
+        if i == 4 {
+            pieces.push(VideoPiece::Black { frames: n });
+            lane.push(AudioPiece::Silence {
+                samples: fps.frame_to_sample(n, 48_000),
+            });
+            want.extend(std::iter::repeat_n(None, n as usize));
+        } else {
+            pieces.push(v(s, from, n));
+            lane.push(a(s, fps, 48_000, from, n));
+            want.extend((from..from + n).map(|f| Some(f as u32)));
+        }
+    }
+    let p = plan(fps, 320, 180, pieces, vec![lane]);
+    let out = out_dir("reuse").join("out.mkv");
+    render(&p, &lossless(), &out);
+
+    let codes = barcodes(&out);
+    assert_eq!(codes.len(), want.len(), "frame count");
+    let bad: Vec<_> = codes
+        .iter()
+        .zip(&want)
+        .enumerate()
+        .filter(|(_, (g, w))| g != w)
+        .collect();
+    assert!(bad.is_empty(), "frames differing from the plan: {bad:?}");
+
+    // The sources beep at every whole second. Output times of the beeps:
+    // a1 100..130 has 4 s at 0.6667; a1 10..40 has 1 s at 1.0 + 0.6667;
+    // a1 59..70 (from 2.5 s) has 2 s at 2.5333; b1 20..40 (from 3.3667 s)
+    // has 1 s at 3.7; a1 210..220 starts on 7 s, at 4.0333.
+    let mono = audio_mono(&out);
+    assert_eq!(mono.len() as i64, p.samples(), "sample count");
+    let onsets = vidcut_av::beep::onsets(&mono, 0.1, 4800);
+    let expect = [0.6667, 1.6667, 2.5333, 3.7, 4.0333];
+    assert_eq!(onsets.len(), expect.len(), "beeps at {onsets:?}");
+    for (got, want) in onsets.iter().zip(expect) {
+        let t = *got as f64 / 48_000.0;
+        assert!(
+            (t - want).abs() < 0.001,
+            "beep at {t:.4}, want {want:.4} (A/V offset > 1 ms)"
+        );
+    }
+}
+
+#[test]
 fn other_rates_are_resampled_by_nearest_frame() {
     // A 25 fps source on a 30 fps timeline: 5 source frames per 6 output frames.
     let fps = Rational::new(30, 1).unwrap();
@@ -409,7 +488,24 @@ fn cancelling_leaves_no_files() {
 #[test]
 fn many_segments_keep_memory_flat() {
     // 400 segments alternating between two sources: memory must not grow with
-    // the number of segments (one decoder open at a time).
+    // the number of segments (the decoder of the current piece and the one
+    // opening ahead). Peak RSS belongs to the process, and the other tests
+    // here run alongside, so the measurement runs in a process of its own.
+    if std::env::var_os("VIDCUT_MEMORY_TEST").is_none() {
+        let run = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "many_segments_keep_memory_flat", "--nocapture"])
+            .env("VIDCUT_MEMORY_TEST", "1")
+            .output()
+            .unwrap();
+        let log = String::from_utf8_lossy(&run.stderr);
+        assert!(
+            run.status.success(),
+            "{}{log}",
+            String::from_utf8_lossy(&run.stdout)
+        );
+        eprint!("{log}");
+        return;
+    }
     let fps = Rational::new(30, 1).unwrap();
     let x = src(FixtureSpec::new(VideoCodec::H264, Container::Mp4, 640, 360, (30, 1), 300).gop(60));
     let y = src(FixtureSpec::new(
@@ -437,7 +533,8 @@ fn many_segments_keep_memory_flat() {
     render(&p, &lossless(), &out);
     let grew = peak_rss_mb() - before;
     eprintln!("400 segments: peak RSS grew by {grew} MB");
-    assert!(grew < 500, "peak RSS grew by {grew} MB");
+    // About 100 MB here; a frame kept per segment would add 280 MB.
+    assert!(grew < 250, "peak RSS grew by {grew} MB");
     assert_eq!(barcodes(&out).len(), 800);
 }
 

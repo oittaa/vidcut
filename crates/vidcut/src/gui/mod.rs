@@ -6,6 +6,7 @@ mod app;
 pub mod export;
 mod mixer;
 mod pool;
+mod preferences;
 mod stills;
 mod theme;
 mod timeline;

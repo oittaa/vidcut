@@ -483,6 +483,40 @@ const WAVEFORM_RATE: u32 = 100;
 const THUMBS: usize = 24;
 const THUMB_SIZE: (u32, u32) = (192, 108);
 
+/// The pool's filmstrip of `media`: from the thumbnail cache when the
+/// preferences keep one, decoded (and then kept) otherwise.
+fn filmstrip(media: &vidcut_core::model::Media) -> std::result::Result<Filmstrip, String> {
+    let prefs = crate::preferences::load().unwrap_or_default().thumbnails;
+    let cached = prefs
+        .disk_cache
+        .then(|| crate::thumbcache::load(media, THUMBS, THUMB_SIZE))
+        .flatten();
+    let (images, times) = match cached {
+        Some(strip) => strip,
+        None => {
+            let strip =
+                vidcut_av::thumbs::filmstrip(&media.path, THUMBS, THUMB_SIZE.0, THUMB_SIZE.1)
+                    .map_err(|e| e.to_string())?;
+            if prefs.disk_cache && !strip.0.is_empty() {
+                crate::thumbcache::store(
+                    media,
+                    THUMBS,
+                    THUMB_SIZE,
+                    (&strip.0, &strip.1),
+                    prefs.cache_limit_mb,
+                );
+            }
+            strip
+        }
+    };
+    Ok(Filmstrip {
+        width: images.first().map_or(0, |i| i.width),
+        height: images.first().map_or(0, |i| i.height),
+        frames: images.into_iter().map(|i| i.rgba).collect(),
+        times,
+    })
+}
+
 /// Minimum time between timeline reloads while edits keep coming.
 const RELOAD_EVERY: Duration = Duration::from_millis(100);
 
@@ -1140,7 +1174,12 @@ impl Live {
         ) || (job.origin == Origin::Gui
             && matches!(
                 job.method.as_str(),
-                "export.plan" | "presets.list" | "presets.get" | "encoders.list" | "jobs.list"
+                "export.plan"
+                    | "presets.list"
+                    | "presets.get"
+                    | "encoders.list"
+                    | "jobs.list"
+                    | "preferences.get"
             ))
             || (job.method == "player.seek" && job.params["fast"] == json!(true))
             // Previews the GUI asks for (Ripple Delete Silence's stripes).
@@ -1590,18 +1629,12 @@ impl Live {
         let media: Vec<_> = open.project().media.clone();
         for m in media {
             if m.info.video.is_some() && self.thumbs_wanted.insert(m.id.clone()) {
-                let (tx, id, path) = (self.tx.clone(), m.id.clone(), m.path.clone());
+                let (tx, id, media) = (self.tx.clone(), m.id.clone(), m.clone());
                 self.workers.run(move || {
-                    let result =
-                        vidcut_av::thumbs::filmstrip(&path, THUMBS, THUMB_SIZE.0, THUMB_SIZE.1)
-                            .map(|(images, times)| Filmstrip {
-                                width: images.first().map_or(0, |i| i.width),
-                                height: images.first().map_or(0, |i| i.height),
-                                frames: images.into_iter().map(|i| i.rgba).collect(),
-                                times,
-                            })
-                            .map_err(|e| e.to_string());
-                    let _ = tx.send(Msg::Thumbs { media: id, result });
+                    let _ = tx.send(Msg::Thumbs {
+                        media: id,
+                        result: filmstrip(&media),
+                    });
                 });
             }
             if !m.info.audio.is_empty() && self.waveforms_wanted.insert(m.id.clone()) {

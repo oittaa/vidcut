@@ -92,6 +92,8 @@ pub struct PresetSave<'a> {
     pub from: Option<&'a str>,
     pub set: &'a [String],
     pub overwrite: bool,
+    /// Check and describe it without writing it.
+    pub dry_run: bool,
 }
 
 /// Saves a user preset as TOML (`presets.save`).
@@ -124,6 +126,9 @@ pub fn save_preset(s: &PresetSave<'_>) -> Result<Value> {
         quick_export: s.quick_export,
         settings,
     };
+    if s.dry_run {
+        return Ok(json!({ "preset": preset, "path": path }));
+    }
     let text = toml::to_string(&preset).map_err(|e| Error::internal(e.to_string()))?;
     let dir = path.parent().expect("has a parent");
     std::fs::create_dir_all(dir).map_err(|e| Error::usage(format!("{}: {e}", dir.display())))?;
@@ -134,8 +139,8 @@ pub fn save_preset(s: &PresetSave<'_>) -> Result<Value> {
     Ok(json!({ "preset": preset, "path": path }))
 }
 
-/// Deletes a user preset (`presets.delete`).
-pub fn delete_preset(name: &str) -> Result<Value> {
+/// Deletes a user preset (`presets.delete`); `dry_run` only checks.
+pub fn delete_preset(name: &str, dry_run: bool) -> Result<Value> {
     check_preset_name(name)?;
     let path = user_preset_path(name);
     if !path.exists() {
@@ -145,7 +150,10 @@ pub fn delete_preset(name: &str) -> Result<Value> {
             Error::not_found(format!("no user preset {name:?}"))
         });
     }
-    std::fs::remove_file(&path).map_err(|e| Error::usage(format!("{}: {e}", path.display())))?;
+    if !dry_run {
+        std::fs::remove_file(&path)
+            .map_err(|e| Error::usage(format!("{}: {e}", path.display())))?;
+    }
     Ok(json!({ "deleted": name, "path": path }))
 }
 

@@ -9,5 +9,7 @@ pub mod live;
 pub mod mcp;
 pub mod output;
 pub mod paths;
+pub mod preferences;
 pub mod session;
 pub mod storyboard;
+pub mod thumbcache;

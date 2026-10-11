@@ -11,6 +11,7 @@ use std::path::Path;
 use vidcut_core::render::VideoPiece;
 use vidcut_core::time::Rational;
 
+use super::ahead::Ahead;
 use crate::decode::VideoReader;
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, filter, format, frame};
@@ -131,20 +132,104 @@ impl Normalizer {
     }
 }
 
-/// An open source piece.
+/// An open source file, read for one piece or several in a row.
 struct Source {
     reader: VideoReader,
     /// Seconds per tick of the reader's time base.
     tick: f64,
+    /// The current piece's origin and first source frame.
     origin: f64,
     source_frame: i64,
+    /// The latest sampling target (seconds); every frame before `current` is
+    /// earlier than it.
+    target: f64,
     /// Current source frame (decoded) and its timestamp in seconds.
     current: Option<(frame::Video, f64)>,
     /// `current`, normalized.
     normalized: Option<frame::Video>,
 }
 
-/// Produces the plan's video frames in order.
+/// How far past the current frame (seconds) a later piece of the same file
+/// may start for decoding on to it to beat a seek.
+const DECODE_AHEAD: f64 = 1.0;
+
+impl Source {
+    /// Opens `path` with `current` at the first frame for `target`. The
+    /// decoding up to there is most of the cost of starting a piece, so the
+    /// next file opens on another thread while this one encodes.
+    fn open(path: &Path, origin: f64, source_frame: i64, target: f64) -> Result<Source> {
+        let reader = VideoReader::open(path)?;
+        let tb = reader.time_base();
+        let mut source = Source {
+            reader,
+            tick: f64::from(tb.numerator()) / f64::from(tb.denominator()),
+            origin,
+            source_frame,
+            target,
+            current: None,
+            normalized: None,
+        };
+        source.seek(target)?;
+        source.advance(target)?;
+        Ok(source)
+    }
+
+    fn seek(&mut self, target: f64) -> Result<()> {
+        self.reader.seek((target / self.tick).floor() as i64)?;
+        self.target = target;
+        self.current = None;
+        self.normalized = None;
+        Ok(())
+    }
+
+    /// Moves `current` to the first frame at or after `target` (1 µs of slack
+    /// for float noise); past the end of the stream, it stays on the last
+    /// frame. Returns whether it moved.
+    fn advance(&mut self, target: f64) -> Result<bool> {
+        self.target = target;
+        let mut changed = false;
+        while self
+            .current
+            .as_ref()
+            .is_none_or(|(_, t)| *t < target - 1e-6)
+        {
+            match self.reader.next_frame()? {
+                Some(f) => {
+                    let t = f.pts().unwrap_or(0) as f64 * self.tick;
+                    self.current = Some((f, t));
+                    changed = true;
+                }
+                None if self.current.is_some() => break,
+                None => {
+                    return Err(Error::Invalid(format!(
+                        "{} ends before {target:.3} s",
+                        self.reader.path().display()
+                    )));
+                }
+            }
+        }
+        Ok(changed)
+    }
+
+    /// Readies the file for another piece starting at `target`: a piece that
+    /// starts a little ahead decodes on to it, any other seeks.
+    fn reposition(&mut self, origin: f64, source_frame: i64, target: f64) -> Result<()> {
+        self.origin = origin;
+        self.source_frame = source_frame;
+        let ahead = self
+            .current
+            .as_ref()
+            .is_some_and(|(_, t)| target >= self.target && target - t <= DECODE_AHEAD);
+        if !ahead {
+            self.seek(target)?;
+        }
+        Ok(())
+    }
+}
+
+/// Produces the plan's video frames in order. A piece from the same file as
+/// the one before it reads on with the same decoder; a piece from another
+/// file is opened while the piece before it encodes.
 pub struct VideoFrames {
     pieces: Vec<VideoPiece>,
     fps: Rational,
@@ -153,6 +238,7 @@ pub struct VideoFrames {
     /// Frame index within the current piece.
     k: i64,
     source: Option<Source>,
+    ahead: Ahead<Source>,
     normalizer: Option<Normalizer>,
     black: Option<frame::Video>,
 }
@@ -172,6 +258,7 @@ impl VideoFrames {
             piece: 0,
             k: 0,
             source: None,
+            ahead: Ahead::new(),
             normalizer: None,
             black: None,
         }
@@ -184,9 +271,9 @@ impl VideoFrames {
                 return Ok(None);
             };
             if self.k >= piece.frames() {
+                // The file stays open: a later piece may read it too.
                 self.piece += 1;
                 self.k = 0;
-                self.source = None;
                 continue;
             }
             let k = self.k;
@@ -199,8 +286,8 @@ impl VideoFrames {
                     source_frame,
                     ..
                 } => {
-                    if self.source.is_none() {
-                        self.source = Some(self.open(&path, origin, source_frame)?);
+                    if k == 0 {
+                        self.start_piece(&path, origin, source_frame)?;
                     }
                     self.source_frame(k).map(Some)
                 }
@@ -223,20 +310,53 @@ impl VideoFrames {
         origin + self.fps.frames_to_secs(pos) - 0.5 * self.fps.frames_to_secs(1)
     }
 
-    fn open(&self, path: &Path, origin: f64, source_frame: i64) -> Result<Source> {
-        let mut reader = VideoReader::open(path)?;
-        let tb = reader.time_base();
-        let tick = f64::from(tb.numerator()) / f64::from(tb.denominator());
+    /// Readies the current piece's file: the open one if it is the same
+    /// file, the one opened ahead for this piece, or a new one. Then starts
+    /// opening the next file.
+    fn start_piece(&mut self, path: &Path, origin: f64, source_frame: i64) -> Result<()> {
         let target = self.target(origin, source_frame);
-        reader.seek((target / tick).floor() as i64)?;
-        Ok(Source {
-            reader,
-            tick,
-            origin,
-            source_frame,
-            current: None,
-            normalized: None,
-        })
+        let source = match self.source.take() {
+            Some(mut s) if s.reader.path() == path => {
+                s.reposition(origin, source_frame, target)?;
+                s
+            }
+            _ => match self.ahead.take(self.piece) {
+                Some(opened) => opened?,
+                None => Source::open(path, origin, source_frame, target)?,
+            },
+        };
+        self.source = Some(source);
+        self.open_next(path);
+        Ok(())
+    }
+
+    /// Starts opening the file of the next source piece, unless it is
+    /// `current`, which that piece then reads on with.
+    fn open_next(&mut self, current: &Path) {
+        let next = self
+            .pieces
+            .iter()
+            .enumerate()
+            .skip(self.piece + 1)
+            .find_map(|(i, p)| match p {
+                VideoPiece::Source {
+                    path,
+                    origin,
+                    source_frame,
+                    frames,
+                    ..
+                } if *frames > 0 => Some((i, path.clone(), *origin, *source_frame)),
+                _ => None,
+            });
+        let Some((i, path, origin, source_frame)) = next else {
+            return;
+        };
+        if path == current {
+            return;
+        }
+        let target = self.target(origin, source_frame);
+        self.ahead
+            .start(i, move || Source::open(&path, origin, source_frame, target));
     }
 
     /// Output frame `k` of the current source piece.
@@ -246,25 +366,7 @@ impl VideoFrames {
         let src = self.source.as_mut().expect("open");
         let target =
             src.origin + fps.frames_to_secs(src.source_frame + k) - 0.5 * fps.frames_to_secs(1);
-        // Advance to the first frame at or after the target (1 µs of slack for
-        // float noise); past the end of the stream, keep the last frame.
-        let mut changed = false;
-        while src.current.as_ref().is_none_or(|(_, t)| *t < target - 1e-6) {
-            match src.reader.next_frame()? {
-                Some(f) => {
-                    let t = f.pts().unwrap_or(0) as f64 * src.tick;
-                    src.current = Some((f, t));
-                    changed = true;
-                }
-                None if src.current.is_some() => break,
-                None => {
-                    return Err(Error::Invalid(format!(
-                        "source ends before frame {}",
-                        src.source_frame + k
-                    )));
-                }
-            }
-        }
+        let changed = src.advance(target)?;
         if changed || src.normalized.is_none() {
             let (frame, _) = src.current.as_ref().expect("have a frame");
             let rebuild = self.normalizer.as_ref().is_none_or(|n| !n.matches(frame));

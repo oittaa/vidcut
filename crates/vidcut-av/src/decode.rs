@@ -82,6 +82,11 @@ impl VideoReader {
         self.time_base
     }
 
+    /// The file this reads.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
     /// Stream start timestamp from the container, if known.
     pub fn start_pts(&self) -> Option<i64> {
         self.start_pts

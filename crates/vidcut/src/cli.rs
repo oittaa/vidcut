@@ -208,6 +208,15 @@ pub enum Command {
         /// Show this preset.
         name: Option<String>,
     },
+    /// Show or change application preferences
+    /// (~/.config/vidcut/preferences.toml).
+    #[command(
+        after_help = "Examples:\n  vidcut preferences\n  vidcut preferences set thumbnails.cache_limit_mb=256\n  vidcut preferences set thumbnails.disk_cache=false   # also empties the cache"
+    )]
+    Preferences {
+        #[command(subcommand)]
+        cmd: Option<PreferencesCmd>,
+    },
     /// Which GPU encoders work here (cached).
     Encoders {
         /// Test again instead of using the cache.
@@ -496,6 +505,15 @@ pub enum JobsCmd {
     },
     /// Cancel a running job.
     Cancel { job: String },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PreferencesCmd {
+    /// Change preferences, e.g. thumbnails.cache_limit_mb=256.
+    Set {
+        #[arg(value_name = "KEY=VALUE", required = true)]
+        values: Vec<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1465,6 +1483,13 @@ impl Cli {
                 }
                 (None, Some(n)) => req("presets.get", json!({ "name": n }))?,
                 (None, None) => req("presets.list", json!({}))?,
+            },
+            Command::Preferences { cmd } => match cmd {
+                None => req("preferences.get", json!({}))?,
+                Some(PreferencesCmd::Set { values }) => {
+                    let patch = vidcut_core::preferences::PreferencesPatch::from_pairs(values)?;
+                    req("preferences.set", json!(patch))?
+                }
             },
             Command::Encoders { refresh } => req("encoders.list", json!({ "refresh": refresh }))?,
             Command::Undo { steps } => req("history.undo", json!({ "steps": steps }))?,

@@ -5,6 +5,7 @@
 //! spans are mixed and encoded. Output goes to a hidden `.part` file that is
 //! renamed into place only on success.
 
+mod ahead;
 pub mod audio;
 pub mod encode;
 pub mod still;

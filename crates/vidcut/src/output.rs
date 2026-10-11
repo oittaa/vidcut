@@ -294,6 +294,21 @@ pub fn print(method: &str, r: &Response, json: bool) {
             "deleted preset {}",
             r.result["deleted"].as_str().unwrap_or_default()
         ),
+        "preferences.get" | "preferences.set" => {
+            let mut lines = Vec::new();
+            flatten("", &r.result["preferences"], &mut lines);
+            for line in lines {
+                println!("{line}");
+            }
+            let c = &r.result["thumbnail_cache"];
+            println!(
+                "thumbnail cache: {} MB in {} files ({})",
+                c["mb"],
+                c["files"],
+                c["path"].as_str().unwrap_or_default()
+            );
+            println!("({})", r.result["path"].as_str().unwrap_or_default());
+        }
         "encoders.list" => {
             for e in r.result["encoders"].as_array().into_iter().flatten() {
                 println!(
@@ -640,4 +655,21 @@ fn summary(s: &Value) {
                 .join(" "))
             .unwrap_or_default()
     );
+}
+
+/// `group.key = value` lines of a JSON object.
+fn flatten(prefix: &str, v: &Value, out: &mut Vec<String>) {
+    match v {
+        Value::Object(m) => {
+            for (k, v) in m {
+                let key = if prefix.is_empty() {
+                    k.clone()
+                } else {
+                    format!("{prefix}.{k}")
+                };
+                flatten(&key, v, out);
+            }
+        }
+        v => out.push(format!("{prefix} = {v}")),
+    }
 }

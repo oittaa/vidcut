@@ -1,10 +1,11 @@
 //! The audio of a render plan: sample-exact source reads, de-click fades at
 //! cuts, and the mix of all lanes, as interleaved `f32`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use vidcut_core::render::AudioPiece;
 
+use super::ahead::Ahead;
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, codec, ffi, format, frame, media};
 
@@ -103,8 +104,12 @@ impl Resampler {
     }
 }
 
-/// Reads `samples` samples of one audio stream starting at a raw time.
+/// Reads one audio stream of a file from a raw time on, for one piece or
+/// several in a row.
 struct SourceAudio {
+    path: PathBuf,
+    /// Which of the file's audio streams.
+    ordinal: u32,
     input: format::context::Input,
     stream: usize,
     tick: f64,
@@ -117,8 +122,16 @@ struct SourceAudio {
     cursor: usize,
     /// Samples still to drop at the start (before the target time).
     skip: usize,
+    /// Raw time (s) of the first sample decoded after the latest seek, and
+    /// the index (in output samples from it) of the next sample `read` gives.
+    t0: f64,
+    at: i64,
     eof: bool,
 }
+
+/// How far ahead (seconds) a later piece of the same stream may start for
+/// decoding on to it to beat a seek.
+const DECODE_AHEAD: i64 = 1;
 
 impl SourceAudio {
     fn open(path: &Path, ordinal: u32, start: f64, rate: u32, channels: u16) -> Result<Self> {
@@ -145,6 +158,8 @@ impl SourceAudio {
             })
             .ctx(|| "opening audio decoder".into())?;
         let mut s = Self {
+            path: path.to_path_buf(),
+            ordinal,
             input,
             stream: index,
             tick,
@@ -155,10 +170,26 @@ impl SourceAudio {
             pending: Vec::new(),
             cursor: 0,
             skip: 0,
+            t0: start,
+            at: 0,
             eof: false,
         };
         s.seek(start)?;
         Ok(s)
+    }
+
+    /// Readies the stream for another piece starting at raw time `start`: a
+    /// piece that starts a little ahead decodes on to it, any other seeks.
+    fn reposition(&mut self, start: f64) -> Result<()> {
+        let want = ((start - self.t0) * f64::from(self.rate)).round() as i64;
+        let ahead = want - self.at;
+        if (0..=DECODE_AHEAD * i64::from(self.rate)).contains(&ahead) {
+            self.skip += ahead as usize;
+            self.at = want;
+            Ok(())
+        } else {
+            self.seek(start)
+        }
     }
 
     /// Positions reading at raw time `start` (seconds), sample-exactly.
@@ -192,11 +223,13 @@ impl SourceAudio {
             self.decoder.flush();
             self.pending.clear();
             self.cursor = 0;
+            self.skip = 0;
             self.eof = false;
             self.resampler = None;
             let Some(first) = self.decode()? else {
                 // Nothing at all after the seek: silence.
                 self.eof = true;
+                (self.t0, self.at) = (start, 0);
                 return Ok(());
             };
             let t0 = first.timestamp().unwrap_or(0) as f64 * self.tick;
@@ -205,6 +238,7 @@ impl SourceAudio {
                 continue;
             }
             self.skip = ((start - t0) * f64::from(self.rate)).round().max(0.0) as usize;
+            (self.t0, self.at) = (t0, self.skip as i64);
             self.push(&first)?;
             return Ok(());
         }
@@ -267,6 +301,7 @@ impl SourceAudio {
     /// silence past the end of the stream.
     fn read(&mut self, n: usize, out: &mut Vec<f32>) -> Result<()> {
         let ch = usize::from(self.channels);
+        self.at += n as i64;
         loop {
             // Drop the samples before the start time.
             let available = (self.pending.len() - self.cursor) / ch;
@@ -317,18 +352,78 @@ pub(crate) fn discard_others(input: &format::context::Input, keep: usize) {
     }
 }
 
-/// One audio lane of a plan, read sequentially.
+/// One audio lane of a plan, read sequentially. A piece from the same stream
+/// as the one before it reads on with the same decoder; a piece from another
+/// stream is opened while the piece before it plays.
 struct Lane {
     pieces: Vec<AudioPiece>,
     piece: usize,
     /// Samples of the current piece already produced.
     pos: i64,
     source: Option<SourceAudio>,
+    ahead: Ahead<SourceAudio>,
     declick: i64,
     scratch: Vec<f32>,
 }
 
 impl Lane {
+    /// Readies the current piece's stream: the open one if it is the same
+    /// stream, the one opened ahead for this piece, or a new one. Then starts
+    /// opening the next stream.
+    fn start_piece(
+        &mut self,
+        path: &Path,
+        stream: u32,
+        start: f64,
+        rate: u32,
+        channels: u16,
+    ) -> Result<()> {
+        let source = match self.source.take() {
+            Some(mut s) if s.path == path && s.ordinal == stream => {
+                s.reposition(start)?;
+                s
+            }
+            _ => match self.ahead.take(self.piece) {
+                Some(opened) => opened?,
+                None => SourceAudio::open(path, stream, start, rate, channels)?,
+            },
+        };
+        self.source = Some(source);
+        self.open_next(path, stream, rate, channels);
+        Ok(())
+    }
+
+    /// Starts opening the stream of the next source piece, unless it is the
+    /// current one, which that piece then reads on with.
+    fn open_next(&mut self, current: &Path, current_stream: u32, rate: u32, channels: u16) {
+        let next = self
+            .pieces
+            .iter()
+            .enumerate()
+            .skip(self.piece + 1)
+            .find_map(|(i, p)| match p {
+                AudioPiece::Source {
+                    path,
+                    stream,
+                    origin,
+                    source_sample,
+                    samples,
+                    ..
+                } if *samples > 0 => Some((i, path.clone(), *stream, *origin, *source_sample)),
+                _ => None,
+            });
+        let Some((i, path, stream, origin, source_sample)) = next else {
+            return;
+        };
+        if path == current && stream == current_stream {
+            return;
+        }
+        let start = origin + source_sample as f64 / f64::from(rate);
+        self.ahead.start(i, move || {
+            SourceAudio::open(&path, stream, start, rate, channels)
+        });
+    }
+
     /// Adds the lane's next `n` samples into `out` (interleaved, `n * ch` long).
     fn mix_into(&mut self, out: &mut [f32], rate: u32, channels: u16) -> Result<()> {
         let ch = usize::from(channels);
@@ -349,9 +444,9 @@ impl Lane {
                 ..
             } = &piece
             {
-                if self.source.is_none() {
+                if self.pos == 0 && take > 0 {
                     let start = origin + *source_sample as f64 / f64::from(rate);
-                    self.source = Some(SourceAudio::open(path, *stream, start, rate, channels)?);
+                    self.start_piece(path, *stream, start, rate, channels)?;
                 }
                 self.scratch.clear();
                 self.source
@@ -380,9 +475,9 @@ impl Lane {
             done += take;
             self.pos += take as i64;
             if self.pos >= len {
+                // The stream stays open: a later piece may read it too.
                 self.piece += 1;
                 self.pos = 0;
-                self.source = None;
             }
         }
         Ok(())
@@ -410,6 +505,7 @@ impl AudioMix {
                     piece: 0,
                     pos: 0,
                     source: None,
+                    ahead: Ahead::new(),
                     declick,
                     scratch: Vec::new(),
                 })

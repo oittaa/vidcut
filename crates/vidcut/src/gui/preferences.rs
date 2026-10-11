@@ -1,0 +1,128 @@
+//! File > Preferences (Ctrl+,): application preferences, like Resolve's
+//! Preferences window (p. 94) but holding only what vidcut needs. Each change
+//! is one `preferences.set`, sent when it is made.
+
+use eframe::egui::{self, RichText};
+use serde_json::{Value, json};
+
+use super::export::{Ask, near_center};
+use super::theme;
+use super::workspace::Workspace;
+
+#[derive(Default)]
+pub(super) struct PreferencesUi {
+    open: bool,
+    /// The request in flight (`preferences.get` or `preferences.set`).
+    ask: Option<Ask>,
+    /// The latest answer (`preferences.get`'s result).
+    state: Option<Value>,
+    error: Option<String>,
+    /// The thumbnail cache limit being edited (MB).
+    limit: u64,
+}
+
+impl Workspace {
+    pub(super) fn open_preferences(&mut self, ctx: &egui::Context) {
+        self.preferences.open = true;
+        self.preferences.ask = Some(Ask::send(&self.live, ctx, "preferences.get", json!({})));
+    }
+
+    pub(super) fn preferences_window(&mut self, ctx: &egui::Context) {
+        let ui_state = &mut self.preferences;
+        if !ui_state.open {
+            return;
+        }
+        if let Some(answer) = ui_state.ask.as_ref().and_then(Ask::take) {
+            ui_state.ask = None;
+            match answer {
+                Ok(r) => {
+                    ui_state.limit = r.result["preferences"]["thumbnails"]["cache_limit_mb"]
+                        .as_u64()
+                        .unwrap_or(1);
+                    ui_state.state = Some(r.result);
+                    ui_state.error = None;
+                }
+                Err(e) => ui_state.error = Some(e.message),
+            }
+        }
+        let mut open = true;
+        let mut patch = None;
+        egui::Window::new("Preferences")
+            .collapsible(false)
+            .resizable(false)
+            .default_pos(near_center(ctx, 380.0, 170.0))
+            .open(&mut open)
+            .show(ctx, |ui| {
+                let Some(state) = &ui_state.state else {
+                    match &ui_state.error {
+                        Some(e) => ui.label(RichText::new(e).color(theme::ERROR)),
+                        None => ui.spinner(),
+                    };
+                    return;
+                };
+                let thumbs = &state["preferences"]["thumbnails"];
+                let cache = &state["thumbnail_cache"];
+                let busy = ui_state.ask.is_some();
+                ui.label(RichText::new("Thumbnails").strong());
+                egui::Grid::new("preferences-thumbnails")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        let mut disk = thumbs["disk_cache"] == true;
+                        ui.label("Disk cache");
+                        if ui
+                            .add_enabled(
+                                !busy,
+                                egui::Checkbox::new(&mut disk, "Keep thumbnails on disk"),
+                            )
+                            .on_hover_text(format!(
+                                "Projects open with their thumbnails shown, without decoding \
+                                 every clip again ({}). Turning this off empties the cache.",
+                                cache["path"].as_str().unwrap_or_default()
+                            ))
+                            .changed()
+                        {
+                            patch = Some(json!({ "thumbnails": { "disk_cache": disk } }));
+                        }
+                        ui.end_row();
+                        ui.label("Size limit");
+                        let r = ui
+                            .add_enabled(
+                                !busy && disk,
+                                egui::DragValue::new(&mut ui_state.limit)
+                                    .range(1..=1_000_000)
+                                    .speed(4.0)
+                                    .suffix(" MB"),
+                            )
+                            .on_hover_text("Above it, the least recently used thumbnails go first");
+                        let done = r.drag_stopped() || r.lost_focus();
+                        if done && Some(ui_state.limit) != thumbs["cache_limit_mb"].as_u64() {
+                            patch = Some(json!({
+                                "thumbnails": { "cache_limit_mb": ui_state.limit }
+                            }));
+                        }
+                        ui.end_row();
+                        ui.label("");
+                        ui.label(
+                            RichText::new(format!(
+                                "Holds {} MB in {} files",
+                                cache["mb"], cache["files"]
+                            ))
+                            .color(theme::TEXT_DIM),
+                        );
+                        ui.end_row();
+                    });
+                if let Some(e) = &ui_state.error {
+                    ui.label(RichText::new(e).color(theme::ERROR));
+                }
+                ui.label(
+                    RichText::new(state["path"].as_str().unwrap_or_default())
+                        .small()
+                        .color(theme::TEXT_DIM),
+                );
+            });
+        ui_state.open = open;
+        if let Some(p) = patch {
+            ui_state.ask = Some(Ask::send(&self.live, ctx, "preferences.set", p));
+        }
+    }
+}

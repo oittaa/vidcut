@@ -549,6 +549,14 @@ pub enum Request {
         #[serde(default)]
         refresh: bool,
     },
+    /// Application preferences (`~/.config/vidcut/preferences.toml`; Resolve's
+    /// Preferences, p. 94) and what the thumbnail cache holds.
+    #[serde(rename = "preferences.get")]
+    PreferencesGet {},
+    /// Change application preferences; what is left out stays. Turning the
+    /// thumbnail cache off empties it, and a lower limit evicts at once.
+    #[serde(rename = "preferences.set")]
+    PreferencesSet(crate::preferences::PreferencesPatch),
 
     // ---------------------------------------------------------------- history and batches
     #[serde(rename = "history.undo")]
@@ -795,6 +803,8 @@ pub enum GuiPanel {
     Log,
     /// The Mixer: track faders, mute, solo and meters (p. 649).
     Mixer,
+    /// Application preferences (p. 94).
+    Preferences,
 }
 
 /// Media Pool sort orders.
@@ -1047,6 +1057,8 @@ impl Request {
                 | Self::PresetsSave { .. }
                 | Self::PresetsDelete { .. }
                 | Self::EncodersList { .. }
+                | Self::PreferencesGet {}
+                | Self::PreferencesSet(_)
         )
     }
 
@@ -1080,6 +1092,8 @@ impl Request {
                     | Self::PresetsSave { .. }
                     | Self::PresetsDelete { .. }
                     | Self::EncodersList { .. }
+                    | Self::PreferencesGet {}
+                    | Self::PreferencesSet(_)
                     | Self::EditCopy { .. }
             )
     }

@@ -1,0 +1,86 @@
+//! Application preferences on disk (`~/.config/vidcut/preferences.toml`)
+//! and what changing them does to the thumbnail cache.
+
+use std::path::PathBuf;
+
+use serde_json::{Value, json};
+use vidcut_core::preferences::{Preferences, PreferencesPatch};
+use vidcut_core::{Error, Result};
+
+use crate::{paths, thumbcache};
+
+pub fn path() -> PathBuf {
+    paths::config_dir().join("preferences.toml")
+}
+
+/// The preferences; defaults for what the file leaves out, or without one.
+pub fn load() -> Result<Preferences> {
+    let path = path();
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Preferences::default()),
+        Err(e) => return Err(Error::internal(format!("{}: {e}", path.display()))),
+    };
+    let p: Preferences = toml::from_str(&text).map_err(|e| {
+        Error::usage(format!(
+            "{}: {e}; fix it, or delete it to start from the defaults",
+            path.display()
+        ))
+    })?;
+    p.check()
+        .map_err(|e| Error::usage(format!("{}: {}", path.display(), e.message)))?;
+    Ok(p)
+}
+
+/// `preferences.get`: the preferences, where they are kept, and what the
+/// thumbnail cache holds.
+pub fn get() -> Result<Value> {
+    Ok(describe(&load()?))
+}
+
+/// `preferences.set`: applies `patch`, saves, and brings the thumbnail
+/// cache in line (emptied when turned off, trimmed to the limit). A dry run
+/// only checks and describes the result.
+pub fn set(patch: &PreferencesPatch, dry_run: bool) -> Result<Value> {
+    // One change at a time: each reads the file the one before wrote.
+    static SETTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one = SETTING.lock().unwrap_or_else(|e| e.into_inner());
+    let p = load()?.patched(patch)?;
+    if dry_run {
+        return Ok(describe(&p));
+    }
+    let path = path();
+    let dir = path.parent().expect("in the config dir");
+    let text = format!(
+        "# vidcut preferences: `vidcut preferences --help`, or File > Preferences.\n\n{}",
+        toml::to_string(&p).map_err(|e| Error::internal(e.to_string()))?
+    );
+    let part = path.with_extension("part");
+    std::fs::create_dir_all(dir)
+        .and_then(|()| std::fs::write(&part, text))
+        .and_then(|()| std::fs::rename(&part, &path))
+        .map_err(|e| Error::internal(format!("{}: {e}", path.display())))?;
+    if p.thumbnails.disk_cache {
+        thumbcache::evict(
+            &thumbcache::dir(),
+            p.thumbnails.cache_limit_mb.saturating_mul(1 << 20),
+        );
+    } else {
+        thumbcache::clear()
+            .map_err(|e| Error::internal(format!("{}: {e}", thumbcache::dir().display())))?;
+    }
+    Ok(describe(&p))
+}
+
+fn describe(p: &Preferences) -> Value {
+    let (files, bytes) = thumbcache::usage();
+    json!({
+        "path": path(),
+        "preferences": p,
+        "thumbnail_cache": {
+            "path": thumbcache::dir(),
+            "files": files,
+            "mb": (bytes as f64 / f64::from(1 << 20) * 10.0).round() / 10.0,
+        },
+    })
+}
