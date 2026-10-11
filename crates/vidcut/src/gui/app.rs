@@ -17,10 +17,11 @@ use vidcut_mpv::{Display, GlRenderer, Mpv};
 use super::theme;
 use super::video::Video;
 use super::workspace::{Picture, Workspace};
-use crate::live::{self, Capture, Image, PlayerId};
+use crate::live::{self, Capture, Image, PlayerId, Presented};
 
 /// Work the session asks of the UI thread.
 enum UiTask {
+    Present(PlayerId, Presented),
     CaptureViewer(PlayerId, Capture),
     CaptureWindow(Capture),
     Window(live::WindowChange),
@@ -49,6 +50,10 @@ impl Port {
 }
 
 impl live::Renderer for Port {
+    fn present(&self, player: PlayerId, done: Presented) {
+        self.push(UiTask::Present(player, done));
+    }
+
     fn capture_viewer(&self, player: PlayerId, done: Capture) {
         self.push(UiTask::CaptureViewer(player, done));
     }
@@ -181,13 +186,22 @@ impl eframe::App for App {
         // Runs even while the window is hidden: keep rendering so mpv never
         // waits for us and the viewer can be captured.
         let gl = self.gl.clone();
-        for id in PlayerId::ALL {
-            if let Some(new) = self.videos[id.index()].render(&gl, frame) {
-                self.ws.live.rendered(id, new);
+        let tasks = self.port.take();
+        // Players asked to present draw their current picture even if mpv
+        // has nothing new for them (a seek finished without us: mpv waits
+        // only 200 ms for a frame to be taken).
+        let mut present = [false; 2];
+        for task in &tasks {
+            if let UiTask::Present(id, _) = task {
+                present[id.index()] = true;
             }
         }
-        for task in self.port.take() {
+        for id in PlayerId::ALL {
+            self.videos[id.index()].render(&gl, frame, present[id.index()]);
+        }
+        for task in tasks {
             match task {
+                UiTask::Present(_, done) => done(),
                 UiTask::CaptureViewer(id, done) => {
                     let image = self.videos[id.index()].read_back(&gl);
                     done(image.ok_or_else(|| {

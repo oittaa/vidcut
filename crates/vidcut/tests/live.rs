@@ -7,12 +7,12 @@
 //! Needs libmpv (skips without it), no display.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use vidcut::live::{self, Capture, Image, Origin, PlayerId, WindowChange};
+use vidcut::live::{self, Capture, Image, Origin, PlayerId, Presented, WindowChange};
 use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
 use vidcut_core::model::Settings;
 use vidcut_core::time::Rational;
@@ -24,10 +24,17 @@ const H: usize = 180;
 
 #[derive(Default)]
 struct Port {
+    presents: Mutex<Vec<(PlayerId, Presented)>>,
     captures: Mutex<Vec<(PlayerId, Capture)>>,
+    /// Milliseconds the render thread looks away once it next finds a new
+    /// picture waiting, like a UI thread busy elsewhere.
+    stall: AtomicU64,
 }
 
 impl live::Renderer for Port {
+    fn present(&self, player: PlayerId, done: Presented) {
+        self.presents.lock().unwrap().push((player, done));
+    }
     fn capture_viewer(&self, player: PlayerId, done: Capture) {
         self.captures.lock().unwrap().push((player, done));
     }
@@ -40,6 +47,7 @@ impl live::Renderer for Port {
 
 struct Harness {
     handle: live::Handle,
+    port: Arc<Port>,
     session: Option<std::thread::JoinHandle<()>>,
     stop: Arc<AtomicBool>,
     render: Option<std::thread::JoinHandle<()>>,
@@ -57,12 +65,12 @@ impl Harness {
         let source = Mpv::new(&opts).unwrap();
         let timeline = Mpv::new(&opts).unwrap();
         let port = Arc::new(Port::default());
-        let handle_cell: Arc<OnceLock<live::Handle>> = Arc::new(OnceLock::new());
         let stop = Arc::new(AtomicBool::new(false));
         // The "render thread": renders both players into buffers whenever
-        // mpv has a frame, reports renders, and answers captures.
+        // mpv has a frame or the session asks to present them, and answers
+        // captures.
         let render = {
-            let (port, cell, stop) = (port.clone(), handle_cell.clone(), stop.clone());
+            let (port, stop) = (port.clone(), stop.clone());
             let players = [source.clone(), timeline.clone()];
             std::thread::spawn(move || {
                 let mut renderers: Vec<SwRenderer> = players
@@ -71,14 +79,21 @@ impl Harness {
                     .collect();
                 let mut bufs = vec![vec![0u8; W * H * 4]; 2];
                 while !stop.load(Ordering::Relaxed) {
+                    if port.stall.load(Ordering::Relaxed) > 0
+                        && renderers.iter().any(|r| r.next_frame_is_new())
+                    {
+                        let ms = port.stall.swap(0, Ordering::Relaxed);
+                        std::thread::sleep(Duration::from_millis(ms));
+                    }
+                    let presents: Vec<_> = port.presents.lock().unwrap().drain(..).collect();
                     for (i, r) in renderers.iter_mut().enumerate() {
-                        if r.update() & MPV_RENDER_UPDATE_FRAME != 0 {
-                            let new = r.next_frame_is_new();
+                        let present = presents.iter().any(|(id, _)| id.index() == i);
+                        if r.update() & MPV_RENDER_UPDATE_FRAME != 0 || present {
                             r.render_rgb0(W, H, W * 4, &mut bufs[i]).unwrap();
-                            if let Some(h) = cell.get() {
-                                h.rendered(PlayerId::ALL[i], new);
-                            }
                         }
+                    }
+                    for (_, done) in presents {
+                        done();
                     }
                     let captures: Vec<_> = port.captures.lock().unwrap().drain(..).collect();
                     for (id, done) in captures {
@@ -102,13 +117,13 @@ impl Harness {
             create: false,
             players: Some((source, timeline)),
             preview_error: None,
-            renderer: port,
+            renderer: port.clone(),
             notify: Arc::new(|| {}),
             socket: None,
         });
-        let _ = handle_cell.set(handle.clone());
         Some(Self {
             handle,
+            port,
             session: Some(session),
             stop,
             render: Some(render),
@@ -123,6 +138,14 @@ impl Harness {
     fn ok(&self, method: &str, params: Value) -> Response {
         self.call(method, params.clone())
             .unwrap_or_else(|e| panic!("{method} {params}: {e}"))
+    }
+
+    /// Makes the render thread look away for `d` once it next finds a new
+    /// picture waiting.
+    fn stall_next(&self, d: Duration) {
+        self.port
+            .stall
+            .store(d.as_millis() as u64, Ordering::Relaxed);
     }
 
     /// The barcode the viewer shows (via a screenshot PNG).
@@ -234,6 +257,15 @@ fn live_session() {
     for t in [0, 1, 59, 60, 61, 89, 90, 91, 149] {
         h.ok("player.seek", json!({ "at": t, "viewer": "timeline" }));
         assert_eq!(h.shown(&dir), Some(expected(t)), "timeline frame {t}");
+    }
+    step("A late renderer");
+    // A renderer that gets to a seek's frame only after libmpv stopped
+    // waiting for it (200 ms) still has that frame on screen when the seek
+    // returns (docs/decisions/gui.md §4).
+    for t in [61, 149] {
+        h.stall_next(Duration::from_millis(500));
+        h.ok("player.seek", json!({ "at": t, "viewer": "timeline" }));
+        assert_eq!(h.shown(&dir), Some(expected(t)), "late renderer, frame {t}");
     }
     let out = dir.join("f.png");
     h.ok("frame.render", json!({ "at": "playhead", "out": out }));

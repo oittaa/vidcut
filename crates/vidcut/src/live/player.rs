@@ -5,9 +5,11 @@
 //! §6); the UI thread renders. Every command is asynchronous and gets an id.
 //! mpv runs them in order, so a reply to command `n` means every command up to
 //! `n` has been queued. A seek or load ("motion") with id `m` has finished
-//! when a `playback-restart` arrives after its reply, and its frame is on
-//! screen once the renderer has drawn a new picture (not a redraw) since the
-//! motion was issued. While paused, that picture can only be the motion's.
+//! when a `playback-restart` arrives after the seek (or file start) that mpv
+//! began after replying to `m`. mpv's current picture is then the motion's
+//! first frame, and it is on screen once the renderer has presented the
+//! player: drawn its current picture after that restart (docs/decisions/gui.md
+//! §4).
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -26,11 +28,6 @@ const OBSERVED: &[(&str, Format)] = &[
     ("video-params/dw", Format::Int),
     ("video-params/dh", Format::Int),
 ];
-
-/// How long to wait for the renderer after a restart before assuming the
-/// frame is shown anyway (no renderer attached, or a hidden window that
-/// renders only every 100 ms).
-const RENDER_GRACE: Duration = Duration::from_millis(250);
 
 /// mpv options for preview players (docs/decisions/preview.md §5).
 /// `VIDCUT_MPV_OPTIONS="hwdec=no,ao=null"` adds or overrides options (for
@@ -100,16 +97,16 @@ pub struct Player {
     /// Last seek or load command.
     pub motion: u64,
     acked: u64,
+    /// Commands acked when mpv last began a seek or a file: the next restart
+    /// finishes them. (A restart of an older seek can arrive after a newer
+    /// command's reply; it doesn't finish that command.)
+    seeking: u64,
+    /// Motions up to this id have finished.
     restarted: u64,
-    /// When playback restarted for the latest motion, while its picture is
-    /// not yet known to be on screen.
-    restart_at: Option<Instant>,
+    /// The motion the renderer was last asked to present.
+    presenting: u64,
     /// Motions up to this id are on screen.
     pub shown: u64,
-    /// New pictures drawn so far, and their count when the latest motion
-    /// was issued.
-    new_frames: u64,
-    motion_frames: u64,
     hwdec: String,
     video_size: (Option<i64>, Option<i64>),
     pub error: Option<String>,
@@ -139,11 +136,10 @@ impl Player {
             next_id: 1,
             motion: 0,
             acked: 0,
+            seeking: 0,
             restarted: 0,
-            restart_at: None,
+            presenting: 0,
             shown: 0,
-            new_frames: 0,
-            motion_frames: 0,
             hwdec: String::new(),
             video_size: (None, None),
             error: None,
@@ -175,8 +171,6 @@ impl Player {
     /// Records a motion command; without mpv it completes at once.
     fn moved(&mut self, id: u64) -> u64 {
         self.motion = id;
-        self.motion_frames = self.new_frames;
-        self.restart_at = None;
         if self.mpv.is_none() {
             self.acked = id;
             self.restarted = id;
@@ -346,19 +340,23 @@ impl Player {
         // `time-pos` keeps the playhead on the frame shown when mpv paused.
     }
 
-    /// The renderer drew a frame of this player; `new` if it was a new
-    /// picture rather than a redraw.
-    pub fn rendered(&mut self, new: bool) {
-        if new {
-            self.new_frames += 1;
-        }
-        self.check_shown();
+    /// The motion to ask the renderer to present, once: the latest one, when
+    /// it has finished but isn't on screen yet.
+    pub fn present_due(&mut self) -> Option<u64> {
+        let due = self.restarted >= self.motion
+            && self.shown < self.motion
+            && self.presenting < self.motion;
+        due.then(|| {
+            self.presenting = self.motion;
+            self.motion
+        })
     }
 
-    fn check_shown(&mut self) {
-        if self.restarted >= self.motion && self.new_frames > self.motion_frames {
-            self.shown = self.shown.max(self.motion);
-            self.restart_at = None;
+    /// The renderer presented this player after motion `motion` finished:
+    /// the viewer shows its frame.
+    pub fn presented(&mut self, motion: u64) {
+        if self.restarted >= motion {
+            self.shown = self.shown.max(motion);
         }
     }
 
@@ -386,13 +384,12 @@ impl Player {
                         self.shown = self.shown.max(id);
                     }
                 }
+                // mpv begins seeks (ours or a load's initial one) and files
+                // only after replying to the commands that asked for them.
+                Event::Seek | Event::StartFile => self.seeking = self.acked,
                 Event::PlaybackRestart => {
-                    self.restarted = self.acked;
-                    if self.restarted >= self.motion && self.shown < self.motion {
-                        self.restart_at = Some(Instant::now());
-                    }
-                    self.check_shown();
-                    if self.loading.is_some_and(|l| self.acked >= l) {
+                    self.restarted = self.restarted.max(self.seeking);
+                    if self.loading.is_some_and(|l| self.restarted >= l) {
                         self.loading = None;
                     }
                 }
@@ -431,35 +428,21 @@ impl Player {
         }
     }
 
-    /// Timed work: stepped reverse and the render grace period. Returns when
-    /// it next needs to run.
+    /// Timed work: stepped reverse. Returns when it next needs to run.
     pub fn tick(&mut self, now: Instant) -> Option<Instant> {
-        let mut next = None;
-        if let Some(at) = self.restart_at {
-            if now >= at + RENDER_GRACE {
-                // Nothing new was drawn (no renderer, or the same picture).
-                self.shown = self.shown.max(self.restarted.min(self.motion));
-                self.restart_at = None;
-            } else {
-                next = Some(at + RENDER_GRACE);
-            }
+        let r = self.reverse?;
+        let elapsed = now.duration_since(r.started).as_secs_f64();
+        let target = (r.from - (elapsed * r.speed * self.fps.as_f64()) as i64).max(0);
+        if self.shown >= self.motion && target < self.position {
+            self.seek(target, false);
         }
-        if let Some(r) = self.reverse {
-            let elapsed = now.duration_since(r.started).as_secs_f64();
-            let target = (r.from - (elapsed * r.speed * self.fps.as_f64()) as i64).max(0);
-            if self.shown >= self.motion && target < self.position {
-                self.seek(target, false);
-            }
-            if target == 0 && self.position == 0 && self.shown >= self.motion {
-                self.reverse = None;
-                self.speed = 0.0;
-            } else {
-                let step = Duration::from_secs_f64(1.0 / (self.fps.as_f64() * r.speed).max(1.0));
-                let t = now + step.min(Duration::from_millis(40));
-                next = Some(next.map_or(t, |n: Instant| n.min(t)));
-            }
+        if target == 0 && self.position == 0 && self.shown >= self.motion {
+            self.reverse = None;
+            self.speed = 0.0;
+            return None;
         }
-        next
+        let step = Duration::from_secs_f64(1.0 / (self.fps.as_f64() * r.speed).max(1.0));
+        Some(now + step.min(Duration::from_millis(40)))
     }
 
     pub fn snap(&self) -> PlayerSnap {

@@ -42,26 +42,28 @@ impl Video {
         }
     }
 
-    /// Renders a new frame if mpv has one (or the target was resized).
-    /// Returns `Some(new)` if it drew, where `new` says whether that was a new
-    /// picture rather than a redraw.
-    pub fn render(&mut self, gl: &glow::Context, frame: &mut eframe::Frame) -> Option<bool> {
-        self.renderer.as_ref()?;
+    /// Draws mpv's picture when it has a frame for us, the target was
+    /// resized, or `present` asks for its current picture again (it then
+    /// redraws that even with nothing new).
+    pub fn render(&mut self, gl: &glow::Context, frame: &mut eframe::Frame, present: bool) {
+        if self.renderer.is_none() {
+            return;
+        }
         let resized = self.ensure_target(gl, frame);
-        let renderer = self.renderer.as_ref()?;
+        let (Some(renderer), Some(target)) = (&self.renderer, &self.target) else {
+            return;
+        };
         // `update` must run whenever mpv asked for it, even if we redraw anyway.
         let update = renderer.update() & MPV_RENDER_UPDATE_FRAME != 0;
-        if !(update || resized && self.has_frame) {
-            return None;
+        if !(update || present || resized && self.has_frame) {
+            return;
         }
-        let new = update && renderer.next_frame_is_new();
         if crate::live::debug() {
-            eprintln!("[gl] render update={update} resized={resized} new={new}");
+            eprintln!("[gl] render update={update} resized={resized} present={present}");
         }
-        let target = self.target.as_ref()?;
         if let Err(e) = renderer.render(target.fbo.0.get(), target.size[0], target.size[1], false) {
             eprintln!("vidcut: mpv render failed: {e}");
-            return None;
+            return;
         }
         self.has_frame = true;
         // SAFETY: plain GL state calls on the thread that owns the context.
@@ -76,7 +78,6 @@ impl Video {
             gl.bind_vertex_array(None);
             gl.use_program(None);
         }
-        Some(new)
     }
 
     /// (Re)creates the target at `want`; returns whether it changed. The

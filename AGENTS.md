@@ -295,6 +295,7 @@ The preview findings and the time-mapping rules are in [docs/decisions/preview.m
   Synchronous `command`/`get_property` there deadlocks against the video output. The mpv update and wakeup callbacks must not call mpv at all.
 - **vsync must stay off** (`GlowConfiguration { vsync: false }`). On GNOME/Wayland with NVIDIA, a vsynced swap blocks forever while the window is hidden.
 - **Players render in `App::logic`, not `App::ui`.** eframe skips `ui` for hidden windows but always calls `logic`.
+- **libmpv waits only 200 ms for the renderer to take a new frame.** Then it keeps the frame as its current picture and finishes the seek anyway, so "a new frame was rendered" doesn't prove a seek is on screen. The session counts a seek as shown only after the renderer presents the player following mpv's restart (docs/decisions/gui.md §4).
 - **mpv's EDL drops leading pictures at segment ends.** Encodes that decode a keyframe before the frames shown just ahead of it lose those frames in the preview when a cut ends there. The live session patches such tails (preview.md §9). Test cuts against fixtures with B-frames and real media, not only small fixtures.
 - **Only the session thread calls mpv's client API.** Seeks while a file is still loading are rejected by mpv; `Player::seek` reloads instead.
 - **File watching:** `notify` reports reads as access events. Ignore them, or a reload re-triggers itself forever.

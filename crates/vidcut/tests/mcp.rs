@@ -12,7 +12,7 @@ use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use vidcut::live::{self, Capture, Origin, PlayerId, WindowChange};
+use vidcut::live::{self, Capture, Origin, PlayerId, Presented, WindowChange};
 use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
 use vidcut_core::model::Settings;
 use vidcut_core::time::Rational;
@@ -23,6 +23,9 @@ const BIN: &str = env!("CARGO_BIN_EXE_vidcut");
 struct NoRenderer;
 
 impl live::Renderer for NoRenderer {
+    fn present(&self, _: PlayerId, done: Presented) {
+        done();
+    }
     fn capture_viewer(&self, _: PlayerId, done: Capture) {
         done(Err(vidcut_core::Error::usage("no renderer in tests")));
     }
