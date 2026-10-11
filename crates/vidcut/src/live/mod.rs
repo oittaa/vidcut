@@ -45,6 +45,7 @@ pub use vidcut_av::thumbs::Image;
 use crate::env::AvEnv;
 use crate::ipc::{self, Instance};
 use crate::paths;
+use crate::threads::Work;
 use player::Player;
 use project::OpenProject;
 use workers::Workers;
@@ -449,21 +450,19 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     };
     let project = config.project;
     let create = config.create;
-    let thread = std::thread::Builder::new()
-        .name("vidcut-session".into())
-        .spawn(move || {
-            if let Some(path) = project
-                && let Err(e) = live.open_project(&path, create)
-            {
-                live.notice(
-                    format!("can't open {}: {}", path.display(), e.message),
-                    true,
-                );
-            }
-            live.register();
-            live.run();
-        })
-        .expect("spawning the session thread");
+    let thread = crate::threads::spawn("vidcut-session", Work::Interactive, move || {
+        if let Some(path) = project
+            && let Err(e) = live.open_project(&path, create)
+        {
+            live.notice(
+                format!("can't open {}: {}", path.display(), e.message),
+                true,
+            );
+        }
+        live.register();
+        live.run();
+    })
+    .expect("spawning the session thread");
     (Handle { tx, shared }, thread)
 }
 
@@ -1225,7 +1224,7 @@ impl Live {
                 until,
                 deadline: limit.map(|l| Instant::now() + l),
             }),
-            Step::Task(task) => self.spawn_task(Job { rev: None, ..job }, task),
+            Step::Task(work, task) => self.spawn_task(Job { rev: None, ..job }, work, task),
             Step::Measure(measure, then) => {
                 let tx = self.tx.clone();
                 // The same flag a closed connection sets. Measuring is the
@@ -1235,21 +1234,18 @@ impl Live {
                     .as_ref()
                     .map(|r| r.cancel.clone())
                     .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
-                let _ = std::thread::Builder::new()
-                    .name("vidcut-measure".into())
-                    .spawn(move || {
-                        // Decoding whole files (Detect Scene Cuts, Ripple
-                        // Delete Silence): everything else comes first.
-                        jobs::background_priority();
-                        let _guard = vidcut_av::cancel::Guard::set(cancel);
-                        let result = measure();
-                        let _ = tx.send(Msg::Measured {
-                            job,
-                            envelope: *then,
-                            result,
-                            encode: None,
-                        });
+                // Decoding whole files (Detect Scene Cuts, Ripple Delete
+                // Silence): a job.
+                let _ = crate::threads::spawn("vidcut-measure", Work::Job, move || {
+                    let _guard = vidcut_av::cancel::Guard::set(cancel);
+                    let result = measure();
+                    let _ = tx.send(Msg::Measured {
+                        job,
+                        envelope: *then,
+                        result,
+                        encode: None,
                     });
+                });
             }
             Step::Encode(encode, then, title) => self.start_encode(job, encode, *then, title),
         }
@@ -1331,48 +1327,44 @@ impl Live {
             self.finish(job, Ok(answer(json!({ "job": id }))));
         }
         let tx = self.tx.clone();
-        let _ = std::thread::Builder::new()
-            .name(format!("vidcut-{id}"))
-            .spawn(move || {
-                jobs::background_priority();
-                let mut last = Instant::now() - Duration::from_secs(1);
-                let mut report =
-                    |i: usize, n: usize, out: &Path, p: vidcut_av::export::Progress| {
-                        if p.frames != p.total && last.elapsed() < Duration::from_millis(100) {
-                            return;
-                        }
-                        last = Instant::now();
-                        let _ = tx.send(Msg::JobProgress {
-                            id: id.clone(),
-                            output: i,
-                            frames: p.frames,
-                            total: p.total,
-                        });
-                        if let Some(ptx) = &progress_tx {
-                            let _ = ptx.send(ReplyEvent::Progress(json!({
-                                "job": id, "output": i, "outputs": n, "path": out,
-                                "frames": p.frames, "total": p.total,
-                                "elapsed": p.elapsed.as_secs_f64(),
-                            })));
-                        }
-                    };
-                let result = crate::session::export_media(
-                    &project,
-                    &project_path,
-                    &params,
-                    &mut crate::session::Hooks {
-                        cancel: &cancel,
-                        progress: &mut report,
-                    },
-                    &mut |outputs| {
-                        let _ = tx.send(Msg::JobPlanned {
-                            id: id.clone(),
-                            outputs,
-                        });
-                    },
-                );
-                let _ = tx.send(Msg::JobDone { id, result });
-            });
+        let _ = crate::threads::spawn(format!("vidcut-{id}"), Work::Job, move || {
+            let mut last = Instant::now() - Duration::from_secs(1);
+            let mut report = |i: usize, n: usize, out: &Path, p: vidcut_av::export::Progress| {
+                if p.frames != p.total && last.elapsed() < Duration::from_millis(100) {
+                    return;
+                }
+                last = Instant::now();
+                let _ = tx.send(Msg::JobProgress {
+                    id: id.clone(),
+                    output: i,
+                    frames: p.frames,
+                    total: p.total,
+                });
+                if let Some(ptx) = &progress_tx {
+                    let _ = ptx.send(ReplyEvent::Progress(json!({
+                        "job": id, "output": i, "outputs": n, "path": out,
+                        "frames": p.frames, "total": p.total,
+                        "elapsed": p.elapsed.as_secs_f64(),
+                    })));
+                }
+            };
+            let result = crate::session::export_media(
+                &project,
+                &project_path,
+                &params,
+                &mut crate::session::Hooks {
+                    cancel: &cancel,
+                    progress: &mut report,
+                },
+                &mut |outputs| {
+                    let _ = tx.send(Msg::JobPlanned {
+                        id: id.clone(),
+                        outputs,
+                    });
+                },
+            );
+            let _ = tx.send(Msg::JobDone { id, result });
+        });
     }
 
     /// Lists a new job, keeping running jobs and the most recent finished
@@ -1411,56 +1403,53 @@ impl Live {
         self.add_job(info, cancel.clone());
         let progress = job.reply.as_ref().map(|r| r.tx.clone());
         let tx = self.tx.clone();
-        let _ = std::thread::Builder::new()
-            .name(format!("vidcut-{id}"))
-            .spawn(move || {
-                jobs::background_priority();
-                let _guard = vidcut_av::cancel::Guard::set(cancel);
-                let _report = {
-                    let (tx, id) = (tx.clone(), id.clone());
-                    let mut last = Instant::now() - Duration::from_secs(1);
-                    // Each proxy file reports its own frames; the job shows
-                    // the one being written.
-                    let mut file: Option<PathBuf> = None;
-                    let mut output = 0;
-                    vidcut_av::progress::Guard::set(Box::new(
-                        move |out: &Path, p: vidcut_av::export::Progress| {
-                            match &file {
-                                Some(f) if f == out => {}
-                                Some(_) => {
-                                    output += 1;
-                                    file = Some(out.to_path_buf());
-                                }
-                                None => file = Some(out.to_path_buf()),
+        let _ = crate::threads::spawn(format!("vidcut-{id}"), Work::Job, move || {
+            let _guard = vidcut_av::cancel::Guard::set(cancel);
+            let _report = {
+                let (tx, id) = (tx.clone(), id.clone());
+                let mut last = Instant::now() - Duration::from_secs(1);
+                // Each proxy file reports its own frames; the job shows
+                // the one being written.
+                let mut file: Option<PathBuf> = None;
+                let mut output = 0;
+                vidcut_av::progress::Guard::set(Box::new(
+                    move |out: &Path, p: vidcut_av::export::Progress| {
+                        match &file {
+                            Some(f) if f == out => {}
+                            Some(_) => {
+                                output += 1;
+                                file = Some(out.to_path_buf());
                             }
-                            if p.frames != p.total && last.elapsed() < Duration::from_millis(100) {
-                                return;
-                            }
-                            last = Instant::now();
-                            let _ = tx.send(Msg::JobProgress {
-                                id: id.clone(),
-                                output,
-                                frames: p.frames,
-                                total: p.total,
-                            });
-                            if let Some(ptx) = &progress {
-                                let _ = ptx.send(ReplyEvent::Progress(json!({
-                                    "job": id, "output": output, "path": out,
-                                    "frames": p.frames, "total": p.total,
-                                    "elapsed": p.elapsed.as_secs_f64(),
-                                })));
-                            }
-                        },
-                    ))
-                };
-                let result = encode();
-                let _ = tx.send(Msg::Measured {
-                    job,
-                    envelope: then,
-                    result,
-                    encode: Some(id),
-                });
+                            None => file = Some(out.to_path_buf()),
+                        }
+                        if p.frames != p.total && last.elapsed() < Duration::from_millis(100) {
+                            return;
+                        }
+                        last = Instant::now();
+                        let _ = tx.send(Msg::JobProgress {
+                            id: id.clone(),
+                            output,
+                            frames: p.frames,
+                            total: p.total,
+                        });
+                        if let Some(ptx) = &progress {
+                            let _ = ptx.send(ReplyEvent::Progress(json!({
+                                "job": id, "output": output, "path": out,
+                                "frames": p.frames, "total": p.total,
+                                "elapsed": p.elapsed.as_secs_f64(),
+                            })));
+                        }
+                    },
+                ))
+            };
+            let result = encode();
+            let _ = tx.send(Msg::Measured {
+                job,
+                envelope: then,
+                result,
+                encode: Some(id),
             });
+        });
     }
 
     fn job_planned(&mut self, id: String, outputs: Vec<(PathBuf, i64)>) {
@@ -1698,17 +1687,15 @@ impl Live {
     }
 
     /// Runs `task` on its own thread; it reports back with `Msg::TaskDone`.
-    fn spawn_task(&mut self, mut job: Job, task: Task) {
+    fn spawn_task(&mut self, mut job: Job, work: Work, task: Task) {
         let tx = self.tx.clone();
         let reply = job.reply.take();
         let progress = reply.as_ref().map(|r| (r.tx.clone(), r.cancel.clone()));
-        let _ = std::thread::Builder::new()
-            .name("vidcut-task".into())
-            .spawn(move || {
-                let result = task(progress);
-                job.reply = reply;
-                let _ = tx.send(Msg::TaskDone { job, result });
-            });
+        let _ = crate::threads::spawn("vidcut-task", work, move || {
+            let result = task(progress);
+            job.reply = reply;
+            let _ = tx.send(Msg::TaskDone { job, result });
+        });
     }
 
     fn dispatch(&mut self, envelope: Envelope, job: &Job) -> Step {
@@ -1725,9 +1712,10 @@ impl Live {
             self.refresh_timeline();
         }
         match request {
-            r if r.is_projectless() => {
-                Step::Task(Box::new(move |_| crate::session::run(None, envelope)))
-            }
+            r if r.is_projectless() => Step::Task(
+                Work::Interactive,
+                Box::new(move |_| crate::session::run(None, envelope)),
+            ),
             Request::ProjectOpen { path, create } => Step::Now(
                 self.open_project(&path, create)
                     .map(|()| self.state_response()),
@@ -1824,11 +1812,14 @@ impl Live {
                         let _ = tx.send(result);
                     })),
                 );
-                Step::Task(Box::new(move |_| match rx.recv() {
-                    Ok(Ok(())) => Ok(answer(json!({ "live": true }))),
-                    Ok(Err(e)) => Err(Error::media(e)),
-                    Err(_) => Err(Error::internal("the mixer thread stopped")),
-                }))
+                Step::Task(
+                    Work::Interactive,
+                    Box::new(move |_| match rx.recv() {
+                        Ok(Ok(())) => Ok(answer(json!({ "live": true }))),
+                        Ok(Err(e)) => Err(Error::media(e)),
+                        Err(_) => Err(Error::internal("the mixer thread stopped")),
+                    }),
+                )
             }
             Request::PlayerMute { mute } => {
                 let mute = mute.unwrap_or(!self.players[TIMELINE].muted());
@@ -2025,47 +2016,48 @@ impl Live {
             .project()
             .time_context(Some(self.players[TIMELINE].position));
         let envelope = bind_playhead(envelope, &context);
-        // Measurements decode whole files: everything else comes first, as
-        // for jobs. Frames and plans are quick, and someone waits for them.
-        let background = matches!(
-            envelope.request,
+        // Measurements decode whole files: jobs. Frames and plans are quick,
+        // and someone waits for them.
+        let work = match envelope.request {
             Request::AnalyzeSilence { .. }
-                | Request::AnalyzeScenes { .. }
-                | Request::AnalyzeBlack { .. }
-                | Request::AnalyzeLoudness { .. }
-                | Request::StoryboardRender { .. }
-        );
-        Step::Task(Box::new(move |progress| {
-            if background {
-                jobs::background_priority();
-            }
-            let cancel_flag = progress
-                .as_ref()
-                .map(|(_, c)| c.clone())
-                .unwrap_or_default();
-            let mut last = Instant::now() - Duration::from_secs(1);
-            let mut report = |i: usize, n: usize, out: &Path, p: vidcut_av::export::Progress| {
-                if let Some((tx, _)) = &progress
-                    && (p.frames == p.total || last.elapsed() >= Duration::from_millis(200))
-                {
-                    last = Instant::now();
-                    let _ = tx.send(ReplyEvent::Progress(json!({
-                        "output": i, "outputs": n, "path": out,
-                        "frames": p.frames, "total": p.total,
-                        "elapsed": p.elapsed.as_secs_f64(),
-                    })));
-                }
-            };
-            crate::session::render(
-                &project,
-                &path,
-                &envelope,
-                &mut crate::session::Hooks {
-                    cancel: &cancel_flag,
-                    progress: &mut report,
-                },
-            )
-        }))
+            | Request::AnalyzeScenes { .. }
+            | Request::AnalyzeBlack { .. }
+            | Request::AnalyzeLoudness { .. }
+            | Request::StoryboardRender { .. } => Work::Job,
+            _ => Work::Interactive,
+        };
+        Step::Task(
+            work,
+            Box::new(move |progress| {
+                let cancel_flag = progress
+                    .as_ref()
+                    .map(|(_, c)| c.clone())
+                    .unwrap_or_default();
+                let mut last = Instant::now() - Duration::from_secs(1);
+                let mut report =
+                    |i: usize, n: usize, out: &Path, p: vidcut_av::export::Progress| {
+                        if let Some((tx, _)) = &progress
+                            && (p.frames == p.total || last.elapsed() >= Duration::from_millis(200))
+                        {
+                            last = Instant::now();
+                            let _ = tx.send(ReplyEvent::Progress(json!({
+                                "output": i, "outputs": n, "path": out,
+                                "frames": p.frames, "total": p.total,
+                                "elapsed": p.elapsed.as_secs_f64(),
+                            })));
+                        }
+                    };
+                crate::session::render(
+                    &project,
+                    &path,
+                    &envelope,
+                    &mut crate::session::Hooks {
+                        cancel: &cancel_flag,
+                        progress: &mut report,
+                    },
+                )
+            }),
+        )
     }
 
     /// Project requests: edits and queries through the editor.
@@ -2981,8 +2973,10 @@ impl Live {
             image
         });
         let state = self.state_response();
+        // A screenshot someone waits for.
         self.spawn_task(
             w.job,
+            Work::Interactive,
             Box::new(move |_| {
                 let image = result?;
                 let png =
@@ -3148,7 +3142,8 @@ type Task =
 enum Step {
     Now(Result<Response>),
     Wait(Until),
-    Task(Task),
+    /// A task on a thread of its own, at the priority its work calls for.
+    Task(Work, Task),
     /// Measure media (or unpack a bundle's) on a worker, then run the
     /// request here (docs/decisions/agents.md §3).
     Measure(Measure, Box<Envelope>),

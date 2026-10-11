@@ -158,14 +158,20 @@ pub fn serve(project: Option<PathBuf>, options: RouteOptions) -> Result<()> {
                 // at once finds it.
                 let cancel = Arc::new(AtomicBool::new(false));
                 state.lock_running().insert(id.to_string(), cancel.clone());
-                calls.push(std::thread::spawn(move || {
-                    let result = state.call(&params, &cancel, &out);
-                    state.lock_running().remove(&id.to_string());
-                    // A cancelled request gets no response (MCP: cancellation).
-                    if !cancel.load(Ordering::Relaxed) {
-                        out.result(&id, result);
-                    }
-                }));
+                let call = crate::threads::spawn(
+                    "vidcut-mcp-call",
+                    crate::threads::Work::Interactive,
+                    move || {
+                        let result = state.call(&params, &cancel, &out);
+                        state.lock_running().remove(&id.to_string());
+                        // A cancelled request gets no response (MCP: cancellation).
+                        if !cancel.load(Ordering::Relaxed) {
+                            out.result(&id, result);
+                        }
+                    },
+                );
+                // As `std::thread::spawn` would, when no thread can start.
+                calls.push(call.expect("starting a thread"));
                 calls.retain(|c| !c.is_finished());
             }
             _ => out.error(&id, -32601, &format!("method not found: {method}")),

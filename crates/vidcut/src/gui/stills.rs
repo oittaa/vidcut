@@ -49,9 +49,11 @@ impl Stills {
     pub fn new(ctx: egui::Context) -> Self {
         let (jobs, rx) = channel::<(Key, Still)>();
         let (tx, done) = channel();
-        let _ = std::thread::Builder::new()
-            .name("vidcut-stills".into())
-            .spawn(move || {
+        // The Trim Editor's frames: someone waits for them.
+        let _ = crate::threads::spawn(
+            "vidcut-stills",
+            crate::threads::Work::Interactive,
+            move || {
                 while let Ok((key, s)) = rx.recv() {
                     let r = vidcut_av::export::still::rgba(&s.piece, s.fps, s.width, s.height)
                         .map_err(|e| e.to_string());
@@ -60,7 +62,8 @@ impl Stills {
                     }
                     ctx.request_repaint();
                 }
-            });
+            },
+        );
         Self {
             jobs,
             done,

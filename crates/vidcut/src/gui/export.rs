@@ -37,7 +37,7 @@ impl Ask {
         let slot = Arc::new(Mutex::new(None));
         let (out, live, ctx) = (slot.clone(), live.clone(), ctx.clone());
         let envelope = Envelope::from_json(json!({ "method": method, "params": params }));
-        std::thread::spawn(move || {
+        let _ = crate::threads::spawn("vidcut-ask", crate::threads::Work::Interactive, move || {
             let result = envelope
                 .map_err(Error::internal)
                 .and_then(|e| live.call(e, Origin::Gui { drag: false }, None, &mut |_| true));
@@ -126,11 +126,15 @@ impl Picked {
     fn ask(ctx: &egui::Context, f: impl FnOnce() -> Option<PathBuf> + Send + 'static) -> Self {
         let slot = Arc::new(Mutex::new(None));
         let (out, ctx) = (slot.clone(), ctx.clone());
-        std::thread::spawn(move || {
-            let path = f();
-            *out.lock().unwrap_or_else(|e| e.into_inner()) = Some(path);
-            ctx.request_repaint();
-        });
+        let _ = crate::threads::spawn(
+            "vidcut-file-dialog",
+            crate::threads::Work::Interactive,
+            move || {
+                let path = f();
+                *out.lock().unwrap_or_else(|e| e.into_inner()) = Some(path);
+                ctx.request_repaint();
+            },
+        );
         Self(slot)
     }
 

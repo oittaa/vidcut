@@ -38,10 +38,12 @@ impl Mixer {
         }
         let api = api().ok()?;
         let (tx, rx) = channel();
-        std::thread::Builder::new()
-            .name("vidcut-mixer".into())
-            .spawn(move || run(api, rx))
-            .ok()?;
+        crate::threads::spawn(
+            "vidcut-mixer",
+            crate::threads::Work::Interactive,
+            move || run(api, rx),
+        )
+        .ok()?;
         Some(Self { tx })
     }
 

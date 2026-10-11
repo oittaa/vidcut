@@ -53,31 +53,31 @@ pub fn start_limited(path: &Path, handler: Arc<Handler>, limits: Limits) -> std:
     let _ = std::fs::remove_file(path);
     let listener = UnixListener::bind(path)?;
     let open = Arc::new(AtomicUsize::new(0));
-    std::thread::Builder::new()
-        .name("vidcut-ipc".into())
-        .spawn(move || {
-            for stream in listener.incoming() {
-                let Ok(mut stream) = stream else { continue };
-                // Only this thread adds connections, so the count can't
-                // pass the limit between the check and the increment.
-                if open.load(Ordering::SeqCst) >= limits.connections {
-                    let e = Error::usage(format!(
-                        "this vidcut GUI is serving {} connections already; try again later",
-                        limits.connections
-                    ));
-                    let _ = send(&mut stream, &failure(Value::Null, &e));
-                    continue;
-                }
-                let slot = Slot::take(&open);
-                let handler = handler.clone();
-                let _ = std::thread::Builder::new()
-                    .name("vidcut-ipc-conn".into())
-                    .spawn(move || {
-                        let _slot = slot;
-                        serve(stream, &*handler, limits.line);
-                    });
+    crate::threads::spawn("vidcut-ipc", crate::threads::Work::Interactive, move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            // Only this thread adds connections, so the count can't
+            // pass the limit between the check and the increment.
+            if open.load(Ordering::SeqCst) >= limits.connections {
+                let e = Error::usage(format!(
+                    "this vidcut GUI is serving {} connections already; try again later",
+                    limits.connections
+                ));
+                let _ = send(&mut stream, &failure(Value::Null, &e));
+                continue;
             }
-        })?;
+            let slot = Slot::take(&open);
+            let handler = handler.clone();
+            let _ = crate::threads::spawn(
+                "vidcut-ipc-conn",
+                crate::threads::Work::Interactive,
+                move || {
+                    let _slot = slot;
+                    serve(stream, &*handler, limits.line);
+                },
+            );
+        }
+    })?;
     Ok(())
 }
 

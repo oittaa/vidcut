@@ -200,18 +200,22 @@ impl Workspace {
             self.import.picked.clone(),
             self.import.ctx.clone(),
         );
-        std::thread::spawn(move || {
-            let filters = filters();
-            let filters: Vec<(&str, &[&str])> = filters
-                .iter()
-                .map(|(name, types)| (*name, types.as_slice()))
-                .collect();
-            let files = dialogs.pick_files("Import Media", &filters);
-            *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some((files, bin));
-            if let Some(ctx) = ctx {
-                ctx.request_repaint();
-            }
-        });
+        let _ = crate::threads::spawn(
+            "vidcut-import-dialog",
+            crate::threads::Work::Interactive,
+            move || {
+                let filters = filters();
+                let filters: Vec<(&str, &[&str])> = filters
+                    .iter()
+                    .map(|(name, types)| (*name, types.as_slice()))
+                    .collect();
+                let files = dialogs.pick_files("Import Media", &filters);
+                *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some((files, bin));
+                if let Some(ctx) = ctx {
+                    ctx.request_repaint();
+                }
+            },
+        );
     }
 
     /// The import's answer, and the window asking about numbered images.

@@ -16,9 +16,11 @@ impl Workers {
         let rx = Arc::new(Mutex::new(rx));
         for i in 0..threads.max(1) {
             let rx = rx.clone();
-            let _ = std::thread::Builder::new()
-                .name(format!("vidcut-worker-{i}"))
-                .spawn(move || {
+            // Thumbnails, waveforms and the preview's helper files: jobs.
+            let _ = crate::threads::spawn(
+                format!("vidcut-worker-{i}"),
+                crate::threads::Work::Job,
+                move || {
                     loop {
                         let job = match rx.lock() {
                             Ok(r) => r.recv(),
@@ -29,7 +31,8 @@ impl Workers {
                             Err(_) => return,
                         }
                     }
-                });
+                },
+            );
         }
         Self { tx }
     }

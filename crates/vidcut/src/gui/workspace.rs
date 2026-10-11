@@ -666,20 +666,24 @@ impl Workspace {
     /// Asks for a project file (on a helper thread: portal dialogs block).
     fn pick_project(&self, new: bool) {
         let live = self.live.clone();
-        std::thread::spawn(move || {
-            let dialog = rfd::FileDialog::new().add_filter("vidcut project", &["vidcut"]);
-            let path = if new {
-                dialog.set_file_name("untitled.vidcut").save_file()
-            } else {
-                dialog.pick_file()
-            };
-            if let Some(mut path) = path {
-                if new && path.extension().is_none() {
-                    path.set_extension("vidcut");
+        let _ = crate::threads::spawn(
+            "vidcut-project-dialog",
+            crate::threads::Work::Interactive,
+            move || {
+                let dialog = rfd::FileDialog::new().add_filter("vidcut project", &["vidcut"]);
+                let path = if new {
+                    dialog.set_file_name("untitled.vidcut").save_file()
+                } else {
+                    dialog.pick_file()
+                };
+                if let Some(mut path) = path {
+                    if new && path.extension().is_none() {
+                        path.set_extension("vidcut");
+                    }
+                    live.request("project.open", json!({ "path": path, "create": new }));
                 }
-                live.request("project.open", json!({ "path": path, "create": new }));
-            }
-        });
+            },
+        );
     }
 
     // ---------------------------------------------------------------- keys
