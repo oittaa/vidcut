@@ -7,9 +7,9 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use eframe::egui::vec2;
+use eframe::egui::{self, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::{Value, json};
 use vidcut::gui::workspace::Workspace;
 use vidcut::live::{self, Capture, Filmstrip, Origin, PlayerId, Presented, WindowChange};
@@ -167,9 +167,6 @@ fn thumbnails_come_back_from_the_disk_cache_until_it_is_turned_off() {
     }
     // A new window is placed in the frame after it is measured.
     harness.step();
-    harness.get_by_label("Keep thumbnails on disk").click();
-    // The request runs as a task: the cache goes while it runs, and the
-    // command log has it once the task has finished.
     let sets = |h: &live::Handle| -> Vec<Value> {
         let log = call(h, "gui.log", json!({ "limit": 1000 })).result;
         log.as_array()
@@ -179,20 +176,50 @@ fn thumbnails_come_back_from_the_disk_cache_until_it_is_turned_off() {
             .cloned()
             .collect()
     };
+    // The size limit is a number typed in: Enter sends it, once.
+    let field = harness.get_by_label("Size limit");
+    field.focus();
+    harness.step();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.get_by_label("Size limit").type_text("256");
+    harness.key_press(egui::Key::Enter);
     let started = Instant::now();
-    while cache.join("vidcut/thumbs").exists() || sets(&h).is_empty() {
+    while sets(&h).is_empty() {
+        assert!(started.elapsed() < Duration::from_secs(30), "no size sent");
+        std::thread::sleep(Duration::from_millis(5));
+        harness.step();
+    }
+    assert_eq!(
+        sets(&h)[0]["params"],
+        json!({ "thumbnails": { "cache_limit_mb": 256 } })
+    );
+    // Wait for the window to take the answer before the next change.
+    while harness
+        .query_by_label("Keep thumbnails on disk")
+        .is_none_or(|n| n.accesskit_node().is_disabled())
+    {
+        assert!(started.elapsed() < Duration::from_secs(30), "no answer");
+        std::thread::sleep(Duration::from_millis(5));
+        harness.step();
+    }
+    harness.get_by_label("Keep thumbnails on disk").click();
+    // The request runs as a task: the cache goes while it runs, and the
+    // command log has it once the task has finished.
+    let started = Instant::now();
+    while cache.join("vidcut/thumbs").exists() || sets(&h).len() < 2 {
         assert!(started.elapsed() < Duration::from_secs(30), "cache kept");
         std::thread::sleep(Duration::from_millis(5));
         harness.step();
     }
     let sets = sets(&h);
-    assert_eq!(sets.len(), 1, "{sets:#?}");
+    assert_eq!(sets.len(), 2, "{sets:#?}");
     assert_eq!(
-        sets[0]["params"],
+        sets[1]["params"],
         json!({ "thumbnails": { "disk_cache": false } })
     );
     let saved = std::fs::read_to_string(dir.join("config/vidcut/preferences.toml")).unwrap();
     assert!(saved.contains("disk_cache = false"), "{saved}");
+    assert!(saved.contains("cache_limit_mb = 256"), "{saved}");
 
     drop(harness);
     h.shutdown();

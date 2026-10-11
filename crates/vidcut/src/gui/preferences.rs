@@ -17,9 +17,12 @@ pub(super) struct PreferencesUi {
     /// The latest answer (`preferences.get`'s result).
     state: Option<Value>,
     error: Option<String>,
-    /// The thumbnail cache limit being edited (MB).
-    limit: u64,
+    /// The thumbnail cache limit as typed (MB).
+    limit: String,
 }
+
+/// The thumbnail cache limit's range, in MB.
+const LIMIT_MB: std::ops::RangeInclusive<u64> = 1..=1_000_000;
 
 impl Workspace {
     pub(super) fn open_preferences(&mut self, ctx: &egui::Context) {
@@ -38,7 +41,8 @@ impl Workspace {
                 Ok(r) => {
                     ui_state.limit = r.result["preferences"]["thumbnails"]["cache_limit_mb"]
                         .as_u64()
-                        .unwrap_or(1);
+                        .unwrap_or(1)
+                        .to_string();
                     ui_state.state = Some(r.result);
                     ui_state.error = None;
                 }
@@ -84,21 +88,46 @@ impl Workspace {
                             patch = Some(json!({ "thumbnails": { "disk_cache": disk } }));
                         }
                         ui.end_row();
-                        ui.label("Size limit");
+                        let label = ui.label("Size limit");
+                        // Typed, and sent on Enter or when the field loses focus.
+                        let saved = thumbs["cache_limit_mb"].as_u64();
                         let r = ui
-                            .add_enabled(
-                                !busy && disk,
-                                egui::DragValue::new(&mut ui_state.limit)
-                                    .range(1..=1_000_000)
-                                    .speed(4.0)
-                                    .suffix(" MB"),
-                            )
-                            .on_hover_text("Above it, the least recently used thumbnails go first");
-                        let done = r.drag_stopped() || r.lost_focus();
-                        if done && Some(ui_state.limit) != thumbs["cache_limit_mb"].as_u64() {
-                            patch = Some(json!({
-                                "thumbnails": { "cache_limit_mb": ui_state.limit }
-                            }));
+                            .horizontal(|ui| {
+                                let r = ui
+                                    .add_enabled(
+                                        !busy && disk,
+                                        egui::TextEdit::singleline(&mut ui_state.limit)
+                                            .desired_width(80.0),
+                                    )
+                                    .labelled_by(label.id)
+                                    .on_hover_text(
+                                        "Above it, the least recently used thumbnails go first",
+                                    );
+                                ui.label("MB");
+                                r
+                            })
+                            .inner;
+                        if r.changed() {
+                            ui_state.limit.retain(|c| c.is_ascii_digit());
+                        }
+                        if r.lost_focus() {
+                            match ui_state.limit.parse::<u64>() {
+                                Ok(mb) if LIMIT_MB.contains(&mb) => {
+                                    if Some(mb) != saved {
+                                        patch = Some(json!({
+                                            "thumbnails": { "cache_limit_mb": mb }
+                                        }));
+                                    }
+                                }
+                                _ => {
+                                    ui_state.error = Some(format!(
+                                        "The size limit is {} to {} MB",
+                                        LIMIT_MB.start(),
+                                        LIMIT_MB.end()
+                                    ));
+                                    ui_state.limit = saved.unwrap_or(1).to_string();
+                                }
+                            }
                         }
                         ui.end_row();
                         ui.label("");
