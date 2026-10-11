@@ -8,7 +8,11 @@
 //!   clip's audio range, so J/L cuts show up as audio edits offset from the
 //!   video edits, which is what other editors expect.
 //! - Clips reference their media by `file://` URL. Available ranges start at
-//!   0, and all times are frames at the project rate.
+//!   0. Times are frames at the project rate, except an image sequence's
+//!   available range: that counts its pictures at the sequence's own rate.
+//!   OTIO turns the range into an image count with `duration.to_frames(rate)`
+//!   and truncates, so a project-rate length is a different number of
+//!   pictures. A still has no available range.
 //! - Timeline markers go on the top-level stack.
 //! - Details OTIO has no field for (clip gain, mute and audio stream, track
 //!   settings, marker colors, the In/Out marks) are kept under
@@ -140,12 +144,18 @@ pub fn export(p: &Project, name: &str, span: Option<(i64, i64)>) -> Result<Value
     if b <= a {
         return Err(Error::invalid("nothing to export: the range is empty"));
     }
-    // A file, an image sequence (OTIO's own reference for one), or a still,
-    // which has no range of its own: its clips make it as long as they are.
+    // A file, an image sequence (OTIO's own reference for one), or a still.
+    // A still has no range of its own: its clips make it as long as they are.
     let reference = |m: &crate::model::Media| match (&m.sequence, &m.info.video) {
         (Some(s), Some(v)) => {
             let (prefix, padding, suffix) = s.parts();
             let dir = m.path.parent().unwrap_or(std::path::Path::new("/"));
+            // The reference's rate is the sequence fps. OTIO counts images
+            // with `available_range.duration.to_frames(rate)` and truncates,
+            // so the range is the picture count at that rate. The timeline
+            // length (`media_frames`) is frames at the project rate, and
+            // those two counts differ whenever the rates do.
+            let sequence_rate = v.fps.as_f64();
             json!({
                 "OTIO_SCHEMA": "ImageSequenceReference.1",
                 "name": m.name,
@@ -154,10 +164,10 @@ pub fn export(p: &Project, name: &str, span: Option<(i64, i64)>) -> Result<Value
                 "name_suffix": suffix,
                 "start_frame": s.first,
                 "frame_step": 1,
-                "rate": v.fps.as_f64(),
+                "rate": sequence_rate,
                 "frame_zero_padding": padding,
                 "missing_frame_policy": "error",
-                "available_range": range(0, p.media_frames(m), rate),
+                "available_range": range(0, s.count as i64, sequence_rate),
                 "available_image_bounds": null,
                 "metadata": {},
             })
