@@ -129,10 +129,10 @@ pub fn run_with(
         _ => {
             let store = open(project)?;
             if envelope.request.is_mutation() {
-                let (r, history_error) =
+                let (mut r, history_error) =
                     store.transact(|editor| editor.apply(envelope, &AvEnv, None))?;
                 if let Some(e) = history_error {
-                    eprintln!("vidcut: warning: {}", history_unsaved(&e));
+                    r.warnings.push(history_unsaved(&e));
                 }
                 r
             } else {
@@ -291,6 +291,7 @@ fn answer(result: Value) -> Response {
         result,
         dry_run: false,
         via: String::new(),
+        warnings: Vec::new(),
     }
 }
 

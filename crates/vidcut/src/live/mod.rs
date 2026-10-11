@@ -1785,9 +1785,13 @@ impl Live {
             return Err(no_project());
         };
         let request = envelope.request.clone();
-        let (result, changed) = open.apply(envelope, &AvEnv, Some(playhead));
+        let (mut result, changed) = open.apply(envelope, &AvEnv, Some(playhead));
         if let Some(e) = open.history_error.take() {
-            self.notice(crate::session::history_unsaved(&e), true);
+            let warning = crate::session::history_unsaved(&e);
+            self.notice(warning.clone(), true);
+            if let Ok(r) = result.as_mut() {
+                r.warnings.push(warning);
+            }
         }
         if changed
             && let Request::BinsRename { path, to } = &request
@@ -2797,6 +2801,7 @@ fn answer(result: Value) -> Response {
         result,
         dry_run: false,
         via: String::new(),
+        warnings: Vec::new(),
     }
 }
 
