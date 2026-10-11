@@ -1577,10 +1577,43 @@ impl Live {
             self.notice(format!("{}: {}", job.method, e.message), true);
         }
         self.dirty = true;
+        self.tool_notice(&job, &result);
         self.auto_proxies(&job, &result);
         if let Some(r) = job.reply {
             self.answers.push((r, result));
         }
+    }
+
+    /// What an automatic tool started from the GUI did, in the status bar:
+    /// it may find nothing, and then nothing on screen changes.
+    fn tool_notice(&mut self, job: &Job, result: &Result<Response>) {
+        let Ok(r) = result else {
+            return;
+        };
+        if !matches!(job.origin, Origin::Gui { .. }) || job.dry_run {
+            return;
+        }
+        let count = |key: &str| r.result[key].as_array().map_or(0, Vec::len);
+        let text = match job.method.as_str() {
+            "edit.detect_scene_cuts" => match count("cuts") {
+                0 => "Detect Scene Cuts: no shot changes in the selected clips".to_string(),
+                1 => "Detect Scene Cuts: split at 1 shot change".to_string(),
+                n => format!("Detect Scene Cuts: split at {n} shot changes"),
+            },
+            "edit.ripple_delete_silence" => match count("removed") {
+                0 => "Ripple Delete Silence: no silences in the selected clips".to_string(),
+                n => {
+                    let secs = r.result["frames"].as_f64().unwrap_or(0.0)
+                        / self
+                            .project
+                            .as_ref()
+                            .map_or(1.0, |p| p.project().settings.fps.as_f64());
+                    format!("Ripple Delete Silence: cut {n} silence(s), {secs:.1} s")
+                }
+            },
+            _ => return,
+        };
+        self.notice(text, false);
     }
 
     /// While the project plays proxies, media the automatic rules pick get
