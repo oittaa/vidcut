@@ -60,7 +60,7 @@ enum Outcome {
 
 pub struct Stills {
     jobs: Sender<Job>,
-    done: Receiver<(Key, Outcome)>,
+    done: Receiver<(Key, usize, Outcome)>,
     cache: HashMap<Key, State>,
     /// The picture each cell showed last, kept while its next one renders.
     shown: Vec<Option<egui::TextureHandle>>,
@@ -103,7 +103,7 @@ impl Stills {
                     queue.extend(rx.try_iter());
                     let (mut newest, outdated) = newest_per_cell(std::mem::take(&mut queue));
                     for job in outdated {
-                        if tx.send((job.key, Outcome::Skipped)).is_err() {
+                        if tx.send((job.key, job.cell, Outcome::Skipped)).is_err() {
                             return;
                         }
                     }
@@ -112,7 +112,7 @@ impl Stills {
                     let s = &job.still;
                     let r = vidcut_av::export::still::rgba(&s.piece, s.fps, s.width, s.height)
                         .map_err(|e| e.to_string());
-                    if tx.send((job.key, Outcome::Rendered(r))).is_err() {
+                    if tx.send((job.key, job.cell, Outcome::Rendered(r))).is_err() {
                         return;
                     }
                     ctx.request_repaint();
@@ -128,23 +128,35 @@ impl Stills {
     }
 
     /// The picture for `cell`: the still's texture, rendering it in the
-    /// background if needed, and until then the cell's last picture.
+    /// background if needed, and until then the newest picture rendered for
+    /// the cell (a running trim moves on before each frame is ready).
     pub fn get(
         &mut self,
         ctx: &egui::Context,
         cell: usize,
         still: &Still,
     ) -> Option<egui::TextureId> {
-        while let Ok((key, outcome)) = self.done.try_recv() {
+        if self.shown.len() <= cell {
+            self.shown.resize(cell + 1, None);
+        }
+        while let Ok((key, done_cell, outcome)) = self.done.try_recv() {
             let state = match outcome {
-                Outcome::Rendered(Ok(img)) => State::Ready(ctx.load_texture(
-                    format!("still-{}", self.cache.len()),
-                    egui::ColorImage::from_rgba_unmultiplied(
-                        [img.width as usize, img.height as usize],
-                        &img.rgba,
-                    ),
-                    egui::TextureOptions::LINEAR,
-                )),
+                Outcome::Rendered(Ok(img)) => {
+                    let texture = ctx.load_texture(
+                        format!("still-{}", self.cache.len()),
+                        egui::ColorImage::from_rgba_unmultiplied(
+                            [img.width as usize, img.height as usize],
+                            &img.rgba,
+                        ),
+                        egui::TextureOptions::LINEAR,
+                    );
+                    // Frames render in the order each cell asked for them.
+                    if done_cell >= self.shown.len() {
+                        self.shown.resize(done_cell + 1, None);
+                    }
+                    self.shown[done_cell] = Some(texture.clone());
+                    State::Ready(texture)
+                }
                 Outcome::Rendered(Err(_)) => State::Failed,
                 // Asked for again, it renders then.
                 Outcome::Skipped => {
@@ -153,9 +165,6 @@ impl Stills {
                 }
             };
             self.cache.insert(key, state);
-        }
-        if self.shown.len() <= cell {
-            self.shown.resize(cell + 1, None);
         }
         let key = still.key();
         match self.cache.get(&key) {
