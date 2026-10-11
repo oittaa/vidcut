@@ -478,8 +478,55 @@ impl Workspace {
                         Color32::from_rgb(255, 210, 60),
                     );
                 }
+                // The slip handle shows on the clip under the pointer, and
+                // lights up while it can be grabbed.
+                if let Hit::Clip(id) | Hit::Slip(id) = &what
+                    && let Some(row) = track.as_deref().and_then(|t| rows.get(t))
+                    && let Some(c) = p.clip(id)
+                    && let Some(handle) =
+                        geometry::slip_handle(&row.rect, scale.xf(c.start), scale.xf(c.end()))
+                {
+                    let grabbed = matches!(what, Hit::Slip(_));
+                    let (fill, ink) = if grabbed {
+                        (Color32::from_rgb(255, 210, 60), Color32::BLACK)
+                    } else {
+                        (Color32::from_black_alpha(150), Color32::WHITE)
+                    };
+                    let handle = handle.shrink2(vec2(1.0, 2.0));
+                    ui.painter().rect_filled(handle, 3.0, fill);
+                    ui.painter().text(
+                        handle.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "↔",
+                        egui::FontId::proportional(11.0),
+                        ink,
+                    );
+                }
+                // The edge or cut a drag would move lights up, and the pointer
+                // says which: an arrow at the clip edge being trimmed, a column
+                // arrow on a cut that rolls.
+                let lit = match &what {
+                    Hit::Edge(id, edge) => p.clip(id).map(|c| match edge {
+                        Edge::Head => scale.xf(c.start)..=scale.xf(c.start) + 3.0,
+                        Edge::Tail => scale.xf(c.end()) - 3.0..=scale.xf(c.end()),
+                    }),
+                    Hit::Roll { outgoing, .. } => p
+                        .clip(outgoing)
+                        .map(|c| scale.xf(c.end()) - 2.0..=scale.xf(c.end()) + 2.0),
+                    _ => None,
+                };
+                if let Some(xs) = lit
+                    && let Some(row) = track.as_deref().and_then(|t| rows.get(t))
+                {
+                    ui.painter().rect_filled(
+                        Rect::from_x_y_ranges(xs, row.rect.rect.y_range()),
+                        1.0,
+                        Color32::from_rgb(255, 210, 60),
+                    );
+                }
                 let icon = match what {
-                    Hit::Edge(..) => Some(egui::CursorIcon::ResizeHorizontal),
+                    Hit::Edge(_, Edge::Head) => Some(egui::CursorIcon::ResizeWest),
+                    Hit::Edge(_, Edge::Tail) => Some(egui::CursorIcon::ResizeEast),
                     Hit::Roll { .. } => Some(egui::CursorIcon::ResizeColumn),
                     Hit::AudioEdit { .. } => Some(egui::CursorIcon::ResizeColumn),
                     Hit::Slip(_) => Some(egui::CursorIcon::Grab),

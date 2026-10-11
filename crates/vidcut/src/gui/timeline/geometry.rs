@@ -266,6 +266,27 @@ fn adjacent(a: &Clip, b: &Clip) -> bool {
 }
 
 /// What is under `pos` on `track`.
+/// Where the slip handle of a clip drawn from `x0` to `x1` is: at its top
+/// center, over the upper part of the picture; none on a clip too narrow
+/// to grab it.
+pub fn slip_handle(tr: &TrackRect, x0: f32, x1: f32) -> Option<Rect> {
+    if x1 - x0 < 48.0 {
+        return None;
+    }
+    let banded = tr.audio_top > tr.rect.top();
+    let band_bottom = if banded {
+        tr.audio_top
+    } else {
+        tr.rect.bottom()
+    };
+    let bottom = tr.rect.top() + (band_bottom - tr.rect.top()) * 0.45;
+    let center = (x0 + x1) / 2.0;
+    Some(Rect::from_x_y_ranges(
+        center - SLIP..=center + SLIP,
+        tr.rect.top()..=bottom,
+    ))
+}
+
 pub fn hit(track: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Hit {
     if !tr.rect.contains(pos) {
         return Hit::Empty;
@@ -345,14 +366,7 @@ pub fn hit(track: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Hit {
         if pos.x < x0 || pos.x >= x1 {
             continue;
         }
-        let center = (x0 + x1) / 2.0;
-        let band_bottom = if banded {
-            tr.audio_top
-        } else {
-            tr.rect.bottom()
-        };
-        let handle_bottom = tr.rect.top() + (band_bottom - tr.rect.top()) * 0.45;
-        if x1 - x0 >= 48.0 && (pos.x - center).abs() <= SLIP && pos.y <= handle_bottom {
+        if slip_handle(tr, x0, x1).is_some_and(|h| h.contains(pos)) {
             return Hit::Slip(c.id.clone());
         }
         return Hit::Clip(c.id.clone());
