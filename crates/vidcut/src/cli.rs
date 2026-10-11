@@ -1122,7 +1122,10 @@ impl Cli {
                             "still_duration": s.still_duration }),
                 )?
             }
-            Command::Probe { file } => req("probe", json!({ "path": file }))?,
+            Command::Probe { file } => req(
+                "probe",
+                json!({ "path": absolute(std::slice::from_ref(file))?[0] }),
+            )?,
             Command::Media(m) => match m {
                 MediaCmd::Add {
                     files,
@@ -1642,5 +1645,38 @@ impl Cli {
             if_rev: self.if_rev,
             dry_run: self.dry_run,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use clap::Parser;
+    use vidcut_core::Request;
+
+    use super::{Action, Cli};
+
+    fn probe(file: &str) -> super::Result<PathBuf> {
+        let cli = Cli::try_parse_from(["vidcut", "probe", file]).unwrap();
+        let Some(Action::Run(envelope)) = cli.action()? else {
+            panic!("probe runs a request");
+        };
+        match envelope.request {
+            Request::Probe { path } => Ok(path),
+            other => panic!("probe built {other:?}"),
+        }
+    }
+
+    /// `vidcut probe` names its file absolutely, the same as every other path
+    /// the CLI sends. `apply` and MCP already do this through `paths_mut`.
+    #[test]
+    fn probe_makes_its_path_absolute() {
+        let cwd = std::env::current_dir().unwrap();
+        assert_eq!(probe("clip.mp4").unwrap(), cwd.join("clip.mp4"));
+        assert_eq!(
+            probe("/srv/clip.mp4").unwrap(),
+            PathBuf::from("/srv/clip.mp4")
+        );
     }
 }
