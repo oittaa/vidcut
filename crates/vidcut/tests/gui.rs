@@ -5,6 +5,10 @@
 //! - after `seek`, the viewer screenshot shows exactly the frame `vidcut frame`
 //!   renders headless;
 //! - live control keeps working while the window is minimized.
+//!
+//! A failed run keeps its temp dir (it says which): the screenshots, each
+//! player's mpv log (`VIDCUT_MPV_LOG_DIR`) and the GUI's stderr with
+//! `VIDCUT_DEBUG_PLAYER` traces.
 #![cfg(feature = "gui-tests")]
 
 use std::path::{Path, PathBuf};
@@ -95,6 +99,12 @@ impl Drop for Gui {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        if std::thread::panicking() {
+            eprintln!(
+                "kept {}: screenshots, mpv logs, the GUI's stderr",
+                self.dir.display()
+            );
+        }
     }
 }
 
@@ -141,12 +151,16 @@ fn gui_acceptance() {
     headless(&["edit", "append", "m1", "--range", "0f..90f"]);
     headless(&["edit", "append", "m1", "--range", "200f..260f"]);
 
+    // Evidence for a failed run, kept in `dir`.
+    let stderr = std::fs::File::create(dir.join("stderr.log")).unwrap();
     let child = Command::new(BIN)
         .arg("-p")
         .arg(&project)
         .env("XDG_STATE_HOME", dir.join("state"))
+        .env("VIDCUT_MPV_LOG_DIR", &dir)
+        .env("VIDCUT_DEBUG_PLAYER", "1")
         .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
+        .stderr(stderr)
         .spawn()
         .unwrap();
     let pid = child.id();
@@ -165,6 +179,11 @@ fn gui_acceptance() {
             "GUI did not start"
         );
         std::thread::sleep(Duration::from_millis(50));
+    }
+    // mpv opens its logs when the players are made, before the session starts.
+    for player in ["source", "timeline"] {
+        let log = dir.join(format!("{pid}-{player}.log"));
+        assert!(log.exists(), "no mpv log {}", log.display());
     }
     // A fixed window size keeps screenshots comparable.
     gui.cli(&["window", "--size", "1280x800"]);
