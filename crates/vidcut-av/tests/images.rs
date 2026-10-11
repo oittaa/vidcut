@@ -299,3 +299,35 @@ fn a_still_repeats_its_one_picture() {
     );
     assert_eq!(barcodes(&out), vec![Some(41); 10]);
 }
+
+#[test]
+fn a_sequence_slower_than_the_project_ends_on_its_last_picture() {
+    // A project rate above the sequence's samples the last output frames
+    // just past the last picture's time: that picture lasts its frame, as a
+    // video's does. 30 pictures at 30 fps in 60, and 12 at 12 fps in 30:
+    // each one second, each picture shown in turn, the last one at the end.
+    for (rate, project) in [(30, 60), (12, 30)] {
+        let spec = ImageSpec::sequence(1, rate, 4, W, H);
+        let dir = scratch(&format!("slower-{rate}-{project}"));
+        let (pattern, files) = place(&spec, &dir);
+        let image = Image::Sequence {
+            pattern,
+            first: 1,
+            count: u64::from(rate),
+            rate: Rational::new(i64::from(rate), 1).unwrap(),
+        };
+        let mut p = plan(vec![pictures(&files[0], image, 0, i64::from(project))]);
+        p.fps = Rational::new(i64::from(project), 1).unwrap();
+        let out = dir.join("out.mkv");
+        render(&p, &out);
+        let codes: Vec<u32> = barcodes(&out).into_iter().map(Option::unwrap).collect();
+        assert_eq!(codes.len(), project as usize, "{rate} fps in {project}");
+        let mut shown = codes.clone();
+        shown.dedup();
+        assert_eq!(
+            shown,
+            (0..rate).collect::<Vec<_>>(),
+            "{rate} in {project}: {codes:?}"
+        );
+    }
+}
