@@ -8,6 +8,7 @@
 pub mod geometry;
 pub mod gesture;
 pub mod paint;
+pub mod tools;
 
 use std::time::Instant;
 
@@ -56,6 +57,13 @@ pub struct Options {
     pub waveforms: bool,
     /// Lower timeline zoom in pixels per frame.
     pub ppf: f64,
+    /// The Boring Detector is on (p. 690), and its limits: clips longer
+    /// than `boring_secs` and shorter than `jump_frames` are highlighted.
+    pub boring: bool,
+    pub boring_secs: f64,
+    pub jump_frames: i64,
+    /// What Dynamic Trim does with selected clips.
+    pub dynamic_mode: tools::DynamicMode,
 }
 
 impl Default for Options {
@@ -70,6 +78,11 @@ impl Default for Options {
             filmstrips: true,
             waveforms: true,
             ppf: 4.0,
+            // Decision D31.
+            boring: false,
+            boring_secs: 30.0,
+            jump_frames: 10,
+            dynamic_mode: tools::DynamicMode::Slip,
         }
     }
 }
@@ -101,6 +114,13 @@ pub struct TimelineView {
     pub marker_dialog: Option<MarkerDialog>,
     /// Change Clip Duration (Ctrl+D), the typed value.
     pub duration_dialog: Option<String>,
+    /// Ripple Delete Silence's dialog, while open.
+    pub silence: Option<tools::SilenceDialog>,
+    /// Analyze Timeline Edits (the Boring Detector's settings): seconds and
+    /// frames being edited.
+    pub boring_dialog: Option<(f64, i64)>,
+    /// Dynamic Trim mode (W), while on.
+    pub dynamic: Option<tools::Dynamic>,
     /// Upper and lower track rects and scales of the last frame.
     pub layout: Option<Layout>,
 }
@@ -117,6 +137,9 @@ impl Default for TimelineView {
             scrub_sent: None,
             marker_dialog: None,
             duration_dialog: None,
+            silence: None,
+            boring_dialog: None,
+            dynamic: None,
             layout: None,
         }
     }
@@ -286,11 +309,14 @@ impl Workspace {
                     compact,
                 );
             }
+            self.paint_boring(&painter, &layout.upper, &upper_scale, &p);
+            self.paint_silence(&painter, &layout.upper, &upper_scale, &p);
             paint::playhead(
                 &painter,
                 upper_scale.xf(playhead),
                 upper_ruler,
                 layout.upper.span().1,
+                self.playhead_color(),
             );
         }
         {
@@ -338,11 +364,13 @@ impl Workspace {
                     Color32::from_rgb(90, 200, 90),
                 );
             }
+            self.paint_silence(&painter, &layout.lower, &lower_scale, &p);
             paint::playhead(
                 &painter,
                 lower_scale.xf(playhead),
                 lower_ruler,
                 layout.lower.span().1,
+                self.playhead_color(),
             );
         }
         self.thumbs = thumbs;
@@ -389,6 +417,18 @@ impl Workspace {
         }
         self.marker_window(ui.ctx());
         self.duration_window(ui.ctx());
+        self.silence_window(ui.ctx());
+        self.boring_window(ui.ctx());
+        self.dynamic_tick(ui.ctx());
+    }
+
+    /// The playhead turns yellow in Dynamic Trim mode (p. 731).
+    fn playhead_color(&self) -> Color32 {
+        if self.timeline.dynamic.is_some() {
+            Color32::from_rgb(240, 200, 40)
+        } else {
+            theme::PLAYHEAD
+        }
     }
 
     /// The lower timeline's scale: the playhead fixed in the middle, or a
@@ -426,8 +466,17 @@ impl Workspace {
                 ui.checkbox(&mut o.status, "Display Clip Status");
                 ui.checkbox(&mut o.filmstrips, "Filmstrips");
                 ui.checkbox(&mut o.waveforms, "Waveforms");
+                ui.separator();
+                ui.checkbox(&mut o.boring, "Boring Detector")
+                    .on_hover_text("Highlights clips that are too long (gray) or too short (red)");
+                let open_boring = ui.button("Analyze Timeline Edits…").clicked();
                 if *o != before {
                     o.save();
+                }
+                if open_boring {
+                    self.timeline.boring_dialog =
+                        Some((self.timeline.options.boring_secs, self.timeline.options.jump_frames));
+                    ui.close();
                 }
             });
             ui.menu_button("Actions", |ui| {
@@ -461,6 +510,44 @@ impl Workspace {
                     .clicked()
                 {
                     self.timeline.duration_dialog = Some(String::new());
+                    ui.close();
+                }
+                ui.separator();
+                let selected = self.snap.selection.clips.clone();
+                let with = |want: fn(&vidcut_core::model::Clip) -> bool| {
+                    selected.iter().any(|id| p.clip(id).is_some_and(want))
+                };
+                if ui
+                    .add_enabled(with(|c| c.audio.is_some()), egui::Button::new("Ripple Delete Silence…"))
+                    .on_hover_text("Cut the silent parts out of the selected clips (p. 773)")
+                    .clicked()
+                {
+                    self.open_silence(selected.clone());
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(with(|c| c.video), egui::Button::new("Detect Scene Cuts"))
+                    .on_hover_text("Split the selected clips where their shots change (p. 690)")
+                    .clicked()
+                {
+                    self.send("edit.detect_scene_cuts", json!({ "clips": selected }));
+                    ui.close();
+                }
+            });
+            let mut dynamic = self.timeline.dynamic.is_some();
+            let r = ui
+                .toggle_value(&mut dynamic, "Dynamic Trim")
+                .on_hover_text("W: J/K/L trim the selected edit (or slip/slide the selected clips) as it plays; right-click for Slip or Slide");
+            if r.clicked() {
+                self.toggle_dynamic();
+            }
+            r.context_menu(|ui| {
+                let o = &mut self.timeline.options;
+                let before = o.dynamic_mode;
+                ui.radio_value(&mut o.dynamic_mode, tools::DynamicMode::Slip, "Slip");
+                ui.radio_value(&mut o.dynamic_mode, tools::DynamicMode::Slide, "Slide");
+                if o.dynamic_mode != before {
+                    o.save();
                     ui.close();
                 }
             });
@@ -1023,6 +1110,18 @@ impl Workspace {
             self.timeline.duration_dialog = Some(String::new());
             ui.close();
         }
+        if c.audio.is_some() {
+            ui.menu_button("Audio Operations", |ui| {
+                if ui.button("Ripple Delete Silence…").clicked() {
+                    self.open_silence(clips.clone());
+                    ui.close();
+                }
+            });
+        }
+        if c.video && ui.button("Detect Scene Cuts").clicked() {
+            self.send("edit.detect_scene_cuts", json!({ "clips": clips }));
+            ui.close();
+        }
     }
 
     fn drag_tooltip(&self, ui: &egui::Ui, pv: &Preview) {
@@ -1171,6 +1270,9 @@ impl Workspace {
         }
         if pressed(Key::D) && input.modifiers.command && !self.snap.selection.clips.is_empty() {
             self.timeline.duration_dialog = Some(String::new());
+        }
+        if pressed(Key::W) && !input.modifiers.command {
+            self.toggle_dynamic();
         }
     }
 

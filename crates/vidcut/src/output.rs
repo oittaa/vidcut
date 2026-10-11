@@ -59,6 +59,32 @@ pub fn print(method: &str, r: &Response, json: bool) {
         if let Some(track) = r.result.get("track").and_then(Value::as_str) {
             println!("  on       {track}");
         }
+        if let Some(removed) = r.result.get("removed").and_then(Value::as_array) {
+            println!(
+                "  removed  {} frames in {} parts",
+                r.result["frames"],
+                removed.len()
+            );
+            for part in removed {
+                println!(
+                    "    {} -> {}  {}",
+                    part["start_tc"].as_str().unwrap_or_default(),
+                    part["end_tc"].as_str().unwrap_or_default(),
+                    part["clip"].as_str().unwrap_or_default()
+                );
+            }
+        }
+        if let Some(cuts) = r.result.get("cuts").and_then(Value::as_array) {
+            let tcs: Vec<&str> = cuts.iter().filter_map(|c| c["tc"].as_str()).collect();
+            println!(
+                "  cuts     {}",
+                if tcs.is_empty() {
+                    "none".into()
+                } else {
+                    tcs.join(" ")
+                }
+            );
+        }
         if let Some(undone) = r
             .result
             .get("undone")
@@ -160,6 +186,82 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 );
             }
         }
+        "analyze.silence" | "analyze.black" | "analyze.scenes" => {
+            for target in r.result.as_array().into_iter().flatten() {
+                let what = match target["clip"].as_str() {
+                    Some(c) => format!("{c} ({})", target["track"].as_str().unwrap_or("?")),
+                    None => target["media"].as_str().unwrap_or_default().to_string(),
+                };
+                println!("{what}");
+                let items = target
+                    .get("ranges")
+                    .or_else(|| target.get("cuts"))
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                if items.is_empty() {
+                    println!("  none");
+                }
+                for i in items {
+                    match i.get("score") {
+                        Some(score) => println!(
+                            "  {}  score {:.1}",
+                            i["tc"].as_str().unwrap_or_default(),
+                            score.as_f64().unwrap_or(0.0)
+                        ),
+                        None => println!(
+                            "  {} -> {}  ({})",
+                            i["start_tc"].as_str().unwrap_or_default(),
+                            i["end_tc"].as_str().unwrap_or_default(),
+                            i["duration_tc"].as_str().unwrap_or_default()
+                        ),
+                    }
+                }
+            }
+        }
+        "analyze.loudness" => {
+            let v = &r.result;
+            let db = |k: &str, unit: &str| match v[k].as_f64() {
+                Some(x) => format!("{x:.1} {unit}"),
+                None => "silent".into(),
+            };
+            println!(
+                "{} integrated, range {:.1} LU, true peak {} ({} -> {})",
+                db("integrated", "LUFS"),
+                v["range"].as_f64().unwrap_or(0.0),
+                db("true_peak", "dBTP"),
+                v["from_tc"].as_str().unwrap_or_default(),
+                v["to_tc"].as_str().unwrap_or_default()
+            );
+        }
+        "timeline.boring" => {
+            for (title, key) in [("boring", "boring"), ("jump cuts", "jump")] {
+                let clips = r.result[key].as_array().cloned().unwrap_or_default();
+                println!(
+                    "{title}: {}",
+                    if clips.is_empty() {
+                        "none".into()
+                    } else {
+                        clips.len().to_string()
+                    }
+                );
+                for c in clips {
+                    println!(
+                        "  {:<5} {}  {}",
+                        c["clip"].as_str().unwrap_or_default(),
+                        c["start_tc"].as_str().unwrap_or_default(),
+                        c["duration_tc"].as_str().unwrap_or_default()
+                    );
+                }
+            }
+        }
+        "storyboard.render" => println!(
+            "wrote {} ({} pictures, {}x{})",
+            r.result["path"].as_str().unwrap_or_default(),
+            r.result["cells"].as_array().map_or(0, Vec::len),
+            r.result["width"],
+            r.result["height"]
+        ),
         "frame.render" => println!(
             "wrote {} (frame {}, {}x{})",
             r.result["path"].as_str().unwrap_or_default(),

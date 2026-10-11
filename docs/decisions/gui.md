@@ -178,7 +178,18 @@ A seek or load ("motion") is shown when two things have happened:
 - **Timeline interchange** (deviation X9): File > Import Timeline asks Append or Replace when the timeline has clips, and asks for a folder when media aren't found (p. 529). Import warnings show in a window.
 - **`gui.show`** opens any of these windows (or the log, or the Mixer) for the person at the GUI, e.g. after an agent prepared an export.
 
-## 10. Still open
+## 10. Automatic tools (M7)
+
+- **Ripple Delete Silence:** the dialog (`gui/timeline/tools.rs`) dry-runs `edit.ripple_delete_silence` on a helper thread whenever its settings change. It draws the parts as red stripes on both timelines while it is open. Remove sends the request once.
+- **Measuring first:** the session measures media on a worker before such an edit runs (agents.md §3), so the GUI stays live while a long clip decodes.
+- **Boring Detector:** its highlights are computed each frame from the project (`analysis::boring`, cheap). Its settings are Timeline Options, kept between runs.
+- **Dynamic Trim:**
+  - W, J/K/L, Space and Up/Down are handled in `dynamic_keys`; the transport keys don't play while it is on.
+  - A run counts frames on egui's clock, so tests drive it. Each frame it tries the next count on a copy of the project, and stops where an edit would fail.
+  - The viewer shows the two-up from the Trim Editor (`two_up`), rendered from that copy.
+- **Tests:** `tests/gui_tools.rs` (egui_kittest) checks that each tool makes one request. A freshly opened menu ignores input in its first frame, so tests step twice before clicking an item.
+
+## 11. Still open
 
 - **A render queue.** Jobs run side by side; several big exports at once compete for the encoder (NVENC allows a few sessions). Resolve's Deliver page queues renders instead.
 - **Source Tape marks spanning several clips** (decision D17 limits marks to one clip).

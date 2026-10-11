@@ -22,6 +22,7 @@ use crate::live::{self, JobInfo, JobState, Origin};
 // ---------------------------------------------------------------- plumbing
 
 /// A request answered on a helper thread, so the UI never waits for it.
+#[derive(Debug)]
 pub(super) struct Ask {
     slot: Arc<Mutex<Option<vidcut_core::Result<Response>>>>,
 }
@@ -1782,6 +1783,7 @@ fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u3
                         bitrate: None,
                         sample_rate: None,
                         channels: None,
+                        loudness: None,
                     });
                     fit_codecs(&mut d.settings);
                 }
@@ -1844,5 +1846,30 @@ fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u3
                 }
             });
             ui.end_row();
+            if let Some(a) = &mut d.settings.audio {
+                ui.label("Loudness");
+                ui.horizontal(|ui| {
+                    let mut on = a.loudness.is_some();
+                    if ui
+                        .checkbox(&mut on, "Normalize to")
+                        .on_hover_text(
+                            "Measure the mix (EBU R128) and change it by one gain to this \
+                             loudness, keeping true peaks at or below -1 dBTP. YouTube: -14.",
+                        )
+                        .changed()
+                    {
+                        a.loudness = on.then_some(-14.0);
+                    }
+                    if let Some(target) = &mut a.loudness {
+                        ui.add(
+                            egui::DragValue::new(target)
+                                .range(-60.0..=-5.0)
+                                .speed(0.1)
+                                .suffix(" LUFS"),
+                        );
+                    }
+                });
+                ui.end_row();
+            }
         });
 }

@@ -157,6 +157,37 @@ pub enum Command {
         #[command(subcommand)]
         cmd: Option<JobsCmd>,
     },
+    /// Measure media or clips: silences, shots, black, loudness.
+    #[command(subcommand)]
+    Analyze(AnalyzeCmd),
+    /// The Boring Detector: clips too long, and too short (jump cuts).
+    Boring {
+        /// Longer than this is boring [default: 30s].
+        #[arg(long)]
+        boring: Option<String>,
+        /// Shorter than this is a jump cut [default: 10f].
+        #[arg(long)]
+        jump: Option<String>,
+    },
+    /// A storyboard PNG: a labeled picture of every shot (or every --every).
+    #[command(
+        after_help = "Examples:\n  vidcut storyboard -o board.png\n  vidcut storyboard -o board.png --every 10s --columns 6 --width 240"
+    )]
+    Storyboard {
+        #[arg(short, long)]
+        out: PathBuf,
+        /// Pictures per row [default: 4].
+        #[arg(long)]
+        columns: Option<u32>,
+        /// Width of each picture [default: 320].
+        #[arg(long)]
+        width: Option<u32>,
+        /// A picture every this often instead of one per shot.
+        #[arg(long)]
+        every: Option<String>,
+        #[arg(long, allow_hyphen_values = true)]
+        range: Option<String>,
+    },
     /// Render one frame as PNG (the timeline, or a media item with --media).
     Frame {
         #[arg(long, allow_hyphen_values = true)]
@@ -220,6 +251,12 @@ pub enum Command {
     },
     /// List running GUIs (live commands go to them).
     Instances,
+    /// Serve the Model Context Protocol on stdin/stdout, so AI agents can use
+    /// vidcut as tools (one per request method, routed like these commands).
+    #[command(
+        after_help = "Example (Claude Code):\n  claude mcp add vidcut -- vidcut mcp -p talk.vidcut"
+    )]
+    Mcp,
     /// Open a project in the running GUI (--new creates it).
     Open {
         file: PathBuf,
@@ -322,6 +359,65 @@ pub enum Command {
     Mute { state: Option<String> },
     /// Open a window in the GUI: quick-export, export, jobs, log or mixer.
     Show { panel: String },
+}
+
+/// What to analyze: a media item, clips, or (neither) every clip.
+#[derive(Args, Debug)]
+pub struct AnalyzeTarget {
+    /// A media item (positions are its source frames).
+    #[arg(long, conflicts_with = "clips")]
+    media: Option<String>,
+    /// Clips (positions are timeline frames).
+    #[arg(long, value_delimiter = ',')]
+    clips: Vec<String>,
+}
+
+impl AnalyzeTarget {
+    fn params(&self) -> Value {
+        json!({
+            "media": self.media,
+            "clips": (!self.clips.is_empty()).then_some(&self.clips),
+        })
+    }
+}
+
+#[derive(Subcommand, Debug)]
+pub enum AnalyzeCmd {
+    /// Silent stretches (as Ripple Delete Silence finds them).
+    Silence {
+        #[command(flatten)]
+        target: AnalyzeTarget,
+        /// Sound below this level (dBFS) is silence [default: -40].
+        #[arg(long, allow_hyphen_values = true)]
+        threshold: Option<f64>,
+        /// The shortest silence reported [default: 0.5s].
+        #[arg(long)]
+        min: Option<String>,
+    },
+    /// Shot changes (as Detect Scene Cuts finds them), with their scores.
+    Scenes {
+        #[command(flatten)]
+        target: AnalyzeTarget,
+        /// Scene score (0..100) from which a frame starts a new shot [default: 10].
+        #[arg(long)]
+        threshold: Option<f64>,
+    },
+    /// Black stretches.
+    Black {
+        #[command(flatten)]
+        target: AnalyzeTarget,
+        /// Share of a frame's pixels that must be black [default: 0.98].
+        #[arg(long)]
+        share: Option<f64>,
+        /// The shortest stretch reported [default: 0.5s].
+        #[arg(long)]
+        min: Option<String>,
+    },
+    /// Loudness of the timeline's mix (EBU R128): In–Out, or everything.
+    Loudness {
+        #[arg(long, allow_hyphen_values = true)]
+        range: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -657,6 +753,41 @@ pub enum EditCmd {
         #[arg(long, allow_hyphen_values = true)]
         by: String,
     },
+    /// Slide a clip: it keeps its media and moves; its neighbors give and take.
+    Slide {
+        clip: String,
+        #[arg(long, allow_hyphen_values = true)]
+        by: String,
+    },
+    /// Cut the silent parts out of clips and close the gaps (one undo step).
+    /// With --dry-run, list the parts instead.
+    #[command(
+        after_help = "Examples:\n  vidcut edit ripple-delete-silence c1 --min 0.7s --dry-run\n  vidcut edit ripple-delete-silence c1 c2 --threshold -35 --pre-head 0.2s --post-tail 0.2s"
+    )]
+    RippleDeleteSilence {
+        #[arg(required = true)]
+        clips: Vec<String>,
+        /// Sound below this level (dBFS) is silence [default: -40].
+        #[arg(long, allow_hyphen_values = true)]
+        threshold: Option<f64>,
+        /// Silence kept before each audible part [default: 0.15s].
+        #[arg(long)]
+        pre_head: Option<String>,
+        /// Silence kept after each audible part [default: 0.15s].
+        #[arg(long)]
+        post_tail: Option<String>,
+        /// The shortest silence removed [default: 0.5s].
+        #[arg(long)]
+        min: Option<String>,
+    },
+    /// Split clips where their shots change.
+    DetectSceneCuts {
+        #[arg(required = true)]
+        clips: Vec<String>,
+        /// Scene score (0..100) from which a frame starts a new shot [default: 10].
+        #[arg(long)]
+        threshold: Option<f64>,
+    },
     /// Move only the audio edit at a clip edge (J/L cut).
     AudioRoll {
         clip: String,
@@ -768,6 +899,8 @@ pub enum MarkersCmd {
 
 /// What `main` should do for a parsed command line.
 pub enum Action {
+    /// Serve MCP on stdin/stdout.
+    Mcp,
     /// Create a project file.
     New {
         file: PathBuf,
@@ -834,6 +967,14 @@ fn parse_size(s: &str) -> Result<(u32, u32)> {
         (Ok(w), Ok(h)) => Ok((w, h)),
         _ => Err(Error::usage(format!("size {s:?}: expected WIDTHxHEIGHT"))),
     }
+}
+
+/// `params` without its `null` fields, so the request's defaults apply.
+fn without_nulls(mut params: Value) -> Value {
+    if let Some(map) = params.as_object_mut() {
+        map.retain(|_, v| !v.is_null());
+    }
+    params
 }
 
 /// Paths made absolute: a running GUI may answer from another directory.
@@ -1099,6 +1240,26 @@ impl Cli {
                     json!({ "clip": clip, "edge": edge.name(), "by": by }),
                 )?,
                 EditCmd::Slip { clip, by } => req("edit.slip", json!({ "clip": clip, "by": by }))?,
+                EditCmd::Slide { clip, by } => {
+                    req("edit.slide", json!({ "clip": clip, "by": by }))?
+                }
+                EditCmd::RippleDeleteSilence {
+                    clips,
+                    threshold,
+                    pre_head,
+                    post_tail,
+                    min,
+                } => req(
+                    "edit.ripple_delete_silence",
+                    without_nulls(json!({
+                        "clips": clips, "threshold_db": threshold,
+                        "pre_head": pre_head, "post_tail": post_tail, "min": min,
+                    })),
+                )?,
+                EditCmd::DetectSceneCuts { clips, threshold } => req(
+                    "edit.detect_scene_cuts",
+                    without_nulls(json!({ "clips": clips, "threshold": threshold })),
+                )?,
                 EditCmd::AudioRoll { clip, edge, by } => req(
                     "edit.audio_roll",
                     json!({ "clip": clip, "edge": edge.name(), "by": by }),
@@ -1219,6 +1380,52 @@ impl Cli {
                 }
                 Some(JobsCmd::Cancel { job }) => req("jobs.cancel", json!({ "job": job }))?,
             },
+            Command::Analyze(cmd) => match cmd {
+                AnalyzeCmd::Silence {
+                    target,
+                    threshold,
+                    min,
+                } => {
+                    let mut params = target.params();
+                    params["threshold_db"] = json!(threshold);
+                    params["min"] = json!(min);
+                    req("analyze.silence", without_nulls(params))?
+                }
+                AnalyzeCmd::Scenes { target, threshold } => {
+                    let mut params = target.params();
+                    params["threshold"] = json!(threshold);
+                    req("analyze.scenes", without_nulls(params))?
+                }
+                AnalyzeCmd::Black { target, share, min } => {
+                    let mut params = target.params();
+                    params["share"] = json!(share);
+                    params["min"] = json!(min);
+                    req("analyze.black", without_nulls(params))?
+                }
+                AnalyzeCmd::Loudness { range } => {
+                    req("analyze.loudness", without_nulls(json!({ "range": range })))?
+                }
+            },
+            Command::Boring { boring, jump } => req(
+                "timeline.boring",
+                without_nulls(json!({ "boring": boring, "jump": jump })),
+            )?,
+            Command::Storyboard {
+                out,
+                columns,
+                width,
+                every,
+                range,
+            } => {
+                let out = absolute(std::slice::from_ref(out))?.remove(0);
+                req(
+                    "storyboard.render",
+                    without_nulls(json!({
+                        "out": out, "columns": columns, "width": width,
+                        "every": every, "range": range,
+                    })),
+                )?
+            }
             Command::Frame {
                 at,
                 out,
@@ -1292,6 +1499,7 @@ impl Cli {
                 }));
             }
             Command::Instances => return Ok(Some(Action::Instances)),
+            Command::Mcp => return Ok(Some(Action::Mcp)),
             Command::Open { file, new } => {
                 let path = absolute(std::slice::from_ref(file))?.remove(0);
                 req("project.open", json!({ "path": path, "create": new }))?

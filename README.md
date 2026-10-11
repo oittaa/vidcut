@@ -11,7 +11,7 @@ A simple, fully scriptable video cutting tool for Linux, modeled on DaVinci Reso
 >   - **M4:** timeline editing with the mouse. The dual timeline has filmstrips and waveforms. You can drag and drop from the pool, move, trim, roll, slip and make J/L cuts, with snapping, Safe Edit, markers and the Trim Editor.
 >   - **M5:** exporting from the GUI: Quick Export, an Export dialog with every setting, and a Jobs window with progress and cancel. Timelines move to and from other editors as OpenTimelineIO.
 >   - **M6:** several tracks: B-roll above Track 1 that follows its edits, music on audio tracks, Place On Top, a mixer with meters, mute and solo, and bins in the media pool.
-> - Next: agent extras (M7). See the milestones below.
+>   - **M7:** for agents and for speed: an MCP server, Ripple Delete Silence, scene and black detection, the Boring Detector, Dynamic Trim, storyboards and loudness-normalized export.
 
 ## What it will do
 
@@ -27,8 +27,9 @@ A simple, fully scriptable video cutting tool for Linux, modeled on DaVinci Reso
   - Quick Export presets (H.264/H.265 Master, ProRes 422 HQ, YouTube, Vimeo, TikTok), plus your own
   - an Export dialog with codec settings, GPU encoding (NVENC, VAAPI), In–Out range, per-clip export and audio-only export
   - exports run in the background, with progress, ETA and cancel
+- **Automatic tools:** Ripple Delete Silence cuts the pauses out of a talk; Detect Scene Cuts splits an edited video back into its shots; the Boring Detector flags clips that run too long or flash by; exports can be normalized to a loudness target (−14 LUFS for YouTube).
 - **Interchange:** import and export timelines as OpenTimelineIO (`.otio`), which DaVinci Resolve and other editors read and write.
-- **Everything scriptable.** Every action in the GUI is also a CLI command and a JSON-RPC call on the running app, so scripts and AI agents can edit with you.
+- **Everything scriptable.** Every action in the GUI is also a CLI command and a JSON-RPC call on the running app, so scripts and AI agents can edit with you. `vidcut mcp` offers it all to AI agents over the Model Context Protocol.
 - **Deliberately not included:** effects, transitions, titles or color grading.
 
 ## Requirements
@@ -76,6 +77,7 @@ Everything you do is listed in the **Command log** (top right) as the request it
 | V, U, `,` / `.` | select the nearest edit, cycle Out/In/both, trim it a frame (Shift: a second) |
 | N, Ctrl+D | snapping on/off (only for the current drag if pressed mid-drag), change clip duration |
 | Ctrl+I, Shift+Ctrl+N | import media (into the open bin), new bin |
+| W | Dynamic Trim: J/K/L trim the selected edit instead of playing; K applies it |
 
 **The timeline** follows the Cut page:
 - The upper timeline shows the whole program; the lower one is a zoomed detail view (Ctrl+wheel) whose playhead stays in the middle.
@@ -89,6 +91,8 @@ Everything you do is listed in the **Command log** (top right) as the request it
 - Drag media from the pool or the viewer to edit it in. Double-click an edit for the Trim Editor.
 
 **Tracks.** Track 1 holds the main story and closes up behind every edit. Clips on the tracks above it are B-roll: they stay with the Track 1 picture they sit over when Track 1 changes. Audio tracks (A1, A2, …) hold music and other sound. Click a track's name to make it the target of the edit buttons, and right-click it to add or remove tracks. Drop a clip on a row to put it on that track, or above the top row (below the bottom row) to make a new track. **Place On Top** (F12) puts the source on the first free track above everything at the playhead. The topmost visible clip is what you see. Every unmuted track is heard; **Mixer** (top bar) has a fader, mute and solo for each track, and mute and solo apply to exports too. The meter next to the viewer shows the level, and its speaker button mutes playback.
+
+**Automatic tools.** Select clips and use **Actions** (above the timeline): *Ripple Delete Silence…* shows the pauses it would cut as red stripes before you press Remove, and *Detect Scene Cuts* splits clips at their shot changes. **Options > Boring Detector** marks clips that are too long (gray) or too short (red). **Dynamic Trim** (W) trims the selected edit with J/K/L while the viewer shows both sides of the cut.
 
 **Bins.** Organize the pool into bins (File > New Bin, or right-click in the pool). Drag clips onto a bin, double-click a bin to open it, and use the path above the pool to go back up. Source Tape plays the open bin.
 
@@ -123,11 +127,24 @@ vidcut -p talk.vidcut frame --at 1m -o check.png                # look at a fram
 vidcut -p talk.vidcut export cut.otio                           # the edit, for another editor
 vidcut new cut2.vidcut && vidcut -p cut2.vidcut import cut.otio  # and back in
 vidcut presets save web --from youtube-1080p --set video.quality=22 --quick-export
+vidcut -p talk.vidcut edit ripple-delete-silence c1 --min 0.7s   # cut the pauses
+vidcut -p talk.vidcut storyboard -o board.png                   # every shot on one page
+vidcut -p talk.vidcut export talk.mp4 --set audio.loudness=-14  # YouTube loudness
 ```
 
 Every command takes `--json` for machine-readable output. `vidcut schema` lists the full protocol. Add `--headless` to work on the file directly even while a GUI has it open.
 
-## Planned milestones
+## Use with AI agents
+
+`vidcut mcp` serves the Model Context Protocol, so an AI agent can use every vidcut command as a tool. If the project is open in the GUI, you watch the agent's edits happen. With Claude Code:
+
+```bash
+claude mcp add vidcut -- vidcut mcp -p /path/to/talk.vidcut
+```
+
+Agents can look at their work: frames, screenshots and storyboards come back as images. AGENTS.md has the details.
+
+## Milestones
 
 | | |
 |---|---|
@@ -138,7 +155,7 @@ Every command takes `--json` for machine-readable output. `vidcut schema` lists 
 | M4 | Timeline editing (dual timeline, trimming, snapping, markers) |
 | M5 | Export UI (Quick Export, Export dialog, jobs), OpenTimelineIO import/export |
 | M6 | Multi-track (B-roll, music, Place On Top, mixer) |
-| M7 | Agent extras (MCP server, Ripple Delete Silence, analysis) |
+| M7 | Agent extras (MCP server, Ripple Delete Silence, scene detection, Boring Detector, Dynamic Trim, storyboards, loudness) |
 
 ## Contributing
 

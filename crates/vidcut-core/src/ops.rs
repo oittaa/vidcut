@@ -569,11 +569,15 @@ pub fn split(p: &mut Project, at: &[i64], selected: &[String]) -> Result<Vec<Str
 /// a lift leaves the gaps. Other tracks close their gaps only where Track 1
 /// has nothing under them (p. 721).
 pub fn delete(p: &mut Project, ids: &[String], lift: bool) -> Result<()> {
+    let ripple = !lift && p.settings.ripple_on;
+    delete_clips(p, ids, ripple)
+}
+
+fn delete_clips(p: &mut Project, ids: &[String], ripple: bool) -> Result<()> {
     if ids.is_empty() {
         return Err(Error::usage("no clips to delete"));
     }
     let main = main_index(p);
-    let ripple = !lift && p.settings.ripple_on;
     let mut main_spans = Vec::new();
     let mut others: BTreeMap<usize, Vec<(i64, i64, String)>> = BTreeMap::new();
     for id in ids {
@@ -612,6 +616,90 @@ pub fn delete(p: &mut Project, ids: &[String], lift: bool) -> Result<()> {
     }
     fix_audio(p, main);
     if ripple {
+        follow::follow(p, &before, &Edit::default());
+    }
+    Ok(())
+}
+
+/// Splits clip `id` at each of `at` that falls strictly inside it (Detect
+/// Scene Cuts, p. 690); returns the new clips, left to right.
+pub fn split_clip(p: &mut Project, id: &str, at: &[i64]) -> Result<Vec<String>> {
+    let (ti, ci) = locate(p, id)?;
+    let (start, end) = {
+        let c = &p.tracks[ti].clips[ci];
+        (c.start, c.end())
+    };
+    let mut points: Vec<i64> = at
+        .iter()
+        .copied()
+        .filter(|&t| start < t && t < end)
+        .collect();
+    points.sort_unstable();
+    points.dedup();
+    let created: Vec<String> = points
+        .into_iter()
+        .filter_map(|t| split_at(p, ti, t))
+        .collect();
+    fix_audio(p, ti);
+    Ok(created)
+}
+
+/// Cuts parts out of clips and closes the gaps (Ripple Delete Silence,
+/// p. 773): each clip is split at its parts' edges, and the pieces inside
+/// go as Delete with ripple removes clips, whatever Ripple On says (Track 1
+/// closes up and other tracks follow; elsewhere p. 721 applies). Parts are
+/// frame ranges inside their clip. Returns the pieces removed.
+pub fn remove_parts(p: &mut Project, parts: &[(String, Vec<(i64, i64)>)]) -> Result<Vec<String>> {
+    let mut doomed = Vec::new();
+    for (id, spans) in parts {
+        let edges: Vec<i64> = spans.iter().flat_map(|&(a, b)| [a, b]).collect();
+        let mut pieces = vec![id.clone()];
+        pieces.extend(split_clip(p, id, &edges)?);
+        for piece in pieces {
+            let c = p.clip(&piece).expect("just split");
+            if spans.iter().any(|&(a, b)| a <= c.start && c.end() <= b) {
+                doomed.push(piece);
+            }
+        }
+    }
+    if !doomed.is_empty() {
+        delete_clips(p, &doomed, true)?;
+    }
+    Ok(doomed)
+}
+
+/// Slide (Dynamic Trim's Slide mode, p. 731): clip `id` keeps its media and
+/// moves `by` frames; the clip before it gets longer and the one after it
+/// shorter, or the reverse. Both must touch it, so the program length stays.
+pub fn slide(p: &mut Project, id: &str, by: i64) -> Result<()> {
+    let (ti, ci) = locate(p, id)?;
+    if by == 0 {
+        return Ok(());
+    }
+    let t = &p.tracks[ti];
+    let c = t.clips[ci].clone();
+    let left = ci.checked_sub(1).filter(|&i| t.clips[i].end() == c.start);
+    let right = Some(ci + 1).filter(|&i| i < t.clips.len() && t.clips[i].start == c.end());
+    let (Some(l), Some(r)) = (left, right) else {
+        return Err(Error::invalid(format!(
+            "{id} slides only between two clips that touch it"
+        )));
+    };
+    let (mut before_c, mut moved, mut after_c) = (t.clips[l].clone(), c, t.clips[r].clone());
+    before_c.duration += by;
+    moved.start += by;
+    after_c.start += by;
+    after_c.source_in += by;
+    after_c.duration -= by;
+    check_source(p, &before_c)?;
+    check_source(p, &after_c)?;
+    let before = (ti == main_index(p)).then(|| Before::of(p));
+    let track = &mut p.tracks[ti];
+    track.clips[l] = before_c;
+    track.clips[ci] = moved;
+    track.clips[r] = after_c;
+    fix_audio(p, ti);
+    if let Some(before) = before {
         follow::follow(p, &before, &Edit::default());
     }
     Ok(())

@@ -153,6 +153,11 @@ pub struct AudioSettings {
     pub sample_rate: Option<u32>,
     #[serde(default)]
     pub channels: Option<u16>,
+    /// Bring the mix to this integrated loudness (LUFS, EBU R128): -14 for
+    /// YouTube, -23 for broadcast. The export measures first, then applies
+    /// one gain, held so true peaks stay at or below -1 dBTP.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loudness: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -204,6 +209,7 @@ fn audio(codec: AudioCodec, kbps: Option<u64>) -> AudioSettings {
         bitrate: kbps.map(|k| k * 1000),
         sample_rate: None,
         channels: None,
+        loudness: None,
     }
 }
 
@@ -427,6 +433,13 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
     use AudioCodec as A;
     use Container as C;
     use VideoCodec as V;
+    if let Some(l) = s.audio.as_ref().and_then(|a| a.loudness)
+        && !(-60.0..=-5.0).contains(&l)
+    {
+        return Err(Error::usage(format!(
+            "audio.loudness {l} LUFS is outside -60..-5"
+        )));
+    }
     if s.video.is_none() && s.audio.is_none() {
         return Err(Error::usage("export needs video or audio"));
     }

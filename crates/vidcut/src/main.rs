@@ -8,8 +8,7 @@ use clap::Parser;
 use serde_json::{Value, json};
 use vidcut::cli::{Action, Cli};
 use vidcut::ipc::{self, Route, RouteOptions};
-use vidcut::session::Hooks;
-use vidcut::{output, session};
+use vidcut::output;
 use vidcut_core::store::Store;
 use vidcut_core::{Envelope, Error, Project, Response, Result};
 
@@ -43,6 +42,13 @@ fn run(cli: &Cli) -> Result<()> {
     };
     match action {
         Action::Gui { project } => vidcut::gui::run(project),
+        Action::Mcp => vidcut::mcp::serve(
+            cli.project.clone(),
+            RouteOptions {
+                headless: cli.headless,
+                instance: cli.instance.clone(),
+            },
+        ),
         Action::Instances => {
             let list = ipc::registry::list();
             if cli.json {
@@ -171,59 +177,44 @@ fn execute(cli: &Cli, envelope: Envelope) -> Result<Response> {
         headless: cli.headless,
         instance: cli.instance.clone(),
     };
-    let route = ipc::route(cli.project.as_deref(), &options, &envelope.request)?;
     let show = std::io::stderr().is_terminal() && !cli.json;
     let mut bar = ProgressBar::new(show);
-    match route {
-        Route::Headless => {
-            static CANCEL: AtomicBool = AtomicBool::new(false);
-            if envelope.request.method() == "export.start" {
-                // First Ctrl-C cancels the export cleanly (no partial files).
-                let _ = ctrlc::set_handler(|| CANCEL.store(true, Ordering::Relaxed));
-            }
-            session::run_with(
-                cli.project.as_deref(),
-                envelope,
-                &mut Hooks {
-                    cancel: &CANCEL,
-                    progress: &mut |i, n, path, p| {
-                        bar.show(i, n, path, p.frames, p.total, p.elapsed.as_secs_f64())
-                    },
-                },
-            )
-        }
-        Route::Instance(instance) => {
-            // Ctrl-C ends this process; the GUI notices the closed connection
-            // and cancels the export.
-            let project = cli.project.as_deref().and_then(|p| p.canonicalize().ok());
-            let mut progress = |v: &Value| {
-                bar.show(
-                    v["output"].as_u64().unwrap_or(0) as usize,
-                    v["outputs"].as_u64().unwrap_or(1) as usize,
-                    Path::new(v["path"].as_str().unwrap_or_default()),
-                    v["frames"].as_i64().unwrap_or(0),
-                    v["total"].as_i64().unwrap_or(0),
-                    v["elapsed"].as_f64().unwrap_or(0.0),
-                )
-            };
-            ipc::client::call(
-                &instance.socket,
-                &envelope,
-                project.as_deref(),
-                &mut progress,
-            )
-            .map_err(|e| {
-                if e.code == vidcut_core::ErrorCode::NoInstance && !cli.json {
-                    Error::new(
-                        e.code,
-                        format!("{} (use --headless to run without the GUI)", e.message),
-                    )
-                } else {
-                    e
-                }
-            })
-        }
+    static CANCEL: AtomicBool = AtomicBool::new(false);
+    if envelope.request.method() == "export.start" {
+        // First Ctrl-C cancels a headless export cleanly (no partial files);
+        // a GUI's export stops when this process ends.
+        let _ = ctrlc::set_handler(|| CANCEL.store(true, Ordering::Relaxed));
     }
+    let live = matches!(
+        ipc::route(cli.project.as_deref(), &options, &envelope.request),
+        Ok(Route::Instance(_))
+    );
+    ipc::run(
+        cli.project.as_deref(),
+        &options,
+        envelope,
+        &CANCEL,
+        &mut |v: &Value| {
+            bar.show(
+                v["output"].as_u64().unwrap_or(0) as usize,
+                v["outputs"].as_u64().unwrap_or(1) as usize,
+                Path::new(v["path"].as_str().unwrap_or_default()),
+                v["frames"].as_i64().unwrap_or(0),
+                v["total"].as_i64().unwrap_or(0),
+                v["elapsed"].as_f64().unwrap_or(0.0),
+            )
+        },
+    )
+    .map_err(|e| {
+        if live && e.code == vidcut_core::ErrorCode::NoInstance && !cli.json {
+            Error::new(
+                e.code,
+                format!("{} (use --headless to run without the GUI)", e.message),
+            )
+        } else {
+            e
+        }
+    })
 }
 
 /// Export progress on a terminal.

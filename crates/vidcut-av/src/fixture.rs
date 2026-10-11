@@ -144,6 +144,16 @@ pub enum Picture {
     Barcode,
     /// Video-range black (filler for gaps).
     Black,
+    /// A new shot every `frames` frames (for scene detection): a flat level
+    /// per shot with a slowly moving bar; every fourth shot is black.
+    Shots { frames: u32 },
+}
+
+impl Picture {
+    /// Luma of shot `s` of [`Picture::Shots`]: 16 (black) for every fourth.
+    pub fn shot_level(s: u32) -> u8 {
+        [70, 190, 120, 16][(s % 4) as usize]
+    }
 }
 
 /// What the audio track carries.
@@ -153,7 +163,13 @@ pub enum Sound {
     Beep,
     /// Digital silence (filler for gaps and no-audio clips).
     Silence,
+    /// A steady 1 kHz sine at -20 dBFS in every channel: -20 LUFS in
+    /// stereo (ITU-R BS.1770).
+    Tone,
 }
+
+/// Peak amplitude of [`Sound::Tone`].
+pub const TONE_AMPLITUDE: f32 = 0.1;
 
 /// Everything that determines a fixture file.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -287,18 +303,19 @@ impl FixtureSpec {
                 a.codec.tag(),
                 a.rate / 1000,
                 a.channels,
-                if self.sound == Sound::Silence {
-                    "sil"
-                } else {
-                    ""
+                match self.sound {
+                    Sound::Silence => "sil",
+                    Sound::Tone => "tone",
+                    Sound::Beep => "",
                 }
             ),
             None => "noaudio".into(),
         };
         let content = match (self.video_enabled, self.picture) {
-            (false, _) => "novideo",
-            (true, Picture::Barcode) => "bc",
-            (true, Picture::Black) => "black",
+            (false, _) => "novideo".to_string(),
+            (true, Picture::Barcode) => "bc".to_string(),
+            (true, Picture::Black) => "black".to_string(),
+            (true, Picture::Shots { frames }) => format!("shots{frames}-"),
         };
         format!(
             "{content}{v}_{codec}_{w}x{h}_{n}-{d}{vfr}_g{g}b{b}_{f}f_{audio}_o{o}.{ext}",
@@ -536,6 +553,18 @@ impl VideoTrack {
         match spec.picture {
             Picture::Barcode => crate::barcode::paint(k, &mut self.luma8, w, h, w),
             Picture::Black => self.luma8.fill(16),
+            Picture::Shots { frames } => {
+                let level = Picture::shot_level(k / frames.max(1));
+                self.luma8.fill(level);
+                if level != 16 {
+                    // A bar a tenth of the width moving 2 px a frame.
+                    let bar = (w / 10).max(1);
+                    let x0 = (2 * (k % frames.max(1)) as usize) % (w - bar).max(1);
+                    for y in 0..h {
+                        self.luma8[y * w + x0..y * w + x0 + bar].fill(level.saturating_add(40));
+                    }
+                }
+            }
         }
         let ten_bit = matches!(
             pixel,
@@ -680,6 +709,15 @@ impl AudioTrack {
             let samples = match self.sound {
                 Sound::Beep => crate::beep::generate(self.spec.rate, channels, self.next_sample, n),
                 Sound::Silence => vec![0.0; n * channels],
+                Sound::Tone => (0..n)
+                    .flat_map(|i| {
+                        let t = (self.next_sample + i as u64) as f64 / f64::from(self.spec.rate);
+                        let v = (f64::from(TONE_AMPLITUDE)
+                            * (2.0 * std::f64::consts::PI * 1000.0 * t).sin())
+                            as f32;
+                        std::iter::repeat_n(v, channels)
+                    })
+                    .collect(),
             };
             let fmt = self.spec.codec.sample();
             let mut frame = frame::Audio::new(fmt, n, layout);

@@ -455,10 +455,10 @@ fn waveform(
 }
 
 /// The playhead line (and its handle on the ruler).
-pub fn playhead(painter: &Painter, x: f32, ruler: Rect, bottom: f32) {
+pub fn playhead(painter: &Painter, x: f32, ruler: Rect, bottom: f32, color: Color32) {
     painter.line_segment(
         [pos2(x, ruler.top()), pos2(x, bottom)],
-        Stroke::new(1.5, theme::PLAYHEAD),
+        Stroke::new(1.5, color),
     );
     painter.add(egui::Shape::convex_polygon(
         vec![
@@ -466,7 +466,7 @@ pub fn playhead(painter: &Painter, x: f32, ruler: Rect, bottom: f32) {
             pos2(x + 5.0, ruler.top()),
             pos2(x, ruler.top() + 7.0),
         ],
-        theme::PLAYHEAD,
+        color,
         Stroke::NONE,
     ));
 }

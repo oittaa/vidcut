@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde_json::Value;
-use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
+use vidcut_av::fixture::{self, Container, FixtureSpec, Picture, Sound, VideoCodec};
 
 /// A scratch directory with its own XDG state (undo history) dir.
 struct Sandbox {
@@ -752,5 +752,115 @@ fn b_roll_and_music_export_correctly() {
     assert!(
         l.iter().all(|s| s.abs() < 1e-3),
         "soloed but muted: silence"
+    );
+}
+
+#[test]
+fn loudness_normalized_exports_meet_their_target() {
+    // A -20 LUFS tone exported at -16 LUFS measures -16 LUFS afterwards.
+    let sb = Sandbox::new("loudness");
+    let tone = fixture(
+        FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 300)
+            .sound(Sound::Tone),
+    );
+    sb.cmd(&["new"]).arg(sb.project()).output().unwrap();
+    sb.ok(&["media", "add", s(&tone)]);
+    sb.ok(&["edit", "append", "m1"]);
+    let before = sb.ok(&["analyze", "loudness"]);
+    assert!((before["result"]["integrated"].as_f64().unwrap() + 20.0).abs() < 0.3);
+    let out = sb.dir.join("tone.wav");
+    let r = sb.ok(&["export", s(&out), "--set", "audio.loudness=-16"]);
+    let applied = &r["result"]["outputs"][0]["loudness"];
+    assert!(
+        (applied["gain_db"].as_f64().unwrap() - 4.0).abs() < 0.3,
+        "{applied}"
+    );
+    let check = sb.dir.join("check.vidcut");
+    sb.cmd_in(&check, &["new"]).arg(&check).output().unwrap();
+    sb.ok_in(&check, &["media", "add", s(&out)]);
+    sb.ok_in(&check, &["edit", "append", "m1"]);
+    let after = sb.ok_in(&check, &["analyze", "loudness"]);
+    let lufs = after["result"]["integrated"].as_f64().unwrap();
+    assert!((lufs + 16.0).abs() < 0.3, "{after}");
+
+    // Beeps peak at -6 dBFS: raising them 8 LU to -14 would clip, so the
+    // gain stops where true peaks reach -1 dBTP.
+    let beeps = fixture(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (30, 1),
+        300,
+    ));
+    let loud = sb.dir.join("loud.vidcut");
+    sb.cmd_in(&loud, &["new"]).arg(&loud).output().unwrap();
+    sb.ok_in(&loud, &["media", "add", s(&beeps)]);
+    sb.ok_in(&loud, &["edit", "append", "m1"]);
+    let measured = sb.ok_in(&loud, &["analyze", "loudness"])["result"].clone();
+    let r = sb.ok_in(
+        &loud,
+        &[
+            "export",
+            s(&sb.dir.join("beeps.wav")),
+            "--set",
+            "audio.loudness=-14",
+        ],
+    );
+    let applied = &r["result"]["outputs"][0]["loudness"];
+    let peak = applied["true_peak"].as_f64().unwrap();
+    assert!((peak + 1.0).abs() < 0.05, "held at -1 dBTP: {applied}");
+    let gain = applied["gain_db"].as_f64().unwrap();
+    let wanted = -14.0 - measured["integrated"].as_f64().unwrap();
+    assert!(
+        gain < wanted - 1.0,
+        "less than the {wanted} dB the target wanted: {applied}"
+    );
+}
+
+#[test]
+fn scene_cuts_split_encoded_shots_exactly() {
+    // p. 690: a clip of five 30-frame shots splits at each shot change;
+    // the fourth shot is black.
+    let sb = Sandbox::new("scenes");
+    let shots = fixture(
+        FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 150)
+            .picture(Picture::Shots { frames: 30 })
+            .no_audio(),
+    );
+    sb.cmd(&["new"]).arg(sb.project()).output().unwrap();
+    sb.ok(&["media", "add", s(&shots)]);
+    let scenes = sb.ok(&["analyze", "scenes", "--media", "m1"]);
+    let cuts: Vec<i64> = scenes["result"][0]["cuts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["frame"].as_i64().unwrap())
+        .collect();
+    assert_eq!(cuts, vec![30, 60, 90, 120]);
+    let black = sb.ok(&["analyze", "black", "--media", "m1"]);
+    let r = &black["result"][0]["ranges"][0];
+    assert_eq!(
+        (r["start"].as_i64(), r["end"].as_i64()),
+        (Some(90), Some(120))
+    );
+    sb.ok(&["edit", "append", "m1", "--range", "10f..150f"]);
+    sb.ok(&["edit", "detect-scene-cuts", "c1"]);
+    let tl = sb.ok(&["timeline"]);
+    let starts: Vec<(i64, i64)> = tl["result"]["tracks"][0]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|i| i["type"] == "clip")
+        .map(|i| {
+            (
+                i["start"].as_i64().unwrap(),
+                i["source_in"].as_i64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        starts,
+        vec![(0, 10), (20, 30), (50, 60), (80, 90), (110, 120)]
     );
 }

@@ -148,6 +148,26 @@ pub fn run_with(
             r.rev = editor.project().rev;
             r
         }
+        Request::StoryboardRender {
+            out,
+            columns,
+            width,
+            every,
+            range,
+        } => {
+            let editor = open(project)?.load()?;
+            let mut r = answer(crate::storyboard::render(
+                editor.project(),
+                out,
+                *columns,
+                *width,
+                every.as_ref(),
+                range.as_ref(),
+                None,
+            )?);
+            r.rev = editor.project().rev;
+            r
+        }
         Request::Probe { .. } => {
             // Probing needs no project; an empty editor answers it.
             let mut editor = vidcut_core::Editor::new(

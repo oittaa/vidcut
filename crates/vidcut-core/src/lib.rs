@@ -3,6 +3,7 @@
 //! Pure Rust: no FFmpeg, no mpv, no I/O beyond the project store, so it
 //! compiles and tests fast. Media facts come from the caller (see [`editor::Env`]).
 
+pub mod analysis;
 pub mod editor;
 pub mod error;
 pub mod export;
@@ -22,6 +23,8 @@ pub use model::Project;
 pub use request::{Envelope, Request, Response};
 pub use store::Store;
 
+#[cfg(test)]
+mod analysis_tests;
 #[cfg(test)]
 mod ops_tests;
 #[cfg(test)]

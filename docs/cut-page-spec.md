@@ -161,6 +161,10 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 **Track headers:**
 - Enlarge (one track at a time), Lock, Mute (audio), Video Enable (pp. 647, 717).
 
+**Automatic tools (M7):**
+- **Boring Detector** (Timeline Options, p. 690): highlights clips longer than "Boring Clips" (light gray) and shorter than "Jump Cuts" (red) on the upper timeline, live as you edit. Analyze Timeline Edits sets both (D31).
+- **Detect Scene Cuts** (Timeline Actions, p. 690): splits the selected clips where their shots change (D30). Resolve's is Studio-only; vidcut has it in every build.
+
 ## 6. Track model (pp. 647, 649, 716, 721, 727)
 
 - **Track 1 is the main story (A-roll):**
@@ -280,8 +284,8 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - End extends to the end of the media
   - "Extend Beyond Clip Length" pads with black (later)
   - applies to every selected clip
-- **Dynamic Trim (M7)** (W, pp. 730–732): JKL trim the selected edits while playing.
-- **Slide (later):** only exists inside Dynamic Trim.
+- **Dynamic Trim (M7)** (W, pp. 730–732): W toggles the mode and the playhead turns yellow. J/K/L then trim the selected edit (Out, In or both by U), or slip or slide the selected clips (right-click the Dynamic Trim button to choose), instead of playing. With nothing selected it takes the edit nearest the playhead. Space plays around the selection; Up/Down move to another edit. Details: D32 and deviation X11.
+- **Slide (M7):** moves a clip keeping its media; the clip before it gets longer and the one after it shorter (Dynamic Trim, p. 731; `edit.slide`).
 
 ### 8.7 J/L cuts (v1) (p. 728)
 Hover the lower audio part of a clip at an edit until the cursor shows a note, then drag. Only the audio edit point moves, as an audio roll.
@@ -307,9 +311,10 @@ Hover the lower audio part of a clip at an edit until the cursor shows a note, t
 - **Mixer (M6)** (pp. 649–650): the Mixer button opens a channel strip per track with sound: name, meter, fader (dB) and mute/solo, plus the mix's meter. Solo silences the tracks that aren't soloed, and mute/solo apply to export too (p. 650). Track pan and FX are out of scope.
 - **Viewer meter and monitoring mute (M6)** (p. 642): a meter beside the viewer shows what it plays. Its speaker button mutes playback only, not the export.
 - **Clip volume (v1):** one gain value per clip, and clip mute.
-- **Ripple Delete Silence (M7)** (p. 773):
-  - settings: threshold (dB), pre-head, post-tail, minimum silence (frames), crossfade
-  - previews the parts to remove as red stripes; Remove cuts them and closes the gaps
+- **Ripple Delete Silence (M7)** (p. 773): select clips, then Clip > Audio Operations > Ripple Delete Silence (vidcut: the clip's right-click menu or Timeline Actions).
+  - settings: threshold (dB), pre-head, post-tail, minimum to trip
+  - previews the parts to remove as red stripes; Remove cuts them and closes the gaps, as one undo step
+  - details and defaults: D29; the crossfade option is deviation X11
 
 ## 10. Quick Export (v1, M5) (Ch. 39, pp. 788–790, 4095–4096, 4104–4109)
 
@@ -361,7 +366,7 @@ Keys from the Cut chapters, with Edit-page keys filling the gaps (marked †).
 | Ctrl+D | Change clip duration | 693 |
 | N | Snapping on/off | 716 |
 | M / Alt+M | Add-or-edit marker / delete marker at playhead | 718 |
-| W | Dynamic Trim (M7) | 731 |
+| W | Dynamic Trim on/off (then J/K/L trim, Space plays around) | 731 |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / redo | 651 |
 | Ctrl+I | Import media | 654 |
 | Shift+Ctrl+N | New bin | 655 |
@@ -402,7 +407,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - A trim, roll, slip or J/L cut stops where the media runs out instead of failing.
   - Safe Edit (p. 732) holds an edge at the neighbor for 0.6 s; pushing on overrides it.
   - Dragging empty space in the upper timeline scrubs; in the lower timeline it draws a marquee.
-- **D20. Keyboard trimming.** With an edit selected (V, U, or a click on an edit), `,` and `.` trim it by one frame and Shift+`,`/`.` by one second: the Out, the In, or both (a roll). These are the Edit page's nudge keys (†); the Cut page's own keyboard trimming is Dynamic Trim (M7).
+- **D20. Keyboard trimming.** With an edit selected (V, U, or a click on an edit), `,` and `.` trim it by one frame and Shift+`,`/`.` by one second: the Out, the In, or both (a roll). These are the Edit page's nudge keys (†); the Cut page's own keyboard trimming is Dynamic Trim (D32).
 - **D14. J/L cuts belong to an edit point.**
   - A J/L cut (§8.7) is stored as matching audio offsets on the two clips that meet there: the outgoing clip's `tail` equals the incoming clip's `head`.
   - When an edit gives a clip a different neighbor at that point, the J/L cut resets to a straight cut. Examples: a delete, a move, or a split inside the overlap zone, where one half would otherwise be left without audio of its own.
@@ -425,3 +430,18 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
 - **D26. Sound alone.** An edit without picture (media without video, or the Audio Only toggle, p. 694) goes to A1 unless a target track is given. A clip on an audio track keeps only its audio. In the GUI, sound alone dragged onto a video track lands on the first audio track.
 - **D27. Track numbers are positions.** Video tracks are V1, V2, … from the bottom; audio tracks A1, A2, … from the top. Removing a track renumbers the ones after it. Edits and moves may name the next track (one past the last) to create it. Track 1 can't be removed, and removing a track with clips must be confirmed (`--force`). Track volume runs from −60 dB to +24 dB, like clip gain (D12).
 - **D28. Meters read the waveforms.** Meters show the peak level at the playhead, taken from the media waveforms (one peak per 10 ms) with clip gain, faders, mute and solo applied. They work while paused and while scrubbing. Each track has one bar (its loudest channel), not one per channel as on p. 649.
+- **D29. Ripple Delete Silence** (p. 773). The manual gives no defaults or measuring rule.
+  - **Silence** is where every channel's peak, after the clip's gain, stays below the threshold, measured in 10 ms steps. Parts of the clip past the end of its audio count as silent.
+  - **Defaults:** threshold −40 dBFS, pre-head and post-tail 0.15 s, minimum to trip 0.5 s. They are seconds rather than frames, so a project's frame rate doesn't change what they mean.
+  - **What goes:** each silence at least the minimum long, less the post-tail after the sound before it and the pre-head before the sound after it. Silence at a clip's start or end goes entirely. Only whole frames are cut.
+  - **One edit:** it ripples whatever Ripple On says, as its name promises. Track 1 closes up, and clips on other tracks follow (D21). It is one undo step, and a dry run reports the parts without cutting (the red stripes).
+- **D30. Finding shots and black.** Detect Scene Cuts (p. 690) gives no algorithm.
+  - **Shots:** each frame gets FFmpeg scdet's scene score on its luma: the mean difference from the previous frame (0–100), or the change in that difference if smaller, so steady motion doesn't read as a cut. A frame scoring at least 10 starts a new shot. The cut lands on the first timeline frame that shows it.
+  - **Black:** a frame is black when 98% of its pixels are within 10% of black. Black stretches of 0.5 s or more are reported (`analyze.black`).
+  - **Measurement:** pictures are measured at 96×54 and sounds in 10 ms peaks. Measurements are cached per file, so trying other thresholds is instant.
+- **D31. Boring Detector defaults** (p. 690). The manual gives none. Clips over 30 s are boring and clips under 10 frames are jump cuts (2 frames finds flash frames, p. 690). The detector looks at clips on video tracks, and its settings are view options kept between runs, not part of the project.
+- **D32. Dynamic Trim** (pp. 730–732).
+  - **Running:** L or J runs the trim at the shuttle speed (repeat for 2×, 4×, 8×), as playback would move. The run stops where the media or a neighbor runs out.
+  - **Seeing it:** the viewer shows the two-up: the frames on both sides of the edit, or of the slipped or sliding clip, as the trim leaves them (exact frames, as the Trim Editor shows).
+  - **Applying it:** K stops the run and applies it as one request (`edit.trim`, `edit.roll`, `edit.slip` or `edit.slide`). K held with a tap of J or L applies one frame. W also applies what is pending before leaving.
+  - **Play around:** Space plays from 2 s before the selection to 2 s after it.

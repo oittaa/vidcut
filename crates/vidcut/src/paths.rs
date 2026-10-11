@@ -26,6 +26,24 @@ pub fn cache_dir() -> PathBuf {
     xdg("XDG_CACHE_HOME", ".cache")
 }
 
+/// A file in `cache_dir()/dir` for what was derived from `media`'s file as
+/// it is now (path, size and modification time), ending in `.ext`.
+pub fn media_cache(dir: &str, media: &vidcut_core::model::Media, ext: &str) -> PathBuf {
+    cache_dir().join(dir).join(format!(
+        "{:016x}-{}-{}.{ext}",
+        fnv1a(media.path.as_os_str().as_encoded_bytes()),
+        media.size,
+        media.mtime_ns
+    ))
+}
+
+/// FNV-1a: stable 64-bit hash for cache file names.
+pub(crate) fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, b| {
+        (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
 /// `~/.local/state/vidcut`: undo history, recent projects.
 pub fn state_dir() -> PathBuf {
     vidcut_core::store::state_dir()

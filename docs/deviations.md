@@ -28,6 +28,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
   - a live plan (`export.plan`: the encoder that will run, the files and their lengths) before anything is written
   - the same export as a shell command, ready to copy
   - saving the settings as a user preset, optionally added to Quick Export (p. 790)
+  - loudness normalization to a target in LUFS (`audio.loudness`), like the Deliver page's Normalize Audio (p. 4105): the mix is measured (EBU R128), then changed by one gain that keeps true peaks at or below −1 dBTP. The export reports what it measured and the gain
 
   Every export is a job: a Jobs window lists them with progress, ETA and Cancel, including exports started from the CLI. Quitting while exports run asks first.
 - **Why:** vidcut has no Deliver page, and the user requires these export options. The plan and the command make every GUI export reproducible from a script.
@@ -49,6 +50,8 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 - **Export jobs** (M5): `export --background` returns a job id at once in a running GUI, and `jobs list|get|wait|cancel` follow it. Foreground exports report progress and cancel when the client disconnects. `export.plan` (`export --dry-run`) describes an export without writing anything.
 - **User presets from scripts:** `presets save` (from settings or from another preset with `--set` overrides) and `presets delete`.
 - **`gui.show`** opens Quick Export, the Export dialog, Jobs, the command log or the Mixer for the person at the GUI.
+- **Measuring as data** (M7): `analyze silence|scenes|black|loudness` report what Ripple Delete Silence, Detect Scene Cuts, a black check and a loudness meter find, as frame ranges, without changing anything. `vidcut boring` is the Boring Detector's finding as a list. Agents use them to plan edits (markers, cuts, In/Out) before making them.
+- **Storyboards** (M7): `storyboard.render` writes one PNG with a labeled picture of every shot (or every N seconds), so an agent can look at a whole edit at once; over MCP it comes back as an image.
 
 ## X6. Removing a bin keeps its clips
 - **Resolve:** Delete Bin deletes the bin, the bins inside it and their clips (p. 377).
@@ -76,3 +79,15 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
   - Left out, with a warning each: transitions (cuts instead), nested stacks, generators, and clips that would overlap others on their track. `.otioz` bundles aren't read.
   - Export → import reproduces a timeline frame for frame (`tests/cli.rs`, `otio.rs` tests).
 - **Why:** the user's choice. OTIO is an open standard that Resolve and other editors read and write, so a cut can move to a finishing tool and back, and agents can write timelines in a documented format instead of vidcut's own.
+
+## X10. An MCP server for AI agents
+- **Resolve:** scripting is a Python/Lua API for Studio (Workspace > Scripts, outside the Cut page chapters).
+- **vidcut:** `vidcut mcp` serves the Model Context Protocol on stdin/stdout. Every request method is a tool with its JSON Schema (`edit.split` is `edit_split`), plus `use_project`. Calls run like CLI commands: inside the GUI that has the project open, so the person at it watches each edit, or headless. Frames, screenshots and storyboards come back as images; exports report progress and a headless export stops when the call is cancelled. AGENTS.md shows how to connect an agent.
+- **Why:** the user wants vidcut drivable by AI agents. MCP is how agents discover and call tools; generating the tools from the request schema keeps them complete and in step with the CLI.
+
+## X11. Dynamic Trim and Ripple Delete Silence, simplified
+- **Resolve:** Dynamic Trim trims while the program plays, with sound, in a dynamically updating timeline (pp. 730–731). Ripple Delete Silence can crossfade the remaining audio (p. 773).
+- **vidcut:**
+  - **Dynamic Trim:** J/L run the trim at shuttle speed while the two-up shows the frames on both sides as the trim leaves them, without sound. The timeline changes once, when K stops it (spec D32).
+  - **Ripple Delete Silence:** there is no crossfade option. Its cuts get the 3 ms de-click fades every vidcut cut gets in export.
+- **Why:** the preview plays the timeline as one EDL, so changing the cut on every frame of a run would mean reloading it many times a second. The two-up shows exactly what the trim will make (the export engine renders those frames), and one change at the end is one undo step that agents and the command log can follow. Crossfades would need overlapping audio, which the track model doesn't have (spec D14); the de-click fades already keep cuts silent.

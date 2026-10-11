@@ -75,6 +75,10 @@ impl Workspace {
             (picture.width() * ppp).round() as i32,
             (picture.height() * ppp).round() as i32,
         ];
+        if self.timeline.dynamic.is_some() && self.dynamic_target().is_some() {
+            self.dynamic_view(ui, area, aspect);
+            return;
+        }
         if self.trim_editor.is_some() {
             self.trim_editor_view(ui, area, aspect);
             return;
@@ -168,6 +172,85 @@ impl Workspace {
             self.trim_editor = None;
             return;
         }
+        self.two_up(
+            ui,
+            area,
+            aspect,
+            &p,
+            [(e.at - 1, "Out (outgoing)"), (e.at, "In (incoming)")],
+        );
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            for (side, label) in [(Side::Out, "Out"), (Side::Both, "Roll"), (Side::In, "In")] {
+                ui.label(dim(label));
+                for by in [-1, 1] {
+                    if ui
+                        .button(if by < 0 { "−1" } else { "+1" })
+                        .on_hover_text(format!("{label} {by:+} frame"))
+                        .clicked()
+                    {
+                        self.timeline.edit = Some(crate::gui::timeline::EditSel { at: e.at, side });
+                        self.nudge_edit(side, by);
+                    }
+                }
+                ui.separator();
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Close").on_hover_text("Esc").clicked() {
+                    self.trim_editor = None;
+                }
+                ui.label(RichText::new(format!("edit at {}", self.tc(e.at))).monospace());
+            });
+        });
+    }
+
+    /// Dynamic Trim's two-up (p. 730): the frames on both sides of the
+    /// edit (or of the slipped or sliding clip) as the trim so far leaves them.
+    fn dynamic_view(&mut self, ui: &mut egui::Ui, area: Rect, aspect: f32) {
+        use crate::gui::timeline::tools::{DynamicTarget, dynamic_preview};
+        let (Some(target), Some(mut p)) = (self.dynamic_target(), self.project().cloned()) else {
+            return;
+        };
+        let pending = self.timeline.dynamic.as_ref().map_or(0, |d| d.pending);
+        let mode = self.timeline.options.dynamic_mode;
+        let Ok((left, right)) = dynamic_preview(&mut p, &target, mode, pending) else {
+            return;
+        };
+        let labels = match &target {
+            DynamicTarget::Edit(_) => ["Out (outgoing)", "In (incoming)"],
+            DynamicTarget::Clips(_) => match mode {
+                crate::gui::timeline::tools::DynamicMode::Slip => ["First frame", "Last frame"],
+                crate::gui::timeline::tools::DynamicMode::Slide => ["Before", "After"],
+            },
+        };
+        self.two_up(
+            ui,
+            area,
+            aspect,
+            &p,
+            [(left, labels[0]), (right, labels[1])],
+        );
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format!("Dynamic Trim {pending:+} frames"))
+                    .monospace()
+                    .color(Color32::from_rgb(240, 200, 40)),
+            );
+            ui.label(dim("L/J trim (repeat for speed), K stops and applies, K+L/J one frame, Space plays around it, W leaves"));
+        });
+    }
+
+    /// Two exact frames of `p` side by side, labeled: timeline frames that
+    /// show nothing read "no clip".
+    fn two_up(
+        &mut self,
+        ui: &mut egui::Ui,
+        area: Rect,
+        aspect: f32,
+        p: &vidcut_core::model::Project,
+        cells: [(i64, &str); 2],
+    ) {
         ui.allocate_rect(area, Sense::hover());
         let painter = ui.painter_at(area);
         painter.rect_filled(area, CornerRadius::ZERO, Color32::from_rgb(12, 12, 13));
@@ -181,19 +264,16 @@ impl Workspace {
         let stills = self
             .stills
             .get_or_insert_with(|| crate::gui::stills::Stills::new(ctx.clone()));
-        for (i, (clip, frame, label)) in [
-            (&out, e.at - 1, "Out (outgoing)"),
-            (&inc, e.at, "In (incoming)"),
-        ]
-        .into_iter()
-        .enumerate()
-        {
+        let main = p.track(vidcut_core::ops::MAIN);
+        for (i, (frame, label)) in cells.into_iter().enumerate() {
             let cell = Rect::from_min_size(
                 pos2(area.left() + half * i as f32, area.top()),
                 vec2(half, area.height()),
             );
             let picture = fit(cell.shrink(6.0), aspect);
             painter.rect_filled(picture, CornerRadius::ZERO, Color32::BLACK);
+            let clip =
+                main.and_then(|t| t.clips.iter().find(|c| c.start <= frame && frame < c.end()));
             let Some(c) = clip else {
                 painter.text(
                     picture.center(),
@@ -204,7 +284,7 @@ impl Workspace {
                 );
                 continue;
             };
-            let piece = vidcut_core::render::flatten(&p, frame, frame + 1)
+            let piece = vidcut_core::render::flatten(p, frame, frame + 1)
                 .ok()
                 .and_then(|plan| plan.video.into_iter().next());
             if let Some(piece) = piece {
@@ -236,29 +316,6 @@ impl Workspace {
                 Color32::WHITE,
             );
         }
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            for (side, label) in [(Side::Out, "Out"), (Side::Both, "Roll"), (Side::In, "In")] {
-                ui.label(dim(label));
-                for by in [-1, 1] {
-                    if ui
-                        .button(if by < 0 { "−1" } else { "+1" })
-                        .on_hover_text(format!("{label} {by:+} frame"))
-                        .clicked()
-                    {
-                        self.timeline.edit = Some(crate::gui::timeline::EditSel { at: e.at, side });
-                        self.nudge_edit(side, by);
-                    }
-                }
-                ui.separator();
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Close").on_hover_text("Esc").clicked() {
-                    self.trim_editor = None;
-                }
-                ui.label(RichText::new(format!("edit at {}", self.tc(e.at))).monospace());
-            });
-        });
     }
 
     fn viewer_title(&self) -> String {

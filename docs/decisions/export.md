@@ -45,6 +45,7 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
 
 **Conversion and mixing:**
 - libswresample converts to interleaved `f32` at the export rate and layout: mono is upmixed, 5.1 is downmixed. vidcut sizes the output buffers itself; ffmpeg-next's wrapper can truncate when upsampling.
+- **Loudness normalization** (`audio.loudness`, M7): the mix is measured first (EBU R128 via FFmpeg's `ebur128`), then gained toward the target, held so true peaks stay at or below −1 dBTP (agents.md §5).
 - Lanes are summed in Rust, with clip gain applied.
 - **De-click:** 3 ms linear fades at every cut inside a lane (on by default; `declick=false` turns them off). Silence-removal cuts would click without them.
 

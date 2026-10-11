@@ -2,12 +2,15 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde_json::{Value, json};
 
+use crate::analysis::{AudioLevels, Loudness, PictureStats};
 use crate::editor::{Editor, Env, History, ProbedMedia};
 use crate::error::{Error, Result};
-use crate::model::{AudioInfo, MediaInfo, Project, Settings, VideoInfo};
+use crate::model::{AudioInfo, Media, MediaInfo, Project, Settings, VideoInfo};
+use crate::render::{AudioPiece, RenderPlan};
 use crate::request::{Envelope, Response};
 use crate::time::Rational;
 
@@ -50,10 +53,62 @@ pub fn audio_info(secs: f64) -> MediaInfo {
     info
 }
 
-/// An Env whose files are fake media keyed by path.
+/// An Env whose files are fake media keyed by path, with made-up
+/// measurements: sound and pictures as tests describe them.
 #[derive(Default)]
 pub struct FakeEnv {
     pub files: HashMap<PathBuf, MediaInfo>,
+    /// Peak levels by media path (stream 0); missing ones are loud.
+    pub levels: HashMap<PathBuf, AudioLevels>,
+    pub pictures: HashMap<PathBuf, PictureStats>,
+}
+
+/// Levels at 100 per second: loud (0.5) during `loud` seconds, otherwise
+/// near silent (-60 dBFS).
+pub fn levels(secs: f64, loud: &[(f64, f64)]) -> AudioLevels {
+    let peaks = (0..(secs * 100.0).round() as usize)
+        .map(|i| {
+            let t = i as f64 / 100.0;
+            if loud.iter().any(|&(a, b)| t >= a && t < b) {
+                0.5
+            } else {
+                0.001
+            }
+        })
+        .collect();
+    AudioLevels {
+        per_second: 100,
+        start: 0.0,
+        peaks,
+    }
+}
+
+/// Pictures at `fps` for `secs`: a new shot at each of `shots` (seconds),
+/// black during `black` seconds.
+pub fn pictures(secs: f64, fps: f64, shots: &[f64], black: &[(f64, f64)]) -> PictureStats {
+    let n = (secs * fps).round() as usize;
+    let pts: Vec<f64> = (0..n).map(|k| k as f64 / fps).collect();
+    let score = pts
+        .iter()
+        .map(|&t| {
+            if shots.iter().any(|&s| (t - s).abs() < 0.5 / fps) {
+                60.0
+            } else {
+                0.5
+            }
+        })
+        .collect();
+    let black = pts
+        .iter()
+        .map(|&t| {
+            if black.iter().any(|&(a, b)| t >= a && t < b) {
+                1.0
+            } else {
+                0.0
+            }
+        })
+        .collect();
+    PictureStats { pts, score, black }
 }
 
 impl FakeEnv {
@@ -75,6 +130,47 @@ impl Env for FakeEnv {
             size: 1,
             mtime_ns: 0,
             info,
+        })
+    }
+
+    fn audio_levels(&self, media: &Media, _stream: u32) -> Result<Arc<AudioLevels>> {
+        Ok(Arc::new(
+            self.levels
+                .get(&media.path)
+                .cloned()
+                .unwrap_or_else(|| levels(media.info.duration, &[(0.0, media.info.duration)])),
+        ))
+    }
+
+    fn picture_stats(&self, media: &Media) -> Result<Arc<PictureStats>> {
+        let fps = media.info.video.as_ref().map_or(25.0, |v| v.fps.as_f64());
+        Ok(Arc::new(
+            self.pictures
+                .get(&media.path)
+                .cloned()
+                .unwrap_or_else(|| pictures(media.info.duration, fps, &[], &[])),
+        ))
+    }
+
+    /// As if every source were -20 LUFS: the loudest piece's gain decides.
+    fn loudness(&self, plan: &RenderPlan) -> Result<Loudness> {
+        let gains: Vec<f64> = plan
+            .audio
+            .iter()
+            .flatten()
+            .filter_map(|p| match p {
+                AudioPiece::Source { gain_db, .. } => Some(*gain_db),
+                AudioPiece::Silence { .. } => None,
+            })
+            .collect();
+        let integrated = match gains.iter().cloned().reduce(f64::max) {
+            Some(g) => -20.0 + g,
+            None => f64::NEG_INFINITY,
+        };
+        Ok(Loudness {
+            integrated,
+            range: 0.0,
+            true_peak: integrated + 6.0,
         })
     }
 

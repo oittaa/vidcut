@@ -129,6 +129,8 @@ pub(crate) struct Job {
     /// The project's revision when a request answered at once started: a
     /// different one at the end means it changed the project.
     rev: Option<u64>,
+    /// A dry run: it changes nothing whatever it reports.
+    dry_run: bool,
 }
 
 pub(crate) enum Msg {
@@ -149,6 +151,12 @@ pub(crate) enum Msg {
     TaskDone {
         job: Job,
         result: Result<Response>,
+    },
+    /// What a request needed is measured: now it runs.
+    Measured {
+        job: Job,
+        envelope: Envelope,
+        result: Result<()>,
     },
     FileChanged,
     Thumbs {
@@ -231,6 +239,7 @@ impl Handle {
                         origin: Origin::Gui,
                         reply: None,
                         rev: None,
+                        dry_run: false,
                     },
                     result: Err(Error::internal(e)),
                 });
@@ -617,6 +626,21 @@ impl Live {
             }
             Msg::Captured { id, result } => self.captured(id, result),
             Msg::TaskDone { job, result } => self.finish(job, result),
+            Msg::Measured {
+                job,
+                envelope,
+                result,
+            } => match result {
+                Err(e) => self.finish(job, Err(e)),
+                Ok(()) => {
+                    // The project may have changed meanwhile; this request's
+                    // change is measured from now.
+                    let rev = self.project.as_ref().map(|p| p.project().rev);
+                    let job = Job { rev, ..job };
+                    let result = self.edit(envelope);
+                    self.finish(job, result);
+                }
+            },
             Msg::FileChanged => {
                 let refreshed = match self.project.as_mut().map(OpenProject::reload) {
                     Some(Ok(changed)) => changed,
@@ -866,6 +890,7 @@ impl Live {
             origin,
             reply,
             rev: self.project.as_ref().map(|p| p.project().rev),
+            dry_run: envelope.dry_run,
         };
         if let Some(expected) = expected {
             let open = self.project.as_ref().map(|p| p.store.path());
@@ -908,7 +933,54 @@ impl Live {
                 deadline: limit.map(|l| Instant::now() + l),
             }),
             Step::Task(task) => self.spawn_task(Job { rev: None, ..job }, task),
+            Step::Measure(measure, then) => {
+                let tx = self.tx.clone();
+                let _ = std::thread::Builder::new()
+                    .name("vidcut-measure".into())
+                    .spawn(move || {
+                        let result = measure();
+                        let _ = tx.send(Msg::Measured {
+                            job,
+                            envelope: *then,
+                            result,
+                        });
+                    });
+            }
         }
+    }
+
+    /// The measuring a request needs before it runs: the sound or pictures
+    /// of the clips it names, whose measurements the media layer then keeps.
+    fn measuring(&self, envelope: &Envelope) -> Option<Measure> {
+        let p = self.project.as_ref()?.project();
+        let playhead = Some(self.players[TIMELINE].position);
+        let (clips, sound) = match &envelope.request {
+            Request::EditRippleDeleteSilence { clips, .. } => (clips.to_vec(), true),
+            Request::EditDetectSceneCuts { clips, .. } => (clips.to_vec(), false),
+            _ => return None,
+        };
+        let mut needed = Vec::new();
+        for r in &clips {
+            let Some(c) = resolve_clip(p, r, playhead).ok().and_then(|id| p.clip(&id)) else {
+                continue;
+            };
+            let Some(m) = p.media(&c.media) else { continue };
+            match (&c.audio, sound) {
+                (Some(a), true) => needed.push((m.clone(), Some(a.stream))),
+                (_, false) if m.info.video.is_some() => needed.push((m.clone(), None)),
+                _ => {}
+            }
+        }
+        Some(Box::new(move || {
+            use vidcut_core::Env;
+            for (m, stream) in &needed {
+                match stream {
+                    Some(s) => AvEnv.audio_levels(m, *s).map(drop)?,
+                    None => AvEnv.picture_stats(m).map(drop)?,
+                }
+            }
+            Ok(())
+        }))
     }
 
     // ---------------------------------------------------------------- jobs
@@ -1070,7 +1142,9 @@ impl Live {
                 job.method.as_str(),
                 "export.plan" | "presets.list" | "presets.get" | "encoders.list" | "jobs.list"
             ))
-            || (job.method == "player.seek" && job.params["fast"] == json!(true));
+            || (job.method == "player.seek" && job.params["fast"] == json!(true))
+            // Previews the GUI asks for (Ripple Delete Silence's stripes).
+            || (job.origin == Origin::Gui && job.dry_run);
         if !quiet {
             self.log_seq += 1;
             let entry = LogEntry {
@@ -1086,10 +1160,11 @@ impl Live {
                 rev,
                 // Track settings, bins and marks change the project without
                 // touching media, clips or markers.
-                changed: result.as_ref().is_ok_and(|r| !r.changes.is_empty())
-                    || (result.is_ok()
-                        && job.method != "project.open"
-                        && job.rev.is_some_and(|before| before != rev)),
+                changed: !job.dry_run
+                    && (result.as_ref().is_ok_and(|r| !r.changes.is_empty())
+                        || (result.is_ok()
+                            && job.method != "project.open"
+                            && job.rev.is_some_and(|before| before != rev))),
             };
             let log = Arc::make_mut(&mut self.log);
             log.push_back(entry);
@@ -1306,10 +1381,22 @@ impl Live {
                 Ok(_) => Step::Wait(Until::Job { id: job }),
                 Err(e) => Step::Now(Err(e)),
             },
-            Request::ExportStart(_) | Request::ExportPlan(_) | Request::FrameRender { .. } => {
-                self.project_task(envelope, job)
+            // Decoding work runs on a worker against the saved project.
+            Request::ExportStart(_)
+            | Request::ExportPlan(_)
+            | Request::FrameRender { .. }
+            | Request::StoryboardRender { .. }
+            | Request::AnalyzeSilence { .. }
+            | Request::AnalyzeScenes { .. }
+            | Request::AnalyzeBlack { .. }
+            | Request::AnalyzeLoudness { .. } => self.project_task(envelope, job),
+            Request::EditRippleDeleteSilence { .. } | Request::EditDetectSceneCuts { .. } => {
+                match self.measuring(&envelope) {
+                    Some(measure) => Step::Measure(measure, Box::new(envelope)),
+                    None => Step::Now(self.edit(envelope)),
+                }
             }
-            _ => self.edit(envelope, job),
+            _ => Step::Now(self.edit(envelope)),
         }
     }
 
@@ -1362,12 +1449,12 @@ impl Live {
     }
 
     /// Project requests: edits and queries through the editor.
-    fn edit(&mut self, mut envelope: Envelope, _job: &Job) -> Step {
+    fn edit(&mut self, mut envelope: Envelope) -> Result<Response> {
         let playhead = self.players[TIMELINE].position;
         match &mut envelope.request {
             Request::EditPaste { clips, .. } if clips.is_none() => {
                 if self.clipboard.is_empty() {
-                    return Step::Now(Err(Error::usage("the clipboard is empty")));
+                    return Err(Error::usage("the clipboard is empty"));
                 }
                 *clips = Some(self.clipboard.clone());
             }
@@ -1401,7 +1488,7 @@ impl Live {
             _ => {}
         }
         let Some(open) = self.project.as_mut() else {
-            return Step::Now(Err(no_project()));
+            return Err(no_project());
         };
         let request = envelope.request.clone();
         let (result, changed) = open.apply(envelope, &AvEnv, Some(playhead));
@@ -1429,7 +1516,7 @@ impl Live {
                 self.playhead_after_edit(r);
             }
         }
-        Step::Now(result)
+        result
     }
 
     // ---------------------------------------------------------------- project
@@ -1519,12 +1606,7 @@ impl Live {
             }
             if !m.info.audio.is_empty() && self.waveforms_wanted.insert(m.id.clone()) {
                 let (tx, id, path) = (self.tx.clone(), m.id.clone(), m.path.clone());
-                let cache = paths::cache_dir().join("waveforms").join(format!(
-                    "{:016x}-{}-{}.peaks",
-                    fnv1a(m.path.as_os_str().as_encoded_bytes()),
-                    m.size,
-                    m.mtime_ns
-                ));
+                let cache = paths::media_cache("waveforms", &m, "peaks");
                 self.workers.run(move || {
                     let cached = std::fs::read(&cache)
                         .ok()
@@ -1547,20 +1629,13 @@ impl Live {
             if vidcut_av::remux::needs_index(&m.info.format) && !self.remux.contains_key(&m.path) {
                 self.remux.insert(m.path.clone(), RemuxState::Pending);
                 let tx = self.tx.clone();
-                let dir = paths::cache_dir().join("preview");
-                let name = format!(
-                    "{:016x}-{}-{}.mkv",
-                    fnv1a(m.path.as_os_str().as_encoded_bytes()),
-                    m.size,
-                    m.mtime_ns
-                );
+                let out = paths::media_cache("preview", &m, "mkv");
                 let source = m.path.clone();
                 self.workers.run(move || {
-                    let out = dir.join(name);
                     let result = if out.exists() {
                         Ok(out)
                     } else {
-                        std::fs::create_dir_all(&dir)
+                        std::fs::create_dir_all(out.parent().expect("in the cache"))
                             .map_err(|e| e.to_string())
                             .and_then(|()| {
                                 let tmp = out.with_extension("part.mkv");
@@ -1701,7 +1776,7 @@ impl Live {
             .unwrap_or_default();
         let name = format!(
             "{:016x}-{end}-{frames}-{}x{h}-{}.mkv",
-            fnv1a(format!("{}|{size}|{mtime}", path.display()).as_bytes()),
+            paths::fnv1a(format!("{}|{size}|{mtime}", path.display()).as_bytes()),
             w,
             fps.to_string().replace('/', "_")
         );
@@ -2141,7 +2216,12 @@ enum Step {
     Now(Result<Response>),
     Wait(Until),
     Task(Task),
+    /// Measure media on a worker, then run the request here (docs/decisions/agents.md §3).
+    Measure(Measure, Box<Envelope>),
 }
+
+/// Measuring that a request needs, done before it runs.
+type Measure = Box<dyn FnOnce() -> Result<()> + Send>;
 
 fn reply(reply: Option<Reply>, result: Result<Response>) {
     if let Some(r) = reply {
@@ -2223,11 +2303,4 @@ fn remove_stale_runtime_dirs() {
             let _ = std::fs::remove_dir_all(e.path());
         }
     }
-}
-
-/// FNV-1a: stable 64-bit hash for cache file names.
-fn fnv1a(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, b| {
-        (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
-    })
 }

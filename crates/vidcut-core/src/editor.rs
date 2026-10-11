@@ -2,14 +2,19 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde_json::{Value, json};
 
+use crate::analysis::{self, AudioLevels, Loudness, PictureStats, SilenceSettings, Span};
 use crate::error::{Error, Result};
 use crate::model::{Clip, ClipAudio, Media, MediaInfo, Project, VideoInfo};
 use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
-use crate::request::{Changes, ClipRef, Envelope, ProjectSet, Request, Response, SourceParams};
+use crate::render::RenderPlan;
+use crate::request::{
+    Changes, ClipRef, Envelope, OneOrMany, ProjectSet, Request, Response, SourceParams,
+};
 use crate::time::{Rational, TimeContext, TimeSpec, format_timecode};
 use crate::validate;
 
@@ -57,6 +62,17 @@ pub trait Env {
         }
         found
     }
+
+    /// Peak levels of audio stream `stream` of `media`. Measuring decodes
+    /// the whole stream, so the media layer keeps the result.
+    fn audio_levels(&self, media: &Media, stream: u32) -> Result<Arc<AudioLevels>>;
+
+    /// Picture measurements of `media`'s video, frame by frame (kept like
+    /// [`audio_levels`](Self::audio_levels)).
+    fn picture_stats(&self, media: &Media) -> Result<Arc<PictureStats>>;
+
+    /// How loud `plan`'s audio is, mixed as an export would mix it.
+    fn loudness(&self, plan: &RenderPlan) -> Result<Loudness>;
 
     /// Reads a text file (an `.otio` file to import).
     fn read_text(&self, path: &Path) -> Result<String> {
@@ -649,6 +665,67 @@ fn mutate(
             let delta = length(p, by)?;
             ops::slip(p, &id, delta)?;
             Value::Null
+        }
+        Request::EditSlide { clip, by } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            let delta = length(p, by)?;
+            ops::slide(p, &id, delta)?;
+            Value::Null
+        }
+        Request::EditRippleDeleteSilence {
+            clips,
+            threshold_db,
+            pre_head,
+            post_tail,
+            min,
+        } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let settings = SilenceSettings {
+                threshold_db: *threshold_db,
+                pre_head: length(p, pre_head)?.max(0),
+                post_tail: length(p, post_tail)?.max(0),
+                min: length(p, min)?.max(1),
+            };
+            let (fps, stc) = (p.settings.fps, p.settings.start_tc);
+            let tc = move |f: i64| format_timecode(f, fps, stc);
+            let mut parts = Vec::new();
+            let mut removed = Vec::new();
+            for id in &ids {
+                let c = p.clip(id).expect("resolved");
+                let found = silent_parts(p, env, &Target::Clip(c), &settings)?;
+                for &(a, b) in &found {
+                    removed.push(json!({
+                        "clip": id, "start": a, "end": b,
+                        "start_tc": tc(a), "end_tc": tc(b),
+                    }));
+                }
+                if !found.is_empty() {
+                    parts.push((id.clone(), found));
+                }
+            }
+            let frames: i64 = parts
+                .iter()
+                .flat_map(|(_, spans)| spans.iter().map(|(a, b)| b - a))
+                .sum();
+            ops::remove_parts(p, &parts)?;
+            json!({ "removed": removed, "frames": frames })
+        }
+        Request::EditDetectSceneCuts { clips, threshold } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let (fps, stc) = (p.settings.fps, p.settings.start_tc);
+            let tc = move |f: i64| format_timecode(f, fps, stc);
+            let mut cuts = Vec::new();
+            let mut created = Vec::new();
+            for id in &ids {
+                let c = p.clip(id).expect("resolved");
+                let found = scene_cuts(p, env, &Target::Clip(c), *threshold)?;
+                cuts.extend(found.iter().map(
+                    |&(f, score)| json!({ "clip": id, "frame": f, "tc": tc(f), "score": score }),
+                ));
+                let at: Vec<i64> = found.iter().map(|c| c.0).collect();
+                created.extend(ops::split_clip(p, id, &at)?);
+            }
+            json!({ "cuts": cuts, "created": created })
         }
         Request::EditAudioRoll { clip, edge, by } => {
             let id = resolve_clip(p, clip, playhead)?;
@@ -1301,11 +1378,94 @@ pub fn query(
                 live.method()
             )));
         }
+        Request::TimelineBoring { boring, jump } => {
+            let (long, short) = analysis::boring(p, length(p, boring)?, length(p, jump)?);
+            let item = |c: &Clip| {
+                json!({
+                    "clip": c.id, "start": c.start, "duration": c.duration,
+                    "start_tc": tc(c.start), "duration_tc": format_timecode(c.duration, fps, 0),
+                })
+            };
+            json!({
+                "boring": long.into_iter().map(item).collect::<Vec<_>>(),
+                "jump": short.into_iter().map(item).collect::<Vec<_>>(),
+            })
+        }
+        Request::AnalyzeSilence {
+            media,
+            clips,
+            threshold_db,
+            min,
+        } => {
+            let settings = SilenceSettings {
+                threshold_db: *threshold_db,
+                pre_head: 0,
+                post_tail: 0,
+                min: length(p, min)?.max(1),
+            };
+            let mut out = Vec::new();
+            for target in targets(p, media, clips, playhead, true)? {
+                let ranges = silent_parts(p, env, &target, &settings)?;
+                out.push(target.json(p, json!({ "ranges": target.ranges(p, &ranges) })));
+            }
+            json!(out)
+        }
+        Request::AnalyzeScenes {
+            media,
+            clips,
+            threshold,
+        } => {
+            let mut out = Vec::new();
+            for target in targets(p, media, clips, playhead, false)? {
+                let cuts: Vec<Value> = scene_cuts(p, env, &target, *threshold)?
+                    .into_iter()
+                    .map(|(f, score)| json!({ "frame": f, "tc": target.tc(p, f), "score": score }))
+                    .collect();
+                out.push(target.json(p, json!({ "cuts": cuts })));
+            }
+            json!(out)
+        }
+        Request::AnalyzeBlack {
+            media,
+            clips,
+            share,
+            min,
+        } => {
+            let min = length(p, min)?.max(1);
+            let mut out = Vec::new();
+            for target in targets(p, media, clips, playhead, false)? {
+                let m = target.media(p)?;
+                let stats = env.picture_stats(m)?;
+                let ranges = analysis::black_parts(&target.span(p)?, &stats, *share, min);
+                out.push(target.json(p, json!({ "ranges": target.ranges(p, &ranges) })));
+            }
+            json!(out)
+        }
+        Request::AnalyzeLoudness { range } => {
+            let (a, b) = match range {
+                Some(r) => ctx(p, playhead).range(r)?,
+                None => match (p.marks.mark_in, p.marks.mark_out) {
+                    (Some(a), Some(b)) => (a, b),
+                    _ => (0, p.end()),
+                },
+            };
+            if b <= a {
+                return Err(Error::invalid("nothing to measure: the range is empty"));
+            }
+            let plan = crate::render::flatten(p, a, b)?;
+            let l = env.loudness(&plan)?;
+            json!({
+                "integrated": finite(l.integrated), "range": l.range,
+                "true_peak": finite(l.true_peak),
+                "from": a, "to": b, "from_tc": tc(a), "to_tc": tc(b),
+            })
+        }
         Request::Schema { .. }
         | Request::Doctor {}
         | Request::ExportPlan(_)
         | Request::ExportStart(_)
         | Request::FrameRender { .. }
+        | Request::StoryboardRender { .. }
         | Request::PresetsList {}
         | Request::PresetsGet { .. }
         | Request::PresetsSave { .. }
@@ -1323,6 +1483,174 @@ pub fn query(
             )));
         }
     })
+}
+
+/// JSON for a level that may be `-inf` (silence): `null` then.
+fn finite(db: f64) -> Value {
+    if db.is_finite() {
+        json!(db)
+    } else {
+        Value::Null
+    }
+}
+
+/// What an analysis looks at: a whole media item (positions are source
+/// frames) or a clip (timeline frames).
+enum Target<'a> {
+    Media(&'a Media),
+    Clip(&'a Clip),
+}
+
+impl Target<'_> {
+    fn media<'p>(&self, p: &'p Project) -> Result<&'p Media> {
+        let id = match self {
+            Target::Media(m) => &m.id,
+            Target::Clip(c) => &c.media,
+        };
+        p.media(id)
+            .ok_or_else(|| Error::not_found(format!("no media {id}")))
+    }
+
+    fn span(&self, p: &Project) -> Result<Span> {
+        let fps = p.settings.fps;
+        Ok(match self {
+            Target::Media(m) => {
+                let (_, origin) = p.media_origin(&m.id)?;
+                Span {
+                    start: 0,
+                    end: p.media_frames(m),
+                    source_in: 0,
+                    origin,
+                    fps,
+                }
+            }
+            Target::Clip(c) => {
+                let (_, origin) = p.media_origin(&c.media)?;
+                Span::of_clip(c, origin, fps)
+            }
+        })
+    }
+
+    /// Timecode of position `f`: source timecode for media, record for clips.
+    fn tc(&self, p: &Project, f: i64) -> String {
+        let start = match self {
+            Target::Media(_) => 0,
+            Target::Clip(_) => p.settings.start_tc,
+        };
+        format_timecode(f, p.settings.fps, start)
+    }
+
+    fn ranges(&self, p: &Project, ranges: &[(i64, i64)]) -> Vec<Value> {
+        ranges
+            .iter()
+            .map(|&(a, b)| {
+                json!({
+                    "start": a, "end": b, "start_tc": self.tc(p, a), "end_tc": self.tc(p, b),
+                    "duration_tc": format_timecode(b - a, p.settings.fps, 0),
+                })
+            })
+            .collect()
+    }
+
+    /// `extra` with what this is.
+    fn json(&self, p: &Project, mut extra: Value) -> Value {
+        match self {
+            Target::Media(m) => extra["media"] = json!(m.id),
+            Target::Clip(c) => {
+                extra["clip"] = json!(c.id);
+                let track = p
+                    .tracks
+                    .iter()
+                    .find(|t| t.clips.iter().any(|x| x.id == c.id));
+                extra["track"] = json!(track.map(|t| t.id.clone()));
+            }
+        }
+        extra
+    }
+}
+
+/// The media or clips an analysis request names, or every clip with sound
+/// (`audio`) or pictures.
+fn targets<'a>(
+    p: &'a Project,
+    media: &Option<String>,
+    clips: &Option<OneOrMany<ClipRef>>,
+    playhead: Option<i64>,
+    audio: bool,
+) -> Result<Vec<Target<'a>>> {
+    match (media, clips) {
+        (Some(_), Some(_)) => Err(Error::usage("give `media` or `clips`, not both")),
+        (Some(id), None) => {
+            let m = p
+                .media(id)
+                .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
+            Ok(vec![Target::Media(m)])
+        }
+        (None, Some(refs)) => resolve_clips(p, &refs.to_vec(), playhead)?
+            .iter()
+            .map(|id| Ok(Target::Clip(p.clip(id).expect("resolved"))))
+            .collect(),
+        (None, None) => Ok(p
+            .tracks
+            .iter()
+            .flat_map(|t| &t.clips)
+            .filter(|c| if audio { c.audio.is_some() } else { c.video })
+            .map(Target::Clip)
+            .collect()),
+    }
+}
+
+/// Ripple Delete Silence's parts of `target` (p. 773).
+fn silent_parts(
+    p: &Project,
+    env: &dyn Env,
+    target: &Target<'_>,
+    settings: &SilenceSettings,
+) -> Result<Vec<(i64, i64)>> {
+    let m = target.media(p)?;
+    let (stream, gain) = match target {
+        Target::Media(_) => (0, 0.0),
+        Target::Clip(c) => match &c.audio {
+            Some(a) => (a.stream, a.gain_db),
+            None => {
+                return Err(Error::invalid(format!(
+                    "{} has no sound to find silence in",
+                    c.id
+                )));
+            }
+        },
+    };
+    if m.info.audio.is_empty() {
+        return Err(Error::invalid(format!("{} has no sound", m.id)));
+    }
+    let levels = env.audio_levels(m, stream)?;
+    Ok(analysis::silent_parts(
+        &target.span(p)?,
+        &levels,
+        gain,
+        settings,
+    ))
+}
+
+/// Detect Scene Cuts' frames in `target`, with their scores (p. 690).
+fn scene_cuts(
+    p: &Project,
+    env: &dyn Env,
+    target: &Target<'_>,
+    threshold: f64,
+) -> Result<Vec<(i64, f32)>> {
+    let m = target.media(p)?;
+    if m.info.video.is_none() || matches!(target, Target::Clip(c) if !c.video) {
+        return Err(Error::invalid(format!(
+            "{} has no picture to find shots in",
+            match target {
+                Target::Media(m) => &m.id,
+                Target::Clip(c) => &c.id,
+            }
+        )));
+    }
+    let stats = env.picture_stats(m)?;
+    Ok(analysis::scene_cuts(&target.span(p)?, &stats, threshold))
 }
 
 fn media_json(p: &Project, m: &Media) -> Value {

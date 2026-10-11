@@ -156,7 +156,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
 }
 
 impl Project {
-    fn media_origin(&self, media: &str) -> Result<(PathBuf, f64)> {
+    pub(crate) fn media_origin(&self, media: &str) -> Result<(PathBuf, f64)> {
         let m = self
             .media(media)
             .ok_or_else(|| Error::not_found(format!("no media {media}")))?;

@@ -7,7 +7,7 @@ use proptest::prelude::*;
 use serde_json::{Value, json};
 
 use crate::error::ErrorCode;
-use crate::test_support::Fixture;
+use crate::test_support::{Fixture, levels, pictures};
 use crate::validate;
 
 /// Where an edit goes: a track (by number) or the default, and whether it
@@ -123,6 +123,17 @@ enum Op {
     Slip {
         pick: u8,
         by: i16,
+    },
+    Slide {
+        pick: u8,
+        by: i16,
+    },
+    DeleteSilence {
+        pick: u8,
+        min: u8,
+    },
+    SceneCuts {
+        pick: u8,
     },
     AudioRoll {
         pick: u8,
@@ -280,6 +291,9 @@ fn op() -> impl Strategy<Value = Op> {
             by
         }),
         (any::<u8>(), -40i16..40).prop_map(|(pick, by)| Op::Slip { pick, by }),
+        (any::<u8>(), -40i16..40).prop_map(|(pick, by)| Op::Slide { pick, by }),
+        (any::<u8>(), 1u8..40).prop_map(|(pick, min)| Op::DeleteSilence { pick, min }),
+        any::<u8>().prop_map(|pick| Op::SceneCuts { pick }),
         (any::<u8>(), any::<bool>(), -20i16..20).prop_map(|(pick, head, by)| Op::AudioRoll {
             pick,
             head,
@@ -456,6 +470,12 @@ fn request(f: &Fixture, op: &Op) -> Option<Value> {
             json!({"clip": pick(f, *i)?, "edge": edge(head), "by": by}),
         ),
         Op::Slip { pick: i, by } => ("edit.slip", json!({"clip": pick(f, *i)?, "by": by})),
+        Op::Slide { pick: i, by } => ("edit.slide", json!({"clip": pick_any(f, *i)?, "by": by})),
+        Op::DeleteSilence { pick: i, min } => (
+            "edit.ripple_delete_silence",
+            json!({"clips": pick_any(f, *i)?, "min": min, "pre_head": 2, "post_tail": 3}),
+        ),
+        Op::SceneCuts { pick: i } => ("edit.detect_scene_cuts", json!({"clips": pick_any(f, *i)?})),
         Op::AudioRoll { pick: i, head, by } => (
             "edit.audio_roll",
             json!({"clip": pick(f, *i)?, "edge": edge(head), "by": by}),
@@ -491,6 +511,13 @@ proptest! {
         // m4: 20 s of audio only (25 fps).
         let mut f = Fixture::new(&[(10.0, true), (4.0, true), (8.0, false)]);
         f.add_music("music.wav", 20.0);
+        // Sound with pauses, and shots, for the analysis edits.
+        for (path, secs) in [("/media/1.mp4", 10.0), ("/media/2.mp4", 4.0), ("/media/music.wav", 20.0)] {
+            let talk: Vec<(f64, f64)> = (0..secs as i32).map(|s| (f64::from(s) + 0.3, f64::from(s) + 0.6)).collect();
+            f.env.levels.insert(path.into(), levels(secs, &talk));
+        }
+        f.env.pictures.insert("/media/1.mp4".into(), pictures(10.0, 25.0, &[1.2, 3.7, 6.0], &[]));
+        f.env.pictures.insert("/media/3.mp4".into(), pictures(8.0, 25.0, &[2.0], &[(5.0, 6.0)]));
         let start = f.editor.project().clone();
         let mut gapless_expected = true;
         for op in &ops {

@@ -8,6 +8,8 @@ A relatively simple video cutting tool modeled on DaVinci Resolve's **Cut page**
 - media pool, source/timeline viewer, dual timeline, ripple editing
 - export with presets, GPU encoding, audio-only, range and per-clip export, as jobs with progress
 - timeline interchange with other editors through OpenTimelineIO (`.otio`)
+- automatic tools: Ripple Delete Silence, scene and black detection, the Boring Detector, loudness normalization, storyboards
+- an MCP server, so AI agents use every command as a tool
 - no effects, transitions, titles or color
 
 It is written in Rust:
@@ -37,8 +39,8 @@ It is written in Rust:
 
 | Crate | Purpose | Depends on |
 |---|---|---|
-| `crates/vidcut-core` | Project model, time and timecode math, edit operations (`ops.rs`; tracks in `ops/tracks.rs`, clips following Track 1 in `ops/follow.rs`), Request/Response protocol, Editor (undo/rev), project store, render plans (`render.rs`: top-wins video, mixed audio lanes), preview EDLs (`preview.rs`), OpenTimelineIO reading and writing (`otio.rs`) | — (pure Rust; fast to build and test) |
-| `crates/vidcut-av` | FFmpeg layer: probe, exact-seek decode, encode/mux, export engine, thumbnails, waveforms, still frames, encoder detection, test-fixture generator | ffmpeg-next |
+| `crates/vidcut-core` | Project model, time and timecode math, edit operations (`ops.rs`; tracks in `ops/tracks.rs`, clips following Track 1 in `ops/follow.rs`), Request/Response protocol, Editor (undo/rev), project store, render plans (`render.rs`: top-wins video, mixed audio lanes), preview EDLs (`preview.rs`), OpenTimelineIO reading and writing (`otio.rs`), what the automatic tools decide from measurements (`analysis.rs`) | — (pure Rust; fast to build and test) |
+| `crates/vidcut-av` | FFmpeg layer: probe, exact-seek decode, encode/mux, export engine (with loudness normalization), thumbnails, waveforms, still frames, measurements for the automatic tools (`analysis.rs`), encoder detection, test-fixture generator | ffmpeg-next |
 | `crates/vidcut-mpv` | libmpv via `dlopen` (`libloading`): client API and render API (OpenGL and software) | libmpv.so.2 at runtime only |
 | `crates/vidcut` | The `vidcut` binary: Session/host, IPC, CLI (clap), GUI (eframe), later MCP | all of the above |
 
@@ -47,16 +49,19 @@ Inside `crates/vidcut`:
 | Module | What |
 |---|---|
 | `cli.rs`, `main.rs`, `output.rs` | clap command line → one `Request`; human/JSON output; routing |
+| `mcp.rs` | `vidcut mcp`: the MCP server (tools generated from the request schema) |
+| `storyboard.rs` | `storyboard.render`: a labeled PNG grid of the program's shots |
+| `env.rs` | `AvEnv`: probing and the measurements behind the automatic tools, cached |
 | `session.rs` | runs requests headless against a project file |
 | `live/` | the GUI's core thread: open project, players, viewer state, waits, command log, export jobs (`jobs.rs`); publishes `Snapshot`s |
 | `ipc/` | JSON-RPC over a Unix socket, the instance registry, CLI routing |
-| `gui/` | `app.rs`: eframe and GL glue; `workspace.rs`: all panels and UI state (testable without GL); `timeline/`: geometry, gestures, drawing; `export.rs`: Quick Export, the Export dialog, jobs and OTIO windows; `mixer.rs`: the Mixer and meters; `pool.rs` (with bins), `viewer.rs`, `video.rs`, `stills.rs` |
+| `gui/` | `app.rs`: eframe and GL glue; `workspace.rs`: all panels and UI state (testable without GL); `timeline/`: geometry, gestures, drawing; `export.rs`: Quick Export, the Export dialog, jobs and OTIO windows; `mixer.rs`: the Mixer and meters; `timeline/tools.rs`: Ripple Delete Silence, the Boring Detector, Dynamic Trim; `pool.rs` (with bins), `viewer.rs`, `video.rs`, `stills.rs` |
 | `export.rs` | presets (built-in and user), outputs, export plans and `.otio` exports as the session runs them |
 
 Docs:
 - `docs/cut-page-spec.md`: the behavioral spec.
 - `docs/deviations.md`: intentional differences from Resolve.
-- `docs/decisions/`: short architecture decision records (preview, export, GUI and live control).
+- `docs/decisions/`: short architecture decision records (preview, export, GUI and live control, agents: MCP and measurements).
 
 ## Build and run
 
@@ -115,11 +120,14 @@ These are mandatory.
 - **Property tests** (proptest) run random edit sequences.
   - Failing seeds land in `proptest-regressions/`. Commit them, so they replay forever.
   - For a deeper run: `PROPTEST_CASES=5000 cargo test -p vidcut-core prop_tests`.
-- **GUI input tests** (`crates/vidcut/tests/gui_input.rs`, `gui_export.rs`, `gui_tracks.rs`) drive the real panels and windows with egui_kittest (clicks, drags, keys; no window or renderer) against a live session without players. Each gesture must change the project with exactly one request. Timeline gesture logic itself is unit-tested in `gui/timeline/gesture.rs` from pointer positions.
+- **GUI input tests** (`crates/vidcut/tests/gui_input.rs`, `gui_export.rs`, `gui_tracks.rs`, `gui_tools.rs`) drive the real panels and windows with egui_kittest (clicks, drags, keys; no window or renderer) against a live session without players. Each gesture must change the project with exactly one request. Timeline gesture logic itself is unit-tested in `gui/timeline/gesture.rs` from pointer positions.
   - File dialogs are replaced with `Workspace::set_dialogs`.
   - A new window or modal is measured in its first frame and placed in the next: step once more after it appears before clicking in it.
   - Windows that ask the session (presets, plans, imports) answer on helper threads, so wait with a loop of `harness.step()`, not a fixed number of steps.
   - egui widgets such as sliders only see a drag that spans several frames: step between press, moves and release (`drag_slowly` in `gui_tracks.rs`). Timeline gestures work either way.
+  - A freshly opened menu ignores input in its first frame: step twice before clicking an item (`menu_item` in `gui_tools.rs`).
+- **MCP** (`crates/vidcut/tests/mcp.rs`, the M7 acceptance) runs `vidcut mcp` as a child process and talks JSON-RPC to it, headless and against a live session serving IPC.
+- **Measurement fixtures:** `Picture::Shots` (a new shot every N frames, every fourth one black) and `Sound::Tone` (a steady 1 kHz sine at −20 dBFS, −20 LUFS in stereo) have known answers for scene, black and loudness tests. In core tests, `FakeEnv` takes made-up levels and pictures (`test_support::levels`, `pictures`).
 - **Export jobs** (`crates/vidcut/tests/jobs.rs`) run the live session without players: foreground, background, cancel and wait.
 - **Live session tests** (`crates/vidcut/tests/live.rs`) run the GUI's core thread without a window: a harness thread renders both players with mpv's software renderer and answers screenshots, and requests go through `Handle::call` like IPC. Prefer them over GUI tests; they need libmpv but no display.
 - **Frame checks** compare barcodes: screenshot the viewer, decode the PNG with `vidcut_av::decode`, and compare with `vidcut frame` (export's renderer).
@@ -127,7 +135,9 @@ These are mandatory.
 
 ## Driving vidcut as an agent
 
-*Status: the CLI edits and exports headless (M1, M2), controls a running GUI (M3), exports in the background and exchanges OTIO timelines (M5), and edits several tracks with a mixer and bins (M6). MCP arrives in M7.*
+*Status: the CLI edits and exports headless (M1, M2), controls a running GUI (M3), exports in the background and exchanges OTIO timelines (M5), edits several tracks with a mixer and bins (M6), and serves MCP with automatic tools and storyboards (M7).*
+
+**MCP** (docs/decisions/agents.md, deviation X10): `vidcut mcp [-p FILE]` serves the Model Context Protocol on stdin/stdout. Every command is a tool (`edit.split` is `edit_split`, with its JSON Schema), plus `use_project` to pick or create the project. Calls run like the CLI's: inside the GUI that has the project open, or headless. `frame_render`, `gui_screenshot` and `storyboard_render` return images. To add it to Claude Code: `claude mcp add vidcut -- vidcut mcp -p /abs/talk.vidcut`; other clients take `{"command": "vidcut", "args": ["mcp", "-p", "/abs/talk.vidcut"]}`.
 
 **Discovering commands:**
 - Every CLI subcommand is one JSON-RPC method on one `Request`.
@@ -201,6 +211,16 @@ vidcut undo                                 # works across separate runs
   - `vidcut presets save web --from youtube-1080p --set video.quality=22 [--quick-export]` saves a user preset to `~/.config/vidcut/presets/web.toml`; `--settings JSON|@FILE` gives full settings instead. `vidcut presets delete web` removes it.
 - `vidcut encoders` shows which GPU encoders work here (cached; `--refresh` re-tests).
 - `vidcut frame --at 1m -o f.png [--width 640]` renders what the timeline shows at a frame. `--media m1` renders a media frame instead. Use it to look at cuts.
+
+**Automatic tools (M7, spec D29–D32):**
+- `vidcut edit ripple-delete-silence c1 [c2…] --min 0.7s [--threshold -40 --pre-head 0.15s --post-tail 0.15s]` cuts silent parts out of clips and closes the gaps, as one undo step. `--dry-run` lists the parts.
+- `vidcut edit detect-scene-cuts c1` splits a clip where its shots change (`--threshold`, scene score 0–100, default 10).
+- `vidcut analyze silence|scenes|black [--media m1 | --clips c1,c2]` and `vidcut analyze loudness [--range a..b]` measure without changing anything. Media positions are source frames; clip positions are timeline frames.
+- `vidcut boring [--boring 30s --jump 10f]` lists clips too long and too short (the Boring Detector).
+- `vidcut storyboard -o board.png [--every 5s --columns 4 --width 320]` draws a picture of every shot with timecode and clip id: the quickest way to look at a whole edit.
+- `vidcut export out.mp4 --set audio.loudness=-14` normalizes the mix to −14 LUFS (one gain, true peak ≤ −1 dBTP); the result reports the gain.
+- `vidcut edit slide c3 --by 5f` moves a clip keeping its media; its neighbors give and take.
+- Measuring decodes a file once; the results are cached (`~/.cache/vidcut/analysis/`), so trying other settings is quick.
 
 **Timeline interchange (OpenTimelineIO, deviation X9):**
 - `vidcut export cut.otio` writes the whole timeline (or `--range`) for other editors: each video track, its clips' audio (J/L cuts included) as an audio track, each audio track, markers, and vidcut extras (marks, clip gain, track settings) in `metadata.vidcut`.

@@ -394,6 +394,8 @@ pub struct AudioMix {
     lanes: Vec<Lane>,
     rate: u32,
     channels: u16,
+    /// Applied to the whole mix (loudness normalization).
+    gain: f32,
 }
 
 impl AudioMix {
@@ -414,6 +416,7 @@ impl AudioMix {
                 .collect(),
             rate,
             channels,
+            gain: 1.0,
         }
     }
 
@@ -421,11 +424,21 @@ impl AudioMix {
         self.channels
     }
 
+    /// Changes the whole mix by `db`.
+    pub fn set_gain_db(&mut self, db: f64) {
+        self.gain = 10f64.powf(db / 20.0) as f32;
+    }
+
     /// The next `n` mixed samples, interleaved.
     pub fn read(&mut self, n: usize) -> Result<Vec<f32>> {
         let mut out = vec![0.0f32; n * usize::from(self.channels)];
         for lane in &mut self.lanes {
             lane.mix_into(&mut out, self.rate, self.channels)?;
+        }
+        if self.gain != 1.0 {
+            for s in &mut out {
+                *s *= self.gain;
+            }
         }
         Ok(out)
     }

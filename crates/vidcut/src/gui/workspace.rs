@@ -710,15 +710,22 @@ impl Workspace {
             }
         }
 
-        // Transport.
-        if pressed(Key::Space) {
+        // Transport; in Dynamic Trim mode J/K/L and Space trim instead (p. 731).
+        let dynamic = self.timeline.dynamic.is_some();
+        if dynamic {
+            self.dynamic_keys(&input);
+        }
+        if pressed(Key::Space) && !dynamic {
             self.send("player.toggle", json!({}));
         }
-        if pressed(Key::K) {
+        if pressed(Key::K) && !dynamic {
             self.send("player.pause", json!({}));
         }
         let k_down = input.key_down(Key::K);
-        for (key, dir) in [(Key::L, 1.0), (Key::J, -1.0)] {
+        for (key, dir) in [(Key::L, 1.0), (Key::J, -1.0)]
+            .into_iter()
+            .filter(|_| !dynamic)
+        {
             if pressed(key) {
                 if k_down {
                     self.send("player.step", json!({ "frames": dir as i64 }));
@@ -761,6 +768,15 @@ impl Workspace {
             };
             if let Some(&f) = target {
                 self.seek(id, f, false);
+                // Dynamic Trim moves on to that edit (p. 732).
+                if dynamic && !m.shift {
+                    self.dynamic_commit();
+                    let side = self
+                        .timeline
+                        .edit
+                        .map_or(crate::gui::timeline::Side::Both, |e| e.side);
+                    self.timeline.edit = Some(crate::gui::timeline::EditSel { at: f, side });
+                }
             }
         }
         if pressed(Key::Q) && !m.command {

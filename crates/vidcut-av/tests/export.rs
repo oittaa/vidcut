@@ -101,6 +101,7 @@ fn lossless() -> ExportSettings {
             bitrate: None,
             sample_rate: None,
             channels: None,
+            loudness: None,
         }),
         declick: false,
     }
@@ -499,6 +500,7 @@ fn gpu_encoders_produce_valid_frame_exact_output() {
                 bitrate: None,
                 sample_rate: None,
                 channels: None,
+                loudness: None,
             }),
             declick: true,
         };

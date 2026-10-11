@@ -41,6 +41,40 @@ pub struct Report {
     pub video_encoder: Option<String>,
     pub audio_encoder: Option<String>,
     pub seconds: f64,
+    /// What loudness normalization did (`audio.loudness`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub loudness: Option<Normalized>,
+}
+
+/// Loudness normalization of an export: the mix was measured, then changed
+/// by one gain.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Normalized {
+    /// The mix as measured, LUFS (`None`: silent).
+    pub measured: Option<f64>,
+    /// The gain applied, dB.
+    pub gain_db: f64,
+    /// Integrated loudness after the gain, LUFS.
+    pub loudness: Option<f64>,
+    /// Highest true peak after the gain, dBTP.
+    pub true_peak: Option<f64>,
+}
+
+/// The ceiling loudness normalization keeps true peaks under, dBTP.
+pub const TRUE_PEAK_CEILING: f64 = -1.0;
+
+/// The gain that brings `measured` to `target`, held so the true peak stays
+/// at or below [`TRUE_PEAK_CEILING`]. Silence gets none.
+pub fn loudness_gain(measured: &vidcut_core::analysis::Loudness, target: f64) -> f64 {
+    if !measured.integrated.is_finite() {
+        return 0.0;
+    }
+    let gain = target - measured.integrated;
+    if measured.true_peak.is_finite() {
+        gain.min(TRUE_PEAK_CEILING - measured.true_peak)
+    } else {
+        gain
+    }
 }
 
 /// Raised (as an error) when `cancel` is set during an export.
@@ -48,7 +82,7 @@ pub fn is_cancelled(e: &Error) -> bool {
     matches!(e, Error::Invalid(m) if m == CANCELLED)
 }
 
-const CANCELLED: &str = "export cancelled";
+pub(crate) const CANCELLED: &str = "export cancelled";
 
 /// Encodes `plan` with `settings` into `output`.
 ///
@@ -81,6 +115,9 @@ pub fn run(
         }
     }
 }
+
+/// Fade length at cuts when de-clicking (the export setting `declick`).
+pub const DECLICK_MS: u32 = 3;
 
 pub(crate) fn write_packet(
     octx: &mut format::context::Output,
@@ -241,6 +278,7 @@ fn encode(
         None => None,
     };
 
+    let mut normalized = None;
     let mut audio = match &settings.audio {
         Some(a) => {
             let spec = encode::resolve_audio(a, plan.sample_rate, plan.channels)?;
@@ -282,10 +320,31 @@ fn encode(
                 0 => 1024,
                 n => n as usize,
             };
-            let declick = if settings.declick { 3 } else { 0 };
+            let declick = if settings.declick { DECLICK_MS } else { 0 };
+            let mut mix = AudioMix::new(&plan.audio, plan.sample_rate, spec.channels, declick);
+            if let Some(target) = a.loudness {
+                // Measure the mix exactly as it will be encoded, then gain.
+                let measured = crate::analysis::mix_loudness(
+                    &plan.audio,
+                    plan.sample_rate,
+                    spec.channels,
+                    declick,
+                    plan.samples(),
+                    Some(cancel),
+                )?;
+                let gain = loudness_gain(&measured, target);
+                mix.set_gain_db(gain);
+                let finite = |v: f64| v.is_finite().then_some(v);
+                normalized = Some(Normalized {
+                    measured: finite(measured.integrated),
+                    gain_db: gain,
+                    loudness: finite(measured.integrated + gain),
+                    true_peak: finite(measured.true_peak + gain),
+                });
+            }
             Some(AudioOut {
                 encoder,
-                mix: AudioMix::new(&plan.audio, plan.sample_rate, spec.channels, declick),
+                mix,
                 spec,
                 stream: index,
                 stream_tb: ffmpeg::Rational(1, plan.sample_rate as i32),
@@ -363,5 +422,6 @@ fn encode(
         video_encoder: video.map(|v| v.name),
         audio_encoder: audio.map(|a| a.spec.name),
         seconds: started.elapsed().as_secs_f64(),
+        loudness: normalized,
     })
 }

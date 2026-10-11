@@ -105,6 +105,67 @@ pub enum Request {
     /// Edit points of V1 (clip boundaries), as the Smart Indicator sees them.
     #[serde(rename = "timeline.edit_points")]
     TimelineEditPoints {},
+    /// The Boring Detector (p. 690): clips on video tracks longer than
+    /// `boring`, and shorter than `jump` (jump cuts, flash frames).
+    #[serde(rename = "timeline.boring")]
+    TimelineBoring {
+        #[serde(default = "boring_length")]
+        boring: TimeSpec,
+        #[serde(default = "jump_length")]
+        jump: TimeSpec,
+    },
+
+    // ---------------------------------------------------------------- analysis
+    /// Silent stretches (as Ripple Delete Silence finds them, p. 773) in
+    /// `media` (source frames), in `clips` (timeline frames), or in every
+    /// clip with sound.
+    #[serde(rename = "analyze.silence")]
+    AnalyzeSilence {
+        #[serde(default)]
+        media: Option<String>,
+        #[serde(default)]
+        clips: Option<OneOrMany<ClipRef>>,
+        /// Sound below this level (dBFS) is silence.
+        #[serde(default = "silence_threshold")]
+        threshold_db: f64,
+        /// The shortest silence reported.
+        #[serde(default = "silence_min")]
+        min: TimeSpec,
+    },
+    /// Shot changes (as Detect Scene Cuts finds them, p. 690) in `media`,
+    /// in `clips`, or in every clip with video: the first frame of each new
+    /// shot with its scene score.
+    #[serde(rename = "analyze.scenes")]
+    AnalyzeScenes {
+        #[serde(default)]
+        media: Option<String>,
+        #[serde(default)]
+        clips: Option<OneOrMany<ClipRef>>,
+        /// Scene score (0..100) from which a frame starts a new shot.
+        #[serde(default = "scene_threshold")]
+        threshold: f64,
+    },
+    /// Black stretches in `media`, in `clips`, or in every clip with video.
+    #[serde(rename = "analyze.black")]
+    AnalyzeBlack {
+        #[serde(default)]
+        media: Option<String>,
+        #[serde(default)]
+        clips: Option<OneOrMany<ClipRef>>,
+        /// Share of a frame's pixels that must be black (0..1).
+        #[serde(default = "black_share")]
+        share: f64,
+        /// The shortest stretch reported.
+        #[serde(default = "black_min")]
+        min: TimeSpec,
+    },
+    /// Loudness of the timeline's mix (EBU R128): integrated LUFS, range and
+    /// true peak, over `range` (default: In–Out if set, else everything).
+    #[serde(rename = "analyze.loudness")]
+    AnalyzeLoudness {
+        #[serde(default)]
+        range: Option<RangeSpec>,
+    },
     /// Import an OpenTimelineIO timeline (`.otio`, deviation X9). Its media
     /// join the pool, and its first video track, with the audio that belongs
     /// to it, goes on V1 after the last clip (or instead of the timeline,
@@ -249,6 +310,38 @@ pub enum Request {
     /// Slip a clip's content.
     #[serde(rename = "edit.slip")]
     EditSlip { clip: ClipRef, by: TimeSpec },
+    /// Slide a clip (Dynamic Trim's Slide mode, p. 731): it keeps its media
+    /// and moves, the clip before it getting longer and the one after it
+    /// shorter (or the reverse).
+    #[serde(rename = "edit.slide")]
+    EditSlide { clip: ClipRef, by: TimeSpec },
+    /// Ripple Delete Silence (p. 773): cut the silent parts out of `clips`
+    /// and close the gaps, as one undo step. `dry_run` reports the parts
+    /// without cutting (the red stripes).
+    #[serde(rename = "edit.ripple_delete_silence")]
+    EditRippleDeleteSilence {
+        clips: OneOrMany<ClipRef>,
+        /// Sound below this level (dBFS) is silence.
+        #[serde(default = "silence_threshold")]
+        threshold_db: f64,
+        /// Silence kept before each audible part ("pre head").
+        #[serde(default = "silence_margin")]
+        pre_head: TimeSpec,
+        /// Silence kept after each audible part ("post tail").
+        #[serde(default = "silence_margin")]
+        post_tail: TimeSpec,
+        /// The shortest silence removed ("minimum to trip").
+        #[serde(default = "silence_min")]
+        min: TimeSpec,
+    },
+    /// Detect Scene Cuts (p. 690): split `clips` where their shots change.
+    #[serde(rename = "edit.detect_scene_cuts")]
+    EditDetectSceneCuts {
+        clips: OneOrMany<ClipRef>,
+        /// Scene score (0..100) from which a frame starts a new shot.
+        #[serde(default = "scene_threshold")]
+        threshold: f64,
+    },
     /// Audio-only roll at a clip's edge (J/L cut).
     #[serde(rename = "edit.audio_roll")]
     EditAudioRoll {
@@ -398,6 +491,24 @@ pub enum Request {
         /// Output width; height follows the picture's aspect. Default: full size.
         #[serde(default)]
         width: Option<u32>,
+    },
+    /// A storyboard: one PNG with a picture of every shot (or every
+    /// `every`), labeled with timecode and clip, to look at an edit at a
+    /// glance. Over `range` (default: everything).
+    #[serde(rename = "storyboard.render")]
+    StoryboardRender {
+        out: PathBuf,
+        /// Pictures per row.
+        #[serde(default = "storyboard_columns")]
+        columns: u32,
+        /// Width of each picture.
+        #[serde(default = "storyboard_width")]
+        width: u32,
+        /// A picture every this often instead of one per shot.
+        #[serde(default)]
+        every: Option<TimeSpec>,
+        #[serde(default)]
+        range: Option<RangeSpec>,
     },
     /// Built-in and user export presets.
     #[serde(rename = "presets.list")]
@@ -726,6 +837,48 @@ fn one() -> u32 {
     1
 }
 
+// Defaults for the analysis tools (spec decisions D29 and D30).
+
+fn silence_threshold() -> f64 {
+    -40.0
+}
+
+fn silence_margin() -> TimeSpec {
+    TimeSpec::Seconds(0.15)
+}
+
+fn silence_min() -> TimeSpec {
+    TimeSpec::Seconds(0.5)
+}
+
+fn scene_threshold() -> f64 {
+    10.0
+}
+
+fn black_share() -> f64 {
+    0.98
+}
+
+fn black_min() -> TimeSpec {
+    TimeSpec::Seconds(0.5)
+}
+
+fn boring_length() -> TimeSpec {
+    TimeSpec::Seconds(30.0)
+}
+
+fn jump_length() -> TimeSpec {
+    TimeSpec::Frames(10)
+}
+
+fn storyboard_columns() -> u32 {
+    4
+}
+
+fn storyboard_width() -> u32 {
+    320
+}
+
 /// What to put on the timeline: a media range, and where.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SourceParams {
@@ -910,6 +1063,12 @@ impl Request {
                     | Self::TimelineGet { .. }
                     | Self::TimelineAt { .. }
                     | Self::TimelineEditPoints {}
+                    | Self::TimelineBoring { .. }
+                    | Self::AnalyzeSilence { .. }
+                    | Self::AnalyzeScenes { .. }
+                    | Self::AnalyzeBlack { .. }
+                    | Self::AnalyzeLoudness { .. }
+                    | Self::StoryboardRender { .. }
                     | Self::HistoryGet {}
                     | Self::Schema { .. }
                     | Self::Doctor {}

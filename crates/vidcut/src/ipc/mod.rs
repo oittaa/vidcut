@@ -44,6 +44,39 @@ pub struct RouteOptions {
     pub instance: Option<String>,
 }
 
+/// Runs `envelope` where [`route`] says: in the GUI that has `project` open,
+/// or headless. `progress` gets export progress as
+/// `{"output", "outputs", "path", "frames", "total", "elapsed"}`; `cancel`
+/// stops a headless export (a GUI's stops when the connection closes).
+pub fn run(
+    project: Option<&Path>,
+    options: &RouteOptions,
+    envelope: Envelope,
+    cancel: &std::sync::atomic::AtomicBool,
+    progress: &mut dyn FnMut(&Value),
+) -> Result<vidcut_core::Response> {
+    match route(project, options, &envelope.request)? {
+        Route::Headless => crate::session::run_with(
+            project,
+            envelope,
+            &mut crate::session::Hooks {
+                cancel,
+                progress: &mut |i, n, path, p| {
+                    progress(&json!({
+                        "output": i, "outputs": n, "path": path,
+                        "frames": p.frames, "total": p.total,
+                        "elapsed": p.elapsed.as_secs_f64(),
+                    }))
+                },
+            },
+        ),
+        Route::Instance(instance) => {
+            let project = project.and_then(|p| p.canonicalize().ok());
+            client::call(&instance.socket, &envelope, project.as_deref(), progress)
+        }
+    }
+}
+
 /// Picks where `request` runs:
 /// - project-less requests (`schema`, `probe`, ...) always run here;
 /// - `--headless` runs here (live-only requests then fail with `NO_INSTANCE`);

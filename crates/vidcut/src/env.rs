@@ -1,12 +1,60 @@
 //! The real [`Env`]: media facts from the FFmpeg libraries via vidcut-av.
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
-use vidcut_core::model::{AudioInfo, MediaInfo, VideoInfo};
+use vidcut_core::analysis::{AudioLevels, Loudness, PictureStats};
+use vidcut_core::model::{AudioInfo, Media, MediaInfo, VideoInfo};
+use vidcut_core::render::RenderPlan;
 use vidcut_core::time::Rational;
 use vidcut_core::{Env, Error, ProbedMedia, Result};
 
+use crate::paths;
+
 pub struct AvEnv;
+
+/// Audio levels are measured in 10 ms buckets.
+const LEVELS_PER_SECOND: u32 = 100;
+
+/// Measurements made in this process, by cache file.
+type Memo<T> = LazyLock<Mutex<HashMap<PathBuf, Arc<T>>>>;
+static LEVELS: Memo<AudioLevels> = LazyLock::new(Default::default);
+static PICTURES: Memo<PictureStats> = LazyLock::new(Default::default);
+
+/// A measurement of a media file: from this process's memory, from the disk
+/// cache, or measured now and kept in both. Measuring decodes the whole
+/// stream, so the live session measures on a worker first (docs/decisions/agents.md §3).
+fn measured<T>(
+    memo: &Memo<T>,
+    file: PathBuf,
+    measure: impl FnOnce() -> vidcut_av::error::Result<T>,
+    to_bytes: impl Fn(&T) -> Vec<u8>,
+    from_bytes: impl Fn(&[u8]) -> Option<T>,
+) -> Result<Arc<T>> {
+    let lock = || memo.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(v) = lock().get(&file) {
+        return Ok(v.clone());
+    }
+    let value = match std::fs::read(&file).ok().and_then(|b| from_bytes(&b)) {
+        Some(v) => v,
+        None => {
+            let v = measure().map_err(|e| Error::media(e.to_string()))?;
+            if let Some(dir) = file.parent()
+                && std::fs::create_dir_all(dir).is_ok()
+            {
+                let part = file.with_extension("part");
+                if std::fs::write(&part, to_bytes(&v)).is_ok() {
+                    let _ = std::fs::rename(&part, &file);
+                }
+            }
+            v
+        }
+    };
+    let value = Arc::new(value);
+    lock().insert(file, value.clone());
+    Ok(value)
+}
 
 impl Env for AvEnv {
     fn probe(&self, path: &Path) -> Result<ProbedMedia> {
@@ -27,6 +75,30 @@ impl Env for AvEnv {
             mtime_ns,
             info: convert(&info)?,
         })
+    }
+
+    fn audio_levels(&self, media: &Media, stream: u32) -> Result<Arc<AudioLevels>> {
+        measured(
+            &LEVELS,
+            paths::media_cache("analysis", media, &format!("levels{stream}")),
+            || vidcut_av::analysis::audio_levels(&media.path, stream, LEVELS_PER_SECOND),
+            AudioLevels::to_bytes,
+            AudioLevels::from_bytes,
+        )
+    }
+
+    fn picture_stats(&self, media: &Media) -> Result<Arc<PictureStats>> {
+        measured(
+            &PICTURES,
+            paths::media_cache("analysis", media, "pictures"),
+            || vidcut_av::analysis::picture_stats(&media.path),
+            PictureStats::to_bytes,
+            PictureStats::from_bytes,
+        )
+    }
+
+    fn loudness(&self, plan: &RenderPlan) -> Result<Loudness> {
+        vidcut_av::analysis::loudness(plan).map_err(|e| Error::media(e.to_string()))
     }
 }
 
