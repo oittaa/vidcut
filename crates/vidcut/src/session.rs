@@ -161,15 +161,12 @@ pub fn render(
         return Err(Error::new(ErrorCode::Cancelled, "cancelled"));
     }
     let mut r = match &envelope.request {
-        Request::ExportPlan(params) | Request::ExportStart(params)
-            if export::is_otio(&params.output) =>
-        {
-            let name = path
-                .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let write = matches!(envelope.request, Request::ExportStart(_));
-            answer(export::otio(project, &name, params, None, write)?)
+        Request::ExportPlan(params) if export::timeline_format(&params.output).is_some() => {
+            let name = export::timeline_name(path);
+            answer(export::timeline(project, &name, params, None, None)?)
+        }
+        Request::ExportStart(params) if export::timeline_format(&params.output).is_some() => {
+            export_media(project, path, params, hooks, &mut |_| {})?
         }
         Request::ExportPlan(params) => {
             let prepared = export::prepare(project, params, None)?;
@@ -180,7 +177,7 @@ pub fn render(
             };
             answer(export::describe(&prepared, &available))
         }
-        Request::ExportStart(params) => export_media(project, params, hooks, &mut |_| {})?,
+        Request::ExportStart(params) => export_media(project, path, params, hooks, &mut |_| {})?,
         Request::FrameRender {
             at,
             out,
@@ -231,14 +228,56 @@ pub fn render(
     Ok(r)
 }
 
-/// Exports media: prepares the export, tells `started` the files it will
-/// write and their lengths in frames, then encodes them.
+/// Exports media, or a timeline bundle with its media, from `p` (saved at
+/// `path`): prepares the export, tells `started` the files it will write
+/// and their lengths in frames, then encodes (or copies) them.
 pub fn export_media(
     p: &Project,
+    path: &Path,
     params: &vidcut_core::request::ExportParams,
     hooks: &mut Hooks<'_>,
     started: &mut dyn FnMut(Vec<(std::path::PathBuf, i64)>),
 ) -> Result<Response> {
+    if export::timeline_format(&params.output).is_some() {
+        let name = export::timeline_name(path);
+        // Planned (and checked) first; bytes copied count as frames done.
+        let plan = export::timeline(p, &name, params, None, None)?;
+        let frames = plan["outputs"][0]["frames"].as_i64().unwrap_or(0);
+        started(vec![(params.output.clone(), frames)]);
+        let clock = std::time::Instant::now();
+        let output = params.output.clone();
+        let progress = &mut *hooks.progress;
+        let mut bytes = |done: u64, total: u64| {
+            let share = if total == 0 {
+                1.0
+            } else {
+                done as f64 / total as f64
+            };
+            progress(
+                0,
+                1,
+                &output,
+                Progress {
+                    frames: (frames as f64 * share) as i64,
+                    total: frames,
+                    elapsed: clock.elapsed(),
+                },
+            );
+        };
+        let written = export::timeline(
+            p,
+            &name,
+            params,
+            None,
+            Some(export::Writing {
+                cancel: hooks.cancel,
+                progress: &mut bytes,
+            }),
+        )?;
+        let mut r = answer(written);
+        r.rev = p.rev;
+        return Ok(r);
+    }
     let prepared = export::prepare(p, params, None)?;
     let available = if export::needs_gpu_info(&prepared.settings) {
         export::availability(false)

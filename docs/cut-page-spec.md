@@ -473,3 +473,9 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - Numbers zero-padded to a width (`%06d`) or not (`%d`) both work; the width shows in the file names.
   - The pool calls it as Resolve does: `frame_[000001-000120].png`.
   - Without `sequence`, a numbered image is a still (deviation X17).
+- **D40. Timeline interchange with Resolve** (deviation X9; pp. 527–530, 4160). The manual describes Resolve's OTIO import and export, not the files. Decided from files Resolve exports and from what its import was seen to need:
+  - **Source positions are timecode.** A source range counts from the media file's start timecode (a `tmcd` track, MXF's, a broadcast WAV's time reference), as Resolve writes and reads it; the available range starts there too. Media without one start at 0. Drop-frame timecode counts its skipped numbers out.
+  - **Paths are plain.** Resolve reads `target_url` as a path: `file://` URLs and `%20` escapes don't find the file. vidcut writes plain absolute paths, and reads URLs, escaped or not, too. In bundles, paths are relative.
+  - **Audio stays with its video** through Resolve's link group number, written on both and read when there.
+  - **What Resolve ignores or keeps elsewhere:** timeline and track names (Resolve names tracks itself), marker notes (in `Resolve_OTIO.Note` as well as `comment`), a one-frame marker duration.
+  - **Bundles:** `.otioz` as OpenTimelineIO's adapter writes it (what Resolve imports); `.otiod` the same as a folder. Unpacked into a folder named after the bundle, not next to it as Resolve does (deviation X9).

@@ -312,6 +312,44 @@ fn export_windows() {
             .is_some_and(|p| p.tracks[0].clips.len() == 6)
     });
 
+    // 6. With its media: an .otioz bundle, written by a job; imported, its
+    // media unpack next to it.
+    harness.get_by_label("File").click();
+    until(&mut harness, "the File menu", |h| {
+        has(h, "Export Timeline with Media (OTIOZ)…")
+    });
+    harness
+        .get_by_label("Export Timeline with Media (OTIOZ)…")
+        .click();
+    until(&mut harness, "the bundle", |_| {
+        dir.join("quick-p.otioz").exists()
+    });
+    assert!(
+        h.snapshot()
+            .jobs
+            .iter()
+            .any(|j| j.title == "quick-p.otioz" && j.origin == "gui"),
+        "a job"
+    );
+    harness.get_by_label("File").click();
+    until(&mut harness, "the File menu", |h| {
+        has(h, "Import Timeline (OTIO)…")
+    });
+    harness.get_by_label("Import Timeline (OTIO)…").click();
+    until(&mut harness, "the choice", |h| {
+        has(h, "Replace the Timeline")
+    });
+    harness.step();
+    harness.get_by_label("Replace the Timeline").click();
+    until(&mut harness, "the bundle's import", |_| {
+        h.snapshot().project().is_some_and(|p| {
+            p.tracks[0].clips.len() == 6
+                && p.media
+                    .iter()
+                    .any(|m| m.path.starts_with(dir.join("quick-p/media")))
+        })
+    });
+
     drop(harness);
     h.shutdown();
     let _ = session.join();

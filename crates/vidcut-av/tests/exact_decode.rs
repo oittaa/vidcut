@@ -147,3 +147,40 @@ fn probe_reports_first_frame_and_duration() {
         );
     }
 }
+
+#[test]
+fn probe_reads_start_timecodes() {
+    // A camera's start timecode, from a QuickTime/MP4 `tmcd` track
+    // (deviation X9: timeline interchange counts sources from it). The
+    // timecode track doesn't disturb decoding.
+    use Container::*;
+    use VideoCodec::*;
+    for (spec, tc) in [
+        (
+            FixtureSpec::new(H264, Mov, 320, 180, (25, 1), 50).timecode("10:00:00:00"),
+            "10:00:00:00",
+        ),
+        (
+            FixtureSpec::new(H264, Mp4, 320, 180, (25, 1), 50).timecode("10:00:00:00"),
+            "10:00:00:00",
+        ),
+        (
+            FixtureSpec::new(ProRes422Hq, Mov, 320, 180, (30000, 1001), 30).timecode("01:00:00;00"),
+            "01:00:00;00",
+        ),
+    ] {
+        let path = fixture::ensure(&spec).unwrap();
+        let info = probe::probe(&path).unwrap();
+        assert_eq!(info.timecode.as_deref(), Some(tc), "{}", path.display());
+        assert_eq!(probe::clock(&path).unwrap(), (Some(tc.to_string()), None));
+        let mut reader = VideoReader::open(&path).unwrap();
+        let mut k = 0;
+        while let Some(frame) = reader.next_frame().unwrap() {
+            assert_eq!(read_barcode(&frame).unwrap(), Some(k), "{}", path.display());
+            k += 1;
+        }
+        assert_eq!(k, spec.frames, "{}", path.display());
+    }
+    let plain = fixture::ensure(&FixtureSpec::new(H264, Mp4, 320, 180, (25, 1), 50)).unwrap();
+    assert_eq!(probe::probe(&plain).unwrap().timecode, None);
+}
