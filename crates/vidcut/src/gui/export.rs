@@ -829,7 +829,6 @@ impl Workspace {
         }
         let mut open = true;
         let mut start = false;
-        let mut close = false;
         let mut browse = false;
         egui::Window::new("Export")
             .collapsible(false)
@@ -1011,9 +1010,6 @@ impl Workspace {
                     {
                         start = true;
                     }
-                    if ui.button("Close").clicked() {
-                        close = true;
-                    }
                 });
             });
         if browse {
@@ -1046,7 +1042,9 @@ impl Workspace {
                 picking: None,
             });
         }
-        if open && !close {
+        // It closes from its title bar only: a button beside Start Export is
+        // too easily hit instead.
+        if open {
             self.export.dialog = Some(d);
         }
     }
