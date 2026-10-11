@@ -56,38 +56,39 @@ fn the_smart_indicator_is_red_without_media_past_the_edit() {
 }
 
 #[test]
-fn the_smart_indicator_ignores_a_higher_track_on_its_first_or_last_frame() {
-    // D36: the indicator is Track 1 only. A V2 clip on its first or last
-    // frame leaves the edit green, including where V1 has no edge at all.
+fn the_smart_indicator_goes_by_track_one_alone() {
+    // D36: the indicator shows Track 1's edit. A higher track's clips there
+    // don't change its color, with media past the edit or without.
     let mut f = three_clips();
-    // Edit 100 is green on V1. V2 ends there on m2's last frame.
-    f.ok(req(
-        "edit.overwrite",
-        json!({"media": "m2", "range": "0f..100f", "at": 0, "track": "V2"}),
-    ));
-    // Edit 150 is green on V1. V2 starts there on m3's first frame.
-    f.ok(req(
-        "edit.overwrite",
-        json!({"media": "m3", "range": "0f..40f", "at": 150, "track": "V2"}),
-    ));
-    // No V1 edge at 300 or 500: V2 alone starts on m3's first frame and ends
-    // on its last.
-    f.ok(req(
-        "edit.overwrite",
-        json!({"media": "m3", "range": "0f..200f", "at": 300, "track": "V2"}),
-    ));
+    f.append("m2", 50, 100); // c4 at 200..250, ending on m2's last frame
+    let on_v2 = |f: &mut Fixture, media: &str, a: i64, b: i64, at: i64| {
+        f.ok(req(
+            "edit.overwrite",
+            json!({"media": media, "range": format!("{a}f..{b}f"), "at": at, "track": "V2"}),
+        ));
+    };
+    // Green on Track 1 at 100 and 150: V2 ends on m2's last frame at 100 and
+    // starts on m3's first at 150.
+    on_v2(&mut f, "m2", 0, 100, 0);
+    on_v2(&mut f, "m3", 0, 40, 150);
+    // Red on Track 1 at 250 (c4): V2 has media on both sides of it there.
+    on_v2(&mut f, "m3", 10, 30, 230);
+    on_v2(&mut f, "m3", 50, 70, 250);
     assert_eq!(
         f.track("V2"),
         vec![
-            row("c4", 0, 100, 0),
-            row("c5", 150, 40, 0),
-            row("c6", 300, 200, 0)
+            row("c5", 0, 100, 0),
+            row("c6", 150, 40, 0),
+            row("c7", 230, 20, 10),
+            row("c8", 250, 20, 50)
         ]
     );
     let p = f.editor.project();
-    for e in [100, 150, 300, 500] {
-        assert!(crate::ops::edit_has_handles(p, e), "edit {e} stays green");
-    }
+    let red: Vec<i64> = [100, 150, 250]
+        .into_iter()
+        .filter(|&e| !crate::ops::edit_has_handles(p, e))
+        .collect();
+    assert_eq!(red, vec![250], "as on Track 1 alone");
 }
 
 #[test]
