@@ -715,20 +715,29 @@ impl Workspace {
             let tall = r.height() >= 40.0;
             let buttons = |ui: &mut egui::Ui, ws: &Self| {
                 ui.spacing_mut().item_spacing.x = 2.0;
+                // Lit means switched on, as for lock and mute: V turns the
+                // video off (p. 647), and a lit V is struck through.
                 let mut toggles = vec![
-                    ("L", t.locked, "locked", "Lock the track"),
-                    ("M", t.muted, "muted", "Mute its audio"),
+                    ("L", t.locked, "locked", false, "Lock the track"),
+                    ("M", t.muted, "muted", false, "Mute its audio"),
                 ];
                 if t.kind == vidcut_core::model::TrackKind::Video {
-                    toggles.push(("V", t.video_enabled, "video_enabled", "Show its video"));
+                    let tip = if t.video_enabled {
+                        "Turn its video off"
+                    } else {
+                        "Turn its video back on"
+                    };
+                    toggles.push(("V", !t.video_enabled, "video_enabled", true, tip));
                 }
-                for (text, value, key, tip) in toggles {
-                    if ui
-                        .selectable_label(value, RichText::new(text).small())
-                        .on_hover_text(tip)
-                        .clicked()
-                    {
-                        ws.send("track.set", json!({ "track": t.id, key: !value }));
+                for (text, lit, key, off, tip) in toggles {
+                    let mut text = RichText::new(text).small();
+                    if off && lit {
+                        text = text.strikethrough();
+                    }
+                    if ui.selectable_label(lit, text).on_hover_text(tip).clicked() {
+                        // `video_enabled` is true while V is not lit.
+                        let value = if off { lit } else { !lit };
+                        ws.send("track.set", json!({ "track": t.id, key: value }));
                     }
                 }
             };

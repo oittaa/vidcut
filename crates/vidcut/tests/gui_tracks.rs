@@ -313,6 +313,34 @@ fn track_gestures_send_one_request_each() {
     gestures += 1;
     assert_eq!(gui_edits(&h).len() - edits0, gestures, "step 3");
 
+    // 3b. A track header's V turns its video off (p. 647), and on again;
+    // it is lit only while the video is off, like L and M.
+    let v1_toggle = |harness: &Harness<'_, Workspace>| {
+        harness
+            .query_all_by_label("V")
+            .max_by(|a, b| a.rect().top().total_cmp(&b.rect().top()))
+            .expect("V1's V")
+            .rect()
+    };
+    for (n, enabled) in [false, true].into_iter().enumerate() {
+        let at = v1_toggle(&harness);
+        harness
+            .get_all_by_label("V")
+            .find(|v| v.rect() == at)
+            .unwrap()
+            .click();
+        harness.step();
+        settle(&h, &mut harness);
+        let (m, p) = last(&h);
+        assert_eq!(
+            (m.as_str(), &p["track"], &p["video_enabled"]),
+            ("track.set", &json!("V1"), &json!(enabled)),
+            "click {n}"
+        );
+    }
+    gestures += 2;
+    assert_eq!(gui_edits(&h).len() - edits0, gestures, "step 3b");
+
     // 4. The mixer: dragging Track 1's fader is one track.set, sent on
     // release (one undo step); S solos the track.
     harness.get_by_label("Mixer").click();
