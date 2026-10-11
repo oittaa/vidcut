@@ -206,9 +206,16 @@ fn edl_entry(path: &Path, start: f64, length: f64, extra: &str) -> String {
     )
 }
 
-fn write_edl(name: &str, body: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("vidcut-edl-spike-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+/// A folder for one test's files, removed when it drops, also when the test
+/// fails.
+fn temp_dir() -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .prefix("vidcut-edl-spike-")
+        .tempdir()
+        .unwrap()
+}
+
+fn write_edl(dir: &Path, name: &str, body: &str) -> PathBuf {
     let path = dir.join(name);
     std::fs::write(&path, format!("# mpv EDL v0\n{body}")).unwrap();
     path
@@ -313,9 +320,11 @@ fn mpegts_needs_demuxer_offset() {
 fn edl_start_is_raw_pts() {
     let src = offset_mkv_source();
     let f = fps(&src.spec);
+    let tmp = temp_dir();
     let Some(mut p) = Probe::new(&[]) else { return };
     // Same segment (source frames 10..30) described both ways.
     let raw = write_edl(
+        tmp.path(),
         "raw.edl",
         &edl_entry(&src.path, src.o + 10.0 / f - 0.5 / f, 20.0 / f, ""),
     );
@@ -325,6 +334,7 @@ fn edl_start_is_raw_pts() {
     p.seek(19.0 / f);
     let raw_last = p.barcode();
     let rel = write_edl(
+        tmp.path(),
         "rel.edl",
         &edl_entry(&src.path, 10.0 / f - 0.5 / f, 20.0 / f, ""),
     );
@@ -408,8 +418,9 @@ fn check_boundaries(p: &mut Probe, timeline: &[(Source, u32, u32)], f: f64) -> V
 fn edl_same_rate_boundaries_are_exact() {
     let timeline = same_rate_timeline();
     let f = 30.0;
+    let tmp = temp_dir();
     let Some(mut p) = Probe::new(&[]) else { return };
-    let edl = write_edl("same-rate.edl", &video_entries(&timeline, f));
+    let edl = write_edl(tmp.path(), "same-rate.edl", &video_entries(&timeline, f));
     p.load(edl.to_str().unwrap());
     let bad = check_boundaries(&mut p, &timeline, f);
     eprintln!(
@@ -487,7 +498,8 @@ fn edl_new_stream_layout_with_fillers() {
         }
     }
     body += &edl_entry(&silence, 0.0, one, ",layout=this");
-    let edl = write_edl("new-stream.edl", &body);
+    let tmp = temp_dir();
+    let edl = write_edl(tmp.path(), "new-stream.edl", &body);
 
     let Some(mut p) = Probe::new(&[]) else { return };
     p.load(edl.to_str().unwrap());
@@ -553,6 +565,7 @@ fn edl_reload_latency() {
         90,
     ));
     let f = 30.0;
+    let tmp = temp_dir();
     let Some(mut p) = Probe::new(&[]) else { return };
     for entries in [20usize, 100, 400] {
         let mut body = String::new();
@@ -561,7 +574,7 @@ fn edl_reload_latency() {
             let first = (i * 7 % 80) as f64;
             body += &edl_entry(&s.path, s.o + first / f - 0.5 / f, 5.0 / f, "");
         }
-        let edl = write_edl(&format!("reload-{entries}.edl"), &body);
+        let edl = write_edl(tmp.path(), &format!("reload-{entries}.edl"), &body);
         let started = Instant::now();
         p.load(edl.to_str().unwrap());
         let loaded = started.elapsed();
@@ -582,8 +595,9 @@ fn edl_reload_latency() {
 fn edl_reverse_play() {
     let timeline = same_rate_timeline();
     let f = 30.0;
+    let tmp = temp_dir();
     let Some(mut p) = Probe::new(&[]) else { return };
-    let edl = write_edl("reverse.edl", &video_entries(&timeline[..3], f));
+    let edl = write_edl(tmp.path(), "reverse.edl", &video_entries(&timeline[..3], f));
     p.load(edl.to_str().unwrap());
     let total: u32 = timeline[..3].iter().map(|t| t.2).sum();
     p.seek(f64::from(total - 1) / f);
@@ -672,9 +686,9 @@ fn edl_audio_streams_mix_with_lavfi_complex() {
     body += &edl_entry(&silence, 0.0, 0.5, "");
     body += &edl_entry(&src.path, src.o, 2.5, "");
     body += &edl_entry(&silence, 0.0, one, ",layout=this");
-    let edl = write_edl("two-audio.edl", &body);
+    let tmp = temp_dir();
+    let edl = write_edl(tmp.path(), "two-audio.edl", &body);
     let wav = edl.with_file_name("mix.wav");
-    let _ = std::fs::remove_file(&wav);
     let wav_opt = wav.to_str().unwrap().to_string();
     let Some(mut p) = Probe::new(&[
         ("ao", "pcm"),
@@ -777,9 +791,9 @@ fn edl_volume_follows_timeline_time() {
     body += "!new_stream\n";
     body += &edl_entry(&src.path, src.o, 3.0, "");
     body += &edl_entry(&silence, 0.0, one, ",layout=this");
-    let edl = write_edl("volume.edl", &body);
+    let tmp = temp_dir();
+    let edl = write_edl(tmp.path(), "volume.edl", &body);
     let wav = edl.with_file_name("volume.wav");
-    let _ = std::fs::remove_file(&wav);
     let wav_opt = wav.to_str().unwrap().to_string();
     let Some(mut p) = Probe::new(&[
         ("ao", "pcm"),
@@ -861,8 +875,8 @@ fn edl_stills_and_image_sequences() {
     ));
     let f = 30.0;
     let rate = vidcut_core::time::Rational::new(30, 1).unwrap();
-    let dir = std::env::temp_dir().join(format!("vidcut-edl-m9-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = temp_dir();
+    let dir = tmp.path();
     let png = |k: i64, out: &Path| {
         let piece = vidcut_core::render::VideoPiece::Source {
             media: "m".into(),
@@ -890,7 +904,7 @@ fn edl_stills_and_image_sequences() {
     // Prints what each frame showed, `!` for the wrong ones; returns how
     // many were wrong.
     let check = |p: &mut Probe, name: &str, middle: &str, want: &dyn Fn(u32) -> u32| {
-        let edl = write_edl(&format!("{name}.edl"), &format!("{a}{middle}{b}"));
+        let edl = write_edl(dir, &format!("{name}.edl"), &format!("{a}{middle}{b}"));
         p.load(edl.to_str().unwrap());
         let mut report = Vec::new();
         let mut wrong = 0;
@@ -1002,6 +1016,5 @@ fn edl_stills_and_image_sequences() {
         ),
         &|k| pick(k) as u32,
     );
-    let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(wrong, 0, "image lists show every frame exactly");
 }
