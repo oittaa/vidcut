@@ -54,8 +54,10 @@ impl Waveform {
             per_second: u32::from_le_bytes(b[0..4].try_into().ok()?),
             start: f64::from_le_bytes(b[4..12].try_into().ok()?),
             peaks: b[12..]
-                .chunks_exact(2)
-                .map(|p| (p[0] as i8, p[1] as i8))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|&[lo, hi]| (lo as i8, hi as i8))
                 .collect(),
         })
     }

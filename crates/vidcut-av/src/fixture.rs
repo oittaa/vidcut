@@ -566,8 +566,8 @@ impl VideoTrack {
                 }
             }
             for p in 1..frame.planes() {
-                for px in frame.data_mut(p).chunks_exact_mut(2) {
-                    px.copy_from_slice(&512u16.to_le_bytes());
+                for px in frame.data_mut(p).as_chunks_mut::<2>().0 {
+                    *px = 512u16.to_le_bytes();
                 }
             }
         } else {

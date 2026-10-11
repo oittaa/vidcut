@@ -2040,10 +2040,7 @@ impl Live {
         let blank = player.is_some_and(|p| !self.players[p.index()].is_loaded());
         let result = result.map(|mut image| {
             if blank {
-                image
-                    .rgba
-                    .chunks_exact_mut(4)
-                    .for_each(|px| px.copy_from_slice(&[0, 0, 0, 255]));
+                image.rgba.as_chunks_mut::<4>().0.fill([0, 0, 0, 255]);
             }
             image
         });

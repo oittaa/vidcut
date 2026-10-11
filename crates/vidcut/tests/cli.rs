@@ -647,8 +647,10 @@ fn wav_left(path: &Path) -> Vec<f32> {
     let bytes = std::fs::read(path).unwrap();
     let data = bytes.windows(4).position(|w| w == b"data").unwrap() + 8;
     bytes[data..]
-        .chunks_exact(4)
-        .map(|s| f32::from(i16::from_le_bytes([s[0], s[1]])) / 32768.0)
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|&[lo, hi, ..]| f32::from(i16::from_le_bytes([lo, hi])) / 32768.0)
         .collect()
 }
 

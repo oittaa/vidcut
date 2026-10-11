@@ -88,7 +88,9 @@ keep-open=always idle=yes pause=yes video-timing-offset=0
 
 For single-file sources, also `rebase-start-time=no`.
 
-## 6. OpenGL embedding (eframe 0.35 glow, GNOME Wayland, NVIDIA)
+## 6. OpenGL embedding (eframe glow, GNOME Wayland, NVIDIA)
+
+Found with eframe 0.35 in M0 and unchanged with 0.36: `tests/gui.rs` (`--features vidcut/gui-tests`) compares the viewer's GL picture with `vidcut frame`.
 
 **Render target:**
 - Each player renders into its own FBO with an RGBA8 texture.

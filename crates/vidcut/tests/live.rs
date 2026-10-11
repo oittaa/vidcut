@@ -84,7 +84,9 @@ impl Harness {
                     for (id, done) in captures {
                         // RGB0 → opaque RGBA.
                         let mut rgba = bufs[id.index()].clone();
-                        rgba.chunks_exact_mut(4).for_each(|px| px[3] = 255);
+                        for px in rgba.as_chunks_mut::<4>().0 {
+                            px[3] = 255;
+                        }
                         done(Ok(Image {
                             width: W as u32,
                             height: H as u32,

@@ -172,7 +172,7 @@ impl Video {
             gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
         // mpv's alpha is undefined outside the picture; the viewer is opaque.
-        for px in rgba.chunks_exact_mut(4) {
+        for px in rgba.as_chunks_mut::<4>().0 {
             px[3] = 255;
         }
         Some(Image {

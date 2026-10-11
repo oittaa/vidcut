@@ -735,8 +735,10 @@ fn edl_audio_streams_mix_with_lavfi_complex() {
         .expect("a WAV data chunk")
         + 8;
     let left: Vec<f32> = bytes[data..]
-        .chunks_exact(4)
-        .map(|s| f32::from(i16::from_le_bytes([s[0], s[1]])) / 32768.0)
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|&[lo, hi, ..]| f32::from(i16::from_le_bytes([lo, hi])) / 32768.0)
         .collect();
     let found = vidcut_av::beep::onsets(&left, 0.1, 4800);
     eprintln!("beep onsets in the mix (samples): {found:?}");
@@ -813,8 +815,10 @@ fn edl_volume_follows_timeline_time() {
     let bytes = std::fs::read(&wav).expect("mpv wrote the audio");
     let data = bytes.windows(4).position(|w| w == b"data").unwrap() + 8;
     let left: Vec<f32> = bytes[data..]
-        .chunks_exact(4)
-        .map(|s| f32::from(i16::from_le_bytes([s[0], s[1]])) / 32768.0)
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|&[lo, hi, ..]| f32::from(i16::from_le_bytes([lo, hi])) / 32768.0)
         .collect();
     // Peak of each beep: at 1 s and 2 s of the timeline, i.e. 0.5 s and
     // 1.5 s into the recording (it starts at the seek).

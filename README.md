@@ -36,10 +36,10 @@ A simple, fully scriptable video cutting tool for Linux, modeled on DaVinci Reso
 Ubuntu 26.04 (or similar) with FFmpeg 8 and libmpv:
 
 ```bash
-sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libclang-dev libmpv2
+sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libclang-dev libmpv2 rustup
 ```
 
-Rust 1.93 or newer (the distro `rustc`/`cargo` packages are fine).
+Rust comes from [rustup](https://rustup.rs). The repository pins its Rust version in `rust-toolchain.toml`, and rustup downloads that toolchain the first time you build.
 
 ## Build and run
 

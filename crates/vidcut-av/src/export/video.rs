@@ -307,8 +307,8 @@ pub(crate) fn fill_black(f: &mut frame::Video) -> Result<()> {
         let data = f.data_mut(plane);
         if deep {
             let v = if is_alpha { 1023 } else { v8 << 2 };
-            for px in data.chunks_exact_mut(2) {
-                px.copy_from_slice(&v.to_le_bytes());
+            for px in data.as_chunks_mut::<2>().0 {
+                *px = v.to_le_bytes();
             }
         } else {
             data.fill(v8 as u8);

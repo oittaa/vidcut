@@ -69,11 +69,12 @@ cargo run -p vidcut -- --help  # CLI
 **System packages** (Ubuntu 26.04):
 
 ```bash
-sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libclang-dev libmpv2 rustfmt rust-clippy
+sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libclang-dev libmpv2 rustup
 ```
 
 **Toolchain notes:**
-- The distro Rust is 1.93; the workspace declares `rust-version = "1.93"`, so the resolver picks compatible crates. That's why we're on eframe **0.35** (0.36 needs Rust 1.95).
+- **Rust comes from rustup.** `rust-toolchain.toml` pins the version (with rustfmt and clippy), and rustup installs it on the first cargo command in the checkout, whatever rustc the distro ships. `rust-version` in Cargo.toml matches it, so the MSRV-aware resolver picks crates that build with it.
+- **Upgrading Rust** is a change of its own: raise `channel` in `rust-toolchain.toml` and `rust-version` together, then fix what the new clippy finds (`scripts/check.sh full`).
 - ffmpeg-next resolves to 8.1.x and builds fine against the system FFmpeg 8.0 headers.
 - Dependencies build with `opt-level = 2` even in dev, while our crates stay unoptimized.
 
