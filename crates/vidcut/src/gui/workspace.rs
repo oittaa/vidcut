@@ -773,10 +773,12 @@ impl Workspace {
         }
         if pressed(Key::ArrowUp) || pressed(Key::ArrowDown) {
             let up = pressed(Key::ArrowUp);
-            let points = if m.shift {
-                self.marker_points()
-            } else {
-                self.edit_points(id)
+            // Dynamic Trim moves along the track of its edit (p. 732).
+            let dynamic_track = self.timeline.edit.filter(|_| dynamic).map(|e| e.track);
+            let points = match (m.shift, dynamic_track) {
+                (true, _) => self.marker_points(),
+                (false, Some(t)) => self.track_edit_points(&t.id()),
+                (false, None) => self.edit_points(id),
             };
             let target = if up {
                 points.iter().rev().find(|&&f| f < player.position)
@@ -788,11 +790,14 @@ impl Workspace {
                 // Dynamic Trim moves on to that edit (p. 732).
                 if dynamic && !m.shift {
                     self.dynamic_commit();
-                    let side = self
-                        .timeline
-                        .edit
-                        .map_or(crate::gui::timeline::Side::Both, |e| e.side);
-                    self.timeline.edit = Some(crate::gui::timeline::EditSel { at: f, side });
+                    let (side, track) = self.timeline.edit.map_or(
+                        (
+                            crate::gui::timeline::Side::Both,
+                            crate::gui::timeline::TrackRef::MAIN,
+                        ),
+                        |e| (e.side, e.track),
+                    );
+                    self.timeline.edit = Some(crate::gui::timeline::EditSel { at: f, side, track });
                 }
             }
         }
@@ -943,6 +948,19 @@ impl Workspace {
     }
 
     /// Edit points to jump between with Up/Down (p. 640).
+    /// The edit points of one track (its clip edges), in order.
+    fn track_edit_points(&self, track: &str) -> Vec<i64> {
+        self.project()
+            .and_then(|p| p.track(track))
+            .map(|t| {
+                let mut v = t.edit_points();
+                v.push(t.end());
+                v.dedup();
+                v
+            })
+            .unwrap_or_default()
+    }
+
     fn edit_points(&self, id: PlayerId) -> Vec<i64> {
         match id {
             PlayerId::Timeline => self

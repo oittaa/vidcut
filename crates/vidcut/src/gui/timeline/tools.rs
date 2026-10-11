@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use vidcut_core::model::Project;
 use vidcut_core::ops;
 
-use super::{EditSel, Side};
+use super::{EditSel, Side, TrackRef};
 use crate::gui::export::{Ask, near_center};
 use crate::gui::theme;
 use crate::gui::timeline::geometry::{Rows, Scale};
@@ -114,8 +114,8 @@ pub fn dynamic_preview(
     match target {
         DynamicTarget::Edit(e) => {
             let t = p
-                .track(ops::MAIN)
-                .ok_or_else(|| vidcut_core::Error::not_found("no Track 1"))?;
+                .track(&e.track.id())
+                .ok_or_else(|| vidcut_core::Error::not_found(format!("no {}", e.track.id())))?;
             let out = t
                 .clips
                 .iter()
@@ -137,11 +137,8 @@ pub fn dynamic_preview(
                 }
                 (Side::In | Side::Both, _, Some(i)) => {
                     ops::trim(p, &i, ops::Edge::Head, by, None)?;
-                    if p.settings.ripple_on {
-                        e.at
-                    } else {
-                        e.at + by
-                    }
+                    // Rippled or not, the incoming clip's start is the edit.
+                    p.clip(&i).map_or(e.at, |c| c.start)
                 }
                 _ => return Err(vidcut_core::Error::not_found("no clip at the edit")),
             };
@@ -442,6 +439,7 @@ impl Workspace {
             self.timeline.edit = Some(EditSel {
                 at,
                 side: Side::Both,
+                track: TrackRef::MAIN,
             });
         }
         self.timeline.dynamic = Some(Dynamic::default());

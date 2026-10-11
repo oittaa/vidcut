@@ -338,6 +338,20 @@ pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
     Ok(plan)
 }
 
+/// Timeline frame `at` of clip `clip` alone, as export samples it, whatever
+/// covers it on the tracks above (the Trim Editor shows the clip it names).
+pub fn clip_frame(p: &Project, clip: &str, at: i64) -> Result<VideoPiece> {
+    let mut alone = p.clone();
+    for t in &mut alone.tracks {
+        t.clips.retain(|x| x.id == clip);
+    }
+    flatten(&alone, at, at + 1)?
+        .video
+        .into_iter()
+        .next()
+        .ok_or_else(|| Error::not_found(format!("no frame {at} of {clip}")))
+}
+
 /// A media item's place on a source tape.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TapeEntry {

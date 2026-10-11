@@ -161,7 +161,7 @@ impl Workspace {
             self.trim_editor = None;
             return;
         };
-        let t = p.track(vidcut_core::ops::MAIN);
+        let t = p.track(&e.track.id());
         let out = t
             .and_then(|t| t.clips.iter().find(|c| c.end() == e.at))
             .cloned();
@@ -177,6 +177,7 @@ impl Workspace {
             area,
             aspect,
             &p,
+            &e.track.id(),
             [(e.at - 1, "Out (outgoing)"), (e.at, "In (incoming)")],
         );
         ui.add_space(4.0);
@@ -189,7 +190,11 @@ impl Workspace {
                         .on_hover_text(format!("{label} {by:+} frame"))
                         .clicked()
                     {
-                        self.timeline.edit = Some(crate::gui::timeline::EditSel { at: e.at, side });
+                        self.timeline.edit = Some(crate::gui::timeline::EditSel {
+                            at: e.at,
+                            side,
+                            track: e.track,
+                        });
                         self.nudge_edit(side, by);
                     }
                 }
@@ -216,6 +221,14 @@ impl Workspace {
         let Ok((left, right)) = dynamic_preview(&mut p, &target, mode, pending) else {
             return;
         };
+        let track = match &target {
+            DynamicTarget::Edit(e) => e.track.id(),
+            DynamicTarget::Clips(ids) => ids
+                .first()
+                .and_then(|id| crate::gui::timeline::TrackRef::of_clip(&p, id))
+                .unwrap_or(crate::gui::timeline::TrackRef::MAIN)
+                .id(),
+        };
         let labels = match &target {
             DynamicTarget::Edit(_) => ["Out (outgoing)", "In (incoming)"],
             DynamicTarget::Clips(_) => match mode {
@@ -228,6 +241,7 @@ impl Workspace {
             area,
             aspect,
             &p,
+            &track,
             [(left, labels[0]), (right, labels[1])],
         );
         ui.add_space(4.0);
@@ -249,6 +263,7 @@ impl Workspace {
         area: Rect,
         aspect: f32,
         p: &vidcut_core::model::Project,
+        track: &str,
         cells: [(i64, &str); 2],
     ) {
         ui.allocate_rect(area, Sense::hover());
@@ -264,7 +279,7 @@ impl Workspace {
         let stills = self
             .stills
             .get_or_insert_with(|| crate::gui::stills::Stills::new(ctx.clone()));
-        let main = p.track(vidcut_core::ops::MAIN);
+        let track = p.track(track);
         for (i, (frame, label)) in cells.into_iter().enumerate() {
             let cell = Rect::from_min_size(
                 pos2(area.left() + half * i as f32, area.top()),
@@ -273,7 +288,7 @@ impl Workspace {
             let picture = fit(cell.shrink(6.0), aspect);
             painter.rect_filled(picture, CornerRadius::ZERO, Color32::BLACK);
             let clip =
-                main.and_then(|t| t.clips.iter().find(|c| c.start <= frame && frame < c.end()));
+                track.and_then(|t| t.clips.iter().find(|c| c.start <= frame && frame < c.end()));
             let Some(c) = clip else {
                 painter.text(
                     picture.center(),
@@ -284,9 +299,8 @@ impl Workspace {
                 );
                 continue;
             };
-            let piece = vidcut_core::render::flatten(p, frame, frame + 1)
-                .ok()
-                .and_then(|plan| plan.video.into_iter().next());
+            // The clip it names, whatever covers it on the tracks above.
+            let piece = vidcut_core::render::clip_frame(p, &c.id, frame).ok();
             if let Some(piece) = piece {
                 let still = crate::gui::stills::Still {
                     piece,

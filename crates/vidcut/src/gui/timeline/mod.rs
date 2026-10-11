@@ -36,11 +36,48 @@ pub enum Side {
     Both,
 }
 
-/// A selected edit point (keyboard trimming with `,` and `.`).
+/// A selected edit point (keyboard trimming with `,` and `.`), on the
+/// track it was picked on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EditSel {
     pub at: i64,
     pub side: Side,
+    pub track: TrackRef,
+}
+
+/// A track by its id (`V2`, `A1`), small enough to keep selections `Copy`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrackRef {
+    pub audio: bool,
+    pub n: u16,
+}
+
+impl TrackRef {
+    /// Track 1, the main story: the Smart Indicator, V and Smart Insert
+    /// take their edits from it (spec D36).
+    pub const MAIN: Self = Self { audio: false, n: 1 };
+
+    pub fn of(id: &str) -> Option<Self> {
+        let (kind, n) = id.split_at_checked(1)?;
+        Some(Self {
+            audio: match kind {
+                "V" => false,
+                "A" => true,
+                _ => return None,
+            },
+            n: n.parse().ok()?,
+        })
+    }
+
+    /// The track of clip `id`.
+    pub fn of_clip(p: &Project, id: &str) -> Option<Self> {
+        let (t, _) = p.find_clip(id)?;
+        Self::of(&p.tracks[t].id)
+    }
+
+    pub fn id(self) -> String {
+        format!("{}{}", if self.audio { 'A' } else { 'V' }, self.n)
+    }
 }
 
 /// Timeline Options (p. 645), kept between runs.
@@ -351,7 +388,9 @@ impl Workspace {
                     look,
                 );
             }
-            if let (Some(e), Some(v1)) = (self.timeline.edit, layout.lower.get(MAIN)) {
+            if let Some(e) = self.timeline.edit
+                && let Some(v1) = layout.lower.get(&e.track.id())
+            {
                 let x = lower_scale.xf(e.at);
                 let (a, b) = match e.side {
                     Side::Out => (x - 6.0, x),
@@ -965,8 +1004,9 @@ impl Workspace {
                 }
             } else if let Hit::Roll { outgoing, .. } | Hit::Edge(outgoing, Edge::Tail) = &what
                 && let Some(c) = p.clip(outgoing)
+                && let Some(track) = TrackRef::of_clip(p, outgoing)
             {
-                self.open_trim_editor(c.end());
+                self.open_trim_editor(c.end(), track);
             }
             return;
         }
@@ -982,19 +1022,22 @@ impl Workspace {
             match &what {
                 Hit::Clip(id) | Hit::Slip(id) => self.click_clip(id, mods, p),
                 Hit::Edge(id, edge) => {
-                    if let Some(c) = p.clip(id) {
+                    if let (Some(c), Some(track)) = (p.clip(id), TrackRef::of_clip(p, id)) {
                         let (at, side) = match edge {
                             Edge::Head => (c.start, Side::In),
                             Edge::Tail => (c.end(), Side::Out),
                         };
-                        self.timeline.edit = Some(EditSel { at, side });
+                        self.timeline.edit = Some(EditSel { at, side, track });
                     }
                 }
                 Hit::Roll { outgoing, .. } => {
-                    if let Some(c) = p.clip(outgoing) {
+                    if let (Some(c), Some(track)) =
+                        (p.clip(outgoing), TrackRef::of_clip(p, outgoing))
+                    {
                         self.timeline.edit = Some(EditSel {
                             at: c.end(),
                             side: Side::Both,
+                            track,
                         });
                     }
                 }
@@ -1237,6 +1280,7 @@ impl Workspace {
             self.timeline.edit = Some(EditSel {
                 at,
                 side: Side::Both,
+                track: TrackRef::MAIN,
             });
         }
         if pressed(Key::U)
@@ -1263,7 +1307,9 @@ impl Workspace {
         } else {
             0
         };
+        // While Dynamic Trim runs, its pending trim is the one edit (D32).
         if nudge != 0
+            && self.timeline.dynamic.is_none()
             && let Some(e) = self.timeline.edit
         {
             self.nudge_edit(e.side, nudge);
@@ -1283,7 +1329,9 @@ impl Workspace {
         let Some(p) = self.project().cloned() else {
             return;
         };
-        let Some(t) = p.track(MAIN) else { return };
+        let Some(t) = p.track(&e.track.id()) else {
+            return;
+        };
         let out = t.clips.iter().find(|c| c.end() == e.at);
         let inc = t.clips.iter().find(|c| c.start == e.at);
         let (method, params, moves) = match (side, out, inc) {
@@ -1300,15 +1348,27 @@ impl Workspace {
             (Side::In | Side::Both, _, Some(i)) => (
                 "edit.trim",
                 json!({ "clip": i.id, "edge": "head", "by": by }),
-                // A rippled head trim keeps the clip's start.
-                !p.settings.ripple_on,
+                // Where the edit ends up depends on whether the trim
+                // ripples: the same trim on a copy says.
+                false,
             ),
             _ => return,
         };
+        let at = if moves {
+            e.at + by
+        } else {
+            let id = params["clip"].as_str().unwrap_or_default().to_string();
+            let mut q = p.clone();
+            ops::trim(&mut q, &id, Edge::Head, by, None)
+                .ok()
+                .and_then(|()| q.clip(&id).map(|c| c.start))
+                .unwrap_or(e.at)
+        };
         self.send(method, params);
         self.timeline.edit = Some(EditSel {
-            at: if moves { e.at + by } else { e.at },
+            at,
             side,
+            track: e.track,
         });
     }
 
@@ -1426,10 +1486,11 @@ impl Workspace {
 
     /// Opens the Trim Editor for the edit at `at` (double-click an edit,
     /// p. 729).
-    pub(crate) fn open_trim_editor(&mut self, at: i64) {
+    pub(crate) fn open_trim_editor(&mut self, at: i64, track: TrackRef) {
         self.timeline.edit = Some(EditSel {
             at,
             side: Side::Both,
+            track,
         });
         self.trim_editor = Some(at);
         self.send("viewer.set", json!({ "mode": "timeline" }));

@@ -374,11 +374,65 @@ fn track_gestures_send_one_request_each() {
     assert_eq!(state["source"]["content"], "source_tape", "{state:#}");
     assert_eq!(state["source"]["media"], "m2", "{state:#}");
 
-    // Every gesture made exactly one change, and each is one undo step
-    // (as are the two source marks this test set over IPC).
+    // 6. An edit picked on V2 stays on V2 (spec D36): with V1 cut at the same
+    // frame, `.` rolls the V2 edit, and so does Dynamic Trim, where `,` waits
+    // for K (D32).
+    call(&h, "viewer.set", json!({ "mode": "timeline" }));
+    let e = clips(&h, "V1")[0].2;
+    for at in [e - 20, e] {
+        call(
+            &h,
+            "edit.overwrite",
+            json!({ "media": "m1", "range": "0f..20f", "at": at, "track": "V2", "video_only": true }),
+        );
+    }
+    settle(&h, &mut harness);
+    let v2 = clips(&h, "V2");
+    let outgoing = v2.iter().find(|c| c.1 + c.2 == e).unwrap().0.clone();
+    let l = harness.state().timeline_layout().unwrap();
+    let row = l.lower.get("V2").unwrap().rect.rect;
+    let at = pos2(l.lower_scale.xf(e), row.top() + 6.0);
+    drag(&mut harness, at, at);
+    settle(&h, &mut harness);
+    harness.key_press(egui::Key::Period);
+    harness.step();
+    settle(&h, &mut harness);
+    let (m, p) = last(&h);
+    assert_eq!(
+        (m.as_str(), &p["clip"], &p["by"]),
+        ("edit.roll", &json!(outgoing), &json!(1)),
+        "the V2 edit, not V1's"
+    );
+    let before = gui_edits(&h).len();
+    harness.key_press(egui::Key::W);
+    harness.key_press(egui::Key::L);
+    for _ in 0..12 {
+        harness.step();
+    }
+    harness.key_press(egui::Key::Comma);
+    harness.step();
+    settle(&h, &mut harness);
+    assert_eq!(
+        gui_edits(&h).len(),
+        before,
+        "`,` waits while Dynamic Trim runs"
+    );
+    harness.key_press(egui::Key::K);
+    harness.step();
+    settle(&h, &mut harness);
     let edits = gui_edits(&h);
-    assert_eq!(edits.len() - edits0, 7, "{edits:#?}");
-    assert_eq!(undo_steps(&h), undo0 + 7 + 2);
+    assert_eq!(edits.len(), before + 1, "one request when K stops it");
+    let (m, p) = edits.last().unwrap();
+    assert_eq!((m.as_str(), &p["clip"]), ("edit.roll", &json!(outgoing)));
+    harness.key_press(egui::Key::W);
+    harness.step();
+
+    // Every gesture made exactly one change, and each is one undo step
+    // (as are the two source marks and two overwrites this test made over
+    // IPC).
+    let edits = gui_edits(&h);
+    assert_eq!(edits.len() - edits0, 9, "{edits:#?}");
+    assert_eq!(undo_steps(&h), undo0 + 9 + 2 + 2);
 
     drop(harness);
     h.shutdown();

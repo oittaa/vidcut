@@ -456,3 +456,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - **HDR output:** `video.hdr` (`pq` or `hlg`) writes BT.2100 in 10 bits. SDR clips are placed with their white at 203 nits (BT.2408), as Resolve's "203 nits" option does (p. 238).
   - **Tags and untagged media:** outputs are tagged with their colors. Untagged media are BT.709 from 720 lines up and BT.601 below, as players assume.
   - **Preview:** mpv tone-maps HDR clips for the screen with its own curve, so the preview can look a little different from an SDR export (deviation X14).
+- **D36. Which track an edit point is on** (pp. 696, 720, 729–732). The manual pictures one main story.
+  - **Track 1's edits:** the Smart Indicator, V (select the nearest edit), Smart Insert, Place On Top's alignment and Up/Down navigation use Track 1, the main story.
+  - **A clicked edit keeps its track:** an edit picked by clicking a clip's edge or a cut stays on that track. `,`/`.`, U, the Trim Editor (its labels and frames are that track's clips, whatever covers them) and Dynamic Trim work there. Dynamic Trim's Up/Down move along that track's edits.
+  - **During Dynamic Trim:** `,` and `.` do nothing while it runs. Its pending trim is the one request K sends (D32).
