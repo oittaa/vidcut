@@ -291,7 +291,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 - **Slide (M7):** moves a clip keeping its media; the clip before it gets longer and the one after it shorter (Dynamic Trim, p. 731; `edit.slide`).
 
 ### 8.7 J/L cuts (v1) (p. 728)
-Hover the lower audio part of a clip at an edit until the cursor shows a note, then drag. Only the audio edit point moves, as an audio roll.
+Hover the lower audio part of a clip at an edit until the cursor shows a note, then drag. Only the audio edit point moves, as an audio roll. A click selects that audio edit, and `,` / `.` move it (D20).
 
 ### 8.8 Snapping (v1) (pp. 716–717)
 - N toggles snapping. Clip edges, markers, the playhead and the timeline In/Out snap to each other, and a white line shows the alignment.
@@ -411,6 +411,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - Safe Edit (p. 732) holds an edge at the neighbor for 0.6 s; pushing on overrides it.
   - Dragging empty space in the upper timeline scrubs; in the lower timeline it draws a marquee.
 - **D20. Keyboard trimming.** With an edit selected (V, U, or a click on an edit), `,` and `.` trim it by one frame and Shift+`,`/`.` by one second: the Out, the In, or both (a roll). These are the Edit page's nudge keys (†); the Cut page's own keyboard trimming is Dynamic Trim (D32).
+  - **The J/L handle is the audio edit.** A click on it (§8.7) selects that audio edit on the clip's track (D36). The selection's frame is the audio edit, `tail` frames after the picture cut. `,` and `.` move the outgoing clip's `tail` and the incoming clip's `head` together (`edit.audio_roll`). The picture cut stays on its frame. U cycles Out, In and both on a picture edit, and leaves an audio edit selected.
 - **D14. J/L cuts belong to an edit point.**
   - A J/L cut (§8.7) is stored as matching audio offsets on the two clips that meet there: the outgoing clip's `tail` equals the incoming clip's `head`.
   - When an edit gives a clip a different neighbor at that point, the J/L cut resets to a straight cut. Examples: a delete, a move, or a split inside the overlap zone, where one half would otherwise be left without audio of its own.
@@ -447,7 +448,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
 - **D32. Dynamic Trim** (pp. 730–732).
   - **Running:** L or J runs the trim at the shuttle speed (repeat for 2×, 4×, 8×), as playback would move. The run stops where the media or a neighbor runs out.
   - **Seeing it:** the viewer shows the two-up: the frames on both sides of the edit, or of the slipped or sliding clip, as the trim leaves them (exact frames, as the Trim Editor shows).
-  - **Applying it:** K stops the run and applies it as one request (`edit.trim`, `edit.roll`, `edit.slip` or `edit.slide`). K held with a tap of J or L applies one frame. W also applies what is pending before leaving.
+  - **Applying it:** K stops the run and applies it as one request (`edit.trim`, `edit.roll`, `edit.slip`, `edit.slide`, or `edit.audio_roll` when the selected edit is the J/L handle). K held with a tap of J or L applies one frame. W also applies what is pending before leaving.
   - **Play around:** Space plays from 2 s before the selection to 2 s after it.
 - **D33. Rotation metadata** (M8). The manual doesn't say. Media show as players show them: the rotation in a file's display matrix is applied in the preview, export, frames, thumbnails and storyboards. Phones store portrait video sideways with one. A portrait clip that sets the project format makes a portrait project, and `media.get` reports the size as shown, with the rotation. Mirrored display matrices are taken as rotations only.
 - **D34. Interlaced sources** (M8; Deinterlace Quality, p. 741).
@@ -462,7 +463,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - **Preview:** mpv tone-maps HDR clips for the screen with its own curve, so the preview can look a little different from an SDR export (deviation X14).
 - **D36. Which track an edit point is on** (pp. 696, 720, 729–732). The manual pictures one main story.
   - **Track 1's edits:** the Smart Indicator, V (select the nearest edit), Smart Insert, Place On Top's alignment and Up/Down navigation use Track 1, the main story.
-  - **A clicked edit keeps its track:** an edit picked by clicking a clip's edge, a cut, or the J/L handle on that cut stays on that track. `,`/`.`, U, the Trim Editor (its labels and frames are that track's clips, whatever covers them) and Dynamic Trim work there. Dynamic Trim's Up/Down move along that track's edits.
+  - **A clicked edit keeps its track:** an edit picked by clicking a clip's edge, a cut, or the J/L handle on that cut stays on that track. The handle selects the audio edit (D20); an edge or a cut selects the picture. `,`/`.`, U, the Trim Editor (its labels and frames are that track's clips, whatever covers them) and Dynamic Trim work there. Dynamic Trim's Up/Down move along that track's edits, and an audio selection stays on the audio edit of the cut they land on.
   - **During Dynamic Trim:** `,` and `.` do nothing while it runs. Its pending trim is the one request K sends (D32).
 - **D37. The first video sets the format, without asking** (§3; Resolve offers it, p. 654). In a new project, the first media file with video sets the frame rate and the picture size as shown (D33), and the project keeps them from then on. Change them with `project.set` before clips are added. A dialog would stop scripts and agents, and the choice is easy to change afterwards.
 - **D38. Stills** (§3; pp. 114, 1194). The manual gives two lengths for a still: the standard still duration, 5 s by default (p. 114), and "10 seconds" for imported stills (p. 1194). vidcut follows the preference's 5 s.

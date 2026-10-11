@@ -116,6 +116,21 @@ fn drag_slowly(harness: &mut Harness<'_, Workspace>, from: Pos2, to: Pos2) {
     harness.step();
 }
 
+/// One audio offset field (`head` or `tail`) of clip `id`.
+fn audio_field(h: &live::Handle, id: &str, field: &str) -> i64 {
+    let tl = call(h, "timeline.get", json!({})).result;
+    tl["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|t| t["items"].as_array())
+        .flatten()
+        .find(|i| i["id"] == id)
+        .unwrap_or_else(|| panic!("no clip {id}"))["audio"][field]
+        .as_i64()
+        .unwrap_or_else(|| panic!("{id} has no audio.{field}"))
+}
+
 /// Clips on `track` as (id, start, duration).
 fn clips(h: &live::Handle, track: &str) -> Vec<(String, i64, i64)> {
     let tl = call(h, "timeline.get", json!({})).result;
@@ -457,11 +472,13 @@ fn track_gestures_send_one_request_each() {
     settle(&h, &mut harness);
     assert_eq!(gui_edits(&h).len(), before, "no edit is selected any more");
 
-    // 8. A J/L handle click selects that edit on the clip's track (D36),
-    // the same way an edge click does, so `.` trims it. The handle is the
-    // audio edit, 8 frames into the next clip, not the picture cut.
+    // 8. A click on the J/L handle selects that audio edit (D20). The
+    // handle sits 8 frames into the next clip, so a picture-cut selection
+    // would roll the cut at `cut` and leave the offset at 8. `.` and `,`
+    // move the offset instead.
     let v1 = clips(&h, "V1");
     let (outgoing, cut) = (v1[0].0.clone(), v1[0].1 + v1[0].2);
+    let incoming = v1[1].0.clone();
     assert_eq!(
         v1[1].1, cut,
         "two clips meet, so the audio band has a handle"
@@ -472,6 +489,14 @@ fn track_gestures_send_one_request_each() {
         "edit.audio_roll",
         json!({ "clip": outgoing, "edge": "tail", "by": offset }),
     );
+    assert_eq!(
+        (
+            audio_field(&h, &outgoing, "tail"),
+            audio_field(&h, &incoming, "head")
+        ),
+        (offset, offset)
+    );
+    let picture: Vec<(i64, i64)> = clips(&h, "V1").iter().map(|c| (c.1, c.2)).collect();
     call(
         &h,
         "player.seek",
@@ -483,7 +508,7 @@ fn track_gestures_send_one_request_each() {
     let y = (tr.audio_top + tr.rect.bottom()) / 2.0;
     assert!(
         tr.in_audio(y),
-        "the click is on the J/L handle, not the picture edge"
+        "the click is on the J/L handle, in the audio band"
     );
     let at = pos2(l.lower_scale.xf(cut + offset), y);
     drag(&mut harness, at, at);
@@ -496,21 +521,71 @@ fn track_gestures_send_one_request_each() {
     assert_eq!(
         edits.len(),
         before + 1,
-        "the handle click selected the edit"
+        "the handle click selected the audio edit"
     );
     let (m, p) = edits.last().unwrap();
     assert_eq!(
-        (m.as_str(), &p["clip"], &p["by"]),
-        ("edit.roll", &json!(outgoing), &json!(1)),
-        "the clip under the J/L handle"
+        (m.as_str(), &p["clip"], &p["edge"], &p["by"]),
+        (
+            "edit.audio_roll",
+            &json!(outgoing),
+            &json!("tail"),
+            &json!(1)
+        ),
+        "`.` moves the audio offset; a picture cut would send edit.roll"
+    );
+    assert_eq!(
+        clips(&h, "V1")
+            .iter()
+            .map(|c| (c.1, c.2))
+            .collect::<Vec<_>>(),
+        picture,
+        "the picture cut stays at {cut}"
+    );
+    assert_eq!(
+        (
+            audio_field(&h, &outgoing, "tail"),
+            audio_field(&h, &incoming, "head")
+        ),
+        (offset + 1, offset + 1),
+        "the nudge changed the J/L offset"
+    );
+    // `,` moves the same audio edit back: the selection followed `.`.
+    harness.key_press(egui::Key::Comma);
+    harness.step();
+    settle(&h, &mut harness);
+    let (m, p) = last(&h);
+    assert_eq!(
+        (m.as_str(), &p["clip"], &p["edge"], &p["by"]),
+        (
+            "edit.audio_roll",
+            &json!(outgoing),
+            &json!("tail"),
+            &json!(-1)
+        ),
+        "`,` moves the audio offset the other way"
+    );
+    assert_eq!(
+        (
+            audio_field(&h, &outgoing, "tail"),
+            audio_field(&h, &incoming, "head")
+        ),
+        (offset, offset)
+    );
+    assert_eq!(
+        clips(&h, "V1")
+            .iter()
+            .map(|c| (c.1, c.2))
+            .collect::<Vec<_>>(),
+        picture
     );
 
     // Every gesture made exactly one change, and each is one undo step
     // (as are the two source marks, three overwrites, the track removal
     // and the audio roll this test made over IPC).
     let edits = gui_edits(&h);
-    assert_eq!(edits.len() - edits0, 10, "{edits:#?}");
-    assert_eq!(undo_steps(&h), undo0 + 10 + 2 + 2 + 2 + 1);
+    assert_eq!(edits.len() - edits0, 11, "{edits:#?}");
+    assert_eq!(undo_steps(&h), undo0 + 11 + 2 + 2 + 2 + 1);
 
     drop(harness);
     h.shutdown();
