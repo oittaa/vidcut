@@ -472,6 +472,71 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
     Ok((plan, entries))
 }
 
+/// One media range covered by a Source Tape span (decision D17).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpanPiece {
+    pub media: String,
+    /// Source frames `[start, end)`.
+    pub range: (i64, i64),
+}
+
+/// The pieces of a half-open tape span: the tail of the first clip, every
+/// whole clip in between, and the head of the last (decision D17).
+pub fn span_pieces(entries: &[TapeEntry], mark_in: i64, mark_out: i64) -> Vec<SpanPiece> {
+    let mut out = Vec::new();
+    for e in entries {
+        let end = e.start + e.frames;
+        let a = mark_in.max(e.start);
+        let b = mark_out.min(end);
+        if b > a {
+            out.push(SpanPiece {
+                media: e.media.clone(),
+                range: (a - e.start, b - e.start),
+            });
+        }
+    }
+    out
+}
+
+/// Where a lone In or Out stays on its own clip (decision D5). Both marks
+/// use the tape range as given, which may cross clips. `None` when neither
+/// mark is set or a lone mark does not fall on a clip.
+pub fn active_span(
+    entries: &[TapeEntry],
+    mark_in: Option<i64>,
+    mark_out: Option<i64>,
+) -> Option<(i64, i64)> {
+    match (mark_in, mark_out) {
+        (None, None) => None,
+        (Some(i), Some(o)) => (o > i).then_some((i, o)),
+        (Some(i), None) => {
+            let end = entries
+                .iter()
+                .find(|e| e.start <= i && i < e.start + e.frames)
+                .map(|e| e.start + e.frames)?;
+            (end > i).then_some((i, end))
+        }
+        (None, Some(o)) => {
+            let frame = o - 1;
+            let start = entries
+                .iter()
+                .find(|e| e.start <= frame && frame < e.start + e.frames)
+                .map(|e| e.start)?;
+            (o > start).then_some((start, o))
+        }
+    }
+}
+
+/// Both marks set and covering more than one clip (decision D17).
+pub fn crossing_span(
+    entries: &[TapeEntry],
+    mark_in: Option<i64>,
+    mark_out: Option<i64>,
+) -> Option<(i64, i64)> {
+    let (i, o) = (mark_in?, mark_out?);
+    (span_pieces(entries, i, o).len() > 1).then_some((i, o))
+}
+
 fn stem(name: &str) -> String {
     std::path::Path::new(name)
         .file_stem()

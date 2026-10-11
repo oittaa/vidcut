@@ -15,7 +15,71 @@ use super::theme;
 use super::workspace::{Drag, TimecodeEntry, Workspace, dim, fit};
 use crate::live::PlayerId;
 
+/// In/Out handles on the source scroll bar.
+enum MarkHandles {
+    Clip {
+        media: String,
+        base: i64,
+        len: i64,
+        in_frame: i64,
+        out_frame: i64,
+        xa: f32,
+        xb: f32,
+    },
+    Tape {
+        in_frame: i64,
+        out_frame: i64,
+        xa: f32,
+        xb: f32,
+    },
+}
+
+impl MarkHandles {
+    fn near(&self, px: f32) -> bool {
+        (px - self.xa()).abs() < 6.0 || (px - self.xb()).abs() < 6.0
+    }
+
+    fn grabs_in(&self, px: f32) -> bool {
+        (px - self.xa()).abs() <= (px - self.xb()).abs()
+    }
+
+    fn xa(&self) -> f32 {
+        match self {
+            Self::Clip { xa, .. } | Self::Tape { xa, .. } => *xa,
+        }
+    }
+
+    fn xb(&self) -> f32 {
+        match self {
+            Self::Clip { xb, .. } | Self::Tape { xb, .. } => *xb,
+        }
+    }
+}
+
 impl Workspace {
+    fn mark_handles(&self, painter: &egui::Painter, rect: Rect, xa: f32, xb: f32) {
+        for (px, is_in) in [(xa, true), (xb, false)] {
+            let tri = if is_in {
+                vec![
+                    Pos2::new(px, rect.bottom() - 9.0),
+                    Pos2::new(px + 7.0, rect.bottom()),
+                    Pos2::new(px, rect.bottom()),
+                ]
+            } else {
+                vec![
+                    Pos2::new(px, rect.bottom() - 9.0),
+                    Pos2::new(px, rect.bottom()),
+                    Pos2::new(px - 7.0, rect.bottom()),
+                ]
+            };
+            painter.add(egui::Shape::convex_polygon(
+                tri,
+                Color32::WHITE,
+                Stroke::NONE,
+            ));
+        }
+    }
+
     pub(super) fn viewer_panel(&mut self, ui: &mut egui::Ui) {
         let mode = self.snap.viewer;
         let id = PlayerId::of(mode);
@@ -384,10 +448,32 @@ impl Workspace {
                 }
             }
         }
-        // The shown media's marks, offset to its place on the tape.
+        // A span across clips is drawn in tape frames (decision D17). One
+        // clip keeps that clip's own marks, offset onto the tape.
+        let span = tape.then(|| self.crossing_span()).flatten();
         let shown = self.snap.source_at().map(|(m, _)| m.to_string());
         let mut handles = None;
-        if let Some(media) = &shown
+        if let Some((mut a, mut b)) = span {
+            if let Some(Drag::TapeMark { is_in, frame }) = &self.drag {
+                if *is_in {
+                    a = *frame;
+                } else {
+                    b = *frame;
+                }
+            }
+            painter.rect_filled(
+                Rect::from_min_max(Pos2::new(x(a), rect.top()), Pos2::new(x(b), rect.bottom())),
+                CornerRadius::ZERO,
+                theme::MARKED,
+            );
+            self.mark_handles(&painter, rect, x(a), x(b));
+            handles = Some(MarkHandles::Tape {
+                in_frame: a,
+                out_frame: b,
+                xa: x(a),
+                xb: x(b),
+            });
+        } else if let Some(media) = &shown
             && let Some(m) = self.project().and_then(|p| p.media(media))
         {
             let base = if tape {
@@ -427,28 +513,16 @@ impl Workspace {
                     theme::MARKED,
                 );
             }
-            for (f, is_in) in [(a, true), (b, false)] {
-                let px = x(base + f);
-                let tri = if is_in {
-                    vec![
-                        Pos2::new(px, rect.bottom() - 9.0),
-                        Pos2::new(px + 7.0, rect.bottom()),
-                        Pos2::new(px, rect.bottom()),
-                    ]
-                } else {
-                    vec![
-                        Pos2::new(px, rect.bottom() - 9.0),
-                        Pos2::new(px, rect.bottom()),
-                        Pos2::new(px - 7.0, rect.bottom()),
-                    ]
-                };
-                painter.add(egui::Shape::convex_polygon(
-                    tri,
-                    Color32::WHITE,
-                    Stroke::NONE,
-                ));
-            }
-            handles = Some((media.clone(), base, len, x(base + a), x(base + b)));
+            self.mark_handles(&painter, rect, x(base + a), x(base + b));
+            handles = Some(MarkHandles::Clip {
+                media: media.clone(),
+                base,
+                len,
+                in_frame: a,
+                out_frame: b,
+                xa: x(base + a),
+                xb: x(base + b),
+            });
         }
         let px = x(self.snap.source.position);
         painter.line_segment(
@@ -461,15 +535,28 @@ impl Workspace {
             && let Some(pos) = resp.interact_pointer_pos()
         {
             self.drag = match &handles {
-                Some((media, _, _, xa, xb))
-                    if (pos.x - xa).abs() < 6.0 || (pos.x - xb).abs() < 6.0 =>
-                {
-                    let is_in = (pos.x - xa).abs() <= (pos.x - xb).abs();
-                    Some(Drag::SourceMark {
-                        media: media.clone(),
-                        is_in,
-                        frame: 0,
-                    })
+                Some(h) if h.near(pos.x) => {
+                    let is_in = h.grabs_in(pos.x);
+                    match h {
+                        MarkHandles::Clip {
+                            media,
+                            in_frame,
+                            out_frame,
+                            ..
+                        } => Some(Drag::SourceMark {
+                            media: media.clone(),
+                            is_in,
+                            frame: if is_in { *in_frame } else { *out_frame },
+                        }),
+                        MarkHandles::Tape {
+                            in_frame,
+                            out_frame,
+                            ..
+                        } => Some(Drag::TapeMark {
+                            is_in,
+                            frame: if is_in { *in_frame } else { *out_frame },
+                        }),
+                    }
                 }
                 _ => Some(Drag::Scrub(PlayerId::Source)),
             };
@@ -484,9 +571,17 @@ impl Workspace {
                     }
                 }
                 Some(Drag::SourceMark { frame, .. }) => {
-                    if let Some((_, base, len, _, _)) = &handles {
+                    if let Some(MarkHandles::Clip { base, len, .. }) = &handles {
                         *frame = (f - base).clamp(0, *len);
                     }
+                }
+                Some(Drag::TapeMark { frame, is_in, .. }) if resp.dragged() => {
+                    let end = self.snap.source.frames;
+                    *frame = if *is_in {
+                        f.clamp(0, end - 1)
+                    } else {
+                        (f + 1).clamp(1, end)
+                    };
                 }
                 _ => {}
             }
@@ -505,6 +600,11 @@ impl Workspace {
                 }) => {
                     let key = if is_in { "in" } else { "out" };
                     self.send("media.marks.set", json!({ "media": media, key: frame }));
+                }
+                Some(Drag::TapeMark { is_in, frame }) => {
+                    let order = self.tape_order();
+                    let key = if is_in { "in" } else { "out" };
+                    self.send("tape.marks.set", json!({ key: frame, "order": order }));
                 }
                 None => {}
             }
