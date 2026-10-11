@@ -15,7 +15,7 @@ A simple, fully scriptable video cutting tool for Linux, modeled on DaVinci Reso
   - a mixer with faders, mute, solo and meters
   - snapping, markers, undo
 - **Export:**
-  - Quick Export presets (H.264/H.265 Master, ProRes 422 HQ, YouTube, Vimeo, TikTok, AV1), plus your own
+  - Quick Export presets (H.265 Master, AV1, ProRes 422 HQ, YouTube, TikTok), plus your own
   - an Export dialog with codec settings, GPU encoding (NVENC, VAAPI), In–Out range, per-clip export and audio-only export
   - exports run in the background, with progress, ETA and cancel
 - **Automatic tools:** Ripple Delete Silence cuts the pauses out of a talk; Detect Scene Cuts splits an edited video back into its shots; the Boring Detector flags clips that run too long or flash by; exports can be normalized to a loudness target (−14 LUFS for YouTube).

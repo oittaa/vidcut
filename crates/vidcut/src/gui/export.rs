@@ -619,7 +619,7 @@ impl Workspace {
                 .export
                 .presets
                 .iter()
-                .find(|p| p.name == "h264-master")
+                .find(|p| p.name == "h265-master")
                 .unwrap_or(&self.export.presets[0])
                 .clone();
             let output = self

@@ -99,7 +99,7 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
 
 **Settings and presets:**
 - Settings are pure data in `vidcut_core::export`: container, video (codec, encoder, quality or bitrate, speed, profile, bit depth, size) and audio (codec, bitrate, rate, channels).
-- Built-in presets mirror Resolve's Quick Export: H.264/H.265 Master, ProRes 422 HQ, YouTube 720p/1080p/2160p, Vimeo, TikTok. There are also AV1, VP9, DNxHR HQ and five audio-only presets.
+- Built-in presets follow Resolve's Quick Export models: H.264/H.265 Master, ProRes 422 HQ, YouTube 720p/1080p/2160p, Vimeo, TikTok. There are also AV1, VP9, DNxHR HQ and five audio-only presets. The Quick Export row shows H.265 Master, AV1, ProRes 422 HQ, YouTube 1080p and 2160p, and TikTok (deviation X3).
 - User presets are TOML files in `~/.config/vidcut/presets/`.
 - `--set key=value` overrides any field.
 
