@@ -446,6 +446,52 @@ mod tests {
     }
 
     #[test]
+    fn a_null_id_refusal_is_usage_and_cancel_already_set_is_not_success() {
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+        let dir = std::env::temp_dir().join(format!("vidcut-ipc-cancel-{}", std::process::id()));
+        let ok = Arc::new(
+            |_: Envelope, _: Option<PathBuf>, _: &mut dyn FnMut(Value) -> bool| {
+                Ok(vidcut_core::Response {
+                    rev: 1,
+                    changes: Default::default(),
+                    result: json!("ok"),
+                    dry_run: false,
+                    via: "gui:1".into(),
+                })
+            },
+        );
+        // The line limit answers with id null before the request is parsed.
+        // Skipping that error used to surface as NO_INSTANCE.
+        let limited = dir.join("limit.sock");
+        server::start_limited(
+            &limited,
+            ok.clone(),
+            server::Limits {
+                line: 32,
+                connections: 4,
+            },
+        )
+        .unwrap();
+        let get = Envelope::from_json(json!({"method": "project.get"})).unwrap();
+        let e = client::call(&limited, &get, None, &mut |_| {}, None).unwrap_err();
+        assert_eq!(e.code, ErrorCode::Usage, "{e}");
+        assert!(e.message.contains("limited to 32 bytes"), "{e}");
+
+        // The server answers success at once. A flag that is already set
+        // must not return that success.
+        let socket = dir.join("cancel.sock");
+        server::start(&socket, ok).unwrap();
+        let waiting = AtomicBool::new(false);
+        let r = client::call(&socket, &get, None, &mut |_| {}, Some(&waiting)).unwrap();
+        assert_eq!(r.result, json!("ok"));
+        let cancel = AtomicBool::new(true);
+        let e = client::call(&socket, &get, None, &mut |_| {}, Some(&cancel)).unwrap_err();
+        assert_eq!(e.code, ErrorCode::Cancelled, "{e}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn projectless_requests_never_route() {
         let r = Request::from_parts("schema", None).unwrap();
         let opts = RouteOptions {
