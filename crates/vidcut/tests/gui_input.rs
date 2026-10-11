@@ -64,6 +64,13 @@ fn gui_edits(h: &live::Handle) -> Vec<(String, Value)> {
         .collect()
 }
 
+/// The timeline playhead, in frames.
+fn playhead(h: &live::Handle) -> i64 {
+    call(h, "player.state", json!({})).result["timeline"]["position"]
+        .as_i64()
+        .unwrap()
+}
+
 fn undo_steps(h: &live::Handle) -> usize {
     call(h, "history.get", json!({})).result["undo"]
         .as_array()
@@ -195,9 +202,14 @@ fn gestures_send_one_request_each() {
     assert_eq!(edits.len(), edits0 + 1, "{edits:#?}");
     assert_eq!(edits.last().unwrap().0, "edit.append");
     assert_eq!(v1(&h).len(), 4);
+    let end = v1(&h).iter().map(|c| c.1 + c.2).max().unwrap();
+    assert_eq!(
+        playhead(&h),
+        end,
+        "an edit function moves the playhead (D15)"
+    );
 
-    // The append moved the playhead to the end (decision D15); bring the
-    // first clips back into the (fixed-playhead) lower timeline.
+    // Bring the first clips back into the (fixed-playhead) lower timeline.
     call(&h, "player.seek", json!({ "at": 90, "viewer": "timeline" }));
     settle(&h, &mut harness);
 
@@ -249,9 +261,11 @@ fn gestures_send_one_request_each() {
     let l = harness.state().timeline_layout().unwrap();
     let upper_v1 = l.upper.get("V1").unwrap().rect.rect;
     let past = pos2(l.upper_scale.xf(end) + 20.0, upper_v1.center().y);
+    let before = playhead(&h);
     drag(&mut harness, row, past, Modifiers::NONE);
     settle(&h, &mut harness);
     assert_eq!(gui_edits(&h).last().unwrap().0, "edit.append");
+    assert_eq!(playhead(&h), before, "a drop leaves the playhead (D15)");
 
     // 5. V selects the edit nearest the playhead, `.` rolls it a frame.
     call(&h, "player.seek", json!({ "at": 66, "viewer": "timeline" }));

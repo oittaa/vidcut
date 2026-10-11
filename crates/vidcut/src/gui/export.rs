@@ -40,7 +40,7 @@ impl Ask {
         std::thread::spawn(move || {
             let result = envelope
                 .map_err(Error::internal)
-                .and_then(|e| live.call(e, Origin::Gui, None, &mut |_| true));
+                .and_then(|e| live.call(e, Origin::Gui { drag: false }, None, &mut |_| true));
             *out.lock().unwrap_or_else(|e| e.into_inner()) = Some(result);
             ctx.request_repaint();
         });

@@ -199,6 +199,12 @@ impl Workspace {
         self.live.request(method, params);
     }
 
+    /// Sends the request that ends a drag on the timeline: a dropped clip
+    /// doesn't move the playhead the way an edit function does (spec D15).
+    pub(super) fn send_drag(&self, method: &str, params: Value) {
+        self.live.request_drag(method, params);
+    }
+
     pub(super) fn project(&self) -> Option<&Project> {
         self.snap.project()
     }

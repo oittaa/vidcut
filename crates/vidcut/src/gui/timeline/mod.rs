@@ -997,7 +997,7 @@ impl Workspace {
         if released {
             if let Some(r) = request {
                 let method = r["method"].as_str().unwrap_or_default().to_string();
-                self.send(&method, r["params"].clone());
+                self.send_drag(&method, r["params"].clone());
             }
             if scrubbing && let Some(f) = self.timeline.scrub_sent.take() {
                 self.seek(PlayerId::Timeline, f, false);

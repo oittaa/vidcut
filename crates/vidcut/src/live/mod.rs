@@ -51,7 +51,12 @@ use workers::Workers;
 /// Where a request came from (shown in the command log).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Origin {
-    Gui,
+    /// The GUI. `drag`: the request ends a drag on the timeline. A media
+    /// drop is an edit but not an edit function, so the playhead stays
+    /// (decision D15).
+    Gui {
+        drag: bool,
+    },
     Ipc,
     Session,
 }
@@ -59,7 +64,7 @@ pub enum Origin {
 impl Origin {
     pub fn name(self) -> &'static str {
         match self {
-            Self::Gui => "gui",
+            Self::Gui { .. } => "gui",
             Self::Ipc => "ipc",
             Self::Session => "session",
         }
@@ -236,9 +241,13 @@ impl Handle {
 
     /// Sends a request from the GUI; errors show up as notices.
     pub fn send(&self, envelope: Envelope) {
+        self.send_from(envelope, false);
+    }
+
+    fn send_from(&self, envelope: Envelope, drag: bool) {
         let _ = self.tx.send(Msg::Request {
             envelope,
-            origin: Origin::Gui,
+            origin: Origin::Gui { drag },
             project: None,
             reply: None,
         });
@@ -246,15 +255,24 @@ impl Handle {
 
     /// Builds and sends a GUI request from a method name and params.
     pub fn request(&self, method: &str, params: Value) {
+        self.request_from(method, params, false);
+    }
+
+    /// [`request`](Self::request) for the request that ends a timeline drag.
+    pub fn request_drag(&self, method: &str, params: Value) {
+        self.request_from(method, params, true);
+    }
+
+    fn request_from(&self, method: &str, params: Value, drag: bool) {
         match Envelope::from_json(json!({ "method": method, "params": params })) {
-            Ok(e) => self.send(e),
+            Ok(e) => self.send_from(e, drag),
             Err(e) => {
                 // A GUI bug: report it like any other failure.
                 let _ = self.tx.send(Msg::TaskDone {
                     job: Job {
                         method: method.into(),
                         params,
-                        origin: Origin::Gui,
+                        origin: Origin::Gui { drag },
                         reply: None,
                         rev: None,
                         dry_run: false,
@@ -809,7 +827,7 @@ impl Live {
                     // change is measured from now.
                     let rev = self.project.as_ref().map(|p| p.project().rev);
                     let job = Job { rev, ..job };
-                    let result = self.edit(envelope);
+                    let result = self.edit(envelope, job.origin);
                     self.finish(job, result);
                 }
             },
@@ -1379,7 +1397,7 @@ impl Live {
             .find(|j| j.id == id)
         {
             j.ended(&result);
-            gui = j.origin == Origin::Gui.name();
+            gui = j.origin == Origin::Gui { drag: false }.name();
         }
         if gui {
             match &result {
@@ -1416,7 +1434,7 @@ impl Live {
         let quiet = matches!(
             job.method.as_str(),
             "player.state" | "selection.get" | "gui.log"
-        ) || (job.origin == Origin::Gui
+        ) || (matches!(job.origin, Origin::Gui { .. })
             && matches!(
                 job.method.as_str(),
                 "export.plan"
@@ -1428,7 +1446,7 @@ impl Live {
             ))
             || (job.method == "player.seek" && job.params["fast"] == json!(true))
             // Previews the GUI asks for (Ripple Delete Silence's stripes).
-            || (job.origin == Origin::Gui && job.dry_run);
+            || (matches!(job.origin, Origin::Gui { .. }) && job.dry_run);
         if !quiet {
             self.log_seq += 1;
             let entry = LogEntry {
@@ -1458,7 +1476,7 @@ impl Live {
         }
         // The GUI shows failures of what it doesn't wait for itself, except
         // its own seeks overtaken by the next click or scrub.
-        if let (Err(e), Origin::Gui, None) = (&result, job.origin, &job.reply)
+        if let (Err(e), Origin::Gui { .. }, None) = (&result, job.origin, &job.reply)
             && e.code != vidcut_core::ErrorCode::Conflict
         {
             self.notice(format!("{}: {}", job.method, e.message), true);
@@ -1704,7 +1722,7 @@ impl Live {
             Request::EditRippleDeleteSilence { .. } | Request::EditDetectSceneCuts { .. } => {
                 match self.measuring(&envelope) {
                     Some(measure) => Step::Measure(measure, Box::new(envelope)),
-                    None => Step::Now(self.edit(envelope)),
+                    None => Step::Now(self.edit(envelope, job.origin)),
                 }
             }
             // Proxies are encoded on a worker, by the same request on a copy
@@ -1739,7 +1757,7 @@ impl Live {
                 };
                 Step::Measure(Box::new(unpack_bundle), Box::new(envelope))
             }
-            _ => Step::Now(self.edit(envelope)),
+            _ => Step::Now(self.edit(envelope, job.origin)),
         }
     }
 
@@ -1799,7 +1817,7 @@ impl Live {
     }
 
     /// Project requests: edits and queries through the editor.
-    fn edit(&mut self, mut envelope: Envelope) -> Result<Response> {
+    fn edit(&mut self, mut envelope: Envelope, origin: Origin) -> Result<Response> {
         let playhead = self.players[TIMELINE].position;
         match &mut envelope.request {
             Request::EditPaste { clips, .. } if clips.is_none() => {
@@ -1874,7 +1892,9 @@ impl Live {
                 }
                 _ => {}
             }
-            if !r.dry_run && is_edit_function(&request) {
+            // Decision D15, for edit functions: a media dropped on the
+            // timeline leaves the playhead where it was.
+            if !r.dry_run && is_edit_function(&request) && origin != (Origin::Gui { drag: true }) {
                 self.playhead_after_edit(r);
             }
         }
