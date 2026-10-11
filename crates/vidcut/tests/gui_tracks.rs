@@ -424,15 +424,45 @@ fn track_gestures_send_one_request_each() {
     assert_eq!(edits.len(), before + 1, "one request when K stops it");
     let (m, p) = edits.last().unwrap();
     assert_eq!((m.as_str(), &p["clip"]), ("edit.roll", &json!(outgoing)));
+    // L rolled it forward, a frame per frame of the run at most.
+    let by = p["by"].as_i64().unwrap_or(0);
+    assert!((1..=12).contains(&by), "rolled by {by}");
     harness.key_press(egui::Key::W);
     harness.step();
 
+    // 7. Removing a track renumbers those above it: an edit picked on V2
+    // isn't kept as "V2" once that is another track (V3 with an edit at
+    // the same frame here).
+    let e = clips(&h, "V2")
+        .iter()
+        .find(|c| c.0 == outgoing)
+        .map(|c| c.1 + c.2)
+        .unwrap();
+    call(
+        &h,
+        "edit.overwrite",
+        json!({ "media": "m1", "range": "0f..20f", "at": e - 20, "track": "V3", "video_only": true }),
+    );
+    settle(&h, &mut harness);
+    let l = harness.state().timeline_layout().unwrap();
+    let row = l.lower.get("V2").unwrap().rect.rect;
+    let at = pos2(l.lower_scale.xf(e), row.top() + 6.0);
+    drag(&mut harness, at, at);
+    settle(&h, &mut harness);
+    call(&h, "track.remove", json!({ "track": "V2", "force": true }));
+    settle(&h, &mut harness);
+    let before = gui_edits(&h).len();
+    harness.key_press(egui::Key::Period);
+    harness.step();
+    settle(&h, &mut harness);
+    assert_eq!(gui_edits(&h).len(), before, "no edit is selected any more");
+
     // Every gesture made exactly one change, and each is one undo step
-    // (as are the two source marks and two overwrites this test made over
-    // IPC).
+    // (as are the two source marks, three overwrites and the track removal
+    // this test made over IPC).
     let edits = gui_edits(&h);
     assert_eq!(edits.len() - edits0, 9, "{edits:#?}");
-    assert_eq!(undo_steps(&h), undo0 + 9 + 2 + 2);
+    assert_eq!(undo_steps(&h), undo0 + 9 + 2 + 2 + 2);
 
     drop(harness);
     h.shutdown();

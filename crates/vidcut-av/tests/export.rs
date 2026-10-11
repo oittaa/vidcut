@@ -609,6 +609,60 @@ fn audio_after_a_lost_packet_keeps_its_time() {
         let t = *got as f64 / 48_000.0;
         assert!((t - want).abs() < 0.001, "beep at {t:.4}, want {want:.4}");
     }
+    // The hole (the packet after the AAC priming one, 79 × 1024 samples in)
+    // is digital silence.
+    let hole = &mono[79 * 1024..80 * 1024];
+    assert!(hole.iter().all(|&x| x == 0.0), "the hole is silent");
+}
+
+#[test]
+fn audio_that_starts_late_keeps_its_time() {
+    // The first FLAC packet is gone, so the audio starts a packet after the
+    // picture (as some recordings do): silence until it starts, and what
+    // follows stays on time.
+    let fps = Rational::new(30, 1).unwrap();
+    let s = src(
+        FixtureSpec::new(VideoCodec::H264, Container::Mkv, 320, 180, (30, 1), 90).with_audio(
+            AudioCodec::Flac,
+            48_000,
+            2,
+        ),
+    );
+    let audio = vidcut_av::probe::probe(&s.path).unwrap().audio[0].index;
+    let dir = out_dir("late");
+    let lossy = dir.join("late.mkv");
+    fixture::spoil(&s.path, &lossy, audio, 0, Spoil::Drop).unwrap();
+    let first = vidcut_av::probe::probe(&lossy).unwrap().audio[0]
+        .first_secs
+        .unwrap();
+    assert!(first > 0.01, "starts at {first}");
+    let late = Src {
+        path: lossy,
+        origin: s.origin,
+    };
+    let p = plan(
+        fps,
+        320,
+        180,
+        vec![v(&late, 0, 90)],
+        vec![vec![a(&late, fps, 48_000, 0, 90)]],
+    );
+    let out = dir.join("out.mkv");
+    render(&p, &lossless(), &out);
+    let mono = audio_mono(&out);
+    let lead = (first * 48_000.0).floor() as usize;
+    assert!(
+        mono[..lead].iter().all(|&x| x == 0.0),
+        "silent for the first {first} s"
+    );
+    // The 0 s beep was in the lost packet.
+    let onsets = vidcut_av::beep::onsets(&mono, 0.1, 4800);
+    let expect = [1.0, 2.0];
+    assert_eq!(onsets.len(), expect.len(), "beeps at {onsets:?}");
+    for (got, want) in onsets.iter().zip(expect) {
+        let t = *got as f64 / 48_000.0;
+        assert!((t - want).abs() < 0.001, "beep at {t:.4}, want {want:.4}");
+    }
 }
 
 #[test]
@@ -908,7 +962,11 @@ fn auto_moves_on_from_a_gpu_encoder_that_wont_open() {
     let p = plan(fps, 320, 180, vec![v(&s, 0, 30)], vec![]);
     let mut settings = lossless();
     settings.audio = None;
-    settings.video.as_mut().unwrap().encoder = EncoderChoice::Auto;
+    let video = settings.video.as_mut().unwrap();
+    video.encoder = EncoderChoice::Auto;
+    // A speed meant for the GPU encoder: libx264 has no such preset, and
+    // takes its own default.
+    video.speed = Some("p4".into());
     let available = Availability {
         encoders: vec![EncoderStatus {
             encoder: "h264_vaapi".into(),
@@ -933,6 +991,18 @@ fn auto_moves_on_from_a_gpu_encoder_that_wont_open() {
     .unwrap();
     assert_eq!(report.video_encoder.as_deref(), Some("libx264"));
     assert_eq!(barcodes(&out), (0..30).map(Some).collect::<Vec<_>>());
+    // An encoder asked for by name doesn't give way.
+    settings.video.as_mut().unwrap().encoder = EncoderChoice::Vaapi;
+    let err = export::run(
+        &p,
+        &settings,
+        &out_dir("fallback").join("named.mkv"),
+        &available,
+        &AtomicBool::new(false),
+        &mut |_| {},
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("VAAPI"), "{err}");
 }
 
 #[test]

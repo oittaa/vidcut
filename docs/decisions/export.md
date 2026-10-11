@@ -32,7 +32,7 @@
 **Damaged sources:** a packet the decoder rejects as invalid data is skipped, as players and the `ffmpeg` tool skip it, and the export goes on.
 - Video shows the next frame in its place (the sampling rule, §2). Frames that refer to it show what the decoder makes of them, up to the next keyframe.
 - Audio has silence there (§3).
-- Any other decoder error still fails the export. Audio levels, scene measurements and waveforms decode by the same rule (`decode::decode_stream`).
+- Any other decoder error still fails the export, as do 100 damaged frames in a row. Audio levels, scene measurements and waveforms decode by the same rule (`decode::decode_stream`).
 
 ## 2. Sampling rule (preview and export)
 
@@ -55,6 +55,8 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
 - **Gaps follow the timestamps.** A frame that starts more than 2 ms after the one before it ended follows a gap: a packet the file lacks, or one the decoder rejected.
   - The gap becomes silence, so what follows stays in sync with the picture. Counting samples instead put everything after a lost AAC packet 21 ms early.
   - The silence is made a second at a time as it is read, so a jump in the timestamps costs no memory.
+  - Audio that starts after a piece's start (a stream that begins after the picture, or a lost first packet) is silent until it does. Starting it at once put it early by that much.
+  - A frame stamped past the file's end has a broken timestamp: it plays in order, with no gap. Otherwise one bad timestamp would silence the rest of the piece.
   - Smaller differences are timestamp rounding (Matroska keeps milliseconds).
   - Audio levels and waveforms count gaps the same way, so silence found in a measurement is where the export has it.
 
@@ -99,6 +101,8 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
 - Picks NVENC if a test encode works, then VAAPI, then the CPU encoder.
 - An export takes the first of these that opens (`encode::video_encoders`). A GPU encoder that tested fine can still fail to open when an export starts: NVENC allows a few sessions at a time, and other exports may hold them. The report names the encoder used; the plan (`--dry-run`) names the first choice.
 - An encoder asked for by name (`nvenc`, `vaapi`, `cpu`) fails the export if it won't open.
+- An explicit `video.speed` goes to the encoder an export starts with. Encoders don't share speed names (x264's, NVENC's p1–p7, SVT-AV1's numbers), so one it moves on to uses its own default.
+- If none opens, the error says why each didn't.
 - Detection test-encodes every GPU encoder × pixel format × VAAPI render node (~2 s) and is cached in `~/.cache/vidcut/encoders.json`.
 - The cache is keyed by FFmpeg versions, the NVIDIA driver, the kernel and the render nodes.
 

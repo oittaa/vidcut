@@ -159,6 +159,10 @@ pub struct Player {
     loading: Option<u64>,
     pub frames: i64,
     pub position: i64,
+    /// The frame the latest seek or load asked for, and whether exactly (a
+    /// fast seek shows a keyframe near it). Playback leaves it alone, so a
+    /// waiting seek is overtaken only by another seek or load.
+    pub target: (i64, bool),
     /// The playhead follows mpv's `time-pos` (playing) rather than the last
     /// requested frame (paused after a seek).
     tracking: bool,
@@ -201,6 +205,7 @@ impl Player {
             loading: None,
             frames: 0,
             position: 0,
+            target: (0, true),
             tracking: false,
             paused: true,
             speed: 0.0,
@@ -286,6 +291,7 @@ impl Player {
         self.fps = fps;
         self.frames = frames;
         self.position = position;
+        self.target = (position, true);
         self.reverse = None;
         if self.mpv.is_some() {
             let tmp = self.edl_path.with_extension("edl.tmp");
@@ -352,6 +358,7 @@ impl Player {
         self.loading = None;
         self.frames = 0;
         self.position = 0;
+        self.target = (0, true);
         self.speed = 0.0;
         self.reverse = None;
         self.instant_motion();
@@ -363,10 +370,12 @@ impl Player {
         if self.loaded.is_none() {
             // Remembered for the next load (which clamps it).
             self.position = frame.max(0);
+            self.target = (self.position, !fast);
             return self.instant_motion();
         }
         let frame = frame.clamp(0, self.frames.max(0));
         self.position = frame;
+        self.target = (frame, !fast);
         if self.loading.is_some() {
             // mpv rejects seeks while it opens the file: open it again at the
             // new position instead.

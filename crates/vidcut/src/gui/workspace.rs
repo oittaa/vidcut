@@ -773,8 +773,16 @@ impl Workspace {
         }
         if pressed(Key::ArrowUp) || pressed(Key::ArrowDown) {
             let up = pressed(Key::ArrowUp);
-            // Dynamic Trim moves along the track of its edit (p. 732).
+            // Dynamic Trim moves along the track of its edit (p. 732), on
+            // the timeline whatever the viewer shows.
             let dynamic_track = self.timeline.edit.filter(|_| dynamic).map(|e| e.track);
+            let (id, player) = match dynamic_track {
+                Some(_) => (
+                    PlayerId::Timeline,
+                    self.snap.player(PlayerId::Timeline).clone(),
+                ),
+                None => (id, player.clone()),
+            };
             let points = match (m.shift, dynamic_track) {
                 (true, _) => self.marker_points(),
                 (false, Some(t)) => self.track_edit_points(&t.id()),
@@ -1084,6 +1092,14 @@ impl Workspace {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         self.snap = self.live.snapshot();
+        // Removing a track renumbers the ones above it: a selected edit or
+        // a Dynamic Trim run may now name another track, so they end.
+        let tracks = self.project().map_or(0, |p| p.tracks.len());
+        if tracks < self.timeline.tracks {
+            self.timeline.edit = None;
+            self.timeline.dynamic = None;
+        }
+        self.timeline.tracks = tracks;
         let title = match &self.snap.project {
             Some(p) => format!(
                 "{} — vidcut",

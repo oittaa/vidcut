@@ -160,6 +160,8 @@ pub struct TimelineView {
     pub dynamic: Option<tools::Dynamic>,
     /// Upper and lower track rects and scales of the last frame.
     pub layout: Option<Layout>,
+    /// How many tracks the project had in the last frame.
+    pub tracks: usize,
 }
 
 impl Default for TimelineView {
@@ -178,6 +180,7 @@ impl Default for TimelineView {
             boring_dialog: None,
             dynamic: None,
             layout: None,
+            tracks: 0,
         }
     }
 }

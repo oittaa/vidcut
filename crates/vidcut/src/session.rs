@@ -243,8 +243,8 @@ pub fn export_media(
 /// Says that the undo history wasn't saved with an edit, and what follows.
 pub fn history_unsaved(error: &str) -> String {
     format!(
-        "the undo history wasn't saved ({error}); undo will take this edit back as an \
-         outside change"
+        "the edit is saved, but its undo history isn't ({error}): other vidcut runs see \
+         the edit as an outside change, or start with no history"
     )
 }
 

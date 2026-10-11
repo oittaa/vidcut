@@ -272,15 +272,40 @@ fn encode(
                 v.width.unwrap_or(plan.width),
                 v.height.unwrap_or(plan.height),
             );
-            // The first encoder that opens.
-            let mut choices = encode::video_encoders(v, available)?.into_iter().peekable();
-            let (enc, (encoder, vaapi)) = loop {
-                let enc = choices.next().expect("at least one encoder");
+            // The first encoder that opens; if none does, why each didn't.
+            let mut failed: Vec<(Option<String>, Error)> = Vec::new();
+            let mut opened = None;
+            for candidate in encode::video_encoders(v, available) {
+                let enc = match candidate {
+                    Ok(enc) => enc,
+                    Err(e) => {
+                        failed.push((None, e));
+                        continue;
+                    }
+                };
                 match encode::open_video(&enc, w, h, fps, global_header) {
-                    Ok(opened) => break (enc, opened),
-                    Err(_) if choices.peek().is_some() => {}
-                    Err(e) => return Err(e),
+                    Ok(o) => {
+                        opened = Some((enc, o));
+                        break;
+                    }
+                    Err(e) => failed.push((Some(enc.name.clone()), e)),
                 }
+            }
+            let Some((enc, (encoder, vaapi))) = opened else {
+                if failed.len() == 1 {
+                    return Err(failed.remove(0).1);
+                }
+                let why: Vec<String> = failed
+                    .iter()
+                    .map(|(name, e)| match name {
+                        Some(n) => format!("{n}: {e}"),
+                        None => e.to_string(),
+                    })
+                    .collect();
+                return Err(Error::Invalid(format!(
+                    "no video encoder would open: {}",
+                    why.join("; ")
+                )));
             };
             let mut ost = octx
                 .add_stream(encoder::find_by_name(&enc.name))

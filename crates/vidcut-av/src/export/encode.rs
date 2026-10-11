@@ -100,16 +100,26 @@ fn opt(k: &str, v: impl ToString) -> (String, String) {
 /// Resolves video settings to the encoder an export starts with: for
 /// `auto`, a working GPU encoder (NVENC, then VAAPI), else the CPU encoder.
 pub fn resolve_video(v: &VideoSettings, available: &Availability) -> Result<VideoEncoder> {
-    Ok(video_encoders(v, available)?.remove(0))
+    let mut errors = Vec::new();
+    for candidate in video_encoders(v, available) {
+        match candidate {
+            Ok(e) => return Ok(e),
+            Err(e) => errors.push(e),
+        }
+    }
+    Err(errors.remove(0))
 }
 
 /// The encoders that may encode `v`, in order: the one asked for, or for
 /// `auto` every working GPU encoder (NVENC, then VAAPI) and then the CPU
-/// encoder. An export takes the first that opens: a GPU encoder can fail
-/// to at that moment (NVENC allows a few sessions at a time, and other
-/// exports may hold them).
-pub fn video_encoders(v: &VideoSettings, available: &Availability) -> Result<Vec<VideoEncoder>> {
-    let ten = ten_bit(v);
+/// encoder; with, in its place, why one can't. An export takes the first
+/// that opens: a GPU encoder can fail to at that moment (NVENC allows a
+/// few sessions at a time, and other exports may hold them).
+///
+/// An explicit `speed` is for the encoder an export starts with. Encoders
+/// don't share speed names (x264's, NVENC's p1–p7, SVT-AV1's numbers), so
+/// one it moves on to uses its own default.
+pub fn video_encoders(v: &VideoSettings, available: &Availability) -> Vec<Result<VideoEncoder>> {
     let kinds: Vec<EncoderChoice> = match v.encoder {
         EncoderChoice::Auto => vec![
             EncoderChoice::Nvenc,
@@ -118,79 +128,99 @@ pub fn video_encoders(v: &VideoSettings, available: &Availability) -> Result<Vec
         ],
         k => vec![k],
     };
-    let mut found = Vec::new();
+    let fallback = VideoSettings {
+        speed: None,
+        ..v.clone()
+    };
+    let mut found: Vec<Result<VideoEncoder>> = Vec::new();
     for kind in kinds {
-        if kind == EncoderChoice::Cpu {
-            match cpu_video(v, ten) {
-                Ok(e) => found.push(e),
-                Err(e) if found.is_empty() => return Err(e),
-                Err(_) => {}
-            }
-            continue;
-        }
-        let Some(name) = gpu_name(v.codec, kind) else {
-            continue;
-        };
-        let pixel = gpu_pixel(kind, ten);
-        let Some(status) = available.find(name, pixel) else {
-            if v.encoder == kind {
-                return Err(Error::Invalid(format!(
-                    "{name} ({}) is not available on this machine; see `vidcut encoders`",
-                    pixel_name(pixel)
-                )));
-            }
-            continue;
-        };
-        let q = v.quality.unwrap_or(match v.codec {
-            VideoCodec::Av1 => 30,
-            _ => 20,
-        });
-        let mut options = Vec::new();
-        if kind == EncoderChoice::Nvenc {
-            options.push(opt("preset", v.speed.as_deref().unwrap_or("p5")));
-            options.push(opt("tune", "hq"));
-            options.push(opt("rc", "vbr"));
-            match v.bitrate {
-                Some(b) => {
-                    options.push(opt("b", b));
-                    options.push(opt("maxrate", b * 3 / 2));
-                }
-                None => {
-                    options.push(opt("cq", q));
-                    options.push(opt("b", 0));
-                }
-            }
-            if v.codec == VideoCodec::Hevc {
-                options.push(opt("profile", if ten { "main10" } else { "main" }));
-            }
-            if v.codec == VideoCodec::H264 {
-                options.push(opt("profile", v.profile.as_deref().unwrap_or("high")));
-            }
+        let settings = if found.iter().any(Result::is_ok) {
+            &fallback
         } else {
-            match v.bitrate {
-                Some(b) => {
-                    options.push(opt("rc_mode", "VBR"));
-                    options.push(opt("b", b));
-                }
-                None => {
-                    options.push(opt("rc_mode", "CQP"));
-                    options.push(opt("qp", q));
-                }
-            }
+            v
+        };
+        match video_encoder(settings, kind, v.encoder == kind, available) {
+            Ok(Some(e)) => found.push(Ok(e)),
+            Ok(None) => {}
+            Err(e) => found.push(Err(e)),
         }
-        found.push(VideoEncoder {
-            name: name.into(),
-            kind,
-            pixel,
-            device: status.device.clone(),
-            options,
-            hdr: v.hdr,
-        });
     }
     if found.is_empty() {
-        return Err(Error::Invalid(format!("no encoder for {:?}", v.codec)));
+        found.push(Err(Error::Invalid(format!("no encoder for {:?}", v.codec))));
     }
-    Ok(found)
+    found
+}
+
+/// The `kind` encoder for `v`, or `None` when this machine has none that
+/// works and it wasn't `asked` for by name.
+fn video_encoder(
+    v: &VideoSettings,
+    kind: EncoderChoice,
+    asked: bool,
+    available: &Availability,
+) -> Result<Option<VideoEncoder>> {
+    let ten = ten_bit(v);
+    if kind == EncoderChoice::Cpu {
+        return cpu_video(v, ten).map(Some);
+    }
+    let Some(name) = gpu_name(v.codec, kind) else {
+        return Ok(None);
+    };
+    let pixel = gpu_pixel(kind, ten);
+    let Some(status) = available.find(name, pixel) else {
+        if asked {
+            return Err(Error::Invalid(format!(
+                "{name} ({}) is not available on this machine; see `vidcut encoders`",
+                pixel_name(pixel)
+            )));
+        }
+        return Ok(None);
+    };
+    let q = v.quality.unwrap_or(match v.codec {
+        VideoCodec::Av1 => 30,
+        _ => 20,
+    });
+    let mut options = Vec::new();
+    if kind == EncoderChoice::Nvenc {
+        options.push(opt("preset", v.speed.as_deref().unwrap_or("p5")));
+        options.push(opt("tune", "hq"));
+        options.push(opt("rc", "vbr"));
+        match v.bitrate {
+            Some(b) => {
+                options.push(opt("b", b));
+                options.push(opt("maxrate", b * 3 / 2));
+            }
+            None => {
+                options.push(opt("cq", q));
+                options.push(opt("b", 0));
+            }
+        }
+        if v.codec == VideoCodec::Hevc {
+            options.push(opt("profile", if ten { "main10" } else { "main" }));
+        }
+        if v.codec == VideoCodec::H264 {
+            options.push(opt("profile", v.profile.as_deref().unwrap_or("high")));
+        }
+    } else {
+        match v.bitrate {
+            Some(b) => {
+                options.push(opt("rc_mode", "VBR"));
+                options.push(opt("b", b));
+            }
+            None => {
+                options.push(opt("rc_mode", "CQP"));
+                options.push(opt("qp", q));
+            }
+        }
+    }
+    Ok(Some(VideoEncoder {
+        name: name.into(),
+        kind,
+        pixel,
+        device: status.device.clone(),
+        options,
+        hdr: v.hdr,
+    }))
 }
 
 fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {

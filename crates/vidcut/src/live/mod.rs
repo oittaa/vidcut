@@ -192,9 +192,12 @@ pub(crate) enum Msg {
         origin: f64,
         lost: std::result::Result<Option<f64>, String>,
     },
-    /// A tail patch was rendered: its file and length in frames.
+    /// A tail patch was rendered: its file and length in frames. `origin`
+    /// and `lost` are what it was rendered from.
     TailRendered {
         key: TailKey,
+        origin: f64,
+        lost: f64,
         result: std::result::Result<(PathBuf, i64), String>,
     },
     /// An export job planned its files: paths and lengths in frames.
@@ -389,6 +392,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         network: HashMap::new(),
         tails: HashMap::new(),
         tail_failures: HashMap::new(),
+        tail_retries: Vec::new(),
         tail_spots: [Vec::new(), Vec::new()],
         workers: Workers::new(2),
         jobs: Arc::new(Vec::new()),
@@ -456,6 +460,15 @@ const TAIL_TRIES: u8 = 2;
 /// Wait before trying a failed tail again.
 const TAIL_RETRY: Duration = Duration::from_secs(2);
 
+/// A failed tail check (`lost: None`) or patch, to try again at `at`.
+struct TailRetry {
+    at: Instant,
+    key: TailKey,
+    origin: f64,
+    /// For a patch: where the cut starts losing frames (s).
+    lost: Option<f64>,
+}
+
 /// What the source player has loaded.
 #[derive(Debug, Clone, PartialEq)]
 enum SourceContent {
@@ -465,13 +478,15 @@ enum SourceContent {
 
 /// What a request waits for before replying.
 enum Until {
-    /// Motion `motion` of `player` is on screen, showing frame `at`. If
-    /// the player moves elsewhere first (another client's seek, a person
-    /// scrubbing), the frame won't show: the request fails with CONFLICT.
+    /// Motion `motion` of `player` is on screen, showing the player's
+    /// `target` as it was then: a frame, and whether exactly. If a later
+    /// seek asks for another frame first (another client, a person
+    /// scrubbing), that frame won't show: the request fails with CONFLICT.
+    /// Playback moving on from it doesn't count.
     Shown {
         player: PlayerId,
         motion: u64,
-        at: i64,
+        at: (i64, bool),
     },
     /// Job `id` ended (`jobs.wait`).
     Job { id: String },
@@ -588,8 +603,11 @@ struct Live {
     network: HashMap<PathBuf, bool>,
     tails: HashMap<TailKey, TailState>,
     /// How often each tail's check or patch has failed: it is tried again
-    /// up to [`TAIL_TRIES`] times (a share may have had a hiccup).
+    /// up to [`TAIL_TRIES`] times (a share may have had a hiccup). A
+    /// success clears the count.
     tail_failures: HashMap<TailKey, u8>,
+    /// Failed checks and patches waiting to be tried again.
+    tail_retries: Vec<TailRetry>,
     /// Where each player's segments end (frames in what it plays) and the
     /// tail that ends there: a seek waits only for checks near its frame.
     tail_spots: [Vec<(i64, TailKey)>; 2],
@@ -671,14 +689,25 @@ impl Live {
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
             {
                 Ok(Msg::JobDone { id, result }) => self.job_done(id, result),
-                Ok(Msg::JobPlanned { id, outputs }) => self.job_planned(id, outputs),
+                // Only noted (the files of a job that gets stuck): its
+                // client hears that the GUI closed, not that it started.
+                Ok(Msg::JobPlanned { id, outputs }) => {
+                    if let Some(j) = Arc::make_mut(&mut self.jobs)
+                        .iter_mut()
+                        .find(|j| j.id == id)
+                    {
+                        j.planned(outputs);
+                    }
+                }
                 Ok(_) => {}
                 Err(_) => break,
             }
         }
         // A job still running is stuck in a decoder or an encoder, and the
-        // process won't wait for it: its partial files go now. Cancelled
-        // jobs start no file, so what one writes was planned by now.
+        // process won't wait for it: its partial files go now. A job plans
+        // its files before it writes them, and once cancelled starts none,
+        // so this misses only a file whose creation began before the cancel
+        // and is still blocked (on a hung network share, say).
         for job in self.jobs.iter() {
             if self.job_cancels.contains_key(&job.id) {
                 for o in &job.outputs {
@@ -691,6 +720,9 @@ impl Live {
                 w.job.reply,
                 Err(Error::no_instance("the vidcut GUI closed")),
             );
+        }
+        for (_, (job, _)) in std::mem::take(&mut self.job_replies) {
+            reply(job.reply, Err(Error::no_instance("the vidcut GUI closed")));
         }
         for (r, result) in self.answers.drain(..) {
             let _ = r.tx.send(ReplyEvent::Done(result));
@@ -800,18 +832,41 @@ impl Live {
             }
             Msg::TailChecked { key, origin, lost } => match lost {
                 Ok(None) => {
+                    self.tail_failures.remove(&key);
                     self.tails.insert(key, TailState::Clean);
                     changed = false;
                 }
                 Ok(Some(t)) => self.render_tail(key, origin, t),
-                Err(e) => self.tail_failed(key, &format!("checking a preview cut: {e}")),
+                Err(e) => self.tail_failed(
+                    TailRetry {
+                        at: Instant::now() + TAIL_RETRY,
+                        key,
+                        origin,
+                        lost: None,
+                    },
+                    &format!("checking a preview cut: {e}"),
+                ),
             },
-            Msg::TailRendered { key, result } => {
+            Msg::TailRendered {
+                key,
+                origin,
+                lost,
+                result,
+            } => {
                 match result {
                     Ok((path, frames)) => {
+                        self.tail_failures.remove(&key);
                         self.tails.insert(key, TailState::Ready { path, frames });
                     }
-                    Err(e) => self.tail_failed(key, &format!("preview patch: {e}")),
+                    Err(e) => self.tail_failed(
+                        TailRetry {
+                            at: Instant::now() + TAIL_RETRY,
+                            key,
+                            origin,
+                            lost: Some(lost),
+                        },
+                        &format!("preview patch: {e}"),
+                    ),
                 }
                 self.refresh_timeline();
                 self.refresh_source();
@@ -854,6 +909,20 @@ impl Live {
                 soonest(due);
             }
         }
+        // Tail checks and patches that failed, tried again.
+        let (due, later): (Vec<_>, Vec<_>) = std::mem::take(&mut self.tail_retries)
+            .into_iter()
+            .partition(|r| r.at <= now);
+        self.tail_retries = later;
+        for r in &self.tail_retries {
+            soonest(r.at);
+        }
+        for r in due {
+            match r.lost {
+                None => self.check_tail(r.key, r.origin),
+                Some(lost) => self.render_tail(r.key, r.origin, lost),
+            }
+        }
         self.sync_tape_selection();
         // Requests waiting for frames or captures.
         let mut i = 0;
@@ -880,11 +949,13 @@ impl Live {
                     // tail patch arriving) replaces what was asked for, at
                     // the same frame.
                     let p = &self.players[player.index()];
-                    if p.position != at {
+                    let (frame, exact) = at;
+                    if p.target.0 != frame || (exact && !p.target.1) {
                         Some(Err(Error::conflict(format!(
-                            "the viewer moved to frame {} before frame {at} showed \
-                             (another seek, or playback)",
-                            p.position
+                            "another seek moved the viewer to {}frame {} before frame \
+                             {frame} showed",
+                            if p.target.1 { "" } else { "a keyframe near " },
+                            p.target.0
                         ))))
                     } else {
                         (p.shown >= motion && self.settled(player)).then(|| match &p.error {
@@ -1031,6 +1102,14 @@ impl Live {
                 );
             }
         }
+        // `if_rev` holds for every request on the project, live ones (seeks,
+        // selections, screenshots) too; exports and measurements then work
+        // on the project as it is now.
+        if let Some(open) = &self.project
+            && let Err(e) = envelope.check_rev(open.project().rev)
+        {
+            return self.finish(job, Err(e));
+        }
         if let Request::ExportStart(params) = &envelope.request
             && !crate::export::is_otio(&params.output)
         {
@@ -1117,10 +1196,8 @@ impl Live {
         let Some(open) = &self.project else {
             return self.finish(job, Err(no_project()));
         };
-        if let Err(e) = envelope.check_rev(open.project().rev) {
-            return self.finish(job, Err(e));
-        }
-        // The job encodes the project as it is now, whatever edits follow.
+        // The job encodes the project as it is now (its `if_rev` checked),
+        // whatever edits follow.
         let project = open.project().clone();
         let context = open
             .project()
@@ -1541,7 +1618,8 @@ impl Live {
                 Ok(_) => Step::Wait(Until::Job { id: job }),
                 Err(e) => Step::Now(Err(e)),
             },
-            // Decoding work runs on a worker against the saved project.
+            // Decoding work runs on a worker, on a copy of the project as it
+            // is now.
             Request::ExportStart(_)
             | Request::ExportPlan(_)
             | Request::FrameRender { .. }
@@ -1566,7 +1644,7 @@ impl Live {
             Some(m) => Step::Wait(Until::Shown {
                 player,
                 motion: m,
-                at: self.players[player.index()].position,
+                at: self.players[player.index()].target,
             }),
             None => Step::Now(Ok(self.state_response())),
         }
@@ -1579,9 +1657,6 @@ impl Live {
         let Some(open) = &self.project else {
             return Step::Now(Err(no_project()));
         };
-        if let Err(e) = envelope.check_rev(open.project().rev) {
-            return Step::Now(Err(e));
-        }
         let project = open.project().clone();
         let path = open.store.path().to_path_buf();
         let context = open
@@ -1905,11 +1980,6 @@ impl Live {
                 plan.height,
             );
             spots.push((at, key.clone()));
-            let retry = matches!(self.tails.get(&key), Some(TailState::Failed))
-                && self.tail_failures.get(&key).copied().unwrap_or(0) < TAIL_TRIES;
-            if retry {
-                self.tails.remove(&key);
-            }
             match self.tails.get(&key) {
                 Some(TailState::Ready {
                     path: patch,
@@ -1942,16 +2012,22 @@ impl Live {
         }
         checks.sort_by_key(|(end, ..)| (end - position).abs());
         for (_, key, origin) in checks {
-            let (tx, fps) = (self.tx.clone(), plan.fps);
-            let end = origin + fps.frames_to_secs(key.1) - fps.frames_to_secs(1) / 2.0;
-            self.workers.run(move || {
-                let lost = vidcut_av::tails::lost_before(&key.0, end).map_err(|e| e.to_string());
-                let _ = tx.send(Msg::TailChecked { key, origin, lost });
-            });
+            self.check_tail(key, origin);
         }
         self.tail_spots[player.index()] = spots;
         plan.video = video;
         plan
+    }
+
+    /// Checks whether mpv would drop frames before the cut `key` ends.
+    fn check_tail(&mut self, key: TailKey, origin: f64) {
+        self.tails.insert(key.clone(), TailState::Checking);
+        let (tx, fps) = (self.tx.clone(), key.2);
+        let end = origin + fps.frames_to_secs(key.1) - fps.frames_to_secs(1) / 2.0;
+        self.workers.run(move || {
+            let lost = vidcut_av::tails::lost_before(&key.0, end).map_err(|e| e.to_string());
+            let _ = tx.send(Msg::TailChecked { key, origin, lost });
+        });
     }
 
     /// Renders the patch for a tail that loses frames from `lost` (s) on.
@@ -1996,7 +2072,12 @@ impl Live {
                     })
                     .map(|()| (out, frames))
             };
-            let _ = tx.send(Msg::TailRendered { key, result });
+            let _ = tx.send(Msg::TailRendered {
+                key,
+                origin,
+                lost,
+                result,
+            });
         });
     }
 
@@ -2362,14 +2443,14 @@ impl Live {
     }
 
     /// A tail's check or patch failed: tried again in a moment up to
-    /// [`TAIL_TRIES`] times, then left unpatched with a notice.
-    fn tail_failed(&mut self, key: TailKey, what: &str) {
-        self.tails.insert(key.clone(), TailState::Failed);
-        let failures = self.tail_failures.entry(key).or_default();
+    /// [`TAIL_TRIES`] times (`retry`), then left unpatched with a notice.
+    /// Seeks near the cut wait for the retry, as for the first try.
+    fn tail_failed(&mut self, retry: TailRetry, what: &str) {
+        self.tails.insert(retry.key.clone(), TailState::Failed);
+        let failures = self.tail_failures.entry(retry.key.clone()).or_default();
         *failures += 1;
         if *failures < TAIL_TRIES {
-            let at = Instant::now() + TAIL_RETRY;
-            self.timeline_due = Some(self.timeline_due.map_or(at, |d| d.min(at)));
+            self.tail_retries.push(retry);
         } else {
             self.notice(
                 format!("{what}; the preview may drop the last frames before that cut"),
@@ -2406,10 +2487,10 @@ impl Live {
     fn tail_near(&self, player: PlayerId, position: i64) -> bool {
         self.tail_spots[player.index()].iter().any(|(end, key)| {
             (end - MAX_TAIL..*end).contains(&position)
-                && matches!(
+                && (matches!(
                     self.tails.get(key),
                     Some(TailState::Checking | TailState::Rendering)
-                )
+                ) || self.tail_retries.iter().any(|r| &r.key == key))
         })
     }
 

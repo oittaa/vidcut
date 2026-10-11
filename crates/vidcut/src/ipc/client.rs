@@ -5,6 +5,7 @@ use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{RecvTimeoutError, channel};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -34,22 +35,27 @@ pub fn call(
     let lost = |e: std::io::Error| Error::no_instance(format!("lost the vidcut GUI: {e}"));
     stream.write_all(line.as_bytes()).map_err(lost)?;
     stream.flush().map_err(lost)?;
-    let watched = cancel.map(|c| (c, stream.try_clone()));
-    let finished = AtomicBool::new(false);
+    let watched = match cancel {
+        Some(c) => Some((c, stream.try_clone().map_err(lost)?)),
+        None => None,
+    };
+    // Closed when the answer is in, which wakes the watcher at once.
+    let (answered, waiting) = channel::<()>();
     std::thread::scope(|scope| {
-        if let Some((cancel, Ok(s))) = &watched {
-            scope.spawn(|| {
-                while !finished.load(Ordering::Relaxed) {
+        if let Some((cancel, s)) = &watched {
+            scope.spawn(move || {
+                while let Err(RecvTimeoutError::Timeout) =
+                    waiting.recv_timeout(Duration::from_millis(20))
+                {
                     if cancel.load(Ordering::Relaxed) {
                         let _ = s.shutdown(Shutdown::Both);
                         return;
                     }
-                    std::thread::sleep(Duration::from_millis(20));
                 }
             });
         }
         let answer = read_answer(BufReader::new(stream), progress);
-        finished.store(true, Ordering::Relaxed);
+        drop(answered);
         match answer {
             Err(_) if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) => {
                 Err(Error::new(ErrorCode::Cancelled, "cancelled"))
@@ -74,14 +80,17 @@ fn read_answer(
         }
         let v: Value = serde_json::from_str(&buf)
             .map_err(|e| Error::internal(format!("bad reply from the vidcut GUI: {e}")))?;
+        // One request per connection: an error answers it, even without an
+        // id (the GUI couldn't read the request, or turned the connection
+        // away).
+        if let Some(e) = v.get("error") {
+            return Err(super::error_from_json(e));
+        }
         if v.get("id").is_none() || v["id"].is_null() {
             if v["method"] == "progress" {
                 progress(&v["params"]);
             }
             continue;
-        }
-        if let Some(e) = v.get("error") {
-            return Err(super::error_from_json(e));
         }
         return serde_json::from_value(v["result"].clone())
             .map_err(|e| Error::internal(format!("bad reply from the vidcut GUI: {e}")));

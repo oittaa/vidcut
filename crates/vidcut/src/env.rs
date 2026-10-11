@@ -218,15 +218,24 @@ fn convert(info: &vidcut_av::probe::MediaInfo) -> Result<MediaInfo> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::frame_rate;
     use vidcut_core::Env;
 
     #[test]
     fn only_regular_files_are_media() {
-        for path in ["/dev/null", "/tmp"] {
-            let e = super::AvEnv.probe(std::path::Path::new(path)).unwrap_err();
-            assert!(e.message.contains("not a regular file"), "{path}: {e}");
+        // A pipe would block the probe until something writes to it.
+        let dir = std::env::temp_dir().join(format!("vidcut-env-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fifo = dir.join("pipe.mp4");
+        let c = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        for path in [std::path::Path::new("/dev/null"), Path::new("/tmp"), &fifo] {
+            let e = super::AvEnv.probe(path).unwrap_err();
+            assert!(e.message.contains("not a regular file"), "{path:?}: {e}");
         }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -364,6 +364,36 @@ mod tests {
             break;
         }
         assert!(done);
+        // The client reports both refusals as what they are.
+        let held = loop {
+            let (s, _, reply) = ask(request);
+            if reply.contains("\"ok\"") {
+                break s;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        let call = |e: &Envelope| client::call(&socket, e, None, &mut |_| {}, None);
+        let get = Envelope::from_json(json!({"method": "project.get"})).unwrap();
+        let e = call(&get).unwrap_err();
+        assert_eq!(e.code, ErrorCode::Usage, "{e}");
+        assert!(e.message.contains("connections already"), "{e}");
+        drop(held);
+        let long = Envelope::from_json(json!({"method": "media.add", "params": {"paths": ["/a/very/long/path/to/some/media/file/that/makes/the/line/too/long.mp4"]}})).unwrap();
+        let mut refused = None;
+        for _ in 0..200 {
+            match call(&long) {
+                Err(e) if e.message.contains("connections already") => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                other => {
+                    refused = Some(other);
+                    break;
+                }
+            }
+        }
+        let e = refused.expect("served").unwrap_err();
+        assert_eq!(e.code, ErrorCode::Usage, "{e}");
+        assert!(e.message.contains("limited to 100 bytes"), "{e}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

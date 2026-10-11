@@ -133,6 +133,9 @@ struct SourceAudio {
     next_in: Option<f64>,
     gap: usize,
     held: Option<frame::Audio>,
+    /// Raw time (s) where the file ends: a frame stamped later has a broken
+    /// timestamp, and plays in order rather than after a gap.
+    end: f64,
     eof: bool,
 }
 
@@ -154,6 +157,14 @@ impl SourceAudio {
         let index = stream.index();
         let tb = stream.time_base();
         let tick = f64::from(tb.numerator()) / f64::from(tb.denominator());
+        let end = unsafe {
+            let ctx = &*input.as_ptr();
+            match (ctx.start_time, ctx.duration) {
+                (_, d) if d == ffi::AV_NOPTS_VALUE || d <= 0 => f64::INFINITY,
+                (s, d) if s == ffi::AV_NOPTS_VALUE => d as f64 / f64::from(ffi::AV_TIME_BASE),
+                (s, d) => (s + d) as f64 / f64::from(ffi::AV_TIME_BASE),
+            }
+        };
         discard_others(&input, index);
         let decoder = codec::context::Context::from_parameters(stream.parameters())
             .and_then(|mut c| {
@@ -182,6 +193,7 @@ impl SourceAudio {
             next_in: None,
             gap: 0,
             held: None,
+            end,
             eof: false,
         };
         s.seek(start)?;
@@ -248,14 +260,22 @@ impl SourceAudio {
                 back *= 2.0;
                 continue;
             }
-            self.skip = ((start - t0) * f64::from(self.rate)).round().max(0.0) as usize;
-            (self.t0, self.at) = (t0, self.skip as i64);
+            if t0 - start > crate::decode::AUDIO_GAP {
+                // The stream starts later (audio that begins after the
+                // picture, or a first packet lost): silence until it does.
+                (self.t0, self.at) = (start, 0);
+                self.next_in = Some(start);
+            } else {
+                self.skip = ((start - t0) * f64::from(self.rate)).round().max(0.0) as usize;
+                (self.t0, self.at) = (t0, self.skip as i64);
+            }
             self.push(first)?;
             return Ok(());
         }
     }
 
     fn decode(&mut self) -> Result<Option<frame::Audio>> {
+        let mut damaged = 0;
         loop {
             let mut f = frame::Audio::empty();
             match self.decoder.receive_frame(&mut f) {
@@ -265,7 +285,10 @@ impl SourceAudio {
                     errno: ffmpeg::util::error::EAGAIN,
                 }) => {}
                 // A damaged frame: on to the next.
-                Err(ffmpeg::Error::InvalidData) => continue,
+                Err(ffmpeg::Error::InvalidData) if damaged < crate::decode::DAMAGED_IN_A_ROW => {
+                    damaged += 1;
+                    continue;
+                }
                 Err(e) => {
                     return Err(Error::Ffmpeg {
                         context: "decoding audio".into(),
@@ -302,6 +325,7 @@ impl SourceAudio {
         let end = start.map(|t| t + f.samples() as f64 / f64::from(f.rate().max(1)));
         if let (Some(t), Some(next)) = (start, std::mem::replace(&mut self.next_in, end))
             && t - next > crate::decode::AUDIO_GAP
+            && t <= self.end
         {
             // The samples before the gap first, all of them.
             if let Some(mut r) = self.resampler.take() {

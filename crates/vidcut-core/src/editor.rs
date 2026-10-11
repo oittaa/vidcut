@@ -909,8 +909,8 @@ fn add_media(p: &mut Project, probed: ProbedMedia) -> String {
     if p.settings.auto_format
         && let Some(v) = &probed.info.video
     {
-        // The first video sets the project format (the Cut page offers this
-        // on the first import, p. 654).
+        // The first video sets the project format, without asking as the
+        // Cut page does (p. 654; decision D37).
         p.settings.fps = v.fps;
         adopt_size(p, v);
     }

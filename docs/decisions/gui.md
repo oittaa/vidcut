@@ -49,7 +49,8 @@ Every action is a [`Request`](../../crates/vidcut-core/src/request.rs), the same
 
 **Watching.** The session watches the project's directory (`notify`, non-recursive, ignoring access events). Changes made by other processes are read back under the lock, so the project file and its history sidecar are always seen together.
 
-**Write order.** `Store::save` writes the history sidecar before the project file. The new state then never shows up without its history. Otherwise a headless edit would be mistaken for an "external change" and lose its undo label.
+**Write order.** `Store::save` writes the history sidecar before the project file. The new state then shows up with its history; otherwise a headless edit would be mistaken for an "external change" and lose its undo label.
+- If the sidecar can't be written, the edit is saved all the same, with a warning (stderr headless, a notice in the GUI). The old sidecar stays whole, so another run sees the edit as one outside change, or starts with no history if there was none. The GUI that made the edit keeps its undo history in memory.
 
 **Locking.** The lock is retried every 5 ms. An edit made by another process shows up in the GUI within about 6 ms (`tests/live.rs`).
 
@@ -70,7 +71,11 @@ A seek or load ("motion") is shown after two steps:
 
 **More waiting.** A seek also waits for the player's newest motion (a preview reload replaces what was asked for) and for the tail checks and patches (preview.md §9) that could change its frame: those of cuts at most 64 frames (the longest patch) after it. Checks start nearest the playhead first, so a timeline with many cuts doesn't hold up the first seek until every cut is checked. Seek-then-screenshot is therefore exact without sleeps. Over IPC it takes about 10–15 ms.
 
-**Overtaken seeks fail.** A waiting seek, step or viewer change remembers the frame it set. If the player moves elsewhere before that frame shows (another client's seek, a person scrubbing, playback), the frame never will. The request then fails with `CONFLICT` and says where the viewer is, rather than reporting the other frame as its own. A reload at the same frame still counts. The GUI's own overtaken seeks raise no notice.
+**Overtaken seeks fail.** A waiting seek, step or viewer change remembers the frame it asked for, and whether exactly. If a later seek asks for another frame before it shows (another client, a person scrubbing), the frame never will. The request then fails with `CONFLICT` and names the frame asked for since, rather than reporting the other frame as its own.
+- A fast seek to the same frame overtakes an exact one too: it may show a keyframe instead.
+- Playback moving on from the frame doesn't count, so a seek while playing returns once its frame has shown. Stepped reverse playback (J) seeks, so it overtakes.
+- A reload at the same frame still counts as that frame.
+- The GUI's own overtaken seeks raise no notice.
 
 **Seeks while loading.** mpv rejects seeks until a freshly loaded file is open. A seek in that window opens the file again at the new position instead.
 
@@ -173,7 +178,8 @@ A seek or load ("motion") is shown after two steps:
 - **Kept:** running jobs and the 50 most recent finished ones.
 - **Closing:** quitting the window while jobs run asks first (`gui.quit` doesn't). The session cancels running jobs on shutdown and waits up to 3 s for them to clean up.
   - A job still running after that is stuck in a decoder or an encoder. The session removes its partial files itself, and the process ends without it.
-  - The engine starts no file once cancelled, so every file such a job writes was planned (`JobPlanned`) before the wait began.
+  - A job plans its files (`JobPlanned`) before it writes them, and once cancelled starts none. So only a file whose creation began before the cancel and is still blocked (on a hung network share, say) can appear afterwards.
+  - A client waiting for such a job, or for its plan, hears that the GUI closed.
 - `.otio` exports write a small file at once and aren't jobs.
 
 **The windows only send requests:**

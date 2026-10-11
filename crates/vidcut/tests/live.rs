@@ -317,7 +317,45 @@ fn live_session() {
     h.ok("player.seek", json!({ "at": 120 }));
     let e = a.join().unwrap().unwrap_err();
     assert_eq!(e.code, vidcut_core::ErrorCode::Conflict, "{e}");
+    assert!(
+        e.message.contains("frame 120"),
+        "names the frame it moved to: {e}"
+    );
     assert_eq!(h.shown(&dir), Some(expected(120)));
+    // A fast seek to the same frame doesn't stand in for an exact one: it
+    // may show a keyframe instead.
+    h.stall_next(Duration::from_millis(400));
+    let handle = h.handle.clone();
+    let a = std::thread::spawn(move || {
+        let e = Envelope::from_json(json!({ "method": "player.seek", "params": { "at": 100 } }))
+            .unwrap();
+        handle.call(e, Origin::Ipc, None, &mut |_| true)
+    });
+    std::thread::sleep(Duration::from_millis(100));
+    h.ok("player.seek", json!({ "at": 100, "fast": true }));
+    let e = a.join().unwrap().unwrap_err();
+    assert_eq!(e.code, vidcut_core::ErrorCode::Conflict, "{e}");
+    assert!(e.message.contains("keyframe near frame 100"), "{e}");
+
+    // `if_rev` holds for live requests too.
+    let rev = h.ok("project.summary", json!({})).rev;
+    let e = h
+        .call("player.seek", json!({ "at": 10, "if_rev": rev - 1 }))
+        .unwrap_err();
+    assert_eq!(e.code, vidcut_core::ErrorCode::Conflict, "{e}");
+
+    step("A seek while playing returns");
+    // Playback moves the playhead on from the sought frame; that isn't
+    // another seek. The renderer looking away lets playback move on before
+    // the frame is counted as shown.
+    h.ok("player.seek", json!({ "at": 0 }));
+    h.ok("player.play", json!({}));
+    std::thread::sleep(Duration::from_millis(150));
+    for at in [40, 90] {
+        h.stall_next(Duration::from_millis(400));
+        h.ok("player.seek", json!({ "at": at }));
+    }
+    h.ok("player.pause", json!({}));
     // Back to 149 for what follows.
     h.ok("player.seek", json!({ "at": 149 }));
     let out = dir.join("f.png");
@@ -670,6 +708,28 @@ fn live_session() {
     );
     let state = h.ok("player.state", json!({})).result;
     assert_eq!(state["timeline"]["frames"].as_i64(), Some(total - 8));
+
+    step("A failed tail check is tried again, then reported");
+    // The source viewer's cut, which the timeline doesn't have: its retry
+    // doesn't wait for the timeline. The file can't be read any more, so the
+    // check fails twice.
+    let gone = dir.join("unreadable.mkv");
+    std::fs::copy(fixture_file(300), &gone).unwrap();
+    let added = h.ok("media.add", json!({ "paths": [gone] }));
+    let media = added.changes.created[0].clone();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&gone, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let _ = h.call("viewer.load", json!({ "media": media }));
+    let took = h.wait_for("the notice", |s| {
+        s.notices
+            .iter()
+            .any(|n| n.text.contains("checking a preview cut"))
+    });
+    assert!(
+        took >= Duration::from_secs(1),
+        "tried again first: {took:?}"
+    );
+    std::fs::set_permissions(&gone, std::fs::Permissions::from_mode(0o644)).unwrap();
 
     drop(h);
     let _ = std::fs::remove_dir_all(&dir);

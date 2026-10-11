@@ -43,13 +43,15 @@ fn the_smart_indicator_is_red_without_media_past_the_edit() {
     // p. 696: red where a clip shows its media's first or last frame.
     let mut f = three_clips();
     f.append("m2", 0, 100); // all of m2, at 200..300
+    f.append("m1", 100, 150); // at 300..350
     let p = f.editor.project();
-    let red: Vec<i64> = [0, 100, 150, 200, 300]
+    let red: Vec<i64> = [0, 100, 150, 200, 300, 350]
         .into_iter()
         .filter(|&e| !crate::ops::edit_has_handles(p, e))
         .collect();
     // 0: c1 starts at m1's first frame; 200: c4 at m2's first; 300: c4 ends
-    // at m2's last. 100 and 150 have media on both sides.
+    // at m2's last, though c5 has media before its start. 100, 150 and 350
+    // have media on both sides.
     assert_eq!(red, vec![0, 200, 300]);
 }
 

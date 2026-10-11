@@ -83,13 +83,13 @@ fn linear(db: f64) -> f64 {
     10f64.powf(db / 20.0)
 }
 
-/// A lane's gain at timeline time `t` as an FFmpeg expression, from its gain
-/// spans `(start s, end s, dB)` in order: a binary search over their starts.
+/// A lane's gain at timeline time `t` as an FFmpeg expression, from where
+/// its gains start, `(start s, dB)` in order: a binary search over them.
 /// It nests only log2(n) deep; FFmpeg's expression parser refuses some 100
 /// levels, so one `if` per span stopped working past a few dozen changes.
 /// Between spans the lane is silent, and any gain does.
-fn gain_at(spans: &[(f64, f64, f64)]) -> String {
-    if let [(_, _, db)] = spans {
+fn gain_at(spans: &[(f64, f64)]) -> String {
+    if let [(_, db)] = spans {
         return format!("{:.6}", linear(*db));
     }
     let mid = spans.len() / 2;
@@ -110,25 +110,23 @@ pub fn audio_graph(plan: &RenderPlan) -> Option<String> {
     let mut inputs = Vec::new();
     for (i, lane) in plan.audio.iter().enumerate() {
         let n = i + 1;
-        // Gains of the lane's source pieces as (start s, end s, dB).
-        let mut spans: Vec<(f64, f64, f64)> = Vec::new();
+        // Where the lane's source pieces change gain, as (start s, dB). A
+        // gain holds until the next: between clips the lane is silent, so
+        // it may reach over the silence.
+        let mut spans: Vec<(f64, f64)> = Vec::new();
         let mut at = 0i64;
         for piece in lane {
-            let len = piece.samples();
-            if let AudioPiece::Source { gain_db, .. } = piece {
-                let (a, b) = (at as f64 / rate, (at + len) as f64 / rate);
-                // A span reaches over silence to the next with its gain.
-                match spans.last_mut() {
-                    Some(last) if last.2 == *gain_db => last.1 = b,
-                    _ => spans.push((a, b, *gain_db)),
-                }
+            if let AudioPiece::Source { gain_db, .. } = piece
+                && spans.last().is_none_or(|last| last.1 != *gain_db)
+            {
+                spans.push((at as f64 / rate, *gain_db));
             }
-            at += len;
+            at += piece.samples();
         }
-        let first = spans.first().map_or(0.0, |s| s.2);
-        let filter = if spans.iter().all(|s| s.2 == 0.0) {
+        let first = spans.first().map_or(0.0, |s| s.1);
+        let filter = if spans.iter().all(|s| s.1 == 0.0) {
             None
-        } else if spans.iter().all(|s| s.2 == first) {
+        } else if spans.iter().all(|s| s.1 == first) {
             Some(format!("volume={:.6}", linear(first)))
         } else {
             Some(format!("volume=volume='{}':eval=frame", gain_at(&spans)))
@@ -364,20 +362,20 @@ mod tests {
         // 2000 clips of 0.1 s cycling through four gains. One `if` per change,
         // as before, broke FFmpeg's parser past a few dozen.
         let db = [0.0, -6.0, -12.0, 3.0];
-        let spans: Vec<(f64, f64, f64)> = (0..2000)
-            .map(|i| (i as f64 * 0.1, (i + 1) as f64 * 0.1, db[i % 4]))
-            .collect();
+        let spans: Vec<(f64, f64)> = (0..2000).map(|i| (i as f64 * 0.1, db[i % 4])).collect();
         let expr = gain_at(&spans);
         let (gain, rest) = Gain::parse(&expr);
         assert!(rest.is_empty(), "left over: {rest:.40}");
         assert!(gain.depth() <= 11, "nests {} deep", gain.depth());
         for (i, s) in spans.iter().enumerate() {
-            for t in [s.0, s.0 + 0.05, s.1 - 0.001] {
+            for t in [s.0, s.0 + 0.05, s.0 + 0.099] {
                 let v = gain.at(t);
                 assert!((v - linear(db[i % 4])).abs() < 1e-5, "span {i} at {t}: {v}");
             }
         }
+        // Before the first clip the lane is silent: its gain does.
+        assert!((gain.at(-1.0) - linear(db[0])).abs() < 1e-5);
         // Gaps are silent: a gain reaches over them to the next clip with it.
-        assert_eq!(gain_at(&[(0.0, 1.0, -6.0)]), "0.501187");
+        assert_eq!(gain_at(&[(0.0, -6.0)]), "0.501187");
     }
 }

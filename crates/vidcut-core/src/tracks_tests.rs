@@ -288,6 +288,15 @@ fn video_tracks_ripple_only_where_track_one_is_empty() {
         vec![row(&b, 65, 15, 25), row(&d, 220, 15, 65)],
         "a head trim leaves a gap over Track 1, and ripples past it"
     );
+
+    // A hole in Track 1 isn't its end: with a picture after the hole, a V2
+    // clip deleted in the hole leaves its gap too.
+    let mut f = three_clips();
+    f.ok(req("edit.delete", json!({"clips": "c2", "lift": true}))); // hole 100..150
+    let a = put(&mut f, "m3", 0, 20, 110, "V2");
+    let b = put(&mut f, "m3", 20, 40, 160, "V2");
+    f.ok(req("edit.delete", json!({"clips": a})));
+    assert_eq!(f.track("V2"), vec![row(&b, 160, 20, 20)], "the gap stays");
 }
 
 #[test]

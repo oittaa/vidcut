@@ -4,10 +4,10 @@ use std::collections::HashSet;
 
 use crate::model::{Project, TrackKind};
 
-/// Returns every invariant violation found (empty when the project is valid).
 /// Clip gain and track volume in dB (decision D12).
 pub const GAIN: std::ops::RangeInclusive<f64> = -60.0..=24.0;
 
+/// Returns every invariant violation found (empty when the project is valid).
 pub fn violations(p: &Project) -> Vec<String> {
     let mut v = Vec::new();
     let mut ids = HashSet::new();

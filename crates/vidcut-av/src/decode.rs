@@ -16,6 +16,11 @@ use crate::ffmpeg::{self, codec, filter, format, frame, media, software::scaling
 /// Smaller differences are timestamp rounding (Matroska keeps ms).
 pub(crate) const AUDIO_GAP: f64 = 0.002;
 
+/// Damaged frames a decoder may report in a row before reading gives up.
+/// It reads on after each one, so only a decoder that reports nothing else
+/// reaches this.
+pub(crate) const DAMAGED_IN_A_ROW: u32 = 100;
+
 /// Sends `packet` to `decoder`. A damaged packet, one the decoder can't
 /// read, is skipped as players skip it: the picture before it stays, and
 /// audio keeps to its timestamps across the gap.
@@ -45,10 +50,14 @@ pub(crate) fn decode_stream<F>(
 where
     F: std::ops::DerefMut<Target = frame::Frame>,
 {
+    let mut damaged = 0;
     let mut drain = |decoder: &mut ffmpeg::decoder::Opened, frame: &mut F| loop {
         match decoder.receive_frame(frame) {
-            Ok(()) => each(frame)?,
-            Err(ffmpeg::Error::InvalidData) => {}
+            Ok(()) => {
+                damaged = 0;
+                each(frame)?
+            }
+            Err(ffmpeg::Error::InvalidData) if damaged < DAMAGED_IN_A_ROW => damaged += 1,
             Err(
                 ffmpeg::Error::Eof
                 | ffmpeg::Error::Other {
@@ -475,6 +484,7 @@ impl VideoReader {
 
     /// Decodes the next frame from the stream, feeding packets as needed.
     fn decode_one(&mut self) -> Result<Option<frame::Video>> {
+        let mut damaged = 0;
         loop {
             let mut frame = frame::Video::empty();
             match self.decoder.receive_frame(&mut frame) {
@@ -488,7 +498,10 @@ impl VideoReader {
                     errno: ffmpeg::util::error::EAGAIN,
                 }) => {}
                 // A damaged frame: on to the next.
-                Err(ffmpeg::Error::InvalidData) => continue,
+                Err(ffmpeg::Error::InvalidData) if damaged < DAMAGED_IN_A_ROW => {
+                    damaged += 1;
+                    continue;
+                }
                 Err(e) => {
                     return Err(Error::Ffmpeg {
                         context: "decoding video".into(),
