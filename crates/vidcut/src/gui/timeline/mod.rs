@@ -1033,7 +1033,10 @@ impl Workspace {
                         self.timeline.edit = Some(EditSel { at, side, track });
                     }
                 }
-                Hit::Roll { outgoing, .. } => {
+                // The picture cut and its J/L handle are one edit (D14). A
+                // click selects it on this clip's track, as an edge or roll
+                // click does, so a later nudge trims that clip (D36).
+                Hit::Roll { outgoing, .. } | Hit::AudioEdit { outgoing, .. } => {
                     if let (Some(c), Some(track)) =
                         (p.clip(outgoing), TrackRef::of_clip(p, outgoing))
                     {
@@ -1044,7 +1047,6 @@ impl Workspace {
                         });
                     }
                 }
-                Hit::AudioEdit { .. } => {}
                 Hit::Empty => {
                     if !mods.command {
                         self.timeline.edit = None;

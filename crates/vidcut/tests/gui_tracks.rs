@@ -457,12 +457,60 @@ fn track_gestures_send_one_request_each() {
     settle(&h, &mut harness);
     assert_eq!(gui_edits(&h).len(), before, "no edit is selected any more");
 
-    // Every gesture made exactly one change, and each is one undo step
-    // (as are the two source marks, three overwrites and the track removal
-    // this test made over IPC).
+    // 8. A J/L handle click selects that edit on the clip's track (D36),
+    // the same way an edge click does, so `.` trims it. The handle is the
+    // audio edit, 8 frames into the next clip, not the picture cut.
+    let v1 = clips(&h, "V1");
+    let (outgoing, cut) = (v1[0].0.clone(), v1[0].1 + v1[0].2);
+    assert_eq!(
+        v1[1].1, cut,
+        "two clips meet, so the audio band has a handle"
+    );
+    let offset = 8;
+    call(
+        &h,
+        "edit.audio_roll",
+        json!({ "clip": outgoing, "edge": "tail", "by": offset }),
+    );
+    call(
+        &h,
+        "player.seek",
+        json!({ "at": cut + offset, "viewer": "timeline" }),
+    );
+    settle(&h, &mut harness);
+    let l = harness.state().timeline_layout().unwrap();
+    let tr = l.lower.get("V1").unwrap().rect;
+    let y = (tr.audio_top + tr.rect.bottom()) / 2.0;
+    assert!(
+        tr.in_audio(y),
+        "the click is on the J/L handle, not the picture edge"
+    );
+    let at = pos2(l.lower_scale.xf(cut + offset), y);
+    drag(&mut harness, at, at);
+    settle(&h, &mut harness);
+    let before = gui_edits(&h).len();
+    harness.key_press(egui::Key::Period);
+    harness.step();
+    settle(&h, &mut harness);
     let edits = gui_edits(&h);
-    assert_eq!(edits.len() - edits0, 9, "{edits:#?}");
-    assert_eq!(undo_steps(&h), undo0 + 9 + 2 + 2 + 2);
+    assert_eq!(
+        edits.len(),
+        before + 1,
+        "the handle click selected the edit"
+    );
+    let (m, p) = edits.last().unwrap();
+    assert_eq!(
+        (m.as_str(), &p["clip"], &p["by"]),
+        ("edit.roll", &json!(outgoing), &json!(1)),
+        "the clip under the J/L handle"
+    );
+
+    // Every gesture made exactly one change, and each is one undo step
+    // (as are the two source marks, three overwrites, the track removal
+    // and the audio roll this test made over IPC).
+    let edits = gui_edits(&h);
+    assert_eq!(edits.len() - edits0, 10, "{edits:#?}");
+    assert_eq!(undo_steps(&h), undo0 + 10 + 2 + 2 + 2 + 1);
 
     drop(harness);
     h.shutdown();
