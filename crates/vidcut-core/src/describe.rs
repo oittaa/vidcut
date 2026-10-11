@@ -42,7 +42,7 @@ pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> Stri
         "edit.overwrite" => format!("Overwrite {} at {}", d.source(), d.time("at")),
         "edit.ripple_overwrite" => format!("Ripple Overwrite {}", d.source()),
         "edit.place_on_top" => format!("Place On Top {} at {}", d.source(), d.time("at")),
-        "edit.split" => format!("Split at {}{}", d.time("at"), d.of_clips()),
+        "edit.split" => format!("Split at {}{}", d.time("at"), d.split_clips()),
         "edit.delete" if d.flag("lift") => format!("Delete {}, leaving a gap", d.clips("clips")),
         "edit.delete" => format!("Delete {}", d.clips("clips")),
         "edit.delete_range" => format!("Delete {}", d.range("range")),
@@ -276,6 +276,33 @@ impl Words<'_> {
         }
     }
 
+    /// The selected clips a split cuts. A split cuts every clip under the
+    /// point when none of the selected ones is, so a selected clip is named
+    /// only when it lies across a split frame (before the split) or ends at
+    /// one (after it, keeping its id).
+    fn split_clips(&self) -> String {
+        let frames: Option<Vec<i64>> = match &self.params["at"] {
+            Value::Array(a) => a.iter().map(Value::as_i64).collect(),
+            v => v.as_i64().map(|f| vec![f]),
+        };
+        let (Some(p), Some(frames)) = (self.project, frames) else {
+            return self.of_clips();
+        };
+        let cut: Vec<String> = self
+            .list("clips")
+            .into_iter()
+            .filter(|id| {
+                p.clip(id)
+                    .is_some_and(|c| frames.iter().any(|&f| c.start < f && f <= c.end()))
+            })
+            .collect();
+        match cut.len() {
+            0 => String::new(),
+            1..=4 => format!(" in {}", cut.join(", ")),
+            n => format!(" in {n} clips"),
+        }
+    }
+
     fn on_track(&self) -> String {
         match self.params["track"].as_str() {
             Some(t) => format!(" on {t}"),
@@ -478,6 +505,16 @@ mod tests {
         assert_eq!(
             say("edit.split", json!({"at": [157], "clips": []})),
             "Split at 00:00:06:07"
+        );
+        let c = p.tracks[0].clips[0].id.clone();
+        assert_eq!(
+            say("edit.split", json!({"at": [40], "clips": [c]})),
+            format!("Split at 00:00:01:15 in {c}")
+        );
+        // A split past the selected clip cuts whatever is under the point.
+        assert_eq!(
+            say("edit.split", json!({"at": [140], "clips": [c]})),
+            "Split at 00:00:05:15"
         );
         assert_eq!(
             say("edit.delete", json!({"clips": ["c14"], "lift": false})),
