@@ -116,8 +116,9 @@ impl Workspace {
         // as export will fit them.
         let below = 34.0 + 36.0;
         let avail = ui.available_rect_before_wrap();
-        // The audio meter and monitoring mute on the right (p. 642).
-        let meter_w = 16.0;
+        // The audio meter and monitoring mute on the right (p. 642): one
+        // bar per project channel.
+        let meter_w = self.viewer_meter_width();
         let area = Rect::from_min_max(
             avail.min,
             Pos2::new(

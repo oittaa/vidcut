@@ -30,7 +30,8 @@ It is written in Rust:
    - GUI gestures emit one Request when they complete.
    - Never mutate project state from GUI code directly.
 3. **No media in git.**
-   - Test media, generated fixtures and the manual live in `$VIDCUT_TEST_DATA` (default `~/Downloads/vidcut-tmp`).
+   - Test media, generated fixtures and the manual live in `$VIDCUT_TEST_DATA` (default `~/Downloads/vidcut-tmp`), the one place for test data. Test outputs go to temp dirs.
+   - `scripts/check.sh` (the pre-commit hook and CI) refuses any binary file, whatever its name, so `.gitignore` lists no file types.
    - Real-world clips are listed in `tests/media-manifest.toml` (URL, license, sha256) and fetched by `scripts/fetch-test-media.sh`.
 4. **No ffmpeg/ffprobe subprocesses.** Use `vidcut-av`, the FFmpeg libraries. libmpv is used only for interactive preview.
 5. **License:** MIT. Don't add dependencies with licenses incompatible with MIT distribution of our source.
@@ -39,8 +40,8 @@ It is written in Rust:
 
 | Crate | Purpose | Depends on |
 |---|---|---|
-| `crates/vidcut-core` | Project model, time and timecode math, edit operations (`ops.rs`; tracks in `ops/tracks.rs`, clips following Track 1 in `ops/follow.rs`), Request/Response protocol, Editor (undo/rev), project store, render plans (`render.rs`: top-wins video, mixed audio lanes), preview EDLs (`preview.rs`), OpenTimelineIO reading and writing (`otio.rs`), what the automatic tools decide from measurements (`analysis.rs`), application preferences (`preferences.rs`) | — (pure Rust; fast to build and test) |
-| `crates/vidcut-av` | FFmpeg layer: probe, exact-seek decode, encode/mux, export engine (with loudness normalization; the next piece's file opens ahead in `export/ahead.rs`), thumbnails (and their JPEG cache form), waveforms, still frames, measurements for the automatic tools (`analysis.rs`), encoder detection, test-fixture generator | ffmpeg-next |
+| `crates/vidcut-core` | Project model, time and timecode math, edit operations (`ops.rs`; tracks in `ops/tracks.rs`, clips following Track 1 in `ops/follow.rs`), Request/Response protocol, Editor (undo/rev), project store, render plans (`render.rs`: top-wins video, mixed audio lanes), preview EDLs (`preview.rs`), OpenTimelineIO reading and writing (`otio.rs`, tests in `otio/tests.rs`), what the automatic tools decide from measurements (`analysis.rs`), application preferences (`preferences.rs`) | — (pure Rust; fast to build and test) |
+| `crates/vidcut-av` | FFmpeg layer: probe (start timecodes too), exact-seek decode, encode/mux, export engine (with loudness normalization; the next piece's file opens ahead in `export/ahead.rs`), thumbnails (and their JPEG cache form), waveforms, still frames, measurements for the automatic tools (`analysis.rs`), encoder detection, test-fixture generator | ffmpeg-next |
 | `crates/vidcut-mpv` | libmpv via `dlopen` (`libloading`): client API and render API (OpenGL and software) | libmpv.so.2 at runtime only |
 | `crates/vidcut` | The `vidcut` binary: Session/host, IPC, CLI (clap), GUI (eframe), later MCP | all of the above |
 
@@ -57,12 +58,14 @@ Inside `crates/vidcut`:
 | `live/` | the GUI's core thread: open project, players, viewer state, waits, command log, export jobs (`jobs.rs`); publishes `Snapshot`s |
 | `ipc/` | JSON-RPC over a Unix socket, the instance registry, CLI routing |
 | `gui/` | `app.rs`: eframe and GL glue; `workspace.rs`: all panels and UI state (testable without GL); `timeline/`: geometry, gestures, drawing; `export.rs`: Quick Export, the Export dialog, jobs and OTIO windows; `mixer.rs`: the Mixer and meters; `preferences.rs`: File > Preferences; `timeline/tools.rs`: Ripple Delete Silence, the Boring Detector, Dynamic Trim; `pool.rs` (with bins), `viewer.rs`, `video.rs`, `stills.rs` |
-| `export.rs` | presets (built-in and user), outputs, export plans and `.otio` exports as the session runs them |
+| `export.rs` | presets (built-in and user), outputs, export plans and timeline (`.otio`, bundle) exports as the session runs them |
+| `bundle.rs` | OpenTimelineIO bundles: writing `.otioz` (zip) and `.otiod` (folder) with their media, unpacking `.otioz` for import |
 
 Docs:
 - `docs/cut-page-spec.md`: the behavioral spec.
 - `docs/deviations.md`: intentional differences from Resolve.
-- `docs/roadmap.md`: the use cases vidcut is for, the to-do list (interchange with Resolve), and the next milestones.
+- `docs/roadmap.md`: the use cases vidcut is for, and the order of what comes next.
+- `docs/todo/`: open work, **one file per item**: add a file for new work, and delete it in the pull request that finishes the work. There is no list to edit, so pull requests don't conflict over it. Keep lists that pull requests edit one item per line, never several items in one line.
 - `docs/decisions/`: short architecture decision records (preview, export, GUI and live control, agents: MCP and measurements).
 
 ## Build and run
@@ -91,7 +94,7 @@ These are mandatory.
 
 | When | Command | Runs |
 |---|---|---|
-| Before **every commit** (enforced by `.githooks/pre-commit`) | `scripts/check.sh` | `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, unit tests (`--lib --bins`) |
+| Before **every commit** (enforced by `.githooks/pre-commit`) | `scripts/check.sh` | no binary files in git, `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, unit tests (`--lib --bins`) |
 | After a **bigger change**, and before a milestone is called done | `scripts/check.sh full` | the above plus all integration/e2e tests and doc tests |
 | Also, when encoders, hwdec or real-media paths change | `scripts/check.sh full --features vidcut-av/gpu-tests` | GPU encode tests (NVENC/VAAPI) |
 | Also, when the GUI, live session, IPC or preview change | `scripts/check.sh full --features vidcut/gui-tests` | the real GUI driven through the CLI (needs a display; opens a window briefly) |
@@ -116,6 +119,7 @@ These are mandatory.
 - **Fixtures:** generated by `vidcut-av` into `$VIDCUT_TEST_DATA/fixtures/` and cached by spec hash.
   - The video is a **barcode**: the frame index encoded as luma blocks, which survives lossy codecs, so frame-exactness can be asserted after any decode or encode.
   - The audio carries a 1 kHz beep at the start of every second, for measuring A/V offset.
+  - `.timecode("10:00:00:00")` records a camera start timecode (a `tmcd` track in MP4/MOV), for timeline interchange tests.
   - Stills and image sequences: `fixture::ensure_images` writes barcode pictures as PNG or JPEG files, one or numbered (`ImageSpec::still`, `ImageSpec::sequence`).
   - Damaged files: `fixture::spoil` copies one with a packet left out or zeroed.
 - **Real-world clips:** `scripts/fetch-test-media.sh` downloads the clips in `tests/media-manifest.toml` to `$VIDCUT_TEST_DATA/media/<name>/<file>` and checks their sha256. They cover H.264 1080p30 and 2160p60 (two audio streams each, stereo MP3 and 5.1 AC-3), a 24000/1001 QuickTime file with 44.1 kHz audio, VP8/Vorbis 5.1 WebM with an unknown sample aspect ratio, and a short HEVC clip.
@@ -141,7 +145,15 @@ These are mandatory.
 
 ## Driving vidcut as an agent
 
-*Status: the CLI edits and exports headless (M1, M2), controls a running GUI (M3), exports in the background and exchanges OTIO timelines (M5), edits several tracks with a mixer and bins (M6), serves MCP with automatic tools and storyboards (M7), handles rotated, interlaced and HDR media (M8), and stills and image sequences (M9).*
+**Status:** what the CLI and an agent can do so far:
+- edits and exports headless (M1, M2)
+- controls a running GUI (M3)
+- exports in the background and exchanges OTIO timelines (M5)
+- edits several tracks, with a mixer and bins (M6)
+- serves MCP, with automatic tools and storyboards (M7)
+- handles rotated, interlaced and HDR media (M8)
+- stills and image sequences (M9)
+- timeline interchange with Resolve: `.otioz` bundles, timecode sources (decision D40)
 
 **MCP** (docs/decisions/agents.md, deviation X10): `vidcut mcp [-p FILE]` serves the Model Context Protocol on stdin/stdout. Every command is a tool (`edit.split` is `edit_split`, with its JSON Schema), plus `use_project` to pick or create the project. Calls run like the CLI's: inside the GUI that has the project open, or headless. `frame_render`, `gui_screenshot` and `storyboard_render` return images. Cancelling a call stops a headless export; routed into the GUI, it also stops a frame, a storyboard, an analysis and the loudness measure before a foreground export. A background export job stops only with `jobs.cancel`. To add it to Claude Code: `claude mcp add vidcut -- vidcut mcp -p /abs/talk.vidcut`; other clients take `{"command": "vidcut", "args": ["mcp", "-p", "/abs/talk.vidcut"]}`.
 
@@ -235,12 +247,17 @@ vidcut undo                                 # works across separate runs
 - `vidcut edit slide c3 --by 5f` moves a clip keeping its media; its neighbors give and take.
 - Measuring decodes a file once; the results are cached (`~/.cache/vidcut/analysis/`), so trying other settings is quick.
 
-**Timeline interchange (OpenTimelineIO, deviation X9):**
-- `vidcut export cut.otio` writes the whole timeline (or `--range`) for other editors: each video track, its clips' audio (J/L cuts included) as an audio track, each audio track, markers, and vidcut extras (marks, clip gain, track settings) in `metadata.vidcut`. Image sequences go as `ImageSequenceReference`s whose available range counts the pictures at the sequence rate, and come back as sequences.
-- `vidcut import cut.otio` adds the file's media to the pool and the file's tracks after the last clip: video tracks onto V1, V2, … with the audio that belongs to their clips, other audio tracks onto A1, A2, …. `--replace` replaces the timeline instead. An empty timeline takes the file's frame rate, start timecode and track settings.
-  - Media that moved: `--search /mnt/footage` looks for them by file name, subfolders too. Missing media fail the import (exit 7) with the list of files.
-  - What can't be imported (transitions, nested stacks, generators, clips overlapping others on their track) is listed in `warnings`.
-- Raw: `timeline.import` also takes the document inline as `otio`.
+**Timeline interchange (OpenTimelineIO, deviation X9):** files are written as DaVinci Resolve writes them, so they go to Resolve and back.
+- `vidcut export cut.otio` writes the whole timeline (or `--range`) for other editors: each video track, its clips' audio (J/L cuts included) as an audio track, each audio track, markers, and vidcut extras (marks, clip gain, track settings) in `metadata.vidcut`.
+  - Media are plain absolute paths; source ranges count from each file's own start timecode (`media show` reports `timecode`); a clip's video and audio share a Resolve link group (`metadata.Resolve_OTIO`).
+  - Image sequences go as `ImageSequenceReference`s whose available range counts the pictures at the sequence rate, and come back as sequences; a still is available for one frame, as Resolve writes it.
+  - `cut.otioz` bundles the media too (a zip file; Resolve imports these), `cut.otiod` in a folder. Bundles copy whole media files, so in a GUI they run as jobs.
+- `vidcut import cut.otio` (or `.otioz`, or an `.otiod` folder) adds the file's media to the pool and the file's tracks after the last clip: video tracks onto V1, V2, … with the audio that belongs to their clips, other audio tracks onto A1, A2, …. `--replace` replaces the timeline instead. An empty timeline takes the file's frame rate, start timecode and track settings.
+  - An `.otioz`'s media unpack next to it, into a folder named after it (`cut/media/…`), or into `--unpack DIR`. A dry run unpacks nothing and says what it would.
+  - Media that moved: paths relative to the file and a project folder moved with the file are found by themselves; otherwise `--search /mnt/footage` looks for them by file name, subfolders too. Missing media fail the import (exit 7) with the list of files.
+  - What can't be imported (transitions, compound clips, generators, speed changes, clips overlapping others on their track) is listed in `warnings`.
+- Raw: `timeline.import` also takes the document inline as `otio` (relative media paths then can't be found but by `search`).
+- `tests/cli.rs` checks the files against OpenTimelineIO's own Python library when one is installed (`pip install opentimelineio`; `VIDCUT_OTIO_PYTHON` names the Python); otherwise that part skips.
 
 **Live control of a running GUI** ([docs/decisions/gui.md](docs/decisions/gui.md)):
 - **Routing:** when a GUI has the project open (`vidcut -p FILE` starts one), every project command runs inside it. You and the human then edit one live session: the GUI updates at once, and `via` in the JSON says `gui:<pid>`.

@@ -150,6 +150,7 @@ A seek or load ("motion") is shown after two steps:
 
 **Gestures are pure functions** (`gui/timeline/geometry.rs`, `gesture.rs`):
 - What the pointer is over picks the operation: edge, edit center, slip handle, audio edit, body.
+- A click on the audio edit selects that J/L handle. `,` and `.` then send `edit.audio_roll` for its offset (spec D20).
 - While dragging, a `Preview` says what the release would do. The timeline draws it: the target, the moved block, the snap line, a tooltip.
 - The release sends that one request. Scrubs only seek.
 - **Clock.** Gesture timing (the 0.8 s hover, Safe Edit's 0.6 s) uses egui's clock, so tests drive it.
@@ -166,16 +167,16 @@ A seek or load ("motion") is shown after two steps:
 - **Destination row:** a drag's destination is the row under the pointer, and the strips above and below the rows stand for a new track (spec D18). `gesture.rs` turns the destination into the request (`track`, D25), and its unit tests cover the rows.
 
 **Mixer and meters (M6, `gui/mixer.rs`).**
-- **Strips:** the Mixer panel (top bar, or `gui.show mixer`) has a strip per track with sound: meter, fader, M and S. The mix gets a meter too.
+- **Strips:** the Mixer panel (top bar, or `gui.show mixer`) has a strip per track with sound: one meter bar per channel, a fader, M and S. The mix gets the same per-channel meter.
 - **One request per fader drag:** the fader sends `track.set` once, when it's let go, so a drag is one undo step. Double-click resets it to 0 dB.
-- **Meters** read the cached waveforms at the playhead (spec D28). That way they need no audio tap in mpv, work while paused and while scrubbing, and apply the same gains, mutes and solos as the export. Peak holds last 1.5 s.
-- **Viewer:** a meter beside the viewer shows what it plays, and its speaker button is `player.mute`.
+- **Meters** are one bar per project channel (spec D28), with a 1.5 s peak hold on each bar. They read the cached waveforms at the playhead, playing or not, so they need no audio tap in mpv, work while paused and while scrubbing, and apply the same gains, mutes and solos as the export. The waveforms' channel envelopes are mixed to the project's channels by the export's resampler, so they are measured again when that count changes.
+- **Viewer:** a meter beside the viewer shows what it plays, one bar per channel, and its speaker button is `player.mute`. That mute silences the viewer meter. In source modes the meter is the source media at the source playhead.
 
 **Bins (M6).**
 - **Pool view:** the pool shows the open bin (`pool.set`: bin, sort, direction). That view lives in the session, not the project, so Source Tape and agents see the same order. It follows a renamed bin, and moves to the parent bin when its own is removed.
-- **Drops:** clips dragged from the pool onto a bin (a folder, or a level of the path) send `media.move`. The pool records where the bins are drawn each frame and the drag's release checks them.
-- **One undo step:** Create Bin With Selected Clips is one `apply` batch (`bins.add` and `media.move`).
-- **Tests:** `tests/gui_tracks.rs` (egui_kittest) covers the target track, a drag onto a new track, Place On Top, a fader drag, solo, New Bin and a drop into a bin. Each sends exactly one request.
+- **Drops:** the pool records where bins are drawn each frame (a folder, or a level of the path) and the drag's release checks them. A clip drop sends `media.move`. A bin drop sends one `bins.rename`, from the dragged bin to `<target>/<name>`. Nothing is sent when the target is the bin itself, a bin inside it, or its current parent. If the name is taken, `bins.rename` fails and the status bar shows the error, the same as other pool actions. The open bin follows a renamed bin, as any rename does.
+- **One undo step:** Create Bin With Selected Clips is one `apply` batch (`bins.add` and `media.move`). A bin drag is the one `bins.rename`.
+- **Tests:** `tests/gui_tracks.rs` (egui_kittest) covers the target track, a drag onto a new track, Place On Top, a fader drag, solo, New Bin, a clip dropped into a bin, and a bin dropped into another bin. Each sends exactly one request. Which bin drops move is unit-tested in `gui/pool.rs`.
 
 ## 9. Export windows and jobs (M5)
 
@@ -189,7 +190,7 @@ A seek or load ("motion") is shown after two steps:
   - A job still running after that is stuck in a decoder or an encoder. The session removes its partial files itself, and the process ends without it.
   - A job plans its files (`JobPlanned`) before it writes them, and once cancelled starts none. So only a file whose creation began before the cancel and is still blocked (on a hung network share, say) can appear afterwards.
   - A client waiting for such a job, or for its plan, hears that the GUI closed.
-- `.otio` exports write a small file at once and aren't jobs.
+- `.otio` exports write a small file at once and aren't jobs. `.otioz` and `.otiod` bundles copy whole media files, so they are jobs like media exports.
 
 **The windows only send requests:**
 - **Quick Export** (p. 788) lists the presets marked `quick_export`; Export… asks for a file name, then starts a background export and opens its progress window.
@@ -198,7 +199,7 @@ A seek or load ("motion") is shown after two steps:
 - **Asking the session:** windows that need answers (presets, plans, starting an export, imports) call `Handle::call` on a helper thread and poll the result each frame (`Ask`), so the UI never waits. These lookups are left out of the command log, and their errors show in the window instead of the status bar.
 - **File dialogs** run on helper threads behind a `Dialogs` trait; tests answer them directly.
 - **Placement:** windows open near the middle and stay anchored at their top-left, so they don't move while their content changes size.
-- **Timeline interchange** (deviation X9): File > Import Timeline asks Append or Replace when the timeline has clips, and asks for a folder when media aren't found (p. 529). Import warnings show in a window.
+- **Timeline interchange** (deviation X9): File > Import Timeline (`.otio` or `.otioz`; an `.otiod` through its `content.otio`) asks Append or Replace when the timeline has clips, and asks for a folder when media aren't found (p. 529). Import warnings show in a window. An `.otioz` import unpacks its media on a worker first (`Step::Measure`), so the session keeps answering meanwhile. File > Export Timeline writes `.otio`; File > Export Timeline with Media writes an `.otioz` as a job, as Resolve's export offers both (p. 4160).
 - **`gui.show`** opens any of these windows (or the log, or the Mixer) for the person at the GUI, e.g. after an agent prepared an export.
 
 ## 10. Automatic tools (M7)
@@ -222,6 +223,4 @@ A seek or load ("motion") is shown after two steps:
 
 ## 12. Still open
 
-- **A render queue.** Jobs run side by side; several big exports at once compete for the encoder. Past NVENC's few sessions, `auto` exports move on to VAAPI or the CPU (export.md §5), and ones asking for `nvenc` fail. Resolve's Deliver page queues renders instead.
-- **Per-channel meters** and meters that tap the player's actual output (spec D28).
-- **Dragging a bin into another bin** in the pool (`bins.rename` does it now).
+Open GUI work is in [docs/todo/](../todo/), one file per item.

@@ -31,6 +31,13 @@ pub struct MediaInfo {
     pub video: Option<VideoStreamInfo>,
     /// All audio streams, in file order.
     pub audio: Vec<AudioStreamInfo>,
+    /// The start timecode the file records (`HH:MM:SS:FF`, `;` before the
+    /// frames for drop-frame): a QuickTime/MP4 `tmcd` track's, MXF's, or a
+    /// `timecode` tag's. Counted in the video's frames.
+    pub timecode: Option<String>,
+    /// A broadcast WAV's time reference: samples since midnight where the
+    /// recording starts (the `bext` chunk).
+    pub time_reference: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -312,6 +319,7 @@ fn probe_input(source: &Input) -> Result<MediaInfo> {
             path.display()
         )));
     }
+    let (timecode, time_reference) = clock_tags(&input, best_video);
     Ok(MediaInfo {
         path: path.to_path_buf(),
         format: input.format().name().to_string(),
@@ -319,5 +327,66 @@ fn probe_input(source: &Input) -> Result<MediaInfo> {
         start_time,
         video,
         audio,
+        timecode,
+        time_reference,
     })
+}
+
+/// The start timecode and broadcast WAV time reference an opened file
+/// records (see [`MediaInfo::timecode`]). The video stream's tag wins (the
+/// MOV demuxer copies its `tmcd` track's there), then any stream's (the
+/// `tmcd` track itself), then the container's (MXF).
+fn clock_tags(
+    input: &ffmpeg::format::context::Input,
+    video: Option<usize>,
+) -> (Option<String>, Option<u64>) {
+    let tag = |d: ffmpeg::DictionaryRef| {
+        d.get("timecode")
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(String::from)
+    };
+    let timecode = video
+        .and_then(|i| input.stream(i))
+        .and_then(|s| tag(s.metadata()))
+        .or_else(|| input.streams().find_map(|s| tag(s.metadata())))
+        .or_else(|| tag(input.metadata()));
+    let time_reference = input
+        .metadata()
+        .get("time_reference")
+        .and_then(|v| v.trim().parse().ok());
+    (timecode, time_reference)
+}
+
+/// Only the start timecode and time reference of `path`, from the
+/// container's header (nothing is decoded): for media probed before vidcut
+/// kept them.
+pub fn clock(path: &Path) -> Result<(Option<String>, Option<u64>)> {
+    crate::init();
+    let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())
+        .map_err(|_| Error::Invalid(format!("{}: a NUL in the name", path.display())))?;
+    // The header holds the tags (a MOV's timecode track is read with it);
+    // finding stream info would decode frames.
+    let input = unsafe {
+        let mut ctx = std::ptr::null_mut();
+        let ret = ffmpeg::ffi::avformat_open_input(
+            &mut ctx,
+            name.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null_mut(),
+        );
+        if ret < 0 {
+            return Err(Error::Ffmpeg {
+                context: format!("opening {}", path.display()),
+                source: ffmpeg::Error::from(ret),
+            });
+        }
+        ffmpeg::format::context::Input::wrap(ctx)
+    };
+    // Without stream info the best video stream is the first one.
+    let video = input
+        .streams()
+        .find(|s| s.parameters().medium() == media::Type::Video)
+        .map(|s| s.index());
+    Ok(clock_tags(&input, video))
 }

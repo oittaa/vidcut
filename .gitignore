@@ -1,16 +1,6 @@
 /target
-# Media and generated test data never go in git; see AGENTS.md (VIDCUT_TEST_DATA).
-*.mp4
-*.mov
-*.mkv
-*.webm
-*.mxf
-*.ts
-*.wav
-*.flac
-*.mp3
-*.m4a
-*.opus
-# insta's temporary snapshot files (review and accept, never commit)
+# insta's temporary snapshots: review and accept them, never commit them.
 *.pending-snap
 *.snap.new
+# Media and other test data live outside the repo, in $VIDCUT_TEST_DATA
+# (AGENTS.md). scripts/check.sh refuses binary files, whatever their names.

@@ -30,7 +30,7 @@ A simple, fully scriptable video cutting tool for Linux, modeled on DaVinci Reso
   - an Export dialog with codec settings, GPU encoding (NVENC, VAAPI), In–Out range, per-clip export and audio-only export
   - exports run in the background, with progress, ETA and cancel
 - **Automatic tools:** Ripple Delete Silence cuts the pauses out of a talk; Detect Scene Cuts splits an edited video back into its shots; the Boring Detector flags clips that run too long or flash by; exports can be normalized to a loudness target (−14 LUFS for YouTube).
-- **Interchange:** import and export timelines as OpenTimelineIO (`.otio`), which DaVinci Resolve and other editors read and write.
+- **Interchange:** import and export timelines as OpenTimelineIO, which DaVinci Resolve and other editors read and write: `.otio` files, and `.otioz` bundles that carry the media along. Files are written the way Resolve writes them, so an edit goes to Resolve and back.
 - **Everything scriptable.** Every action in the GUI is also a CLI command and a JSON-RPC call on the running app, so scripts and AI agents can edit with you. `vidcut mcp` offers it all to AI agents over the Model Context Protocol.
 - **Deliberately not included:** effects, transitions, titles or color grading.
 
@@ -129,6 +129,7 @@ vidcut -p talk.vidcut export talk.mp4 --preset youtube-1080p   # GPU-encoded whe
 vidcut -p talk.vidcut export talk.flac                          # audio only
 vidcut -p talk.vidcut frame --at 1m -o check.png                # look at a frame
 vidcut -p talk.vidcut export cut.otio                           # the edit, for another editor
+vidcut -p talk.vidcut export cut.otioz                          # the edit and its media, in one file
 vidcut new cut2.vidcut && vidcut -p cut2.vidcut import cut.otio  # and back in
 vidcut presets save web --from youtube-1080p --set video.quality=22 --quick-export
 vidcut -p talk.vidcut edit ripple-delete-silence c1   # cut the pauses (0.5 s and longer)
@@ -163,7 +164,7 @@ Agents can look at their work: frames, screenshots and storyboards come back as 
 | M8 | Media coverage: rotation metadata, interlaced sources, HDR (tone mapping and HDR export) |
 | M9 | Stills and image sequences |
 
-What comes next, and the use cases behind it, is in [docs/roadmap.md](docs/roadmap.md).
+What comes next, and the use cases behind it, is in [docs/roadmap.md](docs/roadmap.md); the open items are in [docs/todo/](docs/todo/), one file each.
 
 ## Contributing
 

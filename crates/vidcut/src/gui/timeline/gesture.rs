@@ -68,6 +68,9 @@ pub enum Gesture {
         video_only: bool,
         audio_only: bool,
     },
+    /// Dragging a bin onto another bin in the pool (spec §3). The release
+    /// is decided in the pool, not as a timeline edit.
+    Bin { path: String },
 }
 
 /// Where a drop lands.
@@ -229,6 +232,8 @@ impl Drag {
                 &under,
                 &hovered,
             ),
+            // The pool finishes this drop (`bins.rename`) before update.
+            Gesture::Bin { .. } => Preview::default(),
             Gesture::Trim {
                 clip,
                 edge,
@@ -823,6 +828,7 @@ mod tests {
                     first_pts: 0.0,
                     duration: frames as f64 / 25.0,
                 }],
+                timecode: None,
             },
             marks: Marks::default(),
             bin: String::new(),
