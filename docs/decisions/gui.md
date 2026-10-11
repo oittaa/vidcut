@@ -112,7 +112,7 @@ A seek or load ("motion") is shown after two steps:
 
 **What they load.** All three viewer modes play EDLs built by the same code: `render::tape` for sources and `render::flatten` for the timeline. Source time therefore maps to frames exactly as the timeline's does: the source viewer counts project frames (deviation X8).
 
-**Reloads.** Timeline reloads are coalesced: one at once, then at most one per 100 ms while edits keep coming. A seek flushes a pending reload first.
+**Reloads.** Timeline reloads are coalesced: one at once, then at most one per 100 ms while edits keep coming. Every live request (state, screenshots, playback, viewer changes) applies a pending reload first, so it sees the timeline as edited; a seek or step loads straight at its target.
 
 **Fillers.** Fillers are generated on demand, synchronously (once per size and rate, then cached), so the preview is never half-loaded.
 

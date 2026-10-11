@@ -1298,6 +1298,17 @@ impl Live {
 
     fn dispatch(&mut self, envelope: Envelope, job: &Job) -> Step {
         let request = envelope.request.clone();
+        // Live requests look at or move the players: they see the timeline
+        // as edited, not as last loaded (a reload after edits waits up to
+        // RELOAD_EVERY to coalesce them). Seeks and steps load at their
+        // target themselves; opening a project replaces it.
+        let loads = matches!(
+            request,
+            Request::PlayerSeek { .. } | Request::PlayerStep { .. } | Request::ProjectOpen { .. }
+        );
+        if request.is_live() && !loads && self.timeline_due.take().is_some() {
+            self.refresh_timeline();
+        }
         match request {
             r if r.is_projectless() => {
                 Step::Task(Box::new(move |_| crate::session::run(None, envelope)))

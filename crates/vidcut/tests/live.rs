@@ -504,6 +504,10 @@ fn live_session() {
     let total = h.ok("project.summary", json!({})).result["duration"]
         .as_i64()
         .unwrap();
+    // Live requests see the timeline as edited at once, though its reload
+    // waits a moment to coalesce edits (gui.md §7).
+    let state = h.ok("player.state", json!({})).result;
+    assert_eq!(state["timeline"]["frames"].as_i64(), Some(total));
     let first = total - 4 * 120;
     let started = Instant::now();
     let seek = h.ok(
@@ -531,6 +535,21 @@ fn live_session() {
             );
         }
     }
+    // Deleting the clip under the playhead shows the next one there at once,
+    // without a seek. The second delete's reload is still waiting when the
+    // screenshot asks.
+    let at = first + 4 * 60 + 1;
+    h.ok("player.seek", json!({ "at": at, "viewer": "timeline" }));
+    assert_eq!(h.shown(&dir), Some(13 * 60 + 6));
+    h.ok("edit.delete", json!({ "clips": format!("V1@{at}f") }));
+    h.ok("edit.delete", json!({ "clips": format!("V1@{at}f") }));
+    assert_eq!(
+        h.shown(&dir),
+        Some(13 * 62 + 6),
+        "clip 62 moved under the playhead"
+    );
+    let state = h.ok("player.state", json!({})).result;
+    assert_eq!(state["timeline"]["frames"].as_i64(), Some(total - 8));
 
     drop(h);
     let _ = std::fs::remove_dir_all(&dir);
