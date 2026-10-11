@@ -210,6 +210,35 @@ pub fn format_timecode(frames: i64, fps: Rational, start_tc: i64) -> String {
     )
 }
 
+/// The frame count of a timecode a media file records (`HH:MM:SS:FF`) at
+/// `fps`. A `;` (or `.`) before the frames marks drop-frame timecode, which
+/// at 29.97 and 59.94 fps skips frame numbers 0 and 1 (0–3 at 59.94) at the
+/// start of every minute but every tenth; at other rates it counts as
+/// written.
+pub fn parse_media_timecode(s: &str, fps: Rational) -> Option<i64> {
+    let s = s.trim();
+    let drop = s.contains([';', '.']);
+    let fields: Vec<i64> = s
+        .split([':', ';', '.'])
+        .map(|f| f.parse().ok())
+        .collect::<Option<_>>()?;
+    let [h, m, sec, f] = fields[..] else {
+        return None;
+    };
+    let base = fps.timecode_base();
+    if fields.iter().any(|v| *v < 0) || m > 59 || sec > 59 || f >= base {
+        return None;
+    }
+    let nominal = ((h * 60 + m) * 60 + sec) * base + f;
+    // Drop-frame is defined for 29.97 and 59.94 only.
+    let dropped_per_minute = match (drop, fps.den(), base) {
+        (true, 1001, 30 | 60) => base / 15,
+        _ => 0,
+    };
+    let minutes = h * 60 + m;
+    Some(nominal - dropped_per_minute * (minutes - minutes / 10))
+}
+
 /// Named positions a [`TimeSpec`] can refer to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Keyword {
@@ -641,6 +670,29 @@ mod tests {
         );
         assert!(c.resolve(&TimeSpec::parse("00:00:00:30").unwrap()).is_err());
         assert!(TimeSpec::parse("00:00:01;02").is_err());
+    }
+
+    #[test]
+    fn media_timecodes() {
+        let r = |n, d| Rational::new(n, d).unwrap();
+        let tc = parse_media_timecode;
+        assert_eq!(tc("01:00:00:00", r(25, 1)), Some(90_000));
+        assert_eq!(tc("10:00:00:00", r(24, 1)), Some(864_000));
+        // 23.976 counts 24 frames a second, like 24.
+        assert_eq!(tc("00:37:01:00", r(24000, 1001)), Some(53_304));
+        // Non-drop 29.97: an hour of timecode is 108000 frames...
+        assert_eq!(tc("01:00:00:00", r(30000, 1001)), Some(108_000));
+        // ...drop-frame skips 2 numbers a minute but every tenth: 107892.
+        assert_eq!(tc("01:00:00;00", r(30000, 1001)), Some(107_892));
+        assert_eq!(tc("00:01:00;02", r(30000, 1001)), Some(1800));
+        assert_eq!(tc("00:10:00;00", r(30000, 1001)), Some(17_982));
+        assert_eq!(tc("00:01:00;04", r(60000, 1001)), Some(3600));
+        // Drop-frame means nothing at other rates.
+        assert_eq!(tc("00:00:01;05", r(25, 1)), Some(30));
+        assert_eq!(tc("00:01:00;00", r(24000, 1001)), Some(1440));
+        for bad in ["", "01:00:00", "01:00:00:25", "a:b:c:d", "00:61:00:00"] {
+            assert_eq!(tc(bad, r(25, 1)), None, "{bad:?}");
+        }
     }
 
     #[test]

@@ -744,7 +744,9 @@ impl Live {
         for job in self.jobs.iter() {
             if self.job_cancels.contains_key(&job.id) {
                 for o in &job.outputs {
-                    let _ = std::fs::remove_file(vidcut_av::export::partial_path(&o.path));
+                    let part = vidcut_av::export::partial_path(&o.path);
+                    // An .otiod bundle is written as a folder.
+                    let _ = std::fs::remove_file(&part).or_else(|_| std::fs::remove_dir_all(&part));
                 }
             }
         }
@@ -1248,6 +1250,7 @@ impl Live {
         // The job encodes the project as it is now (its `if_rev` checked),
         // whatever edits follow.
         let project = open.project().clone();
+        let project_path = open.store.path().to_path_buf();
         let context = open
             .project()
             .time_context(Some(self.players[TIMELINE].position));
@@ -1316,6 +1319,7 @@ impl Live {
                     };
                 let result = crate::session::export_media(
                     &project,
+                    &project_path,
                     &params,
                     &mut crate::session::Hooks {
                         cancel: &cancel,
@@ -1683,6 +1687,21 @@ impl Live {
                     None => Step::Now(self.edit(envelope)),
                 }
             }
+            // An `.otioz` bundle's media are unpacked on a worker first; the
+            // edit then finds them there.
+            Request::TimelineImport {
+                path: Some(path),
+                unpack,
+                ..
+            } if vidcut_core::editor::is_otioz(&path) && !envelope.dry_run => {
+                let unpack_bundle = move || {
+                    use vidcut_core::Env;
+                    AvEnv
+                        .open_timeline(&path, unpack.as_deref(), true)
+                        .map(drop)
+                };
+                Step::Measure(Box::new(unpack_bundle), Box::new(envelope))
+            }
             _ => Step::Now(self.edit(envelope)),
         }
     }
@@ -1889,6 +1908,9 @@ impl Live {
     fn check_media(&mut self) {
         let Some(open) = &self.project else { return };
         let media: Vec<_> = open.project().media.clone();
+        // The meters' envelopes are mixed to the project's channels, so a
+        // change of those measures again.
+        let channels = open.project().settings.channels;
         for m in media {
             if m.info.video.is_some() && self.thumbs_wanted.insert(m.id.clone()) {
                 let (tx, id, media) = (self.tx.clone(), m.id.clone(), m.clone());
@@ -1899,16 +1921,18 @@ impl Live {
                     });
                 });
             }
-            if !m.info.audio.is_empty() && self.waveforms_wanted.insert(m.id.clone()) {
+            if !m.info.audio.is_empty()
+                && self.waveforms_wanted.insert(format!("{}:{channels}", m.id))
+            {
                 let (tx, id, path) = (self.tx.clone(), m.id.clone(), m.path.clone());
-                let cache = paths::media_cache("waveforms", &m, "peaks");
+                let cache = paths::media_cache("waveforms", &m, &format!("peaks-{channels}ch"));
                 self.workers.run(move || {
                     let cached = std::fs::read(&cache)
                         .ok()
                         .and_then(|b| vidcut_av::waveform::Waveform::from_bytes(&b));
                     let result = match cached {
                         Some(w) => Ok(w),
-                        None => vidcut_av::waveform::waveform(&path, 0, WAVEFORM_RATE)
+                        None => vidcut_av::waveform::waveform(&path, 0, WAVEFORM_RATE, channels)
                             .map_err(|e| e.to_string())
                             .inspect(|w| {
                                 if let Some(dir) = cache.parent()
@@ -2781,11 +2805,13 @@ enum Step {
     Now(Result<Response>),
     Wait(Until),
     Task(Task),
-    /// Measure media on a worker, then run the request here (docs/decisions/agents.md §3).
+    /// Measure media (or unpack a bundle's) on a worker, then run the
+    /// request here (docs/decisions/agents.md §3).
     Measure(Measure, Box<Envelope>),
 }
 
-/// Measuring that a request needs, done before it runs.
+/// Slow work on media that a request needs, done before it runs:
+/// measuring, unpacking.
 type Measure = Box<dyn FnOnce() -> Result<()> + Send>;
 
 fn reply(reply: Option<Reply>, result: Result<Response>) {

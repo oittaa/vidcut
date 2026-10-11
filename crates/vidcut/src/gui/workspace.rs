@@ -423,7 +423,16 @@ impl Workspace {
                     .add_enabled(open, egui::Button::new("Export Timeline (OTIO)…"))
                     .clicked()
                 {
-                    self.export_timeline(ui.ctx());
+                    self.export_timeline(ui.ctx(), false);
+                }
+                if ui
+                    .add_enabled(
+                        open,
+                        egui::Button::new("Export Timeline with Media (OTIOZ)…"),
+                    )
+                    .clicked()
+                {
+                    self.export_timeline(ui.ctx(), true);
                 }
                 ui.separator();
                 if ui
@@ -781,7 +790,17 @@ impl Workspace {
                         ),
                         |e| (e.side, e.track),
                     );
-                    self.timeline.edit = Some(crate::gui::timeline::EditSel { at: f, side, track });
+                    // Up/Down lands on a picture cut. An audio selection stays
+                    // on that cut's J/L handle (D20).
+                    let at = if side == crate::gui::timeline::Side::Audio {
+                        self.project()
+                            .and_then(|p| p.track(&track.id()))
+                            .map(|t| crate::gui::timeline::audio_at_cut(t, f))
+                            .unwrap_or(f)
+                    } else {
+                        f
+                    };
+                    self.timeline.edit = Some(crate::gui::timeline::EditSel { at, side, track });
                 }
             }
         }

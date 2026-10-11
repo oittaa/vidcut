@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use vidcut_core::analysis::{AudioLevels, Loudness, PictureStats};
-use vidcut_core::model::{AudioInfo, FieldOrder, Hdr, Media, MediaInfo, VideoInfo};
+use vidcut_core::model::{AudioInfo, FieldOrder, Hdr, Media, MediaInfo, StartTimecode, VideoInfo};
 use vidcut_core::render::RenderPlan;
 use vidcut_core::time::Rational;
 use vidcut_core::{Env, Error, ProbedMedia, Result};
@@ -157,6 +157,19 @@ impl Env for AvEnv {
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness> {
         vidcut_av::analysis::loudness(plan).map_err(av_error)
     }
+
+    fn open_timeline(
+        &self,
+        path: &Path,
+        unpack: Option<&Path>,
+        write: bool,
+    ) -> Result<vidcut_core::editor::TimelineFile> {
+        if vidcut_core::editor::is_otioz(path) {
+            crate::bundle::open(path, unpack, write)
+        } else {
+            vidcut_core::editor::read_timeline_file(path)
+        }
+    }
 }
 
 /// A measurement's failure. Cancellation uses the same flag as an export, so
@@ -266,14 +279,65 @@ fn convert(info: &vidcut_av::probe::MediaInfo) -> Result<MediaInfo> {
                 - (a.first_secs.unwrap_or(0.0) - a.start_secs.unwrap_or(0.0)))
             .max(0.0),
         })
-        .collect();
+        .collect::<Vec<_>>();
+    let timecode = start_timecode(
+        info.timecode.as_deref(),
+        info.time_reference,
+        video.as_ref(),
+        &audio,
+    );
     Ok(MediaInfo {
         format: info.format.clone(),
         duration: info.duration.unwrap_or(0.0),
         start_time: info.start_time.unwrap_or(0.0),
         video,
         audio,
+        timecode,
     })
+}
+
+/// The start timecode a file records: its timecode in the video's frames,
+/// else a broadcast WAV's time reference in samples. Stills have none.
+pub fn start_timecode(
+    timecode: Option<&str>,
+    time_reference: Option<u64>,
+    video: Option<&VideoInfo>,
+    audio: &[AudioInfo],
+) -> Option<StartTimecode> {
+    match video {
+        Some(v) if v.still => None,
+        Some(v) => timecode
+            .and_then(|tc| vidcut_core::time::parse_media_timecode(tc, v.fps))
+            .filter(|&count| count > 0)
+            .map(|count| StartTimecode { count, rate: v.fps }),
+        None => {
+            let rate = audio.first().map(|a| a.sample_rate)?;
+            let count = i64::try_from(time_reference?).ok().filter(|&c| c > 0)?;
+            Some(StartTimecode {
+                count,
+                rate: Rational::new(i64::from(rate), 1).ok()?,
+            })
+        }
+    }
+}
+
+/// Fills in the start timecodes of the media `ids` that were probed before
+/// vidcut kept them (cheap: the container's tags, no decoding).
+pub fn fill_timecodes(p: &mut vidcut_core::Project, ids: &[String]) {
+    for m in &mut p.media {
+        if !ids.contains(&m.id) || m.info.timecode.is_some() || m.sequence.is_some() || m.is_still()
+        {
+            continue;
+        }
+        if let Ok((tc, reference)) = vidcut_av::probe::clock(&m.path) {
+            m.info.timecode = start_timecode(
+                tc.as_deref(),
+                reference,
+                m.info.video.as_ref(),
+                &m.info.audio,
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -296,6 +360,52 @@ mod tests {
             assert!(e.message.contains("not a regular file"), "{path:?}: {e}");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn start_timecodes() {
+        use vidcut_core::model::StartTimecode;
+        use vidcut_core::time::Rational;
+        let r = |n, d| Rational::new(n, d).unwrap();
+        let info: vidcut_core::model::MediaInfo = serde_json::from_value(serde_json::json!({
+            "format": "mov", "duration": 10.0, "start_time": 0.0,
+            "video": {"codec": "h264", "width": 320, "height": 180, "sar": [1, 1],
+                "pix_fmt": "yuv420p", "fps": "30000/1001", "vfr": false, "first_pts": 0.0,
+                "duration": 10.0, "rotation": 0, "fields": null, "hdr": null},
+            "audio": [{"index": 0, "codec": "pcm_s24le", "sample_rate": 48000, "channels": 2,
+                "first_pts": 0.0, "duration": 10.0}],
+        }))
+        .unwrap();
+        let v = info.video.as_ref();
+        assert_eq!(
+            super::start_timecode(Some("01:00:00;00"), None, v, &info.audio),
+            Some(StartTimecode {
+                count: 107_892,
+                rate: r(30000, 1001)
+            })
+        );
+        assert_eq!(
+            super::start_timecode(Some("00:00:00:00"), None, v, &info.audio),
+            None
+        );
+        assert_eq!(
+            super::start_timecode(Some("junk"), None, v, &info.audio),
+            None
+        );
+        // A broadcast WAV: samples since midnight.
+        assert_eq!(
+            super::start_timecode(None, Some(172_800_000), None, &info.audio),
+            Some(StartTimecode {
+                count: 172_800_000,
+                rate: r(48_000, 1)
+            })
+        );
+        let mut still = info.video.clone().unwrap();
+        still.still = true;
+        assert_eq!(
+            super::start_timecode(Some("01:00:00:00"), None, Some(&still), &[]),
+            None
+        );
     }
 
     #[test]
