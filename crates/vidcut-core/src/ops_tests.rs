@@ -820,3 +820,145 @@ fn live_requests_need_a_running_gui() {
         assert_eq!(e.code, ErrorCode::NoInstance, "{method}: {}", e.message);
     }
 }
+
+#[test]
+fn drag_and_drop_edits_ignore_timeline_marks() {
+    // Spec §7.3: a drop places by position; the timeline In/Out are for the
+    // edit buttons and keys.
+    let mut f = three_clips();
+    f.ok(req("marks.set", json!({"in": 10, "out": 20})));
+    f.ok(req(
+        "edit.overwrite",
+        json!({"media": "m3", "range": "0f..5f", "at": 120, "use_marks": false}),
+    ));
+    assert_eq!(f.v1()[2], row("c4", 120, 5, 0));
+    f.ok(req(
+        "edit.ripple_overwrite",
+        json!({"media": "m3", "range": "0f..30f", "at": 160, "use_marks": false}),
+    ));
+    // c3 (150..200) was replaced by 30 frames; the marks were left alone.
+    assert_eq!(f.v1().last().unwrap(), &row("c7", 150, 30, 0));
+    let marks = &f.editor.project().marks;
+    assert_eq!((marks.mark_in, marks.mark_out), (Some(10), Some(20)));
+}
+
+#[test]
+fn markers_and_track_toggles() {
+    // p. 718: edit a marker's name, color and note; pp. 647, 717: track lock,
+    // mute and video enable.
+    let mut f = three_clips();
+    let k = f.ok(req("markers.add", json!({"at": 30, "color": "red"})));
+    let id = k.result["marker"].as_str().unwrap().to_string();
+    f.ok(req(
+        "markers.set",
+        json!({"marker": id, "name": "laugh", "color": "mint", "note": "keep"}),
+    ));
+    let m = &f.editor.project().markers[0];
+    assert_eq!(
+        (m.name.as_str(), m.color.as_str(), m.note.as_str()),
+        ("laugh", "mint", "keep")
+    );
+    assert_eq!(
+        f.err(req("markers.set", json!({"marker": id, "color": "plaid"})))
+            .code,
+        ErrorCode::InvalidEdit
+    );
+    f.ok(req("track.set", json!({"track": "V1", "locked": true})));
+    assert_eq!(
+        f.err(req("edit.split", json!({"at": 30}))).code,
+        ErrorCode::InvalidEdit,
+        "a locked track can't be edited"
+    );
+    f.ok(req(
+        "track.set",
+        json!({"track": "V1", "locked": false, "video_enabled": false, "muted": true}),
+    ));
+    let plan = crate::render::flatten(f.editor.project(), 0, 200).unwrap();
+    assert!(matches!(
+        plan.video[..],
+        [crate::render::VideoPiece::Black { frames: 200 }]
+    ));
+    assert_eq!(
+        f.err(req("track.set", json!({"track": "A9", "muted": true})))
+            .code,
+        ErrorCode::NotFound
+    );
+}
+
+#[test]
+fn moving_onto_a_neighbor_overwrites_and_closes_the_gap() {
+    // p. 722: dragging c2 (100..150) 10 frames right over c3's head, without
+    // the pointer reaching c3, overwrites c3's first 10 frames; the 10 frames
+    // c2 vacated close, so c2 stays put and c3 is 10 frames shorter.
+    let mut f = three_clips();
+    f.ok(req(
+        "edit.move",
+        json!({"clips": "c2", "to": 110, "mode": "overwrite"}),
+    ));
+    assert_eq!(
+        f.v1(),
+        vec![
+            row("c1", 0, 100, 0),
+            row("c2", 100, 50, 10),
+            row("c4", 150, 40, 110)
+        ]
+    );
+    // p. 721: hovering over c1's middle and dropping c3 there splits c1; the
+    // span c3 left at the end closes (nothing after it).
+    let mut f = three_clips();
+    f.ok(req(
+        "edit.move",
+        json!({"clips": "c3", "to": 40, "mode": "overwrite"}),
+    ));
+    assert_eq!(
+        f.v1(),
+        vec![
+            row("c1", 0, 40, 0),
+            row("c3", 40, 50, 100),
+            row("c5", 90, 10, 90),
+            row("c2", 100, 50, 10)
+        ]
+    );
+    // Moving c1 to the right of everything: c1's span closes, c1 goes last.
+    let mut f = three_clips();
+    f.ok(req(
+        "edit.move",
+        json!({"clips": "c1", "to": 400, "mode": "overwrite"}),
+    ));
+    assert_eq!(
+        f.v1(),
+        vec![
+            row("c2", 0, 50, 10),
+            row("c3", 50, 50, 100),
+            row("c1", 100, 100, 0)
+        ]
+    );
+    // With Ripple Off the vacated span stays a gap.
+    let mut f = three_clips();
+    f.ok(req("project.set", json!({"ripple_on": false})));
+    f.ok(req(
+        "edit.move",
+        json!({"clips": "c2", "to": 110, "mode": "overwrite"}),
+    ));
+    assert_eq!(
+        f.v1(),
+        vec![
+            row("c1", 0, 100, 0),
+            row("c2", 110, 50, 10),
+            row("c4", 160, 40, 110)
+        ]
+    );
+}
+
+#[test]
+fn change_duration_to_the_end_of_the_media() {
+    // p. 693: End extends a clip to the end of its media.
+    let mut f = three_clips();
+    f.ok(req(
+        "edit.change_duration",
+        json!({"clips": "c2", "duration": "end"}),
+    ));
+    // m2 has 100 frames; c2 used 10..60, so it grows by 40 and c3 ripples.
+    assert_eq!(f.v1()[1], row("c2", 100, 90, 10));
+    assert_eq!(f.v1()[2], row("c3", 190, 50, 100));
+}

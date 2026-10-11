@@ -14,6 +14,7 @@ pub mod remux;
 pub mod tails;
 pub mod testdata;
 pub mod thumbs;
+pub mod waveform;
 
 pub use error::{Error, Result};
 

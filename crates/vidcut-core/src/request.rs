@@ -110,6 +110,10 @@ pub enum Request {
         source: SourceParams,
         #[serde(default)]
         at: Option<TimeSpec>,
+        /// `false` ignores the timeline In/Out and writes at `at` (drag and
+        /// drop places by position, spec §7.3).
+        #[serde(default = "yes")]
+        use_marks: bool,
     },
     /// Ripple Overwrite (Shift+F10): replace the In–Out range or the clip at `at`.
     #[serde(rename = "edit.ripple_overwrite")]
@@ -118,6 +122,9 @@ pub enum Request {
         source: SourceParams,
         #[serde(default)]
         at: Option<TimeSpec>,
+        /// `false` ignores the timeline In/Out and replaces the clip at `at`.
+        #[serde(default = "yes")]
+        use_marks: bool,
     },
 
     // ---------------------------------------------------------------- timeline editing (spec §8)
@@ -197,7 +204,8 @@ pub enum Request {
         #[serde(default)]
         ripple: Option<bool>,
     },
-    /// Change Clip Duration (Ctrl+D).
+    /// Change Clip Duration (Ctrl+D). `end` runs each clip to the end of its
+    /// media.
     #[serde(rename = "edit.change_duration")]
     EditChangeDuration {
         clips: OneOrMany<ClipRef>,
@@ -222,7 +230,18 @@ pub enum Request {
         at: Option<TimeSpec>,
     },
 
-    // ---------------------------------------------------------------- clips, marks, markers
+    // ---------------------------------------------------------------- tracks, clips, marks, markers
+    /// Track header toggles: lock, mute (audio) and video enable (pp. 647, 717).
+    #[serde(rename = "track.set")]
+    TrackSet {
+        track: String,
+        #[serde(default)]
+        locked: Option<bool>,
+        #[serde(default)]
+        muted: Option<bool>,
+        #[serde(default)]
+        video_enabled: Option<bool>,
+    },
     /// Enable/disable video (D), mute, gain (dB, -60..24) and name.
     #[serde(rename = "clip.set")]
     ClipSet {
@@ -260,6 +279,17 @@ pub enum Request {
     },
     #[serde(rename = "markers.move")]
     MarkersMove { marker: String, to: TimeSpec },
+    /// Change a marker's name, color or note (M on a marker, p. 718).
+    #[serde(rename = "markers.set")]
+    MarkersSet {
+        marker: String,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        color: Option<String>,
+        #[serde(default)]
+        note: Option<String>,
+    },
     #[serde(rename = "markers.remove")]
     MarkersRemove { marker: String },
 
@@ -492,6 +522,10 @@ pub enum ScreenshotTarget {
     Viewer,
     /// The whole window (needs it to be visible).
     Window,
+}
+
+fn yes() -> bool {
+    true
 }
 
 fn one_frame() -> i64 {

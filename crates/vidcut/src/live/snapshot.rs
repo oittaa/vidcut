@@ -132,6 +132,8 @@ pub struct Snapshot {
     pub log: Arc<VecDeque<LogEntry>>,
     pub notices: Arc<VecDeque<Notice>>,
     pub thumbs: Arc<HashMap<String, Arc<Filmstrip>>>,
+    /// Audio peaks of media (their first audio stream).
+    pub waveforms: Arc<HashMap<String, Arc<vidcut_av::waveform::Waveform>>>,
     /// Why there is no preview (libmpv missing), if so.
     pub preview_error: Option<String>,
 }

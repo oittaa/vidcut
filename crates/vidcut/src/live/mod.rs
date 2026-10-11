@@ -148,6 +148,10 @@ pub(crate) enum Msg {
         media: String,
         result: std::result::Result<Filmstrip, String>,
     },
+    Waveform {
+        media: String,
+        result: std::result::Result<vidcut_av::waveform::Waveform, String>,
+    },
     Remuxed {
         source: PathBuf,
         result: std::result::Result<PathBuf, String>,
@@ -303,6 +307,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         log: Arc::new(VecDeque::new()),
         notices: Arc::new(VecDeque::new()),
         thumbs: Arc::new(HashMap::new()),
+        waveforms: Arc::new(HashMap::new()),
         preview_error: config.preview_error.clone(),
     };
     let shared = Arc::new(Mutex::new(Arc::new(empty)));
@@ -333,6 +338,8 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         notice_seq: 0,
         thumbs: Arc::new(HashMap::new()),
         thumbs_wanted: HashSet::new(),
+        waveforms: Arc::new(HashMap::new()),
+        waveforms_wanted: HashSet::new(),
         fillers: HashMap::new(),
         remux: HashMap::new(),
         tails: HashMap::new(),
@@ -424,6 +431,9 @@ const WAIT_LIMIT: Duration = Duration::from_secs(10);
 const LOG_CAP: usize = 500;
 const NOTICE_CAP: usize = 20;
 
+/// Waveform buckets per second (10 ms).
+const WAVEFORM_RATE: u32 = 100;
+
 /// Thumbnails per pool item and their maximum size.
 const THUMBS: usize = 24;
 const THUMB_SIZE: (u32, u32) = (192, 108);
@@ -459,6 +469,8 @@ struct Live {
     notice_seq: u64,
     thumbs: Arc<HashMap<String, Arc<Filmstrip>>>,
     thumbs_wanted: HashSet<String>,
+    waveforms: Arc<HashMap<String, Arc<vidcut_av::waveform::Waveform>>>,
+    waveforms_wanted: HashSet<String>,
     /// Filler media by format (`None`: generating them failed).
     fillers: HashMap<FillerKey, Option<Fillers>>,
     remux: HashMap<PathBuf, RemuxState>,
@@ -561,6 +573,14 @@ impl Live {
                 }
                 changed = refreshed;
             }
+            Msg::Waveform { media, result } => match result {
+                Ok(w) => {
+                    let mut map = (*self.waveforms).clone();
+                    map.insert(media, Arc::new(w));
+                    self.waveforms = Arc::new(map);
+                }
+                Err(e) => self.notice(format!("waveform of {media}: {e}"), true),
+            },
             Msg::Thumbs { media, result } => match result {
                 Ok(strip) => {
                     let mut map = (*self.thumbs).clone();
@@ -698,6 +718,7 @@ impl Live {
             log: self.log.clone(),
             notices: self.notices.clone(),
             thumbs: self.thumbs.clone(),
+            waveforms: self.waveforms.clone(),
             preview_error: self.preview_error.clone(),
         };
         *self.shared.lock().unwrap_or_else(|e| e.into_inner()) = Arc::new(snap);
@@ -1170,6 +1191,33 @@ impl Live {
                             })
                             .map_err(|e| e.to_string());
                     let _ = tx.send(Msg::Thumbs { media: id, result });
+                });
+            }
+            if !m.info.audio.is_empty() && self.waveforms_wanted.insert(m.id.clone()) {
+                let (tx, id, path) = (self.tx.clone(), m.id.clone(), m.path.clone());
+                let cache = paths::cache_dir().join("waveforms").join(format!(
+                    "{:016x}-{}-{}.peaks",
+                    fnv1a(m.path.as_os_str().as_encoded_bytes()),
+                    m.size,
+                    m.mtime_ns
+                ));
+                self.workers.run(move || {
+                    let cached = std::fs::read(&cache)
+                        .ok()
+                        .and_then(|b| vidcut_av::waveform::Waveform::from_bytes(&b));
+                    let result = match cached {
+                        Some(w) => Ok(w),
+                        None => vidcut_av::waveform::waveform(&path, 0, WAVEFORM_RATE)
+                            .map_err(|e| e.to_string())
+                            .inspect(|w| {
+                                if let Some(dir) = cache.parent()
+                                    && std::fs::create_dir_all(dir).is_ok()
+                                {
+                                    let _ = std::fs::write(&cache, w.to_bytes());
+                                }
+                            }),
+                    };
+                    let _ = tx.send(Msg::Waveform { media: id, result });
                 });
             }
             if vidcut_av::remux::needs_index(&m.info.format) && !self.remux.contains_key(&m.path) {

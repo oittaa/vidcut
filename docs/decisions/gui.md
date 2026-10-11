@@ -120,7 +120,26 @@ A seek or load ("motion") is shown when two things have happened:
 
 **Stepped reverse.** Reverse shuttle (J) uses exact seeks, one in flight at a time, at the shuttle speed (preview.md §7).
 
-## 8. Still open
+## 8. The timeline (M4)
+
+**Two timelines** (spec §5):
+- **Upper:** the whole program at full width.
+- **Lower:** a detail view at a zoom you choose (Ctrl+wheel, −/+), its playhead fixed in the middle unless Timeline Options says otherwise.
+- **Shared drawing.** Both draw the same clips: names, durations, status, filmstrips from the pool thumbnails, waveforms from per-media peaks (100 per second, cached in `~/.cache/vidcut/waveforms/`).
+
+**Gestures are pure functions** (`gui/timeline/geometry.rs`, `gesture.rs`):
+- What the pointer is over picks the operation: edge, edit center, slip handle, audio edit, body.
+- While dragging, a `Preview` says what the release would do. The timeline draws it: the target, the moved block, the snap line, a tooltip.
+- The release sends that one request. Scrubs only seek.
+- **Clock.** Gesture timing (the 0.8 s hover, Safe Edit's 0.6 s) uses egui's clock, so tests drive it.
+
+**Tests:**
+- `geometry.rs` and `gesture.rs` unit tests cover zones, snapping and every drop rule.
+- `tests/gui_input.rs` (egui_kittest, no window) clicks, drags and types into the real panels against a live session. It checks that each gesture changes the project with exactly one request and that the command log matches the undo history. It also times frames with ~2,000 clips: about 2.5 ms of UI work in a debug build.
+
+**The Trim Editor** draws exact frames rendered by the export engine on a background thread (`gui/stills.rs`).
+
+## 9. Still open
 
 - **Pool sort order and bins**, which also set the Source Tape order. They come with M4/M6.
 - **Source Tape marks spanning several clips** (decision D17 limits marks to one clip).

@@ -8,7 +8,8 @@ A simple, fully scriptable video cutting tool for Linux, modeled on DaVinci Reso
 >   - **M1:** the project model, Cut-page edit operations and the headless CLI.
 >   - **M2:** frame-exact export with presets, GPU encoding, ranges, per-clip and audio-only output.
 >   - **M3:** the GUI shell. It has the media pool, the viewer (Source Clip, Source Tape, Timeline), transport and marks, the edit buttons and an overview timeline. It also has live control: CLI commands and agents drive the running GUI.
-> - Next: timeline editing with the mouse (M4). See the milestones below.
+>   - **M4:** timeline editing with the mouse. The dual timeline has filmstrips and waveforms. You can drag and drop from the pool, move, trim, roll, slip and make J/L cuts, with snapping, Safe Edit, markers and the Trim Editor.
+> - Next: the export UI and OpenTimelineIO import/export (M5). See the milestones below.
 
 ## What it will do
 
@@ -63,8 +64,21 @@ Everything you do is listed in the **Command log** (top right) as the request it
 | F9, Shift+F12, Shift+F10, F10 | Smart Insert, Append, Ripple Overwrite, Overwrite |
 | Ctrl+\\, Delete, Alt+Delete | split at the playhead, ripple delete (or the In–Out range), lift |
 | Ctrl+C / X / V, Ctrl+Z / Ctrl+Shift+Z | copy, cut, paste at the playhead; undo, redo |
-| M, Alt+M, D | add marker, remove marker, disable clip |
+| M, Alt+M, D | add marker (or edit the one at the playhead), remove marker, disable clip |
+| V, U, `,` / `.` | select the nearest edit, cycle Out/In/both, trim it a frame (Shift: a second) |
+| N, Ctrl+D | snapping on/off (only for the current drag if pressed mid-drag), change clip duration |
 | Ctrl+I | import media |
+
+**The timeline** follows the Cut page:
+- The upper timeline shows the whole program; the lower one is a zoomed detail view (Ctrl+wheel) whose playhead stays in the middle.
+- Where you grab a clip picks the operation:
+  - its edge resizes it (Alt: without ripple);
+  - the middle of an edit rolls it;
+  - the handle at a clip's top center slips it;
+  - the audio band at an edit makes a J/L cut;
+  - the body moves it.
+- Where you drop decides the edit: on an edit point inserts; on a clip replaces it, or overwrites if you hover first; past the end appends.
+- Drag media from the pool or the viewer to edit it in. Double-click an edit for the Trim Editor.
 
 **Live control.** While the GUI has a project open, `vidcut` commands for that project run *inside* it, and the window updates at once. A script or an AI agent can therefore edit alongside you:
 

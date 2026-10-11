@@ -3,18 +3,19 @@
 //! fields.
 
 use eframe::egui::{
-    self, Align2, Color32, CornerRadius, FontId, Key, Pos2, Rect, RichText, Sense, Stroke, vec2,
+    self, Align2, Color32, CornerRadius, FontId, Key, Pos2, Rect, RichText, Sense, Stroke, pos2,
+    vec2,
 };
 use serde_json::json;
 use vidcut_core::request::ViewerMode;
 use vidcut_core::time::{TimeContext, TimeSpec};
 
-use super::app::{App, Drag, TimecodeEntry, dim, fit};
 use super::pool::elide;
 use super::theme;
+use super::workspace::{Drag, TimecodeEntry, Workspace, dim, fit};
 use crate::live::PlayerId;
 
-impl App {
+impl Workspace {
     pub(super) fn viewer_panel(&mut self, ui: &mut egui::Ui) {
         let mode = self.snap.viewer;
         let id = PlayerId::of(mode);
@@ -60,21 +61,35 @@ impl App {
         });
         let picture = fit(area.shrink(2.0), aspect);
         let ppp = ui.ctx().pixels_per_point();
-        let want = [
+        self.wants[id.index()] = [
             (picture.width() * ppp).round() as i32,
             (picture.height() * ppp).round() as i32,
         ];
-        if self.videos[id.index()].want != want {
-            // The next logic() pass resizes the target and redraws into it.
-            self.videos[id.index()].want = want;
-            ui.ctx().request_repaint();
+        if self.trim_editor.is_some() {
+            self.trim_editor_view(ui, area, aspect);
+            return;
         }
-        ui.allocate_rect(area, Sense::hover());
+        let area_resp = ui.allocate_rect(area, Sense::drag());
+        // Dragging the source picture onto the timeline edits it in (spec §7.3).
+        if mode.is_source()
+            && area_resp.drag_started()
+            && let Some((media, _)) = self.snap.source_at()
+            && let Some(press) = ui.input(|i| i.pointer.press_origin())
+        {
+            let media = media.to_string();
+            let frames = self.media_frames(&media);
+            let marks = self
+                .project()
+                .and_then(|p| p.media(&media).map(|m| m.marks.clone()))
+                .unwrap_or_default();
+            let range = (marks.mark_in.unwrap_or(0), marks.mark_out.unwrap_or(frames));
+            self.start_media_drag(&media, range, press);
+        }
         let painter = ui.painter_at(area);
         painter.rect_filled(area, CornerRadius::ZERO, Color32::from_rgb(12, 12, 13));
         let player = self.snap.player(id).clone();
-        let video = &self.videos[id.index()];
-        match (video.texture_id, player.loaded && video.has_frame) {
+        let video = self.pictures[id.index()];
+        match (video.texture, player.loaded && video.has_frame) {
             (Some(tex), true) => {
                 painter.image(
                     tex,
@@ -121,6 +136,119 @@ impl App {
             self.clip_edge_hint(ui);
         }
         self.transport(ui, id);
+    }
+
+    /// The Trim Editor (p. 729): the outgoing clip's last frame beside the
+    /// incoming clip's first frame, with one-frame trims of the Out, the In
+    /// and both (a roll). Esc or Close leaves it.
+    fn trim_editor_view(&mut self, ui: &mut egui::Ui, area: Rect, aspect: f32) {
+        use crate::gui::timeline::Side;
+        let (Some(e), Some(p)) = (self.timeline.edit, self.project().cloned()) else {
+            self.trim_editor = None;
+            return;
+        };
+        let t = p.track(vidcut_core::ops::MAIN);
+        let out = t
+            .and_then(|t| t.clips.iter().find(|c| c.end() == e.at))
+            .cloned();
+        let inc = t
+            .and_then(|t| t.clips.iter().find(|c| c.start == e.at))
+            .cloned();
+        if (out.is_none() && inc.is_none()) || ui.input(|i| i.key_pressed(Key::Escape)) {
+            self.trim_editor = None;
+            return;
+        }
+        ui.allocate_rect(area, Sense::hover());
+        let painter = ui.painter_at(area);
+        painter.rect_filled(area, CornerRadius::ZERO, Color32::from_rgb(12, 12, 13));
+        let half = area.width() / 2.0;
+        let fps = p.settings.fps;
+        let (w, h) = {
+            let width = (half - 8.0).clamp(64.0, 640.0);
+            ((width as u32) & !1, ((width / aspect) as u32).max(2) & !1)
+        };
+        let ctx = ui.ctx().clone();
+        let stills = self
+            .stills
+            .get_or_insert_with(|| crate::gui::stills::Stills::new(ctx.clone()));
+        for (i, (clip, frame, label)) in [
+            (&out, e.at - 1, "Out (outgoing)"),
+            (&inc, e.at, "In (incoming)"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let cell = Rect::from_min_size(
+                pos2(area.left() + half * i as f32, area.top()),
+                vec2(half, area.height()),
+            );
+            let picture = fit(cell.shrink(6.0), aspect);
+            painter.rect_filled(picture, CornerRadius::ZERO, Color32::BLACK);
+            let Some(c) = clip else {
+                painter.text(
+                    picture.center(),
+                    Align2::CENTER_CENTER,
+                    "no clip",
+                    FontId::proportional(12.0),
+                    theme::TEXT_DIM,
+                );
+                continue;
+            };
+            let piece = vidcut_core::render::flatten(&p, frame, frame + 1)
+                .ok()
+                .and_then(|plan| plan.video.into_iter().next());
+            if let Some(piece) = piece {
+                let still = crate::gui::stills::Still {
+                    piece,
+                    fps,
+                    width: w,
+                    height: h,
+                };
+                if let Some(tex) = stills.get(&ctx, &still) {
+                    painter.image(
+                        tex,
+                        picture,
+                        Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                }
+            }
+            let name = c
+                .name
+                .clone()
+                .or_else(|| p.media(&c.media).map(|m| m.name.clone()))
+                .unwrap_or_default();
+            painter.text(
+                picture.left_top() + vec2(6.0, 6.0),
+                Align2::LEFT_TOP,
+                format!("{label}: {}  src {}", elide(&name, 28), c.source_at(frame)),
+                FontId::proportional(12.0),
+                Color32::WHITE,
+            );
+        }
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            for (side, label) in [(Side::Out, "Out"), (Side::Both, "Roll"), (Side::In, "In")] {
+                ui.label(dim(label));
+                for by in [-1, 1] {
+                    if ui
+                        .button(if by < 0 { "−1" } else { "+1" })
+                        .on_hover_text(format!("{label} {by:+} frame"))
+                        .clicked()
+                    {
+                        self.timeline.edit = Some(crate::gui::timeline::EditSel { at: e.at, side });
+                        self.nudge_edit(side, by);
+                    }
+                }
+                ui.separator();
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Close").on_hover_text("Esc").clicked() {
+                    self.trim_editor = None;
+                }
+                ui.label(RichText::new(format!("edit at {}", self.tc(e.at))).monospace());
+            });
+        });
     }
 
     fn viewer_title(&self) -> String {

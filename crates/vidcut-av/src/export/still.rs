@@ -45,6 +45,39 @@ pub fn png(piece: &VideoPiece, fps: Rational, width: u32, height: u32) -> Result
     Ok(packet.data().unwrap_or_default().to_vec())
 }
 
+/// Renders one video piece frame (a single-frame piece) as packed RGBA at
+/// `width`×`height` (the picture fit inside, padded black).
+pub fn rgba(
+    piece: &VideoPiece,
+    fps: Rational,
+    width: u32,
+    height: u32,
+) -> Result<crate::thumbs::Image> {
+    crate::init();
+    let mut frames = VideoFrames::new(
+        std::slice::from_ref(piece),
+        fps,
+        width,
+        height,
+        format::Pixel::RGBA,
+    );
+    let frame = frames
+        .next_frame()?
+        .ok_or_else(|| Error::Invalid("no frame to render".into()))?;
+    let stride = frame.stride(0);
+    let row = width as usize * 4;
+    let data = frame.data(0);
+    let mut out = Vec::with_capacity(row * height as usize);
+    for y in 0..height as usize {
+        out.extend_from_slice(&data[y * stride..y * stride + row]);
+    }
+    Ok(crate::thumbs::Image {
+        width,
+        height,
+        rgba: out,
+    })
+}
+
 /// Encodes a packed RGBA picture (rows top to bottom) as PNG.
 pub fn png_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>> {
     crate::init();

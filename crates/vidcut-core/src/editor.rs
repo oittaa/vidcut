@@ -328,6 +328,22 @@ fn source(p: &Project, params: &SourceParams) -> Result<Source> {
     })
 }
 
+/// Runs `f` with the timeline marks hidden when `hide` (they come back
+/// afterwards): edits placed by position rather than by marks.
+fn without_marks<T>(
+    p: &mut Project,
+    hide: bool,
+    f: impl FnOnce(&mut Project) -> Result<T>,
+) -> Result<T> {
+    if !hide {
+        return f(p);
+    }
+    let marks = std::mem::take(&mut p.marks);
+    let result = f(p);
+    p.marks = marks;
+    result
+}
+
 fn need(at: Option<i64>, what: &str) -> Result<i64> {
     at.ok_or_else(|| Error::usage(format!("{what} is required (no live playhead)")))
 }
@@ -470,33 +486,43 @@ fn mutate(
             let s = source(p, src)?;
             json!({ "clip": ops::insert_at(p, &s, at)? })
         }
-        Request::EditOverwrite { source: src, at } => {
+        Request::EditOverwrite {
+            source: src,
+            at,
+            use_marks,
+        } => {
             let at = match at {
                 Some(t) => Some(resolve(p, t, playhead)?),
                 None => playhead,
             };
-            let marked = p.marks.mark_in.is_some() || p.marks.mark_out.is_some();
+            let marked = *use_marks && (p.marks.mark_in.is_some() || p.marks.mark_out.is_some());
             let at = if marked {
                 at.unwrap_or(0)
             } else {
                 need(at, "at")?
             };
             let s = source(p, src)?;
-            json!({ "clip": ops::overwrite(p, &s, at)? })
+            let clip = without_marks(p, !use_marks, |p| ops::overwrite(p, &s, at))?;
+            json!({ "clip": clip })
         }
-        Request::EditRippleOverwrite { source: src, at } => {
+        Request::EditRippleOverwrite {
+            source: src,
+            at,
+            use_marks,
+        } => {
             let at = match at {
                 Some(t) => Some(resolve(p, t, playhead)?),
                 None => playhead,
             };
-            let marked = p.marks.mark_in.is_some() && p.marks.mark_out.is_some();
+            let marked = *use_marks && p.marks.mark_in.is_some() && p.marks.mark_out.is_some();
             let at = if marked {
                 at.unwrap_or(0)
             } else {
                 need(at, "at")?
             };
             let s = source(p, src)?;
-            json!({ "clip": ops::ripple_overwrite(p, &s, at)? })
+            let clip = without_marks(p, !use_marks, |p| ops::ripple_overwrite(p, &s, at))?;
+            json!({ "clip": clip })
         }
         Request::EditSplit { at, clips } => {
             let points = at
@@ -590,8 +616,13 @@ fn mutate(
             ripple,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-            let frames = length(p, duration)?;
-            ops::change_duration(p, &ids, frames, *ripple)?;
+            if matches!(duration, TimeSpec::Keyword(crate::time::Keyword::End)) {
+                // "End": each clip runs to the end of its media (p. 693).
+                ops::extend_to_media_end(p, &ids, *ripple)?;
+            } else {
+                let frames = length(p, duration)?;
+                ops::change_duration(p, &ids, frames, *ripple)?;
+            }
             Value::Null
         }
         Request::ClipSet {
@@ -655,6 +686,24 @@ fn mutate(
         Request::MarkersMove { marker, to } => {
             let to = resolve(p, to, playhead)?;
             ops::move_marker(p, marker, to)?;
+            Value::Null
+        }
+        Request::MarkersSet {
+            marker,
+            name,
+            color,
+            note,
+        } => {
+            ops::set_marker(p, marker, name.clone(), color.clone(), note.clone())?;
+            Value::Null
+        }
+        Request::TrackSet {
+            track,
+            locked,
+            muted,
+            video_enabled,
+        } => {
+            ops::set_track(p, track, *locked, *muted, *video_enabled)?;
             Value::Null
         }
         Request::MarkersRemove { marker } => {

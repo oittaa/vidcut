@@ -49,7 +49,7 @@ Inside `crates/vidcut`:
 | `session.rs` | runs requests headless against a project file |
 | `live/` | the GUI's core thread: open project, players, viewer state, waits, command log; publishes `Snapshot`s |
 | `ipc/` | JSON-RPC over a Unix socket, the instance registry, CLI routing |
-| `gui/` | eframe app: layout, pool, viewer, timeline strip, GL video targets |
+| `gui/` | `app.rs`: eframe and GL glue; `workspace.rs`: all panels and UI state (testable without GL); `timeline/`: geometry, gestures, drawing; `pool.rs`, `viewer.rs`, `video.rs`, `stills.rs` |
 | `export.rs` | presets, outputs and export plans as the session runs them |
 
 Docs:
@@ -113,6 +113,7 @@ These are mandatory.
 - **Property tests** (proptest) run random edit sequences.
   - Failing seeds land in `proptest-regressions/`. Commit them, so they replay forever.
   - For a deeper run: `PROPTEST_CASES=5000 cargo test -p vidcut-core prop_tests`.
+- **GUI input tests** (`crates/vidcut/tests/gui_input.rs`) drive the real panels with egui_kittest (clicks, drags, keys; no window or renderer) against a live session without players. Each gesture must change the project with exactly one request. Timeline gesture logic itself is unit-tested in `gui/timeline/gesture.rs` from pointer positions.
 - **Live session tests** (`crates/vidcut/tests/live.rs`) run the GUI's core thread without a window: a harness thread renders both players with mpv's software renderer and answers screenshots, and requests go through `Handle::call` like IPC. Prefer them over GUI tests; they need libmpv but no display.
 - **Frame checks** compare barcodes: screenshot the viewer, decode the PNG with `vidcut_av::decode`, and compare with `vidcut frame` (export's renderer).
 - **Test outputs** go to temp dirs, never into the repo. Tests that open projects set `XDG_STATE_HOME` to a temp dir so undo history and recent projects stay out of the user's state.
@@ -223,7 +224,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `filmstrip FILE OUTDIR [N]`: pool thumbnails, timed.
 
 **Preview debugging:**
-- `VIDCUT_DEBUG_PLAYER=1` traces every player command, mpv event and render to stderr.
+- `VIDCUT_DEBUG_PLAYER=1` traces every player command, mpv event, render and timeline gesture to stderr.
 - `VIDCUT_MPV_OPTIONS="hwdec=no,ao=null"` overrides mpv options.
 
 **Preview spikes:**

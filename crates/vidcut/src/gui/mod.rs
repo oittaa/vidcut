@@ -4,10 +4,12 @@
 
 mod app;
 mod pool;
+mod stills;
 mod theme;
 mod timeline;
 mod video;
 mod viewer;
+pub mod workspace;
 
 use std::path::PathBuf;
 

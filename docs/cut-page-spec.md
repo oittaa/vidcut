@@ -232,6 +232,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 ### 8.2 Moving clips (v1 for Track 1; M6 for others) (pp. 720–723)
 - **Onto another Track 1 clip, released quickly:** replaces it and ripples.
 - **After hovering first:** overwrites the middle of the target, splitting it; the gap left behind closes on Track 1.
+- **Over a neighbor's edge, the pointer not reaching it** (p. 722): the overlapping part of the neighbor is overwritten and the gap left behind closes, so the neighbor ends up shorter.
 - **Onto an edit point** (it highlights): insert-at-edit. The gap left behind closes, and later clips (with their attached higher-track clips) shift. Works with several clips.
 - **Track 1 clip dropped onto another track:** can only overwrite.
 - **Higher-track clips:** move freely and leave gaps (M6).
@@ -262,6 +263,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - the Viewer shows the outgoing filmstrip on top and the incoming one below
   - the top handle trims the outgoing Out, the bottom handle the incoming In, and the middle handle rolls
   - ±1-frame buttons
+  - vidcut v1 shows the outgoing clip's last frame beside the incoming clip's first frame with the ±1 buttons; the draggable filmstrips are (later).
 - **Trim Start/End to Playhead** (Edit Actions, p. 729): moves a clip's head or tail to the playhead.
 - **Change Clip Duration** (Ctrl+D, p. 693):
   - enter frames or a timecode, or pick 1/5/15 seconds
@@ -342,6 +344,7 @@ Keys from the Cut chapters, with Edit-page keys filling the gaps (marked †).
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all | 719 |
 | Alt+Shift+V | Select clips under the playhead | 719 |
 | V / U | Select nearest edit / cycle edit side | 720 |
+| , / . (Shift: 1 s) | Trim the selected edit one frame left / right | 870† |
 | D | Disable / enable clip video | 724 |
 | Ctrl+D | Change clip duration | 693 |
 | N | Snapping on/off | 716 |
@@ -375,6 +378,17 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
 - **D15. Playhead after an edit function.** After Smart Insert, Append, Overwrite, Ripple Overwrite or Paste, the timeline playhead moves to the first frame after the new clip(s), ready for the next edit. The Viewer stays in its mode, so Q reviews the result (p. 696). The manual doesn't say; this is the Edit page's behavior.
 - **D16. Mark Out includes the frame under the playhead.** As in Resolve, the Out frame is part of the range. vidcut stores ranges half-open, so pressing O at frame `f` stores `out = f + 1`. The Duration field and `--json` output use the stored values.
 - **D17. Source Tape marks belong to one clip.** I/O in Source Tape mode marks the clip under the playhead, using the same per-clip marks as Source Clip mode and the pool thumbnails. An edit takes that clip with its marks (D5). Ranges spanning several clips on the tape come later.
+- **D18. Drop and move targets.**
+  - Within 6 px of an edit point a drop inserts there; the moved clips' own edges don't count.
+  - On another clip: replace if released within 0.8 s of reaching it (D11), else overwrite at the block's position. Several clips always overwrite (Replace takes one clip).
+  - Past the last clip: the clips move (or the media is appended) to the end. Left of the first clip: inserted at the start.
+  - Dragged more than 24 px off the track, or Esc during the drag: cancelled, nothing changes.
+- **D19. Trimming with the pointer.**
+  - Edges follow the pointer's movement from the press (they don't jump to it), snapped to targets (§8.8).
+  - A trim, roll, slip or J/L cut stops where the media runs out instead of failing.
+  - Safe Edit (p. 732) holds an edge at the neighbor for 0.6 s; pushing on overrides it.
+  - Dragging empty space in the upper timeline scrubs; in the lower timeline it draws a marquee.
+- **D20. Keyboard trimming.** With an edit selected (V, U, or a click on an edit), `,` and `.` trim it by one frame and Shift+`,`/`.` by one second: the Out, the In, or both (a roll). These are the Edit page's nudge keys (†); the Cut page's own keyboard trimming is Dynamic Trim (M7).
 - **D14. J/L cuts belong to an edit point.**
   - A J/L cut (§8.7) is stored as matching audio offsets on the two clips that meet there: the outgoing clip's `tail` equals the incoming clip's `head`.
   - When an edit gives a clip a different neighbor at that point, the J/L cut resets to a straight cut. Examples: a delete, a move, or a split inside the overlap zone, where one half would otherwise be left without audio of its own.

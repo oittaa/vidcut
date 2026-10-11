@@ -474,9 +474,15 @@ fn extract(p: &mut Project, ti: usize, ids: &[String], to: i64) -> Result<(Vec<C
     Ok((taken, mapped))
 }
 
-/// Move clips on V1 (p. 720–723). The gaps they leave close (Track 1 is
-/// magnetic); `to` is a position in the timeline before the move. `Insert`
-/// pushes later clips right; `Overwrite` writes over what is there.
+/// Move clips on V1 (p. 720–723).
+///
+/// `to` is a position in the timeline as it is before the move.
+/// - `Insert` (dropping on an edit point): the clips are taken out, the gaps
+///   they leave close, and they go in at `to`, pushing later clips right.
+/// - `Overwrite` (dropping after hovering, or over the edge of a neighbor):
+///   the clips are lifted, written over whatever is at `to`, and then, with
+///   Ripple On, what remains of the spans they left closes (p. 722: moving a
+///   clip a few frames onto its neighbor shortens the neighbor).
 pub fn move_clips(p: &mut Project, ids: &[String], to: i64, mode: MoveMode) -> Result<()> {
     if ids.is_empty() {
         return Err(Error::usage("no clips to move"));
@@ -485,21 +491,77 @@ pub fn move_clips(p: &mut Project, ids: &[String], to: i64, mode: MoveMode) -> R
     if to < 0 {
         return Err(Error::invalid("move target before 0"));
     }
+    if mode == MoveMode::Overwrite {
+        return move_overwrite(p, ti, ids, to);
+    }
     let (clips, to) = extract(p, ti, ids, to)?;
     let total: i64 = clips.iter().map(|c| c.duration).sum();
     let to = to.min(p.tracks[ti].end());
-    match mode {
-        MoveMode::Insert => {
-            split_at(p, ti, to);
-            shift_from(p, ti, to, total);
-        }
-        MoveMode::Overwrite => clear_range(p, ti, to, to + total),
-    }
+    split_at(p, ti, to);
+    shift_from(p, ti, to, total);
     let mut at = to;
     for mut c in clips {
         c.start = at;
         at += c.duration;
         place(p, ti, c);
+    }
+    fix_audio(p, ti);
+    Ok(())
+}
+
+fn move_overwrite(p: &mut Project, ti: usize, ids: &[String], to: i64) -> Result<()> {
+    let mut clips = Vec::new();
+    for id in ids {
+        let (_, ci) = on_main(p, id)?;
+        clips.push(p.tracks[ti].clips[ci].clone());
+    }
+    clips.sort_by_key(|c| c.start);
+    clips.dedup_by(|a, b| a.id == b.id);
+    // Lift: the clips' spans become gaps for now.
+    p.tracks[ti]
+        .clips
+        .retain(|c| !clips.iter().any(|m| m.id == c.id));
+    let total: i64 = clips.iter().map(|c| c.duration).sum();
+    let magnetic = p.settings.ripple_on;
+    // Decision D10: with Ripple On nothing starts after the end.
+    let to = if magnetic {
+        to.min(p.tracks[ti].end())
+    } else {
+        to
+    };
+    clear_range(p, ti, to, to + total);
+    let mut at = to;
+    for mut c in clips.iter().cloned() {
+        c.start = at;
+        at += c.duration;
+        place(p, ti, c);
+    }
+    if magnetic {
+        // Close the vacated spans not covered by the clips' new place, right
+        // to left so earlier spans keep their positions.
+        let mut gaps: Vec<(i64, i64)> = Vec::new();
+        for c in &clips {
+            for (a, b) in [
+                (c.start, c.end().min(to)),
+                (c.start.max(to + total), c.end()),
+            ] {
+                if a < b {
+                    gaps.push((a, b));
+                }
+            }
+        }
+        gaps.sort_unstable();
+        gaps.dedup();
+        for (a, b) in gaps.into_iter().rev() {
+            // Only where nothing else sits (a span may straddle `to`).
+            let occupied = p.tracks[ti]
+                .clips
+                .iter()
+                .any(|c| c.start < b && a < c.end());
+            if !occupied {
+                shift_from(p, ti, b, -(b - a));
+            }
+        }
     }
     fix_audio(p, ti);
     Ok(())
@@ -786,6 +848,28 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
     Ok(())
 }
 
+/// Change Clip Duration > End: each clip runs to the end of its media.
+pub fn extend_to_media_end(p: &mut Project, ids: &[String], ripple: Option<bool>) -> Result<()> {
+    let mut targets = Vec::new();
+    for id in ids {
+        let c = p
+            .clip(id)
+            .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
+        let media = p
+            .media(&c.media)
+            .ok_or_else(|| Error::not_found(format!("no media {}", c.media)))?;
+        let room = p.media_frames(media) - c.source_in - c.duration;
+        targets.push((c.start, id.clone(), room));
+    }
+    targets.sort();
+    for (_, id, room) in targets.into_iter().rev() {
+        if room != 0 {
+            trim(p, &id, Edge::Tail, room, ripple)?;
+        }
+    }
+    Ok(())
+}
+
 /// Sets or clears timeline marks.
 pub fn set_marks(
     p: &mut Project,
@@ -811,6 +895,23 @@ pub fn set_marks(
     Ok(())
 }
 
+/// Marker colors, as in Resolve (p. 718).
+pub const MARKER_COLORS: &[&str] = &[
+    "blue", "cyan", "green", "yellow", "red", "pink", "purple", "fuchsia", "rose", "lavender",
+    "sky", "mint", "lemon", "sand", "cocoa", "cream",
+];
+
+fn check_color(color: &str) -> Result<()> {
+    if MARKER_COLORS.contains(&color) {
+        Ok(())
+    } else {
+        Err(Error::invalid(format!(
+            "unknown marker color {color:?}; use one of {}",
+            MARKER_COLORS.join(", ")
+        )))
+    }
+}
+
 /// Adds a marker (M, p. 718); returns its id.
 pub fn add_marker(
     p: &mut Project,
@@ -821,6 +922,9 @@ pub fn add_marker(
 ) -> Result<String> {
     if at < 0 {
         return Err(Error::invalid("marker before 0"));
+    }
+    if let Some(c) = &color {
+        check_color(c)?;
     }
     let id = p.alloc_marker_id();
     p.markers.push(Marker {
@@ -845,6 +949,60 @@ pub fn move_marker(p: &mut Project, id: &str, to: i64) -> Result<()> {
         .ok_or_else(|| Error::not_found(format!("no marker {id}")))?;
     k.at = to;
     p.markers.sort_by_key(|k| k.at);
+    Ok(())
+}
+
+/// Changes a marker's name, color or note.
+pub fn set_marker(
+    p: &mut Project,
+    id: &str,
+    name: Option<String>,
+    color: Option<String>,
+    note: Option<String>,
+) -> Result<()> {
+    if let Some(c) = &color {
+        check_color(c)?;
+    }
+    let k = p
+        .markers
+        .iter_mut()
+        .find(|k| k.id == id)
+        .ok_or_else(|| Error::not_found(format!("no marker {id}")))?;
+    if let Some(n) = name {
+        k.name = n;
+    }
+    if let Some(c) = color {
+        k.color = c;
+    }
+    if let Some(n) = note {
+        k.note = n;
+    }
+    Ok(())
+}
+
+/// Track header toggles (pp. 647, 717).
+pub fn set_track(
+    p: &mut Project,
+    id: &str,
+    locked: Option<bool>,
+    muted: Option<bool>,
+    video_enabled: Option<bool>,
+) -> Result<()> {
+    let t = p
+        .track_mut(id)
+        .ok_or_else(|| Error::not_found(format!("no track {id}")))?;
+    if video_enabled.is_some() && t.kind != crate::model::TrackKind::Video {
+        return Err(Error::invalid(format!("{id} is an audio track")));
+    }
+    if let Some(l) = locked {
+        t.locked = l;
+    }
+    if let Some(m) = muted {
+        t.muted = m;
+    }
+    if let Some(v) = video_enabled {
+        t.video_enabled = v;
+    }
     Ok(())
 }
 

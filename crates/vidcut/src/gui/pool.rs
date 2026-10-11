@@ -6,12 +6,12 @@ use serde_json::json;
 use vidcut_core::model::Media;
 use vidcut_core::request::ViewerMode;
 
-use super::app::{App, PoolView, dim, fit};
 use super::theme;
+use super::workspace::{PoolView, Workspace, dim, fit};
 
 const TILE: egui::Vec2 = egui::Vec2::new(176.0, 99.0);
 
-impl App {
+impl Workspace {
     pub(super) fn pool_panel(&mut self, ui: &mut egui::Ui) {
         self.hover = None;
         ui.horizontal(|ui| {
@@ -79,7 +79,8 @@ impl App {
 
     /// One thumbnail with hover scrubbing and source marks (p. 664, 691).
     fn tile(&mut self, ui: &mut egui::Ui, m: &Media) {
-        let (rect, resp) = ui.allocate_exact_size(vec2(TILE.x, TILE.y + 30.0), Sense::click());
+        let (rect, resp) =
+            ui.allocate_exact_size(vec2(TILE.x, TILE.y + 30.0), Sense::click_and_drag());
         let picture = Rect::from_min_size(rect.min, TILE);
         let painter = ui.painter_at(rect);
         let selected = self.snap.selection.media.contains(&m.id);
@@ -204,7 +205,9 @@ impl App {
                 ui.end_row();
                 for m in media {
                     let selected = self.snap.selection.media.contains(&m.id);
-                    let resp = ui.selectable_label(selected, elide(&m.name, 40));
+                    let resp = ui
+                        .selectable_label(selected, elide(&m.name, 40))
+                        .interact(Sense::drag());
                     self.media_interaction(&resp, m);
                     let frames = self.project().map_or(0, |p| p.media_frames(m));
                     ui.label(self.src_tc(frames));
@@ -230,8 +233,19 @@ impl App {
     }
 
     /// Click selects (and shows the clip in a source viewer), double-click
-    /// opens it as Source Clip (spec §3).
+    /// opens it as Source Clip, dragging drops it on the timeline (spec §3).
     fn media_interaction(&mut self, resp: &egui::Response, m: &Media) {
+        if resp.drag_started()
+            && let Some(press) = resp.ctx.input(|i| i.pointer.press_origin())
+        {
+            let frames = self.project().map_or(0, |p| p.media_frames(m));
+            let range = (
+                m.marks.mark_in.unwrap_or(0),
+                m.marks.mark_out.unwrap_or(frames),
+            );
+            self.start_media_drag(&m.id, range, press);
+            return;
+        }
         if resp.double_clicked() {
             self.send("viewer.load", json!({ "media": m.id }));
             return;
@@ -363,7 +377,7 @@ impl App {
     }
 }
 
-fn range_text(app: &App, source: &serde_json::Value) -> String {
+fn range_text(app: &Workspace, source: &serde_json::Value) -> String {
     let r = source["range"].as_str().unwrap_or_default();
     let mut parts = r
         .split("..")
