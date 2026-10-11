@@ -43,7 +43,8 @@ pub trait Env {
 
     /// Files named `name` in `dirs` or their subfolders, nearest first: how
     /// an import finds media that moved (Resolve searches subfolders too,
-    /// p. 530).
+    /// p. 530). A match is kept only when its canonical path stays inside
+    /// one of `dirs` ([`hit_stays_in_search`]).
     fn find_file(&self, dirs: &[PathBuf], name: &std::ffi::OsStr) -> Vec<PathBuf> {
         let mut found = Vec::new();
         for dir in dirs {
@@ -68,6 +69,7 @@ pub trait Env {
                 queue.extend(subdirs.into_iter().map(|p| (p, depth + 1)));
             }
         }
+        found.retain(|path| hit_stays_in_search(path, dirs));
         found
     }
 
@@ -994,6 +996,59 @@ fn rescale(f: i64, from: Rational, to: Rational) -> i64 {
     (2 * n + d).div_euclid(2 * d) as i64
 }
 
+/// Whether opening `hit` would read a file inside one of `roots`.
+///
+/// `root/../secret` and a symlink whose target is outside `root` both look
+/// like children until the path is canonicalized. A path that is not on
+/// disk is judged by its components, so tests can name files that were
+/// never created; a symlink that cannot be resolved is not inside.
+fn hit_stays_in_search(hit: &Path, roots: &[PathBuf]) -> bool {
+    match hit.canonicalize() {
+        Ok(canon) => roots.iter().any(|root| {
+            root.canonicalize()
+                .is_ok_and(|root| canon.starts_with(root))
+        }),
+        Err(_) => {
+            if std::fs::symlink_metadata(hit).is_ok_and(|m| m.file_type().is_symlink()) {
+                return false;
+            }
+            lexical_inside(hit, roots)
+        }
+    }
+}
+
+/// `path` is inside one of `roots` after `.` and `..` are resolved, without
+/// asking the filesystem. `..` that climbs past the start of the path is
+/// outside every root.
+fn lexical_inside(path: &Path, roots: &[PathBuf]) -> bool {
+    let Some(path) = lexical_normalize(path) else {
+        return false;
+    };
+    roots
+        .iter()
+        .any(|root| lexical_normalize(root).is_some_and(|root| path.starts_with(root)))
+}
+
+fn lexical_normalize(path: &Path) -> Option<PathBuf> {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !matches!(out.components().next_back(), Some(Component::Normal(_))) {
+                    return None;
+                }
+                out.pop();
+            }
+            Component::Normal(name) => out.push(name),
+            Component::RootDir => out.push(std::path::MAIN_SEPARATOR_STR),
+            Component::Prefix(prefix) => out.push(prefix.as_os_str()),
+        }
+    }
+    Some(out)
+}
+
 /// `timeline.import`: an OpenTimelineIO timeline onto V1 ([`otio`]).
 fn import_timeline(
     p: &mut Project,
@@ -1031,8 +1086,10 @@ fn import_timeline(
     }
     let mut warnings = t.warnings.clone();
 
-    // Media: each file probed once, looked for by name in `search` (and
-    // subfolders) if it isn't where the file says.
+    // Media: each file probed once. The named path is tried first, so a
+    // regular file that is still where the timeline says is opened even
+    // when `search` was given. A search hit is opened only when its
+    // canonical path stays inside a search root.
     let mut ids: HashMap<PathBuf, String> = HashMap::new();
     let mut media = Vec::new();
     let mut missing: Vec<&Path> = Vec::new();
@@ -1051,6 +1108,7 @@ fn import_timeline(
                 .and_then(|name| {
                     env.find_file(search, name)
                         .iter()
+                        .filter(|p| hit_stays_in_search(p, search))
                         .find_map(|p| probe(p).ok())
                 })
                 .ok_or(e)
@@ -1817,4 +1875,268 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
 /// A fixed rate for tests and tools that need one.
 pub fn rate(num: i64, den: i64) -> Rational {
     Rational::new(num, den).expect("valid rate")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+    use std::sync::{Arc, Mutex};
+
+    use serde_json::{Value, json};
+
+    use super::{Editor, Env, History, ProbedMedia, rate};
+    use crate::analysis::{AudioLevels, Loudness, PictureStats};
+    use crate::model::{Media, Project, Settings};
+    use crate::render::RenderPlan;
+    use crate::request::Envelope;
+    use crate::test_support::media_info;
+    use crate::{Error, Result};
+
+    /// Removes `dir` when the test ends, including on failure.
+    struct TempTree(PathBuf);
+
+    impl Drop for TempTree {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn probe_opened(opened: &Mutex<Vec<PathBuf>>, path: &Path) -> Result<ProbedMedia> {
+        opened.lock().unwrap().push(path.to_path_buf());
+        let canon = path
+            .canonicalize()
+            .map_err(|e| Error::media(format!("{}: {e}", path.display())))?;
+        if !canon.is_file() {
+            return Err(Error::media(format!(
+                "{}: not a regular file",
+                path.display()
+            )));
+        }
+        Ok(ProbedMedia {
+            path: canon,
+            size: 1,
+            mtime_ns: 0,
+            info: media_info(10.0, rate(25, 1), false),
+            sequence: None,
+        })
+    }
+
+    macro_rules! disk_probe {
+        () => {
+            fn probe(&self, path: &Path) -> Result<ProbedMedia> {
+                probe_opened(&self.opened, path)
+            }
+
+            fn probe_sequence(&self, path: &Path, _: crate::time::Rational) -> Result<ProbedMedia> {
+                self.probe(path)
+            }
+
+            fn audio_levels(&self, _: &Media, _: u32) -> Result<Arc<AudioLevels>> {
+                Err(Error::media("unused"))
+            }
+
+            fn picture_stats(&self, _: &Media) -> Result<Arc<PictureStats>> {
+                Err(Error::media("unused"))
+            }
+
+            fn loudness(&self, _: &RenderPlan) -> Result<Loudness> {
+                Err(Error::media("unused"))
+            }
+        };
+    }
+
+    /// Walks search folders with [`Env::find_file`]'s default.
+    struct WalkEnv {
+        opened: Mutex<Vec<PathBuf>>,
+    }
+
+    impl Env for WalkEnv {
+        disk_probe!();
+    }
+
+    /// Returns one path from `find_file`, with no confinement of its own.
+    struct ForcedEnv {
+        opened: Mutex<Vec<PathBuf>>,
+        hit: PathBuf,
+    }
+
+    impl Env for ForcedEnv {
+        disk_probe!();
+
+        fn find_file(&self, _: &[PathBuf], name: &std::ffi::OsStr) -> Vec<PathBuf> {
+            if self.hit.file_name() == Some(name) {
+                vec![self.hit.clone()]
+            } else {
+                Vec::new()
+            }
+        }
+    }
+
+    fn one_clip(path: &Path) -> Value {
+        let t = |v: f64| json!({"OTIO_SCHEMA": "RationalTime.1", "rate": 25.0, "value": v});
+        let range = json!({
+            "OTIO_SCHEMA": "TimeRange.1",
+            "start_time": t(0.0),
+            "duration": t(25.0)
+        });
+        json!({
+            "OTIO_SCHEMA": "Timeline.1",
+            "name": "Cut",
+            "tracks": {
+                "OTIO_SCHEMA": "Stack.1",
+                "children": [{
+                    "OTIO_SCHEMA": "Track.1",
+                    "kind": "Video",
+                    "name": "Video 1",
+                    "children": [{
+                        "OTIO_SCHEMA": "Clip.1",
+                        "name": path.file_name().unwrap().to_string_lossy(),
+                        "source_range": range,
+                        "media_reference": {
+                            "OTIO_SCHEMA": "ExternalReference.1",
+                            "target_url": crate::otio::file_url(path)
+                        }
+                    }]
+                }]
+            }
+        })
+    }
+
+    fn new_editor() -> Editor {
+        Editor::new(
+            Project::new(Settings {
+                fps: rate(25, 1),
+                auto_format: false,
+                ..Settings::default()
+            }),
+            History::default(),
+        )
+    }
+
+    fn import(
+        editor: &mut Editor,
+        env: &dyn Env,
+        path: &Path,
+        search: &Path,
+    ) -> Result<crate::Response> {
+        let envelope = Envelope::from_json(json!({
+            "method": "timeline.import",
+            "params": { "otio": one_clip(path), "search": [search] }
+        }))
+        .map_err(Error::usage)?;
+        editor.apply(envelope, env, None)
+    }
+
+    fn paths(lock: &Mutex<Vec<PathBuf>>) -> Vec<PathBuf> {
+        lock.lock().unwrap().clone()
+    }
+
+    fn touches(opened: &[PathBuf], canon: &Path) -> bool {
+        opened
+            .iter()
+            .any(|p| p == canon || p.canonicalize().ok().as_deref() == Some(canon))
+    }
+
+    #[test]
+    fn search_hit_outside_the_root_is_not_opened() {
+        let tmp = std::env::temp_dir().join(format!(
+            "vidcut-search-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _cleanup = TempTree(tmp.clone());
+        let root = tmp.join("root");
+        let outside = tmp.join("outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let outside_file = outside.join("clip.mp4");
+        let keep = root.join("keep.mp4");
+        std::fs::write(&outside_file, b"outside").unwrap();
+        std::fs::write(&keep, b"keep").unwrap();
+        // A symlink whose target climbs out with `..`, and the same escape
+        // written as a path. Both look like children of `root` until
+        // canonicalized.
+        let link = root.join("clip.mp4");
+        std::os::unix::fs::symlink("../outside/clip.mp4", &link).unwrap();
+        let alias = root.join("alias.mp4");
+        std::os::unix::fs::symlink("keep.mp4", &alias).unwrap();
+        let dotdot = root.join("..").join("outside").join("clip.mp4");
+        let root_canon = root.canonicalize().unwrap();
+        let outside_canon = outside_file.canonicalize().unwrap();
+        assert!(link.starts_with(&root) && dotdot.starts_with(&root));
+        assert_eq!(link.canonicalize().unwrap(), outside_canon);
+        assert_eq!(dotdot.canonicalize().unwrap(), outside_canon);
+        assert!(
+            std::fs::read_link(&link)
+                .unwrap()
+                .components()
+                .any(|c| c == std::path::Component::ParentDir)
+        );
+
+        let walk = WalkEnv {
+            opened: Mutex::new(Vec::new()),
+        };
+        let found = walk.find_file(
+            std::slice::from_ref(&root),
+            std::ffi::OsStr::new("clip.mp4"),
+        );
+        assert!(
+            found
+                .iter()
+                .all(|p| p.canonicalize().unwrap().starts_with(&root_canon)),
+            "search hit left the root: {found:?}"
+        );
+
+        let missing = tmp.join("missing");
+        let mut editor = new_editor();
+        let err = import(&mut editor, &walk, &missing.join("clip.mp4"), &root).unwrap_err();
+        assert_eq!(err.code, crate::ErrorCode::Media);
+        let opened = paths(&walk.opened);
+        assert!(
+            !touches(&opened, &outside_canon),
+            "opened the file outside the search root: {opened:?}"
+        );
+        assert!(editor.project().media.is_empty());
+
+        // A later real file with the same name is the hit; the symlink is not.
+        let sub = root.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        let nested = sub.join("clip.mp4");
+        std::fs::write(&nested, b"nested").unwrap();
+        walk.opened.lock().unwrap().clear();
+        import(&mut editor, &walk, &missing.join("clip.mp4"), &root).unwrap();
+        let nested_canon = nested.canonicalize().unwrap();
+        assert_eq!(editor.project().media[0].path, nested_canon);
+        assert!(!touches(&paths(&walk.opened), &outside_canon));
+
+        // A symlink whose target stays inside the root is a real hit.
+        walk.opened.lock().unwrap().clear();
+        import(&mut editor, &walk, &missing.join("alias.mp4"), &root).unwrap();
+        assert_eq!(editor.project().media[1].path, keep.canonicalize().unwrap());
+        assert!(editor.project().media[1].path.starts_with(&root_canon));
+
+        // A finder that still returns a `..` path must not get it opened.
+        let forced = ForcedEnv {
+            opened: Mutex::new(Vec::new()),
+            hit: dotdot,
+        };
+        let err = import(&mut editor, &forced, &missing.join("clip.mp4"), &root).unwrap_err();
+        assert_eq!(err.code, crate::ErrorCode::Media);
+        let opened = paths(&forced.opened);
+        assert!(
+            !touches(&opened, &outside_canon),
+            "opened the `..` escape: {opened:?}"
+        );
+
+        // The path named in the file, when it exists and is a regular file,
+        // is opened even though it sits outside the search root.
+        let mut fresh = new_editor();
+        walk.opened.lock().unwrap().clear();
+        import(&mut fresh, &walk, &outside_file, &root).unwrap();
+        assert_eq!(fresh.project().media[0].path, outside_canon);
+        assert!(touches(&paths(&walk.opened), &outside_canon));
+    }
 }

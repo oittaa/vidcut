@@ -238,7 +238,7 @@ vidcut undo                                 # works across separate runs
 **Timeline interchange (OpenTimelineIO, deviation X9):**
 - `vidcut export cut.otio` writes the whole timeline (or `--range`) for other editors: each video track, its clips' audio (J/L cuts included) as an audio track, each audio track, markers, and vidcut extras (marks, clip gain, track settings) in `metadata.vidcut`. Image sequences go as `ImageSequenceReference`s whose available range counts the pictures at the sequence rate, and come back as sequences.
 - `vidcut import cut.otio` adds the file's media to the pool and the file's tracks after the last clip: video tracks onto V1, V2, … with the audio that belongs to their clips, other audio tracks onto A1, A2, …. `--replace` replaces the timeline instead. An empty timeline takes the file's frame rate, start timecode and track settings.
-  - Media that moved: `--search /mnt/footage` looks for them by file name, subfolders too. Missing media fail the import (exit 7) with the list of files.
+  - Media that moved: `--search /mnt/footage` looks for them by file name, subfolders too. A hit is used only when its canonical path stays inside a search folder, so a symlink or a `..` path cannot point outside it. A file that is still where the timeline says, and is a regular file, is opened as named. Missing media fail the import (exit 7) with the list of files.
   - What can't be imported (transitions, nested stacks, generators, clips overlapping others on their track) is listed in `warnings`.
 - Raw: `timeline.import` also takes the document inline as `otio`.
 
