@@ -99,7 +99,7 @@ pub trait Env {
     fn proxy_dir(&self) -> PathBuf;
 
     /// Writes a playback proxy of `media`'s pictures into `dir` (decision
-    /// D40). `longest` is the longest side in pixels. `dry_run` reports the
+    /// D41). `longest` is the longest side in pixels. `dry_run` reports the
     /// file that would be written and does not encode.
     fn generate_proxy(
         &self,

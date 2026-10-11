@@ -34,7 +34,7 @@ Moving an edit between vidcut and Resolve, in either direction and between compu
 
 ## Milestones
 
-- **Proxies** are in (decision D40, deviation X18). `vidcut proxy generate` writes an H.264 proxy on demand for any video or image sequence — it does not detect which codecs the GPU cannot play. The default longest side is 960. `vidcut set --proxies true` (or the Media Pool switch) plays a proxy in the preview when the source file still matches it. Export, frames, analysis and OTIO always read the originals. Proxy frames keep the source's timestamps, so the preview stays frame-exact, including image sequences that were too slow to decode as pictures. Stills are left as originals. Files live in `proxies/` beside the project.
+- **Proxies** are in (decision D41, deviation X18). `vidcut proxy generate` writes an H.264 proxy on demand for any video or image sequence — it does not detect which codecs the GPU cannot play. The default longest side is 960. `vidcut set --proxies true` (or the Media Pool switch) plays a proxy in the preview when the source file still matches it. Export, frames, analysis and OTIO always read the originals. Proxy frames keep the source's timestamps, so the preview stays frame-exact, including image sequences that were too slow to decode as pictures. Stills are left as originals. Files live in `proxies/` beside the project.
 
 - **Candidates, roughly in this order:**
   - **Interchange with Resolve:** the list above.

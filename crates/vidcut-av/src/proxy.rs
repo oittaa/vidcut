@@ -3,7 +3,7 @@
 //! Each proxy frame keeps the source frame's presentation timestamp, in the
 //! source time base when that base is ordinary and in microseconds otherwise.
 //! The preview can then swap the file and keep the same EDL `start` math
-//! (decision D40). Audio is not copied: preview audio stays on the original.
+//! (decision D41). Audio is not copied: preview audio stays on the original.
 //!
 //! The file is Matroska, written to a temporary name and renamed into place.
 //! Pictures are turned upright and scaled to `width`×`height` as 8-bit 4:2:0.

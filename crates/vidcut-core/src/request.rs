@@ -85,7 +85,7 @@ pub enum Request {
         media: OneOrMany<String>,
         bin: String,
     },
-    /// Write playback proxies for video and image sequences (decision D40).
+    /// Write playback proxies for video and image sequences (decision D41).
     /// With no `media`, every such item in the pool. Stills and audio-only
     /// files are skipped then; naming one is an error.
     #[serde(rename = "proxy.generate")]
@@ -970,7 +970,7 @@ pub struct ProjectSet {
     /// (decision D38).
     #[serde(default)]
     pub still_duration: Option<TimeSpec>,
-    /// Play fresh proxies in the preview (decision D40). Export still
+    /// Play fresh proxies in the preview (decision D41). Export still
     /// reads the originals.
     #[serde(default)]
     pub use_proxies: Option<bool>,

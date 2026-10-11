@@ -61,7 +61,7 @@ pub struct Settings {
     /// duration (p. 114; decision D38).
     pub still_secs: f64,
     /// The preview plays a fresh proxy instead of the original picture
-    /// (decision D40). Export, frames, analysis and OTIO ignore this.
+    /// (decision D41). Export, frames, analysis and OTIO ignore this.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub use_proxies: bool,
 }
@@ -83,7 +83,7 @@ impl Default for Settings {
     }
 }
 
-/// Default longest side of a generated proxy, in pixels (decision D40).
+/// Default longest side of a generated proxy, in pixels (decision D41).
 pub const PROXY_LONGEST: u32 = 960;
 
 /// Even picture size that fits inside a square of side `longest` without
@@ -127,7 +127,7 @@ pub struct Media {
 }
 
 /// A playback proxy of a pool item: an easy-to-play file whose frames carry
-/// the source's presentation timestamps (decision D40, deviation X18).
+/// the source's presentation timestamps (decision D41, deviation X18).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Proxy {
     /// Absolute path of the proxy file.

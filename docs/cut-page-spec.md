@@ -479,7 +479,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - **Audio stays with its video** through Resolve's link group number, written on both and read when there.
   - **What Resolve ignores or keeps elsewhere:** timeline and track names (Resolve names tracks itself), marker notes (in `Resolve_OTIO.Note` as well as `comment`), a one-frame marker duration.
   - **Bundles:** `.otioz` as OpenTimelineIO's adapter writes it (what Resolve imports); `.otiod` the same as a folder. Unpacked into a folder named after the bundle, not next to it as Resolve does (deviation X9).
-- **D40. Proxies** (pp. 207–218 are outside the Cut page; deviation X18). The manual's proxy chapters are not what the Cut page specifies, so the playback rules are fixed here.
+- **D41. Proxies** (pp. 207–218 are outside the Cut page; deviation X18). The manual's proxy chapters are not what the Cut page specifies, so the playback rules are fixed here.
   - **What gets one:** video and image sequences, generated on demand (`proxy.generate`). Stills and audio-only media do not. Naming a still or an audio-only file is an error; generating with no ids skips them.
   - **Size:** the longest side defaults to 960 pixels, even, from 16 to 7680. Aspect is kept. A picture already smaller stays its size.
   - **Switch:** `use_proxies` (saved on the project) makes the preview play a proxy. Export, frame render, analysis and OTIO always use the original paths.

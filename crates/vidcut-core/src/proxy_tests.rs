@@ -1,4 +1,4 @@
-//! Playback proxies (decision D40). The fake env records a path and does not
+//! Playback proxies (decision D41). The fake env records a path and does not
 //! encode. Export plans keep original paths; only [`preview::apply_proxies`]
 //! swaps the picture.
 

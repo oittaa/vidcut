@@ -75,7 +75,7 @@ pub struct Preview {
 }
 
 /// Plays fresh proxies in `plan` when the project asks for them (decision
-/// D40). Video paths become the proxy file and image lists are dropped, so
+/// D41). Video paths become the proxy file and image lists are dropped, so
 /// a sequence plays as that video. `origin` and `source_frame` stay, which
 /// keeps the EDL's frame mapping. Audio paths stay on the originals.
 /// `exists` is whether the proxy file is there: a missing file plays the
