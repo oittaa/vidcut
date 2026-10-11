@@ -1696,7 +1696,7 @@ impl Live {
             } if vidcut_core::editor::is_otioz(&path) && !envelope.dry_run => {
                 let unpack_bundle = move || {
                     use vidcut_core::Env;
-                    AvEnv
+                    AvEnv::new()
                         .open_timeline(&path, unpack.as_deref(), true)
                         .map(drop)
                 };
