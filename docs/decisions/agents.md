@@ -9,7 +9,7 @@
 **Tools are the requests:**
 - Each `Request` method is a tool named with `_` for `.` (`edit.ripple_delete_silence` → `edit_ripple_delete_silence`). Its input schema is the method's params schema from schemars, made self-contained: a params type that is a definition of its own is inlined, and the definitions it uses are copied into the tool's `$defs`.
 - `schema` isn't a tool (`tools/list` gives every schema). `use_project` is the one MCP-only tool: it picks the project file (or makes one, with an optional fps and size) for later calls.
-- All 96 methods are tools, about 71 KB of `tools/list`. Agents get everything the CLI and GUI can do. A curated subset would drift from the protocol.
+- All 97 request methods are tools (98 with `use_project`), about 68 KB of `tools/list`. Agents get everything the CLI and GUI can do. A curated subset would drift from the protocol.
 
 **Calls run like CLI commands** (`ipc::run`, shared with `main.rs`):
 - **Routing:** a call goes into the GUI that has the project open (`via: gui:<pid>`), or runs headless. `vidcut mcp --headless` and `--instance` route like the CLI's flags.

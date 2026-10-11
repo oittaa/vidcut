@@ -91,3 +91,8 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
   - **Dynamic Trim:** J/L run the trim at shuttle speed while the two-up shows the frames on both sides as the trim leaves them, without sound. The timeline changes once, when K stops it (spec D32).
   - **Ripple Delete Silence:** there is no crossfade option. Its cuts get the 3 ms de-click fades every vidcut cut gets in export.
 - **Why:** the preview plays the timeline as one EDL, so changing the cut on every frame of a run would mean reloading it many times a second. The two-up shows exactly what the trim will make (the export engine renders those frames), and one change at the end is one undo step that agents and the command log can follow. Crossfades would need overlapping audio, which the track model doesn't have (spec D14); the de-click fades already keep cuts silent.
+
+## X12. Preferences hold only what vidcut needs
+- **Resolve:** the Preferences window has System and User panels with many settings: hardware, media storage, playback, the UI (p. 94). Caches and proxies are set up in the project settings and preferences (pp. 191–218).
+- **vidcut:** File > Preferences (Ctrl+,) holds settings for vidcut as a whole, kept in `~/.config/vidcut/preferences.toml`: so far whether the pool's thumbnails are kept on disk, and the size limit of that cache. `preferences.get` and `preferences.set` read and change them, from the CLI (`vidcut preferences`), IPC and MCP like everything else.
+- **Why:** a preference belongs here only once vidcut has a behavior to choose. A plain TOML file can be edited by hand, kept in dotfiles, and changed by agents.

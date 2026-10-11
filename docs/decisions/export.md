@@ -19,8 +19,13 @@
 
 **Engine:**
 - For each output frame, it pulls the next video frame from the current piece's decoder, then exactly the audio samples that frame spans from each lane, and encodes them.
-- Only one decoder per lane is open at a time, so memory stays flat with the segment count. The test with 400 segments verifies this.
+- Memory stays flat with the segment count: each reader (video, and each audio lane) has its current file open, plus the next one while it opens. The test with 400 segments verifies this, in a process of its own.
 - This replaced the plan's earlier idea of one big filter graph, which needed about 155 MB per input in measurements.
+
+**Starting a piece** (`export/video.rs`, `export/audio.rs`, `export/ahead.rs`):
+- **Same file as the piece before:** the reader reads on. A piece that starts at most 1 s past where the decoder is decodes on to its first frame (or skips samples); anything else seeks the open file. A frame repeated across the cut needs neither.
+- **Another file:** opening it, seeking and decoding up to its first frame (up to a whole GOP, and round trips on a network share) happen on a helper thread while the piece before encodes. The piece then takes the opened source; a failure there is the same error the piece would have hit.
+- **One opener thread per reader for the whole export**, not one per piece. glibc gives every new thread its own malloc arena, and decoder memory freed across many arenas stays resident. Per-piece threads raised the 400-segment test's peak from about 50 MB to 230 MB; one thread keeps it at about 100 MB (the second decoder).
 
 **Output:** goes to a hidden `.<name>.part` file, renamed into place on success. Errors and cancellation delete it.
 

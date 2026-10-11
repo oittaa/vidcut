@@ -39,8 +39,8 @@ It is written in Rust:
 
 | Crate | Purpose | Depends on |
 |---|---|---|
-| `crates/vidcut-core` | Project model, time and timecode math, edit operations (`ops.rs`; tracks in `ops/tracks.rs`, clips following Track 1 in `ops/follow.rs`), Request/Response protocol, Editor (undo/rev), project store, render plans (`render.rs`: top-wins video, mixed audio lanes), preview EDLs (`preview.rs`), OpenTimelineIO reading and writing (`otio.rs`), what the automatic tools decide from measurements (`analysis.rs`) | — (pure Rust; fast to build and test) |
-| `crates/vidcut-av` | FFmpeg layer: probe, exact-seek decode, encode/mux, export engine (with loudness normalization), thumbnails, waveforms, still frames, measurements for the automatic tools (`analysis.rs`), encoder detection, test-fixture generator | ffmpeg-next |
+| `crates/vidcut-core` | Project model, time and timecode math, edit operations (`ops.rs`; tracks in `ops/tracks.rs`, clips following Track 1 in `ops/follow.rs`), Request/Response protocol, Editor (undo/rev), project store, render plans (`render.rs`: top-wins video, mixed audio lanes), preview EDLs (`preview.rs`), OpenTimelineIO reading and writing (`otio.rs`), what the automatic tools decide from measurements (`analysis.rs`), application preferences (`preferences.rs`) | — (pure Rust; fast to build and test) |
+| `crates/vidcut-av` | FFmpeg layer: probe, exact-seek decode, encode/mux, export engine (with loudness normalization; the next piece's file opens ahead in `export/ahead.rs`), thumbnails (and their JPEG cache form), waveforms, still frames, measurements for the automatic tools (`analysis.rs`), encoder detection, test-fixture generator | ffmpeg-next |
 | `crates/vidcut-mpv` | libmpv via `dlopen` (`libloading`): client API and render API (OpenGL and software) | libmpv.so.2 at runtime only |
 | `crates/vidcut` | The `vidcut` binary: Session/host, IPC, CLI (clap), GUI (eframe), later MCP | all of the above |
 
@@ -53,9 +53,10 @@ Inside `crates/vidcut`:
 | `storyboard.rs` | `storyboard.render`: a labeled PNG grid of the program's shots |
 | `env.rs` | `AvEnv`: probing and the measurements behind the automatic tools, cached |
 | `session.rs` | runs requests headless against a project file |
+| `preferences.rs`, `thumbcache.rs` | `~/.config/vidcut/preferences.toml` and the pool thumbnails kept in `~/.cache/vidcut/thumbs` |
 | `live/` | the GUI's core thread: open project, players, viewer state, waits, command log, export jobs (`jobs.rs`); publishes `Snapshot`s |
 | `ipc/` | JSON-RPC over a Unix socket, the instance registry, CLI routing |
-| `gui/` | `app.rs`: eframe and GL glue; `workspace.rs`: all panels and UI state (testable without GL); `timeline/`: geometry, gestures, drawing; `export.rs`: Quick Export, the Export dialog, jobs and OTIO windows; `mixer.rs`: the Mixer and meters; `timeline/tools.rs`: Ripple Delete Silence, the Boring Detector, Dynamic Trim; `pool.rs` (with bins), `viewer.rs`, `video.rs`, `stills.rs` |
+| `gui/` | `app.rs`: eframe and GL glue; `workspace.rs`: all panels and UI state (testable without GL); `timeline/`: geometry, gestures, drawing; `export.rs`: Quick Export, the Export dialog, jobs and OTIO windows; `mixer.rs`: the Mixer and meters; `preferences.rs`: File > Preferences; `timeline/tools.rs`: Ripple Delete Silence, the Boring Detector, Dynamic Trim; `pool.rs` (with bins), `viewer.rs`, `video.rs`, `stills.rs` |
 | `export.rs` | presets (built-in and user), outputs, export plans and `.otio` exports as the session runs them |
 
 Docs:
@@ -131,7 +132,7 @@ These are mandatory.
 - **Export jobs** (`crates/vidcut/tests/jobs.rs`) run the live session without players: foreground, background, cancel and wait.
 - **Live session tests** (`crates/vidcut/tests/live.rs`) run the GUI's core thread without a window: a harness thread renders both players with mpv's software renderer and answers screenshots, and requests go through `Handle::call` like IPC. Prefer them over GUI tests; they need libmpv but no display.
 - **Frame checks** compare barcodes: screenshot the viewer, decode the PNG with `vidcut_av::decode`, and compare with `vidcut frame` (export's renderer).
-- **Test outputs** go to temp dirs, never into the repo. Tests that open projects set `XDG_STATE_HOME` to a temp dir so undo history and recent projects stay out of the user's state, and tests that save presets set `XDG_CONFIG_HOME`.
+- **Test outputs** go to temp dirs, never into the repo. Tests that open projects set `XDG_STATE_HOME` to a temp dir so undo history and recent projects stay out of the user's state, tests that save presets or preferences set `XDG_CONFIG_HOME`, and tests that check thumbnails set `XDG_CACHE_HOME`.
 
 ## Driving vidcut as an agent
 
@@ -210,6 +211,7 @@ vidcut undo                                 # works across separate runs
 - `vidcut presets` lists the presets (`--json` includes their settings); `vidcut presets NAME` shows one.
   - `vidcut presets save web --from youtube-1080p --set video.quality=22 [--quick-export]` saves a user preset to `~/.config/vidcut/presets/web.toml`; `--settings JSON|@FILE` gives full settings instead. `vidcut presets delete web` removes it.
 - `vidcut encoders` shows which GPU encoders work here (cached; `--refresh` re-tests).
+- `vidcut preferences` shows the application preferences (`~/.config/vidcut/preferences.toml`) and what the thumbnail cache holds; `vidcut preferences set thumbnails.cache_limit_mb=256` changes them (`preferences.set` takes `{"thumbnails": {"disk_cache": false}}`; turning the cache off empties it).
 - `vidcut frame --at 1m -o f.png [--width 640]` renders what the timeline shows at a frame. `--media m1` renders a media frame instead. Use it to look at cuts.
 
 **Automatic tools (M7, spec D29–D32):**

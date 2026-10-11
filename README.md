@@ -62,6 +62,8 @@ Everything you do is listed in the **Command log** (top right) as the request it
 
 **Exporting.** **Quick Export** (top bar) exports the In–Out range, or the whole timeline when no marks are set, with one of the presets shown as tiles. **Export** opens every setting: start from a preset, change the codec, quality, size, range or output, and see the plan (the encoder that will run, the files and their lengths) and the same export as a shell command before you start. Save the settings as your own preset, optionally added to Quick Export. Exports run in the background; **Jobs** (top right) shows their progress and lets you cancel them. **File > Import/Export Timeline** reads and writes OpenTimelineIO files.
 
+**Preferences.** **File > Preferences** (Ctrl+,) holds settings for vidcut as a whole, kept in `~/.config/vidcut/preferences.toml`. The pool's thumbnails are kept on disk (`~/.cache/vidcut/thumbs`, 512 MB by default), so a project opens with its thumbnails shown instead of decoding every clip again; you can change the limit or turn the cache off, which empties it. `vidcut preferences` shows and changes the same settings.
+
 | Keys | |
 |---|---|
 | Space, J / K / L | play/stop, shuttle (repeat J/L for speed; hold K and tap J/L to step) |
