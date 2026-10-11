@@ -92,6 +92,7 @@ A seek or load ("motion") is shown after two steps:
 
 **Registry.** A running GUI writes `$XDG_RUNTIME_DIR/vidcut/instances/<pid>.json` with its pid, socket, open project and version. It serves JSON-RPC 2.0 on `<pid>.sock`, with one JSON object per line (format in `ipc/mod.rs`).
 - **Access.** The directory is mode 0700, so only the user can connect.
+- **Limits** (`ipc::server::Limits`), so a runaway client can't take the session's memory or threads: a request line up to 64 MiB (a longer one gets an error and the connection closes) and 64 connections at once (more are turned away with an error). A waiting request such as `jobs.wait` keeps its connection, as intended.
 - **Clean-up.** Stale entries, and the per-process preview directories of dead instances, are removed when they're found.
 
 **Routing.** The CLI routes each command:

@@ -1,10 +1,11 @@
 //! The GUI side of the socket: one thread accepts connections, one thread per
 //! connection reads requests line by line and answers them in order.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::{Value, json};
 use vidcut_core::{Envelope, Error, Response, Result};
@@ -16,42 +17,124 @@ pub type Handler = dyn Fn(Envelope, Option<PathBuf>, &mut dyn FnMut(Value) -> bo
     + Send
     + Sync;
 
+/// What a GUI serves at most, so that a runaway client can't take the
+/// memory or the threads of the session a person is working in.
+#[derive(Debug, Clone, Copy)]
+pub struct Limits {
+    /// Bytes in one request line. A timeline sent inline as OTIO runs to a
+    /// few MB.
+    pub line: u64,
+    /// Connections at once. Each has a thread, and a waiting request (a
+    /// seek, `jobs.wait`) holds its connection.
+    pub connections: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            line: 64 << 20,
+            connections: 64,
+        }
+    }
+}
+
 /// Binds `path` (replacing a stale socket file) and serves `handler` on it
 /// from background threads until the process exits.
 pub fn start(path: &Path, handler: Arc<Handler>) -> std::io::Result<()> {
+    start_limited(path, handler, Limits::default())
+}
+
+/// [`start`] within `limits`.
+pub fn start_limited(path: &Path, handler: Arc<Handler>, limits: Limits) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         super::private_dir(dir)?;
     }
     let _ = std::fs::remove_file(path);
     let listener = UnixListener::bind(path)?;
+    let open = Arc::new(AtomicUsize::new(0));
     std::thread::Builder::new()
         .name("vidcut-ipc".into())
         .spawn(move || {
             for stream in listener.incoming() {
-                let Ok(stream) = stream else { continue };
+                let Ok(mut stream) = stream else { continue };
+                // Only this thread adds connections, so the count can't
+                // pass the limit between the check and the increment.
+                if open.load(Ordering::SeqCst) >= limits.connections {
+                    let e = Error::usage(format!(
+                        "this vidcut GUI is serving {} connections already; try again later",
+                        limits.connections
+                    ));
+                    let _ = send(&mut stream, &failure(Value::Null, &e));
+                    continue;
+                }
+                let slot = Slot::take(&open);
                 let handler = handler.clone();
                 let _ = std::thread::Builder::new()
                     .name("vidcut-ipc-conn".into())
-                    .spawn(move || serve(stream, &*handler));
+                    .spawn(move || {
+                        let _slot = slot;
+                        serve(stream, &*handler, limits.line);
+                    });
             }
         })?;
     Ok(())
 }
 
-fn serve(stream: UnixStream, handler: &Handler) {
+/// A connection's place among those served; freed when dropped (with its
+/// thread, or with the closure of a thread that never started).
+struct Slot(Arc<AtomicUsize>);
+
+impl Slot {
+    fn take(open: &Arc<AtomicUsize>) -> Self {
+        open.fetch_add(1, Ordering::SeqCst);
+        Self(open.clone())
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+fn failure(id: Value, e: &Error) -> Value {
+    json!({ "jsonrpc": "2.0", "id": id, "error": super::error_json(e) })
+}
+
+fn serve(stream: UnixStream, handler: &Handler, max_line: u64) {
     let Ok(read_half) = stream.try_clone() else {
         return;
     };
     let mut writer = stream;
-    for line in BufReader::new(read_half).lines() {
-        let Ok(line) = line else { return };
+    let mut reader = BufReader::new(read_half);
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        match (&mut reader).take(max_line + 1).read_until(b'\n', &mut buf) {
+            Ok(0) | Err(_) => return,
+            Ok(_) => {}
+        }
+        let content = buf.strip_suffix(b"\n").unwrap_or(&buf);
+        if content.len() as u64 > max_line {
+            // The rest of the line can't be skipped safely: say why, and close.
+            let e = Error::usage(format!("a request is limited to {max_line} bytes"));
+            let _ = send(&mut writer, &failure(Value::Null, &e));
+            return;
+        }
+        let Ok(line) = std::str::from_utf8(content) else {
+            let e = Error::usage("a request must be UTF-8 JSON");
+            if send(&mut writer, &failure(Value::Null, &e)).is_err() {
+                return;
+            }
+            continue;
+        };
         if line.trim().is_empty() {
             continue;
         }
-        let (id, outcome) = answer(&line, handler, &mut writer);
+        let (id, outcome) = answer(line, handler, &mut writer);
         let reply = match outcome {
             Ok(response) => json!({ "jsonrpc": "2.0", "id": id, "result": response }),
-            Err(e) => json!({ "jsonrpc": "2.0", "id": id, "error": super::error_json(&e) }),
+            Err(e) => failure(id, &e),
         };
         if send(&mut writer, &reply).is_err() {
             return;

@@ -298,6 +298,76 @@ mod tests {
     }
 
     #[test]
+    fn the_server_limits_lines_and_connections() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+        use std::sync::Arc;
+        let dir = std::env::temp_dir().join(format!("vidcut-ipc-limits-{}", std::process::id()));
+        let socket = dir.join("test.sock");
+        let limits = server::Limits {
+            line: 100,
+            connections: 1,
+        };
+        let handler = Arc::new(
+            |_: Envelope, _: Option<PathBuf>, _: &mut dyn FnMut(Value) -> bool| {
+                Ok(vidcut_core::Response {
+                    rev: 1,
+                    changes: Default::default(),
+                    result: json!("ok"),
+                    dry_run: false,
+                    via: "gui:1".into(),
+                })
+            },
+        );
+        server::start_limited(&socket, handler, limits).unwrap();
+        // Sends a line on a new connection and reads one line back.
+        let ask = |line: &[u8]| {
+            let mut s = UnixStream::connect(&socket).unwrap();
+            s.write_all(line).unwrap();
+            let mut reader = BufReader::new(s.try_clone().unwrap());
+            let mut reply = String::new();
+            reader.read_line(&mut reply).unwrap();
+            (s, reader, reply)
+        };
+        let request = b"{\"method\": \"project.get\"}\n";
+        // Served one at a time: a second connection is turned away while
+        // the first is open, and served once it closes.
+        let (first, _, reply) = ask(request);
+        assert!(reply.contains("\"ok\""), "{reply}");
+        let (_, _, reply) = ask(request);
+        assert!(reply.contains("1 connections already"), "{reply}");
+        drop(first);
+        let mut served = false;
+        for _ in 0..200 {
+            let (_, _, reply) = ask(request);
+            if reply.contains("\"ok\"") {
+                served = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(served, "the freed place serves again");
+        // A line past the limit: an error, then the connection closes.
+        let mut long = vec![b' '; 200];
+        long.push(b'\n');
+        let mut done = false;
+        for _ in 0..200 {
+            let (_, mut reader, reply) = ask(&long);
+            if reply.contains("connections already") {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                continue;
+            }
+            assert!(reply.contains("limited to 100 bytes"), "{reply}");
+            let mut rest = String::new();
+            assert_eq!(reader.read_line(&mut rest).unwrap(), 0, "closed");
+            done = true;
+            break;
+        }
+        assert!(done);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn projectless_requests_never_route() {
         let r = Request::from_parts("schema", None).unwrap();
         let opts = RouteOptions {
