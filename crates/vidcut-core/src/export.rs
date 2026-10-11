@@ -289,7 +289,7 @@ pub fn builtin_presets() -> Vec<Preset> {
                     bit_depth: Some(10),
                     ..video(V::Av1, Some(30))
                 },
-                audio(A::Aac, Some(256)),
+                audio(A::Aac, Some(320)),
             ),
         ),
         preset(
