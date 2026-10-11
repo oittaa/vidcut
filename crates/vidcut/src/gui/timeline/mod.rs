@@ -689,7 +689,7 @@ impl Workspace {
             });
             ui.menu_button("Actions", |ui| {
                 let at = self.snap.timeline.position;
-                if ui.button("Split Clips  (Ctrl+\\)").clicked() {
+                if ui.button("Split Clips  (Ctrl+B)").clicked() {
                     self.send(
                         "edit.split",
                         json!({ "at": at, "clips": self.snap.selection.clips }),
@@ -767,7 +767,7 @@ impl Workspace {
             {
                 self.send("project.set", json!({ "ripple_on": ripple }));
             }
-            if ui.button("Split").on_hover_text("Ctrl+\\").clicked() {
+            if ui.button("Split").on_hover_text("Ctrl+B").clicked() {
                 self.send(
                     "edit.split",
                     json!({ "at": self.snap.timeline.position, "clips": self.snap.selection.clips }),
