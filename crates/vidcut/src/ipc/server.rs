@@ -143,44 +143,22 @@ fn serve(stream: UnixStream, handler: &Handler, max_line: u64) {
     }
 }
 
-/// Whether the peer has closed `stream`. Does not read: a later request on
-/// this connection stays in the buffer.
+/// Whether the peer has closed `stream`, or shut down both ways (a cancelled
+/// client does). A client that only shut down its writing still waits for
+/// the answer: on a Unix socket, `poll` reports `POLLHUP` only once neither
+/// direction is left. Reads nothing, so a later request stays buffered.
 fn peer_gone(stream: &UnixStream) -> bool {
     use std::os::fd::AsRawFd;
-    let fd = stream.as_raw_fd();
+    // `POLLHUP` and `POLLERR` are reported whatever `events` asks for.
     let mut pfd = libc::pollfd {
-        fd,
-        events: libc::POLLIN,
+        fd: stream.as_raw_fd(),
+        events: 0,
         revents: 0,
     };
     // SAFETY: `pfd` describes this socket, and the timeout is zero so this
     // returns at once.
     let rc = unsafe { libc::poll(&mut pfd, 1, 0) };
-    if rc <= 0 {
-        return false;
-    }
-    let mut buf = [0u8; 1];
-    // SAFETY: peek one byte without taking it. Zero is EOF (the client
-    // closed); a positive count is data still waiting to be read.
-    let n = unsafe {
-        libc::recv(
-            fd,
-            buf.as_mut_ptr().cast(),
-            1,
-            libc::MSG_PEEK | libc::MSG_DONTWAIT,
-        )
-    };
-    if n > 0 {
-        return false;
-    }
-    if n == 0 {
-        return true;
-    }
-    let err = std::io::Error::last_os_error().raw_os_error();
-    if err == Some(libc::EAGAIN) || err == Some(libc::EWOULDBLOCK) {
-        return pfd.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0;
-    }
-    true
+    rc > 0 && pfd.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0
 }
 
 fn send(writer: &mut UnixStream, v: &Value) -> std::io::Result<()> {

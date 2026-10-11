@@ -55,7 +55,7 @@ pub fn run(
     project: Option<&Path>,
     options: &RouteOptions,
     envelope: Envelope,
-    cancel: &std::sync::atomic::AtomicBool,
+    cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     progress: &mut dyn FnMut(&Value),
 ) -> Result<vidcut_core::Response> {
     match route(project, options, &envelope.request)? {
@@ -80,7 +80,7 @@ pub fn run(
                 &envelope,
                 project.as_deref(),
                 progress,
-                Some(cancel),
+                Some(&**cancel),
             )
         }
     }
@@ -568,6 +568,51 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(ms < 1000, "still running after the client left: {ms} ms");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_client_that_only_stops_writing_still_gets_its_answer() {
+        // `printf '...' | socat - UNIX:...` shuts down its writing once the
+        // request is sent, and reads on. That is not a client that left.
+        use std::io::{BufRead, BufReader, Write};
+        use std::net::Shutdown;
+        use std::os::unix::net::UnixStream;
+        use std::sync::Arc;
+        use std::time::Duration;
+        let dir = std::env::temp_dir().join(format!("vidcut-ipc-half-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let socket = dir.join("t.sock");
+        server::start(
+            &socket,
+            Arc::new(
+                |_: Envelope,
+                 _: Option<PathBuf>,
+                 progress: &mut dyn FnMut(Option<Value>) -> bool| {
+                    for _ in 0..10 {
+                        if !progress(None) {
+                            return Err(Error::new(ErrorCode::Cancelled, "cancelled"));
+                        }
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Ok(vidcut_core::Response {
+                        rev: 1,
+                        changes: Default::default(),
+                        result: json!("ok"),
+                        dry_run: false,
+                        via: "gui:1".into(),
+                    })
+                },
+            ),
+        )
+        .unwrap();
+        let mut stream = UnixStream::connect(&socket).unwrap();
+        stream.write_all(b"{\"method\":\"project.get\"}\n").unwrap();
+        stream.shutdown(Shutdown::Write).unwrap();
+        let mut reply = String::new();
+        BufReader::new(stream).read_line(&mut reply).unwrap();
+        assert!(reply.contains("\"ok\""), "{reply}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

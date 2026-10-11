@@ -198,7 +198,7 @@ impl State {
     }
 
     /// Runs one tool call; returns the MCP tool result.
-    fn call(&self, params: &Value, cancel: &AtomicBool, out: &Out) -> Value {
+    fn call(&self, params: &Value, cancel: &Arc<AtomicBool>, out: &Out) -> Value {
         let name = params["name"].as_str().unwrap_or_default();
         let args = match params.get("arguments") {
             Some(Value::Null) | None => json!({}),

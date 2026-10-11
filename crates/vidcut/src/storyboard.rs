@@ -161,15 +161,15 @@ fn pictures(cells: &[Cell], p: &Project, w: usize, h: usize) -> Result<Vec<Vec<u
     let fps = p.settings.fps;
     let threads = std::thread::available_parallelism().map_or(2, |n| n.get().min(6));
     let chunk = cells.len().div_ceil(threads);
-    // The render thread's cancel flag. Workers don't inherit the slot; the
-    // guard that published it is held until these threads are joined.
+    // The render thread's cancel flag: workers don't inherit the slot.
     let cancel = vidcut_av::cancel::current();
     std::thread::scope(|s| {
         let handles: Vec<_> = cells
             .chunks(chunk)
             .map(|part| {
+                let cancel = cancel.clone();
                 s.spawn(move || {
-                    let _guard = vidcut_av::cancel::Guard::set_ptr(cancel);
+                    let _guard = cancel.map(vidcut_av::cancel::Guard::set);
                     part.iter()
                         .map(|c| {
                             vidcut_av::export::still::rgba(&c.piece, fps, w as u32, h as u32)

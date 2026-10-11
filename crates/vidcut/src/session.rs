@@ -1,6 +1,7 @@
 //! Runs requests: headless against a project file (M1), live in the GUI (M3).
 
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::{Value, json};
@@ -13,14 +14,14 @@ use crate::export;
 
 /// Cancellation and progress for long-running requests (exports).
 pub struct Hooks<'a> {
-    pub cancel: &'a AtomicBool,
+    pub cancel: &'a Arc<AtomicBool>,
     /// Called as `(output index, output count, output path, progress)`.
     pub progress: &'a mut dyn FnMut(usize, usize, &Path, Progress),
 }
 
 /// Runs one request headless with no progress reporting.
 pub fn run(project: Option<&Path>, envelope: Envelope) -> Result<Response> {
-    let cancel = AtomicBool::new(false);
+    let cancel = Arc::new(AtomicBool::new(false));
     run_with(
         project,
         envelope,
@@ -155,7 +156,7 @@ pub fn render(
     // Publishing the flag lets decoders on this thread (and storyboard
     // workers, which copy it) stop when the client leaves, the way the
     // export frame loop loads the same flag.
-    let _guard = vidcut_av::cancel::Guard::set(hooks.cancel);
+    let _guard = vidcut_av::cancel::Guard::set(hooks.cancel.clone());
     if watches_cancel(&envelope.request) && hooks.cancel.load(Ordering::Relaxed) {
         return Err(Error::new(ErrorCode::Cancelled, "cancelled"));
     }
@@ -362,6 +363,7 @@ pub fn doctor() -> Value {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use serde_json::json;
@@ -373,7 +375,7 @@ mod tests {
     fn render_req(req: serde_json::Value) -> vidcut_core::Result<vidcut_core::Response> {
         let project = Project::new(Settings::default());
         let envelope = Envelope::from_json(req).unwrap();
-        let cancel = AtomicBool::new(false);
+        let cancel = Arc::new(AtomicBool::new(false));
         render(
             &project,
             Path::new("p.vidcut"),
@@ -409,7 +411,7 @@ mod tests {
     fn a_set_cancel_flag_stops_frames_storyboards_and_analysis() {
         let project = Project::new(Settings::default());
         let path = Path::new("not-saved.vidcut");
-        let cancel = AtomicBool::new(true);
+        let cancel = Arc::new(AtomicBool::new(true));
         let calls = [
             ("frame.render", json!({ "at": "0f", "out": "f.png" })),
             ("storyboard.render", json!({ "out": "board.png" })),

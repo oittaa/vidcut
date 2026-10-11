@@ -4,47 +4,31 @@
 //! call's flag, and the frame loop loads it. A frame, a storyboard, an
 //! analysis and the loudness measure before an export report no progress, so
 //! the same flag is published here and those decoders load it too. A worker
-//! thread does not inherit the slot; it installs [`Guard::set_ptr`] with
-//! [`current`] while the publishing guard is still held.
+//! thread does not inherit the slot; it installs a [`Guard`] with a clone of
+//! [`current`].
 
-use std::cell::Cell;
+use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::error::{Error, Result};
 
 thread_local! {
-    static CANCEL: Cell<*const AtomicBool> = const { Cell::new(std::ptr::null()) };
+    static CANCEL: RefCell<Option<Arc<AtomicBool>>> = const { RefCell::new(None) };
 }
 
-/// A cancel flag a worker may install while the publishing [`Guard`] lives.
-#[derive(Clone, Copy)]
-pub struct Flag(*const AtomicBool);
-
-// SAFETY: `Flag` only loads an `AtomicBool`. The guard that published it
-// stays alive until every worker that received the `Flag` has joined.
-unsafe impl Send for Flag {}
-// SAFETY: same as `Send`: loads of the `AtomicBool` are synchronized.
-unsafe impl Sync for Flag {}
-
-/// Makes `cancel` visible to decoding on this thread until dropped.
+/// Makes a cancel flag visible to decoding on this thread until dropped.
 pub struct Guard {
-    prev: *const AtomicBool,
+    prev: Option<Arc<AtomicBool>>,
     /// `Rc` is not `Send`: the slot belongs to this thread.
     _unsend: PhantomData<Rc<()>>,
 }
 
 impl Guard {
-    /// `cancel` must outlive the guard.
-    pub fn set(cancel: &AtomicBool) -> Self {
-        Self::set_ptr(Flag(std::ptr::from_ref(cancel)))
-    }
-
-    /// `flag` is one [`current`] returned while its guard is still held, or
-    /// a null flag. It must stay valid until this guard drops.
-    pub fn set_ptr(flag: Flag) -> Self {
-        let prev = CANCEL.with(|slot| slot.replace(flag.0));
+    pub fn set(cancel: Arc<AtomicBool>) -> Self {
+        let prev = CANCEL.with(|slot| slot.replace(Some(cancel)));
         Self {
             prev,
             _unsend: PhantomData,
@@ -54,25 +38,22 @@ impl Guard {
 
 impl Drop for Guard {
     fn drop(&mut self) {
-        let prev = self.prev;
-        CANCEL.with(|slot| slot.set(prev));
+        let prev = self.prev.take();
+        CANCEL.with(|slot| *slot.borrow_mut() = prev);
     }
 }
 
-/// The flag installed on this thread, or a null flag.
-pub fn current() -> Flag {
-    Flag(CANCEL.with(|slot| slot.get()))
+/// The flag installed on this thread, if any, for a worker to install too.
+pub fn current() -> Option<Arc<AtomicBool>> {
+    CANCEL.with(|slot| slot.borrow().clone())
 }
 
 pub(crate) fn cancelled() -> bool {
-    let ptr = current().0;
-    if ptr.is_null() {
-        return false;
-    }
-    // SAFETY: a non-null pointer was stored by `Guard::set` from a flag that
-    // outlives that guard. `current` is passed to a worker only while the
-    // publishing guard is held across the scope that joins the worker.
-    unsafe { (*ptr).load(Ordering::Relaxed) }
+    CANCEL.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .is_some_and(|c| c.load(Ordering::Relaxed))
+    })
 }
 
 /// The error the export frame loop already returns when its flag is set.
@@ -96,9 +77,9 @@ mod tests {
     #[test]
     fn the_guard_is_visible_only_while_held() {
         assert!(!cancelled());
-        let flag = AtomicBool::new(true);
+        let flag = Arc::new(AtomicBool::new(true));
         {
-            let _guard = Guard::set(&flag);
+            let _guard = Guard::set(flag.clone());
             assert!(cancelled());
             flag.store(false, Ordering::Relaxed);
             assert!(!cancelled());
@@ -110,8 +91,7 @@ mod tests {
 
     #[test]
     fn a_set_flag_stops_measurements_before_they_open_a_file() {
-        let flag = AtomicBool::new(true);
-        let _guard = Guard::set(&flag);
+        let _guard = Guard::set(Arc::new(AtomicBool::new(true)));
         let err = analysis::audio_levels(Path::new("no-such-media"), 0, 10).unwrap_err();
         assert!(is_cancelled(&err), "{err}");
         let err = analysis::picture_stats(&crate::decode::Input::File("no-such-media".into()))

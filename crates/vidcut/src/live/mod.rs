@@ -1184,7 +1184,7 @@ impl Live {
                 let _ = std::thread::Builder::new()
                     .name("vidcut-measure".into())
                     .spawn(move || {
-                        let _guard = vidcut_av::cancel::Guard::set(&cancel);
+                        let _guard = vidcut_av::cancel::Guard::set(cancel);
                         let result = measure();
                         let _ = tx.send(Msg::Measured {
                             job,
