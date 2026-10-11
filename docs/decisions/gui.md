@@ -164,10 +164,10 @@ A seek or load ("motion") is shown after two steps:
 - **Destination row:** a drag's destination is the row under the pointer, and the strips above and below the rows stand for a new track (spec D18). `gesture.rs` turns the destination into the request (`track`, D25), and its unit tests cover the rows.
 
 **Mixer and meters (M6, `gui/mixer.rs`).**
-- **Strips:** the Mixer panel (top bar, or `gui.show mixer`) has a strip per track with sound: meter, fader, M and S. The mix gets a meter too.
+- **Strips:** the Mixer panel (top bar, or `gui.show mixer`) has a strip per track with sound: one meter bar per channel, a fader, M and S. The mix gets the same per-channel meter.
 - **One request per fader drag:** the fader sends `track.set` once, when it's let go, so a drag is one undo step. Double-click resets it to 0 dB.
-- **Meters** read the cached waveforms at the playhead (spec D28). That way they need no audio tap in mpv, work while paused and while scrubbing, and apply the same gains, mutes and solos as the export. Peak holds last 1.5 s.
-- **Viewer:** a meter beside the viewer shows what it plays, and its speaker button is `player.mute`.
+- **Meters** are one bar per project channel (spec D28), with a 1.5 s peak hold on each bar. They read the cached waveforms at the playhead, playing or not, so they need no audio tap in mpv, work while paused and while scrubbing, and apply the same gains, mutes and solos as the export. The waveforms' channel envelopes are mixed to the project's channels by the export's resampler, so they are measured again when that count changes.
+- **Viewer:** a meter beside the viewer shows what it plays, one bar per channel, and its speaker button is `player.mute`. That mute silences the viewer meter. In source modes the meter is the source media at the source playhead.
 
 **Bins (M6).**
 - **Pool view:** the pool shows the open bin (`pool.set`: bin, sort, direction). That view lives in the session, not the project, so Source Tape and agents see the same order. It follows a renamed bin, and moves to the parent bin when its own is removed.
@@ -222,5 +222,5 @@ A seek or load ("motion") is shown after two steps:
 
 - **A render queue.** Jobs run side by side; several big exports at once compete for the encoder. Past NVENC's few sessions, `auto` exports move on to VAAPI or the CPU (export.md §5), and ones asking for `nvenc` fail. Resolve's Deliver page queues renders instead.
 - **Source Tape marks spanning several clips** (decision D17 limits marks to one clip).
-- **Per-channel meters** and meters that tap the player's actual output (spec D28).
+- **Meters that tap the player's actual output** (spec D28): they read the waveforms instead.
 - **Dragging a bin into another bin** in the pool (`bins.rename` does it now).

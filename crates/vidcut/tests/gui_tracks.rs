@@ -279,6 +279,18 @@ fn track_gestures_send_one_request_each() {
     harness.get_by_label("Mixer").click();
     harness.step();
     harness.step();
+    // Stereo project, no player: one bar per channel on each strip and the
+    // mix (p. 649). Four video tracks carry sound here.
+    assert_eq!(
+        harness.query_all_by_label("mix meter").count(),
+        2,
+        "mix meter is one bar per channel"
+    );
+    assert_eq!(
+        harness.query_all_by_label("track meter").count(),
+        8,
+        "four strips, stereo"
+    );
     let mut faders: Vec<egui::Rect> = harness
         .query_all_by_role(Role::Slider)
         .map(|n| n.rect())
