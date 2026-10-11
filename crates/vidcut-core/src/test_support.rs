@@ -70,6 +70,17 @@ impl Env for FakeEnv {
             info,
         })
     }
+
+    fn find_file(&self, dirs: &[PathBuf], name: &std::ffi::OsStr) -> Vec<PathBuf> {
+        let mut found: Vec<PathBuf> = self
+            .files
+            .keys()
+            .filter(|p| p.file_name() == Some(name) && dirs.iter().any(|d| p.starts_with(d)))
+            .cloned()
+            .collect();
+        found.sort();
+        found
+    }
 }
 
 /// An editor at 25 fps with media `m1`..: each `(secs, audio)` becomes `/media/<n>.mp4`.

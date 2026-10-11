@@ -6,7 +6,8 @@ Guide for AI agents (and humans) working on this repository. Keep it current: wh
 
 A relatively simple video cutting tool modeled on DaVinci Resolve's **Cut page**:
 - media pool, source/timeline viewer, dual timeline, ripple editing
-- export with presets, GPU encoding, audio-only, range and per-clip export
+- export with presets, GPU encoding, audio-only, range and per-clip export, as jobs with progress
+- timeline interchange with other editors through OpenTimelineIO (`.otio`)
 - no effects, transitions, titles or color
 
 It is written in Rust:
@@ -36,7 +37,7 @@ It is written in Rust:
 
 | Crate | Purpose | Depends on |
 |---|---|---|
-| `crates/vidcut-core` | Project model, time and timecode math, edit operations, Request/Response protocol, Editor (undo/rev), project store | — (pure Rust; fast to build and test) |
+| `crates/vidcut-core` | Project model, time and timecode math, edit operations, Request/Response protocol, Editor (undo/rev), project store, OpenTimelineIO reading and writing (`otio.rs`) | — (pure Rust; fast to build and test) |
 | `crates/vidcut-av` | FFmpeg layer: probe, exact-seek decode, encode/mux, export engine, thumbnails, waveforms, still frames, encoder detection, test-fixture generator | ffmpeg-next |
 | `crates/vidcut-mpv` | libmpv via `dlopen` (`libloading`): client API and render API (OpenGL and software) | libmpv.so.2 at runtime only |
 | `crates/vidcut` | The `vidcut` binary: Session/host, IPC, CLI (clap), GUI (eframe), later MCP | all of the above |
@@ -47,10 +48,10 @@ Inside `crates/vidcut`:
 |---|---|
 | `cli.rs`, `main.rs`, `output.rs` | clap command line → one `Request`; human/JSON output; routing |
 | `session.rs` | runs requests headless against a project file |
-| `live/` | the GUI's core thread: open project, players, viewer state, waits, command log; publishes `Snapshot`s |
+| `live/` | the GUI's core thread: open project, players, viewer state, waits, command log, export jobs (`jobs.rs`); publishes `Snapshot`s |
 | `ipc/` | JSON-RPC over a Unix socket, the instance registry, CLI routing |
-| `gui/` | `app.rs`: eframe and GL glue; `workspace.rs`: all panels and UI state (testable without GL); `timeline/`: geometry, gestures, drawing; `pool.rs`, `viewer.rs`, `video.rs`, `stills.rs` |
-| `export.rs` | presets, outputs and export plans as the session runs them |
+| `gui/` | `app.rs`: eframe and GL glue; `workspace.rs`: all panels and UI state (testable without GL); `timeline/`: geometry, gestures, drawing; `export.rs`: Quick Export, the Export dialog, jobs and OTIO windows; `pool.rs`, `viewer.rs`, `video.rs`, `stills.rs` |
+| `export.rs` | presets (built-in and user), outputs, export plans and `.otio` exports as the session runs them |
 
 Docs:
 - `docs/cut-page-spec.md`: the behavioral spec.
@@ -113,14 +114,18 @@ These are mandatory.
 - **Property tests** (proptest) run random edit sequences.
   - Failing seeds land in `proptest-regressions/`. Commit them, so they replay forever.
   - For a deeper run: `PROPTEST_CASES=5000 cargo test -p vidcut-core prop_tests`.
-- **GUI input tests** (`crates/vidcut/tests/gui_input.rs`) drive the real panels with egui_kittest (clicks, drags, keys; no window or renderer) against a live session without players. Each gesture must change the project with exactly one request. Timeline gesture logic itself is unit-tested in `gui/timeline/gesture.rs` from pointer positions.
+- **GUI input tests** (`crates/vidcut/tests/gui_input.rs`, `gui_export.rs`) drive the real panels and windows with egui_kittest (clicks, drags, keys; no window or renderer) against a live session without players. Each gesture must change the project with exactly one request. Timeline gesture logic itself is unit-tested in `gui/timeline/gesture.rs` from pointer positions.
+  - File dialogs are replaced with `Workspace::set_dialogs`.
+  - A new window or modal is measured in its first frame and placed in the next: step once more after it appears before clicking in it.
+  - Windows that ask the session (presets, plans, imports) answer on helper threads, so wait with a loop of `harness.step()`, not a fixed number of steps.
+- **Export jobs** (`crates/vidcut/tests/jobs.rs`) run the live session without players: foreground, background, cancel and wait.
 - **Live session tests** (`crates/vidcut/tests/live.rs`) run the GUI's core thread without a window: a harness thread renders both players with mpv's software renderer and answers screenshots, and requests go through `Handle::call` like IPC. Prefer them over GUI tests; they need libmpv but no display.
 - **Frame checks** compare barcodes: screenshot the viewer, decode the PNG with `vidcut_av::decode`, and compare with `vidcut frame` (export's renderer).
-- **Test outputs** go to temp dirs, never into the repo. Tests that open projects set `XDG_STATE_HOME` to a temp dir so undo history and recent projects stay out of the user's state.
+- **Test outputs** go to temp dirs, never into the repo. Tests that open projects set `XDG_STATE_HOME` to a temp dir so undo history and recent projects stay out of the user's state, and tests that save presets set `XDG_CONFIG_HOME`.
 
 ## Driving vidcut as an agent
 
-*Status: the CLI edits and exports headless (M1, M2) and controls a running GUI (M3). MCP arrives in M7.*
+*Status: the CLI edits and exports headless (M1, M2), controls a running GUI (M3), and exports in the background and exchanges OTIO timelines (M5). MCP arrives in M7.*
 
 **Discovering commands:**
 - Every CLI subcommand is one JSON-RPC method on one `Request`.
@@ -179,9 +184,18 @@ vidcut undo                                 # works across separate runs
   - Extra options: `--preset youtube-1080p`, `--encoder nvenc|vaapi|cpu|auto`, `--set video.quality=20`, `--range 1m..2m`, `--per-clip`, `--audio-only`, `--overwrite`.
   - With `--dry-run` it prints the plan and the chosen encoder without encoding.
   - Ctrl-C cancels cleanly (exit 9, no partial file).
-- `vidcut presets` lists the presets; `vidcut presets NAME` shows one's settings.
+  - With a GUI running, `--background` returns a job id at once; follow it with `vidcut jobs` (below).
+- `vidcut presets` lists the presets (`--json` includes their settings); `vidcut presets NAME` shows one.
+  - `vidcut presets save web --from youtube-1080p --set video.quality=22 [--quick-export]` saves a user preset to `~/.config/vidcut/presets/web.toml`; `--settings JSON|@FILE` gives full settings instead. `vidcut presets delete web` removes it.
 - `vidcut encoders` shows which GPU encoders work here (cached; `--refresh` re-tests).
 - `vidcut frame --at 1m -o f.png [--width 640]` renders what the timeline shows at a frame. `--media m1` renders a media frame instead. Use it to look at cuts.
+
+**Timeline interchange (OpenTimelineIO, deviation X9):**
+- `vidcut export cut.otio` writes the whole timeline (or `--range`) for other editors: V1 as a video track, the clips' audio (J/L cuts included) as an audio track, markers, and vidcut extras in `metadata.vidcut`.
+- `vidcut import cut.otio` adds the file's media to the pool and its first video track (with the audio that belongs to it) after the last clip; `--replace` replaces the timeline instead. An empty timeline takes the file's frame rate and start timecode.
+  - Media that moved: `--search /mnt/footage` looks for them by file name, subfolders too. Missing media fail the import (exit 7) with the list of files.
+  - What can't be imported (transitions, extra tracks, generators) is listed in `warnings`.
+- Raw: `timeline.import` also takes the document inline as `otio`.
 
 **Live control of a running GUI** ([docs/decisions/gui.md](docs/decisions/gui.md)):
 - **Routing:** when a GUI has the project open (`vidcut -p FILE` starts one), every project command runs inside it. You and the human then edit one live session: the GUI updates at once, and `via` in the JSON says `gui:<pid>`.
@@ -199,8 +213,11 @@ vidcut undo                                 # works across separate runs
 | `vidcut screenshot -o v.png [--window]` | `gui.screenshot` | the viewer picture as shown (works while minimized), or the whole window |
 | `vidcut log [--since N]` | `gui.log` | what everyone (the human too) did, as requests |
 | `vidcut window --size 1600x1000`, `open FILE [--new]`, `quit` | `gui.*`, `project.open` | window and project |
+| `vidcut jobs`, `jobs get\|wait\|cancel J [--timeout S]` | `jobs.*` | export jobs, the GUI's own included; `wait` fails like the job did |
+| `vidcut show quick-export\|export\|jobs\|log` | `gui.show` | opens that window for the person at the GUI |
 
 - **Looking at the result:** `vidcut seek 1m && vidcut screenshot -o shot.png` shows exactly what `vidcut frame --at 1m -o f.png` renders. Both are frame-exact.
+- **Exporting alongside the human:** `vidcut export out.mp4 --background` returns at once; the export shows in the GUI's Jobs window, and `vidcut jobs wait j1` blocks until it's done. An export the human starts from Quick Export is a job too, so `vidcut jobs` sees it.
 - **Source marks and clipboard work headless too:**
   - `vidcut media marks m1 --in 5s --out 10s`: edits without `--range` then use these marks.
   - `vidcut edit copy c3 --json`, then `vidcut edit paste --clips @clips.json --at 1m`.

@@ -96,6 +96,9 @@ pub struct Workspace {
     pub(super) trim_editor: Option<i64>,
     /// Exact frames for the Trim Editor (created on first use).
     pub(super) stills: Option<super::stills::Stills>,
+    /// Quick Export, the Export dialog, jobs and timeline interchange.
+    pub(super) export: super::export::ExportUi,
+    pub(super) dialogs: Arc<dyn super::export::Dialogs>,
 }
 
 impl Workspace {
@@ -125,7 +128,28 @@ impl Workspace {
             },
             trim_editor: None,
             stills: None,
+            export: Default::default(),
+            dialogs: Arc::new(super::export::RfdDialogs),
         }
+    }
+
+    /// Opens a window (`gui.show`).
+    pub fn show_panel(&mut self, panel: vidcut_core::request::GuiPanel, ctx: &egui::Context) {
+        use vidcut_core::request::GuiPanel;
+        if self.project().is_none() && matches!(panel, GuiPanel::QuickExport | GuiPanel::Export) {
+            return;
+        }
+        match panel {
+            GuiPanel::QuickExport => self.open_quick_export(ctx),
+            GuiPanel::Export => self.open_export(ctx),
+            GuiPanel::Jobs => self.export.show_jobs = true,
+            GuiPanel::Log => self.show_log = true,
+        }
+    }
+
+    /// Replaces the file dialogs (tests answer them themselves).
+    pub fn set_dialogs(&mut self, dialogs: Arc<dyn super::export::Dialogs>) {
+        self.dialogs = dialogs;
     }
 
     /// Where the timelines were drawn last frame (for tests).
@@ -333,11 +357,34 @@ impl Workspace {
                     }
                 });
                 ui.separator();
+                let open = self.project().is_some();
                 if ui
-                    .add_enabled(self.project().is_some(), egui::Button::new("Import Media…"))
+                    .add_enabled(open, egui::Button::new("Import Media…"))
                     .clicked()
                 {
                     self.import_media();
+                }
+                if ui
+                    .add_enabled(open, egui::Button::new("Import Timeline (OTIO)…"))
+                    .clicked()
+                {
+                    self.import_timeline(ui.ctx());
+                }
+                if ui
+                    .add_enabled(open, egui::Button::new("Export Timeline (OTIO)…"))
+                    .clicked()
+                {
+                    self.export_timeline(ui.ctx());
+                }
+                ui.separator();
+                if ui
+                    .add_enabled(open, egui::Button::new("Quick Export…"))
+                    .clicked()
+                {
+                    self.open_quick_export(ui.ctx());
+                }
+                if ui.add_enabled(open, egui::Button::new("Export…")).clicked() {
+                    self.open_export(ui.ctx());
                 }
                 ui.separator();
                 if ui.button("Quit").clicked() {
@@ -382,9 +429,31 @@ impl Workspace {
                 if ui.button("Import").on_hover_text("Ctrl+I").clicked() {
                     self.import_media();
                 }
+                if ui
+                    .button("Quick Export")
+                    .on_hover_text("Export the In–Out range, or the whole timeline, with a preset")
+                    .clicked()
+                {
+                    self.open_quick_export(ui.ctx());
+                }
+                if ui
+                    .button("Export")
+                    .on_hover_text("All export settings")
+                    .clicked()
+                {
+                    self.open_export(ui.ctx());
+                }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.toggle_value(&mut self.show_log, "Command log");
+                let running = self.snap.jobs.iter().filter(|j| j.running()).count();
+                let jobs = if running > 0 {
+                    format!("Jobs ({running})")
+                } else {
+                    "Jobs".to_string()
+                };
+                ui.toggle_value(&mut self.export.show_jobs, jobs)
+                    .on_hover_text("Exports, with progress");
                 if let Some(e) = &self.snap.preview_error {
                     ui.label(RichText::new("no preview").color(theme::ERROR))
                         .on_hover_text(e);
@@ -922,6 +991,7 @@ impl Workspace {
         }
         self.sync_textures(&ctx);
         self.keys(&ctx);
+        self.export_windows(&ctx);
         egui::Panel::top("top")
             .frame(egui::Frame::new().fill(theme::BG).inner_margin(4))
             .show(ui, |ui| self.top_bar(ui));

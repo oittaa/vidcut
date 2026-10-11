@@ -3,6 +3,7 @@
 //! docs/decisions/gui.md.
 
 mod app;
+pub mod export;
 mod pool;
 mod stills;
 mod theme;

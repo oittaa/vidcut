@@ -62,6 +62,8 @@ pub fn run_with(
                     "description": p.description,
                     "quick_export": p.quick_export,
                     "container": p.settings.container,
+                    "user": export::is_user_preset(&p.name),
+                    "settings": p.settings,
                 }))
                 .collect::<Vec<_>>()
         )),
@@ -72,8 +74,49 @@ pub fn run_with(
                 .ok_or_else(|| Error::not_found(format!("no preset {name:?}")))?;
             answer(serde_json::to_value(p).map_err(|e| Error::internal(e.to_string()))?)
         }
+        Request::PresetsSave {
+            name,
+            title,
+            description,
+            quick_export,
+            settings,
+            from,
+            set,
+            overwrite,
+        } => answer(export::save_preset(&export::PresetSave {
+            name,
+            title: title.as_deref(),
+            description: description.as_deref(),
+            quick_export: *quick_export,
+            settings: settings.as_ref(),
+            from: from.as_deref(),
+            set,
+            overwrite: *overwrite,
+        })?),
+        Request::PresetsDelete { name } => answer(export::delete_preset(name)?),
         Request::EncodersList { refresh } => answer(json!(export::availability(*refresh))),
-        Request::ExportPlan(params) | Request::ExportStart(params) => {
+        Request::ExportStart(params) if params.background => {
+            return Err(Error::no_instance(
+                "background exports run in a vidcut GUI (they would stop with this \
+                 process); start one with `vidcut -p FILE`, or export without background",
+            ));
+        }
+        Request::ExportPlan(params) | Request::ExportStart(params)
+            if export::is_otio(&params.output) =>
+        {
+            let store = open(project)?;
+            let name = store
+                .path()
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let editor = store.load()?;
+            let write = matches!(envelope.request, Request::ExportStart(_));
+            let mut r = answer(export::otio(editor.project(), &name, params, None, write)?);
+            r.rev = editor.project().rev;
+            r
+        }
+        Request::ExportPlan(params) => {
             let editor = open(project)?.load()?;
             let p = editor.project();
             let prepared = export::prepare(p, params, None)?;
@@ -82,19 +125,11 @@ pub fn run_with(
             } else {
                 Default::default()
             };
-            let mut r = answer(if matches!(envelope.request, Request::ExportPlan(_)) {
-                export::describe(&prepared, &available)
-            } else {
-                let count = prepared.outputs.len();
-                let reports =
-                    export::run(&prepared, &available, hooks.cancel, &mut |i, path, pr| {
-                        (hooks.progress)(i, count, path, pr)
-                    })?;
-                json!({ "outputs": reports })
-            });
+            let mut r = answer(export::describe(&prepared, &available));
             r.rev = p.rev;
             r
         }
+        Request::ExportStart(params) => export_media(&open(project)?, params, hooks, &mut |_| {})?,
         Request::FrameRender {
             at,
             out,
@@ -132,6 +167,38 @@ pub fn run_with(
     };
     response.via = "headless".into();
     Ok(response)
+}
+
+/// Exports media: prepares the export, tells `started` the files it will
+/// write and their lengths in frames, then encodes them.
+pub fn export_media(
+    store: &Store,
+    params: &vidcut_core::request::ExportParams,
+    hooks: &mut Hooks<'_>,
+    started: &mut dyn FnMut(Vec<(std::path::PathBuf, i64)>),
+) -> Result<Response> {
+    let editor = store.load()?;
+    let p = editor.project();
+    let prepared = export::prepare(p, params, None)?;
+    let available = if export::needs_gpu_info(&prepared.settings) {
+        export::availability(false)
+    } else {
+        Default::default()
+    };
+    started(
+        prepared
+            .outputs
+            .iter()
+            .map(|o| (o.path.clone(), o.plan.frames))
+            .collect(),
+    );
+    let count = prepared.outputs.len();
+    let reports = export::run(&prepared, &available, hooks.cancel, &mut |i, path, pr| {
+        (hooks.progress)(i, count, path, pr)
+    })?;
+    let mut r = answer(json!({ "outputs": reports }));
+    r.rev = p.rev;
+    Ok(r)
 }
 
 fn answer(result: Value) -> Response {

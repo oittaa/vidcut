@@ -91,9 +91,10 @@ pub enum Command {
     #[command(subcommand)]
     Markers(MarkersCmd),
     /// Export the timeline (In–Out if both marks are set, else all of it).
-    /// With --dry-run, print the plan instead.
+    /// With --dry-run, print the plan instead. A `.otio` output writes the
+    /// edit as OpenTimelineIO (the whole timeline unless --range).
     #[command(
-        after_help = "Examples:\n  vidcut export out.mp4\n  vidcut export out.mp4 --preset youtube-1080p --encoder nvenc\n  vidcut export cut.mov --range 1m..2m --set video.quality=14\n  vidcut export clips/ --per-clip --preset prores-422hq\n  vidcut export voice.wav --audio-only"
+        after_help = "Examples:\n  vidcut export out.mp4\n  vidcut export out.mp4 --preset youtube-1080p --encoder nvenc\n  vidcut export cut.mov --range 1m..2m --set video.quality=14\n  vidcut export clips/ --per-clip --preset prores-422hq\n  vidcut export voice.wav --audio-only\n  vidcut export cut.otio\n  vidcut export out.mp4 --background && vidcut jobs wait j1"
     )]
     Export {
         /// Output file (a directory with --per-clip). The extension picks the container.
@@ -122,6 +123,28 @@ pub enum Command {
         /// Replace existing files.
         #[arg(long)]
         overwrite: bool,
+        /// Return a job id at once (a running GUI exports; see `vidcut jobs`).
+        #[arg(long)]
+        background: bool,
+    },
+    /// Import an OpenTimelineIO timeline (.otio): media join the pool, clips
+    /// go after the last clip (or replace the timeline).
+    #[command(
+        after_help = "Examples:\n  vidcut new cut.vidcut && vidcut -p cut.vidcut import resolve-cut.otio\n  vidcut -p cut.vidcut import cut.otio --replace --search /mnt/footage"
+    )]
+    Import {
+        file: PathBuf,
+        /// Replace the timeline's clips, markers and marks.
+        #[arg(long)]
+        replace: bool,
+        /// Look for missing media by file name in this directory (repeatable).
+        #[arg(long, value_name = "DIR")]
+        search: Vec<PathBuf>,
+    },
+    /// Export jobs of the running GUI: list them, or get, wait for or cancel one.
+    Jobs {
+        #[command(subcommand)]
+        cmd: Option<JobsCmd>,
     },
     /// Render one frame as PNG (the timeline, or a media item with --media).
     Frame {
@@ -135,8 +158,14 @@ pub enum Command {
         #[arg(long)]
         width: Option<u32>,
     },
-    /// List export presets, or show one.
-    Presets { name: Option<String> },
+    /// List export presets, show one, or save and delete your own.
+    #[command(args_conflicts_with_subcommands = true)]
+    Presets {
+        #[command(subcommand)]
+        cmd: Option<PresetsCmd>,
+        /// Show this preset.
+        name: Option<String>,
+    },
     /// Which GPU encoders work here (cached).
     Encoders {
         /// Test again instead of using the cache.
@@ -264,6 +293,59 @@ pub enum Command {
     },
     /// Close the GUI.
     Quit,
+    /// Open a window in the GUI: quick-export, export, jobs or log.
+    Show { panel: String },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum JobsCmd {
+    /// List jobs, oldest first.
+    #[command(visible_alias = "ls")]
+    List,
+    /// One job's state and progress.
+    Get { job: String },
+    /// Wait until a job ends; fails like the job did.
+    Wait {
+        job: String,
+        /// Give up after this many seconds.
+        #[arg(long)]
+        timeout: Option<f64>,
+    },
+    /// Cancel a running job.
+    Cancel { job: String },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PresetsCmd {
+    /// Save a user preset (~/.config/vidcut/presets/NAME.toml).
+    #[command(
+        after_help = "Examples:\n  vidcut presets save web --from youtube-1080p --set video.quality=22 --quick-export\n  vidcut presets save master --settings @settings.json --title \"Our master\""
+    )]
+    Save {
+        name: String,
+        /// Start from this preset.
+        #[arg(long, conflicts_with = "settings")]
+        from: Option<String>,
+        /// Full settings as JSON (inline, @FILE or - for stdin).
+        #[arg(long)]
+        settings: Option<String>,
+        /// Override a setting, e.g. video.quality=20 (repeatable).
+        #[arg(long = "set", value_name = "KEY=VALUE")]
+        set: Vec<String>,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
+        /// Show it in Quick Export.
+        #[arg(long)]
+        quick_export: bool,
+        /// Replace an existing preset of that name.
+        #[arg(long)]
+        overwrite: bool,
+    },
+    /// Delete a user preset.
+    #[command(visible_alias = "rm")]
+    Delete { name: String },
 }
 
 #[derive(Args, Debug)]
@@ -928,6 +1010,7 @@ impl Cli {
                 encoder,
                 name,
                 overwrite,
+                background,
             } => req(
                 if self.dry_run {
                     "export.plan"
@@ -935,8 +1018,26 @@ impl Cli {
                     "export.start"
                 },
                 json!({ "output": absolute(std::slice::from_ref(output))?[0], "preset": preset, "set": set, "range": range, "per_clip": per_clip,
-                        "audio_only": audio_only, "encoder": encoder, "name": name, "overwrite": overwrite }),
+                        "audio_only": audio_only, "encoder": encoder, "name": name, "overwrite": overwrite,
+                        "background": *background && !self.dry_run }),
             )?,
+            Command::Import {
+                file,
+                replace,
+                search,
+            } => req(
+                "timeline.import",
+                json!({ "path": absolute(std::slice::from_ref(file))?[0], "replace": replace,
+                        "search": absolute(search)? }),
+            )?,
+            Command::Jobs { cmd } => match cmd {
+                None | Some(JobsCmd::List) => req("jobs.list", json!({}))?,
+                Some(JobsCmd::Get { job }) => req("jobs.get", json!({ "job": job }))?,
+                Some(JobsCmd::Wait { job, timeout }) => {
+                    req("jobs.wait", json!({ "job": job, "timeout": timeout }))?
+                }
+                Some(JobsCmd::Cancel { job }) => req("jobs.cancel", json!({ "job": job }))?,
+            },
             Command::Frame {
                 at,
                 out,
@@ -949,9 +1050,33 @@ impl Cli {
                     json!({ "at": time(at), "out": out, "media": media, "width": width }),
                 )?
             }
-            Command::Presets { name } => match name {
-                Some(n) => req("presets.get", json!({ "name": n }))?,
-                None => req("presets.list", json!({}))?,
+            Command::Presets { cmd, name } => match (cmd, name) {
+                (
+                    Some(PresetsCmd::Save {
+                        name,
+                        from,
+                        settings,
+                        set,
+                        title,
+                        description,
+                        quick_export,
+                        overwrite,
+                    }),
+                    _,
+                ) => {
+                    let settings = settings.as_deref().map(read_json_arg).transpose()?;
+                    req(
+                        "presets.save",
+                        json!({ "name": name, "from": from, "settings": settings, "set": set,
+                                "title": title, "description": description,
+                                "quick_export": quick_export, "overwrite": overwrite }),
+                    )?
+                }
+                (Some(PresetsCmd::Delete { name }), _) => {
+                    req("presets.delete", json!({ "name": name }))?
+                }
+                (None, Some(n)) => req("presets.get", json!({ "name": n }))?,
+                (None, None) => req("presets.list", json!({}))?,
             },
             Command::Encoders { refresh } => req("encoders.list", json!({ "refresh": refresh }))?,
             Command::Undo { steps } => req("history.undo", json!({ "steps": steps }))?,
@@ -1041,6 +1166,7 @@ impl Cli {
                 )?
             }
             Command::Quit => req("gui.quit", json!({}))?,
+            Command::Show { panel } => req("gui.show", json!({ "panel": panel }))?,
         };
         Ok(Some(Action::Run(self.envelope(request))))
     }

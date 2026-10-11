@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, Media, MediaInfo, Project};
+use crate::model::{Clip, ClipAudio, Media, MediaInfo, Project, VideoInfo};
 use crate::ops::{self, ClipProps, Edge, Source};
+use crate::otio;
 use crate::request::{Changes, ClipRef, Envelope, ProjectSet, Request, Response, SourceParams};
 use crate::time::{Rational, TimeContext, TimeSpec, format_timecode};
 use crate::validate;
@@ -26,6 +27,47 @@ pub struct ProbedMedia {
 pub trait Env {
     /// Probes a media file.
     fn probe(&self, path: &Path) -> Result<ProbedMedia>;
+
+    /// Files named `name` in `dirs` or their subfolders, nearest first: how
+    /// an import finds media that moved (Resolve searches subfolders too,
+    /// p. 530).
+    fn find_file(&self, dirs: &[PathBuf], name: &std::ffi::OsStr) -> Vec<PathBuf> {
+        let mut found = Vec::new();
+        for dir in dirs {
+            let mut queue = std::collections::VecDeque::from([(dir.clone(), 0)]);
+            while let Some((d, depth)) = queue.pop_front() {
+                let Ok(entries) = std::fs::read_dir(&d) else {
+                    continue;
+                };
+                let mut subdirs = Vec::new();
+                for e in entries.flatten() {
+                    let is_dir = e.file_type().is_ok_and(|t| t.is_dir());
+                    if !is_dir && e.file_name() == name {
+                        found.push(e.path());
+                    } else if is_dir
+                        && depth < 8
+                        && !e.file_name().to_string_lossy().starts_with('.')
+                    {
+                        subdirs.push(e.path());
+                    }
+                }
+                subdirs.sort();
+                queue.extend(subdirs.into_iter().map(|p| (p, depth + 1)));
+            }
+        }
+        found
+    }
+
+    /// Reads a text file (an `.otio` file to import).
+    fn read_text(&self, path: &Path) -> Result<String> {
+        std::fs::read_to_string(path).map_err(|e| {
+            let message = format!("{}: {e}", path.display());
+            match e.kind() {
+                std::io::ErrorKind::NotFound => Error::not_found(message),
+                _ => Error::usage(message),
+            }
+        })
+    }
 }
 
 /// One undo step: the project as it was before a change.
@@ -363,42 +405,7 @@ fn mutate(
         Request::MediaAdd { paths } => {
             let mut ids = Vec::new();
             for path in paths {
-                let probed = env.probe(path)?;
-                if let Some(existing) = p.media.iter().find(|m| m.path == probed.path) {
-                    ids.push(existing.id.clone());
-                    continue;
-                }
-                if p.settings.auto_format
-                    && let Some(v) = &probed.info.video
-                {
-                    // The first video sets the project format (the Cut page
-                    // offers this on the first import, p. 654).
-                    p.settings.fps = v.fps;
-                    let sar = if v.sar[0] > 0 && v.sar[1] > 0 {
-                        f64::from(v.sar[0]) / f64::from(v.sar[1])
-                    } else {
-                        1.0
-                    };
-                    p.settings.width = ((f64::from(v.width) * sar).round() as u32).max(2) & !1;
-                    p.settings.height = v.height & !1;
-                    p.settings.auto_format = false;
-                }
-                let id = p.alloc_media_id();
-                let name = probed
-                    .path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| id.clone());
-                p.media.push(Media {
-                    id: id.clone(),
-                    path: probed.path,
-                    name,
-                    size: probed.size,
-                    mtime_ns: probed.mtime_ns,
-                    info: probed.info,
-                    marks: Default::default(),
-                });
-                ids.push(id);
+                ids.push(add_media(p, env.probe(path)?));
             }
             json!({ "media": ids })
         }
@@ -710,6 +717,12 @@ fn mutate(
             ops::remove_marker(p, marker)?;
             Value::Null
         }
+        Request::TimelineImport {
+            path,
+            otio,
+            replace,
+            search,
+        } => import_timeline(p, path.as_deref(), otio.as_ref(), *replace, search, env)?,
         Request::Apply { commands, .. } => {
             let mut results = Vec::new();
             for (i, cmd) in commands.iter().enumerate() {
@@ -745,6 +758,300 @@ fn mutate(
             )));
         }
     })
+}
+
+/// Adds probed media to the pool (or finds it there); returns its id.
+fn add_media(p: &mut Project, probed: ProbedMedia) -> String {
+    if let Some(existing) = p.media.iter().find(|m| m.path == probed.path) {
+        return existing.id.clone();
+    }
+    if p.settings.auto_format
+        && let Some(v) = &probed.info.video
+    {
+        // The first video sets the project format (the Cut page offers this
+        // on the first import, p. 654).
+        p.settings.fps = v.fps;
+        adopt_size(p, v);
+    }
+    let id = p.alloc_media_id();
+    let name = probed
+        .path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| id.clone());
+    p.media.push(Media {
+        id: id.clone(),
+        path: probed.path,
+        name,
+        size: probed.size,
+        mtime_ns: probed.mtime_ns,
+        info: probed.info,
+        marks: Default::default(),
+    });
+    id
+}
+
+/// Takes the frame size of `v` (square pixels, even) and fixes the format.
+fn adopt_size(p: &mut Project, v: &VideoInfo) {
+    let sar = if v.sar[0] > 0 && v.sar[1] > 0 {
+        f64::from(v.sar[0]) / f64::from(v.sar[1])
+    } else {
+        1.0
+    };
+    p.settings.width = ((f64::from(v.width) * sar).round() as u32).max(2) & !1;
+    p.settings.height = v.height & !1;
+    p.settings.auto_format = false;
+}
+
+/// Frame `f` at rate `from` as the nearest frame at rate `to`.
+fn rescale(f: i64, from: Rational, to: Rational) -> i64 {
+    if from == to {
+        return f;
+    }
+    let n = i128::from(f) * i128::from(from.den()) * i128::from(to.num());
+    let d = i128::from(from.num()) * i128::from(to.den());
+    (2 * n + d).div_euclid(2 * d) as i64
+}
+
+/// `timeline.import`: an OpenTimelineIO timeline onto V1 ([`otio`]).
+fn import_timeline(
+    p: &mut Project,
+    path: Option<&Path>,
+    doc: Option<&Value>,
+    replace: bool,
+    search: &[PathBuf],
+    env: &dyn Env,
+) -> Result<Value> {
+    let read;
+    let doc = match (path, doc) {
+        (Some(path), None) => {
+            read = serde_json::from_str::<Value>(&env.read_text(path)?).map_err(|e| {
+                Error::usage(format!("{}: not an OTIO (JSON) file: {e}", path.display()))
+            })?;
+            &read
+        }
+        (None, Some(doc)) => doc,
+        _ => {
+            return Err(Error::usage(
+                "timeline.import needs exactly one of `path` and `otio`",
+            ));
+        }
+    };
+    let t = otio::import(doc)?;
+    if t.clips.is_empty() {
+        return Err(Error::invalid(format!(
+            "nothing to import: the timeline has no clips with media files{}",
+            if t.warnings.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", t.warnings.join("; "))
+            }
+        )));
+    }
+    let mut warnings = t.warnings.clone();
+
+    // Media: each file probed once, looked for by name in `search` (and
+    // subfolders) if it isn't where the file says.
+    let mut ids: HashMap<PathBuf, String> = HashMap::new();
+    let mut media = Vec::new();
+    let mut missing: Vec<&Path> = Vec::new();
+    for c in &t.clips {
+        if ids.contains_key(&c.path) || missing.contains(&c.path.as_path()) {
+            continue;
+        }
+        let probed = env.probe(&c.path).or_else(|e| {
+            c.path
+                .file_name()
+                .and_then(|name| {
+                    env.find_file(search, name)
+                        .iter()
+                        .find_map(|p| env.probe(p).ok())
+                })
+                .ok_or(e)
+        });
+        match probed {
+            Ok(m) => {
+                let id = add_media(p, m);
+                if !media.contains(&id) {
+                    media.push(id.clone());
+                }
+                ids.insert(c.path.clone(), id);
+            }
+            Err(_) => missing.push(&c.path),
+        }
+    }
+    if !missing.is_empty() {
+        return Err(Error::media(format!(
+            "{} media file(s) not found: {}{}",
+            missing.len(),
+            missing
+                .iter()
+                .map(|m| m.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+            if search.is_empty() {
+                "; pass `search` folders to look for them by name (subfolders too)"
+            } else {
+                ""
+            }
+        )));
+    }
+
+    if replace {
+        for track in &mut p.tracks {
+            track.clips.clear();
+        }
+        p.markers.clear();
+        p.marks = Default::default();
+    }
+    // An empty timeline takes the file's rate and start timecode; otherwise
+    // positions are converted to the project's rate.
+    let empty = p.tracks.iter().all(|t| t.clips.is_empty());
+    let from = t.fps;
+    if empty {
+        if p.settings.auto_format
+            && let Some(v) = t
+                .clips
+                .iter()
+                .find_map(|c| p.media(&ids[&c.path])?.info.video.clone())
+        {
+            adopt_size(p, &v);
+        }
+        p.settings.fps = t.fps;
+        p.settings.start_tc = t.start_tc;
+        p.settings.auto_format = false;
+    } else if t.fps != p.settings.fps {
+        warnings.push(format!(
+            "converted from {} to the project's {} fps: cuts may move by up to half a frame",
+            t.fps, p.settings.fps
+        ));
+    }
+    let to = p.settings.fps;
+    let conv = |f: i64| rescale(f, from, to);
+    let offset = if empty { 0 } else { p.end() };
+    let v1 = p
+        .track(ops::MAIN)
+        .ok_or_else(|| Error::internal("no V1 track"))?;
+    let mut audio_floor = v1
+        .clips
+        .iter()
+        .filter_map(|c| c.audio_range().map(|r| r.1))
+        .max()
+        .unwrap_or(0);
+
+    let mut clips = Vec::new();
+    for c in &t.clips {
+        let m = p.media(&ids[&c.path]).expect("added").clone();
+        let frames = p.media_frames(&m);
+        let label = if c.name.is_empty() { &m.name } else { &c.name };
+        let mut start = offset + conv(c.start);
+        let end = offset + conv(c.end());
+        let mut source_in = conv(c.source_in);
+        if c.video && m.info.video.is_none() {
+            warnings.push(format!("{label}: {} has no video; left out", m.name));
+            continue;
+        }
+        // Keep to the media (rates and rounding may differ by a frame).
+        if source_in < 0 {
+            warnings.push(format!(
+                "{label}: {} frame(s) before the start of {} were left out",
+                -source_in, m.name
+            ));
+            start -= source_in;
+            source_in = 0;
+        }
+        let duration = (end - start).min(frames - source_in);
+        if duration < end - start {
+            warnings.push(format!(
+                "{label}: {} frame(s) past the end of {} were left out",
+                end - start - duration.max(0),
+                m.name
+            ));
+        }
+        if duration < 1 {
+            continue;
+        }
+        // The audio's timeline range, then as offsets from the video edges.
+        let audio = match (c.audio, t.has_audio_tracks) {
+            (Some((h, tl)), _) => Some((
+                offset + conv(c.start + h) - start,
+                offset + conv(c.end() + tl) - (start + duration),
+            )),
+            // No audio tracks in the file: clips bring their media's audio.
+            (None, false) => Some((0, 0)),
+            (None, true) => None,
+        };
+        let audio = audio
+            .filter(|_| !m.info.audio.is_empty())
+            .and_then(|(h, tl)| {
+                let h = h.max(-source_in).max(audio_floor - start);
+                let tl = tl.min(frames - source_in - duration);
+                (duration + tl - h >= 1).then_some(ClipAudio {
+                    stream: if (c.stream as usize) < m.info.audio.len() {
+                        c.stream
+                    } else {
+                        0
+                    },
+                    head: h,
+                    tail: tl,
+                    gain_db: c.gain_db,
+                    muted: c.muted,
+                })
+            });
+        if !c.video && audio.is_none() {
+            warnings.push(format!("{label}: {} has no audio; left out", m.name));
+            continue;
+        }
+        if let Some(a) = &audio {
+            audio_floor = start + duration + a.tail;
+        }
+        let name = (!c.name.is_empty()
+            && c.name != m.name
+            && Some(c.name.as_str()) != c.path.file_name().and_then(|n| n.to_str()))
+        .then(|| c.name.clone());
+        let id = p.alloc_clip_id();
+        clips.push(id.clone());
+        let track = p.track_mut(ops::MAIN).expect("checked");
+        track.clips.push(Clip {
+            id,
+            media: m.id.clone(),
+            start,
+            duration,
+            source_in,
+            video: c.video,
+            audio,
+            enabled: c.enabled,
+            name,
+        });
+        track.sort();
+    }
+    let mut markers = Vec::new();
+    for k in &t.markers {
+        markers.push(ops::add_marker(
+            p,
+            offset + conv(k.at),
+            k.name.clone(),
+            Some(k.color.clone()),
+            k.note.clone(),
+        )?);
+    }
+    if empty {
+        let (i, o) = (t.marks.mark_in.map(conv), t.marks.mark_out.map(conv));
+        if !matches!((i, o), (Some(i), Some(o)) if i >= o) {
+            p.marks = crate::model::Marks {
+                mark_in: i.filter(|&i| i >= 0),
+                mark_out: o.filter(|&o| o > 0),
+            };
+        }
+    }
+    Ok(json!({
+        "name": t.name,
+        "fps": p.settings.fps,
+        "clips": clips,
+        "media": media,
+        "markers": markers,
+        "warnings": warnings,
+    }))
 }
 
 fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
@@ -902,6 +1209,8 @@ pub fn query(
         | Request::FrameRender { .. }
         | Request::PresetsList {}
         | Request::PresetsGet { .. }
+        | Request::PresetsSave { .. }
+        | Request::PresetsDelete { .. }
         | Request::EncodersList { .. } => {
             return Err(Error::internal(format!(
                 "{} is answered by the session, not the editor",

@@ -20,13 +20,17 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 - **Why:** simplicity for a cutting tool, and an obvious mapping for scripts. Several timelines means several project files that share media.
 
 ## X3. Export dialog beyond Quick Export
-- **Resolve:** the Cut page has Quick Export only, writing a single file. Full render settings and "Individual clips" live on the Deliver page (Ch. 39, pp. 788–790).
-- **vidcut:** Quick Export behaves as in Resolve. An additional Export dialog provides:
-  - full codec and container settings
+- **Resolve:** the Cut page has Quick Export only, writing a single file. Full render settings and "Individual clips" live on the Deliver page (Ch. 39, pp. 788–790), and finished renders are tracked in the Deliver page's Render Queue.
+- **vidcut:** Quick Export behaves as in Resolve: a row of presets, Export, a file dialog, then a progress window (Cancel, or Hide to keep it running). The preset tiles show the preset's name and format rather than brand logos. An additional Export dialog provides:
+  - full codec and container settings, starting from any preset
   - GPU encoder choice
-  - per-clip export
-  - audio-only export
-- **Why:** vidcut has no Deliver page, and the user requires these export options.
+  - range (whole timeline, In–Out, or typed), per-clip export with file-name templates, audio-only export
+  - a live plan (`export.plan`: the encoder that will run, the files and their lengths) before anything is written
+  - the same export as a shell command, ready to copy
+  - saving the settings as a user preset, optionally added to Quick Export (p. 790)
+
+  Every export is a job: a Jobs window lists them with progress, ETA and Cancel, including exports started from the CLI. Quitting while exports run asks first.
+- **Why:** vidcut has no Deliver page, and the user requires these export options. The plan and the command make every GUI export reproducible from a script.
 
 ## X4. Undo history persists across sessions and CLI runs
 - **Resolve:** undo is unlimited within a session and cleared when the project closes (p. 651).
@@ -42,6 +46,9 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 - **Clipboard as data:** `edit.copy` returns the clips as JSON, and `edit.paste --clips` pastes such JSON into any project. In the GUI, Ctrl+C also puts that JSON on the system clipboard.
 - **API parameters for scripted edits:** `edit.overwrite`/`edit.ripple_overwrite` take `use_marks: false` to place by position (what a drag and drop does), `edit.change_duration` takes `end`, and `track.set`/`markers.set` cover the track header buttons and the marker dialog.
 - **Persistent source marks:** a media item's In/Out (`media.marks.set`) are saved in the project and used by edits without a range. Resolve remembers per-clip marks too (decision D6), and this makes them scriptable.
+- **Export jobs** (M5): `export --background` returns a job id at once in a running GUI, and `jobs list|get|wait|cancel` follow it. Foreground exports report progress and cancel when the client disconnects. `export.plan` (`export --dry-run`) describes an export without writing anything.
+- **User presets from scripts:** `presets save` (from settings or from another preset with `--set` overrides) and `presets delete`.
+- **`gui.show`** opens Quick Export, the Export dialog, Jobs or the command log for the person at the GUI.
 
 ## X6. Flat media pool in v1
 - **Resolve:** nested bins and a breadcrumb (pp. 655–656).
@@ -59,3 +66,13 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
   - A 23.976 clip in a 30 fps project steps the way it will appear in the timeline: nearest-frame sampling, as export does.
   - Embedded start timecodes are not shown (yet).
 - **Why:** vidcut stores every position, including `source_in` and source marks, in project frames ([cut-page-spec.md](cut-page-spec.md), time model). One unit everywhere means what you mark is exactly what lands in the timeline and in the export. The source viewer plays through the same EDL code as the timeline, so the preview matches export frame for frame.
+
+## X9. OpenTimelineIO interchange
+- **Resolve:** timelines move between applications as EDL, AAF, XML or OTIO files, imported with File > Import Timeline and exported from File > Export (pp. 527–530, 4159–4160). An import creates a new timeline, can apply the file's frame rate to the project, and asks for a folder (searched with its subfolders) when media isn't where the file says. None of this is on the Cut page.
+- **vidcut:** OpenTimelineIO only, both ways (`otio.rs`):
+  - `vidcut export cut.otio` (or File > Export Timeline) writes the timeline: V1 as a video track, the clips' audio as an audio track (J/L cuts become audio clips offset from the video edits), markers, and the In/Out marks and clip gain/mute in `metadata.vidcut`. Media are referenced by absolute `file://` URL. Unlike media exports it covers the whole timeline unless given a range.
+  - `vidcut import cut.otio` (or File > Import Timeline) adds the media to the pool and puts the first video track, with the audio that belongs to its clips, on V1. One project holds one timeline (X2), so the import goes after the last clip, or replaces the timeline with `--replace`; the GUI asks which. An empty timeline takes the file's frame rate and start timecode. Media that moved are found by name with `--search FOLDER` (subfolders too), and the GUI asks for that folder.
+  - Accepts what Resolve writes: `Clip.1`, source ranges in media timecode, float rates (snapped to exact rationals such as 24000/1001).
+  - Left out, with a warning each: transitions (cuts instead), more video tracks and audio-only tracks (until M6), nested stacks, generators. `.otioz` bundles aren't read.
+  - Export → import reproduces a timeline frame for frame (`tests/cli.rs`, `otio.rs` tests).
+- **Why:** the user's choice. OTIO is an open standard that Resolve and other editors read and write, so a cut can move to a finishing tool and back, and agents can write timelines in a documented format instead of vidcut's own.

@@ -1,11 +1,12 @@
 # GUI and live control: decisions from M3
 
-**Status:** accepted (M3, October 2026).
+**Status:** accepted (M3, October 2026); §8 added in M4, §9 in M5.
 
 **Evidence** (all rerunnable):
 - [`crates/vidcut/tests/live.rs`](../../crates/vidcut/tests/live.rs): the live session with software-rendered players and no window. Covers frame-exact seeks at every boundary, the source viewers, the clipboard, edits from other processes, and errors.
 - [`crates/vidcut/tests/gui.rs`](../../crates/vidcut/tests/gui.rs) (`--features vidcut/gui-tests`, needs a display): the real GUI driven through the CLI. Covers edit latency, screenshot vs `vidcut frame`, and a minimized window.
 - `ipc::tests` in [`crates/vidcut/src/ipc/mod.rs`](../../crates/vidcut/src/ipc/mod.rs): the JSON-RPC wire format.
+- [`crates/vidcut/tests/jobs.rs`](../../crates/vidcut/tests/jobs.rs) and [`gui_export.rs`](../../crates/vidcut/tests/gui_export.rs): export jobs, and the export windows under simulated input (§9).
 
 ## 1. Threads
 
@@ -15,7 +16,7 @@
 | **Session** (`live`) | the open project, both mpv client handles, viewer/selection/clipboard state, the command log | touch GL |
 | **IPC** | one listener plus one thread per connection | anything but forward requests and wait for answers |
 | **Workers** (2) | thumbnails, preview remuxes, tail checks and patches | touch shared state (they report back by message) |
-| **Tasks** | one thread per export, frame render, screenshot encode or project-less request | touch the session's state |
+| **Tasks** | one thread per export job, frame render, screenshot encode or project-less request | touch the session's state |
 
 **How they talk:**
 - **One inbox.** Everyone talks to the session through one `mpsc` inbox (`Handle`).
@@ -33,7 +34,7 @@ Every action is a [`Request`](../../crates/vidcut-core/src/request.rs), the same
 **Kinds of request:**
 - **Project requests** go through the project's `Editor`, exactly as headless.
 - **Live-only requests** act on the session: `viewer.*`, `player.*`, `selection.*`, `gui.*` and `project.open`. Run headless, they fail with `NO_INSTANCE`.
-- **Slow requests** run as tasks on a copy of the project: `export.*`, `frame.render`, and project-less ones such as `encoders.list`. Export progress is streamed to the client, and closing the connection cancels the export.
+- **Slow requests** run as tasks on a copy of the project: `export.*`, `frame.render`, and project-less ones such as `encoders.list`. Media exports are jobs (§9).
 
 **Requests that wait** don't block the session. They become entries in a wait list:
 - **`player.seek` and `player.step`** wait until the frame is on screen (§4).
@@ -139,8 +140,30 @@ A seek or load ("motion") is shown when two things have happened:
 
 **The Trim Editor** draws exact frames rendered by the export engine on a background thread (`gui/stills.rs`).
 
-## 9. Still open
+## 9. Export windows and jobs (M5)
 
-- **Pool sort order and bins**, which also set the Source Tape order. They come with M4/M6.
+**Jobs.** Every media export in a running GUI is a job (`live/jobs.rs`), whoever started it:
+- **A thread per job** prepares the export, reports its files and their lengths (`JobPlanned`), then encodes, sending progress about ten times a second. The session keeps each job's state for `jobs.*` and the snapshot.
+- **Foreground** (an IPC client without `background`): progress notifications carry the job id, the reply comes when the job ends, and a closed connection cancels it, as in M3.
+- **Background** (`background: true`, and every GUI export): the reply comes once the files are planned, so mistakes (an unknown preset, an existing file) still fail the request itself. The job goes on without the client.
+- **`jobs.wait`** is a wait-list entry like a seek's (§2), without the 10 s limit unless given a `timeout`; it fails the way the job failed. `jobs.cancel` sets the job's cancel flag, and the engine removes partial files.
+- **Kept:** running jobs and the 50 most recent finished ones.
+- **Closing:** quitting the window while jobs run asks first (`gui.quit` doesn't). The session cancels running jobs on shutdown and waits up to 3 s for them to clean up.
+- `.otio` exports write a small file at once and aren't jobs.
+
+**The windows only send requests:**
+- **Quick Export** (p. 788) lists the presets marked `quick_export`; Export… asks for a file name, then starts a background export and opens its progress window.
+- **The Export dialog** always starts from a preset. What the user changes becomes `--set` overrides of that preset (a JSON diff of the settings), so every GUI export reads as `vidcut export OUT --preset NAME --set …`. The dialog shows that command; `tests/gui_export.rs` parses it with the real CLI parser and checks it makes the same request as the GUI, and that the plan headless equals the plan in the GUI (M5 acceptance).
+- **The plan** is `export.plan`, asked again whenever the params change (one request in flight). Mistakes the dialog can see itself (codec vs container) don't go to the session. Plans never change anything: per-clip folders are made when the export runs.
+- **Asking the session:** windows that need answers (presets, plans, starting an export, imports) call `Handle::call` on a helper thread and poll the result each frame (`Ask`), so the UI never waits. These lookups are left out of the command log, and their errors show in the window instead of the status bar.
+- **File dialogs** run on helper threads behind a `Dialogs` trait; tests answer them directly.
+- **Placement:** windows open near the middle and stay anchored at their top-left, so they don't move while their content changes size.
+- **Timeline interchange** (deviation X9): File > Import Timeline asks Append or Replace when the timeline has clips, and asks for a folder when media aren't found (p. 529). Import warnings show in a window.
+- **`gui.show`** opens any of these windows (or the log) for the person at the GUI, e.g. after an agent prepared an export.
+
+## 10. Still open
+
+- **Pool sort order and bins**, which also set the Source Tape order. They come with M6.
+- **A render queue.** Jobs run side by side; several big exports at once compete for the encoder (NVENC allows a few sessions). Resolve's Deliver page queues renders instead.
 - **Source Tape marks spanning several clips** (decision D17 limits marks to one clip).
 - **Audio meters and monitoring mute** come with the mixer (M6).

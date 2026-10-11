@@ -8,6 +8,7 @@ pub mod error;
 pub mod export;
 pub mod model;
 pub mod ops;
+pub mod otio;
 pub mod preview;
 pub mod render;
 pub mod request;

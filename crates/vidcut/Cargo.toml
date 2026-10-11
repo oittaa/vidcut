@@ -25,6 +25,7 @@ tracing-subscriber.workspace = true
 libc.workspace = true
 notify.workspace = true
 rfd.workspace = true
+shlex.workspace = true
 
 [dev-dependencies]
 egui_kittest.workspace = true

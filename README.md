@@ -9,7 +9,8 @@ A simple, fully scriptable video cutting tool for Linux, modeled on DaVinci Reso
 >   - **M2:** frame-exact export with presets, GPU encoding, ranges, per-clip and audio-only output.
 >   - **M3:** the GUI shell. It has the media pool, the viewer (Source Clip, Source Tape, Timeline), transport and marks, the edit buttons and an overview timeline. It also has live control: CLI commands and agents drive the running GUI.
 >   - **M4:** timeline editing with the mouse. The dual timeline has filmstrips and waveforms. You can drag and drop from the pool, move, trim, roll, slip and make J/L cuts, with snapping, Safe Edit, markers and the Trim Editor.
-> - Next: the export UI and OpenTimelineIO import/export (M5). See the milestones below.
+>   - **M5:** exporting from the GUI: Quick Export, an Export dialog with every setting, and a Jobs window with progress and cancel. Timelines move to and from other editors as OpenTimelineIO.
+> - Next: multi-track (M6). See the milestones below.
 
 ## What it will do
 
@@ -20,8 +21,10 @@ A simple, fully scriptable video cutting tool for Linux, modeled on DaVinci Reso
   - split, ripple delete, trimming (resize, roll, slip, J/L cuts)
   - snapping, markers, undo
 - **Export:**
-  - Quick Export presets (H.264/H.265 Master, ProRes 422 HQ, YouTube, Vimeo, TikTok)
+  - Quick Export presets (H.264/H.265 Master, ProRes 422 HQ, YouTube, Vimeo, TikTok), plus your own
   - an Export dialog with codec settings, GPU encoding (NVENC, VAAPI), In–Out range, per-clip export and audio-only export
+  - exports run in the background, with progress, ETA and cancel
+- **Interchange:** import and export timelines as OpenTimelineIO (`.otio`), which DaVinci Resolve and other editors read and write.
 - **Everything scriptable.** Every action in the GUI is also a CLI command and a JSON-RPC call on the running app, so scripts and AI agents can edit with you.
 - **Deliberately not included:** effects, transitions, titles or color grading.
 
@@ -52,6 +55,8 @@ The layout follows the Cut page:
 - the timeline across the bottom.
 
 Everything you do is listed in the **Command log** (top right) as the request it sent. Click an entry to copy it as a shell command.
+
+**Exporting.** **Quick Export** (top bar) exports the In–Out range, or the whole timeline when no marks are set, with one of the presets shown as tiles. **Export** opens every setting: start from a preset, change the codec, quality, size, range or output, and see the plan (the encoder that will run, the files and their lengths) and the same export as a shell command before you start. Save the settings as your own preset, optionally added to Quick Export. Exports run in the background; **Jobs** (top right) shows their progress and lets you cancel them. **File > Import/Export Timeline** reads and writes OpenTimelineIO files.
 
 | Keys | |
 |---|---|
@@ -87,6 +92,8 @@ vidcut -p talk.vidcut edit split --at 1m          # shows up in the GUI immediat
 vidcut -p talk.vidcut seek 1m                     # moves the GUI's playhead
 vidcut -p talk.vidcut screenshot -o shot.png      # what the viewer shows, frame-exact
 vidcut -p talk.vidcut log                         # what was done, by whom
+vidcut -p talk.vidcut export talk.mp4 --background   # shows in the GUI's Jobs window
+vidcut -p talk.vidcut jobs wait j1                # blocks until that export is done
 ```
 
 ## Try the CLI
@@ -102,6 +109,9 @@ vidcut -p talk.vidcut undo
 vidcut -p talk.vidcut export talk.mp4 --preset youtube-1080p   # GPU-encoded when available
 vidcut -p talk.vidcut export talk.flac                          # audio only
 vidcut -p talk.vidcut frame --at 1m -o check.png                # look at a frame
+vidcut -p talk.vidcut export cut.otio                           # the edit, for another editor
+vidcut new cut2.vidcut && vidcut -p cut2.vidcut import cut.otio  # and back in
+vidcut presets save web --from youtube-1080p --set video.quality=22 --quick-export
 ```
 
 Every command takes `--json` for machine-readable output. `vidcut schema` lists the full protocol. Add `--headless` to work on the file directly even while a GUI has it open.

@@ -13,6 +13,7 @@
 //! its frame is on screen, a screenshot for the picture, an export for the
 //! encoder) reply later, without blocking other requests.
 
+mod jobs;
 mod player;
 mod project;
 pub mod snapshot;
@@ -30,11 +31,12 @@ use vidcut_core::editor::{media_context, resolve_clip};
 use vidcut_core::model::Clip;
 use vidcut_core::preview::{self, Fillers};
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
-use vidcut_core::request::{OneOrMany, ScreenshotTarget, ViewerMode};
+use vidcut_core::request::{GuiPanel, OneOrMany, ScreenshotTarget, ViewerMode};
 use vidcut_core::time::{Keyword, Rational, TimeContext, TimeSpec, format_timecode};
 use vidcut_core::{Envelope, Error, Project, Request, Response, Result};
 use vidcut_mpv::Mpv;
 
+pub use jobs::{JobInfo, JobOutput, JobState};
 pub use player::{debug, mpv_options};
 pub use snapshot::*;
 pub use vidcut_av::thumbs::Image;
@@ -78,6 +80,8 @@ pub trait Renderer: Send + Sync {
     fn window(&self, change: WindowChange);
     /// Close the window (and so the session).
     fn quit(&self);
+    /// Open a window for the person at the GUI.
+    fn show(&self, _panel: GuiPanel) {}
 }
 
 /// A `gui.window` request.
@@ -166,6 +170,21 @@ pub(crate) enum Msg {
     TailRendered {
         key: TailKey,
         result: std::result::Result<(PathBuf, i64), String>,
+    },
+    /// An export job planned its files: paths and lengths in frames.
+    JobPlanned {
+        id: String,
+        outputs: Vec<(PathBuf, i64)>,
+    },
+    JobProgress {
+        id: String,
+        output: usize,
+        frames: i64,
+        total: i64,
+    },
+    JobDone {
+        id: String,
+        result: Result<Response>,
     },
     Shutdown,
 }
@@ -308,6 +327,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         notices: Arc::new(VecDeque::new()),
         thumbs: Arc::new(HashMap::new()),
         waveforms: Arc::new(HashMap::new()),
+        jobs: Arc::new(Vec::new()),
         preview_error: config.preview_error.clone(),
     };
     let shared = Arc::new(Mutex::new(Arc::new(empty)));
@@ -344,6 +364,10 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         remux: HashMap::new(),
         tails: HashMap::new(),
         workers: Workers::new(2),
+        jobs: Arc::new(Vec::new()),
+        job_cancels: HashMap::new(),
+        job_replies: HashMap::new(),
+        next_job: 1,
         waits: Vec::new(),
         next_capture: 1,
         timeline_due: None,
@@ -409,6 +433,8 @@ enum SourceContent {
 enum Until {
     /// Motion `motion` of `player` is on screen.
     Shown { player: PlayerId, motion: u64 },
+    /// Job `id` ended (`jobs.wait`).
+    Job { id: String },
     /// Capture `id` arrives; then it is written to `out`. For a viewer
     /// capture, `player` is the player shown.
     Capture {
@@ -421,11 +447,15 @@ enum Until {
 struct Wait {
     job: Job,
     until: Until,
-    deadline: Instant,
+    /// When to give up (none: `jobs.wait` without a timeout).
+    deadline: Option<Instant>,
 }
 
 /// How long a request may wait for frames or captures.
 const WAIT_LIMIT: Duration = Duration::from_secs(10);
+
+/// Finished jobs kept for `jobs.list` and the jobs panel.
+const JOBS_KEPT: usize = 50;
 
 /// Entries kept in the command log and notices.
 const LOG_CAP: usize = 500;
@@ -476,6 +506,12 @@ struct Live {
     remux: HashMap<PathBuf, RemuxState>,
     tails: HashMap<TailKey, TailState>,
     workers: Workers,
+    /// Export jobs, oldest first.
+    jobs: Arc<Vec<JobInfo>>,
+    job_cancels: HashMap<String, Arc<AtomicBool>>,
+    /// Requests answered when their job is planned (`background`) or done.
+    job_replies: HashMap<String, (Job, bool)>,
+    next_job: u64,
     waits: Vec<Wait>,
     next_capture: u64,
     timeline_due: Option<Instant>,
@@ -528,6 +564,21 @@ impl Live {
     }
 
     fn shutdown(&mut self) {
+        // Running exports cancel, removing their partial files.
+        for c in self.job_cancels.values() {
+            c.store(true, Ordering::Relaxed);
+        }
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !self.job_cancels.is_empty() {
+            match self
+                .rx
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            {
+                Ok(Msg::JobDone { id, result }) => self.job_done(id, result),
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
         for w in std::mem::take(&mut self.waits) {
             reply(
                 w.job.reply,
@@ -626,6 +677,21 @@ impl Live {
                 self.refresh_timeline();
                 self.refresh_source();
             }
+            Msg::JobPlanned { id, outputs } => self.job_planned(id, outputs),
+            Msg::JobProgress {
+                id,
+                output,
+                frames,
+                total,
+            } => {
+                if let Some(j) = Arc::make_mut(&mut self.jobs)
+                    .iter_mut()
+                    .find(|j| j.id == id)
+                {
+                    j.progressed(output, frames, total);
+                }
+            }
+            Msg::JobDone { id, result } => self.job_done(id, result),
             Msg::Shutdown => return false,
         }
         self.dirty |= changed;
@@ -666,15 +732,27 @@ impl Live {
                     })
                 }
                 Until::Capture { .. } => None,
+                Until::Job { ref id } => self
+                    .jobs
+                    .iter()
+                    .find(|j| &j.id == id)
+                    .filter(|j| !j.running())
+                    .map(job_answer),
             };
+            let expired = w.deadline.is_some_and(|d| now >= d);
             let outcome = match outcome {
                 Some(r) => Some(r),
-                None if now >= w.deadline => Some(Err(Error::internal(match w.until {
-                    Until::Shown { .. } => "timed out waiting for the frame to show".to_string(),
-                    Until::Capture { .. } => "timed out waiting for the picture (target=window \
-                        needs a visible window; target=viewer works while it is hidden)"
-                        .to_string(),
-                }))),
+                None if expired => Some(match &w.until {
+                    Until::Shown { .. } => {
+                        Err(Error::internal("timed out waiting for the frame to show"))
+                    }
+                    Until::Capture { .. } => Err(Error::internal(
+                        "timed out waiting for the picture (target=window needs a visible \
+                         window; target=viewer works while it is hidden)",
+                    )),
+                    // Time is up: the job as it is now (still running).
+                    Until::Job { id } => self.job_json(id).map(answer),
+                }),
                 None => None,
             };
             match outcome {
@@ -683,14 +761,20 @@ impl Live {
                     self.finish(w.job, result);
                 }
                 None => {
-                    soonest(w.deadline);
+                    if let Some(d) = w.deadline {
+                        soonest(d);
+                    }
                     i += 1;
                 }
             }
         }
         // Waiters on frames are checked again when renders arrive; poll a
         // little while any exist in case the renderer is slow.
-        if !self.waits.is_empty() {
+        if self
+            .waits
+            .iter()
+            .any(|w| !matches!(w.until, Until::Job { .. }))
+        {
             soonest(now + Duration::from_millis(20));
         }
         next
@@ -719,6 +803,7 @@ impl Live {
             notices: self.notices.clone(),
             thumbs: self.thumbs.clone(),
             waveforms: self.waveforms.clone(),
+            jobs: self.jobs.clone(),
             preview_error: self.preview_error.clone(),
         };
         *self.shared.lock().unwrap_or_else(|e| e.into_inner()) = Arc::new(snap);
@@ -787,16 +872,175 @@ impl Live {
                 );
             }
         }
+        if let Request::ExportStart(params) = &envelope.request
+            && !crate::export::is_otio(&params.output)
+        {
+            return self.start_export(envelope, job);
+        }
+        let limit = match &envelope.request {
+            Request::JobsWait { timeout, .. } => {
+                match timeout.map(|t| Duration::try_from_secs_f64(t.max(0.0))) {
+                    None => None,
+                    Some(Ok(d)) => Some(d),
+                    Some(Err(_)) => {
+                        return self.finish(job, Err(Error::usage("timeout: invalid seconds")));
+                    }
+                }
+            }
+            _ => Some(WAIT_LIMIT),
+        };
         let result = self.dispatch(envelope, &job);
         match result {
             Step::Now(r) => self.finish(job, r),
             Step::Wait(until) => self.waits.push(Wait {
                 job,
                 until,
-                deadline: Instant::now() + WAIT_LIMIT,
+                deadline: limit.map(|l| Instant::now() + l),
             }),
             Step::Task(task) => self.spawn_task(job, task),
         }
+    }
+
+    // ---------------------------------------------------------------- jobs
+
+    /// `export.start` (media): a job on its own thread. A background request
+    /// is answered with the job once its files are planned; otherwise when
+    /// it ends, with progress on the way.
+    fn start_export(&mut self, envelope: Envelope, job: Job) {
+        let Some(open) = &self.project else {
+            return self.finish(job, Err(no_project()));
+        };
+        let store = open.store.clone();
+        let context = open
+            .project()
+            .time_context(Some(self.players[TIMELINE].position));
+        let Request::ExportStart(mut params) = bind_playhead(envelope, &context).request else {
+            unreachable!("checked by the caller");
+        };
+        let background = params.background || job.reply.is_none();
+        params.background = false;
+        let id = format!("j{}", self.next_job);
+        self.next_job += 1;
+        // The client going away cancels a foreground export.
+        let cancel = match (&job.reply, background) {
+            (Some(r), false) => r.cancel.clone(),
+            _ => Arc::new(AtomicBool::new(false)),
+        };
+        let progress_tx = job
+            .reply
+            .as_ref()
+            .filter(|_| !background)
+            .map(|r| r.tx.clone());
+        let info = JobInfo::new(id.clone(), job.origin.name(), job.params.clone());
+        let jobs = Arc::make_mut(&mut self.jobs);
+        jobs.push(info);
+        // Keep running jobs and the most recent finished ones.
+        let finished = jobs.iter().filter(|j| !j.running()).count();
+        if finished > JOBS_KEPT {
+            let mut drop = finished - JOBS_KEPT;
+            jobs.retain(|j| {
+                let gone = drop > 0 && !j.running();
+                drop -= usize::from(gone);
+                !gone
+            });
+        }
+        self.job_cancels.insert(id.clone(), cancel.clone());
+        if job.reply.is_some() {
+            self.job_replies.insert(id.clone(), (job, background));
+        } else {
+            // GUI requests: logged now, the job shows the rest.
+            self.finish(job, Ok(answer(json!({ "job": id }))));
+        }
+        self.dirty = true;
+        let tx = self.tx.clone();
+        let _ = std::thread::Builder::new()
+            .name(format!("vidcut-{id}"))
+            .spawn(move || {
+                let mut last = Instant::now() - Duration::from_secs(1);
+                let mut report =
+                    |i: usize, n: usize, out: &Path, p: vidcut_av::export::Progress| {
+                        if p.frames != p.total && last.elapsed() < Duration::from_millis(100) {
+                            return;
+                        }
+                        last = Instant::now();
+                        let _ = tx.send(Msg::JobProgress {
+                            id: id.clone(),
+                            output: i,
+                            frames: p.frames,
+                            total: p.total,
+                        });
+                        if let Some(ptx) = &progress_tx {
+                            let _ = ptx.send(ReplyEvent::Progress(json!({
+                                "job": id, "output": i, "outputs": n, "path": out,
+                                "frames": p.frames, "total": p.total,
+                                "elapsed": p.elapsed.as_secs_f64(),
+                            })));
+                        }
+                    };
+                let result = crate::session::export_media(
+                    &store,
+                    &params,
+                    &mut crate::session::Hooks {
+                        cancel: &cancel,
+                        progress: &mut report,
+                    },
+                    &mut |outputs| {
+                        let _ = tx.send(Msg::JobPlanned {
+                            id: id.clone(),
+                            outputs,
+                        });
+                    },
+                );
+                let _ = tx.send(Msg::JobDone { id, result });
+            });
+    }
+
+    fn job_planned(&mut self, id: String, outputs: Vec<(PathBuf, i64)>) {
+        if let Some(j) = Arc::make_mut(&mut self.jobs)
+            .iter_mut()
+            .find(|j| j.id == id)
+        {
+            j.planned(outputs);
+        }
+        if self.job_replies.get(&id).is_some_and(|(_, bg)| *bg)
+            && let Some((job, _)) = self.job_replies.remove(&id)
+        {
+            let r = self.job_json(&id).map(answer);
+            self.finish(job, r);
+        }
+    }
+
+    fn job_done(&mut self, id: String, result: Result<Response>) {
+        self.job_cancels.remove(&id);
+        let mut gui = false;
+        if let Some(j) = Arc::make_mut(&mut self.jobs)
+            .iter_mut()
+            .find(|j| j.id == id)
+        {
+            j.ended(&result);
+            gui = j.origin == Origin::Gui.name();
+        }
+        if gui {
+            match &result {
+                Ok(_) => self.notice(format!("export {id} finished"), false),
+                Err(e) if e.code == vidcut_core::ErrorCode::Cancelled => {
+                    self.notice(format!("export {id} cancelled"), false)
+                }
+                Err(e) => self.notice(format!("export {id} failed: {}", e.message), true),
+            }
+        }
+        if let Some((job, _)) = self.job_replies.remove(&id) {
+            self.finish(job, result);
+        }
+        self.dirty = true;
+    }
+
+    fn job_json(&self, id: &str) -> Result<Value> {
+        self.jobs
+            .iter()
+            .find(|j| j.id == id)
+            .map(JobInfo::to_json)
+            .ok_or_else(|| Error::not_found(format!("no job {id}")))
     }
 
     /// Logs and answers a finished request.
@@ -806,11 +1050,17 @@ impl Live {
             r
         });
         let rev = self.project.as_ref().map_or(0, |p| p.project().rev);
-        // Queries of live state and scrubbing seeks would drown the log.
+        // Queries of live state, the GUI's own lookups and scrubbing seeks
+        // would drown the log.
         let quiet = matches!(
             job.method.as_str(),
             "player.state" | "selection.get" | "gui.log"
-        ) || (job.method == "player.seek" && job.params["fast"] == json!(true));
+        ) || (job.origin == Origin::Gui
+            && matches!(
+                job.method.as_str(),
+                "export.plan" | "presets.list" | "presets.get" | "encoders.list" | "jobs.list"
+            ))
+            || (job.method == "player.seek" && job.params["fast"] == json!(true));
         if !quiet {
             self.log_seq += 1;
             let entry = LogEntry {
@@ -832,7 +1082,8 @@ impl Live {
                 log.pop_front();
             }
         }
-        if let (Err(e), Origin::Gui) = (&result, job.origin) {
+        // The GUI shows failures of what it waits for itself.
+        if let (Err(e), Origin::Gui, None) = (&result, job.origin, &job.reply) {
             self.notice(format!("{}: {}", job.method, e.message), true);
         }
         self.dirty = true;
@@ -990,6 +1241,24 @@ impl Live {
                 self.renderer.quit();
                 Step::Now(Ok(answer(Value::Null)))
             }
+            Request::GuiShow { panel } => {
+                self.renderer.show(panel);
+                Step::Now(Ok(answer(Value::Null)))
+            }
+            Request::JobsList {} => Step::Now(Ok(answer(json!(
+                self.jobs.iter().map(JobInfo::to_json).collect::<Vec<_>>()
+            )))),
+            Request::JobsGet { job } => Step::Now(self.job_json(&job).map(answer)),
+            Request::JobsCancel { job } => {
+                if let Some(c) = self.job_cancels.get(&job) {
+                    c.store(true, Ordering::Relaxed);
+                }
+                Step::Now(self.job_json(&job).map(answer))
+            }
+            Request::JobsWait { job, .. } => match self.job_json(&job) {
+                Ok(_) => Step::Wait(Until::Job { id: job }),
+                Err(e) => Step::Now(Err(e)),
+            },
             Request::ExportStart(_) | Request::ExportPlan(_) | Request::FrameRender { .. } => {
                 self.project_task(envelope, job)
             }
@@ -1827,6 +2096,14 @@ fn answer(result: Value) -> Response {
         result,
         dry_run: false,
         via: String::new(),
+    }
+}
+
+/// `jobs.wait`'s answer for an ended job: the job, or how it failed.
+fn job_answer(j: &JobInfo) -> Result<Response> {
+    match &j.error {
+        Some(e) => Err(Error::new(e.code, format!("job {}: {}", j.id, e.message))),
+        None => Ok(answer(j.to_json())),
     }
 }
 

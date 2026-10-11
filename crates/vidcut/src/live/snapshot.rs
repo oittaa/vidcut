@@ -134,6 +134,8 @@ pub struct Snapshot {
     pub thumbs: Arc<HashMap<String, Arc<Filmstrip>>>,
     /// Audio peaks of media (their first audio stream).
     pub waveforms: Arc<HashMap<String, Arc<vidcut_av::waveform::Waveform>>>,
+    /// Export jobs, oldest first.
+    pub jobs: Arc<Vec<super::JobInfo>>,
     /// Why there is no preview (libmpv missing), if so.
     pub preview_error: Option<String>,
 }

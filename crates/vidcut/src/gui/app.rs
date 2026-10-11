@@ -11,6 +11,7 @@ use eframe::egui;
 use eframe::glow;
 use raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 use vidcut_core::Error;
+use vidcut_core::request::GuiPanel;
 use vidcut_mpv::{Display, GlRenderer, Mpv};
 
 use super::theme;
@@ -23,6 +24,7 @@ enum UiTask {
     CaptureViewer(PlayerId, Capture),
     CaptureWindow(Capture),
     Window(live::WindowChange),
+    Show(GuiPanel),
     Quit,
 }
 
@@ -61,6 +63,10 @@ impl live::Renderer for Port {
 
     fn quit(&self) {
         self.push(UiTask::Quit);
+    }
+
+    fn show(&self, panel: GuiPanel) {
+        self.push(UiTask::Show(panel));
     }
 }
 
@@ -214,7 +220,12 @@ impl eframe::App for App {
                         ctx.send_viewport_cmd(C::Minimized(m));
                     }
                 }
-                UiTask::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                UiTask::Show(panel) => self.ws.show_panel(panel, ctx),
+                UiTask::Quit => {
+                    // `gui.quit` doesn't ask about running exports.
+                    self.ws.export.quit_confirmed = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
             }
         }
     }

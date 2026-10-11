@@ -56,6 +56,162 @@ pub fn presets() -> Result<Vec<Preset>> {
     Ok(all)
 }
 
+/// Where a user preset lives.
+fn user_preset_path(name: &str) -> PathBuf {
+    config_dir().join("presets").join(format!("{name}.toml"))
+}
+
+/// Whether `name` is a user preset (which may shadow a built-in one).
+pub fn is_user_preset(name: &str) -> bool {
+    check_preset_name(name).is_ok() && user_preset_path(name).exists()
+}
+
+fn check_preset_name(name: &str) -> Result<()> {
+    let ok = !name.is_empty()
+        && name.len() <= 64
+        && !name.starts_with('.')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    if ok {
+        Ok(())
+    } else {
+        Err(Error::usage(format!(
+            "preset name {name:?}: use letters, digits, '-', '_' and '.'"
+        )))
+    }
+}
+
+/// What `presets.save` stores.
+pub struct PresetSave<'a> {
+    pub name: &'a str,
+    pub title: Option<&'a str>,
+    pub description: Option<&'a str>,
+    pub quick_export: bool,
+    pub settings: Option<&'a ExportSettings>,
+    pub from: Option<&'a str>,
+    pub set: &'a [String],
+    pub overwrite: bool,
+}
+
+/// Saves a user preset as TOML (`presets.save`).
+pub fn save_preset(s: &PresetSave<'_>) -> Result<Value> {
+    check_preset_name(s.name)?;
+    let mut settings = match (s.settings, s.from) {
+        (Some(settings), None) => settings.clone(),
+        (None, Some(from)) => preset(from)?.settings,
+        _ => {
+            return Err(Error::usage(
+                "presets.save needs exactly one of `settings` and `from`",
+            ));
+        }
+    };
+    apply_overrides(&mut settings, s.set)?;
+    validate(&settings)?;
+    let path = user_preset_path(s.name);
+    let builtin = builtin_presets().iter().any(|p| p.name == s.name);
+    if (path.exists() || builtin) && !s.overwrite {
+        return Err(Error::invalid(format!(
+            "preset {:?} exists{}; pass overwrite to replace it",
+            s.name,
+            if builtin { " (built in)" } else { "" }
+        )));
+    }
+    let preset = Preset {
+        name: s.name.into(),
+        title: s.title.unwrap_or(s.name).into(),
+        description: s.description.unwrap_or_default().into(),
+        quick_export: s.quick_export,
+        settings,
+    };
+    let text = toml::to_string(&preset).map_err(|e| Error::internal(e.to_string()))?;
+    let dir = path.parent().expect("has a parent");
+    std::fs::create_dir_all(dir).map_err(|e| Error::usage(format!("{}: {e}", dir.display())))?;
+    let part = path.with_extension("toml.part");
+    std::fs::write(&part, text)
+        .and_then(|()| std::fs::rename(&part, &path))
+        .map_err(|e| Error::usage(format!("{}: {e}", path.display())))?;
+    Ok(json!({ "preset": preset, "path": path }))
+}
+
+/// Deletes a user preset (`presets.delete`).
+pub fn delete_preset(name: &str) -> Result<Value> {
+    check_preset_name(name)?;
+    let path = user_preset_path(name);
+    if !path.exists() {
+        return Err(if builtin_presets().iter().any(|p| p.name == name) {
+            Error::invalid(format!("{name:?} is built in and can't be deleted"))
+        } else {
+            Error::not_found(format!("no user preset {name:?}"))
+        });
+    }
+    std::fs::remove_file(&path).map_err(|e| Error::usage(format!("{}: {e}", path.display())))?;
+    Ok(json!({ "deleted": name, "path": path }))
+}
+
+/// Whether `output` is an OpenTimelineIO file: the edit, not media.
+pub fn is_otio(output: &Path) -> bool {
+    output
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("otio"))
+}
+
+/// An `.otio` export (deviation X9): the timeline, or `range` of it, as
+/// OpenTimelineIO. Unlike media exports it ignores the In/Out marks (they
+/// travel inside the file). `write: false` only describes it.
+pub fn otio(
+    p: &Project,
+    name: &str,
+    params: &ExportParams,
+    playhead: Option<i64>,
+    write: bool,
+) -> Result<Value> {
+    if params.per_clip
+        || params.audio_only
+        || params.preset.is_some()
+        || params.settings.is_some()
+        || !params.set.is_empty()
+        || params.encoder.is_some()
+        || params.name.is_some()
+    {
+        return Err(Error::usage(
+            "an .otio export writes the edit, not media: it takes only a range and overwrite",
+        ));
+    }
+    let span = match &params.range {
+        Some(r) => Some(p.time_context(playhead).range(r)?),
+        None => None,
+    };
+    let doc = vidcut_core::otio::export(p, name, span)?;
+    let (a, b) = span.unwrap_or((0, p.end()));
+    let clips = doc["tracks"]["children"][0]["children"]
+        .as_array()
+        .map_or(0, |items| {
+            items
+                .iter()
+                .filter(|i| i["OTIO_SCHEMA"] == "Clip.2")
+                .count()
+        });
+    let summary = json!({
+        "path": params.output, "format": "otio", "range": [a, b], "frames": b - a, "clips": clips,
+    });
+    if !write {
+        return Ok(json!({ "preset": null, "format": "otio", "outputs": [summary] }));
+    }
+    if params.output.exists() && !params.overwrite {
+        return Err(Error::invalid(format!(
+            "{} exists; pass overwrite to replace it",
+            params.output.display()
+        )));
+    }
+    let text = serde_json::to_string_pretty(&doc).map_err(|e| Error::internal(e.to_string()))?;
+    let part = params.output.with_extension("otio.part");
+    std::fs::write(&part, text + "\n")
+        .and_then(|()| std::fs::rename(&part, &params.output))
+        .map_err(|e| Error::usage(format!("{}: {e}", params.output.display())))?;
+    Ok(json!({ "outputs": [summary] }))
+}
+
 fn preset(name: &str) -> Result<Preset> {
     presets()?
         .into_iter()
@@ -194,8 +350,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
     let ext = settings.container.extension();
     let mut outputs = Vec::new();
     if params.per_clip {
-        std::fs::create_dir_all(&params.output)
-            .map_err(|e| Error::usage(format!("{}: {e}", params.output.display())))?;
+        // The folder is made when the export runs: a plan changes nothing.
         let template = params.name.as_deref().unwrap_or("{index:03}-{name}");
         let clips: Vec<_> = proj
             .tracks

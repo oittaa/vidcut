@@ -54,8 +54,40 @@ pub fn print(method: &str, r: &Response, json: bool) {
         return;
     }
     match method {
+        "timeline.import" => {
+            let n = |k: &str| r.result[k].as_array().map_or(0, Vec::len);
+            let verb = if r.dry_run {
+                "would import"
+            } else {
+                "imported"
+            };
+            println!(
+                "{verb} {} clip(s), {} media, {} marker(s) from {:?} at {} fps (rev {})",
+                n("clips"),
+                n("media"),
+                n("markers"),
+                r.result["name"].as_str().unwrap_or_default(),
+                r.result["fps"].as_str().unwrap_or_default(),
+                r.rev
+            );
+            for w in r.result["warnings"].as_array().into_iter().flatten() {
+                println!("  warning: {}", w.as_str().unwrap_or_default());
+            }
+        }
+        "export.start" if r.result.get("id").is_some() => {
+            println!("{}", job_line(&r.result));
+        }
         "export.start" => {
             for o in r.result["outputs"].as_array().into_iter().flatten() {
+                if o["format"] == "otio" {
+                    println!(
+                        "wrote {} ({} clips, {} frames)",
+                        o["path"].as_str().unwrap_or_default(),
+                        o["clips"],
+                        o["frames"]
+                    );
+                    continue;
+                }
                 let enc: Vec<&str> = [&o["video_encoder"], &o["audio_encoder"]]
                     .iter()
                     .filter_map(|v| v.as_str())
@@ -66,6 +98,17 @@ pub fn print(method: &str, r: &Response, json: bool) {
                     o["frames"],
                     enc.join(" + "),
                     o["seconds"].as_f64().unwrap_or(0.0)
+                );
+            }
+        }
+        "export.plan" if r.result["format"] == "otio" => {
+            for o in r.result["outputs"].as_array().into_iter().flatten() {
+                println!(
+                    "otio  {}  frames {}..{} ({} clips)",
+                    o["path"].as_str().unwrap_or_default(),
+                    o["range"][0],
+                    o["range"][1],
+                    o["clips"]
                 );
             }
         }
@@ -122,6 +165,15 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 );
             }
         }
+        "presets.save" => println!(
+            "saved preset {} ({})",
+            r.result["preset"]["name"].as_str().unwrap_or_default(),
+            r.result["path"].as_str().unwrap_or_default()
+        ),
+        "presets.delete" => println!(
+            "deleted preset {}",
+            r.result["deleted"].as_str().unwrap_or_default()
+        ),
         "encoders.list" => {
             for e in r.result["encoders"].as_array().into_iter().flatten() {
                 println!(
@@ -235,10 +287,47 @@ fn live(method: &str, r: &Response) -> Option<()> {
             "copied {} clip(s); paste with `vidcut edit paste` (GUI) or --clips",
             v["clips"].as_array().map_or(0, Vec::len)
         ),
-        "gui.quit" | "gui.window" => println!("ok {method}"),
+        "gui.quit" | "gui.window" | "gui.show" => println!("ok {method}"),
+        "jobs.list" => {
+            let jobs = v.as_array().cloned().unwrap_or_default();
+            if jobs.is_empty() {
+                println!("no jobs");
+            }
+            for j in jobs {
+                println!("{}", job_line(&j));
+            }
+        }
+        "jobs.get" | "jobs.wait" | "jobs.cancel" => println!("{}", job_line(v)),
         _ => return None,
     }
     Some(())
+}
+
+fn clock(secs: f64) -> String {
+    let s = secs.max(0.0).round() as u64;
+    format!("{}:{:02}", s / 60, s % 60)
+}
+
+/// `j1  running    42%  ETA 0:12  out.mp4`
+fn job_line(j: &Value) -> String {
+    let state = j["state"].as_str().unwrap_or_default();
+    let time = match (state, j["eta"].as_f64()) {
+        ("running", Some(eta)) => format!("ETA {}", clock(eta)),
+        ("running", None) => "starting".into(),
+        _ => format!("took {}", clock(j["elapsed"].as_f64().unwrap_or(0.0))),
+    };
+    let error = j["error"]["message"]
+        .as_str()
+        .map(|e| format!("  ({e})"))
+        .unwrap_or_default();
+    format!(
+        "{:<4} {:<9} {:>3}%  {:<10} {}{error}",
+        j["id"].as_str().unwrap_or_default(),
+        state,
+        (j["progress"].as_f64().unwrap_or(0.0) * 100.0).floor(),
+        time,
+        j["title"].as_str().unwrap_or_default()
+    )
 }
 
 /// `viewer timeline | timeline 00:00:10:00 (300/450) stopped | source ...`

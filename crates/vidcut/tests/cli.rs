@@ -1,7 +1,7 @@
 //! End-to-end tests of the `vidcut` binary on generated fixtures.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Command;
 
 use serde_json::Value;
 use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
@@ -24,27 +24,34 @@ impl Sandbox {
     }
 
     fn cmd(&self, args: &[&str]) -> Command {
+        self.cmd_in(&self.project(), args)
+    }
+
+    /// A command on another project.
+    fn cmd_in(&self, project: &Path, args: &[&str]) -> Command {
         let mut c = Command::new(env!("CARGO_BIN_EXE_vidcut"));
-        // Own runtime dir: a GUI running on this machine must not answer.
+        // Own runtime and config dirs: a GUI running on this machine must
+        // not answer, and the user's presets stay out of it.
         c.env("XDG_STATE_HOME", self.dir.join("state"))
             .env("XDG_RUNTIME_DIR", self.dir.join("run"))
+            .env("XDG_CONFIG_HOME", self.dir.join("config"))
             .env_remove("VIDCUT_SOCKET")
             .env_remove("VIDCUT_PROJECT")
             .arg("-p")
-            .arg(self.project())
+            .arg(project)
             .args(args);
         c
     }
 
-    fn run(&self, args: &[&str]) -> Output {
-        self.cmd(args).output().expect("run vidcut")
-    }
-
     /// Runs and expects success; returns the parsed `--json` response.
     fn ok(&self, args: &[&str]) -> Value {
+        self.ok_in(&self.project(), args)
+    }
+
+    fn ok_in(&self, project: &Path, args: &[&str]) -> Value {
         let mut all = vec!["--json"];
         all.extend_from_slice(args);
-        let out = self.run(&all);
+        let out = self.cmd_in(project, &all).output().expect("run vidcut");
         assert!(
             out.status.success(),
             "vidcut {args:?} failed: {}{}",
@@ -57,9 +64,13 @@ impl Sandbox {
 
     /// Runs and expects failure with `code`; returns the JSON error.
     fn fails(&self, code: i32, args: &[&str]) -> Value {
+        self.fails_in(&self.project(), code, args)
+    }
+
+    fn fails_in(&self, project: &Path, code: i32, args: &[&str]) -> Value {
         let mut all = vec!["--json"];
         all.extend_from_slice(args);
-        let out = self.run(&all);
+        let out = self.cmd_in(project, &all).output().expect("run vidcut");
         assert_eq!(
             out.status.code(),
             Some(code),
@@ -465,4 +476,168 @@ fn exports_frames_ranges_clips_and_audio() {
             "prores-422hq",
         ],
     );
+}
+
+/// `timeline.get` without ids (they differ between projects).
+fn timeline_shape(sb: &Sandbox, project: &Path) -> Value {
+    let mut t = sb.ok_in(project, &["timeline"])["result"].clone();
+    for item in t["tracks"][0]["items"].as_array_mut().unwrap() {
+        item.as_object_mut().unwrap().remove("id");
+    }
+    for k in t["markers"].as_array_mut().unwrap() {
+        k.as_object_mut().unwrap().remove("id");
+    }
+    t
+}
+
+#[test]
+fn otio_round_trips_frame_exactly() {
+    // M5 acceptance: export → import reproduces the timeline frame-exactly.
+    let sb = Sandbox::new("otio");
+    let a = fixture(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (30, 1),
+        90,
+    ));
+    let b = fixture(FixtureSpec::new(
+        VideoCodec::Hevc10,
+        Container::Mkv,
+        320,
+        180,
+        (30, 1),
+        90,
+    ));
+    sb.cmd(&["new"]).arg(sb.project()).output().unwrap();
+    sb.ok(&["media", "add", s(&a), s(&b)]);
+    sb.ok(&["edit", "append", "m1", "--range", "10f..40f"]);
+    sb.ok(&["edit", "append", "m2", "--range", "50f..80f"]);
+    sb.ok(&["edit", "append", "m1", "--range", "60f..90f"]);
+    sb.ok(&["edit", "append", "m2", "--range", "0f..20f"]);
+    sb.ok(&["edit", "audio-roll", "c1", "--tail", "--by", "4f"]);
+    sb.ok(&["edit", "delete", "c3", "--lift"]);
+    sb.ok(&["clip", "set", "c4", "--gain", "-3"]);
+    sb.ok(&[
+        "markers", "add", "--at", "15f", "--name", "look", "--color", "rose",
+    ]);
+    sb.ok(&["marks", "set", "--in", "5f", "--out", "80f"]);
+    let cut = sb.dir.join("cut.otio");
+    let plan = sb.ok(&["--dry-run", "export", s(&cut)]);
+    assert_eq!(plan["result"]["outputs"][0]["clips"], 3);
+    assert!(!cut.exists());
+    // The whole timeline, not In–Out: the marks travel inside.
+    let r = sb.ok(&["export", s(&cut)]);
+    assert_eq!(r["result"]["outputs"][0]["frames"], 110);
+    sb.fails(4, &["export", s(&cut)]);
+    sb.fails(
+        2,
+        &["export", s(&cut), "--preset", "h264-master", "--overwrite"],
+    );
+
+    let other = sb.dir.join("q.vidcut");
+    sb.ok(&["new", s(&other)]);
+    let r = sb.ok_in(&other, &["import", s(&cut)]);
+    assert_eq!(r["result"]["warnings"], serde_json::json!([]));
+    assert_eq!(
+        timeline_shape(&sb, &other),
+        timeline_shape(&sb, &sb.project())
+    );
+    // Same pictures at the cuts, in the gap and at the end.
+    for at in ["0f", "29f", "30f", "59f", "60f", "89f", "90f", "109f"] {
+        let (x, y) = (sb.dir.join("x.png"), sb.dir.join("y.png"));
+        sb.ok(&["frame", "--at", at, "-o", s(&x)]);
+        sb.ok_in(&other, &["frame", "--at", at, "-o", s(&y)]);
+        assert_eq!(
+            std::fs::read(&x).unwrap(),
+            std::fs::read(&y).unwrap(),
+            "frame {at}"
+        );
+    }
+
+    // Moved media: an error naming the files, unless found by name.
+    let fixtures = a.parent().unwrap();
+    let moved = sb.dir.join("moved.otio");
+    let text = std::fs::read_to_string(&cut).unwrap().replace(
+        &format!("file://{}/", s(fixtures)),
+        "file:///nonexistent/footage/",
+    );
+    std::fs::write(&moved, text).unwrap();
+    let third = sb.dir.join("r.vidcut");
+    sb.ok(&["new", s(&third)]);
+    let e = sb.fails_in(&third, 7, &["import", s(&moved)]);
+    assert!(
+        e["message"]
+            .as_str()
+            .unwrap()
+            .contains("/nonexistent/footage/"),
+        "{e}"
+    );
+    // Found by name in a subfolder (as Resolve relinks, p. 530).
+    let above = fixtures.parent().unwrap();
+    sb.ok_in(&third, &["import", s(&moved), "--search", s(above)]);
+    assert_eq!(
+        timeline_shape(&sb, &third),
+        timeline_shape(&sb, &sb.project())
+    );
+}
+
+#[test]
+fn presets_save_and_delete() {
+    let sb = Sandbox::new("presets");
+    let r = sb.ok(&[
+        "presets",
+        "save",
+        "web",
+        "--from",
+        "youtube-1080p",
+        "--set",
+        "video.quality=23",
+        "--title",
+        "Web",
+        "--quick-export",
+    ]);
+    let path = r["result"]["path"].as_str().unwrap().to_string();
+    assert!(path.starts_with(s(&sb.dir.join("config"))), "{path}");
+    let p = sb.ok(&["presets", "web"])["result"].clone();
+    assert_eq!(
+        (p["title"].as_str(), p["quick_export"].as_bool()),
+        (Some("Web"), Some(true))
+    );
+    assert_eq!(p["settings"]["video"]["quality"], 23);
+    let list = sb.ok(&["presets"])["result"].clone();
+    assert!(list.as_array().unwrap().iter().any(|p| p["name"] == "web"));
+    // Existing names need --overwrite; built-in presets can't be deleted.
+    sb.fails(4, &["presets", "save", "web", "--from", "h264-master"]);
+    sb.fails(4, &["presets", "save", "h264-master", "--from", "av1"]);
+    sb.fails(2, &["presets", "save", "../evil", "--from", "av1"]);
+    sb.fails(
+        2,
+        &[
+            "presets",
+            "save",
+            "x",
+            "--from",
+            "av1",
+            "--set",
+            "video.nope=1",
+        ],
+    );
+    let settings = serde_json::json!({ "container": "mkv", "audio": { "codec": "flac" } });
+    sb.ok(&[
+        "presets",
+        "save",
+        "lossless-audio",
+        "--settings",
+        &settings.to_string(),
+    ]);
+    assert_eq!(
+        sb.ok(&["presets", "lossless-audio"])["result"]["settings"]["container"],
+        "mkv"
+    );
+    sb.ok(&["presets", "rm", "web"]);
+    sb.fails(3, &["presets", "web"]);
+    sb.fails(4, &["presets", "delete", "h264-master"]);
+    sb.fails(3, &["presets", "delete", "web"]);
 }

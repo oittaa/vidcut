@@ -84,6 +84,26 @@ pub enum Request {
     /// Edit points of V1 (clip boundaries), as the Smart Indicator sees them.
     #[serde(rename = "timeline.edit_points")]
     TimelineEditPoints {},
+    /// Import an OpenTimelineIO timeline (`.otio`, deviation X9). Its media
+    /// join the pool, and its first video track, with the audio that belongs
+    /// to it, goes on V1 after the last clip (or instead of the timeline,
+    /// with `replace`). An empty timeline takes the file's frame rate and
+    /// start timecode. What can't be imported is listed in `warnings`.
+    #[serde(rename = "timeline.import")]
+    TimelineImport {
+        /// The `.otio` file, read by the process that runs the request.
+        #[serde(default)]
+        path: Option<PathBuf>,
+        /// The OTIO document itself, instead of `path`.
+        #[serde(default)]
+        otio: Option<serde_json::Value>,
+        /// Replace the timeline's clips, markers and marks.
+        #[serde(default)]
+        replace: bool,
+        /// Directories to look in, by file name, for media missing at its path.
+        #[serde(default)]
+        search: Vec<PathBuf>,
+    },
 
     // ---------------------------------------------------------------- edit functions (spec §7)
     /// Append after the last clip (Shift+F12).
@@ -318,6 +338,34 @@ pub enum Request {
     PresetsList {},
     #[serde(rename = "presets.get")]
     PresetsGet { name: String },
+    /// Save a user preset (`~/.config/vidcut/presets/NAME.toml`): `settings`,
+    /// or preset `from` with `set` overrides. `quick_export` puts it in Quick
+    /// Export (p. 790).
+    #[serde(rename = "presets.save")]
+    PresetsSave {
+        /// File-name safe: letters, digits, `-`, `_` and `.`.
+        name: String,
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default)]
+        description: Option<String>,
+        #[serde(default)]
+        quick_export: bool,
+        #[serde(default)]
+        settings: Option<ExportSettings>,
+        /// Start from this preset's settings.
+        #[serde(default)]
+        from: Option<String>,
+        /// Overrides like `video.quality=20`.
+        #[serde(default)]
+        set: Vec<String>,
+        /// Replace a user preset of that name (or shadow a built-in one).
+        #[serde(default)]
+        overwrite: bool,
+    },
+    /// Delete a user preset.
+    #[serde(rename = "presets.delete")]
+    PresetsDelete { name: String },
     /// Which GPU encoders work here (cached; `refresh` re-tests).
     #[serde(rename = "encoders.list")]
     EncodersList {
@@ -448,6 +496,25 @@ pub enum Request {
     /// Close the GUI.
     #[serde(rename = "gui.quit")]
     GuiQuit {},
+    /// Open a window for the person at the GUI: `quick_export`, `export`,
+    /// `jobs` or `log`.
+    #[serde(rename = "gui.show")]
+    GuiShow { panel: GuiPanel },
+    /// The GUI's export jobs, oldest first: state, progress, ETA, result.
+    #[serde(rename = "jobs.list")]
+    JobsList {},
+    #[serde(rename = "jobs.get")]
+    JobsGet { job: String },
+    /// Cancel a running job; its partial output is removed.
+    #[serde(rename = "jobs.cancel")]
+    JobsCancel { job: String },
+    /// Wait until a job ends (or `timeout` seconds pass) and return it.
+    #[serde(rename = "jobs.wait")]
+    JobsWait {
+        job: String,
+        #[serde(default)]
+        timeout: Option<f64>,
+    },
 
     // ---------------------------------------------------------------- meta
     /// JSON Schema of the protocol, or of one method's params.
@@ -494,6 +561,10 @@ pub struct ExportParams {
     /// Replace existing output files.
     #[serde(default)]
     pub overwrite: bool,
+    /// Return at once with a job id instead of waiting (running GUI only;
+    /// see `jobs.*`).
+    #[serde(default)]
+    pub background: bool,
 }
 
 /// What the single viewer shows (spec §4.1).
@@ -511,6 +582,21 @@ impl ViewerMode {
     pub fn is_source(self) -> bool {
         self != Self::Timeline
     }
+}
+
+/// A window `gui.show` opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GuiPanel {
+    /// Quick Export (p. 788).
+    #[serde(alias = "quick-export")]
+    QuickExport,
+    /// The Export dialog.
+    Export,
+    /// Export jobs with their progress.
+    Jobs,
+    /// The command log.
+    Log,
 }
 
 /// What `gui.screenshot` captures.
@@ -677,6 +763,11 @@ impl Request {
                 | Self::GuiLog { .. }
                 | Self::GuiWindow { .. }
                 | Self::GuiQuit {}
+                | Self::GuiShow { .. }
+                | Self::JobsList {}
+                | Self::JobsGet { .. }
+                | Self::JobsCancel { .. }
+                | Self::JobsWait { .. }
         )
     }
 
@@ -689,6 +780,8 @@ impl Request {
                 | Self::Probe { .. }
                 | Self::PresetsList {}
                 | Self::PresetsGet { .. }
+                | Self::PresetsSave { .. }
+                | Self::PresetsDelete { .. }
                 | Self::EncodersList { .. }
         )
     }
@@ -714,6 +807,8 @@ impl Request {
                     | Self::FrameRender { .. }
                     | Self::PresetsList {}
                     | Self::PresetsGet { .. }
+                    | Self::PresetsSave { .. }
+                    | Self::PresetsDelete { .. }
                     | Self::EncodersList { .. }
                     | Self::EditCopy { .. }
             )
