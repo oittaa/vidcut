@@ -153,7 +153,9 @@ impl Mpv {
                 "unsupported libmpv client API major version {major}, need 2"
             )));
         }
-        // mpv refuses to start unless numbers are formatted the C way.
+        // mpv refuses to start unless numbers are formatted the C way. This
+        // sets the whole process's locale, not this thread's: from here on,
+        // C code that formats numbers by the locale uses C's, not the user's.
         unsafe { libc::setlocale(libc::LC_NUMERIC, c"C".as_ptr()) };
         let handle = unsafe { (api.create)() };
         if handle.is_null() {
