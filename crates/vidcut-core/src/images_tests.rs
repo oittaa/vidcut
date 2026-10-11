@@ -248,3 +248,71 @@ fn stills_and_sequences_travel_through_otio() {
         Rational::new(50, 1).unwrap()
     );
 }
+
+/// OpenTimelineIO's `RationalTime.to_frames(rate)`: rescale to `rate`, then
+/// truncate toward zero. `ImageSequenceReference` counts pictures that way,
+/// passing its own `rate`.
+fn otio_to_frames(value: f64, value_rate: f64, rate: f64) -> i64 {
+    let scaled = if value_rate == rate {
+        value
+    } else {
+        value * rate / value_rate
+    };
+    scaled.trunc() as i64
+}
+
+#[test]
+fn sequence_available_range_counts_pictures_at_the_sequence_rate() {
+    // 100 pictures at 24 fps in a 25 fps project. Their timeline length is
+    // 104 frames at 25 fps; stored as the available range, `to_frames(24)`
+    // truncates to 99 pictures (one picture can come out as none). The
+    // range has to be the picture count at the sequence rate. A clip's
+    // source range stays the timeline length at the project rate, and
+    // reimport still takes the picture count from the directory.
+    let mut f = Fixture::new(&[]);
+    f.env = std::mem::take(&mut f.env).with_sequence("/renders", "frame_%04d.png", 1, 100);
+    f.ok(req(
+        "media.add",
+        json!({"paths": ["/renders/frame_0001.png"], "sequence": true, "fps": "24"}),
+    ));
+    f.ok(req(
+        "edit.append",
+        json!({"media": "m1", "range": "0f..+10f"}),
+    ));
+    let before = f.editor.project().clone();
+    let clip_len = before.track("V1").unwrap().clips[0].duration;
+    let doc = crate::otio::export(&before, "seq", None).unwrap();
+    let clip = &doc["tracks"]["children"][0]["children"][0];
+    let seq = &clip["media_references"]["DEFAULT_MEDIA"];
+    assert_eq!(seq["OTIO_SCHEMA"], "ImageSequenceReference.1");
+    let sequence_rate = seq["rate"].as_f64().unwrap();
+    assert_eq!(sequence_rate, 24.0);
+    let duration = &seq["available_range"]["duration"];
+    assert_eq!(
+        otio_to_frames(
+            duration["value"].as_f64().unwrap(),
+            duration["rate"].as_f64().unwrap(),
+            sequence_rate,
+        ),
+        100
+    );
+    let source = &clip["source_range"]["duration"];
+    assert_eq!(
+        (source["value"].as_f64(), source["rate"].as_f64()),
+        (Some(clip_len as f64), Some(before.settings.fps.as_f64()))
+    );
+
+    let mut g = Fixture::new(&[]);
+    g.env = std::mem::take(&mut f.env);
+    let r = g.ok(req("timeline.import", json!({ "otio": doc })));
+    assert_eq!(r.result["warnings"], json!([]), "{}", r.result);
+    let p = g.editor.project();
+    let c = &p.track("V1").unwrap().clips[0];
+    let m = p.media(&c.media).unwrap();
+    assert_eq!(c.duration, clip_len);
+    assert_eq!(m.sequence.as_ref().map(|s| s.count), Some(100));
+    assert_eq!(
+        m.info.video.as_ref().unwrap().fps,
+        Rational::new(24, 1).unwrap()
+    );
+}
