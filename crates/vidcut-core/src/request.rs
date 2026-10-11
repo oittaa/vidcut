@@ -79,6 +79,27 @@ pub enum Request {
     /// Clear a media item's source In and Out.
     #[serde(rename = "media.marks.clear")]
     MediaMarksClear { media: String },
+    /// Set Source Tape In and/or Out (decision D17). `in` and `out` are tape
+    /// frames of `order` (the media ids in tape order); `out` is exclusive
+    /// (D16). A span on one clip is stored as that clip's source marks. A
+    /// span across clips is stored as tape marks and is not written onto one
+    /// clip.
+    #[serde(rename = "tape.marks.set")]
+    TapeMarksSet {
+        #[serde(rename = "in", default)]
+        mark_in: Option<TimeSpec>,
+        #[serde(default)]
+        out: Option<TimeSpec>,
+        /// Media ids in the current tape order.
+        order: Vec<String>,
+    },
+    /// Clear Source Tape marks (Alt+X in Source Tape). With `media`, also
+    /// clear that clip's source marks when the span does not cross clips.
+    #[serde(rename = "tape.marks.clear")]
+    TapeMarksClear {
+        #[serde(default)]
+        media: Option<String>,
+    },
     /// Put media into a bin (`""`: the top level).
     #[serde(rename = "media.move")]
     MediaMove {
@@ -930,8 +951,13 @@ fn storyboard_width() -> u32 {
 /// What to put on the timeline: a media range, and where.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SourceParams {
-    /// Media id (`m1`).
+    /// Media id (`m1`). Omitted when `tape` is set.
+    #[serde(default)]
     pub media: String,
+    /// Edit the Source Tape In–Out span instead of one media item
+    /// (decision D17). Both marks must be set.
+    #[serde(default)]
+    pub tape: bool,
     /// Source range (TimeSpecs relative to the media's start). Default: the
     /// media's source marks, or all of it.
     #[serde(default)]
@@ -1300,8 +1326,16 @@ mod tests {
         assert!(matches!(r, Request::EditSplit { at: OneOrMany::Many(ref v), .. } if v.len() == 2));
         let err = Request::from_parts("edit.frobnicate", None).unwrap_err();
         assert!(err.contains("unknown method"), "{err}");
-        let err = Request::from_parts("edit.append", Some(serde_json::json!({}))).unwrap_err();
-        assert!(err.contains("media"), "{err}");
+        let r =
+            Request::from_parts("edit.append", Some(serde_json::json!({"tape": true}))).unwrap();
+        assert!(matches!(
+            r,
+            Request::EditAppend(SourceParams {
+                tape: true,
+                media,
+                ..
+            }) if media.is_empty()
+        ));
     }
 
     #[test]

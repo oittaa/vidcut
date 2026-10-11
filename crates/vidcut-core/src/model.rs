@@ -35,6 +35,11 @@ pub struct Project {
     pub tracks: Vec<Track>,
     /// Timeline In/Out marks.
     pub marks: Marks,
+    /// Source Tape In/Out (decision D17). Empty until the tape is marked.
+    /// Frames are tape frames of `order`; a span on one clip is also that
+    /// clip's source marks.
+    #[serde(default, skip_serializing_if = "TapeMarks::is_empty")]
+    pub tape_marks: TapeMarks,
     pub markers: Vec<Marker>,
     pub next_id: NextIds,
     /// Media Pool bins (p. 655), as `/`-separated paths below the top level
@@ -469,6 +474,26 @@ impl Marks {
     }
 }
 
+/// Source Tape In/Out (decision D17). `in` and `out` are tape frames of
+/// `order` (the media ids in tape order when the marks were set). The range
+/// is half-open, so `out` is the first frame after it (D16).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TapeMarks {
+    #[serde(rename = "in", default, skip_serializing_if = "Option::is_none")]
+    pub mark_in: Option<i64>,
+    #[serde(rename = "out", default, skip_serializing_if = "Option::is_none")]
+    pub mark_out: Option<i64>,
+    /// Media ids in the tape order these frames refer to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub order: Vec<String>,
+}
+
+impl TapeMarks {
+    pub fn is_empty(&self) -> bool {
+        self.mark_in.is_none() && self.mark_out.is_none()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Marker {
     /// `k<N>`, never reused.
@@ -497,6 +522,7 @@ impl Project {
             media: Vec::new(),
             tracks: vec![Track::new("V1", TrackKind::Video)],
             marks: Marks::default(),
+            tape_marks: TapeMarks::default(),
             markers: Vec::new(),
             next_id: NextIds {
                 media: 1,

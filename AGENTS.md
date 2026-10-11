@@ -289,6 +289,7 @@ vidcut undo                                 # works across separate runs
 - **Exporting alongside the human:** `vidcut export out.mp4 --background` returns at once; the export shows in the GUI's Jobs window, and `vidcut jobs wait j1` blocks until it's done. An export the human starts from Quick Export is a job too, so `vidcut jobs` sees it.
 - **Source marks and clipboard work headless too:**
   - `vidcut media marks m1 --in 5s --out 10s`: edits without `--range` then use these marks.
+  - Source Tape marks can span clips (spec D17): `vidcut rpc tape.marks.set '{"in": 200, "out": 300, "order": ["m1", "m2"]}'` (tape frames of those media end to end), then edits with `{"tape": true}` instead of `media`, such as `vidcut rpc edit.append '{"tape": true}'`, place the span as one block.
   - `vidcut edit copy c3 --json`, then `vidcut edit paste --clips @clips.json --at 1m`.
 - **Paths:** the CLI makes paths absolute before routing, those in `apply` batches too. In raw `rpc` requests, use absolute paths.
 
