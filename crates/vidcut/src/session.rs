@@ -43,6 +43,13 @@ pub fn run_with(
             .ok_or_else(|| Error::usage("no project: pass -p FILE or set VIDCUT_PROJECT"))?;
         Store::open(path)
     };
+    if envelope.request.is_live() {
+        return Err(Error::no_instance(format!(
+            "{} controls a running vidcut GUI, and none is reachable; start one with \
+             `vidcut -p FILE` (the CLI forwards to it automatically)",
+            envelope.request.method()
+        )));
+    }
     let mut response = match &envelope.request {
         Request::Schema { method } => answer(schema(method.as_deref())?),
         Request::Doctor {} => answer(doctor()),

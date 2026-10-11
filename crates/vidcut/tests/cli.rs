@@ -25,7 +25,10 @@ impl Sandbox {
 
     fn cmd(&self, args: &[&str]) -> Command {
         let mut c = Command::new(env!("CARGO_BIN_EXE_vidcut"));
+        // Own runtime dir: a GUI running on this machine must not answer.
         c.env("XDG_STATE_HOME", self.dir.join("state"))
+            .env("XDG_RUNTIME_DIR", self.dir.join("run"))
+            .env_remove("VIDCUT_SOCKET")
             .env_remove("VIDCUT_PROJECT")
             .arg("-p")
             .arg(self.project())
@@ -223,6 +226,7 @@ fn errors_have_stable_exit_codes() {
     // No project at all.
     let out = Command::new(env!("CARGO_BIN_EXE_vidcut"))
         .env_remove("VIDCUT_PROJECT")
+        .env("XDG_RUNTIME_DIR", sb.dir.join("run"))
         .args(["--json", "info"])
         .output()
         .unwrap();

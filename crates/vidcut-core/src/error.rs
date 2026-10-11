@@ -71,6 +71,10 @@ impl Error {
         Self::new(ErrorCode::Media, message)
     }
 
+    pub fn no_instance(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::NoInstance, message)
+    }
+
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::Internal, message)
     }

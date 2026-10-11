@@ -86,6 +86,10 @@ pub struct Media {
     pub size: u64,
     pub mtime_ns: i64,
     pub info: MediaInfo,
+    /// Source In/Out (spec §4.4; decision D6: remembered per clip). Edits
+    /// without an explicit source range use them.
+    #[serde(default, skip_serializing_if = "Marks::is_empty")]
+    pub marks: Marks,
 }
 
 /// What the media layer found out about a file (stored so headless edits never
@@ -222,14 +226,20 @@ impl Clip {
     }
 }
 
-/// Timeline In/Out marks; ranges are half-open, so `out` is the first frame
-/// after the marked range.
+/// In/Out marks (timeline or source); ranges are half-open, so `out` is the
+/// first frame after the marked range.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Marks {
     #[serde(rename = "in", default, skip_serializing_if = "Option::is_none")]
     pub mark_in: Option<i64>,
     #[serde(rename = "out", default, skip_serializing_if = "Option::is_none")]
     pub mark_out: Option<i64>,
+}
+
+impl Marks {
+    pub fn is_empty(&self) -> bool {
+        self.mark_in.is_none() && self.mark_out.is_none()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

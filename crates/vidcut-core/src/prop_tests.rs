@@ -93,6 +93,21 @@ enum Op {
         len: u16,
     },
     ClearMarks,
+    MediaMarks {
+        media: u8,
+        a: u16,
+        len: u16,
+    },
+    AppendMarked {
+        media: u8,
+    },
+    Cut {
+        pick: u8,
+    },
+    Paste {
+        pick: u8,
+        at: u16,
+    },
     Undo,
     Redo,
 }
@@ -174,6 +189,10 @@ fn op() -> impl Strategy<Value = Op> {
         (any::<u8>(), 1u16..120).prop_map(|(pick, frames)| Op::ChangeDuration { pick, frames }),
         (0u16..600, 1u16..100).prop_map(|(a, len)| Op::Marks { a, len }),
         Just(Op::ClearMarks),
+        (0u8..3, 0u16..200, 1u16..80).prop_map(|(media, a, len)| Op::MediaMarks { media, a, len }),
+        (0u8..3).prop_map(|media| Op::AppendMarked { media }),
+        any::<u8>().prop_map(|pick| Op::Cut { pick }),
+        (any::<u8>(), 0u16..600).prop_map(|(pick, at)| Op::Paste { pick, at }),
         Just(Op::Undo),
         Just(Op::Redo),
     ]
@@ -261,6 +280,16 @@ fn request(f: &Fixture, op: &Op) -> Option<Value> {
         ),
         Op::Marks { a, len } => ("marks.set", json!({"in": a, "out": a + len})),
         Op::ClearMarks => ("marks.clear", json!({})),
+        Op::MediaMarks { media, a, len } => (
+            "media.marks.set",
+            json!({"media": m(media), "in": a, "out": a + len}),
+        ),
+        Op::AppendMarked { media } => ("edit.append", json!({"media": m(media)})),
+        Op::Cut { pick: i } => ("edit.cut", json!({"clips": pick(f, *i)?})),
+        Op::Paste { pick: i, at } => {
+            let clip = f.editor.project().clip(&pick(f, *i)?)?.clone();
+            ("edit.paste", json!({"clips": [clip], "at": at}))
+        }
         Op::Undo => ("history.undo", json!({})),
         Op::Redo => ("history.redo", json!({})),
     };

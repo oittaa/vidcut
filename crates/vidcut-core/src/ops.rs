@@ -856,3 +856,114 @@ pub fn remove_marker(p: &mut Project, id: &str) -> Result<()> {
     }
     Ok(())
 }
+
+// ---------------------------------------------------------------- source marks, clipboard
+
+/// Sets or clears a media item's source marks (spec §4.4, decision D6).
+pub fn set_media_marks(
+    p: &mut Project,
+    media: &str,
+    mark_in: Option<Option<i64>>,
+    mark_out: Option<Option<i64>>,
+) -> Result<()> {
+    let m = p
+        .media(media)
+        .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+    let frames = p.media_frames(m);
+    let mut marks = m.marks.clone();
+    if let Some(i) = mark_in {
+        marks.mark_in = i;
+    }
+    if let Some(o) = mark_out {
+        marks.mark_out = o;
+    }
+    if let (Some(i), Some(o)) = (marks.mark_in, marks.mark_out)
+        && i >= o
+    {
+        return Err(Error::invalid(format!("In ({i}) must be before Out ({o})")));
+    }
+    if marks.mark_in.is_some_and(|i| i < 0 || i >= frames)
+        || marks.mark_out.is_some_and(|o| o < 1 || o > frames)
+    {
+        return Err(Error::invalid(format!(
+            "source marks must be inside {media} (0..{frames} frames)"
+        )));
+    }
+    let m = p.media.iter_mut().find(|m| m.id == media).expect("found");
+    m.marks = marks;
+    Ok(())
+}
+
+/// The clips `ids` in timeline order, as the clipboard holds them (Ctrl+C,
+/// p. 723).
+pub fn copy_clips(p: &Project, ids: &[String]) -> Result<Vec<Clip>> {
+    if ids.is_empty() {
+        return Err(Error::usage("no clips to copy"));
+    }
+    let mut clips = ids
+        .iter()
+        .map(|id| {
+            p.clip(id)
+                .cloned()
+                .ok_or_else(|| Error::not_found(format!("no clip {id}")))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    clips.sort_by_key(|c| c.start);
+    clips.dedup_by(|a, b| a.id == b.id);
+    Ok(clips)
+}
+
+/// Paste (Ctrl+V, p. 723): copies of `clips` overwrite Track 1 from `at`,
+/// keeping their spacing and properties. J/L cuts reset to straight cuts
+/// (decision D14); with Ripple On a paste past the end starts at the end
+/// (like decision D10). Returns the new clip ids.
+pub fn paste(p: &mut Project, clips: &[Clip], at: i64) -> Result<Vec<String>> {
+    let ti = main_index(p)?;
+    if clips.is_empty() {
+        return Err(Error::usage("nothing to paste"));
+    }
+    if at < 0 {
+        return Err(Error::invalid("paste position before 0"));
+    }
+    let mut clips = clips.to_vec();
+    clips.sort_by_key(|c| c.start);
+    let first = clips[0].start;
+    let mut ids = Vec::new();
+    for c in clips {
+        let media = p
+            .media(&c.media)
+            .ok_or_else(|| Error::not_found(format!("no media {} in this project", c.media)))?;
+        let frames = p.media_frames(media);
+        if c.duration <= 0 || c.source_in < 0 || c.source_in + c.duration > frames {
+            return Err(Error::invalid(format!(
+                "pasted clip {} is outside {} (0..{frames} frames)",
+                c.id, c.media
+            )));
+        }
+        if c.audio.as_ref().is_some_and(|a| {
+            a.stream as usize >= media.info.audio.len() || !(-60.0..=24.0).contains(&a.gain_db)
+        }) {
+            return Err(Error::invalid(format!(
+                "pasted clip {} has invalid audio settings",
+                c.id
+            )));
+        }
+        let mut start = at + (c.start - first);
+        if p.settings.ripple_on {
+            start = start.min(p.tracks[ti].end());
+        }
+        let mut clip = c;
+        clip.id = p.alloc_clip_id();
+        clip.start = start;
+        clip.video = true;
+        if let Some(a) = clip.audio.as_mut() {
+            a.head = 0;
+            a.tail = 0;
+        }
+        clear_range(p, ti, start, start + clip.duration);
+        ids.push(clip.id.clone());
+        place(p, ti, clip);
+    }
+    fix_audio(p, ti);
+    Ok(ids)
+}

@@ -54,6 +54,25 @@ impl Context {
         unsafe { (self.mpv.inner.api.render_context_update)(self.ctx) }
     }
 
+    /// Whether the frame the next render draws is a new picture (not a redraw
+    /// or a repeat of the last one).
+    fn next_frame_is_new(&self) -> bool {
+        let mut info = ffi::mpv_render_frame_info::default();
+        let code = unsafe {
+            (self.mpv.inner.api.render_context_get_info)(
+                self.ctx,
+                param(
+                    ffi::MPV_RENDER_PARAM_NEXT_FRAME_INFO,
+                    (&raw mut info).cast(),
+                ),
+            )
+        };
+        code >= 0
+            && info.flags & ffi::MPV_RENDER_FRAME_INFO_PRESENT != 0
+            && info.flags & (ffi::MPV_RENDER_FRAME_INFO_REDRAW | ffi::MPV_RENDER_FRAME_INFO_REPEAT)
+                == 0
+    }
+
     fn render(&self, params: &mut [ffi::mpv_render_param]) -> Result<()> {
         let api = self.mpv.inner.api;
         let code = unsafe { (api.render_context_render)(self.ctx, params.as_mut_ptr()) };
@@ -111,6 +130,12 @@ impl SwRenderer {
     /// means a new frame is ready.
     pub fn update(&self) -> u64 {
         self.ctx.update()
+    }
+
+    /// Whether the next render draws a new picture (call after
+    /// [`update`](Self::update) asked for a frame, before rendering it).
+    pub fn next_frame_is_new(&self) -> bool {
+        self.ctx.next_frame_is_new()
     }
 
     /// Renders the current frame as `rgb0` (4 bytes per pixel) into `buffer`.
@@ -208,6 +233,12 @@ impl GlRenderer {
     /// means a new frame should be rendered.
     pub fn update(&self) -> u64 {
         self.ctx.update()
+    }
+
+    /// Whether the next render draws a new picture (call after
+    /// [`update`](Self::update) asked for a frame, before rendering it).
+    pub fn next_frame_is_new(&self) -> bool {
+        self.ctx.next_frame_is_new()
     }
 
     /// Renders the current frame into framebuffer object `fbo` (0 = default)

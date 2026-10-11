@@ -11,7 +11,9 @@ pub mod filler;
 pub mod fixture;
 pub mod probe;
 pub mod remux;
+pub mod tails;
 pub mod testdata;
+pub mod thumbs;
 
 pub use error::{Error, Result};
 

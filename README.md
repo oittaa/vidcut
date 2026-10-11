@@ -5,9 +5,10 @@ A simple, fully scriptable video cutting tool for Linux, modeled on DaVinci Reso
 > **Status: early development.**
 > - Done:
 >   - **M0:** spikes proved frame-exact decoding and mpv preview.
->   - **M1:** the project model, Cut-page edit operations and the headless CLI. Timelines can be built and edited from the command line.
+>   - **M1:** the project model, Cut-page edit operations and the headless CLI.
 >   - **M2:** frame-exact export with presets, GPU encoding, ranges, per-clip and audio-only output.
-> - Not yet: the GUI. See the milestones below.
+>   - **M3:** the GUI shell. It has the media pool, the viewer (Source Clip, Source Tape, Timeline), transport and marks, the edit buttons and an overview timeline. It also has live control: CLI commands and agents drive the running GUI.
+> - Next: timeline editing with the mouse (M4). See the milestones below.
 
 ## What it will do
 
@@ -37,7 +38,41 @@ Rust 1.93 or newer (the distro `rustc`/`cargo` packages are fine).
 
 ```bash
 cargo build --release
-./target/release/vidcut --help     # CLI (the GUI arrives in M3)
+./target/release/vidcut                     # the GUI (start screen: new or open a project)
+./target/release/vidcut -p talk.vidcut      # the GUI with a project (created if missing)
+./target/release/vidcut --help              # the CLI
+```
+
+## The GUI
+
+The layout follows the Cut page:
+- the Media Pool on the left, with the edit buttons below it;
+- the Viewer on the right;
+- the timeline across the bottom.
+
+Everything you do is listed in the **Command log** (top right) as the request it sent. Click an entry to copy it as a shell command.
+
+| Keys | |
+|---|---|
+| Space, J / K / L | play/stop, shuttle (repeat J/L for speed; hold K and tap J/L to step) |
+| ← / →, Shift+← / → | one frame, one second |
+| ↑ / ↓, Shift+↑ / ↓, Home / End | previous/next edit, previous/next marker, start/end |
+| I / O, Alt+X, Shift+I / O | mark In/Out (source, timeline, or the pool clip under the pointer), clear, go to |
+| Q | Viewer: Timeline ↔ last source mode |
+| = / + / − | type a timecode (absolute or relative); digits fill from the right, so 100 is 1 second |
+| F9, Shift+F12, Shift+F10, F10 | Smart Insert, Append, Ripple Overwrite, Overwrite |
+| Ctrl+\\, Delete, Alt+Delete | split at the playhead, ripple delete (or the In–Out range), lift |
+| Ctrl+C / X / V, Ctrl+Z / Ctrl+Shift+Z | copy, cut, paste at the playhead; undo, redo |
+| M, Alt+M, D | add marker, remove marker, disable clip |
+| Ctrl+I | import media |
+
+**Live control.** While the GUI has a project open, `vidcut` commands for that project run *inside* it, and the window updates at once. A script or an AI agent can therefore edit alongside you:
+
+```bash
+vidcut -p talk.vidcut edit split --at 1m          # shows up in the GUI immediately
+vidcut -p talk.vidcut seek 1m                     # moves the GUI's playhead
+vidcut -p talk.vidcut screenshot -o shot.png      # what the viewer shows, frame-exact
+vidcut -p talk.vidcut log                         # what was done, by whom
 ```
 
 ## Try the CLI
@@ -55,7 +90,7 @@ vidcut -p talk.vidcut export talk.flac                          # audio only
 vidcut -p talk.vidcut frame --at 1m -o check.png                # look at a frame
 ```
 
-Every command takes `--json` for machine-readable output. `vidcut schema` lists the full protocol.
+Every command takes `--json` for machine-readable output. `vidcut schema` lists the full protocol. Add `--headless` to work on the file directly even while a GUI has it open.
 
 ## Planned milestones
 
@@ -66,7 +101,7 @@ Every command takes `--json` for machine-readable output. `vidcut schema` lists 
 | M2 | Export engine (presets, GPU, range, per-clip, audio-only) |
 | M3 | GUI shell, viewer, media pool, live control over a socket |
 | M4 | Timeline editing (dual timeline, trimming, snapping, markers) |
-| M5 | Export UI (Quick Export, Export dialog, jobs) |
+| M5 | Export UI (Quick Export, Export dialog, jobs), OpenTimelineIO import/export |
 | M6 | Multi-track (B-roll, music, Place On Top, mixer) |
 | M7 | Agent extras (MCP server, Ripple Delete Silence, analysis) |
 

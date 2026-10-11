@@ -82,7 +82,10 @@ pub fn run(
     }
 }
 
-fn write_packet(octx: &mut format::context::Output, packet: &mut ffmpeg::Packet) -> Result<()> {
+pub(crate) fn write_packet(
+    octx: &mut format::context::Output,
+    packet: &mut ffmpeg::Packet,
+) -> Result<()> {
     use ffmpeg::packet::Mut;
     let ret = unsafe { ffi::av_interleaved_write_frame(octx.as_mut_ptr(), packet.as_mut_ptr()) };
     if ret < 0 {

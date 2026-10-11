@@ -315,6 +315,88 @@ pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
     Ok(plan)
 }
 
+/// A media item's place on a source tape.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TapeEntry {
+    pub media: String,
+    /// First tape frame.
+    pub start: i64,
+    pub frames: i64,
+}
+
+/// Plans whole media items laid end to end: the Source Tape (spec §4.1), or
+/// one item for the Source Clip viewer. Media without video shows black and
+/// media without audio is silent; empty media is left out.
+pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>)> {
+    let s = &p.settings;
+    let sample = |t: i64| s.fps.frame_to_sample(t, s.sample_rate);
+    let (mut video, mut lane, mut entries) = (Vec::new(), Vec::new(), Vec::new());
+    let mut t = 0;
+    for id in media {
+        let m = p
+            .media(id)
+            .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
+        let frames = p.media_frames(m);
+        if frames <= 0 {
+            continue;
+        }
+        let (path, origin) = p.media_origin(id)?;
+        if m.info.video.is_some() {
+            push_video(
+                &mut video,
+                VideoPiece::Source {
+                    media: id.clone(),
+                    path: path.clone(),
+                    origin,
+                    source_frame: 0,
+                    frames,
+                },
+            );
+        } else {
+            push_video(&mut video, VideoPiece::Black { frames });
+        }
+        let samples = sample(t + frames) - sample(t);
+        if m.info.audio.is_empty() {
+            push_audio(&mut lane, AudioPiece::Silence { samples });
+        } else {
+            push_audio(
+                &mut lane,
+                AudioPiece::Source {
+                    media: id.clone(),
+                    path,
+                    stream: 0,
+                    origin,
+                    source_sample: 0,
+                    samples,
+                    gain_db: 0.0,
+                },
+            );
+        }
+        entries.push(TapeEntry {
+            media: id.clone(),
+            start: t,
+            frames,
+        });
+        t += frames;
+    }
+    if t == 0 {
+        return Err(Error::invalid("no media to show"));
+    }
+    let plan = RenderPlan {
+        fps: s.fps,
+        width: s.width,
+        height: s.height,
+        sample_rate: s.sample_rate,
+        channels: s.channels,
+        frames: t,
+        video,
+        audio: vec![lane],
+        range: (0, t),
+        name: "tape".into(),
+    };
+    Ok((plan, entries))
+}
+
 fn stem(name: &str) -> String {
     std::path::Path::new(name)
         .file_stem()
@@ -362,6 +444,38 @@ mod tests {
         // c1 = m1 0..100; the lifted gap and disabled c3 merge into one black piece.
         assert_eq!(kinds, vec![("m1@0".into(), 100), ("black".into(), 100)]);
         assert_eq!(plan.frames, 200);
+    }
+
+    #[test]
+    fn tape_lays_whole_media_end_to_end() {
+        // Spec §4.1: the Source Tape plays every pool clip end to end.
+        let f = fixture();
+        let ids: Vec<String> = ["m3", "m1"].iter().map(|s| s.to_string()).collect();
+        let (plan, entries) = tape(f.editor.project(), &ids).unwrap();
+        assert_eq!(
+            entries
+                .iter()
+                .map(|e| (e.media.as_str(), e.start, e.frames))
+                .collect::<Vec<_>>(),
+            vec![("m3", 0, 200), ("m1", 200, 250)]
+        );
+        assert_eq!(plan.frames, 450);
+        assert_eq!(plan.video.len(), 2);
+        // m3 has no audio: silence, then m1's audio, exactly as long as the video.
+        let lane = &plan.audio[0];
+        assert!(matches!(lane[0], AudioPiece::Silence { samples: 384_000 }));
+        assert!(matches!(
+            lane[1],
+            AudioPiece::Source {
+                samples: 480_000,
+                ..
+            }
+        ));
+        assert_eq!(
+            lane.iter().map(AudioPiece::samples).sum::<i64>(),
+            plan.samples()
+        );
+        assert!(tape(f.editor.project(), &[]).is_err());
     }
 
     #[test]

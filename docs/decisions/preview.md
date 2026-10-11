@@ -127,8 +127,31 @@ For single-file sources, also `rebase-start-time=no`.
 - **v1:** J uses stepped reverse, i.e. exact seeks backwards at a reduced rate.
 - Revisit later.
 
-## 8. Still open
+## 8. Settled in M3
 
-- **Mixed rates and VFR:** how a source at another frame rate (e.g. 25p on a 30p timeline) or a variable-frame-rate source is sampled inside EDLs. Must match export; decided in M2.
-- **Multi-track audio preview:** mixing several audio tracks via `lavfi-complex` (M6).
-- **Source viewer mapping:** raw-time single files or one-entry EDLs (M3).
+- **Mixed rates and VFR:** settled in M2. Preview and export share the sampling rule ([export.md](export.md) §2).
+- **Source viewer mapping:** sources play as EDLs too (`render::tape`), one entry per clip, using the same formulas as the timeline. Source times are project frames (deviation X8). See [gui.md](gui.md) §7.
+- **Multi-track audio preview:** still open (M6).
+
+## 9. Segment ends before open-GOP keyframes: tail patches
+
+**The problem** (found in M3; the M0 fixtures happened not to show it):
+- **Leading pictures.** In many encodes, a keyframe is decoded *before* the frames displayed just ahead of it. These are open GOPs, and x264 also places B-frames before a keyframe. Big Buck Bunny, Tears of Steel, and our own 640×360 H.264 fixture all do this.
+- **mpv's heuristic.** mpv's EDL demuxer ends a segment at the first keyframe whose timestamp is past the segment's end. A segment that ends within the leading pictures therefore never sends its last 1–3 frames to the decoder.
+- **The symptom.** The viewer shows the next segment's first frame in their place. Seeks there and playback across the cut are both wrong.
+- **Export is unaffected:** our decoder selects frames by timestamp after decoding.
+
+**Why EDL parameters can't fix it:**
+- Including that keyframe in the segment means lengthening it by at least half a frame.
+- Shifting the next segment back to compensate would drop that segment's own first frame.
+
+**The fix (`vidcut_av::tails`, used by the live session's `preview_plan`):**
+1. **Scan.** For every video segment end, check the packets around the cut (`lost_before`) on a worker. The scan runs once per (file, end frame, rate, size) and is cached.
+2. **Patch.** If frames would be lost, render the segment's last frames with the export engine itself (`render_patch`): lossless FFV1, all-intra, Matroska, timestamps from 0, the project's size. Patches are cached in `~/.cache/vidcut/tails/`.
+3. **Splice.** The EDL plays the segment shortened by the patch's length, then the patch. Preview equals export by construction.
+
+**Waiting.** Seeks wait until pending checks and patches are done ([gui.md](gui.md) §4), and the state reports them as `preview_pending`.
+
+**Evidence:**
+- `crates/vidcut-av/tests/tails.rs`: frames 88–89 are lost before keyframe 90 and patched exactly.
+- `crates/vidcut/tests/live.rs` (clip from the first frame of a 640×360 file) and `tests/gui.rs`: frames 88–90 are exact.

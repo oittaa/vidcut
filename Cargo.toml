@@ -50,6 +50,8 @@ eframe = { version = "0.35", default-features = false, features = [
 winit = "0.30"
 # Platform display handle passed to libmpv for hardware-decoding interop.
 raw-window-handle = "0.6"
+notify = { version = "8.2", default-features = false }
+rfd = "0.17"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

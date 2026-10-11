@@ -689,3 +689,134 @@ fn timeline_json_is_stable() {
     ));
     insta::assert_json_snapshot!("trim_error", e);
 }
+
+#[test]
+fn source_marks_drive_edits_without_a_range() {
+    // §4.4 and decisions D5/D6: source marks are kept per clip; a missing In
+    // means the first frame and a missing Out the end of the media.
+    let mut f = fixture();
+    let r = f.ok(req(
+        "media.marks.set",
+        json!({"media": "m1", "in": "20f", "out": "60f"}),
+    ));
+    assert_eq!(r.result, json!({"in": 20, "out": 60}));
+    f.ok(req("edit.append", json!({"media": "m1"})));
+    f.ok(req("media.marks.set", json!({"media": "m2", "in": 90})));
+    f.ok(req("edit.append", json!({"media": "m2"})));
+    // An explicit range wins over the marks.
+    f.ok(req(
+        "edit.append",
+        json!({"media": "m1", "range": "0f..5f"}),
+    ));
+    assert_eq!(
+        f.v1(),
+        vec![
+            row("c1", 0, 40, 20),
+            row("c2", 40, 10, 90),
+            row("c3", 50, 5, 0)
+        ]
+    );
+    // Source times resolve against the media: `end` is its end.
+    f.ok(req("media.marks.set", json!({"media": "m1", "out": "end"})));
+    let m1 = f.editor.project().media("m1").unwrap().marks.clone();
+    assert_eq!((m1.mark_in, m1.mark_out), (Some(20), Some(250)));
+    assert_eq!(
+        f.ok(req("media.get", json!({"media": "m1"}))).result["marks"],
+        json!({"in": 20, "out": 250})
+    );
+    f.ok(req("media.marks.clear", json!({"media": "m1"})));
+    assert!(f.editor.project().media("m1").unwrap().marks.is_empty());
+    // Marks stay inside the media and in order.
+    for bad in [
+        json!({"media": "m2", "in": 150}),
+        json!({"media": "m2", "in": 50, "out": 40}),
+        json!({"media": "m2", "out": "5s"}),
+    ] {
+        assert_eq!(
+            f.err(req("media.marks.set", bad)).code,
+            ErrorCode::InvalidEdit
+        );
+    }
+    assert_eq!(
+        f.err(req("media.marks.set", json!({"media": "m2"}))).code,
+        ErrorCode::Usage
+    );
+}
+
+#[test]
+fn copy_cut_and_paste() {
+    // p. 723: Ctrl+C copies, Ctrl+X cuts and ripples, Ctrl+V pastes at the
+    // playhead on the original track, overwriting.
+    let mut f = three_clips();
+    f.ok(req(
+        "clip.set",
+        json!({"clips": "c2", "gain_db": -6.0, "name": "B"}),
+    ));
+    let rev = f.editor.project().rev;
+    let copied = f.ok(req("edit.copy", json!({"clips": ["c3", "c2"]})));
+    let clips = copied.result["clips"].clone();
+    assert_eq!(clips[0]["id"], "c2", "copied clips are in timeline order");
+    assert_eq!(f.editor.project().rev, rev, "copy changes nothing");
+
+    // Paste at 20: the copies keep their spacing and properties and overwrite
+    // c1's tail and c2's head (20..120); nothing moves.
+    let r = f.ok(req("edit.paste", json!({"clips": clips, "at": 20})));
+    assert_eq!(r.result["clips"], json!(["c4", "c7"]));
+    assert_eq!(
+        f.v1(),
+        vec![
+            row("c1", 0, 20, 0),
+            row("c4", 20, 50, 10),
+            row("c7", 70, 50, 100),
+            row("c8", 120, 30, 30),
+            row("c3", 150, 50, 100),
+        ]
+    );
+    let c4 = f.editor.project().clip("c4").unwrap();
+    assert_eq!(c4.audio.as_ref().unwrap().gain_db, -6.0);
+    assert_eq!(c4.name.as_deref(), Some("B"));
+
+    // Cut ripples Track 1 and returns the clips.
+    let r = f.ok(req("edit.cut", json!({"clips": "c4"})));
+    assert_eq!(r.result["clips"][0]["id"], "c4");
+    assert_eq!(
+        f.v1(),
+        vec![
+            row("c1", 0, 20, 0),
+            row("c7", 20, 50, 100),
+            row("c8", 70, 30, 30),
+            row("c3", 100, 50, 100),
+        ]
+    );
+    // With Ripple On, a paste past the end starts at the end (like D10).
+    let cut = r.result["clips"].clone();
+    f.ok(req("edit.paste", json!({"clips": cut, "at": 500})));
+    assert_eq!(f.v1().last().unwrap(), &row("c9", 150, 50, 10));
+
+    // Headless paste needs clips and a position; pasted media must exist.
+    assert_eq!(
+        f.err(req("edit.paste", json!({"at": 0}))).code,
+        ErrorCode::Usage
+    );
+    let mut alien = cut.clone();
+    alien[0]["media"] = json!("m9");
+    assert_eq!(
+        f.err(req("edit.paste", json!({"clips": alien, "at": 0})))
+            .code,
+        ErrorCode::NotFound
+    );
+}
+
+#[test]
+fn live_requests_need_a_running_gui() {
+    let mut f = three_clips();
+    for (method, params) in [
+        ("player.seek", json!({"at": "1s"})),
+        ("viewer.set", json!({"mode": "source"})),
+        ("selection.get", json!({})),
+        ("gui.screenshot", json!({"out": "/tmp/x.png"})),
+    ] {
+        let e = f.err(req(method, params));
+        assert_eq!(e.code, ErrorCode::NoInstance, "{method}: {}", e.message);
+    }
+}

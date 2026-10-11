@@ -14,27 +14,7 @@ use vidcut_core::request::ExportParams;
 use vidcut_core::time::{TimeContext, TimeSpec};
 use vidcut_core::{Error, ErrorCode, Project, Result};
 
-fn config_dir() -> PathBuf {
-    std::env::var_os("XDG_CONFIG_HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home().join(".config"))
-        .join("vidcut")
-}
-
-fn cache_dir() -> PathBuf {
-    std::env::var_os("XDG_CACHE_HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home().join(".cache"))
-        .join("vidcut")
-}
-
-fn home() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-}
+use crate::paths::{cache_dir, config_dir};
 
 /// Built-in presets plus user presets from `~/.config/vidcut/presets/*.toml`.
 pub fn presets() -> Result<Vec<Preset>> {

@@ -9,6 +9,9 @@ pub fn print(method: &str, r: &Response, json: bool) {
         println!("{}", serde_json::to_string_pretty(r).unwrap_or_default());
         return;
     }
+    if let Some(()) = live(method, r) {
+        return;
+    }
     let mutation = matches!(
         method.split('.').next(),
         Some("edit" | "clip" | "marks" | "markers" | "history" | "apply" | "media" | "project")
@@ -178,6 +181,110 @@ pub fn print(method: &str, r: &Response, json: bool) {
             serde_json::to_string_pretty(&r.result).unwrap_or_default()
         ),
     }
+}
+
+/// Live (GUI) requests; `None` for everything else.
+fn live(method: &str, r: &Response) -> Option<()> {
+    let v = &r.result;
+    match method {
+        "player.state" | "player.play" | "player.pause" | "player.toggle" | "player.seek"
+        | "player.step" | "viewer.set" | "viewer.load" | "project.open" => {
+            println!("{}", state_line(v));
+        }
+        "gui.screenshot" => println!(
+            "wrote {} ({}x{})",
+            v["path"].as_str().unwrap_or_default(),
+            v["width"],
+            v["height"]
+        ),
+        "gui.log" => {
+            for e in v.as_array().into_iter().flatten() {
+                let params = match &e["params"] {
+                    p if p.as_object().is_some_and(|o| o.is_empty()) => String::new(),
+                    p => p.to_string(),
+                };
+                let status = match e["error"].as_str() {
+                    Some(err) => format!("  ERROR {err}"),
+                    None => String::new(),
+                };
+                println!(
+                    "#{:<5} {:<7} {} {}{}",
+                    e["seq"],
+                    e["origin"].as_str().unwrap_or_default(),
+                    e["method"].as_str().unwrap_or_default(),
+                    params,
+                    status
+                );
+            }
+        }
+        "selection.get" | "selection.set" => {
+            let ids = |k: &str| {
+                v[k].as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(Value::as_str)
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "-".into())
+            };
+            println!("clips {}  media {}", ids("clips"), ids("media"));
+        }
+        "edit.copy" => println!(
+            "copied {} clip(s); paste with `vidcut edit paste` (GUI) or --clips",
+            v["clips"].as_array().map_or(0, Vec::len)
+        ),
+        "gui.quit" | "gui.window" => println!("ok {method}"),
+        _ => return None,
+    }
+    Some(())
+}
+
+/// `viewer timeline | timeline 00:00:10:00 (300/450) stopped | source ...`
+fn state_line(v: &Value) -> String {
+    let player = |p: &Value| {
+        let what = if p["playing"].as_bool() == Some(true) {
+            match p["speed"].as_f64() {
+                Some(s) if s != 1.0 => format!("playing {s:+}x"),
+                _ => "playing".to_string(),
+            }
+        } else {
+            "stopped".to_string()
+        };
+        let mut s = format!(
+            "{} ({}/{}) {what}",
+            p["position_tc"].as_str().unwrap_or("-"),
+            p["position"],
+            p["frames"]
+        );
+        if let Some(e) = p["error"].as_str() {
+            s.push_str(&format!(" ERROR {e}"));
+        }
+        s
+    };
+    let source = &v["source"];
+    let source_text = match source["media"].as_str() {
+        Some(m) => format!(
+            "{} {m} @{}",
+            source["content"].as_str().unwrap_or("source"),
+            source["source_frame"]
+        ),
+        None => "source -".to_string(),
+    };
+    format!(
+        "viewer {} | timeline {} | {} {}",
+        v["viewer"].as_str().unwrap_or("-"),
+        player(&v["timeline"]),
+        source_text,
+        if source["loaded"].as_bool() == Some(true) {
+            player(source)
+        } else {
+            String::new()
+        }
+    )
+    .trim_end()
+    .to_string()
 }
 
 fn clip_line(c: &Value) -> String {

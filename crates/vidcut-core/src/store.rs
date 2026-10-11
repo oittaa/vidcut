@@ -107,11 +107,20 @@ impl Store {
         &self.path
     }
 
+    /// The project file's current text.
+    pub fn read(&self) -> Result<String> {
+        std::fs::read_to_string(&self.path).map_err(|e| io(&self.path, e))
+    }
+
     /// Reads the project and its history without locking (writes are atomic,
     /// so readers always see a whole file).
     pub fn load(&self) -> Result<Editor> {
-        let text = std::fs::read_to_string(&self.path).map_err(|e| io(&self.path, e))?;
-        let project = parse(&self.path, &text)?;
+        self.load_text(&self.read()?)
+    }
+
+    /// Like [`load`](Self::load), for file text the caller already read.
+    pub fn load_text(&self, text: &str) -> Result<Editor> {
+        let project = parse(&self.path, text)?;
         let sidecar = std::fs::read_to_string(&self.history_path)
             .ok()
             .and_then(|t| serde_json::from_str::<Sidecar>(&t).ok())
@@ -152,14 +161,19 @@ impl Store {
         Ok(out)
     }
 
-    fn save(&self, editor: &Editor) -> Result<()> {
-        write_atomic(&self.path, &to_json(editor.project())?).map_err(|e| io(&self.path, e))?;
+    /// Writes the project and its history; returns the project file's new
+    /// text. Callers hold the [`lock`](Self::lock).
+    pub fn save(&self, editor: &Editor) -> Result<String> {
+        let text = to_json(editor.project())?;
         let sidecar = Sidecar {
             project_path: self.path.clone(),
             head: editor.project().clone(),
             undo: editor.history().undo.clone(),
             redo: editor.history().redo.clone(),
         };
+        // The sidecar goes first: whoever sees the new project file (a file
+        // watcher, say) then also finds the history that matches it, instead
+        // of mistaking the change for an external edit.
         let dir = self.history_path.parent().expect("history dir");
         // History is a convenience: failing to save it must not lose the edit.
         if std::fs::create_dir_all(dir).is_ok() {
@@ -167,10 +181,13 @@ impl Store {
                 serde_json::to_string(&sidecar).map_err(|e| Error::internal(e.to_string()))?;
             let _ = write_atomic(&self.history_path, &json);
         }
-        Ok(())
+        write_atomic(&self.path, &text).map_err(|e| io(&self.path, e))?;
+        Ok(text)
     }
 
-    fn lock(&self) -> Result<File> {
+    /// Takes the project's write lock (released when the returned file is
+    /// dropped), waiting up to 30 s for other writers.
+    pub fn lock(&self) -> Result<File> {
         let file = File::options()
             .create(true)
             .truncate(false)
@@ -182,7 +199,7 @@ impl Store {
             match file.try_lock() {
                 Ok(()) => return Ok(file),
                 Err(std::fs::TryLockError::WouldBlock) if started.elapsed() < LOCK_TIMEOUT => {
-                    std::thread::sleep(Duration::from_millis(20));
+                    std::thread::sleep(Duration::from_millis(5));
                 }
                 Err(std::fs::TryLockError::WouldBlock) => {
                     return Err(Error::conflict(format!(

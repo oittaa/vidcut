@@ -33,6 +33,12 @@ pub struct Cli {
     /// Fail unless the project is at this revision.
     #[arg(long, global = true, value_name = "REV")]
     pub if_rev: Option<u64>,
+    /// Run here even if a GUI has the project open.
+    #[arg(long, global = true, conflicts_with = "instance")]
+    pub headless: bool,
+    /// Send to this running GUI (pid or socket path) instead of choosing one.
+    #[arg(long, global = true, env = "VIDCUT_SOCKET", value_name = "PID|SOCKET")]
+    pub instance: Option<String>,
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -165,6 +171,99 @@ pub enum Command {
     },
     /// Check dependencies (FFmpeg, libmpv, GPUs).
     Doctor,
+
+    // ------------------------------------------------------------ the GUI
+    /// Start the GUI (also what `vidcut` without a command does).
+    Gui {
+        /// Project to open (created if missing). Default: -p / VIDCUT_PROJECT.
+        file: Option<PathBuf>,
+    },
+    /// List running GUIs (live commands go to them).
+    Instances,
+    /// Open a project in the running GUI (--new creates it).
+    Open {
+        file: PathBuf,
+        #[arg(long)]
+        new: bool,
+    },
+    /// Show the viewer as source (Source Clip), tape (Source Tape) or timeline.
+    Viewer { mode: String },
+    /// Open a media item in the viewer as Source Clip.
+    Load {
+        media: String,
+        /// Source time to show.
+        #[arg(long, allow_hyphen_values = true)]
+        at: Option<String>,
+    },
+    /// Play the viewer (negative speed plays backwards).
+    Play {
+        #[arg(long, allow_hyphen_values = true)]
+        speed: Option<f64>,
+        /// Switch the viewer first: source, tape or timeline.
+        #[arg(long)]
+        viewer: Option<String>,
+    },
+    /// Stop playback.
+    Pause {
+        #[arg(long)]
+        viewer: Option<String>,
+    },
+    /// Move the playhead and wait until the frame shows (+10f, -2s: relative).
+    Seek {
+        #[arg(allow_hyphen_values = true)]
+        at: String,
+        /// Switch the viewer first: source, tape or timeline.
+        #[arg(long)]
+        viewer: Option<String>,
+        /// Seek to a keyframe (fast, inexact).
+        #[arg(long)]
+        fast: bool,
+    },
+    /// Step frames (negative: back).
+    Step {
+        #[arg(default_value_t = 1, allow_hyphen_values = true)]
+        frames: i64,
+        #[arg(long)]
+        viewer: Option<String>,
+    },
+    /// Viewer mode, playheads, source clip and selection.
+    State,
+    /// Show or set the selection (timeline clips and/or pool media).
+    Select {
+        #[arg(long, value_delimiter = ',')]
+        clips: Option<Vec<String>>,
+        #[arg(long, value_delimiter = ',')]
+        media: Option<Vec<String>>,
+    },
+    /// Save a PNG of the viewer as shown (or of the whole window).
+    Screenshot {
+        #[arg(short, long)]
+        out: PathBuf,
+        #[arg(long)]
+        window: bool,
+    },
+    /// The GUI's command log (requests from every client).
+    Log {
+        /// Only entries after this sequence number.
+        #[arg(long)]
+        since: Option<u64>,
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    /// Resize, minimize, maximize or fullscreen the GUI window.
+    Window {
+        /// Inner size WIDTHxHEIGHT in logical pixels.
+        #[arg(long)]
+        size: Option<String>,
+        #[arg(long)]
+        minimize: bool,
+        #[arg(long)]
+        maximize: Option<bool>,
+        #[arg(long)]
+        fullscreen: Option<bool>,
+    },
+    /// Close the GUI.
+    Quit,
 }
 
 #[derive(Args, Debug)]
@@ -213,6 +312,16 @@ pub enum MediaCmd {
     Rename {
         media: String,
         name: String,
+    },
+    /// Set or clear a media item's source In/Out (Out is exclusive).
+    Marks {
+        media: String,
+        #[arg(long = "in", allow_hyphen_values = true)]
+        mark_in: Option<String>,
+        #[arg(long, allow_hyphen_values = true)]
+        out: Option<String>,
+        #[arg(long, conflicts_with_all = ["mark_in", "out"])]
+        clear: bool,
     },
 }
 
@@ -371,6 +480,24 @@ pub enum EditCmd {
         #[arg(long)]
         no_ripple: bool,
     },
+    /// Copy clips (prints them for `edit paste --clips`).
+    Copy {
+        #[arg(required = true)]
+        clips: Vec<String>,
+    },
+    /// Cut clips: copy, then delete with ripple.
+    Cut {
+        #[arg(required = true)]
+        clips: Vec<String>,
+    },
+    /// Paste clips over Track 1 (default: the GUI's clipboard at its playhead).
+    Paste {
+        #[arg(long, allow_hyphen_values = true)]
+        at: Option<String>,
+        /// Clips as JSON (the `clips` of `edit copy --json`), or @FILE, or - for stdin.
+        #[arg(long)]
+        clips: Option<String>,
+    },
     /// Set clips' duration.
     Duration {
         #[arg(required = true)]
@@ -456,6 +583,10 @@ pub enum Action {
     ShowMarks(Envelope),
     /// List markers (from `timeline.get`).
     ListMarkers(Envelope),
+    /// Start the GUI.
+    Gui { project: Option<PathBuf> },
+    /// List running GUIs.
+    Instances,
 }
 
 fn time(s: &str) -> Value {
@@ -500,6 +631,30 @@ fn parse_size(s: &str) -> Result<(u32, u32)> {
         (Ok(w), Ok(h)) => Ok((w, h)),
         _ => Err(Error::usage(format!("size {s:?}: expected WIDTHxHEIGHT"))),
     }
+}
+
+/// Paths made absolute: a running GUI may answer from another directory.
+fn absolute(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    paths
+        .iter()
+        .map(|p| std::path::absolute(p).map_err(|e| Error::usage(format!("{}: {e}", p.display()))))
+        .collect()
+}
+
+/// A JSON argument given inline, as `@FILE`, or as `-` (stdin).
+fn read_json_arg(arg: &str) -> Result<Value> {
+    let text = if arg == "-" {
+        let mut s = String::new();
+        std::io::stdin()
+            .read_to_string(&mut s)
+            .map_err(|e| Error::usage(format!("stdin: {e}")))?;
+        s
+    } else if let Some(file) = arg.strip_prefix('@') {
+        std::fs::read_to_string(file).map_err(|e| Error::usage(format!("{file}: {e}")))?
+    } else {
+        arg.to_string()
+    };
+    serde_json::from_str(&text).map_err(|e| Error::usage(format!("not JSON: {e}")))
 }
 
 /// Reads requests for `vidcut apply`: JSON Lines or one JSON array.
@@ -594,17 +749,33 @@ impl Cli {
             }
             Command::Probe { file } => req("probe", json!({ "path": file }))?,
             Command::Media(m) => match m {
-                MediaCmd::Add { files } => req("media.add", json!({ "paths": files }))?,
+                MediaCmd::Add { files } => req("media.add", json!({ "paths": absolute(files)? }))?,
                 MediaCmd::List => req("media.list", json!({}))?,
                 MediaCmd::Show { media } => req("media.get", json!({ "media": media }))?,
                 MediaCmd::Remove { media, force } => {
                     req("media.remove", json!({ "media": media, "force": force }))?
                 }
-                MediaCmd::Relink { media, file } => {
-                    req("media.relink", json!({ "media": media, "path": file }))?
-                }
+                MediaCmd::Relink { media, file } => req(
+                    "media.relink",
+                    json!({ "media": media, "path": absolute(std::slice::from_ref(file))?[0] }),
+                )?,
                 MediaCmd::Rename { media, name } => {
                     req("media.rename", json!({ "media": media, "name": name }))?
+                }
+                MediaCmd::Marks {
+                    media,
+                    mark_in,
+                    out,
+                    clear,
+                } => {
+                    if *clear {
+                        req("media.marks.clear", json!({ "media": media }))?
+                    } else {
+                        req(
+                            "media.marks.set",
+                            json!({ "media": media, "in": mark_in, "out": out }),
+                        )?
+                    }
                 }
             },
             Command::Timeline { range } => req("timeline.get", json!({ "range": range }))?,
@@ -678,6 +849,15 @@ impl Cli {
                     "edit.trim_to_playhead",
                     json!({ "edge": edge.name(), "at": time(at), "clips": clips, "ripple": ripple(*no_ripple) }),
                 )?,
+                EditCmd::Copy { clips } => req("edit.copy", json!({ "clips": clips }))?,
+                EditCmd::Cut { clips } => req("edit.cut", json!({ "clips": clips }))?,
+                EditCmd::Paste { at, clips } => {
+                    let clips = match clips {
+                        Some(text) => Some(read_json_arg(text)?),
+                        None => None,
+                    };
+                    req("edit.paste", json!({ "at": at, "clips": clips }))?
+                }
                 EditCmd::Duration {
                     clips,
                     set,
@@ -754,7 +934,7 @@ impl Cli {
                 } else {
                     "export.start"
                 },
-                json!({ "output": output, "preset": preset, "set": set, "range": range, "per_clip": per_clip,
+                json!({ "output": absolute(std::slice::from_ref(output))?[0], "preset": preset, "set": set, "range": range, "per_clip": per_clip,
                         "audio_only": audio_only, "encoder": encoder, "name": name, "overwrite": overwrite }),
             )?,
             Command::Frame {
@@ -762,10 +942,13 @@ impl Cli {
                 out,
                 media,
                 width,
-            } => req(
-                "frame.render",
-                json!({ "at": time(at), "out": out, "media": media, "width": width }),
-            )?,
+            } => {
+                let out = absolute(std::slice::from_ref(out))?.remove(0);
+                req(
+                    "frame.render",
+                    json!({ "at": time(at), "out": out, "media": media, "width": width }),
+                )?
+            }
             Command::Presets { name } => match name {
                 Some(n) => req("presets.get", json!({ "name": n }))?,
                 None => req("presets.list", json!({}))?,
@@ -797,6 +980,67 @@ impl Cli {
                 return Ok(Some(Action::Run(env)));
             }
             Command::Doctor => req("doctor", json!({}))?,
+            Command::Gui { file } => {
+                return Ok(Some(Action::Gui {
+                    project: file.clone().or_else(|| self.project.clone()),
+                }));
+            }
+            Command::Instances => return Ok(Some(Action::Instances)),
+            Command::Open { file, new } => {
+                let path = absolute(std::slice::from_ref(file))?.remove(0);
+                req("project.open", json!({ "path": path, "create": new }))?
+            }
+            Command::Viewer { mode } => req("viewer.set", json!({ "mode": mode }))?,
+            Command::Load { media, at } => req("viewer.load", json!({ "media": media, "at": at }))?,
+            Command::Play { speed, viewer } => {
+                req("player.play", json!({ "speed": speed, "viewer": viewer }))?
+            }
+            Command::Pause { viewer } => req("player.pause", json!({ "viewer": viewer }))?,
+            Command::Seek { at, viewer, fast } => req(
+                "player.seek",
+                json!({ "at": time(at), "viewer": viewer, "fast": fast }),
+            )?,
+            Command::Step { frames, viewer } => {
+                req("player.step", json!({ "frames": frames, "viewer": viewer }))?
+            }
+            Command::State => req("player.state", json!({}))?,
+            Command::Select { clips, media } => {
+                if clips.is_none() && media.is_none() {
+                    req("selection.get", json!({}))?
+                } else {
+                    req("selection.set", json!({ "clips": clips, "media": media }))?
+                }
+            }
+            Command::Screenshot { out, window } => {
+                let path = absolute(std::slice::from_ref(out))?.remove(0);
+                req(
+                    "gui.screenshot",
+                    json!({ "out": path, "target": if *window { "window" } else { "viewer" } }),
+                )?
+            }
+            Command::Log { since, limit } => {
+                req("gui.log", json!({ "since": since, "limit": limit }))?
+            }
+            Command::Window {
+                size,
+                minimize,
+                maximize,
+                fullscreen,
+            } => {
+                let size = match size {
+                    Some(s) => {
+                        let (w, h) = parse_size(s)?;
+                        Some([w as f32, h as f32])
+                    }
+                    None => None,
+                };
+                req(
+                    "gui.window",
+                    json!({ "size": size, "minimized": minimize.then_some(true),
+                            "maximized": maximize, "fullscreen": fullscreen }),
+                )?
+            }
+            Command::Quit => req("gui.quit", json!({}))?,
         };
         Ok(Some(Action::Run(self.envelope(request))))
     }

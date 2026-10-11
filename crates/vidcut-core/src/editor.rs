@@ -293,26 +293,33 @@ fn resolve_clips(p: &Project, refs: &[ClipRef], playhead: Option<i64>) -> Result
     refs.iter().map(|r| resolve_clip(p, r, playhead)).collect()
 }
 
-/// Source range of `params` in source frames (default: the whole media).
+/// Context for source times of `media`: they count from its first frame,
+/// `end` is its end and `in`/`out` are its source marks.
+pub fn media_context(p: &Project, media: &Media, playhead: Option<i64>) -> TimeContext {
+    TimeContext {
+        fps: p.settings.fps,
+        start_tc: 0,
+        end: p.media_frames(media),
+        mark_in: media.marks.mark_in,
+        mark_out: media.marks.mark_out,
+        playhead,
+    }
+}
+
+/// Source range of `params` in source frames. Default: the media's source
+/// marks, with a missing In meaning its first frame and a missing Out its end
+/// (decision D5).
 fn source(p: &Project, params: &SourceParams) -> Result<Source> {
     let media = p
         .media(&params.media)
         .ok_or_else(|| Error::not_found(format!("no media {}", params.media)))?;
     let frames = p.media_frames(media);
     let range = match &params.range {
-        None => (0, frames),
-        Some(r) => {
-            // Source times count from the media's first frame; `end` is its end.
-            let c = TimeContext {
-                fps: p.settings.fps,
-                start_tc: 0,
-                end: frames,
-                mark_in: None,
-                mark_out: None,
-                playhead: None,
-            };
-            c.range(r)?
-        }
+        None => (
+            media.marks.mark_in.unwrap_or(0),
+            media.marks.mark_out.unwrap_or(frames),
+        ),
+        Some(r) => media_context(p, media, None).range(r)?,
     };
     Ok(Source {
         media: params.media.clone(),
@@ -373,6 +380,7 @@ fn mutate(
                     size: probed.size,
                     mtime_ns: probed.mtime_ns,
                     info: probed.info,
+                    marks: Default::default(),
                 });
                 ids.push(id);
             }
@@ -411,6 +419,28 @@ fn mutate(
             m.size = probed.size;
             m.mtime_ns = probed.mtime_ns;
             m.info = probed.info;
+            Value::Null
+        }
+        Request::MediaMarksSet {
+            media,
+            mark_in,
+            out,
+        } => {
+            let m = p
+                .media(media)
+                .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+            let c = media_context(p, m, None);
+            let i = mark_in.as_ref().map(|t| c.resolve(t)).transpose()?;
+            let o = out.as_ref().map(|t| c.resolve(t)).transpose()?;
+            if i.is_none() && o.is_none() {
+                return Err(Error::usage("media.marks.set needs `in` and/or `out`"));
+            }
+            ops::set_media_marks(p, media, i.map(Some), o.map(Some))?;
+            let m = p.media(media).expect("exists");
+            json!({ "in": m.marks.mark_in, "out": m.marks.mark_out })
+        }
+        Request::MediaMarksClear { media } => {
+            ops::set_media_marks(p, media, Some(None), Some(None))?;
             Value::Null
         }
         Request::MediaRename { media, name } => {
@@ -580,6 +610,22 @@ fn mutate(
             };
             ops::set_clips(p, &ids, &props)?;
             Value::Null
+        }
+        Request::EditCut { clips } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let copied = ops::copy_clips(p, &ids)?;
+            ops::delete(p, &ids, false)?;
+            json!({ "clips": copied })
+        }
+        Request::EditPaste { clips, at } => {
+            let clips = clips.as_ref().ok_or_else(|| {
+                Error::usage("edit.paste needs `clips` (the GUI pastes its clipboard)")
+            })?;
+            let at = match at {
+                Some(t) => resolve(p, t, playhead)?,
+                None => need(playhead, "at")?,
+            };
+            json!({ "clips": ops::paste(p, clips, at)? })
         }
         Request::MarksSet { mark_in, out } => {
             let i = mark_in
@@ -789,6 +835,17 @@ pub fn query(
             "undo": history.undo.iter().rev().map(|e| &e.label).collect::<Vec<_>>(),
             "redo": history.redo.iter().rev().map(|e| &e.label).collect::<Vec<_>>(),
         }),
+        Request::EditCopy { clips } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            json!({ "clips": ops::copy_clips(p, &ids)? })
+        }
+        live if live.is_live() => {
+            return Err(Error::no_instance(format!(
+                "{} controls a running vidcut GUI; open the project with `vidcut -p FILE` \
+                 (the CLI forwards to it automatically)",
+                live.method()
+            )));
+        }
         Request::Schema { .. }
         | Request::Doctor {}
         | Request::ExportPlan(_)
@@ -813,7 +870,7 @@ pub fn query(
 
 fn media_json(p: &Project, m: &Media) -> Value {
     let frames = p.media_frames(m);
-    json!({
+    let mut v = json!({
         "id": m.id,
         "name": m.name,
         "path": m.path,
@@ -821,7 +878,11 @@ fn media_json(p: &Project, m: &Media) -> Value {
         "duration_tc": format_timecode(frames, p.settings.fps, 0),
         "video": m.info.video.as_ref().map(|v| json!({ "width": v.width, "height": v.height, "fps": v.fps.to_string(), "codec": v.codec })),
         "audio_streams": m.info.audio.len(),
-    })
+    });
+    if !m.marks.is_empty() {
+        v["marks"] = json!(m.marks);
+    }
+    v
 }
 
 /// A clip as reported by timeline queries.

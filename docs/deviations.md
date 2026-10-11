@@ -35,7 +35,12 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 
 ## X5. Scripting additions (no Cut-page behavior changes)
 - **Exact-frame insert and overwrite:** `edit.insert --at` and `edit.overwrite --at` are API-only. The Cut page's Smart Insert can only insert at an existing edit point (p. 697). Scripts need deterministic, frame-exact placement that doesn't depend on a playhead.
-- **Command log panel:** shows every action as its equivalent CLI command and teaches the API.
+- **Command log panel:** shows every action as the request it sent, from any client (GUI or agent). A click copies it as a `vidcut rpc` command, which teaches the API.
+- **Live control of the running GUI** ([decisions/gui.md](decisions/gui.md)):
+  - CLI commands for an open project run inside the GUI, so humans and agents edit the same session.
+  - Live-only commands drive it: `seek`, `play`, `viewer`, `select`, `screenshot` (the viewer picture, or the whole window), `window`, `log`.
+- **Clipboard as data:** `edit.copy` returns the clips as JSON, and `edit.paste --clips` pastes such JSON into any project. In the GUI, Ctrl+C also puts that JSON on the system clipboard.
+- **Persistent source marks:** a media item's In/Out (`media.marks.set`) are saved in the project and used by edits without a range. Resolve remembers per-clip marks too (decision D6), and this makes them scriptable.
 
 ## X6. Flat media pool in v1
 - **Resolve:** nested bins and a breadcrumb (pp. 655–656).
@@ -46,3 +51,10 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 - **Resolve:** new timelines start at record timecode 01:00:00:00 (p. 678).
 - **vidcut:** the start timecode defaults to 00:00:00:00, and `project.set --start-tc 01:00:00:00` changes it. Timecodes typed into commands are record timecodes, so they follow the setting.
 - **Why:** with a zero start, timecode, seconds and frame numbers all count from the same point. Scripts and agents mix all three, and a hidden one-hour offset would make `00:01:00:00` and `60s` mean different frames.
+
+## X8. The source viewer counts project frames
+- **Resolve:** Source Clip and Source Tape show a clip at its own frame rate, with its own source timecode (p. 680, 688).
+- **vidcut:** source viewers step through *project* frames; for media at the project rate this is the same thing. Source times, marks and the timecode shown count project frames from the clip's first frame.
+  - A 23.976 clip in a 30 fps project steps the way it will appear in the timeline: nearest-frame sampling, as export does.
+  - Embedded start timecodes are not shown (yet).
+- **Why:** vidcut stores every position, including `source_in` and source marks, in project frames ([cut-page-spec.md](cut-page-spec.md), time model). One unit everywhere means what you mark is exactly what lands in the timeline and in the export. The source viewer plays through the same EDL code as the timeline, so the preview matches export frame for frame.

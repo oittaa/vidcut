@@ -11,6 +11,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::export::{EncoderChoice, ExportSettings};
+use crate::model::Clip;
 use crate::ops::{Edge, MoveMode};
 use crate::time::{RangeSpec, Rational, TimeSpec};
 
@@ -52,6 +53,20 @@ pub enum Request {
     MediaRelink { media: String, path: PathBuf },
     #[serde(rename = "media.rename")]
     MediaRename { media: String, name: String },
+    /// Set a media item's source In and/or Out (I/O in a source viewer or over
+    /// a pool thumbnail). Source time, `out` exclusive. Edits without a
+    /// `range` use these marks (decisions D5, D6).
+    #[serde(rename = "media.marks.set")]
+    MediaMarksSet {
+        media: String,
+        #[serde(rename = "in", default)]
+        mark_in: Option<TimeSpec>,
+        #[serde(default)]
+        out: Option<TimeSpec>,
+    },
+    /// Clear a media item's source In and Out.
+    #[serde(rename = "media.marks.clear")]
+    MediaMarksClear { media: String },
     /// Probe a file without adding it.
     #[serde(rename = "probe")]
     Probe { path: PathBuf },
@@ -190,6 +205,22 @@ pub enum Request {
         #[serde(default)]
         ripple: Option<bool>,
     },
+    /// Copy clips (Ctrl+C): returns them as `clips`, ready for `edit.paste`.
+    /// The GUI also keeps them on its clipboard.
+    #[serde(rename = "edit.copy")]
+    EditCopy { clips: OneOrMany<ClipRef> },
+    /// Cut clips (Ctrl+X): copy, then delete with ripple on Track 1.
+    #[serde(rename = "edit.cut")]
+    EditCut { clips: OneOrMany<ClipRef> },
+    /// Paste clips (Ctrl+V) over Track 1 at `at`, keeping their spacing.
+    /// Defaults: the GUI's clipboard and playhead.
+    #[serde(rename = "edit.paste")]
+    EditPaste {
+        #[serde(default)]
+        clips: Option<Vec<Clip>>,
+        #[serde(default)]
+        at: Option<TimeSpec>,
+    },
 
     // ---------------------------------------------------------------- clips, marks, markers
     /// Enable/disable video (D), mute, gain (dB, -60..24) and name.
@@ -286,6 +317,108 @@ pub enum Request {
         label: Option<String>,
     },
 
+    // ---------------------------------------------------------------- live (a running GUI)
+    /// Open (or with `create`, create) a project in the running GUI.
+    #[serde(rename = "project.open")]
+    ProjectOpen {
+        path: PathBuf,
+        #[serde(default)]
+        create: bool,
+    },
+    /// Show the viewer in a mode: `source_clip`, `source_tape` or `timeline`.
+    #[serde(rename = "viewer.set")]
+    ViewerSet { mode: ViewerMode },
+    /// Open a media item in the viewer as Source Clip, optionally at a source time.
+    #[serde(rename = "viewer.load")]
+    ViewerLoad {
+        media: String,
+        #[serde(default)]
+        at: Option<TimeSpec>,
+    },
+    /// Play the viewer (`speed` < 0 plays backwards). With `viewer`, switch to it first.
+    #[serde(rename = "player.play")]
+    PlayerPlay {
+        #[serde(default)]
+        speed: Option<f64>,
+        #[serde(default)]
+        viewer: Option<ViewerMode>,
+    },
+    #[serde(rename = "player.pause")]
+    PlayerPause {
+        #[serde(default)]
+        viewer: Option<ViewerMode>,
+    },
+    /// Play/stop (Space).
+    #[serde(rename = "player.toggle")]
+    PlayerToggle {
+        #[serde(default)]
+        viewer: Option<ViewerMode>,
+    },
+    /// Move the playhead and wait until the frame is shown. Times are relative
+    /// to the viewer's content (`+10f` and `-2s` are relative to the playhead).
+    /// `fast` seeks to a keyframe (scrubbing).
+    #[serde(rename = "player.seek")]
+    PlayerSeek {
+        at: TimeSpec,
+        #[serde(default)]
+        viewer: Option<ViewerMode>,
+        #[serde(default)]
+        fast: bool,
+    },
+    /// Step frames (negative: backwards).
+    #[serde(rename = "player.step")]
+    PlayerStep {
+        #[serde(default = "one_frame")]
+        frames: i64,
+        #[serde(default)]
+        viewer: Option<ViewerMode>,
+    },
+    /// Viewer mode, both playheads, the source clip and selection.
+    #[serde(rename = "player.state")]
+    PlayerState {},
+    #[serde(rename = "selection.get")]
+    SelectionGet {},
+    /// Select timeline clips and/or pool media (omitted parts stay as they are).
+    #[serde(rename = "selection.set")]
+    SelectionSet {
+        #[serde(default)]
+        clips: Option<OneOrMany<ClipRef>>,
+        #[serde(default)]
+        media: Option<OneOrMany<String>>,
+    },
+    /// Save a PNG of the viewer (the frame as shown) or of the whole window.
+    #[serde(rename = "gui.screenshot")]
+    GuiScreenshot {
+        out: PathBuf,
+        #[serde(default)]
+        target: ScreenshotTarget,
+    },
+    /// The GUI's command log: recent requests from every client, oldest first.
+    #[serde(rename = "gui.log")]
+    GuiLog {
+        /// Only entries after this sequence number.
+        #[serde(default)]
+        since: Option<u64>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    /// Change the window: inner `size` in logical pixels `[w, h]`, minimize
+    /// (Wayland can't un-minimize), maximize, fullscreen.
+    #[serde(rename = "gui.window")]
+    GuiWindow {
+        #[serde(default)]
+        size: Option<[f32; 2]>,
+        #[serde(default)]
+        minimized: Option<bool>,
+        #[serde(default)]
+        maximized: Option<bool>,
+        #[serde(default)]
+        fullscreen: Option<bool>,
+    },
+    /// Close the GUI.
+    #[serde(rename = "gui.quit")]
+    GuiQuit {},
+
     // ---------------------------------------------------------------- meta
     /// JSON Schema of the protocol, or of one method's params.
     #[serde(rename = "schema")]
@@ -331,6 +464,38 @@ pub struct ExportParams {
     /// Replace existing output files.
     #[serde(default)]
     pub overwrite: bool,
+}
+
+/// What the single viewer shows (spec §4.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewerMode {
+    #[serde(alias = "source", alias = "clip")]
+    SourceClip,
+    #[serde(alias = "tape")]
+    SourceTape,
+    Timeline,
+}
+
+impl ViewerMode {
+    pub fn is_source(self) -> bool {
+        self != Self::Timeline
+    }
+}
+
+/// What `gui.screenshot` captures.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ScreenshotTarget {
+    /// The viewer picture as displayed (works while the window is hidden).
+    #[default]
+    Viewer,
+    /// The whole window (needs it to be visible).
+    Window,
+}
+
+fn one_frame() -> i64 {
+    1
 }
 
 fn insert_mode() -> MoveMode {
@@ -458,28 +623,66 @@ impl Request {
         Ok(request)
     }
 
-    /// Whether the request changes the project (and so takes part in undo).
-    pub fn is_mutation(&self) -> bool {
-        !matches!(
+    /// Whether the request only makes sense in a running GUI (viewer, players,
+    /// selection, window). Headless runs reject these with `NO_INSTANCE`.
+    pub fn is_live(&self) -> bool {
+        matches!(
             self,
-            Self::ProjectGet {}
-                | Self::ProjectSummary {}
-                | Self::MediaList {}
-                | Self::MediaGet { .. }
-                | Self::Probe { .. }
-                | Self::TimelineGet { .. }
-                | Self::TimelineAt { .. }
-                | Self::TimelineEditPoints {}
-                | Self::HistoryGet {}
-                | Self::Schema { .. }
+            Self::ProjectOpen { .. }
+                | Self::ViewerSet { .. }
+                | Self::ViewerLoad { .. }
+                | Self::PlayerPlay { .. }
+                | Self::PlayerPause { .. }
+                | Self::PlayerToggle { .. }
+                | Self::PlayerSeek { .. }
+                | Self::PlayerStep { .. }
+                | Self::PlayerState {}
+                | Self::SelectionGet {}
+                | Self::SelectionSet { .. }
+                | Self::GuiScreenshot { .. }
+                | Self::GuiLog { .. }
+                | Self::GuiWindow { .. }
+                | Self::GuiQuit {}
+        )
+    }
+
+    /// Whether the request works without a project (it never needs one open).
+    pub fn is_projectless(&self) -> bool {
+        matches!(
+            self,
+            Self::Schema { .. }
                 | Self::Doctor {}
-                | Self::ExportPlan(_)
-                | Self::ExportStart(_)
-                | Self::FrameRender { .. }
+                | Self::Probe { .. }
                 | Self::PresetsList {}
                 | Self::PresetsGet { .. }
                 | Self::EncodersList { .. }
         )
+    }
+
+    /// Whether the request changes the project (and so takes part in undo).
+    pub fn is_mutation(&self) -> bool {
+        !self.is_live()
+            && !matches!(
+                self,
+                Self::ProjectGet {}
+                    | Self::ProjectSummary {}
+                    | Self::MediaList {}
+                    | Self::MediaGet { .. }
+                    | Self::Probe { .. }
+                    | Self::TimelineGet { .. }
+                    | Self::TimelineAt { .. }
+                    | Self::TimelineEditPoints {}
+                    | Self::HistoryGet {}
+                    | Self::Schema { .. }
+                    | Self::Doctor {}
+                    | Self::ExportPlan(_)
+                    | Self::ExportStart(_)
+                    | Self::FrameRender { .. }
+                    | Self::PresetsList {}
+                    | Self::PresetsGet { .. }
+                    | Self::EncodersList { .. }
+                    | Self::EditCopy { .. }
+            )
     }
 }
 

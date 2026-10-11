@@ -106,6 +106,7 @@ pub const MPV_RENDER_PARAM_OPENGL_FBO: c_int = 3;
 pub const MPV_RENDER_PARAM_FLIP_Y: c_int = 4;
 pub const MPV_RENDER_PARAM_X11_DISPLAY: c_int = 8;
 pub const MPV_RENDER_PARAM_WL_DISPLAY: c_int = 9;
+pub const MPV_RENDER_PARAM_NEXT_FRAME_INFO: c_int = 11;
 pub const MPV_RENDER_PARAM_SW_SIZE: c_int = 17;
 pub const MPV_RENDER_PARAM_SW_FORMAT: c_int = 18;
 pub const MPV_RENDER_PARAM_SW_STRIDE: c_int = 19;
@@ -113,6 +114,18 @@ pub const MPV_RENDER_PARAM_SW_POINTER: c_int = 20;
 
 // mpv_render_update_flag
 pub const MPV_RENDER_UPDATE_FRAME: u64 = 1;
+
+// mpv_render_frame_info_flag
+pub const MPV_RENDER_FRAME_INFO_PRESENT: u64 = 1 << 0;
+pub const MPV_RENDER_FRAME_INFO_REDRAW: u64 = 1 << 1;
+pub const MPV_RENDER_FRAME_INFO_REPEAT: u64 = 1 << 2;
+
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy)]
+pub struct mpv_render_frame_info {
+    pub flags: u64,
+    pub target_time: i64,
+}
 
 pub const MPV_RENDER_API_TYPE_OPENGL: &std::ffi::CStr = c"opengl";
 pub const MPV_RENDER_API_TYPE_SW: &std::ffi::CStr = c"sw";
@@ -151,6 +164,8 @@ pub struct Api {
     pub render_context_set_update_callback:
         unsafe extern "C" fn(*mut mpv_render_context, Option<WakeupFn>, *mut c_void),
     pub render_context_update: unsafe extern "C" fn(*mut mpv_render_context) -> u64,
+    pub render_context_get_info:
+        unsafe extern "C" fn(*mut mpv_render_context, mpv_render_param) -> c_int,
     pub render_context_render:
         unsafe extern "C" fn(*mut mpv_render_context, *mut mpv_render_param) -> c_int,
     pub render_context_report_swap: unsafe extern "C" fn(*mut mpv_render_context),
@@ -216,6 +231,7 @@ fn resolve(lib: libloading::Library) -> Result<Api, libloading::Error> {
         render_context_create: sym!("mpv_render_context_create"),
         render_context_set_update_callback: sym!("mpv_render_context_set_update_callback"),
         render_context_update: sym!("mpv_render_context_update"),
+        render_context_get_info: sym!("mpv_render_context_get_info"),
         render_context_render: sym!("mpv_render_context_render"),
         render_context_report_swap: sym!("mpv_render_context_report_swap"),
         render_context_free: sym!("mpv_render_context_free"),

@@ -372,6 +372,9 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
 - **D11. Hover time.** 0.8 s of hovering turns a drop or move onto a clip from "replace" into "overwrite". The manual doesn't give a value.
 - **D12. Clip gain range.** −60 dB to +24 dB, plus mute. The manual gives no range.
 - **D13. Keys.** Shortcuts the Cut chapters don't give come from the Edit page (marked † in §11). Mac → Linux mapping: Command → Ctrl, Option → Alt.
+- **D15. Playhead after an edit function.** After Smart Insert, Append, Overwrite, Ripple Overwrite or Paste, the timeline playhead moves to the first frame after the new clip(s), ready for the next edit. The Viewer stays in its mode, so Q reviews the result (p. 696). The manual doesn't say; this is the Edit page's behavior.
+- **D16. Mark Out includes the frame under the playhead.** As in Resolve, the Out frame is part of the range. vidcut stores ranges half-open, so pressing O at frame `f` stores `out = f + 1`. The Duration field and `--json` output use the stored values.
+- **D17. Source Tape marks belong to one clip.** I/O in Source Tape mode marks the clip under the playhead, using the same per-clip marks as Source Clip mode and the pool thumbnails. An edit takes that clip with its marks (D5). Ranges spanning several clips on the tape come later.
 - **D14. J/L cuts belong to an edit point.**
   - A J/L cut (§8.7) is stored as matching audio offsets on the two clips that meet there: the outgoing clip's `tail` equals the incoming clip's `head`.
   - When an edit gives a clip a different neighbor at that point, the J/L cut resets to a straight cut. Examples: a delete, a move, or a split inside the overlap zone, where one half would otherwise be left without audio of its own.

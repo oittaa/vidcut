@@ -41,10 +41,21 @@ It is written in Rust:
 | `crates/vidcut-mpv` | libmpv via `dlopen` (`libloading`): client API and render API (OpenGL and software) | libmpv.so.2 at runtime only |
 | `crates/vidcut` | The `vidcut` binary: Session/host, IPC, CLI (clap), GUI (eframe), later MCP | all of the above |
 
+Inside `crates/vidcut`:
+
+| Module | What |
+|---|---|
+| `cli.rs`, `main.rs`, `output.rs` | clap command line → one `Request`; human/JSON output; routing |
+| `session.rs` | runs requests headless against a project file |
+| `live/` | the GUI's core thread: open project, players, viewer state, waits, command log; publishes `Snapshot`s |
+| `ipc/` | JSON-RPC over a Unix socket, the instance registry, CLI routing |
+| `gui/` | eframe app: layout, pool, viewer, timeline strip, GL video targets |
+| `export.rs` | presets, outputs and export plans as the session runs them |
+
 Docs:
 - `docs/cut-page-spec.md`: the behavioral spec.
 - `docs/deviations.md`: intentional differences from Resolve.
-- `docs/decisions/`: short architecture decision records.
+- `docs/decisions/`: short architecture decision records (preview, export, GUI and live control).
 
 ## Build and run
 
@@ -74,6 +85,7 @@ These are mandatory.
 | Before **every commit** (enforced by `.githooks/pre-commit`) | `scripts/check.sh` | `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, unit tests (`--lib --bins`) |
 | After a **bigger change**, and before a milestone is called done | `scripts/check.sh full` | the above plus all integration/e2e tests and doc tests |
 | Also, when encoders, hwdec or real-media paths change | `scripts/check.sh full --features vidcut-av/gpu-tests` | GPU encode tests (NVENC/VAAPI) |
+| Also, when the GUI, live session, IPC or preview change | `scripts/check.sh full --features vidcut/gui-tests` | the real GUI driven through the CLI (needs a display; opens a window briefly) |
 
 **Enable the hook once per clone:** `git config core.hooksPath .githooks`.
 
@@ -101,11 +113,13 @@ These are mandatory.
 - **Property tests** (proptest) run random edit sequences.
   - Failing seeds land in `proptest-regressions/`. Commit them, so they replay forever.
   - For a deeper run: `PROPTEST_CASES=5000 cargo test -p vidcut-core prop_tests`.
-- **Test outputs** go to temp dirs (`tempfile`), never into the repo.
+- **Live session tests** (`crates/vidcut/tests/live.rs`) run the GUI's core thread without a window: a harness thread renders both players with mpv's software renderer and answers screenshots, and requests go through `Handle::call` like IPC. Prefer them over GUI tests; they need libmpv but no display.
+- **Frame checks** compare barcodes: screenshot the viewer, decode the PNG with `vidcut_av::decode`, and compare with `vidcut frame` (export's renderer).
+- **Test outputs** go to temp dirs, never into the repo. Tests that open projects set `XDG_STATE_HOME` to a temp dir so undo history and recent projects stay out of the user's state.
 
 ## Driving vidcut as an agent
 
-*Status: the headless CLI edits (M1) and exports (M2). Live control of a running GUI arrives in M3, MCP in M7.*
+*Status: the CLI edits and exports headless (M1, M2) and controls a running GUI (M3). MCP arrives in M7.*
 
 **Discovering commands:**
 - Every CLI subcommand is one JSON-RPC method on one `Request`.
@@ -168,7 +182,28 @@ vidcut undo                                 # works across separate runs
 - `vidcut encoders` shows which GPU encoders work here (cached; `--refresh` re-tests).
 - `vidcut frame --at 1m -o f.png [--width 640]` renders what the timeline shows at a frame. `--media m1` renders a media frame instead. Use it to look at cuts.
 
-**Still to come:** live GUI control (`seek`, `screenshot`, auto-routing) in M3.
+**Live control of a running GUI** ([docs/decisions/gui.md](docs/decisions/gui.md)):
+- **Routing:** when a GUI has the project open (`vidcut -p FILE` starts one), every project command runs inside it. You and the human then edit one live session: the GUI updates at once, and `via` in the JSON says `gui:<pid>`.
+  - `--headless` forces a separate run; `--instance PID|SOCKET` (or `VIDCUT_SOCKET`) picks a GUI.
+  - `vidcut instances` lists running GUIs.
+- **Live-only commands:**
+
+| Command | Request | What |
+|---|---|---|
+| `vidcut state` | `player.state` | viewer mode, both playheads, the source clip, selection |
+| `vidcut seek 10s [--viewer timeline\|source\|tape]` | `player.seek` | returns once the frame is on screen; `+10f`/`-2s` are relative |
+| `vidcut step [-]N`, `play [--speed -2]`, `pause` | `player.*` | negative speeds play backwards |
+| `vidcut viewer source\|tape\|timeline`, `load m1 [--at 5s]` | `viewer.*` | what the viewer shows |
+| `vidcut select --clips c1,c2 --media m3` | `selection.set` | without flags: `selection.get` |
+| `vidcut screenshot -o v.png [--window]` | `gui.screenshot` | the viewer picture as shown (works while minimized), or the whole window |
+| `vidcut log [--since N]` | `gui.log` | what everyone (the human too) did, as requests |
+| `vidcut window --size 1600x1000`, `open FILE [--new]`, `quit` | `gui.*`, `project.open` | window and project |
+
+- **Looking at the result:** `vidcut seek 1m && vidcut screenshot -o shot.png` shows exactly what `vidcut frame --at 1m -o f.png` renders. Both are frame-exact.
+- **Source marks and clipboard work headless too:**
+  - `vidcut media marks m1 --in 5s --out 10s`: edits without `--range` then use these marks.
+  - `vidcut edit copy c3 --json`, then `vidcut edit paste --clips @clips.json --at 1m`.
+- **Paths:** the CLI makes paths absolute before routing. In raw `rpc` requests, use absolute paths.
 
 ## Tools
 
@@ -181,6 +216,15 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 **GPU encoders:** `cargo run -p vidcut-av --example encoders` test-encodes every NVENC/VAAPI option, uncached.
 
 **FFmpeg logging:** quiet by default (fatal only). Set `VIDCUT_AV_LOG=error` (or `warning`, `debug`) to see FFmpeg's messages when debugging media problems.
+
+**Media inspection** (examples in `crates/vidcut-av/examples/`):
+- `read_barcode FILE...`: the barcode index in images or video (compare screenshots with `vidcut frame`).
+- `packets FILE [FROM TO]`: video packets in decode order, with pts, dts and keyframe flags (open-GOP questions).
+- `filmstrip FILE OUTDIR [N]`: pool thumbnails, timed.
+
+**Preview debugging:**
+- `VIDCUT_DEBUG_PLAYER=1` traces every player command, mpv event and render to stderr.
+- `VIDCUT_MPV_OPTIONS="hwdec=no,ao=null"` overrides mpv options.
 
 **Preview spikes:**
 - `cargo test -p vidcut-mpv --test edl_spike -- --nocapture` runs the mpv EDL/seek semantics experiments headless.
@@ -198,6 +242,10 @@ The preview findings and the time-mapping rules are in [docs/decisions/preview.m
 
   Synchronous `command`/`get_property` there deadlocks against the video output. The mpv update and wakeup callbacks must not call mpv at all.
 - **vsync must stay off** (`GlowConfiguration { vsync: false }`). On GNOME/Wayland with NVIDIA, a vsynced swap blocks forever while the window is hidden.
+- **Players render in `App::logic`, not `App::ui`.** eframe skips `ui` for hidden windows but always calls `logic`.
+- **mpv's EDL drops leading pictures at segment ends.** Encodes that decode a keyframe before the frames shown just ahead of it lose those frames in the preview when a cut ends there. The live session patches such tails (preview.md §9). Test cuts against fixtures with B-frames and real media, not only small fixtures.
+- **Only the session thread calls mpv's client API.** Seeks while a file is still loading are rejected by mpv; `Player::seek` reloads instead.
+- **File watching:** `notify` reports reads as access events. Ignore them, or a reload re-triggers itself forever.
 - **The half-frame bias is applied exactly once.** mpv EDL `start` values are raw source timestamps and carry it, so timeline seeks to frame `j` go to exactly `j/f`.
 - **Never send negative absolute seeks.** mpv counts them from the end of the file.
 - **MPEG-TS and other index-less containers can't be seeked exactly by mpv.** Preview uses an MKV remux (`vidcut_av::remux`); export reads the original.
