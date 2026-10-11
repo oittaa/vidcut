@@ -21,6 +21,18 @@ if [[ -n "${CI:-}" ]]; then
   cargo_quiet=()
 fi
 
+step "no binary files"
+# Media and test data live in $VIDCUT_TEST_DATA, never in git (AGENTS.md).
+# Git's own test decides what is binary: `--numstat` shows "-" for it. The
+# index is what a commit would hold (in CI, the checkout).
+empty_tree=$(git hash-object -t tree /dev/null)
+binary=$(git diff --cached --numstat "$empty_tree" | awk -F'\t' '$1 == "-" { print $3 }')
+if [[ -n "$binary" ]]; then
+  echo "binary files can't go in git (test data belongs in \$VIDCUT_TEST_DATA):" >&2
+  printf '%s\n' "$binary" | sed 's/^/  /' >&2
+  exit 1
+fi
+
 step "rustfmt"
 cargo fmt --all --check
 

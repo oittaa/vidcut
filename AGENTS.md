@@ -30,7 +30,8 @@ It is written in Rust:
    - GUI gestures emit one Request when they complete.
    - Never mutate project state from GUI code directly.
 3. **No media in git.**
-   - Test media, generated fixtures and the manual live in `$VIDCUT_TEST_DATA` (default `~/Downloads/vidcut-tmp`).
+   - Test media, generated fixtures and the manual live in `$VIDCUT_TEST_DATA` (default `~/Downloads/vidcut-tmp`), the one place for test data. Test outputs go to temp dirs.
+   - `scripts/check.sh` (the pre-commit hook and CI) refuses any binary file, whatever its name, so `.gitignore` lists no file types.
    - Real-world clips are listed in `tests/media-manifest.toml` (URL, license, sha256) and fetched by `scripts/fetch-test-media.sh`.
 4. **No ffmpeg/ffprobe subprocesses.** Use `vidcut-av`, the FFmpeg libraries. libmpv is used only for interactive preview.
 5. **License:** MIT. Don't add dependencies with licenses incompatible with MIT distribution of our source.
@@ -63,7 +64,8 @@ Inside `crates/vidcut`:
 Docs:
 - `docs/cut-page-spec.md`: the behavioral spec.
 - `docs/deviations.md`: intentional differences from Resolve.
-- `docs/roadmap.md`: the use cases vidcut is for, the to-do list (interchange with Resolve), and the next milestones.
+- `docs/roadmap.md`: the use cases vidcut is for, and the order of what comes next.
+- `docs/todo/`: open work, **one file per item**: add a file for new work, and delete it in the pull request that finishes the work. There is no list to edit, so pull requests don't conflict over it. Keep lists that pull requests edit one item per line, never several items in one line.
 - `docs/decisions/`: short architecture decision records (preview, export, GUI and live control, agents: MCP and measurements).
 
 ## Build and run
@@ -92,7 +94,7 @@ These are mandatory.
 
 | When | Command | Runs |
 |---|---|---|
-| Before **every commit** (enforced by `.githooks/pre-commit`) | `scripts/check.sh` | `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, unit tests (`--lib --bins`) |
+| Before **every commit** (enforced by `.githooks/pre-commit`) | `scripts/check.sh` | no binary files in git, `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, unit tests (`--lib --bins`) |
 | After a **bigger change**, and before a milestone is called done | `scripts/check.sh full` | the above plus all integration/e2e tests and doc tests |
 | Also, when encoders, hwdec or real-media paths change | `scripts/check.sh full --features vidcut-av/gpu-tests` | GPU encode tests (NVENC/VAAPI) |
 | Also, when the GUI, live session, IPC or preview change | `scripts/check.sh full --features vidcut/gui-tests` | the real GUI driven through the CLI (needs a display; opens a window briefly) |
@@ -143,7 +145,15 @@ These are mandatory.
 
 ## Driving vidcut as an agent
 
-*Status: the CLI edits and exports headless (M1, M2), controls a running GUI (M3), exports in the background and exchanges OTIO timelines (M5), edits several tracks with a mixer and bins (M6), serves MCP with automatic tools and storyboards (M7), handles rotated, interlaced and HDR media (M8), and stills and image sequences (M9).*
+**Status:** what the CLI and an agent can do so far:
+- edits and exports headless (M1, M2)
+- controls a running GUI (M3)
+- exports in the background and exchanges OTIO timelines (M5)
+- edits several tracks, with a mixer and bins (M6)
+- serves MCP, with automatic tools and storyboards (M7)
+- handles rotated, interlaced and HDR media (M8)
+- stills and image sequences (M9)
+- timeline interchange with Resolve: `.otioz` bundles, timecode sources (decision D40)
 
 **MCP** (docs/decisions/agents.md, deviation X10): `vidcut mcp [-p FILE]` serves the Model Context Protocol on stdin/stdout. Every command is a tool (`edit.split` is `edit_split`, with its JSON Schema), plus `use_project` to pick or create the project. Calls run like the CLI's: inside the GUI that has the project open, or headless. `frame_render`, `gui_screenshot` and `storyboard_render` return images. Cancelling a call stops a headless export; routed into the GUI, it also stops a frame, a storyboard, an analysis and the loudness measure before a foreground export. A background export job stops only with `jobs.cancel`. To add it to Claude Code: `claude mcp add vidcut -- vidcut mcp -p /abs/talk.vidcut`; other clients take `{"command": "vidcut", "args": ["mcp", "-p", "/abs/talk.vidcut"]}`.
 

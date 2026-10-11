@@ -164,7 +164,7 @@ Agents can look at their work: frames, screenshots and storyboards come back as 
 | M8 | Media coverage: rotation metadata, interlaced sources, HDR (tone mapping and HDR export) |
 | M9 | Stills and image sequences |
 
-What comes next, and the use cases behind it, is in [docs/roadmap.md](docs/roadmap.md).
+What comes next, and the use cases behind it, is in [docs/roadmap.md](docs/roadmap.md); the open items are in [docs/todo/](docs/todo/), one file each.
 
 ## Contributing
 
