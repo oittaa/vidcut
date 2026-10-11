@@ -598,15 +598,12 @@ mod tests {
         // keep going, and the strip would show the later pictures. A sample
         // past those four must not open the next path (it is removed below)
         // and must not fail the strip.
-        let dir = std::env::temp_dir().join(format!(
-            "vidcut-seq-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let pattern = numbered_pngs(&dir, 1000, 8);
+        let tmp = tempfile::Builder::new()
+            .prefix("vidcut-seq-")
+            .tempdir()
+            .unwrap();
+        let dir = tmp.path();
+        let pattern = numbered_pngs(dir, 1000, 8);
         let input = crate::decode::Input::Sequence {
             pattern,
             first: 1000,
@@ -641,6 +638,5 @@ mod tests {
         let (tail, _) = filmstrip_pictures(&input, 4, 24, 320, 180).unwrap();
         assert_eq!(tail.len(), 24);
         assert!(codes(&tail).iter().all(|c| *c < 4), "{:?}", codes(&tail));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

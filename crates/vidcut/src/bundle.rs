@@ -496,11 +496,13 @@ pub fn open(path: &Path, unpack: Option<&Path>, write: bool) -> Result<TimelineF
 mod tests {
     use super::*;
 
-    fn temp(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("vidcut-bundle-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+    /// A folder for one test's files, removed when it drops, also when the
+    /// test fails.
+    fn temp(name: &str) -> tempfile::TempDir {
+        tempfile::Builder::new()
+            .prefix(&format!("vidcut-bundle-{name}-"))
+            .tempdir()
+            .unwrap()
     }
 
     fn item(media: &str, files: &[(&Path, &str)]) -> Item {
@@ -533,7 +535,8 @@ mod tests {
 
     #[test]
     fn otioz_round_trip() {
-        let dir = temp("otioz");
+        let tmp = temp("otioz");
+        let dir = tmp.path();
         let (a, b) = (dir.join("a b.mov"), dir.join("music.wav"));
         std::fs::write(&a, vec![7u8; 3_000_000]).unwrap();
         std::fs::write(&b, b"RIFF....").unwrap();
@@ -634,12 +637,12 @@ mod tests {
         let opened = open(&out, Some(&other), true).unwrap();
         assert_eq!(opened.base, other);
         assert!(other.join("media/music.wav").is_file());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn otiod_and_cancelling() {
-        let dir = temp("otiod");
+        let tmp = temp("otiod");
+        let dir = tmp.path();
         let a = dir.join("a.mov");
         std::fs::write(&a, vec![1u8; 2_500_000]).unwrap();
         let items = [item("m1", &[(&a, "media/a.mov")])];
@@ -674,16 +677,7 @@ mod tests {
             &mut |_, _| {},
         )
         .unwrap();
-        let e = write(
-            Kind::Otiod,
-            &dir,
-            "{}",
-            &items,
-            true,
-            &never,
-            &mut |_, _| {},
-        )
-        .unwrap_err();
+        let e = write(Kind::Otiod, dir, "{}", &items, true, &never, &mut |_, _| {}).unwrap_err();
         assert!(e.message.contains("not an .otiod bundle"), "{e}");
 
         // Cancelled: nothing is left.
@@ -701,12 +695,12 @@ mod tests {
         .unwrap_err();
         assert_eq!(e.code, ErrorCode::Cancelled);
         assert!(!out.exists() && !dir.join(".gone.otioz.part").exists());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn unsafe_and_foreign_zips() {
-        let dir = temp("unsafe");
+        let tmp = temp("unsafe");
+        let dir = tmp.path();
         // An entry that would land outside the folder.
         let evil = dir.join("evil.otioz");
         let mut zip = zip::ZipWriter::new(File::create(&evil).unwrap());
@@ -741,6 +735,5 @@ mod tests {
             open(&dir.join("none.otioz"), None, true).unwrap_err().code,
             ErrorCode::NotFound
         );
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

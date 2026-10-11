@@ -20,11 +20,13 @@ const W: u32 = 320;
 const H: u32 = 180;
 const FPS: i64 = 24;
 
-fn scratch(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("vidcut-images-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&d);
-    std::fs::create_dir_all(&d).unwrap();
-    d
+/// A folder for one test's files, removed when it drops, also when the test
+/// fails.
+fn scratch(name: &str) -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .prefix(&format!("vidcut-images-{name}-"))
+        .tempdir()
+        .unwrap()
 }
 
 /// Copies `spec` into `dir` and returns image2's pattern plus the files.
@@ -135,7 +137,7 @@ fn missing_first_file_fails_the_open() {
     // would open img_0011.png as picture 0. The range is 1: the open fails.
     let spec = ImageSpec::sequence(10, 5, 4, W, H);
     let dir = scratch("missing-first");
-    let (pattern, files) = place(&spec, &dir);
+    let (pattern, files) = place(&spec, dir.path());
     std::fs::remove_file(&files[0]).unwrap();
     assert!(files[1].exists(), "the next file is there");
 
@@ -153,7 +155,7 @@ fn missing_first_file_fails_the_open() {
         "probed despite a missing start: {probed:?}"
     );
 
-    let out = dir.join("out.mkv");
+    let out = dir.path().join("out.mkv");
     assert_fails(
         &plan(vec![pictures(&files[0], sequence(&pattern, 10, 5), 0, 5)]),
         &out,
@@ -167,7 +169,7 @@ fn a_hole_fails_the_export_instead_of_repeating() {
     // checks the next number first), so the run is 4 pictures, not 8.
     let spec = ImageSpec::sequence(10, 8, 4, W, H);
     let dir = scratch("hole");
-    let (pattern, files) = place(&spec, &dir);
+    let (pattern, files) = place(&spec, dir.path());
     std::fs::remove_file(&files[4]).unwrap();
     assert!(files[5].exists(), "a file after the hole is there");
 
@@ -177,13 +179,13 @@ fn a_hole_fails_the_export_instead_of_repeating() {
     assert!((v.duration_secs.unwrap() - 4.0 / FPS as f64).abs() < 1e-9);
 
     let image = sequence(&pattern, 10, 8);
-    let out = dir.join("prefix.mkv");
+    let out = dir.path().join("prefix.mkv");
     render(&plan(vec![pictures(&files[0], image.clone(), 0, 4)]), &out);
     assert_eq!(barcodes(&out), (0..4).map(Some).collect::<Vec<_>>());
 
     assert_fails(
         &plan(vec![pictures(&files[0], image, 0, 8)]),
-        &dir.join("out.mkv"),
+        &dir.path().join("out.mkv"),
         "ends before",
     );
 }
@@ -194,7 +196,7 @@ fn a_short_run_is_not_the_requested_length() {
     // export then repeated the last picture out to the end of the piece.
     let spec = ImageSpec::sequence(100, 2, 4, W, H);
     let dir = scratch("short");
-    let (pattern, files) = place(&spec, &dir);
+    let (pattern, files) = place(&spec, dir.path());
 
     let info = vidcut_av::probe::probe_sequence(&pattern, 100, 60, (FPS as i32, 1)).unwrap();
     let v = info.video.unwrap();
@@ -204,13 +206,13 @@ fn a_short_run_is_not_the_requested_length() {
     assert!((info.duration.unwrap() - 2.0 / FPS as f64).abs() < 1e-9);
 
     let image = sequence(&pattern, 100, 60);
-    let out = dir.join("fit.mkv");
+    let out = dir.path().join("fit.mkv");
     render(&plan(vec![pictures(&files[0], image.clone(), 0, 2)]), &out);
     assert_eq!(barcodes(&out), vec![Some(0), Some(1)]);
 
     assert_fails(
         &plan(vec![pictures(&files[0], image, 0, 10)]),
-        &dir.join("out.mkv"),
+        &dir.path().join("out.mkv"),
         "ends before",
     );
 }
@@ -221,7 +223,7 @@ fn a_contiguous_sequence_maps_picture_k_to_its_file() {
     let first = 1000u64;
     let spec = ImageSpec::sequence(first, 12, 4, W, H);
     let dir = scratch("contiguous");
-    let (pattern, files) = place(&spec, &dir);
+    let (pattern, files) = place(&spec, dir.path());
     for (k, file) in files.iter().enumerate() {
         let n = first + k as u64;
         assert_eq!(
@@ -269,7 +271,7 @@ fn a_contiguous_sequence_maps_picture_k_to_its_file() {
     assert!(reader.next_frame().unwrap().is_none());
 
     let image = sequence(&pattern, first, 12);
-    let out = dir.join("out.mkv");
+    let out = dir.path().join("out.mkv");
     render(
         &plan(vec![
             pictures(&files[0], image.clone(), 0, 6),
@@ -289,7 +291,7 @@ fn a_still_repeats_its_one_picture() {
     // the export.
     let png = fixture::ensure_images(&ImageSpec::still(41, W, H, "png")).unwrap();
     let dir = scratch("still");
-    let out = dir.join("out.mkv");
+    let out = dir.path().join("out.mkv");
     render(
         &plan(vec![
             pictures(&png[0], Image::Still, 0, 6),
@@ -309,7 +311,7 @@ fn a_sequence_slower_than_the_project_ends_on_its_last_picture() {
     for (rate, project) in [(30, 60), (12, 30)] {
         let spec = ImageSpec::sequence(1, rate, 4, W, H);
         let dir = scratch(&format!("slower-{rate}-{project}"));
-        let (pattern, files) = place(&spec, &dir);
+        let (pattern, files) = place(&spec, dir.path());
         let image = Image::Sequence {
             pattern,
             first: 1,
@@ -318,7 +320,7 @@ fn a_sequence_slower_than_the_project_ends_on_its_last_picture() {
         };
         let mut p = plan(vec![pictures(&files[0], image, 0, i64::from(project))]);
         p.fps = Rational::new(i64::from(project), 1).unwrap();
-        let out = dir.join("out.mkv");
+        let out = dir.path().join("out.mkv");
         render(&p, &out);
         let codes: Vec<u32> = barcodes(&out).into_iter().map(Option::unwrap).collect();
         assert_eq!(codes.len(), project as usize, "{rate} fps in {project}");

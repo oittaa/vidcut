@@ -100,9 +100,11 @@ fn last_gui_export(h: &live::Handle) -> Value {
 
 #[test]
 fn export_windows() {
-    let dir = std::env::temp_dir().join(format!("vidcut-gui-export-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-gui-export-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
     // SAFETY: the only test in this binary; set before any thread starts.
     unsafe {
         std::env::set_var("XDG_STATE_HOME", dir.join("state"));
@@ -153,9 +155,9 @@ fn export_windows() {
     call(&h, "marks.set", json!({ "in": 10, "out": 40 }));
     let mut ws = Workspace::new(h.clone());
     let saved = Arc::new(Mutex::new(Vec::new()));
-    let folder = Arc::new(Mutex::new(dir.clone()));
+    let folder = Arc::new(Mutex::new(dir.to_path_buf()));
     ws.set_dialogs(Arc::new(FakeDialogs {
-        dir: dir.clone(),
+        dir: dir.to_path_buf(),
         saved: saved.clone(),
         folder: folder.clone(),
     }));
@@ -354,5 +356,4 @@ fn export_windows() {
     h.shutdown();
     let _ = session.join();
     std::thread::sleep(Duration::from_millis(10));
-    let _ = std::fs::remove_dir_all(&dir);
 }

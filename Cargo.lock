@@ -3716,6 +3716,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shlex",
+ "tempfile",
  "toml",
  "tracing",
  "tracing-subscriber",
@@ -3733,6 +3734,7 @@ dependencies = [
  "ffmpeg-next",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
  "vidcut-core",
 ]
@@ -3746,6 +3748,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
 ]
 

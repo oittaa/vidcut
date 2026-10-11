@@ -22,7 +22,8 @@ const BIN: &str = env!("CARGO_BIN_EXE_vidcut");
 
 struct Gui {
     child: Child,
-    dir: PathBuf,
+    /// Removed when the run passes; kept as evidence when it fails.
+    dir: tempfile::TempDir,
     project: PathBuf,
 }
 
@@ -35,7 +36,7 @@ impl Gui {
             .args(["--json", "--instance", &self.child.id().to_string(), "-p"])
             .arg(&self.project)
             .args(args)
-            .env("XDG_STATE_HOME", self.dir.join("state"))
+            .env("XDG_STATE_HOME", self.dir.path().join("state"))
             .output()
             .unwrap();
         let took = started.elapsed();
@@ -55,14 +56,14 @@ impl Gui {
     fn check_frame(&self, frame: i64) {
         let at = format!("{frame}f");
         self.cli(&["seek", &at, "--viewer", "timeline"]);
-        let shot = self.dir.join(format!("shot-{frame}.png"));
+        let shot = self.dir.path().join(format!("shot-{frame}.png"));
         self.cli(&["screenshot", "-o", shot.to_str().unwrap()]);
-        let reference = self.dir.join(format!("frame-{frame}.png"));
+        let reference = self.dir.path().join(format!("frame-{frame}.png"));
         let out = Command::new(BIN)
             .args(["--headless", "-p"])
             .arg(&self.project)
             .args(["frame", "--at", &at, "-o", reference.to_str().unwrap()])
-            .env("XDG_STATE_HOME", self.dir.join("state"))
+            .env("XDG_STATE_HOME", self.dir.path().join("state"))
             .output()
             .unwrap();
         assert!(out.status.success());
@@ -100,9 +101,10 @@ impl Drop for Gui {
         let _ = self.child.kill();
         let _ = self.child.wait();
         if std::thread::panicking() {
+            self.dir.disable_cleanup(true);
             eprintln!(
                 "kept {}: screenshots, mpv logs, the GUI's stderr",
-                self.dir.display()
+                self.dir.path().display()
             );
         }
     }
@@ -127,9 +129,11 @@ fn gui_acceptance() {
         300,
     ))
     .unwrap();
-    let dir = std::env::temp_dir().join(format!("vidcut-gui-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-gui-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path().to_path_buf();
     let project = dir.join("accept.vidcut");
     let headless = |args: &[&str]| {
         let out = Command::new(BIN)
@@ -177,7 +181,7 @@ fn gui_acceptance() {
     let pid = child.id();
     let gui = Gui {
         child,
-        dir: dir.clone(),
+        dir: tmp,
         project: project.clone(),
     };
     let started = Instant::now();
@@ -247,6 +251,4 @@ fn gui_acceptance() {
         );
         std::thread::sleep(Duration::from_millis(50));
     }
-    drop(gui);
-    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -308,9 +308,12 @@ mod tests {
 
     #[test]
     fn edits_persist_with_undo_across_opens() {
-        let dir = std::env::temp_dir().join(format!("vidcut-store-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        isolated_state(&dir);
+        let tmp = tempfile::Builder::new()
+            .prefix("vidcut-store-")
+            .tempdir()
+            .unwrap();
+        let dir = tmp.path();
+        isolated_state(dir);
         let env = FakeEnv::default().with(
             "/m.mp4",
             crate::test_support::media_info(4.0, crate::time::Rational::new(25, 1).unwrap(), true),
@@ -409,6 +412,5 @@ mod tests {
             .unwrap();
         assert!(history_error.is_some_and(|e| e.contains(".json")));
         assert_eq!(other.load().unwrap().project().media.len(), 1);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

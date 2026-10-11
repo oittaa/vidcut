@@ -50,9 +50,11 @@ fn quick(out: &Path) -> Value {
 
 #[test]
 fn export_jobs() {
-    let dir = std::env::temp_dir().join(format!("vidcut-jobs-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-jobs-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
     // SAFETY: the only test in this binary; set before any thread starts.
     unsafe {
         std::env::set_var("XDG_STATE_HOME", dir.join("state"));
@@ -154,7 +156,7 @@ fn export_jobs() {
         ok(&h, "jobs.get", json!({ "job": "j2" }))["state"],
         "cancelled"
     );
-    let leftovers: Vec<_> = std::fs::read_dir(&dir)
+    let leftovers: Vec<_> = std::fs::read_dir(dir)
         .unwrap()
         .flatten()
         .filter(|e| e.file_name().to_string_lossy().starts_with("b."))
@@ -318,5 +320,4 @@ fn export_jobs() {
     h.shutdown();
     let _ = session.join();
     assert!(!part.exists() && !dir.join("h.mkv").exists());
-    let _ = std::fs::remove_dir_all(&dir);
 }

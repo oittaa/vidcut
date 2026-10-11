@@ -115,9 +115,11 @@ fn menu_item(harness: &mut Harness<'_, Workspace>, menu: &str, item: &str) {
 
 #[test]
 fn tools_send_one_request_each() {
-    let dir = std::env::temp_dir().join(format!("vidcut-gui-tools-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-gui-tools-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
     // SAFETY: the only test in this binary; set before any thread starts.
     unsafe {
         std::env::set_var("XDG_STATE_HOME", dir.join("state"));
@@ -257,5 +259,4 @@ fn tools_send_one_request_each() {
     h.shutdown();
     let _ = session.join();
     std::thread::sleep(Duration::from_millis(10));
-    let _ = std::fs::remove_dir_all(&dir);
 }

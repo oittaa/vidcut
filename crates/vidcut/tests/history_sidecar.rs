@@ -56,9 +56,11 @@ fn sidecar_file(state: &Path) -> PathBuf {
 
 #[test]
 fn gui_command_puts_the_history_warning_on_the_result() {
-    let dir = std::env::temp_dir().join(format!("vidcut-hist-gui-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-hist-gui-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
     let state = dir.join("state");
     // SAFETY: this integration test is its own process.
     unsafe { std::env::set_var("XDG_STATE_HOME", &state) };
@@ -102,5 +104,4 @@ fn gui_command_puts_the_history_warning_on_the_result() {
 
     h.shutdown();
     session.join().unwrap();
-    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -81,9 +81,11 @@ fn cache_files(cache: &Path) -> Vec<String> {
 
 #[test]
 fn thumbnails_come_back_from_the_disk_cache_until_it_is_turned_off() {
-    let dir = std::env::temp_dir().join(format!("vidcut-thumbnails-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-thumbnails-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
     let cache = dir.join("cache");
     // SAFETY: the only test in this binary; set before any thread starts.
     unsafe {
@@ -224,5 +226,4 @@ fn thumbnails_come_back_from_the_disk_cache_until_it_is_turned_off() {
     drop(harness);
     h.shutdown();
     let _ = session.join();
-    let _ = std::fs::remove_dir_all(&dir);
 }

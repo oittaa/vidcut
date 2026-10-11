@@ -51,8 +51,11 @@ fn patches_are_exact_lossless_frames_from_zero() {
         frames: 3,
         image: None,
     };
-    let dir = std::env::temp_dir().join(format!("vidcut-tails-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-tails-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
     let out = dir.join("patch.mkv");
     render_patch(&piece, fps, 640, 360, &out).unwrap();
     let mut r = VideoReader::open(&out).unwrap();
@@ -63,5 +66,4 @@ fn patches_are_exact_lossless_frames_from_zero() {
         got.push((read_barcode(&f).unwrap(), (secs * 30.0).round() as i64));
     }
     assert_eq!(got, vec![(Some(87), 0), (Some(88), 1), (Some(89), 2)]);
-    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -218,15 +218,17 @@ fn setup(dir: &Path) -> (live::Handle, std::thread::JoinHandle<()>) {
 
 #[test]
 fn track_gestures_send_one_request_each() {
-    let dir = std::env::temp_dir().join(format!("vidcut-gui-tracks-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-gui-tracks-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
     // SAFETY: the only test in this binary; set before any thread starts.
     unsafe {
         std::env::set_var("XDG_STATE_HOME", dir.join("state"));
         std::env::set_var("XDG_CONFIG_HOME", dir.join("config"));
     }
-    let (h, session) = setup(&dir);
+    let (h, session) = setup(dir);
     let mut ws = Workspace::new(h.clone());
     ws.timeline_options_mut().snapping = false;
     ws.timeline_options_mut().ppf = 4.0;
@@ -673,5 +675,4 @@ fn track_gestures_send_one_request_each() {
     h.shutdown();
     let _ = session.join();
     std::thread::sleep(Duration::from_millis(10));
-    let _ = std::fs::remove_dir_all(&dir);
 }

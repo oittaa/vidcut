@@ -57,12 +57,14 @@ fn a_lost_packet_keeps_the_time() {
     ))
     .unwrap();
     let audio = vidcut_av::probe::probe(&path).unwrap().audio[0].index;
-    let dir = std::env::temp_dir().join(format!("vidcut-waveform-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-waveform-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
     let lossy = dir.join("lossy.mkv");
     fixture::spoil(&path, &lossy, audio, 80, Spoil::Drop).unwrap();
     let w = waveform(&lossy, 0, 100, 2).unwrap();
-    let _ = std::fs::remove_dir_all(&dir);
     let loud: Vec<usize> = w
         .peaks
         .iter()
@@ -114,12 +116,14 @@ fn centre_only_wav(path: &std::path::Path) {
 fn a_centre_channel_shows_on_a_stereo_meter() {
     // The meters show the project's channels, mixed as the export mixes:
     // 5.1 dialogue in the centre is in both of a stereo meter's channels.
-    let dir = std::env::temp_dir().join(format!("vidcut-waveform-51-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-waveform-51-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
     let path = dir.join("centre.wav");
     centre_only_wav(&path);
     let w = waveform(&path, 0, 100, 2).unwrap();
-    let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(w.channels, 2);
     let (left, right) = (w.channel_peak(0, 0.2, 0.8), w.channel_peak(1, 0.2, 0.8));
     // Half scale, mixed in at -3 dB.

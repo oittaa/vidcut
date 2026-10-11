@@ -248,9 +248,11 @@ fn fixture_file(frames: u32) -> PathBuf {
 
 #[test]
 fn live_session() {
-    let dir = std::env::temp_dir().join(format!("vidcut-live-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-live-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
     // SAFETY: the only test in this binary; set before any thread starts.
     unsafe { std::env::set_var("XDG_STATE_HOME", dir.join("state")) };
     let a = fixture_file(300);
@@ -307,7 +309,7 @@ fn live_session() {
     };
     for t in [0, 1, 59, 60, 61, 89, 90, 91, 149] {
         h.ok("player.seek", json!({ "at": t, "viewer": "timeline" }));
-        assert_eq!(h.shown(&dir), Some(expected(t)), "timeline frame {t}");
+        assert_eq!(h.shown(dir), Some(expected(t)), "timeline frame {t}");
     }
     step("A late renderer");
     // A renderer that gets to a seek's frame only after libmpv stopped
@@ -316,7 +318,7 @@ fn live_session() {
     for t in [61, 149] {
         h.stall_next(Duration::from_millis(500));
         h.ok("player.seek", json!({ "at": t, "viewer": "timeline" }));
-        assert_eq!(h.shown(&dir), Some(expected(t)), "late renderer, frame {t}");
+        assert_eq!(h.shown(dir), Some(expected(t)), "late renderer, frame {t}");
     }
     step("An overtaken seek fails");
     // Seek A's frame is late (the renderer looks away), and seek B moves the
@@ -337,7 +339,7 @@ fn live_session() {
         e.message.contains("frame 120"),
         "names the frame it moved to: {e}"
     );
-    assert_eq!(h.shown(&dir), Some(expected(120)));
+    assert_eq!(h.shown(dir), Some(expected(120)));
     // A fast seek to the same frame doesn't stand in for an exact one: it
     // may show a keyframe instead.
     h.stall_next(Duration::from_millis(400));
@@ -413,15 +415,15 @@ fn live_session() {
         } else {
             (100 + t - 150) as u32
         };
-        assert_eq!(h.shown(&dir), Some(want), "same-file boundary, frame {t}");
+        assert_eq!(h.shown(dir), Some(want), "same-file boundary, frame {t}");
     }
     h.ok("edit.delete", json!({ "clips": c4 }));
     h.ok("player.seek", json!({ "at": 149 }));
     // Relative steps and seeks.
     h.ok("player.step", json!({ "frames": -2 }));
-    assert_eq!(h.shown(&dir), Some(expected(147)));
+    assert_eq!(h.shown(dir), Some(expected(147)));
     h.ok("player.seek", json!({ "at": "-1s" }));
-    assert_eq!(h.shown(&dir), Some(expected(117)));
+    assert_eq!(h.shown(dir), Some(expected(117)));
 
     step("An edit reloads the preview");
     // An edit reloads the preview: split c1 and delete its first half.
@@ -429,7 +431,7 @@ fn live_session() {
     h.ok("edit.delete", json!({ "clips": "c1" }));
     h.ok("player.seek", json!({ "at": 0 }));
     assert_eq!(
-        h.shown(&dir),
+        h.shown(dir),
         Some(50),
         "the timeline now starts at m1 frame 50"
     );
@@ -437,7 +439,7 @@ fn live_session() {
     step("Source Clip: source times");
     // Source Clip: source times, marks drive edits without a range.
     h.ok("viewer.load", json!({ "media": "m1", "at": "100f" }));
-    assert_eq!(h.shown(&dir), Some(100));
+    assert_eq!(h.shown(dir), Some(100));
     h.ok(
         "media.marks.set",
         json!({ "media": "m1", "in": "playhead", "out": "+10f" }),
@@ -452,13 +454,13 @@ fn live_session() {
     // Source Tape: m1 (300 frames) then m2; the clip under the playhead is
     // selected in the pool.
     h.ok("player.seek", json!({ "at": 310, "viewer": "source_tape" }));
-    assert_eq!(h.shown(&dir), Some(10), "tape frame 310 = m2 frame 10");
+    assert_eq!(h.shown(dir), Some(10), "tape frame 310 = m2 frame 10");
     let sel = h.ok("selection.get", json!({}));
     assert_eq!(sel.result["media"], json!(["m2"]));
     // Q-style switching keeps each player where it was.
     h.ok("viewer.set", json!({ "mode": "timeline" }));
     h.ok("viewer.set", json!({ "mode": "source_tape" }));
-    assert_eq!(h.shown(&dir), Some(10));
+    assert_eq!(h.shown(dir), Some(10));
 
     step("Clipboard: copy two clips");
     // Clipboard: copy two clips, paste them at the end of the timeline.
@@ -486,7 +488,7 @@ fn live_session() {
         .unwrap();
     assert_eq!(after, end + 40 + 30);
     h.ok("player.seek", json!({ "at": end }));
-    assert_eq!(h.shown(&dir), Some(50), "the pasted copy of the first clip");
+    assert_eq!(h.shown(dir), Some(50), "the pasted copy of the first clip");
 
     step("Selection takes clip refs.");
     // Selection takes clip refs.
@@ -558,7 +560,7 @@ fn live_session() {
     ] {
         h.ok("player.seek", json!({ "at": t, "viewer": "timeline" }));
         assert_eq!(
-            h.shown(&dir),
+            h.shown(dir),
             Some(want),
             "first-frame clip, timeline frame {t}"
         );
@@ -572,7 +574,7 @@ fn live_session() {
     );
     for (t, want) in [(29, 29), (30, 250), (49, 269), (50, 50)] {
         h.ok("player.seek", json!({ "at": t, "viewer": "timeline" }));
-        assert_eq!(h.shown(&dir), Some(want), "with B-roll, timeline frame {t}");
+        assert_eq!(h.shown(dir), Some(want), "with B-roll, timeline frame {t}");
     }
     // Music on A1 plays as a second audio stream, mixed with Track 1's
     // audio and turned down by its fader; the picture stays exact.
@@ -595,7 +597,7 @@ fn live_session() {
     );
     h.ok("track.set", json!({ "track": "A1", "volume_db": -6.0 }));
     h.ok("player.seek", json!({ "at": 31, "viewer": "timeline" }));
-    assert_eq!(h.shown(&dir), Some(251));
+    assert_eq!(h.shown(dir), Some(251));
     assert_eq!(
         h.ok("player.state", json!({})).result["timeline"]["error"],
         Value::Null
@@ -603,9 +605,9 @@ fn live_session() {
     // Track 1 ripples: the B-roll and the music follow (decision D21).
     h.ok("edit.delete", json!({ "clips": "c1" }));
     h.ok("player.seek", json!({ "at": 0, "viewer": "timeline" }));
-    assert_eq!(h.shown(&dir), Some(250), "the B-roll moved with Track 1");
+    assert_eq!(h.shown(dir), Some(250), "the B-roll moved with Track 1");
     h.ok("player.seek", json!({ "at": 20, "viewer": "timeline" }));
-    assert_eq!(h.shown(&dir), Some(220));
+    assert_eq!(h.shown(dir), Some(220));
     // The monitoring mute (p. 642) changes nothing in the project.
     let rev = h.ok("project.summary", json!({})).rev;
     let s = h.ok("player.mute", json!({}));
@@ -640,7 +642,7 @@ fn live_session() {
     for (t, want) in [(end, 10), (end + 7, 17), (end + 19, 29)] {
         h.ok("player.seek", json!({ "at": t, "viewer": "timeline" }));
         assert_eq!(
-            h.shown(&dir),
+            h.shown(dir),
             Some(want),
             "interlaced clip, timeline frame {t}"
         );
@@ -677,7 +679,7 @@ fn live_session() {
         "player.seek",
         json!({ "at": end + 3, "viewer": "timeline" }),
     );
-    assert_eq!(h.shown(&dir), Some(8), "PQ clip in the preview");
+    assert_eq!(h.shown(dir), Some(8), "PQ clip in the preview");
 
     step("Many cuts: a seek waits only for the checks near its frame");
     // 120 clips of 4 frames from all over a long fixture, appended at once:
@@ -711,7 +713,7 @@ fn live_session() {
         started.elapsed(),
         seek.result["preview_pending"]
     );
-    assert_eq!(h.shown(&dir), Some(13 * 119 + 5 + 1));
+    assert_eq!(h.shown(dir), Some(13 * 119 + 5 + 1));
     let all = h.wait_for("every tail checked", |_| {
         h.ok("player.state", json!({})).result["preview_pending"] == 0
     });
@@ -721,7 +723,7 @@ fn live_session() {
         for (t, want) in [(at, 13 * k + 5), (at + 3, 13 * k + 8)] {
             h.ok("player.seek", json!({ "at": t, "viewer": "timeline" }));
             assert_eq!(
-                h.shown(&dir),
+                h.shown(dir),
                 Some(want as u32),
                 "clip {k}, timeline frame {t}"
             );
@@ -732,11 +734,11 @@ fn live_session() {
     // screenshot asks.
     let at = first + 4 * 60 + 1;
     h.ok("player.seek", json!({ "at": at, "viewer": "timeline" }));
-    assert_eq!(h.shown(&dir), Some(13 * 60 + 6));
+    assert_eq!(h.shown(dir), Some(13 * 60 + 6));
     h.ok("edit.delete", json!({ "clips": format!("V1@{at}f") }));
     h.ok("edit.delete", json!({ "clips": format!("V1@{at}f") }));
     assert_eq!(
-        h.shown(&dir),
+        h.shown(dir),
         Some(13 * 62 + 6),
         "clip 62 moved under the playhead"
     );
@@ -780,13 +782,13 @@ fn live_session() {
         (end + 429, pick(34)),
     ] {
         h.ok("player.seek", json!({ "at": t, "viewer": "timeline" }));
-        assert_eq!(h.shown(&dir), Some(want), "timeline frame {t}");
+        assert_eq!(h.shown(dir), Some(want), "timeline frame {t}");
     }
     // The source viewer shows a still as long as the still duration.
     h.ok("viewer.load", json!({ "media": still_id }));
     let state = h.ok("player.state", json!({})).result;
     assert_eq!(state["source"]["frames"], 150, "{state}");
-    assert_eq!(h.shown(&dir), Some(77));
+    assert_eq!(h.shown(dir), Some(77));
 
     step("A failed tail check is tried again, then reported");
     // The source viewer's cut, which the timeline doesn't have: its retry
@@ -811,5 +813,4 @@ fn live_session() {
     std::fs::set_permissions(&gone, std::fs::Permissions::from_mode(0o644)).unwrap();
 
     drop(h);
-    let _ = std::fs::remove_dir_all(&dir);
 }

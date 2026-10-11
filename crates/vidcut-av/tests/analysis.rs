@@ -47,12 +47,14 @@ fn levels_keep_time_across_a_lost_packet() {
     ))
     .unwrap();
     let audio = vidcut_av::probe::probe(&path).unwrap().audio[0].index;
-    let dir = std::env::temp_dir().join(format!("vidcut-levels-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-levels-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
     let lossy = dir.join("lossy.mkv");
     fixture::spoil(&path, &lossy, audio, 80, Spoil::Drop).unwrap();
     let l = analysis::audio_levels(&lossy, 0, 1000).unwrap();
-    let _ = std::fs::remove_dir_all(&dir);
     let at = |secs: f64| ((secs - l.start) * 1000.0).round() as usize;
     for s in 0..3 {
         let i = at(f64::from(s));

@@ -251,7 +251,11 @@ mod tests {
     #[test]
     fn server_and_client_talk_json_rpc() {
         use std::sync::Arc;
-        let dir = std::env::temp_dir().join(format!("vidcut-ipc-{}", std::process::id()));
+        let tmp = tempfile::Builder::new()
+            .prefix("vidcut-ipc-")
+            .tempdir()
+            .unwrap();
+        let dir = tmp.path();
         let socket = dir.join("test.sock");
         server::start(
             &socket,
@@ -297,7 +301,6 @@ mod tests {
         let gone =
             client::call(&dir.join("missing.sock"), &split, None, &mut |_| {}, None).unwrap_err();
         assert_eq!(gone.code, ErrorCode::NoInstance);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -305,7 +308,11 @@ mod tests {
         use std::io::{BufRead, BufReader, Write};
         use std::os::unix::net::UnixStream;
         use std::sync::Arc;
-        let dir = std::env::temp_dir().join(format!("vidcut-ipc-limits-{}", std::process::id()));
+        let tmp = tempfile::Builder::new()
+            .prefix("vidcut-ipc-limits-")
+            .tempdir()
+            .unwrap();
+        let dir = tmp.path();
         let socket = dir.join("test.sock");
         let limits = server::Limits {
             line: 100,
@@ -401,7 +408,6 @@ mod tests {
         let e = refused.expect("served").unwrap_err();
         assert_eq!(e.code, ErrorCode::Usage, "{e}");
         assert!(e.message.contains("limited to 100 bytes"), "{e}");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -413,7 +419,11 @@ mod tests {
         use std::io::{BufRead, BufReader, Write};
         use std::os::unix::net::UnixStream;
         use std::sync::Arc;
-        let dir = std::env::temp_dir().join(format!("vidcut-ipc-refused-{}", std::process::id()));
+        let tmp = tempfile::Builder::new()
+            .prefix("vidcut-ipc-refused-")
+            .tempdir()
+            .unwrap();
+        let dir = tmp.path();
         let socket = dir.join("test.sock");
         let handler = Arc::new(
             |_: Envelope, _: Option<PathBuf>, _: &mut dyn FnMut(Option<Value>) -> bool| {
@@ -447,7 +457,6 @@ mod tests {
         assert_eq!(e.code, ErrorCode::Usage, "{e}");
         assert!(e.message.contains("connections already"), "{e}");
         drop(held);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -456,7 +465,11 @@ mod tests {
         // the truth. (Sending it and hanging up could still apply an edit.)
         use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-        let dir = std::env::temp_dir().join(format!("vidcut-ipc-cancel-{}", std::process::id()));
+        let tmp = tempfile::Builder::new()
+            .prefix("vidcut-ipc-cancel-")
+            .tempdir()
+            .unwrap();
+        let dir = tmp.path();
         let socket = dir.join("test.sock");
         let calls = Arc::new(AtomicUsize::new(0));
         let seen = calls.clone();
@@ -491,7 +504,6 @@ mod tests {
             1,
             "the cancelled call sent nothing"
         );
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -513,9 +525,11 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         use std::time::{Duration, Instant};
 
-        let dir = std::env::temp_dir().join(format!("vidcut-ipc-probe-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::Builder::new()
+            .prefix("vidcut-ipc-probe-")
+            .tempdir()
+            .unwrap();
+        let dir = tmp.path();
         let socket = dir.join("t.sock");
         let probes = Arc::new(AtomicU64::new(0));
         let stopped = Arc::new(AtomicU64::new(u64::MAX));
@@ -572,7 +586,6 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(ms < 1000, "still running after the client left: {ms} ms");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -584,9 +597,11 @@ mod tests {
         use std::os::unix::net::UnixStream;
         use std::sync::Arc;
         use std::time::Duration;
-        let dir = std::env::temp_dir().join(format!("vidcut-ipc-half-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::Builder::new()
+            .prefix("vidcut-ipc-half-")
+            .tempdir()
+            .unwrap();
+        let dir = tmp.path();
         let socket = dir.join("t.sock");
         server::start(
             &socket,
@@ -618,6 +633,5 @@ mod tests {
         let mut reply = String::new();
         BufReader::new(stream).read_line(&mut reply).unwrap();
         assert!(reply.contains("\"ok\""), "{reply}");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

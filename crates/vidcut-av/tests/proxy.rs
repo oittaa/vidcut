@@ -36,9 +36,11 @@ fn a_proxy_matches_source_frames_and_timestamps() {
     let Some(shifted) = fixture::ensure(&offset).map_err(skip).ok() else {
         return;
     };
-    let dir = std::env::temp_dir().join(format!("vidcut-proxy-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-proxy-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
 
     for (i, path) in [source, shifted].iter().enumerate() {
         let dest = dir.join(format!("proxy-{i}.mkv"));
@@ -71,9 +73,11 @@ fn a_proxy_keeps_its_own_keyframes() {
     let Some(source) = fixture::ensure(&spec).map_err(skip).ok() else {
         return;
     };
-    let dir = std::env::temp_dir().join(format!("vidcut-proxy-keys-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-proxy-keys-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
     let dest = dir.join("proxy.mkv");
     vidcut_av::proxy::write(&Input::File(source), 320, 180, &dest, None).unwrap();
     let mut input = ffmpeg::format::input(&dest).unwrap();
@@ -90,7 +94,6 @@ fn a_proxy_keeps_its_own_keyframes() {
         .map(|(n, _)| n)
         .collect();
     assert_eq!(keys, [0, 60, 120]);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -105,9 +108,11 @@ fn a_sequence_proxy_uses_the_sequence_timestamps() {
         first: 1,
         rate: (25, 1),
     };
-    let dir = std::env::temp_dir().join(format!("vidcut-proxy-seq-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-proxy-seq-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
     let dest = dir.join("seq.mkv");
     let written = match vidcut_av::proxy::write(&input, 320, 180, &dest, None) {
         Ok(w) => w,

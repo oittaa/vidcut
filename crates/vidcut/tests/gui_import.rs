@@ -110,9 +110,11 @@ fn media_count(h: &live::Handle) -> usize {
 
 #[test]
 fn numbered_images_are_asked_about() {
-    let dir = std::env::temp_dir().join(format!("vidcut-gui-import-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-gui-import-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
     // SAFETY: the only test in this binary; set before any thread starts.
     unsafe {
         std::env::set_var("XDG_STATE_HOME", dir.join("state"));
@@ -290,5 +292,4 @@ fn numbered_images_are_asked_about() {
     drop(harness);
     h.shutdown();
     let _ = session.join();
-    let _ = std::fs::remove_dir_all(&dir);
 }

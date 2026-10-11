@@ -115,16 +115,15 @@ mod tests {
         assert_eq!(split("é0001.png"), Some(("é", "0001", ".png")));
     }
 
-    fn folder(names: &[&str]) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "vidcut-seq-{}-{}",
-            std::process::id(),
-            names.join("+").len()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+    /// A folder of empty files, removed when it drops, also when the test
+    /// fails.
+    fn folder(names: &[&str]) -> tempfile::TempDir {
+        let dir = tempfile::Builder::new()
+            .prefix("vidcut-seq-")
+            .tempdir()
+            .unwrap();
         for n in names {
-            std::fs::write(dir.join(n), b"").unwrap();
+            std::fs::write(dir.path().join(n), b"").unwrap();
         }
         dir
     }
@@ -140,39 +139,39 @@ mod tests {
             "f_0010.jpg",
             "g_0010.png",
         ]);
-        let s = find(&dir.join("f_0010.png")).unwrap();
+        let s = find(&dir.path().join("f_0010.png")).unwrap();
         assert_eq!((s.pattern.as_str(), s.first, s.count), ("f_%04d.png", 8, 4));
         assert_eq!(s.name(11), "f_0011.png");
         assert_eq!(s.display(), "f_[0008-0011].png");
         // Past the gap, a run of its own.
-        let s = find(&dir.join("f_0013.png")).unwrap();
+        let s = find(&dir.path().join("f_0013.png")).unwrap();
         assert_eq!((s.first, s.count), (13, 1));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn unpadded_numbers_and_percent_signs() {
         let dir = folder(&["50% 9.png", "50% 10.png", "50% 11.png"]);
-        let s = find(&dir.join("50% 10.png")).unwrap();
+        let s = find(&dir.path().join("50% 10.png")).unwrap();
         assert_eq!(
             (s.pattern.as_str(), s.first, s.count),
             ("50%% %d.png", 9, 3)
         );
         assert_eq!(s.name(10), "50% 10.png");
         assert_eq!(s.display(), "50% [9-11].png");
-        assert!(find(&dir.join("50% 12.png")).is_err(), "no such file");
-        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            find(&dir.path().join("50% 12.png")).is_err(),
+            "no such file"
+        );
     }
 
     #[test]
     fn padding_shows_in_the_neighbours() {
         // 123456 has no leading zero, but its folder's other files do.
         let dir = folder(&["c_099999.exr", "c_100000.exr", "c_100001.exr"]);
-        let s = find(&dir.join("c_100000.exr")).unwrap();
+        let s = find(&dir.path().join("c_100000.exr")).unwrap();
         assert_eq!(
             (s.pattern.as_str(), s.first, s.count),
             ("c_%06d.exr", 99_999, 3)
         );
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

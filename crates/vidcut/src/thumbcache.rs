@@ -127,9 +127,11 @@ mod tests {
 
     #[test]
     fn eviction_drops_the_least_recently_used_first() {
-        let dir = std::env::temp_dir().join(format!("vidcut-thumbcache-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::Builder::new()
+            .prefix("vidcut-thumbcache-")
+            .tempdir()
+            .unwrap();
+        let dir = tmp.path();
         let now = SystemTime::now();
         // a used 30 s ago, b 20 s ago, c 10 s ago; 1000 bytes each.
         for (name, age) in [("a", 30), ("b", 20), ("c", 10)] {
@@ -139,12 +141,11 @@ mod tests {
             f.set_modified(now - Duration::from_secs(age)).unwrap();
         }
         std::fs::write(dir.join("d.part"), [0u8; 5000]).unwrap();
-        assert_eq!(evict(&dir, 3000), 0, "within the limit");
-        assert_eq!(evict(&dir, 2500), 1);
+        assert_eq!(evict(dir, 3000), 0, "within the limit");
+        assert_eq!(evict(dir, 2500), 1);
         assert!(!dir.join("a.thumbs").exists(), "the oldest went");
         assert!(dir.join("b.thumbs").exists() && dir.join("c.thumbs").exists());
-        assert_eq!(evict(&dir, 0), 2);
+        assert_eq!(evict(dir, 0), 2);
         assert!(dir.join("d.part").exists(), "a file being written stays");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

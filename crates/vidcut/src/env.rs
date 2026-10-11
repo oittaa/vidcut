@@ -411,8 +411,11 @@ mod tests {
     #[test]
     fn only_regular_files_are_media() {
         // A pipe would block the probe until something writes to it.
-        let dir = std::env::temp_dir().join(format!("vidcut-env-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::Builder::new()
+            .prefix("vidcut-env-")
+            .tempdir()
+            .unwrap();
+        let dir = tmp.path();
         let fifo = dir.join("pipe.mp4");
         let c = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
         assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
@@ -420,7 +423,6 @@ mod tests {
             let e = super::AvEnv::new().probe(path).unwrap_err();
             assert!(e.message.contains("not a regular file"), "{path:?}: {e}");
         }
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -322,9 +322,11 @@ mod tests {
 
     #[test]
     fn numbered_images_make_runs_and_the_rest_stay() {
-        let dir = std::env::temp_dir().join(format!("vidcut-import-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::Builder::new()
+            .prefix("vidcut-import-")
+            .tempdir()
+            .unwrap();
+        let dir = tmp.path();
         for n in [
             "f_001.png",
             "f_002.png",
@@ -386,6 +388,5 @@ mod tests {
         assert!(request(&choice).is_err());
         choice.fps = "0".into();
         assert!(request(&choice).is_err());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

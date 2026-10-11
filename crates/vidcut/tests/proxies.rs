@@ -79,9 +79,11 @@ fn files(dir: &Path) -> Vec<PathBuf> {
 
 #[test]
 fn proxies_encode_beside_the_session() {
-    let dir = std::env::temp_dir().join(format!("vidcut-proxies-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-proxies-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
     // SAFETY: the only test in this binary; set before any thread starts.
     unsafe {
         std::env::set_var("XDG_STATE_HOME", dir.join("state"));
@@ -238,5 +240,4 @@ fn proxies_encode_beside_the_session() {
     assert_eq!(e.code, ErrorCode::Cancelled, "{e}");
     assert!(frames > 0, "no progress headless");
     assert!(files(&proxies).is_empty(), "{:?}", files(&proxies));
-    let _ = std::fs::remove_dir_all(&dir);
 }

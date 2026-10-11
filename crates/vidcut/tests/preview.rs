@@ -1,7 +1,6 @@
 //! Timeline preview: the product EDL (core) with generated fillers (vidcut-av)
 //! plays frame-exactly in libmpv, gaps included. Skips without libmpv.
 
-use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use serde_json::json;
@@ -184,8 +183,11 @@ fn product_edl_plays_frame_exactly_with_gaps() {
     let p = ed.project();
     let plan = flatten(p, 0, p.end()).unwrap();
 
-    let dir: PathBuf = std::env::temp_dir().join(format!("vidcut-preview-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-preview-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
     let fillers = vidcut_av::filler::ensure(&dir.join("fillers"), 320, 180, fps).unwrap();
     let edl = dir.join("timeline.edl");
     std::fs::write(&edl, vidcut_core::preview::edl(&plan, &fillers)).unwrap();
@@ -221,5 +223,4 @@ fn product_edl_plays_frame_exactly_with_gaps() {
         }
     }
     assert!(bad.is_empty(), "{bad:#?}");
-    let _ = std::fs::remove_dir_all(&dir);
 }

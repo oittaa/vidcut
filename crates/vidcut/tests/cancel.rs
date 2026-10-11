@@ -27,9 +27,11 @@ impl live::Renderer for NoRenderer {
 
 #[test]
 fn a_gone_client_cancels_frames_storyboards_and_analysis() {
-    let dir = std::env::temp_dir().join(format!("vidcut-cancel-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-cancel-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
     // SAFETY: the only test in this binary; set before any thread starts.
     unsafe {
         std::env::set_var("XDG_STATE_HOME", dir.join("state"));
@@ -88,5 +90,4 @@ fn a_gone_client_cancels_frames_storyboards_and_analysis() {
     }
     h.shutdown();
     session.join().unwrap();
-    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -174,9 +174,11 @@ fn has_png(result: &Value) -> bool {
 
 #[test]
 fn an_agent_cuts_silence_over_mcp_live_in_the_gui() {
-    let dir = std::env::temp_dir().join(format!("vidcut-mcp-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-mcp-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
     // SAFETY: the only test in this binary; set before any thread starts.
     unsafe {
         std::env::set_var("XDG_STATE_HOME", dir.join("state"));
@@ -422,5 +424,4 @@ fn an_agent_cuts_silence_over_mcp_live_in_the_gui() {
     h.shutdown();
     let _ = session.join();
     std::thread::sleep(Duration::from_millis(10));
-    let _ = std::fs::remove_dir_all(&dir);
 }

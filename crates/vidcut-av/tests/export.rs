@@ -17,11 +17,13 @@ use vidcut_core::export::{
 use vidcut_core::render::{AudioPiece, Image, RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
 
-fn out_dir(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("vidcut-export-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&d);
-    std::fs::create_dir_all(&d).unwrap();
-    d
+/// A folder for one test's outputs, removed when it drops, also when the
+/// test fails.
+fn out_dir(name: &str) -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .prefix(&format!("vidcut-export-{name}-"))
+        .tempdir()
+        .unwrap()
 }
 
 struct Src {
@@ -222,7 +224,8 @@ fn same_rate_cuts_are_frame_and_sample_exact() {
         a(&np, fps, 48_000, 3, 30),
     ];
     let p = plan(fps, 320, 180, pieces, vec![lane]);
-    let out = out_dir("exact").join("out.mkv");
+    let dir = out_dir("exact");
+    let out = dir.path().join("out.mkv");
     let report = render(&p, &lossless(), &out);
     assert_eq!(report.frames, 125);
 
@@ -308,7 +311,8 @@ fn pieces_of_one_file_read_on_seek_back_and_open_ahead() {
         }
     }
     let p = plan(fps, 320, 180, pieces, vec![lane]);
-    let out = out_dir("reuse").join("out.mkv");
+    let dir = out_dir("reuse");
+    let out = dir.path().join("out.mkv");
     render(&p, &lossless(), &out);
 
     let codes = barcodes(&out);
@@ -370,7 +374,8 @@ fn rotated_sources_export_upright() {
         }
     }
     let p = plan(fps, 320, 180, pieces, vec![]);
-    let out = out_dir("rotated").join("out.mkv");
+    let dir = out_dir("rotated");
+    let out = dir.path().join("out.mkv");
     render(&p, &lossless(), &out);
     let codes = barcodes(&out);
     let bad: Vec<_> = codes
@@ -422,7 +427,8 @@ fn interlaced_sources_are_deinterlaced() {
         want.extend((5..25).map(Some));
     }
     let p = plan(fps, 320, 180, pieces, vec![]);
-    let out = out_dir("interlaced").join("out.mkv");
+    let dir = out_dir("interlaced");
+    let out = dir.path().join("out.mkv");
     render(&p, &lossless(), &out);
     let mut r = VideoReader::open(&out).unwrap();
     let mut codes = Vec::new();
@@ -490,7 +496,8 @@ fn hdr_is_tone_mapped_for_sdr_and_kept_for_hdr() {
         }
     }
     let p = plan(fps, 320, 180, pieces.clone(), vec![]);
-    let out = out_dir("hdr").join("sdr.mkv");
+    let dir = out_dir("hdr");
+    let out = dir.path().join("sdr.mkv");
     render(&p, &lossless(), &out);
     let mut r = VideoReader::open(&out).unwrap();
     let mut codes = Vec::new();
@@ -519,7 +526,7 @@ fn hdr_is_tone_mapped_for_sdr_and_kept_for_hdr() {
     video.quality = Some(4);
     video.speed = Some("ultrafast".into());
     video.hdr = Some(Hdr::Pq);
-    let out = out_dir("hdr").join("pq.mkv");
+    let out = dir.path().join("pq.mkv");
     render(&p, &settings, &out);
     let info = vidcut_av::probe::probe(&out).unwrap().video.unwrap();
     assert_eq!(info.transfer, "smpte2084");
@@ -549,7 +556,7 @@ fn a_failed_rename_leaves_no_part_file() {
         src(FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 30).no_audio());
     let p = plan(fps, 320, 180, vec![v(&s, 0, 10)], vec![]);
     let dir = out_dir("rename");
-    let out = dir.join("taken.mkv");
+    let out = dir.path().join("taken.mkv");
     std::fs::create_dir_all(out.join("inside")).unwrap();
     // An encode that fails first also deletes `.part`. The frame count and
     // the error both have to say the file was finished and the rename failed.
@@ -575,7 +582,7 @@ fn a_failed_rename_leaves_no_part_file() {
         !export::partial_path(&out).exists(),
         "the finished .part is gone"
     );
-    let left: Vec<_> = std::fs::read_dir(&dir)
+    let left: Vec<_> = std::fs::read_dir(dir.path())
         .unwrap()
         .map(|e| e.unwrap().file_name())
         .collect();
@@ -603,7 +610,7 @@ fn audio_after_a_lost_packet_keeps_its_time() {
     let audio = info.audio[0].index;
     // AAC packets are 1024 samples: number 80 starts at 1.7 s.
     let dir = out_dir("lost");
-    let lossy = dir.join("lossy.mkv");
+    let lossy = dir.path().join("lossy.mkv");
     fixture::spoil(&s.path, &lossy, audio, 80, Spoil::Drop).unwrap();
     let gapped = Src {
         path: lossy,
@@ -616,7 +623,7 @@ fn audio_after_a_lost_packet_keeps_its_time() {
         vec![v(&gapped, 0, 90)],
         vec![vec![a(&gapped, fps, 48_000, 0, 90)]],
     );
-    let out = dir.join("out.mkv");
+    let out = dir.path().join("out.mkv");
     render(&p, &lossless(), &out);
     let mono = audio_mono(&out);
     assert_eq!(mono.len() as i64, p.samples(), "sample count");
@@ -650,7 +657,7 @@ fn a_rejected_audio_packet_leaves_silence() {
     let info = vidcut_av::probe::probe(&s.path).unwrap();
     let audio = info.audio[0].index;
     let dir = out_dir("rejected");
-    let damaged = dir.join("rejected.mkv");
+    let damaged = dir.path().join("rejected.mkv");
     fixture::spoil(&s.path, &damaged, audio, 80, Spoil::Zero).unwrap();
     let gapped = Src {
         path: damaged,
@@ -663,7 +670,7 @@ fn a_rejected_audio_packet_leaves_silence() {
         vec![v(&gapped, 0, 90)],
         vec![vec![a(&gapped, fps, 48_000, 0, 90)]],
     );
-    let out = dir.join("out.mkv");
+    let out = dir.path().join("out.mkv");
     render(&p, &lossless(), &out);
     let mono = audio_mono(&out);
     assert_eq!(mono.len() as i64, p.samples(), "sample count");
@@ -748,7 +755,7 @@ fn a_decoder_error_other_than_invalid_data_fails_the_export() {
     assert!(extra.len() >= 2, "{extra:?}");
     extra[0] &= 0x07;
     let dir = out_dir("unimplemented");
-    let bad = dir.join("bad.mkv");
+    let bad = dir.path().join("bad.mkv");
     with_audio_extradata(&s.path, &bad, &extra);
     let broken = Src {
         path: bad,
@@ -761,7 +768,7 @@ fn a_decoder_error_other_than_invalid_data_fails_the_export() {
         vec![v(&broken, 0, 30)],
         vec![vec![a(&broken, fps, 48_000, 0, 30)]],
     );
-    let out = dir.join("out.mkv");
+    let out = dir.path().join("out.mkv");
     let err = export::run(
         &p,
         &lossless(),
@@ -804,7 +811,7 @@ fn audio_that_starts_late_keeps_its_time() {
     );
     let audio = vidcut_av::probe::probe(&s.path).unwrap().audio[0].index;
     let dir = out_dir("late");
-    let lossy = dir.join("late.mkv");
+    let lossy = dir.path().join("late.mkv");
     fixture::spoil(&s.path, &lossy, audio, 0, Spoil::Drop).unwrap();
     let first = vidcut_av::probe::probe(&lossy).unwrap().audio[0]
         .first_secs
@@ -821,7 +828,7 @@ fn audio_that_starts_late_keeps_its_time() {
         vec![v(&late, 0, 90)],
         vec![vec![a(&late, fps, 48_000, 0, 90)]],
     );
-    let out = dir.join("out.mkv");
+    let out = dir.path().join("out.mkv");
     render(&p, &lossless(), &out);
     let mono = audio_mono(&out);
     let lead = (first * 48_000.0).floor() as usize;
@@ -859,14 +866,14 @@ fn a_damaged_video_packet_is_skipped() {
         .unwrap()
         .index;
     let dir = out_dir("damaged");
-    let damaged = dir.join("damaged.mov");
+    let damaged = dir.path().join("damaged.mov");
     fixture::spoil(&s.path, &damaged, video, 10, Spoil::Zero).unwrap();
     let d = Src {
         path: damaged,
         origin: s.origin,
     };
     let p = plan(fps, 320, 180, vec![v(&d, 0, 30)], vec![]);
-    let out = dir.join("out.mkv");
+    let out = dir.path().join("out.mkv");
     render(&p, &lossless(), &out);
     let mut want: Vec<Option<u32>> = (0..30).map(Some).collect();
     want[10] = Some(11);
@@ -888,14 +895,14 @@ fn a_damaged_video_packet_is_skipped() {
         .video
         .unwrap()
         .index;
-    let damaged = dir.join("damaged.mkv");
+    let damaged = dir.path().join("damaged.mkv");
     fixture::spoil(&s.path, &damaged, video, 40, Spoil::Zero).unwrap();
     let d = Src {
         path: damaged,
         origin: s.origin,
     };
     let p = plan(fps, 320, 180, vec![v(&d, 0, 90)], vec![]);
-    let out = dir.join("out-h264.mkv");
+    let out = dir.path().join("out-h264.mkv");
     render(&p, &lossless(), &out);
     let codes = barcodes(&out);
     assert_eq!(codes.len(), 90);
@@ -918,7 +925,8 @@ fn other_rates_are_resampled_by_nearest_frame() {
     )
     .no_audio());
     let p = plan(fps, 320, 180, vec![v(&s25, 0, 12)], vec![]);
-    let out = out_dir("rate").join("out.mkv");
+    let dir = out_dir("rate");
+    let out = dir.path().join("out.mkv");
     let mut settings = lossless();
     settings.audio = None;
     render(&p, &settings, &out);
@@ -947,7 +955,7 @@ fn the_encoder_chooses_its_own_keyframes() {
     ));
     let p = plan(fps, 320, 180, vec![v(&s, 0, 150)], vec![]);
     let dir = out_dir("keyframes");
-    let out = dir.join("out.mkv");
+    let out = dir.path().join("out.mkv");
     let mut settings = lossless();
     settings.audio = None;
     render(&p, &settings, &out);
@@ -966,7 +974,6 @@ fn the_encoder_chooses_its_own_keyframes() {
         .collect();
     // x264's own interval (250 frames, ultrafast: no scene cuts) is longer.
     assert_eq!(keys, [0]);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -1007,7 +1014,7 @@ fn scaling_padding_and_presets() {
         {
             p.sample_rate = 48_000;
         }
-        let out = dir.join(format!(
+        let out = dir.path().join(format!(
             "{}.{}",
             preset.name,
             settings.container.extension()
@@ -1048,7 +1055,8 @@ fn still_frames_follow_the_sampling_rule() {
     ));
     let png = vidcut_av::export::still::png(&v(&a1, 37, 1), fps, 320, 180).unwrap();
     assert_eq!(&png[1..4], b"PNG");
-    let path = out_dir("still").join("f.png");
+    let dir = out_dir("still");
+    let path = dir.path().join("f.png");
     std::fs::write(&path, &png).unwrap();
     let mut r = VideoReader::open(&path).unwrap();
     let f = r.next_frame().unwrap().unwrap();
@@ -1068,7 +1076,7 @@ fn cancelling_leaves_no_files() {
     ));
     let p = plan(fps, 320, 180, vec![v(&a1, 0, 90)], vec![]);
     let dir = out_dir("cancel");
-    let out = dir.join("out.mkv");
+    let out = dir.path().join("out.mkv");
     let cancel = AtomicBool::new(false);
     let mut settings = lossless();
     settings.audio = None;
@@ -1087,7 +1095,7 @@ fn cancelling_leaves_no_files() {
     .unwrap_err();
     assert!(export::is_cancelled(&err), "{err}");
     assert_eq!(
-        std::fs::read_dir(&dir).unwrap().count(),
+        std::fs::read_dir(dir.path()).unwrap().count(),
         0,
         "no output or .part left"
     );
@@ -1102,7 +1110,7 @@ fn cancelling_leaves_no_files() {
     )
     .unwrap_err();
     assert!(export::is_cancelled(&err), "{err}");
-    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
 }
 
 #[test]
@@ -1132,7 +1140,8 @@ fn normalizing_hot_lanes_keeps_true_peaks_under_the_ceiling() {
     );
     let mut settings = lossless();
     settings.audio.as_mut().unwrap().loudness = Some(-5.0);
-    let out = out_dir("hot").join("out.mkv");
+    let dir = out_dir("hot");
+    let out = dir.path().join("out.mkv");
     let n = render(&p, &settings, &out).loudness.expect("normalized");
     let before = n.true_peak.unwrap() - n.gain_db;
     assert!(before > 5.5, "the mix peaks above full scale: {n:?}");
@@ -1191,7 +1200,8 @@ fn auto_moves_on_from_a_gpu_encoder_that_wont_open() {
     };
     let first = export::encode::resolve_video(settings.video.as_ref().unwrap(), &available);
     assert_eq!(first.unwrap().name, "h264_vaapi");
-    let out = out_dir("fallback").join("out.mkv");
+    let dir = out_dir("fallback");
+    let out = dir.path().join("out.mkv");
     let report = export::run(
         &p,
         &settings,
@@ -1208,7 +1218,7 @@ fn auto_moves_on_from_a_gpu_encoder_that_wont_open() {
     let err = export::run(
         &p,
         &settings,
-        &out_dir("fallback").join("named.mkv"),
+        &dir.path().join("named.mkv"),
         &available,
         &AtomicBool::new(false),
         &mut |_| {},
@@ -1260,7 +1270,8 @@ fn many_segments_keep_memory_flat() {
         lane.push(a(s, fps, 48_000, at, 2));
     }
     let p = plan(fps, 640, 360, video, vec![lane]);
-    let out = out_dir("many").join("out.mkv");
+    let dir = out_dir("many");
+    let out = dir.path().join("out.mkv");
     let before = peak_rss_mb();
     render(&p, &lossless(), &out);
     let grew = peak_rss_mb() - before;
@@ -1334,7 +1345,9 @@ fn gpu_encoders_produce_valid_frame_exact_output() {
             }),
             declick: true,
         };
-        let out = dir.join(format!("{}-{}.mp4", status.encoder, status.pixel));
+        let out = dir
+            .path()
+            .join(format!("{}-{}.mp4", status.encoder, status.pixel));
         let report = export::run(
             &p,
             &settings,
@@ -1399,7 +1412,8 @@ fn stills_show_one_picture_for_as_long_as_they_last() {
         ],
         vec![],
     );
-    let out = out_dir("stills").join("out.mkv");
+    let dir = out_dir("stills");
+    let out = dir.path().join("out.mkv");
     render(&p, &lossless(), &out);
     let mut want = vec![Some(77); 20];
     want.extend([Some(88); 10]);
@@ -1453,7 +1467,8 @@ fn sequences_play_their_pictures_at_their_rate() {
         ],
         vec![],
     );
-    let out = out_dir("sequences").join("out.mkv");
+    let dir = out_dir("sequences");
+    let out = dir.path().join("out.mkv");
     render(&p, &lossless(), &out);
     let mut want: Vec<Option<u32>> = (5..25).map(Some).collect();
     // Timeline frame j of a 30 fps project shows the first 24 fps picture

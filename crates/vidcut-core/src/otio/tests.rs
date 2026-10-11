@@ -940,8 +940,11 @@ fn reads_resolve_exports() {
 fn relative_paths_count_from_the_file() {
     // Bundles name their media relative to themselves (`.otiod` folders,
     // unpacked `.otioz`), and a project folder may move with its timeline.
-    let dir = std::env::temp_dir().join(format!("vidcut-otio-rel-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-otio-rel-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
     let bundle = dir.join("cut.otiod");
     std::fs::create_dir_all(&bundle).unwrap();
     let fps = Rational::new(25, 1).unwrap();
@@ -1012,7 +1015,6 @@ fn relative_paths_count_from_the_file() {
         json!({ "path": dir.join("cut.otioz") }),
     ));
     assert_eq!(e.code, crate::ErrorCode::Usage);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

@@ -6,21 +6,23 @@ use std::process::Command;
 use serde_json::Value;
 use vidcut_av::fixture::{self, Container, FixtureSpec, ImageSpec, Picture, Sound, VideoCodec};
 
-/// A scratch directory with its own XDG state (undo history) dir.
+/// A scratch directory with its own XDG state (undo history) dir, removed
+/// when it drops, also when the test fails.
 struct Sandbox {
-    dir: PathBuf,
+    dir: tempfile::TempDir,
 }
 
 impl Sandbox {
     fn new(name: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("vidcut-cli-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = tempfile::Builder::new()
+            .prefix(&format!("vidcut-cli-{name}-"))
+            .tempdir()
+            .unwrap();
         Self { dir }
     }
 
     fn project(&self) -> PathBuf {
-        self.dir.join("p.vidcut")
+        self.dir.path().join("p.vidcut")
     }
 
     fn cmd(&self, args: &[&str]) -> Command {
@@ -32,9 +34,9 @@ impl Sandbox {
         let mut c = Command::new(env!("CARGO_BIN_EXE_vidcut"));
         // Own runtime and config dirs: a GUI running on this machine must
         // not answer, and the user's presets stay out of it.
-        c.env("XDG_STATE_HOME", self.dir.join("state"))
-            .env("XDG_RUNTIME_DIR", self.dir.join("run"))
-            .env("XDG_CONFIG_HOME", self.dir.join("config"))
+        c.env("XDG_STATE_HOME", self.dir.path().join("state"))
+            .env("XDG_RUNTIME_DIR", self.dir.path().join("run"))
+            .env("XDG_CONFIG_HOME", self.dir.path().join("config"))
             .env_remove("VIDCUT_SOCKET")
             .env_remove("VIDCUT_PROJECT")
             .arg("-p")
@@ -97,12 +99,6 @@ impl Sandbox {
                 )
             })
             .collect()
-    }
-}
-
-impl Drop for Sandbox {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
 
@@ -234,11 +230,11 @@ fn errors_have_stable_exit_codes() {
     sb.ok(&["--if-rev", &rev.to_string(), "edit", "split", "--at", "1s"]);
     // What reads the project checks it too: nothing comes of a stale one.
     let stale = rev.to_string();
-    let out = sb.dir.join("stale.mp4");
+    let out = sb.dir.path().join("stale.mp4");
     let e = sb.fails(5, &["--if-rev", &stale, "export", s(&out)]);
     assert_eq!(e["code"], "CONFLICT");
     assert!(!out.exists());
-    let png = sb.dir.join("stale.png");
+    let png = sb.dir.path().join("stale.png");
     let e = sb.fails(
         5,
         &["--if-rev", &stale, "frame", "--at", "1s", "-o", s(&png)],
@@ -255,7 +251,7 @@ fn errors_have_stable_exit_codes() {
     // No project at all.
     let out = Command::new(env!("CARGO_BIN_EXE_vidcut"))
         .env_remove("VIDCUT_PROJECT")
-        .env("XDG_RUNTIME_DIR", sb.dir.join("run"))
+        .env("XDG_RUNTIME_DIR", sb.dir.path().join("run"))
         .args(["--json", "info"])
         .output()
         .unwrap();
@@ -275,7 +271,7 @@ fn apply_runs_a_batch_as_one_undo_step() {
     ));
     sb.cmd(&["new"]).arg(sb.project()).output().unwrap();
     sb.ok(&["media", "add", s(&a)]);
-    let batch = sb.dir.join("cuts.jsonl");
+    let batch = sb.dir.path().join("cuts.jsonl");
     std::fs::write(
         &batch,
         "// a rough cut\n\
@@ -402,7 +398,7 @@ fn exports_frames_ranges_clips_and_audio() {
     sb.ok(&["media", "add", s(&a), s(&b)]);
     sb.ok(&["edit", "append", "m1", "--range", "10f..40f"]);
     sb.ok(&["edit", "append", "m2", "--range", "50f..80f"]);
-    let out = sb.dir.join("out.mkv");
+    let out = sb.dir.path().join("out.mkv");
     let o = s(&out);
 
     // Dry run: a plan, no file.
@@ -453,7 +449,7 @@ fn exports_frames_ranges_clips_and_audio() {
     sb.ok(&["marks", "clear"]);
 
     // Per clip, with a name template.
-    let dir = sb.dir.join("clips");
+    let dir = sb.dir.path().join("clips");
     let r = sb.ok(&[
         "export",
         s(&dir),
@@ -470,26 +466,34 @@ fn exports_frames_ranges_clips_and_audio() {
     );
 
     // Audio only, container from the extension.
-    let wav = sb.dir.join("a.wav");
+    let wav = sb.dir.path().join("a.wav");
     sb.ok(&["export", s(&wav)]);
     let info = vidcut_av::probe::probe(&wav).unwrap();
     assert!(info.video.is_none());
     assert_eq!(info.audio[0].sample_rate, 48_000);
 
     // A still frame of the timeline and of a media item.
-    let png = sb.dir.join("f.png");
+    let png = sb.dir.path().join("f.png");
     sb.ok(&["frame", "--at", "35f", "-o", s(&png)]);
     assert_eq!(barcodes(&png), vec![Some(55)]);
     sb.ok(&["frame", "--media", "m1", "--at", "1s", "-o", s(&png)]);
     assert_eq!(barcodes(&png), vec![Some(30)]);
 
     // Unknown presets and impossible settings fail cleanly.
-    sb.fails(3, &["export", s(&sb.dir.join("x.mp4")), "--preset", "nope"]);
+    sb.fails(
+        3,
+        &[
+            "export",
+            s(&sb.dir.path().join("x.mp4")),
+            "--preset",
+            "nope",
+        ],
+    );
     sb.fails(
         2,
         &[
             "export",
-            s(&sb.dir.join("x.mp4")),
+            s(&sb.dir.path().join("x.mp4")),
             "--preset",
             "prores-422hq",
         ],
@@ -541,7 +545,7 @@ fn otio_round_trips_frame_exactly() {
         "markers", "add", "--at", "15f", "--name", "look", "--color", "rose",
     ]);
     sb.ok(&["marks", "set", "--in", "5f", "--out", "80f"]);
-    let cut = sb.dir.join("cut.otio");
+    let cut = sb.dir.path().join("cut.otio");
     let plan = sb.ok(&["--dry-run", "export", s(&cut)]);
     assert_eq!(plan["result"]["outputs"][0]["clips"], 3);
     assert!(!cut.exists());
@@ -554,7 +558,7 @@ fn otio_round_trips_frame_exactly() {
         &["export", s(&cut), "--preset", "h264-master", "--overwrite"],
     );
 
-    let other = sb.dir.join("q.vidcut");
+    let other = sb.dir.path().join("q.vidcut");
     sb.ok(&["new", s(&other)]);
     let r = sb.ok_in(&other, &["import", s(&cut)]);
     assert_eq!(r["result"]["warnings"], serde_json::json!([]));
@@ -564,7 +568,7 @@ fn otio_round_trips_frame_exactly() {
     );
     // Same pictures at the cuts, in the gap and at the end.
     for at in ["0f", "29f", "30f", "59f", "60f", "89f", "90f", "109f"] {
-        let (x, y) = (sb.dir.join("x.png"), sb.dir.join("y.png"));
+        let (x, y) = (sb.dir.path().join("x.png"), sb.dir.path().join("y.png"));
         sb.ok(&["frame", "--at", at, "-o", s(&x)]);
         sb.ok_in(&other, &["frame", "--at", at, "-o", s(&y)]);
         assert_eq!(
@@ -576,13 +580,13 @@ fn otio_round_trips_frame_exactly() {
 
     // Moved media: an error naming the files, unless found by name.
     let fixtures = a.parent().unwrap();
-    let moved = sb.dir.join("moved.otio");
+    let moved = sb.dir.path().join("moved.otio");
     // (Media are named by plain path, as Resolve names them.)
     let text = std::fs::read_to_string(&cut)
         .unwrap()
         .replace(&format!("\"{}/", s(fixtures)), "\"/nonexistent/footage/");
     std::fs::write(&moved, text).unwrap();
-    let third = sb.dir.join("r.vidcut");
+    let third = sb.dir.path().join("r.vidcut");
     sb.ok(&["new", s(&third)]);
     let e = sb.fails_in(&third, 7, &["import", s(&moved)]);
     assert!(
@@ -630,7 +634,7 @@ fn python(python: &str, dir: &Path, script: &str) -> String {
 /// The same pictures at `frames` in two projects.
 fn same_frames(sb: &Sandbox, a: &Path, b: &Path, frames: &[&str]) {
     for at in frames {
-        let (x, y) = (sb.dir.join("x.png"), sb.dir.join("y.png"));
+        let (x, y) = (sb.dir.path().join("x.png"), sb.dir.path().join("y.png"));
         sb.ok_in(a, &["frame", "--at", at, "-o", s(&x)]);
         sb.ok_in(b, &["frame", "--at", at, "-o", s(&y)]);
         assert_eq!(
@@ -675,7 +679,7 @@ fn otio_bundles_and_timecode() {
     sb.ok(&["clip", "set", "c2", "--gain", "-4"]);
 
     // .otio: plain paths, sources from 10:00:00:00.
-    let cut = sb.dir.join("cut.otio");
+    let cut = sb.dir.path().join("cut.otio");
     sb.ok(&["export", s(&cut)]);
     let doc: Value = serde_json::from_str(&std::fs::read_to_string(&cut).unwrap()).unwrap();
     let first = &doc["tracks"]["children"][0]["children"][0];
@@ -688,7 +692,7 @@ fn otio_bundles_and_timecode() {
     assert_eq!(first["source_range"]["start_time"]["value"], 900_010.0);
 
     // .otioz: planned, then written as OpenTimelineIO's adapter lays it out.
-    let bundle = sb.dir.join("cut.otioz");
+    let bundle = sb.dir.path().join("cut.otioz");
     let plan = sb.ok(&["--dry-run", "export", s(&bundle)]);
     let o = &plan["result"]["outputs"][0];
     assert_eq!(
@@ -719,7 +723,7 @@ fn otio_bundles_and_timecode() {
     );
 
     // Imported elsewhere: the media unpack next to the bundle.
-    let away = sb.dir.join("away");
+    let away = sb.dir.path().join("away");
     std::fs::create_dir_all(&away).unwrap();
     let moved = away.join("cut.otioz");
     std::fs::copy(&bundle, &moved).unwrap();
@@ -752,17 +756,17 @@ fn otio_bundles_and_timecode() {
     // Again: the unpacked media are the bundle's, and stay.
     sb.ok_in(&other, &["import", s(&moved), "--replace"]);
     // Or unpacked where asked.
-    let third = sb.dir.join("r.vidcut");
+    let third = sb.dir.path().join("r.vidcut");
     sb.ok(&["new", s(&third)]);
-    let fast = sb.dir.join("fast");
+    let fast = sb.dir.path().join("fast");
     sb.ok_in(&third, &["import", s(&moved), "--unpack", s(&fast)]);
     assert!(fast.join("media").join(file_name(&plain)).is_file());
 
     // .otiod: the same as a folder.
-    let folder = sb.dir.join("cut.otiod");
+    let folder = sb.dir.path().join("cut.otiod");
     sb.ok(&["export", s(&folder)]);
     assert!(folder.join("content.otio").is_file());
-    let fourth = sb.dir.join("s.vidcut");
+    let fourth = sb.dir.path().join("s.vidcut");
     sb.ok(&["new", s(&fourth)]);
     sb.ok_in(&fourth, &["import", s(&folder)]);
     assert_eq!(
@@ -772,8 +776,8 @@ fn otio_bundles_and_timecode() {
 
     // Not a timeline nor a container vidcut knows: an error, not an MP4
     // under that name.
-    sb.fails(2, &["export", s(&sb.dir.join("cut.xyz"))]);
-    assert!(!sb.dir.join("cut.xyz").exists());
+    sb.fails(2, &["export", s(&sb.dir.path().join("cut.xyz"))]);
+    assert!(!sb.dir.path().join("cut.xyz").exists());
 
     // The reference implementation reads all three, and its own bundles of
     // our timeline import frame-exactly.
@@ -786,7 +790,7 @@ fn otio_bundles_and_timecode() {
     };
     let out = python(
         &py,
-        &sb.dir,
+        sb.dir.path(),
         r#"
 import opentimelineio as otio
 for f in ["cut.otio", "cut.otioz", "cut.otiod"]:
@@ -806,9 +810,9 @@ otio.adapters.write_to_file(tl, "py.otioz")
             "cut.otiod 6 900010.0 900000.0 0.0"
         ]
     );
-    let fifth = sb.dir.join("t.vidcut");
+    let fifth = sb.dir.path().join("t.vidcut");
     sb.ok(&["new", s(&fifth)]);
-    let r = sb.ok_in(&fifth, &["import", s(&sb.dir.join("py.otioz"))]);
+    let r = sb.ok_in(&fifth, &["import", s(&sb.dir.path().join("py.otioz"))]);
     assert_eq!(r["result"]["warnings"], serde_json::json!([]), "{r}");
     assert_eq!(
         timeline_shape(&sb, &fifth),
@@ -832,7 +836,7 @@ fn presets_save_and_delete() {
         "--quick-export",
     ]);
     let path = r["result"]["path"].as_str().unwrap().to_string();
-    assert!(path.starts_with(s(&sb.dir.join("config"))), "{path}");
+    assert!(path.starts_with(s(&sb.dir.path().join("config"))), "{path}");
     let p = sb.ok(&["presets", "web"])["result"].clone();
     assert_eq!(
         (p["title"].as_str(), p["quick_export"].as_bool()),
@@ -940,7 +944,7 @@ fn b_roll_and_music_export_correctly() {
     let tracks = sb.ok(&["track", "list"])["result"].clone();
     assert_eq!(tracks.as_array().unwrap().len(), 3);
 
-    let video = sb.dir.join("v.mkv");
+    let video = sb.dir.path().join("v.mkv");
     sb.ok(&[
         "export",
         s(&video),
@@ -955,7 +959,7 @@ fn b_roll_and_music_export_correctly() {
     assert_eq!(barcodes(&video), want, "the B-roll covers frames 30..60");
 
     let mix = |name: &str| {
-        let out = sb.dir.join(name);
+        let out = sb.dir.path().join(name);
         sb.ok(&["export", s(&out), "--set", "audio.codec=pcm_s16"]);
         wav_left(&out)
     };
@@ -1001,14 +1005,14 @@ fn loudness_normalized_exports_meet_their_target() {
     sb.ok(&["edit", "append", "m1"]);
     let before = sb.ok(&["analyze", "loudness"]);
     assert!((before["result"]["integrated"].as_f64().unwrap() + 20.0).abs() < 0.3);
-    let out = sb.dir.join("tone.wav");
+    let out = sb.dir.path().join("tone.wav");
     let r = sb.ok(&["export", s(&out), "--set", "audio.loudness=-16"]);
     let applied = &r["result"]["outputs"][0]["loudness"];
     assert!(
         (applied["gain_db"].as_f64().unwrap() - 4.0).abs() < 0.3,
         "{applied}"
     );
-    let check = sb.dir.join("check.vidcut");
+    let check = sb.dir.path().join("check.vidcut");
     sb.cmd_in(&check, &["new"]).arg(&check).output().unwrap();
     sb.ok_in(&check, &["media", "add", s(&out)]);
     sb.ok_in(&check, &["edit", "append", "m1"]);
@@ -1026,7 +1030,7 @@ fn loudness_normalized_exports_meet_their_target() {
         (30, 1),
         300,
     ));
-    let loud = sb.dir.join("loud.vidcut");
+    let loud = sb.dir.path().join("loud.vidcut");
     sb.cmd_in(&loud, &["new"]).arg(&loud).output().unwrap();
     sb.ok_in(&loud, &["media", "add", s(&beeps)]);
     sb.ok_in(&loud, &["edit", "append", "m1"]);
@@ -1035,7 +1039,7 @@ fn loudness_normalized_exports_meet_their_target() {
         &loud,
         &[
             "export",
-            s(&sb.dir.join("beeps.wav")),
+            s(&sb.dir.path().join("beeps.wav")),
             "--set",
             "audio.loudness=-14",
         ],
@@ -1127,7 +1131,7 @@ fn stills_and_sequences_edit_and_export() {
     sb.ok(&["edit", "append", "m1"]);
     sb.ok(&["edit", "append", "m2", "--range", "10f..+20f"]);
     sb.ok(&["edit", "append", "m1", "--range", "1h..+5f"]);
-    let out = sb.dir.join("out.mkv");
+    let out = sb.dir.path().join("out.mkv");
     sb.ok(&[
         "export",
         s(&out),
@@ -1144,9 +1148,9 @@ fn stills_and_sequences_edit_and_export() {
     assert_eq!(barcodes(&out), want);
     // Through an .otioz bundle (deviation X9): the still, and the sequence's
     // pictures in a folder of their own; back, the same pictures.
-    let bundle = sb.dir.join("pictures.otioz");
+    let bundle = sb.dir.path().join("pictures.otioz");
     sb.ok(&["export", s(&bundle)]);
-    let other = sb.dir.join("q.vidcut");
+    let other = sb.dir.path().join("q.vidcut");
     sb.ok(&["new", s(&other)]);
     let r = sb.ok_in(&other, &["import", s(&bundle)]);
     assert_eq!(r["result"]["warnings"], serde_json::json!([]), "{r}");
@@ -1156,10 +1160,10 @@ fn stills_and_sequences_edit_and_export() {
         m["path"]
             .as_str()
             .unwrap()
-            .starts_with(s(&sb.dir.join("pictures/media/"))),
+            .starts_with(s(&sb.dir.path().join("pictures/media/"))),
         "{m}"
     );
-    let back = sb.dir.join("back.mkv");
+    let back = sb.dir.path().join("back.mkv");
     sb.ok_in(
         &other,
         &[
@@ -1177,7 +1181,7 @@ fn stills_and_sequences_edit_and_export() {
     if let Some(py) = otio_python() {
         let out = python(
             &py,
-            &sb.dir,
+            sb.dir.path(),
             r#"
 import opentimelineio as otio
 tl = otio.adapters.read_from_file("pictures.otioz")
