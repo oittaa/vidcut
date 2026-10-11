@@ -515,14 +515,8 @@ impl Workspace {
                 }
             });
             ui.separator();
-            if let Some(p) = &self.snap.project {
-                let name = p
-                    .path
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                ui.label(RichText::new(name).strong())
-                    .on_hover_text(p.path.display().to_string());
+            // The project's name is in the window title.
+            if self.snap.project.is_some() {
                 if ui.button("Import").on_hover_text("Ctrl+I").clicked() {
                     self.import_media();
                 }
