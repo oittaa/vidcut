@@ -65,10 +65,17 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
   - It runs `bwdif=mode=send_frame:deint=interlaced`: one frame per frame, with the first field kept, and progressive frames passing through.
   - A seek starts it over, and frames decoded on the way to the target feed it. `bwdif` halves its output time base, so timestamps are rescaled back to the stream's.
   - Thumbnails aren't deinterlaced: at pool size, combing barely shows.
-- **Not yet handled:**
-  - HDR: needs tone mapping or passthrough decisions.
-
-  These follow when real-world media tests need them; they are tracked in AGENTS.md.
+- **Color** (`color.rs`, spec D35). Every picture is converted to the output's colors, from its tags or else what players assume (untagged: BT.709 from 720 lines up, BT.601 below; HDR untagged in BT.2020):
+  - **SDR into SDR:** `scale` converts the YUV matrix and range to BT.709 limited as it scales. SD sources become BT.709, and full-range sources limited.
+  - **HDR into SDR:** `zscale` takes the picture to linear light, with the reference white (203 nits) at 1.0, then to BT.709 primaries. `tonemap=mobius` (transition 0.8, peak 1000 nits) maps it, and `zscale` gives BT.709's transfer.
+    - Everything up to 0.8 of the reference white stays as it was, so SDR-graded material in an HDR file looks as it did, and highlights roll off above it. PQ's 203 nits and HLG's 75% both come out at about 95% white.
+    - FFmpeg's usual `hable` curve put that white at about 40% gray.
+  - **Into HDR** (`video.hdr = pq` or `hlg`): the same linear light, SDR white at 203 nits (BT.2408), then BT.2020 and the transfer. An SDR source's white lands at PQ code 573 of 1023, exactly 203 nits.
+  - **Output tags:** encoders tag what they write: BT.709, or BT.2020 with PQ or HLG.
+  - **zimg detail:** `zscale` needs explicit output primaries when it converts to linear. Untagged frames otherwise give it no path.
+  - **Cost at 4K60 with NVENC:** about 31 frames a second with conversion, against 50 for plain SDR.
+  - **Real footage:** a 4K60 SDR clip exported as PQ and tone-mapped back differs from the original by about 6 of 255 on average.
+  - **Not done:** mastering-display and content-light metadata aren't written. Players then assume their own peak.
 
 ## 5. Encoders
 

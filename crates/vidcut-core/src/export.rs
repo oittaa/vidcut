@@ -140,6 +140,11 @@ pub struct VideoSettings {
     pub width: Option<u32>,
     #[serde(default)]
     pub height: Option<u32>,
+    /// HDR output with this transfer (BT.2100: PQ or HLG): BT.2020 colors,
+    /// 10 bits, HEVC, AV1 or VP9. SDR sources show their white at 203 nits.
+    /// Default: SDR (BT.709), HDR sources tone-mapped to it.
+    #[serde(default)]
+    pub hdr: Option<crate::model::Hdr>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -200,6 +205,7 @@ fn video(codec: VideoCodec, quality: Option<u32>) -> VideoSettings {
         bit_depth: None,
         width: None,
         height: None,
+        hdr: None,
     }
 }
 
@@ -485,6 +491,17 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
             && d != 10
         {
             return Err(Error::usage("bit_depth must be 8 or 10"));
+        }
+        if v.hdr.is_some() {
+            if !matches!(v.codec, V::Hevc | V::Av1 | V::Vp9) {
+                return Err(Error::usage(format!(
+                    "HDR needs HEVC, AV1 or VP9, not {:?}",
+                    v.codec
+                )));
+            }
+            if v.bit_depth == Some(8) {
+                return Err(Error::usage("HDR needs 10 bits"));
+            }
         }
         if v.width.is_some() != v.height.is_some() {
             return Err(Error::usage("set both video.width and video.height"));

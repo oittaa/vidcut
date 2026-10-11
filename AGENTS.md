@@ -222,6 +222,7 @@ vidcut undo                                 # works across separate runs
 - `vidcut boring [--boring 30s --jump 10f]` lists clips too long and too short (the Boring Detector).
 - `vidcut storyboard -o board.png [--every 5s --columns 4 --width 320]` draws a picture of every shot with timecode and clip id: the quickest way to look at a whole edit.
 - `vidcut export out.mp4 --set audio.loudness=-14` normalizes the mix to −14 LUFS (one gain, true peak ≤ −1 dBTP); the result reports the gain.
+- `vidcut export out.mp4 --set video.codec=hevc --set video.hdr=pq` (or `hlg`) exports HDR in 10 bits (HEVC, AV1 or VP9). Without it, HDR sources are tone-mapped to SDR. `media get` reports each clip's `hdr`, `rotation` and interlaced `fields` (M8).
 - `vidcut edit slide c3 --by 5f` moves a clip keeping its media; its neighbors give and take.
 - Measuring decodes a file once; the results are cached (`~/.cache/vidcut/analysis/`), so trying other settings is quick.
 
@@ -310,7 +311,8 @@ The preview findings and the time-mapping rules are in [docs/decisions/preview.m
 - **MPEG-TS and other index-less containers can't be seeked exactly by mpv.** Preview uses an MKV remux (`vidcut_av::remux`); export reads the original.
 - **Set packet durations explicitly when muxing** from delayed encoders (x264 with B-frames). Otherwise MP4 edit lists drop the last frame.
 - **Set `pkt_timebase` on every decoder** (`codec_ctx.pkt_timebase = stream.time_base`). Without it, FFmpeg can't adjust timestamps when it skips priming samples, and audio drifts by the codec delay.
-- **Not handled in export yet:** HDR (see docs/decisions/export.md §4). Rotation metadata is applied everywhere (spec D33).
+- **Color goes through `vidcut_av::color`** (export.md §4): HDR sources are tone-mapped for SDR output, SDR sources sit at 203 nits in HDR output, untagged HD is BT.709. Rotation metadata is applied everywhere (spec D33).
+- **`zscale` needs explicit output primaries** when converting to linear light: for untagged frames it otherwise fails with "no path between colorspaces".
 - **Interlaced sources are deinterlaced inside `VideoReader`** (`bwdif`, one frame per frame), before frames are picked. The preview adds the same filter per file (preview.md §5); mpv's own `deinterlace` makes one frame per field, which breaks frame-exact seeks.
 - **mpv's software renderer aborts on rotated video** (an assertion in `mp_image_crop`). The GUI renders with OpenGL, which rotates on the GPU, so `tests/live.rs` (software rendering) leaves rotated clips to `tests/gui.rs`.
 - **GPUs on the dev machine:**

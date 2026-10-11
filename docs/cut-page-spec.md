@@ -450,3 +450,9 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - **Detection:** a stream is interlaced if its field order says so, or if its first frame is flagged interlaced. `media.get` reports the field shown first as `fields`.
   - **Deinterlacing:** frames flagged interlaced are deinterlaced everywhere (export, frames, storyboards, the preview), one progressive frame per frame. The first field (in time) is kept and the second rebuilt from it and the neighboring frames (`bwdif`). Like the Cut page's playback, which always uses Normal quality, there is one method (deviation X13).
   - **Rates:** output is never interlaced, and an interlaced clip in a project at twice its frame rate shows each frame twice (no field-rate output).
+- **D35. HDR and color** (M8; Resolve's color management, pp. 230–239).
+  - **Detection:** a clip is HDR when its transfer is PQ (SMPTE ST 2084) or HLG; `media.get` reports it as `hdr`.
+  - **SDR output (the default):** HDR clips are tone-mapped to BT.709. Up to 80% of the 203-nit reference white stays as it was, and brighter highlights roll off, up to 1000 nits.
+  - **HDR output:** `video.hdr` (`pq` or `hlg`) writes BT.2100 in 10 bits. SDR clips are placed with their white at 203 nits (BT.2408), as Resolve's "203 nits" option does (p. 238).
+  - **Tags and untagged media:** outputs are tagged with their colors. Untagged media are BT.709 from 720 lines up and BT.601 below, as players assume.
+  - **Preview:** mpv tone-maps HDR clips for the screen with its own curve, so the preview can look a little different from an SDR export (deviation X14).

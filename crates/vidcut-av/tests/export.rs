@@ -95,6 +95,7 @@ fn lossless() -> ExportSettings {
             bit_depth: None,
             width: None,
             height: None,
+            hdr: None,
         }),
         audio: Some(AudioSettings {
             codec: ACodec::PcmS16,
@@ -428,6 +429,111 @@ fn interlaced_sources_are_deinterlaced() {
     assert_eq!(codes, want);
 }
 
+/// The darkest and brightest luma (as 10-bit codes) in the middle of the
+/// barcode's top band: its black and white cells.
+fn cell_levels(f: &vidcut_av::ffmpeg::frame::Video) -> (u16, u16) {
+    use vidcut_av::ffmpeg::format::Pixel;
+    let (w, h, stride) = (f.width() as usize, f.height() as usize, f.stride(0));
+    let data = f.data(0);
+    let ten = matches!(f.format(), Pixel::YUV420P10LE | Pixel::YUV422P10LE);
+    let (mut lo, mut hi) = (u16::MAX, 0);
+    for y in h / 4..h * 3 / 8 {
+        for x in (w / 40..w).step_by(w / 20) {
+            let v = if ten {
+                u16::from_le_bytes([data[y * stride + 2 * x], data[y * stride + 2 * x + 1]])
+            } else {
+                u16::from(data[y * stride + x]) << 2
+            };
+            lo = lo.min(v);
+            hi = hi.max(v);
+        }
+    }
+    (lo, hi)
+}
+
+#[test]
+fn hdr_is_tone_mapped_for_sdr_and_kept_for_hdr() {
+    use vidcut_core::model::Hdr;
+    // The fixtures' barcode white is SDR reference white in HDR: 203 nits in
+    // PQ, 75% in HLG. An SDR export tone-maps it to near white (it would be
+    // gray unconverted, and PQ's barcode wouldn't read).
+    let fps = Rational::new(30, 1).unwrap();
+    let mut pieces = Vec::new();
+    let mut want: Vec<Option<u32>> = Vec::new();
+    for hdr in [Hdr::Pq, Hdr::Hlg] {
+        let spec = FixtureSpec::new(VideoCodec::Hevc10, Container::Mkv, 320, 180, (30, 1), 30)
+            .hdr(hdr)
+            .no_audio();
+        let s = src(spec);
+        let info = vidcut_av::probe::probe(&s.path).unwrap().video.unwrap();
+        let transfer = if hdr == Hdr::Pq {
+            "smpte2084"
+        } else {
+            "arib-std-b67"
+        };
+        assert_eq!(info.transfer, transfer);
+        pieces.push(v(&s, 5, 10));
+        want.extend((5..15).map(Some));
+        // Pool thumbnails are tone-mapped too.
+        let (images, _) = vidcut_av::thumbs::filmstrip(&s.path, 2, 192, 108).unwrap();
+        for img in &images {
+            let w = img.width as usize;
+            let code =
+                vidcut_av::barcode::read_packed(&img.rgba, w, img.height as usize, w * 4, 4, 1);
+            assert!(code.is_some(), "{hdr:?} thumbnail not tone-mapped");
+        }
+    }
+    let p = plan(fps, 320, 180, pieces.clone(), vec![]);
+    let out = out_dir("hdr").join("sdr.mkv");
+    render(&p, &lossless(), &out);
+    let mut r = VideoReader::open(&out).unwrap();
+    let mut codes = Vec::new();
+    while let Some(f) = r.next_frame().unwrap() {
+        let (lo, hi) = cell_levels(&f);
+        eprintln!(
+            "SDR frame {}: black {lo}, white {hi} (10-bit codes)",
+            codes.len()
+        );
+        // 95% white (about 220 of 8-bit's 235); black stays black.
+        assert!((850..=940).contains(&hi), "white {hi}");
+        assert!(lo <= 80, "black {lo}");
+        codes.push(read_barcode(&f).unwrap());
+    }
+    assert_eq!(codes, want);
+
+    // HDR out (PQ, 10-bit HEVC): SDR white lands at the reference white, the
+    // PQ source keeps its level, and the stream says PQ.
+    let sdr =
+        src(FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 30).no_audio());
+    pieces.insert(0, v(&sdr, 5, 10));
+    let p = plan(fps, 320, 180, pieces, vec![]);
+    let mut settings = lossless();
+    let video = settings.video.as_mut().unwrap();
+    video.codec = VCodec::Hevc;
+    video.quality = Some(4);
+    video.speed = Some("ultrafast".into());
+    video.hdr = Some(Hdr::Pq);
+    let out = out_dir("hdr").join("pq.mkv");
+    render(&p, &settings, &out);
+    let info = vidcut_av::probe::probe(&out).unwrap().video.unwrap();
+    assert_eq!(info.transfer, "smpte2084");
+    assert_eq!(info.pix_fmt, "yuv420p10le");
+    let mut r = VideoReader::open(&out).unwrap();
+    let mut n = 0;
+    while let Some(f) = r.next_frame().unwrap() {
+        let (lo, hi) = cell_levels(&f);
+        eprintln!("PQ frame {n}: black {lo}, white {hi}");
+        let white = vidcut_av::fixture::PQ_WHITE;
+        assert!(
+            hi.abs_diff(white) <= 12,
+            "frame {n}: white {hi}, want {white}"
+        );
+        assert!(lo <= 80, "black {lo}");
+        n += 1;
+    }
+    assert_eq!(n, 30);
+}
+
 #[test]
 fn other_rates_are_resampled_by_nearest_frame() {
     // A 25 fps source on a 30 fps timeline: 5 source frames per 6 output frames.
@@ -685,6 +791,7 @@ fn gpu_encoders_produce_valid_frame_exact_output() {
                 bit_depth: Some(if ten { 10 } else { 8 }),
                 width: None,
                 height: None,
+                hdr: None,
             }),
             audio: Some(AudioSettings {
                 codec: ACodec::Aac,

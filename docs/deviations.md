@@ -101,3 +101,8 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 - **Resolve:** each interlaced clip has a Deinterlace Quality (Normal, High, or the Neural Engine) in the Cut page's Inspector, and Normal is always used during playback (p. 741). Clip Attributes can turn deinterlacing on or off per clip (p. 451).
 - **vidcut:** frames flagged interlaced are always deinterlaced with one method (`bwdif`, one frame per frame), in the preview and in export alike (spec D34).
 - **Why:** one method keeps the preview and export frame-exact with each other, and `bwdif` is the better of FFmpeg's CPU deinterlacers. vidcut has no Inspector to hold a per-clip choice.
+
+## X14. Color is set per export, not managed
+- **Resolve:** color management (RCM) gives the timeline a color space. Media come into it through input transforms and tone mapping, and the output color space is chosen for delivery (pp. 230–239).
+- **vidcut:** there is no timeline color space and no grading. Each export picks its output, SDR BT.709 or HDR PQ or HLG (`video.hdr`), and every clip is converted to it from its own tags: tone-mapped, or with SDR white at 203 nits (spec D35). The preview is mpv's rendering for the screen, so HDR clips may look a little different there than in an SDR export.
+- **Why:** vidcut cuts, and color correction belongs in an editor like Resolve (see docs/roadmap.md). Converting each clip straight to the output keeps exports right for mixed phone, camera and screen footage without color settings.

@@ -1633,6 +1633,7 @@ fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u3
                                 bit_depth: None,
                                 width: None,
                                 height: None,
+                                hdr: None,
                             }),
                         );
                         fit_codecs(&mut d.settings);
@@ -1756,6 +1757,36 @@ fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u3
                             ui.selectable_value(&mut v.bit_depth, Some(8), "8");
                             ui.selectable_value(&mut v.bit_depth, Some(10), "10");
                         });
+                    // Dynamic range: HDR needs a 10-bit HEVC, AV1 or VP9.
+                    if matches!(
+                        v.codec,
+                        VideoCodec::Hevc | VideoCodec::Av1 | VideoCodec::Vp9
+                    ) {
+                        use vidcut_core::model::Hdr;
+                        let label = |h: Option<Hdr>| match h {
+                            None => "SDR",
+                            Some(Hdr::Pq) => "HDR (PQ)",
+                            Some(Hdr::Hlg) => "HDR (HLG)",
+                        };
+                        ui.label(dim("range"));
+                        egui::ComboBox::from_id_salt("export-hdr")
+                            .selected_text(label(v.hdr))
+                            .show_ui(ui, |ui| {
+                                for h in [None, Some(Hdr::Pq), Some(Hdr::Hlg)] {
+                                    ui.selectable_value(&mut v.hdr, h, label(h));
+                                }
+                            })
+                            .response
+                            .on_hover_text(
+                                "SDR: HDR sources are tone-mapped. HDR: BT.2020 in 10 bits, \
+                                 SDR sources with their white at 203 nits.",
+                            );
+                        if v.hdr.is_some() && v.bit_depth == Some(8) {
+                            v.bit_depth = None;
+                        }
+                    } else {
+                        v.hdr = None;
+                    }
                     ui.label(dim("speed"));
                     let mut speed = v.speed.clone().unwrap_or_default();
                     if ui

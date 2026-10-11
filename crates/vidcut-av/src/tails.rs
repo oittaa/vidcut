@@ -77,8 +77,20 @@ pub fn render_patch(
     out: &Path,
 ) -> Result<()> {
     crate::init();
-    let pixel = format::Pixel::YUV420P;
-    let mut frames = VideoFrames::new(std::slice::from_ref(piece), fps, width, height, pixel);
+    // HDR sources keep their transfer, so the preview shows the patch as it
+    // shows the frames around it.
+    let hdr = match piece {
+        VideoPiece::Source { path, .. } => crate::decode::VideoReader::open(path)
+            .ok()
+            .and_then(|r| r.first_props())
+            .and_then(|p| crate::color::hdr_of_transfer(p.transfer)),
+        VideoPiece::Black { .. } => None,
+    };
+    let pixel = match hdr {
+        Some(_) => format::Pixel::YUV420P10LE,
+        None => format::Pixel::YUV420P,
+    };
+    let mut frames = VideoFrames::new(std::slice::from_ref(piece), fps, width, height, pixel, hdr);
     let rate = ffmpeg::Rational(fps.num() as i32, fps.den() as i32);
     let tmp = out.with_extension("part.mkv");
     let result = (|| -> Result<()> {
@@ -96,6 +108,7 @@ pub fn render_patch(
         ctx.set_time_base(rate.invert());
         ctx.set_frame_rate(Some(rate));
         ctx.set_gop(1);
+        crate::color::tag(unsafe { ctx.as_mut_ptr() }, hdr);
         if octx.format().flags().contains(format::Flags::GLOBAL_HEADER) {
             ctx.set_flags(codec::Flags::GLOBAL_HEADER);
         }

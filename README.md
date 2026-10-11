@@ -60,7 +60,7 @@ The layout follows the Cut page:
 
 Everything you do is listed in the **Command log** (top right) as the request it sent. Click an entry to copy it as a shell command.
 
-**Exporting.** **Quick Export** (top bar) exports the In–Out range, or the whole timeline when no marks are set, with one of the presets shown as tiles. **Export** opens every setting: start from a preset, change the codec, quality, size, range or output, and see the plan (the encoder that will run, the files and their lengths) and the same export as a shell command before you start. Save the settings as your own preset, optionally added to Quick Export. Exports run in the background; **Jobs** (top right) shows their progress and lets you cancel them. **File > Import/Export Timeline** reads and writes OpenTimelineIO files.
+**Exporting.** **Quick Export** (top bar) exports the In–Out range, or the whole timeline when no marks are set, with one of the presets shown as tiles. **Export** opens every setting: start from a preset, change the codec, quality, size, range or output, and see the plan (the encoder that will run, the files and their lengths) and the same export as a shell command before you start. Save the settings as your own preset, optionally added to Quick Export. Exports run in the background; **Jobs** (top right) shows their progress and lets you cancel them. Phone video shows upright, interlaced video is deinterlaced, and HDR video is tone-mapped for ordinary (SDR) exports; choose an HDR range in Export (HEVC, AV1 or VP9) to keep it HDR. **File > Import/Export Timeline** reads and writes OpenTimelineIO files.
 
 **Preferences.** **File > Preferences** (Ctrl+,) holds settings for vidcut as a whole, kept in `~/.config/vidcut/preferences.toml`. The pool's thumbnails are kept on disk (`~/.cache/vidcut/thumbs`, 512 MB by default), so a project opens with its thumbnails shown instead of decoding every clip again; you can change the limit or turn the cache off, which empties it. `vidcut preferences` shows and changes the same settings.
 
@@ -158,7 +158,7 @@ Agents can look at their work: frames, screenshots and storyboards come back as 
 | M5 | Export UI (Quick Export, Export dialog, jobs), OpenTimelineIO import/export |
 | M6 | Multi-track (B-roll, music, Place On Top, mixer) |
 | M7 | Agent extras (MCP server, Ripple Delete Silence, scene detection, Boring Detector, Dynamic Trim, storyboards, loudness) |
-| M8 | Media coverage, in progress: rotation metadata, interlaced sources (both done), HDR |
+| M8 | Media coverage: rotation metadata, interlaced sources, HDR (tone mapping and HDR export) |
 
 What comes next, and the use cases behind it, is in [docs/roadmap.md](docs/roadmap.md).
 

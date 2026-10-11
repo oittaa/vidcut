@@ -8,6 +8,7 @@
 
 use std::path::Path;
 
+use vidcut_core::model::Hdr;
 use vidcut_core::render::VideoPiece;
 use vidcut_core::time::Rational;
 
@@ -25,11 +26,18 @@ pub(crate) fn frame_ref(src: &frame::Video) -> frame::Video {
 
 /// Turns pictures upright (the stream's rotation), scales them keeping the
 /// display aspect (honoring the sample aspect ratio), pads to the output
-/// size, and converts to the output pixel format.
+/// size, and converts them to the output's colors and pixel format.
 pub(crate) struct Normalizer {
     graph: filter::Graph,
     /// Input parameters the graph was built for, and the rotation.
-    input: (u32, u32, format::Pixel, (i32, i32), u16),
+    input: (
+        u32,
+        u32,
+        format::Pixel,
+        (i32, i32),
+        u16,
+        crate::color::Source,
+    ),
 }
 
 /// The filters that turn a picture stored with clockwise `rotation` upright.
@@ -60,12 +68,14 @@ pub(crate) fn fit(w: u32, h: u32, sar: (i32, i32), out_w: u32, out_h: u32) -> (u
 }
 
 impl Normalizer {
+    /// `target`: the output's dynamic range (`None`: SDR BT.709).
     pub(crate) fn new(
         src: &frame::Video,
         rotation: u16,
         out_w: u32,
         out_h: u32,
         out_fmt: format::Pixel,
+        target: Option<Hdr>,
     ) -> Result<Self> {
         let (w, h, fmt) = (src.width(), src.height(), src.format());
         let sar = src.aspect_ratio();
@@ -103,11 +113,15 @@ impl Normalizer {
                 "",
             )
             .ctx(|| "creating video sink".into())?;
+        let color = crate::color::Source::of(src);
+        let conv = crate::color::conversion(color, out_fmt, target);
         let spec = format!(
-            "{}scale={sw}:{sh}:flags=bicubic,pad={out_w}:{out_h}:{}:{}:color=black,setsar=1,format={}",
+            "{}scale={sw}:{sh}:flags=bicubic{},pad={out_w}:{out_h}:{}:{}:color=black,setsar=1{},format={}",
             upright(rotation),
+            conv.scale,
             (out_w - sw) / 2,
             (out_h - sh) / 2,
+            conv.after,
             fmt_name(out_fmt)
         );
         graph
@@ -120,7 +134,7 @@ impl Normalizer {
             .ctx(|| format!("configuring filter {spec}"))?;
         Ok(Self {
             graph,
-            input: (w, h, fmt, sar, rotation),
+            input: (w, h, fmt, sar, rotation, color),
         })
     }
 
@@ -133,6 +147,7 @@ impl Normalizer {
                 src.format(),
                 (sar.numerator(), sar.denominator()),
                 rotation,
+                crate::color::Source::of(src),
             )
     }
 
@@ -265,15 +280,19 @@ pub struct VideoFrames {
     ahead: Ahead<Source>,
     normalizer: Option<Normalizer>,
     black: Option<frame::Video>,
+    /// The output's dynamic range (`None`: SDR BT.709).
+    target: Option<Hdr>,
 }
 
 impl VideoFrames {
+    /// `target`: the output's dynamic range (`None`: SDR BT.709).
     pub fn new(
         pieces: &[VideoPiece],
         fps: Rational,
         width: u32,
         height: u32,
         pixel: format::Pixel,
+        target: Option<Hdr>,
     ) -> Self {
         Self {
             pieces: pieces.to_vec(),
@@ -285,6 +304,7 @@ impl VideoFrames {
             ahead: Ahead::new(),
             normalizer: None,
             black: None,
+            target,
         }
     }
 
@@ -399,7 +419,14 @@ impl VideoFrames {
                 .as_ref()
                 .is_none_or(|n| !n.matches(frame, rotation));
             if rebuild {
-                self.normalizer = Some(Normalizer::new(frame, rotation, out_w, out_h, out_fmt)?);
+                self.normalizer = Some(Normalizer::new(
+                    frame,
+                    rotation,
+                    out_w,
+                    out_h,
+                    out_fmt,
+                    self.target,
+                )?);
             }
             src.normalized = Some(self.normalizer.as_mut().expect("built").run(frame)?);
         }

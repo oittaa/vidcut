@@ -21,6 +21,7 @@ pub fn png(piece: &VideoPiece, fps: Rational, width: u32, height: u32) -> Result
         width,
         height,
         format::Pixel::RGB24,
+        None,
     );
     let mut frame = frames
         .next_frame()?
@@ -60,6 +61,7 @@ pub fn rgba(
         width,
         height,
         format::Pixel::RGBA,
+        None,
     );
     let frame = frames
         .next_frame()?

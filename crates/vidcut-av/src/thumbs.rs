@@ -65,21 +65,15 @@ pub fn filmstrip(
         crate::decode::stream_rotation(&input.stream(index).expect("found").parameters());
     let (w, h) = (decoder.width().max(1), decoder.height().max(1));
     let sar = decoder.aspect_ratio();
-    let stored_aspect = if sar.numerator() > 0 && sar.denominator() > 0 {
-        f64::from(w) * f64::from(sar.numerator()) / f64::from(sar.denominator()) / f64::from(h)
+    let sar = (sar.numerator(), sar.denominator());
+    // Fitted as shown (turned upright, square pixels), as export fits.
+    let (tw, th) = if rotation % 180 == 90 {
+        crate::export::video::fit(h, w, (sar.1, sar.0), max_w, max_h)
     } else {
-        f64::from(w) / f64::from(h)
+        crate::export::video::fit(w, h, sar, max_w, max_h)
     };
-    // Fitted as shown; scaled as stored, then turned upright.
-    let quarter = rotation % 180 == 90;
-    let aspect = if quarter {
-        1.0 / stored_aspect
-    } else {
-        stored_aspect
-    };
-    let (tw, th) = fit(aspect, max_w, max_h);
-    let (tw, th) = if quarter { (th, tw) } else { (tw, th) };
-    let mut scaler: Option<scaling::Context> = None;
+    // Export's normalizer: upright, tone-mapped to SDR, as RGBA.
+    let mut normalizer: Option<crate::export::video::Normalizer> = None;
 
     let spacing = duration / count.max(1) as f64;
     let mut images = Vec::with_capacity(count);
@@ -110,26 +104,18 @@ pub fn filmstrip(
             }
         }
         let Some(decoded) = picked else { break };
-        let scaler = match &mut scaler {
-            Some(s) if s.input().format == decoded.format() => s,
-            _ => scaler.insert(
-                scaling::Context::get(
-                    decoded.format(),
-                    decoded.width(),
-                    decoded.height(),
-                    format::Pixel::RGBA,
-                    tw,
-                    th,
-                    scaling::Flags::BILINEAR,
-                )
-                .ctx(|| "creating thumbnail scaler".into())?,
-            ),
+        let n = match &mut normalizer {
+            Some(n) if n.matches(&decoded, rotation) => n,
+            _ => normalizer.insert(crate::export::video::Normalizer::new(
+                &decoded,
+                rotation,
+                tw,
+                th,
+                format::Pixel::RGBA,
+                None,
+            )?),
         };
-        let mut rgba = frame::Video::empty();
-        scaler
-            .run(&decoded, &mut rgba)
-            .ctx(|| "scaling thumbnail".into())?;
-        images.push(turn(packed(&rgba), rotation));
+        images.push(packed(&n.run(&decoded)?));
         times.push(t);
     }
     Ok((images, times))
@@ -303,44 +289,6 @@ fn unjpeg(jpeg: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
     Some(packed(&rgba).rgba)
 }
 
-/// `img` turned clockwise by `rotation` (0, 90, 180 or 270 degrees).
-fn turn(img: Image, rotation: u16) -> Image {
-    if rotation == 0 {
-        return img;
-    }
-    let (w, h) = (img.width as usize, img.height as usize);
-    let (tw, th) = if rotation == 180 { (w, h) } else { (h, w) };
-    let mut rgba = vec![0; img.rgba.len()];
-    for y in 0..h {
-        for x in 0..w {
-            let (tx, ty) = match rotation {
-                90 => (h - 1 - y, x),
-                180 => (w - 1 - x, h - 1 - y),
-                _ => (y, w - 1 - x),
-            };
-            let (s, d) = (4 * (y * w + x), 4 * (ty * tw + tx));
-            rgba[d..d + 4].copy_from_slice(&img.rgba[s..s + 4]);
-        }
-    }
-    Image {
-        width: tw as u32,
-        height: th as u32,
-        rgba,
-    }
-}
-
-/// The largest even size with `aspect` that fits `max_w`×`max_h`.
-fn fit(aspect: f64, max_w: u32, max_h: u32) -> (u32, u32) {
-    let (mw, mh) = (f64::from(max_w), f64::from(max_h));
-    let (w, h) = if mw / mh > aspect {
-        (mh * aspect, mh)
-    } else {
-        (mw, mw / aspect)
-    };
-    let even = |v: f64| ((v.round() as u32) & !1).max(2);
-    (even(w), even(h))
-}
-
 /// Decodes the next frame (`None` at the end of the stream).
 fn next_frame(
     input: &mut format::context::Input,
@@ -450,30 +398,5 @@ mod tests {
         assert!(from_bytes(b"vct1").is_none());
         assert!(from_bytes(&[b"xxxx".as_slice(), &bytes[4..]].concat()).is_none());
         assert!(to_bytes(&images, &times[..2]).is_err(), "a time each");
-    }
-
-    #[test]
-    fn turning_moves_the_top_left_corner_where_a_rotation_does() {
-        // A 3x2 picture whose pixels are numbered 0..6 in the red channel.
-        let img = Image {
-            width: 3,
-            height: 2,
-            rgba: (0..6u8).flat_map(|i| [i, 0, 0, 255]).collect(),
-        };
-        let red = |i: &Image| i.rgba.iter().step_by(4).copied().collect::<Vec<u8>>();
-        let q = turn(img.clone(), 90);
-        assert_eq!((q.width, q.height), (2, 3));
-        // Clockwise: the bottom row becomes the left column.
-        assert_eq!(red(&q), [3, 0, 4, 1, 5, 2]);
-        assert_eq!(red(&turn(img.clone(), 180)), [5, 4, 3, 2, 1, 0]);
-        assert_eq!(red(&turn(img.clone(), 270)), [2, 5, 1, 4, 0, 3]);
-        assert_eq!(turn(turn(img.clone(), 90), 270), img);
-    }
-
-    #[test]
-    fn fit_keeps_the_aspect_and_even_sizes() {
-        assert_eq!(fit(16.0 / 9.0, 192, 108), (192, 108));
-        assert_eq!(fit(2.4, 192, 108), (192, 80));
-        assert_eq!(fit(9.0 / 16.0, 192, 108), (60, 108));
     }
 }

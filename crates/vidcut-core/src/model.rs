@@ -157,7 +157,7 @@ pub enum FieldOrder {
 }
 
 /// High dynamic range transfer functions (ITU-R BT.2100).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Hdr {
     /// Perceptual quantizer (SMPTE ST 2084): HDR10, Dolby Vision.

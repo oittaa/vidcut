@@ -203,7 +203,16 @@ pub struct FixtureSpec {
     /// which the barcode reader doesn't sample, a white block moves 40 px
     /// each field, as a camera would see it. Not deinterlaced, it combs.
     pub top_field_first: Option<bool>,
+    /// HDR (10-bit HEVC tagged BT.2100 with this transfer): the barcode's
+    /// white is SDR reference white (203 nits in PQ, 75% in HLG), which an
+    /// SDR player that doesn't convert shows gray.
+    pub hdr: Option<vidcut_core::model::Hdr>,
 }
+
+/// 10-bit codes (limited range) of SDR reference white in HDR: 203 nits in
+/// PQ, 75% in HLG (ITU-R BT.2408).
+pub const PQ_WHITE: u16 = 573;
+pub const HLG_WHITE: u16 = 721;
 
 /// VFR frame durations in quarter-frame ticks (average 4 = one nominal frame).
 const VFR_PATTERN: [i64; 4] = [2, 6, 4, 4];
@@ -253,7 +262,14 @@ impl FixtureSpec {
             sound: Sound::Beep,
             rotation: 0,
             top_field_first: None,
+            hdr: None,
         }
+    }
+
+    /// 10-bit HDR with this transfer (needs [`VideoCodec::Hevc10`]).
+    pub fn hdr(mut self, hdr: vidcut_core::model::Hdr) -> Self {
+        self.hdr = Some(hdr);
+        self
     }
 
     /// Interlaced fields, the top (`true`) or the bottom one first.
@@ -357,6 +373,10 @@ impl FixtureSpec {
             None => "",
             Some(true) => "itff",
             Some(false) => "ibff",
+        } + match self.hdr {
+            None => "",
+            Some(vidcut_core::model::Hdr::Pq) => "pq",
+            Some(vidcut_core::model::Hdr::Hlg) => "hlg",
         };
         format!(
             "{content}{v}_{codec}_{w}x{h}{rot}_{n}-{d}{vfr}_g{g}b{b}_{f}f_{audio}_o{o}.{ext}",
@@ -456,6 +476,9 @@ pub fn generate(spec: &FixtureSpec, path: &Path) -> Result<()> {
     }
     if spec.top_field_first.is_some() && spec.video != VideoCodec::H264 {
         return Err(Error::Invalid("interlaced fixtures are H.264".into()));
+    }
+    if spec.hdr.is_some() && spec.video != VideoCodec::Hevc10 {
+        return Err(Error::Invalid("HDR fixtures are 10-bit HEVC".into()));
     }
     let mut octx = format::output_as(path, spec.container.muxer())
         .ctx(|| format!("creating {}", path.display()))?;
@@ -562,6 +585,9 @@ impl VideoTrack {
             }
         }
         enc.set_flags(flags);
+        if spec.hdr.is_some() {
+            crate::color::tag(unsafe { enc.as_mut_ptr() }, spec.hdr);
+        }
         let mut opts = ffmpeg::Dictionary::new();
         match spec.video {
             VideoCodec::H264 => {
@@ -695,9 +721,17 @@ impl VideoTrack {
         if ten_bit {
             let stride = frame.stride(0);
             let plane = frame.data_mut(0);
+            let white = match spec.hdr {
+                Some(vidcut_core::model::Hdr::Pq) => PQ_WHITE,
+                Some(vidcut_core::model::Hdr::Hlg) => HLG_WHITE,
+                None => 940,
+            };
             for y in 0..h {
                 for x in 0..w {
-                    let v = u16::from(self.stored[y * w + x]) << 2;
+                    let v = match self.stored[y * w + x] {
+                        235 => white,
+                        v8 => u16::from(v8) << 2,
+                    };
                     plane[y * stride + 2 * x..y * stride + 2 * x + 2]
                         .copy_from_slice(&v.to_le_bytes());
                 }

@@ -270,7 +270,7 @@ fn encode(
             Some(VideoOut {
                 encoder,
                 vaapi,
-                frames: VideoFrames::new(&plan.video, plan.fps, w, h, enc.pixel),
+                frames: VideoFrames::new(&plan.video, plan.fps, w, h, enc.pixel, enc.hdr),
                 enc_tb: fps.invert(),
                 stream_tb: fps.invert(),
                 name: enc.name.clone(),

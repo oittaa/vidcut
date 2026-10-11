@@ -18,6 +18,8 @@ pub struct VideoEncoder {
     /// VAAPI render node, e.g. `/dev/dri/renderD129`.
     pub device: Option<String>,
     pub options: Vec<(String, String)>,
+    /// HDR output with this transfer; `None`: SDR BT.709.
+    pub hdr: Option<vidcut_core::model::Hdr>,
 }
 
 /// A resolved audio encoder.
@@ -67,7 +69,7 @@ pub fn pixel_name(p: format::Pixel) -> String {
 }
 
 fn ten_bit(v: &VideoSettings) -> bool {
-    v.bit_depth == Some(10) || v.profile.as_deref() == Some("main10")
+    v.bit_depth == Some(10) || v.profile.as_deref() == Some("main10") || v.hdr.is_some()
 }
 
 fn gpu_name(codec: VideoCodec, kind: EncoderChoice) -> Option<&'static str> {
@@ -167,6 +169,7 @@ pub fn resolve_video(v: &VideoSettings, available: &Availability) -> Result<Vide
             pixel,
             device: status.device.clone(),
             options,
+            hdr: v.hdr,
         });
     }
     Err(Error::Invalid(format!("no encoder for {:?}", v.codec)))
@@ -271,6 +274,7 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
         pixel,
         device: None,
         options,
+        hdr: v.hdr,
     })
 }
 
@@ -403,6 +407,7 @@ pub(crate) fn open_video(
     ctx.set_height(height);
     ctx.set_time_base(fps.invert());
     ctx.set_frame_rate(Some(fps));
+    crate::color::tag(unsafe { ctx.as_mut_ptr() }, enc.hdr);
     if global_header {
         ctx.set_flags(codec::Flags::GLOBAL_HEADER);
     }
@@ -441,6 +446,7 @@ fn try_gpu(
         pixel,
         device: device.map(String::from),
         options: Vec::new(),
+        hdr: None,
     };
     let (w, h) = (640, 360);
     let (mut encoder, vaapi) = open_video(&enc, w, h, ffmpeg::Rational(30, 1), false)?;

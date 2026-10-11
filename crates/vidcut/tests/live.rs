@@ -558,6 +558,37 @@ fn live_session() {
         assert!(combing(&shot) < 10.0, "frame {t} shows woven fields");
     }
 
+    step("HDR sources are tone-mapped");
+    // The barcode's white is SDR reference white in PQ: shown without tone
+    // mapping it is gray and doesn't read (M8).
+    let pq = fixture::ensure(
+        &FixtureSpec::new(
+            VideoCodec::Hevc10,
+            Container::Mkv,
+            W as u32,
+            H as u32,
+            (30, 1),
+            30,
+        )
+        .hdr(vidcut_core::model::Hdr::Pq)
+        .no_audio(),
+    )
+    .unwrap();
+    let added = h.ok("media.add", json!({ "paths": [pq] }));
+    let media = added.changes.created[0].clone();
+    let end = h.ok("project.summary", json!({})).result["duration"]
+        .as_i64()
+        .unwrap();
+    h.ok(
+        "edit.append",
+        json!({ "media": media, "range": "5f..+10f" }),
+    );
+    h.ok(
+        "player.seek",
+        json!({ "at": end + 3, "viewer": "timeline" }),
+    );
+    assert_eq!(h.shown(&dir), Some(8), "PQ clip in the preview");
+
     step("Many cuts: a seek waits only for the checks near its frame");
     // 120 clips of 4 frames from all over a long fixture, appended at once:
     // 120 tail checks, those nearest the playhead (the end, decision D15)
