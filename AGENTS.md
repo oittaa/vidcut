@@ -63,7 +63,8 @@ Inside `crates/vidcut`:
 Docs:
 - `docs/cut-page-spec.md`: the behavioral spec.
 - `docs/deviations.md`: intentional differences from Resolve.
-- `docs/roadmap.md`: the use cases vidcut is for, the to-do list (interchange with Resolve), and the next milestones.
+- `docs/roadmap.md`: the use cases vidcut is for, and the order of what comes next.
+- `docs/todo/`: open work, **one file per item**: add a file for new work, and delete it in the pull request that finishes the work. There is no list to edit, so pull requests don't conflict over it. Keep lists that pull requests edit one item per line, never several items in one line.
 - `docs/decisions/`: short architecture decision records (preview, export, GUI and live control, agents: MCP and measurements).
 
 ## Build and run
@@ -143,7 +144,15 @@ These are mandatory.
 
 ## Driving vidcut as an agent
 
-*Status: the CLI edits and exports headless (M1, M2), controls a running GUI (M3), exports in the background and exchanges OTIO timelines (M5), edits several tracks with a mixer and bins (M6), serves MCP with automatic tools and storyboards (M7), handles rotated, interlaced and HDR media (M8), and stills and image sequences (M9).*
+**Status:** what the CLI and an agent can do so far:
+- edits and exports headless (M1, M2)
+- controls a running GUI (M3)
+- exports in the background and exchanges OTIO timelines (M5)
+- edits several tracks, with a mixer and bins (M6)
+- serves MCP, with automatic tools and storyboards (M7)
+- handles rotated, interlaced and HDR media (M8)
+- stills and image sequences (M9)
+- timeline interchange with Resolve: `.otioz` bundles, timecode sources (decision D40)
 
 **MCP** (docs/decisions/agents.md, deviation X10): `vidcut mcp [-p FILE]` serves the Model Context Protocol on stdin/stdout. Every command is a tool (`edit.split` is `edit_split`, with its JSON Schema), plus `use_project` to pick or create the project. Calls run like the CLI's: inside the GUI that has the project open, or headless. `frame_render`, `gui_screenshot` and `storyboard_render` return images. Cancelling a call stops a headless export; routed into the GUI, it also stops a frame, a storyboard, an analysis and the loudness measure before a foreground export. A background export job stops only with `jobs.cancel`. To add it to Claude Code: `claude mcp add vidcut -- vidcut mcp -p /abs/talk.vidcut`; other clients take `{"command": "vidcut", "args": ["mcp", "-p", "/abs/talk.vidcut"]}`.
 

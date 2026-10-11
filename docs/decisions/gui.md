@@ -221,6 +221,4 @@ A seek or load ("motion") is shown after two steps:
 
 ## 12. Still open
 
-- **A render queue.** Jobs run side by side; several big exports at once compete for the encoder. Past NVENC's few sessions, `auto` exports move on to VAAPI or the CPU (export.md §5), and ones asking for `nvenc` fail. Resolve's Deliver page queues renders instead.
-- **Source Tape marks spanning several clips** (decision D17 limits marks to one clip).
-- **Meters that tap the player's actual output** (spec D28): they read the waveforms instead.
+Open GUI work is in [docs/todo/](../todo/), one file per item.

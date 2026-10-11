@@ -25,19 +25,8 @@ Moving an edit between vidcut and Resolve, in either direction and between compu
 
 **Done** (deviation X9, decision D40): `.otio`, `.otioz` and `.otiod` both ways; plain paths and timecode source ranges as Resolve writes them; link groups keeping audio with its video; Resolve's clip volume, channel map, track lock and solo, clip markers and offline media read; relative paths and a project folder moved with its timeline found by themselves; files checked against OpenTimelineIO's Python library.
 
-- **Check Resolve's import of our files** with the current free and Studio versions (no Resolve to test with when the above was written; it follows Resolve's own exports).
-  - What should survive: tracks, J/L cuts, clip gain, markers, In/Out, still and sequence clips, sources with timecode.
-  - List what doesn't, and fix it on our side where the file allows.
-- **Portable project paths.** Projects store absolute media paths. Store them relative to the project file when the media sit in or under its folder, so a folder holding the project and its media can move to another computer.
-- **Relinking steps in the README** for media that moved between computers (Resolve's folder search, vidcut's `--search`).
-- **Other formats if OTIO falls short.** Resolve also imports FCPXML, FCP7 XML and EDL. Add one only if a check above shows OTIO losing something these keep.
+What is still open is in [docs/todo/](todo/), one file per item.
 
 ## Milestones
 
-- **Candidates, roughly in this order:**
-  - **Interchange with Resolve:** the list above.
-  - **Proxies,** for footage the GPU can't decode (10-bit 4:2:2, ProRes, DNxHR, 8K), for slow storage, and for image sequences of big pictures (a 4K 16-bit PNG takes about 100 ms to decode, so such a sequence can't play in real time).
-    - Resolve generates them from the Media Pool and switches between proxies and originals; export always reads the originals (pp. 207–218).
-    - Ours would keep the source's frame timestamps, so the preview stays frame-exact.
-  - **Smaller items** from [gui.md §12](decisions/gui.md): a render queue, Source Tape marks across clips.
-  - **macOS and Windows.**
+Open work is in [docs/todo/](todo/), one file per item, each saying when it is wanted. Roughly: the interchange with Resolve first, then proxies, then the smaller items, then macOS and Windows.

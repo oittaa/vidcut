@@ -62,6 +62,16 @@ fn gui_edits(h: &live::Handle) -> Vec<(String, Value)> {
         .collect()
 }
 
+/// Requests over IPC (this test's own) that changed the project.
+fn changes_over_ipc(h: &live::Handle) -> usize {
+    let log = call(h, "gui.log", json!({ "limit": 1000 })).result;
+    log.as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["origin"] == "ipc" && e["changed"] == true)
+        .count()
+}
+
 fn undo_steps(h: &live::Handle) -> usize {
     call(h, "history.get", json!({})).result["undo"]
         .as_array()
@@ -228,6 +238,9 @@ fn track_gestures_send_one_request_each() {
     settle(&h, &mut harness);
     let undo0 = undo_steps(&h);
     let edits0 = gui_edits(&h).len();
+    let ipc0 = changes_over_ipc(&h);
+    // The GUI requests the steps so far sent: each adds its own.
+    let mut gestures = 0;
     let last = |h: &live::Handle| gui_edits(h).last().cloned().unwrap();
 
     // 1. V2's header makes it the target track (p. 696): F10 overwrites
@@ -249,6 +262,9 @@ fn track_gestures_send_one_request_each() {
     assert_eq!(clips(&h, "V2"), vec![("c4".into(), 90, 30)]);
     assert_eq!(clips(&h, "V1").len(), 3, "Track 1 untouched");
 
+    gestures += 1;
+    assert_eq!(gui_edits(&h).len() - edits0, gestures, "step 1");
+
     // 2. Dragging c2 off Track 1 into the strip above the top track: a new
     // track V3 (p. 723); Track 1 closes up.
     let l = harness.state().timeline_layout().unwrap();
@@ -267,6 +283,9 @@ fn track_gestures_send_one_request_each() {
         clips(&h, "V1"),
         vec![("c1".into(), 0, 60), ("c3".into(), 60, 60)]
     );
+
+    gestures += 1;
+    assert_eq!(gui_edits(&h).len() - edits0, gestures, "step 2");
 
     // 3. Place On Top at 100: above the highest track with clips there
     // (V3), so on a new V4 (pp. 699–700).
@@ -288,6 +307,9 @@ fn track_gestures_send_one_request_each() {
     assert_eq!((m.as_str(), &p["at"]), ("edit.place_on_top", &json!(100)));
     assert_eq!(clips(&h, "V4").len(), 1);
     assert_eq!(clips(&h, "V4")[0].1, 100);
+
+    gestures += 1;
+    assert_eq!(gui_edits(&h).len() - edits0, gestures, "step 3");
 
     // 4. The mixer: dragging Track 1's fader is one track.set, sent on
     // release (one undo step); S solos the track.
@@ -353,6 +375,9 @@ fn track_gestures_send_one_request_each() {
         .unwrap()
         .click();
     harness.step();
+
+    gestures += 2;
+    assert_eq!(gui_edits(&h).len() - edits0, gestures, "step 4");
 
     // 5. Bins (p. 655): File > New Bin, then a pool clip dropped on it
     // moves into it.
@@ -433,6 +458,9 @@ fn track_gestures_send_one_request_each() {
         "moved out of Master"
     );
 
+    gestures += 4;
+    assert_eq!(gui_edits(&h).len() - edits0, gestures, "step 5");
+
     // 6. An edit picked on V2 stays on V2 (spec D36): with V1 cut at the same
     // frame, `.` rolls the V2 edit, and so does Dynamic Trim, where `,` waits
     // for K (D32).
@@ -489,6 +517,9 @@ fn track_gestures_send_one_request_each() {
     harness.key_press(egui::Key::W);
     harness.step();
 
+    gestures += 2;
+    assert_eq!(gui_edits(&h).len() - edits0, gestures, "step 6");
+
     // 7. Removing a track renumbers those above it: an edit picked on V2
     // isn't kept as "V2" once that is another track (V3 with an edit at
     // the same frame here).
@@ -515,6 +546,9 @@ fn track_gestures_send_one_request_each() {
     harness.step();
     settle(&h, &mut harness);
     assert_eq!(gui_edits(&h).len(), before, "no edit is selected any more");
+
+    gestures += 0;
+    assert_eq!(gui_edits(&h).len() - edits0, gestures, "step 7");
 
     // 8. A click on the J/L handle selects that audio edit (D20). The
     // handle sits 8 frames into the next clip, so a picture-cut selection
@@ -624,12 +658,16 @@ fn track_gestures_send_one_request_each() {
         picture
     );
 
-    // Every gesture made exactly one change, and each is one undo step
-    // (as are the two source marks, three overwrites, the track removal
-    // and the audio roll this test made over IPC).
-    let edits = gui_edits(&h);
-    assert_eq!(edits.len() - edits0, 13, "{edits:#?}");
-    assert_eq!(undo_steps(&h), undo0 + 13 + 2 + 2 + 2 + 1);
+    gestures += 2;
+    assert_eq!(gui_edits(&h).len() - edits0, gestures, "step 8");
+
+    // Each change is one undo step: the gestures' and this test's own
+    // requests over IPC alike. (Each step adds its own count above, so a new
+    // step changes no line another step's PR also changes.)
+    assert_eq!(
+        undo_steps(&h) - undo0,
+        gestures + changes_over_ipc(&h) - ipc0
+    );
 
     drop(harness);
     h.shutdown();
