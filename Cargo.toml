@@ -32,7 +32,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 libc = "0.2"
 libloading = "0.9"
 # Links the system FFmpeg 8.0 via pkg-config; bindings are generated with bindgen.
-ffmpeg-next = { version = "8.0", default-features = false, features = [
+# The crate's version numbers follow FFmpeg's, but it detects the installed
+# FFmpeg and compiles only what that version has, so 9.x builds against 8.0.
+ffmpeg-next = { version = "9.0", default-features = false, features = [
     "codec",
     "filter",
     "format",

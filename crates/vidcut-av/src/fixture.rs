@@ -441,20 +441,6 @@ pub fn generate(spec: &FixtureSpec, path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Interleaved write that, unlike `Packet::write_interleaved`, also passes on
-/// empty packets carrying only side data (FLAC's final STREAMINFO update).
-fn write_packet(
-    octx: &mut format::context::Output,
-    packet: &mut ffmpeg::Packet,
-) -> std::result::Result<(), ffmpeg::Error> {
-    use ffmpeg::packet::Mut;
-    match unsafe { ffmpeg::ffi::av_interleaved_write_frame(octx.as_mut_ptr(), packet.as_mut_ptr()) }
-    {
-        0 => Ok(()),
-        e => Err(ffmpeg::Error::from(e)),
-    }
-}
-
 struct VideoTrack {
     encoder: encoder::Video,
     enc_tb: ffmpeg::Rational,
@@ -599,7 +585,9 @@ impl VideoTrack {
             }
             packet.set_stream(0);
             packet.rescale_ts(self.enc_tb, self.stream_tb);
-            write_packet(octx, &mut packet).ctx(|| "writing video packet".into())?;
+            packet
+                .write_interleaved(octx)
+                .ctx(|| "writing video packet".into())?;
         }
         Ok(())
     }
@@ -739,7 +727,9 @@ impl AudioTrack {
         while self.encoder.receive_packet(&mut packet).is_ok() {
             packet.set_stream(self.stream_index);
             packet.rescale_ts(self.enc_tb, self.stream_tb);
-            write_packet(octx, &mut packet).ctx(|| "writing audio packet".into())?;
+            packet
+                .write_interleaved(octx)
+                .ctx(|| "writing audio packet".into())?;
         }
         Ok(())
     }

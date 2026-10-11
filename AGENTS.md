@@ -75,7 +75,7 @@ sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev li
 **Toolchain notes:**
 - **Rust comes from rustup.** `rust-toolchain.toml` pins the version (with rustfmt and clippy), and rustup installs it on the first cargo command in the checkout, whatever rustc the distro ships. `rust-version` in Cargo.toml matches it, so the MSRV-aware resolver picks crates that build with it.
 - **Upgrading Rust** is a change of its own: raise `channel` in `rust-toolchain.toml` and `rust-version` together, then fix what the new clippy finds (`scripts/check.sh full`).
-- ffmpeg-next resolves to 8.1.x and builds fine against the system FFmpeg 8.0 headers.
+- ffmpeg-next is 9.x. Its version numbers follow FFmpeg's, but it detects the installed FFmpeg and compiles only what that version has, so it builds against the system FFmpeg 8.0.
 - Dependencies build with `opt-level = 2` even in dev, while our crates stay unoptimized.
 
 ## Quality gates
@@ -281,7 +281,6 @@ The preview findings and the time-mapping rules are in [docs/decisions/preview.m
 - **The half-frame bias is applied exactly once.** mpv EDL `start` values are raw source timestamps and carry it, so timeline seeks to frame `j` go to exactly `j/f`.
 - **Never send negative absolute seeks.** mpv counts them from the end of the file.
 - **MPEG-TS and other index-less containers can't be seeked exactly by mpv.** Preview uses an MKV remux (`vidcut_av::remux`); export reads the original.
-- **ffmpeg-next's `Packet::write_interleaved` refuses empty packets.** Encoders such as FLAC emit a final empty packet carrying side data; use `av_interleaved_write_frame` directly.
 - **Set packet durations explicitly when muxing** from delayed encoders (x264 with B-frames). Otherwise MP4 edit lists drop the last frame.
 - **Set `pkt_timebase` on every decoder** (`codec_ctx.pkt_timebase = stream.time_base`). Without it, FFmpeg can't adjust timestamps when it skips priming samples, and audio drifts by the codec delay.
 - **Not handled in export yet:** rotation metadata, interlaced sources, HDR (see docs/decisions/export.md §4).

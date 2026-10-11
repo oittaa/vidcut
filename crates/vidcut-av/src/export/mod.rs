@@ -19,7 +19,7 @@ use vidcut_core::export::{ExportSettings, validate};
 use vidcut_core::render::RenderPlan;
 
 use crate::error::{Context, Error, Result};
-use crate::ffmpeg::{self, encoder, ffi, format, frame};
+use crate::ffmpeg::{self, encoder, format, frame};
 use audio::AudioMix;
 use encode::{AudioEncoder, Availability, Vaapi};
 use video::VideoFrames;
@@ -84,17 +84,11 @@ pub fn run(
 
 pub(crate) fn write_packet(
     octx: &mut format::context::Output,
-    packet: &mut ffmpeg::Packet,
+    packet: &ffmpeg::Packet,
 ) -> Result<()> {
-    use ffmpeg::packet::Mut;
-    let ret = unsafe { ffi::av_interleaved_write_frame(octx.as_mut_ptr(), packet.as_mut_ptr()) };
-    if ret < 0 {
-        return Err(Error::Ffmpeg {
-            context: "writing packet".into(),
-            source: ffmpeg::Error::from(ret),
-        });
-    }
-    Ok(())
+    packet
+        .write_interleaved(octx)
+        .ctx(|| "writing packet".into())
 }
 
 struct VideoOut {
@@ -113,7 +107,7 @@ impl VideoOut {
             p.set_stream(0);
             p.set_duration(1);
             p.rescale_ts(self.enc_tb, self.stream_tb);
-            write_packet(octx, &mut p)?;
+            write_packet(octx, &p)?;
         }
         Ok(())
     }
@@ -199,7 +193,7 @@ impl AudioOut {
         while self.encoder.receive_packet(&mut p).is_ok() {
             p.set_stream(self.stream);
             p.rescale_ts(enc_tb, self.stream_tb);
-            write_packet(octx, &mut p)?;
+            write_packet(octx, &p)?;
         }
         Ok(())
     }

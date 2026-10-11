@@ -119,7 +119,7 @@ pub fn render_patch(
                 p.set_stream(0);
                 p.set_duration(1);
                 p.rescale_ts(rate.invert(), stream_tb);
-                crate::export::write_packet(octx, &mut p)?;
+                crate::export::write_packet(octx, &p)?;
             }
             Ok::<(), Error>(())
         };
