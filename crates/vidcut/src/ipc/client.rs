@@ -16,7 +16,8 @@ use vidcut_core::{Envelope, Error, ErrorCode, Response, Result};
 /// project the GUI has open.
 ///
 /// Setting `cancel` closes the connection: the wait ends with `CANCELLED`,
-/// and the GUI stops a foreground export once it can't report progress.
+/// and the GUI stops a foreground export once it can't report progress. A
+/// flag already set when the call starts sends nothing, so nothing ran.
 pub fn call(
     socket: &Path,
     envelope: &Envelope,
@@ -24,6 +25,10 @@ pub fn call(
     progress: &mut dyn FnMut(&Value),
     cancel: Option<&AtomicBool>,
 ) -> Result<Response> {
+    // Sending the request and hanging up at once could still apply it.
+    if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
+        return Err(Error::new(ErrorCode::Cancelled, "cancelled"));
+    }
     let mut stream = UnixStream::connect(socket).map_err(|e| {
         Error::no_instance(format!(
             "can't reach the vidcut GUI at {}: {e}",
@@ -33,6 +38,13 @@ pub fn call(
     let mut line = super::request_json(1, envelope, project)?.to_string();
     line.push('\n');
     let lost = |e: std::io::Error| Error::no_instance(format!("lost the vidcut GUI: {e}"));
+    // Dup before the request is written. A failed clone returns NO_INSTANCE
+    // and drops the socket; once the GUI has accepted the request, that drop
+    // cancels it.
+    let watched = match cancel {
+        Some(c) => Some((c, stream.try_clone().map_err(lost)?)),
+        None => None,
+    };
     if let Err(e) = stream
         .write_all(line.as_bytes())
         .and_then(|()| stream.flush())
@@ -46,21 +58,22 @@ pub fn call(
             answer => answer,
         };
     }
-    let watched = match cancel {
-        Some(c) => Some((c, stream.try_clone().map_err(lost)?)),
-        None => None,
-    };
     // Closed when the answer is in, which wakes the watcher at once.
     let (answered, waiting) = channel::<()>();
     std::thread::scope(|scope| {
         if let Some((cancel, s)) = &watched {
             scope.spawn(move || {
-                while let Err(RecvTimeoutError::Timeout) =
-                    waiting.recv_timeout(Duration::from_millis(20))
-                {
+                loop {
+                    // Before the wait. Blocking in recv_timeout first leaves
+                    // the flag invisible for up to 20 ms, and a reply in that
+                    // window comes back as success.
                     if cancel.load(Ordering::Relaxed) {
                         let _ = s.shutdown(Shutdown::Both);
                         return;
+                    }
+                    match waiting.recv_timeout(Duration::from_millis(20)) {
+                        Err(RecvTimeoutError::Timeout) => {}
+                        _ => return,
                     }
                 }
             });

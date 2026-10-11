@@ -446,6 +446,49 @@ mod tests {
     }
 
     #[test]
+    fn a_cancel_already_set_sends_nothing() {
+        // The GUI never sees the request, so nothing ran there: CANCELLED is
+        // the truth. (Sending it and hanging up could still apply an edit.)
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let dir = std::env::temp_dir().join(format!("vidcut-ipc-cancel-{}", std::process::id()));
+        let socket = dir.join("test.sock");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let seen = calls.clone();
+        server::start(
+            &socket,
+            Arc::new(
+                move |_: Envelope, _: Option<PathBuf>, _: &mut dyn FnMut(Value) -> bool| {
+                    seen.fetch_add(1, Ordering::SeqCst);
+                    Ok(vidcut_core::Response {
+                        rev: 1,
+                        changes: Default::default(),
+                        result: json!("ok"),
+                        dry_run: false,
+                        via: "gui:1".into(),
+                    })
+                },
+            ),
+        )
+        .unwrap();
+        let split =
+            Envelope::from_json(json!({"method": "edit.split", "params": {"at": "1s"}})).unwrap();
+        let cancel = AtomicBool::new(true);
+        let e = client::call(&socket, &split, None, &mut |_| {}, Some(&cancel)).unwrap_err();
+        assert_eq!(e.code, ErrorCode::Cancelled, "{e}");
+        // A clear flag is served, and only that request reached the GUI.
+        let waiting = AtomicBool::new(false);
+        let r = client::call(&socket, &split, None, &mut |_| {}, Some(&waiting)).unwrap();
+        assert_eq!(r.result, json!("ok"));
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "the cancelled call sent nothing"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn projectless_requests_never_route() {
         let r = Request::from_parts("schema", None).unwrap();
         let opts = RouteOptions {
