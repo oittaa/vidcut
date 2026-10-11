@@ -405,6 +405,15 @@ impl Workspace {
                 0.0,
                 theme::PANEL_DARK,
             );
+            // Each track's header is a band beside its row, with the rows'
+            // gaps between them, so a header reads as its track's.
+            for row in &layout.lower.rows {
+                let band = Rect::from_min_max(
+                    pos2(lower_rect.left() + 1.0, row.rect.rect.top()),
+                    pos2(content.left() - 2.0, row.rect.rect.bottom()),
+                );
+                painter.rect_filled(band, 2.0, theme::PANEL);
+            }
             paint::ruler(&painter, lower_ruler, &lower_scale, &p, smart, false);
             for row in &layout.lower.rows {
                 let Some(t) = p.track(&row.track) else {
