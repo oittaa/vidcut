@@ -9,7 +9,9 @@ use serde_json::{Value, json};
 
 use crate::analysis::{self, AudioLevels, Loudness, PictureStats, SilenceSettings, Span};
 use crate::error::{Error, Result};
-use crate::model::{Clip, ClipAudio, ImageSequence, Media, MediaInfo, Project, VideoInfo};
+use crate::model::{
+    Clip, ClipAudio, ImageSequence, Media, MediaInfo, PROXY_LONGEST, Project, Proxy, VideoInfo,
+};
 use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
 use crate::render::RenderPlan;
@@ -29,6 +31,15 @@ pub struct ProbedMedia {
     pub info: MediaInfo,
     /// For an image sequence, its files.
     pub sequence: Option<ImageSequence>,
+}
+
+/// A proxy file the editor records on a pool item.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GeneratedProxy {
+    pub path: PathBuf,
+    pub width: u32,
+    pub height: u32,
+    pub codec: String,
 }
 
 /// What the editor needs from the outside world.
@@ -81,6 +92,31 @@ pub trait Env {
 
     /// How loud `plan`'s audio is, mixed as an export would mix it.
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness>;
+
+    /// Directory new proxy files are written into. The real env uses a
+    /// `proxies` folder beside the project when it knows that path, and
+    /// the cache otherwise.
+    fn proxy_dir(&self) -> PathBuf;
+
+    /// Writes a playback proxy of `media`'s pictures into `dir` (decision
+    /// D41). `longest` is the longest side in pixels. `dry_run` reports the
+    /// file that would be written and does not encode.
+    fn generate_proxy(
+        &self,
+        media: &Media,
+        longest: u32,
+        dir: &Path,
+        dry_run: bool,
+    ) -> Result<GeneratedProxy>;
+
+    /// Deletes a proxy file. Missing files are fine.
+    fn remove_proxy_file(&self, path: &Path) -> Result<()> {
+        match std::fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(Error::media(format!("{}: {e}", path.display()))),
+        }
+    }
 
     /// Opens a timeline file to import: an `.otio` file, or an `.otiod`
     /// bundle folder (its `content.otio`). `.otioz` bundles (zip files) need
@@ -647,6 +683,12 @@ fn mutate(
                 .iter_mut()
                 .find(|m| &m.id == media)
                 .expect("found above");
+            // The proxy was made from the previous file.
+            if let Some(old) = m.proxy.take()
+                && !dry_run
+            {
+                env.remove_proxy_file(&old.path)?;
+            }
             m.path = probed.path;
             m.size = probed.size;
             m.mtime_ns = probed.mtime_ns;
@@ -657,6 +699,10 @@ fn mutate(
             }
             Value::Null
         }
+        Request::ProxyGenerate { media, width } => {
+            proxy_generate(p, env, media.as_ref(), *width, dry_run)?
+        }
+        Request::ProxyRemove { media } => proxy_remove(p, env, media.as_ref(), dry_run)?,
         Request::MediaMarksSet {
             media,
             mark_in,
@@ -1180,6 +1226,7 @@ fn add_media(p: &mut Project, probed: ProbedMedia) -> String {
         marks: Default::default(),
         bin: String::new(),
         sequence: probed.sequence,
+        proxy: None,
     });
     id
 }
@@ -1593,7 +1640,149 @@ fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
         }
         p.settings.still_secs = secs;
     }
+    if let Some(on) = set.use_proxies {
+        p.settings.use_proxies = on;
+    }
     Ok(())
+}
+
+/// Longest side for a proxy: the default, or an even size from 16 to 7680.
+fn proxy_longest(width: Option<u32>) -> Result<u32> {
+    match width {
+        None => Ok(PROXY_LONGEST),
+        Some(n) if (16..=7680).contains(&n) && n % 2 == 0 => Ok(n),
+        Some(n) => Err(Error::invalid(format!(
+            "proxy width {n} must be even, from 16 to 7680"
+        ))),
+    }
+}
+
+fn proxy_targets(p: &Project, media: Option<&OneOrMany<String>>) -> Result<Vec<String>> {
+    let mut ids = match media {
+        None => p
+            .media
+            .iter()
+            .filter(|m| m.info.video.is_some() && !m.is_still())
+            .map(|m| m.id.clone())
+            .collect(),
+        Some(listed) => {
+            let ids = listed.to_vec();
+            if ids.is_empty() {
+                return Err(Error::usage(
+                    "name the media to proxy, or omit them to proxy every video",
+                ));
+            }
+            for id in &ids {
+                let m = p
+                    .media(id)
+                    .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
+                if m.info.video.is_none() {
+                    return Err(Error::invalid(format!(
+                        "{id} has no picture to make a proxy of"
+                    )));
+                }
+                if m.is_still() {
+                    return Err(Error::invalid(format!(
+                        "{id} is a still; stills play from the original picture"
+                    )));
+                }
+            }
+            ids
+        }
+    };
+    let mut seen = Vec::new();
+    ids.retain(|id| {
+        if seen.contains(id) {
+            false
+        } else {
+            seen.push(id.clone());
+            true
+        }
+    });
+    Ok(ids)
+}
+
+/// `proxy.generate`: one H.264 file per video or image sequence.
+fn proxy_generate(
+    p: &mut Project,
+    env: &dyn Env,
+    media: Option<&OneOrMany<String>>,
+    width: Option<u32>,
+    dry_run: bool,
+) -> Result<Value> {
+    let longest = proxy_longest(width)?;
+    let ids = proxy_targets(p, media)?;
+    let dir = env.proxy_dir();
+    let mut proxies = Vec::new();
+    for id in ids {
+        let item = p.media(&id).expect("checked").clone();
+        let made = env.generate_proxy(&item, longest, &dir, dry_run)?;
+        let entry = Proxy {
+            path: made.path.clone(),
+            source_size: item.size,
+            source_mtime_ns: item.mtime_ns,
+            width: made.width,
+            height: made.height,
+            codec: made.codec,
+        };
+        let m = p.media.iter_mut().find(|m| m.id == id).expect("checked");
+        if let Some(old) = m.proxy.take()
+            && old.path != entry.path
+            && !dry_run
+        {
+            env.remove_proxy_file(&old.path)?;
+        }
+        m.proxy = Some(entry);
+        proxies.push(json!({
+            "media": id,
+            "path": made.path,
+            "width": made.width,
+            "height": made.height,
+        }));
+    }
+    Ok(json!({ "proxies": proxies }))
+}
+
+/// `proxy.remove`: delete the files and forget them.
+fn proxy_remove(
+    p: &mut Project,
+    env: &dyn Env,
+    media: Option<&OneOrMany<String>>,
+    dry_run: bool,
+) -> Result<Value> {
+    let ids = match media {
+        None => p
+            .media
+            .iter()
+            .filter(|m| m.proxy.is_some())
+            .map(|m| m.id.clone())
+            .collect(),
+        Some(listed) => {
+            let ids = listed.to_vec();
+            if ids.is_empty() {
+                return Err(Error::usage(
+                    "name the media whose proxies to remove, or omit them to remove every proxy",
+                ));
+            }
+            for id in &ids {
+                p.media(id)
+                    .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
+            }
+            ids
+        }
+    };
+    let mut cleared = Vec::new();
+    for id in ids {
+        let m = p.media.iter_mut().find(|m| m.id == id).expect("checked");
+        let Some(old) = m.proxy.take() else {
+            continue;
+        };
+        if !dry_run {
+            env.remove_proxy_file(&old.path)?;
+        }
+        cleared.push(id);
+    }
+    Ok(json!({ "cleared": cleared }))
 }
 
 // ---------------------------------------------------------------- queries
@@ -2000,6 +2189,15 @@ fn media_json(p: &Project, m: &Media) -> Value {
     if let Some(s) = &m.sequence {
         v["sequence"] = json!({
             "pattern": s.pattern, "first": s.first, "count": s.count,
+        });
+    }
+    if let Some(px) = &m.proxy {
+        v["proxy"] = json!({
+            "path": px.path,
+            "width": px.width,
+            "height": px.height,
+            "codec": px.codec,
+            "stale": m.fresh_proxy().is_none(),
         });
     }
     // The file's own start timecode, as `HH:MM:SS:FF` in its frames (or,

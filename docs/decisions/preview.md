@@ -203,5 +203,17 @@ An image in an EDL entry is a source with one frame at time 0. Seeking into the 
 - **FFmpeg concat scripts** (`.ffconcat` listing files with durations) take the first file's time base (25 fps for a PNG) unless each file gets a `framerate` option, and then seeking inside them falls through to the next entry at some frames.
 - **mpv's `mf-fps`** is one rate for the whole file, so a sequence's own rate can't be given per entry. Lists at the project rate need only one.
 
-**Playing sequences.** Big pictures decode slowly: a 4K 16-bit PNG takes about 100 ms, so such a sequence can't play in real time, and mpv drops frames. Scrubbing and seeking are fine. Proxies (roadmap) are the answer for playback.
+**Playing sequences.** Big pictures decode slowly: a 4K 16-bit PNG takes about 100 ms, so such a sequence can't play in real time, and mpv drops frames. Scrubbing and seeking are fine. A proxy (§12) is what plays instead.
+
+## 12. Proxies
+
+A proxy is a smaller H.264 file (8-bit 4:2:0, no B-frames) of a pool item's pictures. `proxy.generate` writes one for a video or an image sequence.
+
+**Encoding.** The request first runs on a copy of the project, which writes the files: in the GUI on a worker thread (the measure step that analysis edits use), headless before the project is locked. Then it runs for real and finds the files there, so recording them is quick. The encode reports progress through `vidcut_av::progress` and stops on the `vidcut_av::cancel` flag; a stopped encode removes its temporary file. The preview plays it only when `settings.use_proxies` is set and the proxy is fresh: same source size and modification time as when it was made, and the file is there. Otherwise the original plays, image lists included.
+
+**Timestamps.** Each proxy frame is given the source frame's presentation timestamp (the source time base, or microseconds when that base is not a sane clock). The live session swaps only the video piece's path and clears `image`, and leaves `origin` and `source_frame` alone. The EDL `start` is still `origin + source_frame/fps − ½ frame`, so the seek lands on the same frame. Matroska rounds timestamps to 1 ms, which the half-frame bias absorbs. An image sequence's proxy is picture `k` at `k/rate` with origin 0, and the preview plays that video instead of the `mf://` list.
+
+**What does not change.** `render::flatten`, frame render, analysis and OTIO keep the original paths. Preview audio entries keep the original file too, so proxy video is not mixed with a second clock. Export never reads a proxy. A proxy is already progressive and upright, so the preview does not deinterlace it again and does not rely on the source's rotation metadata.
+
+**Where.** Beside the project, in `proxies/`, when the session knows the project path; otherwise `~/.cache/vidcut/proxies`. The stored path is absolute. Stills are not proxied: one picture is not the real-time problem.
 

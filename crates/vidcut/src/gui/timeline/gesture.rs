@@ -833,6 +833,7 @@ mod tests {
             marks: Marks::default(),
             bin: String::new(),
             sequence: None,
+            proxy: None,
         }
     }
 

@@ -1189,10 +1189,30 @@ impl Live {
                     .as_ref()
                     .map(|r| r.cancel.clone())
                     .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+                // Work that reports progress (proxy encodes) shows it to the
+                // client as an export does.
+                let progress = job.reply.as_ref().map(|r| r.tx.clone());
                 let _ = std::thread::Builder::new()
                     .name("vidcut-measure".into())
                     .spawn(move || {
                         let _guard = vidcut_av::cancel::Guard::set(cancel);
+                        let _report = progress.map(|tx| {
+                            let mut last = Instant::now() - Duration::from_secs(1);
+                            vidcut_av::progress::Guard::set(Box::new(
+                                move |out: &Path, p: vidcut_av::export::Progress| {
+                                    if p.frames == p.total
+                                        || last.elapsed() >= Duration::from_millis(200)
+                                    {
+                                        last = Instant::now();
+                                        let _ = tx.send(ReplyEvent::Progress(json!({
+                                            "output": 0, "outputs": 1, "path": out,
+                                            "frames": p.frames, "total": p.total,
+                                            "elapsed": p.elapsed.as_secs_f64(),
+                                        })));
+                                    }
+                                },
+                            ))
+                        });
                         let result = measure();
                         let _ = tx.send(Msg::Measured {
                             job,
@@ -1230,8 +1250,8 @@ impl Live {
             use vidcut_core::Env;
             for (m, stream) in &needed {
                 match stream {
-                    Some(s) => AvEnv.audio_levels(m, *s).map(drop)?,
-                    None => AvEnv.picture_stats(m).map(drop)?,
+                    Some(s) => AvEnv::new().audio_levels(m, *s).map(drop)?,
+                    None => AvEnv::new().picture_stats(m).map(drop)?,
                 }
             }
             Ok(())
@@ -1687,6 +1707,23 @@ impl Live {
                     None => Step::Now(self.edit(envelope)),
                 }
             }
+            // Proxies are encoded on a worker, by the same request on a copy
+            // of the project; the edit then finds the files and records them
+            // at once (decision D41).
+            Request::ProxyGenerate { .. } if !envelope.dry_run => {
+                let Some(open) = &self.project else {
+                    return Step::Now(Err(no_project()));
+                };
+                let (project, path) = (open.project().clone(), open.store.path().to_path_buf());
+                let copy = envelope.clone();
+                let encode = move || {
+                    let env = AvEnv::for_project(&path);
+                    vidcut_core::Editor::new(project, Default::default())
+                        .apply(copy, &env, None)
+                        .map(drop)
+                };
+                Step::Measure(Box::new(encode), Box::new(envelope))
+            }
             // An `.otioz` bundle's media are unpacked on a worker first; the
             // edit then finds them there.
             Request::TimelineImport {
@@ -1696,7 +1733,7 @@ impl Live {
             } if vidcut_core::editor::is_otioz(&path) && !envelope.dry_run => {
                 let unpack_bundle = move || {
                     use vidcut_core::Env;
-                    AvEnv
+                    AvEnv::new()
                         .open_timeline(&path, unpack.as_deref(), true)
                         .map(drop)
                 };
@@ -1800,11 +1837,16 @@ impl Live {
             }
             _ => {}
         }
+        let env = self
+            .project
+            .as_ref()
+            .map(|open| AvEnv::for_project(open.store.path()))
+            .unwrap_or_default();
         let Some(open) = self.project.as_mut() else {
             return Err(no_project());
         };
         let request = envelope.request.clone();
-        let (mut result, changed) = open.apply(envelope, &AvEnv, Some(playhead));
+        let (mut result, changed) = open.apply(envelope, &env, Some(playhead));
         if let Some(e) = open.history_error.take() {
             let warning = crate::session::history_unsaved(&e);
             self.notice(warning.clone(), true);
@@ -2173,6 +2215,8 @@ impl Live {
     ) -> Option<preview::Preview> {
         let p = self.project.as_ref()?.project().clone();
         let fillers = self.fillers(&p)?;
+        let mut plan = plan;
+        preview::apply_proxies(&mut plan, &p, |path| path.is_file());
         let plan = self.preview_plan(plan, player, position);
         let network = |path: &PathBuf| self.network.get(path).copied().unwrap_or(false);
         let read_ahead = plan.video.iter().any(|v| match v {
@@ -2183,10 +2227,14 @@ impl Live {
             render::AudioPiece::Silence { .. } => false,
         });
         let deinterlace = plan.video.iter().any(|v| match v {
-            render::VideoPiece::Source { media, .. } => p
-                .media(media)
-                .and_then(|m| m.info.video.as_ref())
-                .is_some_and(|v| v.fields.is_some()),
+            render::VideoPiece::Source { media, path, .. } => {
+                let Some(m) = p.media(media) else {
+                    return false;
+                };
+                // A proxy is already progressive (and upright).
+                let proxied = m.fresh_proxy().is_some_and(|px| &px.path == path);
+                !proxied && m.info.video.as_ref().is_some_and(|v| v.fields.is_some())
+            }
             render::VideoPiece::Black { .. } => false,
         });
         let mut plan = plan;

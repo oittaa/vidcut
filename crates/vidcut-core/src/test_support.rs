@@ -7,9 +7,12 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use crate::analysis::{AudioLevels, Loudness, PictureStats};
+use crate::editor::GeneratedProxy;
 use crate::editor::{Editor, Env, History, ProbedMedia};
 use crate::error::{Error, Result};
-use crate::model::{AudioInfo, ImageSequence, Media, MediaInfo, Project, Settings, VideoInfo};
+use crate::model::{
+    AudioInfo, ImageSequence, Media, MediaInfo, Project, Settings, VideoInfo, proxy_size,
+};
 use crate::render::{AudioPiece, RenderPlan};
 use crate::request::{Envelope, Response};
 use crate::time::Rational;
@@ -223,6 +226,32 @@ impl Env for FakeEnv {
             integrated,
             range: 0.0,
             true_peak: integrated + 6.0,
+        })
+    }
+
+    fn proxy_dir(&self) -> PathBuf {
+        PathBuf::from("/proxies")
+    }
+
+    fn generate_proxy(
+        &self,
+        media: &Media,
+        longest: u32,
+        dir: &Path,
+        _dry_run: bool,
+    ) -> Result<GeneratedProxy> {
+        let v = media
+            .info
+            .video
+            .as_ref()
+            .ok_or_else(|| Error::invalid(format!("{} has no picture", media.id)))?;
+        let (w, h) = v.display_size();
+        let (w, h) = proxy_size(w, h, longest);
+        Ok(GeneratedProxy {
+            path: dir.join(format!("{}-{}x{h}.mkv", media.id, w)),
+            width: w,
+            height: h,
+            codec: "h264".into(),
         })
     }
 

@@ -65,6 +65,10 @@ pub struct Settings {
     /// what the viewer shows of it, in seconds: Resolve's standard still
     /// duration (p. 114; decision D38).
     pub still_secs: f64,
+    /// The preview plays a fresh proxy instead of the original picture
+    /// (decision D41). Export, frames, analysis and OTIO ignore this.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub use_proxies: bool,
 }
 
 impl Default for Settings {
@@ -79,8 +83,25 @@ impl Default for Settings {
             start_tc: 0,
             auto_format: true,
             still_secs: 5.0,
+            use_proxies: false,
         }
     }
+}
+
+/// Default longest side of a generated proxy, in pixels (decision D41).
+pub const PROXY_LONGEST: u32 = 960;
+
+/// Even picture size that fits inside a square of side `longest` without
+/// getting larger. `width` and `height` are the size as shown.
+pub fn proxy_size(width: u32, height: u32, longest: u32) -> (u32, u32) {
+    let longest = longest.max(2) & !1;
+    let (w, h) = (width.max(2) & !1, height.max(2) & !1);
+    if w.max(h) <= longest {
+        return (w, h);
+    }
+    let scale = f64::from(longest) / f64::from(w.max(h));
+    let even = |v: f64| (v.round() as u32).max(2) & !1;
+    (even(f64::from(w) * scale), even(f64::from(h) * scale))
 }
 
 /// A file in the media pool.
@@ -105,6 +126,26 @@ pub struct Media {
     /// For a numbered image sequence, its files; `path` is the first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sequence: Option<ImageSequence>,
+    /// A smaller copy the preview can play. Absent until one is generated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<Proxy>,
+}
+
+/// A playback proxy of a pool item: an easy-to-play file whose frames carry
+/// the source's presentation timestamps (decision D41, deviation X18).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Proxy {
+    /// Absolute path of the proxy file.
+    pub path: PathBuf,
+    /// [`Media::size`] when the proxy was made.
+    pub source_size: u64,
+    /// [`Media::mtime_ns`] when the proxy was made. A different size or
+    /// time means the source changed and the proxy is stale.
+    pub source_mtime_ns: i64,
+    pub width: u32,
+    pub height: u32,
+    /// Encoder name, e.g. `h264`.
+    pub codec: String,
 }
 
 impl Media {
@@ -117,6 +158,14 @@ impl Media {
     pub fn sequence_file(&self, k: u64) -> Option<PathBuf> {
         let s = self.sequence.as_ref()?;
         Some(s.file(self.path.parent().unwrap_or(Path::new("")), k))
+    }
+
+    /// The proxy, when one is stored and it was made from this file as
+    /// probed (same size and modification time).
+    pub fn fresh_proxy(&self) -> Option<&Proxy> {
+        self.proxy
+            .as_ref()
+            .filter(|p| p.source_size == self.size && p.source_mtime_ns == self.mtime_ns)
     }
 }
 

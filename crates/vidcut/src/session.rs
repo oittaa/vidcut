@@ -124,24 +124,59 @@ pub fn run_with(
                 vidcut_core::Project::new(Default::default()),
                 Default::default(),
             );
-            editor.apply(envelope, &AvEnv, None)?
+            editor.apply(envelope, &AvEnv::new(), None)?
         }
         _ => {
             let store = open(project)?;
+            let env = AvEnv::for_project(store.path());
+            if matches!(envelope.request, Request::ProxyGenerate { .. }) && !envelope.dry_run {
+                encode_proxies(&store, &envelope, &env, hooks)?;
+            }
             if envelope.request.is_mutation() {
                 let (mut r, history_error) =
-                    store.transact(|editor| editor.apply(envelope, &AvEnv, None))?;
+                    store.transact(|editor| editor.apply(envelope, &env, None))?;
                 if let Some(e) = history_error {
                     r.warnings.push(history_unsaved(&e));
                 }
                 r
             } else {
-                store.load()?.apply(envelope, &AvEnv, None)?
+                store.load()?.apply(envelope, &env, None)?
             }
         }
     };
     response.via = "headless".into();
     Ok(response)
+}
+
+/// Encodes the proxies `envelope` (`proxy.generate`) asks for, by the same
+/// request on a copy of the project, before the edit takes the project's
+/// lock: the edit then finds the files and records them at once, and other
+/// runs aren't held up for the encode (decision D41). Progress goes to
+/// `hooks`; its cancel flag stops the encode, leaving no file.
+fn encode_proxies(
+    store: &Store,
+    envelope: &Envelope,
+    env: &AvEnv,
+    hooks: &mut Hooks<'_>,
+) -> Result<()> {
+    let mut copy = store.load()?;
+    let (tx, rx) = std::sync::mpsc::channel::<(std::path::PathBuf, Progress)>();
+    let cancel = hooks.cancel.clone();
+    std::thread::scope(|scope| {
+        let work = scope.spawn(move || {
+            let _cancel = vidcut_av::cancel::Guard::set(cancel);
+            let _report = vidcut_av::progress::Guard::set(Box::new(move |out: &Path, p| {
+                let _ = tx.send((out.to_path_buf(), p));
+            }));
+            copy.apply(envelope.clone(), env, None).map(drop)
+        });
+        // Ends when the encode does: its guard holds the only sender.
+        for (out, p) in rx {
+            (hooks.progress)(0, 1, &out, p);
+        }
+        work.join()
+            .unwrap_or_else(|_| Err(Error::internal("encoding proxies panicked")))
+    })
 }
 
 /// Runs a request that reads `project` (saved at `path`) without changing
@@ -219,7 +254,7 @@ pub fn render(
             }
             Editor::new(project.clone(), Default::default()).apply(
                 envelope.clone(),
-                &AvEnv,
+                &AvEnv::for_project(path),
                 None,
             )?
         }

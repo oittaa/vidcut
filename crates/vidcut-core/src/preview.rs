@@ -14,6 +14,7 @@
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
+use crate::model::Project;
 use crate::render::{AudioPiece, RenderPlan, VideoPiece};
 
 /// Filler media used for gaps (generated once per format by the media layer).
@@ -71,6 +72,34 @@ pub struct Preview {
     /// them one file a frame at the project rate. Set by the host, which
     /// writes the lists.
     pub images: bool,
+}
+
+/// Plays fresh proxies in `plan` when the project asks for them (decision
+/// D41). Video paths become the proxy file and image lists are dropped, so
+/// a sequence plays as that video. `origin` and `source_frame` stay, which
+/// keeps the EDL's frame mapping. Audio paths stay on the originals.
+/// `exists` is whether the proxy file is there: a missing file plays the
+/// original. Export plans never call this.
+pub fn apply_proxies(plan: &mut RenderPlan, project: &Project, exists: impl Fn(&Path) -> bool) {
+    if !project.settings.use_proxies {
+        return;
+    }
+    for piece in &mut plan.video {
+        let VideoPiece::Source {
+            media, path, image, ..
+        } = piece
+        else {
+            continue;
+        };
+        let Some(proxy) = project.media(media).and_then(|m| m.fresh_proxy()) else {
+            continue;
+        };
+        if !exists(&proxy.path) {
+            continue;
+        }
+        *path = proxy.path.clone();
+        *image = None;
+    }
 }
 
 /// The EDL and audio graph that play `plan` in mpv.
