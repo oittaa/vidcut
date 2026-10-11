@@ -393,6 +393,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         timeline_loaded_at: None,
         seq: 0,
         dirty: true,
+        answers: Vec::new(),
         preview_error: config.preview_error,
     };
     let project = config.project;
@@ -572,6 +573,9 @@ struct Live {
     timeline_loaded_at: Option<Instant>,
     seq: u64,
     dirty: bool,
+    /// Answers held until the snapshot shows what they answer, so a client
+    /// that looks once it hears back (the GUI, a test stepping it) sees it.
+    answers: Vec<(Reply, Result<Response>)>,
     preview_error: Option<String>,
 }
 
@@ -583,8 +587,13 @@ impl Live {
 
     fn run(&mut self) {
         loop {
-            self.publish();
+            // Timers may finish requests too; then everyone hears back with
+            // the snapshot showing it, before the session waits again.
             let wake = self.tick(Instant::now());
+            self.publish();
+            for (r, result) in self.answers.drain(..) {
+                let _ = r.tx.send(ReplyEvent::Done(result));
+            }
             let msg = match wake {
                 Some(at) => {
                     match self
@@ -638,6 +647,9 @@ impl Live {
                 w.job.reply,
                 Err(Error::no_instance("the vidcut GUI closed")),
             );
+        }
+        for (r, result) in self.answers.drain(..) {
+            let _ = r.tx.send(ReplyEvent::Done(result));
         }
         if let Some(i) = &self.instance {
             ipc::registry::unregister(i.pid);
@@ -1222,7 +1234,9 @@ impl Live {
             self.notice(format!("{}: {}", job.method, e.message), true);
         }
         self.dirty = true;
-        reply(job.reply, result);
+        if let Some(r) = job.reply {
+            self.answers.push((r, result));
+        }
     }
 
     /// Runs `task` on its own thread; it reports back with `Msg::TaskDone`.

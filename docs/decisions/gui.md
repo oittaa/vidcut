@@ -21,6 +21,7 @@
 **How they talk:**
 - **One inbox.** Everyone talks to the session through one `mpsc` inbox (`Handle`).
 - **Snapshots out.** After each batch of messages, the session publishes an immutable `Arc<Snapshot>`, and the UI reads the latest one each frame. Publishing is a pointer swap under a mutex.
+- **Answers after the snapshot.** The session sends a request's answer only once the snapshot shows its result. A client that looks right after hearing back (the GUI, a test stepping it) never sees the state from before. Answering first let a loaded test draw a stale selection and send nothing.
 - **No blocking.** The UI therefore never blocks on the session, and the session never blocks on the UI.
 - **Repaints.** The session calls `request_repaint` when it publishes or asks the UI for something (a present, a capture, a window change), and mpv's render update callback does too. Nothing else wakes the UI.
 
@@ -190,7 +191,15 @@ A seek or load ("motion") is shown after two steps:
   - The viewer shows the two-up from the Trim Editor (`two_up`), rendered from that copy.
 - **Tests:** `tests/gui_tools.rs` (egui_kittest) checks that each tool makes one request. A freshly opened menu ignores input in its first frame, so tests step twice before clicking an item.
 
-## 11. Still open
+## 11. Pool thumbnails and preferences
+
+- **Filmstrips are kept on disk** (`thumbcache.rs`): 24 pictures of a media file, fitted in 192×108, as one JPEG strip in `~/.cache/vidcut/thumbs` (about 6 KB a picture, where the RGBA in memory takes 83 KB). The file name holds the media file's path hash, size and modification time, and the strip's layout, so a changed file or another layout never reads a stale strip.
+- **Eviction:** a strip's modification time is its last use. After each new strip, the least recently used go until the rest fit `thumbnails.cache_limit_mb` (512 MB by default, about 3,000 media files).
+- **Why:** decoding 24 pictures takes from a tenth of a second to seconds per clip, much more from a network share, and it ran again for every clip each time a project opened. The project still keeps no pictures (deviation X1).
+- **Preferences** (`preferences.toml`, deviation X12) are read whenever a thumbnail job runs, so a change from the CLI applies to a running GUI at once. `preferences.set` empties the cache when it is turned off and trims it when the limit drops.
+- **Tests:** `tests/thumbnails.rs` opens a project whose media moved away and still gets its thumbnails, then turns the cache off in the Preferences window with one request.
+
+## 12. Still open
 
 - **A render queue.** Jobs run side by side; several big exports at once compete for the encoder (NVENC allows a few sessions). Resolve's Deliver page queues renders instead.
 - **Source Tape marks spanning several clips** (decision D17 limits marks to one clip).
