@@ -25,7 +25,7 @@ use serde_json::{Value, json};
 use vidcut_core::model::Settings;
 use vidcut_core::store::Store;
 use vidcut_core::time::Rational;
-use vidcut_core::{Envelope, Error, Project, Result};
+use vidcut_core::{Envelope, Error, Project, Request, Result};
 
 use crate::ipc::{self, RouteOptions};
 
@@ -241,13 +241,14 @@ impl State {
                 },
             }));
         };
-        let envelope = match Envelope::from_json(json!({
+        let mut envelope = match Envelope::from_json(json!({
             "method": method,
-            "params": absolute_paths(args),
+            "params": args,
         })) {
             Ok(e) => e,
             Err(e) => return failure(&Error::usage(e)),
         };
+        absolute_paths(&mut envelope.request);
         let project = self.project();
         match ipc::run(
             project.as_deref(),
@@ -418,27 +419,12 @@ fn refs(v: &Value, defs: &serde_json::Map<String, Value>, used: &mut Vec<String>
     }
 }
 
-/// Parameters naming files made absolute (from this server's directory):
-/// the GUI that may run the call has its own.
-fn absolute_paths(mut args: Value) -> Value {
-    if let Some(o) = args.as_object_mut() {
-        for key in ["path", "paths", "out", "output", "search"] {
-            match o.get_mut(key) {
-                Some(Value::String(s)) => {
-                    *s = absolute(PathBuf::from(&*s)).to_string_lossy().into_owned();
-                }
-                Some(Value::Array(items)) => {
-                    for item in items {
-                        if let Value::String(s) = item {
-                            *s = absolute(PathBuf::from(&*s)).to_string_lossy().into_owned();
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
+/// The request's file paths made absolute (from this server's directory),
+/// `apply`'s commands' too: the GUI that may run the call has its own.
+fn absolute_paths(request: &mut Request) {
+    for p in request.paths_mut() {
+        *p = absolute(std::mem::take(p));
     }
-    args
 }
 
 fn absolute(p: PathBuf) -> PathBuf {
@@ -515,12 +501,21 @@ mod tests {
 
     #[test]
     fn file_parameters_become_absolute() {
-        let args =
-            absolute_paths(json!({"paths": ["a.mp4", "/x/b.mp4"], "out": "f.png", "at": "1s"}));
         let cwd = std::env::current_dir().unwrap();
-        assert_eq!(args["paths"][0], json!(cwd.join("a.mp4")));
-        assert_eq!(args["paths"][1], "/x/b.mp4");
-        assert_eq!(args["out"], json!(cwd.join("f.png")));
-        assert_eq!(args["at"], "1s");
+        let mut frame =
+            Request::from_parts("frame.render", Some(json!({"at": "1s", "out": "f.png"}))).unwrap();
+        absolute_paths(&mut frame);
+        assert!(matches!(frame, Request::FrameRender { ref out, .. } if *out == cwd.join("f.png")));
+        // In a batch too.
+        let mut batch = Request::from_parts(
+            "apply",
+            Some(json!({"commands": [
+                {"method": "media.add", "params": {"paths": ["a.mp4", "/x/b.mp4"]}},
+            ]})),
+        )
+        .unwrap();
+        absolute_paths(&mut batch);
+        let paths: Vec<PathBuf> = batch.paths_mut().into_iter().map(|p| p.clone()).collect();
+        assert_eq!(paths, [cwd.join("a.mp4"), PathBuf::from("/x/b.mp4")]);
     }
 }

@@ -13,7 +13,7 @@
 
 **Calls run like CLI commands** (`ipc::run`, shared with `main.rs`):
 - **Routing:** a call goes into the GUI that has the project open (`via: gui:<pid>`), or runs headless. `vidcut mcp --headless` and `--instance` route like the CLI's flags.
-- **Paths:** file parameters (`path`, `paths`, `out`, `output`, `search`) are made absolute first, since a GUI may run the call from another directory.
+- **Paths:** file parameters, those of `apply`'s commands too (`Request::paths_mut`), are made absolute first, since a GUI may run the call from another directory.
 - **Results:** the vidcut response (`rev`, `changes`, `result`, `via`) comes back as text and as structured content. A failure is a tool error (`isError`) whose text starts with the stable error code (`INVALID_EDIT: ...`).
 - **Pictures:** `frame.render`, `gui.screenshot` and `storyboard.render` also return their PNG as image content (up to 8 MB), so an agent can look at what it made.
 - **Concurrency:** each call runs on its own thread, so `notifications/cancelled` can reach a running one. Its flag is registered before the call starts, so an immediate cancel isn't lost.

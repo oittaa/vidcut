@@ -1106,7 +1106,11 @@ impl Live {
         let Some(open) = &self.project else {
             return self.finish(job, Err(no_project()));
         };
-        let store = open.store.clone();
+        if let Err(e) = envelope.check_rev(open.project().rev) {
+            return self.finish(job, Err(e));
+        }
+        // The job encodes the project as it is now, whatever edits follow.
+        let project = open.project().clone();
         let context = open
             .project()
             .time_context(Some(self.players[TIMELINE].position));
@@ -1174,7 +1178,7 @@ impl Live {
                         }
                     };
                 let result = crate::session::export_media(
-                    &store,
+                    &project,
                     &params,
                     &mut crate::session::Hooks {
                         cancel: &cancel,
@@ -1557,12 +1561,17 @@ impl Live {
         }
     }
 
-    /// Exports and frame renders run on their own thread, on a copy of the
-    /// project, reusing the headless session code.
+    /// Exports, frame renders and measurements run on their own thread, on
+    /// a copy of the project as it is now (whatever edits follow), reusing
+    /// the headless session code.
     fn project_task(&mut self, envelope: Envelope, _job: &Job) -> Step {
         let Some(open) = &self.project else {
             return Step::Now(Err(no_project()));
         };
+        if let Err(e) = envelope.check_rev(open.project().rev) {
+            return Step::Now(Err(e));
+        }
+        let project = open.project().clone();
         let path = open.store.path().to_path_buf();
         let context = open
             .project()
@@ -1586,9 +1595,10 @@ impl Live {
                     })));
                 }
             };
-            crate::session::run_with(
-                Some(&path),
-                envelope,
+            crate::session::render(
+                &project,
+                &path,
+                &envelope,
                 &mut crate::session::Hooks {
                     cancel: &cancel_flag,
                     progress: &mut report,

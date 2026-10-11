@@ -1495,10 +1495,16 @@ impl Cli {
             Command::Undo { steps } => req("history.undo", json!({ "steps": steps }))?,
             Command::Redo { steps } => req("history.redo", json!({ "steps": steps }))?,
             Command::History => req("history.get", json!({}))?,
-            Command::Apply { file, label } => Request::Apply {
-                commands: read_batch(file)?,
-                label: Some(label.clone().unwrap_or_else(|| format!("apply {file}"))),
-            },
+            Command::Apply { file, label } => {
+                let mut batch = Request::Apply {
+                    commands: read_batch(file)?,
+                    label: Some(label.clone().unwrap_or_else(|| format!("apply {file}"))),
+                };
+                for p in batch.paths_mut() {
+                    *p = absolute(std::slice::from_ref(p))?.remove(0);
+                }
+                batch
+            }
             Command::Schema { method } => req("schema", json!({ "method": method }))?,
             Command::Rpc { method, params } => {
                 let params: Option<Value> = match params {

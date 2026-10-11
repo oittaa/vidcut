@@ -35,7 +35,8 @@ Every action is a [`Request`](../../crates/vidcut-core/src/request.rs), the same
 **Kinds of request:**
 - **Project requests** go through the project's `Editor`, exactly as headless.
 - **Live-only requests** act on the session: `viewer.*`, `player.*`, `selection.*`, `gui.*` and `project.open`. Run headless, they fail with `NO_INSTANCE`.
-- **Slow requests** run as tasks on a copy of the project: `export.*`, `frame.render`, and project-less ones such as `encoders.list`. Media exports are jobs (§9).
+- **Slow requests** run as tasks: `export.*`, `frame.render`, `storyboard.render`, `analyze.*`, and project-less ones such as `encoders.list`. Media exports are jobs (§9).
+  - A task works on a copy of the project taken when the request arrives, after its `if_rev` check. Edits that follow, by anyone, don't reach it. Reading the saved file when the task starts could give a newer revision than the one checked.
 
 **Requests that wait** don't block the session. They become entries in a wait list:
 - **`player.seek` and `player.step`** wait until the frame is on screen (§4).
@@ -103,7 +104,7 @@ A seek or load ("motion") is shown after two steps:
 - **Without `-p`:** the only GUI with a project open; with several GUIs, it's a usage error.
 - **Safety check.** Requests carry the project path, and a GUI that has a different project open refuses them (`CONFLICT`).
 
-**Paths.** The CLI makes path arguments absolute before routing, since the GUI may run in another directory. Raw `rpc` requests should use absolute paths.
+**Paths.** The CLI makes path arguments absolute before routing, those in `apply` batches too, since the GUI may run in another directory. Raw `rpc` requests should use absolute paths.
 
 ## 7. Previews
 
@@ -164,7 +165,7 @@ A seek or load ("motion") is shown after two steps:
 ## 9. Export windows and jobs (M5)
 
 **Jobs.** Every media export in a running GUI is a job (`live/jobs.rs`), whoever started it:
-- **A thread per job** prepares the export, reports its files and their lengths (`JobPlanned`), then encodes, sending progress about ten times a second. The session keeps each job's state for `jobs.*` and the snapshot.
+- **A thread per job** prepares the export from a copy of the project (§2), reports its files and their lengths (`JobPlanned`), then encodes, sending progress about ten times a second. The session keeps each job's state for `jobs.*` and the snapshot.
 - **Foreground** (an IPC client without `background`): progress notifications carry the job id, the reply comes when the job ends, and a closed connection cancels it, as in M3.
 - **Background** (`background: true`, and every GUI export): the reply comes once the files are planned, so mistakes (an unknown preset, an existing file) still fail the request itself. The job goes on without the client.
 - **`jobs.wait`** is a wait-list entry like a seek's (§2), without the 10 s limit unless given a `timeout`; it fails the way the job failed. `jobs.cancel` sets the job's cancel flag, and the engine removes partial files.

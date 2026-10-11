@@ -232,6 +232,24 @@ fn errors_have_stable_exit_codes() {
     );
     assert_eq!(e["code"], "CONFLICT");
     sb.ok(&["--if-rev", &rev.to_string(), "edit", "split", "--at", "1s"]);
+    // What reads the project checks it too: nothing comes of a stale one.
+    let stale = rev.to_string();
+    let out = sb.dir.join("stale.mp4");
+    let e = sb.fails(5, &["--if-rev", &stale, "export", s(&out)]);
+    assert_eq!(e["code"], "CONFLICT");
+    assert!(!out.exists());
+    let png = sb.dir.join("stale.png");
+    let e = sb.fails(
+        5,
+        &["--if-rev", &stale, "frame", "--at", "1s", "-o", s(&png)],
+    );
+    assert_eq!(e["code"], "CONFLICT");
+    assert!(!png.exists());
+    let e = sb.fails(5, &["--if-rev", &stale, "timeline"]);
+    assert_eq!(e["code"], "CONFLICT");
+    let now = (rev + 1).to_string();
+    sb.ok(&["--if-rev", &now, "frame", "--at", "1s", "-o", s(&png)]);
+    sb.ok(&["--if-rev", &now, "timeline"]);
     let e = sb.fails(7, &["media", "add", "/nonexistent.mp4"]);
     assert_eq!(e["code"], "MEDIA");
     // No project at all.

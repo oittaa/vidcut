@@ -6,7 +6,7 @@ use std::sync::atomic::AtomicBool;
 use serde_json::{Value, json};
 use vidcut_av::export::Progress;
 use vidcut_core::store::{Store, state_dir};
-use vidcut_core::{Envelope, Error, Request, Response, Result};
+use vidcut_core::{Editor, Envelope, Error, Project, Request, Response, Result};
 
 use crate::env::AvEnv;
 use crate::export;
@@ -104,72 +104,14 @@ pub fn run_with(
                  process); start one with `vidcut -p FILE`, or export without background",
             ));
         }
-        Request::ExportPlan(params) | Request::ExportStart(params)
-            if export::is_otio(&params.output) =>
-        {
+        Request::ExportPlan(_)
+        | Request::ExportStart(_)
+        | Request::FrameRender { .. }
+        | Request::StoryboardRender { .. } => {
             let store = open(project)?;
-            let name = store
-                .path()
-                .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_default();
             let editor = store.load()?;
-            let write = matches!(envelope.request, Request::ExportStart(_));
-            let mut r = answer(export::otio(editor.project(), &name, params, None, write)?);
-            r.rev = editor.project().rev;
-            r
-        }
-        Request::ExportPlan(params) => {
-            let editor = open(project)?.load()?;
-            let p = editor.project();
-            let prepared = export::prepare(p, params, None)?;
-            let available = if export::needs_gpu_info(&prepared.settings) {
-                export::availability(false)
-            } else {
-                Default::default()
-            };
-            let mut r = answer(export::describe(&prepared, &available));
-            r.rev = p.rev;
-            r
-        }
-        Request::ExportStart(params) => export_media(&open(project)?, params, hooks, &mut |_| {})?,
-        Request::FrameRender {
-            at,
-            out,
-            media,
-            width,
-        } => {
-            let editor = open(project)?.load()?;
-            let mut r = answer(export::frame(
-                editor.project(),
-                at,
-                out,
-                media.as_deref(),
-                *width,
-                None,
-            )?);
-            r.rev = editor.project().rev;
-            r
-        }
-        Request::StoryboardRender {
-            out,
-            columns,
-            width,
-            every,
-            range,
-        } => {
-            let editor = open(project)?.load()?;
-            let mut r = answer(crate::storyboard::render(
-                editor.project(),
-                out,
-                *columns,
-                *width,
-                every.as_ref(),
-                range.as_ref(),
-                None,
-            )?);
-            r.rev = editor.project().rev;
-            r
+            envelope.check_rev(editor.project().rev)?;
+            render(editor.project(), store.path(), &envelope, hooks)?
         }
         Request::Probe { .. } => {
             // Probing needs no project; an empty editor answers it.
@@ -192,16 +134,85 @@ pub fn run_with(
     Ok(response)
 }
 
+/// Runs a request that reads `project` (saved at `path`) without changing
+/// it, against the project as given: exports, export plans, frames,
+/// storyboards and measurements. The caller has checked `if_rev`.
+pub fn render(
+    project: &Project,
+    path: &Path,
+    envelope: &Envelope,
+    hooks: &mut Hooks<'_>,
+) -> Result<Response> {
+    let mut r = match &envelope.request {
+        Request::ExportPlan(params) | Request::ExportStart(params)
+            if export::is_otio(&params.output) =>
+        {
+            let name = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let write = matches!(envelope.request, Request::ExportStart(_));
+            answer(export::otio(project, &name, params, None, write)?)
+        }
+        Request::ExportPlan(params) => {
+            let prepared = export::prepare(project, params, None)?;
+            let available = if export::needs_gpu_info(&prepared.settings) {
+                export::availability(false)
+            } else {
+                Default::default()
+            };
+            answer(export::describe(&prepared, &available))
+        }
+        Request::ExportStart(params) => export_media(project, params, hooks, &mut |_| {})?,
+        Request::FrameRender {
+            at,
+            out,
+            media,
+            width,
+        } => answer(export::frame(
+            project,
+            at,
+            out,
+            media.as_deref(),
+            *width,
+            None,
+        )?),
+        Request::StoryboardRender {
+            out,
+            columns,
+            width,
+            every,
+            range,
+        } => answer(crate::storyboard::render(
+            project,
+            out,
+            *columns,
+            *width,
+            every.as_ref(),
+            range.as_ref(),
+            None,
+        )?),
+        // Measurements: queries, on a copy.
+        _ => {
+            let envelope = Envelope {
+                if_rev: None,
+                ..envelope.clone()
+            };
+            Editor::new(project.clone(), Default::default()).apply(envelope, &AvEnv, None)?
+        }
+    };
+    r.rev = project.rev;
+    Ok(r)
+}
+
 /// Exports media: prepares the export, tells `started` the files it will
 /// write and their lengths in frames, then encodes them.
 pub fn export_media(
-    store: &Store,
+    p: &Project,
     params: &vidcut_core::request::ExportParams,
     hooks: &mut Hooks<'_>,
     started: &mut dyn FnMut(Vec<(std::path::PathBuf, i64)>),
 ) -> Result<Response> {
-    let editor = store.load()?;
-    let p = editor.project();
     let prepared = export::prepare(p, params, None)?;
     let available = if export::needs_gpu_info(&prepared.settings) {
         export::availability(false)

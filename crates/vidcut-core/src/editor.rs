@@ -133,10 +133,9 @@ impl Editor {
         env: &dyn Env,
         playhead: Option<i64>,
     ) -> Result<Response> {
+        envelope.check_rev(self.project.rev)?;
         let Envelope {
-            request,
-            if_rev,
-            dry_run,
+            request, dry_run, ..
         } = envelope;
         if !request.is_mutation() {
             let result = query(&self.project, &self.history, &request, env, playhead)?;
@@ -147,14 +146,6 @@ impl Editor {
                 dry_run: false,
                 via: String::new(),
             });
-        }
-        if let Some(rev) = if_rev
-            && rev != self.project.rev
-        {
-            return Err(Error::conflict(format!(
-                "project is at revision {}, not {rev}; re-read it and retry",
-                self.project.rev
-            )));
         }
         match request {
             Request::HistoryUndo { steps } => return self.step_history(steps, true, dry_run),

@@ -1097,13 +1097,35 @@ impl Request {
                     | Self::EditCopy { .. }
             )
     }
+
+    /// The file paths the request names, those of `apply`'s commands too.
+    /// Clients make them absolute before sending: a GUI that answers runs
+    /// in a directory of its own.
+    pub fn paths_mut(&mut self) -> Vec<&mut PathBuf> {
+        match self {
+            Self::MediaAdd { paths, .. } => paths.iter_mut().collect(),
+            Self::MediaRelink { path, .. }
+            | Self::Probe { path }
+            | Self::ProjectOpen { path, .. } => vec![path],
+            Self::TimelineImport { path, search, .. } => {
+                path.iter_mut().chain(search.iter_mut()).collect()
+            }
+            Self::ExportPlan(p) | Self::ExportStart(p) => vec![&mut p.output],
+            Self::FrameRender { out, .. }
+            | Self::StoryboardRender { out, .. }
+            | Self::GuiScreenshot { out, .. } => vec![out],
+            Self::Apply { commands, .. } => commands.iter_mut().flat_map(Self::paths_mut).collect(),
+            _ => Vec::new(),
+        }
+    }
 }
 
 /// A request plus the options every mutation accepts.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Envelope {
     pub request: Request,
-    /// Fail with `CONFLICT` unless the project is at this revision.
+    /// Fail with `CONFLICT` unless the project is at this revision: for
+    /// edits, and for what reads the project (queries, exports, frames).
     pub if_rev: Option<u64>,
     /// Compute the result and changes without committing them.
     pub dry_run: bool,
@@ -1115,6 +1137,19 @@ impl Envelope {
             request,
             if_rev: None,
             dry_run: false,
+        }
+    }
+
+    /// `CONFLICT` if `if_rev` names another revision than `rev`, the
+    /// project's. Requests without a project pass.
+    pub fn check_rev(&self, rev: u64) -> crate::Result<()> {
+        match self.if_rev {
+            Some(want) if want != rev && !self.request.is_projectless() => {
+                Err(crate::Error::conflict(format!(
+                    "project is at revision {rev}, not {want}; re-read it and retry"
+                )))
+            }
+            _ => Ok(()),
         }
     }
 
@@ -1209,6 +1244,21 @@ mod tests {
         assert!(err.contains("unknown method"), "{err}");
         let err = Request::from_parts("edit.append", Some(serde_json::json!({}))).unwrap_err();
         assert!(err.contains("media"), "{err}");
+    }
+
+    #[test]
+    fn paths_include_those_of_batched_commands() {
+        let mut r = Request::from_parts(
+            "apply",
+            Some(serde_json::json!({"commands": [
+                {"method": "media.add", "params": {"paths": ["a.mp4", "b.mp4"]}},
+                {"method": "edit.split", "params": {"at": "1s"}},
+                {"method": "timeline.import", "params": {"path": "c.otio", "search": ["d"]}},
+            ]})),
+        )
+        .unwrap();
+        let paths: Vec<_> = r.paths_mut().into_iter().map(|p| p.clone()).collect();
+        assert_eq!(paths, ["a.mp4", "b.mp4", "c.otio", "d"].map(PathBuf::from));
     }
 
     #[test]

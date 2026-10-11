@@ -196,7 +196,7 @@ vidcut undo                                 # works across separate runs
 
 **Safe automation:**
 - `--dry-run` reports `changes` without writing anything.
-- `--if-rev N` fails with `CONFLICT` if someone else changed the project after you read revision `N`.
+- `--if-rev N` fails with `CONFLICT` if someone else changed the project after you read revision `N`. Exports, frames, measurements and queries check it too, and an export encodes the project as it was when it started, whatever edits follow.
 - `vidcut apply edits.jsonl` (or `-` for stdin) applies many requests atomically, as one undo step. The format is one `{"method", "params"}` object per line.
 - Parallel `vidcut` processes on one project are serialized by a lock and never corrupt it.
 
@@ -259,7 +259,7 @@ vidcut undo                                 # works across separate runs
 - **Source marks and clipboard work headless too:**
   - `vidcut media marks m1 --in 5s --out 10s`: edits without `--range` then use these marks.
   - `vidcut edit copy c3 --json`, then `vidcut edit paste --clips @clips.json --at 1m`.
-- **Paths:** the CLI makes paths absolute before routing. In raw `rpc` requests, use absolute paths.
+- **Paths:** the CLI makes paths absolute before routing, those in `apply` batches too. In raw `rpc` requests, use absolute paths.
 
 ## Tools
 

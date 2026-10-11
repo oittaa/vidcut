@@ -230,6 +230,47 @@ fn export_jobs() {
     assert_eq!(e.code, ErrorCode::Cancelled, "{e}");
     assert!(!dir.join("e.mkv").exists());
 
+    // 6. An export encodes the project as it was when asked for: a stale
+    // `if_rev` fails it up front, and an edit right after it (another
+    // client's, say) doesn't change what it encodes.
+    let r = call(&h, "project.summary", json!({})).unwrap();
+    let (rev, frames) = (r.rev, r.result["duration"].clone());
+    let mut stale = quick(&dir.join("f.mkv"));
+    stale["if_rev"] = json!(rev - 1);
+    let e = call(&h, "export.start", stale).unwrap_err();
+    assert_eq!(e.code, ErrorCode::Conflict, "{e}");
+    assert!(!dir.join("f.mkv").exists());
+    let mut now = quick(&dir.join("g.mkv"));
+    now["if_rev"] = json!(rev);
+    let e = Envelope::from_json(json!({ "method": "export.start", "params": now })).unwrap();
+    h.send(e);
+    let e = Envelope::from_json(json!({ "method": "edit.delete", "params": { "clips": "c1" } }))
+        .unwrap();
+    h.send(e);
+    let mut id = None;
+    for _ in 0..500 {
+        id = h
+            .snapshot()
+            .jobs
+            .iter()
+            .find(|j| j.outputs.first().is_some_and(|o| o.path.ends_with("g.mkv")))
+            .map(|j| j.id.clone());
+        if id.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let j = ok(
+        &h,
+        "jobs.wait",
+        json!({ "job": id.expect("the export's job") }),
+    );
+    assert_eq!((&j["frames"], &j["total"]), (&frames, &frames), "{j}");
+    assert_ne!(
+        call(&h, "project.summary", json!({})).unwrap().result["duration"],
+        frames
+    );
+
     h.shutdown();
     let _ = session.join();
     let _ = std::fs::remove_dir_all(&dir);
