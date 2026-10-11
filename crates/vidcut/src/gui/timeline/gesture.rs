@@ -813,6 +813,7 @@ mod tests {
                     rotation: 0,
                     fields: None,
                     hdr: None,
+                    still: false,
                 }),
                 audio: vec![AudioInfo {
                     index: 0,
@@ -825,6 +826,7 @@ mod tests {
             },
             marks: Marks::default(),
             bin: String::new(),
+            sequence: None,
         }
     }
 

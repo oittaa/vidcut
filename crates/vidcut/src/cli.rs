@@ -565,16 +565,28 @@ pub struct SetArgs {
     /// Record timecode of the first frame, e.g. 01:00:00:00.
     #[arg(long)]
     start_tc: Option<String>,
+    /// How long a still lasts when edited without a range, e.g. 5s.
+    #[arg(long)]
+    still_duration: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum MediaCmd {
-    /// Add files to the pool.
+    /// Add files to the pool. An image is a still; with --sequence, a
+    /// numbered image brings the files numbered in a row around it as one
+    /// clip.
     Add {
         files: Vec<PathBuf>,
         /// Into this bin.
         #[arg(long)]
         bin: Option<String>,
+        /// Each file is one of a numbered image sequence (frame_000001.png).
+        #[arg(long)]
+        sequence: bool,
+        /// The sequence's frame rate, e.g. 24 or 30000/1001 (default: the
+        /// project's).
+        #[arg(long, requires = "sequence")]
+        fps: Option<String>,
     },
     /// Put media into a bin ("" for the top level).
     Move {
@@ -1106,14 +1118,20 @@ impl Cli {
                 req(
                     "project.set",
                     json!({ "fps": s.fps, "width": width, "height": height, "sample_rate": s.sample_rate,
-                            "channels": s.channels, "ripple_on": s.ripple, "start_tc": s.start_tc }),
+                            "channels": s.channels, "ripple_on": s.ripple, "start_tc": s.start_tc,
+                            "still_duration": s.still_duration }),
                 )?
             }
             Command::Probe { file } => req("probe", json!({ "path": file }))?,
             Command::Media(m) => match m {
-                MediaCmd::Add { files, bin } => req(
+                MediaCmd::Add {
+                    files,
+                    bin,
+                    sequence,
+                    fps,
+                } => req(
                     "media.add",
-                    json!({ "paths": absolute(files)?, "bin": bin }),
+                    json!({ "paths": absolute(files)?, "bin": bin, "sequence": sequence, "fps": fps }),
                 )?,
                 MediaCmd::Move { media, bin } => {
                     req("media.move", json!({ "media": media, "bin": bin }))?

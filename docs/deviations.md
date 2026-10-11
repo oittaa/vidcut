@@ -111,3 +111,13 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 - **Resolve:** after a few seconds of idling, the Smart Indicator moves up and down on the ruler, and the edit point strobes green, or red once the clip has reached its start or end frame (p. 696).
 - **vidcut:** the indicator is green, or red where a clip at the edit shows its media's first or last frame (`ops::edit_has_handles`). It doesn't move or strobe.
 - **Why:** an idle animation keeps the window repainting for as long as it is open, which costs a modest laptop CPU time and battery while nothing happens. The color tells the same.
+
+## X16. The still duration is a project setting
+- **Resolve:** the standard still duration is a user preference (Preferences > User > Editing, p. 114).
+- **vidcut:** it is in the project's settings (`still_secs`; `vidcut set --still-duration 3s`).
+- **Why:** an edit is then the same in every run, whoever makes it and on whichever computer: an agent appending a still gets the length the project says, not one set in somebody's preferences.
+
+## X17. Image sequences are asked for, not guessed
+- **Resolve:** the Media Storage panel's Frame Display Mode decides whether numbered images are one sequence or separate stills: Auto goes by file type (DPX and EXR as sequences, JPEG as stills), or always one way (p. 366).
+- **vidcut:** `media.add` adds a still for each image, unless `sequence` asks for the numbered run around it as one clip.
+- **Why:** the file type doesn't tell a render's frames from numbered photos or exported slides, and a wrong guess turns a slideshow into a fraction of a second of video, or a render into thousands of stills. A flag makes the CLI and agents predictable.

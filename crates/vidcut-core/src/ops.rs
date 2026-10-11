@@ -222,7 +222,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
             if src.audio_only { "audio" } else { "video" }
         )));
     }
-    let frames = p.media_frames(media);
+    let frames = p.media_limit(media);
     let (a, b) = src.range;
     if a < 0 || b > frames || a >= b {
         return Err(Error::invalid(format!(
@@ -327,7 +327,7 @@ pub fn edit_has_handles(p: &Project, e: i64) -> bool {
     !t.clips.iter().any(|c| {
         let at_end = c.end() == e
             && p.media(&c.media)
-                .is_some_and(|m| c.source_in + c.duration >= p.media_frames(m));
+                .is_some_and(|m| c.source_in + c.duration >= p.media_limit(m));
         let at_start = c.start == e && c.source_in <= 0;
         at_end || at_start
     })
@@ -1063,7 +1063,7 @@ fn check_source(p: &Project, c: &Clip) -> Result<()> {
     let m = p
         .media(&c.media)
         .ok_or_else(|| Error::not_found(format!("no media {}", c.media)))?;
-    let frames = p.media_frames(m);
+    let frames = p.media_limit(m);
     if c.duration < 1 {
         return Err(Error::invalid(format!(
             "{} would be shorter than one frame",
@@ -1337,7 +1337,7 @@ pub fn extend_to_media_end(p: &mut Project, ids: &[String], ripple: Option<bool>
         let media = p
             .media(&c.media)
             .ok_or_else(|| Error::not_found(format!("no media {}", c.media)))?;
-        let room = p.media_frames(media) - c.source_in - c.duration;
+        let room = p.media_limit(media) - c.source_in - c.duration;
         targets.push((c.start, id.clone(), room));
     }
     targets.sort();
@@ -1480,7 +1480,7 @@ pub fn set_media_marks(
     let m = p
         .media(media)
         .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
-    let frames = p.media_frames(m);
+    let frames = p.media_limit(m);
     let mut marks = m.marks.clone();
     if let Some(i) = mark_in {
         marks.mark_in = i;
@@ -1548,7 +1548,7 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
         let media = p
             .media(&c.media)
             .ok_or_else(|| Error::not_found(format!("no media {} in this project", c.media)))?;
-        let frames = p.media_frames(media);
+        let frames = p.media_limit(media);
         if c.duration <= 0 || c.source_in < 0 || c.source_in + c.duration > frames {
             return Err(Error::invalid(format!(
                 "pasted clip {} is outside {} (0..{frames} frames)",

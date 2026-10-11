@@ -12,7 +12,7 @@
 //! `origin + (source_frame + j) / fps − ½ frame`, i.e. the nearest source
 //! frame, ties to the later one. Frame-exact for sources at the project rate.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -50,9 +50,29 @@ pub enum VideoPiece {
         /// First source position, in project frames from `origin`.
         source_frame: i64,
         frames: i64,
+        /// Pictures that aren't a video file's frames.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        image: Option<Image>,
     },
     Black {
         frames: i64,
+    },
+}
+
+/// What a source piece shows when it isn't a video file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Image {
+    /// One picture (the piece's `path`), for every frame.
+    Still,
+    /// Numbered pictures, one a frame at `rate`: picture `k` is the file
+    /// `pattern` (a full path, FFmpeg's image2 form) names with the number
+    /// `first + k`. The piece's `path` is the first.
+    Sequence {
+        pattern: PathBuf,
+        first: u64,
+        count: u64,
+        rate: Rational,
     },
 }
 
@@ -169,6 +189,22 @@ impl Project {
             .unwrap_or(0.0);
         Ok((m.path.clone(), origin))
     }
+
+    /// How `media`'s pictures are read, if not as a video file's frames.
+    pub fn media_image(&self, media: &str) -> Option<Image> {
+        let m = self.media(media)?;
+        let v = m.info.video.as_ref()?;
+        match &m.sequence {
+            Some(s) => Some(Image::Sequence {
+                pattern: m.path.parent().unwrap_or(Path::new("")).join(&s.pattern),
+                first: s.first,
+                count: s.count,
+                rate: v.fps,
+            }),
+            None if v.still => Some(Image::Still),
+            None => None,
+        }
+    }
 }
 
 /// Plans the timeline range `[a, b)`.
@@ -219,6 +255,7 @@ pub fn flatten(p: &Project, a: i64, b: i64) -> Result<RenderPlan> {
                         origin,
                         source_frame: c.source_at(x),
                         frames: y - x,
+                        image: p.media_image(&c.media),
                     },
                 );
             }
@@ -387,6 +424,7 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
                     origin,
                     source_frame: 0,
                     frames,
+                    image: p.media_image(id),
                 },
             );
         } else {

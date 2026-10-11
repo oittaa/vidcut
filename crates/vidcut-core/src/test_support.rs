@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use crate::analysis::{AudioLevels, Loudness, PictureStats};
 use crate::editor::{Editor, Env, History, ProbedMedia};
 use crate::error::{Error, Result};
-use crate::model::{AudioInfo, Media, MediaInfo, Project, Settings, VideoInfo};
+use crate::model::{AudioInfo, ImageSequence, Media, MediaInfo, Project, Settings, VideoInfo};
 use crate::render::{AudioPiece, RenderPlan};
 use crate::request::{Envelope, Response};
 use crate::time::Rational;
@@ -33,6 +33,7 @@ pub fn media_info(secs: f64, fps: Rational, audio: bool) -> MediaInfo {
             rotation: 0,
             fields: None,
             hdr: None,
+            still: false,
         }),
         audio: if audio {
             vec![AudioInfo {
@@ -49,6 +50,15 @@ pub fn media_info(secs: f64, fps: Rational, audio: bool) -> MediaInfo {
     }
 }
 
+/// Media facts for a fake still image (a photo, a title card).
+pub fn still_info(width: u32, height: u32) -> MediaInfo {
+    let mut info = media_info(0.04, Rational::new(25, 1).unwrap(), false);
+    info.format = "png_pipe".into();
+    let v = info.video.as_mut().expect("video");
+    (v.codec, v.width, v.height, v.still) = ("png".into(), width, height, true);
+    info
+}
+
 /// Media facts for a fake audio-only file (music, narration).
 pub fn audio_info(secs: f64) -> MediaInfo {
     let mut info = media_info(secs, Rational::new(25, 1).unwrap(), true);
@@ -61,6 +71,9 @@ pub fn audio_info(secs: f64) -> MediaInfo {
 #[derive(Default)]
 pub struct FakeEnv {
     pub files: HashMap<PathBuf, MediaInfo>,
+    /// Image sequences by their first file: the files (in that file's
+    /// folder) and the picture size.
+    pub sequences: HashMap<PathBuf, (ImageSequence, u32, u32)>,
     /// Peak levels by media path (stream 0); missing ones are loud.
     pub levels: HashMap<PathBuf, AudioLevels>,
     pub pictures: HashMap<PathBuf, PictureStats>,
@@ -119,6 +132,19 @@ impl FakeEnv {
         self.files.insert(PathBuf::from(path), info);
         self
     }
+
+    /// An image sequence of 1920×1080 pictures, `count` files from `first`,
+    /// named by `pattern` in `dir`.
+    pub fn with_sequence(mut self, dir: &str, pattern: &str, first: u64, count: u64) -> Self {
+        let s = ImageSequence {
+            pattern: pattern.into(),
+            first,
+            count,
+        };
+        self.sequences
+            .insert(s.file(Path::new(dir), 0), (s, 1920, 1080));
+        self
+    }
 }
 
 impl Env for FakeEnv {
@@ -133,6 +159,28 @@ impl Env for FakeEnv {
             size: 1,
             mtime_ns: 0,
             info,
+            sequence: None,
+        })
+    }
+
+    fn probe_sequence(&self, path: &Path, rate: Rational) -> Result<ProbedMedia> {
+        let dir = path.parent().unwrap_or(Path::new(""));
+        let (first, (s, w, h)) = self
+            .sequences
+            .iter()
+            .find(|(_, (s, ..))| (0..s.count).any(|k| s.file(dir, k) == path))
+            .ok_or_else(|| Error::media(format!("{}: not a numbered image", path.display())))?;
+        let secs = rate.frames_to_secs(s.count as i64);
+        let mut info = media_info(secs, rate, false);
+        info.format = "image2".into();
+        let v = info.video.as_mut().expect("video");
+        (v.codec, v.width, v.height) = ("png".into(), *w, *h);
+        Ok(ProbedMedia {
+            path: first.clone(),
+            size: 1,
+            mtime_ns: 0,
+            info,
+            sequence: Some(s.clone()),
         })
     }
 

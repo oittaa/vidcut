@@ -82,7 +82,32 @@ impl Env for AvEnv {
             size: meta.len(),
             mtime_ns,
             info: convert(&info)?,
+            sequence: None,
         })
+    }
+
+    fn probe_sequence(&self, path: &Path, rate: Rational) -> Result<ProbedMedia> {
+        let canonical = path
+            .canonicalize()
+            .map_err(|e| Error::media(format!("{}: {e}", path.display())))?;
+        let sequence = vidcut_core::sequence::find(&canonical)?;
+        let dir = canonical.parent().unwrap_or(Path::new("/"));
+        let first = sequence.file(dir, 0);
+        let mut probed = self.probe(&first)?;
+        let info = vidcut_av::probe::probe_sequence(
+            &dir.join(&sequence.pattern),
+            sequence.first,
+            sequence.count,
+            (rate.num() as i32, rate.den() as i32),
+        )
+        .map_err(|e| Error::media(e.to_string()))?;
+        probed.info = convert(&info)?;
+        if let Some(v) = probed.info.video.as_mut() {
+            // The rate asked for, exactly.
+            (v.fps, v.vfr) = (rate, false);
+        }
+        probed.sequence = Some(sequence);
+        Ok(probed)
     }
 
     fn audio_levels(&self, media: &Media, stream: u32) -> Result<Arc<AudioLevels>> {
@@ -187,6 +212,7 @@ fn convert(info: &vidcut_av::probe::MediaInfo) -> Result<MediaInfo> {
                     "arib-std-b67" => Some(Hdr::Hlg),
                     _ => None,
                 },
+                still: v.still,
             })
         }
         None => None,

@@ -9,13 +9,30 @@
 use std::path::Path;
 
 use vidcut_core::model::Hdr;
-use vidcut_core::render::VideoPiece;
+use vidcut_core::render::{Image, VideoPiece};
 use vidcut_core::time::Rational;
 
 use super::ahead::Ahead;
-use crate::decode::VideoReader;
+use crate::decode::{Input, VideoReader};
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, filter, format, frame};
+
+/// How a piece's pictures are read: its file, or its image sequence.
+pub(crate) fn input_of(path: &Path, image: Option<&Image>) -> Input {
+    match image {
+        Some(Image::Sequence {
+            pattern,
+            first,
+            rate,
+            ..
+        }) => Input::Sequence {
+            pattern: pattern.clone(),
+            first: *first,
+            rate: (rate.num() as i32, rate.den() as i32),
+        },
+        Some(Image::Still) | None => Input::File(path.to_path_buf()),
+    }
+}
 
 /// A new reference to `src`'s buffers (no pixel copy).
 pub(crate) fn frame_ref(src: &frame::Video) -> Result<frame::Video> {
@@ -202,8 +219,8 @@ impl Source {
     /// Opens `path` with `current` at the first frame for `target`. The
     /// decoding up to there is most of the cost of starting a piece, so the
     /// next file opens on another thread while this one encodes.
-    fn open(path: &Path, origin: f64, source_frame: i64, target: f64) -> Result<Source> {
-        let reader = VideoReader::open(path)?;
+    fn open(input: &Input, origin: f64, source_frame: i64, target: f64) -> Result<Source> {
+        let reader = VideoReader::open_input(input)?;
         let tb = reader.time_base();
         let mut source = Source {
             reader,
@@ -334,12 +351,17 @@ impl VideoFrames {
                     path,
                     origin,
                     source_frame,
+                    image,
                     ..
                 } => {
+                    // A still's one picture serves every frame: it is never
+                    // sought (an image file has nothing past it).
+                    let still = image == Some(Image::Still);
                     if k == 0 {
-                        self.start_piece(&path, origin, source_frame)?;
+                        let from = if still { 0 } else { source_frame };
+                        self.start_piece(&input_of(&path, image.as_ref()), origin, from)?;
                     }
-                    self.source_frame(k).map(Some)
+                    self.source_frame(if still { 0 } else { k }).map(Some)
                 }
             };
         }
@@ -363,26 +385,26 @@ impl VideoFrames {
     /// Readies the current piece's file: the open one if it is the same
     /// file, the one opened ahead for this piece, or a new one. Then starts
     /// opening the next file.
-    fn start_piece(&mut self, path: &Path, origin: f64, source_frame: i64) -> Result<()> {
+    fn start_piece(&mut self, input: &Input, origin: f64, source_frame: i64) -> Result<()> {
         let target = self.target(origin, source_frame);
         let source = match self.source.take() {
-            Some(mut s) if s.reader.path() == path => {
+            Some(mut s) if s.reader.input() == input => {
                 s.reposition(origin, source_frame, target)?;
                 s
             }
             _ => match self.ahead.take(self.piece) {
                 Some(opened) => opened?,
-                None => Source::open(path, origin, source_frame, target)?,
+                None => Source::open(input, origin, source_frame, target)?,
             },
         };
         self.source = Some(source);
-        self.open_next(path);
+        self.open_next(input);
         Ok(())
     }
 
     /// Starts opening the file of the next source piece, unless it is
     /// `current`, which that piece then reads on with.
-    fn open_next(&mut self, current: &Path) {
+    fn open_next(&mut self, current: &Input) {
         let next = self
             .pieces
             .iter()
@@ -394,19 +416,27 @@ impl VideoFrames {
                     origin,
                     source_frame,
                     frames,
+                    image,
                     ..
-                } if *frames > 0 => Some((i, path.clone(), *origin, *source_frame)),
+                } if *frames > 0 => {
+                    let from = match image {
+                        Some(Image::Still) => 0,
+                        _ => *source_frame,
+                    };
+                    Some((i, input_of(path, image.as_ref()), *origin, from))
+                }
                 _ => None,
             });
-        let Some((i, path, origin, source_frame)) = next else {
+        let Some((i, input, origin, source_frame)) = next else {
             return;
         };
-        if path == current {
+        if &input == current {
             return;
         }
         let target = self.target(origin, source_frame);
-        self.ahead
-            .start(i, move || Source::open(&path, origin, source_frame, target));
+        self.ahead.start(i, move || {
+            Source::open(&input, origin, source_frame, target)
+        });
     }
 
     /// Output frame `k` of the current source piece.

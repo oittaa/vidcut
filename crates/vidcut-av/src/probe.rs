@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::decode::Input;
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, media};
 
@@ -62,6 +63,8 @@ pub struct VideoStreamInfo {
     /// Transfer characteristic, FFmpeg's name: `bt709`, `smpte2084` (PQ),
     /// `arib-std-b67` (HLG), `unknown`, ….
     pub transfer: String,
+    /// A single picture (an image file), not a video.
+    pub still: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -102,11 +105,46 @@ fn stream_duration(stream: &ffmpeg::format::stream::Stream) -> Option<f64> {
     Some(h * 3600.0 + m * 60.0 + s)
 }
 
+/// Whether FFmpeg reads files of demuxer `format` as images: image2, and
+/// the `*_pipe` demuxers it picks for one image file (`png_pipe`, …).
+fn image_format(format: &str) -> bool {
+    format == "image2" || format.ends_with("_pipe")
+}
+
 /// Probes `path`, including the first decodable video frame (one frame is
-/// decoded) and stream durations.
+/// decoded) and stream durations. An image file is a still.
 pub fn probe(path: &Path) -> Result<MediaInfo> {
-    crate::init();
-    let input = ffmpeg::format::input(path).ctx(|| format!("opening {}", path.display()))?;
+    probe_input(&Input::File(path.to_path_buf()))
+}
+
+/// Probes an image sequence: the files `pattern` names, `count` of them
+/// from the number `first`, shown at `rate` (numerator, denominator).
+pub fn probe_sequence(
+    pattern: &Path,
+    first: u64,
+    count: u64,
+    rate: (i32, i32),
+) -> Result<MediaInfo> {
+    let mut info = probe_input(&Input::Sequence {
+        pattern: pattern.to_path_buf(),
+        first,
+        rate,
+    })?;
+    let secs = count as f64 * f64::from(rate.1) / f64::from(rate.0);
+    info.duration = Some(secs);
+    if let Some(v) = info.video.as_mut() {
+        v.frames = Some(count as i64);
+        v.duration_secs = Some(secs);
+        v.avg_frame_rate = rate;
+        v.r_frame_rate = rate;
+    }
+    Ok(info)
+}
+
+fn probe_input(source: &Input) -> Result<MediaInfo> {
+    let path = source.path();
+    let input = source.open()?;
+    let still = matches!(source, Input::File(_)) && image_format(input.format().name());
     let (duration, start_time) = unsafe {
         let ctx = input.as_ptr();
         let to_secs = |v: i64| opt_ts(v).map(|v| v as f64 / f64::from(ffmpeg::ffi::AV_TIME_BASE));
@@ -132,7 +170,7 @@ pub fn probe(path: &Path) -> Result<MediaInfo> {
                 let secs =
                     |t: i64| t as f64 * f64::from(tb.numerator()) / f64::from(tb.denominator());
                 let start = opt_ts(stream.start_time()).map(secs);
-                let reader = crate::decode::VideoReader::open(path).ok();
+                let reader = crate::decode::VideoReader::open_input(source).ok();
                 let first_frame_time = reader.as_ref().and_then(|r| r.first_pts()).map(secs);
                 let first = reader.as_ref().and_then(|r| r.first_props());
                 // Field order: the stream's, else the first frame's flags.
@@ -192,6 +230,7 @@ pub fn probe(path: &Path) -> Result<MediaInfo> {
                     rotation: crate::decode::stream_rotation(&params),
                     top_field_first,
                     transfer,
+                    still,
                 });
             }
             media::Type::Audio => {

@@ -56,7 +56,7 @@ pub fn violations(p: &Project) -> Vec<String> {
             match p.media(&c.media) {
                 None => v.push(format!("{}: unknown media {}", c.id, c.media)),
                 Some(m) => {
-                    let frames = p.media_frames(m);
+                    let frames = p.media_limit(m);
                     if c.video && m.info.video.is_none() {
                         v.push(format!("{}: video clip of audio-only media {}", c.id, m.id));
                     }

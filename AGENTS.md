@@ -174,6 +174,11 @@ vidcut undo                                 # works across separate runs
 - Track 1 ripples. Clips on other tracks follow the Track 1 picture under their first frame (spec D21); other tracks ripple only where Track 1 is empty (D22). Only Track 1 pushes clips: inserts elsewhere overwrite (D23).
 - Export, `frame` and the preview show the highest visible clip and mix every audible track with its fader. Mute and solo apply to the export too (p. 650).
 
+**Stills and image sequences (M9, spec D38, D39):**
+- `vidcut media add photo.jpg` adds a still. Edited without `--range` it lasts the project's still duration (5 s; `vidcut set --still-duration 3s`); a range or trim makes it up to 17 h 40 min long.
+- `vidcut media add renders/frame_000001.png --sequence [--fps 60]` adds the numbered files in a row around it as one clip (`frame_[000001-010560].png`), at the project's rate unless `--fps` is given. Without `--sequence` a numbered image is a still.
+- `media get` reports `still: true`, or `sequence: {pattern, first, count}`.
+
 **Bins (M6):** `vidcut bins` lists them. `bins add "Interviews/Day 1"` (parents too), `bins rename A B`, `bins remove A` (its media move up a level, deviation X6), `media add FILE --bin A`, `media move m1 m2 --bin A` (`""` is the top level). `media list` shows each item's bin.
 
 **JSON output:**

@@ -41,6 +41,13 @@ pub enum Request {
         /// Into this bin (default: the top level).
         #[serde(default)]
         bin: Option<String>,
+        /// Each path is a file of a numbered image sequence, added as one
+        /// clip: the files numbered in a row around it (p. 366).
+        #[serde(default)]
+        sequence: bool,
+        /// Frame rate of the image sequences (default: the project's).
+        #[serde(default)]
+        fps: Option<Rational>,
     },
     #[serde(rename = "media.list")]
     MediaList {},
@@ -928,6 +935,10 @@ pub struct ProjectSet {
     /// Record timecode of the first frame, e.g. `01:00:00:00`.
     #[serde(default)]
     pub start_tc: Option<TimeSpec>,
+    /// How long a still lasts when edited without a range, e.g. `5s`
+    /// (decision D38).
+    #[serde(default)]
+    pub still_duration: Option<TimeSpec>,
 }
 
 /// One value or a list (`"c1"` or `["c1", "c2"]`).

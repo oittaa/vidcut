@@ -14,6 +14,7 @@ pub mod preferences;
 pub mod preview;
 pub mod render;
 pub mod request;
+pub mod sequence;
 pub mod store;
 pub mod time;
 pub mod validate;
@@ -26,6 +27,8 @@ pub use store::Store;
 
 #[cfg(test)]
 mod analysis_tests;
+#[cfg(test)]
+mod images_tests;
 #[cfg(test)]
 mod ops_tests;
 #[cfg(test)]

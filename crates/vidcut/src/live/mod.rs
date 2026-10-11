@@ -1960,12 +1960,15 @@ impl Live {
         let mut at = 0;
         for mut piece in std::mem::take(&mut plan.video) {
             at += piece.frames();
+            // Pictures (stills, sequences) have no frames decoded ahead of
+            // others to lose at a cut.
             let render::VideoPiece::Source {
                 media,
                 path,
                 origin,
                 source_frame,
                 frames,
+                image: None,
             } = &mut piece
             else {
                 video.push(piece);
@@ -2000,6 +2003,7 @@ impl Live {
                         origin: 0.0,
                         source_frame: (n - total).max(0),
                         frames: total.min(n),
+                        image: None,
                     });
                 }
                 Some(_) => video.push(piece),
@@ -2063,6 +2067,7 @@ impl Live {
                     origin,
                     source_frame: end - frames,
                     frames,
+                    image: None,
                 };
                 std::fs::create_dir_all(&dir)
                     .map_err(|e| e.to_string())

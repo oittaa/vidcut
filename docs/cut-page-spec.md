@@ -53,6 +53,9 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
   - Ctrl+I, the Import Media button, or right-click > Import Media opens a file dialog with multi-select.
   - Import Media Folder imports a whole folder.
   - The first import into an empty project offers to change the project frame rate to match the media.
+- **Stills and image sequences (M9)** (pp. 114, 366, 1194):
+  - An image file (PNG, JPEG, TIFF, EXR, DPX, …) comes in as a still. Edited without a range or marks it lasts the standard still duration; its clips can be made up to 17 h 40 min long (D38).
+  - Numbered image files (renders, scans) can come in as one clip, an image sequence, at a frame rate (D39).
 - **Remove (v1)** (p. 654): Delete or Backspace, after a confirmation. Only the pool entry goes; files on disk stay.
 - **Views:**
   - **Thumbnail (v1)** (p. 664):
@@ -461,3 +464,11 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - **A clicked edit keeps its track:** an edit picked by clicking a clip's edge or a cut stays on that track. `,`/`.`, U, the Trim Editor (its labels and frames are that track's clips, whatever covers them) and Dynamic Trim work there. Dynamic Trim's Up/Down move along that track's edits.
   - **During Dynamic Trim:** `,` and `.` do nothing while it runs. Its pending trim is the one request K sends (D32).
 - **D37. The first video sets the format, without asking** (§3; Resolve offers it, p. 654). In a new project, the first media file with video sets the frame rate and the picture size as shown (D33), and the project keeps them from then on. Change them with `project.set` before clips are added. A dialog would stop scripts and agents, and the choice is easy to change afterwards.
+- **D38. Stills** (§3; pp. 114, 1194). The manual gives two lengths for a still: the standard still duration, 5 s by default (p. 114), and "10 seconds" for imported stills (p. 1194). vidcut follows the preference's 5 s.
+  - A still edited without a range or marks lasts the project's still duration (`project.set still_duration`, deviation X16). The Viewer shows it as a clip that long.
+  - Its clips can be made longer by a range or a trim, up to 17 h 40 min (p. 1194). Every frame shows the one picture, so a still has no frame rate, and the first video still sets the project format (D37).
+  - Media that are images: what FFmpeg reads as one (its `image2` and `*_pipe` demuxers).
+- **D39. Image sequences** (§3; p. 366). Numbered files (`frame_000001.png`, `frame_000002.png`, …) come in as one clip with `media.add sequence`: the files numbered in a row around each file given, with no number missing. Its frame rate is the project's unless `fps` says otherwise (Resolve takes it from Clip Attributes).
+  - Numbers zero-padded to a width (`%06d`) or not (`%d`) both work; the width shows in the file names.
+  - The pool calls it as Resolve does: `frame_[000001-000120].png`.
+  - Without `sequence`, a numbered image is a still (deviation X17).

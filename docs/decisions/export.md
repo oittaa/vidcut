@@ -43,6 +43,10 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
 - Other rates: nearest-frame sampling with ties going to the later frame.
 - Example: a 25 fps clip on a 30 fps timeline shows source frames `0 1 2 3 3 4 5 6 7 8 8 9…`, 5 source frames per 6 output frames.
 
+**Stills and image sequences (M9):**
+- A still's one picture is decoded once and shows for every frame of its pieces. It is never sought: an image file has nothing past its picture.
+- A sequence is read by FFmpeg's `image2` demuxer (`decode::Input::Sequence`): picture `k` has timestamp `k` in a time base of one frame at the sequence's rate, so the rule above picks pictures as from a video file, frame for frame at the project's rate and nearest-frame otherwise.
+
 **Preview vs export:**
 - Preview (mpv EDL, see [preview.md](preview.md)) follows the same rule through the half-frame bias in segment starts.
 - At mismatched rates, mpv's 5 ms hr-seek tolerance can make a paused preview differ from the export by one frame at exact ties. Accepted.

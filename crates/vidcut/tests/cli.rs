@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde_json::Value;
-use vidcut_av::fixture::{self, Container, FixtureSpec, Picture, Sound, VideoCodec};
+use vidcut_av::fixture::{self, Container, FixtureSpec, ImageSpec, Picture, Sound, VideoCodec};
 
 /// A scratch directory with its own XDG state (undo history) dir.
 struct Sandbox {
@@ -881,4 +881,59 @@ fn scene_cuts_split_encoded_shots_exactly() {
         starts,
         vec![(0, 10), (20, 30), (50, 60), (80, 90), (110, 120)]
     );
+}
+
+#[test]
+fn stills_and_sequences_edit_and_export() {
+    // M9: a still and a numbered image sequence, added, edited and
+    // exported (pp. 114, 366, 1194; decisions D38, D39).
+    let sb = Sandbox::new("images");
+    let still = fixture::ensure_images(&ImageSpec::still(77, 320, 180, "png")).unwrap();
+    let seq = fixture::ensure_images(&ImageSpec::sequence(1, 60, 6, 320, 180)).unwrap();
+    sb.cmd(&["new"]).arg(sb.project()).output().unwrap();
+    // The still leaves the format to the sequence, which brings its rate.
+    sb.ok(&["media", "add", s(&still[0])]);
+    sb.ok(&["media", "add", s(&seq[10]), "--sequence", "--fps", "25"]);
+    let info = sb.ok(&["info"]);
+    assert_eq!(info["result"]["settings"]["fps"], "25", "{info}");
+    let m = sb.ok(&["media", "show", "m2"])["result"].clone();
+    assert_eq!(m["name"], "img_[000001-000060].png");
+    assert_eq!(
+        (&m["frames"], &m["sequence"]["count"]),
+        (&60.into(), &60.into())
+    );
+    let m = sb.ok(&["media", "show", "m1"])["result"].clone();
+    assert_eq!(
+        (&m["still"], &m["frames"]),
+        (&true.into(), &125.into()),
+        "5 s"
+    );
+    sb.ok(&["set", "--still-duration", "2s"]);
+    sb.ok(&["edit", "append", "m1"]);
+    sb.ok(&["edit", "append", "m2", "--range", "10f..+20f"]);
+    sb.ok(&["edit", "append", "m1", "--range", "1h..+5f"]);
+    let out = sb.dir.join("out.mkv");
+    sb.ok(&[
+        "export",
+        s(&out),
+        "--set",
+        "video.quality=0",
+        "--set",
+        "video.speed=ultrafast",
+        "--encoder",
+        "cpu",
+    ]);
+    let mut want = vec![Some(77); 50];
+    want.extend((10..30).map(Some));
+    want.extend([Some(77); 5]);
+    assert_eq!(barcodes(&out), want);
+    // A file of the sequence without --sequence is a still of its own.
+    let r = sb.ok(&["media", "add", s(&seq[0])]);
+    assert_eq!(r["changes"]["created"], serde_json::json!(["m3"]));
+    // --fps is for sequences (a usage error, before any request).
+    let out = sb
+        .cmd(&["media", "add", s(&seq[0]), "--fps", "30"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
 }

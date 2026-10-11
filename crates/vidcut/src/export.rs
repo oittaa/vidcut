@@ -556,6 +556,7 @@ pub fn frame(
                 origin: v.first_pts,
                 source_frame: t,
                 frames: 1,
+                image: p.media_image(id),
             };
             (piece, v.display_size(), t)
         }

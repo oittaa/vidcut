@@ -6,7 +6,7 @@
 //! into `target` (see the time map), so that rounding in timestamps never selects
 //! the neighboring frame.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, codec, filter, format, frame, media, software::scaling};
@@ -82,9 +82,79 @@ where
     drain(decoder, frame)
 }
 
+/// Where pictures come from: a media file, or the numbered files of an
+/// image sequence, which FFmpeg's image2 demuxer reads as one stream:
+/// picture `k` at `k / rate`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Input {
+    File(PathBuf),
+    /// `pattern` names the files (image2's printf form, `frame_%06d.png`)
+    /// from the number `first` on; `rate` is (numerator, denominator).
+    Sequence {
+        pattern: PathBuf,
+        first: u64,
+        rate: (i32, i32),
+    },
+}
+
+impl Input {
+    /// The file, or the sequence's pattern.
+    pub fn path(&self) -> &Path {
+        match self {
+            Input::File(p) => p,
+            Input::Sequence { pattern, .. } => pattern,
+        }
+    }
+
+    /// Opens it for demuxing.
+    pub fn open(&self) -> Result<format::context::Input> {
+        crate::init();
+        match self {
+            Input::File(p) => format::input(p).ctx(|| format!("opening {}", p.display())),
+            Input::Sequence {
+                pattern,
+                first,
+                rate,
+            } => open_sequence(pattern, *first, *rate),
+        }
+    }
+}
+
+fn open_sequence(pattern: &Path, first: u64, rate: (i32, i32)) -> Result<format::context::Input> {
+    let what = || format!("opening {}", pattern.display());
+    let mut options = ffmpeg::Dictionary::new();
+    options.set("pattern_type", "sequence");
+    options.set("start_number", &first.to_string());
+    options.set("framerate", &format!("{}/{}", rate.0, rate.1));
+    let path = std::ffi::CString::new(pattern.as_os_str().as_encoded_bytes())
+        .map_err(|_| Error::Invalid(format!("{}: a NUL in the name", pattern.display())))?;
+    unsafe {
+        let image2 = ffmpeg::ffi::av_find_input_format(c"image2".as_ptr());
+        let mut ctx = std::ptr::null_mut();
+        let mut opts = options.disown();
+        let ret = ffmpeg::ffi::avformat_open_input(&mut ctx, path.as_ptr(), image2, &mut opts);
+        drop(ffmpeg::Dictionary::own(opts));
+        if ret < 0 {
+            return Err(Error::Ffmpeg {
+                context: what(),
+                source: ffmpeg::Error::from(ret),
+            });
+        }
+        let ret = ffmpeg::ffi::avformat_find_stream_info(ctx, std::ptr::null_mut());
+        if ret < 0 {
+            ffmpeg::ffi::avformat_close_input(&mut ctx);
+            return Err(Error::Ffmpeg {
+                context: what(),
+                source: ffmpeg::Error::from(ret),
+            });
+        }
+        Ok(format::context::Input::wrap(ctx))
+    }
+}
+
 /// Decodes the primary video stream of a file in presentation order.
 pub struct VideoReader {
-    path: std::path::PathBuf,
+    source: Input,
     input: format::context::Input,
     stream: usize,
     time_base: ffmpeg::Rational,
@@ -272,7 +342,11 @@ pub fn stream_rotation(params: &codec::Parameters) -> u16 {
 
 impl VideoReader {
     pub fn open(path: &Path) -> Result<Self> {
-        let mut reader = Self::open_raw(path)?;
+        Self::open_input(&Input::File(path.to_path_buf()))
+    }
+
+    pub fn open_input(source: &Input) -> Result<Self> {
+        let mut reader = Self::open_raw(source)?;
         // Learn `o` up front; keep the frame as look-ahead so reading from the
         // start still returns it.
         reader.pending = reader.decode_one()?;
@@ -301,9 +375,9 @@ impl VideoReader {
         Ok(reader)
     }
 
-    fn open_raw(path: &Path) -> Result<Self> {
-        crate::init();
-        let input = format::input(path).ctx(|| format!("opening {}", path.display()))?;
+    fn open_raw(source: &Input) -> Result<Self> {
+        let path = source.path();
+        let input = source.open()?;
         let stream = input
             .streams()
             .best(media::Type::Video)
@@ -327,7 +401,7 @@ impl VideoReader {
             .ctx(|| "opening video decoder".into())?;
         crate::export::audio::discard_others(&input, index);
         Ok(Self {
-            path: path.to_path_buf(),
+            source: source.clone(),
             input,
             stream: index,
             time_base,
@@ -349,8 +423,13 @@ impl VideoReader {
     }
 
     /// The file this reads.
+    /// The file, or the sequence's pattern.
     pub fn path(&self) -> &Path {
-        &self.path
+        self.source.path()
+    }
+
+    pub fn input(&self) -> &Input {
+        &self.source
     }
 
     /// Clockwise rotation (0, 90, 180 or 270) that shows the pictures upright.
@@ -475,7 +554,7 @@ impl VideoReader {
 
     /// Reopens the input at its very beginning.
     fn rewind(&mut self) -> Result<()> {
-        let fresh = Self::open_raw(&self.path)?;
+        let fresh = Self::open_raw(&self.source)?;
         self.input = fresh.input;
         self.decoder = fresh.decoder;
         self.draining = false;

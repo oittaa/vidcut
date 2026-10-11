@@ -51,6 +51,7 @@ pub fn render(
             path,
             origin,
             source_frame,
+            image,
             ..
         } => VideoPiece::Source {
             media: media.clone(),
@@ -58,6 +59,7 @@ pub fn render(
             origin: *origin,
             source_frame: source_frame + k,
             frames: 1,
+            image: image.clone(),
         },
         VideoPiece::Black { .. } => VideoPiece::Black { frames: 1 },
     };

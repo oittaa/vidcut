@@ -459,6 +459,144 @@ pub fn ensure_in(dir: &Path, spec: &FixtureSpec) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// Barcode pictures as image files: a still (one file) or a numbered
+/// sequence, in a folder of their own under the fixture cache.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ImageSpec {
+    pub width: u32,
+    pub height: u32,
+    /// Picture `k` shows the barcode `barcode + k`.
+    pub barcode: u32,
+    pub count: u32,
+    /// The first file's number, and the width numbers are zero-padded to
+    /// (0: not padded).
+    pub first: u64,
+    pub digits: usize,
+    /// `png` or `jpg`.
+    pub ext: &'static str,
+}
+
+impl ImageSpec {
+    /// One picture showing `barcode`.
+    pub fn still(barcode: u32, width: u32, height: u32, ext: &'static str) -> Self {
+        Self {
+            width,
+            height,
+            barcode,
+            count: 1,
+            first: 0,
+            digits: 0,
+            ext,
+        }
+    }
+
+    /// `count` pictures numbered from `first`, showing barcodes `0..count`.
+    pub fn sequence(first: u64, count: u32, digits: usize, width: u32, height: u32) -> Self {
+        Self {
+            width,
+            height,
+            barcode: 0,
+            count,
+            first,
+            digits,
+            ext: "png",
+        }
+    }
+
+    /// The name of picture `k`'s file: `img_<number>.<ext>`.
+    pub fn file_name(&self, k: u32) -> String {
+        let n = self.first + u64::from(k);
+        format!("img_{n:0width$}.{}", self.ext, width = self.digits)
+    }
+
+    fn folder_name(&self) -> String {
+        format!(
+            "images-{}x{}-b{}-n{}-f{}-d{}-{}",
+            self.width, self.height, self.barcode, self.count, self.first, self.digits, self.ext
+        )
+    }
+}
+
+/// Generates `spec`'s images (once; cached), returning their files in order.
+pub fn ensure_images(spec: &ImageSpec) -> Result<Vec<PathBuf>> {
+    crate::init();
+    let dir = crate::testdata::fixtures_dir()?.join(spec.folder_name());
+    let files = |dir: &Path| -> Vec<PathBuf> {
+        (0..spec.count)
+            .map(|k| dir.join(spec.file_name(k)))
+            .collect()
+    };
+    if dir.exists() {
+        return Ok(files(&dir));
+    }
+    // Into a folder of its own first, so an interrupted run leaves no
+    // half-made fixture that later runs would trust.
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = dir.with_file_name(format!(
+        ".{}.{}.{n}.part",
+        spec.folder_name(),
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&tmp)?;
+    let (w, h) = (spec.width as usize, spec.height as usize);
+    let mut luma = vec![0u8; w * h];
+    for (k, path) in files(&tmp).iter().enumerate() {
+        crate::barcode::paint(spec.barcode + k as u32, &mut luma, w, h, w);
+        let bytes = match spec.ext {
+            "jpg" => jpeg_gray(spec.width, spec.height, &luma)?,
+            _ => {
+                let rgba: Vec<u8> = luma.iter().flat_map(|&y| [y, y, y, 255]).collect();
+                crate::export::still::png_rgba(spec.width, spec.height, &rgba)?
+            }
+        };
+        std::fs::write(path, bytes)?;
+    }
+    match std::fs::rename(&tmp, &dir) {
+        Ok(()) => {}
+        // Another test made it meanwhile.
+        Err(_) if dir.exists() => {
+            let _ = std::fs::remove_dir_all(&tmp);
+        }
+        Err(e) => return Err(e.into()),
+    }
+    Ok(files(&dir))
+}
+
+/// A gray picture as a high-quality JPEG.
+fn jpeg_gray(width: u32, height: u32, luma: &[u8]) -> Result<Vec<u8>> {
+    let mut f = frame::Video::new(format::Pixel::YUVJ420P, width, height);
+    let (w, h) = (width as usize, height as usize);
+    let stride = f.stride(0);
+    for y in 0..h {
+        f.data_mut(0)[y * stride..y * stride + w].copy_from_slice(&luma[y * w..(y + 1) * w]);
+    }
+    for plane in [1, 2] {
+        f.data_mut(plane).fill(128);
+    }
+    f.set_pts(Some(0));
+    let codec = encoder::find_by_name("mjpeg")
+        .ok_or_else(|| Error::Invalid("this FFmpeg has no JPEG encoder".into()))?;
+    let mut ctx = codec::context::Context::new_with_codec(codec)
+        .encoder()
+        .video()
+        .ctx(|| "creating JPEG encoder".into())?;
+    ctx.set_width(width);
+    ctx.set_height(height);
+    ctx.set_format(format::Pixel::YUVJ420P);
+    ctx.set_time_base(ffmpeg::Rational(1, 25));
+    // Fixed quality 2 (of 31): fine enough for every barcode cell.
+    ctx.set_flags(codec::Flags::QSCALE);
+    unsafe { (*ctx.as_mut_ptr()).global_quality = 2 * ffmpeg::ffi::FF_QP2LAMBDA };
+    let mut enc = ctx.open_as(codec).ctx(|| "opening JPEG encoder".into())?;
+    enc.send_frame(&f).ctx(|| "encoding JPEG".into())?;
+    enc.send_eof().ctx(|| "encoding JPEG".into())?;
+    let mut packet = ffmpeg::Packet::empty();
+    enc.receive_packet(&mut packet)
+        .ctx(|| "encoding JPEG".into())?;
+    Ok(packet.data().unwrap_or_default().to_vec())
+}
+
 /// What [`spoil`] does to a packet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Spoil {

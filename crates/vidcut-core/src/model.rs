@@ -6,7 +6,7 @@
 //! frames at the project frame rate; `source_in` counts project frames from the
 //! media's first video frame.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -15,6 +15,10 @@ use crate::time::{Rational, TimeContext};
 
 /// Version of the project file format.
 pub const FORMAT_VERSION: u32 = 1;
+
+/// How long a still may last in the timeline, seconds: 17 h 40 min, as in
+/// Resolve (p. 1194).
+pub const STILL_LIMIT_SECS: f64 = 63_600.0;
 
 /// A whole project: one timeline (deviation X2) plus its media pool.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -52,6 +56,10 @@ pub struct Settings {
     pub start_tc: i64,
     /// Format not chosen yet: the first video media added sets fps and size.
     pub auto_format: bool,
+    /// How long a still lasts when edited without a range or marks, and
+    /// what the viewer shows of it, in seconds: Resolve's standard still
+    /// duration (p. 114; decision D38).
+    pub still_secs: f64,
 }
 
 impl Default for Settings {
@@ -65,6 +73,7 @@ impl Default for Settings {
             ripple_on: true,
             start_tc: 0,
             auto_format: true,
+            still_secs: 5.0,
         }
     }
 }
@@ -88,6 +97,74 @@ pub struct Media {
     /// The bin it is in (a path from [`Project::bins`]); empty: the top level.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub bin: String,
+    /// For a numbered image sequence, its files; `path` is the first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<ImageSequence>,
+}
+
+impl Media {
+    /// A single picture, shown for as long as its clips last.
+    pub fn is_still(&self) -> bool {
+        self.info.video.as_ref().is_some_and(|v| v.still)
+    }
+
+    /// The file of picture `k` of an image sequence.
+    pub fn sequence_file(&self, k: u64) -> Option<PathBuf> {
+        let s = self.sequence.as_ref()?;
+        Some(s.file(self.path.parent().unwrap_or(Path::new("")), k))
+    }
+}
+
+/// Numbered image files making one clip (p. 366): the pictures of a render
+/// or a scan, one file per frame.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+pub struct ImageSequence {
+    /// The files' name with the number as FFmpeg's image2 demuxer reads it:
+    /// `%06d` for six zero-padded digits, `%d` for unpadded ones, `%%` for
+    /// a percent sign (`frame_%06d.png`).
+    pub pattern: String,
+    /// The first file's number, and how many files follow in a row.
+    pub first: u64,
+    pub count: u64,
+}
+
+impl ImageSequence {
+    /// The pattern with its number written by `number` (given the padded
+    /// width, 0 for none).
+    fn fill(&self, number: impl Fn(usize) -> String) -> String {
+        let mut out = String::with_capacity(self.pattern.len() + 16);
+        let mut rest = self.pattern.as_str();
+        while let Some(i) = rest.find('%') {
+            out.push_str(&rest[..i]);
+            rest = &rest[i + 1..];
+            if let Some(r) = rest.strip_prefix('%') {
+                out.push('%');
+                rest = r;
+                continue;
+            }
+            let digits = rest.find('d').unwrap_or(0);
+            out.push_str(&number(rest[..digits].parse().unwrap_or(0)));
+            rest = &rest[(digits + 1).min(rest.len())..];
+        }
+        out.push_str(rest);
+        out
+    }
+
+    /// The name of the file numbered `n`.
+    pub fn name(&self, n: u64) -> String {
+        self.fill(|w| format!("{n:0w$}"))
+    }
+
+    /// The pool's name for it, as Resolve shows one: `frame_[000-119].png`.
+    pub fn display(&self) -> String {
+        let last = self.first + self.count.saturating_sub(1);
+        self.fill(|w| format!("[{:0w$}-{last:0w$}]", self.first))
+    }
+
+    /// Picture `k`'s file, in `dir`.
+    pub fn file(&self, dir: &Path, k: u64) -> PathBuf {
+        dir.join(self.name(self.first + k))
+    }
 }
 
 /// What the media layer found out about a file (stored so headless edits never
@@ -127,6 +204,10 @@ pub struct VideoInfo {
     pub fields: Option<FieldOrder>,
     /// The HDR transfer; `None` for SDR video.
     pub hdr: Option<Hdr>,
+    /// A single picture (a still image file): it lasts as long as an edit
+    /// makes it, and `fps` and `duration` mean nothing.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub still: bool,
 }
 
 impl VideoInfo {
@@ -389,15 +470,34 @@ impl Project {
     }
 
     /// Frames of `media` available from its first video frame (or first audio
-    /// sample for audio-only media), at the project frame rate. A frame counts
-    /// if it is at least 95% present, so container timestamp rounding (1 ms in
-    /// Matroska) doesn't lose the last frame.
+    /// sample for audio-only media), at the project frame rate: what an edit
+    /// takes without a range or marks, and what the viewer shows. A frame
+    /// counts if it is at least 95% present, so container timestamp rounding
+    /// (1 ms in Matroska) doesn't lose the last frame. A still lasts the
+    /// project's still duration here (p. 114), though a clip may make it
+    /// longer ([`media_limit`](Self::media_limit)).
     pub fn media_frames(&self, media: &Media) -> i64 {
         let secs = match (&media.info.video, media.info.audio.first()) {
+            (Some(v), _) if v.still => self.settings.still_secs,
             (Some(v), _) => v.duration,
             (None, Some(a)) => a.duration,
             (None, None) => 0.0,
         };
+        self.frames_in(secs)
+    }
+
+    /// The source frames clips of `media` may use: [`media_frames`]
+    /// (Self::media_frames), or for a still up to 17 h 40 min (p. 1194).
+    pub fn media_limit(&self, media: &Media) -> i64 {
+        if media.is_still() {
+            self.frames_in(STILL_LIMIT_SECS)
+        } else {
+            self.media_frames(media)
+        }
+    }
+
+    /// Whole frames in `secs` at the project rate (95% of a frame counts).
+    fn frames_in(&self, secs: f64) -> i64 {
         (secs * self.settings.fps.as_f64() + 0.05).floor().max(0.0) as i64
     }
 

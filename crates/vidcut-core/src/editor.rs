@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 
 use crate::analysis::{self, AudioLevels, Loudness, PictureStats, SilenceSettings, Span};
 use crate::error::{Error, Result};
-use crate::model::{Clip, ClipAudio, Media, MediaInfo, Project, VideoInfo};
+use crate::model::{Clip, ClipAudio, ImageSequence, Media, MediaInfo, Project, VideoInfo};
 use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
 use crate::render::RenderPlan;
@@ -22,17 +22,24 @@ use crate::validate;
 /// A probed media file, as the media layer reports it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProbedMedia {
-    /// Canonical absolute path.
+    /// Canonical absolute path (an image sequence's first file).
     pub path: PathBuf,
     pub size: u64,
     pub mtime_ns: i64,
     pub info: MediaInfo,
+    /// For an image sequence, its files.
+    pub sequence: Option<ImageSequence>,
 }
 
 /// What the editor needs from the outside world.
 pub trait Env {
     /// Probes a media file.
     fn probe(&self, path: &Path) -> Result<ProbedMedia>;
+
+    /// Probes the numbered image sequence `path` is a file of
+    /// ([`sequence::find`](crate::sequence::find)), its pictures shown at
+    /// `rate`.
+    fn probe_sequence(&self, path: &Path, rate: Rational) -> Result<ProbedMedia>;
 
     /// Files named `name` in `dirs` or their subfolders, nearest first: how
     /// an import finds media that moved (Resolve searches subfolders too,
@@ -412,10 +419,28 @@ fn mutate(
             project_set(p, set)?;
             Value::Null
         }
-        Request::MediaAdd { paths, bin } => {
+        Request::MediaAdd {
+            paths,
+            bin,
+            sequence,
+            fps,
+        } => {
+            if fps.is_some() && !sequence {
+                return Err(Error::usage(
+                    "fps is the frame rate of image sequences: add them with sequence",
+                ));
+            }
             let mut ids = Vec::new();
             for path in paths {
-                ids.push(add_media(p, env.probe(path)?));
+                let probed = match sequence {
+                    true => env.probe_sequence(path, fps.unwrap_or(p.settings.fps))?,
+                    false => env.probe(path)?,
+                };
+                // Several files of one sequence make one clip.
+                let id = add_media(p, probed);
+                if !ids.contains(&id) {
+                    ids.push(id);
+                }
             }
             if let Some(bin) = bin {
                 ops::move_media(p, &ids, bin)?;
@@ -461,16 +486,24 @@ fn mutate(
             Value::Null
         }
         Request::MediaRelink { media, path } => {
-            let probed = env.probe(path)?;
+            let old = p
+                .media(media)
+                .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+            // A sequence stays a sequence at its rate.
+            let probed = match (&old.sequence, &old.info.video) {
+                (Some(_), Some(v)) => env.probe_sequence(path, v.fps)?,
+                _ => env.probe(path)?,
+            };
             let m = p
                 .media
                 .iter_mut()
                 .find(|m| &m.id == media)
-                .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+                .expect("found above");
             m.path = probed.path;
             m.size = probed.size;
             m.mtime_ns = probed.mtime_ns;
             m.info = probed.info;
+            m.sequence = probed.sequence;
             Value::Null
         }
         Request::MediaMarksSet {
@@ -903,11 +936,18 @@ fn mutate(
 
 /// Adds probed media to the pool (or finds it there); returns its id.
 fn add_media(p: &mut Project, probed: ProbedMedia) -> String {
-    if let Some(existing) = p.media.iter().find(|m| m.path == probed.path) {
+    // The same file is the same media, unless one is a still and the other
+    // the sequence it starts.
+    if let Some(existing) = p
+        .media
+        .iter()
+        .find(|m| m.path == probed.path && m.sequence == probed.sequence)
+    {
         return existing.id.clone();
     }
+    // A still has no frame rate to give, and its size is a photo's.
     if p.settings.auto_format
-        && let Some(v) = &probed.info.video
+        && let Some(v) = probed.info.video.as_ref().filter(|v| !v.still)
     {
         // The first video sets the project format, without asking as the
         // Cut page does (p. 654; decision D37).
@@ -915,11 +955,14 @@ fn add_media(p: &mut Project, probed: ProbedMedia) -> String {
         adopt_size(p, v);
     }
     let id = p.alloc_media_id();
-    let name = probed
-        .path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| id.clone());
+    let name = match &probed.sequence {
+        Some(s) => s.display(),
+        None => probed
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| id.clone()),
+    };
     p.media.push(Media {
         id: id.clone(),
         path: probed.path,
@@ -929,6 +972,7 @@ fn add_media(p: &mut Project, probed: ProbedMedia) -> String {
         info: probed.info,
         marks: Default::default(),
         bin: String::new(),
+        sequence: probed.sequence,
     });
     id
 }
@@ -1103,7 +1147,7 @@ fn import_timeline(
     let mut clips = Vec::new();
     for c in &t.clips {
         let m = p.media(&ids[&c.path]).expect("added").clone();
-        let frames = p.media_frames(&m);
+        let frames = p.media_limit(&m);
         let label = if c.name.is_empty() { &m.name } else { &c.name };
         let mut start = offset + conv(c.start);
         let end = offset + conv(c.end());
@@ -1268,6 +1312,19 @@ fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
             ..p.time_context(None)
         };
         p.settings.start_tc = c.resolve(tc)?;
+    }
+    if let Some(d) = &set.still_duration {
+        let c = TimeContext {
+            start_tc: 0,
+            ..p.time_context(None)
+        };
+        let secs = p.settings.fps.frames_to_secs(c.resolve(d)?);
+        if !(secs > 0.0 && secs <= crate::model::STILL_LIMIT_SECS) {
+            return Err(Error::invalid(
+                "a still lasts at least a frame and at most 17 h 40 min",
+            ));
+        }
+        p.settings.still_secs = secs;
     }
     Ok(())
 }
@@ -1666,6 +1723,16 @@ fn media_json(p: &Project, m: &Media) -> Value {
     }
     if !m.bin.is_empty() {
         v["bin"] = json!(m.bin);
+    }
+    // A still lasts as long as clips make it; `frames` is the still duration.
+    if m.is_still() {
+        v["still"] = json!(true);
+        v["video"]["fps"] = Value::Null;
+    }
+    if let Some(s) = &m.sequence {
+        v["sequence"] = json!({
+            "pattern": s.pattern, "first": s.first, "count": s.count,
+        });
     }
     v
 }

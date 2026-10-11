@@ -828,3 +828,180 @@ fn edl_volume_follows_timeline_time() {
     assert!((one_s - 0.5).abs() < 0.05, "{one_s}");
     assert!((two_s - 0.125).abs() < 0.03, "{two_s}");
 }
+
+/// Exact concat-script durations: frame `k` starts at `round(k / fps)` µs.
+fn ffconcat(files: &[PathBuf], fps: f64) -> String {
+    let mut out = String::from("ffconcat version 1.0\n");
+    let at = |k: usize| (k as f64 * 1e6 / fps).round() as i64;
+    for (k, f) in files.iter().enumerate() {
+        out.push_str(&format!(
+            "file '{}'\noption framerate {fps}\nduration {}us\n",
+            f.display(),
+            at(k + 1) - at(k)
+        ));
+    }
+    out
+}
+
+/// M9 spike: ways for a still image and a numbered image sequence to play in
+/// the EDL frame-exactly. Barcode PNGs of a fixture's frames stand in for
+/// the images: "still.png" shows 77, frame_0000kk.png shows kk.
+#[test]
+fn edl_stills_and_image_sequences() {
+    let Some(mut p) = Probe::new(&[("demuxer-lavf-o", "safe=0"), ("mf-fps", "30")]) else {
+        return;
+    };
+    let src = source(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mkv,
+        320,
+        180,
+        (30, 1),
+        90,
+    ));
+    let f = 30.0;
+    let rate = vidcut_core::time::Rational::new(30, 1).unwrap();
+    let dir = std::env::temp_dir().join(format!("vidcut-edl-m9-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let png = |k: i64, out: &Path| {
+        let piece = vidcut_core::render::VideoPiece::Source {
+            media: "m".into(),
+            path: src.path.clone(),
+            origin: src.o,
+            source_frame: k,
+            frames: 1,
+            image: None,
+        };
+        vidcut_av::export::still::write_png(&piece, rate, 320, 180, out).unwrap();
+    };
+    let still = dir.join("still.png");
+    png(77, &still);
+    let frames: Vec<PathBuf> = (0..60)
+        .map(|k| {
+            let out = dir.join(format!("frame_{k:06}.png"));
+            png(k, &out);
+            out
+        })
+        .collect();
+    // Video A shows 0..30 at timeline 0..1 s; the middle part is 2 s (60
+    // frames); video B shows 30..60 from timeline 3 s.
+    let a = edl_entry(&src.path, src.o - 0.5 / f, 1.0, "");
+    let b = edl_entry(&src.path, src.o + 1.0 - 0.5 / f, 1.0, "");
+    // Prints what each frame showed, `!` for the wrong ones; returns how
+    // many were wrong.
+    let check = |p: &mut Probe, name: &str, middle: &str, want: &dyn Fn(u32) -> u32| {
+        let edl = write_edl(&format!("{name}.edl"), &format!("{a}{middle}{b}"));
+        p.load(edl.to_str().unwrap());
+        let mut report = Vec::new();
+        let mut wrong = 0;
+        for j in [29u32, 30, 31, 45, 59, 60, 61, 75, 89, 90, 91] {
+            p.seek(f64::from(j) / f);
+            let got = p.barcode();
+            let expect = match j {
+                0..30 => j,
+                30..90 => want(j - 30),
+                _ => j - 60,
+            };
+            wrong += usize::from(got != Some(expect));
+            report.push(format!(
+                "{j}:{}{}",
+                got.map_or("-".into(), |g| g.to_string()),
+                if got == Some(expect) { "" } else { "!" }
+            ));
+        }
+        eprintln!("{name}: {}", report.join(" "));
+        wrong
+    };
+    // Findings only (preview.md §11): a still as one entry shows the next
+    // clip past its first frame, and concat scripts don't seek reliably.
+    // E1: the still as one entry.
+    check(
+        &mut p,
+        "still-entry",
+        &edl_entry(&still, 0.0, 2.0, ""),
+        &|_| 77,
+    );
+    // E2: the still repeated once per frame by a concat script.
+    let script = dir.join("still.ffconcat");
+    std::fs::write(&script, ffconcat(&vec![still.clone(); 61], f)).unwrap();
+    check(
+        &mut p,
+        "still-concat",
+        &edl_entry(&script, -0.5 / f, 2.0, ""),
+        &|_| 77,
+    );
+    // E3: the sequence through a concat script, its frames 0..60.
+    let script = dir.join("seq.ffconcat");
+    std::fs::write(&script, ffconcat(&frames, f)).unwrap();
+    check(
+        &mut p,
+        "seq-concat",
+        &edl_entry(&script, -0.5 / f, 2.0, ""),
+        &|k| k,
+    );
+    // What preview relies on: image lists (mf://, at the timeline's rate)
+    // are exact for a sequence (E4), a still repeated (E5), and a sequence
+    // at another rate sampled frame by frame (E6).
+    // E4: the sequence through mpv's own image list (mf-fps 30).
+    let list = dir.join("seq.txt");
+    std::fs::write(
+        &list,
+        frames
+            .iter()
+            .map(|f| f.display().to_string())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .unwrap();
+    let mut wrong = check(
+        &mut p,
+        "seq-mf",
+        &edl_entry(
+            Path::new(&format!("mf://@{}", list.display())),
+            -0.5 / f,
+            2.0,
+            "",
+        ),
+        &|k| k,
+    );
+    // E5: the still through an image list repeating it once per frame.
+    let list = dir.join("still.txt");
+    std::fs::write(&list, vec![still.display().to_string(); 61].join("\n")).unwrap();
+    wrong += check(
+        &mut p,
+        "still-mf",
+        &edl_entry(
+            Path::new(&format!("mf://@{}", list.display())),
+            -0.5 / f,
+            2.0,
+            "",
+        ),
+        &|_| 77,
+    );
+    // E6: a 24 fps sequence on the 30 fps timeline: the list holds, for
+    // each timeline frame, the image the export's sampling rule picks
+    // (first source frame at or after the frame's time less half a frame).
+    let pick = |k: u32| ((f64::from(k) - 0.5) * 24.0 / 30.0).ceil().max(0.0) as usize;
+    let list = dir.join("seq24.txt");
+    std::fs::write(
+        &list,
+        (0..61)
+            .map(|k| frames[pick(k).min(59)].display().to_string())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .unwrap();
+    wrong += check(
+        &mut p,
+        "seq24-mf",
+        &edl_entry(
+            Path::new(&format!("mf://@{}", list.display())),
+            -0.5 / f,
+            2.0,
+            "",
+        ),
+        &|k| pick(k) as u32,
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(wrong, 0, "image lists show every frame exactly");
+}

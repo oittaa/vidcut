@@ -9,12 +9,12 @@ use vidcut_av::export::{
     self,
     encode::{Availability, EncoderStatus},
 };
-use vidcut_av::fixture::{self, AudioCodec, Container, FixtureSpec, Spoil, VideoCodec};
+use vidcut_av::fixture::{self, AudioCodec, Container, FixtureSpec, ImageSpec, Spoil, VideoCodec};
 use vidcut_core::export::{
     AudioCodec as ACodec, AudioSettings, Container as OutContainer, EncoderChoice, ExportSettings,
     VideoCodec as VCodec, VideoSettings,
 };
-use vidcut_core::render::{AudioPiece, RenderPlan, VideoPiece};
+use vidcut_core::render::{AudioPiece, Image, RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
 
 fn out_dir(name: &str) -> PathBuf {
@@ -47,6 +47,7 @@ fn v(s: &Src, source_frame: i64, frames: i64) -> VideoPiece {
         origin: s.origin,
         source_frame,
         frames,
+        image: None,
     }
 }
 
@@ -1144,4 +1145,93 @@ fn gpu_encoders_produce_valid_frame_exact_output() {
     }
     eprintln!("verified {tested} GPU encoder configurations");
     assert!(tested > 0, "no GPU encoder available");
+}
+
+/// A piece of image `path` (a still, or a sequence's first file).
+fn pictures(path: &Path, image: Image, source_frame: i64, frames: i64) -> VideoPiece {
+    VideoPiece::Source {
+        media: "m".into(),
+        path: path.to_path_buf(),
+        origin: 0.0,
+        source_frame,
+        frames,
+        image: Some(image),
+    }
+}
+
+#[test]
+fn stills_show_one_picture_for_as_long_as_they_last() {
+    // A still lasts as long as its clip (p. 1194), from any source frame:
+    // every frame is its one picture. PNG and JPEG alike.
+    let fps = Rational::new(30, 1).unwrap();
+    let png = fixture::ensure_images(&ImageSpec::still(77, 320, 180, "png")).unwrap();
+    let jpg = fixture::ensure_images(&ImageSpec::still(88, 640, 360, "jpg")).unwrap();
+    let info = vidcut_av::probe::probe(&png[0]).unwrap();
+    let v = info.video.unwrap();
+    assert!(v.still, "{}", info.format);
+    assert_eq!((v.width, v.height), (320, 180));
+    assert!(
+        vidcut_av::probe::probe(&jpg[0])
+            .unwrap()
+            .video
+            .unwrap()
+            .still
+    );
+    let p = plan(
+        fps,
+        320,
+        180,
+        vec![
+            pictures(&png[0], Image::Still, 0, 20),
+            pictures(&jpg[0], Image::Still, 4000, 10),
+            pictures(&png[0], Image::Still, 90_000, 5),
+        ],
+        vec![],
+    );
+    let out = out_dir("stills").join("out.mkv");
+    render(&p, &lossless(), &out);
+    let mut want = vec![Some(77); 20];
+    want.extend([Some(88); 10]);
+    want.extend([Some(77); 5]);
+    assert_eq!(barcodes(&out), want);
+}
+
+#[test]
+fn sequences_play_their_pictures_at_their_rate() {
+    // Numbered images are one clip (p. 366) at a rate: here 30 fps on a 30
+    // fps timeline, frame for frame, then 24 fps, by the sampling rule.
+    let fps = Rational::new(30, 1).unwrap();
+    let files = fixture::ensure_images(&ImageSpec::sequence(1000, 60, 4, 320, 180)).unwrap();
+    let pattern = files[0].with_file_name("img_%04d.png");
+    let at = |rate: i64| Image::Sequence {
+        pattern: pattern.clone(),
+        first: 1000,
+        count: 60,
+        rate: Rational::new(rate, 1).unwrap(),
+    };
+    let info = vidcut_av::probe::probe_sequence(&pattern, 1000, 60, (24, 1)).unwrap();
+    let v = info.video.unwrap();
+    assert!(!v.still);
+    assert_eq!((v.frames, v.avg_frame_rate), (Some(60), (24, 1)));
+    assert!((v.duration_secs.unwrap() - 2.5).abs() < 1e-9);
+    let p = plan(
+        fps,
+        320,
+        180,
+        vec![
+            pictures(&files[0], at(30), 5, 20),
+            pictures(&files[0], at(24), 10, 30),
+        ],
+        vec![],
+    );
+    let out = out_dir("sequences").join("out.mkv");
+    render(&p, &lossless(), &out);
+    let mut want: Vec<Option<u32>> = (5..25).map(Some).collect();
+    // Timeline frame j of a 30 fps project shows the first 24 fps picture
+    // at or after j/30 less half a frame.
+    want.extend((10..40).map(|j| {
+        let t = (f64::from(j) - 0.5) / 30.0;
+        Some((t * 24.0 - 1e-6).ceil() as u32)
+    }));
+    assert_eq!(barcodes(&out), want);
 }

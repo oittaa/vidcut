@@ -49,6 +49,7 @@ fn patches_are_exact_lossless_frames_from_zero() {
         origin: 0.0,
         source_frame: 87,
         frames: 3,
+        image: None,
     };
     let dir = std::env::temp_dir().join(format!("vidcut-tails-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
