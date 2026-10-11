@@ -111,6 +111,28 @@ fn sort_label(s: PoolSort) -> &'static str {
     }
 }
 
+/// The pool's mark for a media item's proxy: badge text, its color and a
+/// tooltip. None without a proxy. A proxy made from an older version of the
+/// file is out of date, and the original plays instead.
+fn proxy_state(m: &Media) -> Option<(&'static str, Color32, String)> {
+    let p = m.proxy.as_ref()?;
+    Some(if m.fresh_proxy().is_some() {
+        (
+            "PROXY",
+            theme::OK,
+            format!("Proxy: {}x{} (plays when Proxies is on)", p.width, p.height),
+        )
+    } else {
+        (
+            "OLD PROXY",
+            theme::ERROR,
+            "The proxy is out of date: the file changed after it was made, so \
+             the original plays. Generate Proxy makes a new one."
+                .to_string(),
+        )
+    })
+}
+
 impl Workspace {
     pub(super) fn pool_panel(&mut self, ui: &mut egui::Ui) {
         self.hover = None;
@@ -566,6 +588,17 @@ impl Workspace {
             border,
             egui::StrokeKind::Inside,
         );
+        let proxy = proxy_state(m);
+        if let Some((text, color, _)) = proxy {
+            let galley =
+                painter.layout_no_wrap(text.to_string(), egui::FontId::proportional(10.0), color);
+            let badge = Rect::from_min_size(
+                Pos2::new(picture.right() - galley.size().x - 8.0, picture.top() + 3.0),
+                galley.size() + vec2(6.0, 2.0),
+            );
+            painter.rect_filled(badge, CornerRadius::same(2), theme::PANEL_DARK);
+            painter.galley(badge.min + vec2(3.0, 1.0), galley, color);
+        }
         let label = |pos: Pos2, text: String, color: Color32| {
             painter.text(
                 pos,
@@ -589,9 +622,10 @@ impl Workspace {
             theme::TEXT_DIM,
         );
         let resp = resp.on_hover_text(format!(
-            "{}\n{}\nI/O while hovering marks the clip; double-click opens it",
+            "{}\n{}\n{}I/O while hovering marks the clip; double-click opens it",
             m.name,
-            m.path.display()
+            m.path.display(),
+            proxy.map_or(String::new(), |(_, _, tip)| format!("{tip}\n")),
         ));
         self.media_interaction(&resp, m);
     }
@@ -599,10 +633,18 @@ impl Workspace {
     fn list(&mut self, ui: &mut egui::Ui, p: &Project, folders: &[String], media: &[Media]) {
         egui::Grid::new("pool-list")
             .striped(true)
-            .num_columns(6)
+            .num_columns(7)
             .spacing(vec2(12.0, 4.0))
             .show(ui, |ui| {
-                for h in ["Name", "Duration", "Resolution", "FPS", "Codec", "Audio"] {
+                for h in [
+                    "Name",
+                    "Duration",
+                    "Resolution",
+                    "FPS",
+                    "Codec",
+                    "Audio",
+                    "Proxy",
+                ] {
                     ui.label(dim(h));
                 }
                 ui.end_row();
@@ -617,7 +659,7 @@ impl Workspace {
                     self.bin_interaction(&r, b);
                     let count = p.media.iter().filter(|m| within(&m.bin, b)).count();
                     ui.label(dim(format!("{count} clip(s)")));
-                    for _ in 0..4 {
+                    for _ in 0..5 {
                         ui.label("");
                     }
                     ui.end_row();
@@ -647,6 +689,20 @@ impl Workspace {
                         Some(a) => format!("{} {} ch", a.codec, a.channels),
                         None => "none".into(),
                     });
+                    match (proxy_state(m), &m.proxy) {
+                        (Some((_, color, tip)), Some(p)) => {
+                            let text = if m.fresh_proxy().is_some() {
+                                format!("{}x{}", p.width, p.height)
+                            } else {
+                                "out of date".into()
+                            };
+                            ui.label(RichText::new(text).color(color))
+                                .on_hover_text(tip);
+                        }
+                        _ => {
+                            ui.label("-");
+                        }
+                    }
                     ui.end_row();
                 }
             });
