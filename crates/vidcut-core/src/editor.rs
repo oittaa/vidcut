@@ -949,8 +949,8 @@ fn add_media(p: &mut Project, probed: ProbedMedia) -> String {
     if p.settings.auto_format
         && let Some(v) = probed.info.video.as_ref().filter(|v| !v.still)
     {
-        // The first video sets the project format, without asking as the
-        // Cut page does (p. 654; decision D37).
+        // The first video sets the project format, with no prompt (D37).
+        // Resolve offers a format change on the first import (p. 654).
         p.settings.fps = v.fps;
         adopt_size(p, v);
     }
