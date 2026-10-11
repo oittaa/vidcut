@@ -13,20 +13,31 @@ use vidcut_core::time::Rational;
 
 use super::workspace::{Workspace, dim};
 
-/// What the file dialog offers.
-pub(super) const MEDIA_TYPES: &[&str] = &[
+/// Video and audio files.
+const MEDIA_TYPES: &[&str] = &[
     "mp4", "mov", "mkv", "webm", "avi", "mxf", "m4v", "ts", "mts", "m2ts", "mpg", "wav", "flac",
     "mp3", "m4a", "aac", "ogg", "opus",
 ];
 
 /// Image files: stills, or the frames of a sequence.
-pub(super) const IMAGE_TYPES: &[&str] = &[
+const IMAGE_TYPES: &[&str] = &[
     "png", "jpg", "jpeg", "tif", "tiff", "exr", "dpx", "tga", "bmp", "webp",
 ];
 
 /// Image types that are frames of renders and scans: numbered ones are
 /// offered as sequences first. (Numbered JPEGs are usually photos.)
 const FRAME_TYPES: &[&str] = &["png", "tif", "tiff", "exr", "dpx", "tga", "bmp"];
+
+/// The file dialog's filters. The first one, which the dialog opens with,
+/// shows everything vidcut imports: pictures hidden behind a second filter
+/// made a folder of frames look empty.
+fn filters() -> [(&'static str, Vec<&'static str>); 3] {
+    [
+        ("all media", [MEDIA_TYPES, IMAGE_TYPES].concat()),
+        ("video and audio", MEDIA_TYPES.to_vec()),
+        ("images", IMAGE_TYPES.to_vec()),
+    ]
+}
 
 fn extension(path: &Path) -> String {
     path.extension()
@@ -190,10 +201,12 @@ impl Workspace {
             self.import.ctx.clone(),
         );
         std::thread::spawn(move || {
-            let files = dialogs.pick_files(
-                "Import Media",
-                &[("media", MEDIA_TYPES), ("images", IMAGE_TYPES)],
-            );
+            let filters = filters();
+            let filters: Vec<(&str, &[&str])> = filters
+                .iter()
+                .map(|(name, types)| (*name, types.as_slice()))
+                .collect();
+            let files = dialogs.pick_files("Import Media", &filters);
             *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some((files, bin));
             if let Some(ctx) = ctx {
                 ctx.request_repaint();
@@ -298,6 +311,14 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_dialog_opens_showing_every_importable_file() {
+        let [(_, first), ..] = filters();
+        for ext in MEDIA_TYPES.iter().chain(IMAGE_TYPES) {
+            assert!(first.contains(ext), "{ext}");
+        }
+    }
 
     #[test]
     fn numbered_images_make_runs_and_the_rest_stay() {
