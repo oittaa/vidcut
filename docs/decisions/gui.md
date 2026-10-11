@@ -148,6 +148,7 @@ A seek or load ("motion") is shown after two steps:
 
 **Gestures are pure functions** (`gui/timeline/geometry.rs`, `gesture.rs`):
 - What the pointer is over picks the operation: edge, edit center, slip handle, audio edit, body.
+- A click on the audio edit selects that J/L handle. `,` and `.` then send `edit.audio_roll` for its offset (spec D20).
 - While dragging, a `Preview` says what the release would do. The timeline draws it: the target, the moved block, the snap line, a tooltip.
 - The release sends that one request. Scrubs only seek.
 - **Clock.** Gesture timing (the 0.8 s hover, Safe Edit's 0.6 s) uses egui's clock, so tests drive it.

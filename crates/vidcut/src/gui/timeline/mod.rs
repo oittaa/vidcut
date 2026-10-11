@@ -15,7 +15,7 @@ use std::time::Instant;
 use eframe::egui::{self, Align2, Color32, FontId, Key, Pos2, Rect, RichText, Sense, pos2, vec2};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use vidcut_core::model::Project;
+use vidcut_core::model::{Project, Track};
 use vidcut_core::ops::{self, Edge, MAIN};
 
 use crate::gui::theme;
@@ -32,8 +32,11 @@ pub enum Side {
     Out,
     /// The incoming clip's In.
     In,
-    /// Both: a roll.
+    /// Both: a roll of the picture cut.
     Both,
+    /// The J/L handle: the audio edit (D20).
+    /// `EditSel::at` is where that audio edit sits.
+    Audio,
 }
 
 /// A selected edit point (keyboard trimming with `,` and `.`), on the
@@ -43,6 +46,29 @@ pub struct EditSel {
     pub at: i64,
     pub side: Side,
     pub track: TrackRef,
+}
+
+/// Outgoing clip of the audio edit at timeline frame `at` (D14): its audio
+/// ends there, and the next clip has audio and starts where the picture ends.
+pub(crate) fn audio_edit_outgoing(t: &Track, at: i64) -> Option<String> {
+    t.clips.windows(2).find_map(|w| {
+        let (a, b) = (&w[0], &w[1]);
+        let tail = a.audio.as_ref()?.tail;
+        (a.end() == b.start && b.audio.is_some() && a.end() + tail == at).then(|| a.id.clone())
+    })
+}
+
+/// Timeline frame of the audio edit on the picture cut at `picture`.
+/// `picture` itself when the clips that meet there have no audio.
+pub(crate) fn audio_at_cut(t: &Track, picture: i64) -> i64 {
+    t.clips
+        .windows(2)
+        .find_map(|w| {
+            let (a, b) = (&w[0], &w[1]);
+            (a.end() == picture && b.start == picture)
+                .then(|| a.audio.as_ref().map_or(picture, |x| a.end() + x.tail))
+        })
+        .unwrap_or(picture)
 }
 
 /// A track by its id (`V2`, `A1`), small enough to keep selections `Copy`.
@@ -398,10 +424,16 @@ impl Workspace {
                 let (a, b) = match e.side {
                     Side::Out => (x - 6.0, x),
                     Side::In => (x, x + 6.0),
-                    Side::Both => (x - 4.0, x + 4.0),
+                    Side::Both | Side::Audio => (x - 4.0, x + 4.0),
+                };
+                // The J/L handle lives in the audio band (D20).
+                let y = if e.side == Side::Audio {
+                    egui::Rangef::new(v1.rect.audio_top, v1.rect.rect.bottom())
+                } else {
+                    v1.rect.rect.y_range()
                 };
                 painter.rect_filled(
-                    Rect::from_x_y_ranges(a..=b, v1.rect.rect.y_range()),
+                    Rect::from_x_y_ranges(a..=b, y),
                     0.0,
                     Color32::from_rgb(90, 200, 90),
                 );
@@ -1044,7 +1076,20 @@ impl Workspace {
                         });
                     }
                 }
-                Hit::AudioEdit { .. } => {}
+                // The J/L handle is the audio edit (D20). The selection sits
+                // on that offset, so `,` and `.` move the audio.
+                Hit::AudioEdit { outgoing, .. } => {
+                    if let (Some(c), Some(track)) =
+                        (p.clip(outgoing), TrackRef::of_clip(p, outgoing))
+                    {
+                        let at = c.end() + c.audio.as_ref().map_or(0, |a| a.tail);
+                        self.timeline.edit = Some(EditSel {
+                            at,
+                            side: Side::Audio,
+                            track,
+                        });
+                    }
+                }
                 Hit::Empty => {
                     if !mods.command {
                         self.timeline.edit = None;
@@ -1289,10 +1334,12 @@ impl Workspace {
         if pressed(Key::U)
             && let Some(e) = &mut self.timeline.edit
         {
+            // U cycles the picture trim. An audio edit stays the audio edit (D20).
             e.side = match e.side {
                 Side::Both => Side::Out,
                 Side::Out => Side::In,
                 Side::In => Side::Both,
+                Side::Audio => Side::Audio,
             };
         }
         if input.modifiers.command && input.modifiers.shift && pressed(Key::A) {
@@ -1326,7 +1373,8 @@ impl Workspace {
     }
 
     /// Trims the selected edit by `by` frames: the Out (outgoing tail), the
-    /// In (incoming head) or both (a roll). The selection follows the edit.
+    /// In (incoming head), both (a picture roll), or the audio edit (the J/L
+    /// offset). The selection follows the edit.
     pub(crate) fn nudge_edit(&mut self, side: Side, by: i64) {
         let Some(e) = self.timeline.edit else { return };
         let Some(p) = self.project().cloned() else {
@@ -1335,6 +1383,21 @@ impl Workspace {
         let Some(t) = p.track(&e.track.id()) else {
             return;
         };
+        if side == Side::Audio {
+            let Some(id) = audio_edit_outgoing(t, e.at) else {
+                return;
+            };
+            self.send(
+                "edit.audio_roll",
+                json!({ "clip": id, "edge": "tail", "by": by }),
+            );
+            self.timeline.edit = Some(EditSel {
+                at: e.at + by,
+                side,
+                track: e.track,
+            });
+            return;
+        }
         let out = t.clips.iter().find(|c| c.end() == e.at);
         let inc = t.clips.iter().find(|c| c.start == e.at);
         let (method, params, moves) = match (side, out, inc) {
