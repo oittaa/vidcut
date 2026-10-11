@@ -490,7 +490,15 @@ impl Workspace {
         if self.timeline.drag.is_none()
             && let Some(pos) = ui.input(|i| i.pointer.hover_pos())
         {
-            for (rows, scale) in [(&layout.upper, &upper_scale), (&layout.lower, &lower_scale)] {
+            for (rows, scale, area) in [
+                (&layout.upper, &upper_scale, upper_rect),
+                (&layout.lower, &lower_scale, content),
+            ] {
+                // Only over the timeline itself: an edge's zone reaches past
+                // the first clip's start, over the track header's buttons.
+                if !area.contains(pos) {
+                    continue;
+                }
                 let (track, what) = hit_rows(&p, rows, scale, pos);
                 // The audio edit has no mark of its own: light it up while it
                 // can be grabbed, so a J/L cut is found without guessing.
@@ -934,6 +942,10 @@ impl Workspace {
         let Some(press) = ui.input(|i| i.pointer.press_origin()) else {
             return;
         };
+        // The track headers are buttons: a drag from there trims nothing.
+        if !upper && press.x < layout.lower_ruler.left() {
+            return;
+        }
         let mods = ui.input(|i| i.modifiers);
         let (ruler, rows, scale) = if upper {
             (layout.upper_ruler, &layout.upper, layout.upper_scale)
