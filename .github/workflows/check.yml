@@ -90,4 +90,6 @@ jobs:
           fi
 
       - name: Fast gate
+        # CI is set, so scripts/check.sh omits cargo --quiet and the log
+        # shows each crate as it compiles.
         run: scripts/check.sh

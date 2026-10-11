@@ -13,21 +13,29 @@ shift || true
 
 step() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 
+# --quiet hides "Compiling …" until the command exits. Locally that keeps the
+# pre-commit hook short. GitHub Actions sets CI=true; there the log is the
+# only progress, so print Cargo's normal status lines.
+cargo_quiet=(--quiet)
+if [[ -n "${CI:-}" ]]; then
+  cargo_quiet=()
+fi
+
 step "rustfmt"
 cargo fmt --all --check
 
 step "clippy (warnings are errors)"
-cargo clippy --workspace --all-targets --quiet "$@" -- -D warnings
+cargo clippy --workspace --all-targets "${cargo_quiet[@]}" "$@" -- -D warnings
 
 case "$mode" in
   fast)
     step "unit tests"
-    cargo test --workspace --lib --bins --quiet "$@"
+    cargo test --workspace --lib --bins "${cargo_quiet[@]}" "$@"
     ;;
   full)
     step "all tests (unit, integration, e2e, doc)"
-    cargo test --workspace --all-targets --quiet "$@"
-    cargo test --workspace --doc --quiet "$@"
+    cargo test --workspace --all-targets "${cargo_quiet[@]}" "$@"
+    cargo test --workspace --doc "${cargo_quiet[@]}" "$@"
     ;;
   *)
     echo "usage: $0 [fast|full] [cargo flags...]" >&2
