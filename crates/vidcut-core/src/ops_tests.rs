@@ -1238,3 +1238,21 @@ fn change_duration_to_the_end_of_the_media() {
     assert_eq!(f.v1()[1], row("c2", 100, 90, 10));
     assert_eq!(f.v1()[2], row("c3", 190, 50, 100));
 }
+
+/// An edit that changes nothing is no undo step and no new revision: the
+/// next undo takes back the last real change.
+#[test]
+fn an_edit_that_changes_nothing_is_no_undo_step() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.append("m1", 0, 100);
+    let rev = f
+        .ok(json!({"method": "track.set", "params": {"track": "V1", "volume_db": -6.0}}))
+        .rev;
+    let same = f.ok(json!({"method": "track.set", "params": {"track": "V1", "volume_db": -6.0}}));
+    assert_eq!(same.rev, rev);
+    assert!(same.changes.is_empty());
+    let undo = f.ok(json!({"method": "history.undo", "params": {}}));
+    assert_eq!(undo.rev, rev + 1);
+    let v1 = f.editor.project().track("V1").unwrap().volume_db;
+    assert_eq!(v1, 0.0, "the undo took back the real change");
+}

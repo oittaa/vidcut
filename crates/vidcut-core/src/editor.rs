@@ -279,6 +279,19 @@ impl Editor {
                 warnings: Vec::new(),
             });
         }
+        // An edit that changes nothing (no shot changes found, a setting set
+        // to what it was) is no undo step and no new revision: an undo would
+        // undo nothing, and the edit before would take two.
+        if working == self.project {
+            return Ok(Response {
+                rev: self.project.rev,
+                changes,
+                result,
+                dry_run: false,
+                via: String::new(),
+                warnings: Vec::new(),
+            });
+        }
         working.rev = self.project.rev + 1;
         let before = std::mem::replace(&mut self.project, working);
         self.history.undo.push(Entry {
