@@ -5,7 +5,8 @@
 //!   their parameter schemas, plus `use_project`. Each call runs like the
 //!   same CLI command: inside the GUI that has the project open (the person
 //!   at the GUI sees every edit), or headless.
-//! - **Results** are the response JSON (`rev`, `changes`, `result`) as text
+//! - **Results** are the response JSON (`rev`, `changes`, `result`, and
+//!   `warnings` when the undo history could not be saved) as text
 //!   and as structured content; failures are tool errors with the stable
 //!   error code. Frames, screenshots and storyboards also come back as
 //!   images, so an agent can look at its edit.
@@ -198,7 +199,7 @@ impl State {
     }
 
     /// Runs one tool call; returns the MCP tool result.
-    fn call(&self, params: &Value, cancel: &AtomicBool, out: &Out) -> Value {
+    fn call(&self, params: &Value, cancel: &Arc<AtomicBool>, out: &Out) -> Value {
         let name = params["name"].as_str().unwrap_or_default();
         let args = match params.get("arguments") {
             Some(Value::Null) | None => json!({}),

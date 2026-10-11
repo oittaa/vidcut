@@ -500,6 +500,16 @@ pub fn run(
     Ok(reports)
 }
 
+/// A still render's failure. The cancel flag is the export's, so a client
+/// that left is `CANCELLED`.
+fn from_av(e: vidcut_av::error::Error) -> Error {
+    if vidcut_av::export::is_cancelled(&e) {
+        Error::new(ErrorCode::Cancelled, "cancelled")
+    } else {
+        Error::new(ErrorCode::Export, e.to_string())
+    }
+}
+
 /// Renders the timeline (or a media item) at `at` to a PNG.
 pub fn frame(
     p: &Project,
@@ -568,7 +578,6 @@ pub fn frame(
         ),
         None => (w, h),
     };
-    vidcut_av::export::still::write_png(&piece, fps, w.max(2), h.max(2), out)
-        .map_err(|e| Error::new(ErrorCode::Export, e.to_string()))?;
+    vidcut_av::export::still::write_png(&piece, fps, w.max(2), h.max(2), out).map_err(from_av)?;
     Ok(json!({ "path": out, "frame": frame, "width": w, "height": h }))
 }

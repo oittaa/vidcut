@@ -108,7 +108,9 @@ fn export_jobs() {
     let e = Envelope::from_json(json!({ "method": "export.start", "params": quick(&a) })).unwrap();
     let r = h
         .call(e, Origin::Ipc, None, &mut |v| {
-            events.push(v);
+            if let Some(v) = v {
+                events.push(v);
+            }
             true
         })
         .unwrap();

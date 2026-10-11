@@ -161,17 +161,22 @@ fn pictures(cells: &[Cell], p: &Project, w: usize, h: usize) -> Result<Vec<Vec<u
     let fps = p.settings.fps;
     let threads = std::thread::available_parallelism().map_or(2, |n| n.get().min(6));
     let chunk = cells.len().div_ceil(threads);
+    // The render thread's cancel flag: workers don't inherit the slot.
+    let cancel = vidcut_av::cancel::current();
     std::thread::scope(|s| {
         let handles: Vec<_> = cells
             .chunks(chunk)
             .map(|part| {
+                let cancel = cancel.clone();
                 s.spawn(move || {
+                    let _guard = cancel.map(vidcut_av::cancel::Guard::set);
                     part.iter()
                         .map(|c| {
                             vidcut_av::export::still::rgba(&c.piece, fps, w as u32, h as u32)
                                 .map(|image| image.rgba)
+                                .map_err(from_av)
                         })
-                        .collect::<vidcut_av::error::Result<Vec<_>>>()
+                        .collect::<Result<Vec<_>>>()
                 })
             })
             .collect();
@@ -179,12 +184,19 @@ fn pictures(cells: &[Cell], p: &Project, w: usize, h: usize) -> Result<Vec<Vec<u
         for handle in handles {
             let part = handle
                 .join()
-                .map_err(|_| Error::internal("a storyboard picture panicked"))?
-                .map_err(|e| Error::new(ErrorCode::Export, e.to_string()))?;
+                .map_err(|_| Error::internal("a storyboard picture panicked"))??;
             all.extend(part);
         }
         Ok(all)
     })
+}
+
+fn from_av(e: vidcut_av::error::Error) -> Error {
+    if vidcut_av::export::is_cancelled(&e) {
+        Error::new(ErrorCode::Cancelled, "cancelled")
+    } else {
+        Error::new(ErrorCode::Export, e.to_string())
+    }
 }
 
 /// The clip whose picture shows at `frame`, and its track: the highest

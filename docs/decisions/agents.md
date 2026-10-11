@@ -17,7 +17,7 @@
 - **Results:** the vidcut response (`rev`, `changes`, `result`, `via`) comes back as text and as structured content. A failure is a tool error (`isError`) whose text starts with the stable error code (`INVALID_EDIT: ...`).
 - **Pictures:** `frame.render`, `gui.screenshot` and `storyboard.render` also return their PNG as image content (up to 8 MB), so an agent can look at what it made.
 - **Concurrency:** each call runs on its own thread, so `notifications/cancelled` can reach a running one. Its flag is registered before the call starts, so an immediate cancel isn't lost.
-- **Cancelling:** a headless export polls the cancel flag. A call routed into the GUI closes its connection, and the GUI stops a foreground export once it can't report progress. A cancelled request gets no answer, as MCP asks (`tests/mcp.rs` cancels a slow 4K export in the GUI).
+- **Cancelling:** a headless export polls the cancel flag. A call routed into the GUI closes its connection. The GUI sets that call's cancel flag when a progress write fails, and also when the connection closes while nothing is reporting progress. The same flag stops a foreground export (its frame loop and the loudness measure before it), `frame.render`, a storyboard and an analysis. A background export is a job: the client leaving does not cancel it, `jobs.cancel` does. A cancelled request gets no answer, as MCP asks (`tests/mcp.rs` cancels a slow 4K export in the GUI).
 - **Progress:** with a `progressToken`, exports send `notifications/progress` (frames done of total, about four a second).
 
 ## 2. Measurements (`vidcut_core::analysis`, `vidcut_av::analysis`)
