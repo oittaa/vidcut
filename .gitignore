@@ -11,3 +11,6 @@
 *.mp3
 *.m4a
 *.opus
+# insta's temporary snapshot files (review and accept, never commit)
+*.pending-snap
+*.snap.new
