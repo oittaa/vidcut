@@ -26,7 +26,7 @@ It is written in Rust:
    - When the manual is silent or contradictory, add a decision to §12 of the spec.
    - The manual is `DaVinci_Resolve_21.1_Reference_Manual.pdf` in `$VIDCUT_TEST_DATA`. Read pages with `pdftotext -f N -l N <pdf> -`; the Cut page is pp. 635–790. Never paste manual text into the repo; describe behavior in your own words.
 2. **One mutation path.**
-   - Every feature is a `Request` handled by the core Session, so the GUI, CLI, IPC and (later) MCP have identical capabilities.
+   - Every feature is a `Request` handled by the core Session, so the GUI, CLI, IPC and MCP have identical capabilities.
    - GUI gestures emit one Request when they complete.
    - Never mutate project state from GUI code directly.
 3. **No media in git.**
@@ -43,7 +43,7 @@ It is written in Rust:
 | `crates/vidcut-core` | Project model, time and timecode math, edit operations (`ops.rs`; tracks in `ops/tracks.rs`, clips following Track 1 in `ops/follow.rs`), Request/Response protocol, Editor (undo/rev), project store, render plans (`render.rs`: top-wins video, mixed audio lanes), preview EDLs (`preview.rs`), OpenTimelineIO reading and writing (`otio.rs`, tests in `otio/tests.rs`), what the automatic tools decide from measurements (`analysis.rs`), application preferences (`preferences.rs`) | — (pure Rust; fast to build and test) |
 | `crates/vidcut-av` | FFmpeg layer: probe (start timecodes too), exact-seek decode, encode/mux, export engine (with loudness normalization; the next piece's file opens ahead in `export/ahead.rs`), thumbnails (and their JPEG cache form), waveforms, still frames, measurements for the automatic tools (`analysis.rs`), encoder detection, test-fixture generator | ffmpeg-next |
 | `crates/vidcut-mpv` | libmpv via `dlopen` (`libloading`): client API and render API (OpenGL and software) | libmpv.so.2 at runtime only |
-| `crates/vidcut` | The `vidcut` binary: Session/host, IPC, CLI (clap), GUI (eframe), later MCP | all of the above |
+| `crates/vidcut` | The `vidcut` binary: Session/host, IPC, CLI (clap), GUI (eframe), MCP server | all of the above |
 
 Inside `crates/vidcut`:
 
@@ -136,7 +136,7 @@ These are mandatory.
   - Windows that ask the session (presets, plans, imports) answer on helper threads, so wait with a loop of `harness.step()`, not a fixed number of steps.
   - egui widgets such as sliders only see a drag that spans several frames: step between press, moves and release (`drag_slowly` in `gui_tracks.rs`). Timeline gestures work either way.
   - A freshly opened menu ignores input in its first frame: step twice before clicking an item (`menu_item` in `gui_tools.rs`).
-- **MCP** (`crates/vidcut/tests/mcp.rs`, the M7 acceptance) runs `vidcut mcp` as a child process and talks JSON-RPC to it, headless and against a live session serving IPC.
+- **MCP** (`crates/vidcut/tests/mcp.rs`) runs `vidcut mcp` as a child process and talks JSON-RPC to it, headless and against a live session serving IPC.
 - **Measurement fixtures:** `Picture::Shots` (a new shot every N frames, every fourth one black) and `Sound::Tone` (a steady 1 kHz sine at −20 dBFS, −20 LUFS in stereo) have known answers for scene, black and loudness tests. In core tests, `FakeEnv` takes made-up levels and pictures (`test_support::levels`, `pictures`).
 - **Export jobs** (`crates/vidcut/tests/jobs.rs`) run the live session without players: foreground, background, cancel and wait.
 - **Live session tests** (`crates/vidcut/tests/live.rs`) run the GUI's core thread without a window: a harness thread renders both players with mpv's software renderer and answers screenshots, and requests go through `Handle::call` like IPC. Prefer them over GUI tests; they need libmpv but no display.
@@ -144,16 +144,6 @@ These are mandatory.
 - **Test outputs** go to temp dirs, never into the repo. Make test temp dirs with `tempfile` (`tempfile::Builder::new().prefix("vidcut-…").tempdir()`), which removes them when they drop, also when the test fails. Tests that open projects set `XDG_STATE_HOME` to a temp dir so undo history and recent projects stay out of the user's state, tests that save presets or preferences set `XDG_CONFIG_HOME`, and tests that check thumbnails set `XDG_CACHE_HOME`.
 
 ## Driving vidcut as an agent
-
-**Status:** what the CLI and an agent can do so far:
-- edits and exports headless (M1, M2)
-- controls a running GUI (M3)
-- exports in the background and exchanges OTIO timelines (M5)
-- edits several tracks, with a mixer and bins (M6)
-- serves MCP, with automatic tools and storyboards (M7)
-- handles rotated, interlaced and HDR media (M8)
-- stills and image sequences (M9)
-- timeline interchange with Resolve: `.otioz` bundles, timecode sources (decision D40)
 
 **MCP** (docs/decisions/agents.md, deviation X10): `vidcut mcp [-p FILE]` serves the Model Context Protocol on stdin/stdout. Every command is a tool (`edit.split` is `edit_split`, with its JSON Schema), plus `use_project` to pick or create the project. Calls run like the CLI's: inside the GUI that has the project open, or headless. `frame_render`, `gui_screenshot` and `storyboard_render` return images. Cancelling a call stops a headless export; routed into the GUI, it also stops a frame, a storyboard, an analysis and the loudness measure before a foreground export. A background export job stops only with `jobs.cancel`. To add it to Claude Code: `claude mcp add vidcut -- vidcut mcp -p /abs/talk.vidcut`; other clients take `{"command": "vidcut", "args": ["mcp", "-p", "/abs/talk.vidcut"]}`.
 
@@ -182,7 +172,7 @@ vidcut undo                                 # works across separate runs
 
 **Clips:** refer to them by id (`c17`) or by position (`V1@<time>`, `V2@1m`).
 
-**Tracks (M6):**
+**Tracks:**
 - `vidcut track` lists them. `track add video|audio [--count N]`, `track remove V3 [--force]` (`--force` also deletes its clips), and `track set A1 --volume -6 --name Music` with `--lock`/`--unlock`, `--mute`/`--unmute`, `--solo`/`--unsolo`, `--video false`.
 - Track ids are positions: V1, V2, … from the bottom and A1, A2, … (spec D27). Removing a track renumbers the later ones, so list them again afterwards.
 - Edit functions take `--track V2` (the target track) and `--audio-only`/`--video-only`. Naming the next new track (V3 when V2 is the last) creates it. Media without video go to A1 by default.
@@ -190,7 +180,7 @@ vidcut undo                                 # works across separate runs
 - Track 1 ripples. Clips on other tracks follow the Track 1 picture under their first frame (spec D21); other tracks ripple only where Track 1 is empty (D22). Only Track 1 pushes clips: inserts elsewhere overwrite (D23).
 - Export, `frame` and the preview show the highest visible clip and mix every audible track with its fader. Mute and solo apply to the export too (p. 650).
 
-**Stills and image sequences (M9, spec D38, D39):**
+**Stills and image sequences (spec D38, D39):**
 - `vidcut media add photo.jpg` adds a still. Edited without `--range` it lasts the project's still duration (5 s; `vidcut set --still-duration 3s`); a range or trim makes it up to 17 h 40 min long.
 - `vidcut media add renders/frame_000001.png --sequence [--fps 60]` adds the numbered files in a row around it as one clip (`frame_[000001-010560].png`), at the project's rate unless `--fps` is given. Without `--sequence` a numbered image is a still. Exporting a sequence fails if a frame's file is missing, rather than repeating the picture before it.
 - `media get` reports `still: true`, or `sequence: {pattern, first, count}`.
@@ -200,7 +190,7 @@ vidcut undo                                 # works across separate runs
 - `vidcut proxy remove [m1…]` deletes the proxy files and clears them. `vidcut set --proxies true` plays fresh proxies in the preview (the Media Pool has the same switch). Export, `frame`, analysis and OTIO keep the original paths. Preview audio stays on the original file.
 - Proxy frames keep the source's presentation timestamps, so swapping the preview path stays frame-exact. `media get` reports the proxy path and `stale: true` when the source size or modification time no longer matches. Files live in `proxies/` beside the project (or `~/.cache/vidcut/proxies` when the project path is unknown).
 
-**Bins (M6):** `vidcut bins` lists them. `bins add "Interviews/Day 1"` (parents too), `bins rename A B`, `bins remove A` (its media move up a level, deviation X6), `media add FILE --bin A`, `media move m1 m2 --bin A` (`""` is the top level). `media list` shows each item's bin.
+**Bins:** `vidcut bins` lists them. `bins add "Interviews/Day 1"` (parents too), `bins rename A B`, `bins remove A` (its media move up a level, deviation X6), `media add FILE --bin A`, `media move m1 m2 --bin A` (`""` is the top level). `media list` shows each item's bin.
 
 **JSON output:**
 - `--json` prints `{"rev", "changes": {"created", "modified", "deleted"}, "result", "via"}`. When the undo history could not be saved, `warnings` says so; the edit is in the file.
@@ -241,14 +231,14 @@ vidcut undo                                 # works across separate runs
 - `vidcut preferences` shows the application preferences (`~/.config/vidcut/preferences.toml`) and what the thumbnail cache holds; `vidcut preferences set thumbnails.cache_limit_mb=256` changes them (`preferences.set` takes `{"thumbnails": {"disk_cache": false}}`; turning the cache off empties it).
 - `vidcut frame --at 1m -o f.png [--width 640]` renders what the timeline shows at a frame. `--media m1` renders a media frame instead. Use it to look at cuts.
 
-**Automatic tools (M7, spec D29–D32):**
+**Automatic tools (spec D29–D32):**
 - `vidcut edit ripple-delete-silence c1 [c2…] [--min 0.5s --threshold -40 --pre-head 0.15s --post-tail 0.15s]` (the defaults shown) cuts silent parts out of clips and closes the gaps, as one undo step. `--dry-run` lists the parts.
 - `vidcut edit detect-scene-cuts c1` splits a clip where its shots change (`--threshold`, scene score 0–100, default 10).
 - `vidcut analyze silence|scenes|black [--media m1 | --clips c1,c2]` and `vidcut analyze loudness [--range a..b]` measure without changing anything. Media positions are source frames; clip positions are timeline frames.
 - `vidcut boring [--boring 30s --jump 10f]` lists clips too long and too short (the Boring Detector).
 - `vidcut storyboard -o board.png [--every 5s --columns 4 --width 320]` draws a picture of every shot with timecode and clip id: the quickest way to look at a whole edit.
 - `vidcut export out.mp4 --set audio.loudness=-14` normalizes the mix to −14 LUFS (one gain, true peak ≤ −1 dBTP); the result reports the gain.
-- `vidcut export out.mp4 --set video.codec=hevc --set video.hdr=pq` (or `hlg`) exports HDR in 10 bits (HEVC, AV1 or VP9). Without it, HDR sources are tone-mapped to SDR. `media get` reports each clip's `hdr`, `rotation` and interlaced `fields` (M8).
+- `vidcut export out.mp4 --set video.codec=hevc --set video.hdr=pq` (or `hlg`) exports HDR in 10 bits (HEVC, AV1 or VP9). Without it, HDR sources are tone-mapped to SDR. `media get` reports each clip's `hdr`, `rotation` and interlaced `fields`.
 - `vidcut edit slide c3 --by 5f` moves a clip keeping its media; its neighbors give and take.
 - Measuring decodes a file once; the results are cached (`~/.cache/vidcut/analysis/`), so trying other settings is quick.
 
