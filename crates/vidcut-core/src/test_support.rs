@@ -50,6 +50,7 @@ pub fn media_info(secs: f64, fps: Rational, audio: bool) -> MediaInfo {
         } else {
             vec![]
         },
+        timecode: None,
     }
 }
 

@@ -823,6 +823,7 @@ mod tests {
                     first_pts: 0.0,
                     duration: frames as f64 / 25.0,
                 }],
+                timecode: None,
             },
             marks: Marks::default(),
             bin: String::new(),

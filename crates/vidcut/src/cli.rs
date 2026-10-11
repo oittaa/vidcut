@@ -110,9 +110,11 @@ pub enum Command {
     Markers(MarkersCmd),
     /// Export the timeline (In–Out if both marks are set, else all of it).
     /// With --dry-run, print the plan instead. A `.otio` output writes the
-    /// edit as OpenTimelineIO (the whole timeline unless --range).
+    /// edit as OpenTimelineIO for DaVinci Resolve and other editors (the
+    /// whole timeline unless --range); `.otioz` bundles the edit with its
+    /// media in one zip file, `.otiod` in a folder.
     #[command(
-        after_help = "Examples:\n  vidcut export out.mp4\n  vidcut export out.mp4 --preset youtube-1080p --encoder nvenc\n  vidcut export cut.mov --range 1m..2m --set video.quality=14\n  vidcut export clips/ --per-clip --preset prores-422hq\n  vidcut export voice.wav --audio-only\n  vidcut export cut.otio\n  vidcut export out.mp4 --background && vidcut jobs wait j1"
+        after_help = "Examples:\n  vidcut export out.mp4\n  vidcut export out.mp4 --preset youtube-1080p --encoder nvenc\n  vidcut export cut.mov --range 1m..2m --set video.quality=14\n  vidcut export clips/ --per-clip --preset prores-422hq\n  vidcut export voice.wav --audio-only\n  vidcut export cut.otio\n  vidcut export cut.otioz\n  vidcut export out.mp4 --background && vidcut jobs wait j1"
     )]
     Export {
         /// Output file (a directory with --per-clip). The extension picks the container.
@@ -145,10 +147,11 @@ pub enum Command {
         #[arg(long)]
         background: bool,
     },
-    /// Import an OpenTimelineIO timeline (.otio): media join the pool, clips
-    /// go after the last clip (or replace the timeline).
+    /// Import an OpenTimelineIO timeline (.otio, or a bundle with its media:
+    /// .otioz, .otiod), from DaVinci Resolve or another editor: media join
+    /// the pool, clips go after the last clip (or replace the timeline).
     #[command(
-        after_help = "Examples:\n  vidcut new cut.vidcut && vidcut -p cut.vidcut import resolve-cut.otio\n  vidcut -p cut.vidcut import cut.otio --replace --search /mnt/footage"
+        after_help = "Examples:\n  vidcut new cut.vidcut && vidcut -p cut.vidcut import resolve-cut.otio\n  vidcut -p cut.vidcut import cut.otio --replace --search /mnt/footage\n  vidcut -p cut.vidcut import cut.otioz --unpack /mnt/fast/cut-media"
     )]
     Import {
         file: PathBuf,
@@ -158,6 +161,10 @@ pub enum Command {
         /// Look for missing media by file name in this directory (repeatable).
         #[arg(long, value_name = "DIR")]
         search: Vec<PathBuf>,
+        /// Unpack an .otioz bundle's media into this directory (default: a
+        /// directory named after the bundle, next to it).
+        #[arg(long, value_name = "DIR")]
+        unpack: Option<PathBuf>,
     },
     /// Export jobs of the running GUI: list them, or get, wait for or cancel one.
     Jobs {
@@ -1458,10 +1465,12 @@ impl Cli {
                 file,
                 replace,
                 search,
+                unpack,
             } => req(
                 "timeline.import",
                 json!({ "path": absolute(std::slice::from_ref(file))?[0], "replace": replace,
-                        "search": absolute(search)? }),
+                        "search": absolute(search)?,
+                        "unpack": unpack.as_ref().map(|u| absolute(std::slice::from_ref(u))).transpose()?.map(|u| u[0].clone()) }),
             )?,
             Command::Jobs { cmd } => match cmd {
                 None | Some(JobsCmd::List) => req("jobs.list", json!({}))?,

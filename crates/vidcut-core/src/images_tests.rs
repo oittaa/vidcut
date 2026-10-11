@@ -169,7 +169,8 @@ fn plans_say_how_pictures_are_read() {
 #[test]
 fn stills_and_sequences_travel_through_otio() {
     // Deviation X9: a sequence as OTIO's ImageSequenceReference, a still as
-    // a file with no range of its own; both come back as they were.
+    // a file available for one frame (as Resolve writes stills); both come
+    // back as they were.
     let mut f = with_still();
     f.env = std::mem::take(&mut f.env).with_sequence("/renders", "frame_%04d.png", 100, 50);
     f.ok(req(
@@ -185,11 +186,12 @@ fn stills_and_sequences_travel_through_otio() {
         json!({"media": "m3", "range": "4f..+10f"}),
     ));
     let before = f.editor.project().clone();
-    let doc = crate::otio::export(&before, "images", None).unwrap();
+    let doc =
+        crate::otio::export(&before, "images", None, crate::otio::Locations::Absolute).unwrap();
     let clips = doc["tracks"]["children"][0]["children"].as_array().unwrap();
     let still = &clips[0]["media_references"]["DEFAULT_MEDIA"];
-    assert_eq!(still["target_url"], "file:///media/photo.png");
-    assert_eq!(still["available_range"], serde_json::Value::Null);
+    assert_eq!(still["target_url"], "/media/photo.png");
+    assert_eq!(still["available_range"]["duration"]["value"], 1.0);
     let seq = &clips[1]["media_references"]["DEFAULT_MEDIA"];
     assert_eq!(seq["OTIO_SCHEMA"], "ImageSequenceReference.1");
     assert_eq!(
@@ -202,7 +204,7 @@ fn stills_and_sequences_travel_through_otio() {
             &seq["rate"],
         ),
         (
-            &json!("file:///renders/"),
+            &json!("/renders/"),
             &json!("frame_"),
             &json!(".png"),
             &json!(100),
@@ -281,7 +283,7 @@ fn sequence_available_range_counts_pictures_at_the_sequence_rate() {
     ));
     let before = f.editor.project().clone();
     let clip_len = before.track("V1").unwrap().clips[0].duration;
-    let doc = crate::otio::export(&before, "seq", None).unwrap();
+    let doc = crate::otio::export(&before, "seq", None, crate::otio::Locations::Absolute).unwrap();
     let clip = &doc["tracks"]["children"][0]["children"][0];
     let seq = &clip["media_references"]["DEFAULT_MEDIA"];
     assert_eq!(seq["OTIO_SCHEMA"], "ImageSequenceReference.1");

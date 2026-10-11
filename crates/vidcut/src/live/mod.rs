@@ -744,7 +744,9 @@ impl Live {
         for job in self.jobs.iter() {
             if self.job_cancels.contains_key(&job.id) {
                 for o in &job.outputs {
-                    let _ = std::fs::remove_file(vidcut_av::export::partial_path(&o.path));
+                    let part = vidcut_av::export::partial_path(&o.path);
+                    // An .otiod bundle is written as a folder.
+                    let _ = std::fs::remove_file(&part).or_else(|_| std::fs::remove_dir_all(&part));
                 }
             }
         }
@@ -1248,6 +1250,7 @@ impl Live {
         // The job encodes the project as it is now (its `if_rev` checked),
         // whatever edits follow.
         let project = open.project().clone();
+        let project_path = open.store.path().to_path_buf();
         let context = open
             .project()
             .time_context(Some(self.players[TIMELINE].position));
@@ -1316,6 +1319,7 @@ impl Live {
                     };
                 let result = crate::session::export_media(
                     &project,
+                    &project_path,
                     &params,
                     &mut crate::session::Hooks {
                         cancel: &cancel,
@@ -1682,6 +1686,21 @@ impl Live {
                     Some(measure) => Step::Measure(measure, Box::new(envelope)),
                     None => Step::Now(self.edit(envelope)),
                 }
+            }
+            // An `.otioz` bundle's media are unpacked on a worker first; the
+            // edit then finds them there.
+            Request::TimelineImport {
+                path: Some(path),
+                unpack,
+                ..
+            } if vidcut_core::editor::is_otioz(&path) && !envelope.dry_run => {
+                let unpack_bundle = move || {
+                    use vidcut_core::Env;
+                    AvEnv
+                        .open_timeline(&path, unpack.as_deref(), true)
+                        .map(drop)
+                };
+                Step::Measure(Box::new(unpack_bundle), Box::new(envelope))
             }
             _ => Step::Now(self.edit(envelope)),
         }
@@ -2792,11 +2811,13 @@ enum Step {
     Now(Result<Response>),
     Wait(Until),
     Task(Task),
-    /// Measure media on a worker, then run the request here (docs/decisions/agents.md §3).
+    /// Measure media (or unpack a bundle's) on a worker, then run the
+    /// request here (docs/decisions/agents.md §3).
     Measure(Measure, Box<Envelope>),
 }
 
-/// Measuring that a request needs, done before it runs.
+/// Slow work on media that a request needs, done before it runs:
+/// measuring, unpacking.
 type Measure = Box<dyn FnOnce() -> Result<()> + Send>;
 
 fn reply(reply: Option<Reply>, result: Result<Response>) {

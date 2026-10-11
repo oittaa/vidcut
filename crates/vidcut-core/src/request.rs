@@ -194,14 +194,17 @@ pub enum Request {
         #[serde(default)]
         range: Option<RangeSpec>,
     },
-    /// Import an OpenTimelineIO timeline (`.otio`, deviation X9). Its media
-    /// join the pool, and its first video track, with the audio that belongs
-    /// to it, goes on V1 after the last clip (or instead of the timeline,
-    /// with `replace`). An empty timeline takes the file's frame rate and
-    /// start timecode. What can't be imported is listed in `warnings`.
+    /// Import an OpenTimelineIO timeline (deviation X9): an `.otio` file,
+    /// an `.otioz` bundle (its media are unpacked first) or an `.otiod`
+    /// bundle folder, as DaVinci Resolve and other editors write them. Its
+    /// media join the pool, and its tracks go on V1, V2, … and A1, A2, …
+    /// after the last clip (or instead of the timeline, with `replace`). An
+    /// empty timeline takes the file's frame rate and start timecode. What
+    /// can't be imported is listed in `warnings`.
     #[serde(rename = "timeline.import")]
     TimelineImport {
-        /// The `.otio` file, read by the process that runs the request.
+        /// The `.otio`, `.otioz` or `.otiod` file, read by the process that
+        /// runs the request.
         #[serde(default)]
         path: Option<PathBuf>,
         /// The OTIO document itself, instead of `path`.
@@ -213,6 +216,10 @@ pub enum Request {
         /// Directories to look in, by file name, for media missing at its path.
         #[serde(default)]
         search: Vec<PathBuf>,
+        /// Where an `.otioz` bundle's media are unpacked (default: a folder
+        /// named after the bundle, next to it). A dry run doesn't unpack.
+        #[serde(default)]
+        unpack: Option<PathBuf>,
     },
 
     // ---------------------------------------------------------------- edit functions (spec §7)
@@ -763,7 +770,10 @@ pub enum Request {
 /// What to export and how.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ExportParams {
-    /// Output file; for `per_clip`, a directory.
+    /// Output file; for `per_clip`, a directory. A timeline for other
+    /// editors instead of media (deviation X9): `.otio` (the edit),
+    /// `.otioz` (a zip bundle of the edit and its media, as DaVinci Resolve
+    /// reads one) or `.otiod` (the same as a folder).
     pub output: PathBuf,
     /// Preset name (see `presets.list`). Default: from the output extension
     /// (`h264-master` settings for video, the matching `audio-*` preset for audio).
@@ -1143,9 +1153,16 @@ impl Request {
             Self::MediaRelink { path, .. }
             | Self::Probe { path }
             | Self::ProjectOpen { path, .. } => vec![path],
-            Self::TimelineImport { path, search, .. } => {
-                path.iter_mut().chain(search.iter_mut()).collect()
-            }
+            Self::TimelineImport {
+                path,
+                search,
+                unpack,
+                ..
+            } => path
+                .iter_mut()
+                .chain(search.iter_mut())
+                .chain(unpack.iter_mut())
+                .collect(),
             Self::ExportPlan(p) | Self::ExportStart(p) => vec![&mut p.output],
             Self::FrameRender { out, .. }
             | Self::StoryboardRender { out, .. }

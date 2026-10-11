@@ -241,6 +241,33 @@ pub struct MediaInfo {
     pub start_time: f64,
     pub video: Option<VideoInfo>,
     pub audio: Vec<AudioInfo>,
+    /// Where the file's own clock starts: a camera's start timecode, a sound
+    /// recorder's time of day. Timeline interchange counts source positions
+    /// from it (deviation X9).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timecode: Option<StartTimecode>,
+}
+
+/// A media file's start timecode: `count` units at `rate` from midnight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct StartTimecode {
+    /// Video frames (a recorded timecode, drop-frame counted out), or audio
+    /// samples (a broadcast WAV's time reference).
+    pub count: i64,
+    /// The video's frame rate, or the sample rate.
+    pub rate: Rational,
+}
+
+impl StartTimecode {
+    /// The start as a (possibly fractional) frame count at `fps`.
+    pub fn frames_at(&self, fps: Rational) -> f64 {
+        if self.rate == fps {
+            return self.count as f64;
+        }
+        let n = i128::from(self.count) * i128::from(self.rate.den()) * i128::from(fps.num());
+        let d = i128::from(self.rate.num()) * i128::from(fps.den());
+        n as f64 / d as f64
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

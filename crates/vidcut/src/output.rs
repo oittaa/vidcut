@@ -117,6 +117,19 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 r.result["fps"].as_str().unwrap_or_default(),
                 r.rev
             );
+            let b = &r.result["bundle"];
+            if let Some(folder) = b["folder"].as_str() {
+                let verb = if b["unpacked"] == true {
+                    "media in"
+                } else {
+                    "would unpack the media into"
+                };
+                println!(
+                    "  {verb} {folder} ({} file(s), {})",
+                    b["files"],
+                    size(b["bytes"].as_u64().unwrap_or(0))
+                );
+            }
             for w in r.result["warnings"].as_array().into_iter().flatten() {
                 println!("  warning: {}", w.as_str().unwrap_or_default());
             }
@@ -135,6 +148,17 @@ pub fn print(method: &str, r: &Response, json: bool) {
                     );
                     continue;
                 }
+                if o["format"] == "otioz" || o["format"] == "otiod" {
+                    println!(
+                        "wrote {} ({} clips, {} frames, {} media file(s), {})",
+                        o["path"].as_str().unwrap_or_default(),
+                        o["clips"],
+                        o["frames"],
+                        o["files"],
+                        size(o["bytes"].as_u64().unwrap_or(0))
+                    );
+                    continue;
+                }
                 let enc: Vec<&str> = [&o["video_encoder"], &o["audio_encoder"]]
                     .iter()
                     .filter_map(|v| v.as_str())
@@ -148,10 +172,20 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 );
             }
         }
-        "export.plan" if r.result["format"] == "otio" => {
+        "export.plan"
+            if matches!(
+                r.result["format"].as_str(),
+                Some("otio" | "otioz" | "otiod")
+            ) =>
+        {
             for o in r.result["outputs"].as_array().into_iter().flatten() {
+                let media = match o["bytes"].as_u64() {
+                    Some(bytes) => format!(", {} media file(s), {}", o["files"], size(bytes)),
+                    None => String::new(),
+                };
                 println!(
-                    "otio  {}  frames {}..{} ({} clips)",
+                    "{}  {}  frames {}..{} ({} clips{media})",
+                    o["format"].as_str().unwrap_or_default(),
                     o["path"].as_str().unwrap_or_default(),
                     o["range"][0],
                     o["range"][1],
@@ -711,5 +745,21 @@ fn flatten(prefix: &str, v: &Value, out: &mut Vec<String>) {
             }
         }
         v => out.push(format!("{prefix} = {v}")),
+    }
+}
+
+/// A byte count for people: `12.3 MB`.
+fn size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["bytes", "kB", "MB", "GB", "TB"];
+    let mut v = bytes as f64;
+    let mut unit = 0;
+    while v >= 1000.0 && unit < UNITS.len() - 1 {
+        v /= 1000.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} bytes")
+    } else {
+        format!("{v:.1} {}", UNITS[unit])
     }
 }

@@ -273,7 +273,32 @@ fn export_jobs() {
         frames
     );
 
-    // 7. Quitting while an export runs leaves no partial file.
+    // 7. A bundle copies media: a job like a media export, and its media
+    // unpack (on a worker) when it is imported.
+    let bundle = dir.join("cut.otioz");
+    let job = ok(
+        &h,
+        "export.start",
+        json!({ "output": bundle, "background": true }),
+    );
+    let j = ok(&h, "jobs.wait", json!({ "job": job["id"] }));
+    assert_eq!(j["state"], "done", "{j}");
+    assert_eq!(j["result"]["outputs"][0]["format"], "otioz");
+    assert!(bundle.is_file());
+    let clips = call(&h, "project.summary", json!({})).unwrap().result["clips"].clone();
+    let r = ok(
+        &h,
+        "timeline.import",
+        json!({ "path": bundle, "replace": true }),
+    );
+    assert_eq!(r["bundle"]["folder"], json!(dir.join("cut")), "{r}");
+    assert!(dir.join("cut/media").is_dir());
+    assert_eq!(
+        call(&h, "project.summary", json!({})).unwrap().result["clips"],
+        clips
+    );
+
+    // 8. Quitting while an export runs leaves no partial file.
     let mut slow = quick(&dir.join("h.mkv"));
     slow["set"] = json!([
         "video.width=3840",

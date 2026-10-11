@@ -224,7 +224,8 @@ enum Otio {
         path: PathBuf,
         replace: bool,
     },
-    PickExport(Picked),
+    /// Where to write, and the extension it gets if it has none.
+    PickExport(Picked, &'static str),
     Exporting(Ask),
 }
 
@@ -1250,20 +1251,32 @@ impl Workspace {
         self.export.show_jobs = open;
     }
 
-    /// File > Import Timeline / Export Timeline (OpenTimelineIO).
+    /// File > Import Timeline / Export Timeline (OpenTimelineIO). An
+    /// `.otiod` bundle imports through its `content.otio`.
     pub(super) fn import_timeline(&mut self, ctx: &egui::Context) {
         let (dialogs, folder) = (self.dialogs.clone(), self.export_folder());
         self.export.otio = Some(Otio::PickImport(Picked::ask(ctx, move || {
-            dialogs.pick_file("Import Timeline", &folder, &["otio"])
+            dialogs.pick_file("Import Timeline", &folder, &["otio", "otioz"])
         })));
     }
 
-    pub(super) fn export_timeline(&mut self, ctx: &egui::Context) {
+    /// The edit alone (`.otio`), or with its media in a bundle (`.otioz`, as
+    /// Resolve's File > Export > Timeline offers both).
+    pub(super) fn export_timeline(&mut self, ctx: &egui::Context, bundle: bool) {
         let (dialogs, folder) = (self.dialogs.clone(), self.export_folder());
-        let file = format!("{}.otio", self.project_stem());
-        self.export.otio = Some(Otio::PickExport(Picked::ask(ctx, move || {
-            dialogs.save_file("Export Timeline", &folder, &file, &["otio"])
-        })));
+        let ext = if bundle { "otioz" } else { "otio" };
+        let file = format!("{}.{ext}", self.project_stem());
+        let title = if bundle {
+            "Export Timeline with Media"
+        } else {
+            "Export Timeline"
+        };
+        self.export.otio = Some(Otio::PickExport(
+            Picked::ask(ctx, move || {
+                dialogs.save_file(title, &folder, &file, &[ext])
+            }),
+            ext,
+        ));
     }
 
     fn otio_windows(&mut self, ctx: &egui::Context) {
@@ -1286,6 +1299,13 @@ impl Workspace {
             return;
         };
         let import = |ws: &mut Self, path: PathBuf, replace: bool, search: Option<PathBuf>| {
+            if vidcut_core::editor::is_otioz(&path) {
+                ws.say(format!(
+                    "Unpacking the media of {}…",
+                    path.file_name()
+                        .map_or(String::new(), |n| n.to_string_lossy().into_owned())
+                ));
+            }
             let mut params = json!({ "path": path, "replace": replace });
             if let Some(dir) = search {
                 params["search"] = json!([dir]);
@@ -1418,23 +1438,35 @@ impl Workspace {
                     None
                 }
             },
-            Otio::PickExport(p) => match p.take() {
-                None => Some(Otio::PickExport(p)),
+            Otio::PickExport(p, ext) => match p.take() {
+                None => Some(Otio::PickExport(p, ext)),
                 Some(None) => None,
                 Some(Some(mut path)) => {
                     if path.extension().is_none() {
-                        path.set_extension("otio");
+                        path.set_extension(ext);
                     }
+                    self.export.last_folder = path.parent().map(Path::to_path_buf);
+                    // A bundle copies media: a job, as media exports are.
+                    let background = !crate::export::is_otio(&path);
                     Some(Otio::Exporting(Ask::send(
                         &self.live,
                         ctx,
                         "export.start",
-                        json!({ "output": path, "overwrite": true }),
+                        json!({ "output": path, "overwrite": true, "background": background }),
                     )))
                 }
             },
             Otio::Exporting(ask) => match ask.take() {
                 None => Some(Otio::Exporting(ask)),
+                Some(Ok(r)) if r.result["id"].is_string() => {
+                    let id = r.result["id"].as_str().unwrap_or_default().to_string();
+                    self.say(format!(
+                        "Writing {} ({id})",
+                        r.result["title"].as_str().unwrap_or("the bundle")
+                    ));
+                    self.export.watching.push(id);
+                    None
+                }
                 Some(Ok(r)) => {
                     let o = &r.result["outputs"][0];
                     self.say(format!(
