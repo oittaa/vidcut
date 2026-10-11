@@ -107,23 +107,9 @@ const MEASURE: (u32, u32) = (96, 54);
 /// steady pan doesn't read as a cut.
 ///
 /// An image sequence is read by image2, which continues while the file
-/// numbers do. Pass the sequence's own length to [`picture_stats_pictures`].
-pub fn picture_stats(source: &crate::decode::Input) -> Result<PictureStats> {
-    picture_stats_inner(source, None)
-}
-
-/// [`picture_stats`] of the first `pictures` frames of `source`.
-///
-/// `pictures` is an image sequence's length. The frames after it, even when
-/// more numbered files follow, are not measured and not opened.
-pub fn picture_stats_pictures(
-    source: &crate::decode::Input,
-    pictures: u64,
-) -> Result<PictureStats> {
-    picture_stats_inner(source, Some(pictures))
-}
-
-fn picture_stats_inner(
+/// numbers do. Pass that sequence's own length as `pictures`; frames after
+/// it are not measured and not opened. `None` reads the whole source.
+pub fn picture_stats(
     source: &crate::decode::Input,
     pictures: Option<u64>,
 ) -> Result<PictureStats> {

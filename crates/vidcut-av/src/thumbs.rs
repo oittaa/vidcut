@@ -624,10 +624,10 @@ mod tests {
             *times.last().unwrap() < 4.0 / 24.0,
             "spread over the four pictures, not the eight files: {times:?}"
         );
-        let stats = crate::analysis::picture_stats_pictures(&input, 4).unwrap();
+        let stats = crate::analysis::picture_stats(&input, Some(4)).unwrap();
         assert_eq!(stats.pts.len(), 4);
         assert_eq!(
-            crate::analysis::picture_stats(&input).unwrap().pts.len(),
+            crate::analysis::picture_stats(&input, None).unwrap().pts.len(),
             8,
             "without a count, image2 measures the files that follow"
         );

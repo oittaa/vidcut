@@ -148,10 +148,7 @@ impl Env for AvEnv {
         measured(
             &PICTURES,
             paths::media_cache("analysis", media, &key),
-            || match pictures {
-                Some(n) => vidcut_av::analysis::picture_stats_pictures(&input_of(media), n),
-                None => vidcut_av::analysis::picture_stats(&input_of(media)),
-            },
+            || vidcut_av::analysis::picture_stats(&input_of(media), pictures),
             PictureStats::to_bytes,
             PictureStats::from_bytes,
         )
