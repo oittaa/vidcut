@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::{Value, json};
 use vidcut_av::export::Progress;
-use vidcut_core::store::{Store, state_dir};
+use vidcut_core::store::{HistoryError, HistoryLoad, Store, state_dir};
 use vidcut_core::{Editor, Envelope, Error, ErrorCode, Project, Request, Response, Result};
 
 use crate::env::AvEnv;
@@ -129,10 +129,10 @@ pub fn run_with(
         _ => {
             let store = open(project)?;
             if envelope.request.is_mutation() {
-                let (r, history_error) =
+                let (mut r, history_error) =
                     store.transact(|editor| editor.apply(envelope, &AvEnv, None))?;
                 if let Some(e) = history_error {
-                    eprintln!("vidcut: warning: {}", history_unsaved(&e));
+                    r.warnings.push(history_unsaved(&e));
                 }
                 r
             } else {
@@ -261,11 +261,24 @@ pub fn export_media(
     Ok(r)
 }
 
-/// Says that the undo history wasn't saved with an edit, and what follows.
-pub fn history_unsaved(error: &str) -> String {
+/// Says that the undo history wasn't saved with an edit, and what the next
+/// load can undo. That depends on the sidecar still on disk: one outside
+/// change when it parses and differs, nothing when it is missing or unreadable.
+pub fn history_unsaved(error: &HistoryError) -> String {
+    let next = match error.on_load {
+        HistoryLoad::OutsideChange => {
+            "on the next load, undo takes this edit back as one outside change"
+        }
+        HistoryLoad::Matches => {
+            "the history file still matches this project, so the next load keeps that history"
+        }
+        HistoryLoad::Empty => {
+            "on the next load the history is empty, so this edit has no undo step"
+        }
+    };
     format!(
-        "the edit is saved, but its undo history isn't ({error}): other vidcut runs see \
-         the edit as an outside change, or start with no history"
+        "the edit is saved, but its undo history isn't ({}): {next}",
+        error.message
     )
 }
 
@@ -291,6 +304,7 @@ fn answer(result: Value) -> Response {
         result,
         dry_run: false,
         via: String::new(),
+        warnings: Vec::new(),
     }
 }
 
@@ -368,9 +382,10 @@ mod tests {
 
     use serde_json::json;
     use vidcut_core::model::Settings;
+    use vidcut_core::store::{HistoryError, HistoryLoad};
     use vidcut_core::{Envelope, ErrorCode, Project};
 
-    use super::{Hooks, render};
+    use super::{Hooks, history_unsaved, render};
 
     fn render_req(req: serde_json::Value) -> vidcut_core::Result<vidcut_core::Response> {
         let project = Project::new(Settings::default());
@@ -451,5 +466,24 @@ mod tests {
         )
         .unwrap_err();
         assert_ne!(err.code, ErrorCode::Cancelled, "{err}");
+    }
+
+    #[test]
+    fn history_warning_names_what_the_next_load_can_undo() {
+        let text = |on_load| {
+            history_unsaved(&HistoryError {
+                message: "h.json: denied".into(),
+                on_load,
+            })
+        };
+        let outside = text(HistoryLoad::OutsideChange);
+        assert!(outside.contains("one outside change"), "{outside}");
+        assert!(!outside.contains("no undo step"), "{outside}");
+        let empty = text(HistoryLoad::Empty);
+        assert!(empty.contains("no undo step"), "{empty}");
+        assert!(empty.contains("history is empty"), "{empty}");
+        assert!(!empty.contains("outside change"), "{empty}");
+        let same = text(HistoryLoad::Matches);
+        assert!(same.contains("still matches"), "{same}");
     }
 }

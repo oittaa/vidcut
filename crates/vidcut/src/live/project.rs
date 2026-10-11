@@ -11,6 +11,7 @@ use std::sync::mpsc::Sender;
 
 use notify::Watcher;
 use vidcut_core::model::Settings;
+use vidcut_core::store::HistoryError;
 use vidcut_core::{Editor, Env, Envelope, Project, Response, Result, Store};
 
 use super::Msg;
@@ -21,8 +22,8 @@ pub struct OpenProject {
     /// The file's text when last read or written.
     disk: String,
     /// Why the undo history couldn't be saved with the latest edit, until
-    /// the session shows it.
-    pub history_error: Option<String>,
+    /// the session reports it.
+    pub history_error: Option<HistoryError>,
     _watcher: Option<notify::RecommendedWatcher>,
 }
 

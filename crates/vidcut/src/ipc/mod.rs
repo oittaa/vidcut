@@ -267,6 +267,7 @@ mod tests {
                             result: json!({ "project": project }),
                             dry_run: false,
                             via: "gui:1".into(),
+                            warnings: Vec::new(),
                         })
                     }
                     _ => Err(Error::invalid("nope")),
@@ -318,6 +319,7 @@ mod tests {
                     result: json!("ok"),
                     dry_run: false,
                     via: "gui:1".into(),
+                    warnings: Vec::new(),
                 })
             },
         );
@@ -421,6 +423,7 @@ mod tests {
                     result: json!("ok"),
                     dry_run: false,
                     via: "gui:1".into(),
+                    warnings: Vec::new(),
                 })
             },
         );
@@ -468,6 +471,7 @@ mod tests {
                         result: json!("ok"),
                         dry_run: false,
                         via: "gui:1".into(),
+                        warnings: Vec::new(),
                     })
                 },
             ),

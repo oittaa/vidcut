@@ -186,7 +186,7 @@ vidcut undo                                 # works across separate runs
 **Bins (M6):** `vidcut bins` lists them. `bins add "Interviews/Day 1"` (parents too), `bins rename A B`, `bins remove A` (its media move up a level, deviation X6), `media add FILE --bin A`, `media move m1 m2 --bin A` (`""` is the top level). `media list` shows each item's bin.
 
 **JSON output:**
-- `--json` prints `{"rev", "changes": {"created", "modified", "deleted"}, "result", "via"}`.
+- `--json` prints `{"rev", "changes": {"created", "modified", "deleted"}, "result", "via"}`. When the undo history could not be saved, `warnings` says so and what the next load can undo; the edit is in the file.
 - Errors print `{"error": {"code", "message"}}` and exit with the matching code:
 
 | Code | Error |
