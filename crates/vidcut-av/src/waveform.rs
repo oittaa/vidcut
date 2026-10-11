@@ -9,7 +9,8 @@ use crate::export::audio::{Resampler, discard_others};
 use crate::ffmpeg::{codec, format, frame, media};
 
 /// Peaks of one audio stream: a mono downmix for drawing, and one envelope
-/// per channel for the meters (spec D28).
+/// per meter channel (spec D28), the stream mixed to that many channels as
+/// the export mixes it.
 ///
 /// For each bucket of `1 / per_second` seconds, the lowest and highest
 /// sample, scaled to ±127.
@@ -121,8 +122,12 @@ impl Waveform {
 }
 
 /// Decodes audio stream `ordinal` of `path` (counting audio streams only)
-/// and returns its peaks at `per_second` buckets per second.
-pub fn waveform(path: &Path, ordinal: u32, per_second: u32) -> Result<Waveform> {
+/// and returns its peaks at `per_second` buckets per second, with an
+/// envelope for each of `channels` (the project's; at most 8).
+pub fn waveform(path: &Path, ordinal: u32, per_second: u32, channels: u16) -> Result<Waveform> {
+    // The export's resampler, so a 5.1 source's centre and surrounds land in
+    // a stereo meter's left and right as they do in the export.
+    let want = channels.clamp(1, 8);
     crate::init();
     let mut input = format::input(path).ctx(|| format!("opening {}", path.display()))?;
     let stream = input
@@ -159,12 +164,6 @@ pub fn waveform(path: &Path, ordinal: u32, per_second: u32) -> Result<Waveform> 
             resampler = Some(Resampler::new(f, f.rate(), 1)?);
             acc.rate = f.rate();
         }
-        // The first frame's channel count is the meter's. Later frames are
-        // converted to it, capped at the project's 8.
-        let want = ch_acc.as_ref().map_or_else(
-            || f.channels().clamp(1, 8),
-            |c| u16::try_from(c.channels).unwrap_or(8),
-        );
         if ch_resampler.as_ref().is_none_or(|r| !r.matches(f)) {
             ch_resampler = Some(Resampler::new(f, f.rate(), want)?);
             if ch_acc.is_none() {
@@ -204,9 +203,7 @@ pub fn waveform(path: &Path, ordinal: u32, per_second: u32) -> Result<Waveform> 
         &mut frame::Audio::empty(),
         handle,
     )?;
-    let channels = ch_acc
-        .as_ref()
-        .map_or(1, |c| u16::try_from(c.channels).unwrap_or(1));
+    let channels = want;
     let peaks = acc.finish();
     let mut channel_peaks = ch_acc.map(|c| c.finish()).unwrap_or_default();
     // The two resamplers can disagree by a bucket at the tail. The cache

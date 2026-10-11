@@ -2,12 +2,10 @@
 //! per track with a meter, a fader, mute and solo, and the viewer's meter
 //! with the monitoring mute.
 //!
-//! Each meter is one bar per project channel (spec D28). While the player is
-//! paused or scrubbing, the bars read cached waveform peaks at the playhead.
-//! While it is playing, the mix and the viewer read the preview output tap:
-//! the same per-channel peaks, with the gains the preview already applies,
-//! summed the way the preview mixes lanes. mpv does not expose the samples
-//! leaving the audio device on the calls the session thread may make.
+//! Each meter is one bar per project channel (spec D28). The bars read the
+//! cached waveform peaks at the playhead, playing or not, with clip gain,
+//! faders, mute and solo applied: they show the edit's levels rather than
+//! the player's output, which mpv doesn't expose to the session.
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -53,23 +51,6 @@ fn position(level: f32) -> f32 {
     ((db(level) + 60.0) / 60.0).clamp(0.0, 1.0)
 }
 
-/// Where meter levels come from (spec D28).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MeterSource {
-    /// Paused or scrubbing: waveform peaks at the playhead.
-    Waveform,
-    /// Playing: the preview mix, which is the player's output tap.
-    PreviewOutput,
-}
-
-fn meter_source(playing: bool) -> MeterSource {
-    if playing {
-        MeterSource::PreviewOutput
-    } else {
-        MeterSource::Waveform
-    }
-}
-
 /// The project's channel count, at least one. Stereo is the usual case.
 fn project_channels(p: &Project) -> usize {
     usize::from(p.settings.channels.max(1))
@@ -81,12 +62,12 @@ fn meter_column_width(n: usize) -> f32 {
     BAR_W * n as f32 + 2.0 * (n - 1) as f32
 }
 
-/// Place source-channel peaks onto `n` project channels.
+/// Place a waveform's channel peaks onto `n` project channels.
 ///
-/// Matching counts copy. A mono source is copied onto every channel: the
-/// preview and the export upmix one channel across a stereo mix, which is
-/// the common case. Any other mismatch keeps channel `i` (further source
-/// channels are not on the meter; missing ones stay silent).
+/// Waveforms are measured mixed to the project's channels, as the export
+/// mixes (D28), so the counts match. Until a waveform measured for another
+/// count is measured again, a mono one fills every channel and any other
+/// keeps channel `i`.
 fn map_channels(src: &[f32], n: usize) -> Vec<f32> {
     let mut out = vec![0.0; n.max(1)];
     if src.len() == 1 && out.len() > 1 {
@@ -162,23 +143,6 @@ fn sum_channels(tracks: &[Vec<f32>], n: usize) -> Vec<f32> {
     out
 }
 
-/// The player's output tap while the timeline is playing.
-///
-/// mpv's client API does not expose the PCM leaving the audio output, and
-/// the UI thread may not call mpv synchronously. The session already builds
-/// this mix for the preview: each audible lane with clip gain and the fader,
-/// summed per channel like `amix` with `normalize=0` (the same gains as the
-/// export). The meters read that mix at the playhead.
-fn preview_output(audible: &[Vec<f32>], n: usize) -> Vec<f32> {
-    sum_channels(audible, n)
-}
-
-/// Waveform peaks of the audible tracks, summed the same way, so the meters
-/// still move while paused or scrubbing (spec D28).
-fn waveform_mix(audible: &[Vec<f32>], n: usize) -> Vec<f32> {
-    sum_channels(audible, n)
-}
-
 /// One strip's bars and the monitored mix.
 struct TimelineMeters {
     tracks: Vec<(String, Vec<f32>)>,
@@ -186,12 +150,11 @@ struct TimelineMeters {
 }
 
 /// Levels at timeline frame `at`. Track strips show that track's channels,
-/// silent when mute or solo says it is not heard. The mix is the preview
-/// output tap while `playing`, and the waveform mix otherwise.
-fn timeline_meters(p: &Project, at: i64, waveforms: &Waves, playing: bool) -> TimelineMeters {
+/// silent when mute or solo says it is not heard. The mix sums the audible
+/// tracks per channel, as the preview does.
+fn timeline_meters(p: &Project, at: i64, waveforms: &Waves) -> TimelineMeters {
     let n = project_channels(p);
     let any_solo = p.any_solo();
-    let source = meter_source(playing);
     let mut audible = Vec::new();
     let tracks = p
         .tracks
@@ -206,10 +169,7 @@ fn timeline_meters(p: &Project, at: i64, waveforms: &Waves, playing: bool) -> Ti
             }
         })
         .collect();
-    let mix = match source {
-        MeterSource::PreviewOutput => preview_output(&audible, n),
-        MeterSource::Waveform => waveform_mix(&audible, n),
-    };
+    let mix = sum_channels(&audible, n);
     TimelineMeters { tracks, mix }
 }
 
@@ -236,19 +196,12 @@ impl Workspace {
                 mix: Vec::new(),
             };
         };
-        timeline_meters(
-            p,
-            self.snap.timeline.position,
-            &self.snap.waveforms,
-            self.snap.timeline.playing,
-        )
+        timeline_meters(p, self.snap.timeline.position, &self.snap.waveforms)
     }
 
     /// The channels the viewer plays: the monitored mix in Timeline mode,
-    /// the source media at the source playhead otherwise. `player.mute`
-    /// silences it. While that player is playing, a timeline mix is the
-    /// preview output tap; a source is the file the source player is
-    /// producing, which is its waveform at the playhead (no fader).
+    /// the source media at the source playhead otherwise (no fader).
+    /// `player.mute` silences it.
     fn viewer_channels(&self) -> Vec<f32> {
         let Some(p) = self.project() else {
             return vec![0.0; 2];
@@ -621,9 +574,8 @@ mod tests {
         let mut waves = Waves::new();
         // Left is loud, right is quiet: the old meter would show only the left.
         waves.insert("m1".into(), wave(&[(-80, 80), (0, 10)]));
-        let m = timeline_meters(&p, 0, &waves, false);
+        let m = timeline_meters(&p, 0, &waves);
         let bars = &m.tracks[0].1;
-        assert_eq!(meter_source(false), MeterSource::Waveform);
         assert!((bars[0] - lin(80)).abs() < 1e-6);
         assert!((bars[1] - lin(10)).abs() < 1e-6);
         assert!(bars[0] > bars[1]);
@@ -641,7 +593,7 @@ mod tests {
         let mut waves = Waves::new();
         waves.insert("m1".into(), wave(&[(-40, 40), (0, 20)]));
         waves.insert("m2".into(), wave(&[(0, 50), (-60, 60)]));
-        let open = timeline_meters(&p, 0, &waves, false);
+        let open = timeline_meters(&p, 0, &waves);
         // +6 dB of clip gain and −6 dB of fader cancel.
         assert!((open.tracks[0].1[0] - lin(40)).abs() < 1e-5);
         assert!((open.tracks[0].1[1] - lin(20)).abs() < 1e-5);
@@ -649,13 +601,13 @@ mod tests {
         assert!((open.mix[1] - (lin(20) + lin(60))).abs() < 1e-5);
 
         p.tracks[1].muted = true;
-        let muted = timeline_meters(&p, 0, &waves, false);
+        let muted = timeline_meters(&p, 0, &waves);
         assert_eq!(muted.tracks[1].1, vec![0.0, 0.0]);
         assert_eq!(muted.mix, muted.tracks[0].1);
 
         p.tracks[1].muted = false;
         p.tracks[1].solo = true;
-        let solo = timeline_meters(&p, 0, &waves, false);
+        let solo = timeline_meters(&p, 0, &waves);
         assert_eq!(
             solo.tracks[0].1,
             vec![0.0, 0.0],
@@ -666,17 +618,9 @@ mod tests {
 
         p.tracks[0].clips[0].audio.as_mut().unwrap().muted = true;
         p.tracks[1].solo = false;
-        let clip_muted = timeline_meters(&p, 0, &waves, true);
-        assert_eq!(meter_source(true), MeterSource::PreviewOutput);
+        let clip_muted = timeline_meters(&p, 0, &waves);
         assert_eq!(clip_muted.tracks[0].1, vec![0.0, 0.0]);
         assert_eq!(clip_muted.mix, clip_muted.tracks[1].1);
-        // The output tap is this preview mix: the same sum the waveform path uses.
-        let paused = timeline_meters(&p, 0, &waves, false);
-        assert_eq!(paused.mix, clip_muted.mix);
-        assert_eq!(
-            paused.mix,
-            preview_output(&[clip_muted.tracks[1].1.clone()], 2)
-        );
     }
 
     #[test]
@@ -685,8 +629,7 @@ mod tests {
         p.tracks[0].clips.push(clip("c1", "m1", 0.0, false));
         let mut waves = Waves::new();
         waves.insert("m1".into(), wave(&[(0, 64)]));
-        let m = timeline_meters(&p, 0, &waves, true);
-        assert_eq!(meter_source(true), MeterSource::PreviewOutput);
+        let m = timeline_meters(&p, 0, &waves);
         assert_eq!(m.mix.len(), 2);
         assert!((m.mix[0] - lin(64)).abs() < 1e-6);
         assert_eq!(m.mix[0], m.mix[1]);

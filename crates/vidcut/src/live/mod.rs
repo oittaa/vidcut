@@ -1908,6 +1908,9 @@ impl Live {
     fn check_media(&mut self) {
         let Some(open) = &self.project else { return };
         let media: Vec<_> = open.project().media.clone();
+        // The meters' envelopes are mixed to the project's channels, so a
+        // change of those measures again.
+        let channels = open.project().settings.channels;
         for m in media {
             if m.info.video.is_some() && self.thumbs_wanted.insert(m.id.clone()) {
                 let (tx, id, media) = (self.tx.clone(), m.id.clone(), m.clone());
@@ -1918,18 +1921,18 @@ impl Live {
                     });
                 });
             }
-            if !m.info.audio.is_empty() && self.waveforms_wanted.insert(m.id.clone()) {
+            if !m.info.audio.is_empty()
+                && self.waveforms_wanted.insert(format!("{}:{channels}", m.id))
+            {
                 let (tx, id, path) = (self.tx.clone(), m.id.clone(), m.path.clone());
-                // `chpeaks` superseded the mono `peaks` cache: those files have
-                // no per-channel envelopes, so they are left unread.
-                let cache = paths::media_cache("waveforms", &m, "chpeaks");
+                let cache = paths::media_cache("waveforms", &m, &format!("peaks-{channels}ch"));
                 self.workers.run(move || {
                     let cached = std::fs::read(&cache)
                         .ok()
                         .and_then(|b| vidcut_av::waveform::Waveform::from_bytes(&b));
                     let result = match cached {
                         Some(w) => Ok(w),
-                        None => vidcut_av::waveform::waveform(&path, 0, WAVEFORM_RATE)
+                        None => vidcut_av::waveform::waveform(&path, 0, WAVEFORM_RATE, channels)
                             .map_err(|e| e.to_string())
                             .inspect(|w| {
                                 if let Some(dir) = cache.parent()
