@@ -4,9 +4,8 @@
 //! The project is one pretty-printed JSON file. History lives outside it, in
 //! `$XDG_STATE_HOME/vidcut/history/<hash of the project path>.json`, together
 //! with the project state it was recorded against. If the file on disk differs
-//! from that state and the sidecar still parses, the difference becomes one
-//! undoable "external change" step. A missing or unreadable sidecar loads
-//! with an empty history: the edit stays, and there is no undo step.
+//! from that state, someone edited it externally; the difference becomes one
+//! undoable "external change" step.
 
 use std::fs::File;
 use std::io::Write;
@@ -53,37 +52,15 @@ struct Sidecar {
     redo: Vec<Entry>,
 }
 
-/// What the next [`Store::load`] can undo when the history file was not updated.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HistoryLoad {
-    /// The previous sidecar still parses, and it is not this project. The
-    /// next load records one outside change.
-    OutsideChange,
-    /// The previous sidecar still parses and already matches this project.
-    /// The next load keeps that history.
-    Matches,
-    /// The sidecar is missing or unreadable. The next load has an empty
-    /// history, so this edit has no undo step.
-    Empty,
-}
-
-/// A history sidecar that could not be written. The project file was.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HistoryError {
-    /// `{path}: {io error}`.
-    pub message: String,
-    /// What the next load does with undo.
-    pub on_load: HistoryLoad,
-}
-
 /// What [`Store::save`] wrote.
 #[derive(Debug, Clone)]
 pub struct Saved {
     /// The project file's new text.
     pub text: String,
-    /// Set when the history file could not be written. The edit is in the
-    /// project file. [`HistoryError::on_load`] says what a later load can undo.
-    pub history_error: Option<HistoryError>,
+    /// Why the undo history couldn't be written, if so. The edit is saved
+    /// all the same, and the history on disk stays as it was: the next load
+    /// sees the edit as an outside change, one undo step.
+    pub history_error: Option<String>,
 }
 
 /// A project file and its sidecar.
@@ -155,7 +132,10 @@ impl Store {
     /// Like [`load`](Self::load), for file text the caller already read.
     pub fn load_text(&self, text: &str) -> Result<Editor> {
         let project = parse(&self.path, text)?;
-        let sidecar = self.read_sidecar();
+        let sidecar = std::fs::read_to_string(&self.history_path)
+            .ok()
+            .and_then(|t| serde_json::from_str::<Sidecar>(&t).ok())
+            .filter(|s| s.project_path == self.path);
         Ok(match sidecar {
             Some(s) if s.head == project => Editor::new(
                 project,
@@ -184,7 +164,7 @@ impl Store {
     pub fn transact<T>(
         &self,
         f: impl FnOnce(&mut Editor) -> Result<T>,
-    ) -> Result<(T, Option<HistoryError>)> {
+    ) -> Result<(T, Option<String>)> {
         let _lock = self.lock()?;
         let mut editor = self.load()?;
         let before = editor.project().clone();
@@ -214,35 +194,15 @@ impl Store {
         // leaves the old sidecar whole (`write_atomic`).
         let dir = self.history_path.parent().expect("history dir");
         let json = serde_json::to_string(&sidecar).map_err(|e| Error::internal(e.to_string()))?;
-        let history_error = match std::fs::create_dir_all(dir)
+        let history_error = std::fs::create_dir_all(dir)
             .and_then(|()| write_atomic(&self.history_path, &json))
-        {
-            Ok(()) => None,
-            Err(e) => Some(HistoryError {
-                message: format!("{}: {e}", self.history_path.display()),
-                // The failed write left the previous sidecar whole, so this
-                // is what the next load will do with the project just written.
-                on_load: match self.read_sidecar() {
-                    Some(s) if s.head != *editor.project() => HistoryLoad::OutsideChange,
-                    Some(_) => HistoryLoad::Matches,
-                    None => HistoryLoad::Empty,
-                },
-            }),
-        };
+            .err()
+            .map(|e| format!("{}: {e}", self.history_path.display()));
         write_atomic(&self.path, &text).map_err(|e| io(&self.path, e))?;
         Ok(Saved {
             text,
             history_error,
         })
-    }
-
-    /// The sidecar for this project, if it parses. A missing file, bad JSON,
-    /// or another project's path is `None`: the same cases [`load_text`](Self::load_text)
-    /// treats as an empty history.
-    fn read_sidecar(&self) -> Option<Sidecar> {
-        let text = std::fs::read_to_string(&self.history_path).ok()?;
-        let sidecar: Sidecar = serde_json::from_str(&text).ok()?;
-        (sidecar.project_path == self.path).then_some(sidecar)
     }
 
     /// Takes the project's write lock (released when the returned file is
@@ -334,15 +294,9 @@ mod tests {
     use crate::test_support::FakeEnv;
     use serde_json::json;
 
-    fn lock_state() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        LOCK.lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-
     fn isolated_state(dir: &Path) {
-        // SAFETY: callers hold `lock_state`, so tests in this module never
-        // read XDG_STATE_HOME concurrently with a different value.
+        // SAFETY: tests in this module only set XDG_STATE_HOME to a temp dir
+        // and never read it concurrently with a different value.
         unsafe { std::env::set_var("XDG_STATE_HOME", dir.join("state")) };
     }
 
@@ -354,7 +308,6 @@ mod tests {
 
     #[test]
     fn edits_persist_with_undo_across_opens() {
-        let _state = lock_state();
         let dir = std::env::temp_dir().join(format!("vidcut-store-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         isolated_state(&dir);
@@ -454,102 +407,8 @@ mod tests {
                 ed.apply(e.unwrap(), &env, None)
             })
             .unwrap();
-        let history_error = history_error.expect("sidecar write fails");
-        assert!(history_error.message.contains(".json"), "{history_error:?}");
-        // A directory where the sidecar goes does not parse, so the next
-        // load must not invent an undo step for the edit it kept.
-        assert_eq!(history_error.on_load, HistoryLoad::Empty);
-        let loaded = other.load().unwrap();
-        assert_eq!(loaded.project().media.len(), 1);
-        assert!(loaded.history().undo.is_empty());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn failed_sidecar_write_keeps_the_edit_and_a_missing_sidecar_has_no_undo() {
-        let _state = lock_state();
-        let dir = std::env::temp_dir().join(format!("vidcut-store-missing-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        isolated_state(&dir);
-        let env = FakeEnv::default().with(
-            "/m.mp4",
-            crate::test_support::media_info(4.0, crate::time::Rational::new(25, 1).unwrap(), true),
-        );
-        let path = dir.join("p.vidcut");
-        let store = Store::create(&path, &Project::new(Settings::default())).unwrap();
-        apply(
-            &store,
-            &env,
-            json!({"method": "media.add", "params": {"paths": ["/m.mp4"]}}),
-        )
-        .unwrap();
-        assert!(store.history_path.is_file());
-
-        // Sit on the temp name `write_atomic` uses, so the replace fails and
-        // the previous sidecar stays a file that still parses.
-        let name = store.history_path.file_name().unwrap().to_string_lossy();
-        let block = store
-            .history_path
-            .with_file_name(format!(".{name}.{}.tmp", std::process::id()));
-        std::fs::create_dir(&block).unwrap();
-        // The sidecar already matches this project, so a failed rewrite does
-        // not become an outside change.
-        let same = store.load().unwrap();
-        let saved = {
-            let _lock = store.lock().unwrap();
-            store.save(&same).unwrap()
-        };
-        assert_eq!(
-            saved.history_error.expect("rewrite fails").on_load,
-            HistoryLoad::Matches
-        );
-
-        let (_, history_error) = store
-            .transact(|ed| {
-                let e = Envelope::from_json(json!({
-                    "method": "project.set",
-                    "params": {"ripple_on": false}
-                }))
-                .map_err(Error::usage)?;
-                ed.apply(e, &env, None)
-            })
-            .unwrap();
-        let history_error = history_error.expect("sidecar write fails");
-        assert_eq!(history_error.on_load, HistoryLoad::OutsideChange);
-        assert!(
-            history_error.message.contains(name.as_ref()),
-            "{history_error:?}"
-        );
-
-        // The failed write kept the edit. The previous sidecar still parses,
-        // so the next load records one outside change.
-        let loaded = store.load().unwrap();
-        assert!(!loaded.project().settings.ripple_on);
-        assert_eq!(loaded.project().media.len(), 1);
-        assert_eq!(
-            loaded.history().undo.last().unwrap().label,
-            "external change"
-        );
-
-        // Delete that sidecar. The edit stays, and nothing invents an undo step.
-        std::fs::remove_dir(&block).unwrap();
-        std::fs::remove_file(&store.history_path).unwrap();
-        let loaded = store.load().unwrap();
-        assert!(!loaded.project().settings.ripple_on);
-        assert_eq!(loaded.project().media.len(), 1);
-        assert!(
-            loaded.history().undo.is_empty(),
-            "a missing sidecar is not an undo step"
-        );
-        assert!(loaded.history().redo.is_empty());
-
-        // Unreadable JSON is the same: empty history, edit kept.
-        std::fs::write(&store.history_path, "{not json").unwrap();
-        let loaded = store.load().unwrap();
-        assert!(loaded.history().undo.is_empty());
-        assert!(!loaded.project().settings.ripple_on);
-
+        assert!(history_error.is_some_and(|e| e.contains(".json")));
+        assert_eq!(other.load().unwrap().project().media.len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

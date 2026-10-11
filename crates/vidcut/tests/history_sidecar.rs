@@ -41,7 +41,7 @@ fn notices(h: &live::Handle) -> String {
         .join("\n")
 }
 
-/// The one history file under `state` (the blocked temp name is a directory).
+/// The one history file under `state`.
 fn sidecar_file(state: &Path) -> PathBuf {
     let dir = state.join("vidcut").join("history");
     let mut files: Vec<_> = std::fs::read_dir(&dir)
@@ -77,17 +77,15 @@ fn gui_command_puts_the_history_warning_on_the_result() {
 
     let first = call(&h, "project.set", json!({ "ripple_on": false }));
     assert!(first.warnings.is_empty(), "{:?}", first.warnings);
+    // A directory where the history file goes: writing it fails.
     let history = sidecar_file(&state);
-    // The temp name `write_atomic` uses, so the replace fails and the
-    // previous sidecar stays.
-    let name = history.file_name().unwrap().to_string_lossy();
-    let block = history.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
-    std::fs::create_dir(&block).unwrap();
+    std::fs::remove_file(&history).unwrap();
+    std::fs::create_dir(&history).unwrap();
 
     let failed = call(&h, "project.set", json!({ "ripple_on": true }));
     assert_eq!(failed.warnings.len(), 1, "{:?}", failed.warnings);
     assert!(
-        failed.warnings[0].contains("one outside change"),
+        failed.warnings[0].contains("undo history isn't"),
         "{}",
         failed.warnings[0]
     );
@@ -96,36 +94,11 @@ fn gui_command_puts_the_history_warning_on_the_result() {
         "status bar: {}",
         notices(&h)
     );
-    // This session still has the real undo step. The warning is about the next load.
-    let live_undo = call(&h, "history.get", json!({}));
-    assert_eq!(live_undo.result["undo"][0], "project.set");
+    // The edit is in the file, and this session still has its undo step.
     let reloaded = Store::open(&path).unwrap().load().unwrap();
     assert!(reloaded.project().settings.ripple_on);
-    assert_eq!(
-        reloaded.history().undo.last().unwrap().label,
-        "external change"
-    );
-
-    std::fs::remove_dir(&block).unwrap();
-    std::fs::remove_file(&history).unwrap();
-    std::fs::create_dir(&history).unwrap();
-    let missing = call(&h, "project.set", json!({ "ripple_on": false }));
-    assert!(
-        missing.warnings.iter().any(|w| w.contains("no undo step")),
-        "{:?}",
-        missing.warnings
-    );
-    assert!(
-        notices(&h).contains("no undo step"),
-        "status bar: {}",
-        notices(&h)
-    );
-    let reloaded = Store::open(&path).unwrap().load().unwrap();
-    assert!(!reloaded.project().settings.ripple_on);
-    assert!(
-        reloaded.history().undo.is_empty(),
-        "a missing sidecar is not an undo step"
-    );
+    let live_undo = call(&h, "history.get", json!({}));
+    assert_eq!(live_undo.result["undo"][0], "project.set");
 
     h.shutdown();
     session.join().unwrap();

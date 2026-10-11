@@ -606,6 +606,7 @@ mod tests {
                         result: json!("ok"),
                         dry_run: false,
                         via: "gui:1".into(),
+                        warnings: Vec::new(),
                     })
                 },
             ),
