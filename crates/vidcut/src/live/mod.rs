@@ -1544,6 +1544,7 @@ impl Live {
                 origin: job.origin.name().into(),
                 method: job.method.clone(),
                 params: job.params.clone(),
+                summary: self.summary(&job, &result),
                 ok: result.is_ok(),
                 error: result.as_ref().err().map(|e| e.message.clone()),
                 rev,
@@ -1573,6 +1574,31 @@ impl Live {
         self.auto_proxies(&job, &result);
         if let Some(r) = job.reply {
             self.answers.push((r, result));
+        }
+    }
+
+    /// A log entry's words: the request described, and for an undo or
+    /// redo, the steps it took.
+    fn summary(&self, job: &Job, result: &Result<Response>) -> String {
+        let project = self.project.as_ref().map(|o| o.project());
+        let said = vidcut_core::describe::describe(&job.method, &job.params, project);
+        let steps = |key: &str| {
+            result
+                .as_ref()
+                .ok()
+                .and_then(|r| r.result[key].as_array())
+                .map(|labels| {
+                    labels
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                })
+        };
+        match job.method.as_str() {
+            "history.undo" => steps("undone").map_or(said, |s| format!("Undo: {s}")),
+            "history.redo" => steps("redone").map_or(said, |s| format!("Redo: {s}")),
+            _ => said,
         }
     }
 

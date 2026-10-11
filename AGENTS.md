@@ -271,7 +271,7 @@ vidcut undo                                 # works across separate runs
 | `vidcut viewer source\|tape\|timeline`, `load m1 [--at 5s]` | `viewer.*` | what the viewer shows |
 | `vidcut select --clips c1,c2 --media m3` | `selection.set` | without flags: `selection.get` |
 | `vidcut screenshot -o v.png [--window]` | `gui.screenshot` | the viewer picture as shown (works while minimized), or the whole window |
-| `vidcut log [--since N]` | `gui.log` | what everyone (the human too) did, as requests |
+| `vidcut log [--since N]` | `gui.log` | what everyone (the human too) did: each entry's `summary` in words, and the request as sent |
 | `vidcut window --size 1600x1000`, `open FILE [--new]`, `quit` | `gui.*`, `project.open` | window and project |
 | `vidcut jobs`, `jobs get\|wait\|cancel J [--timeout S]` | `jobs.*` | export and proxy jobs, the GUI's own included; `wait` fails like the job did |
 | `vidcut pool --bin A --sort name --descending` | `pool.set` | the bin the Media Pool shows and its order; Source Tape follows it |

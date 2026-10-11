@@ -215,8 +215,18 @@ fn numbered_images_are_asked_about() {
     let media = call(&h, "media.get", json!({ "media": "m3" })).result;
     assert_eq!(media["still"], true);
 
-    // 3. Files with no numbered run come in at once.
-    *picked.lock().unwrap() = vec![video.clone()];
+    // 3. Files with no numbered run come in at once. (A file new to the
+    // pool: adding one already there changes nothing.)
+    let other = fixture::ensure(&FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (30, 1),
+        31,
+    ))
+    .unwrap();
+    *picked.lock().unwrap() = vec![other];
     harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::I);
     until(&mut harness, "the request", |_| gui_edits(&h).len() == 3);
     assert!(!has(&harness, "Numbered images"));

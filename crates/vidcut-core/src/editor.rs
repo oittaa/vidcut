@@ -257,7 +257,7 @@ impl Editor {
             Request::HistoryRedo { steps } => return self.step_history(steps, false, dry_run),
             _ => {}
         }
-        let label = label_of(&request);
+        let label = label_of(&request, &self.project);
         let mut working = self.project.clone();
         let result = mutate(&mut working, &request, env, playhead, dry_run)?;
         let problems = validate::violations(&working);
@@ -382,12 +382,13 @@ impl Editor {
 }
 
 /// Undo label for a request.
-fn label_of(request: &Request) -> String {
-    match request {
-        Request::Apply { label: Some(l), .. } => l.clone(),
-        Request::Apply { commands, .. } => format!("batch of {} commands", commands.len()),
-        other => other.method(),
-    }
+/// The undo history's name for an edit: the request in words.
+fn label_of(request: &Request, project: &Project) -> String {
+    let json = serde_json::to_value(request).unwrap_or_default();
+    let method = json["method"]
+        .as_str()
+        .map_or_else(|| request.method(), String::from);
+    crate::describe::describe(&method, &json["params"], Some(project))
 }
 
 /// Created, modified and deleted ids between two project states.

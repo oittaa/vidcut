@@ -517,7 +517,10 @@ fn live_session() {
     assert!(took < Duration::from_millis(500), "{took:?}");
     // ...and undoes like any other step, from the GUI's side.
     let undone = h.ok("history.undo", json!({}));
-    assert_eq!(undone.result["undone"], json!(["marks.set"]));
+    assert_eq!(
+        undone.result["undone"],
+        json!(["Timeline marks: In 00:00:00:05, Out 00:00:00:15"])
+    );
 
     step("Errors are reported, not hangs.");
     // Errors are reported, not hangs.

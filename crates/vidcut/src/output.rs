@@ -454,21 +454,17 @@ fn live(method: &str, r: &Response) -> Option<()> {
             v["height"]
         ),
         "gui.log" => {
+            // In words; `--json` has each request as sent.
             for e in v.as_array().into_iter().flatten() {
-                let params = match &e["params"] {
-                    p if p.as_object().is_some_and(|o| o.is_empty()) => String::new(),
-                    p => p.to_string(),
-                };
                 let status = match e["error"].as_str() {
                     Some(err) => format!("  ERROR {err}"),
                     None => String::new(),
                 };
                 println!(
-                    "#{:<5} {:<7} {} {}{}",
+                    "#{:<5} {:<7} {}{}",
                     e["seq"],
                     e["origin"].as_str().unwrap_or_default(),
-                    e["method"].as_str().unwrap_or_default(),
-                    params,
+                    e["summary"].as_str().unwrap_or_default(),
                     status
                 );
             }

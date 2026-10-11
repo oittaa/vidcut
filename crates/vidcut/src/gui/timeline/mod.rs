@@ -1064,7 +1064,7 @@ impl Workspace {
         if crate::live::debug() {
             eprintln!("[gesture] {gesture:?}");
         }
-        self.send("viewer.set", json!({ "mode": "timeline" }));
+        self.show_timeline();
         self.timeline.snap_flipped = false;
         self.timeline.scrub_sent = None;
         self.timeline.drag = Some(ActiveDrag {
@@ -1228,7 +1228,7 @@ impl Workspace {
             return;
         }
         if resp.clicked() {
-            self.send("viewer.set", json!({ "mode": "timeline" }));
+            self.show_timeline();
             if on_ruler {
                 let f = scale.under(pos.x).clamp(0, p.end());
                 if upper || !self.timeline.options.fixed_playhead {
@@ -1776,6 +1776,6 @@ impl Workspace {
             track,
         });
         self.trim_editor = Some(at);
-        self.send("viewer.set", json!({ "mode": "timeline" }));
+        self.show_timeline();
     }
 }

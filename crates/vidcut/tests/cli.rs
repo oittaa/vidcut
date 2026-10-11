@@ -181,7 +181,11 @@ fn builds_and_edits_a_timeline() {
     assert_eq!(sb.v1().len(), 4);
     sb.ok(&["redo"]);
     let hist = sb.ok(&["history"]);
-    assert_eq!(hist["result"]["redo"], serde_json::json!(["edit.delete"]));
+    // History steps read as words.
+    assert_eq!(
+        hist["result"]["redo"],
+        serde_json::json!(["Delete V1@00:00:01:05"])
+    );
 
     // Dry run changes nothing.
     let before = std::fs::read_to_string(sb.project()).unwrap();

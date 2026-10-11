@@ -30,7 +30,7 @@
 Every action is a [`Request`](../../crates/vidcut-core/src/request.rs), the same type the headless CLI runs:
 - **GUI gestures** send one request each, without waiting for an answer. Failures show as notices in the status bar.
 - **IPC clients** send a request and wait for its answer.
-- **The command log** shows every request with its origin (`gui`, `ipc`), so a human can see what an agent did and an agent can read what the human did (`gui.log`). Fast scrubbing seeks are left out. An entry's `changed` says whether the request changed the project: its revision moved, even if no media, clip or marker did (track settings, bins, marks).
+- **The command log** shows every request with its origin (`gui`, `ipc`, `session`), so a human can see what an agent did and an agent can read what the human did (`gui.log`). Each entry has a `summary` in words (`vidcut_core::describe`): times as timecodes, media by name, and for an undo or redo the steps it took, which the undo history names the same way. The GUI shows the summary and the request on hover. Fast scrubbing seeks and a fader's drag (`mixer.preview`) are left out, and the GUI asks for the timeline view only when the viewer isn't showing it. An entry's `changed` says whether the request changed the project: its revision moved, even if no media, clip or marker did (track settings, bins, marks).
 
 **Kinds of request:**
 - **Project requests** go through the project's `Editor`, exactly as headless.

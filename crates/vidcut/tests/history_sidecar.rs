@@ -100,7 +100,7 @@ fn gui_command_puts_the_history_warning_on_the_result() {
     let reloaded = Store::open(&path).unwrap().load().unwrap();
     assert!(reloaded.project().settings.ripple_on);
     let live_undo = call(&h, "history.get", json!({}));
-    assert_eq!(live_undo.result["undo"][0], "project.set");
+    assert_eq!(live_undo.result["undo"][0], "Project: Ripple On");
 
     h.shutdown();
     session.join().unwrap();

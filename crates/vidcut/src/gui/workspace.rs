@@ -199,6 +199,15 @@ impl Workspace {
         self.live.request(method, params);
     }
 
+    /// Any timeline action shows the timeline in the viewer (spec §4.1):
+    /// asked only when it isn't shown already, so the command log isn't
+    /// full of requests that change nothing.
+    pub(super) fn show_timeline(&self) {
+        if self.snap.viewer != vidcut_core::request::ViewerMode::Timeline {
+            self.send("viewer.set", json!({ "mode": "timeline" }));
+        }
+    }
+
     /// Sends the request that ends a drag on the timeline: a dropped clip
     /// doesn't move the playhead the way an edit function does (spec D15).
     pub(super) fn send_drag(&self, method: &str, params: Value) {
@@ -611,7 +620,7 @@ impl Workspace {
         });
         ui.label(
             RichText::new(
-                "Every action as the request it sent; copy one to replay it from a shell.",
+                "What you, scripts and agents did. Hover an entry for its request; click to copy it as a command.",
             )
             .color(theme::TEXT_DIM)
             .small(),
@@ -632,14 +641,29 @@ impl Workspace {
                     } else {
                         e.params.to_string()
                     };
-                    let line = format!("{} {} {}", e.origin, e.method, params);
-                    let r = ui.add(
-                        egui::Label::new(RichText::new(&line).monospace().small().color(color))
-                            .sense(egui::Sense::click()),
-                    );
+                    // Who: nothing for the person at the GUI.
+                    let who = match e.origin.as_str() {
+                        "ipc" => "script",
+                        "session" => "automatic",
+                        _ => "",
+                    };
+                    let r = ui
+                        .horizontal_wrapped(|ui| {
+                            if !who.is_empty() {
+                                ui.label(RichText::new(who).small().color(theme::TEXT_DIM));
+                            }
+                            ui.add(
+                                egui::Label::new(RichText::new(&e.summary).small().color(color))
+                                    .sense(egui::Sense::click()),
+                            )
+                        })
+                        .inner;
+                    let request = format!("{} {}", e.method, params);
                     let r = match &e.error {
-                        Some(err) => r.on_hover_text(err),
-                        None => r.on_hover_text("click: copy as a vidcut command"),
+                        Some(err) => r.on_hover_text(format!("{err}\n{request}")),
+                        None => {
+                            r.on_hover_text(format!("{request}\nclick: copy as a vidcut command"))
+                        }
                     };
                     if r.clicked() {
                         let cli = match &project {

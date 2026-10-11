@@ -49,7 +49,7 @@ The layout follows the Cut page:
 - the Viewer on the right;
 - the timeline across the bottom.
 
-Everything you do is listed in the **Command log** (top right) as the request it sent. Click an entry to copy it as a shell command.
+Everything you, scripts and agents do is listed in the **Command log** (top right) in words, such as "Split at 00:01:05:12" or "Undo: Delete c14". Hover an entry for the request it sent; click it to copy that as a shell command.
 
 **Exporting.** **Quick Export** (top bar) exports the In–Out range, or the whole timeline when no marks are set, with one of the presets shown as tiles. **Export** opens every setting: start from a preset, change the codec, quality, size, range or output, and see the plan (the encoder that will run, the files and their lengths) and the same export as a shell command before you start. Save the settings as your own preset, optionally added to Quick Export. Exports run in the background; **Jobs** (top right) shows their progress and lets you cancel them. Phone video shows upright, interlaced video is deinterlaced, and HDR video is tone-mapped for ordinary (SDR) exports; choose an HDR range in Export (HEVC, AV1 or VP9) to keep it HDR. **File > Import/Export Timeline** reads and writes OpenTimelineIO files.
 

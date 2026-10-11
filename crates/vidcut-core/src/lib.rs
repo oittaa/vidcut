@@ -4,6 +4,7 @@
 //! compiles and tests fast. Media facts come from the caller (see [`editor::Env`]).
 
 pub mod analysis;
+pub mod describe;
 pub mod editor;
 pub mod error;
 pub mod export;

@@ -117,6 +117,8 @@ pub struct LogEntry {
     pub origin: String,
     pub method: String,
     pub params: Value,
+    /// The request in words; an undo or redo names the steps it took.
+    pub summary: String,
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
