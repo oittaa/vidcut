@@ -302,6 +302,24 @@ fn live_session() {
         h.ok("player.seek", json!({ "at": t, "viewer": "timeline" }));
         assert_eq!(h.shown(&dir), Some(expected(t)), "late renderer, frame {t}");
     }
+    step("An overtaken seek fails");
+    // Seek A's frame is late (the renderer looks away), and seek B moves the
+    // viewer elsewhere first: A's frame never shows, so A says so instead of
+    // reporting B's frame as its own.
+    h.stall_next(Duration::from_millis(400));
+    let handle = h.handle.clone();
+    let a = std::thread::spawn(move || {
+        let e = Envelope::from_json(json!({ "method": "player.seek", "params": { "at": 30 } }))
+            .unwrap();
+        handle.call(e, Origin::Ipc, None, &mut |_| true)
+    });
+    std::thread::sleep(Duration::from_millis(100));
+    h.ok("player.seek", json!({ "at": 120 }));
+    let e = a.join().unwrap().unwrap_err();
+    assert_eq!(e.code, vidcut_core::ErrorCode::Conflict, "{e}");
+    assert_eq!(h.shown(&dir), Some(expected(120)));
+    // Back to 149 for what follows.
+    h.ok("player.seek", json!({ "at": 149 }));
     let out = dir.join("f.png");
     h.ok("frame.render", json!({ "at": "playhead", "out": out }));
     let mut r = vidcut_av::decode::VideoReader::open(&out).unwrap();

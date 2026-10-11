@@ -69,6 +69,8 @@ A seek or load ("motion") is shown after two steps:
 
 **More waiting.** A seek also waits for the player's newest motion (a preview reload replaces what was asked for) and for the tail checks and patches (preview.md §9) that could change its frame: those of cuts at most 64 frames (the longest patch) after it. Checks start nearest the playhead first, so a timeline with many cuts doesn't hold up the first seek until every cut is checked. Seek-then-screenshot is therefore exact without sleeps. Over IPC it takes about 10–15 ms.
 
+**Overtaken seeks fail.** A waiting seek, step or viewer change remembers the frame it set. If the player moves elsewhere before that frame shows (another client's seek, a person scrubbing, playback), the frame never will. The request then fails with `CONFLICT` and says where the viewer is, rather than reporting the other frame as its own. A reload at the same frame still counts. The GUI's own overtaken seeks raise no notice.
+
 **Seeks while loading.** mpv rejects seeks until a freshly loaded file is open. A seek in that window opens the file again at the new position instead.
 
 ## 5. Rendering and screenshots

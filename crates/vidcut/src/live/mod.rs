@@ -465,8 +465,14 @@ enum SourceContent {
 
 /// What a request waits for before replying.
 enum Until {
-    /// Motion `motion` of `player` is on screen.
-    Shown { player: PlayerId, motion: u64 },
+    /// Motion `motion` of `player` is on screen, showing frame `at`. If
+    /// the player moves elsewhere first (another client's seek, a person
+    /// scrubbing), the frame won't show: the request fails with CONFLICT.
+    Shown {
+        player: PlayerId,
+        motion: u64,
+        at: i64,
+    },
     /// Job `id` ended (`jobs.wait`).
     Job { id: String },
     /// `player` shows its latest motion with no tail patch pending near it;
@@ -858,14 +864,23 @@ impl Live {
             }
             let w = &self.waits[i];
             let outcome = match w.until {
-                Until::Shown { player, motion } => {
+                Until::Shown { player, motion, at } => {
                     // The latest motion counts too: a preview reload (say, a
-                    // tail patch arriving) replaces what was asked for.
+                    // tail patch arriving) replaces what was asked for, at
+                    // the same frame.
                     let p = &self.players[player.index()];
-                    (p.shown >= motion && self.settled(player)).then(|| match &p.error {
-                        Some(e) => Err(Error::media(format!("preview: {e}"))),
-                        None => Ok(self.state_response()),
-                    })
+                    if p.position != at {
+                        Some(Err(Error::conflict(format!(
+                            "the viewer moved to frame {} before frame {at} showed \
+                             (another seek, or playback)",
+                            p.position
+                        ))))
+                    } else {
+                        (p.shown >= motion && self.settled(player)).then(|| match &p.error {
+                            Some(e) => Err(Error::media(format!("preview: {e}"))),
+                            None => Ok(self.state_response()),
+                        })
+                    }
                 }
                 Until::Capture { .. } | Until::Settled { .. } => None,
                 Until::Job { ref id } => self
@@ -1276,8 +1291,11 @@ impl Live {
                 log.pop_front();
             }
         }
-        // The GUI shows failures of what it waits for itself.
-        if let (Err(e), Origin::Gui, None) = (&result, job.origin, &job.reply) {
+        // The GUI shows failures of what it doesn't wait for itself, except
+        // its own seeks overtaken by the next click or scrub.
+        if let (Err(e), Origin::Gui, None) = (&result, job.origin, &job.reply)
+            && e.code != vidcut_core::ErrorCode::Conflict
+        {
             self.notice(format!("{}: {}", job.method, e.message), true);
         }
         self.dirty = true;
@@ -1530,7 +1548,11 @@ impl Live {
     /// Replies once `motion` of `player` is on screen.
     fn shown(&mut self, player: PlayerId, motion: Option<u64>) -> Step {
         match motion {
-            Some(m) => Step::Wait(Until::Shown { player, motion: m }),
+            Some(m) => Step::Wait(Until::Shown {
+                player,
+                motion: m,
+                at: self.players[player.index()].position,
+            }),
             None => Step::Now(Ok(self.state_response())),
         }
     }

@@ -242,7 +242,7 @@ vidcut undo                                 # works across separate runs
 | Command | Request | What |
 |---|---|---|
 | `vidcut state` | `player.state` | viewer mode, both playheads, the source clip, selection |
-| `vidcut seek 10s [--viewer timeline\|source\|tape]` | `player.seek` | returns once the frame is on screen; `+10f`/`-2s` are relative |
+| `vidcut seek 10s [--viewer timeline\|source\|tape]` | `player.seek` | returns once the frame is on screen (`CONFLICT` if someone moved the viewer first); `+10f`/`-2s` are relative |
 | `vidcut step [-]N`, `play [--speed -2]`, `pause` | `player.*` | negative speeds play backwards |
 | `vidcut viewer source\|tape\|timeline`, `load m1 [--at 5s]` | `viewer.*` | what the viewer shows |
 | `vidcut select --clips c1,c2 --media m3` | `selection.set` | without flags: `selection.get` |
