@@ -535,6 +535,37 @@ fn hdr_is_tone_mapped_for_sdr_and_kept_for_hdr() {
 }
 
 #[test]
+fn a_failed_rename_leaves_no_part_file() {
+    // The finished file can't take the output's name (a folder is there):
+    // the export fails and removes its `.part`.
+    let fps = Rational::new(30, 1).unwrap();
+    let s =
+        src(FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 30).no_audio());
+    let p = plan(fps, 320, 180, vec![v(&s, 0, 10)], vec![]);
+    let dir = out_dir("rename");
+    let out = dir.join("taken.mkv");
+    std::fs::create_dir_all(out.join("inside")).unwrap();
+    let r = export::run(
+        &p,
+        &lossless(),
+        &out,
+        &Availability::default(),
+        &AtomicBool::new(false),
+        &mut |_| {},
+    );
+    assert!(r.is_err(), "the rename can't succeed");
+    let left: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(
+        left,
+        vec![std::ffi::OsString::from("taken.mkv")],
+        "only the folder"
+    );
+}
+
+#[test]
 fn other_rates_are_resampled_by_nearest_frame() {
     // A 25 fps source on a 30 fps timeline: 5 source frames per 6 output frames.
     let fps = Rational::new(30, 1).unwrap();

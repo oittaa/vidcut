@@ -129,7 +129,7 @@ vidcut -p talk.vidcut frame --at 1m -o check.png                # look at a fram
 vidcut -p talk.vidcut export cut.otio                           # the edit, for another editor
 vidcut new cut2.vidcut && vidcut -p cut2.vidcut import cut.otio  # and back in
 vidcut presets save web --from youtube-1080p --set video.quality=22 --quick-export
-vidcut -p talk.vidcut edit ripple-delete-silence c1 --min 0.7s   # cut the pauses
+vidcut -p talk.vidcut edit ripple-delete-silence c1   # cut the pauses (0.5 s and longer)
 vidcut -p talk.vidcut storyboard -o board.png                   # every shot on one page
 vidcut -p talk.vidcut export talk.mp4 --set audio.loudness=-14  # YouTube loudness
 ```

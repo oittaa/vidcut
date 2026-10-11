@@ -780,7 +780,7 @@ pub enum EditCmd {
     /// Cut the silent parts out of clips and close the gaps (one undo step).
     /// With --dry-run, list the parts instead.
     #[command(
-        after_help = "Examples:\n  vidcut edit ripple-delete-silence c1 --min 0.7s --dry-run\n  vidcut edit ripple-delete-silence c1 c2 --threshold -35 --pre-head 0.2s --post-tail 0.2s"
+        after_help = "Examples:\n  vidcut edit ripple-delete-silence c1 --dry-run          # silences of 0.5 s and more\n  vidcut edit ripple-delete-silence c1 c2 --threshold -35 --pre-head 0.2s --post-tail 0.2s"
     )]
     RippleDeleteSilence {
         #[arg(required = true)]

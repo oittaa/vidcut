@@ -216,7 +216,7 @@ vidcut undo                                 # works across separate runs
 - `vidcut frame --at 1m -o f.png [--width 640]` renders what the timeline shows at a frame. `--media m1` renders a media frame instead. Use it to look at cuts.
 
 **Automatic tools (M7, spec D29–D32):**
-- `vidcut edit ripple-delete-silence c1 [c2…] --min 0.7s [--threshold -40 --pre-head 0.15s --post-tail 0.15s]` cuts silent parts out of clips and closes the gaps, as one undo step. `--dry-run` lists the parts.
+- `vidcut edit ripple-delete-silence c1 [c2…] [--min 0.5s --threshold -40 --pre-head 0.15s --post-tail 0.15s]` (the defaults shown) cuts silent parts out of clips and closes the gaps, as one undo step. `--dry-run` lists the parts.
 - `vidcut edit detect-scene-cuts c1` splits a clip where its shots change (`--threshold`, scene score 0–100, default 10).
 - `vidcut analyze silence|scenes|black [--media m1 | --clips c1,c2]` and `vidcut analyze loudness [--range a..b]` measure without changing anything. Media positions are source frames; clip positions are timeline frames.
 - `vidcut boring [--boring 30s --jump 10f]` lists clips too long and too short (the Boring Detector).

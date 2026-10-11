@@ -1084,6 +1084,46 @@ mod tests {
     }
 
     #[test]
+    fn imported_gains_stay_within_range() {
+        // A file from elsewhere may carry any gain: the import sets it to
+        // the nearest of -60..24 dB (D12) and says so.
+        let f = busy();
+        let mut doc = export(f.editor.project(), "busy", None).unwrap();
+        let mut raised = 0;
+        fn raise(v: &mut Value, raised: &mut usize) {
+            match v {
+                Value::Object(m) => {
+                    if let Some(g) = m.get_mut("gain_db") {
+                        *g = json!(1000.0);
+                        *raised += 1;
+                    }
+                    m.values_mut().for_each(|v| raise(v, raised));
+                }
+                Value::Array(a) => a.iter_mut().for_each(|v| raise(v, raised)),
+                _ => {}
+            }
+        }
+        raise(&mut doc, &mut raised);
+        assert!(raised > 0);
+        let mut g = Fixture::new(&[(10.0, true), (4.0, true), (8.0, false)]);
+        let r = g.ok(req("timeline.import", json!({ "otio": doc })));
+        let warnings = r.result["warnings"].to_string();
+        assert!(warnings.contains("-60..24 dB"), "{warnings}");
+        let p = g.editor.project();
+        let gains: Vec<f64> = p
+            .tracks
+            .iter()
+            .flat_map(|t| &t.clips)
+            .filter_map(|c| c.audio.as_ref().map(|a| a.gain_db))
+            .collect();
+        assert!(gains.contains(&24.0), "{gains:?}");
+        assert!(
+            gains.iter().all(|g| (-60.0..=24.0).contains(g)),
+            "{gains:?}"
+        );
+    }
+
+    #[test]
     fn files_without_audio_tracks_bring_media_audio() {
         let mut doc = resolve_style();
         let tracks = doc["tracks"]["children"].as_array_mut().unwrap();

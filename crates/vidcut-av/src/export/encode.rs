@@ -415,7 +415,11 @@ pub(crate) fn open_video(
         Some(node) if enc.kind == EncoderChoice::Vaapi => {
             let v = Vaapi::new(node, enc.pixel, width, height)?;
             ctx.set_format(format::Pixel::VAAPI);
-            unsafe { (*ctx.as_mut_ptr()).hw_frames_ctx = ffi::av_buffer_ref(v.frames) };
+            let frames = unsafe { ffi::av_buffer_ref(v.frames) };
+            if frames.is_null() {
+                return Err(Error::Invalid("no memory for the VAAPI frames".into()));
+            }
+            unsafe { (*ctx.as_mut_ptr()).hw_frames_ctx = frames };
             Some(v)
         }
         _ => {
@@ -457,7 +461,7 @@ fn try_gpu(
         sw.set_pts(Some(i));
         let f = match &vaapi {
             Some(v) => v.upload(&sw)?,
-            None => crate::export::video::frame_ref(&sw),
+            None => crate::export::video::frame_ref(&sw)?,
         };
         encoder.send_frame(&f).ctx(|| format!("{name}: encoding"))?;
         let mut p = ffmpeg::Packet::empty();

@@ -106,10 +106,13 @@ pub fn run(
     let part = output.with_file_name(format!(".{name}.part"));
     let result = encode(plan, settings, &part, output, available, cancel, progress);
     match result {
-        Ok(report) => {
-            std::fs::rename(&part, output)?;
-            Ok(report)
-        }
+        Ok(report) => match std::fs::rename(&part, output) {
+            Ok(()) => Ok(report),
+            Err(e) => {
+                let _ = std::fs::remove_file(&part);
+                Err(Error::Io(e))
+            }
+        },
         Err(e) => {
             let _ = std::fs::remove_file(&part);
             Err(e)

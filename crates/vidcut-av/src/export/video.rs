@@ -18,10 +18,16 @@ use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, filter, format, frame};
 
 /// A new reference to `src`'s buffers (no pixel copy).
-pub(crate) fn frame_ref(src: &frame::Video) -> frame::Video {
+pub(crate) fn frame_ref(src: &frame::Video) -> Result<frame::Video> {
     let mut dst = frame::Video::empty();
-    unsafe { ffmpeg::ffi::av_frame_ref(dst.as_mut_ptr(), src.as_ptr()) };
-    dst
+    let ret = unsafe { ffmpeg::ffi::av_frame_ref(dst.as_mut_ptr(), src.as_ptr()) };
+    if ret < 0 {
+        return Err(Error::Ffmpeg {
+            context: "referencing a frame".into(),
+            source: ffmpeg::Error::from(ret),
+        });
+    }
+    Ok(dst)
 }
 
 /// Turns pictures upright (the stream's rotation), scales them keeping the
@@ -152,7 +158,7 @@ impl Normalizer {
     }
 
     pub(crate) fn run(&mut self, src: &frame::Video) -> Result<frame::Video> {
-        let mut input = frame_ref(src);
+        let mut input = frame_ref(src)?;
         input.set_pts(Some(0));
         self.graph
             .get("in")
@@ -323,7 +329,7 @@ impl VideoFrames {
             let k = self.k;
             self.k += 1;
             return match piece.clone() {
-                VideoPiece::Black { .. } => Ok(Some(frame_ref(self.black()?))),
+                VideoPiece::Black { .. } => frame_ref(self.black()?).map(Some),
                 VideoPiece::Source {
                     path,
                     origin,
@@ -430,7 +436,7 @@ impl VideoFrames {
             }
             src.normalized = Some(self.normalizer.as_mut().expect("built").run(frame)?);
         }
-        Ok(frame_ref(src.normalized.as_ref().expect("normalized")))
+        frame_ref(src.normalized.as_ref().expect("normalized"))
     }
 }
 

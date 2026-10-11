@@ -1,5 +1,6 @@
 //! Applies requests to a project with snapshot undo, revisions and dry runs.
 
+use crate::validate::GAIN;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -1164,10 +1165,16 @@ fn import_timeline(
                     },
                     head: h,
                     tail: tl,
-                    gain_db: c.gain_db,
+                    gain_db: c.gain_db.clamp(*GAIN.start(), *GAIN.end()),
                     muted: c.muted,
                 })
             });
+        if audio.is_some() && !GAIN.contains(&c.gain_db) {
+            warnings.push(format!(
+                "{label}: gain {:.1} dB set to the nearest of -60..24 dB",
+                c.gain_db
+            ));
+        }
         if !c.video && audio.is_none() {
             warnings.push(format!("{label}: {} has no audio; left out", m.name));
             continue;

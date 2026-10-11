@@ -5,6 +5,9 @@ use std::collections::HashSet;
 use crate::model::{Project, TrackKind};
 
 /// Returns every invariant violation found (empty when the project is valid).
+/// Clip gain and track volume in dB (decision D12).
+pub const GAIN: std::ops::RangeInclusive<f64> = -60.0..=24.0;
+
 pub fn violations(p: &Project) -> Vec<String> {
     let mut v = Vec::new();
     let mut ids = HashSet::new();
@@ -27,6 +30,12 @@ pub fn violations(p: &Project) -> Vec<String> {
         }
         if i > 0 && t.kind == TrackKind::Video && p.tracks[i - 1].kind == TrackKind::Audio {
             v.push(format!("video track {} after audio tracks", t.id));
+        }
+        if !GAIN.contains(&t.volume_db) {
+            v.push(format!(
+                "track {} volume {} dB outside -60..24 dB (decision D12)",
+                t.id, t.volume_db
+            ));
         }
         let mut prev_end: Option<i64> = None;
         let mut prev_audio_end: Option<i64> = None;
@@ -61,6 +70,12 @@ pub fn violations(p: &Project) -> Vec<String> {
                         ));
                     }
                     if let Some(a) = &c.audio {
+                        if !GAIN.contains(&a.gain_db) {
+                            v.push(format!(
+                                "{}: gain {} dB outside -60..24 dB (decision D12)",
+                                c.id, a.gain_db
+                            ));
+                        }
                         if a.stream as usize >= m.info.audio.len() {
                             v.push(format!(
                                 "{}: no audio stream {} in {}",
@@ -137,4 +152,24 @@ pub fn v1_gapless(p: &Project) -> bool {
         at = c.end();
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::violations;
+    use crate::test_support::Fixture;
+
+    #[test]
+    fn gains_out_of_range_make_a_project_inconsistent() {
+        // A hand-edited file can hold any number; loading checks it (D12).
+        let mut f = Fixture::new(&[(10.0, true)]);
+        f.append("m1", 0, 25);
+        let mut p = f.editor.project().clone();
+        assert!(violations(&p).is_empty());
+        p.tracks[0].clips[0].audio.as_mut().unwrap().gain_db = 1000.0;
+        p.tracks[0].volume_db = f64::NAN;
+        let v = violations(&p).join("; ");
+        assert!(v.contains("gain 1000 dB outside -60..24 dB"), "{v}");
+        assert!(v.contains("track V1 volume NaN dB"), "{v}");
+    }
 }

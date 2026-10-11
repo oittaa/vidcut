@@ -35,7 +35,12 @@ pub fn lost_before(path: &Path, end: f64) -> Result<Option<f64>> {
     // From the keyframe before the cut: what matters is the first keyframe
     // past it and the frames decoded right after that keyframe.
     let ts = (end.max(0.0) * f64::from(ffmpeg::ffi::AV_TIME_BASE)) as i64;
-    let _ = input.seek(ts, ..ts);
+    // Walking on from wherever a failed seek left the reader could pass the
+    // cut and report nothing lost; scanning from the start could read
+    // gigabytes from a share. The session retries instead.
+    input
+        .seek(ts, ..ts)
+        .ctx(|| format!("seeking {} to {end:.3} s", path.display()))?;
     let mut keyframe = false;
     let mut after = 0;
     let mut lost: Option<f64> = None;

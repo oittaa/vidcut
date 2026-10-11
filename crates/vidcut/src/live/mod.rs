@@ -388,6 +388,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         remux: HashMap::new(),
         network: HashMap::new(),
         tails: HashMap::new(),
+        tail_failures: HashMap::new(),
         tail_spots: [Vec::new(), Vec::new()],
         workers: Workers::new(2),
         jobs: Arc::new(Vec::new()),
@@ -448,6 +449,12 @@ enum TailState {
 
 /// Longest tail patch: leading pictures span a few frames at most.
 const MAX_TAIL: i64 = 64;
+
+/// Attempts at a tail's check and patch before the preview gives up on it.
+const TAIL_TRIES: u8 = 2;
+
+/// Wait before trying a failed tail again.
+const TAIL_RETRY: Duration = Duration::from_secs(2);
 
 /// What the source player has loaded.
 #[derive(Debug, Clone, PartialEq)]
@@ -574,6 +581,9 @@ struct Live {
     /// a share that doesn't answer must not stall the session.
     network: HashMap<PathBuf, bool>,
     tails: HashMap<TailKey, TailState>,
+    /// How often each tail's check or patch has failed: it is tried again
+    /// up to [`TAIL_TRIES`] times (a share may have had a hiccup).
+    tail_failures: HashMap<TailKey, u8>,
     /// Where each player's segments end (frames in what it plays) and the
     /// tail that ends there: a seek waits only for checks near its frame.
     tail_spots: [Vec<(i64, TailKey)>; 2],
@@ -777,20 +787,14 @@ impl Live {
                     changed = false;
                 }
                 Ok(Some(t)) => self.render_tail(key, origin, t),
-                Err(e) => {
-                    self.tails.insert(key, TailState::Failed);
-                    self.notice(format!("checking a preview cut: {e}"), true);
-                }
+                Err(e) => self.tail_failed(key, &format!("checking a preview cut: {e}")),
             },
             Msg::TailRendered { key, result } => {
                 match result {
                     Ok((path, frames)) => {
                         self.tails.insert(key, TailState::Ready { path, frames });
                     }
-                    Err(e) => {
-                        self.tails.insert(key, TailState::Failed);
-                        self.notice(format!("preview patch: {e}"), true);
-                    }
+                    Err(e) => self.tail_failed(key, &format!("preview patch: {e}")),
                 }
                 self.refresh_timeline();
                 self.refresh_source();
@@ -1855,6 +1859,11 @@ impl Live {
                 plan.height,
             );
             spots.push((at, key.clone()));
+            let retry = matches!(self.tails.get(&key), Some(TailState::Failed))
+                && self.tail_failures.get(&key).copied().unwrap_or(0) < TAIL_TRIES;
+            if retry {
+                self.tails.remove(&key);
+            }
             match self.tails.get(&key) {
                 Some(TailState::Ready {
                     path: patch,
@@ -2304,6 +2313,23 @@ impl Live {
                 Ok(r)
             }),
         );
+    }
+
+    /// A tail's check or patch failed: tried again in a moment up to
+    /// [`TAIL_TRIES`] times, then left unpatched with a notice.
+    fn tail_failed(&mut self, key: TailKey, what: &str) {
+        self.tails.insert(key.clone(), TailState::Failed);
+        let failures = self.tail_failures.entry(key).or_default();
+        *failures += 1;
+        if *failures < TAIL_TRIES {
+            let at = Instant::now() + TAIL_RETRY;
+            self.timeline_due = Some(self.timeline_due.map_or(at, |d| d.min(at)));
+        } else {
+            self.notice(
+                format!("{what}; the preview may drop the last frames before that cut"),
+                true,
+            );
+        }
     }
 
     /// Whether `player` shows its latest motion (seek or load), with no tail

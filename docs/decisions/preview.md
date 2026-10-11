@@ -163,6 +163,8 @@ Found with eframe 0.35 in M0 and unchanged with 0.36: `tests/gui.rs` (`--feature
 
 **Waiting.** A seek waits until the checks and patches that could change its frame are done: those of cuts at most 64 frames after it ([gui.md](gui.md) §4). Checks start nearest the playhead first. The state reports all that are still running as `preview_pending`.
 
+**Failures are tried again.** A check whose seek fails reports an error rather than "nothing lost". A failed check or patch is tried once more 2 s later; a network share may just have hiccuped. After that the cut stays unpatched, with a notice that the preview may drop its last frames.
+
 **Evidence:**
 - `crates/vidcut-av/tests/tails.rs`: frames 88–89 are lost before keyframe 90 and patched exactly.
 - `crates/vidcut/tests/live.rs` (clip from the first frame of a 640×360 file) and `tests/gui.rs`: frames 88–90 are exact.
