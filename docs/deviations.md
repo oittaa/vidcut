@@ -21,7 +21,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 
 ## X3. Export dialog beyond Quick Export
 - **Resolve:** the Cut page has Quick Export only, writing a single file. Full render settings and "Individual clips" live on the Deliver page (Ch. 39, pp. 788–790), and finished renders are tracked in the Deliver page's Render Queue.
-- **vidcut:** Quick Export behaves as in Resolve: a row of presets, Export, a file dialog, then a progress window (Cancel, or Hide to keep it running). The preset tiles show the preset's name and format rather than brand logos. An additional Export dialog provides:
+- **vidcut:** Quick Export behaves as in Resolve: a row of presets, Export, a file dialog, then a progress window (Cancel, or Hide to keep it running). The preset tiles show the preset's name and format rather than brand logos, and the row also has an AV1 preset (10-bit, at the timeline's size), which Resolve's row lacks. An additional Export dialog provides:
   - full codec and container settings, starting from any preset
   - GPU encoder choice
   - range (whole timeline, In–Out, or typed), per-clip export with file-name templates, audio-only export
@@ -31,7 +31,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
   - loudness normalization to a target in LUFS (`audio.loudness`), like the Deliver page's Normalize Audio (p. 4105): the mix is measured (EBU R128), then changed by one gain that keeps true peaks at or below −1 dBTP. The export reports what it measured and the gain
 
   Every export is a job: a Jobs window lists them with progress, ETA and Cancel, including exports started from the CLI. Quitting while exports run asks first.
-- **Why:** vidcut has no Deliver page, and the user requires these export options. The plan and the command make every GUI export reproducible from a script.
+- **Why:** vidcut has no Deliver page, and the user requires these export options. The plan and the command make every GUI export reproducible from a script. AV1 makes the smallest files at a given quality, YouTube and other sites take it, and current GPUs encode it in hardware as fast as H.264.
 
 ## X4. Undo history persists across sessions and CLI runs
 - **Resolve:** undo is unlimited within a session and cleared when the project closes (p. 651).

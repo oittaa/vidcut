@@ -337,8 +337,8 @@ pub fn builtin_presets() -> Vec<Preset> {
         preset(
             "av1",
             "AV1",
-            "MP4, 10-bit AV1, AAC: small files",
-            false,
+            "MP4, 10-bit AV1, AAC: small files for YouTube and the web",
+            true,
             av(
                 C::Mp4,
                 VideoSettings {
