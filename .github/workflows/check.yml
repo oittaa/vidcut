@@ -1,0 +1,92 @@
+# Fast gate only: scripts/check.sh (fmt, clippy -D warnings, unit tests).
+# scripts/check.sh full (integration, e2e, doc tests) is intentionally not run here.
+name: check
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.workflow }}-${{ github.ref }}
+  # A new push to a pull request replaces its run. Every master commit gets
+  # a run of its own.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  # No debug info: a smaller cache and faster links. Panics still name the
+  # file and line.
+  CARGO_PROFILE_DEV_DEBUG: 0
+
+jobs:
+  check:
+    name: fmt, clippy, unit tests
+    # Pin Ubuntu 26.04. Its apt archive ships FFmpeg 8.0 (libavcodec 62).
+    # ubuntu-24.04, and ubuntu-latest until the October 2026 migration,
+    # ship FFmpeg 6. Those headers do not match this tree (swr_convert).
+    runs-on: ubuntu-26.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install FFmpeg 8 and libclang
+        run: |
+          set -euo pipefail
+          # Ubuntu 26.04 (resolute) publishes FFmpeg 8 in the archive.
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            libavcodec-dev \
+            libavformat-dev \
+            libavfilter-dev \
+            libavutil-dev \
+            libswscale-dev \
+            libswresample-dev \
+            libavdevice-dev \
+            libclang-dev \
+            pkg-config
+          ver=$(dpkg-query -W -f='${Version}' libavcodec-dev)
+          upstream=${ver#*:}
+          major=${upstream%%.*}
+          echo "libavcodec-dev ${ver} (upstream ${upstream})"
+          if ! [[ "$major" =~ ^[0-9]+$ ]] || [ "$major" -lt 8 ]; then
+            echo "apt FFmpeg ${upstream} is older than 8. This tree needs FFmpeg 8 headers and does not build against FFmpeg 6." >&2
+            exit 1
+          fi
+          pkg-config --exists --print-errors \
+            libavcodec libavformat libavfilter libavutil libswscale libswresample libavdevice
+          pkg-config --modversion libavcodec libswresample
+
+      - name: Install the pinned Rust toolchain
+        run: |
+          set -euo pipefail
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
+          # rust-toolchain.toml selects the channel and rustfmt/clippy.
+          rustup show active-toolchain
+          rustc --version
+          cargo fmt --version
+          cargo clippy --version
+          channel=$(awk -F'"' '/^channel/ { print $2; exit }' rust-toolchain.toml)
+          got=$(rustc --version | awk '{ print $2 }')
+          if [ "$got" != "$channel" ]; then
+            echo "expected rustc ${channel} from rust-toolchain.toml, got ${got}" >&2
+            exit 1
+          fi
+
+      # After the toolchain step: the cache key includes the rustc version.
+      # It keeps the compiled dependencies (target/, not vidcut's own crates)
+      # and the downloaded crates. After a Cargo.lock change it restores the
+      # previous cache, so only the changed dependencies are compiled again.
+      - name: Cache compiled dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Fast gate
+        # CI is set, so scripts/check.sh omits cargo --quiet and the log
+        # shows each crate as it compiles.
+        run: scripts/check.sh
