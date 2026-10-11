@@ -560,12 +560,19 @@ fn filmstrip(media: &vidcut_core::model::Media) -> std::result::Result<Filmstrip
     let (images, times) = match cached {
         Some(strip) => strip,
         None => {
-            let strip = vidcut_av::thumbs::filmstrip(
-                &crate::env::input_of(media),
-                THUMBS,
-                THUMB_SIZE.0,
-                THUMB_SIZE.1,
-            )
+            let input = crate::env::input_of(media);
+            // image2 would read every numbered file after the first. A
+            // sequence is only its own count, even when more files follow.
+            let strip = match media.sequence.as_ref().map(|s| s.count) {
+                Some(pictures) => vidcut_av::thumbs::filmstrip_pictures(
+                    &input,
+                    pictures,
+                    THUMBS,
+                    THUMB_SIZE.0,
+                    THUMB_SIZE.1,
+                ),
+                None => vidcut_av::thumbs::filmstrip(&input, THUMBS, THUMB_SIZE.0, THUMB_SIZE.1),
+            }
             .map_err(|e| e.to_string())?;
             if prefs.disk_cache && !strip.0.is_empty() {
                 crate::thumbcache::store(

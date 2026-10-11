@@ -65,7 +65,7 @@ fn levels_keep_time_across_a_lost_packet() {
 fn shots_score_at_their_cuts_and_black_reads_black() {
     let path =
         fixture::ensure(&spec(150).picture(Picture::Shots { frames: 30 }).no_audio()).unwrap();
-    let s = analysis::picture_stats(&vidcut_av::decode::Input::File(path)).unwrap();
+    let s = analysis::picture_stats(&vidcut_av::decode::Input::File(path), None).unwrap();
     assert_eq!(s.pts.len(), 150);
     for k in [30, 60, 90, 120] {
         assert!(s.score[k] >= 20.0, "cut at {k}: {}", s.score[k]);

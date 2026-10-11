@@ -105,8 +105,15 @@ const MEASURE: (u32, u32) = (96, 54);
 /// is FFmpeg scdet's: the mean absolute difference from the previous frame
 /// (0..100), or its change from the previous difference if smaller, so a
 /// steady pan doesn't read as a cut.
-pub fn picture_stats(source: &crate::decode::Input) -> Result<PictureStats> {
+///
+/// An image sequence is read by image2, which continues while the file
+/// numbers do. Pass that sequence's own length as `pictures`; frames after
+/// it are not measured and not opened. `None` reads the whole source.
+pub fn picture_stats(source: &crate::decode::Input, pictures: Option<u64>) -> Result<PictureStats> {
     crate::cancel::stop()?;
+    if pictures == Some(0) {
+        return Ok(PictureStats::default());
+    }
     let path = source.path();
     let mut input = source.open()?;
     let stream = input
@@ -187,14 +194,79 @@ pub fn picture_stats(source: &crate::decode::Input) -> Result<PictureStats> {
         prev = Some(luma);
         Ok(())
     };
-    decode_stream(
-        &mut input,
-        index,
-        &mut decoder,
-        &mut frame::Video::empty(),
-        handle,
-    )?;
+    match pictures {
+        Some(n) => decode_pictures(&mut input, index, &mut decoder, n, handle)?,
+        None => decode_stream(
+            &mut input,
+            index,
+            &mut decoder,
+            &mut frame::Video::empty(),
+            handle,
+        )?,
+    }
     Ok(stats)
+}
+
+/// Decodes at most `pictures` frames. The packet after the last one is not
+/// read: for an image sequence that packet is the next numbered file.
+fn decode_pictures(
+    input: &mut format::context::Input,
+    index: usize,
+    decoder: &mut ffmpeg::decoder::Opened,
+    pictures: u64,
+    mut each: impl FnMut(&frame::Video) -> Result<()>,
+) -> Result<()> {
+    let mut frame = frame::Video::empty();
+    let mut damaged = 0u32;
+    let mut got = 0u64;
+    let mut eof = false;
+    loop {
+        if got >= pictures {
+            return Ok(());
+        }
+        match decoder.receive_frame(&mut frame) {
+            Ok(()) => {
+                damaged = 0;
+                each(&frame)?;
+                got += 1;
+                continue;
+            }
+            Err(ffmpeg::Error::InvalidData) if damaged < crate::decode::DAMAGED_IN_A_ROW => {
+                damaged += 1;
+                continue;
+            }
+            Err(ffmpeg::Error::Eof) => return Ok(()),
+            Err(ffmpeg::Error::Other {
+                errno: ffmpeg::util::error::EAGAIN,
+            }) => {}
+            Err(e) => {
+                return Err(Error::Ffmpeg {
+                    context: "decoding".into(),
+                    source: e,
+                });
+            }
+        }
+        if eof || got >= pictures {
+            return Ok(());
+        }
+        let mut packet = ffmpeg::Packet::empty();
+        match packet.read(input) {
+            Ok(()) if packet.stream() == index => {
+                crate::decode::send_packet(decoder, &packet)?;
+            }
+            Ok(()) => continue,
+            Err(ffmpeg::Error::Eof) => {
+                decoder.send_eof().ctx(|| "flushing decoder".into())?;
+                eof = true;
+            }
+            Err(e) => {
+                return Err(Error::Ffmpeg {
+                    context: "reading packet".into(),
+                    source: e,
+                });
+            }
+        }
+    }
 }
 
 /// Loudness of `plan`'s audio mixed as an export mixes it (FFmpeg's

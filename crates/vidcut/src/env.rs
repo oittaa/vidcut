@@ -57,6 +57,10 @@ fn measured<T>(
 }
 
 /// How `m`'s pictures are read: its file, or its image sequence.
+///
+/// The sequence's `count` is not given here. image2 reads every numbered
+/// file after the first; filmstrips and picture measurements stop at
+/// `count` themselves.
 pub fn input_of(m: &Media) -> vidcut_av::decode::Input {
     use vidcut_av::decode::Input;
     match (&m.sequence, &m.info.video) {
@@ -134,10 +138,17 @@ impl Env for AvEnv {
     }
 
     fn picture_stats(&self, media: &Media) -> Result<Arc<PictureStats>> {
+        // The count is part of the cache name: a prefix of a longer numbered
+        // run is not the same measurement as that run.
+        let pictures = media.sequence.as_ref().map(|s| s.count);
+        let key = match pictures {
+            Some(n) => format!("pictures-{n}"),
+            None => "pictures".to_string(),
+        };
         measured(
             &PICTURES,
-            paths::media_cache("analysis", media, "pictures"),
-            || vidcut_av::analysis::picture_stats(&input_of(media)),
+            paths::media_cache("analysis", media, &key),
+            || vidcut_av::analysis::picture_stats(&input_of(media), pictures),
             PictureStats::to_bytes,
             PictureStats::from_bytes,
         )
