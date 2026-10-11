@@ -3,8 +3,9 @@
 //!
 //! HDR into SDR is tone-mapped. SDR into HDR puts SDR white at 203 nits,
 //! the reference white of ITU-R BT.2408 (Resolve's "203 nits" option,
-//! p. 238). Untagged pictures are BT.709 from 720 lines up, as players
-//! assume, and BT.601 below.
+//! p. 238). Untagged pictures are BT.709 when HD by mpv's rule (1280 wide,
+//! or over 576 lines), else BT.601: mpv shows the preview, so the export
+//! then matches it.
 
 use vidcut_core::model::Hdr;
 
@@ -53,6 +54,18 @@ fn is_rgb(p: format::Pixel) -> bool {
         .is_some_and(|d| unsafe { (*d.as_ptr()).flags } & ffi::AV_PIX_FMT_FLAG_RGB as u64 != 0)
 }
 
+/// The matrix an untagged SDR picture of `width`×`height` is taken to use:
+/// mpv's guess (BT.709 from 1280 wide or over 576 lines, else BT.601), so
+/// the export decodes it as the preview shows it. A 1280×534 widescreen
+/// film is HD this way, though it has fewer than 720 lines.
+fn untagged_matrix(width: u32, height: u32) -> Matrix {
+    if width >= 1280 || height > 576 {
+        Matrix::Bt709
+    } else {
+        Matrix::Bt601
+    }
+}
+
 impl Source {
     pub(crate) fn of(f: &frame::Video) -> Self {
         use ffi::AVColorSpace as S;
@@ -64,8 +77,7 @@ impl Source {
             S::AVCOL_SPC_BT470BG | S::AVCOL_SPC_SMPTE170M | S::AVCOL_SPC_FCC => Matrix::Bt601,
             S::AVCOL_SPC_BT2020_NCL | S::AVCOL_SPC_BT2020_CL => Matrix::Bt2020,
             _ if hdr.is_some() => Matrix::Bt2020,
-            _ if f.height().min(f.width()) >= 720 => Matrix::Bt709,
-            _ => Matrix::Bt601,
+            _ => untagged_matrix(f.width(), f.height()),
         };
         Self {
             hdr,
@@ -228,5 +240,27 @@ pub(crate) fn tag(ctx: *mut ffi::AVCodecContext, hdr: Option<Hdr>) {
         (*ctx).color_trc = t;
         (*ctx).colorspace = s;
         (*ctx).color_range = ffi::AVColorRange::AVCOL_RANGE_MPEG;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn untagged_pictures_are_guessed_as_mpv_guesses() {
+        for (w, h, hd) in [
+            (1280, 534, true), // a widescreen film in HD
+            (1920, 800, true),
+            (1920, 1080, true),
+            (720, 1280, true), // portrait HD
+            (720, 576, false), // PAL
+            (720, 480, false), // NTSC
+            (1024, 576, false),
+            (640, 360, false),
+        ] {
+            let want = if hd { Matrix::Bt709 } else { Matrix::Bt601 };
+            assert_eq!(untagged_matrix(w, h), want, "{w}x{h}");
+        }
     }
 }

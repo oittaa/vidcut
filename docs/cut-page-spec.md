@@ -464,7 +464,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - **Detection:** a clip is HDR when its transfer is PQ (SMPTE ST 2084) or HLG; `media.get` reports it as `hdr`.
   - **SDR output (the default):** HDR clips are tone-mapped to BT.709. Up to 80% of the 203-nit reference white stays as it was, and brighter highlights roll off, up to 1000 nits.
   - **HDR output:** `video.hdr` (`pq` or `hlg`) writes BT.2100 in 10 bits. SDR clips are placed with their white at 203 nits (BT.2408), as Resolve's "203 nits" option does (p. 238).
-  - **Tags and untagged media:** outputs are tagged with their colors. Untagged media are BT.709 from 720 lines up and BT.601 below, as players assume.
+  - **Tags and untagged media:** outputs are tagged with their colors. Untagged media are BT.709 when 1280 wide or over 576 lines, and BT.601 otherwise: mpv's guess, so an export matches the preview (a 1280×534 widescreen film is HD).
   - **Preview:** mpv tone-maps HDR clips for the screen with its own curve, so the preview can look a little different from an SDR export (deviation X14).
 - **D36. Which track an edit point is on** (pp. 696, 720, 729–732). The manual pictures one main story.
   - **Track 1's edits:** the Smart Indicator, V (select the nearest edit), Smart Insert, Place On Top's alignment and Up/Down navigation use Track 1, the main story.
