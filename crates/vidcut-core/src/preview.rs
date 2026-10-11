@@ -79,12 +79,26 @@ pub fn build(plan: &RenderPlan, fillers: &Fillers) -> Preview {
     }
 }
 
-/// Clip gain changes in one lane that preview follows (more fall back to
-/// the lane's most common gain).
-const MAX_GAIN_CHANGES: usize = 64;
-
 fn linear(db: f64) -> f64 {
     10f64.powf(db / 20.0)
+}
+
+/// A lane's gain at timeline time `t` as an FFmpeg expression, from its gain
+/// spans `(start s, end s, dB)` in order: a binary search over their starts.
+/// It nests only log2(n) deep; FFmpeg's expression parser refuses some 100
+/// levels, so one `if` per span stopped working past a few dozen changes.
+/// Between spans the lane is silent, and any gain does.
+fn gain_at(spans: &[(f64, f64, f64)]) -> String {
+    if let [(_, _, db)] = spans {
+        return format!("{:.6}", linear(*db));
+    }
+    let mid = spans.len() / 2;
+    format!(
+        "if(lt(t,{:.6}),{},{})",
+        spans[mid].0,
+        gain_at(&spans[..mid]),
+        gain_at(&spans[mid..])
+    )
 }
 
 /// The `lavfi-complex` graph for the audio streams of [`edl`]: each lane's
@@ -103,8 +117,9 @@ pub fn audio_graph(plan: &RenderPlan) -> Option<String> {
             let len = piece.samples();
             if let AudioPiece::Source { gain_db, .. } = piece {
                 let (a, b) = (at as f64 / rate, (at + len) as f64 / rate);
+                // A span reaches over silence to the next with its gain.
                 match spans.last_mut() {
-                    Some(last) if last.2 == *gain_db && (last.1 - a).abs() < 1e-9 => last.1 = b,
+                    Some(last) if last.2 == *gain_db => last.1 = b,
                     _ => spans.push((a, b, *gain_db)),
                 }
             }
@@ -115,23 +130,8 @@ pub fn audio_graph(plan: &RenderPlan) -> Option<String> {
             None
         } else if spans.iter().all(|s| s.2 == first) {
             Some(format!("volume={:.6}", linear(first)))
-        } else if spans.len() <= MAX_GAIN_CHANGES {
-            let mut expr = String::from("1");
-            for (a, b, db) in spans.iter().rev().filter(|s| s.2 != 0.0) {
-                expr = format!("if(between(t,{a:.6},{b:.6}),{:.6},{expr})", linear(*db));
-            }
-            Some(format!("volume=volume='{expr}':eval=frame"))
         } else {
-            // Too many changes: the most common gain for the whole lane.
-            let mut counts: Vec<(f64, usize)> = Vec::new();
-            for s in &spans {
-                match counts.iter_mut().find(|c| c.0 == s.2) {
-                    Some(c) => c.1 += 1,
-                    None => counts.push((s.2, 1)),
-                }
-            }
-            let db = counts.iter().max_by_key(|c| c.1).map_or(0.0, |c| c.0);
-            (db != 0.0).then(|| format!("volume={:.6}", linear(db)))
+            Some(format!("volume=volume='{}':eval=frame", gain_at(&spans)))
         };
         match filter {
             Some(f) => {
@@ -308,7 +308,7 @@ mod tests {
         let plan = flatten(f.editor.project(), 0, 75).unwrap();
         assert_eq!(
             audio_graph(&plan).unwrap(),
-            "[aid1]volume=volume='if(between(t,2.000000,3.000000),1.995262,1)':eval=frame[g1];\
+            "[aid1]volume=volume='if(lt(t,2.000000),1.000000,1.995262)':eval=frame[g1];\
              [aid2]volume=0.501187[g2];[g1][g2]amix=inputs=2:normalize=0[ao]"
         );
         // One plain lane needs no graph.
@@ -316,5 +316,68 @@ mod tests {
         f.ok(json!({"method": "clip.set", "params": {"clips": "c2", "gain_db": 0.0}}));
         let plan = flatten(f.editor.project(), 0, 75).unwrap();
         assert_eq!(audio_graph(&plan), None);
+    }
+
+    /// The expressions [`gain_at`] makes: `if(lt(t,X),A,B)` and numbers.
+    enum Gain {
+        If(f64, Box<Gain>, Box<Gain>),
+        Is(f64),
+    }
+
+    impl Gain {
+        fn parse(s: &str) -> (Gain, &str) {
+            if let Some(rest) = s.strip_prefix("if(lt(t,") {
+                let (x, rest) = rest.split_once("),").unwrap();
+                let (a, rest) = Gain::parse(rest);
+                let (b, rest) = Gain::parse(rest.strip_prefix(',').unwrap());
+                let node = Gain::If(x.parse().unwrap(), Box::new(a), Box::new(b));
+                (node, rest.strip_prefix(')').unwrap())
+            } else {
+                let end = s.find([',', ')']).unwrap_or(s.len());
+                (Gain::Is(s[..end].parse().unwrap()), &s[end..])
+            }
+        }
+
+        fn at(&self, t: f64) -> f64 {
+            match self {
+                Gain::If(x, a, b) => {
+                    if t < *x {
+                        a.at(t)
+                    } else {
+                        b.at(t)
+                    }
+                }
+                Gain::Is(v) => *v,
+            }
+        }
+
+        fn depth(&self) -> usize {
+            match self {
+                Gain::If(_, a, b) => 1 + a.depth().max(b.depth()),
+                Gain::Is(_) => 0,
+            }
+        }
+    }
+
+    #[test]
+    fn gains_switch_by_binary_search_however_many_there_are() {
+        // 2000 clips of 0.1 s cycling through four gains. One `if` per change,
+        // as before, broke FFmpeg's parser past a few dozen.
+        let db = [0.0, -6.0, -12.0, 3.0];
+        let spans: Vec<(f64, f64, f64)> = (0..2000)
+            .map(|i| (i as f64 * 0.1, (i + 1) as f64 * 0.1, db[i % 4]))
+            .collect();
+        let expr = gain_at(&spans);
+        let (gain, rest) = Gain::parse(&expr);
+        assert!(rest.is_empty(), "left over: {rest:.40}");
+        assert!(gain.depth() <= 11, "nests {} deep", gain.depth());
+        for (i, s) in spans.iter().enumerate() {
+            for t in [s.0, s.0 + 0.05, s.1 - 0.001] {
+                let v = gain.at(t);
+                assert!((v - linear(db[i % 4])).abs() < 1e-5, "span {i} at {t}: {v}");
+            }
+        }
+        // Gaps are silent: a gain reaches over them to the next clip with it.
+        assert_eq!(gain_at(&[(0.0, 1.0, -6.0)]), "0.501187");
     }
 }
