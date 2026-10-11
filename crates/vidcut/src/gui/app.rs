@@ -294,9 +294,10 @@ fn make_players(
 ) -> std::result::Result<((Mpv, Mpv), [GlRenderer; 2]), String> {
     vidcut_mpv::available()?;
     let lookup = proc_address.ok_or("no OpenGL function loader")?;
-    let opts = live::mpv_options(true);
-    let opts: Vec<(&str, &str)> = opts.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-    let make = || -> std::result::Result<(Mpv, GlRenderer), String> {
+    let make = |id: PlayerId| -> std::result::Result<(Mpv, GlRenderer), String> {
+        let mut opts = live::mpv_options(true);
+        opts.extend(live::mpv_log_options(id));
+        let opts: Vec<(&str, &str)> = opts.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
         let mpv = Mpv::new(&opts).map_err(|e| e.to_string())?;
         let l = lookup.clone();
         let renderer = GlRenderer::new(&mpv, Box::new(move |name| l(name)), display)
@@ -305,7 +306,10 @@ fn make_players(
         renderer.set_update_callback(move || ctx.request_repaint());
         Ok((mpv, renderer))
     };
-    let (s, sr) = make()?;
-    let (t, tr) = make()?;
+    // The timeline player comes first: FFmpeg has one log callback per
+    // process, which the first mpv takes, so all of FFmpeg's messages go to
+    // the timeline's log (`VIDCUT_MPV_LOG_DIR`).
+    let (t, tr) = make(PlayerId::Timeline)?;
+    let (s, sr) = make(PlayerId::Source)?;
     Ok(((s, t), [sr, tr]))
 }

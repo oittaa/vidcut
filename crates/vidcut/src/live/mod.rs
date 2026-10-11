@@ -37,7 +37,7 @@ use vidcut_core::{Envelope, Error, Project, Request, Response, Result};
 use vidcut_mpv::Mpv;
 
 pub use jobs::{JobInfo, JobOutput, JobState};
-pub use player::{debug, mpv_options};
+pub use player::{debug, mpv_log_options, mpv_options};
 pub use snapshot::*;
 pub use vidcut_av::thumbs::Image;
 

@@ -279,6 +279,9 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 **Preview debugging:**
 - `VIDCUT_DEBUG_PLAYER=1` traces every player command, mpv event, render and timeline gesture to stderr.
 - `VIDCUT_MPV_OPTIONS="hwdec=no,ao=null"` overrides mpv options.
+- `VIDCUT_MPV_LOG_DIR=DIR` makes each GUI player write mpv's own log, at debug level, to `DIR/<pid>-source.log` and `DIR/<pid>-timeline.log`. `VIDCUT_MPV_OPTIONS=msg-level=all=trace` adds more.
+  - FFmpeg's messages are all in the timeline's log: both players' and those of vidcut's own FFmpeg work in the GUI process (thumbnails, waveforms, exports). FFmpeg has one log callback per process, and the first mpv instance (the timeline's) takes it.
+  - `tests/gui.rs` sets it and `VIDCUT_DEBUG_PLAYER` for its GUI. A failed run keeps its temp dir, which the failure names: the screenshots, both mpv logs and the GUI's stderr.
 
 **Preview spikes:**
 - `cargo test -p vidcut-mpv --test edl_spike -- --nocapture` runs the mpv EDL/seek semantics experiments headless.

@@ -65,6 +65,30 @@ pub fn mpv_options(audio: bool) -> Vec<(String, String)> {
     o
 }
 
+/// Options that make `player` write mpv's own log when `VIDCUT_MPV_LOG_DIR`
+/// is set (for debugging): to `<dir>/<pid>-source.log` or
+/// `<dir>/<pid>-timeline.log`, since `VIDCUT_MPV_OPTIONS` would give both
+/// players one file. mpv logs to a file at debug level;
+/// `VIDCUT_MPV_OPTIONS=msg-level=all=trace` adds more.
+pub fn mpv_log_options(player: PlayerId) -> Vec<(String, String)> {
+    let dir = match std::env::var("VIDCUT_MPV_LOG_DIR") {
+        Ok(dir) if !dir.is_empty() => PathBuf::from(dir),
+        _ => return Vec::new(),
+    };
+    // mpv doesn't create the directory and, with its terminal off, would
+    // fail silently.
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        eprintln!("vidcut: no mpv log: can't create {}: {e}", dir.display());
+        return Vec::new();
+    }
+    let name = match player {
+        PlayerId::Source => "source",
+        PlayerId::Timeline => "timeline",
+    };
+    let file = dir.join(format!("{}-{name}.log", std::process::id()));
+    vec![("log-file".into(), file.to_string_lossy().into_owned())]
+}
+
 /// Whether `path` is on a network file system (NFS, SMB/CIFS, Ceph, AFS,
 /// 9P, or FUSE, as GNOME's mounted shares and sshfs are). Can block while a
 /// share doesn't answer: call it off the session thread.
