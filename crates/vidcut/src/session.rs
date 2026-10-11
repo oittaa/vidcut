@@ -197,13 +197,22 @@ pub fn render(
             range.as_ref(),
             None,
         )?),
-        // Measurements: queries, on a copy.
+        // Measurements: queries, on a copy. Keep `if_rev`. A mutation that
+        // lands here later must not apply on this throwaway editor and come
+        // back as success: the copy is discarded, and `r.rev` below would
+        // still report the snapshot revision.
         _ => {
-            let envelope = Envelope {
-                if_rev: None,
-                ..envelope.clone()
-            };
-            Editor::new(project.clone(), Default::default()).apply(envelope, &AvEnv, None)?
+            if envelope.request.is_mutation() {
+                return Err(Error::internal(format!(
+                    "{} changes the project; it cannot run on the render copy",
+                    envelope.request.method()
+                )));
+            }
+            Editor::new(project.clone(), Default::default()).apply(
+                envelope.clone(),
+                &AvEnv,
+                None,
+            )?
         }
     };
     r.rev = project.rev;
@@ -322,4 +331,51 @@ pub fn doctor() -> Value {
         "state_dir": state_dir(),
         "test_data": vidcut_av::testdata::root(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::sync::atomic::AtomicBool;
+
+    use serde_json::json;
+    use vidcut_core::model::Settings;
+    use vidcut_core::{Envelope, ErrorCode, Project};
+
+    use super::{Hooks, render};
+
+    fn render_req(req: serde_json::Value) -> vidcut_core::Result<vidcut_core::Response> {
+        let project = Project::new(Settings::default());
+        let envelope = Envelope::from_json(req).unwrap();
+        let cancel = AtomicBool::new(false);
+        render(
+            &project,
+            Path::new("p.vidcut"),
+            &envelope,
+            &mut Hooks {
+                cancel: &cancel,
+                progress: &mut |_, _, _, _| {},
+            },
+        )
+    }
+
+    #[test]
+    fn render_keeps_if_rev_and_refuses_mutations() {
+        let stale = render_req(json!({ "method": "timeline.get", "if_rev": 1 })).unwrap_err();
+        assert_eq!(stale.code, ErrorCode::Conflict);
+
+        let ok = render_req(json!({ "method": "timeline.get", "if_rev": 0 })).unwrap();
+        assert_eq!(ok.rev, 0);
+
+        // A matching `if_rev` would pass the revision check and then apply
+        // on the throwaway editor. That must still fail.
+        for req in [
+            json!({ "method": "project.set", "params": { "ripple_on": false }, "if_rev": 0 }),
+            json!({ "method": "project.set", "params": { "ripple_on": false } }),
+        ] {
+            let err = render_req(req).unwrap_err();
+            assert_eq!(err.code, ErrorCode::Internal);
+            assert!(err.message.contains("project.set"), "{err}");
+        }
+    }
 }
