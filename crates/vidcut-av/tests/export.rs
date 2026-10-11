@@ -551,15 +551,30 @@ fn a_failed_rename_leaves_no_part_file() {
     let dir = out_dir("rename");
     let out = dir.join("taken.mkv");
     std::fs::create_dir_all(out.join("inside")).unwrap();
-    let r = export::run(
+    // An encode that fails first also deletes `.part`. The frame count and
+    // the error both have to say the file was finished and the rename failed.
+    let mut encoded = 0;
+    let err = export::run(
         &p,
         &lossless(),
         &out,
         &Availability::default(),
         &AtomicBool::new(false),
-        &mut |_| {},
+        &mut |pr| {
+            encoded = pr.frames;
+            assert_eq!(pr.total, p.frames);
+        },
+    )
+    .expect_err("the rename can't succeed");
+    assert_eq!(encoded, p.frames, "the encode ran to the end");
+    let vidcut_av::Error::Io(io) = err else {
+        panic!("the encode finished and the rename failed: {err}");
+    };
+    assert_eq!(io.kind(), std::io::ErrorKind::IsADirectory, "{io}");
+    assert!(
+        !export::partial_path(&out).exists(),
+        "the finished .part is gone"
     );
-    assert!(r.is_err(), "the rename can't succeed");
     let left: Vec<_> = std::fs::read_dir(&dir)
         .unwrap()
         .map(|e| e.unwrap().file_name())
@@ -613,9 +628,165 @@ fn audio_after_a_lost_packet_keeps_its_time() {
         assert!((t - want).abs() < 0.001, "beep at {t:.4}, want {want:.4}");
     }
     // The hole (the packet after the AAC priming one, 79 × 1024 samples in)
-    // is digital silence.
+    // is digital silence. A loud sample here fails; the length check above
+    // would not.
     let hole = &mono[79 * 1024..80 * 1024];
     assert!(hole.iter().all(|&x| x == 0.0), "the hole is silent");
+}
+
+#[test]
+fn a_rejected_audio_packet_leaves_silence() {
+    // The same AAC packet, with its bytes replaced by zeros. The decoder
+    // rejects it (invalid data) instead of concealing a tone, and the hole
+    // is silence. A loud glitch there fails this, not only a short file.
+    let fps = Rational::new(30, 1).unwrap();
+    let s = src(
+        FixtureSpec::new(VideoCodec::H264, Container::Mkv, 320, 180, (30, 1), 90).with_audio(
+            AudioCodec::Aac,
+            48_000,
+            2,
+        ),
+    );
+    let info = vidcut_av::probe::probe(&s.path).unwrap();
+    let audio = info.audio[0].index;
+    let dir = out_dir("rejected");
+    let damaged = dir.join("rejected.mkv");
+    fixture::spoil(&s.path, &damaged, audio, 80, Spoil::Zero).unwrap();
+    let gapped = Src {
+        path: damaged,
+        origin: s.origin,
+    };
+    let p = plan(
+        fps,
+        320,
+        180,
+        vec![v(&gapped, 0, 90)],
+        vec![vec![a(&gapped, fps, 48_000, 0, 90)]],
+    );
+    let out = dir.join("out.mkv");
+    render(&p, &lossless(), &out);
+    let mono = audio_mono(&out);
+    assert_eq!(mono.len() as i64, p.samples(), "sample count");
+    let onsets = vidcut_av::beep::onsets(&mono, 0.1, 4800);
+    let expect = [0.0, 1.0, 2.0];
+    assert_eq!(onsets.len(), expect.len(), "beeps at {onsets:?}");
+    for (got, want) in onsets.iter().zip(expect) {
+        let t = *got as f64 / 48_000.0;
+        assert!((t - want).abs() < 0.001, "beep at {t:.4}, want {want:.4}");
+    }
+    let hole = &mono[79 * 1024..80 * 1024];
+    let peak = hole.iter().fold(0f32, |m, s| m.max(s.abs()));
+    assert!(
+        hole.iter().all(|&x| x == 0.0),
+        "the hole is silent, peak {peak}"
+    );
+}
+
+/// Copies `src` to `out` with the audio stream's extradata replaced.
+fn with_audio_extradata(src: &Path, out: &Path, extra: &[u8]) {
+    use vidcut_av::ffmpeg::{self, codec, encoder, format, media};
+    vidcut_av::init();
+    let mut input = format::input(src).unwrap();
+    let mut output = format::output(out).unwrap();
+    for s in input.streams() {
+        let mut o = output.add_stream(encoder::find(codec::Id::None)).unwrap();
+        o.set_parameters(s.parameters());
+        let audio = s.parameters().medium() == media::Type::Audio;
+        let mut params = o.parameters();
+        unsafe {
+            let par = params.as_mut_ptr();
+            (*par).codec_tag = 0;
+            if audio {
+                ffmpeg::ffi::av_freep(std::ptr::addr_of_mut!((*par).extradata).cast());
+                let pad = ffmpeg::ffi::AV_INPUT_BUFFER_PADDING_SIZE as usize;
+                let buf = ffmpeg::ffi::av_mallocz(extra.len() + pad).cast::<u8>();
+                assert!(!buf.is_null(), "allocating extradata");
+                std::ptr::copy_nonoverlapping(extra.as_ptr(), buf, extra.len());
+                (*par).extradata = buf;
+                (*par).extradata_size = extra.len() as i32;
+            }
+        }
+    }
+    output.write_header().unwrap();
+    for (s, mut packet) in input.packets() {
+        let tb = output.stream(s.index()).unwrap().time_base();
+        packet.rescale_ts(s.time_base(), tb);
+        packet.set_position(-1);
+        packet
+            .write_interleaved(&mut output)
+            .expect("writing packet");
+    }
+    output.write_trailer().unwrap();
+}
+
+#[test]
+fn a_decoder_error_other_than_invalid_data_fails_the_export() {
+    // AudioSpecificConfig's object type is the first five bits. Type 0
+    // (Null) is one this AAC decoder does not implement: it returns
+    // ENOSYS, not invalid data, and invalid data is the only decoder
+    // error the export skips.
+    use vidcut_av::ffmpeg::{format, media};
+    let fps = Rational::new(30, 1).unwrap();
+    let s = src(
+        FixtureSpec::new(VideoCodec::H264, Container::Mkv, 320, 180, (30, 1), 30).with_audio(
+            AudioCodec::Aac,
+            48_000,
+            2,
+        ),
+    );
+    vidcut_av::init();
+    let input = format::input(&s.path).unwrap();
+    let stream = input
+        .streams()
+        .find(|st| st.parameters().medium() == media::Type::Audio)
+        .expect("audio");
+    let mut extra = unsafe {
+        let p = &*stream.parameters().as_ptr();
+        std::slice::from_raw_parts(p.extradata, p.extradata_size as usize).to_vec()
+    };
+    drop(input);
+    assert!(extra.len() >= 2, "{extra:?}");
+    extra[0] &= 0x07;
+    let dir = out_dir("unimplemented");
+    let bad = dir.join("bad.mkv");
+    with_audio_extradata(&s.path, &bad, &extra);
+    let broken = Src {
+        path: bad,
+        origin: s.origin,
+    };
+    let p = plan(
+        fps,
+        320,
+        180,
+        vec![v(&broken, 0, 30)],
+        vec![vec![a(&broken, fps, 48_000, 0, 30)]],
+    );
+    let out = dir.join("out.mkv");
+    let err = export::run(
+        &p,
+        &lossless(),
+        &out,
+        &Availability::default(),
+        &AtomicBool::new(false),
+        &mut |_| {},
+    )
+    .expect_err("an unimplemented audio config must fail");
+    match err {
+        vidcut_av::Error::Ffmpeg { context, source } => {
+            assert_eq!(context, "opening audio decoder");
+            assert!(
+                !matches!(source, vidcut_av::ffmpeg::Error::InvalidData),
+                "invalid data is skipped; this error must fail the export: {source}"
+            );
+            assert!(
+                source.to_string().contains("Function not implemented"),
+                "{source}"
+            );
+        }
+        other => panic!("expected a decoder error, got {other}"),
+    }
+    assert!(!out.exists(), "no finished file");
+    assert!(!export::partial_path(&out).exists(), "no .part left");
 }
 
 #[test]
