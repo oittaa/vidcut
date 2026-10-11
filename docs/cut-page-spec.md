@@ -332,7 +332,7 @@ Hover the lower audio part of a clip at an edit until the cursor shows a note, t
   - Vimeo
   - TikTok: vertical 1080×1920
 - **User presets** can be added to the Quick Export row.
-- **In vidcut:** the preset row shows each preset's name and format, and holds H.265 Master, AV1, ProRes 422 HQ, YouTube 1080p and 2160p, and TikTok (deviation X3), the file name defaults to the project's name, and the progress window can be hidden while the export goes on in the Jobs window. The Export dialog, jobs and presets from scripts are deviation X3; OTIO timeline interchange is X9.
+- **In vidcut:** Quick Export and Export are top-bar buttons only, not File menu items as well. The preset row shows each preset's name and format, and holds H.265 Master, AV1, ProRes 422 HQ, YouTube 1080p and 2160p, and TikTok (deviation X3), the file name defaults to the project's name, and the progress window can be hidden while the export goes on in the Jobs window. The Export dialog, jobs and presets from scripts are deviation X3; OTIO timeline interchange is X9.
 
 ## 11. Keyboard shortcuts (Linux)
 

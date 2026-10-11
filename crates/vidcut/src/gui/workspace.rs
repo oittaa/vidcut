@@ -468,16 +468,6 @@ impl Workspace {
                 }
                 ui.separator();
                 if ui
-                    .add_enabled(open, egui::Button::new("Quick Export…"))
-                    .clicked()
-                {
-                    self.open_quick_export(ui.ctx());
-                }
-                if ui.add_enabled(open, egui::Button::new("Export…")).clicked() {
-                    self.open_export(ui.ctx());
-                }
-                ui.separator();
-                if ui
                     .add(egui::Button::new("Preferences…").shortcut_text("Ctrl+,"))
                     .clicked()
                 {

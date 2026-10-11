@@ -21,7 +21,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 
 ## X3. Export dialog beyond Quick Export
 - **Resolve:** the Cut page has Quick Export only, writing a single file. Full render settings and "Individual clips" live on the Deliver page (Ch. 39, pp. 788–790), and finished renders are tracked in the Deliver page's Render Queue.
-- **vidcut:** Quick Export behaves as in Resolve: a row of presets, Export, a file dialog, then a progress window (Cancel, or Hide to keep it running). The preset tiles show the preset's name and format rather than brand logos. The row is shorter than Resolve's and starts with the modern codecs: H.265 Master, AV1 (10-bit, at the timeline's size), ProRes 422 HQ, YouTube 1080p and 2160p, TikTok. H.264 Master, YouTube 720p and Vimeo stay available as presets in the Export dialog, which starts from H.265 Master. An additional Export dialog provides:
+- **vidcut:** Quick Export behaves as in Resolve: a row of presets, Export, a file dialog, then a progress window (Cancel, or Hide to keep it running). It and Export are buttons in the top bar, not also File menu items: the bar always shows them. The preset tiles show the preset's name and format rather than brand logos. The row is shorter than Resolve's and starts with the modern codecs: H.265 Master, AV1 (10-bit, at the timeline's size), ProRes 422 HQ, YouTube 1080p and 2160p, TikTok. H.264 Master, YouTube 720p and Vimeo stay available as presets in the Export dialog, which starts from H.265 Master. An additional Export dialog provides:
   - full codec and container settings, starting from any preset
   - GPU encoder choice
   - range (whole timeline, In–Out, or typed), per-clip export with file-name templates, audio-only export

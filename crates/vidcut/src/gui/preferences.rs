@@ -168,6 +168,30 @@ impl Workspace {
                 egui::Grid::new("preferences-proxies")
                     .num_columns(2)
                     .show(ui, |ui| {
+                        let label = ui.label("Size");
+                        ui.horizontal(|ui| {
+                            let saved = proxies["size"].as_u64().unwrap_or(960);
+                            let field = NumberField {
+                                label: label.id,
+                                saved,
+                                range: 16..=7680,
+                                enabled: !busy,
+                                tip: "The longest side of a proxy, automatic or not",
+                                refusal: "The proxy size is even, from 16 to 7680",
+                            };
+                            if let Some(n) = field.show(ui, &mut ui_state.size, &mut ui_state.error)
+                            {
+                                if n.is_multiple_of(2) {
+                                    patch = Some(json!({ "proxies": { "size": n } }));
+                                } else {
+                                    ui_state.error =
+                                        Some("The proxy size is even, from 16 to 7680".into());
+                                    ui_state.size = saved.to_string();
+                                }
+                            }
+                            ui.label("px, longest side");
+                        });
+                        ui.end_row();
                         let mut auto = proxies["auto"] == true;
                         ui.label("Automatic");
                         if ui
@@ -236,30 +260,6 @@ impl Workspace {
                                 patch = Some(json!({ "proxies": { "above_mbps": n } }));
                             }
                             ui.label("Mb/s");
-                        });
-                        ui.end_row();
-                        let label = ui.label("Size");
-                        ui.horizontal(|ui| {
-                            let saved = proxies["size"].as_u64().unwrap_or(960);
-                            let field = NumberField {
-                                label: label.id,
-                                saved,
-                                range: 16..=7680,
-                                enabled: !busy,
-                                tip: "The longest side of a proxy, automatic or not",
-                                refusal: "The proxy size is even, from 16 to 7680",
-                            };
-                            if let Some(n) = field.show(ui, &mut ui_state.size, &mut ui_state.error)
-                            {
-                                if n.is_multiple_of(2) {
-                                    patch = Some(json!({ "proxies": { "size": n } }));
-                                } else {
-                                    ui_state.error =
-                                        Some("The proxy size is even, from 16 to 7680".into());
-                                    ui_state.size = saved.to_string();
-                                }
-                            }
-                            ui.label("px, longest side");
                         });
                         ui.end_row();
                     });
