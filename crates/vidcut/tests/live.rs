@@ -148,6 +148,22 @@ impl Harness {
             .store(d.as_millis() as u64, Ordering::Relaxed);
     }
 
+    /// Waits until the render thread has begun the stall [`stall_next`]
+    /// asked for: the picture it found is held back from now on, so a
+    /// request sent now lands while it is.
+    ///
+    /// [`stall_next`]: Self::stall_next
+    fn wait_stalled(&self) {
+        let started = Instant::now();
+        while self.port.stall.load(Ordering::Relaxed) != 0 {
+            assert!(
+                started.elapsed() < Duration::from_secs(10),
+                "the render thread never stalled"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
     /// The barcode the viewer shows (via a screenshot PNG).
     fn shown(&self, dir: &Path) -> Option<u32> {
         let out = dir.join("shot.png");
@@ -313,7 +329,7 @@ fn live_session() {
             .unwrap();
         handle.call(e, Origin::Ipc, None, &mut |_| true)
     });
-    std::thread::sleep(Duration::from_millis(100));
+    h.wait_stalled();
     h.ok("player.seek", json!({ "at": 120 }));
     let e = a.join().unwrap().unwrap_err();
     assert_eq!(e.code, vidcut_core::ErrorCode::Conflict, "{e}");
@@ -331,7 +347,7 @@ fn live_session() {
             .unwrap();
         handle.call(e, Origin::Ipc, None, &mut |_| true)
     });
-    std::thread::sleep(Duration::from_millis(100));
+    h.wait_stalled();
     h.ok("player.seek", json!({ "at": 100, "fast": true }));
     let e = a.join().unwrap().unwrap_err();
     assert_eq!(e.code, vidcut_core::ErrorCode::Conflict, "{e}");
@@ -368,7 +384,7 @@ fn live_session() {
         .unwrap();
         handle.call(e, Origin::Ipc, None, &mut |_| true)
     });
-    std::thread::sleep(Duration::from_millis(200));
+    h.wait_stalled();
     h.ok("track.set", json!({ "track": "V1", "volume_db": -6.0 }));
     a.join()
         .unwrap()
