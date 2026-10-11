@@ -94,8 +94,22 @@ impl Workspace {
     pub(super) fn pool_panel(&mut self, ui: &mut egui::Ui) {
         self.hover = None;
         self.bins.targets.clear();
+        let snap = self.snap.clone();
+        let project = snap.project();
         ui.horizontal(|ui| {
             ui.label(RichText::new("Media Pool").strong());
+            if let Some(p) = project {
+                let mut on = p.settings.use_proxies;
+                if ui
+                    .checkbox(&mut on, "Proxies")
+                    .on_hover_text(
+                        "The preview plays a proxy when the source file still matches it. Export always reads the originals.",
+                    )
+                    .changed()
+                {
+                    self.send("project.set", json!({ "use_proxies": on }));
+                }
+            }
             ui.selectable_value(&mut self.pool_view, PoolView::Thumbnails, "Grid")
                 .on_hover_text("Thumbnail view");
             ui.selectable_value(&mut self.pool_view, PoolView::List, "List")
@@ -106,8 +120,6 @@ impl Workspace {
                     .desired_width(f32::INFINITY),
             );
         });
-        let snap = self.snap.clone();
-        let project = snap.project();
         if let Some(p) = project {
             self.bin_bar(ui, p);
         }
@@ -657,6 +669,14 @@ impl Workspace {
                 .clicked()
             {
                 self.send("media.marks.clear", json!({ "media": m.id }));
+                ui.close();
+            }
+            if m.info.video.is_some() && !m.is_still() && ui.button("Generate Proxy").clicked() {
+                self.send("proxy.generate", json!({ "media": m.id }));
+                ui.close();
+            }
+            if m.proxy.is_some() && ui.button("Remove Proxy").clicked() {
+                self.send("proxy.remove", json!({ "media": m.id }));
                 ui.close();
             }
             ui.separator();

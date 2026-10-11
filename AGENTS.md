@@ -183,6 +183,11 @@ vidcut undo                                 # works across separate runs
 - `vidcut media add renders/frame_000001.png --sequence [--fps 60]` adds the numbered files in a row around it as one clip (`frame_[000001-010560].png`), at the project's rate unless `--fps` is given. Without `--sequence` a numbered image is a still.
 - `media get` reports `still: true`, or `sequence: {pattern, first, count}`.
 
+**Proxies (spec D40, deviation X18):**
+- `vidcut proxy generate [m1 m2…] [--width 960]` writes an H.264 8-bit 4:2:0 proxy for each video or image sequence (default longest side 960; smaller pictures stay their size). With no ids, every such clip in the pool. Naming a still or an audio-only file is an error; those are skipped when generating everything.
+- `vidcut proxy remove [m1…]` deletes the proxy files and clears them. `vidcut set --proxies true` plays fresh proxies in the preview (the Media Pool has the same switch). Export, `frame`, analysis and OTIO keep the original paths. Preview audio stays on the original file.
+- Proxy frames keep the source's presentation timestamps, so swapping the preview path stays frame-exact. `media get` reports the proxy path and `stale: true` when the source size or modification time no longer matches. Files live in `proxies/` beside the project (or `~/.cache/vidcut/proxies` when the project path is unknown).
+
 **Bins (M6):** `vidcut bins` lists them. `bins add "Interviews/Day 1"` (parents too), `bins rename A B`, `bins remove A` (its media move up a level, deviation X6), `media add FILE --bin A`, `media move m1 m2 --bin A` (`""` is the top level). `media list` shows each item's bin.
 
 **JSON output:**

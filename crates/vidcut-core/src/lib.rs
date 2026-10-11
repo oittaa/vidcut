@@ -34,6 +34,8 @@ mod ops_tests;
 #[cfg(test)]
 mod prop_tests;
 #[cfg(test)]
+mod proxy_tests;
+#[cfg(test)]
 mod test_support;
 #[cfg(test)]
 mod tracks_tests;

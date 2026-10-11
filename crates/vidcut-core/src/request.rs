@@ -85,6 +85,27 @@ pub enum Request {
         media: OneOrMany<String>,
         bin: String,
     },
+    /// Write playback proxies for video and image sequences (decision D40).
+    /// With no `media`, every such item in the pool. Stills and audio-only
+    /// files are skipped then; naming one is an error.
+    #[serde(rename = "proxy.generate")]
+    ProxyGenerate {
+        /// Media ids. Absent: every video and image sequence.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        media: Option<OneOrMany<String>>,
+        /// Longest side in pixels, even, from 16 to 7680. Default
+        /// [`PROXY_LONGEST`](crate::model::PROXY_LONGEST). Pictures already
+        /// smaller stay their size.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        width: Option<u32>,
+    },
+    /// Delete proxy files and clear them from the pool. With no `media`,
+    /// every item that has one.
+    #[serde(rename = "proxy.remove")]
+    ProxyRemove {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        media: Option<OneOrMany<String>>,
+    },
     /// Add a Media Pool bin (p. 655), like `Interviews/Day 1`; missing
     /// parents are added too.
     #[serde(rename = "bins.add")]
@@ -939,6 +960,10 @@ pub struct ProjectSet {
     /// (decision D38).
     #[serde(default)]
     pub still_duration: Option<TimeSpec>,
+    /// Play fresh proxies in the preview (decision D40). Export still
+    /// reads the originals.
+    #[serde(default)]
+    pub use_proxies: Option<bool>,
 }
 
 /// One value or a list (`"c1"` or `["c1", "c2"]`).

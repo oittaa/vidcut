@@ -12,6 +12,7 @@ pub mod export;
 pub mod filler;
 pub mod fixture;
 pub mod probe;
+pub mod proxy;
 pub mod remux;
 pub mod tails;
 pub mod testdata;

@@ -117,7 +117,7 @@ impl Player {
 }
 
 fn req(ed: &mut Editor, v: serde_json::Value) -> vidcut_core::Response {
-    ed.apply(Envelope::from_json(v).unwrap(), &AvEnv, None)
+    ed.apply(Envelope::from_json(v).unwrap(), &AvEnv::new(), None)
         .unwrap()
 }
 

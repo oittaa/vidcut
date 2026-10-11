@@ -119,19 +119,20 @@ pub fn run_with(
                 vidcut_core::Project::new(Default::default()),
                 Default::default(),
             );
-            editor.apply(envelope, &AvEnv, None)?
+            editor.apply(envelope, &AvEnv::new(), None)?
         }
         _ => {
             let store = open(project)?;
+            let env = AvEnv::for_project(store.path());
             if envelope.request.is_mutation() {
                 let (r, history_error) =
-                    store.transact(|editor| editor.apply(envelope, &AvEnv, None))?;
+                    store.transact(|editor| editor.apply(envelope, &env, None))?;
                 if let Some(e) = history_error {
                     eprintln!("vidcut: warning: {}", history_unsaved(&e));
                 }
                 r
             } else {
-                store.load()?.apply(envelope, &AvEnv, None)?
+                store.load()?.apply(envelope, &env, None)?
             }
         }
     };
@@ -210,7 +211,7 @@ pub fn render(
             }
             Editor::new(project.clone(), Default::default()).apply(
                 envelope.clone(),
-                &AvEnv,
+                &AvEnv::for_project(path),
                 None,
             )?
         }

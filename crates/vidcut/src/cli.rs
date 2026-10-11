@@ -62,12 +62,19 @@ pub enum Command {
     /// Project settings, counts and duration.
     Info,
     /// Change project settings.
+    #[command(
+        after_help = "Examples:\n  vidcut set --ripple false\n  vidcut set --proxies true\n  vidcut set --still-duration 3s"
+    )]
     Set(SetArgs),
     /// Show what the media layer knows about a file.
     Probe { file: PathBuf },
     /// Media pool.
     #[command(subcommand)]
     Media(MediaCmd),
+    /// Playback proxies: smaller H.264 copies the preview can play.
+    /// Export, frames, analysis and OTIO keep reading the originals.
+    #[command(subcommand)]
+    Proxy(ProxyCmd),
     /// Show the timeline (clips and gaps).
     #[command(visible_alias = "tl")]
     Timeline {
@@ -568,6 +575,33 @@ pub struct SetArgs {
     /// How long a still lasts when edited without a range, e.g. 5s.
     #[arg(long)]
     still_duration: Option<String>,
+    /// Play fresh proxies in the preview (true/false). Export still reads
+    /// the originals.
+    #[arg(long)]
+    proxies: Option<bool>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ProxyCmd {
+    /// Make proxies for video and image sequences. With no ids, every such
+    /// clip in the pool. Stills and audio-only files are skipped then;
+    /// naming one is an error.
+    #[command(
+        after_help = "Examples:\n  vidcut proxy generate\n  vidcut proxy generate m1 m2 --width 1280\n  vidcut set --proxies true"
+    )]
+    Generate {
+        /// Media ids. Default: every video and image sequence.
+        media: Vec<String>,
+        /// Longest side in pixels (even). Default: 960. Smaller pictures
+        /// stay their size.
+        #[arg(long)]
+        width: Option<u32>,
+    },
+    /// Delete proxy files and forget them. With no ids, every proxy.
+    Remove {
+        /// Media ids. Default: every item that has a proxy.
+        media: Vec<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1119,7 +1153,7 @@ impl Cli {
                     "project.set",
                     json!({ "fps": s.fps, "width": width, "height": height, "sample_rate": s.sample_rate,
                             "channels": s.channels, "ripple_on": s.ripple, "start_tc": s.start_tc,
-                            "still_duration": s.still_duration }),
+                            "still_duration": s.still_duration, "use_proxies": s.proxies }),
                 )?
             }
             Command::Probe { file } => req(
@@ -1165,6 +1199,24 @@ impl Cli {
                             json!({ "media": media, "in": mark_in, "out": out }),
                         )?
                     }
+                }
+            },
+            Command::Proxy(p) => match p {
+                ProxyCmd::Generate { media, width } => {
+                    let media = if media.is_empty() {
+                        Value::Null
+                    } else {
+                        json!(media)
+                    };
+                    req("proxy.generate", json!({ "media": media, "width": width }))?
+                }
+                ProxyCmd::Remove { media } => {
+                    let media = if media.is_empty() {
+                        Value::Null
+                    } else {
+                        json!(media)
+                    };
+                    req("proxy.remove", json!({ "media": media }))?
                 }
             },
             Command::Timeline { range } => req("timeline.get", json!({ "range": range }))?,

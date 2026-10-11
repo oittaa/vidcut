@@ -468,7 +468,7 @@ fn live_session() {
             ed.apply(
                 Envelope::from_json(json!({"method": "marks.set", "params": {"in": 5, "out": 15}}))
                     .unwrap(),
-                &vidcut::env::AvEnv,
+                &vidcut::env::AvEnv::new(),
                 None,
             )
         })

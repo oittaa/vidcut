@@ -1186,8 +1186,8 @@ impl Live {
             use vidcut_core::Env;
             for (m, stream) in &needed {
                 match stream {
-                    Some(s) => AvEnv.audio_levels(m, *s).map(drop)?,
-                    None => AvEnv.picture_stats(m).map(drop)?,
+                    Some(s) => AvEnv::new().audio_levels(m, *s).map(drop)?,
+                    None => AvEnv::new().picture_stats(m).map(drop)?,
                 }
             }
             Ok(())
@@ -1739,11 +1739,16 @@ impl Live {
             }
             _ => {}
         }
+        let env = self
+            .project
+            .as_ref()
+            .map(|open| AvEnv::for_project(open.store.path()))
+            .unwrap_or_default();
         let Some(open) = self.project.as_mut() else {
             return Err(no_project());
         };
         let request = envelope.request.clone();
-        let (result, changed) = open.apply(envelope, &AvEnv, Some(playhead));
+        let (result, changed) = open.apply(envelope, &env, Some(playhead));
         if let Some(e) = open.history_error.take() {
             self.notice(crate::session::history_unsaved(&e), true);
         }
@@ -2103,6 +2108,8 @@ impl Live {
     ) -> Option<preview::Preview> {
         let p = self.project.as_ref()?.project().clone();
         let fillers = self.fillers(&p)?;
+        let mut plan = plan;
+        preview::apply_proxies(&mut plan, &p, |path| path.is_file());
         let plan = self.preview_plan(plan, player, position);
         let network = |path: &PathBuf| self.network.get(path).copied().unwrap_or(false);
         let read_ahead = plan.video.iter().any(|v| match v {
@@ -2113,10 +2120,14 @@ impl Live {
             render::AudioPiece::Silence { .. } => false,
         });
         let deinterlace = plan.video.iter().any(|v| match v {
-            render::VideoPiece::Source { media, .. } => p
-                .media(media)
-                .and_then(|m| m.info.video.as_ref())
-                .is_some_and(|v| v.fields.is_some()),
+            render::VideoPiece::Source { media, path, .. } => {
+                let Some(m) = p.media(media) else {
+                    return false;
+                };
+                // A proxy is already progressive (and upright).
+                let proxied = m.fresh_proxy().is_some_and(|px| &px.path == path);
+                !proxied && m.info.video.as_ref().is_some_and(|v| v.fields.is_some())
+            }
             render::VideoPiece::Black { .. } => false,
         });
         let mut plan = plan;

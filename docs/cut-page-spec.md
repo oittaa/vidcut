@@ -473,3 +473,9 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - Numbers zero-padded to a width (`%06d`) or not (`%d`) both work; the width shows in the file names.
   - The pool calls it as Resolve does: `frame_[000001-000120].png`.
   - Without `sequence`, a numbered image is a still (deviation X17).
+- **D40. Proxies** (pp. 207–218 are outside the Cut page; deviation X18). The manual's proxy chapters are not what the Cut page specifies, so the playback rules are fixed here.
+  - **What gets one:** video and image sequences, generated on demand (`proxy.generate`). Stills and audio-only media do not. Naming a still or an audio-only file is an error; generating with no ids skips them.
+  - **Size:** the longest side defaults to 960 pixels, even, from 16 to 7680. Aspect is kept. A picture already smaller stays its size.
+  - **Switch:** `use_proxies` (saved on the project) makes the preview play a proxy. Export, frame render, analysis and OTIO always use the original paths.
+  - **Fresh:** a proxy is used only when its stored source size and modification time match the pool item and the file is present. Otherwise the original plays. Relink drops the proxy.
+  - **Frame exact:** proxy frames carry the source's presentation timestamps. The preview keeps `origin` and `source_frame` and only replaces the video path, dropping an image list so a sequence plays as that video. Preview audio stays on the original.

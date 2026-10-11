@@ -5,14 +5,33 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use vidcut_core::analysis::{AudioLevels, Loudness, PictureStats};
-use vidcut_core::model::{AudioInfo, FieldOrder, Hdr, Media, MediaInfo, VideoInfo};
+use vidcut_core::editor::GeneratedProxy;
+use vidcut_core::model::{AudioInfo, FieldOrder, Hdr, Media, MediaInfo, VideoInfo, proxy_size};
 use vidcut_core::render::RenderPlan;
 use vidcut_core::time::Rational;
 use vidcut_core::{Env, Error, ProbedMedia, Result};
 
 use crate::paths;
 
-pub struct AvEnv;
+/// The real [`Env`]. `project_dir` is the folder of the open project file,
+/// when a session has one: proxies are written to `proxies/` beside it.
+#[derive(Clone, Debug, Default)]
+pub struct AvEnv {
+    project_dir: Option<PathBuf>,
+}
+
+impl AvEnv {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Proxies land in `<project>/proxies`.
+    pub fn for_project(project_file: &Path) -> Self {
+        Self {
+            project_dir: project_file.parent().map(Path::to_path_buf),
+        }
+    }
+}
 
 /// Audio levels are measured in 10 ms buckets.
 const LEVELS_PER_SECOND: u32 = 100;
@@ -146,6 +165,46 @@ impl Env for AvEnv {
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness> {
         vidcut_av::analysis::loudness(plan).map_err(|e| Error::media(e.to_string()))
     }
+
+    fn proxy_dir(&self) -> PathBuf {
+        match &self.project_dir {
+            Some(dir) => dir.join("proxies"),
+            None => paths::cache_dir().join("proxies"),
+        }
+    }
+
+    fn generate_proxy(
+        &self,
+        media: &Media,
+        longest: u32,
+        dir: &Path,
+        dry_run: bool,
+    ) -> Result<GeneratedProxy> {
+        let v = media.info.video.as_ref().ok_or_else(|| {
+            Error::invalid(format!("{} has no picture to make a proxy of", media.id))
+        })?;
+        let (w, h) = v.display_size();
+        let (w, h) = proxy_size(w, h, longest);
+        let path = dir.join(format!(
+            "{:016x}-{}-{}-{}x{h}.mkv",
+            paths::fnv1a(media.path.as_os_str().as_encoded_bytes()),
+            media.size,
+            media.mtime_ns,
+            w,
+        ));
+        if !dry_run && !path.is_file() {
+            std::fs::create_dir_all(dir)
+                .map_err(|e| Error::media(format!("{}: {e}", dir.display())))?;
+            vidcut_av::proxy::write(&input_of(media), w, h, &path)
+                .map_err(|e| Error::media(e.to_string()))?;
+        }
+        Ok(GeneratedProxy {
+            path,
+            width: w,
+            height: h,
+            codec: "h264".into(),
+        })
+    }
 }
 
 /// A stream's frame rate as a project-usable rational.
@@ -271,7 +330,7 @@ mod tests {
         let c = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
         assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
         for path in [std::path::Path::new("/dev/null"), Path::new("/tmp"), &fifo] {
-            let e = super::AvEnv.probe(path).unwrap_err();
+            let e = super::AvEnv::new().probe(path).unwrap_err();
             assert!(e.message.contains("not a regular file"), "{path:?}: {e}");
         }
         let _ = std::fs::remove_dir_all(&dir);

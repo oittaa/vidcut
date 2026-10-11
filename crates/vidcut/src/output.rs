@@ -324,6 +324,38 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 );
             }
         }
+        "proxy.generate" => {
+            let proxies = r.result["proxies"].as_array().cloned().unwrap_or_default();
+            let verb = if r.dry_run { "would write" } else { "proxy" };
+            if proxies.is_empty() {
+                println!("no video to proxy (rev {})", r.rev);
+            }
+            for p in proxies {
+                println!(
+                    "{verb} {}  {}  {}x{} (rev {})",
+                    p["media"].as_str().unwrap_or_default(),
+                    p["path"].as_str().unwrap_or_default(),
+                    p["width"],
+                    p["height"],
+                    r.rev
+                );
+            }
+        }
+        "proxy.remove" => {
+            let cleared = r.result["cleared"].as_array().cloned().unwrap_or_default();
+            let ids: Vec<&str> = cleared.iter().filter_map(|v| v.as_str()).collect();
+            let verb = if r.dry_run { "would remove" } else { "removed" };
+            println!(
+                "{verb} {} proxy file(s){} (rev {})",
+                ids.len(),
+                if ids.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {}", ids.join(" "))
+                },
+                r.rev
+            );
+        }
         "timeline.get" => timeline(&r.result),
         "media.list" => media_list(&r.result),
         "project.summary" => summary(&r.result),
@@ -612,8 +644,13 @@ fn media_list(m: &Value) {
             Some(b) if !b.is_empty() => format!("  [{b}]"),
             _ => String::new(),
         };
+        let proxy = match i["proxy"]["stale"].as_bool() {
+            Some(false) => "  proxy",
+            Some(true) => "  proxy (stale)",
+            None => "",
+        };
         println!(
-            "{:<5} {:<30} {} ({} frames)  {}, {} audio{bin}",
+            "{:<5} {:<30} {} ({} frames)  {}, {} audio{bin}{proxy}",
             i["id"].as_str().unwrap_or_default(),
             i["name"].as_str().unwrap_or_default(),
             i["duration_tc"].as_str().unwrap_or_default(),
