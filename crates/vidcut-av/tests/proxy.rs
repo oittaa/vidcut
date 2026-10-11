@@ -61,6 +61,38 @@ fn a_proxy_matches_source_frames_and_timestamps() {
     }
 }
 
+/// The proxy's keyframes come every 60 frames as it is set up, not where
+/// the source's are: a decoded frame's picture type would force itself on
+/// the encoder.
+#[test]
+fn a_proxy_keeps_its_own_keyframes() {
+    // Keyframes every 30 frames, and B-frames.
+    let spec = FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 150);
+    let Some(source) = fixture::ensure(&spec).map_err(skip).ok() else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("vidcut-proxy-keys-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let dest = dir.join("proxy.mkv");
+    vidcut_av::proxy::write(&Input::File(source), 320, 180, &dest, None).unwrap();
+    let mut input = ffmpeg::format::input(&dest).unwrap();
+    let video = input
+        .streams()
+        .best(ffmpeg::media::Type::Video)
+        .unwrap()
+        .index();
+    let keys: Vec<usize> = input
+        .packets()
+        .filter(|(s, _)| s.index() == video)
+        .enumerate()
+        .filter(|(_, (_, p))| p.is_key())
+        .map(|(n, _)| n)
+        .collect();
+    assert_eq!(keys, [0, 60, 120]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_sequence_proxy_uses_the_sequence_timestamps() {
     let spec = ImageSpec::sequence(1, 8, 2, 320, 180);

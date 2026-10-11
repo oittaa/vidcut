@@ -185,6 +185,8 @@ fn encode_into(
                       dur: i64|
      -> Result<()> {
         picture.set_pts(Some(pts));
+        // The source's picture type would force it on the encoder.
+        picture.set_kind(ffmpeg::picture::Type::None);
         unsafe { (*picture.as_mut_ptr()).duration = dur };
         durations.insert(pts, dur);
         enc.send_frame(&picture)

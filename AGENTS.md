@@ -342,6 +342,7 @@ The preview findings and the time-mapping rules are in [docs/decisions/preview.m
 - **Never send negative absolute seeks.** mpv counts them from the end of the file.
 - **MPEG-TS and other index-less containers can't be seeked exactly by mpv.** Preview uses an MKV remux (`vidcut_av::remux`); export reads the original.
 - **Set packet durations explicitly when muxing** from delayed encoders (x264 with B-frames). Otherwise MP4 edit lists drop the last frame.
+- **Clear a decoded frame's picture type before encoding it** (`set_kind(picture::Type::None)`). Encoders take it as an order: the output copies the source's keyframes, and x264 warns about every B-frame it can't make.
 - **Set `pkt_timebase` on every decoder** (`codec_ctx.pkt_timebase = stream.time_base`). Without it, FFmpeg can't adjust timestamps when it skips priming samples, and audio drifts by the codec delay.
 - **Color goes through `vidcut_av::color`** (export.md §4): HDR sources are tone-mapped for SDR output, SDR sources sit at 203 nits in HDR output, untagged HD is BT.709. Rotation metadata is applied everywhere (spec D33).
 - **`zscale` needs explicit output primaries** when converting to linear light: for untagged frames it otherwise fails with "no path between colorspaces".

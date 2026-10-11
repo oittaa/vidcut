@@ -426,6 +426,10 @@ fn encode(
                 Error::Invalid("plan has fewer video frames than expected".into())
             })?;
             f.set_pts(Some(j));
+            // A decoded picture keeps its source's type (I, P, B), which
+            // encoders take as an order; the encoder chooses its own, as
+            // in the ffmpeg command line.
+            f.set_kind(ffmpeg::picture::Type::None);
             let f = match &v.vaapi {
                 Some(hw) => hw.upload(&f)?,
                 None => f,

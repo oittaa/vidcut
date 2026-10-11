@@ -931,6 +931,44 @@ fn other_rates_are_resampled_by_nearest_frame() {
     assert_eq!(codes, vec![0, 1, 2, 3, 3, 4, 5, 6, 7, 8, 8, 9]);
 }
 
+/// The encoder places its own keyframes: a decoded frame's picture type
+/// (the source's keyframes here) would force itself on it.
+#[test]
+fn the_encoder_chooses_its_own_keyframes() {
+    let fps = Rational::new(30, 1).unwrap();
+    // Keyframes every 30 frames.
+    let s = src(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (30, 1),
+        150,
+    ));
+    let p = plan(fps, 320, 180, vec![v(&s, 0, 150)], vec![]);
+    let dir = out_dir("keyframes");
+    let out = dir.join("out.mkv");
+    let mut settings = lossless();
+    settings.audio = None;
+    render(&p, &settings, &out);
+    let mut input = vidcut_av::ffmpeg::format::input(&out).unwrap();
+    let video = input
+        .streams()
+        .best(vidcut_av::ffmpeg::media::Type::Video)
+        .unwrap()
+        .index();
+    let keys: Vec<usize> = input
+        .packets()
+        .filter(|(s, _)| s.index() == video)
+        .enumerate()
+        .filter(|(_, (_, p))| p.is_key())
+        .map(|(n, _)| n)
+        .collect();
+    // x264's own interval (250 frames, ultrafast: no scene cuts) is longer.
+    assert_eq!(keys, [0]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn scaling_padding_and_presets() {
     let fps = Rational::new(30, 1).unwrap();
