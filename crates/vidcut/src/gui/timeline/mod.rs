@@ -458,6 +458,34 @@ impl Workspace {
         self.thumbs = thumbs;
         self.track_headers(ui, lower_rect, &layout.lower, &p);
 
+        // While a trim drags, its pointer stays.
+        if let Some(d) = &self.timeline.drag
+            && let Some(pos) = ui.input(|i| i.pointer.latest_pos())
+        {
+            let pointer = match &d.drag.gesture {
+                Gesture::Trim {
+                    edge: Edge::Head, ..
+                } => Some(paint::TrimPointer::Start),
+                Gesture::Trim {
+                    edge: Edge::Tail, ..
+                } => Some(paint::TrimPointer::End),
+                Gesture::Roll { .. } | Gesture::AudioRoll { .. } => Some(paint::TrimPointer::Roll),
+                Gesture::Slip { .. } => {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                    None
+                }
+                _ => None,
+            };
+            if let Some(kind) = pointer {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+                let painter = ui.ctx().layer_painter(egui::LayerId::new(
+                    egui::Order::Tooltip,
+                    egui::Id::new("timeline-pointer"),
+                ));
+                paint::trim_pointer(&painter, pos, kind);
+            }
+        }
+
         // The pointer shows what a drag would do.
         if self.timeline.drag.is_none()
             && let Some(pos) = ui.input(|i| i.pointer.hover_pos())
@@ -502,38 +530,55 @@ impl Workspace {
                         ink,
                     );
                 }
-                // The edge or cut a drag would move lights up, and the pointer
-                // says which: an arrow at the clip edge being trimmed, a column
-                // arrow on a cut that rolls.
-                let lit = match &what {
-                    Hit::Edge(id, edge) => p.clip(id).map(|c| match edge {
-                        Edge::Head => scale.xf(c.start)..=scale.xf(c.start) + 3.0,
-                        Edge::Tail => scale.xf(c.end()) - 3.0..=scale.xf(c.end()),
-                    }),
+                // The clip end a drag would trim, or both ends at a cut that
+                // rolls, turn green, and the timeline draws its own pointer:
+                // a bracket for each end that moves, the arrow on its side.
+                let green = Color32::from_rgb(90, 220, 120);
+                let ends: Vec<(f32, f32)> = match &what {
+                    Hit::Edge(id, edge) => p
+                        .clip(id)
+                        .map(|c| match edge {
+                            Edge::Head => (scale.xf(c.start), 1.0),
+                            Edge::Tail => (scale.xf(c.end()), -1.0),
+                        })
+                        .into_iter()
+                        .collect(),
                     Hit::Roll { outgoing, .. } => p
                         .clip(outgoing)
-                        .map(|c| scale.xf(c.end()) - 2.0..=scale.xf(c.end()) + 2.0),
-                    _ => None,
+                        .map(|c| vec![(scale.xf(c.end()), -1.0), (scale.xf(c.end()), 1.0)])
+                        .unwrap_or_default(),
+                    _ => Vec::new(),
                 };
-                if let Some(xs) = lit
-                    && let Some(row) = track.as_deref().and_then(|t| rows.get(t))
-                {
-                    ui.painter().rect_filled(
-                        Rect::from_x_y_ranges(xs, row.rect.rect.y_range()),
-                        1.0,
-                        Color32::from_rgb(255, 210, 60),
-                    );
+                if let Some(row) = track.as_deref().and_then(|t| rows.get(t)) {
+                    let ys = row.rect.rect.y_range();
+                    // Each end: a solid band at the edge and a wash into the
+                    // clip, on the side that moves (`side`: 1 into the clip
+                    // on the right, -1 into the one on the left).
+                    for (x, side) in &ends {
+                        let span = |w: f32| {
+                            let far = x + side * w;
+                            Rect::from_x_y_ranges(x.min(far)..=x.max(far), ys)
+                        };
+                        ui.painter()
+                            .rect_filled(span(18.0), 0.0, green.gamma_multiply(0.25));
+                        ui.painter().rect_filled(span(4.0), 0.0, green);
+                    }
                 }
-                let icon = match what {
-                    Hit::Edge(_, Edge::Head) => Some(egui::CursorIcon::ResizeWest),
-                    Hit::Edge(_, Edge::Tail) => Some(egui::CursorIcon::ResizeEast),
-                    Hit::Roll { .. } => Some(egui::CursorIcon::ResizeColumn),
-                    Hit::AudioEdit { .. } => Some(egui::CursorIcon::ResizeColumn),
-                    Hit::Slip(_) => Some(egui::CursorIcon::Grab),
+                let pointer = match &what {
+                    Hit::Edge(_, Edge::Head) => Some(paint::TrimPointer::Start),
+                    Hit::Edge(_, Edge::Tail) => Some(paint::TrimPointer::End),
+                    Hit::Roll { .. } | Hit::AudioEdit { .. } => Some(paint::TrimPointer::Roll),
                     _ => None,
                 };
-                if let Some(i) = icon {
-                    ui.ctx().set_cursor_icon(i);
+                if let Some(kind) = pointer {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+                    let painter = ui.ctx().layer_painter(egui::LayerId::new(
+                        egui::Order::Tooltip,
+                        egui::Id::new("timeline-pointer"),
+                    ));
+                    paint::trim_pointer(&painter, pos, kind);
+                } else if let Hit::Slip(_) = what {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                 }
             }
         }

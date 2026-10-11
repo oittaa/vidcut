@@ -554,3 +554,68 @@ pub fn preview(painter: &Painter, rows: &Rows, scale: &Scale, p: &Project, pv: &
         );
     }
 }
+
+/// What a drag at the pointer would trim, for the timeline's own pointer:
+/// the end of the clip on the left, the start of the clip on the right, or
+/// the cut between them (a roll).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrimPointer {
+    End,
+    Start,
+    Roll,
+}
+
+/// Draws the trim pointer at `at`, like an editor's: a bracket for each clip
+/// end that moves (`]` an end, `[` a start) with a double arrow on that
+/// clip's side. Outlined, so it shows on any picture.
+pub fn trim_pointer(painter: &Painter, at: Pos2, kind: TrimPointer) {
+    let (h, serif, reach) = (9.0, 4.0, 13.0);
+    // A bracket at `x`; its serifs point toward `side` (-1 left, 1 right).
+    let bracket = |x: f32, side: f32| {
+        vec![
+            pos2(x + side * serif, at.y - h),
+            pos2(x, at.y - h),
+            pos2(x, at.y + h),
+            pos2(x + side * serif, at.y + h),
+        ]
+    };
+    // A double arrow from `a` to `b` along the pointer's line.
+    let arrow = |a: f32, b: f32| {
+        let (y, head) = (at.y, 3.5);
+        vec![
+            vec![pos2(a, y), pos2(b, y)],
+            vec![
+                pos2(a + head, y - head),
+                pos2(a, y),
+                pos2(a + head, y + head),
+            ],
+            vec![
+                pos2(b - head, y - head),
+                pos2(b, y),
+                pos2(b - head, y + head),
+            ],
+        ]
+    };
+    let mut lines: Vec<Vec<Pos2>> = Vec::new();
+    match kind {
+        TrimPointer::End => {
+            lines.push(bracket(at.x + 1.0, -1.0));
+            lines.extend(arrow(at.x - reach, at.x - 2.0));
+        }
+        TrimPointer::Start => {
+            lines.push(bracket(at.x - 1.0, 1.0));
+            lines.extend(arrow(at.x + 2.0, at.x + reach));
+        }
+        TrimPointer::Roll => {
+            lines.push(bracket(at.x - 2.0, -1.0));
+            lines.push(bracket(at.x + 2.0, 1.0));
+            lines.extend(arrow(at.x - reach - 3.0, at.x - 5.0));
+            lines.extend(arrow(at.x + 5.0, at.x + reach + 3.0));
+        }
+    }
+    for (width, color) in [(4.0, Color32::BLACK), (2.0, Color32::WHITE)] {
+        for l in &lines {
+            painter.add(egui::Shape::line(l.clone(), Stroke::new(width, color)));
+        }
+    }
+}
