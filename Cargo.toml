@@ -1,0 +1,55 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# Distro toolchain (Ubuntu 26.04). The MSRV-aware resolver picks dependency
+# versions that build with it; eframe 0.36 needs 1.95, so we stay on 0.35.
+rust-version = "1.93"
+license = "MIT"
+
+[workspace.dependencies]
+vidcut-core = { path = "crates/vidcut-core" }
+vidcut-av = { path = "crates/vidcut-av" }
+vidcut-mpv = { path = "crates/vidcut-mpv" }
+
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4.6", features = ["derive", "env"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+libc = "0.2"
+libloading = "0.9"
+# Links the system FFmpeg 8.0 via pkg-config; bindings are generated with bindgen.
+ffmpeg-next = { version = "8.0", default-features = false, features = [
+    "codec",
+    "filter",
+    "format",
+    "software-resampling",
+    "software-scaling",
+] }
+# glow (OpenGL) backend: libmpv's render API needs a GL context.
+eframe = { version = "0.35", default-features = false, features = [
+    "accesskit",
+    "default_fonts",
+    "glow",
+    "wayland",
+    "x11",
+] }
+# Direct dep only to keep winit's default features (client-side decorations on
+# GNOME/Wayland, runtime-loaded libwayland), which eframe enables only by default.
+winit = "0.30"
+# Platform display handle passed to libmpv for hardware-decoding interop.
+raw-window-handle = "0.6"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+# Dependencies (egui, image handling) are unbearably slow unoptimized; our own
+# crates stay at opt-level 0 for fast incremental builds.
+[profile.dev.package."*"]
+opt-level = 2

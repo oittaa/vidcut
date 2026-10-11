@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Enforces the fast quality gate before every commit (see AGENTS.md).
+# Enabled per clone with: git config core.hooksPath .githooks
+exec "$(git rev-parse --show-toplevel)/scripts/check.sh" fast

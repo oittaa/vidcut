@@ -1,0 +1,22 @@
+[package]
+name = "vidcut"
+description = "A simple, fully scriptable video cutting tool modeled on DaVinci Resolve's Cut page"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+vidcut-core.workspace = true
+vidcut-av.workspace = true
+vidcut-mpv.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+eframe.workspace = true
+winit.workspace = true
+raw-window-handle.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

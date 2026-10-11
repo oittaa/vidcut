@@ -1,0 +1,18 @@
+[package]
+name = "vidcut-mpv"
+description = "Minimal runtime-loaded (dlopen) libmpv bindings for vidcut's preview"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+libc.workspace = true
+libloading.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+vidcut-av.workspace = true

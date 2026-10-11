@@ -1,0 +1,13 @@
+/target
+# Media and generated test data never go in git; see AGENTS.md (VIDCUT_TEST_DATA).
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.mxf
+*.ts
+*.wav
+*.flac
+*.mp3
+*.m4a
+*.opus
