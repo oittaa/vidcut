@@ -45,7 +45,7 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
 
 **Stills and image sequences (M9):**
 - A still's one picture is decoded once and shows for every frame of its pieces. It is never sought: an image file has nothing past its picture.
-- A sequence is read by FFmpeg's `image2` demuxer (`decode::Input::Sequence`): picture `k` has timestamp `k` in a time base of one frame at the sequence's rate, so the rule above picks pictures as from a video file, frame for frame at the project's rate and nearest-frame otherwise.
+- A sequence is read by FFmpeg's `image2` demuxer (`decode::Input::Sequence`): picture `k` has timestamp `k` in a time base of one frame at the sequence's rate, so the rule above picks pictures as from a video file, frame for frame at the project's rate and nearest-frame otherwise. The run is the contiguous files from its first number: image2's `start_number_range` is 1, so a missing first file fails the open instead of starting a few numbers later. A hole, or a piece that runs past the last file, fails the export. The last picture is not repeated; a still's one picture still is.
 
 **Preview vs export:**
 - Preview (mpv EDL, see [preview.md](preview.md)) follows the same rule through the half-frame bias in segment starts.
