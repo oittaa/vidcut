@@ -467,6 +467,36 @@ fn audio_roll_makes_j_and_l_cuts() {
 }
 
 #[test]
+fn a_clip_heard_only_past_its_picture_keeps_its_audio() {
+    // Decision D14. c1's L cut covers all of c2's picture, and c2 is heard
+    // only in its own L cut into c3. Deleting c3 resets that cut, which
+    // would leave c2 no audio at all: the cut before it resets too, and c2
+    // is heard over its picture again. (A property test found it.)
+    let mut f = three_clips();
+    f.ok(req(
+        "edit.audio_roll",
+        json!({"clip": "c3", "edge": "head", "by": 6}),
+    ));
+    f.ok(req(
+        "edit.audio_roll",
+        json!({"clip": "c1", "edge": "tail", "by": 50}),
+    ));
+    let range = |f: &crate::test_support::Fixture, c: &str| {
+        f.editor.project().clip(c).unwrap().audio_range()
+    };
+    assert_eq!(
+        range(&f, "c2"),
+        Some((150, 156)),
+        "heard only past its picture"
+    );
+    f.ok(req("edit.delete", json!({"clips": "c3"})));
+    assert_eq!(
+        (range(&f, "c1"), range(&f, "c2")),
+        (Some((0, 100)), Some((100, 150)))
+    );
+}
+
+#[test]
 fn trim_to_playhead_and_change_duration() {
     // p. 729 and decision D4; p. 693 Change Clip Duration.
     let mut f = three_clips();

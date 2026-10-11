@@ -174,30 +174,47 @@ fn place(p: &mut Project, ti: usize, clip: Clip) {
 /// an edit (a neighbor changed) are reset to a straight cut.
 fn fix_audio(p: &mut Project, ti: usize) {
     let clips = &mut p.tracks[ti].clips;
-    for i in 0..clips.len() {
-        let adjacent_next = i + 1 < clips.len()
-            && clips[i + 1].start == clips[i].end()
-            && clips[i + 1].audio.is_some();
-        let adjacent_prev =
-            i > 0 && clips[i - 1].end() == clips[i].start && clips[i - 1].audio.is_some();
-        let (prev_tail, next_head) = (
-            if adjacent_prev {
-                clips[i - 1].audio.as_ref().map(|a| a.tail)
-            } else {
-                None
-            },
-            if adjacent_next {
-                clips[i + 1].audio.as_ref().map(|a| a.head)
-            } else {
-                None
-            },
-        );
-        if let Some(a) = clips[i].audio.as_mut() {
-            if prev_tail != Some(a.head) {
-                a.head = 0;
-            }
-            if next_head != Some(a.tail) {
-                a.tail = 0;
+    // A reset can leave a clip whose audio lay wholly past its picture (in
+    // its tail, under its neighbor's J/L cut) with no audio of its own:
+    // then the J/L cut at its other edge goes too, and that one's
+    // neighbor's offset in the next round (decision D14). Each round zeroes
+    // an offset, so the rounds end (a clip of no length is left to
+    // validation).
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for i in 0..clips.len() {
+            let adjacent_next = i + 1 < clips.len()
+                && clips[i + 1].start == clips[i].end()
+                && clips[i + 1].audio.is_some();
+            let adjacent_prev =
+                i > 0 && clips[i - 1].end() == clips[i].start && clips[i - 1].audio.is_some();
+            let (prev_tail, next_head) = (
+                if adjacent_prev {
+                    clips[i - 1].audio.as_ref().map(|a| a.tail)
+                } else {
+                    None
+                },
+                if adjacent_next {
+                    clips[i + 1].audio.as_ref().map(|a| a.head)
+                } else {
+                    None
+                },
+            );
+            let duration = clips[i].duration;
+            if let Some(a) = clips[i].audio.as_mut() {
+                if prev_tail != Some(a.head) && a.head != 0 {
+                    a.head = 0;
+                    changed = true;
+                }
+                if next_head != Some(a.tail) && a.tail != 0 {
+                    a.tail = 0;
+                    changed = true;
+                }
+                if a.head >= duration + a.tail && (a.head, a.tail) != (0, 0) {
+                    (a.head, a.tail) = (0, 0);
+                    changed = true;
+                }
             }
         }
     }

@@ -414,6 +414,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
 - **D14. J/L cuts belong to an edit point.**
   - A J/L cut (§8.7) is stored as matching audio offsets on the two clips that meet there: the outgoing clip's `tail` equals the incoming clip's `head`.
   - When an edit gives a clip a different neighbor at that point, the J/L cut resets to a straight cut. Examples: a delete, a move, or a split inside the overlap zone, where one half would otherwise be left without audio of its own.
+  - A clip can be heard only past its picture: its neighbor's J/L cut covers all of it, and its own sound runs on in its J/L cut at the other end. If that cut resets, the clip would be left with no audio, so the cut at its other end resets too.
   - The manual doesn't cover this. Without the rule, audio could overlap on a track or extend into gaps.
 - **D21. Following Track 1** (pp. 649, 727). A clip on another track is attached to the Track 1 picture under its first frame: that clip and source frame. Nothing is stored; each edit works it out from the timeline before and after.
   - When that picture moves (later clips shift, or its clip moves, even to another track), the attached clip moves with it. Split parts count as the same picture.
