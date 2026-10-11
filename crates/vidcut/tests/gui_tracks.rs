@@ -246,9 +246,11 @@ fn track_gestures_send_one_request_each() {
     let last = |h: &live::Handle| gui_edits(h).last().cloned().unwrap();
 
     // 1. V2's header makes it the target track: F10 overwrites
-    // there, not on Track 1.
-    harness.get_by_label("V2").click();
-    harness.step();
+    // there, not on Track 1. Clicking it again keeps it the target.
+    for _ in 0..2 {
+        harness.get_by_label("V2").click();
+        harness.step();
+    }
     call(
         &h,
         "media.marks.set",

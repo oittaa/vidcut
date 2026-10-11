@@ -865,12 +865,10 @@ impl Workspace {
                 let r = ui
                     .selectable_label(is_target, RichText::new(&label).strong().small())
                     .on_hover_text("The target track for edit functions");
+                // A click makes the track the target, however often it comes;
+                // V1, the default, is no target of its own.
                 if r.clicked() {
-                    ws.target = if t.id == MAIN || is_target {
-                        None
-                    } else {
-                        Some(t.id.clone())
-                    };
+                    ws.target = (t.id != MAIN).then(|| t.id.clone());
                 }
                 r.context_menu(|ui| {
                     if ui.button("Add Video Track").clicked() {
