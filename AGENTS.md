@@ -98,6 +98,8 @@ These are mandatory.
 
 **Enable the hook once per clone:** `git config core.hooksPath .githooks`.
 
+**CI** (`.github/workflows/check.yml`) runs the fast gate on pull requests and on pushes to master, on `ubuntu-26.04`: older images ship FFmpeg 6. The compiled dependencies are cached (`Swatinem/rust-cache`), so a run builds only vidcut's own crates and the dependencies `Cargo.lock` changed; after a toolchain upgrade it builds everything once. The full gate, GPU and GUI tests run only locally. Dependabot opens weekly update pull requests.
+
 **A bigger change** is anything touching:
 - time mapping, decode/seek, the export engine
 - EDL/preview, the Request/IPC protocol

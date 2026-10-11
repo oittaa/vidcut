@@ -10,15 +10,18 @@ on:
 
 permissions:
   contents: read
-  # Saving the cargo cache needs this when the token's default is read-only.
-  actions: write
 
 concurrency:
   group: check-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A new push to a pull request replaces its run. Every master commit gets
+  # a run of its own.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
+  # No debug info: a smaller cache and faster links. Panics still name the
+  # file and line.
+  CARGO_PROFILE_DEV_DEBUG: 0
 
 jobs:
   check:
@@ -31,19 +34,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-
-      - name: Cache cargo registry and git db
-        uses: actions/cache@v6
-        with:
-          # Crate files and the index, plus git deps' object db.
-          # Extracted sources and target/ are rebuilt from these.
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
 
       - name: Install FFmpeg 8 and libclang
         run: |
@@ -88,6 +78,13 @@ jobs:
             echo "expected rustc ${channel} from rust-toolchain.toml, got ${got}" >&2
             exit 1
           fi
+
+      # After the toolchain step: the cache key includes the rustc version.
+      # It keeps the compiled dependencies (target/, not vidcut's own crates)
+      # and the downloaded crates. After a Cargo.lock change it restores the
+      # previous cache, so only the changed dependencies are compiled again.
+      - name: Cache compiled dependencies
+        uses: Swatinem/rust-cache@v2
 
       - name: Fast gate
         # CI is set, so scripts/check.sh omits cargo --quiet and the log
