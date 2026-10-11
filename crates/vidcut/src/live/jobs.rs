@@ -63,6 +63,19 @@ pub struct JobInfo {
     pub(crate) clock: Instant,
 }
 
+/// Gives the calling thread the lowest CPU priority (nice 19), for a job's
+/// thread as it starts: the GUI, playback and other programs come first, and
+/// the job still takes every core they leave idle. Threads it starts later,
+/// FFmpeg's decoder and encoder threads among them, inherit it. Linux only.
+pub(crate) fn background_priority() {
+    #[cfg(target_os = "linux")]
+    // SAFETY: plain system calls on this thread's own id.
+    unsafe {
+        let tid = libc::gettid();
+        libc::setpriority(libc::PRIO_PROCESS, tid as libc::id_t, 19);
+    }
+}
+
 fn now() -> f64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -168,5 +181,28 @@ impl JobInfo {
 
     pub fn to_json(&self) -> Value {
         serde_json::to_value(self).unwrap_or_else(|_| json!({ "id": self.id }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_job_thread_and_the_threads_it_starts_run_at_low_priority() {
+        fn nice() -> i32 {
+            // SAFETY: plain system calls on this thread's own id.
+            unsafe { libc::getpriority(libc::PRIO_PROCESS, libc::gettid() as libc::id_t) }
+        }
+        let before = nice();
+        let (job, child) = std::thread::spawn(|| {
+            background_priority();
+            (nice(), std::thread::spawn(nice).join().unwrap())
+        })
+        .join()
+        .unwrap();
+        assert_eq!((job, child), (19, 19));
+        assert_eq!(nice(), before, "the caller's priority changed");
     }
 }

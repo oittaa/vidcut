@@ -1321,6 +1321,7 @@ impl Live {
         let _ = std::thread::Builder::new()
             .name(format!("vidcut-{id}"))
             .spawn(move || {
+                jobs::background_priority();
                 let mut last = Instant::now() - Duration::from_secs(1);
                 let mut report =
                     |i: usize, n: usize, out: &Path, p: vidcut_av::export::Progress| {
@@ -1400,6 +1401,7 @@ impl Live {
         let _ = std::thread::Builder::new()
             .name(format!("vidcut-{id}"))
             .spawn(move || {
+                jobs::background_priority();
                 let _guard = vidcut_av::cancel::Guard::set(cancel);
                 let _report = {
                     let (tx, id) = (tx.clone(), id.clone());

@@ -185,6 +185,7 @@ A seek or load ("motion") is shown after two steps:
 - **Foreground** (an IPC client without `background`): progress notifications carry the job id, the reply comes when the job ends, and a closed connection cancels it, as in M3. That same closed connection cancels a `frame.render`, a storyboard, an analysis and the loudness measure before the export, which send no progress of their own. A background job is cancelled only by `jobs.cancel`.
 - **Background** (`background: true`, and every GUI export): the reply comes once the files are planned, so mistakes (an unknown preset, an existing file) still fail the request itself. The job goes on without the client.
 - **`jobs.wait`** is a wait-list entry like a seek's (§2), without the 10 s limit unless given a `timeout`; it fails the way the job failed. `jobs.cancel` sets the job's cancel flag, and the engine removes partial files.
+- **Low priority:** a job's thread drops to the lowest CPU priority (nice 19) as it starts, and the FFmpeg threads it starts inherit it. The GUI, playback and other programs come first, and the job still takes every core they leave idle. Headless runs keep their priority: a terminal waits for them.
 - **Kept:** running jobs and the 50 most recent finished ones.
 - **Closing:** quitting the window while jobs run asks first (`gui.quit` doesn't). The session cancels running jobs on shutdown and waits up to 3 s for them to clean up.
   - A job still running after that is stuck in a decoder or an encoder. The session removes its partial files itself, and the process ends without it.
