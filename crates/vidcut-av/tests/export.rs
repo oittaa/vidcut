@@ -840,6 +840,58 @@ fn cancelling_leaves_no_files() {
 }
 
 #[test]
+fn normalizing_hot_lanes_keeps_true_peaks_under_the_ceiling() {
+    // Two lanes of the same beeps, each raised to full scale: their mix
+    // peaks near +6 dBFS. Short beeps are loud for their loudness, so
+    // reaching -5 LUFS needs the true-peak cap: the gain stops where peaks
+    // reach -1 dBTP, in the report and in the file as measured again.
+    let fps = Rational::new(30, 1).unwrap();
+    let s = src(
+        FixtureSpec::new(VideoCodec::H264, Container::Mkv, 320, 180, (30, 1), 300).with_audio(
+            AudioCodec::Flac,
+            48_000,
+            2,
+        ),
+    );
+    let mut hot = a(&s, fps, 48_000, 0, 300);
+    if let AudioPiece::Source { gain_db, .. } = &mut hot {
+        *gain_db = 20.0 * 2f64.log10();
+    }
+    let p = plan(
+        fps,
+        320,
+        180,
+        vec![v(&s, 0, 300)],
+        vec![vec![hot.clone()], vec![hot]],
+    );
+    let mut settings = lossless();
+    settings.audio.as_mut().unwrap().loudness = Some(-5.0);
+    let out = out_dir("hot").join("out.mkv");
+    let n = render(&p, &settings, &out).loudness.expect("normalized");
+    let before = n.true_peak.unwrap() - n.gain_db;
+    assert!(before > 5.5, "the mix peaks above full scale: {n:?}");
+    assert!(n.true_peak.unwrap() <= -1.0 + 1e-9, "{n:?}");
+    assert!(n.loudness.unwrap() < -6.0, "the cap held the gain: {n:?}");
+    let o = Src {
+        path: out,
+        origin: 0.0,
+    };
+    let again = vidcut_av::analysis::loudness(&plan(
+        fps,
+        320,
+        180,
+        vec![v(&o, 0, 300)],
+        vec![vec![a(&o, fps, 48_000, 0, 300)]],
+    ))
+    .unwrap();
+    assert!(again.true_peak <= -0.95, "{again:?} after {n:?}");
+    assert!(
+        (again.integrated - n.loudness.unwrap()).abs() < 0.3,
+        "{again:?} after {n:?}"
+    );
+}
+
+#[test]
 fn auto_moves_on_from_a_gpu_encoder_that_wont_open() {
     // A GPU encoder that tested fine can fail to open when an export starts
     // (NVENC allows a few sessions at a time). Here the VAAPI render node is
