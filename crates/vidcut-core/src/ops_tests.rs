@@ -56,6 +56,42 @@ fn the_smart_indicator_is_red_without_media_past_the_edit() {
 }
 
 #[test]
+fn the_smart_indicator_goes_by_track_one_alone() {
+    // D36: the indicator shows Track 1's edit. A higher track's clips there
+    // don't change its color, with media past the edit or without.
+    let mut f = three_clips();
+    f.append("m2", 50, 100); // c4 at 200..250, ending on m2's last frame
+    let on_v2 = |f: &mut Fixture, media: &str, a: i64, b: i64, at: i64| {
+        f.ok(req(
+            "edit.overwrite",
+            json!({"media": media, "range": format!("{a}f..{b}f"), "at": at, "track": "V2"}),
+        ));
+    };
+    // Green on Track 1 at 100 and 150: V2 ends on m2's last frame at 100 and
+    // starts on m3's first at 150.
+    on_v2(&mut f, "m2", 0, 100, 0);
+    on_v2(&mut f, "m3", 0, 40, 150);
+    // Red on Track 1 at 250 (c4): V2 has media on both sides of it there.
+    on_v2(&mut f, "m3", 10, 30, 230);
+    on_v2(&mut f, "m3", 50, 70, 250);
+    assert_eq!(
+        f.track("V2"),
+        vec![
+            row("c5", 0, 100, 0),
+            row("c6", 150, 40, 0),
+            row("c7", 230, 20, 10),
+            row("c8", 250, 20, 50)
+        ]
+    );
+    let p = f.editor.project();
+    let red: Vec<i64> = [100, 150, 250]
+        .into_iter()
+        .filter(|&e| !crate::ops::edit_has_handles(p, e))
+        .collect();
+    assert_eq!(red, vec![250], "as on Track 1 alone");
+}
+
+#[test]
 fn smart_insert_uses_the_nearest_edit() {
     // p. 696–697: Smart Insert inserts at the edit point nearest the playhead
     // and ripples Track 1.
