@@ -165,3 +165,86 @@ fn plans_say_how_pictures_are_read() {
         ]
     );
 }
+
+#[test]
+fn stills_and_sequences_travel_through_otio() {
+    // Deviation X9: a sequence as OTIO's ImageSequenceReference, a still as
+    // a file with no range of its own; both come back as they were.
+    let mut f = with_still();
+    f.env = std::mem::take(&mut f.env).with_sequence("/renders", "frame_%04d.png", 100, 50);
+    f.ok(req(
+        "media.add",
+        json!({"paths": ["/renders/frame_0100.png"], "sequence": true, "fps": "50"}),
+    ));
+    f.ok(req(
+        "edit.append",
+        json!({"media": "m2", "range": "0f..+2s"}),
+    ));
+    f.ok(req(
+        "edit.append",
+        json!({"media": "m3", "range": "4f..+10f"}),
+    ));
+    let before = f.editor.project().clone();
+    let doc = crate::otio::export(&before, "images", None).unwrap();
+    let clips = doc["tracks"]["children"][0]["children"].as_array().unwrap();
+    let still = &clips[0]["media_references"]["DEFAULT_MEDIA"];
+    assert_eq!(still["target_url"], "file:///media/photo.png");
+    assert_eq!(still["available_range"], serde_json::Value::Null);
+    let seq = &clips[1]["media_references"]["DEFAULT_MEDIA"];
+    assert_eq!(seq["OTIO_SCHEMA"], "ImageSequenceReference.1");
+    assert_eq!(
+        (
+            &seq["target_url_base"],
+            &seq["name_prefix"],
+            &seq["name_suffix"],
+            &seq["start_frame"],
+            &seq["frame_zero_padding"],
+            &seq["rate"],
+        ),
+        (
+            &json!("file:///renders/"),
+            &json!("frame_"),
+            &json!(".png"),
+            &json!(100),
+            &json!(4),
+            &json!(50.0),
+        )
+    );
+    // Into an empty project with the same files.
+    let mut g = Fixture::new(&[]);
+    g.env = std::mem::take(&mut f.env);
+    let r = g.ok(req("timeline.import", json!({ "otio": doc })));
+    assert_eq!(r.result["warnings"], json!([]), "{}", r.result);
+    let p = g.editor.project();
+    let kinds: Vec<_> = p
+        .track("V1")
+        .unwrap()
+        .clips
+        .iter()
+        .map(|c| {
+            let m = p.media(&c.media).unwrap();
+            (m.is_still(), m.sequence.clone(), c.duration, c.source_in)
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            (true, None, 50, 0),
+            (
+                false,
+                Some(crate::model::ImageSequence {
+                    pattern: "frame_%04d.png".into(),
+                    first: 100,
+                    count: 50,
+                }),
+                10,
+                4
+            ),
+        ]
+    );
+    let seq = p.media(&p.track("V1").unwrap().clips[1].media).unwrap();
+    assert_eq!(
+        seq.info.video.as_ref().unwrap().fps,
+        Rational::new(50, 1).unwrap()
+    );
+}

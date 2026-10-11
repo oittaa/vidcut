@@ -7,8 +7,6 @@
 //! continues forward from the previous picture. Either way the cost stays
 //! close to decoding one frame per picture or the clip once.
 
-use std::path::Path;
-
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, codec, decoder, encoder, format, frame, media, software::scaling};
 
@@ -20,18 +18,18 @@ pub struct Image {
     pub rgba: Vec<u8>,
 }
 
-/// `count` pictures at evenly spaced times of `path`'s video (the middle of
-/// each of `count` equal parts), each fitted into `max_w`×`max_h` keeping the
-/// display aspect. Returns the pictures and their times in seconds from the
-/// first frame.
+/// `count` pictures at evenly spaced times of `source`'s video (the middle
+/// of each of `count` equal parts), each fitted into `max_w`×`max_h` keeping
+/// the display aspect. Returns the pictures and their times in seconds from
+/// the first frame. A still gives its one picture.
 pub fn filmstrip(
-    path: &Path,
+    source: &crate::decode::Input,
     count: usize,
     max_w: u32,
     max_h: u32,
 ) -> Result<(Vec<Image>, Vec<f64>)> {
-    crate::init();
-    let mut input = format::input(path).ctx(|| format!("opening {}", path.display()))?;
+    let path = source.path();
+    let mut input = source.open()?;
     let stream = input
         .streams()
         .best(media::Type::Video)

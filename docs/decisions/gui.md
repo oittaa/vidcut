@@ -125,6 +125,13 @@ A seek or load ("motion") is shown after two steps:
 
 **Fillers.** Fillers are generated on demand, synchronously (once per size and rate, then cached), so the preview is never half-loaded.
 
+**Stills and image sequences (M9).** The players show them through image lists that the session writes into its runtime folder (preview.md §11). The pool's thumbnails of a sequence spread over its pictures; a still has its one picture.
+
+**Importing numbered images (M9).** Import Media (Ctrl+I, `gui/import.rs`) looks for numbered runs among the files picked, counting each run on disk. If there are any, it asks once:
+- **One clip each, at a frame rate:** an image sequence per run (`media.add sequence`), at the project's rate unless typed over. Offered first when a run is of a frame type (PNG, TIFF, EXR, DPX, TGA, BMP).
+- **Separate stills:** every file a still. Offered first for numbered JPEGs, which are usually photos.
+- The import stays one request: `media.add`, or an `apply` of two when sequences come with other files.
+
 **Pool thumbnails.**
 - **Frames:** 24 per clip at 192×108, spread evenly.
 - **Accuracy:** each is within half the spacing of its time, so keyframes are good enough for long clips; short clips are decoded forward.

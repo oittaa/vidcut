@@ -137,7 +137,7 @@ These are mandatory.
 
 ## Driving vidcut as an agent
 
-*Status: the CLI edits and exports headless (M1, M2), controls a running GUI (M3), exports in the background and exchanges OTIO timelines (M5), edits several tracks with a mixer and bins (M6), and serves MCP with automatic tools and storyboards (M7).*
+*Status: the CLI edits and exports headless (M1, M2), controls a running GUI (M3), exports in the background and exchanges OTIO timelines (M5), edits several tracks with a mixer and bins (M6), serves MCP with automatic tools and storyboards (M7), handles rotated, interlaced and HDR media (M8), and stills and image sequences (M9).*
 
 **MCP** (docs/decisions/agents.md, deviation X10): `vidcut mcp [-p FILE]` serves the Model Context Protocol on stdin/stdout. Every command is a tool (`edit.split` is `edit_split`, with its JSON Schema), plus `use_project` to pick or create the project. Calls run like the CLI's: inside the GUI that has the project open, or headless. `frame_render`, `gui_screenshot` and `storyboard_render` return images. To add it to Claude Code: `claude mcp add vidcut -- vidcut mcp -p /abs/talk.vidcut`; other clients take `{"command": "vidcut", "args": ["mcp", "-p", "/abs/talk.vidcut"]}`.
 
@@ -232,7 +232,7 @@ vidcut undo                                 # works across separate runs
 - Measuring decodes a file once; the results are cached (`~/.cache/vidcut/analysis/`), so trying other settings is quick.
 
 **Timeline interchange (OpenTimelineIO, deviation X9):**
-- `vidcut export cut.otio` writes the whole timeline (or `--range`) for other editors: each video track, its clips' audio (J/L cuts included) as an audio track, each audio track, markers, and vidcut extras (marks, clip gain, track settings) in `metadata.vidcut`.
+- `vidcut export cut.otio` writes the whole timeline (or `--range`) for other editors: each video track, its clips' audio (J/L cuts included) as an audio track, each audio track, markers, and vidcut extras (marks, clip gain, track settings) in `metadata.vidcut`. Image sequences go as `ImageSequenceReference`s, and come back as sequences.
 - `vidcut import cut.otio` adds the file's media to the pool and the file's tracks after the last clip: video tracks onto V1, V2, … with the audio that belongs to their clips, other audio tracks onto A1, A2, …. `--replace` replaces the timeline instead. An empty timeline takes the file's frame rate, start timecode and track settings.
   - Media that moved: `--search /mnt/footage` looks for them by file name, subfolders too. Missing media fail the import (exit 7) with the list of files.
   - What can't be imported (transitions, nested stacks, generators, clips overlapping others on their track) is listed in `warnings`.

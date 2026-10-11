@@ -359,7 +359,8 @@ fn rotated_sources_export_upright() {
         pieces.push(v(&s, from, 20));
         want.extend((from..from + 20).map(|f| Some(f as u32)));
         // Pool thumbnails show upright too, at the shown aspect.
-        let (images, _) = vidcut_av::thumbs::filmstrip(&s.path, 4, 192, 108).unwrap();
+        let input = vidcut_av::decode::Input::File(s.path.clone());
+        let (images, _) = vidcut_av::thumbs::filmstrip(&input, 4, 192, 108).unwrap();
         for img in &images {
             assert_eq!((img.width, img.height), (192, 108), "rotation {rotation}");
             let w = img.width as usize;
@@ -479,7 +480,8 @@ fn hdr_is_tone_mapped_for_sdr_and_kept_for_hdr() {
         pieces.push(v(&s, 5, 10));
         want.extend((5..15).map(Some));
         // Pool thumbnails are tone-mapped too.
-        let (images, _) = vidcut_av::thumbs::filmstrip(&s.path, 2, 192, 108).unwrap();
+        let input = vidcut_av::decode::Input::File(s.path.clone());
+        let (images, _) = vidcut_av::thumbs::filmstrip(&input, 2, 192, 108).unwrap();
         for img in &images {
             let w = img.width as usize;
             let code =
@@ -1214,6 +1216,24 @@ fn sequences_play_their_pictures_at_their_rate() {
     assert!(!v.still);
     assert_eq!((v.frames, v.avg_frame_rate), (Some(60), (24, 1)));
     assert!((v.duration_secs.unwrap() - 2.5).abs() < 1e-9);
+    // Pool thumbnails spread over the pictures, as over a video's frames.
+    let input = vidcut_av::decode::Input::Sequence {
+        pattern: pattern.clone(),
+        first: 1000,
+        rate: (24, 1),
+    };
+    // (At the pictures' own size: barcodes don't survive shrinking.)
+    let (images, times) = vidcut_av::thumbs::filmstrip(&input, 4, 320, 180).unwrap();
+    assert_eq!(images.len(), 4);
+    for (img, t) in images.iter().zip(&times) {
+        let w = img.width as usize;
+        let code = vidcut_av::barcode::read_packed(&img.rgba, w, img.height as usize, w * 4, 4, 1)
+            .unwrap();
+        // A thumbnail may be up to half the spacing (2.5 s / 4) early.
+        let early = ((t - 0.3125) * 24.0).floor() as u32;
+        let late = (t * 24.0).ceil() as u32;
+        assert!((early..=late).contains(&code), "{code} for {t} s");
+    }
     let p = plan(
         fps,
         320,

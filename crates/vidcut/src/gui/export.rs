@@ -66,6 +66,10 @@ pub trait Dialogs: Send + Sync {
     ) -> Option<PathBuf>;
     fn pick_file(&self, title: &str, folder: &Path, extensions: &[&str]) -> Option<PathBuf>;
     fn pick_folder(&self, title: &str, folder: &Path) -> Option<PathBuf>;
+    /// Files to open, under named filters; none if cancelled.
+    fn pick_files(&self, _title: &str, _filters: &[(&str, &[&str])]) -> Vec<PathBuf> {
+        Vec::new()
+    }
 }
 
 /// The desktop's file dialogs (XDG portal).
@@ -100,6 +104,17 @@ impl Dialogs for RfdDialogs {
             .set_title(title)
             .set_directory(folder)
             .pick_folder()
+    }
+
+    fn pick_files(&self, title: &str, filters: &[(&str, &[&str])]) -> Vec<PathBuf> {
+        let mut dialog = rfd::FileDialog::new().set_title(title);
+        for (name, extensions) in filters {
+            dialog = dialog.add_filter(*name, extensions);
+        }
+        dialog
+            .add_filter("all files", &["*"])
+            .pick_files()
+            .unwrap_or_default()
     }
 }
 

@@ -100,9 +100,9 @@ const MEASURE: (u32, u32) = (96, 54);
 /// is FFmpeg scdet's: the mean absolute difference from the previous frame
 /// (0..100), or its change from the previous difference if smaller, so a
 /// steady pan doesn't read as a cut.
-pub fn picture_stats(path: &Path) -> Result<PictureStats> {
-    crate::init();
-    let mut input = format::input(path).ctx(|| format!("opening {}", path.display()))?;
+pub fn picture_stats(source: &crate::decode::Input) -> Result<PictureStats> {
+    let path = source.path();
+    let mut input = source.open()?;
     let stream = input
         .streams()
         .best(media::Type::Video)

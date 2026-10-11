@@ -4,6 +4,7 @@
 
 mod app;
 pub mod export;
+mod import;
 mod mixer;
 mod pool;
 mod preferences;

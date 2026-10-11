@@ -187,3 +187,21 @@ Found with eframe 0.35 in M0 and unchanged with 0.36: `tests/gui.rs` (`--feature
 - **Accuracy:** EDL audio segment edges are within about 10 ms (export is sample-exact). Preview audio leads the picture by half a frame, the bias of §1. That was already so with one stream.
 
 **Audio-only media start after the encoder priming.** An audio-only Matroska file with AAC starts with a priming packet 21 ms (1024 samples) before the content. The probe now takes the content start as the stream start plus `initial_padding` and shortens the duration to match, so export and preview line it up with video clips' sound. Files with video are unchanged, because the video's first frame sets the origin.
+
+## 11. Stills and image sequences (M9)
+
+An image in an EDL entry is a source with one frame at time 0. Seeking into the middle of a still's entry finds no frame there, so mpv goes on to the next entry and shows its first frame (`tests/edl_spike.rs`, `edl_stills_and_image_sequences`).
+
+**Image lists.** The live session gives mpv image pieces as image lists instead (`mf://@list`), one file a frame, with `mf-fps` at the project rate (`Preview::images`). The EDL then plays a list like a video file whose frame `m` is at `m / fps`: same `start` arithmetic, same half-frame bias.
+- **A sequence's list** covers all of it at the project rate. Line `m` holds the picture the export's sampling rule picks for project frame `m`, so a 24 fps sequence on a 30 fps timeline shows what the export shows.
+- **A still's list** is the still repeated for 10 s at the project rate. Longer still pieces chain it like the black filler: every frame is alike, so any part of the list will do.
+- **Where:** lists go in the runtime folder (`<pid>/images/`), written the first time they are needed, keyed by the files, the rates and the project rate.
+- **No tail patches:** pictures aren't decoded ahead of each other, so a cut loses no frames.
+- **Verified:** seeks to every boundary and into the middle of stills, sequences and resampled sequences show the export's frame (the spike, and `tests/live.rs`).
+
+**Not used, from the spike:**
+- **FFmpeg concat scripts** (`.ffconcat` listing files with durations) take the first file's time base (25 fps for a PNG) unless each file gets a `framerate` option, and then seeking inside them falls through to the next entry at some frames.
+- **mpv's `mf-fps`** is one rate for the whole file, so a sequence's own rate can't be given per entry. Lists at the project rate need only one.
+
+**Playing sequences.** Big pictures decode slowly: a 4K 16-bit PNG takes about 100 ms, so such a sequence can't play in real time, and mpv drops frames. Scrubbing and seeking are fine. Proxies (roadmap) are the answer for playback.
+

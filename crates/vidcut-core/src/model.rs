@@ -131,7 +131,7 @@ pub struct ImageSequence {
 impl ImageSequence {
     /// The pattern with its number written by `number` (given the padded
     /// width, 0 for none).
-    fn fill(&self, number: impl Fn(usize) -> String) -> String {
+    fn fill(&self, mut number: impl FnMut(usize) -> String) -> String {
         let mut out = String::with_capacity(self.pattern.len() + 16);
         let mut rest = self.pattern.as_str();
         while let Some(i) = rest.find('%') {
@@ -148,6 +148,19 @@ impl ImageSequence {
         }
         out.push_str(rest);
         out
+    }
+
+    /// The name around the number, and the width it is zero-padded to (0:
+    /// not padded): OpenTimelineIO's `name_prefix`, `frame_zero_padding`
+    /// and `name_suffix`.
+    pub fn parts(&self) -> (String, usize, String) {
+        let mut width = None;
+        let marked = self.fill(|w| {
+            width = Some(w);
+            "\u{0}".into()
+        });
+        let (prefix, suffix) = marked.split_once('\u{0}').unwrap_or((&marked, ""));
+        (prefix.to_string(), width.unwrap_or(0), suffix.to_string())
     }
 
     /// The name of the file numbered `n`.

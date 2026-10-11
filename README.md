@@ -12,6 +12,8 @@ A simple, fully scriptable video cutting tool for Linux, modeled on DaVinci Reso
 >   - **M5:** exporting from the GUI: Quick Export, an Export dialog with every setting, and a Jobs window with progress and cancel. Timelines move to and from other editors as OpenTimelineIO.
 >   - **M6:** several tracks: B-roll above Track 1 that follows its edits, music on audio tracks, Place On Top, a mixer with meters, mute and solo, and bins in the media pool.
 >   - **M7:** for agents and for speed: an MCP server, Ripple Delete Silence, scene and black detection, the Boring Detector, Dynamic Trim, storyboards and loudness-normalized export.
+>   - **M8:** media from phones and broadcast: rotation metadata, interlaced sources and HDR, tone-mapped or exported as HDR.
+>   - **M9:** stills (photos, title cards) and image sequences (numbered frames from renders and scans), in the pool, the viewer, the timeline, export and OpenTimelineIO.
 
 ## What it will do
 
@@ -159,6 +161,7 @@ Agents can look at their work: frames, screenshots and storyboards come back as 
 | M6 | Multi-track (B-roll, music, Place On Top, mixer) |
 | M7 | Agent extras (MCP server, Ripple Delete Silence, scene detection, Boring Detector, Dynamic Trim, storyboards, loudness) |
 | M8 | Media coverage: rotation metadata, interlaced sources, HDR (tone mapping and HDR export) |
+| M9 | Stills and image sequences |
 
 What comes next, and the use cases behind it, is in [docs/roadmap.md](docs/roadmap.md).
 

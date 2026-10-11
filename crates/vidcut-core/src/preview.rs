@@ -67,6 +67,10 @@ pub struct Preview {
     /// Interlaced sources: the player deinterlaces flagged frames, one
     /// frame per frame as export does. Set by the host.
     pub deinterlace: bool,
+    /// Image lists (`mf://@list`, stills and sequences): the player shows
+    /// them one file a frame at the project rate. Set by the host, which
+    /// writes the lists.
+    pub images: bool,
 }
 
 /// The EDL and audio graph that play `plan` in mpv.
@@ -76,6 +80,7 @@ pub fn build(plan: &RenderPlan, fillers: &Fillers) -> Preview {
         audio_graph: audio_graph(plan),
         read_ahead: false,
         deinterlace: false,
+        images: false,
     }
 }
 

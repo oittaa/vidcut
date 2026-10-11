@@ -1040,13 +1040,18 @@ fn import_timeline(
         if ids.contains_key(&c.path) || missing.contains(&c.path.as_path()) {
             continue;
         }
-        let probed = env.probe(&c.path).or_else(|e| {
+        // An image sequence is probed as one, at its rate.
+        let probe = |path: &Path| match c.sequence {
+            Some(rate) => env.probe_sequence(path, rate),
+            None => env.probe(path),
+        };
+        let probed = probe(&c.path).or_else(|e| {
             c.path
                 .file_name()
                 .and_then(|name| {
                     env.find_file(search, name)
                         .iter()
-                        .find_map(|p| env.probe(p).ok())
+                        .find_map(|p| probe(p).ok())
                 })
                 .ok_or(e)
         });

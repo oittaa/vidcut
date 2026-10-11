@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use vidcut::live::{self, Capture, Image, Origin, PlayerId, Presented, WindowChange};
-use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
+use vidcut_av::fixture::{self, Container, FixtureSpec, ImageSpec, VideoCodec};
 use vidcut_core::model::Settings;
 use vidcut_core::time::Rational;
 use vidcut_core::{Envelope, Project, Response, Store};
@@ -708,6 +708,51 @@ fn live_session() {
     );
     let state = h.ok("player.state", json!({})).result;
     assert_eq!(state["timeline"]["frames"].as_i64(), Some(total - 8));
+
+    step("Stills and image sequences show frame for frame");
+    // A still longer than one image list (chained), then a 24 fps sequence
+    // on the 30 fps timeline, its pictures picked as export picks them.
+    let still = fixture::ensure_images(&ImageSpec::still(77, W as u32, H as u32, "png")).unwrap();
+    let seq = fixture::ensure_images(&ImageSpec::sequence(1, 60, 6, W as u32, H as u32)).unwrap();
+    let r = h.ok("media.add", json!({ "paths": [still[0]] }));
+    let still_id = r.changes.created[0].clone();
+    let r = h.ok(
+        "media.add",
+        json!({ "paths": [seq[0]], "sequence": true, "fps": "24" }),
+    );
+    let seq_id = r.changes.created[0].clone();
+    let end = h.ok("project.summary", json!({})).result["duration"]
+        .as_i64()
+        .unwrap();
+    h.ok(
+        "edit.append",
+        json!({ "media": still_id, "range": "0f..+400f" }),
+    );
+    h.ok(
+        "edit.append",
+        json!({ "media": seq_id, "range": "5f..+30f" }),
+    );
+    let pick = |m: i64| {
+        let t = (m as f64 - 0.5) / 30.0;
+        (t * 24.0 - 1e-6).ceil() as u32
+    };
+    for (t, want) in [
+        (end, 77),
+        (end + 299, 77),
+        (end + 350, 77),
+        (end + 399, 77),
+        (end + 400, pick(5)),
+        (end + 411, pick(16)),
+        (end + 429, pick(34)),
+    ] {
+        h.ok("player.seek", json!({ "at": t, "viewer": "timeline" }));
+        assert_eq!(h.shown(&dir), Some(want), "timeline frame {t}");
+    }
+    // The source viewer shows a still as long as the still duration.
+    h.ok("viewer.load", json!({ "media": still_id }));
+    let state = h.ok("player.state", json!({})).result;
+    assert_eq!(state["source"]["frames"], 150, "{state}");
+    assert_eq!(h.shown(&dir), Some(77));
 
     step("A failed tail check is tried again, then reported");
     // The source viewer's cut, which the timeline doesn't have: its retry

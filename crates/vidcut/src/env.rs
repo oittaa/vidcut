@@ -56,6 +56,19 @@ fn measured<T>(
     Ok(value)
 }
 
+/// How `m`'s pictures are read: its file, or its image sequence.
+pub fn input_of(m: &Media) -> vidcut_av::decode::Input {
+    use vidcut_av::decode::Input;
+    match (&m.sequence, &m.info.video) {
+        (Some(s), Some(v)) => Input::Sequence {
+            pattern: m.path.parent().unwrap_or(Path::new("")).join(&s.pattern),
+            first: s.first,
+            rate: (v.fps.num() as i32, v.fps.den() as i32),
+        },
+        _ => Input::File(m.path.clone()),
+    }
+}
+
 impl Env for AvEnv {
     fn probe(&self, path: &Path) -> Result<ProbedMedia> {
         let canonical = path
@@ -124,7 +137,7 @@ impl Env for AvEnv {
         measured(
             &PICTURES,
             paths::media_cache("analysis", media, "pictures"),
-            || vidcut_av::analysis::picture_stats(&media.path),
+            || vidcut_av::analysis::picture_stats(&input_of(media)),
             PictureStats::to_bytes,
             PictureStats::from_bytes,
         )

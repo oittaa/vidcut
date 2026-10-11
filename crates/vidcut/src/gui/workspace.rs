@@ -110,6 +110,7 @@ pub struct Workspace {
     pub(super) mixer: super::mixer::Mixer,
     /// File > Preferences.
     pub(super) preferences: super::preferences::PreferencesUi,
+    pub(super) import: super::import::ImportUi,
     pub(super) dialogs: Arc<dyn super::export::Dialogs>,
 }
 
@@ -147,6 +148,7 @@ impl Workspace {
             show_mixer: false,
             mixer: Default::default(),
             preferences: Default::default(),
+            import: Default::default(),
             dialogs: Arc::new(super::export::RfdDialogs),
         }
     }
@@ -655,32 +657,6 @@ impl Workspace {
         });
     }
 
-    /// Ctrl+I: pick media files to import (p. 654).
-    pub(super) fn import_media(&self) {
-        if self.project().is_none() {
-            return;
-        }
-        let live = self.live.clone();
-        // Into the bin the pool shows (p. 655).
-        let bin = self.snap.pool.bin.clone();
-        std::thread::spawn(move || {
-            if let Some(files) = rfd::FileDialog::new()
-                .add_filter(
-                    "media",
-                    &[
-                        "mp4", "mov", "mkv", "webm", "avi", "mxf", "m4v", "ts", "mts", "m2ts",
-                        "mpg", "wav", "flac", "mp3", "m4a", "aac", "ogg", "opus",
-                    ],
-                )
-                .add_filter("all files", &["*"])
-                .pick_files()
-            {
-                let bin = (!bin.is_empty()).then_some(bin);
-                live.request("media.add", json!({ "paths": files, "bin": bin }));
-            }
-        });
-    }
-
     // ---------------------------------------------------------------- keys
 
     /// Keyboard shortcuts (spec §11). Ignored while a text field has focus.
@@ -820,7 +796,8 @@ impl Workspace {
 
         // Marks (p. 691). Out marks the frame under the playhead as the last
         // one in the range; ranges are half-open, so the stored Out is one more.
-        if pressed(Key::I) || pressed(Key::O) {
+        // (Ctrl+I imports.)
+        if (pressed(Key::I) || pressed(Key::O)) && !m.command {
             let is_in = pressed(Key::I);
             if m.shift {
                 self.go_to_mark(is_in);
@@ -1118,6 +1095,7 @@ impl Workspace {
         self.keys(&ctx);
         self.export_windows(&ctx);
         self.preferences_window(&ctx);
+        self.import_window(&ctx);
         egui::Panel::top("top")
             .frame(egui::Frame::new().fill(theme::BG).inner_margin(4))
             .show(ui, |ui| self.top_bar(ui));

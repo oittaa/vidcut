@@ -331,6 +331,10 @@ impl Player {
         if self.loaded.as_ref().is_some_and(|p| p.deinterlace) {
             options.push_str(",vf=bwdif=mode=send_frame:deint=interlaced");
         }
+        // Image lists show a file a frame at the project rate.
+        if self.loaded.as_ref().is_some_and(|p| p.images) {
+            options.push_str(&format!(",mf-fps={}", self.fps.as_f64()));
+        }
         let id = self.command(&["loadfile", &path, "replace", "-1", &options]);
         self.tracking = self.speed > 0.0;
         if self.mpv.is_some() {

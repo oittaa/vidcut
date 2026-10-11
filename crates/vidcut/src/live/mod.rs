@@ -460,6 +460,9 @@ const TAIL_TRIES: u8 = 2;
 /// Wait before trying a failed tail again.
 const TAIL_RETRY: Duration = Duration::from_secs(2);
 
+/// Seconds of a still in its preview image list; longer stills chain it.
+const STILL_LIST_SECS: i64 = 10;
+
 /// A failed tail check (`lost: None`) or patch, to try again at `at`.
 struct TailRetry {
     at: Instant,
@@ -538,9 +541,13 @@ fn filmstrip(media: &vidcut_core::model::Media) -> std::result::Result<Filmstrip
     let (images, times) = match cached {
         Some(strip) => strip,
         None => {
-            let strip =
-                vidcut_av::thumbs::filmstrip(&media.path, THUMBS, THUMB_SIZE.0, THUMB_SIZE.1)
-                    .map_err(|e| e.to_string())?;
+            let strip = vidcut_av::thumbs::filmstrip(
+                &crate::env::input_of(media),
+                THUMBS,
+                THUMB_SIZE.0,
+                THUMB_SIZE.1,
+            )
+            .map_err(|e| e.to_string())?;
             if prefs.disk_cache && !strip.0.is_empty() {
                 crate::thumbcache::store(
                     media,
@@ -2112,11 +2119,131 @@ impl Live {
                 .is_some_and(|v| v.fields.is_some()),
             render::VideoPiece::Black { .. } => false,
         });
+        let mut plan = plan;
+        let images = self.image_lists(&mut plan);
         Some(preview::Preview {
             read_ahead,
             deinterlace,
+            images,
             ..preview::build(&plan, &fillers)
         })
+    }
+
+    /// Image pieces as mpv shows them (preview.md §11): image lists
+    /// (`mf://@list`), one file a frame at the project rate, which the EDL
+    /// plays like video files. A sequence's list covers all of it, its
+    /// pictures picked by the export's sampling rule; a still's is
+    /// [`STILL_LIST_SECS`] of it, chained over longer pieces like the
+    /// fillers. Returns whether there were any.
+    fn image_lists(&mut self, plan: &mut RenderPlan) -> bool {
+        let fps = plan.fps;
+        let mut any = false;
+        let mut video = Vec::with_capacity(plan.video.len());
+        for piece in std::mem::take(&mut plan.video) {
+            let render::VideoPiece::Source {
+                media,
+                path,
+                source_frame,
+                frames,
+                image: Some(image),
+                ..
+            } = piece
+            else {
+                video.push(piece);
+                continue;
+            };
+            let listed = |list: &Path, source_frame: i64, frames: i64| render::VideoPiece::Source {
+                media: media.clone(),
+                path: PathBuf::from(format!("mf://@{}", list.display())),
+                origin: 0.0,
+                source_frame,
+                frames,
+                image: None,
+            };
+            let made = match &image {
+                render::Image::Still => {
+                    let n = fps.secs_to_frames(STILL_LIST_SECS as f64).max(2);
+                    let list = self.image_list(&format!("still|{}|{fps}", path.display()), || {
+                        vec![path.clone(); n as usize]
+                    });
+                    list.map(|list| {
+                        // All its frames are alike: any part of the list will do.
+                        let mut parts = Vec::new();
+                        let mut left = frames;
+                        while left > 0 {
+                            let part = left.min(n - 1);
+                            parts.push(listed(&list, 0, part));
+                            left -= part;
+                        }
+                        parts
+                    })
+                }
+                render::Image::Sequence {
+                    pattern,
+                    first,
+                    count,
+                    rate,
+                } => {
+                    let key = format!("seq|{}|{first}|{count}|{rate}|{fps}", pattern.display());
+                    let (first, count, rate) = (*first, *count, *rate);
+                    let dir = pattern.parent().unwrap_or(Path::new("")).to_path_buf();
+                    let files = vidcut_core::model::ImageSequence {
+                        pattern: pattern
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default(),
+                        first,
+                        count,
+                    };
+                    let list = self.image_list(&key, || {
+                        // Frame m shows the first picture at or after m's
+                        // time less half a frame, as export picks it.
+                        let secs = rate.frames_to_secs(count as i64);
+                        let m = fps.secs_to_frames(secs) + 1;
+                        (0..m)
+                            .map(|m| {
+                                let t = fps.frames_to_secs(m) - fps.frames_to_secs(1) / 2.0;
+                                let k = (t * rate.as_f64() - 1e-6).ceil().max(0.0) as u64;
+                                files.file(&dir, k.min(count - 1))
+                            })
+                            .collect()
+                    });
+                    list.map(|list| vec![listed(&list, source_frame, frames)])
+                }
+            };
+            match made {
+                Some(parts) => {
+                    any = true;
+                    video.extend(parts);
+                }
+                // No list (the runtime folder can't be written): black.
+                None => video.push(render::VideoPiece::Black { frames }),
+            }
+        }
+        plan.video = video;
+        any
+    }
+
+    /// The image list for `key` in the runtime folder, written from
+    /// `files` the first time it is asked for.
+    fn image_list(&mut self, key: &str, files: impl FnOnce() -> Vec<PathBuf>) -> Option<PathBuf> {
+        let dir = self.edl_dir.join("images");
+        let path = dir.join(format!("{:016x}.txt", paths::fnv1a(key.as_bytes())));
+        if !path.exists() {
+            let text: String = files()
+                .iter()
+                .map(|f| format!("{}\n", f.display()))
+                .collect();
+            let tmp = path.with_extension("tmp");
+            let written = std::fs::create_dir_all(&dir)
+                .and_then(|()| std::fs::write(&tmp, text))
+                .and_then(|()| std::fs::rename(&tmp, &path));
+            if let Err(e) = written {
+                self.notice(format!("preview of images: {e}"), true);
+                return None;
+            }
+        }
+        Some(path)
     }
 
     /// Reloads the timeline soon: at once if the last reload was a while

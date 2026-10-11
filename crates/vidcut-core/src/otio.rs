@@ -140,6 +140,41 @@ pub fn export(p: &Project, name: &str, span: Option<(i64, i64)>) -> Result<Value
     if b <= a {
         return Err(Error::invalid("nothing to export: the range is empty"));
     }
+    // A file, an image sequence (OTIO's own reference for one), or a still,
+    // which has no range of its own: its clips make it as long as they are.
+    let reference = |m: &crate::model::Media| match (&m.sequence, &m.info.video) {
+        (Some(s), Some(v)) => {
+            let (prefix, padding, suffix) = s.parts();
+            let dir = m.path.parent().unwrap_or(std::path::Path::new("/"));
+            json!({
+                "OTIO_SCHEMA": "ImageSequenceReference.1",
+                "name": m.name,
+                "target_url_base": format!("{}/", file_url(dir).trim_end_matches('/')),
+                "name_prefix": prefix,
+                "name_suffix": suffix,
+                "start_frame": s.first,
+                "frame_step": 1,
+                "rate": v.fps.as_f64(),
+                "frame_zero_padding": padding,
+                "missing_frame_policy": "error",
+                "available_range": range(0, p.media_frames(m), rate),
+                "available_image_bounds": null,
+                "metadata": {},
+            })
+        }
+        _ => json!({
+            "OTIO_SCHEMA": "ExternalReference.1",
+            "name": m.name,
+            "target_url": file_url(&m.path),
+            "available_range": if m.is_still() {
+                Value::Null
+            } else {
+                range(0, p.media_frames(m), rate)
+            },
+            "available_image_bounds": null,
+            "metadata": {},
+        }),
+    };
     let item = |label: &str, media: &str, source: i64, frames: i64, enabled, meta: Value| {
         let m = p
             .media(media)
@@ -148,16 +183,7 @@ pub fn export(p: &Project, name: &str, span: Option<(i64, i64)>) -> Result<Value
             "OTIO_SCHEMA": "Clip.2",
             "name": label,
             "source_range": range(source, frames, rate),
-            "media_references": {
-                "DEFAULT_MEDIA": {
-                    "OTIO_SCHEMA": "ExternalReference.1",
-                    "name": m.name,
-                    "target_url": file_url(&m.path),
-                    "available_range": range(0, p.media_frames(m), rate),
-                    "available_image_bounds": null,
-                    "metadata": {},
-                }
-            },
+            "media_references": { "DEFAULT_MEDIA": reference(m) },
             "active_media_reference_key": "DEFAULT_MEDIA",
             "effects": [],
             "markers": [],
@@ -309,6 +335,8 @@ pub struct ImportedClip {
     pub stream: u32,
     pub gain_db: f64,
     pub muted: bool,
+    /// For an image sequence (`path` is its first file), its frame rate.
+    pub sequence: Option<Rational>,
 }
 
 impl ImportedClip {
@@ -469,30 +497,54 @@ fn item_len(item: &Value, fps: Rational) -> i64 {
 }
 
 /// A clip's media path and source start, in frames from the media's first
-/// frame. Source ranges count from the available range's start, which
-/// Resolve sets to the media's timecode.
-fn clip_source(item: &Value, fps: Rational) -> Result<(PathBuf, i64)> {
+/// frame, and for an image sequence (the path its first file) its rate.
+/// Source ranges count from the available range's start, which Resolve
+/// sets to the media's timecode.
+fn clip_source(item: &Value, fps: Rational) -> Result<(PathBuf, i64, Option<Rational>)> {
     let reference = media_reference(item);
     let name = item["name"].as_str().unwrap_or("");
-    if !schema(reference).starts_with("ExternalReference") {
-        return Err(Error::media(format!(
-            "clip {name:?} has no media file ({})",
-            match schema(reference) {
-                "" => "no reference",
-                s => s,
+    let (path, sequence) = match schema(reference) {
+        s if s.starts_with("ExternalReference") => {
+            let url = reference["target_url"].as_str().unwrap_or("");
+            let path = url_path(url).ok_or_else(|| {
+                Error::media(format!("clip {name:?}: unsupported media URL {url:?}"))
+            })?;
+            (path, None)
+        }
+        s if s.starts_with("ImageSequenceReference") => {
+            let base = reference["target_url_base"].as_str().unwrap_or("");
+            let dir = url_path(base).ok_or_else(|| {
+                Error::media(format!("clip {name:?}: unsupported media URL {base:?}"))
+            })?;
+            if reference["frame_step"].as_i64().unwrap_or(1) != 1 {
+                return Err(Error::media(format!(
+                    "clip {name:?}: an image sequence that skips frames"
+                )));
             }
-        )));
-    }
-    let url = reference["target_url"].as_str().unwrap_or("");
-    let path = url_path(url)
-        .ok_or_else(|| Error::media(format!("clip {name:?}: unsupported media URL {url:?}")))?;
+            let first = reference["start_frame"].as_u64().unwrap_or(1);
+            let width = reference["frame_zero_padding"].as_u64().unwrap_or(0) as usize;
+            let file = format!(
+                "{}{first:0width$}{}",
+                reference["name_prefix"].as_str().unwrap_or(""),
+                reference["name_suffix"].as_str().unwrap_or("")
+            );
+            let rate = rational(reference["rate"].as_f64().unwrap_or(fps.as_f64()))?;
+            (dir.join(file), Some(rate))
+        }
+        s => {
+            return Err(Error::media(format!(
+                "clip {name:?} has no media file ({})",
+                if s.is_empty() { "no reference" } else { s }
+            )));
+        }
+    };
     let available = time(&reference["available_range"]["start_time"]);
     let start = match time(&item["source_range"]["start_time"]) {
         Some((v, r)) => frames(v, r, fps),
         None => available.map_or(0, |(v, r)| frames(v, r, fps)),
     };
     let base = available.map_or(0, |(v, r)| frames(v, r, fps));
-    Ok((path, start - base))
+    Ok((path, start - base, sequence))
 }
 
 /// A track's items that take time, as `(start, length, item)`. Transitions
@@ -582,9 +634,10 @@ pub fn import(doc: &Value) -> Result<Imported> {
                 continue;
             }
             match clip_source(item, fps) {
-                Ok((path, source_in)) => {
+                Ok((path, source_in, sequence)) => {
                     let meta = &item["metadata"][VIDCUT];
                     clips.push(ImportedClip {
+                        sequence,
                         track: id.clone(),
                         path,
                         name: item["name"].as_str().unwrap_or("").to_string(),
@@ -615,7 +668,7 @@ pub fn import(doc: &Value) -> Result<Imported> {
             if !is_clip(item) || len <= 0 {
                 continue;
             }
-            let (path, source_in) = match clip_source(item, fps) {
+            let (path, source_in, sequence) = match clip_source(item, fps) {
                 Ok(s) => s,
                 Err(e) => {
                     warnings.push(format!("{}; left as a gap", e.message));
@@ -658,6 +711,7 @@ pub fn import(doc: &Value) -> Result<Imported> {
                     .clone(),
             };
             clips.push(ImportedClip {
+                sequence,
                 track,
                 path,
                 name: item["name"].as_str().unwrap_or("").to_string(),

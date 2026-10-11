@@ -7,7 +7,8 @@ fn main() {
     let out = std::path::PathBuf::from(args.next().expect("OUTDIR"));
     let count = args.next().map_or(24, |c| c.parse().expect("COUNT"));
     let started = std::time::Instant::now();
-    let (images, times) = vidcut_av::thumbs::filmstrip(&file, count, 192, 108).unwrap();
+    let input = vidcut_av::decode::Input::File(file.clone());
+    let (images, times) = vidcut_av::thumbs::filmstrip(&input, count, 192, 108).unwrap();
     println!(
         "{} pictures ({}x{}) in {:.0} ms",
         images.len(),
