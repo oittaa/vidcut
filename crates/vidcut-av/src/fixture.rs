@@ -12,7 +12,7 @@ use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, codec, encoder, format, frame};
 
 /// Part of every fixture file name; bump to invalidate cached fixtures.
-pub const GENERATOR_VERSION: u32 = 4;
+pub const GENERATOR_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Container {
@@ -352,12 +352,25 @@ impl FixtureSpec {
 
 /// Returns the path of the fixture for `spec`, generating it first if needed.
 pub fn ensure(spec: &FixtureSpec) -> Result<PathBuf> {
-    let dir = crate::testdata::fixtures_dir()?;
+    ensure_in(&crate::testdata::fixtures_dir()?, spec)
+}
+
+/// Like [`ensure`], caching in `dir`.
+pub fn ensure_in(dir: &Path, spec: &FixtureSpec) -> Result<PathBuf> {
+    std::fs::create_dir_all(dir)?;
     let path = dir.join(spec.file_name());
     if !path.exists() {
         // Generate under a temporary name so an interrupted run never leaves a
         // truncated fixture that later runs would trust.
-        let tmp = dir.join(format!(".{}.{}.part", spec.file_name(), std::process::id()));
+        // Unique per thread: tests generate fixtures concurrently within one
+        // process, and two writers sharing a temp file corrupt it.
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = dir.join(format!(
+            ".{}.{}.{n}.part",
+            spec.file_name(),
+            std::process::id()
+        ));
         let result = generate(spec, &tmp);
         if result.is_err() {
             let _ = std::fs::remove_file(&tmp);
@@ -492,7 +505,7 @@ impl VideoTrack {
                 opts.set(
                     "x265-params",
                     &format!(
-                        "log-level=error:scenecut=0:keyint={g}:min-keyint={g}:bframes={b}",
+                        "log-level=error:scenecut=0:open-gop=0:keyint={g}:min-keyint={g}:bframes={b}",
                         g = spec.gop,
                         b = spec.bframes
                     ),

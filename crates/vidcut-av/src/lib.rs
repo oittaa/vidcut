@@ -6,6 +6,8 @@ pub mod barcode;
 pub mod beep;
 pub mod decode;
 pub mod error;
+pub mod export;
+pub mod filler;
 pub mod fixture;
 pub mod probe;
 pub mod remux;
@@ -13,8 +15,10 @@ pub mod testdata;
 
 pub use error::{Error, Result};
 
-/// Initializes FFmpeg once per process. Library log output is limited to errors
-/// unless `VIDCUT_AV_LOG` is set to an FFmpeg level name (e.g. `debug`).
+/// Initializes FFmpeg once per process. FFmpeg's own log output is limited to
+/// fatal messages: decoders recovering after a seek log harmless errors, and
+/// real failures surface as vidcut errors anyway. Set `VIDCUT_AV_LOG` to an
+/// FFmpeg level name (`error`, `warning`, `debug`, ...) to see more.
 pub fn init() {
     static INIT: std::sync::Once = std::sync::Once::new();
     INIT.call_once(|| {
@@ -22,12 +26,13 @@ pub fn init() {
         use ffmpeg::util::log::Level;
         let level = match std::env::var("VIDCUT_AV_LOG").as_deref() {
             Ok("quiet") => Level::Quiet,
+            Ok("error") => Level::Error,
             Ok("warning") => Level::Warning,
             Ok("info") => Level::Info,
             Ok("verbose") => Level::Verbose,
             Ok("debug") => Level::Debug,
             Ok("trace") => Level::Trace,
-            _ => Level::Error,
+            _ => Level::Fatal,
         };
         ffmpeg::util::log::set_level(level);
     });

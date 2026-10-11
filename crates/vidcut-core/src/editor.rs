@@ -789,7 +789,14 @@ pub fn query(
             "undo": history.undo.iter().rev().map(|e| &e.label).collect::<Vec<_>>(),
             "redo": history.redo.iter().rev().map(|e| &e.label).collect::<Vec<_>>(),
         }),
-        Request::Schema { .. } | Request::Doctor {} => {
+        Request::Schema { .. }
+        | Request::Doctor {}
+        | Request::ExportPlan(_)
+        | Request::ExportStart(_)
+        | Request::FrameRender { .. }
+        | Request::PresetsList {}
+        | Request::PresetsGet { .. }
+        | Request::EncodersList { .. } => {
             return Err(Error::internal(format!(
                 "{} is answered by the session, not the editor",
                 request.method()

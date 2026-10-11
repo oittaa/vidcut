@@ -84,6 +84,59 @@ pub enum Command {
     /// Timeline markers.
     #[command(subcommand)]
     Markers(MarkersCmd),
+    /// Export the timeline (In–Out if both marks are set, else all of it).
+    /// With --dry-run, print the plan instead.
+    #[command(
+        after_help = "Examples:\n  vidcut export out.mp4\n  vidcut export out.mp4 --preset youtube-1080p --encoder nvenc\n  vidcut export cut.mov --range 1m..2m --set video.quality=14\n  vidcut export clips/ --per-clip --preset prores-422hq\n  vidcut export voice.wav --audio-only"
+    )]
+    Export {
+        /// Output file (a directory with --per-clip). The extension picks the container.
+        output: PathBuf,
+        /// Preset (see `vidcut presets`). Default: from the output extension.
+        #[arg(long)]
+        preset: Option<String>,
+        /// Override a setting, e.g. video.quality=20 (repeatable).
+        #[arg(long = "set", value_name = "KEY=VALUE")]
+        set: Vec<String>,
+        /// Timeline range (default: In–Out if both are set, else everything).
+        #[arg(long, allow_hyphen_values = true)]
+        range: Option<String>,
+        /// One file per clip, into the output directory.
+        #[arg(long)]
+        per_clip: bool,
+        /// Leave the video out.
+        #[arg(long)]
+        audio_only: bool,
+        /// auto, cpu, nvenc or vaapi.
+        #[arg(long)]
+        encoder: Option<String>,
+        /// Per-clip file name template: {index}, {index:03}, {name}, {clip}, {media}.
+        #[arg(long)]
+        name: Option<String>,
+        /// Replace existing files.
+        #[arg(long)]
+        overwrite: bool,
+    },
+    /// Render one frame as PNG (the timeline, or a media item with --media).
+    Frame {
+        #[arg(long, allow_hyphen_values = true)]
+        at: String,
+        #[arg(short, long)]
+        out: PathBuf,
+        #[arg(long)]
+        media: Option<String>,
+        /// Width in pixels; height follows the aspect.
+        #[arg(long)]
+        width: Option<u32>,
+    },
+    /// List export presets, or show one.
+    Presets { name: Option<String> },
+    /// Which GPU encoders work here (cached).
+    Encoders {
+        /// Test again instead of using the cache.
+        #[arg(long)]
+        refresh: bool,
+    },
     /// Undo the last change(s).
     Undo {
         #[arg(default_value_t = 1)]
@@ -685,6 +738,39 @@ impl Cli {
                     )));
                 }
             },
+            Command::Export {
+                output,
+                preset,
+                set,
+                range,
+                per_clip,
+                audio_only,
+                encoder,
+                name,
+                overwrite,
+            } => req(
+                if self.dry_run {
+                    "export.plan"
+                } else {
+                    "export.start"
+                },
+                json!({ "output": output, "preset": preset, "set": set, "range": range, "per_clip": per_clip,
+                        "audio_only": audio_only, "encoder": encoder, "name": name, "overwrite": overwrite }),
+            )?,
+            Command::Frame {
+                at,
+                out,
+                media,
+                width,
+            } => req(
+                "frame.render",
+                json!({ "at": time(at), "out": out, "media": media, "width": width }),
+            )?,
+            Command::Presets { name } => match name {
+                Some(n) => req("presets.get", json!({ "name": n }))?,
+                None => req("presets.list", json!({}))?,
+            },
+            Command::Encoders { refresh } => req("encoders.list", json!({ "refresh": refresh }))?,
             Command::Undo { steps } => req("history.undo", json!({ "steps": steps }))?,
             Command::Redo { steps } => req("history.redo", json!({ "steps": steps }))?,
             Command::History => req("history.get", json!({}))?,

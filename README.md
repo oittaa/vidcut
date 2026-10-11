@@ -6,7 +6,8 @@ A simple, fully scriptable video cutting tool for Linux, modeled on DaVinci Reso
 > - Done:
 >   - **M0:** spikes proved frame-exact decoding and mpv preview.
 >   - **M1:** the project model, Cut-page edit operations and the headless CLI. Timelines can be built and edited from the command line.
-> - Not yet: export and the GUI. See the milestones below.
+>   - **M2:** frame-exact export with presets, GPU encoding, ranges, per-clip and audio-only output.
+> - Not yet: the GUI. See the milestones below.
 
 ## What it will do
 
@@ -49,6 +50,9 @@ vidcut -p talk.vidcut edit split --at 1m
 vidcut -p talk.vidcut edit delete V1@1m10s       # ripple delete the clip under 1m10s
 vidcut -p talk.vidcut timeline
 vidcut -p talk.vidcut undo
+vidcut -p talk.vidcut export talk.mp4 --preset youtube-1080p   # GPU-encoded when available
+vidcut -p talk.vidcut export talk.flac                          # audio only
+vidcut -p talk.vidcut frame --at 1m -o check.png                # look at a frame
 ```
 
 Every command takes `--json` for machine-readable output. `vidcut schema` lists the full protocol.

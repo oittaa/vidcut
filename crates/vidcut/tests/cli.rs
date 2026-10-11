@@ -335,3 +335,130 @@ fn concurrent_cli_runs_never_corrupt_the_project() {
     }
     assert_eq!(sb.ok(&["info"])["rev"], 17);
 }
+
+/// Barcodes of every frame of a video file.
+fn barcodes(path: &Path) -> Vec<Option<u32>> {
+    let mut r = vidcut_av::decode::VideoReader::open(path).unwrap();
+    let mut out = Vec::new();
+    while let Some(f) = r.next_frame().unwrap() {
+        out.push(vidcut_av::decode::read_barcode(&f).unwrap());
+    }
+    out
+}
+
+#[test]
+fn exports_frames_ranges_clips_and_audio() {
+    let sb = Sandbox::new("export");
+    let a = fixture(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (30, 1),
+        90,
+    ));
+    let b = fixture(FixtureSpec::new(
+        VideoCodec::Hevc10,
+        Container::Mkv,
+        320,
+        180,
+        (30, 1),
+        90,
+    ));
+    sb.cmd(&["new"]).arg(sb.project()).output().unwrap();
+    sb.ok(&["media", "add", s(&a), s(&b)]);
+    sb.ok(&["edit", "append", "m1", "--range", "10f..40f"]);
+    sb.ok(&["edit", "append", "m2", "--range", "50f..80f"]);
+    let out = sb.dir.join("out.mkv");
+    let o = s(&out);
+
+    // Dry run: a plan, no file.
+    let plan = sb.ok(&[
+        "--dry-run",
+        "export",
+        o,
+        "--set",
+        "video.quality=0",
+        "--encoder",
+        "cpu",
+    ]);
+    assert_eq!(plan["result"]["outputs"][0]["frames"], 60);
+    assert!(!out.exists());
+
+    // Whole timeline, frame-exact.
+    let r = sb.ok(&[
+        "export",
+        o,
+        "--set",
+        "video.quality=0",
+        "--set",
+        "video.speed=ultrafast",
+        "--encoder",
+        "cpu",
+    ]);
+    assert_eq!(r["result"]["outputs"][0]["frames"], 60);
+    let want: Vec<Option<u32>> = (10..40).chain(50..80).map(Some).collect();
+    assert_eq!(barcodes(&out), want);
+
+    // Existing outputs need --overwrite; marks set the range (Quick Export).
+    sb.fails(4, &["export", o]);
+    sb.ok(&["marks", "set", "--in", "25f", "--out", "35f"]);
+    sb.ok(&[
+        "export",
+        o,
+        "--overwrite",
+        "--set",
+        "video.quality=0",
+        "--encoder",
+        "cpu",
+    ]);
+    // Frames 25..35 straddle the cut at 30: c1's source 35..40, then c2's 50..55.
+    assert_eq!(
+        barcodes(&out),
+        (35..40).chain(50..55).map(Some).collect::<Vec<_>>()
+    );
+    sb.ok(&["marks", "clear"]);
+
+    // Per clip, with a name template.
+    let dir = sb.dir.join("clips");
+    let r = sb.ok(&[
+        "export",
+        s(&dir),
+        "--per-clip",
+        "--preset",
+        "prores-422hq",
+        "--name",
+        "{index:02}-{clip}",
+    ]);
+    assert_eq!(r["result"]["outputs"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        barcodes(&dir.join("02-c2.mov")),
+        (50..80).map(Some).collect::<Vec<_>>()
+    );
+
+    // Audio only, container from the extension.
+    let wav = sb.dir.join("a.wav");
+    sb.ok(&["export", s(&wav)]);
+    let info = vidcut_av::probe::probe(&wav).unwrap();
+    assert!(info.video.is_none());
+    assert_eq!(info.audio[0].sample_rate, 48_000);
+
+    // A still frame of the timeline and of a media item.
+    let png = sb.dir.join("f.png");
+    sb.ok(&["frame", "--at", "35f", "-o", s(&png)]);
+    assert_eq!(barcodes(&png), vec![Some(55)]);
+    sb.ok(&["frame", "--media", "m1", "--at", "1s", "-o", s(&png)]);
+    assert_eq!(barcodes(&png), vec![Some(30)]);
+
+    // Unknown presets and impossible settings fail cleanly.
+    sb.fails(3, &["export", s(&sb.dir.join("x.mp4")), "--preset", "nope"]);
+    sb.fails(
+        2,
+        &[
+            "export",
+            s(&sb.dir.join("x.mp4")),
+            "--preset",
+            "prores-422hq",
+        ],
+    );
+}

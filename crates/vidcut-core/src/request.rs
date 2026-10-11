@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::export::{EncoderChoice, ExportSettings};
 use crate::ops::{Edge, MoveMode};
 use crate::time::{RangeSpec, Rational, TimeSpec};
 
@@ -231,6 +232,38 @@ pub enum Request {
     #[serde(rename = "markers.remove")]
     MarkersRemove { marker: String },
 
+    // ---------------------------------------------------------------- export (spec §10)
+    /// Plan an export without encoding: settings, encoder, outputs, segments.
+    #[serde(rename = "export.plan")]
+    ExportPlan(ExportParams),
+    /// Export. Quick Export semantics: the timeline In–Out range when both
+    /// marks are set, otherwise the whole timeline (p. 789).
+    #[serde(rename = "export.start")]
+    ExportStart(ExportParams),
+    /// Render one frame as PNG: the timeline at `at`, or with `media` that
+    /// media's frame at `at` (source time).
+    #[serde(rename = "frame.render")]
+    FrameRender {
+        at: TimeSpec,
+        out: PathBuf,
+        #[serde(default)]
+        media: Option<String>,
+        /// Output width; height follows the picture's aspect. Default: full size.
+        #[serde(default)]
+        width: Option<u32>,
+    },
+    /// Built-in and user export presets.
+    #[serde(rename = "presets.list")]
+    PresetsList {},
+    #[serde(rename = "presets.get")]
+    PresetsGet { name: String },
+    /// Which GPU encoders work here (cached; `refresh` re-tests).
+    #[serde(rename = "encoders.list")]
+    EncodersList {
+        #[serde(default)]
+        refresh: bool,
+    },
+
     // ---------------------------------------------------------------- history and batches
     #[serde(rename = "history.undo")]
     HistoryUndo {
@@ -263,6 +296,41 @@ pub enum Request {
     /// Report dependencies (FFmpeg, libmpv, GPUs).
     #[serde(rename = "doctor")]
     Doctor {},
+}
+
+/// What to export and how.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ExportParams {
+    /// Output file; for `per_clip`, a directory.
+    pub output: PathBuf,
+    /// Preset name (see `presets.list`). Default: from the output extension
+    /// (`h264-master` settings for video, the matching `audio-*` preset for audio).
+    #[serde(default)]
+    pub preset: Option<String>,
+    /// Full settings instead of a preset.
+    #[serde(default)]
+    pub settings: Option<ExportSettings>,
+    /// Overrides like `video.quality=20` or `audio.bitrate=192000`.
+    #[serde(default)]
+    pub set: Vec<String>,
+    /// Timeline range. Default: In–Out if both marks are set, else everything.
+    #[serde(default)]
+    pub range: Option<RangeSpec>,
+    /// One file per clip (in the range) instead of one file.
+    #[serde(default)]
+    pub per_clip: bool,
+    /// Leave the video out.
+    #[serde(default)]
+    pub audio_only: bool,
+    /// Shortcut for `video.encoder`.
+    #[serde(default)]
+    pub encoder: Option<EncoderChoice>,
+    /// Per-clip file name template: `{index}`, `{index:03}`, `{name}`, `{clip}`, `{media}`.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Replace existing output files.
+    #[serde(default)]
+    pub overwrite: bool,
 }
 
 fn insert_mode() -> MoveMode {
@@ -405,6 +473,12 @@ impl Request {
                 | Self::HistoryGet {}
                 | Self::Schema { .. }
                 | Self::Doctor {}
+                | Self::ExportPlan(_)
+                | Self::ExportStart(_)
+                | Self::FrameRender { .. }
+                | Self::PresetsList {}
+                | Self::PresetsGet { .. }
+                | Self::EncodersList { .. }
         )
     }
 }

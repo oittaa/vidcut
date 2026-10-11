@@ -51,6 +51,89 @@ pub fn print(method: &str, r: &Response, json: bool) {
         return;
     }
     match method {
+        "export.start" => {
+            for o in r.result["outputs"].as_array().into_iter().flatten() {
+                let enc: Vec<&str> = [&o["video_encoder"], &o["audio_encoder"]]
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .collect();
+                println!(
+                    "exported {} ({} frames) with {} in {:.1} s",
+                    o["output"].as_str().unwrap_or_default(),
+                    o["frames"],
+                    enc.join(" + "),
+                    o["seconds"].as_f64().unwrap_or(0.0)
+                );
+            }
+        }
+        "export.plan" => {
+            let s = &r.result["settings"];
+            println!(
+                "preset {}  container {}  video {}  audio {}",
+                r.result["preset"].as_str().unwrap_or("custom"),
+                s["container"].as_str().unwrap_or_default(),
+                match &r.result["video_encoder"] {
+                    Value::Null => "none".to_string(),
+                    v if v.get("error").is_some() =>
+                        format!("unavailable: {}", v["error"].as_str().unwrap_or_default()),
+                    v => format!(
+                        "{} ({})",
+                        v["name"].as_str().unwrap_or_default(),
+                        v["pixel"].as_str().unwrap_or_default()
+                    ),
+                },
+                s["audio"]["codec"].as_str().unwrap_or("none")
+            );
+            for o in r.result["outputs"].as_array().into_iter().flatten() {
+                println!(
+                    "  {}  frames {}..{} ({} frames, {} video pieces, {} audio lanes)",
+                    o["path"].as_str().unwrap_or_default(),
+                    o["range"][0],
+                    o["range"][1],
+                    o["frames"],
+                    o["video_pieces"],
+                    o["audio_lanes"]
+                );
+            }
+        }
+        "frame.render" => println!(
+            "wrote {} (frame {}, {}x{})",
+            r.result["path"].as_str().unwrap_or_default(),
+            r.result["frame"],
+            r.result["width"],
+            r.result["height"]
+        ),
+        "presets.list" => {
+            for p in r.result.as_array().into_iter().flatten() {
+                println!(
+                    "{:<14} {:<4} {:<16} {}{}",
+                    p["name"].as_str().unwrap_or_default(),
+                    p["container"].as_str().unwrap_or_default(),
+                    p["title"].as_str().unwrap_or_default(),
+                    p["description"].as_str().unwrap_or_default(),
+                    if p["quick_export"] == true {
+                        "  [Quick Export]"
+                    } else {
+                        ""
+                    }
+                );
+            }
+        }
+        "encoders.list" => {
+            for e in r.result["encoders"].as_array().into_iter().flatten() {
+                println!(
+                    "{:<11} {:<8} {:<20} {}",
+                    e["encoder"].as_str().unwrap_or_default(),
+                    e["pixel"].as_str().unwrap_or_default(),
+                    e["device"].as_str().unwrap_or("-"),
+                    if e["ok"] == true {
+                        "ok".to_string()
+                    } else {
+                        format!("no ({})", e["error"].as_str().unwrap_or_default())
+                    }
+                );
+            }
+        }
         "timeline.get" => timeline(&r.result),
         "media.list" => media_list(&r.result),
         "project.summary" => summary(&r.result),

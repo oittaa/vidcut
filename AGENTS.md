@@ -73,7 +73,7 @@ These are mandatory.
 |---|---|---|
 | Before **every commit** (enforced by `.githooks/pre-commit`) | `scripts/check.sh` | `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, unit tests (`--lib --bins`) |
 | After a **bigger change**, and before a milestone is called done | `scripts/check.sh full` | the above plus all integration/e2e tests and doc tests |
-| Also, when encoders, hwdec or real-media paths change | `scripts/check.sh full --features gpu-tests,media-tests` | GPU encode tests and tests on downloaded clips |
+| Also, when encoders, hwdec or real-media paths change | `scripts/check.sh full --features vidcut-av/gpu-tests` | GPU encode tests (NVENC/VAAPI) |
 
 **Enable the hook once per clone:** `git config core.hooksPath .githooks`.
 
@@ -104,7 +104,7 @@ These are mandatory.
 
 ## Driving vidcut as an agent
 
-*Status: the headless CLI works (M1). Live control of a running GUI arrives in M3, MCP in M7.*
+*Status: the headless CLI edits (M1) and exports (M2). Live control of a running GUI arrives in M3, MCP in M7.*
 
 **Discovering commands:**
 - Every CLI subcommand is one JSON-RPC method on one `Request`.
@@ -157,9 +157,17 @@ vidcut undo                                 # works across separate runs
 
 **Raw requests:** `vidcut rpc edit.split '{"at": ["1m", 2700]}'` sends one exactly as written.
 
-**Still to come:**
-- `frame` to render a still: M2.
-- Live GUI control (`seek`, `screenshot`, auto-routing): M3.
+**Export and stills:**
+- `vidcut export out.mp4` renders the timeline: its In–Out range when both marks are set, else everything.
+  - The extension picks the container, and also the preset unless `--preset` is given.
+  - Extra options: `--preset youtube-1080p`, `--encoder nvenc|vaapi|cpu|auto`, `--set video.quality=20`, `--range 1m..2m`, `--per-clip`, `--audio-only`, `--overwrite`.
+  - With `--dry-run` it prints the plan and the chosen encoder without encoding.
+  - Ctrl-C cancels cleanly (exit 9, no partial file).
+- `vidcut presets` lists the presets; `vidcut presets NAME` shows one's settings.
+- `vidcut encoders` shows which GPU encoders work here (cached; `--refresh` re-tests).
+- `vidcut frame --at 1m -o f.png [--width 640]` renders what the timeline shows at a frame. `--media m1` renders a media frame instead. Use it to look at cuts.
+
+**Still to come:** live GUI control (`seek`, `screenshot`, auto-routing) in M3.
 
 ## Tools
 
@@ -169,13 +177,17 @@ vidcut undo                                 # works across separate runs
 cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 60 600
 ```
 
+**GPU encoders:** `cargo run -p vidcut-av --example encoders` test-encodes every NVENC/VAAPI option, uncached.
+
+**FFmpeg logging:** quiet by default (fatal only). Set `VIDCUT_AV_LOG=error` (or `warning`, `debug`) to see FFmpeg's messages when debugging media problems.
+
 **Preview spikes:**
 - `cargo test -p vidcut-mpv --test edl_spike -- --nocapture` runs the mpv EDL/seek semantics experiments headless.
 - `cargo run -p vidcut --example mpv_gl_spike -- FILE [FILE2] --auto-exit 8` opens a window with mpv embedded in egui and prints hwdec and drop statistics.
 
 ## Gotchas
 
-The preview findings and the time-mapping rules are in [docs/decisions/preview.md](docs/decisions/preview.md). Read it before touching preview, seeking or time conversion.
+The preview findings and the time-mapping rules are in [docs/decisions/preview.md](docs/decisions/preview.md); the export engine, sampling rule and encoder decisions are in [docs/decisions/export.md](docs/decisions/export.md). Read them before touching preview, seeking, time conversion or export.
 
 - **libmpv needs `LC_NUMERIC=C`.** `Mpv::new` calls `setlocale` before `mpv_create`.
 - **mpv's render thread (the GUI's UI thread) may only call render-thread-safe client functions:**
@@ -190,6 +202,8 @@ The preview findings and the time-mapping rules are in [docs/decisions/preview.m
 - **MPEG-TS and other index-less containers can't be seeked exactly by mpv.** Preview uses an MKV remux (`vidcut_av::remux`); export reads the original.
 - **ffmpeg-next's `Packet::write_interleaved` refuses empty packets.** Encoders such as FLAC emit a final empty packet carrying side data; use `av_interleaved_write_frame` directly.
 - **Set packet durations explicitly when muxing** from delayed encoders (x264 with B-frames). Otherwise MP4 edit lists drop the last frame.
+- **Set `pkt_timebase` on every decoder** (`codec_ctx.pkt_timebase = stream.time_base`). Without it, FFmpeg can't adjust timestamps when it skips priming samples, and audio drifts by the codec delay.
+- **Not handled in export yet:** rotation metadata, interlaced sources, HDR (see docs/decisions/export.md §4).
 - **GPUs on the dev machine:**
   - NVIDIA on `renderD128`: NVENC works, VAAPI doesn't.
   - AMD on `renderD129`: VAAPI H.264/HEVC.

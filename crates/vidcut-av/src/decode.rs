@@ -51,6 +51,9 @@ impl VideoReader {
         let start_pts = Some(stream.start_time()).filter(|&t| t != ffmpeg::ffi::AV_NOPTS_VALUE);
         let mut ctx = codec::context::Context::from_parameters(stream.parameters())
             .ctx(|| "creating video decoder context".into())?;
+        // The packet time base lets the decoder keep timestamps right when it
+        // drops samples or frames (FFmpeg's CLI sets it too).
+        unsafe { (*ctx.as_mut_ptr()).pkt_timebase = time_base.into() };
         ctx.set_threading(codec::threading::Config {
             kind: codec::threading::Type::Frame,
             count: 0, // let FFmpeg choose
@@ -59,6 +62,7 @@ impl VideoReader {
             .decoder()
             .video()
             .ctx(|| "opening video decoder".into())?;
+        crate::export::audio::discard_others(&input, index);
         Ok(Self {
             path: path.to_path_buf(),
             input,
