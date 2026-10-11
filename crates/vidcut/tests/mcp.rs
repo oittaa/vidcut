@@ -367,6 +367,56 @@ fn an_agent_cuts_silence_over_mcp_live_in_the_gui() {
     agent.ok("history_undo", json!({}));
     let tl = call(&h, "timeline.get", json!({})).result;
     assert_eq!(tl["duration"], 300);
+
+    // Cancelling a call that runs in the GUI stops it there, and the
+    // cancelled request gets no answer (MCP's cancellation). A slow export:
+    // 4K with x264's slowest preset.
+    let slow = dir.join("slow.mp4");
+    let id = agent.next;
+    agent.next += 1;
+    agent.send(&json!({
+        "jsonrpc": "2.0", "id": id, "method": "tools/call",
+        "params": {
+            "name": "export_start",
+            "arguments": {
+                "output": slow,
+                "set": ["video.width=3840", "video.height=2160", "video.speed=veryslow",
+                        "video.encoder=cpu"],
+            },
+            "_meta": { "progressToken": "slow" },
+        },
+    }));
+    loop {
+        let v = agent
+            .lines
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the slow export reports progress");
+        assert_ne!(v["id"], json!(id), "finished before the cancel: {v}");
+        if v["params"]["progressToken"] == "slow" {
+            break;
+        }
+    }
+    agent.send(&json!({
+        "jsonrpc": "2.0", "method": "notifications/cancelled",
+        "params": { "requestId": id, "reason": "test" },
+    }));
+    let started = std::time::Instant::now();
+    loop {
+        let jobs = call(&h, "jobs.list", json!({})).result;
+        let state = jobs.as_array().unwrap().last().unwrap()["state"].clone();
+        if state == "cancelled" {
+            break;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(15),
+            "the GUI's export goes on: {jobs:#}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(!slow.exists(), "no output left");
+    while let Ok(v) = agent.lines.recv_timeout(Duration::from_millis(500)) {
+        assert_ne!(v["id"], json!(id), "an answer to a cancelled call: {v}");
+    }
     agent.finish();
 
     h.shutdown();

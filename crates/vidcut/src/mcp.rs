@@ -153,12 +153,17 @@ pub fn serve(project: Option<PathBuf>, options: RouteOptions) -> Result<()> {
             "tools/call" => {
                 let (out, state) = (out.clone(), state.clone());
                 let params = message["params"].clone();
+                // Registered before the call starts, so a cancel that follows
+                // at once finds it.
+                let cancel = Arc::new(AtomicBool::new(false));
+                state.lock_running().insert(id.to_string(), cancel.clone());
                 calls.push(std::thread::spawn(move || {
-                    let cancel = Arc::new(AtomicBool::new(false));
-                    state.lock_running().insert(id.to_string(), cancel.clone());
                     let result = state.call(&params, &cancel, &out);
                     state.lock_running().remove(&id.to_string());
-                    out.result(&id, result);
+                    // A cancelled request gets no response (MCP: cancellation).
+                    if !cancel.load(Ordering::Relaxed) {
+                        out.result(&id, result);
+                    }
                 }));
                 calls.retain(|c| !c.is_finished());
             }

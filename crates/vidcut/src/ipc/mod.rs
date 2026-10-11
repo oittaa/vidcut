@@ -46,8 +46,9 @@ pub struct RouteOptions {
 
 /// Runs `envelope` where [`route`] says: in the GUI that has `project` open,
 /// or headless. `progress` gets export progress as
-/// `{"output", "outputs", "path", "frames", "total", "elapsed"}`; `cancel`
-/// stops a headless export (a GUI's stops when the connection closes).
+/// `{"output", "outputs", "path", "frames", "total", "elapsed"}`. `cancel`
+/// stops a headless export; for a GUI it closes the connection, which ends
+/// the wait and stops a foreground export there.
 pub fn run(
     project: Option<&Path>,
     options: &RouteOptions,
@@ -72,7 +73,13 @@ pub fn run(
         ),
         Route::Instance(instance) => {
             let project = project.and_then(|p| p.canonicalize().ok());
-            client::call(&instance.socket, &envelope, project.as_deref(), progress)
+            client::call(
+                &instance.socket,
+                &envelope,
+                project.as_deref(),
+                progress,
+                Some(cancel),
+            )
         }
     }
 }
@@ -269,18 +276,23 @@ mod tests {
             Envelope::from_json(json!({"method": "export.start", "params": {"output": "/o.mp4"}}))
                 .unwrap();
         let mut seen = Vec::new();
-        let r = client::call(&socket, &export, Some(Path::new("/p.vidcut")), &mut |p| {
-            seen.push(p["frames"].as_i64().unwrap())
-        })
+        let r = client::call(
+            &socket,
+            &export,
+            Some(Path::new("/p.vidcut")),
+            &mut |p| seen.push(p["frames"].as_i64().unwrap()),
+            None,
+        )
         .unwrap();
         assert_eq!(seen, vec![0, 1, 2]);
         assert_eq!((r.rev, r.via.as_str()), (7, "gui:1"));
         assert_eq!(r.result["project"], "/p.vidcut");
         let split =
             Envelope::from_json(json!({"method": "edit.split", "params": {"at": "1s"}})).unwrap();
-        let e = client::call(&socket, &split, None, &mut |_| {}).unwrap_err();
+        let e = client::call(&socket, &split, None, &mut |_| {}, None).unwrap_err();
         assert_eq!(e, Error::invalid("nope"));
-        let gone = client::call(&dir.join("missing.sock"), &split, None, &mut |_| {}).unwrap_err();
+        let gone =
+            client::call(&dir.join("missing.sock"), &split, None, &mut |_| {}, None).unwrap_err();
         assert_eq!(gone.code, ErrorCode::NoInstance);
         let _ = std::fs::remove_dir_all(&dir);
     }
