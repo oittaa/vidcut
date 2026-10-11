@@ -89,8 +89,11 @@ impl Resampler {
             let room = ffi::swr_get_out_samples(self.swr, in_count).max(0) as usize + 32;
             let start = out.len();
             out.resize(start + room * self.channels, 0.0);
-            let dst = out[start..].as_mut_ptr() as *mut u8;
-            let n = ffi::swr_convert(self.swr, &dst, room as i32, inp, in_count);
+            // Bindgen's `swr_convert` takes `*mut *mut u8` and `*mut *const u8`
+            // on current FFmpeg headers (`*const` for the input pointer on
+            // older ones). A mut outer pointer still coerces to const.
+            let mut dst = out[start..].as_mut_ptr() as *mut u8;
+            let n = ffi::swr_convert(self.swr, &mut dst, room as i32, inp.cast_mut(), in_count);
             if n < 0 {
                 out.truncate(start);
                 return Err(Error::Ffmpeg {
