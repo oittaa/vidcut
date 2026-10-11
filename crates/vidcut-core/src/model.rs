@@ -30,9 +30,7 @@ pub struct Project {
     /// Video tracks `V1…` first, then audio tracks `A1…`.
     pub tracks: Vec<Track>,
     /// Timeline In/Out marks.
-    #[serde(default)]
     pub marks: Marks,
-    #[serde(default)]
     pub markers: Vec<Marker>,
     pub next_id: NextIds,
     /// Media Pool bins (p. 655), as `/`-separated paths below the top level
@@ -49,18 +47,11 @@ pub struct Settings {
     pub sample_rate: u32,
     pub channels: u16,
     /// Track 1 ripples on insert, delete, move and trim (the Cut page's Ripple On).
-    #[serde(default = "yes")]
     pub ripple_on: bool,
     /// Record timecode of timeline frame 0, in frames (deviation X7: 0, not 01:00:00:00).
-    #[serde(default)]
     pub start_tc: i64,
     /// Format not chosen yet: the first video media added sets fps and size.
-    #[serde(default)]
     pub auto_format: bool,
-}
-
-fn yes() -> bool {
-    true
 }
 
 impl Default for Settings {
@@ -124,7 +115,6 @@ pub struct VideoInfo {
     /// Average frame rate, snapped to a standard rate when within 0.1%.
     pub fps: Rational,
     /// Variable frame rate.
-    #[serde(default)]
     pub vfr: bool,
     /// Raw timestamp of the first frame in seconds (`o` in the time map).
     pub first_pts: f64,
@@ -161,10 +151,8 @@ pub struct Track {
     pub kind: TrackKind,
     /// Sorted by `start`, never overlapping.
     pub clips: Vec<Clip>,
-    #[serde(default)]
     pub locked: bool,
     /// Audio of this track is silent.
-    #[serde(default)]
     pub muted: bool,
     /// While any track is soloed, only soloed tracks are heard (the mixer,
     /// p. 650).
@@ -174,7 +162,6 @@ pub struct Track {
     #[serde(default, skip_serializing_if = "is_zero")]
     pub volume_db: f64,
     /// Video of this track is shown (video tracks only).
-    #[serde(default = "yes")]
     pub video_enabled: bool,
     /// A name shown in the track header and the mixer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -205,7 +192,6 @@ pub struct Clip {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio: Option<ClipAudio>,
     /// Disabled clips are kept but not shown (the Cut page's D key).
-    #[serde(default = "yes")]
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -215,15 +201,9 @@ pub struct Clip {
 /// `edit.paste` takes (paste puts clips back on their own tracks, p. 723).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TrackClip {
-    /// Default: Track 1.
-    #[serde(default = "main_track")]
     pub track: String,
     #[serde(flatten)]
     pub clip: Clip,
-}
-
-fn main_track() -> String {
-    "V1".into()
 }
 
 /// The audio part of a clip.
@@ -233,14 +213,10 @@ pub struct ClipAudio {
     pub stream: u32,
     /// Audio starts this many frames after the clip start (negative: before,
     /// i.e. a J cut).
-    #[serde(default)]
     pub head: i64,
     /// Audio ends this many frames after the clip end (positive: an L cut).
-    #[serde(default)]
     pub tail: i64,
-    #[serde(default)]
     pub gain_db: f64,
-    #[serde(default)]
     pub muted: bool,
 }
 
@@ -284,16 +260,9 @@ pub struct Marker {
     /// `k<N>`, never reused.
     pub id: String,
     pub at: i64,
-    #[serde(default)]
     pub name: String,
-    #[serde(default = "default_marker_color")]
     pub color: String,
-    #[serde(default)]
     pub note: String,
-}
-
-fn default_marker_color() -> String {
-    "blue".into()
 }
 
 /// Counters for new ids.

@@ -350,11 +350,11 @@ fn paste_puts_clips_back_on_their_tracks() {
         json!({"clips": r.result["clips"], "at": 150}),
     ));
     assert_eq!(f.track("V2")[1].1, 160);
-    // Clipboards without tracks (M1–M5) paste onto Track 1.
-    let old = json!([{"id": "c1", "media": "m2", "start": 0, "duration": 10,
-                      "source_in": 0, "video": true}]);
-    f.ok(req("edit.paste", json!({"clips": old, "at": 0})));
-    assert_eq!(f.v1()[0].2, 10);
+    // Every clip says its track.
+    let bare = json!([{"id": "c1", "media": "m2", "start": 0, "duration": 10,
+                       "source_in": 0, "video": true, "enabled": true}]);
+    let e = f.err(req("edit.paste", json!({"clips": bare, "at": 0})));
+    assert_eq!(e.code, ErrorCode::Usage);
 }
 
 #[test]
