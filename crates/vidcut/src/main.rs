@@ -181,9 +181,12 @@ fn execute(cli: &Cli, envelope: Envelope) -> Result<Response> {
     let show = std::io::stderr().is_terminal() && !cli.json;
     let mut bar = ProgressBar::new(show);
     static CANCEL: LazyLock<Arc<AtomicBool>> = LazyLock::new(Arc::default);
-    if envelope.request.method() == "export.start" {
-        // First Ctrl-C cancels a headless export cleanly (no partial files);
-        // a GUI's export stops when this process ends.
+    if matches!(
+        envelope.request.method().as_str(),
+        "export.start" | "proxy.generate"
+    ) {
+        // First Ctrl-C cancels a headless export or proxy encode cleanly (no
+        // partial files); a GUI's export stops when this process ends.
         let _ = ctrlc::set_handler(|| CANCEL.store(true, Ordering::Relaxed));
     }
     let live = matches!(

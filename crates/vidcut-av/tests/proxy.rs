@@ -42,7 +42,7 @@ fn a_proxy_matches_source_frames_and_timestamps() {
 
     for (i, path) in [source, shifted].iter().enumerate() {
         let dest = dir.join(format!("proxy-{i}.mkv"));
-        let written = vidcut_av::proxy::write(&Input::File(path.clone()), 320, 180, &dest)
+        let written = vidcut_av::proxy::write(&Input::File(path.clone()), 320, 180, &dest, None)
             .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
         assert_eq!(written.codec, "h264");
         assert_eq!((written.width, written.height), (320, 180));
@@ -77,7 +77,7 @@ fn a_sequence_proxy_uses_the_sequence_timestamps() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let dest = dir.join("seq.mkv");
-    let written = match vidcut_av::proxy::write(&input, 320, 180, &dest) {
+    let written = match vidcut_av::proxy::write(&input, 320, 180, &dest, None) {
         Ok(w) => w,
         Err(e) => {
             eprintln!("skipping: {e}");

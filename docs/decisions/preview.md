@@ -207,7 +207,9 @@ An image in an EDL entry is a source with one frame at time 0. Seeking into the 
 
 ## 12. Proxies
 
-A proxy is a smaller H.264 file (8-bit 4:2:0, no B-frames) of a pool item's pictures. `proxy.generate` writes one for a video or an image sequence. The preview plays it only when `settings.use_proxies` is set and the proxy is fresh: same source size and modification time as when it was made, and the file is there. Otherwise the original plays, image lists included.
+A proxy is a smaller H.264 file (8-bit 4:2:0, no B-frames) of a pool item's pictures. `proxy.generate` writes one for a video or an image sequence.
+
+**Encoding.** The request first runs on a copy of the project, which writes the files: in the GUI on a worker thread (the measure step that analysis edits use), headless before the project is locked. Then it runs for real and finds the files there, so recording them is quick. The encode reports progress through `vidcut_av::progress` and stops on the `vidcut_av::cancel` flag; a stopped encode removes its temporary file. The preview plays it only when `settings.use_proxies` is set and the proxy is fresh: same source size and modification time as when it was made, and the file is there. Otherwise the original plays, image lists included.
 
 **Timestamps.** Each proxy frame is given the source frame's presentation timestamp (the source time base, or microseconds when that base is not a sane clock). The live session swaps only the video piece's path and clears `image`, and leaves `origin` and `source_frame` alone. The EDL `start` is still `origin + source_frame/fps − ½ frame`, so the seek lands on the same frame. Matroska rounds timestamps to 1 ms, which the half-frame bias absorbs. An image sequence's proxy is picture `k` at `k/rate` with origin 0, and the preview plays that video instead of the `mf://` list.
 

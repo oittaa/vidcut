@@ -1189,10 +1189,30 @@ impl Live {
                     .as_ref()
                     .map(|r| r.cancel.clone())
                     .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+                // Work that reports progress (proxy encodes) shows it to the
+                // client as an export does.
+                let progress = job.reply.as_ref().map(|r| r.tx.clone());
                 let _ = std::thread::Builder::new()
                     .name("vidcut-measure".into())
                     .spawn(move || {
                         let _guard = vidcut_av::cancel::Guard::set(cancel);
+                        let _report = progress.map(|tx| {
+                            let mut last = Instant::now() - Duration::from_secs(1);
+                            vidcut_av::progress::Guard::set(Box::new(
+                                move |out: &Path, p: vidcut_av::export::Progress| {
+                                    if p.frames == p.total
+                                        || last.elapsed() >= Duration::from_millis(200)
+                                    {
+                                        last = Instant::now();
+                                        let _ = tx.send(ReplyEvent::Progress(json!({
+                                            "output": 0, "outputs": 1, "path": out,
+                                            "frames": p.frames, "total": p.total,
+                                            "elapsed": p.elapsed.as_secs_f64(),
+                                        })));
+                                    }
+                                },
+                            ))
+                        });
                         let result = measure();
                         let _ = tx.send(Msg::Measured {
                             job,
@@ -1686,6 +1706,23 @@ impl Live {
                     Some(measure) => Step::Measure(measure, Box::new(envelope)),
                     None => Step::Now(self.edit(envelope)),
                 }
+            }
+            // Proxies are encoded on a worker, by the same request on a copy
+            // of the project; the edit then finds the files and records them
+            // at once (decision D41).
+            Request::ProxyGenerate { .. } if !envelope.dry_run => {
+                let Some(open) = &self.project else {
+                    return Step::Now(Err(no_project()));
+                };
+                let (project, path) = (open.project().clone(), open.store.path().to_path_buf());
+                let copy = envelope.clone();
+                let encode = move || {
+                    let env = AvEnv::for_project(&path);
+                    vidcut_core::Editor::new(project, Default::default())
+                        .apply(copy, &env, None)
+                        .map(drop)
+                };
+                Step::Measure(Box::new(encode), Box::new(envelope))
             }
             // An `.otioz` bundle's media are unpacked on a worker first; the
             // edit then finds them there.

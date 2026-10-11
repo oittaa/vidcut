@@ -208,7 +208,8 @@ impl Env for AvEnv {
         if !dry_run && !path.is_file() {
             std::fs::create_dir_all(dir)
                 .map_err(|e| Error::media(format!("{}: {e}", dir.display())))?;
-            vidcut_av::proxy::write(&input_of(media), w, h, &path).map_err(av_error)?;
+            let total = Some((v.duration * v.fps.as_f64()).round().max(0.0) as u64);
+            vidcut_av::proxy::write(&input_of(media), w, h, &path, total).map_err(av_error)?;
         }
         Ok(GeneratedProxy {
             path,

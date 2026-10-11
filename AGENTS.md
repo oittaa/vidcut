@@ -196,7 +196,7 @@ vidcut undo                                 # works across separate runs
 - `media get` reports `still: true`, or `sequence: {pattern, first, count}`.
 
 **Proxies (spec D41, deviation X18):**
-- `vidcut proxy generate [m1 m2…] [--width 960]` writes an H.264 8-bit 4:2:0 proxy for each video or image sequence (default longest side 960; smaller pictures stay their size). With no ids, every such clip in the pool. Naming a still or an audio-only file is an error; those are skipped when generating everything.
+- `vidcut proxy generate [m1 m2…] [--width 960]` writes an H.264 8-bit 4:2:0 proxy for each video or image sequence (default longest side 960; smaller pictures stay their size). With no ids, every such clip in the pool. Naming a still or an audio-only file is an error; those are skipped when generating everything. It shows progress like an export, Ctrl-C stops it without leaving a file, and the GUI and other `vidcut` runs aren't held up while it encodes.
 - `vidcut proxy remove [m1…]` deletes the proxy files and clears them. `vidcut set --proxies true` plays fresh proxies in the preview (the Media Pool has the same switch). Export, `frame`, analysis and OTIO keep the original paths. Preview audio stays on the original file.
 - Proxy frames keep the source's presentation timestamps, so swapping the preview path stays frame-exact. `media get` reports the proxy path and `stale: true` when the source size or modification time no longer matches. Files live in `proxies/` beside the project (or `~/.cache/vidcut/proxies` when the project path is unknown).
 

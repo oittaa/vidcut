@@ -27,8 +27,17 @@ pub struct WrittenProxy {
     pub codec: &'static str,
 }
 
-/// Encodes `input`'s pictures to `dest` at `width`×`height` (even).
-pub fn write(input: &Input, width: u32, height: u32, dest: &Path) -> Result<WrittenProxy> {
+/// Encodes `input`'s pictures to `dest` at `width`×`height` (even). Each
+/// frame is reported to this thread's [`crate::progress`] guard, out of
+/// `total` (the source's frame count, when known); this thread's
+/// [`crate::cancel`] flag stops it, leaving no file.
+pub fn write(
+    input: &Input,
+    width: u32,
+    height: u32,
+    dest: &Path,
+    total: Option<u64>,
+) -> Result<WrittenProxy> {
     crate::init();
     if width < 2 || height < 2 || !width.is_multiple_of(2) || !height.is_multiple_of(2) {
         return Err(Error::Invalid(format!(
@@ -46,7 +55,19 @@ pub fn write(input: &Input, width: u32, height: u32, dest: &Path) -> Result<Writ
             .map_err(|e| Error::Invalid(format!("creating {}: {e}", parent.display())))?;
     }
     let tmp = dest.with_extension("part.mkv");
-    let result = encode_into(&mut reader, width, height, rotation, src_tb, enc_tb, &tmp);
+    let shown = Shown {
+        dest,
+        total: total.map_or(0, |t| t as i64),
+        started: std::time::Instant::now(),
+    };
+    let result = encode_into(
+        &mut reader,
+        (width, height, rotation),
+        src_tb,
+        enc_tb,
+        &tmp,
+        &shown,
+    );
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
@@ -83,14 +104,34 @@ fn scale_pts(pts: i64, from: ffmpeg::Rational, to: ffmpeg::Rational) -> i64 {
     (n / d) as i64
 }
 
+/// Where progress goes: the file it is for, out of how many frames, since
+/// when.
+struct Shown<'a> {
+    dest: &'a Path,
+    total: i64,
+    started: std::time::Instant,
+}
+
+impl Shown<'_> {
+    fn frame(&self, frames: u64) {
+        crate::progress::report(
+            self.dest,
+            crate::export::Progress {
+                frames: frames as i64,
+                total: self.total.max(frames as i64),
+                elapsed: self.started.elapsed(),
+            },
+        );
+    }
+}
+
 fn encode_into(
     reader: &mut VideoReader,
-    width: u32,
-    height: u32,
-    rotation: u16,
+    (width, height, rotation): (u32, u32, u16),
     src_tb: ffmpeg::Rational,
     enc_tb: ffmpeg::Rational,
     tmp: &Path,
+    shown: &Shown<'_>,
 ) -> Result<u64> {
     let mut octx =
         format::output_as(tmp, "matroska").ctx(|| format!("creating {}", tmp.display()))?;
@@ -168,6 +209,7 @@ fn encode_into(
             last_dur = dur;
             encode_one(&mut enc, &mut octx, &mut durations, prev, prev_pts, dur)?;
             frames += 1;
+            shown.frame(frames);
         }
         pending = Some((picture, pts));
     }
@@ -181,6 +223,7 @@ fn encode_into(
             last_dur,
         )?;
         frames += 1;
+        shown.frame(frames);
     }
     if frames == 0 {
         return Err(Error::Invalid(format!(
