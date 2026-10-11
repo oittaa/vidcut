@@ -294,3 +294,45 @@ fn proxies_encode_beside_the_session() {
     assert!(frames > 0, "no progress headless");
     assert!(files(&proxies).is_empty(), "{:?}", files(&proxies));
 }
+
+/// An image sequence's size and time are the whole run's: the total of its
+/// pictures and the newest of their times. A render that rewrites a later
+/// picture makes a new proxy name, though the first picture stays as it was.
+#[test]
+fn a_sequence_is_as_new_as_its_newest_picture() {
+    use vidcut::env::AvEnv;
+    use vidcut_av::fixture::ImageSpec;
+    use vidcut_core::editor::Env;
+    let made = fixture::ensure_images(&ImageSpec::sequence(1, 3, 4, 64, 36)).unwrap();
+    let dir = tempfile::Builder::new()
+        .prefix("vidcut-sequence-times")
+        .tempdir()
+        .unwrap();
+    let files: Vec<PathBuf> = made
+        .iter()
+        .map(|f| {
+            let to = dir.path().join(f.file_name().unwrap());
+            std::fs::copy(f, &to).unwrap();
+            to
+        })
+        .collect();
+    let at = |secs: u64| std::time::UNIX_EPOCH + Duration::from_secs(secs);
+    for (k, f) in files.iter().enumerate() {
+        let file = std::fs::File::options().write(true).open(f).unwrap();
+        file.set_modified(at(1_000_000 + k as u64)).unwrap();
+    }
+    let env = AvEnv::new();
+    let fps = Rational::new(25, 1).unwrap();
+    let probed = env.probe_sequence(&files[0], fps).unwrap();
+    let total: u64 = files.iter().map(|f| f.metadata().unwrap().len()).sum();
+    assert_eq!(probed.size, total);
+    assert_eq!(probed.mtime_ns, 1_000_002 * 1_000_000_000);
+    // A later picture rendered again.
+    let last = std::fs::File::options()
+        .write(true)
+        .open(&files[2])
+        .unwrap();
+    last.set_modified(at(2_000_000)).unwrap();
+    let again = env.probe_sequence(&files[0], fps).unwrap();
+    assert_eq!(again.mtime_ns, 2_000_000 * 1_000_000_000);
+}

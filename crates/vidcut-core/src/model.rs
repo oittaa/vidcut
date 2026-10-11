@@ -109,8 +109,9 @@ pub struct Media {
     pub id: String,
     pub path: PathBuf,
     pub name: String,
-    /// File size and modification time (Unix ns) when probed; used for cache
-    /// keys and to notice changed or missing files.
+    /// File size and modification time (Unix ns) when probed; for an image
+    /// sequence, the total size of its pictures and the newest of their
+    /// times. Used for cache keys and to notice changed or missing files.
     pub size: u64,
     pub mtime_ns: i64,
     pub info: MediaInfo,

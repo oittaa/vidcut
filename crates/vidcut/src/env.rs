@@ -144,6 +144,19 @@ impl Env for AvEnv {
             // The rate asked for, exactly.
             (v.fps, v.vfr) = (rate, false);
         }
+        // Size and time stand for the whole run, once, here: a render that
+        // rewrites later pictures makes a new proxy name and a stale proxy,
+        // even when the first picture stays as it was.
+        (probed.size, probed.mtime_ns) = (0..sequence.count)
+            .filter_map(|k| std::fs::metadata(sequence.file(dir, k)).ok())
+            .fold((0, 0), |(size, newest), meta| {
+                let mtime = meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map_or(0, |d| d.as_nanos() as i64);
+                (size + meta.len(), newest.max(mtime))
+            });
         probed.sequence = Some(sequence);
         Ok(probed)
     }
