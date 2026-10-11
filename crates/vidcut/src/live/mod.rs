@@ -1238,6 +1238,9 @@ impl Live {
                 let _ = std::thread::Builder::new()
                     .name("vidcut-measure".into())
                     .spawn(move || {
+                        // Decoding whole files (Detect Scene Cuts, Ripple
+                        // Delete Silence): everything else comes first.
+                        jobs::background_priority();
                         let _guard = vidcut_av::cancel::Guard::set(cancel);
                         let result = measure();
                         let _ = tx.send(Msg::Measured {
@@ -2022,7 +2025,20 @@ impl Live {
             .project()
             .time_context(Some(self.players[TIMELINE].position));
         let envelope = bind_playhead(envelope, &context);
+        // Measurements decode whole files: everything else comes first, as
+        // for jobs. Frames and plans are quick, and someone waits for them.
+        let background = matches!(
+            envelope.request,
+            Request::AnalyzeSilence { .. }
+                | Request::AnalyzeScenes { .. }
+                | Request::AnalyzeBlack { .. }
+                | Request::AnalyzeLoudness { .. }
+                | Request::StoryboardRender { .. }
+        );
         Step::Task(Box::new(move |progress| {
+            if background {
+                jobs::background_priority();
+            }
             let cancel_flag = progress
                 .as_ref()
                 .map(|(_, c)| c.clone())
