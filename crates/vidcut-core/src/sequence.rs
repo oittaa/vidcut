@@ -13,9 +13,13 @@ fn split(name: &str) -> Option<(&str, &str, &str)> {
     let stem_end = name.rfind('.').filter(|&i| i > 0).unwrap_or(name.len());
     let stem = &name[..stem_end];
     let end = stem.rfind(|c: char| c.is_ascii_digit())? + 1;
+    // The index is the character's first byte. Step over the whole character:
+    // the one before the digits may not be ASCII (`写真0001.exr`).
     let start = stem[..end]
-        .rfind(|c: char| !c.is_ascii_digit())
-        .map_or(0, |i| i + 1);
+        .char_indices()
+        .rev()
+        .find(|(_, c)| !c.is_ascii_digit())
+        .map_or(0, |(i, c)| i + c.len_utf8());
     Some((&name[..start], &name[start..end], &name[end..]))
 }
 
@@ -101,6 +105,14 @@ mod tests {
         assert_eq!(split("img7"), Some(("img", "7", "")));
         assert_eq!(split("logo.png"), None);
         assert_eq!(split("image.jp2"), None, "not the extension's digit");
+    }
+
+    #[test]
+    fn a_non_ascii_character_immediately_before_the_digits() {
+        // The byte after that character's start is still inside it. Stepping
+        // one byte used to slice there and panic; the number is still found.
+        assert_eq!(split("写真0001.exr"), Some(("写真", "0001", ".exr")));
+        assert_eq!(split("é0001.png"), Some(("é", "0001", ".png")));
     }
 
     fn folder(names: &[&str]) -> std::path::PathBuf {
