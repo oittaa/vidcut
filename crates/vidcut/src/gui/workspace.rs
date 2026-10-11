@@ -52,6 +52,9 @@ pub(super) enum Drag {
         is_in: bool,
         frame: i64,
     },
+    /// Moving a Source Tape span handle (decision D17). `frame` is the stored
+    /// tape frame: In inclusive, Out exclusive.
+    TapeMark { is_in: bool, frame: i64 },
 }
 
 /// What the viewer can show of one player (from the GL glue).
@@ -222,10 +225,33 @@ impl Workspace {
             .unwrap_or(0)
     }
 
+    /// Media ids of the Source Tape, in order.
+    pub(super) fn tape_order(&self) -> Vec<String> {
+        self.snap.tape.iter().map(|e| e.media.clone()).collect()
+    }
+
+    /// A Source Tape span that sits on more than one clip (decision D17),
+    /// when the stored order is still this tape.
+    pub(super) fn crossing_span(&self) -> Option<(i64, i64)> {
+        let p = self.project()?;
+        if p.tape_marks.order != self.tape_order() {
+            return None;
+        }
+        vidcut_core::render::crossing_span(
+            &self.snap.tape,
+            p.tape_marks.mark_in,
+            p.tape_marks.mark_out,
+        )
+    }
+
     /// Source ranges for an edit function (spec §7): the clip in the source
     /// viewer with its marks, or in Timeline mode the media selected in the
-    /// pool. Ranges are explicit so the command log replays exactly.
+    /// pool. A Source Tape span across clips is one `tape` edit (D17).
+    /// Ranges are explicit so the command log replays exactly.
     pub(super) fn edit_sources(&self) -> Vec<Value> {
+        if self.snap.viewer == ViewerMode::SourceTape && self.crossing_span().is_some() {
+            return vec![json!({ "tape": true })];
+        }
         let Some(p) = self.project() else {
             return Vec::new();
         };
@@ -959,7 +985,15 @@ impl Workspace {
                 })
                 .unwrap_or_default(),
             PlayerId::Source => match self.snap.viewer {
-                ViewerMode::SourceTape => self.snap.tape.iter().map(|e| e.start).collect(),
+                ViewerMode::SourceTape => {
+                    let mut v: Vec<i64> = self.snap.tape.iter().map(|e| e.start).collect();
+                    if let Some((a, b)) = self.crossing_span() {
+                        v.extend([a, b]);
+                    }
+                    v.sort_unstable();
+                    v.dedup();
+                    v
+                }
                 _ => {
                     let mut v = vec![0, self.snap.source.frames];
                     if let Some((m, _)) = self.snap.source_at()
@@ -981,9 +1015,21 @@ impl Workspace {
             .unwrap_or_default()
     }
 
-    /// I/O: marks the source clip in source modes, the timeline otherwise.
-    /// While the pointer is over a pool thumbnail, marks that clip there (p. 691).
+    /// I/O: marks the source clip in Source Clip mode, the tape in Source
+    /// Tape mode (decision D17), the timeline otherwise. While the pointer
+    /// is over a pool thumbnail, marks that clip there (p. 691).
     pub(super) fn mark(&self, is_in: bool) {
+        if self.hover.is_none() && self.snap.viewer == ViewerMode::SourceTape {
+            let order = self.tape_order();
+            if order.is_empty() {
+                return;
+            }
+            let frame = self.snap.source.position;
+            let value = if is_in { frame } else { frame + 1 };
+            let key = if is_in { "in" } else { "out" };
+            self.send("tape.marks.set", json!({ key: value, "order": order }));
+            return;
+        }
         let (media, frame) = match (&self.hover, self.snap.source_at()) {
             (Some((m, f)), _) => (Some(m.clone()), *f),
             (None, Some((m, f))) => (Some(m.to_string()), f),
@@ -1004,6 +1050,12 @@ impl Workspace {
     }
 
     fn go_to_mark(&self, is_in: bool) {
+        if self.snap.viewer == ViewerMode::SourceTape
+            && let Some((a, b)) = self.crossing_span()
+        {
+            self.seek(PlayerId::Source, if is_in { a } else { b - 1 }, false);
+            return;
+        }
         match self.snap.source_at() {
             Some((media, _)) => {
                 let Some(m) = self.project().and_then(|p| p.media(media)) else {
@@ -1042,6 +1094,11 @@ impl Workspace {
     }
 
     pub(super) fn clear_marks(&self) {
+        if self.snap.viewer == ViewerMode::SourceTape {
+            let media = self.snap.source_at().map(|(m, _)| m.to_string());
+            self.send("tape.marks.clear", json!({ "media": media }));
+            return;
+        }
         match self.snap.source_at() {
             Some((media, _)) => self.send("media.marks.clear", json!({ "media": media })),
             None => self.send("marks.clear", json!({})),

@@ -137,6 +137,11 @@ pub fn violations(p: &Project) -> Vec<String> {
     {
         v.push(format!("timeline In {i} is not before Out {o}"));
     }
+    if let (Some(i), Some(o)) = (p.tape_marks.mark_in, p.tape_marks.mark_out)
+        && i >= o
+    {
+        v.push(format!("tape In {i} is not before Out {o}"));
+    }
     v
 }
 

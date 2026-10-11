@@ -845,6 +845,91 @@ fn source_marks_drive_edits_without_a_range() {
     );
 }
 
+fn tape_order() -> serde_json::Value {
+    json!(["m1", "m2", "m3"])
+}
+
+#[test]
+fn tape_marks_on_one_clip_mirror_source_marks() {
+    // Decision D17: a span that stays on one clip is that clip's source marks.
+    let mut f = fixture();
+    let r = f.ok(req(
+        "tape.marks.set",
+        json!({"in": 50, "out": 100, "order": tape_order()}),
+    ));
+    assert_eq!(r.result["in"], 50);
+    assert_eq!(r.result["out"], 100);
+    assert_eq!(
+        r.result["pieces"],
+        json!([{"media": "m1", "in": 50, "out": 100}])
+    );
+    let p = f.editor.project();
+    assert_eq!(p.tape_marks.mark_in, Some(50));
+    assert_eq!(p.tape_marks.mark_out, Some(100));
+    let m1 = p.media("m1").unwrap().marks.clone();
+    assert_eq!((m1.mark_in, m1.mark_out), (Some(50), Some(100)));
+    assert!(p.media("m2").unwrap().marks.is_empty());
+}
+
+#[test]
+fn tape_marks_across_two_clips_stay_on_the_tape() {
+    // Decision D17: a span across clips is only tape marks, not one clip's marks.
+    let mut f = fixture();
+    f.ok(req(
+        "tape.marks.set",
+        json!({"in": 200, "out": 300, "order": tape_order()}),
+    ));
+    let p = f.editor.project();
+    assert_eq!(p.tape_marks.mark_in, Some(200));
+    assert_eq!(p.tape_marks.mark_out, Some(300));
+    assert!(p.media("m1").unwrap().marks.is_empty());
+    assert!(p.media("m2").unwrap().marks.is_empty());
+    let rev = p.rev;
+    f.ok(req("edit.append", json!({"tape": true})));
+    assert_eq!(f.editor.project().rev, rev + 1, "one undo step");
+    assert_eq!(f.v1(), vec![row("c1", 0, 50, 200), row("c2", 50, 50, 0)]);
+}
+
+#[test]
+fn tape_marks_from_mid_clip_to_mid_clip() {
+    let mut f = fixture();
+    let r = f.ok(req(
+        "tape.marks.set",
+        json!({"in": 100, "out": 300, "order": tape_order()}),
+    ));
+    assert_eq!(
+        r.result["pieces"],
+        json!([
+            {"media": "m1", "in": 100, "out": 250},
+            {"media": "m2", "in": 0, "out": 50}
+        ])
+    );
+    let rev = f.editor.project().rev;
+    f.ok(req("edit.append", json!({"tape": true})));
+    assert_eq!(f.editor.project().rev, rev + 1);
+    assert_eq!(f.v1(), vec![row("c1", 0, 150, 100), row("c2", 150, 50, 0)]);
+}
+
+#[test]
+fn tape_marks_clear() {
+    let mut f = fixture();
+    f.ok(req(
+        "tape.marks.set",
+        json!({"in": 50, "out": 100, "order": tape_order()}),
+    ));
+    f.ok(req("tape.marks.clear", json!({"media": "m1"})));
+    let p = f.editor.project();
+    assert!(p.tape_marks.is_empty());
+    assert!(p.media("m1").unwrap().marks.is_empty());
+
+    f.ok(req(
+        "tape.marks.set",
+        json!({"in": 200, "out": 300, "order": tape_order()}),
+    ));
+    f.ok(req("tape.marks.clear", json!({})));
+    assert!(f.editor.project().tape_marks.is_empty());
+}
+
 #[test]
 fn copy_cut_and_paste() {
     // p. 723: Ctrl+C copies, Ctrl+X cuts and ripples, Ctrl+V pastes at the

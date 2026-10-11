@@ -1522,6 +1522,128 @@ pub fn set_media_marks(
     Ok(())
 }
 
+/// The one clip a tape span mirrors onto, when it does not cross clips.
+fn mirrored_piece(
+    entries: &[crate::render::TapeEntry],
+    marks: &crate::model::TapeMarks,
+) -> Option<crate::render::SpanPiece> {
+    let (a, b) = crate::render::active_span(entries, marks.mark_in, marks.mark_out)?;
+    let mut pieces = crate::render::span_pieces(entries, a, b);
+    (pieces.len() == 1).then(|| pieces.remove(0))
+}
+
+/// Clears source marks that this tape span wrote onto its one clip.
+fn clear_owned_mirror(
+    p: &mut Project,
+    marks: &crate::model::TapeMarks,
+    entries: &[crate::render::TapeEntry],
+) {
+    let Some(piece) = mirrored_piece(entries, marks) else {
+        return;
+    };
+    let Some(m) = p.media.iter_mut().find(|m| m.id == piece.media) else {
+        return;
+    };
+    if marks.mark_in.is_some() && m.marks.mark_in == Some(piece.range.0) {
+        m.marks.mark_in = None;
+    }
+    if marks.mark_out.is_some() && m.marks.mark_out == Some(piece.range.1) {
+        m.marks.mark_out = None;
+    }
+}
+
+/// Writes a one-clip tape span onto that clip's source marks (D5, D6).
+fn write_mirror(
+    p: &mut Project,
+    marks: &crate::model::TapeMarks,
+    entries: &[crate::render::TapeEntry],
+) -> Result<()> {
+    let Some(piece) = mirrored_piece(entries, marks) else {
+        return Ok(());
+    };
+    set_media_marks(
+        p,
+        &piece.media,
+        marks.mark_in.map(|_| Some(piece.range.0)),
+        marks.mark_out.map(|_| Some(piece.range.1)),
+    )
+}
+
+/// Sets Source Tape In/Out (decision D17). `entries` are `order` laid end
+/// to end. A span that stays on one clip is also that clip's source marks;
+/// a span across clips is only the tape marks.
+pub fn set_tape_marks(
+    p: &mut Project,
+    new_in: Option<i64>,
+    new_out: Option<i64>,
+    order: &[String],
+    entries: &[crate::render::TapeEntry],
+) -> Result<()> {
+    let tape_end = entries.last().map(|e| e.start + e.frames).unwrap_or(0);
+    if tape_end <= 0 {
+        return Err(Error::invalid("no media to mark"));
+    }
+    let same_order = p.tape_marks.order == order;
+    let mut marks = if same_order {
+        p.tape_marks.clone()
+    } else {
+        crate::model::TapeMarks::default()
+    };
+    let previous = marks.clone();
+    if let Some(i) = new_in {
+        marks.mark_in = Some(i);
+    }
+    if let Some(o) = new_out {
+        marks.mark_out = Some(o);
+    }
+    if marks.mark_in.is_some_and(|i| !(0..tape_end).contains(&i))
+        || marks.mark_out.is_some_and(|o| o < 1 || o > tape_end)
+    {
+        return Err(Error::invalid(format!(
+            "tape marks must lie on the tape (0..{tape_end} frames)"
+        )));
+    }
+    if let (Some(i), Some(o)) = (marks.mark_in, marks.mark_out)
+        && i >= o
+    {
+        return Err(Error::invalid(format!("In ({i}) must be before Out ({o})")));
+    }
+    marks.order = order.to_vec();
+    if same_order {
+        clear_owned_mirror(p, &previous, entries);
+    } else if !p.tape_marks.order.is_empty() {
+        let old = p.tape_marks.clone();
+        if let Ok((_, old_entries)) = crate::render::tape(p, &old.order) {
+            clear_owned_mirror(p, &old, &old_entries);
+        }
+    }
+    write_mirror(p, &marks, entries)?;
+    p.tape_marks = marks;
+    Ok(())
+}
+
+/// Clears Source Tape marks. When the span does not cross clips, also clears
+/// `media` (the clip under the playhead, Alt+X) and the one-clip mirror.
+pub fn clear_tape_marks(p: &mut Project, media: Option<&str>) -> Result<()> {
+    let previous = std::mem::take(&mut p.tape_marks);
+    let crossed = if previous.order.is_empty() {
+        false
+    } else if let Ok((_, entries)) = crate::render::tape(p, &previous.order) {
+        let crossed =
+            crate::render::crossing_span(&entries, previous.mark_in, previous.mark_out).is_some();
+        if !crossed {
+            clear_owned_mirror(p, &previous, &entries);
+        }
+        crossed
+    } else {
+        false
+    };
+    if !crossed && let Some(media) = media {
+        set_media_marks(p, media, Some(None), Some(None))?;
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------- clipboard
 
 /// The clips `ids` in timeline order with their tracks, as the clipboard

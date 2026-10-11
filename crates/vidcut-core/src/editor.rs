@@ -363,6 +363,198 @@ pub fn media_context(p: &Project, media: &Media, playhead: Option<i64>) -> TimeC
     }
 }
 
+/// Source ranges of an edit. `tape` takes the Source Tape span (decision D17):
+/// the tail of the first clip, the middle clips and the head of the last.
+fn resolve_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
+    if params.tape {
+        if !params.media.is_empty() || params.range.is_some() {
+            return Err(Error::usage(
+                "a tape-span edit takes the marked range; leave out media and range",
+            ));
+        }
+        return tape_sources(p, params);
+    }
+    if params.media.is_empty() {
+        return Err(Error::usage(
+            "media is required (or pass tape: true to edit the Source Tape span)",
+        ));
+    }
+    Ok(vec![source(p, params)?])
+}
+
+/// Both Source Tape marks, as source ranges in tape order (decision D17).
+fn tape_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
+    let tm = &p.tape_marks;
+    let (Some(mark_in), Some(mark_out)) = (tm.mark_in, tm.mark_out) else {
+        return Err(Error::invalid(
+            "a Source Tape edit needs both In and Out (decision D17)",
+        ));
+    };
+    if tm.order.is_empty() {
+        return Err(Error::invalid("Source Tape marks have no media order"));
+    }
+    let entries = crate::render::tape(p, &tm.order)?.1;
+    let pieces = crate::render::span_pieces(&entries, mark_in, mark_out);
+    if pieces.is_empty() {
+        return Err(Error::invalid("Source Tape marks cover no media"));
+    }
+    Ok(pieces
+        .into_iter()
+        .map(|piece| Source {
+            media: piece.media,
+            range: piece.range,
+            video_only: params.video_only,
+            audio_only: params.audio_only,
+            track: params.track.clone(),
+        })
+        .collect())
+}
+
+fn clip_ids(ids: &[String]) -> Value {
+    let mut v = json!({ "clip": ids.first().cloned().unwrap_or_default() });
+    if ids.len() > 1 {
+        v["clips"] = json!(ids);
+    }
+    v
+}
+
+fn placed_end(p: &Project, id: &str, fallback: i64) -> i64 {
+    p.clip(id).map(crate::model::Clip::end).unwrap_or(fallback)
+}
+
+/// Timeline In/Out applied to a whole source span: three-point when both
+/// marks are set (decision D7), backtimed to a lone Out.
+fn fit_block(p: &Project, sources: &[Source], at: i64) -> Result<(i64, Vec<Source>)> {
+    let total: i64 = sources.iter().map(|s| s.range.1 - s.range.0).sum();
+    let mut sources = sources.to_vec();
+    let start = match (p.marks.mark_in, p.marks.mark_out) {
+        (Some(i), Some(o)) => {
+            let dur = o - i;
+            if total < dur {
+                return Err(Error::invalid(
+                    "not enough source media for the timeline In–Out",
+                ));
+            }
+            let mut left = dur;
+            sources.retain_mut(|s| {
+                if left <= 0 {
+                    return false;
+                }
+                let len = s.range.1 - s.range.0;
+                let take = len.min(left);
+                s.range.1 = s.range.0 + take;
+                left -= take;
+                true
+            });
+            i
+        }
+        (Some(i), None) => i,
+        (None, Some(o)) => o - total,
+        (None, None) => at,
+    };
+    if start < 0 {
+        return Err(Error::invalid("overwrite would start before 0"));
+    }
+    Ok((start, sources))
+}
+
+fn overwrite_span(
+    p: &mut Project,
+    sources: &[Source],
+    at: i64,
+    use_marks: bool,
+) -> Result<Vec<String>> {
+    let (start, sources) = if use_marks {
+        fit_block(p, sources, at)?
+    } else {
+        (at, sources.to_vec())
+    };
+    without_marks(p, true, |p| {
+        let mut ids = Vec::new();
+        let mut cursor = start;
+        for s in &sources {
+            let id = ops::overwrite(p, s, cursor)?;
+            cursor = placed_end(p, &id, cursor);
+            ids.push(id);
+        }
+        Ok(ids)
+    })
+}
+
+fn place_span(
+    p: &mut Project,
+    sources: &[Source],
+    at: i64,
+    use_marks: bool,
+) -> Result<(Vec<String>, String)> {
+    let marked = use_marks && (p.marks.mark_in.is_some() || p.marks.mark_out.is_some());
+    let (start, sources) = if marked {
+        fit_block(p, sources, at)?
+    } else {
+        let edit = ops::nearest_edit(p, at);
+        let start = if (edit - at).abs() <= 5 { edit } else { at };
+        (start, sources.to_vec())
+    };
+    if start < 0 {
+        return Err(Error::invalid("the clip would start before 0"));
+    }
+    without_marks(p, true, |p| {
+        let mut ids = Vec::new();
+        let mut cursor = start;
+        let mut track = String::new();
+        for s in &sources {
+            let (id, t) = ops::place_on_top(p, s, cursor)?;
+            cursor = placed_end(p, &id, cursor);
+            track = t;
+            ids.push(id);
+        }
+        Ok((ids, track))
+    })
+}
+
+fn ripple_span(
+    p: &mut Project,
+    sources: &[Source],
+    at: i64,
+    use_marks: bool,
+) -> Result<Vec<String>> {
+    let id = without_marks(p, !use_marks, |p| ops::ripple_overwrite(p, &sources[0], at))?;
+    let mut ids = vec![id.clone()];
+    let mut cursor = placed_end(p, &id, at);
+    for s in &sources[1..] {
+        let id = ops::insert_at(p, s, cursor)?;
+        cursor = placed_end(p, &id, cursor);
+        ids.push(id);
+    }
+    Ok(ids)
+}
+
+fn lay_in_order(p: &mut Project, sources: &[Source], mut at: i64) -> Result<Vec<String>> {
+    let mut ids = Vec::new();
+    for s in sources {
+        let id = ops::insert_at(p, s, at)?;
+        at = placed_end(p, &id, at);
+        ids.push(id);
+    }
+    Ok(ids)
+}
+
+fn tape_marks_json(p: &Project, entries: &[crate::render::TapeEntry]) -> Value {
+    let m = &p.tape_marks;
+    let pieces = match crate::render::active_span(entries, m.mark_in, m.mark_out) {
+        Some((a, b)) => crate::render::span_pieces(entries, a, b),
+        None => Vec::new(),
+    };
+    json!({
+        "in": m.mark_in,
+        "out": m.mark_out,
+        "order": m.order,
+        "pieces": pieces.iter().map(|s| json!({
+            "media": s.media, "in": s.range.0, "out": s.range.1,
+        })).collect::<Vec<_>>(),
+    })
+}
+
 /// Source range of `params` in source frames. Default: the media's source
 /// marks, with a missing In meaning its first frame and a missing Out its end
 /// (decision D5).
@@ -528,6 +720,43 @@ fn mutate(
             ops::set_media_marks(p, media, Some(None), Some(None))?;
             Value::Null
         }
+        Request::TapeMarksSet {
+            mark_in,
+            out,
+            order,
+        } => {
+            if mark_in.is_none() && out.is_none() {
+                return Err(Error::usage("tape.marks.set needs `in` and/or `out`"));
+            }
+            if order.is_empty() {
+                return Err(Error::usage(
+                    "tape.marks.set needs the tape's media, in order",
+                ));
+            }
+            let entries = crate::render::tape(p, order)?.1;
+            let end = entries.last().map(|e| e.start + e.frames).unwrap_or(0);
+            let (cur_in, cur_out) = if p.tape_marks.order == *order {
+                (p.tape_marks.mark_in, p.tape_marks.mark_out)
+            } else {
+                (None, None)
+            };
+            let ctx = TimeContext {
+                fps: p.settings.fps,
+                start_tc: 0,
+                end,
+                mark_in: cur_in,
+                mark_out: cur_out,
+                playhead: None,
+            };
+            let i = mark_in.as_ref().map(|t| ctx.resolve(t)).transpose()?;
+            let o = out.as_ref().map(|t| ctx.resolve(t)).transpose()?;
+            ops::set_tape_marks(p, i, o, order, &entries)?;
+            tape_marks_json(p, &entries)
+        }
+        Request::TapeMarksClear { media } => {
+            ops::clear_tape_marks(p, media.as_deref())?;
+            Value::Null
+        }
         Request::MediaRename { media, name } => {
             let m = p
                 .media
@@ -538,22 +767,38 @@ fn mutate(
             Value::Null
         }
         Request::EditAppend(src) => {
-            let s = source(p, src)?;
-            json!({ "clip": ops::append(p, &s)? })
+            let sources = resolve_sources(p, src)?;
+            let mut ids = Vec::new();
+            for s in &sources {
+                ids.push(ops::append(p, s)?);
+            }
+            clip_ids(&ids)
         }
         Request::EditSmartInsert {
             source: src,
             playhead: at,
         } => {
             let at = resolve(p, at, playhead)?;
-            let s = source(p, src)?;
+            let sources = resolve_sources(p, src)?;
             let edit = ops::nearest_edit(p, at);
-            json!({ "clip": ops::smart_insert(p, &s, at)?, "at": edit })
+            let ids = if sources.len() == 1 {
+                vec![ops::smart_insert(p, &sources[0], at)?]
+            } else {
+                lay_in_order(p, &sources, edit)?
+            };
+            let mut v = clip_ids(&ids);
+            v["at"] = json!(edit);
+            v
         }
         Request::EditInsert { source: src, at } => {
             let at = resolve(p, at, playhead)?;
-            let s = source(p, src)?;
-            json!({ "clip": ops::insert_at(p, &s, at)? })
+            let sources = resolve_sources(p, src)?;
+            let ids = if sources.len() == 1 {
+                vec![ops::insert_at(p, &sources[0], at)?]
+            } else {
+                lay_in_order(p, &sources, at)?
+            };
+            clip_ids(&ids)
         }
         Request::EditOverwrite {
             source: src,
@@ -564,15 +809,21 @@ fn mutate(
                 Some(t) => Some(resolve(p, t, playhead)?),
                 None => playhead,
             };
+            let sources = resolve_sources(p, src)?;
             let marked = *use_marks && (p.marks.mark_in.is_some() || p.marks.mark_out.is_some());
             let at = if marked {
                 at.unwrap_or(0)
             } else {
                 need(at, "at")?
             };
-            let s = source(p, src)?;
-            let clip = without_marks(p, !use_marks, |p| ops::overwrite(p, &s, at))?;
-            json!({ "clip": clip })
+            let ids = if sources.len() == 1 {
+                vec![without_marks(p, !use_marks, |p| {
+                    ops::overwrite(p, &sources[0], at)
+                })?]
+            } else {
+                overwrite_span(p, &sources, at, *use_marks)?
+            };
+            clip_ids(&ids)
         }
         Request::EditPlaceOnTop {
             source: src,
@@ -588,15 +839,23 @@ fn mutate(
                 Some(t) => Some(resolve(p, t, playhead)?),
                 None => playhead,
             };
+            let sources = resolve_sources(p, src)?;
             let marked = *use_marks && (p.marks.mark_in.is_some() || p.marks.mark_out.is_some());
             let at = if marked {
                 at.unwrap_or(0)
             } else {
                 need(at, "at")?
             };
-            let s = source(p, src)?;
-            let (clip, track) = without_marks(p, !use_marks, |p| ops::place_on_top(p, &s, at))?;
-            json!({ "clip": clip, "track": track })
+            if sources.len() == 1 {
+                let (clip, track) =
+                    without_marks(p, !use_marks, |p| ops::place_on_top(p, &sources[0], at))?;
+                json!({ "clip": clip, "track": track })
+            } else {
+                let (ids, track) = place_span(p, &sources, at, *use_marks)?;
+                let mut v = clip_ids(&ids);
+                v["track"] = json!(track);
+                v
+            }
         }
         Request::EditRippleOverwrite {
             source: src,
@@ -607,15 +866,21 @@ fn mutate(
                 Some(t) => Some(resolve(p, t, playhead)?),
                 None => playhead,
             };
+            let sources = resolve_sources(p, src)?;
             let marked = *use_marks && p.marks.mark_in.is_some() && p.marks.mark_out.is_some();
             let at = if marked {
                 at.unwrap_or(0)
             } else {
                 need(at, "at")?
             };
-            let s = source(p, src)?;
-            let clip = without_marks(p, !use_marks, |p| ops::ripple_overwrite(p, &s, at))?;
-            json!({ "clip": clip })
+            let ids = if sources.len() == 1 {
+                vec![without_marks(p, !use_marks, |p| {
+                    ops::ripple_overwrite(p, &sources[0], at)
+                })?]
+            } else {
+                ripple_span(p, &sources, at, *use_marks)?
+            };
+            clip_ids(&ids)
         }
         Request::EditSplit { at, clips } => {
             let points = at
@@ -1361,6 +1626,7 @@ pub fn query(
             "marks": p.marks,
             "markers": p.markers.len(),
             "bins": p.bins,
+            "tape_marks": p.tape_marks,
         }),
         Request::MediaList {} => {
             json!(p.media.iter().map(|m| media_json(p, m)).collect::<Vec<_>>())
