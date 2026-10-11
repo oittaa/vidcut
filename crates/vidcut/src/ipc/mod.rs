@@ -446,48 +446,45 @@ mod tests {
     }
 
     #[test]
-    fn a_null_id_refusal_is_usage_and_cancel_already_set_is_not_success() {
+    fn a_cancel_already_set_sends_nothing() {
+        // The GUI never sees the request, so nothing ran there: CANCELLED is
+        // the truth. (Sending it and hanging up could still apply an edit.)
         use std::sync::Arc;
-        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
         let dir = std::env::temp_dir().join(format!("vidcut-ipc-cancel-{}", std::process::id()));
-        let ok = Arc::new(
-            |_: Envelope, _: Option<PathBuf>, _: &mut dyn FnMut(Value) -> bool| {
-                Ok(vidcut_core::Response {
-                    rev: 1,
-                    changes: Default::default(),
-                    result: json!("ok"),
-                    dry_run: false,
-                    via: "gui:1".into(),
-                })
-            },
-        );
-        // The line limit answers with id null before the request is parsed.
-        // Skipping that error used to surface as NO_INSTANCE.
-        let limited = dir.join("limit.sock");
-        server::start_limited(
-            &limited,
-            ok.clone(),
-            server::Limits {
-                line: 32,
-                connections: 4,
-            },
+        let socket = dir.join("test.sock");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let seen = calls.clone();
+        server::start(
+            &socket,
+            Arc::new(
+                move |_: Envelope, _: Option<PathBuf>, _: &mut dyn FnMut(Value) -> bool| {
+                    seen.fetch_add(1, Ordering::SeqCst);
+                    Ok(vidcut_core::Response {
+                        rev: 1,
+                        changes: Default::default(),
+                        result: json!("ok"),
+                        dry_run: false,
+                        via: "gui:1".into(),
+                    })
+                },
+            ),
         )
         .unwrap();
-        let get = Envelope::from_json(json!({"method": "project.get"})).unwrap();
-        let e = client::call(&limited, &get, None, &mut |_| {}, None).unwrap_err();
-        assert_eq!(e.code, ErrorCode::Usage, "{e}");
-        assert!(e.message.contains("limited to 32 bytes"), "{e}");
-
-        // The server answers success at once. A flag that is already set
-        // must not return that success.
-        let socket = dir.join("cancel.sock");
-        server::start(&socket, ok).unwrap();
-        let waiting = AtomicBool::new(false);
-        let r = client::call(&socket, &get, None, &mut |_| {}, Some(&waiting)).unwrap();
-        assert_eq!(r.result, json!("ok"));
+        let split =
+            Envelope::from_json(json!({"method": "edit.split", "params": {"at": "1s"}})).unwrap();
         let cancel = AtomicBool::new(true);
-        let e = client::call(&socket, &get, None, &mut |_| {}, Some(&cancel)).unwrap_err();
+        let e = client::call(&socket, &split, None, &mut |_| {}, Some(&cancel)).unwrap_err();
         assert_eq!(e.code, ErrorCode::Cancelled, "{e}");
+        // A clear flag is served, and only that request reached the GUI.
+        let waiting = AtomicBool::new(false);
+        let r = client::call(&socket, &split, None, &mut |_| {}, Some(&waiting)).unwrap();
+        assert_eq!(r.result, json!("ok"));
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "the cancelled call sent nothing"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

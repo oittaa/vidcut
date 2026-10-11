@@ -16,9 +16,8 @@ use vidcut_core::{Envelope, Error, ErrorCode, Response, Result};
 /// project the GUI has open.
 ///
 /// Setting `cancel` closes the connection: the wait ends with `CANCELLED`,
-/// and the GUI stops a foreground export once it can't report progress.
-/// A flag that is already set closes the connection before the reply is
-/// read, so that reply is not returned as success.
+/// and the GUI stops a foreground export once it can't report progress. A
+/// flag already set when the call starts sends nothing, so nothing ran.
 pub fn call(
     socket: &Path,
     envelope: &Envelope,
@@ -26,6 +25,10 @@ pub fn call(
     progress: &mut dyn FnMut(&Value),
     cancel: Option<&AtomicBool>,
 ) -> Result<Response> {
+    // Sending the request and hanging up at once could still apply it.
+    if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
+        return Err(Error::new(ErrorCode::Cancelled, "cancelled"));
+    }
     let mut stream = UnixStream::connect(socket).map_err(|e| {
         Error::no_instance(format!(
             "can't reach the vidcut GUI at {}: {e}",
@@ -54,15 +57,6 @@ pub fn call(
             Err(answer) if answer.code == ErrorCode::NoInstance => Err(lost(e)),
             answer => answer,
         };
-    }
-    // Already set: close now and do not read. The watcher may not be
-    // scheduled yet, and shutdown does not discard a reply already buffered,
-    // which would otherwise come back as success.
-    if let Some((flag, s)) = &watched
-        && flag.load(Ordering::Relaxed)
-    {
-        let _ = s.shutdown(Shutdown::Both);
-        return Err(Error::new(ErrorCode::Cancelled, "cancelled"));
     }
     // Closed when the answer is in, which wakes the watcher at once.
     let (answered, waiting) = channel::<()>();
