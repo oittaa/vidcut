@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use vidcut_core::analysis::{AudioLevels, Loudness, PictureStats};
 use vidcut_core::render::{AudioPiece, RenderPlan};
 
-use crate::decode::{AUDIO_GAP, decode_stream};
+use crate::decode::decode_stream;
 use crate::error::{Context, Error, Result};
 use crate::export::audio::{AudioMix, Resampler, discard_others};
 use crate::ffmpeg::{self, codec, filter, format, frame, media, software::scaling};
@@ -25,10 +25,13 @@ pub fn audio_levels(path: &Path, ordinal: u32, per_second: u32) -> Result<AudioL
         .filter(|s| s.parameters().medium() == media::Type::Audio)
         .nth(ordinal as usize)
         .ok_or_else(|| Error::Invalid(format!("{}: no audio stream {ordinal}", path.display())))?;
-    let (index, tb) = (stream.index(), stream.time_base());
+    let (index, tb, start_pts) = (stream.index(), stream.time_base(), stream.start_time());
+    let params = stream.parameters();
     let tick = f64::from(tb);
     discard_others(&input, index);
-    let mut decoder = codec::context::Context::from_parameters(stream.parameters())
+    // Same end as export: a past-end timestamp is not a hole in the levels.
+    let file_end = crate::decode::container_end(&mut input, index, start_pts, tick);
+    let mut decoder = codec::context::Context::from_parameters(params)
         .and_then(|mut c| {
             unsafe { (*c.as_mut_ptr()).pkt_timebase = tb.into() };
             c.decoder().audio()
@@ -55,13 +58,14 @@ pub fn audio_levels(path: &Path, ordinal: u32, per_second: u32) -> Result<AudioL
             ));
         }
         let (r, rate, channels) = resampler.as_mut().expect("set");
-        // A gap (a damaged or missing packet) lasts as its timestamps say,
-        // as in export.
-        let end = t.map(|t| t + f.samples() as f64 / f64::from(*rate));
-        if let (Some(t), Some(next)) = (t, std::mem::replace(&mut next_in, end))
-            && t - next > AUDIO_GAP
-        {
-            n += ((t - next) * f64::from(*rate)).round() as u64;
+        // A gap lasts as its timestamps say, as in export: not past the
+        // file's end, and not for a far jump when that end is unknown.
+        let frame_end = t.map(|t| t + f.samples() as f64 / f64::from(*rate));
+        if let (Some(t), Some(next)) = (t, std::mem::replace(&mut next_in, frame_end)) {
+            let gap = crate::decode::audio_gap(next, t, file_end);
+            if gap > 0.0 {
+                n += (gap * f64::from(*rate)).round() as u64;
+            }
         }
         samples.clear();
         r.convert(Some(f), &mut samples)?;

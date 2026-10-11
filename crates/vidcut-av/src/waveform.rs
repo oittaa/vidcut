@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use crate::decode::{AUDIO_GAP, decode_stream};
+use crate::decode::decode_stream;
 use crate::error::{Context, Error, Result};
 use crate::export::audio::{Resampler, discard_others};
 use crate::ffmpeg::{codec, format, frame, media};
@@ -74,10 +74,13 @@ pub fn waveform(path: &Path, ordinal: u32, per_second: u32) -> Result<Waveform> 
         .filter(|s| s.parameters().medium() == media::Type::Audio)
         .nth(ordinal as usize)
         .ok_or_else(|| Error::Invalid(format!("{}: no audio stream {ordinal}", path.display())))?;
-    let (index, tb) = (stream.index(), stream.time_base());
+    let (index, tb, start_pts) = (stream.index(), stream.time_base(), stream.start_time());
+    let params = stream.parameters();
     let tick = f64::from(tb);
     discard_others(&input, index);
-    let mut decoder = codec::context::Context::from_parameters(stream.parameters())
+    // Same end as export: a past-end timestamp does not stretch the peaks.
+    let file_end = crate::decode::container_end(&mut input, index, start_pts, tick);
+    let mut decoder = codec::context::Context::from_parameters(params)
         .and_then(|mut c| {
             unsafe { (*c.as_mut_ptr()).pkt_timebase = tb.into() };
             c.decoder().audio()
@@ -97,13 +100,14 @@ pub fn waveform(path: &Path, ordinal: u32, per_second: u32) -> Result<Waveform> 
             resampler = Some(Resampler::new(f, f.rate(), 1)?);
             acc.rate = f.rate();
         }
-        // A gap (a damaged or missing packet) lasts as its timestamps say,
-        // as in export.
-        let end = t.map(|t| t + f.samples() as f64 / f64::from(f.rate().max(1)));
-        if let (Some(t), Some(next)) = (t, std::mem::replace(&mut next_in, end))
-            && t - next > AUDIO_GAP
-        {
-            acc.n += ((t - next) * f64::from(acc.rate)).round() as u64;
+        // A gap lasts as its timestamps say, as in export: not past the
+        // file's end, and not for a far jump when that end is unknown.
+        let frame_end = t.map(|t| t + f.samples() as f64 / f64::from(f.rate().max(1)));
+        if let (Some(t), Some(next)) = (t, std::mem::replace(&mut next_in, frame_end)) {
+            let gap = crate::decode::audio_gap(next, t, file_end);
+            if gap > 0.0 {
+                acc.n += (gap * f64::from(acc.rate)).round() as u64;
+            }
         }
         mono.clear();
         resampler
