@@ -209,6 +209,20 @@ impl Project {
 
 /// Plans the timeline range `[a, b)`.
 pub fn flatten(p: &Project, a: i64, b: i64) -> Result<RenderPlan> {
+    flatten_lanes(p, a, b).map(|(plan, _)| plan)
+}
+
+/// The track an audio lane of [`flatten_lanes`] comes from, and its fader,
+/// which the lane's gains include.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LaneTrack {
+    pub track: String,
+    pub volume_db: f64,
+}
+
+/// [`flatten`], with the track of each audio lane, in lane order: the
+/// preview controls track faders apart from clip gains.
+pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>)> {
     if a < 0 || b <= a {
         return Err(Error::invalid(format!("nothing to render in {a}..{b}")));
     }
@@ -266,6 +280,7 @@ pub fn flatten(p: &Project, a: i64, b: i64) -> Result<RenderPlan> {
     // Audio: one lane per heard track (mute, solo), with its fader.
     let any_solo = p.any_solo();
     let mut audio = Vec::new();
+    let mut lanes = Vec::new();
     for track in &p.tracks {
         if !track.audible(any_solo) || track.clips.iter().all(|c| c.audio.is_none()) {
             continue;
@@ -314,10 +329,14 @@ pub fn flatten(p: &Project, a: i64, b: i64) -> Result<RenderPlan> {
             .any(|piece| matches!(piece, AudioPiece::Source { .. }))
         {
             audio.push(lane);
+            lanes.push(LaneTrack {
+                track: track.id.clone(),
+                volume_db: track.volume_db,
+            });
         }
     }
 
-    Ok(RenderPlan {
+    let plan = RenderPlan {
         fps: s.fps,
         width: s.width,
         height: s.height,
@@ -328,7 +347,8 @@ pub fn flatten(p: &Project, a: i64, b: i64) -> Result<RenderPlan> {
         audio,
         range: (a, b),
         name: "timeline".into(),
-    })
+    };
+    Ok((plan, lanes))
 }
 
 /// Audio of clip `c` from timeline frame `x`, `samples` long.

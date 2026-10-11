@@ -16,7 +16,7 @@ use vidcut::live::{self, Capture, Image, Origin, PlayerId, Presented, WindowChan
 use vidcut_av::fixture::{self, Container, FixtureSpec, ImageSpec, VideoCodec};
 use vidcut_core::model::Settings;
 use vidcut_core::time::Rational;
-use vidcut_core::{Envelope, Project, Response, Store};
+use vidcut_core::{Envelope, ErrorCode, Project, Response, Store};
 use vidcut_mpv::{Mpv, SwRenderer, ffi::MPV_RENDER_UPDATE_FRAME};
 
 const W: usize = 320;
@@ -602,6 +602,26 @@ fn live_session() {
         h.ok("player.state", json!({})).result["timeline"]["error"],
         Value::Null
     );
+    // The Mixer's fader while dragged: the running preview's level changes
+    // at once (preview.md §10), the project doesn't. The filter reads
+    // commands as sound passes, so the preview plays.
+    let rev = h.ok("project.summary", json!({})).rev;
+    h.ok("player.play", json!({}));
+    let preview = h.ok(
+        "mixer.preview",
+        json!({ "track": "A1", "volume_db": -20.0 }),
+    );
+    if preview.result["live"] == true {
+        // A track with no fader in the graph: the filter says so.
+        let e = h
+            .call("mixer.preview", json!({ "track": "V7", "volume_db": 0.0 }))
+            .unwrap_err();
+        assert_eq!(e.code, ErrorCode::Media, "{e}");
+    } else {
+        eprintln!("skipping live faders: no ZeroMQ, or an FFmpeg without azmq");
+    }
+    h.ok("player.pause", json!({}));
+    assert_eq!(h.ok("project.summary", json!({})).rev, rev);
     // Track 1 ripples: the B-roll and the music follow (decision D21).
     h.ok("edit.delete", json!({ "clips": "c1" }));
     h.ok("player.seek", json!({ "at": 0, "viewer": "timeline" }));

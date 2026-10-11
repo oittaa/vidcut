@@ -275,6 +275,7 @@ vidcut undo                                 # works across separate runs
 | `vidcut jobs`, `jobs get\|wait\|cancel J [--timeout S]` | `jobs.*` | export and proxy jobs, the GUI's own included; `wait` fails like the job did |
 | `vidcut pool --bin A --sort name --descending` | `pool.set` | the bin the Media Pool shows and its order; Source Tape follows it |
 | `vidcut mute [on\|off]` | `player.mute` | the viewer's monitoring mute (not the export) |
+| `vidcut fader A1 -12` | `mixer.preview` | a track's level heard now, without changing the project (`track set --volume` keeps one); `live: false` without ZeroMQ or FFmpeg's `azmq` |
 | `vidcut show quick-export\|export\|jobs\|log\|mixer` | `gui.show` | opens that window for the person at the GUI |
 
 - **Looking at the result:** `vidcut seek 1m && vidcut screenshot -o shot.png` shows exactly what `vidcut frame --at 1m -o f.png` renders. Both are frame-exact.

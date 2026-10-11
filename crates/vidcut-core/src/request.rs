@@ -711,6 +711,13 @@ pub enum Request {
         #[serde(default)]
         mute: Option<bool>,
     },
+    /// Hear `track`'s fader at `volume_db` in the timeline preview at once,
+    /// without changing the project: what the Mixer's fader does while it is
+    /// dragged; `track.set` keeps a level. `live: false` in the result: this
+    /// system can't change the level while playing (no ZeroMQ, or an FFmpeg
+    /// without `azmq`), and only `track.set` changes what is heard.
+    #[serde(rename = "mixer.preview")]
+    MixerPreview { track: String, volume_db: f64 },
     /// The Media Pool view: the bin shown and the sort order. Source Tape
     /// strings together that bin's media, and its bins', in that order.
     #[serde(rename = "pool.set")]
@@ -1113,6 +1120,7 @@ impl Request {
                 | Self::PlayerStep { .. }
                 | Self::PlayerState {}
                 | Self::PlayerMute { .. }
+                | Self::MixerPreview { .. }
                 | Self::PoolSet { .. }
                 | Self::SelectionGet {}
                 | Self::SelectionSet { .. }

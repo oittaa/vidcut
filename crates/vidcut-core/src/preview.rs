@@ -15,7 +15,7 @@ use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 use crate::model::Project;
-use crate::render::{AudioPiece, RenderPlan, VideoPiece};
+use crate::render::{AudioPiece, LaneTrack, RenderPlan, VideoPiece};
 
 /// Filler media used for gaps (generated once per format by the media layer).
 #[derive(Debug, Clone, PartialEq)]
@@ -102,11 +102,12 @@ pub fn apply_proxies(plan: &mut RenderPlan, project: &Project, exists: impl Fn(&
     }
 }
 
-/// The EDL and audio graph that play `plan` in mpv.
-pub fn build(plan: &RenderPlan, fillers: &Fillers) -> Preview {
+/// The EDL and audio graph that play `plan` in mpv; `control`, when the
+/// track faders are to change while it plays.
+pub fn build(plan: &RenderPlan, fillers: &Fillers, control: Option<FaderControl<'_>>) -> Preview {
     Preview {
         edl: edl(plan, fillers),
-        audio_graph: audio_graph(plan),
+        audio_graph: audio_graph(plan, control),
         read_ahead: false,
         deinterlace: false,
         images: false,
@@ -136,15 +137,56 @@ fn gain_at(spans: &[(f64, f64)]) -> String {
     )
 }
 
+/// Live control of the preview's track faders (preview.md §10): each lane's
+/// fader is a `volume` filter of its own, named for its track
+/// ([`fader_filter`]), and an `azmq` filter takes commands for them at
+/// `bind`, a ZeroMQ address. `lanes` are the plan's lanes' tracks.
+#[derive(Debug, Clone, Copy)]
+pub struct FaderControl<'a> {
+    pub lanes: &'a [LaneTrack],
+    pub bind: &'a str,
+}
+
+/// The filter of `track`'s fader in a graph with [`FaderControl`]: the
+/// target of the commands that change it.
+pub fn fader_filter(track: &str) -> String {
+    format!("volume@fader_{track}")
+}
+
+/// `value` as a filter option inside a filter graph, escaped twice: for the
+/// option list (`\`, `:`, `'`), then for the graph (`\`, `'`, `[`, `]`,
+/// `,`, `;`). An address `ipc:///p` becomes `ipc\\:///p`.
+pub fn lavfi_value(value: &str) -> String {
+    let escape = |s: &str, special: &[char]| {
+        s.chars().fold(String::new(), |mut out, c| {
+            if special.contains(&c) {
+                out.push('\\');
+            }
+            out.push(c);
+            out
+        })
+    };
+    escape(
+        &escape(value, &['\\', ':', '\'']),
+        &['\\', '\'', '[', ']', ',', ';'],
+    )
+}
+
 /// The `lavfi-complex` graph for the audio streams of [`edl`]: each lane's
 /// gains (clip gain plus track fader, switched by timeline time `t`) and an
 /// `amix` that sums the lanes. `None` when a single lane plays as it is.
-pub fn audio_graph(plan: &RenderPlan) -> Option<String> {
+/// With `control`, each lane's fader is apart from its clip gains, and the
+/// graph is there whenever there is sound, for its commands.
+pub fn audio_graph(plan: &RenderPlan, control: Option<FaderControl<'_>>) -> Option<String> {
     let rate = f64::from(plan.sample_rate);
+    let control = control.filter(|c| c.lanes.len() == plan.audio.len());
     let mut filters = Vec::new();
     let mut inputs = Vec::new();
     for (i, lane) in plan.audio.iter().enumerate() {
         let n = i + 1;
+        let fader = control.map(|c| &c.lanes[i]);
+        // The lane's gains include its fader; with control it is apart.
+        let less = fader.map_or(0.0, |f| f.volume_db);
         // Where the lane's source pieces change gain, as (start s, dB). A
         // gain holds until the next: between clips the lane is silent, so
         // it may reach over the silence.
@@ -152,9 +194,9 @@ pub fn audio_graph(plan: &RenderPlan) -> Option<String> {
         let mut at = 0i64;
         for piece in lane {
             if let AudioPiece::Source { gain_db, .. } = piece
-                && spans.last().is_none_or(|last| last.1 != *gain_db)
+                && spans.last().is_none_or(|last| last.1 != *gain_db - less)
             {
-                spans.push((at as f64 / rate, *gain_db));
+                spans.push((at as f64 / rate, *gain_db - less));
             }
             at += piece.samples();
         }
@@ -166,13 +208,31 @@ pub fn audio_graph(plan: &RenderPlan) -> Option<String> {
         } else {
             Some(format!("volume=volume='{}':eval=frame", gain_at(&spans)))
         };
-        match filter {
-            Some(f) => {
-                filters.push(format!("[aid{n}]{f}[g{n}]"));
-                inputs.push(format!("[g{n}]"));
-            }
-            None => inputs.push(format!("[aid{n}]")),
+        let chain: Vec<String> = filter
+            .into_iter()
+            .chain(fader.map(|f| format!("{}={:.6}", fader_filter(&f.track), linear(f.volume_db))))
+            .collect();
+        if chain.is_empty() {
+            inputs.push(format!("[aid{n}]"));
+        } else {
+            filters.push(format!("[aid{n}]{}[g{n}]", chain.join(",")));
+            inputs.push(format!("[g{n}]"));
         }
+    }
+    if let Some(c) = control {
+        let azmq = format!("azmq=bind_address={}", lavfi_value(c.bind));
+        return match inputs.len() {
+            0 => None,
+            1 => Some(filters[0].replace("[g1]", &format!(",{azmq}[ao]"))),
+            n => {
+                filters.push(format!(
+                    "{}amix=inputs={n}:normalize=0[mix]",
+                    inputs.concat()
+                ));
+                filters.push(format!("[mix]{azmq}[ao]"));
+                Some(filters.join(";"))
+            }
+        };
     }
     match inputs.len() {
         0 => None,
@@ -332,7 +392,7 @@ mod tests {
         let text = edl(&plan, &fillers());
         assert_eq!(text.matches("!new_stream").count(), 3, "{text}");
         assert_eq!(
-            audio_graph(&plan).unwrap(),
+            audio_graph(&plan, None).unwrap(),
             "[aid1][aid2]amix=inputs=2:normalize=0[ao]"
         );
         // A fader is one gain for the lane; clip gains switch by time.
@@ -340,7 +400,7 @@ mod tests {
         f.ok(json!({"method": "clip.set", "params": {"clips": "c2", "gain_db": 6.0}}));
         let plan = flatten(f.editor.project(), 0, 75).unwrap();
         assert_eq!(
-            audio_graph(&plan).unwrap(),
+            audio_graph(&plan, None).unwrap(),
             "[aid1]volume=volume='if(lt(t,2.000000),1.000000,1.995262)':eval=frame[g1];\
              [aid2]volume=0.501187[g2];[g1][g2]amix=inputs=2:normalize=0[ao]"
         );
@@ -348,7 +408,48 @@ mod tests {
         f.ok(json!({"method": "track.remove", "params": {"track": "A1", "force": true}}));
         f.ok(json!({"method": "clip.set", "params": {"clips": "c2", "gain_db": 0.0}}));
         let plan = flatten(f.editor.project(), 0, 75).unwrap();
-        assert_eq!(audio_graph(&plan), None);
+        assert_eq!(audio_graph(&plan, None), None);
+    }
+
+    /// Preview.md §10: with control, each track's fader is a named filter of
+    /// its own, apart from the clip gains, and azmq takes commands for them.
+    #[test]
+    fn controlled_faders_are_filters_of_their_own() {
+        let mut f = Fixture::new(&[(4.0, true), (4.0, true)]);
+        f.append("m1", 0, 100);
+        f.ok(json!({"method": "edit.overwrite", "params": {"media": "m2", "range": "0f..100f", "track": "A1", "audio_only": true, "at": 0}}));
+        f.ok(json!({"method": "track.set", "params": {"track": "A1", "volume_db": -6.0}}));
+        f.ok(json!({"method": "clip.set", "params": {"clips": ["c1"], "gain_db": 6.0}}));
+        let (plan, lanes) = crate::render::flatten_lanes(f.editor.project(), 0, 100).unwrap();
+        let tracks: Vec<_> = lanes
+            .iter()
+            .map(|l| (l.track.as_str(), l.volume_db))
+            .collect();
+        assert_eq!(tracks, [("V1", 0.0), ("A1", -6.0)]);
+        let control = FaderControl {
+            lanes: &lanes,
+            bind: "ipc:///run/v/mix-1",
+        };
+        assert_eq!(
+            audio_graph(&plan, Some(control)).unwrap(),
+            "[aid1]volume=1.995262,volume@fader_V1=1.000000[g1];\
+             [aid2]volume@fader_A1=0.501187[g2];\
+             [g1][g2]amix=inputs=2:normalize=0[mix];\
+             [mix]azmq=bind_address=ipc\\\\:///run/v/mix-1[ao]"
+        );
+        // One track, no gain: still a graph, for the commands.
+        f.ok(json!({"method": "track.set", "params": {"track": "A1", "muted": true}}));
+        f.ok(json!({"method": "clip.set", "params": {"clips": ["c1"], "gain_db": 0.0}}));
+        let (plan, lanes) = crate::render::flatten_lanes(f.editor.project(), 0, 100).unwrap();
+        let control = FaderControl {
+            lanes: &lanes,
+            bind: "ipc:///run/v/mix-2",
+        };
+        assert_eq!(
+            audio_graph(&plan, Some(control)).unwrap(),
+            "[aid1]volume@fader_V1=1.000000,azmq=bind_address=ipc\\\\:///run/v/mix-2[ao]"
+        );
+        assert_eq!(lavfi_value("a:b'c[d]"), "a\\\\:b\\\\\\'c\\[d\\]");
     }
 
     /// The expressions [`gain_at`] makes: `if(lt(t,X),A,B)` and numbers.
@@ -458,7 +559,7 @@ mod tests {
             source(sec, 6.0),
             AudioPiece::Silence { samples: sec },
         ];
-        let graph = audio_graph(&lane_plan(lane)).unwrap();
+        let graph = audio_graph(&lane_plan(lane), None).unwrap();
         assert_eq!(
             graph,
             "[aid1]volume=volume='if(lt(t,4.500000),0.501187,1.995262)':eval=frame[ao]"
@@ -483,16 +584,19 @@ mod tests {
 
         // One gain is a constant, including over the leading silence.
         assert_eq!(
-            audio_graph(&lane_plan(vec![
-                AudioPiece::Silence { samples: sec },
-                source(sec, -6.0),
-            ]))
+            audio_graph(
+                &lane_plan(vec![
+                    AudioPiece::Silence { samples: sec },
+                    source(sec, -6.0),
+                ]),
+                None
+            )
             .unwrap(),
             "[aid1]volume=0.501187[ao]"
         );
         // Silence alone needs no graph.
         assert_eq!(
-            audio_graph(&lane_plan(vec![AudioPiece::Silence { samples: sec }])),
+            audio_graph(&lane_plan(vec![AudioPiece::Silence { samples: sec }]), None),
             None
         );
     }

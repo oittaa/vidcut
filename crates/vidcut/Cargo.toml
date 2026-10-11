@@ -23,6 +23,7 @@ raw-window-handle.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 libc.workspace = true
+libloading.workspace = true
 notify.workspace = true
 rfd.workspace = true
 shlex.workspace = true

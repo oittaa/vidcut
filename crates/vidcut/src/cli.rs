@@ -380,6 +380,16 @@ pub enum Command {
     },
     /// Mute what the GUI's viewer plays (on, off; default: toggle).
     Mute { state: Option<String> },
+    /// Hear a track's fader at a level in the GUI's timeline preview now,
+    /// without changing the project, as the Mixer's fader while dragged;
+    /// `track set --volume` keeps a level.
+    #[command(after_help = "Example:\n  vidcut fader A1 -12")]
+    Fader {
+        track: String,
+        /// The level in dB.
+        #[arg(allow_hyphen_values = true)]
+        volume_db: f64,
+    },
     /// Open a window in the GUI: quick-export, export, jobs, log or mixer.
     Show { panel: String },
 }
@@ -1692,6 +1702,10 @@ impl Cli {
                     json!({ "bin": bin, "sort": sort, "descending": order }),
                 )?
             }
+            Command::Fader { track, volume_db } => req(
+                "mixer.preview",
+                json!({ "track": track, "volume_db": volume_db }),
+            )?,
             Command::Mute { state } => {
                 let mute = match state.as_deref() {
                     None => Value::Null,

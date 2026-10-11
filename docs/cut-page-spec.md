@@ -311,7 +311,7 @@ Hover the lower audio part of a clip at an edit until the cursor shows a note, t
 ## 9. Audio (pp. 642, 649–650, 743, 771, 773)
 
 - **Meter (v1):** green is safe, yellow is near the limit, red risks clipping.
-- **Mixer (M6)** (pp. 649–650): the Mixer button opens a channel strip per track with sound: name, meter, fader (dB) and mute/solo, plus the mix's meter. Solo silences the tracks that aren't soloed, and mute/solo apply to export too (p. 650). Track pan and FX are out of scope.
+- **Mixer (M6)** (pp. 649–650): the Mixer button opens a channel strip per track with sound: name, meter, fader (dB) and mute/solo, plus the mix's meter. Solo silences the tracks that aren't soloed, and mute/solo apply to export too (p. 650). A fader is heard as it is dragged (`mixer.preview`, preview.md §10) and saved when it is let go, as one `track.set`. Track pan and FX are out of scope.
 - **Viewer meter and monitoring mute (M6)** (p. 642): a meter beside the viewer shows what it plays. Its speaker button mutes playback only, not the export.
 - **Clip volume (v1):** one gain value per clip, and clip mute.
 - **Ripple Delete Silence (M7)** (p. 773): select clips, then Clip > Audio Operations > Ripple Delete Silence (vidcut: the clip's right-click menu or Timeline Actions).

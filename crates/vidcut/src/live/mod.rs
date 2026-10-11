@@ -14,6 +14,7 @@
 //! encoder) reply later, without blocking other requests.
 
 mod jobs;
+mod mixctl;
 mod player;
 mod project;
 pub mod snapshot;
@@ -434,6 +435,9 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         job_cancels: HashMap::new(),
         job_replies: HashMap::new(),
         next_job: 1,
+        mixer: mixctl::Mixer::start(),
+        mix_endpoint: None,
+        mix_loads: 0,
         waits: Vec::new(),
         next_capture: 1,
         timeline_due: None,
@@ -671,6 +675,12 @@ struct Live {
     /// Requests answered when their job is planned (`background`) or done.
     job_replies: HashMap<String, (Job, bool)>,
     next_job: u64,
+    /// Live track faders (preview.md §10), when this system has them; the
+    /// control address of the timeline's audio graph as last loaded, and
+    /// how many graphs were loaded.
+    mixer: Option<mixctl::Mixer>,
+    mix_endpoint: Option<String>,
+    mix_loads: u64,
     waits: Vec<Wait>,
     next_capture: u64,
     timeline_due: Option<Instant>,
@@ -1528,6 +1538,8 @@ impl Live {
                     | "preferences.get"
             ))
             || (job.method == "player.seek" && job.params["fast"] == json!(true))
+            // A fader's drag: the level it ends at is a track.set.
+            || (job.method == "mixer.preview" && matches!(job.origin, Origin::Gui { .. }))
             // Previews the GUI asks for (Ripple Delete Silence's stripes).
             || (matches!(job.origin, Origin::Gui { .. }) && job.dry_run);
         if !quiet {
@@ -1754,6 +1766,34 @@ impl Live {
                 self.shown(id, Some(motion))
             }
             Request::PlayerState {} => Step::Now(Ok(self.state_response())),
+            Request::MixerPreview { track, volume_db } => {
+                let (Some(mixer), Some(endpoint)) = (&self.mixer, &self.mix_endpoint) else {
+                    return Step::Now(Ok(answer(json!({ "live": false }))));
+                };
+                let filter = preview::fader_filter(&track);
+                let gain = 10f64.powf(volume_db / 20.0);
+                if job.reply.is_none() {
+                    // The GUI's drag doesn't wait for the answer.
+                    mixer.set(endpoint, filter, gain, None);
+                    return Step::Now(Ok(answer(json!({ "live": true }))));
+                }
+                // A client hears whether the filter took it; a task waits
+                // for that, so the session doesn't.
+                let (tx, rx) = std::sync::mpsc::channel();
+                mixer.set(
+                    endpoint,
+                    filter,
+                    gain,
+                    Some(Box::new(move |result| {
+                        let _ = tx.send(result);
+                    })),
+                );
+                Step::Task(Box::new(move |_| match rx.recv() {
+                    Ok(Ok(())) => Ok(answer(json!({ "live": true }))),
+                    Ok(Err(e)) => Err(Error::media(e)),
+                    Err(_) => Err(Error::internal("the mixer thread stopped")),
+                }))
+            }
             Request::PlayerMute { mute } => {
                 let mute = mute.unwrap_or(!self.players[TIMELINE].muted());
                 for p in &mut self.players {
@@ -2390,9 +2430,12 @@ impl Live {
 
     /// EDL for `plan` as `player` plays it from `position`, or `None` while
     /// fillers are being made.
+    /// `lanes`: the plan's lanes' tracks, for a timeline whose faders change
+    /// while it plays.
     fn edl(
         &mut self,
         plan: RenderPlan,
+        lanes: Option<&[render::LaneTrack]>,
         player: PlayerId,
         position: i64,
     ) -> Option<preview::Preview> {
@@ -2422,11 +2465,32 @@ impl Live {
         });
         let mut plan = plan;
         let images = self.image_lists(&mut plan);
+        // Each graph gets an address of its own: the one before may not
+        // have let go of its address yet.
+        let bind = match (lanes, &self.mixer) {
+            (Some(_), Some(_)) => {
+                self.mix_loads += 1;
+                let path = self.edl_dir.join(format!("mix-{}", self.mix_loads));
+                if let Some(old) = self.mix_endpoint.take() {
+                    let _ = std::fs::remove_file(old.trim_start_matches("ipc://"));
+                }
+                Some(format!("ipc://{}", path.display()))
+            }
+            _ => None,
+        };
+        let control = lanes
+            .zip(bind.as_deref())
+            .map(|(lanes, bind)| preview::FaderControl { lanes, bind });
+        let built = preview::build(&plan, &fillers, control);
+        // No graph, nothing to control (a timeline without sound).
+        self.mix_endpoint = bind
+            .filter(|_| built.audio_graph.is_some())
+            .or(self.mix_endpoint.take());
         Some(preview::Preview {
             read_ahead,
             deinterlace,
             images,
-            ..preview::build(&plan, &fillers)
+            ..built
         })
     }
 
@@ -2572,8 +2636,8 @@ impl Live {
             self.players[TIMELINE].unload();
             return None;
         }
-        let plan = match render::flatten(&p, 0, end) {
-            Ok(plan) => plan,
+        let (plan, lanes) = match render::flatten_lanes(&p, 0, end) {
+            Ok(planned) => planned,
             Err(e) => {
                 self.notice(format!("timeline preview: {}", e.message), true);
                 return None;
@@ -2583,7 +2647,7 @@ impl Live {
             Some(frame) => frame,
             None => self.preview_frame(PlayerId::Timeline, self.players[TIMELINE].position),
         };
-        let edl = self.edl(plan, PlayerId::Timeline, position)?;
+        let edl = self.edl(plan, Some(&lanes), PlayerId::Timeline, position)?;
         self.timeline_loaded_at = Some(Instant::now());
         self.players[TIMELINE].load(edl, end, p.settings.fps, position)
     }
@@ -2635,7 +2699,7 @@ impl Live {
             }
         };
         let frames = plan.frames;
-        let edl = self.edl(plan, PlayerId::Source, position)?;
+        let edl = self.edl(plan, None, PlayerId::Source, position)?;
         self.source_content = Some(want);
         self.players[SOURCE].load(edl, frames, p.settings.fps, position)
     }

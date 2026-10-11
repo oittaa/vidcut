@@ -196,7 +196,17 @@ impl Workspace {
                 mix: Vec::new(),
             };
         };
-        timeline_meters(p, self.snap.timeline.position, &self.snap.waveforms)
+        // A fader being dragged is heard at its new level; so it shows.
+        if self.mixer.dragging.is_empty() {
+            return timeline_meters(p, self.snap.timeline.position, &self.snap.waveforms);
+        }
+        let mut p = p.clone();
+        for t in &mut p.tracks {
+            if let Some(v) = self.mixer.dragging.get(&t.id) {
+                t.volume_db = *v;
+            }
+        }
+        timeline_meters(&p, self.snap.timeline.position, &self.snap.waveforms)
     }
 
     /// The channels the viewer plays: the monitored mix in Timeline mode,
@@ -320,7 +330,8 @@ impl Workspace {
             let held = self.hold_channels(&t.id, level);
             ui.horizontal(|ui| {
                 self.channel_bars(ui, level, &held, height - 90.0, "track meter");
-                // The fader: dB, sent when it is let go.
+                // The fader: heard at once while dragged (`mixer.preview`),
+                // kept when it is let go (one `track.set`).
                 let mut value = self
                     .mixer
                     .dragging
@@ -341,6 +352,12 @@ impl Workspace {
                     self.mixer.dragging.remove(&t.id);
                     self.send("track.set", json!({ "track": t.id, "volume_db": 0.0 }));
                 } else if r.dragged() || r.changed() {
+                    if r.dragged() && self.mixer.dragging.get(&t.id) != Some(&value) {
+                        self.send(
+                            "mixer.preview",
+                            json!({ "track": t.id, "volume_db": value }),
+                        );
+                    }
                     self.mixer.dragging.insert(t.id.clone(), value);
                 }
                 if (r.drag_stopped() || (r.changed() && !r.dragged()))

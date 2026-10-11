@@ -23,6 +23,13 @@ pub mod waveform;
 
 pub use error::{Error, Result};
 
+/// Whether this FFmpeg has the filter `name` (builds differ: `azmq` needs
+/// ZeroMQ, `zscale` the zimg library).
+pub fn has_filter(name: &str) -> bool {
+    init();
+    ffmpeg::filter::find(name).is_some()
+}
+
 /// Initializes FFmpeg once per process. FFmpeg's own log output is limited to
 /// fatal messages: decoders recovering after a seek log harmless errors, and
 /// real failures surface as vidcut errors anyway. Set `VIDCUT_AV_LOG` to an

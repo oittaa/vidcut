@@ -178,6 +178,13 @@ Found with eframe 0.35 in M0 and unchanged with 0.36: `tests/gui.rs` (`--feature
 - Each lane is a `!new_stream` group, pinned by its trailing `layout=this` silence entry (§4).
 - mpv plays one audio track at a time, so a file with several lanes is loaded with a `lavfi-complex` graph (`preview::audio_graph`), passed as a per-file `loadfile` option with `%len%` quoting: `[aid1][aid2]amix=inputs=2:normalize=0[ao]`. `normalize=0` sums the lanes the way export does.
 - **Gains:** clip gain plus the track fader. A lane with one gain gets `volume=<linear>`. A lane whose gain changes from clip to clip gets `volume=volume='if(lt(t,s),A,B)':eval=frame`, where `t` is timeline time: a binary search over the starts of its gain spans, so the expression nests only log₂(n) deep. FFmpeg's expression parser refuses some 100 nested levels; one `if` per change, as first written, failed past a few dozen and fell back to one gain. A span reaches over silence to the next clip with the same gain. `tests/preview_gains.rs` runs 2000 changes through the real filter. A single lane at 0 dB needs no graph.
+- **Live faders:** a fader being dragged is heard at once, without reloading the timeline (a reload is a short hiccup):
+  - With FFmpeg's `azmq` filter (built with ZeroMQ) and `libzmq.so.5` loadable, the timeline's graph keeps each lane's fader apart from its clip gains, as a filter of its own named for the track (`volume@fader_V2`), and ends in `azmq=bind_address=ipc\\:///…/mix-N`. `render::flatten_lanes` says which track each lane is.
+  - The address needs two levels of escaping, the filter's options and then the graph (`preview::lavfi_value`): with one, `azmq` fails to load, and so does the graph and its sound. `tests/preview_gains.rs` binds it in real FFmpeg.
+  - Every load gets a new address (`mix-1`, `mix-2`, …): mpv may build the new graph before it frees the old one's address.
+  - `mixer.preview` (the Mixer's fader while dragged, `vidcut fader`) sends `volume@fader_A1 volume <linear>` from a thread of its own (`live/mixctl.rs`), which loads libzmq at run time as libmpv is loaded, keeps only each fader's latest level, and waits at most 0.5 s for the answer. `azmq` reads commands as sound passes through it, so while paused a command waits for playback; nothing is heard then anyway, and releasing the fader saves the level with `track.set`, which reloads the timeline with it.
+  - Without ZeroMQ or `azmq`, the graph is as before and `mixer.preview` answers `live: false`; the fader is heard when released.
+  - `tests/live.rs` sends a level to the running player's graph and gets the filter's answer.
 - **Monitoring mute** (`player.mute`, the speaker by the viewer) mutes both players. It changes neither the project nor the export.
 
 **Verified:**
