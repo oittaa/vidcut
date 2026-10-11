@@ -23,12 +23,23 @@ pub(crate) fn frame_ref(src: &frame::Video) -> frame::Video {
     dst
 }
 
-/// Scales (keeping the display aspect, honoring the sample aspect ratio),
-/// pads to the output size, and converts to the output pixel format.
-struct Normalizer {
+/// Turns pictures upright (the stream's rotation), scales them keeping the
+/// display aspect (honoring the sample aspect ratio), pads to the output
+/// size, and converts to the output pixel format.
+pub(crate) struct Normalizer {
     graph: filter::Graph,
-    /// Input parameters the graph was built for.
-    input: (u32, u32, format::Pixel, (i32, i32)),
+    /// Input parameters the graph was built for, and the rotation.
+    input: (u32, u32, format::Pixel, (i32, i32), u16),
+}
+
+/// The filters that turn a picture stored with clockwise `rotation` upright.
+fn upright(rotation: u16) -> &'static str {
+    match rotation {
+        90 => "transpose=clock,",
+        180 => "hflip,vflip,",
+        270 => "transpose=cclock,",
+        _ => "",
+    }
 }
 
 /// The scaled size of a `w`×`h` picture with sample aspect `sar` fitted inside
@@ -49,11 +60,22 @@ pub(crate) fn fit(w: u32, h: u32, sar: (i32, i32), out_w: u32, out_h: u32) -> (u
 }
 
 impl Normalizer {
-    fn new(src: &frame::Video, out_w: u32, out_h: u32, out_fmt: format::Pixel) -> Result<Self> {
+    pub(crate) fn new(
+        src: &frame::Video,
+        rotation: u16,
+        out_w: u32,
+        out_h: u32,
+        out_fmt: format::Pixel,
+    ) -> Result<Self> {
         let (w, h, fmt) = (src.width(), src.height(), src.format());
         let sar = src.aspect_ratio();
         let sar = (sar.numerator(), sar.denominator());
-        let (sw, sh) = fit(w, h, sar, out_w, out_h);
+        // Fitted as shown: a quarter turn swaps the sides and the pixel aspect.
+        let (sw, sh) = if rotation % 180 == 90 {
+            fit(h, w, (sar.1, sar.0), out_w, out_h)
+        } else {
+            fit(w, h, sar, out_w, out_h)
+        };
         let fmt_name = |p: format::Pixel| {
             p.descriptor()
                 .map(|d| d.name().to_string())
@@ -82,7 +104,8 @@ impl Normalizer {
             )
             .ctx(|| "creating video sink".into())?;
         let spec = format!(
-            "scale={sw}:{sh}:flags=bicubic,pad={out_w}:{out_h}:{}:{}:color=black,setsar=1,format={}",
+            "{}scale={sw}:{sh}:flags=bicubic,pad={out_w}:{out_h}:{}:{}:color=black,setsar=1,format={}",
+            upright(rotation),
             (out_w - sw) / 2,
             (out_h - sh) / 2,
             fmt_name(out_fmt)
@@ -97,11 +120,11 @@ impl Normalizer {
             .ctx(|| format!("configuring filter {spec}"))?;
         Ok(Self {
             graph,
-            input: (w, h, fmt, sar),
+            input: (w, h, fmt, sar, rotation),
         })
     }
 
-    fn matches(&self, src: &frame::Video) -> bool {
+    pub(crate) fn matches(&self, src: &frame::Video, rotation: u16) -> bool {
         let sar = src.aspect_ratio();
         self.input
             == (
@@ -109,10 +132,11 @@ impl Normalizer {
                 src.height(),
                 src.format(),
                 (sar.numerator(), sar.denominator()),
+                rotation,
             )
     }
 
-    fn run(&mut self, src: &frame::Video) -> Result<frame::Video> {
+    pub(crate) fn run(&mut self, src: &frame::Video) -> Result<frame::Video> {
         let mut input = frame_ref(src);
         input.set_pts(Some(0));
         self.graph
@@ -369,9 +393,13 @@ impl VideoFrames {
         let changed = src.advance(target)?;
         if changed || src.normalized.is_none() {
             let (frame, _) = src.current.as_ref().expect("have a frame");
-            let rebuild = self.normalizer.as_ref().is_none_or(|n| !n.matches(frame));
+            let rotation = src.reader.rotation();
+            let rebuild = self
+                .normalizer
+                .as_ref()
+                .is_none_or(|n| !n.matches(frame, rotation));
             if rebuild {
-                self.normalizer = Some(Normalizer::new(frame, out_w, out_h, out_fmt)?);
+                self.normalizer = Some(Normalizer::new(frame, rotation, out_w, out_h, out_fmt)?);
             }
             src.normalized = Some(self.normalizer.as_mut().expect("built").run(frame)?);
         }

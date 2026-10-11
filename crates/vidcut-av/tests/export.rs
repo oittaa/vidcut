@@ -335,6 +335,49 @@ fn pieces_of_one_file_read_on_seek_back_and_open_ahead() {
 }
 
 #[test]
+fn rotated_sources_export_upright() {
+    // Phone video stores pictures sideways with a rotation in the display
+    // matrix. The fixtures store the barcode turned against it, so it reads
+    // only where the rotation is applied.
+    let fps = Rational::new(30, 1).unwrap();
+    let mut pieces = Vec::new();
+    let mut want: Vec<Option<u32>> = Vec::new();
+    for (i, rotation) in [90u16, 180, 270].into_iter().enumerate() {
+        let spec = FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 60)
+            .rotation(rotation)
+            .no_audio();
+        let s = src(spec.clone());
+        let info = vidcut_av::probe::probe(&s.path).unwrap().video.unwrap();
+        assert_eq!(info.rotation, rotation, "probed rotation");
+        assert_eq!((info.width, info.height), spec.coded_size(), "stored size");
+        let from = 10 * i as i64;
+        pieces.push(v(&s, from, 20));
+        want.extend((from..from + 20).map(|f| Some(f as u32)));
+        // Pool thumbnails show upright too, at the shown aspect.
+        let (images, _) = vidcut_av::thumbs::filmstrip(&s.path, 4, 192, 108).unwrap();
+        for img in &images {
+            assert_eq!((img.width, img.height), (192, 108), "rotation {rotation}");
+            let w = img.width as usize;
+            let code =
+                vidcut_av::barcode::read_packed(&img.rgba, w, img.height as usize, w * 4, 4, 1);
+            assert!(code.is_some(), "rotation {rotation}: thumbnail not upright");
+        }
+    }
+    let p = plan(fps, 320, 180, pieces, vec![]);
+    let out = out_dir("rotated").join("out.mkv");
+    render(&p, &lossless(), &out);
+    let codes = barcodes(&out);
+    let bad: Vec<_> = codes
+        .iter()
+        .zip(&want)
+        .enumerate()
+        .filter(|(_, (g, w))| g != w)
+        .collect();
+    assert_eq!(codes.len(), want.len());
+    assert!(bad.is_empty(), "frames differing from the plan: {bad:?}");
+}
+
+#[test]
 fn other_rates_are_resampled_by_nearest_frame() {
     // A 25 fps source on a 30 fps timeline: 5 source frames per 6 output frames.
     let fps = Rational::new(30, 1).unwrap();

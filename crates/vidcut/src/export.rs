@@ -550,11 +550,6 @@ pub fn frame(
                     "frame {t} is outside {id} (0..{frames})"
                 )));
             }
-            let sar = if v.sar[0] > 0 && v.sar[1] > 0 {
-                f64::from(v.sar[0]) / f64::from(v.sar[1])
-            } else {
-                1.0
-            };
             let piece = VideoPiece::Source {
                 media: id.into(),
                 path: m.path.clone(),
@@ -562,14 +557,7 @@ pub fn frame(
                 source_frame: t,
                 frames: 1,
             };
-            (
-                piece,
-                (
-                    ((f64::from(v.width) * sar).round() as u32) & !1,
-                    v.height & !1,
-                ),
-                t,
-            )
+            (piece, v.display_size(), t)
         }
     };
     let (w, h) = match width {

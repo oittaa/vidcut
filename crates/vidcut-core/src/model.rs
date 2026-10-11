@@ -120,6 +120,50 @@ pub struct VideoInfo {
     pub first_pts: f64,
     /// Seconds from the first frame's start to the last frame's end.
     pub duration: f64,
+    /// Clockwise rotation (0, 90, 180 or 270) that shows the stored pictures
+    /// upright: phones store portrait video sideways with this.
+    pub rotation: u16,
+    /// For interlaced video, the field shown first; `None` when progressive.
+    pub fields: Option<FieldOrder>,
+    /// The HDR transfer; `None` for SDR video.
+    pub hdr: Option<Hdr>,
+}
+
+impl VideoInfo {
+    /// The picture size as shown: square pixels (the sample aspect ratio
+    /// applied to the width), rotated, even.
+    pub fn display_size(&self) -> (u32, u32) {
+        let sar = if self.sar[0] > 0 && self.sar[1] > 0 {
+            f64::from(self.sar[0]) / f64::from(self.sar[1])
+        } else {
+            1.0
+        };
+        let w = ((f64::from(self.width) * sar).round() as u32).max(2) & !1;
+        let h = self.height.max(2) & !1;
+        if self.rotation % 180 == 90 {
+            (h, w)
+        } else {
+            (w, h)
+        }
+    }
+}
+
+/// Which field of an interlaced frame is shown first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FieldOrder {
+    Top,
+    Bottom,
+}
+
+/// High dynamic range transfer functions (ITU-R BT.2100).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Hdr {
+    /// Perceptual quantizer (SMPTE ST 2084): HDR10, Dolby Vision.
+    Pq,
+    /// Hybrid log-gamma (ARIB STD-B67): broadcast and phone HDR.
+    Hlg,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

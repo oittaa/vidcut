@@ -810,6 +810,9 @@ mod tests {
                     vfr: false,
                     first_pts: 0.0,
                     duration: frames as f64 / 25.0,
+                    rotation: 0,
+                    fields: None,
+                    hdr: None,
                 }),
                 audio: vec![AudioInfo {
                     index: 0,

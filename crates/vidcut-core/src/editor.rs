@@ -941,15 +941,10 @@ fn add_media(p: &mut Project, probed: ProbedMedia) -> String {
     id
 }
 
-/// Takes the frame size of `v` (square pixels, even) and fixes the format.
+/// Takes the picture size of `v` as shown (square pixels, rotated, even)
+/// and fixes the format.
 fn adopt_size(p: &mut Project, v: &VideoInfo) {
-    let sar = if v.sar[0] > 0 && v.sar[1] > 0 {
-        f64::from(v.sar[0]) / f64::from(v.sar[1])
-    } else {
-        1.0
-    };
-    p.settings.width = ((f64::from(v.width) * sar).round() as u32).max(2) & !1;
-    p.settings.height = v.height & !1;
+    (p.settings.width, p.settings.height) = v.display_size();
     p.settings.auto_format = false;
 }
 
@@ -1661,7 +1656,11 @@ fn media_json(p: &Project, m: &Media) -> Value {
         "path": m.path,
         "frames": frames,
         "duration_tc": format_timecode(frames, p.settings.fps, 0),
-        "video": m.info.video.as_ref().map(|v| json!({ "width": v.width, "height": v.height, "fps": v.fps.to_string(), "codec": v.codec })),
+        "video": m.info.video.as_ref().map(|v| {
+            let (width, height) = v.display_size();
+            json!({ "width": width, "height": height, "fps": v.fps.to_string(), "codec": v.codec,
+                    "rotation": v.rotation, "fields": v.fields, "hdr": v.hdr })
+        }),
         "audio_streams": m.info.audio.len(),
     });
     if !m.marks.is_empty() {

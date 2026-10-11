@@ -556,7 +556,8 @@ impl Workspace {
                     ui.label(self.src_tc(frames));
                     match &m.info.video {
                         Some(v) => {
-                            ui.label(format!("{}x{}", v.width, v.height));
+                            let (w, h) = v.display_size();
+                            ui.label(format!("{w}x{h}"));
                             ui.label(v.fps.to_string());
                             ui.label(&v.codec);
                         }

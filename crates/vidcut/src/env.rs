@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use vidcut_core::analysis::{AudioLevels, Loudness, PictureStats};
-use vidcut_core::model::{AudioInfo, Media, MediaInfo, VideoInfo};
+use vidcut_core::model::{AudioInfo, FieldOrder, Hdr, Media, MediaInfo, VideoInfo};
 use vidcut_core::render::RenderPlan;
 use vidcut_core::time::Rational;
 use vidcut_core::{Env, Error, ProbedMedia, Result};
@@ -166,6 +166,19 @@ fn convert(info: &vidcut_av::probe::MediaInfo) -> Result<MediaInfo> {
                 vfr: matches!((r, avg), (Some(r), Some(avg)) if r > avg * 1.05),
                 first_pts: v.first_frame_time.unwrap_or(0.0),
                 duration: v.duration_secs.or(info.duration).unwrap_or(0.0).max(0.0),
+                rotation: v.rotation,
+                fields: v.top_field_first.map(|top| {
+                    if top {
+                        FieldOrder::Top
+                    } else {
+                        FieldOrder::Bottom
+                    }
+                }),
+                hdr: match v.transfer.as_str() {
+                    "smpte2084" => Some(Hdr::Pq),
+                    "arib-std-b67" => Some(Hdr::Hlg),
+                    _ => None,
+                },
             })
         }
         None => None,

@@ -54,6 +54,14 @@ pub struct VideoStreamInfo {
     pub first_frame_time: Option<f64>,
     /// Seconds from the first frame to the end of the stream.
     pub duration_secs: Option<f64>,
+    /// Clockwise rotation (0, 90, 180 or 270) that shows the pictures upright.
+    pub rotation: u16,
+    /// Interlaced, with the top field shown first (`Some(true)`) or the
+    /// bottom one; `None` when progressive.
+    pub top_field_first: Option<bool>,
+    /// Transfer characteristic, FFmpeg's name: `bt709`, `smpte2084` (PQ),
+    /// `arib-std-b67` (HLG), `unknown`, ….
+    pub transfer: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -124,10 +132,33 @@ pub fn probe(path: &Path) -> Result<MediaInfo> {
                 let secs =
                     |t: i64| t as f64 * f64::from(tb.numerator()) / f64::from(tb.denominator());
                 let start = opt_ts(stream.start_time()).map(secs);
-                let first_frame_time = crate::decode::VideoReader::open(path)
-                    .ok()
-                    .and_then(|r| r.first_pts())
-                    .map(secs);
+                let reader = crate::decode::VideoReader::open(path).ok();
+                let first_frame_time = reader.as_ref().and_then(|r| r.first_pts()).map(secs);
+                let first = reader.as_ref().and_then(|r| r.first_props());
+                // Field order: the stream's, else the first frame's flags.
+                use ffmpeg::ffi::AVFieldOrder as F;
+                let top_field_first = match raw.field_order {
+                    F::AV_FIELD_TT | F::AV_FIELD_BT => Some(true),
+                    F::AV_FIELD_BB | F::AV_FIELD_TB => Some(false),
+                    _ => first.and_then(|f| f.top_field_first),
+                };
+                // Transfer: the stream's, else the first frame's.
+                let transfer = match raw.color_trc {
+                    ffmpeg::ffi::AVColorTransferCharacteristic::AVCOL_TRC_UNSPECIFIED => {
+                        first.map_or(raw.color_trc, |f| f.transfer)
+                    }
+                    t => t,
+                };
+                let transfer = unsafe {
+                    let name = ffmpeg::ffi::av_color_transfer_name(transfer);
+                    if name.is_null() {
+                        "unknown".to_string()
+                    } else {
+                        std::ffi::CStr::from_ptr(name)
+                            .to_string_lossy()
+                            .into_owned()
+                    }
+                };
                 // Duration from the first frame: the stream's end (start + its
                 // duration) minus the first frame's time; else the container's.
                 let end = match (start, stream_duration(&stream)) {
@@ -158,6 +189,9 @@ pub fn probe(path: &Path) -> Result<MediaInfo> {
                     duration_pts: opt_ts(stream.duration()).filter(|d| *d > 0),
                     first_frame_time,
                     duration_secs,
+                    rotation: crate::decode::stream_rotation(&params),
+                    top_field_first,
+                    transfer,
                 });
             }
             media::Type::Audio => {

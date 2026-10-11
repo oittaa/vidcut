@@ -60,8 +60,8 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
 
 - Each source frame goes through a libavfilter graph: `scale` (fit inside the output keeping the display aspect, honoring the sample aspect ratio), `pad` (black, centered), `setsar=1`, `format=<encoder pixel format>`.
 - The fit is computed in Rust (`export::video::fit`, unit-tested).
+- **Rotation** (spec D33): a stream's display matrix (phones store portrait video sideways with one) turns the picture upright first: `transpose=clock` or `cclock`, or `hflip,vflip` for 180°. The fit then uses the shown aspect. Thumbnails turn their pictures the same way.
 - **Not yet handled:**
-  - Rotation metadata (phone video): needs transpose filters.
   - Interlaced sources: need deinterlacing (`bwdif`).
   - HDR: needs tone mapping or passthrough decisions.
 

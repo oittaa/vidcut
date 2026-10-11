@@ -194,6 +194,10 @@ pub struct FixtureSpec {
     pub video_enabled: bool,
     pub picture: Picture,
     pub sound: Sound,
+    /// Clockwise rotation in the stream's display matrix (MP4 and MOV). The
+    /// pictures are stored turned the other way, so they show upright only
+    /// when a player applies it; `width`×`height` is the upright size.
+    pub rotation: u16,
 }
 
 /// VFR frame durations in quarter-frame ticks (average 4 = one nominal frame).
@@ -242,6 +246,23 @@ impl FixtureSpec {
             video_enabled: true,
             picture: Picture::Barcode,
             sound: Sound::Beep,
+            rotation: 0,
+        }
+    }
+
+    /// Stores the pictures turned against `degrees` (clockwise: 90, 180 or
+    /// 270) with that rotation in the display matrix, like phone video.
+    pub fn rotation(mut self, degrees: u16) -> Self {
+        self.rotation = degrees;
+        self
+    }
+
+    /// The stored (coded) picture size.
+    pub fn coded_size(&self) -> (u32, u32) {
+        if self.rotation % 180 == 90 {
+            (self.height, self.width)
+        } else {
+            (self.width, self.height)
         }
     }
 
@@ -317,8 +338,12 @@ impl FixtureSpec {
             (true, Picture::Black) => "black".to_string(),
             (true, Picture::Shots { frames }) => format!("shots{frames}-"),
         };
+        let rot = match self.rotation {
+            0 => String::new(),
+            r => format!("r{r}"),
+        };
         format!(
-            "{content}{v}_{codec}_{w}x{h}_{n}-{d}{vfr}_g{g}b{b}_{f}f_{audio}_o{o}.{ext}",
+            "{content}{v}_{codec}_{w}x{h}{rot}_{n}-{d}{vfr}_g{g}b{b}_{f}f_{audio}_o{o}.{ext}",
             v = GENERATOR_VERSION,
             codec = self.video.tag(),
             w = self.width,
@@ -407,6 +432,12 @@ pub fn generate(spec: &FixtureSpec, path: &Path) -> Result<()> {
     if !spec.video_enabled && spec.audio.is_none() {
         return Err(Error::Invalid("fixture needs video or audio".into()));
     }
+    if !spec.rotation.is_multiple_of(90) || spec.rotation >= 360 {
+        return Err(Error::Invalid("rotation must be 0, 90, 180 or 270".into()));
+    }
+    if spec.rotation != 0 && !matches!(spec.container, Container::Mp4 | Container::Mov) {
+        return Err(Error::Invalid("rotation needs MP4 or MOV".into()));
+    }
     let mut octx = format::output_as(path, spec.container.muxer())
         .ctx(|| format!("creating {}", path.display()))?;
     let global_header = octx.format().flags().contains(format::Flags::GLOBAL_HEADER);
@@ -463,7 +494,9 @@ struct VideoTrack {
     enc_tb: ffmpeg::Rational,
     stream_tb: ffmpeg::Rational,
     offset: i64,
+    /// The upright picture, and the same turned for storage.
     luma8: Vec<u8>,
+    stored: Vec<u8>,
     /// Duration of each submitted frame by pts. Delayed encoders (x264 with
     /// B-frames) don't reliably carry frame durations onto packets; without them
     /// the MP4 muxer gives the last sample duration 0 and its edit list drops it.
@@ -487,8 +520,9 @@ impl VideoTrack {
             .video()
             .ctx(|| "creating video encoder".into())?;
         let tb = spec.video_time_base();
-        enc.set_width(spec.width);
-        enc.set_height(spec.height);
+        let (coded_w, coded_h) = spec.coded_size();
+        enc.set_width(coded_w);
+        enc.set_height(coded_h);
         enc.set_format(spec.video.pixel());
         enc.set_time_base(tb);
         enc.set_frame_rate(Some(ffmpeg::Rational(spec.fps.0 as i32, spec.fps.1 as i32)));
@@ -529,6 +563,27 @@ impl VideoTrack {
             .ctx(|| format!("opening {name}"))?;
         ost.set_parameters(&encoder);
         ost.set_time_base(tb);
+        if spec.rotation != 0 {
+            unsafe {
+                let par = &mut *(*ost.as_mut_ptr()).codecpar;
+                let sd = ffmpeg::ffi::av_packet_side_data_new(
+                    &mut par.coded_side_data,
+                    &mut par.nb_coded_side_data,
+                    ffmpeg::ffi::AVPacketSideDataType::AV_PKT_DATA_DISPLAYMATRIX,
+                    9 * 4,
+                    0,
+                );
+                if sd.is_null() {
+                    return Err(Error::Invalid("no memory for the display matrix".into()));
+                }
+                // Setting takes the clockwise angle (reading gives the
+                // counterclockwise one).
+                ffmpeg::ffi::av_display_rotation_set(
+                    (*sd).data as *mut i32,
+                    f64::from(spec.rotation),
+                );
+            }
+        }
         let offset = i64::from(spec.start_offset_ms) * i64::from(tb.denominator())
             / (1000 * i64::from(tb.numerator()));
         Ok(Self {
@@ -537,6 +592,7 @@ impl VideoTrack {
             stream_tb: tb,
             offset,
             luma8: vec![0; (spec.width * spec.height) as usize],
+            stored: vec![0; (spec.width * spec.height) as usize],
             durations: std::collections::HashMap::new(),
         })
     }
@@ -549,7 +605,8 @@ impl VideoTrack {
     ) -> Result<()> {
         let (w, h) = (spec.width as usize, spec.height as usize);
         let pixel = spec.video.pixel();
-        let mut frame = frame::Video::new(pixel, spec.width, spec.height);
+        let (coded_w, coded_h) = spec.coded_size();
+        let mut frame = frame::Video::new(pixel, coded_w, coded_h);
         match spec.picture {
             Picture::Barcode => crate::barcode::paint(k, &mut self.luma8, w, h, w),
             Picture::Black => self.luma8.fill(16),
@@ -566,6 +623,21 @@ impl VideoTrack {
                 }
             }
         }
+        // Store the picture turned against the rotation the display matrix
+        // applies: stored (sx, sy) shows at upright (x, y).
+        let (cw, ch) = (coded_w as usize, coded_h as usize);
+        for sy in 0..ch {
+            for sx in 0..cw {
+                let (x, y) = match spec.rotation {
+                    90 => (w - 1 - sy, sx),
+                    180 => (w - 1 - sx, h - 1 - sy),
+                    270 => (sy, h - 1 - sx),
+                    _ => (sx, sy),
+                };
+                self.stored[sy * cw + sx] = self.luma8[y * w + x];
+            }
+        }
+        let (w, h) = (cw, ch);
         let ten_bit = matches!(
             pixel,
             format::Pixel::YUV420P10LE | format::Pixel::YUV422P10LE
@@ -575,7 +647,7 @@ impl VideoTrack {
             let plane = frame.data_mut(0);
             for y in 0..h {
                 for x in 0..w {
-                    let v = u16::from(self.luma8[y * w + x]) << 2;
+                    let v = u16::from(self.stored[y * w + x]) << 2;
                     plane[y * stride + 2 * x..y * stride + 2 * x + 2]
                         .copy_from_slice(&v.to_le_bytes());
                 }
@@ -589,7 +661,7 @@ impl VideoTrack {
             let stride = frame.stride(0);
             let plane = frame.data_mut(0);
             for y in 0..h {
-                plane[y * stride..y * stride + w].copy_from_slice(&self.luma8[y * w..(y + 1) * w]);
+                plane[y * stride..y * stride + w].copy_from_slice(&self.stored[y * w..(y + 1) * w]);
             }
             for p in 1..frame.planes() {
                 frame.data_mut(p).fill(128);

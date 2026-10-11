@@ -147,9 +147,20 @@ fn gui_acceptance() {
     };
     let out = Command::new(BIN).arg("new").arg(&project).output().unwrap();
     assert!(out.status.success());
+    // A phone-style clip, stored sideways with a rotation (M8): the preview
+    // turns it upright on the GPU, like export. (mpv's software renderer,
+    // which tests/live.rs uses, aborts on rotated video.)
+    let rotated = fixture::ensure(
+        &FixtureSpec::new(VideoCodec::H264, Container::Mp4, 640, 360, (30, 1), 60)
+            .rotation(90)
+            .no_audio(),
+    )
+    .unwrap();
     headless(&["media", "add", media.to_str().unwrap()]);
+    headless(&["media", "add", rotated.to_str().unwrap()]);
     headless(&["edit", "append", "m1", "--range", "0f..90f"]);
     headless(&["edit", "append", "m1", "--range", "200f..260f"]);
+    headless(&["edit", "append", "m2", "--range", "10f..30f"]);
 
     // Evidence for a failed run, kept in `dir`.
     let stderr = std::fs::File::create(dir.join("stderr.log")).unwrap();
@@ -190,7 +201,8 @@ fn gui_acceptance() {
     std::thread::sleep(Duration::from_millis(500));
 
     // 1. Seek + screenshot shows exactly what `vidcut frame` renders.
-    for f in [0, 1, 45, 89, 90, 91, 149] {
+    // Frames 150..170 are the rotated clip.
+    for f in [0, 1, 45, 89, 90, 91, 149, 150, 155, 169] {
         gui.check_frame(f);
     }
 
@@ -210,7 +222,7 @@ fn gui_acceptance() {
     );
     let (tl, _) = gui.cli(&["timeline"]);
     let clips = tl["result"]["tracks"][0]["items"].as_array().unwrap().len();
-    assert_eq!(clips, 3, "{tl}");
+    assert_eq!(clips, 4, "{tl}");
 
     // 3. Minimized, the GUI still answers, seeks and renders frame-exactly.
     gui.cli(&["window", "--minimize"]);

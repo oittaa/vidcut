@@ -30,6 +30,9 @@ pub fn media_info(secs: f64, fps: Rational, audio: bool) -> MediaInfo {
             vfr: false,
             first_pts: 0.0,
             duration: secs,
+            rotation: 0,
+            fields: None,
+            hdr: None,
         }),
         audio: if audio {
             vec![AudioInfo {

@@ -650,6 +650,23 @@ fn first_video_sets_the_project_format() {
 }
 
 #[test]
+fn a_portrait_phone_clip_makes_a_portrait_project() {
+    // Phones store portrait video sideways with a rotation: the project takes
+    // the picture as shown.
+    let mut info =
+        crate::test_support::media_info(2.0, crate::time::Rational::new(30, 1).unwrap(), true);
+    info.video.as_mut().unwrap().rotation = 90;
+    let mut f = Fixture::new(&[]);
+    f.env = std::mem::take(&mut f.env).with("/media/phone.mp4", info);
+    let mut settings = f.editor.project().settings.clone();
+    settings.auto_format = true;
+    f.editor = crate::Editor::new(crate::Project::new(settings), Default::default());
+    f.ok(req("media.add", json!({"paths": ["/media/phone.mp4"]})));
+    let s = &f.editor.project().settings;
+    assert_eq!((s.width, s.height), (1080, 1920));
+}
+
+#[test]
 fn media_remove_needs_force_when_used() {
     let mut f = three_clips();
     f.err(req("media.remove", json!({"media": "m1"})));

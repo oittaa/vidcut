@@ -27,6 +27,53 @@ pub struct VideoReader {
     pending: Option<frame::Video>,
     /// Pts of the first decodable frame (`o` in the time map).
     first_pts: Option<i64>,
+    /// Clockwise rotation that shows the pictures upright.
+    rotation: u16,
+    /// What the first decodable frame says about fields and color.
+    first_props: Option<FrameProps>,
+}
+
+/// Facts carried by a decoded frame rather than the stream.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FrameProps {
+    /// Interlaced, with the top field shown first (`Some(true)`) or the
+    /// bottom one (`Some(false)`); `None` when progressive.
+    pub top_field_first: Option<bool>,
+    pub transfer: ffmpeg::ffi::AVColorTransferCharacteristic,
+}
+
+impl FrameProps {
+    pub fn of(frame: &frame::Video) -> Self {
+        let f = unsafe { &*frame.as_ptr() };
+        let interlaced = f.flags & ffmpeg::ffi::AV_FRAME_FLAG_INTERLACED != 0;
+        let top = f.flags & ffmpeg::ffi::AV_FRAME_FLAG_TOP_FIELD_FIRST != 0;
+        Self {
+            top_field_first: interlaced.then_some(top),
+            transfer: f.color_trc,
+        }
+    }
+}
+
+/// Clockwise rotation (0, 90, 180 or 270) that shows a stream's stored
+/// pictures upright, from its display matrix (phones write one).
+pub fn stream_rotation(params: &codec::Parameters) -> u16 {
+    unsafe {
+        let p = &*params.as_ptr();
+        let sd = ffmpeg::ffi::av_packet_side_data_get(
+            p.coded_side_data,
+            p.nb_coded_side_data,
+            ffmpeg::ffi::AVPacketSideDataType::AV_PKT_DATA_DISPLAYMATRIX,
+        );
+        if sd.is_null() || (*sd).size < 9 * 4 {
+            return 0;
+        }
+        // FFmpeg gives the counterclockwise angle.
+        let ccw = ffmpeg::ffi::av_display_rotation_get((*sd).data as *const i32);
+        if !ccw.is_finite() {
+            return 0;
+        }
+        ((-ccw).rem_euclid(360.0) / 90.0).round() as u16 % 4 * 90
+    }
 }
 
 impl VideoReader {
@@ -36,6 +83,7 @@ impl VideoReader {
         // start still returns it.
         reader.pending = reader.decode_one()?;
         reader.first_pts = reader.pending.as_ref().and_then(|f| f.pts());
+        reader.first_props = reader.pending.as_ref().map(FrameProps::of);
         Ok(reader)
     }
 
@@ -49,6 +97,7 @@ impl VideoReader {
         let index = stream.index();
         let time_base = stream.time_base();
         let start_pts = Some(stream.start_time()).filter(|&t| t != ffmpeg::ffi::AV_NOPTS_VALUE);
+        let rotation = stream_rotation(&stream.parameters());
         let mut ctx = codec::context::Context::from_parameters(stream.parameters())
             .ctx(|| "creating video decoder context".into())?;
         // The packet time base lets the decoder keep timestamps right when it
@@ -74,6 +123,8 @@ impl VideoReader {
             min_pts: None,
             pending: None,
             first_pts: None,
+            rotation,
+            first_props: None,
         })
     }
 
@@ -85,6 +136,16 @@ impl VideoReader {
     /// The file this reads.
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Clockwise rotation (0, 90, 180 or 270) that shows the pictures upright.
+    pub fn rotation(&self) -> u16 {
+        self.rotation
+    }
+
+    /// Fields and color of the first decodable frame.
+    pub fn first_props(&self) -> Option<FrameProps> {
+        self.first_props
     }
 
     /// Stream start timestamp from the container, if known.
