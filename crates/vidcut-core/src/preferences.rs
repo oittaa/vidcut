@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::{Error, Result};
+use crate::model::{Media, PROXY_LONGEST};
 
 /// Everything a person may set for vidcut as a whole. Missing keys in the
 /// file take their defaults: it is edited by hand too.
@@ -14,6 +15,7 @@ use crate::error::{Error, Result};
 #[serde(default, deny_unknown_fields)]
 pub struct Preferences {
     pub thumbnails: Thumbnails,
+    pub proxies: Proxies,
 }
 
 /// The Media Pool's thumbnails.
@@ -37,12 +39,85 @@ impl Default for Thumbnails {
     }
 }
 
+/// Playback proxies (decision D41): which media the running app makes them
+/// for by itself, and their size.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct Proxies {
+    /// While a project plays proxies, the running app makes them for the
+    /// media these rules pick: those imported, and the pool's when proxies
+    /// are turned on.
+    pub auto: bool,
+    /// Image sequences get one.
+    pub image_sequences: bool,
+    /// Videos with more pixels than this get one: `[width, height]`.
+    pub larger_than: [u32; 2],
+    /// Videos whose file averages more than this many Mb/s get one.
+    pub above_mbps: u32,
+    /// The longest side of a proxy in pixels, even, from 16 to 7680.
+    pub size: u32,
+}
+
+impl Default for Proxies {
+    fn default() -> Self {
+        Self {
+            auto: true,
+            image_sequences: true,
+            larger_than: [3840, 2160],
+            above_mbps: 150,
+            size: PROXY_LONGEST,
+        }
+    }
+}
+
+impl Proxies {
+    /// Whether the rules pick `m`: an image sequence, a video with more
+    /// pixels than `larger_than`, or a video file averaging more than
+    /// `above_mbps`. Stills and sound never.
+    pub fn wants(&self, m: &Media) -> bool {
+        let Some(v) = m.info.video.as_ref().filter(|v| !v.still) else {
+            return false;
+        };
+        if m.sequence.is_some() && self.image_sequences {
+            return true;
+        }
+        let [w, h] = self.larger_than;
+        if u64::from(v.width) * u64::from(v.height) > u64::from(w) * u64::from(h) {
+            return true;
+        }
+        let secs = m.info.duration;
+        m.sequence.is_none()
+            && secs > 0.0
+            && m.size as f64 * 8.0 / secs / 1e6 > f64::from(self.above_mbps)
+    }
+}
+
 /// Changes to the preferences: what is left out stays as it is.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PreferencesPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thumbnails: Option<ThumbnailsPatch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxies: Option<ProxiesPatch>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ProxiesPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_sequences: Option<bool>,
+    /// `[width, height]`, each at least 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub larger_than: Option<[u32; 2]>,
+    /// At least 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub above_mbps: Option<u32>,
+    /// Even, from 16 to 7680.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -96,6 +171,14 @@ impl Preferences {
                 p.thumbnails.cache_limit_mb = v;
             }
         }
+        if let Some(x) = &patch.proxies {
+            let p = &mut p.proxies;
+            p.auto = x.auto.unwrap_or(p.auto);
+            p.image_sequences = x.image_sequences.unwrap_or(p.image_sequences);
+            p.larger_than = x.larger_than.unwrap_or(p.larger_than);
+            p.above_mbps = x.above_mbps.unwrap_or(p.above_mbps);
+            p.size = x.size.unwrap_or(p.size);
+        }
         p.check()?;
         Ok(p)
     }
@@ -104,6 +187,18 @@ impl Preferences {
     pub fn check(&self) -> Result<()> {
         if self.thumbnails.cache_limit_mb == 0 {
             return Err(Error::usage("thumbnails.cache_limit_mb must be at least 1"));
+        }
+        let x = &self.proxies;
+        if x.larger_than.contains(&0) {
+            return Err(Error::usage(
+                "proxies.larger_than needs a width and height of at least 1",
+            ));
+        }
+        if x.above_mbps == 0 {
+            return Err(Error::usage("proxies.above_mbps must be at least 1"));
+        }
+        if !(16..=7680).contains(&x.size) || !x.size.is_multiple_of(2) {
+            return Err(Error::usage("proxies.size must be even, from 16 to 7680"));
         }
         Ok(())
     }
@@ -123,6 +218,7 @@ mod tests {
                     disk_cache: Some(false),
                     cache_limit_mb: None,
                 }),
+                ..Default::default()
             })
             .unwrap();
         assert!(!off.thumbnails.disk_cache);
@@ -133,8 +229,89 @@ mod tests {
                 disk_cache: None,
                 cache_limit_mb: Some(0),
             }),
+            ..Default::default()
         };
         assert_eq!(p.patched(&zero).unwrap_err().code, crate::ErrorCode::Usage);
+        // Proxies: the size must suit the encoder, the limits be positive.
+        let proxies = |x: ProxiesPatch| PreferencesPatch {
+            proxies: Some(x),
+            ..Default::default()
+        };
+        let smaller = p
+            .patched(&proxies(ProxiesPatch {
+                size: Some(540),
+                ..Default::default()
+            }))
+            .unwrap();
+        assert_eq!(
+            (smaller.proxies.size, smaller.proxies.above_mbps),
+            (540, 150)
+        );
+        for bad in [
+            ProxiesPatch {
+                size: Some(961),
+                ..Default::default()
+            },
+            ProxiesPatch {
+                size: Some(8000),
+                ..Default::default()
+            },
+            ProxiesPatch {
+                above_mbps: Some(0),
+                ..Default::default()
+            },
+            ProxiesPatch {
+                larger_than: Some([0, 1080]),
+                ..Default::default()
+            },
+        ] {
+            let e = p.patched(&proxies(bad.clone())).unwrap_err();
+            assert_eq!(e.code, crate::ErrorCode::Usage, "{bad:?}");
+        }
+    }
+
+    /// Spec D41: image sequences, very large pictures and high bitrates.
+    #[test]
+    fn the_proxy_rules_pick_heavy_media() {
+        use crate::time::Rational;
+        let fps = Rational::new(25, 1).unwrap();
+        let rules = Proxies::default();
+        // A 10 s file of `bytes` with `w`×`h` pictures.
+        let media = |w: u32, h: u32, bytes: u64| {
+            let mut info = crate::test_support::media_info(10.0, fps, true);
+            let v = info.video.as_mut().unwrap();
+            (v.width, v.height) = (w, h);
+            serde_json::from_value::<Media>(serde_json::json!({
+                "id": "m1", "path": "/media/a.mov", "name": "a.mov",
+                "size": bytes, "mtime_ns": 0, "info": info,
+            }))
+            .unwrap()
+        };
+        // 4K at 100 Mb/s (125 MB in 10 s): the GPU plays it.
+        assert!(!rules.wants(&media(3840, 2160, 125_000_000)));
+        // 8K, or 200 Mb/s at 1080p (a ProRes file, say).
+        assert!(rules.wants(&media(7680, 4320, 125_000_000)));
+        assert!(rules.wants(&media(1920, 1080, 250_000_000)));
+        // An image sequence, at any size, unless sequences are left out.
+        let mut seq = media(320, 180, 1000);
+        seq.sequence = Some(crate::model::ImageSequence {
+            pattern: "f_%04d.png".into(),
+            first: 1,
+            count: 60,
+        });
+        assert!(rules.wants(&seq));
+        let no_seq = Proxies {
+            image_sequences: false,
+            ..Proxies::default()
+        };
+        assert!(!no_seq.wants(&seq));
+        // Stills and sound never.
+        let mut still = media(7680, 4320, 125_000_000);
+        still.info.video.as_mut().unwrap().still = true;
+        assert!(!rules.wants(&still));
+        let mut sound = media(7680, 4320, 125_000_000);
+        sound.info.video = None;
+        assert!(!rules.wants(&sound));
     }
 
     #[test]

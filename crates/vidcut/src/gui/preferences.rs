@@ -16,12 +16,56 @@ pub(super) struct PreferencesUi {
     /// The latest answer (`preferences.get`'s result).
     state: Option<Value>,
     error: Option<String>,
-    /// The thumbnail cache limit as typed (MB).
+    /// The number fields as typed: the thumbnail cache limit (MB), the
+    /// proxy rules' picture size and bitrate, and the proxy size.
     limit: String,
+    larger_w: String,
+    larger_h: String,
+    mbps: String,
+    size: String,
 }
 
-/// The thumbnail cache limit's range, in MB.
-const LIMIT_MB: std::ops::RangeInclusive<u64> = 1..=1_000_000;
+/// A number typed into a field: digits only, sent on Enter or when the
+/// field loses focus.
+struct NumberField<'a> {
+    /// The label it is read by (accessibility, tests).
+    label: egui::Id,
+    /// The value in the preferences now.
+    saved: u64,
+    range: std::ops::RangeInclusive<u64>,
+    enabled: bool,
+    tip: &'a str,
+    /// Shown when the number is outside `range`.
+    refusal: &'a str,
+}
+
+impl NumberField<'_> {
+    /// The number once it is sent and differs from `saved`. A number outside
+    /// `range` is refused with `refusal`, and the field goes back to `saved`.
+    fn show(self, ui: &mut egui::Ui, text: &mut String, error: &mut Option<String>) -> Option<u64> {
+        let r = ui
+            .add_enabled(
+                self.enabled,
+                egui::TextEdit::singleline(text).desired_width(56.0),
+            )
+            .labelled_by(self.label)
+            .on_hover_text(self.tip);
+        if r.changed() {
+            text.retain(|c| c.is_ascii_digit());
+        }
+        if !r.lost_focus() {
+            return None;
+        }
+        match text.parse::<u64>() {
+            Ok(n) if self.range.contains(&n) => (n != self.saved).then_some(n),
+            _ => {
+                *error = Some(self.refusal.to_string());
+                *text = self.saved.to_string();
+                None
+            }
+        }
+    }
+}
 
 impl Workspace {
     pub(super) fn open_preferences(&mut self, ctx: &egui::Context) {
@@ -38,10 +82,13 @@ impl Workspace {
             ui_state.ask = None;
             match answer {
                 Ok(r) => {
-                    ui_state.limit = r.result["preferences"]["thumbnails"]["cache_limit_mb"]
-                        .as_u64()
-                        .unwrap_or(1)
-                        .to_string();
+                    let p = &r.result["preferences"];
+                    let n = |v: &Value| v.as_u64().unwrap_or(0).to_string();
+                    ui_state.limit = n(&p["thumbnails"]["cache_limit_mb"]);
+                    ui_state.larger_w = n(&p["proxies"]["larger_than"][0]);
+                    ui_state.larger_h = n(&p["proxies"]["larger_than"][1]);
+                    ui_state.mbps = n(&p["proxies"]["above_mbps"]);
+                    ui_state.size = n(&p["proxies"]["size"]);
                     ui_state.state = Some(r.result);
                     ui_state.error = None;
                 }
@@ -64,6 +111,7 @@ impl Workspace {
                     return;
                 };
                 let thumbs = &state["preferences"]["thumbnails"];
+                let proxies = &state["preferences"]["proxies"];
                 let cache = &state["thumbnail_cache"];
                 let busy = ui_state.ask.is_some();
                 ui.label(RichText::new("Thumbnails").strong());
@@ -88,46 +136,22 @@ impl Workspace {
                         }
                         ui.end_row();
                         let label = ui.label("Size limit");
-                        // Typed, and sent on Enter or when the field loses focus.
-                        let saved = thumbs["cache_limit_mb"].as_u64();
-                        let r = ui
-                            .horizontal(|ui| {
-                                let r = ui
-                                    .add_enabled(
-                                        !busy && disk,
-                                        egui::TextEdit::singleline(&mut ui_state.limit)
-                                            .desired_width(80.0),
-                                    )
-                                    .labelled_by(label.id)
-                                    .on_hover_text(
-                                        "Above it, the least recently used thumbnails go first",
-                                    );
-                                ui.label("MB");
-                                r
-                            })
-                            .inner;
-                        if r.changed() {
-                            ui_state.limit.retain(|c| c.is_ascii_digit());
-                        }
-                        if r.lost_focus() {
-                            match ui_state.limit.parse::<u64>() {
-                                Ok(mb) if LIMIT_MB.contains(&mb) => {
-                                    if Some(mb) != saved {
-                                        patch = Some(json!({
-                                            "thumbnails": { "cache_limit_mb": mb }
-                                        }));
-                                    }
-                                }
-                                _ => {
-                                    ui_state.error = Some(format!(
-                                        "The size limit is {} to {} MB",
-                                        LIMIT_MB.start(),
-                                        LIMIT_MB.end()
-                                    ));
-                                    ui_state.limit = saved.unwrap_or(1).to_string();
-                                }
+                        ui.horizontal(|ui| {
+                            let field = NumberField {
+                                label: label.id,
+                                saved: thumbs["cache_limit_mb"].as_u64().unwrap_or(1),
+                                range: 1..=1_000_000,
+                                enabled: !busy && disk,
+                                tip: "Above it, the least recently used thumbnails go first",
+                                refusal: "The size limit is 1 to 1000000 MB",
+                            };
+                            if let Some(mb) =
+                                field.show(ui, &mut ui_state.limit, &mut ui_state.error)
+                            {
+                                patch = Some(json!({ "thumbnails": { "cache_limit_mb": mb } }));
                             }
-                        }
+                            ui.label("MB");
+                        });
                         ui.end_row();
                         ui.label("");
                         ui.label(
@@ -137,6 +161,106 @@ impl Workspace {
                             ))
                             .color(theme::TEXT_DIM),
                         );
+                        ui.end_row();
+                    });
+                ui.add_space(8.0);
+                ui.label(RichText::new("Proxies").strong());
+                egui::Grid::new("preferences-proxies")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        let mut auto = proxies["auto"] == true;
+                        ui.label("Automatic");
+                        if ui
+                            .add_enabled(
+                                !busy,
+                                egui::Checkbox::new(&mut auto, "Make proxies by themselves"),
+                            )
+                            .on_hover_text(
+                                "While Proxies is on in the Media Pool: for the media you import \
+                                 that the rules below pick, and for the pool's when you turn \
+                                 Proxies on",
+                            )
+                            .changed()
+                        {
+                            patch = Some(json!({ "proxies": { "auto": auto } }));
+                        }
+                        ui.end_row();
+                        let mut seq = proxies["image_sequences"] == true;
+                        ui.label("For");
+                        if ui
+                            .add_enabled(
+                                !busy && auto,
+                                egui::Checkbox::new(&mut seq, "Image sequences"),
+                            )
+                            .on_hover_text("Every picture is decoded on the CPU as it plays")
+                            .changed()
+                        {
+                            patch = Some(json!({ "proxies": { "image_sequences": seq } }));
+                        }
+                        ui.end_row();
+                        ui.label("");
+                        ui.horizontal(|ui| {
+                            let label = ui.label("Videos larger than");
+                            let saved = |i: usize| proxies["larger_than"][i].as_u64().unwrap_or(1);
+                            let field = |i: usize| NumberField {
+                                label: label.id,
+                                saved: saved(i),
+                                range: 1..=100_000,
+                                enabled: !busy && auto,
+                                tip: "Pictures with more pixels than this get a proxy",
+                                refusal: "The size needs a width and height of at least 1",
+                            };
+                            let w = field(0).show(ui, &mut ui_state.larger_w, &mut ui_state.error);
+                            ui.label("×");
+                            let h = field(1).show(ui, &mut ui_state.larger_h, &mut ui_state.error);
+                            if w.is_some() || h.is_some() {
+                                let size = [w.unwrap_or(saved(0)), h.unwrap_or(saved(1))];
+                                patch = Some(json!({ "proxies": { "larger_than": size } }));
+                            }
+                        });
+                        ui.end_row();
+                        ui.label("");
+                        ui.horizontal(|ui| {
+                            let label = ui.label("Videos above");
+                            let field = NumberField {
+                                label: label.id,
+                                saved: proxies["above_mbps"].as_u64().unwrap_or(1),
+                                range: 1..=100_000,
+                                enabled: !busy && auto,
+                                tip: "Files averaging more get a proxy: camera and editing \
+                                      formats the GPU can't decode",
+                                refusal: "The bitrate is at least 1 Mb/s",
+                            };
+                            if let Some(n) = field.show(ui, &mut ui_state.mbps, &mut ui_state.error)
+                            {
+                                patch = Some(json!({ "proxies": { "above_mbps": n } }));
+                            }
+                            ui.label("Mb/s");
+                        });
+                        ui.end_row();
+                        let label = ui.label("Size");
+                        ui.horizontal(|ui| {
+                            let saved = proxies["size"].as_u64().unwrap_or(960);
+                            let field = NumberField {
+                                label: label.id,
+                                saved,
+                                range: 16..=7680,
+                                enabled: !busy,
+                                tip: "The longest side of a proxy, automatic or not",
+                                refusal: "The proxy size is even, from 16 to 7680",
+                            };
+                            if let Some(n) = field.show(ui, &mut ui_state.size, &mut ui_state.error)
+                            {
+                                if n.is_multiple_of(2) {
+                                    patch = Some(json!({ "proxies": { "size": n } }));
+                                } else {
+                                    ui_state.error =
+                                        Some("The proxy size is even, from 16 to 7680".into());
+                                    ui_state.size = saved.to_string();
+                                }
+                            }
+                            ui.label("px, longest side");
+                        });
                         ui.end_row();
                     });
                 if let Some(e) = &ui_state.error {

@@ -179,6 +179,14 @@ impl Env for AvEnv {
         vidcut_av::analysis::loudness(plan).map_err(av_error)
     }
 
+    fn proxy_rules(&self) -> vidcut_core::preferences::Proxies {
+        // A broken preferences file fails `preferences.get` with the
+        // reason; proxies go on with the defaults.
+        crate::preferences::load()
+            .map(|p| p.proxies)
+            .unwrap_or_default()
+    }
+
     fn proxy_dir(&self) -> PathBuf {
         match &self.project_dir {
             Some(dir) => dir.join("proxies"),

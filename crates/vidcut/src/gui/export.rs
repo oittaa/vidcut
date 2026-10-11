@@ -1233,7 +1233,11 @@ impl Workspace {
                                 ui.set_min_width(ui.available_width());
                                 ui.horizontal(|ui| {
                                     ui.label(RichText::new(&j.title).strong());
-                                    ui.label(dim(format!("{} · from {}", j.id, j.origin)));
+                                    let from = match j.origin {
+                                        "session" => "automatic".to_string(),
+                                        o => format!("from {o}"),
+                                    };
+                                    ui.label(dim(format!("{} · {from}", j.id)));
                                 });
                                 job_view(ui, j, false, |method, params| self.send(method, params));
                             });

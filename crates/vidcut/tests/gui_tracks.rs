@@ -313,8 +313,8 @@ fn track_gestures_send_one_request_each() {
     gestures += 1;
     assert_eq!(gui_edits(&h).len() - edits0, gestures, "step 3");
 
-    // 3b. A track header's V turns its video off, and on again;
-    // it is lit only while the video is off, like L and M.
+    // 3b. A track header's V turns its video off, and on again; it is lit
+    // while the video is on, as A is while the audio is.
     let v1_toggle = |harness: &Harness<'_, Workspace>| {
         harness
             .query_all_by_label("V")

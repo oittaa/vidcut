@@ -594,15 +594,20 @@ pub enum ProxyCmd {
     /// clip in the pool. Stills and audio-only files are skipped then;
     /// naming one is an error.
     #[command(
-        after_help = "Examples:\n  vidcut proxy generate\n  vidcut proxy generate m1 m2 --width 1280\n  vidcut set --proxies true"
+        after_help = "Examples:\n  vidcut proxy generate\n  vidcut proxy generate m1 m2 --width 1280\n  vidcut proxy generate --auto\n  vidcut set --proxies true"
     )]
     Generate {
         /// Media ids. Default: every video and image sequence.
         media: Vec<String>,
-        /// Longest side in pixels (even). Default: 960. Smaller pictures
-        /// stay their size.
+        /// Longest side in pixels (even). Default: the preferences' proxy
+        /// size, 960 unless changed. Smaller pictures stay their size.
         #[arg(long)]
         width: Option<u32>,
+        /// Only what the automatic proxy rules pick (`vidcut preferences`:
+        /// image sequences, very large or high-bitrate video) and has no
+        /// fresh proxy yet.
+        #[arg(long)]
+        auto: bool,
     },
     /// Delete proxy files and forget them. With no ids, every proxy.
     Remove {
@@ -1209,13 +1214,16 @@ impl Cli {
                 }
             },
             Command::Proxy(p) => match p {
-                ProxyCmd::Generate { media, width } => {
+                ProxyCmd::Generate { media, width, auto } => {
                     let media = if media.is_empty() {
                         Value::Null
                     } else {
                         json!(media)
                     };
-                    req("proxy.generate", json!({ "media": media, "width": width }))?
+                    req(
+                        "proxy.generate",
+                        json!({ "media": media, "width": width, "auto": auto }),
+                    )?
                 }
                 ProxyCmd::Remove { media } => {
                     let media = if media.is_empty() {

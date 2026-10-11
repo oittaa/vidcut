@@ -81,6 +81,8 @@ pub struct FakeEnv {
     /// Peak levels by media path (stream 0); missing ones are loud.
     pub levels: HashMap<PathBuf, AudioLevels>,
     pub pictures: HashMap<PathBuf, PictureStats>,
+    /// The preferences' proxy rules.
+    pub proxy_rules: crate::preferences::Proxies,
 }
 
 /// Levels at 100 per second: loud (0.5) during `loud` seconds, otherwise
@@ -231,6 +233,10 @@ impl Env for FakeEnv {
 
     fn proxy_dir(&self) -> PathBuf {
         PathBuf::from("/proxies")
+    }
+
+    fn proxy_rules(&self) -> crate::preferences::Proxies {
+        self.proxy_rules.clone()
     }
 
     fn generate_proxy(

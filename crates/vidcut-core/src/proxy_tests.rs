@@ -228,3 +228,36 @@ fn proxy_size_keeps_aspect_and_does_not_enlarge() {
     assert_eq!(proxy_size(320, 180, 960), (320, 180));
     assert_eq!(proxy_size(1080, 1920, 960), (540, 960));
 }
+
+/// Decision D41: `auto` takes what the rules pick and has no fresh proxy,
+/// and finding nothing is fine.
+#[test]
+fn auto_generates_only_what_the_rules_pick() {
+    let mut f = Fixture::new(&[(4.0, true)]);
+    f.env = std::mem::take(&mut f.env).with_sequence("/renders", "frame_%04d.png", 1, 10);
+    f.ok(req(
+        "media.add",
+        json!({"paths": ["/renders/frame_0001.png"], "sequence": true}),
+    ));
+    // m1 is a 1080p video of a small file: the GPU plays it. m2 is a sequence.
+    let r = f.ok(req("proxy.generate", json!({"auto": true})));
+    let made: Vec<_> = r.result["proxies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["media"].clone())
+        .collect();
+    assert_eq!(made, [json!("m2")]);
+    let again = f.ok(req("proxy.generate", json!({"auto": true})));
+    assert_eq!(again.result["proxies"], json!([]));
+    assert!(again.changes.is_empty());
+    // Limited to the media named; the preferences' size is the default.
+    f.env.proxy_rules.larger_than = [1280, 720];
+    f.env.proxy_rules.size = 640;
+    let r = f.ok(req(
+        "proxy.generate",
+        json!({"auto": true, "media": ["m1"]}),
+    ));
+    assert_eq!(r.result["proxies"][0]["media"], "m1");
+    assert_eq!(r.result["proxies"][0]["width"], 640);
+}

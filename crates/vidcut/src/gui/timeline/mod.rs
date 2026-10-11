@@ -715,11 +715,28 @@ impl Workspace {
             let tall = r.height() >= 40.0;
             let buttons = |ui: &mut egui::Ui, ws: &Self| {
                 ui.spacing_mut().item_spacing.x = 2.0;
-                // Lit means switched on, as for lock and mute: V turns the
-                // video off, and a lit V is struck through.
+                // Lit means on, as for the target track: L while locked, A
+                // while the audio plays, V while the video shows. A and V
+                // are struck through while off.
                 let mut toggles = vec![
-                    ("L", t.locked, "locked", false, "Lock the track"),
-                    ("M", t.muted, "muted", false, "Mute its audio"),
+                    (
+                        "L",
+                        t.locked,
+                        if t.locked {
+                            "Unlock the track"
+                        } else {
+                            "Lock the track"
+                        },
+                    ),
+                    (
+                        "A",
+                        !t.muted,
+                        if t.muted {
+                            "Turn its audio back on"
+                        } else {
+                            "Mute its audio"
+                        },
+                    ),
                 ];
                 if t.kind == vidcut_core::model::TrackKind::Video {
                     let tip = if t.video_enabled {
@@ -727,17 +744,20 @@ impl Workspace {
                     } else {
                         "Turn its video back on"
                     };
-                    toggles.push(("V", !t.video_enabled, "video_enabled", true, tip));
+                    toggles.push(("V", t.video_enabled, tip));
                 }
-                for (text, lit, key, off, tip) in toggles {
-                    let mut text = RichText::new(text).small();
-                    if off && lit {
+                for (name, lit, tip) in toggles {
+                    let mut text = RichText::new(name).small();
+                    if !lit && name != "L" {
                         text = text.strikethrough();
                     }
                     if ui.selectable_label(lit, text).on_hover_text(tip).clicked() {
-                        // `video_enabled` is true while V is not lit.
-                        let value = if off { lit } else { !lit };
-                        ws.send("track.set", json!({ "track": t.id, key: value }));
+                        let change = match name {
+                            "L" => json!({ "track": t.id, "locked": !lit }),
+                            "A" => json!({ "track": t.id, "muted": lit }),
+                            _ => json!({ "track": t.id, "video_enabled": !lit }),
+                        };
+                        ws.send("track.set", change);
                     }
                 }
             };

@@ -1472,7 +1472,8 @@ impl Live {
         }
     }
 
-    /// A job ended: its state, and a notice when the GUI started it.
+    /// A job ended: its state, and a notice when the GUI started it or the
+    /// session did (automatic proxies).
     fn job_ended(&mut self, id: &str, result: &Result<Response>) {
         self.job_cancels.remove(id);
         self.dirty = true;
@@ -1483,7 +1484,7 @@ impl Live {
             return;
         };
         j.ended(result);
-        if j.origin != (Origin::Gui { drag: false }).name() {
+        if j.origin != (Origin::Gui { drag: false }).name() && j.origin != Origin::Session.name() {
             return;
         }
         let kind = j.kind;
@@ -1564,9 +1565,88 @@ impl Live {
             self.notice(format!("{}: {}", job.method, e.message), true);
         }
         self.dirty = true;
+        self.auto_proxies(&job, &result);
         if let Some(r) = job.reply {
             self.answers.push((r, result));
         }
+    }
+
+    /// While the project plays proxies, media the automatic rules pick get
+    /// one without being asked (decision D41): those an import just added,
+    /// and the pool's when proxies are turned on. The encode is the
+    /// session's own `proxy.generate`, a job like any other; media already
+    /// being encoded are left out.
+    fn auto_proxies(&mut self, job: &Job, result: &Result<Response>) {
+        let Ok(response) = result else {
+            return;
+        };
+        let added: Option<Vec<&str>> = match job.method.as_str() {
+            _ if job.dry_run => return,
+            "media.add" | "timeline.import" => Some(
+                response
+                    .changes
+                    .created
+                    .iter()
+                    .map(String::as_str)
+                    .collect(),
+            ),
+            "project.set" if job.params["use_proxies"] == json!(true) => None,
+            _ => return,
+        };
+        let Some(open) = &self.project else {
+            return;
+        };
+        let p = open.project();
+        if !p.settings.use_proxies {
+            return;
+        }
+        let rules = match crate::preferences::load() {
+            Ok(prefs) if prefs.proxies.auto => prefs.proxies,
+            _ => return,
+        };
+        let busy = self.proxies_encoding(p);
+        let ids: Vec<&str> = p
+            .media
+            .iter()
+            .filter(|m| added.as_ref().is_none_or(|a| a.contains(&m.id.as_str())))
+            .filter(|m| rules.wants(m) && m.fresh_proxy().is_none() && !busy.contains(&m.id))
+            .map(|m| m.id.as_str())
+            .collect();
+        if ids.is_empty() {
+            return;
+        }
+        let request =
+            json!({ "method": "proxy.generate", "params": { "media": ids, "auto": true } });
+        if let Ok(envelope) = Envelope::from_json(request) {
+            let _ = self.tx.send(Msg::Request {
+                envelope,
+                origin: Origin::Session,
+                project: None,
+                reply: None,
+            });
+        }
+    }
+
+    /// The media running proxy jobs are encoding.
+    fn proxies_encoding(&self, p: &Project) -> HashSet<String> {
+        let mut ids = HashSet::new();
+        for j in self
+            .jobs
+            .iter()
+            .filter(|j| j.kind == "proxy" && j.running())
+        {
+            match &j.params["media"] {
+                Value::String(id) => {
+                    ids.insert(id.clone());
+                }
+                Value::Array(list) => {
+                    ids.extend(list.iter().filter_map(|v| v.as_str().map(String::from)));
+                }
+                // No media named: every video in the pool.
+                _ => ids.extend(p.media.iter().map(|m| m.id.clone())),
+            }
+        }
+        ids
     }
 
     /// Runs `task` on its own thread; it reports back with `Msg::TaskDone`.

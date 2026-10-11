@@ -9,9 +9,7 @@ use serde_json::{Value, json};
 
 use crate::analysis::{self, AudioLevels, Loudness, PictureStats, SilenceSettings, Span};
 use crate::error::{Error, Result};
-use crate::model::{
-    Clip, ClipAudio, ImageSequence, Media, MediaInfo, PROXY_LONGEST, Project, Proxy, VideoInfo,
-};
+use crate::model::{Clip, ClipAudio, ImageSequence, Media, MediaInfo, Project, Proxy, VideoInfo};
 use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
 use crate::render::RenderPlan;
@@ -107,6 +105,11 @@ pub trait Env {
         dir: &Path,
         dry_run: bool,
     ) -> Result<GeneratedProxy>;
+
+    /// The preferences' rules for automatic proxies, and the proxy size.
+    fn proxy_rules(&self) -> crate::preferences::Proxies {
+        crate::preferences::Proxies::default()
+    }
 
     /// Deletes a proxy file. Missing files are fine.
     fn remove_proxy_file(&self, path: &Path) -> Result<()> {
@@ -696,8 +699,8 @@ fn mutate(
             }
             Value::Null
         }
-        Request::ProxyGenerate { media, width } => {
-            proxy_generate(p, env, media.as_ref(), *width, dry_run)?
+        Request::ProxyGenerate { media, width, auto } => {
+            proxy_generate(p, env, media.as_ref(), *width, *auto, dry_run)?
         }
         Request::ProxyRemove { media } => proxy_remove(p, env, media.as_ref(), dry_run)?,
         Request::MediaMarksSet {
@@ -1643,9 +1646,9 @@ fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
 }
 
 /// Longest side for a proxy: the default, or an even size from 16 to 7680.
-fn proxy_longest(width: Option<u32>) -> Result<u32> {
+fn proxy_longest(width: Option<u32>, default: u32) -> Result<u32> {
     match width {
-        None => Ok(PROXY_LONGEST),
+        None => Ok(default),
         Some(n) if (16..=7680).contains(&n) && n % 2 == 0 => Ok(n),
         Some(n) => Err(Error::invalid(format!(
             "proxy width {n} must be even, from 16 to 7680"
@@ -1704,10 +1707,19 @@ fn proxy_generate(
     env: &dyn Env,
     media: Option<&OneOrMany<String>>,
     width: Option<u32>,
+    auto: bool,
     dry_run: bool,
 ) -> Result<Value> {
-    let longest = proxy_longest(width)?;
-    let ids = proxy_targets(p, media)?;
+    let rules = env.proxy_rules();
+    let longest = proxy_longest(width, rules.size)?;
+    let mut ids = proxy_targets(p, media)?;
+    if auto {
+        // Spec D41: what the rules pick and has no fresh proxy yet.
+        ids.retain(|id| {
+            p.media(id)
+                .is_some_and(|m| rules.wants(m) && m.fresh_proxy().is_none())
+        });
+    }
     let dir = env.proxy_dir();
     let mut proxies = Vec::new();
     for id in ids {

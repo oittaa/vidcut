@@ -218,6 +218,59 @@ fn proxies_encode_beside_the_session() {
     assert_eq!(ok(&h, "jobs.wait", json!({ "job": "j4" }))["state"], "done");
     assert!(!ok(&h, "media.get", json!({ "media": "m1" }))["proxy"].is_null());
     ok(&h, "proxy.remove", json!({ "media": "m1" }));
+
+    // 4. Automatic proxies, for what the rules pick (here: more than
+    // 1280×720). Turning proxies on makes a job of the session's own for
+    // the pool; an import makes one for what it added.
+    ok(
+        &h,
+        "preferences.set",
+        json!({ "proxies": { "larger_than": [1280, 720] } }),
+    );
+    let jobs = |h: &live::Handle| ok(h, "jobs.list", json!({})).as_array().unwrap().len();
+    let before = jobs(&h);
+    ok(&h, "project.set", json!({ "use_proxies": true }));
+    let job = proxy_job(&h, |j| j["origin"] == "session");
+    assert_eq!(job["params"]["media"], json!(["m1"]), "{job:#}");
+    let id = job["id"].as_str().unwrap().to_string();
+    assert_eq!(ok(&h, "jobs.wait", json!({ "job": id }))["state"], "done");
+    assert!(!ok(&h, "media.get", json!({ "media": "m1" }))["proxy"].is_null());
+    let second = fixture::ensure(&FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        1920,
+        1080,
+        (30, 1),
+        60,
+    ))
+    .unwrap();
+    ok(&h, "media.add", json!({ "paths": [second] }));
+    let job = proxy_job(&h, |j| j["params"]["media"] == json!(["m2"]));
+    let id = job["id"].as_str().unwrap().to_string();
+    assert_eq!(ok(&h, "jobs.wait", json!({ "job": id }))["state"], "done");
+    assert!(!ok(&h, "media.get", json!({ "media": "m2" }))["proxy"].is_null());
+    assert_eq!(jobs(&h), before + 2);
+    // Switched off in the preferences: nothing by itself.
+    ok(
+        &h,
+        "preferences.set",
+        json!({ "proxies": { "auto": false } }),
+    );
+    ok(&h, "proxy.remove", json!({}));
+    ok(&h, "project.set", json!({ "use_proxies": false }));
+    ok(&h, "project.set", json!({ "use_proxies": true }));
+    let third = fixture::ensure(&FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        1920,
+        1080,
+        (30, 1),
+        30,
+    ))
+    .unwrap();
+    ok(&h, "media.add", json!({ "paths": [third] }));
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(jobs(&h), before + 2);
     h.shutdown();
     let _ = session.join();
 

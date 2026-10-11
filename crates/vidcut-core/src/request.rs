@@ -116,11 +116,16 @@ pub enum Request {
         /// Media ids. Absent: every video and image sequence.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         media: Option<OneOrMany<String>>,
-        /// Longest side in pixels, even, from 16 to 7680. Default
-        /// [`PROXY_LONGEST`](crate::model::PROXY_LONGEST). Pictures already
+        /// Longest side in pixels, even, from 16 to 7680. Default: the
+        /// preferences' proxy size (960 unless changed). Pictures already
         /// smaller stay their size.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         width: Option<u32>,
+        /// Only the media the automatic proxy rules pick (preferences
+        /// `proxies`) that have no fresh proxy, of `media` or of the pool;
+        /// none is fine.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        auto: bool,
     },
     /// Delete proxy files and clear them from the pool. With no `media`,
     /// every item that has one.
