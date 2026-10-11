@@ -109,10 +109,7 @@ const MEASURE: (u32, u32) = (96, 54);
 /// An image sequence is read by image2, which continues while the file
 /// numbers do. Pass that sequence's own length as `pictures`; frames after
 /// it are not measured and not opened. `None` reads the whole source.
-pub fn picture_stats(
-    source: &crate::decode::Input,
-    pictures: Option<u64>,
-) -> Result<PictureStats> {
+pub fn picture_stats(source: &crate::decode::Input, pictures: Option<u64>) -> Result<PictureStats> {
     crate::cancel::stop()?;
     if pictures == Some(0) {
         return Ok(PictureStats::default());

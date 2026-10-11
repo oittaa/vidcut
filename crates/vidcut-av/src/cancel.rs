@@ -114,8 +114,9 @@ mod tests {
         let _guard = Guard::set(&flag);
         let err = analysis::audio_levels(Path::new("no-such-media"), 0, 10).unwrap_err();
         assert!(is_cancelled(&err), "{err}");
-        let err = analysis::picture_stats(&crate::decode::Input::File("no-such-media".into()), None)
-            .unwrap_err();
+        let err =
+            analysis::picture_stats(&crate::decode::Input::File("no-such-media".into()), None)
+                .unwrap_err();
         assert!(is_cancelled(&err), "{err}");
         let err = analysis::mix_loudness(&[], 48_000, 2, 0, 48_000, None).unwrap_err();
         assert!(is_cancelled(&err), "{err}");

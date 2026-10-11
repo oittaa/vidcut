@@ -627,7 +627,10 @@ mod tests {
         let stats = crate::analysis::picture_stats(&input, Some(4)).unwrap();
         assert_eq!(stats.pts.len(), 4);
         assert_eq!(
-            crate::analysis::picture_stats(&input, None).unwrap().pts.len(),
+            crate::analysis::picture_stats(&input, None)
+                .unwrap()
+                .pts
+                .len(),
             8,
             "without a count, image2 measures the files that follow"
         );
