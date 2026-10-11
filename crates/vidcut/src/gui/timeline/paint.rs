@@ -10,6 +10,7 @@ use eframe::egui::{
 };
 use vidcut_av::waveform::Waveform;
 use vidcut_core::model::{Clip, Project, Track};
+use vidcut_core::ops;
 use vidcut_core::time::{Rational, format_timecode};
 
 use super::geometry::{Rows, Scale, TrackRect, clips_in};
@@ -167,15 +168,21 @@ pub fn ruler(
         }
     }
     if let Some(e) = smart {
-        // The Smart Indicator (p. 696).
+        // The Smart Indicator (p. 696): red where a clip has no media past
+        // the edit. It holds still (deviation X15).
         let x = scale.xf(e);
+        let color = if ops::edit_has_handles(p, e) {
+            theme::OK
+        } else {
+            theme::ERROR
+        };
         painter.add(egui::Shape::convex_polygon(
             vec![
                 pos2(x, rect.bottom()),
                 pos2(x - 5.0, rect.bottom() - 7.0),
                 pos2(x + 5.0, rect.bottom() - 7.0),
             ],
-            theme::OK,
+            color,
             Stroke::NONE,
         ));
     }

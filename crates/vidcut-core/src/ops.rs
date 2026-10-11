@@ -317,6 +317,22 @@ pub fn nearest_edit(p: &Project, playhead: i64) -> i64 {
         .unwrap_or(0)
 }
 
+/// Whether the clips at Track 1's edit `e` have media past it: not when the
+/// clip ending there shows its media's last frame, or the clip starting
+/// there its first. The Smart Indicator then turns red (p. 696).
+pub fn edit_has_handles(p: &Project, e: i64) -> bool {
+    let Some(t) = p.track(MAIN) else {
+        return true;
+    };
+    !t.clips.iter().any(|c| {
+        let at_end = c.end() == e
+            && p.media(&c.media)
+                .is_some_and(|m| c.source_in + c.duration >= p.media_frames(m));
+        let at_start = c.start == e && c.source_in <= 0;
+        at_end || at_start
+    })
+}
+
 /// Smart Insert: insert at the edit nearest the playhead (p. 697).
 pub fn smart_insert(p: &mut Project, src: &Source, playhead: i64) -> Result<String> {
     let at = nearest_edit(p, playhead);

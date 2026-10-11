@@ -195,7 +195,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 
 ### 7.1 Smart Indicator (v1) (p. 696)
 - **What it marks:** a marker on the ruler shows the edit point nearest the playhead. Some functions use that point instead of the exact playhead frame.
-- **How it looks:** after idling it bobs, and the chosen edit flashes green. It flashes red if the clip there has no media left beyond its edge.
+- **How it looks:** after idling it bobs, and the chosen edit flashes green. It flashes red if the clip there has no media left beyond its edge. vidcut shows the colors without the motion (deviation X15).
 
 ### 7.2 Edit functions
 - **Smart Insert (v1)** (F9 in the Edit page; p. 697):

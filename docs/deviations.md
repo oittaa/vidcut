@@ -106,3 +106,8 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 - **Resolve:** color management (RCM) gives the timeline a color space. Media come into it through input transforms and tone mapping, and the output color space is chosen for delivery (pp. 230–239).
 - **vidcut:** there is no timeline color space and no grading. Each export picks its output, SDR BT.709 or HDR PQ or HLG (`video.hdr`), and every clip is converted to it from its own tags: tone-mapped, or with SDR white at 203 nits (spec D35). The preview is mpv's rendering for the screen, so HDR clips may look a little different there than in an SDR export.
 - **Why:** vidcut cuts, and color correction belongs in an editor like Resolve (see docs/roadmap.md). Converting each clip straight to the output keeps exports right for mixed phone, camera and screen footage without color settings.
+
+## X15. The Smart Indicator holds still
+- **Resolve:** after a few seconds of idling, the Smart Indicator moves up and down on the ruler, and the edit point strobes green, or red once the clip has reached its start or end frame (p. 696).
+- **vidcut:** the indicator is green, or red where a clip at the edit shows its media's first or last frame (`ops::edit_has_handles`). It doesn't move or strobe.
+- **Why:** an idle animation keeps the window repainting for as long as it is open, which costs a modest laptop CPU time and battery while nothing happens. The color tells the same.
