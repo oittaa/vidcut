@@ -1,11 +1,15 @@
 //! mpv EDL for timeline playback (docs/decisions/preview.md).
 //!
 //! The timeline plays as one virtual file: a video stream of source segments
-//! (black filler in gaps) and an audio stream (silence filler in gaps and for
-//! clips without audio). Each stream ends with a one-frame filler entry marked
-//! `layout=this`, which pins it to exactly one track. Video `start` values are
-//! raw source timestamps carrying the half-frame bias, so timeline frame `j` is
-//! shown by seeking to exactly `j / fps`.
+//! (black filler in gaps) and one audio stream per audio lane (silence filler
+//! in gaps and for clips without audio). Each stream ends with a one-frame
+//! filler entry marked `layout=this`, which pins it to exactly one track.
+//! Video `start` values are raw source timestamps carrying the half-frame
+//! bias, so timeline frame `j` is shown by seeking to exactly `j / fps`.
+//!
+//! mpv plays one audio track at a time, so several lanes are mixed by a
+//! `lavfi-complex` graph ([`audio_graph`]), which also applies clip gains and
+//! track faders by timeline time (preview.md §10).
 
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
@@ -50,6 +54,98 @@ fn filler(out: &mut String, path: &Path, available: f64, offset: f64, mut secs: 
     }
 }
 
+/// What a player loads: the EDL and the audio graph for it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Preview {
+    pub edl: String,
+    /// `lavfi-complex` for the file, if its audio needs mixing or gain.
+    pub audio_graph: Option<String>,
+}
+
+/// The EDL and audio graph that play `plan` in mpv.
+pub fn build(plan: &RenderPlan, fillers: &Fillers) -> Preview {
+    Preview {
+        edl: edl(plan, fillers),
+        audio_graph: audio_graph(plan),
+    }
+}
+
+/// Clip gain changes in one lane that preview follows (more fall back to
+/// the lane's most common gain).
+const MAX_GAIN_CHANGES: usize = 64;
+
+fn linear(db: f64) -> f64 {
+    10f64.powf(db / 20.0)
+}
+
+/// The `lavfi-complex` graph for the audio streams of [`edl`]: each lane's
+/// gains (clip gain plus track fader, switched by timeline time `t`) and an
+/// `amix` that sums the lanes. `None` when a single lane plays as it is.
+pub fn audio_graph(plan: &RenderPlan) -> Option<String> {
+    let rate = f64::from(plan.sample_rate);
+    let mut filters = Vec::new();
+    let mut inputs = Vec::new();
+    for (i, lane) in plan.audio.iter().enumerate() {
+        let n = i + 1;
+        // Gains of the lane's source pieces as (start s, end s, dB).
+        let mut spans: Vec<(f64, f64, f64)> = Vec::new();
+        let mut at = 0i64;
+        for piece in lane {
+            let len = piece.samples();
+            if let AudioPiece::Source { gain_db, .. } = piece {
+                let (a, b) = (at as f64 / rate, (at + len) as f64 / rate);
+                match spans.last_mut() {
+                    Some(last) if last.2 == *gain_db && (last.1 - a).abs() < 1e-9 => last.1 = b,
+                    _ => spans.push((a, b, *gain_db)),
+                }
+            }
+            at += len;
+        }
+        let first = spans.first().map_or(0.0, |s| s.2);
+        let filter = if spans.iter().all(|s| s.2 == 0.0) {
+            None
+        } else if spans.iter().all(|s| s.2 == first) {
+            Some(format!("volume={:.6}", linear(first)))
+        } else if spans.len() <= MAX_GAIN_CHANGES {
+            let mut expr = String::from("1");
+            for (a, b, db) in spans.iter().rev().filter(|s| s.2 != 0.0) {
+                expr = format!("if(between(t,{a:.6},{b:.6}),{:.6},{expr})", linear(*db));
+            }
+            Some(format!("volume=volume='{expr}':eval=frame"))
+        } else {
+            // Too many changes: the most common gain for the whole lane.
+            let mut counts: Vec<(f64, usize)> = Vec::new();
+            for s in &spans {
+                match counts.iter_mut().find(|c| c.0 == s.2) {
+                    Some(c) => c.1 += 1,
+                    None => counts.push((s.2, 1)),
+                }
+            }
+            let db = counts.iter().max_by_key(|c| c.1).map_or(0.0, |c| c.0);
+            (db != 0.0).then(|| format!("volume={:.6}", linear(db)))
+        };
+        match filter {
+            Some(f) => {
+                filters.push(format!("[aid{n}]{f}[g{n}]"));
+                inputs.push(format!("[g{n}]"));
+            }
+            None => inputs.push(format!("[aid{n}]")),
+        }
+    }
+    match inputs.len() {
+        0 => None,
+        1 if filters.is_empty() => None,
+        1 => Some(filters[0].replace("[g1]", "[ao]")),
+        n => {
+            filters.push(format!(
+                "{}amix=inputs={n}:normalize=0[ao]",
+                inputs.concat()
+            ));
+            Some(filters.join(";"))
+        }
+    }
+}
+
 /// The EDL text that plays `plan` in mpv.
 pub fn edl(plan: &RenderPlan, fillers: &Fillers) -> String {
     let fps = plan.fps;
@@ -80,49 +176,50 @@ pub fn edl(plan: &RenderPlan, fillers: &Fillers) -> String {
     }
     entry(&mut out, &fillers.black, 0.0, one, ",layout=this");
 
-    out.push_str("!new_stream\n");
     let rate = f64::from(plan.sample_rate);
-    // M2 timelines have one audio lane (V1); several lanes are mixed in M6.
-    match plan.audio.first() {
-        Some(lane) => {
-            for piece in lane {
-                match piece {
-                    AudioPiece::Source {
-                        path,
-                        origin,
-                        source_sample,
-                        samples,
-                        ..
-                    } => {
-                        entry(
-                            &mut out,
-                            path,
-                            origin + *source_sample as f64 / rate,
-                            *samples as f64 / rate,
-                            "",
-                        );
-                    }
-                    AudioPiece::Silence { samples } => {
-                        filler(
-                            &mut out,
-                            &fillers.silence,
-                            fillers.silence_secs,
-                            0.0,
-                            *samples as f64 / rate,
-                        );
-                    }
-                }
-            }
-        }
-        None => filler(
+    if plan.audio.is_empty() {
+        out.push_str("!new_stream\n");
+        filler(
             &mut out,
             &fillers.silence,
             fillers.silence_secs,
             0.0,
             fps.frames_to_secs(plan.frames),
-        ),
+        );
+        entry(&mut out, &fillers.silence, 0.0, one, ",layout=this");
     }
-    entry(&mut out, &fillers.silence, 0.0, one, ",layout=this");
+    for lane in &plan.audio {
+        out.push_str("!new_stream\n");
+        for piece in lane {
+            match piece {
+                AudioPiece::Source {
+                    path,
+                    origin,
+                    source_sample,
+                    samples,
+                    ..
+                } => {
+                    entry(
+                        &mut out,
+                        path,
+                        origin + *source_sample as f64 / rate,
+                        *samples as f64 / rate,
+                        "",
+                    );
+                }
+                AudioPiece::Silence { samples } => {
+                    filler(
+                        &mut out,
+                        &fillers.silence,
+                        fillers.silence_secs,
+                        0.0,
+                        *samples as f64 / rate,
+                    );
+                }
+            }
+        }
+        entry(&mut out, &fillers.silence, 0.0, one, ",layout=this");
+    }
     out
 }
 
@@ -180,5 +277,35 @@ mod tests {
         assert_eq!(blacks, 3, "25 s of black in 9.9 s chunks:\n{text}");
         // Lengths count UTF-8 bytes: "ä" and "ö" are two bytes each.
         assert!(text.contains("%23%/media/kesä, öljy.mp4,start="), "{text}");
+    }
+
+    #[test]
+    fn lanes_become_streams_mixed_with_their_gains() {
+        let mut f = Fixture::new(&[(10.0, true), (4.0, true)]);
+        f.append("m1", 0, 50);
+        f.append("m2", 0, 25);
+        let music = f.add_music("music.wav", 20.0);
+        f.ok(json!({"method": "edit.overwrite", "params": {"media": music, "range": "0f..75f", "at": 0}}));
+        let plan = flatten(f.editor.project(), 0, 75).unwrap();
+        let text = edl(&plan, &fillers());
+        assert_eq!(text.matches("!new_stream").count(), 3, "{text}");
+        assert_eq!(
+            audio_graph(&plan).unwrap(),
+            "[aid1][aid2]amix=inputs=2:normalize=0[ao]"
+        );
+        // A fader is one gain for the lane; clip gains switch by time.
+        f.ok(json!({"method": "track.set", "params": {"track": "A1", "volume_db": -6.0}}));
+        f.ok(json!({"method": "clip.set", "params": {"clips": "c2", "gain_db": 6.0}}));
+        let plan = flatten(f.editor.project(), 0, 75).unwrap();
+        assert_eq!(
+            audio_graph(&plan).unwrap(),
+            "[aid1]volume=volume='if(between(t,2.000000,3.000000),1.995262,1)':eval=frame[g1];\
+             [aid2]volume=0.501187[g2];[g1][g2]amix=inputs=2:normalize=0[ao]"
+        );
+        // One plain lane needs no graph.
+        f.ok(json!({"method": "track.remove", "params": {"track": "A1", "force": true}}));
+        f.ok(json!({"method": "clip.set", "params": {"clips": "c2", "gain_db": 0.0}}));
+        let plan = flatten(f.editor.project(), 0, 75).unwrap();
+        assert_eq!(audio_graph(&plan), None);
     }
 }

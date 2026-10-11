@@ -412,7 +412,7 @@ pub(super) fn command(project: &Path, p: &Value) -> String {
 
 /// Where a window of about `w`×`h` starts so it sits near the middle. Its
 /// top-left stays put afterwards, so it doesn't move as its content changes.
-fn near_center(ctx: &egui::Context, w: f32, h: f32) -> egui::Pos2 {
+pub(super) fn near_center(ctx: &egui::Context, w: f32, h: f32) -> egui::Pos2 {
     let r = ctx.content_rect();
     egui::pos2(
         (r.center().x - w / 2.0).max(r.left() + 8.0),

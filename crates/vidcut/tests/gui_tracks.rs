@@ -1,0 +1,385 @@
+//! The multi-track GUI under simulated input (egui_kittest, M6): the target
+//! track, drags onto a new track, Place On Top, the mixer and bins. Each
+//! gesture changes the project with exactly one request.
+
+use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
+
+use eframe::egui::{self, Modifiers, Pos2, accesskit::Role, pos2, vec2};
+use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
+use serde_json::{Value, json};
+use vidcut::gui::workspace::Workspace;
+use vidcut::live::{self, Capture, Origin, PlayerId, WindowChange};
+use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
+use vidcut_core::model::Settings;
+use vidcut_core::time::Rational;
+use vidcut_core::{Envelope, Project, Response, Store};
+
+struct NoRenderer;
+
+impl live::Renderer for NoRenderer {
+    fn capture_viewer(&self, _: PlayerId, done: Capture) {
+        done(Err(vidcut_core::Error::usage("no renderer in tests")));
+    }
+    fn capture_window(&self, done: Capture) {
+        done(Err(vidcut_core::Error::usage("no window in tests")));
+    }
+    fn window(&self, _: WindowChange) {}
+    fn quit(&self) {}
+}
+
+fn call(h: &live::Handle, method: &str, params: Value) -> Response {
+    let e = Envelope::from_json(json!({ "method": method, "params": params })).unwrap();
+    h.call(e, Origin::Ipc, None, &mut |_| true)
+        .unwrap_or_else(|e| panic!("{method}: {e}"))
+}
+
+/// Lets the session catch up with the GUI's requests, then redraws.
+fn settle(h: &live::Handle, harness: &mut Harness<'_, Workspace>) {
+    call(h, "player.state", json!({}));
+    harness.step();
+    harness.step();
+}
+
+/// Requests the GUI sent that changed the project, oldest first.
+fn gui_edits(h: &live::Handle) -> Vec<(String, Value)> {
+    let log = call(h, "gui.log", json!({ "limit": 1000 })).result;
+    log.as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["origin"] == "gui" && e["changed"] == true)
+        .map(|e| {
+            (
+                e["method"].as_str().unwrap().to_string(),
+                e["params"].clone(),
+            )
+        })
+        .collect()
+}
+
+fn undo_steps(h: &live::Handle) -> usize {
+    call(h, "history.get", json!({})).result["undo"]
+        .as_array()
+        .unwrap()
+        .len()
+}
+
+fn drag(harness: &mut Harness<'_, Workspace>, from: Pos2, to: Pos2) {
+    harness.event(egui::Event::PointerMoved(from));
+    harness.event(egui::Event::PointerButton {
+        pos: from,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    });
+    for i in 1..=6 {
+        let t = i as f32 / 6.0;
+        harness.event(egui::Event::PointerMoved(from + (to - from) * t));
+    }
+    harness.event(egui::Event::PointerButton {
+        pos: to,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    harness.step();
+}
+
+/// Like [`drag`], a frame per step, as a hand would (widgets such as
+/// sliders only see a drag that lasts more than one frame).
+fn drag_slowly(harness: &mut Harness<'_, Workspace>, from: Pos2, to: Pos2) {
+    harness.event(egui::Event::PointerMoved(from));
+    harness.step();
+    harness.event(egui::Event::PointerButton {
+        pos: from,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    });
+    harness.step();
+    for i in 1..=6 {
+        let t = i as f32 / 6.0;
+        harness.event(egui::Event::PointerMoved(from + (to - from) * t));
+        harness.step();
+    }
+    harness.event(egui::Event::PointerButton {
+        pos: to,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    harness.step();
+}
+
+/// Clips on `track` as (id, start, duration).
+fn clips(h: &live::Handle, track: &str) -> Vec<(String, i64, i64)> {
+    let tl = call(h, "timeline.get", json!({})).result;
+    let Some(t) = tl["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == track)
+    else {
+        return Vec::new();
+    };
+    t["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|i| i["type"] == "clip")
+        .map(|i| {
+            (
+                i["id"].as_str().unwrap().to_string(),
+                i["start"].as_i64().unwrap(),
+                i["duration"].as_i64().unwrap(),
+            )
+        })
+        .collect()
+}
+
+fn setup(dir: &Path) -> (live::Handle, std::thread::JoinHandle<()>) {
+    let video = fixture::ensure(&FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (30, 1),
+        300,
+    ))
+    .unwrap();
+    let music = fixture::ensure(
+        &FixtureSpec::new(VideoCodec::H264, Container::Mkv, 320, 180, (30, 1), 120).audio_only(),
+    )
+    .unwrap();
+    let path = dir.join("tracks.vidcut");
+    Store::create(
+        &path,
+        &Project::new(Settings {
+            fps: Rational::new(30, 1).unwrap(),
+            width: 320,
+            height: 180,
+            auto_format: false,
+            ..Settings::default()
+        }),
+    )
+    .unwrap();
+    let (h, t) = live::start(live::Config {
+        project: Some(path),
+        create: false,
+        players: None,
+        preview_error: Some("no preview in tests".into()),
+        renderer: Arc::new(NoRenderer),
+        notify: Arc::new(|| {}),
+        socket: None,
+    });
+    call(&h, "media.add", json!({ "paths": [video, music] }));
+    // c1 0..60, c2 60..120, c3 120..180 on Track 1, and an empty V2.
+    for (a, b) in [(0, 60), (100, 160), (200, 260)] {
+        call(
+            &h,
+            "edit.append",
+            json!({ "media": "m1", "range": format!("{a}f..{b}f") }),
+        );
+    }
+    call(&h, "track.add", json!({ "kind": "video" }));
+    call(&h, "player.seek", json!({ "at": 90, "viewer": "timeline" }));
+    (h, t)
+}
+
+#[test]
+fn track_gestures_send_one_request_each() {
+    let dir = std::env::temp_dir().join(format!("vidcut-gui-tracks-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    // SAFETY: the only test in this binary; set before any thread starts.
+    unsafe {
+        std::env::set_var("XDG_STATE_HOME", dir.join("state"));
+        std::env::set_var("XDG_CONFIG_HOME", dir.join("config"));
+    }
+    let (h, session) = setup(&dir);
+    let mut ws = Workspace::new(h.clone());
+    ws.timeline_options_mut().snapping = false;
+    ws.timeline_options_mut().ppf = 4.0;
+    let mut harness = Harness::builder()
+        .with_size(vec2(1600.0, 1000.0))
+        .with_step_dt(1.0 / 60.0)
+        .with_max_steps(50)
+        .build_ui_state(|ui, ws: &mut Workspace| ws.ui(ui), ws);
+    settle(&h, &mut harness);
+    let undo0 = undo_steps(&h);
+    let edits0 = gui_edits(&h).len();
+    let last = |h: &live::Handle| gui_edits(h).last().cloned().unwrap();
+
+    // 1. V2's header makes it the target track (p. 696): F10 overwrites
+    // there, not on Track 1.
+    harness.get_by_label("V2").click();
+    harness.step();
+    call(
+        &h,
+        "media.marks.set",
+        json!({ "media": "m1", "in": 10, "out": 40 }),
+    );
+    call(&h, "selection.set", json!({ "media": "m1" }));
+    settle(&h, &mut harness);
+    harness.key_press(egui::Key::F10);
+    harness.step();
+    settle(&h, &mut harness);
+    let (m, p) = last(&h);
+    assert_eq!((m.as_str(), &p["track"]), ("edit.overwrite", &json!("V2")));
+    assert_eq!(clips(&h, "V2"), vec![("c4".into(), 90, 30)]);
+    assert_eq!(clips(&h, "V1").len(), 3, "Track 1 untouched");
+
+    // 2. Dragging c2 off Track 1 into the strip above the top track: a new
+    // track V3 (p. 723); Track 1 closes up.
+    let l = harness.state().timeline_layout().unwrap();
+    let v1 = l.lower.get("V1").unwrap().rect.rect;
+    let grab = pos2(l.lower_scale.xf(70), v1.top() + 20.0);
+    let strip = pos2(grab.x, l.lower.span().0 - 5.0);
+    drag(&mut harness, grab, strip);
+    settle(&h, &mut harness);
+    let (m, p) = last(&h);
+    assert_eq!(
+        (m.as_str(), &p["clips"], &p["track"]),
+        ("edit.move", &json!(["c2"]), &json!("V3"))
+    );
+    assert_eq!(clips(&h, "V3"), vec![("c2".into(), 60, 60)]);
+    assert_eq!(
+        clips(&h, "V1"),
+        vec![("c1".into(), 0, 60), ("c3".into(), 60, 60)]
+    );
+
+    // 3. Place On Top at 100: above the highest track with clips there
+    // (V3), so on a new V4 (pp. 699–700).
+    call(
+        &h,
+        "media.marks.set",
+        json!({ "media": "m1", "in": 0, "out": 30 }),
+    );
+    call(
+        &h,
+        "player.seek",
+        json!({ "at": 100, "viewer": "timeline" }),
+    );
+    settle(&h, &mut harness);
+    harness.get_by_label("Place On Top").click();
+    harness.step();
+    settle(&h, &mut harness);
+    let (m, p) = last(&h);
+    assert_eq!((m.as_str(), &p["at"]), ("edit.place_on_top", &json!(100)));
+    assert_eq!(clips(&h, "V4").len(), 1);
+    assert_eq!(clips(&h, "V4")[0].1, 100);
+
+    // 4. The mixer: dragging Track 1's fader is one track.set, sent on
+    // release (one undo step); S solos the track.
+    harness.get_by_label("Mixer").click();
+    harness.step();
+    harness.step();
+    let mut faders: Vec<egui::Rect> = harness
+        .query_all_by_role(Role::Slider)
+        .map(|n| n.rect())
+        .collect();
+    faders.sort_by(|a, b| a.left().total_cmp(&b.left()));
+    let fader = *faders.first().expect("a fader per strip");
+    let before = gui_edits(&h).len();
+    drag_slowly(
+        &mut harness,
+        fader.center(),
+        fader.center() + vec2(0.0, 40.0),
+    );
+    settle(&h, &mut harness);
+    let edits = gui_edits(&h);
+    assert_eq!(edits.len(), before + 1, "one request per fader drag");
+    let (m, p) = edits.last().unwrap().clone();
+    assert_eq!((m.as_str(), &p["track"]), ("track.set", &json!("V1")));
+    let db = p["volume_db"].as_f64().unwrap();
+    assert!(db < 0.0, "dragged down: {db} dB");
+    let tracks = call(&h, "timeline.get", json!({})).result["tracks"].clone();
+    assert_eq!(tracks[0]["volume_db"].as_f64(), Some(db));
+    let solo = harness
+        .query_all_by_label("S")
+        .filter(|n| n.rect().left() >= fader.left() - 60.0)
+        .min_by(|a, b| a.rect().left().total_cmp(&b.rect().left()))
+        .expect("Track 1's solo button")
+        .rect();
+    harness.event(egui::Event::PointerMoved(solo.center()));
+    harness
+        .get_all_by_label("S")
+        .find(|n| n.rect() == solo)
+        .unwrap()
+        .click();
+    harness.step();
+    settle(&h, &mut harness);
+    let (m, p) = last(&h);
+    assert_eq!(
+        (m.as_str(), &p["track"], &p["solo"]),
+        ("track.set", &json!("V1"), &json!(true))
+    );
+    // The top bar's toggle closes it (the panel's heading says Mixer too).
+    harness
+        .get_all_by_label("Mixer")
+        .min_by(|a, b| a.rect().top().total_cmp(&b.rect().top()))
+        .unwrap()
+        .click();
+    harness.step();
+
+    // 5. Bins (p. 655): File > New Bin, then a pool clip dropped on it
+    // moves into it.
+    harness.get_by_label("File").click();
+    harness.step();
+    harness.get_by_label("New Bin").click();
+    harness.step();
+    settle(&h, &mut harness);
+    let (m, p) = last(&h);
+    assert_eq!((m.as_str(), &p["path"]), ("bins.add", &json!("Bin 1")));
+    harness.get_by_label("List").click();
+    harness.step();
+    let name = call(&h, "media.get", json!({ "media": "m2" })).result["name"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let label = if name.chars().count() > 40 {
+        format!("{}…", name.chars().take(39).collect::<String>())
+    } else {
+        name
+    };
+    let row = harness.get_by_label(&label).rect().center();
+    let bin = harness.get_by_label("📁 Bin 1").rect().center();
+    drag(&mut harness, row, bin);
+    settle(&h, &mut harness);
+    let (m, p) = last(&h);
+    assert_eq!(
+        (m.as_str(), &p["media"], &p["bin"]),
+        ("media.move", &json!(["m2"]), &json!("Bin 1"))
+    );
+    let bin_of = |h: &live::Handle, id: &str| {
+        call(h, "media.get", json!({ "media": id })).result["bin"].clone()
+    };
+    assert_eq!(bin_of(&h, "m2"), json!("Bin 1"));
+    assert!(harness.query_by_label(&label).is_none(), "gone from Master");
+    // Opening the bin shows it, and Source Tape follows (p. 696).
+    harness.get_by_label("📁 Bin 1").click_secondary();
+    harness.step();
+    harness.get_by_label("Open").click();
+    harness.step();
+    settle(&h, &mut harness);
+    assert_eq!(call(&h, "pool.set", json!({})).result["bin"], "Bin 1");
+    assert!(harness.query_by_label(&label).is_some(), "shown in its bin");
+    call(&h, "viewer.set", json!({ "mode": "source_tape" }));
+    let state = call(&h, "player.state", json!({})).result;
+    assert_eq!(state["source"]["content"], "source_tape", "{state:#}");
+    assert_eq!(state["source"]["media"], "m2", "{state:#}");
+
+    // Every gesture made exactly one change, and each is one undo step
+    // (as are the two source marks this test set over IPC).
+    let edits = gui_edits(&h);
+    assert_eq!(edits.len() - edits0, 7, "{edits:#?}");
+    assert_eq!(undo_steps(&h), undo0 + 7 + 2);
+
+    drop(harness);
+    h.shutdown();
+    let _ = session.join();
+    std::thread::sleep(Duration::from_millis(10));
+    let _ = std::fs::remove_dir_all(&dir);
+}

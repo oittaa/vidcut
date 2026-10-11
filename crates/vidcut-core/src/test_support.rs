@@ -43,6 +43,13 @@ pub fn media_info(secs: f64, fps: Rational, audio: bool) -> MediaInfo {
     }
 }
 
+/// Media facts for a fake audio-only file (music, narration).
+pub fn audio_info(secs: f64) -> MediaInfo {
+    let mut info = media_info(secs, Rational::new(25, 1).unwrap(), true);
+    info.video = None;
+    info
+}
+
 /// An Env whose files are fake media keyed by path.
 #[derive(Default)]
 pub struct FakeEnv {
@@ -148,6 +155,40 @@ impl Fixture {
             .clips
             .iter()
             .map(|c| (c.id.clone(), c.start, c.duration, c.source_in))
+            .collect()
+    }
+
+    /// Adds an audio-only file `secs` long to the pool; returns its media id.
+    pub fn add_music(&mut self, name: &str, secs: f64) -> String {
+        let path = format!("/media/{name}");
+        self.env
+            .files
+            .insert(PathBuf::from(&path), audio_info(secs));
+        let r = self.ok(json!({"method": "media.add", "params": {"paths": [path]}}));
+        r.result["media"][0].as_str().unwrap().to_string()
+    }
+
+    /// A track's clips as `(id, start, duration, source_in)`.
+    pub fn track(&self, id: &str) -> Vec<(String, i64, i64, i64)> {
+        self.editor
+            .project()
+            .track(id)
+            .map(|t| {
+                t.clips
+                    .iter()
+                    .map(|c| (c.id.clone(), c.start, c.duration, c.source_in))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Track ids, bottom video track first.
+    pub fn track_ids(&self) -> Vec<String> {
+        self.editor
+            .project()
+            .tracks
+            .iter()
+            .map(|t| t.id.clone())
             .collect()
     }
 

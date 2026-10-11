@@ -42,18 +42,18 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 - **Command log panel:** shows every action as the request it sent, from any client (GUI or agent). A click copies it as a `vidcut rpc` command, which teaches the API.
 - **Live control of the running GUI** ([decisions/gui.md](decisions/gui.md)):
   - CLI commands for an open project run inside the GUI, so humans and agents edit the same session.
-  - Live-only commands drive it: `seek`, `play`, `viewer`, `select`, `screenshot` (the viewer picture, or the whole window), `window`, `log`.
+  - Live-only commands drive it: `seek`, `play`, `viewer`, `select`, `screenshot` (the viewer picture, or the whole window), `window`, `log`, `pool` (the bin and sort order the pool shows, which Source Tape follows) and `mute` (the viewer's monitoring mute).
 - **Clipboard as data:** `edit.copy` returns the clips as JSON, and `edit.paste --clips` pastes such JSON into any project. In the GUI, Ctrl+C also puts that JSON on the system clipboard.
-- **API parameters for scripted edits:** `edit.overwrite`/`edit.ripple_overwrite` take `use_marks: false` to place by position (what a drag and drop does), `edit.change_duration` takes `end`, and `track.set`/`markers.set` cover the track header buttons and the marker dialog.
+- **API parameters for scripted edits:** `edit.overwrite`/`edit.ripple_overwrite` take `use_marks: false` to place by position (what a drag and drop does), `edit.change_duration` takes `end`, and `track.set`/`markers.set` cover the track header buttons, the mixer and the marker dialog. Edit functions and `edit.move` take `--track`, which may name the next new track (decision D27).
 - **Persistent source marks:** a media item's In/Out (`media.marks.set`) are saved in the project and used by edits without a range. Resolve remembers per-clip marks too (decision D6), and this makes them scriptable.
 - **Export jobs** (M5): `export --background` returns a job id at once in a running GUI, and `jobs list|get|wait|cancel` follow it. Foreground exports report progress and cancel when the client disconnects. `export.plan` (`export --dry-run`) describes an export without writing anything.
 - **User presets from scripts:** `presets save` (from settings or from another preset with `--set` overrides) and `presets delete`.
-- **`gui.show`** opens Quick Export, the Export dialog, Jobs or the command log for the person at the GUI.
+- **`gui.show`** opens Quick Export, the Export dialog, Jobs, the command log or the Mixer for the person at the GUI.
 
-## X6. Flat media pool in v1
-- **Resolve:** nested bins and a breadcrumb (pp. 655–656).
-- **vidcut v1:** one flat pool. Source Tape covers the whole pool.
-- **Why:** temporary scope cut. Bins are scheduled for the multi-track milestone.
+## X6. Removing a bin keeps its clips
+- **Resolve:** Delete Bin deletes the bin, the bins inside it and their clips (p. 377).
+- **vidcut:** `bins.remove` (Remove Bin) removes the bin and the bins inside it. Their media move up into the removed bin's parent, and the timeline is untouched. Taking media out of the project stays `media.remove`, which needs `force` when timeline clips use them.
+- **Why:** bins only organize the pool. A bin removed by a script or by mistake must not take media, and the timeline clips cut from them, out of the project. Undo would restore them, but an agent tidying bins shouldn't have to know that.
 
 ## X7. Timelines start at 00:00:00:00
 - **Resolve:** new timelines start at record timecode 01:00:00:00 (p. 678).
@@ -70,9 +70,9 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 ## X9. OpenTimelineIO interchange
 - **Resolve:** timelines move between applications as EDL, AAF, XML or OTIO files, imported with File > Import Timeline and exported from File > Export (pp. 527–530, 4159–4160). An import creates a new timeline, can apply the file's frame rate to the project, and asks for a folder (searched with its subfolders) when media isn't where the file says. None of this is on the Cut page.
 - **vidcut:** OpenTimelineIO only, both ways (`otio.rs`):
-  - `vidcut export cut.otio` (or File > Export Timeline) writes the timeline: V1 as a video track, the clips' audio as an audio track (J/L cuts become audio clips offset from the video edits), markers, and the In/Out marks and clip gain/mute in `metadata.vidcut`. Media are referenced by absolute `file://` URL. Unlike media exports it covers the whole timeline unless given a range.
-  - `vidcut import cut.otio` (or File > Import Timeline) adds the media to the pool and puts the first video track, with the audio that belongs to its clips, on V1. One project holds one timeline (X2), so the import goes after the last clip, or replaces the timeline with `--replace`; the GUI asks which. An empty timeline takes the file's frame rate and start timecode. Media that moved are found by name with `--search FOLDER` (subfolders too), and the GUI asks for that folder.
+  - `vidcut export cut.otio` (or File > Export Timeline) writes the timeline: a video track per video track; the audio of each video track's clips as an audio track (J/L cuts become audio clips offset from the video edits); a track per audio track; markers; and in `metadata.vidcut`, the In/Out marks, clip gain/mute and track settings (lock, mute, solo, fader, name). A track's video off or audio muted also marks the OTIO track disabled. Media are referenced by absolute `file://` URL. Unlike media exports it covers the whole timeline unless given a range.
+  - `vidcut import cut.otio` (or File > Import Timeline) adds the media to the pool. Video tracks become V1, V2, …, each with the audio that belongs to its clips; other audio tracks become A1, A2, … (vidcut's own files map back exactly). One project holds one timeline (X2), so the import goes after the last clip, or replaces the timeline with `--replace`; the GUI asks which. An empty timeline takes the file's frame rate, start timecode and track settings. Media that moved are found by name with `--search FOLDER` (subfolders too), and the GUI asks for that folder.
   - Accepts what Resolve writes: `Clip.1`, source ranges in media timecode, float rates (snapped to exact rationals such as 24000/1001).
-  - Left out, with a warning each: transitions (cuts instead), more video tracks and audio-only tracks (until M6), nested stacks, generators. `.otioz` bundles aren't read.
+  - Left out, with a warning each: transitions (cuts instead), nested stacks, generators, and clips that would overlap others on their track. `.otioz` bundles aren't read.
   - Export → import reproduces a timeline frame for frame (`tests/cli.rs`, `otio.rs` tests).
 - **Why:** the user's choice. OTIO is an open standard that Resolve and other editors read and write, so a cut can move to a finishing tool and back, and agents can write timelines in a documented format instead of vidcut's own.

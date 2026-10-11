@@ -37,7 +37,7 @@ It is written in Rust:
 
 | Crate | Purpose | Depends on |
 |---|---|---|
-| `crates/vidcut-core` | Project model, time and timecode math, edit operations, Request/Response protocol, Editor (undo/rev), project store, OpenTimelineIO reading and writing (`otio.rs`) | — (pure Rust; fast to build and test) |
+| `crates/vidcut-core` | Project model, time and timecode math, edit operations (`ops.rs`; tracks in `ops/tracks.rs`, clips following Track 1 in `ops/follow.rs`), Request/Response protocol, Editor (undo/rev), project store, render plans (`render.rs`: top-wins video, mixed audio lanes), preview EDLs (`preview.rs`), OpenTimelineIO reading and writing (`otio.rs`) | — (pure Rust; fast to build and test) |
 | `crates/vidcut-av` | FFmpeg layer: probe, exact-seek decode, encode/mux, export engine, thumbnails, waveforms, still frames, encoder detection, test-fixture generator | ffmpeg-next |
 | `crates/vidcut-mpv` | libmpv via `dlopen` (`libloading`): client API and render API (OpenGL and software) | libmpv.so.2 at runtime only |
 | `crates/vidcut` | The `vidcut` binary: Session/host, IPC, CLI (clap), GUI (eframe), later MCP | all of the above |
@@ -50,7 +50,7 @@ Inside `crates/vidcut`:
 | `session.rs` | runs requests headless against a project file |
 | `live/` | the GUI's core thread: open project, players, viewer state, waits, command log, export jobs (`jobs.rs`); publishes `Snapshot`s |
 | `ipc/` | JSON-RPC over a Unix socket, the instance registry, CLI routing |
-| `gui/` | `app.rs`: eframe and GL glue; `workspace.rs`: all panels and UI state (testable without GL); `timeline/`: geometry, gestures, drawing; `export.rs`: Quick Export, the Export dialog, jobs and OTIO windows; `pool.rs`, `viewer.rs`, `video.rs`, `stills.rs` |
+| `gui/` | `app.rs`: eframe and GL glue; `workspace.rs`: all panels and UI state (testable without GL); `timeline/`: geometry, gestures, drawing; `export.rs`: Quick Export, the Export dialog, jobs and OTIO windows; `mixer.rs`: the Mixer and meters; `pool.rs` (with bins), `viewer.rs`, `video.rs`, `stills.rs` |
 | `export.rs` | presets (built-in and user), outputs, export plans and `.otio` exports as the session runs them |
 
 Docs:
@@ -114,10 +114,11 @@ These are mandatory.
 - **Property tests** (proptest) run random edit sequences.
   - Failing seeds land in `proptest-regressions/`. Commit them, so they replay forever.
   - For a deeper run: `PROPTEST_CASES=5000 cargo test -p vidcut-core prop_tests`.
-- **GUI input tests** (`crates/vidcut/tests/gui_input.rs`, `gui_export.rs`) drive the real panels and windows with egui_kittest (clicks, drags, keys; no window or renderer) against a live session without players. Each gesture must change the project with exactly one request. Timeline gesture logic itself is unit-tested in `gui/timeline/gesture.rs` from pointer positions.
+- **GUI input tests** (`crates/vidcut/tests/gui_input.rs`, `gui_export.rs`, `gui_tracks.rs`) drive the real panels and windows with egui_kittest (clicks, drags, keys; no window or renderer) against a live session without players. Each gesture must change the project with exactly one request. Timeline gesture logic itself is unit-tested in `gui/timeline/gesture.rs` from pointer positions.
   - File dialogs are replaced with `Workspace::set_dialogs`.
   - A new window or modal is measured in its first frame and placed in the next: step once more after it appears before clicking in it.
   - Windows that ask the session (presets, plans, imports) answer on helper threads, so wait with a loop of `harness.step()`, not a fixed number of steps.
+  - egui widgets such as sliders only see a drag that spans several frames: step between press, moves and release (`drag_slowly` in `gui_tracks.rs`). Timeline gestures work either way.
 - **Export jobs** (`crates/vidcut/tests/jobs.rs`) run the live session without players: foreground, background, cancel and wait.
 - **Live session tests** (`crates/vidcut/tests/live.rs`) run the GUI's core thread without a window: a harness thread renders both players with mpv's software renderer and answers screenshots, and requests go through `Handle::call` like IPC. Prefer them over GUI tests; they need libmpv but no display.
 - **Frame checks** compare barcodes: screenshot the viewer, decode the PNG with `vidcut_av::decode`, and compare with `vidcut frame` (export's renderer).
@@ -125,7 +126,7 @@ These are mandatory.
 
 ## Driving vidcut as an agent
 
-*Status: the CLI edits and exports headless (M1, M2), controls a running GUI (M3), and exports in the background and exchanges OTIO timelines (M5). MCP arrives in M7.*
+*Status: the CLI edits and exports headless (M1, M2), controls a running GUI (M3), exports in the background and exchanges OTIO timelines (M5), and edits several tracks with a mixer and bins (M6). MCP arrives in M7.*
 
 **Discovering commands:**
 - Every CLI subcommand is one JSON-RPC method on one `Request`.
@@ -150,7 +151,17 @@ vidcut undo                                 # works across separate runs
 - In JSON params, a bare integer is a frame number.
 - Ranges are half-open: `A..B` excludes B; `A..+D` is D long.
 
-**Clips:** refer to them by id (`c17`) or by position (`V1@<time>`).
+**Clips:** refer to them by id (`c17`) or by position (`V1@<time>`, `V2@1m`).
+
+**Tracks (M6):**
+- `vidcut track` lists them. `track add video|audio [--count N]`, `track remove V3 [--force]` (`--force` also deletes its clips), and `track set A1 --volume -6 --name Music` with `--lock`/`--unlock`, `--mute`/`--unmute`, `--solo`/`--unsolo`, `--video false`.
+- Track ids are positions: V1, V2, … from the bottom and A1, A2, … (spec D27). Removing a track renumbers the later ones, so list them again afterwards.
+- Edit functions take `--track V2` (the target track) and `--audio-only`/`--video-only`. Naming the next new track (V3 when V2 is the last) creates it. Media without video go to A1 by default.
+- `vidcut edit place-on-top m4 --range 5s..+3s` puts B-roll on the first track above everything at the playhead (or `--at`, or the timeline marks); the result names the clip and the track. `vidcut edit move c7 --to 2m --track V2` moves clips between tracks.
+- Track 1 ripples. Clips on other tracks follow the Track 1 picture under their first frame (spec D21); other tracks ripple only where Track 1 is empty (D22). Only Track 1 pushes clips: inserts elsewhere overwrite (D23).
+- Export, `frame` and the preview show the highest visible clip and mix every audible track with its fader. Mute and solo apply to the export too (p. 650).
+
+**Bins (M6):** `vidcut bins` lists them. `bins add "Interviews/Day 1"` (parents too), `bins rename A B`, `bins remove A` (its media move up a level, deviation X6), `media add FILE --bin A`, `media move m1 m2 --bin A` (`""` is the top level). `media list` shows each item's bin.
 
 **JSON output:**
 - `--json` prints `{"rev", "changes": {"created", "modified", "deleted"}, "result", "via"}`.
@@ -191,10 +202,10 @@ vidcut undo                                 # works across separate runs
 - `vidcut frame --at 1m -o f.png [--width 640]` renders what the timeline shows at a frame. `--media m1` renders a media frame instead. Use it to look at cuts.
 
 **Timeline interchange (OpenTimelineIO, deviation X9):**
-- `vidcut export cut.otio` writes the whole timeline (or `--range`) for other editors: V1 as a video track, the clips' audio (J/L cuts included) as an audio track, markers, and vidcut extras in `metadata.vidcut`.
-- `vidcut import cut.otio` adds the file's media to the pool and its first video track (with the audio that belongs to it) after the last clip; `--replace` replaces the timeline instead. An empty timeline takes the file's frame rate and start timecode.
+- `vidcut export cut.otio` writes the whole timeline (or `--range`) for other editors: each video track, its clips' audio (J/L cuts included) as an audio track, each audio track, markers, and vidcut extras (marks, clip gain, track settings) in `metadata.vidcut`.
+- `vidcut import cut.otio` adds the file's media to the pool and the file's tracks after the last clip: video tracks onto V1, V2, … with the audio that belongs to their clips, other audio tracks onto A1, A2, …. `--replace` replaces the timeline instead. An empty timeline takes the file's frame rate, start timecode and track settings.
   - Media that moved: `--search /mnt/footage` looks for them by file name, subfolders too. Missing media fail the import (exit 7) with the list of files.
-  - What can't be imported (transitions, extra tracks, generators) is listed in `warnings`.
+  - What can't be imported (transitions, nested stacks, generators, clips overlapping others on their track) is listed in `warnings`.
 - Raw: `timeline.import` also takes the document inline as `otio`.
 
 **Live control of a running GUI** ([docs/decisions/gui.md](docs/decisions/gui.md)):
@@ -214,7 +225,9 @@ vidcut undo                                 # works across separate runs
 | `vidcut log [--since N]` | `gui.log` | what everyone (the human too) did, as requests |
 | `vidcut window --size 1600x1000`, `open FILE [--new]`, `quit` | `gui.*`, `project.open` | window and project |
 | `vidcut jobs`, `jobs get\|wait\|cancel J [--timeout S]` | `jobs.*` | export jobs, the GUI's own included; `wait` fails like the job did |
-| `vidcut show quick-export\|export\|jobs\|log` | `gui.show` | opens that window for the person at the GUI |
+| `vidcut pool --bin A --sort name --descending` | `pool.set` | the bin the Media Pool shows and its order; Source Tape follows it |
+| `vidcut mute [on\|off]` | `player.mute` | the viewer's monitoring mute (not the export) |
+| `vidcut show quick-export\|export\|jobs\|log\|mixer` | `gui.show` | opens that window for the person at the GUI |
 
 - **Looking at the result:** `vidcut seek 1m && vidcut screenshot -o shot.png` shows exactly what `vidcut frame --at 1m -o f.png` renders. Both are frame-exact.
 - **Exporting alongside the human:** `vidcut export out.mp4 --background` returns at once; the export shows in the GUI's Jobs window, and `vidcut jobs wait j1` blocks until it's done. An export the human starts from Quick Export is a job too, so `vidcut jobs` sees it.

@@ -1,26 +1,43 @@
-//! Cut-page edit operations (spec §7–§8) as functions on a [`Project`].
+//! Cut-page edit operations (spec §6–§8) as functions on a [`Project`].
 //!
 //! Every operation works on resolved frame numbers; parsing TimeSpecs and
 //! ClipRefs happens in the request layer. Operations may leave the project
 //! half-modified when they fail: callers apply them to a copy (the Editor does).
 //!
-//! In M1 only track V1 is editable. It is the Cut page's Track 1: magnetic
-//! while Ripple On is set (spec §6).
+//! **Tracks** (spec §6): Track 1 (`V1`) is magnetic while Ripple On is set.
+//! Inserts, deletes, moves and trims there ripple, and the clips on every
+//! other track follow the Track 1 picture under their first frame
+//! ([`follow`], decision D21). Other tracks never ripple themselves, except
+//! where Track 1 has nothing under them (p. 721).
+
+mod follow;
+mod tracks;
+
+use std::collections::BTreeMap;
+
+pub use tracks::{TrackProps, add_track, remove_track, set_track};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, ClipAudio, Marker, Project, Track};
+use crate::model::{Clip, ClipAudio, Marker, Project, Track, TrackClip, TrackKind};
+use follow::{Before, Edit};
 
 /// The main (magnetic) track.
 pub const MAIN: &str = "V1";
 
-/// A media range to put on the timeline.
-#[derive(Debug, Clone, PartialEq)]
+/// A media range to put on the timeline, and where.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Source {
     pub media: String,
     /// Source frames `[start, end)` (project frames from the media's first frame).
     pub range: (i64, i64),
-    /// Leave the audio out (the Cut page's Video Only toggle).
+    /// Leave the audio out (the Cut page's Video Only toggle, p. 694).
     pub video_only: bool,
+    /// Leave the video out (Audio Only, p. 694).
+    pub audio_only: bool,
+    /// The target track (spec §7 step 3). Default: Track 1 for clips with
+    /// video, A1 for audio-only clips. The next new track (`V3` above V2) is
+    /// made. On an audio track only the audio is used.
+    pub track: Option<String>,
 }
 
 #[derive(
@@ -45,35 +62,26 @@ pub enum MoveMode {
 
 // ---------------------------------------------------------------- helpers
 
-fn main_index(p: &Project) -> Result<usize> {
-    let i = p
-        .tracks
-        .iter()
-        .position(|t| t.id == MAIN)
-        .ok_or_else(|| Error::internal("no V1 track"))?;
-    if p.tracks[i].locked {
-        return Err(Error::invalid("track V1 is locked"));
-    }
-    Ok(i)
+fn main_index(p: &Project) -> usize {
+    p.track_index(MAIN).expect("every project has V1")
 }
 
-/// Locates a clip that must be on V1 (other tracks arrive with multi-track).
-fn on_main(p: &Project, id: &str) -> Result<(usize, usize)> {
-    let (ti, ci) = p
-        .find_clip(id)
-        .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
-    if p.tracks[ti].id != MAIN {
-        return Err(Error::invalid(format!(
-            "{id} is on {}; only V1 is editable until multi-track editing (M6)",
-            p.tracks[ti].id
-        )));
-    }
+fn unlocked(p: &Project, ti: usize) -> Result<()> {
     if p.tracks[ti].locked {
         return Err(Error::invalid(format!(
             "track {} is locked",
             p.tracks[ti].id
         )));
     }
+    Ok(())
+}
+
+/// Locates a clip on an unlocked track: (track index, clip index).
+fn locate(p: &Project, id: &str) -> Result<(usize, usize)> {
+    let (ti, ci) = p
+        .find_clip(id)
+        .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
+    unlocked(p, ti)?;
     Ok((ti, ci))
 }
 
@@ -82,6 +90,12 @@ fn clip_index(t: &Track, id: &str) -> usize {
         .iter()
         .position(|c| c.id == id)
         .expect("clip present")
+}
+
+/// Whether Track 1 has nothing at or after `t`: other tracks may ripple
+/// there (p. 721).
+fn main_empty_from(p: &Project, t: i64) -> bool {
+    p.tracks[main_index(p)].clips.iter().all(|c| c.end() <= t)
 }
 
 /// Splits the clip strictly covering `t` on track `ti`; returns the new
@@ -194,10 +208,18 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
     let media = p
         .media(&src.media)
         .ok_or_else(|| Error::not_found(format!("no media {}", src.media)))?;
-    if media.info.video.is_none() {
+    if src.video_only && src.audio_only {
+        return Err(Error::usage(
+            "an edit can't be both Video Only and Audio Only",
+        ));
+    }
+    let video = media.info.video.is_some() && !src.audio_only;
+    let audio = !media.info.audio.is_empty() && !src.video_only;
+    if !video && !audio {
         return Err(Error::invalid(format!(
-            "{} has no video; audio-only media goes on audio tracks (multi-track, M6)",
-            media.id
+            "{} has no {}",
+            media.id,
+            if src.audio_only { "audio" } else { "video" }
         )));
     }
     let frames = p.media_frames(media);
@@ -208,13 +230,6 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
             media.id
         )));
     }
-    let audio = (!src.video_only && !media.info.audio.is_empty()).then_some(ClipAudio {
-        stream: 0,
-        head: 0,
-        tail: 0,
-        gain_db: 0.0,
-        muted: false,
-    });
     let id = p.alloc_clip_id();
     Ok(Clip {
         id,
@@ -222,23 +237,66 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         start: 0,
         duration: b - a,
         source_in: a,
-        video: true,
-        audio,
+        video,
+        audio: audio.then_some(ClipAudio {
+            stream: 0,
+            head: 0,
+            tail: 0,
+            gain_db: 0.0,
+            muted: false,
+        }),
         enabled: true,
         name: None,
     })
 }
 
-fn ripple_main(p: &Project, ripple: Option<bool>) -> bool {
-    ripple.unwrap_or(p.settings.ripple_on)
+/// The track an edit puts `clip` on (spec §7 step 3, decision D3): the
+/// source's track, else Track 1 for clips with video and A1 for audio-only
+/// clips. On an audio track only the audio is used.
+fn home(p: &mut Project, clip: &mut Clip, src: &Source) -> Result<usize> {
+    let ti = match &src.track {
+        Some(id) => tracks::resolve(p, id)?,
+        None if clip.video => main_index(p),
+        None => tracks::nth(p, TrackKind::Audio, 0),
+    };
+    if p.tracks[ti].kind == TrackKind::Audio && clip.video {
+        if clip.audio.is_none() {
+            return Err(Error::invalid(format!(
+                "{} has no audio for audio track {}",
+                clip.media, p.tracks[ti].id
+            )));
+        }
+        clip.video = false;
+    }
+    unlocked(p, ti)?;
+    Ok(ti)
+}
+
+/// Index of track `id` (`V3`, `A2`), adding tracks up to it.
+pub fn ensure_track(p: &mut Project, id: &str) -> Result<usize> {
+    let kind = match id.chars().next() {
+        Some('V') => TrackKind::Video,
+        Some('A') => TrackKind::Audio,
+        _ => return Err(Error::usage(format!("{id:?} is not a track (V1, A2…)"))),
+    };
+    let n: usize = id[1..]
+        .parse()
+        .ok()
+        .filter(|&n| (1..=99).contains(&n))
+        .ok_or_else(|| Error::usage(format!("{id:?} is not a track (V1, A2…)")))?;
+    Ok(tracks::nth(p, kind, n - 1))
+}
+
+fn is_main(p: &Project, ti: usize) -> bool {
+    p.tracks[ti].id == MAIN
 }
 
 // ---------------------------------------------------------------- edit functions (spec §7)
 
-/// Append: after the last clip, ignoring the playhead (p. 697).
+/// Append (Shift+F12, p. 697): after the last clip of the target track.
 pub fn append(p: &mut Project, src: &Source) -> Result<String> {
-    let ti = main_index(p)?;
     let mut clip = make_clip(p, src)?;
+    let ti = home(p, &mut clip, src)?;
     clip.start = p.tracks[ti].end();
     let id = clip.id.clone();
     place(p, ti, clip);
@@ -259,41 +317,57 @@ pub fn nearest_edit(p: &Project, playhead: i64) -> i64 {
         .unwrap_or(0)
 }
 
-/// Smart Insert: insert at the edit nearest the playhead; later clips move
-/// right (p. 697).
+/// Smart Insert: insert at the edit nearest the playhead (p. 697).
 pub fn smart_insert(p: &mut Project, src: &Source, playhead: i64) -> Result<String> {
     let at = nearest_edit(p, playhead);
     insert_at(p, src, at)
 }
 
-/// Insert at an exact frame, splitting a clip there if needed (API-only,
-/// deviation X5). With Ripple On, a position past the end means the end.
+/// Insert at an exact frame (API-only, deviation X5). On Track 1 later clips
+/// move right, splitting a clip there if needed, and other tracks follow;
+/// with Ripple On a position past the end means the end. On other tracks
+/// nothing is pushed (p. 697): the clip writes over what is there.
 pub fn insert_at(p: &mut Project, src: &Source, at: i64) -> Result<String> {
-    let ti = main_index(p)?;
     if at < 0 {
         return Err(Error::invalid("insert position before 0"));
     }
+    let mut clip = make_clip(p, src)?;
+    let ti = home(p, &mut clip, src)?;
+    let id = clip.id.clone();
+    if !is_main(p, ti) {
+        clear_range(p, ti, at, at + clip.duration);
+        clip.start = at;
+        place(p, ti, clip);
+        fix_audio(p, ti);
+        return Ok(id);
+    }
+    let before = Before::of(p);
     let at = if p.settings.ripple_on {
         at.min(p.tracks[ti].end())
     } else {
         at
     };
-    let mut clip = make_clip(p, src)?;
     split_at(p, ti, at);
     shift_from(p, ti, at, clip.duration);
     clip.start = at;
-    let id = clip.id.clone();
     place(p, ti, clip);
     fix_audio(p, ti);
+    follow::follow(
+        p,
+        &before,
+        &Edit {
+            created: std::slice::from_ref(&id),
+            ..Edit::default()
+        },
+    );
     Ok(id)
 }
 
-/// Overwrite (F10, p. 701): writes over V1 without moving other clips.
-/// Placement: the timeline In; else backtimed to a lone timeline Out; else
-/// `at`. With both marks set it is a three-point edit and the marked range sets
-/// the length (decision D7).
-pub fn overwrite(p: &mut Project, src: &Source, at: i64) -> Result<String> {
-    let ti = main_index(p)?;
+/// Where an Overwrite or Place On Top goes, and the source range it takes:
+/// the timeline In; else backtimed to a lone timeline Out; else `at`. With
+/// both marks set it is a three-point edit: the marked range sets the length
+/// (decision D7).
+fn marked_start(p: &Project, src: &Source, at: i64) -> (i64, Source) {
     let mut src = src.clone();
     let len = src.range.1 - src.range.0;
     let start = match (p.marks.mark_in, p.marks.mark_out) {
@@ -305,16 +379,24 @@ pub fn overwrite(p: &mut Project, src: &Source, at: i64) -> Result<String> {
         (None, Some(o)) => o - len,
         (None, None) => at,
     };
+    (start, src)
+}
+
+/// Overwrite (F10, p. 701): writes over the target track without moving
+/// other clips.
+pub fn overwrite(p: &mut Project, src: &Source, at: i64) -> Result<String> {
+    let (start, src) = marked_start(p, src, at);
     if start < 0 {
         return Err(Error::invalid("overwrite would start before 0"));
     }
+    let mut clip = make_clip(p, &src)?;
+    let ti = home(p, &mut clip, &src)?;
     // Decision D10: with Ripple On, Track 1 stays gapless.
-    let start = if p.settings.ripple_on {
+    let start = if is_main(p, ti) && p.settings.ripple_on {
         start.min(p.tracks[ti].end())
     } else {
         start
     };
-    let mut clip = make_clip(p, &src)?;
     clear_range(p, ti, start, start + clip.duration);
     clip.start = start;
     let id = clip.id.clone();
@@ -324,20 +406,32 @@ pub fn overwrite(p: &mut Project, src: &Source, at: i64) -> Result<String> {
 }
 
 /// Ripple Overwrite (Shift+F10, p. 698): replaces the timeline In–Out range,
-/// or else the whole clip under `at`; everything after moves by the length
-/// difference. The source length always wins (decision D8).
+/// or else the whole clip under `at`, on the target track. On Track 1
+/// everything after moves by the length difference (the source length always
+/// wins, decision D8), and what was over the replaced clips stays. On other
+/// tracks nothing moves: a longer clip writes over what follows.
 pub fn ripple_overwrite(p: &mut Project, src: &Source, at: i64) -> Result<String> {
-    let ti = main_index(p)?;
+    let mut clip = make_clip(p, src)?;
+    let ti = home(p, &mut clip, src)?;
     let (a, b) = match (p.marks.mark_in, p.marks.mark_out) {
         (Some(i), Some(o)) => (i, o),
         _ => {
             let t = &p.tracks[ti];
-            let ci = t
-                .clip_at(at)
-                .ok_or_else(|| Error::invalid("no clip under the playhead to replace"))?;
+            let ci = t.clip_at(at).ok_or_else(|| {
+                Error::invalid(format!("no clip on {} under the playhead to replace", t.id))
+            })?;
             (t.clips[ci].start, t.clips[ci].end())
         }
     };
+    let id = clip.id.clone();
+    let len = clip.duration;
+    if !is_main(p, ti) {
+        clear_range(p, ti, a, b.max(a + len));
+        clip.start = a;
+        place(p, ti, clip);
+        fix_audio(p, ti);
+        return Ok(id);
+    }
     // A marked range past the end of a magnetic V1 replaces nothing: the clip
     // goes at the end so V1 stays gapless (like decision D10).
     let end = p.tracks[ti].end();
@@ -346,38 +440,115 @@ pub fn ripple_overwrite(p: &mut Project, src: &Source, at: i64) -> Result<String
     } else {
         (a, b)
     };
-    let mut clip = make_clip(p, src)?;
+    let before = Before::of(p);
     clear_range(p, ti, a, b);
-    shift_from(p, ti, b, clip.duration - (b - a));
+    shift_from(p, ti, b, len - (b - a));
     clip.start = a;
+    place(p, ti, clip);
+    fix_audio(p, ti);
+    follow::follow(
+        p,
+        &before,
+        &Edit {
+            created: std::slice::from_ref(&id),
+            kept: &[(a, a + len.min(b - a))],
+            ..Edit::default()
+        },
+    );
+    Ok(id)
+}
+
+/// Place On Top (F12, pp. 699–700): the clip goes on the first track above
+/// every clip in its span (made if needed), ignoring the target track and
+/// never rippling. It lines up with the timeline In, a lone Out
+/// (backtimed), the edit nearest the playhead when within 5 frames, or the
+/// playhead. Audio-only clips go on the first audio track with room.
+/// Returns the clip and the track it went on.
+pub fn place_on_top(p: &mut Project, src: &Source, playhead: i64) -> Result<(String, String)> {
+    let marked = p.marks.mark_in.is_some() || p.marks.mark_out.is_some();
+    let at = if marked {
+        playhead
+    } else {
+        let edit = nearest_edit(p, playhead);
+        if (edit - playhead).abs() <= 5 {
+            edit
+        } else {
+            playhead
+        }
+    };
+    let (start, src) = marked_start(p, src, at);
+    if start < 0 {
+        return Err(Error::invalid("the clip would start before 0"));
+    }
+    let mut clip = make_clip(p, &src)?;
+    let end = start + clip.duration;
+    let busy = |t: &Track| t.clips.iter().any(|c| c.start < end && start < c.end());
+    let ti = if clip.video {
+        let video = p.tracks_of(TrackKind::Video);
+        let top = video.iter().rposition(|&i| busy(&p.tracks[i]));
+        tracks::nth(p, TrackKind::Video, top.map_or(0, |k| k + 1))
+    } else {
+        let audio = p.tracks_of(TrackKind::Audio);
+        let free = audio.iter().position(|&i| !busy(&p.tracks[i]));
+        tracks::nth(p, TrackKind::Audio, free.unwrap_or(audio.len()))
+    };
+    unlocked(p, ti)?;
+    // An empty Track 1 is where it lands when nothing is there; Ripple On
+    // keeps it gapless (decision D10).
+    let start = if is_main(p, ti) && p.settings.ripple_on {
+        start.min(p.tracks[ti].end())
+    } else {
+        start
+    };
+    clear_range(p, ti, start, start + clip.duration);
+    clip.start = start;
     let id = clip.id.clone();
     place(p, ti, clip);
     fix_audio(p, ti);
-    Ok(id)
+    Ok((id, p.tracks[ti].id.clone()))
 }
 
 // ---------------------------------------------------------------- timeline editing (spec §8)
 
-/// Split (Ctrl+\, p. 723) at each of `at`. Decision D2: if any of `selected`
-/// lies under a split point, only selected clips are split there; otherwise
-/// every clip under it on the editable track. Returns the new right-hand ids.
+/// Split (Ctrl+\, p. 723) at each of `at`. Decision D2: where some of
+/// `selected` lie under a split point, only those are split there; otherwise
+/// every clip under it on every unlocked track. Returns the new right-hand
+/// ids.
 pub fn split(p: &mut Project, at: &[i64], selected: &[String]) -> Result<Vec<String>> {
-    let ti = main_index(p)?;
     for id in selected {
-        on_main(p, id)?;
+        locate(p, id)?;
     }
     let mut created = Vec::new();
     let mut points: Vec<i64> = at.to_vec();
     points.sort_unstable();
     points.dedup();
+    let mut touched = Vec::new();
     for t in points {
-        let covering = p.tracks[ti]
-            .clip_at(t)
-            .map(|ci| p.tracks[ti].clips[ci].id.clone());
-        let allowed =
-            selected.is_empty() || covering.as_ref().is_some_and(|id| selected.contains(id));
-        if allowed && let Some(id) = split_at(p, ti, t) {
-            created.push(id);
+        let covering: Vec<(usize, String)> = (0..p.tracks.len())
+            .filter(|&ti| !p.tracks[ti].locked)
+            .filter_map(|ti| {
+                let track = &p.tracks[ti];
+                track
+                    .clips
+                    .iter()
+                    .find(|c| c.start < t && t < c.end())
+                    .map(|c| (ti, c.id.clone()))
+            })
+            .collect();
+        let chosen: Vec<&(usize, String)> = covering
+            .iter()
+            .filter(|(_, id)| selected.contains(id))
+            .collect();
+        let targets: Vec<usize> = if chosen.is_empty() {
+            covering.iter().map(|(ti, _)| *ti).collect()
+        } else {
+            chosen.iter().map(|(ti, _)| *ti).collect()
+        };
+        for ti in targets {
+            if let Some(id) = split_at(p, ti, t) {
+                created.push(id);
+                touched.push(ti);
+            }
         }
     }
     if created.is_empty() {
@@ -385,55 +556,93 @@ pub fn split(p: &mut Project, at: &[i64], selected: &[String]) -> Result<Vec<Str
             "nothing to split: no clip strictly covers the split point",
         ));
     }
-    fix_audio(p, ti);
+    touched.sort_unstable();
+    touched.dedup();
+    for ti in touched {
+        fix_audio(p, ti);
+    }
     Ok(created)
 }
 
-/// Delete clips (p. 724–725). On V1 with ripple (Ripple On unless `lift`),
-/// later clips move left to close each gap; a lift leaves the gaps.
+/// Delete clips (pp. 721, 724–725). On Track 1 with ripple (Ripple On unless
+/// `lift`) later clips move left to close each gap and other tracks follow;
+/// a lift leaves the gaps. Other tracks close their gaps only where Track 1
+/// has nothing under them (p. 721).
 pub fn delete(p: &mut Project, ids: &[String], lift: bool) -> Result<()> {
     if ids.is_empty() {
         return Err(Error::usage("no clips to delete"));
     }
-    let ti = main_index(p)?;
-    let mut spans = Vec::new();
-    for id in ids {
-        let (_, ci) = on_main(p, id)?;
-        let c = &p.tracks[ti].clips[ci];
-        spans.push((c.start, c.end(), c.id.clone()));
-    }
+    let main = main_index(p);
     let ripple = !lift && p.settings.ripple_on;
-    spans.sort();
-    spans.dedup();
-    for (start, end, id) in spans.into_iter().rev() {
-        let track = &mut p.tracks[ti];
-        track.clips.retain(|c| c.id != id);
-        if ripple {
-            shift_from(p, ti, end, -(end - start));
+    let mut main_spans = Vec::new();
+    let mut others: BTreeMap<usize, Vec<(i64, i64, String)>> = BTreeMap::new();
+    for id in ids {
+        let (ti, ci) = locate(p, id)?;
+        let c = &p.tracks[ti].clips[ci];
+        let span = (c.start, c.end(), c.id.clone());
+        if ti == main {
+            main_spans.push(span);
+        } else {
+            others.entry(ti).or_default().push(span);
         }
     }
-    fix_audio(p, ti);
+    // Other tracks first, so the clips deleted there don't follow Track 1.
+    for (ti, mut spans) in others {
+        spans.sort();
+        spans.dedup();
+        for (start, end, id) in spans.into_iter().rev() {
+            p.tracks[ti].clips.retain(|c| c.id != id);
+            if ripple && main_empty_from(p, start) {
+                shift_from(p, ti, end, -(end - start));
+            }
+        }
+        fix_audio(p, ti);
+    }
+    if main_spans.is_empty() {
+        return Ok(());
+    }
+    let before = Before::of(p);
+    main_spans.sort();
+    main_spans.dedup();
+    for (start, end, id) in main_spans.into_iter().rev() {
+        p.tracks[main].clips.retain(|c| c.id != id);
+        if ripple {
+            shift_from(p, main, end, -(end - start));
+        }
+    }
+    fix_audio(p, main);
+    if ripple {
+        follow::follow(p, &before, &Edit::default());
+    }
     Ok(())
 }
 
-/// Delete the range `[a, b)` (Delete with timeline In/Out set, p. 725);
-/// ripples unless `lift`.
+/// Delete the range `[a, b)` on every unlocked track (Delete with timeline
+/// In/Out set, p. 725); with ripple (unless `lift`) everything after moves
+/// left on those tracks.
 pub fn delete_range(p: &mut Project, a: i64, b: i64, lift: bool) -> Result<()> {
     if a >= b {
         return Err(Error::usage(format!("empty range {a}..{b}")));
     }
-    let ti = main_index(p)?;
-    clear_range(p, ti, a, b);
-    if !lift && p.settings.ripple_on {
-        shift_from(p, ti, b, -(b - a));
+    unlocked(p, main_index(p))?;
+    let ripple = !lift && p.settings.ripple_on;
+    for ti in 0..p.tracks.len() {
+        if p.tracks[ti].locked {
+            continue;
+        }
+        clear_range(p, ti, a, b);
+        if ripple {
+            shift_from(p, ti, b, -(b - a));
+        }
+        fix_audio(p, ti);
     }
-    fix_audio(p, ti);
     Ok(())
 }
 
-/// Closes the gap on V1 containing frame `at`.
+/// Closes the gap on V1 containing frame `at`; other tracks follow.
 pub fn close_gap(p: &mut Project, at: i64) -> Result<()> {
-    let ti = main_index(p)?;
+    let ti = main_index(p);
+    unlocked(p, ti)?;
     let t = &p.tracks[ti];
     let mut gap_start = 0;
     let mut gap = None;
@@ -445,62 +654,206 @@ pub fn close_gap(p: &mut Project, at: i64) -> Result<()> {
         gap_start = c.end();
     }
     let (a, b) = gap.ok_or_else(|| Error::invalid(format!("no gap at frame {at}")))?;
+    let before = Before::of(p);
     shift_from(p, ti, b, -(b - a));
     fix_audio(p, ti);
+    follow::follow(p, &before, &Edit::default());
     Ok(())
 }
 
 /// Takes clips out of V1, closing the gaps; returns them in timeline order and
 /// maps `to` into the resulting timeline.
-fn extract(p: &mut Project, ti: usize, ids: &[String], to: i64) -> Result<(Vec<Clip>, i64)> {
-    let mut taken: Vec<Clip> = Vec::new();
-    for id in ids {
-        let (_, ci) = on_main(p, id)?;
-        taken.push(p.tracks[ti].clips[ci].clone());
-    }
-    taken.sort_by_key(|c| c.start);
-    taken.dedup_by(|a, b| a.id == b.id);
-    if let Some(c) = taken.iter().find(|c| c.start < to && to < c.end()) {
+fn extract(p: &mut Project, ti: usize, clips: &[Clip], to: i64) -> Result<i64> {
+    if let Some(c) = clips.iter().find(|c| c.start < to && to < c.end()) {
         return Err(Error::invalid(format!("cannot move {} into itself", c.id)));
     }
     let mut mapped = to;
-    for c in taken.iter().rev() {
+    for c in clips.iter().rev() {
         p.tracks[ti].clips.retain(|x| x.id != c.id);
         shift_from(p, ti, c.end(), -c.duration);
         if c.end() <= to {
             mapped -= c.duration;
         }
     }
-    Ok((taken, mapped))
+    Ok(mapped)
 }
 
-/// Move clips on V1 (p. 720–723).
+/// Move clips (pp. 720–723). `to` is where the first of them starts, in the
+/// timeline as it is before the move; `track` is the track it goes to (the
+/// others keep theirs: with `track`, the clips must all be on one track).
 ///
-/// `to` is a position in the timeline as it is before the move.
+/// On Track 1:
 /// - `Insert` (dropping on an edit point): the clips are taken out, the gaps
 ///   they leave close, and they go in at `to`, pushing later clips right.
 /// - `Overwrite` (dropping after hovering, or over the edge of a neighbor):
 ///   the clips are lifted, written over whatever is at `to`, and then, with
 ///   Ripple On, what remains of the spans they left closes (p. 722: moving a
 ///   clip a few frames onto its neighbor shortens the neighbor).
-pub fn move_clips(p: &mut Project, ids: &[String], to: i64, mode: MoveMode) -> Result<()> {
+///
+/// Other tracks don't ripple: clips write over what is at their new place.
+/// Clips moved off Track 1 leave a gap that closes with Ripple On, and a
+/// Track 1 clip dropped on another track can only overwrite (p. 721). Clips
+/// on other tracks follow Track 1 (decision D21).
+pub fn move_clips(
+    p: &mut Project,
+    ids: &[String],
+    to: i64,
+    mode: MoveMode,
+    track: Option<&str>,
+) -> Result<()> {
     if ids.is_empty() {
         return Err(Error::usage("no clips to move"));
     }
-    let ti = main_index(p)?;
     if to < 0 {
         return Err(Error::invalid("move target before 0"));
     }
-    if mode == MoveMode::Overwrite {
-        return move_overwrite(p, ti, ids, to);
+    // A new destination track comes first: making it shifts track indexes.
+    let dest = track.map(|id| tracks::resolve(p, id)).transpose()?;
+    let main = main_index(p);
+    let mut clips: Vec<(usize, Clip)> = Vec::new();
+    for id in ids {
+        let (ti, ci) = locate(p, id)?;
+        clips.push((ti, p.tracks[ti].clips[ci].clone()));
     }
-    let (clips, to) = extract(p, ti, ids, to)?;
+    clips.sort_by_key(|(_, c)| c.start);
+    clips.dedup_by(|a, b| a.1.id == b.1.id);
+    let from = clips[0].0;
+    let dest = dest.unwrap_or(from);
+    unlocked(p, dest)?;
+    if dest != from && clips.iter().any(|(ti, _)| *ti != from) {
+        return Err(Error::usage(
+            "clips from several tracks keep their tracks; move them to another track one track at a time",
+        ));
+    }
+    if p.tracks[dest].kind == TrackKind::Audio && clips.iter().any(|(_, c)| c.video) {
+        return Err(Error::invalid(format!(
+            "{} is an audio track: only audio clips go there",
+            p.tracks[dest].id
+        )));
+    }
+    let on_main: Vec<Clip> = clips
+        .iter()
+        .filter(|(ti, _)| *ti == main)
+        .map(|(_, c)| c.clone())
+        .collect();
+    if dest == main && from == main {
+        // Clips on other tracks that were picked too follow Track 1.
+        let before = Before::of(p);
+        match mode {
+            MoveMode::Insert => move_insert(p, main, &on_main, to)?,
+            MoveMode::Overwrite => move_overwrite(p, main, &on_main, to),
+        }
+        follow::follow(p, &before, &Edit::default());
+        return Ok(());
+    }
+    if !on_main.is_empty() && dest == from {
+        // A mix of tracks moved sideways: Track 1's clips move by Track 1's
+        // rules and the others follow them.
+        let before = Before::of(p);
+        let to = to + (on_main[0].start - clips[0].1.start);
+        match mode {
+            MoveMode::Insert => move_insert(p, main, &on_main, to)?,
+            MoveMode::Overwrite => move_overwrite(p, main, &on_main, to),
+        }
+        follow::follow(p, &before, &Edit::default());
+        return Ok(());
+    }
+    let before = Before::of(p);
+    let delta = to - clips[0].1.start;
+    for (ti, c) in &clips {
+        p.tracks[*ti].clips.retain(|x| x.id != c.id);
+    }
+    let moved: Vec<Clip> = clips
+        .iter()
+        .map(|(_, c)| Clip {
+            start: c.start + delta,
+            ..c.clone()
+        })
+        .collect();
+    if dest == main {
+        // Onto Track 1 from another track.
+        match mode {
+            MoveMode::Insert => {
+                let total: i64 = moved.iter().map(|c| c.duration).sum();
+                let at = if p.settings.ripple_on {
+                    to.min(p.tracks[main].end())
+                } else {
+                    to
+                };
+                split_at(p, main, at);
+                shift_from(p, main, at, total);
+                let mut t = at;
+                for mut c in moved {
+                    c.start = t;
+                    t += c.duration;
+                    place(p, main, c);
+                }
+            }
+            MoveMode::Overwrite => {
+                let first = if p.settings.ripple_on {
+                    to.min(p.tracks[main].end())
+                } else {
+                    to
+                };
+                for mut c in moved {
+                    c.start += first - to;
+                    clear_range(p, main, c.start, c.end());
+                    place(p, main, c);
+                }
+            }
+        }
+        fix_all(p);
+        follow::follow(p, &before, &Edit::default());
+        return Ok(());
+    }
+    // Onto a track other than Track 1 (or along one): overwrite there.
+    let placed: Vec<String> = moved.iter().map(|c| c.id.clone()).collect();
+    for ((own, _), c) in clips.iter().zip(moved) {
+        let ti = if dest != from { dest } else { *own };
+        clear_range(p, ti, c.start, c.end());
+        place(p, ti, c);
+    }
+    if from == main && p.settings.ripple_on {
+        // The spans left on Track 1 close (p. 649), and what was over them
+        // follows; the moved clips themselves sit where they were dropped.
+        let mut spans: Vec<(i64, i64)> = clips.iter().map(|(_, c)| (c.start, c.end())).collect();
+        spans.sort_unstable();
+        for (a, b) in spans.into_iter().rev() {
+            shift_from(p, main, b, -(b - a));
+        }
+        fix_all(p);
+        follow::follow(
+            p,
+            &before,
+            &Edit {
+                placed: &placed,
+                ..Edit::default()
+            },
+        );
+        return Ok(());
+    }
+    fix_all(p);
+    Ok(())
+}
+
+/// Keeps J/L offsets consistent on every track (decision D14).
+fn fix_all(p: &mut Project) {
+    for ti in 0..p.tracks.len() {
+        fix_audio(p, ti);
+    }
+}
+
+/// Track 1 insert-move: take the clips out (closing their gaps) and insert
+/// them at `to`.
+fn move_insert(p: &mut Project, ti: usize, clips: &[Clip], to: i64) -> Result<()> {
+    let to = extract(p, ti, clips, to)?;
     let total: i64 = clips.iter().map(|c| c.duration).sum();
     let to = to.min(p.tracks[ti].end());
     split_at(p, ti, to);
     shift_from(p, ti, to, total);
     let mut at = to;
-    for mut c in clips {
+    for c in clips {
+        let mut c = c.clone();
         c.start = at;
         at += c.duration;
         place(p, ti, c);
@@ -509,14 +862,8 @@ pub fn move_clips(p: &mut Project, ids: &[String], to: i64, mode: MoveMode) -> R
     Ok(())
 }
 
-fn move_overwrite(p: &mut Project, ti: usize, ids: &[String], to: i64) -> Result<()> {
-    let mut clips = Vec::new();
-    for id in ids {
-        let (_, ci) = on_main(p, id)?;
-        clips.push(p.tracks[ti].clips[ci].clone());
-    }
-    clips.sort_by_key(|c| c.start);
-    clips.dedup_by(|a, b| a.id == b.id);
+/// Track 1 overwrite-move.
+fn move_overwrite(p: &mut Project, ti: usize, clips: &[Clip], to: i64) {
     // Lift: the clips' spans become gaps for now.
     p.tracks[ti]
         .clips
@@ -531,7 +878,8 @@ fn move_overwrite(p: &mut Project, ti: usize, ids: &[String], to: i64) -> Result
     };
     clear_range(p, ti, to, to + total);
     let mut at = to;
-    for mut c in clips.iter().cloned() {
+    for c in clips {
+        let mut c = c.clone();
         c.start = at;
         at += c.duration;
         place(p, ti, c);
@@ -540,7 +888,7 @@ fn move_overwrite(p: &mut Project, ti: usize, ids: &[String], to: i64) -> Result
         // Close the vacated spans not covered by the clips' new place, right
         // to left so earlier spans keep their positions.
         let mut gaps: Vec<(i64, i64)> = Vec::new();
-        for c in &clips {
+        for c in clips {
             for (a, b) in [
                 (c.start, c.end().min(to)),
                 (c.start.max(to + total), c.end()),
@@ -564,25 +912,45 @@ fn move_overwrite(p: &mut Project, ti: usize, ids: &[String], to: i64) -> Result
         }
     }
     fix_audio(p, ti);
-    Ok(())
 }
 
-/// Move a clip onto another and replace it, rippling the difference (dropping
-/// on a clip right away, p. 721).
+/// Move a clip onto another on Track 1 and replace it, rippling the
+/// difference (dropping on a clip right away, p. 721). What was over the
+/// replaced clip stays.
 pub fn move_replace(p: &mut Project, id: &str, onto: &str) -> Result<()> {
-    let ti = main_index(p)?;
+    let main = main_index(p);
     if id == onto {
         return Err(Error::invalid("a clip cannot replace itself"));
     }
-    on_main(p, onto)?;
-    let (mut clips, _) = extract(p, ti, &[id.to_string()], 0)?;
-    let clip = clips.pop().expect("one clip");
-    let target = &p.tracks[ti].clips[clip_index(&p.tracks[ti], onto)];
+    let (ti, ci) = locate(p, id)?;
+    let (ui, _) = locate(p, onto)?;
+    if ti != main || ui != main {
+        return Err(Error::invalid(
+            "Replace works on Track 1; on other tracks a dropped clip overwrites (p. 721)",
+        ));
+    }
+    let clip = p.tracks[main].clips[ci].clone();
+    let before = Before::of(p);
+    extract(p, main, std::slice::from_ref(&clip), 0)?;
+    let target = &p.tracks[main].clips[clip_index(&p.tracks[main], onto)];
     let (a, b) = (target.start, target.end());
-    clear_range(p, ti, a, b);
-    shift_from(p, ti, b, clip.duration - (b - a));
-    place(p, ti, Clip { start: a, ..clip });
-    fix_audio(p, ti);
+    // The replaced span in the timeline as it was.
+    let (ka, kb) = {
+        let t = before.main_clip(onto).expect("on Track 1");
+        (t.start, t.start + clip.duration.min(t.duration))
+    };
+    clear_range(p, main, a, b);
+    shift_from(p, main, b, clip.duration - (b - a));
+    place(p, main, Clip { start: a, ..clip });
+    fix_audio(p, main);
+    follow::follow(
+        p,
+        &before,
+        &Edit {
+            kept: &[(ka, kb)],
+            ..Edit::default()
+        },
+    );
     Ok(())
 }
 
@@ -620,13 +988,17 @@ fn check_source(p: &Project, c: &Clip) -> Result<()> {
 }
 
 /// Resize a clip edge by `delta` frames (positive = later), p. 726.
-/// On V1 with ripple (Ripple On unless overridden), the clip keeps its start
-/// and later clips move; without ripple the edge moves in place, writing over
-/// a neighbor when extending into it.
+///
+/// On Track 1 with ripple (Ripple On unless overridden), the clip keeps its
+/// start, later clips move, and other tracks follow (a clip whose first
+/// frame was over the trimmed-off tail goes, p. 727). Other tracks ripple
+/// only where Track 1 has nothing under them (p. 721). Without ripple the
+/// edge moves in place, writing over a neighbor when extending into it.
 pub fn trim(p: &mut Project, id: &str, edge: Edge, delta: i64, ripple: Option<bool>) -> Result<()> {
-    let (ti, ci) = on_main(p, id)?;
-    let ripple = ripple_main(p, ripple);
+    let (ti, ci) = locate(p, id)?;
+    let main = ti == main_index(p);
     let c = p.tracks[ti].clips[ci].clone();
+    let ripple = ripple.unwrap_or(p.settings.ripple_on) && (main || main_empty_from(p, c.start));
     let old_end = c.end();
     let mut new = c.clone();
     match edge {
@@ -643,6 +1015,7 @@ pub fn trim(p: &mut Project, id: &str, edge: Edge, delta: i64, ripple: Option<bo
     if new.start < 0 {
         return Err(Error::invalid(format!("{id} would start before 0")));
     }
+    let before = (main && ripple).then(|| Before::of(p));
     if ripple {
         // Later clips follow the clip's new end.
         shift_from(p, ti, old_end, new.end() - old_end);
@@ -658,6 +1031,16 @@ pub fn trim(p: &mut Project, id: &str, edge: Edge, delta: i64, ripple: Option<bo
     p.tracks[ti].clips[ci] = new;
     p.tracks[ti].sort();
     fix_audio(p, ti);
+    if let Some(before) = before {
+        follow::follow(
+            p,
+            &before,
+            &Edit {
+                trimmed: Some(id),
+                ..Edit::default()
+            },
+        );
+    }
     Ok(())
 }
 
@@ -681,7 +1064,7 @@ fn edit_pair(p: &Project, ti: usize, id: &str, edge: Edge) -> Result<(usize, usi
 /// Roll the edit at a clip's edge by `delta` (p. 727): the outgoing clip's end
 /// and the incoming clip's start move together; the program length stays.
 pub fn roll(p: &mut Project, id: &str, edge: Edge, delta: i64) -> Result<()> {
-    let (ti, _) = on_main(p, id)?;
+    let (ti, _) = locate(p, id)?;
     let (a, b) = edit_pair(p, ti, id, edge)?;
     let mut out = p.tracks[ti].clips[a].clone();
     let mut inc = p.tracks[ti].clips[b].clone();
@@ -699,7 +1082,7 @@ pub fn roll(p: &mut Project, id: &str, edge: Edge, delta: i64) -> Result<()> {
 /// Slip a clip's content by `delta` source frames (p. 727); position and
 /// length stay.
 pub fn slip(p: &mut Project, id: &str, delta: i64) -> Result<()> {
-    let (ti, ci) = on_main(p, id)?;
+    let (ti, ci) = locate(p, id)?;
     let mut c = p.tracks[ti].clips[ci].clone();
     c.source_in += delta;
     check_source(p, &c)?;
@@ -710,7 +1093,7 @@ pub fn slip(p: &mut Project, id: &str, delta: i64) -> Result<()> {
 /// Audio-only roll at a clip's edge: a J/L cut (p. 728). Only the audio edit
 /// moves; positive `delta` lets the outgoing audio run longer.
 pub fn audio_roll(p: &mut Project, id: &str, edge: Edge, delta: i64) -> Result<()> {
-    let (ti, _) = on_main(p, id)?;
+    let (ti, _) = locate(p, id)?;
     let (a, b) = edit_pair(p, ti, id, edge)?;
     let mut out = p.tracks[ti].clips[a].clone();
     let mut inc = p.tracks[ti].clips[b].clone();
@@ -738,7 +1121,7 @@ pub fn trim_to(
     ripple: Option<bool>,
 ) -> Result<()> {
     let targets: Vec<String> = if ids.is_empty() {
-        let ti = main_index(p)?;
+        let ti = main_index(p);
         let t = &p.tracks[ti];
         // At a clip's end the playhead sits on the next clip; for the tail use
         // the clip ending here.
@@ -816,15 +1199,7 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
         )));
     }
     for id in ids {
-        let (ti, ci) = p
-            .find_clip(id)
-            .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
-        if p.tracks[ti].locked {
-            return Err(Error::invalid(format!(
-                "track {} is locked",
-                p.tracks[ti].id
-            )));
-        }
+        let (ti, ci) = locate(p, id)?;
         let c = &mut p.tracks[ti].clips[ci];
         if let Some(e) = props.enabled {
             c.enabled = e;
@@ -980,32 +1355,6 @@ pub fn set_marker(
     Ok(())
 }
 
-/// Track header toggles (pp. 647, 717).
-pub fn set_track(
-    p: &mut Project,
-    id: &str,
-    locked: Option<bool>,
-    muted: Option<bool>,
-    video_enabled: Option<bool>,
-) -> Result<()> {
-    let t = p
-        .track_mut(id)
-        .ok_or_else(|| Error::not_found(format!("no track {id}")))?;
-    if video_enabled.is_some() && t.kind != crate::model::TrackKind::Video {
-        return Err(Error::invalid(format!("{id} is an audio track")));
-    }
-    if let Some(l) = locked {
-        t.locked = l;
-    }
-    if let Some(m) = muted {
-        t.muted = m;
-    }
-    if let Some(v) = video_enabled {
-        t.video_enabled = v;
-    }
-    Ok(())
-}
-
 pub fn remove_marker(p: &mut Project, id: &str) -> Result<()> {
     let before = p.markers.len();
     p.markers.retain(|k| k.id != id);
@@ -1052,31 +1401,35 @@ pub fn set_media_marks(
     Ok(())
 }
 
-/// The clips `ids` in timeline order, as the clipboard holds them (Ctrl+C,
-/// p. 723).
-pub fn copy_clips(p: &Project, ids: &[String]) -> Result<Vec<Clip>> {
+// ---------------------------------------------------------------- clipboard
+
+/// The clips `ids` in timeline order with their tracks, as the clipboard
+/// holds them (Ctrl+C, p. 723).
+pub fn copy_clips(p: &Project, ids: &[String]) -> Result<Vec<TrackClip>> {
     if ids.is_empty() {
         return Err(Error::usage("no clips to copy"));
     }
     let mut clips = ids
         .iter()
         .map(|id| {
-            p.clip(id)
-                .cloned()
+            p.find_clip(id)
+                .map(|(ti, ci)| TrackClip {
+                    track: p.tracks[ti].id.clone(),
+                    clip: p.tracks[ti].clips[ci].clone(),
+                })
                 .ok_or_else(|| Error::not_found(format!("no clip {id}")))
         })
         .collect::<Result<Vec<_>>>()?;
-    clips.sort_by_key(|c| c.start);
-    clips.dedup_by(|a, b| a.id == b.id);
+    clips.sort_by_key(|c| c.clip.start);
+    clips.dedup_by(|a, b| a.clip.id == b.clip.id);
     Ok(clips)
 }
 
-/// Paste (Ctrl+V, p. 723): copies of `clips` overwrite Track 1 from `at`,
-/// keeping their spacing and properties. J/L cuts reset to straight cuts
-/// (decision D14); with Ripple On a paste past the end starts at the end
-/// (like decision D10). Returns the new clip ids.
-pub fn paste(p: &mut Project, clips: &[Clip], at: i64) -> Result<Vec<String>> {
-    let ti = main_index(p)?;
+/// Paste (Ctrl+V, p. 723): copies of `clips` overwrite their own tracks
+/// (made if missing) from `at`, keeping their spacing and properties. J/L
+/// cuts reset to straight cuts (decision D14); with Ripple On a paste past
+/// the end of Track 1 starts there (like decision D10). Returns the new ids.
+pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String>> {
     if clips.is_empty() {
         return Err(Error::usage("nothing to paste"));
     }
@@ -1084,10 +1437,10 @@ pub fn paste(p: &mut Project, clips: &[Clip], at: i64) -> Result<Vec<String>> {
         return Err(Error::invalid("paste position before 0"));
     }
     let mut clips = clips.to_vec();
-    clips.sort_by_key(|c| c.start);
-    let first = clips[0].start;
+    clips.sort_by_key(|c| c.clip.start);
+    let first = clips[0].clip.start;
     let mut ids = Vec::new();
-    for c in clips {
+    for TrackClip { track, clip: c } in clips {
         let media = p
             .media(&c.media)
             .ok_or_else(|| Error::not_found(format!("no media {} in this project", c.media)))?;
@@ -1106,14 +1459,24 @@ pub fn paste(p: &mut Project, clips: &[Clip], at: i64) -> Result<Vec<String>> {
                 c.id
             )));
         }
+        let has_video = media.info.video.is_some();
+        // A track that's gone: the paste makes tracks up to it.
+        let ti = ensure_track(p, &track)?;
+        unlocked(p, ti)?;
         let mut start = at + (c.start - first);
-        if p.settings.ripple_on {
+        if is_main(p, ti) && p.settings.ripple_on {
             start = start.min(p.tracks[ti].end());
         }
         let mut clip = c;
         clip.id = p.alloc_clip_id();
         clip.start = start;
-        clip.video = true;
+        clip.video = clip.video && has_video && p.tracks[ti].kind == TrackKind::Video;
+        if !clip.video && clip.audio.is_none() {
+            return Err(Error::invalid(format!(
+                "pasted clip has nothing for track {}",
+                p.tracks[ti].id
+            )));
+        }
         if let Some(a) = clip.audio.as_mut() {
             a.head = 0;
             a.tail = 0;
@@ -1122,6 +1485,113 @@ pub fn paste(p: &mut Project, clips: &[Clip], at: i64) -> Result<Vec<String>> {
         ids.push(clip.id.clone());
         place(p, ti, clip);
     }
-    fix_audio(p, ti);
+    fix_all(p);
     Ok(ids)
+}
+
+// ---------------------------------------------------------------- bins
+
+/// Checks a bin path: `/`-separated names, none empty.
+fn check_bin(path: &str) -> Result<()> {
+    if path.is_empty()
+        || path
+            .split('/')
+            .any(|n| n.trim().is_empty() || n != n.trim())
+    {
+        return Err(Error::usage(format!(
+            "bin {path:?}: use names separated by '/', like \"Interviews/Day 1\""
+        )));
+    }
+    Ok(())
+}
+
+fn has_bin(p: &Project, path: &str) -> bool {
+    path.is_empty() || p.bins.iter().any(|b| b == path)
+}
+
+/// Whether `path` is `bin` or inside it.
+fn within(path: &str, bin: &str) -> bool {
+    path == bin || path.starts_with(&format!("{bin}/"))
+}
+
+/// Adds a bin, and any missing parents (p. 655).
+pub fn add_bin(p: &mut Project, path: &str) -> Result<()> {
+    check_bin(path)?;
+    let mut prefix = String::new();
+    for name in path.split('/') {
+        if !prefix.is_empty() {
+            prefix.push('/');
+        }
+        prefix.push_str(name);
+        if !has_bin(p, &prefix) {
+            p.bins.push(prefix.clone());
+        }
+    }
+    p.bins.sort();
+    Ok(())
+}
+
+/// Removes a bin with the bins inside it. Their media go to the bin's
+/// parent: removing a bin never removes media.
+pub fn remove_bin(p: &mut Project, path: &str) -> Result<()> {
+    if !has_bin(p, path) || path.is_empty() {
+        return Err(Error::not_found(format!("no bin {path:?}")));
+    }
+    let parent = path.rsplit_once('/').map_or("", |(a, _)| a).to_string();
+    p.bins.retain(|b| !within(b, path));
+    for m in &mut p.media {
+        if within(&m.bin, path) {
+            m.bin = parent.clone();
+        }
+    }
+    Ok(())
+}
+
+/// Renames or moves a bin, with what is inside it.
+pub fn rename_bin(p: &mut Project, path: &str, to: &str) -> Result<()> {
+    if !has_bin(p, path) || path.is_empty() {
+        return Err(Error::not_found(format!("no bin {path:?}")));
+    }
+    check_bin(to)?;
+    if within(to, path) {
+        return Err(Error::invalid(format!(
+            "can't move bin {path:?} into itself"
+        )));
+    }
+    if has_bin(p, to) {
+        return Err(Error::invalid(format!("bin {to:?} exists")));
+    }
+    let rebase = |b: &str| format!("{to}{}", &b[path.len()..]);
+    for b in &mut p.bins {
+        if within(b, path) {
+            *b = rebase(b);
+        }
+    }
+    for m in &mut p.media {
+        if within(&m.bin, path) {
+            m.bin = rebase(&m.bin);
+        }
+    }
+    add_bin(p, to)?;
+    p.bins.sort();
+    p.bins.dedup();
+    Ok(())
+}
+
+/// Puts media into a bin (`""`: the top level).
+pub fn move_media(p: &mut Project, ids: &[String], bin: &str) -> Result<()> {
+    if !has_bin(p, bin) {
+        return Err(Error::not_found(format!(
+            "no bin {bin:?}; add it with bins.add"
+        )));
+    }
+    for id in ids {
+        let m = p
+            .media
+            .iter_mut()
+            .find(|m| &m.id == id)
+            .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
+        m.bin = bin.to_string();
+    }
+    Ok(())
 }

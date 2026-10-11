@@ -196,10 +196,12 @@ fn split_at_points() {
     );
     // Splitting exactly on an edit point does nothing and is an error.
     f.err(req("edit.split", json!({"at": 30})));
-    // Decision D2: with a selection, only selected clips are split.
-    f.err(req("edit.split", json!({"at": 70, "clips": ["c1"]})));
-    f.ok(req("edit.split", json!({"at": 70, "clips": ["c3"]})));
+    // Decision D2: selected clips under the point are the only ones split
+    // there; when none of them is there, everything under it is.
+    f.ok(req("edit.split", json!({"at": 70, "clips": ["c1"]})));
     assert_eq!(f.v1().len(), 4);
+    f.ok(req("edit.split", json!({"at": 80, "clips": ["c4"]})));
+    assert_eq!(f.v1().len(), 5);
 }
 
 #[test]

@@ -35,6 +35,10 @@ pub struct Project {
     #[serde(default)]
     pub markers: Vec<Marker>,
     pub next_id: NextIds,
+    /// Media Pool bins (p. 655), as `/`-separated paths below the top level
+    /// (`Interviews`, `Interviews/Day 1`), sorted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bins: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -90,6 +94,9 @@ pub struct Media {
     /// without an explicit source range use them.
     #[serde(default, skip_serializing_if = "Marks::is_empty")]
     pub marks: Marks,
+    /// The bin it is in (a path from [`Project::bins`]); empty: the top level.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub bin: String,
 }
 
 /// What the media layer found out about a file (stored so headless edits never
@@ -148,7 +155,8 @@ pub enum TrackKind {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Track {
-    /// `V<N>` or `A<N>`, by position.
+    /// `V<N>` or `A<N>`, by position: video tracks count up from V1, audio
+    /// tracks from A1.
     pub id: String,
     pub kind: TrackKind,
     /// Sorted by `start`, never overlapping.
@@ -158,9 +166,23 @@ pub struct Track {
     /// Audio of this track is silent.
     #[serde(default)]
     pub muted: bool,
+    /// While any track is soloed, only soloed tracks are heard (the mixer,
+    /// p. 650).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub solo: bool,
+    /// The mixer fader, in dB (decision D12's range, -60..24).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub volume_db: f64,
     /// Video of this track is shown (video tracks only).
     #[serde(default = "yes")]
     pub video_enabled: bool,
+    /// A name shown in the track header and the mixer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+fn is_zero(v: &f64) -> bool {
+    *v == 0.0
 }
 
 /// A clip on the timeline.
@@ -187,6 +209,21 @@ pub struct Clip {
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+}
+
+/// A clip with the track it is on: what `edit.copy` returns and
+/// `edit.paste` takes (paste puts clips back on their own tracks, p. 723).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TrackClip {
+    /// Default: Track 1.
+    #[serde(default = "main_track")]
+    pub track: String,
+    #[serde(flatten)]
+    pub clip: Clip,
+}
+
+fn main_track() -> String {
+    "V1".into()
 }
 
 /// The audio part of a clip.
@@ -275,14 +312,7 @@ impl Project {
             rev: 0,
             settings,
             media: Vec::new(),
-            tracks: vec![Track {
-                id: "V1".into(),
-                kind: TrackKind::Video,
-                clips: Vec::new(),
-                locked: false,
-                muted: false,
-                video_enabled: true,
-            }],
+            tracks: vec![Track::new("V1", TrackKind::Video)],
             marks: Marks::default(),
             markers: Vec::new(),
             next_id: NextIds {
@@ -290,7 +320,25 @@ impl Project {
                 clip: 1,
                 marker: 1,
             },
+            bins: Vec::new(),
         }
+    }
+
+    /// Index of track `id` in [`Project::tracks`].
+    pub fn track_index(&self, id: &str) -> Option<usize> {
+        self.tracks.iter().position(|t| t.id == id)
+    }
+
+    /// Indexes of the tracks of `kind`, bottom (V1, A1) first.
+    pub fn tracks_of(&self, kind: TrackKind) -> Vec<usize> {
+        (0..self.tracks.len())
+            .filter(|&i| self.tracks[i].kind == kind)
+            .collect()
+    }
+
+    /// Whether any track is soloed (then only soloed tracks are heard).
+    pub fn any_solo(&self) -> bool {
+        self.tracks.iter().any(|t| t.solo)
     }
 
     pub fn track(&self, id: &str) -> Option<&Track> {
@@ -372,6 +420,32 @@ impl Project {
 }
 
 impl Track {
+    /// An empty track.
+    pub fn new(id: impl Into<String>, kind: TrackKind) -> Self {
+        Self {
+            id: id.into(),
+            kind,
+            clips: Vec::new(),
+            locked: false,
+            muted: false,
+            solo: false,
+            volume_db: 0.0,
+            video_enabled: true,
+            name: None,
+        }
+    }
+
+    /// Whether the track's audio is heard, given whether any track is soloed.
+    pub fn audible(&self, any_solo: bool) -> bool {
+        !self.muted && (self.solo || !any_solo)
+    }
+
+    /// Index of the clip covering frame `t`, by binary search.
+    pub fn clip_covering(&self, t: i64) -> Option<usize> {
+        let i = self.clips.partition_point(|c| c.start <= t);
+        (i > 0 && t < self.clips[i - 1].end()).then(|| i - 1)
+    }
+
     /// End of the last clip (video extent).
     pub fn end(&self) -> i64 {
         self.clips.last().map_or(0, Clip::end)

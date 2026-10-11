@@ -405,6 +405,54 @@ fn live_session() {
         );
     }
 
+    step("Several tracks: B-roll on top, music mixed");
+    // M6: B-roll on V2 covers Track 1 in the preview, frame-exactly.
+    h.ok(
+        "edit.overwrite",
+        json!({ "media": "m1", "range": "250f..270f", "at": 30, "track": "V2" }),
+    );
+    for (t, want) in [(29, 29), (30, 250), (49, 269), (50, 50)] {
+        h.ok("player.seek", json!({ "at": t, "viewer": "timeline" }));
+        assert_eq!(h.shown(&dir), Some(want), "with B-roll, timeline frame {t}");
+    }
+    // Music on A1 plays as a second audio stream, mixed with Track 1's
+    // audio and turned down by its fader; the picture stays exact.
+    let music = fixture::ensure(
+        &FixtureSpec::new(
+            VideoCodec::H264,
+            Container::Mkv,
+            W as u32,
+            H as u32,
+            (30, 1),
+            120,
+        )
+        .audio_only(),
+    )
+    .unwrap();
+    h.ok("media.add", json!({ "paths": [music] }));
+    h.ok(
+        "edit.overwrite",
+        json!({ "media": "m2", "range": "0f..60f", "at": 10 }),
+    );
+    h.ok("track.set", json!({ "track": "A1", "volume_db": -6.0 }));
+    h.ok("player.seek", json!({ "at": 31, "viewer": "timeline" }));
+    assert_eq!(h.shown(&dir), Some(251));
+    assert_eq!(
+        h.ok("player.state", json!({})).result["timeline"]["error"],
+        Value::Null
+    );
+    // Track 1 ripples: the B-roll and the music follow (decision D21).
+    h.ok("edit.delete", json!({ "clips": "c1" }));
+    h.ok("player.seek", json!({ "at": 0, "viewer": "timeline" }));
+    assert_eq!(h.shown(&dir), Some(250), "the B-roll moved with Track 1");
+    h.ok("player.seek", json!({ "at": 20, "viewer": "timeline" }));
+    assert_eq!(h.shown(&dir), Some(220));
+    // The monitoring mute (p. 642) changes nothing in the project.
+    let rev = h.ok("project.summary", json!({})).rev;
+    let s = h.ok("player.mute", json!({}));
+    assert_eq!(s.result["muted"], true);
+    assert_eq!(h.ok("project.summary", json!({})).rev, rev);
+
     drop(h);
     let _ = std::fs::remove_dir_all(&dir);
 }

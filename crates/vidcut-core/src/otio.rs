@@ -2,34 +2,35 @@
 //! `.otio` file and reads one back.
 //!
 //! **Writing** ([`export`]):
-//! - Track V1 becomes a video track of clips and gaps.
-//! - The clips' audio becomes an audio track. Each audio clip covers its
+//! - Each video track becomes an OTIO video track of clips and gaps.
+//! - The audio of each track's clips becomes an audio track (`V1 audio`, …),
+//!   and each audio track (`A1`, …) one more. Each audio clip covers its
 //!   clip's audio range, so J/L cuts show up as audio edits offset from the
 //!   video edits, which is what other editors expect.
 //! - Clips reference their media by `file://` URL. Available ranges start at
 //!   0, and all times are frames at the project rate.
 //! - Timeline markers go on the top-level stack.
-//! - Details OTIO has no field for (clip gain, mute and audio stream, marker
-//!   colors, the In/Out marks) are kept under `metadata.vidcut`.
+//! - Details OTIO has no field for (clip gain, mute and audio stream, track
+//!   settings, marker colors, the In/Out marks) are kept under
+//!   `metadata.vidcut`.
 //!
 //! **Reading** ([`import`]) accepts what Resolve and the OTIO library write:
 //! - `Clip.1` and `Clip.2`; source ranges in the media's own timecode
 //!   (relative to the reference's available range); float rates, snapped to
 //!   exact rationals.
-//! - The first video track becomes V1. An audio clip that lines up with a
-//!   video clip of the same media becomes that clip's audio, J/L offsets
-//!   included. Audio on the first audio track under a gap in the video
-//!   becomes an audio-only clip.
+//! - Video tracks become V1, V2, … An audio clip that lines up with a video
+//!   clip of the same media (on any video track) becomes that clip's audio,
+//!   J/L offsets included. Other audio clips go on audio tracks A1, A2, …
+//!   (files vidcut wrote say which track each audio track belongs to).
 //! - Everything else is left out with a warning: transitions (cuts instead),
-//!   nested compositions (gaps instead), further tracks (until M6).
+//!   nested compositions and generators (gaps instead).
 
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Marks, Project};
-use crate::ops::MAIN;
+use crate::model::{Marks, Project, TrackKind};
 use crate::time::Rational;
 
 /// Where vidcut keeps its own details in OTIO metadata.
@@ -139,9 +140,6 @@ pub fn export(p: &Project, name: &str, span: Option<(i64, i64)>) -> Result<Value
     if b <= a {
         return Err(Error::invalid("nothing to export: the range is empty"));
     }
-    let v1 = p
-        .track(MAIN)
-        .ok_or_else(|| Error::internal("no V1 track"))?;
     let item = |label: &str, media: &str, source: i64, frames: i64, enabled, meta: Value| {
         let m = p
             .media(media)
@@ -167,55 +165,7 @@ pub fn export(p: &Project, name: &str, span: Option<(i64, i64)>) -> Result<Value
             "metadata": { VIDCUT: meta },
         }))
     };
-    let (mut video, mut audio) = (Vec::new(), Vec::new());
-    let (mut tv, mut ta) = (a, a);
-    for c in &v1.clips {
-        let label = c
-            .name
-            .clone()
-            .or_else(|| p.media(&c.media).map(|m| m.name.clone()))
-            .unwrap_or_default();
-        let (s, e) = (c.start.max(a), c.end().min(b));
-        if c.video && e > s {
-            if s > tv {
-                video.push(gap(s - tv, rate));
-            }
-            let mut meta = json!({ "clip": c.id, "media": c.media });
-            if let Some(au) = &c.audio {
-                meta["stream"] = json!(au.stream);
-                meta["gain_db"] = json!(au.gain_db);
-                meta["muted"] = json!(au.muted);
-            }
-            video.push(item(
-                &label,
-                &c.media,
-                c.source_at(s),
-                e - s,
-                c.enabled,
-                meta,
-            )?);
-            tv = e;
-        }
-        if let (Some(au), Some((ra, rb))) = (&c.audio, c.audio_range()) {
-            let (s, e) = (ra.max(a).max(ta), rb.min(b));
-            if e > s {
-                if s > ta {
-                    audio.push(gap(s - ta, rate));
-                }
-                let meta = json!({ "clip": c.id, "stream": au.stream, "gain_db": au.gain_db });
-                audio.push(item(
-                    &label,
-                    &c.media,
-                    c.source_at(s),
-                    e - s,
-                    !au.muted,
-                    meta,
-                )?);
-                ta = e;
-            }
-        }
-    }
-    let track = |name: &str, kind: &str, children: Vec<Value>| {
+    let track = |name: &str, kind: &str, children: Vec<Value>, enabled: bool, meta: &Value| {
         json!({
             "OTIO_SCHEMA": "Track.1",
             "name": name,
@@ -224,10 +174,76 @@ pub fn export(p: &Project, name: &str, span: Option<(i64, i64)>) -> Result<Value
             "source_range": null,
             "effects": [],
             "markers": [],
-            "enabled": true,
-            "metadata": {},
+            "enabled": enabled,
+            "metadata": { VIDCUT: meta },
         })
     };
+    // A video track for each video track, and an audio track for each track
+    // that carries audio; vidcut's track settings go in their metadata.
+    let (mut video_tracks, mut audio_tracks) = (Vec::new(), Vec::new());
+    for t in &p.tracks {
+        let (mut video, mut audio) = (Vec::new(), Vec::new());
+        let (mut tv, mut ta) = (a, a);
+        for c in &t.clips {
+            let label = c
+                .name
+                .clone()
+                .or_else(|| p.media(&c.media).map(|m| m.name.clone()))
+                .unwrap_or_default();
+            let (s, e) = (c.start.max(a), c.end().min(b));
+            if c.video && e > s {
+                if s > tv {
+                    video.push(gap(s - tv, rate));
+                }
+                let mut meta = json!({ "clip": c.id, "media": c.media });
+                if let Some(au) = &c.audio {
+                    meta["stream"] = json!(au.stream);
+                    meta["gain_db"] = json!(au.gain_db);
+                    meta["muted"] = json!(au.muted);
+                }
+                video.push(item(
+                    &label,
+                    &c.media,
+                    c.source_at(s),
+                    e - s,
+                    c.enabled,
+                    meta,
+                )?);
+                tv = e;
+            }
+            if let (Some(au), Some((ra, rb))) = (&c.audio, c.audio_range()) {
+                let (s, e) = (ra.max(a).max(ta), rb.min(b));
+                if e > s {
+                    if s > ta {
+                        audio.push(gap(s - ta, rate));
+                    }
+                    let meta = json!({ "clip": c.id, "stream": au.stream, "gain_db": au.gain_db });
+                    audio.push(item(
+                        &label,
+                        &c.media,
+                        c.source_at(s),
+                        e - s,
+                        !au.muted,
+                        meta,
+                    )?);
+                    ta = e;
+                }
+            }
+        }
+        let meta = json!({
+            "track": t.id, "locked": t.locked, "muted": t.muted, "solo": t.solo,
+            "volume_db": t.volume_db, "video_enabled": t.video_enabled, "name": t.name,
+        });
+        if t.kind == TrackKind::Video {
+            video_tracks.push(track(&t.id, "Video", video, t.video_enabled, &meta));
+            if !audio.is_empty() {
+                let name = format!("{} audio", t.id);
+                audio_tracks.push(track(&name, "Audio", audio, !t.muted, &meta));
+            }
+        } else {
+            audio_tracks.push(track(&t.id, "Audio", audio, !t.muted, &meta));
+        }
+    }
     let markers: Vec<Value> = p
         .markers
         .iter()
@@ -262,7 +278,7 @@ pub fn export(p: &Project, name: &str, span: Option<(i64, i64)>) -> Result<Value
         "tracks": {
             "OTIO_SCHEMA": "Stack.1",
             "name": "tracks",
-            "children": [track("V1", "Video", video), track("A1", "Audio", audio)],
+            "children": video_tracks.into_iter().chain(audio_tracks).collect::<Vec<_>>(),
             "source_range": null,
             "effects": [],
             "markers": markers,
@@ -276,6 +292,8 @@ pub fn export(p: &Project, name: &str, span: Option<(i64, i64)>) -> Result<Value
 /// A clip read from an OTIO file. Frames are at [`Imported::fps`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportedClip {
+    /// The track it goes on: `V<n>` or `A<n>`.
+    pub track: String,
     /// The media file, as the OTIO file names it.
     pub path: PathBuf,
     pub name: String,
@@ -303,6 +321,35 @@ impl ImportedClip {
     }
 }
 
+/// A track's settings read from an OTIO file.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportedTrack {
+    pub id: String,
+    pub locked: bool,
+    pub muted: bool,
+    pub solo: bool,
+    pub volume_db: f64,
+    pub video_enabled: bool,
+    pub name: Option<String>,
+}
+
+impl ImportedTrack {
+    /// From vidcut's metadata, else from the OTIO track's `enabled`.
+    fn of(otio: &Value, id: &str, audio: bool) -> Self {
+        let meta = &otio["metadata"][VIDCUT];
+        let enabled = otio["enabled"].as_bool().unwrap_or(true);
+        Self {
+            id: id.to_string(),
+            locked: meta["locked"].as_bool().unwrap_or(false),
+            muted: meta["muted"].as_bool().unwrap_or(audio && !enabled),
+            solo: meta["solo"].as_bool().unwrap_or(false),
+            volume_db: meta["volume_db"].as_f64().unwrap_or(0.0),
+            video_enabled: meta["video_enabled"].as_bool().unwrap_or(audio || enabled),
+            name: meta["name"].as_str().map(String::from),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportedMarker {
     pub at: i64,
@@ -318,8 +365,10 @@ pub struct Imported {
     pub fps: Rational,
     /// Record timecode of the first frame, in frames.
     pub start_tc: i64,
-    /// Sorted by start, not overlapping.
+    /// Sorted by start; on each track, not overlapping.
     pub clips: Vec<ImportedClip>,
+    /// Settings of the tracks the clips go on.
+    pub tracks: Vec<ImportedTrack>,
     pub markers: Vec<ImportedMarker>,
     pub marks: Marks,
     /// Whether the file has audio tracks. Without any, clips take their
@@ -503,12 +552,6 @@ pub fn import(doc: &Value) -> Result<Imported> {
     };
     let (video_tracks, audio_tracks) = (of_kind("Video"), of_kind("Audio"));
     let mut warnings = Vec::new();
-    if video_tracks.len() > 1 {
-        warnings.push(format!(
-            "only the first of {} video tracks was imported (more tracks come with M6)",
-            video_tracks.len()
-        ));
-    }
     // The rate: ours if we wrote the file, else the first clip's, else the
     // timeline's.
     let ours = tl["metadata"][VIDCUT]["fps"]
@@ -528,8 +571,12 @@ pub fn import(doc: &Value) -> Result<Imported> {
     };
     let start_tc = time(&tl["global_start_time"]).map_or(0, |(v, r)| frames(v, r, fps));
 
+    // Video tracks become V1, V2…
     let mut clips: Vec<ImportedClip> = Vec::new();
-    if let Some(v) = video_tracks.first() {
+    let mut settings: Vec<ImportedTrack> = Vec::new();
+    for (k, v) in video_tracks.iter().enumerate() {
+        let id = format!("V{}", k + 1);
+        settings.push(ImportedTrack::of(v, &id, false));
         for (start, len, item) in walk(v, fps, &mut warnings) {
             if !is_clip(item) || len <= 0 {
                 continue;
@@ -538,6 +585,7 @@ pub fn import(doc: &Value) -> Result<Imported> {
                 Ok((path, source_in)) => {
                     let meta = &item["metadata"][VIDCUT];
                     clips.push(ImportedClip {
+                        track: id.clone(),
                         path,
                         name: item["name"].as_str().unwrap_or("").to_string(),
                         start,
@@ -555,28 +603,40 @@ pub fn import(doc: &Value) -> Result<Imported> {
             }
         }
     }
-    // An audio clip lining up with a video clip of the same media is that
-    // clip's audio.
-    let mut left_out = 0;
-    for (ti, a) in audio_tracks.iter().enumerate() {
+    // An audio clip lining up with a video clip of the same media (on the
+    // track vidcut named, else on any) is that clip's audio. Others are
+    // audio-only clips: on the track vidcut named, else on audio tracks A1,
+    // A2… in the file's order.
+    let mut foreign_audio = 0;
+    for a in &audio_tracks {
+        let hint = a["metadata"][VIDCUT]["track"].as_str().map(String::from);
+        let mut own: Option<String> = None;
         for (start, len, item) in walk(a, fps, &mut warnings) {
             if !is_clip(item) || len <= 0 {
                 continue;
             }
-            let Ok((path, source_in)) = clip_source(item, fps) else {
-                left_out += 1;
-                continue;
+            let (path, source_in) = match clip_source(item, fps) {
+                Ok(s) => s,
+                Err(e) => {
+                    warnings.push(format!("{}; left as a gap", e.message));
+                    continue;
+                }
             };
             let span = (start, start + len);
             let meta = &item["metadata"][VIDCUT];
             let muted = item["enabled"].as_bool() == Some(false);
-            let owner = clips.iter_mut().find(|c| {
+            let pairs = |c: &ImportedClip| {
                 c.video
                     && c.audio.is_none()
                     && c.path == path
                     && c.source_in - c.start == source_in - start
                     && overlaps((c.start, c.end()), span)
-            });
+            };
+            let owner = match &hint {
+                Some(h) if h.starts_with('A') => None,
+                Some(h) => clips.iter_mut().find(|c| &c.track == h && pairs(c)),
+                None => clips.iter_mut().find(|c| pairs(c)),
+            };
             if let Some(c) = owner {
                 c.audio = Some((start - c.start, span.1 - c.end()));
                 c.muted |= muted;
@@ -588,56 +648,86 @@ pub fn import(doc: &Value) -> Result<Imported> {
                 }
                 continue;
             }
-            // Under a gap in the video: an audio-only clip.
-            let free = clips.iter().all(|c| {
-                !overlaps((c.start, c.end()), span)
-                    && c.audio_range().is_none_or(|r| !overlaps(r, span))
+            let track = match &hint {
+                Some(h) => h.clone(),
+                None => own
+                    .get_or_insert_with(|| {
+                        foreign_audio += 1;
+                        format!("A{foreign_audio}")
+                    })
+                    .clone(),
+            };
+            clips.push(ImportedClip {
+                track,
+                path,
+                name: item["name"].as_str().unwrap_or("").to_string(),
+                start,
+                duration: len,
+                source_in,
+                video: false,
+                enabled: true,
+                audio: Some((0, 0)),
+                stream: meta["stream"].as_u64().unwrap_or(0) as u32,
+                gain_db: meta["gain_db"].as_f64().unwrap_or(0.0),
+                muted,
             });
-            if ti == 0 && free {
-                clips.push(ImportedClip {
-                    path,
-                    name: item["name"].as_str().unwrap_or("").to_string(),
-                    start,
-                    duration: len,
-                    source_in,
-                    video: false,
-                    enabled: true,
-                    audio: Some((0, 0)),
-                    stream: meta["stream"].as_u64().unwrap_or(0) as u32,
-                    gain_db: meta["gain_db"].as_f64().unwrap_or(0.0),
-                    muted,
-                });
-            } else {
-                left_out += 1;
-            }
+        }
+        match (&hint, own) {
+            (Some(h), _) if h.starts_with('A') => settings.push(ImportedTrack::of(a, h, true)),
+            (None, Some(id)) => settings.push(ImportedTrack::of(a, &id, true)),
+            _ => {}
         }
     }
-    if left_out > 0 {
-        warnings.push(format!(
-            "{left_out} audio clip(s) that don't belong to a video clip were left out \
-             (audio tracks come with M6)"
-        ));
+    // Per track: clips that overlap what is already there lose their audio,
+    // or go if that is all they have.
+    clips.sort_by(|x, y| x.track.cmp(&y.track).then(x.start.cmp(&y.start)));
+    let (mut dropped, mut gone) = (0, 0);
+    let mut kept: Vec<ImportedClip> = Vec::new();
+    for mut c in clips {
+        let same: Vec<&ImportedClip> = kept.iter().filter(|k| k.track == c.track).collect();
+        let span = (c.start, c.end());
+        let busy = |r: (i64, i64)| {
+            same.iter().any(|k| {
+                (k.video && overlaps((k.start, k.end()), r))
+                    || k.audio_range().is_some_and(|a| overlaps(a, r))
+                    || (!k.video && overlaps((k.start, k.end()), r))
+            })
+        };
+        if !c.video && busy(span) {
+            gone += 1;
+            continue;
+        }
+        if c.video
+            && same
+                .iter()
+                .any(|k| k.video && overlaps((k.start, k.end()), span))
+        {
+            gone += 1;
+            continue;
+        }
+        if let Some(r) = c.audio_range()
+            && same
+                .iter()
+                .any(|k| k.audio_range().is_some_and(|a| overlaps(a, r)))
+        {
+            dropped += 1;
+            c.audio = None;
+        }
+        kept.push(c);
     }
+    let mut clips = kept;
     clips.sort_by_key(|c| c.start);
-    // Audio paired from different tracks may overlap: the later clip loses it.
-    let mut audio_end = i64::MIN;
-    let mut dropped = 0;
-    clips.retain_mut(|c| {
-        if let Some((s, e)) = c.audio_range() {
-            if s < audio_end {
-                dropped += 1;
-                c.audio = None;
-                return c.video;
-            }
-            audio_end = e;
-        }
-        true
-    });
     if dropped > 0 {
         warnings.push(format!(
-            "{dropped} clip(s) lost audio that overlapped the previous clip's"
+            "{dropped} clip(s) lost audio that overlapped other audio on their track"
         ));
     }
+    if gone > 0 {
+        warnings.push(format!(
+            "{gone} clip(s) that overlapped others on their track were left out"
+        ));
+    }
+    settings.retain(|t| t.id.starts_with('V') || clips.iter().any(|c| c.track == t.id));
 
     let mut markers = Vec::new();
     let mut take_markers = |list: &Value| {
@@ -670,6 +760,7 @@ pub fn import(doc: &Value) -> Result<Imported> {
         fps,
         start_tc,
         clips,
+        tracks: settings,
         markers,
         marks,
         has_audio_tracks: !audio_tracks.is_empty(),
@@ -681,19 +772,27 @@ pub fn import(doc: &Value) -> Result<Imported> {
 mod tests {
     use super::*;
     use crate::model::{AudioInfo, MediaInfo};
+    use crate::ops::MAIN;
     use crate::test_support::{FakeEnv, Fixture, media_info};
 
     fn req(method: &str, params: Value) -> Value {
         json!({ "method": method, "params": params })
     }
 
-    /// V1 with everything an OTIO file can carry, and the media path of each clip.
-    fn clips(p: &Project) -> Vec<(crate::model::Clip, PathBuf)> {
-        p.track(MAIN)
-            .unwrap()
-            .clips
+    /// Every track with everything an OTIO file can carry, and the media
+    /// path of each clip.
+    fn clips(p: &Project) -> Vec<(String, crate::model::Clip, PathBuf)> {
+        p.tracks
             .iter()
-            .map(|c| (c.clone(), p.media(&c.media).unwrap().path.clone()))
+            .flat_map(|t| {
+                t.clips.iter().map(|c| {
+                    (
+                        t.id.clone(),
+                        c.clone(),
+                        p.media(&c.media).unwrap().path.clone(),
+                    )
+                })
+            })
             .collect()
     }
 
@@ -774,11 +873,11 @@ mod tests {
         assert_eq!(r.result["warnings"], json!([]), "{}", r.result);
         let after = g.editor.project();
         assert_eq!(after.settings.fps, before.settings.fps);
-        let strip = |v: Vec<(crate::model::Clip, PathBuf)>| -> Vec<_> {
+        let strip = |v: Vec<(String, crate::model::Clip, PathBuf)>| -> Vec<_> {
             v.into_iter()
-                .map(|(mut c, path)| {
+                .map(|(t, mut c, path)| {
                     c.id.clear();
-                    (c, path)
+                    (t, c, path)
                 })
                 .collect()
         };
@@ -840,9 +939,12 @@ mod tests {
         g.ok(req("project.set", json!({"fps": "50"})));
         g.append("m3", 0, 10);
         let r = g.ok(req("timeline.import", json!({ "otio": doc })));
-        // c1's L-cut audio (100..105) came along without c1's video.
+        // c1's L-cut audio (100..105) came along without c1's video, over c2.
         let w = r.result["warnings"].to_string();
-        assert!(w.contains("1 audio clip") && w.contains("converted"), "{w}");
+        assert!(
+            w.contains("1 clip(s) that overlapped") && w.contains("converted"),
+            "{w}"
+        );
         let v1 = g.v1();
         assert_eq!(v1[1].1..v1[1].1 + v1[1].2, 10..110);
         assert_eq!(v1[1].3, 20);
@@ -917,17 +1019,24 @@ mod tests {
         let t = import(&resolve_style()).unwrap();
         assert_eq!(t.fps, Rational::new(24, 1).unwrap());
         assert_eq!(t.start_tc, 86400);
-        let a = &t.clips[0];
+        let v1: Vec<&ImportedClip> = t.clips.iter().filter(|c| c.track == "V1").collect();
+        let a = v1[0];
         assert_eq!((a.start, a.duration, a.source_in), (0, 48, 48));
         // The audio runs 6 frames past the video: an L cut.
         assert_eq!(a.audio, Some((0, 6)));
-        let b = &t.clips[1];
+        let b = v1[1];
         assert_eq!(
             (b.start, b.duration, b.source_in, b.enabled),
             (60, 24, 10, false)
         );
         assert_eq!(b.audio, None);
-        assert_eq!(t.clips.len(), 2, "the title has no media file");
+        assert_eq!(v1.len(), 2, "the title has no media file");
+        // The music, alone on its audio track, gets an audio track (A1).
+        let music: Vec<&ImportedClip> = t.clips.iter().filter(|c| c.track == "A1").collect();
+        assert_eq!(
+            (music[0].start, music[0].duration, music[0].video),
+            (54, 30, false)
+        );
         assert_eq!(
             t.markers,
             vec![ImportedMarker {
@@ -938,14 +1047,10 @@ mod tests {
             }]
         );
         let w = t.warnings.join("\n");
-        for expected in [
-            "2 video tracks",
-            "transitions",
-            "GeneratorReference",
-            "1 audio clip",
-        ] {
+        for expected in ["transitions", "GeneratorReference"] {
             assert!(w.contains(expected), "{expected:?} in {w}");
         }
+        assert!(!w.contains("overlapped"), "nothing else was left out: {w}");
 
         // Through the editor: an empty 25 fps project becomes 24 fps from 01:00:00:00.
         let fps = Rational::new(24, 1).unwrap();
@@ -963,13 +1068,18 @@ mod tests {
             f.v1(),
             vec![
                 crate::test_support::row("c1", 0, 48, 48),
-                crate::test_support::row("c2", 60, 24, 10),
+                crate::test_support::row("c3", 60, 24, 10),
             ]
         );
+        assert_eq!(
+            f.track("A1"),
+            vec![crate::test_support::row("c2", 54, 30, 0)]
+        );
+        assert_eq!(f.track_ids(), ["V1", "V2", "A1"], "Video 2 comes too");
         let c1 = p.clip("c1").unwrap();
         assert_eq!(c1.audio_range(), Some((0, 54)));
-        assert!(p.clip("c2").unwrap().audio.is_none() && !p.clip("c2").unwrap().enabled);
-        assert_eq!(r.result["media"], json!(["m1", "m2"]));
+        assert!(p.clip("c3").unwrap().audio.is_none() && !p.clip("c3").unwrap().enabled);
+        assert_eq!(r.result["media"], json!(["m1", "m2", "m3"]));
         assert_eq!(p.markers[0].color, "red");
     }
 
@@ -1024,5 +1134,144 @@ mod tests {
         assert_eq!(rational(12.5).unwrap(), r(25, 2));
         // Ten hours of 23.976 timecode doesn't drift.
         assert_eq!(frames(863_136.0, 23.976, r(24000, 1001)), 863_136);
+    }
+
+    #[test]
+    fn several_tracks_round_trip() {
+        // M6: B-roll on V2, music on A1, track settings, an audio-only clip on
+        // V2 and a muted, soloed, faded track.
+        let mut f = busy();
+        let music = f.add_music("music.wav", 20.0);
+        let ok = |f: &mut Fixture, m: &str, p: Value| {
+            f.ok(req(m, p));
+        };
+        ok(&mut f, "marks.clear", json!({}));
+        ok(
+            &mut f,
+            "edit.overwrite",
+            json!({"media": "m3", "range": "0f..30f", "at": 20, "track": "V2"}),
+        );
+        ok(
+            &mut f,
+            "edit.overwrite",
+            json!({"media": "m1", "range": "0f..15f", "at": 60, "track": "V2", "audio_only": true}),
+        );
+        ok(
+            &mut f,
+            "edit.overwrite",
+            json!({"media": music, "range": "0f..200f", "at": 10}),
+        );
+        ok(
+            &mut f,
+            "edit.overwrite",
+            json!({"media": music, "range": "300f..350f", "at": 230, "track": "A2"}),
+        );
+        ok(
+            &mut f,
+            "track.set",
+            json!({"track": "A1", "volume_db": -9.0, "name": "Music"}),
+        );
+        ok(
+            &mut f,
+            "track.set",
+            json!({"track": "A2", "muted": true, "solo": true}),
+        );
+        ok(
+            &mut f,
+            "track.set",
+            json!({"track": "V2", "video_enabled": false}),
+        );
+        let before = f.editor.project().clone();
+        let doc = export(&before, "busy", None).unwrap();
+        let names: Vec<&str> = doc["tracks"]["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, ["V1", "V2", "V1 audio", "V2 audio", "A1", "A2"]);
+
+        let mut g = Fixture::new(&[(10.0, true), (4.0, true), (8.0, false)]);
+        g.add_music("music.wav", 20.0);
+        let r = g.ok(req("timeline.import", json!({ "otio": doc })));
+        assert_eq!(r.result["warnings"], json!([]), "{}", r.result);
+        let after = g.editor.project();
+        let strip = |v: Vec<(String, crate::model::Clip, PathBuf)>| -> Vec<_> {
+            v.into_iter()
+                .map(|(t, mut c, path)| {
+                    c.id.clear();
+                    (t, c, path)
+                })
+                .collect()
+        };
+        assert_eq!(strip(clips(after)), strip(clips(&before)));
+        let settings = |p: &Project| -> Vec<_> {
+            p.tracks
+                .iter()
+                .map(|t| {
+                    (
+                        t.id.clone(),
+                        t.muted,
+                        t.solo,
+                        t.volume_db,
+                        t.video_enabled,
+                        t.name.clone(),
+                    )
+                })
+                .collect()
+        };
+        assert_eq!(settings(after), settings(&before));
+    }
+
+    #[test]
+    fn resolve_style_tracks_map_onto_ours() {
+        // A Resolve-style file: B-roll with linked audio on Video 2/Audio 2,
+        // and music alone on Audio 3.
+        let doc = resolve_style();
+        let mut doc = doc;
+        let tracks = doc["tracks"]["children"].as_array_mut().unwrap();
+        // Video 2 gets a clip of A002 over A001, with its audio on a new
+        // Audio 2 track; Audio 1's Music clip moves to Audio 3.
+        let t = |v: f64| json!({"OTIO_SCHEMA": "RationalTime.1", "rate": 24.0, "value": v});
+        let r = |s: f64, d: f64| json!({"OTIO_SCHEMA": "TimeRange.1", "start_time": t(s), "duration": t(d)});
+        let a002 = json!({"OTIO_SCHEMA": "Clip.1", "name": "A002", "source_range": r(0.0, 12.0),
+            "media_reference": {"OTIO_SCHEMA": "ExternalReference.1", "target_url": "file:///media/A002.mov"}});
+        let gap = json!({"OTIO_SCHEMA": "Gap.1", "source_range": r(0.0, 10.0)});
+        tracks[1]["children"] = json!([gap.clone(), a002.clone()]);
+        let music = tracks[2]["children"].as_array_mut().unwrap().pop().unwrap();
+        tracks.push(json!({"OTIO_SCHEMA": "Track.1", "kind": "Audio", "name": "Audio 2", "children": [gap, a002]}));
+        tracks.push(
+            json!({"OTIO_SCHEMA": "Track.1", "kind": "Audio", "name": "Audio 3", "enabled": false,
+            "children": [{"OTIO_SCHEMA": "Gap.1", "source_range": r(0.0, 54.0)}, music]}),
+        );
+        let t = import(&doc).unwrap();
+        // (start, duration, video, audio head/tail) of the clips on a track.
+        type Placed = (i64, i64, bool, Option<(i64, i64)>);
+        let on = |id: &str| -> Vec<Placed> {
+            t.clips
+                .iter()
+                .filter(|c| c.track == id)
+                .map(|c| (c.start, c.duration, c.video, c.audio))
+                .collect()
+        };
+        assert_eq!(
+            on("V2"),
+            vec![(10, 12, true, Some((0, 0)))],
+            "linked audio paired across tracks"
+        );
+        assert_eq!(
+            on("A1"),
+            vec![(54, 30, false, Some((0, 0)))],
+            "music on its own track"
+        );
+        assert!(
+            t.tracks.iter().any(|s| s.id == "A1" && s.muted),
+            "disabled track: muted"
+        );
+        assert!(
+            !t.warnings.iter().any(|w| w.contains("audio clip")),
+            "{:?}",
+            t.warnings
+        );
     }
 }

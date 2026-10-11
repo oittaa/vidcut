@@ -29,7 +29,7 @@
 Every action is a [`Request`](../../crates/vidcut-core/src/request.rs), the same type the headless CLI runs:
 - **GUI gestures** send one request each, without waiting for an answer. Failures show as notices in the status bar.
 - **IPC clients** send a request and wait for its answer.
-- **The command log** shows every request with its origin (`gui`, `ipc`), so a human can see what an agent did and an agent can read what the human did (`gui.log`). Fast scrubbing seeks are left out.
+- **The command log** shows every request with its origin (`gui`, `ipc`), so a human can see what an agent did and an agent can read what the human did (`gui.log`). Fast scrubbing seeks are left out. An entry's `changed` says whether the request changed the project: its revision moved, even if no media, clip or marker did (track settings, bins, marks).
 
 **Kinds of request:**
 - **Project requests** go through the project's `Editor`, exactly as headless.
@@ -140,6 +140,23 @@ A seek or load ("motion") is shown when two things have happened:
 
 **The Trim Editor** draws exact frames rendered by the export engine on a background thread (`gui/stills.rs`).
 
+**Several tracks (M6).**
+- **Rows:** both timelines draw every track: V*n*…V1, then A1…. The upper timeline grows a little per track, and the lower one shares its height among the rows (Track 1 gets the most).
+- **Headers:** the lower timeline's track headers hold the target-track toggle, L/M/V (lock, mute, video) and a menu to add or remove tracks.
+- **Destination row:** a drag's destination is the row under the pointer, and the strips above and below the rows stand for a new track (spec D18). `gesture.rs` turns the destination into the request (`track`, D25), and its unit tests cover the rows.
+
+**Mixer and meters (M6, `gui/mixer.rs`).**
+- **Strips:** the Mixer panel (top bar, or `gui.show mixer`) has a strip per track with sound: meter, fader, M and S. The mix gets a meter too.
+- **One request per fader drag:** the fader sends `track.set` once, when it's let go, so a drag is one undo step. Double-click resets it to 0 dB.
+- **Meters** read the cached waveforms at the playhead (spec D28). That way they need no audio tap in mpv, work while paused and while scrubbing, and apply the same gains, mutes and solos as the export. Peak holds last 1.5 s.
+- **Viewer:** a meter beside the viewer shows what it plays, and its speaker button is `player.mute`.
+
+**Bins (M6).**
+- **Pool view:** the pool shows the open bin (`pool.set`: bin, sort, direction). That view lives in the session, not the project, so Source Tape and agents see the same order. It follows a renamed bin, and moves to the parent bin when its own is removed.
+- **Drops:** clips dragged from the pool onto a bin (a folder, or a level of the path) send `media.move`. The pool records where the bins are drawn each frame and the drag's release checks them.
+- **One undo step:** Create Bin With Selected Clips is one `apply` batch (`bins.add` and `media.move`).
+- **Tests:** `tests/gui_tracks.rs` (egui_kittest) covers the target track, a drag onto a new track, Place On Top, a fader drag, solo, New Bin and a drop into a bin. Each sends exactly one request.
+
 ## 9. Export windows and jobs (M5)
 
 **Jobs.** Every media export in a running GUI is a job (`live/jobs.rs`), whoever started it:
@@ -159,11 +176,11 @@ A seek or load ("motion") is shown when two things have happened:
 - **File dialogs** run on helper threads behind a `Dialogs` trait; tests answer them directly.
 - **Placement:** windows open near the middle and stay anchored at their top-left, so they don't move while their content changes size.
 - **Timeline interchange** (deviation X9): File > Import Timeline asks Append or Replace when the timeline has clips, and asks for a folder when media aren't found (p. 529). Import warnings show in a window.
-- **`gui.show`** opens any of these windows (or the log) for the person at the GUI, e.g. after an agent prepared an export.
+- **`gui.show`** opens any of these windows (or the log, or the Mixer) for the person at the GUI, e.g. after an agent prepared an export.
 
 ## 10. Still open
 
-- **Pool sort order and bins**, which also set the Source Tape order. They come with M6.
 - **A render queue.** Jobs run side by side; several big exports at once compete for the encoder (NVENC allows a few sessions). Resolve's Deliver page queues renders instead.
 - **Source Tape marks spanning several clips** (decision D17 limits marks to one clip).
-- **Audio meters and monitoring mute** come with the mixer (M6).
+- **Per-channel meters** and meters that tap the player's actual output (spec D28).
+- **Dragging a bin into another bin** in the pool (`bins.rename` does it now).

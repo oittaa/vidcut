@@ -96,6 +96,22 @@ pub fn violations(p: &Project) -> Vec<String> {
             }
         }
     }
+    for (kind, prefix) in [(TrackKind::Video, 'V'), (TrackKind::Audio, 'A')] {
+        for (n, i) in p.tracks_of(kind).into_iter().enumerate() {
+            let want = format!("{prefix}{}", n + 1);
+            if p.tracks[i].id != want {
+                v.push(format!("track {} should be {want}", p.tracks[i].id));
+            }
+        }
+    }
+    if p.track("V1").is_none() {
+        v.push("no track V1".into());
+    }
+    for m in &p.media {
+        if !m.bin.is_empty() && !p.bins.contains(&m.bin) {
+            v.push(format!("{} is in unknown bin {:?}", m.id, m.bin));
+        }
+    }
     for k in &p.markers {
         if !ids.insert(k.id.as_str()) {
             v.push(format!("duplicate id {}", k.id));

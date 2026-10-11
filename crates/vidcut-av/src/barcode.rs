@@ -79,7 +79,20 @@ pub fn read_with(width: usize, height: usize, px: impl Fn(usize, usize) -> u8) -
     if width < BITS * 4 || height < 8 {
         return None;
     }
-    let cell = width / BITS;
+    // The cells as painted (`width / BITS` wide, then a gray margin), or else
+    // spread over the whole width: a scaled picture of a frame whose width is
+    // a multiple of BITS, like a screenshot of the viewer.
+    let painted = width / BITS;
+    read_cells(height, &px, |quarters| quarters * painted / 4)
+        .or_else(|| read_cells(height, &px, |quarters| quarters * width / (BITS * 4)))
+}
+
+/// Reads the bits with cell edges at `x(quarter cells from the left)`.
+fn read_cells(
+    height: usize,
+    px: &impl Fn(usize, usize) -> u8,
+    x: impl Fn(usize) -> usize,
+) -> Option<u32> {
     let half = height / 2;
     // Sample the middle half of each cell in both bands to stay clear of
     // edges blurred by compression or scaling.
@@ -97,7 +110,7 @@ pub fn read_with(width: usize, height: usize, px: impl Fn(usize, usize) -> u8) -
     let (by0, by1) = (half + half / 4, half + half * 3 / 4);
     let mut index = 0u32;
     for bit in 0..BITS {
-        let (x0, x1) = (bit * cell + cell / 4, bit * cell + cell * 3 / 4);
+        let (x0, x1) = (x(bit * 4 + 1), x(bit * 4 + 3));
         let top = mean(x0, x1.max(x0 + 1), ty0, ty1.max(ty0 + 1));
         let bottom = mean(x0, x1.max(x0 + 1), by0, by1.max(by0 + 1));
         let mid = i32::from(MID);
@@ -139,6 +152,24 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn reads_scaled_pictures() {
+        // A 640-wide frame shown 594 wide (cells 29.7 px), as in a viewer
+        // screenshot; also odd widths with a margin, unscaled.
+        let (w, h) = (640, 360);
+        for index in [1, 2, 29, 1000, MAX_INDEX] {
+            let mut buf = vec![0u8; w * h];
+            paint(index, &mut buf, w, h, w);
+            let (sw, sh) = (594, 334);
+            let scaled: Vec<u8> = (0..sw * sh)
+                .map(|i| buf[(i / sw) * h / sh * w + (i % sw) * w / sw])
+                .collect();
+            assert_eq!(read(&scaled, sw, sh, sw), Some(index), "#{index}");
+        }
+        assert_eq!(roundtrip(1000, 330, 180, 330), Some(1000));
+        assert_eq!(roundtrip(1000, 854, 480, 854), Some(1000));
     }
 
     #[test]

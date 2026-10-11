@@ -107,8 +107,11 @@ fn convert(info: &vidcut_av::probe::MediaInfo) -> Result<MediaInfo> {
             codec: a.codec.clone(),
             sample_rate: a.sample_rate,
             channels: a.channels,
-            first_pts: a.start_secs.unwrap_or(0.0),
-            duration: a.duration_secs.or(info.duration).unwrap_or(0.0).max(0.0),
+            // Where the content starts: after the encoder's priming.
+            first_pts: a.first_secs.or(a.start_secs).unwrap_or(0.0),
+            duration: (a.duration_secs.or(info.duration).unwrap_or(0.0)
+                - (a.first_secs.unwrap_or(0.0) - a.start_secs.unwrap_or(0.0)))
+            .max(0.0),
         })
         .collect();
     Ok(MediaInfo {

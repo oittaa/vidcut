@@ -10,15 +10,18 @@ A simple, fully scriptable video cutting tool for Linux, modeled on DaVinci Reso
 >   - **M3:** the GUI shell. It has the media pool, the viewer (Source Clip, Source Tape, Timeline), transport and marks, the edit buttons and an overview timeline. It also has live control: CLI commands and agents drive the running GUI.
 >   - **M4:** timeline editing with the mouse. The dual timeline has filmstrips and waveforms. You can drag and drop from the pool, move, trim, roll, slip and make J/L cuts, with snapping, Safe Edit, markers and the Trim Editor.
 >   - **M5:** exporting from the GUI: Quick Export, an Export dialog with every setting, and a Jobs window with progress and cancel. Timelines move to and from other editors as OpenTimelineIO.
-> - Next: multi-track (M6). See the milestones below.
+>   - **M6:** several tracks: B-roll above Track 1 that follows its edits, music on audio tracks, Place On Top, a mixer with meters, mute and solo, and bins in the media pool.
+> - Next: agent extras (M7). See the milestones below.
 
 ## What it will do
 
 - **Cut-page editing:**
-  - a media pool and a source/timeline viewer (Source Clip, Source Tape, Timeline)
+  - a media pool with bins, and a source/timeline viewer (Source Clip, Source Tape, Timeline)
   - a dual timeline: an overview of the whole program plus a detail view
-  - Smart Insert, Append, Ripple Overwrite, Overwrite
+  - Smart Insert, Append, Ripple Overwrite, Overwrite, Place On Top
   - split, ripple delete, trimming (resize, roll, slip, J/L cuts)
+  - several tracks: B-roll that follows the main story on Track 1, music on audio tracks
+  - a mixer with faders, mute, solo and meters
   - snapping, markers, undo
 - **Export:**
   - Quick Export presets (H.264/H.265 Master, ProRes 422 HQ, YouTube, Vimeo, TikTok), plus your own
@@ -66,13 +69,13 @@ Everything you do is listed in the **Command log** (top right) as the request it
 | I / O, Alt+X, Shift+I / O | mark In/Out (source, timeline, or the pool clip under the pointer), clear, go to |
 | Q | Viewer: Timeline ↔ last source mode |
 | = / + / − | type a timecode (absolute or relative); digits fill from the right, so 100 is 1 second |
-| F9, Shift+F12, Shift+F10, F10 | Smart Insert, Append, Ripple Overwrite, Overwrite |
+| F9, Shift+F12, Shift+F10, F10, F12 | Smart Insert, Append, Ripple Overwrite, Overwrite, Place On Top |
 | Ctrl+\\, Delete, Alt+Delete | split at the playhead, ripple delete (or the In–Out range), lift |
 | Ctrl+C / X / V, Ctrl+Z / Ctrl+Shift+Z | copy, cut, paste at the playhead; undo, redo |
 | M, Alt+M, D | add marker (or edit the one at the playhead), remove marker, disable clip |
 | V, U, `,` / `.` | select the nearest edit, cycle Out/In/both, trim it a frame (Shift: a second) |
 | N, Ctrl+D | snapping on/off (only for the current drag if pressed mid-drag), change clip duration |
-| Ctrl+I | import media |
+| Ctrl+I, Shift+Ctrl+N | import media (into the open bin), new bin |
 
 **The timeline** follows the Cut page:
 - The upper timeline shows the whole program; the lower one is a zoomed detail view (Ctrl+wheel) whose playhead stays in the middle.
@@ -84,6 +87,10 @@ Everything you do is listed in the **Command log** (top right) as the request it
   - the body moves it.
 - Where you drop decides the edit: on an edit point inserts; on a clip replaces it, or overwrites if you hover first; past the end appends.
 - Drag media from the pool or the viewer to edit it in. Double-click an edit for the Trim Editor.
+
+**Tracks.** Track 1 holds the main story and closes up behind every edit. Clips on the tracks above it are B-roll: they stay with the Track 1 picture they sit over when Track 1 changes. Audio tracks (A1, A2, …) hold music and other sound. Click a track's name to make it the target of the edit buttons, and right-click it to add or remove tracks. Drop a clip on a row to put it on that track, or above the top row (below the bottom row) to make a new track. **Place On Top** (F12) puts the source on the first free track above everything at the playhead. The topmost visible clip is what you see. Every unmuted track is heard; **Mixer** (top bar) has a fader, mute and solo for each track, and mute and solo apply to exports too. The meter next to the viewer shows the level, and its speaker button mutes playback.
+
+**Bins.** Organize the pool into bins (File > New Bin, or right-click in the pool). Drag clips onto a bin, double-click a bin to open it, and use the path above the pool to go back up. Source Tape plays the open bin.
 
 **Live control.** While the GUI has a project open, `vidcut` commands for that project run *inside* it, and the window updates at once. A script or an AI agent can therefore edit alongside you:
 
@@ -104,6 +111,10 @@ vidcut -p talk.vidcut media add cam.mp4 screen.mkv
 vidcut -p talk.vidcut edit append m1 --range 10s..2m
 vidcut -p talk.vidcut edit split --at 1m
 vidcut -p talk.vidcut edit delete V1@1m10s       # ripple delete the clip under 1m10s
+vidcut -p talk.vidcut edit place-on-top m2 --range 5s..+3s --at 30s   # B-roll over Track 1
+vidcut -p talk.vidcut media add music.flac       # m3
+vidcut -p talk.vidcut edit overwrite m3 --at start   # sound alone lands on audio track A1
+vidcut -p talk.vidcut track set A1 --volume -12 --name Music
 vidcut -p talk.vidcut timeline
 vidcut -p talk.vidcut undo
 vidcut -p talk.vidcut export talk.mp4 --preset youtube-1080p   # GPU-encoded when available

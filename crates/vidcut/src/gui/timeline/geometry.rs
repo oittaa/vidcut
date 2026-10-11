@@ -1,9 +1,9 @@
 //! Timeline geometry: frames ↔ pixels, what the pointer is over, snapping.
 //! Pure functions over the project, testable without a window.
 
-use eframe::egui::{Pos2, Rect};
-use vidcut_core::model::{Clip, Project, Track};
-use vidcut_core::ops::Edge;
+use eframe::egui::{Pos2, Rect, pos2};
+use vidcut_core::model::{Clip, Project, Track, TrackKind};
+use vidcut_core::ops::{Edge, MAIN};
 
 /// Maps timeline frames to screen x and back.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -84,6 +84,148 @@ impl TrackRect {
     }
 }
 
+/// A track's row on a timeline.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Row {
+    pub track: String,
+    pub rect: TrackRect,
+}
+
+/// A timeline's rows, top to bottom: the video tracks from the top one down
+/// to V1, then the audio tracks A1, A2… (p. 648). Above the rows is room for
+/// a new video track, below them for a new audio track.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Rows {
+    pub rows: Vec<Row>,
+    /// Where the rows were laid out.
+    pub area: Rect,
+}
+
+/// Height of the gray strip above the rows where a drop makes a new video
+/// track.
+pub const NEW_TRACK_STRIP: f32 = 14.0;
+
+impl Rows {
+    /// Lays out `p`'s tracks in `area`. Track 1 gets the most room; rows
+    /// shrink (to `min` pixels) when many tracks share the area.
+    pub fn layout(p: &Project, area: Rect, heights: [f32; 3], min: f32, strip: f32) -> Self {
+        let [v1, video, audio] = heights;
+        let mut order: Vec<&Track> = p
+            .tracks_of(TrackKind::Video)
+            .into_iter()
+            .rev()
+            .map(|i| &p.tracks[i])
+            .collect();
+        order.extend(
+            p.tracks_of(TrackKind::Audio)
+                .into_iter()
+                .map(|i| &p.tracks[i]),
+        );
+        let want: Vec<f32> = order
+            .iter()
+            .map(|t| match t.kind {
+                TrackKind::Audio => audio,
+                TrackKind::Video if t.id == MAIN => v1,
+                TrackKind::Video => video,
+            })
+            .collect();
+        let room = (area.height() - strip).max(1.0);
+        let total: f32 = want.iter().sum();
+        let factor = if total > room { room / total } else { 1.0 };
+        let mut y = area.top() + strip;
+        let rows = order
+            .iter()
+            .zip(want)
+            .map(|(t, h)| {
+                let h = (h * factor).max(min).round();
+                let rect =
+                    Rect::from_min_max(pos2(area.left(), y), pos2(area.right(), y + h - 1.0));
+                y += h;
+                let share = match t.kind {
+                    TrackKind::Audio => 1.0,
+                    TrackKind::Video if t.id == MAIN => 0.32,
+                    TrackKind::Video => 0.3,
+                };
+                Row {
+                    track: t.id.clone(),
+                    rect: TrackRect::new(rect, share),
+                }
+            })
+            .collect();
+        Self { rows, area }
+    }
+
+    pub fn get(&self, track: &str) -> Option<&Row> {
+        self.rows.iter().find(|r| r.track == track)
+    }
+
+    /// The row under `y`.
+    pub fn at(&self, y: f32) -> Option<&Row> {
+        self.rows
+            .iter()
+            .find(|r| r.rect.rect.top() <= y && y <= r.rect.rect.bottom())
+    }
+
+    /// The top of the first row and the bottom of the last.
+    pub fn span(&self) -> (f32, f32) {
+        (
+            self.rows
+                .first()
+                .map_or(self.area.top(), |r| r.rect.rect.top()),
+            self.rows
+                .last()
+                .map_or(self.area.top(), |r| r.rect.rect.bottom()),
+        )
+    }
+
+    /// The track a drop at `y` goes to: the row's track, or a new video
+    /// track above the rows, or a new audio track below them (p. 648).
+    pub fn target(&self, p: &Project, y: f32) -> Option<String> {
+        if let Some(r) = self.at(y) {
+            return Some(r.track.clone());
+        }
+        let (top, bottom) = self.span();
+        let count = |k| p.tracks_of(k).len() + 1;
+        if y < top && y >= self.area.top() - 4.0 {
+            Some(format!("V{}", count(TrackKind::Video)))
+        } else if y > bottom && y <= self.area.bottom() + 24.0 {
+            Some(format!("A{}", count(TrackKind::Audio)))
+        } else {
+            None
+        }
+    }
+
+    /// Where a track that doesn't exist yet would be drawn: the strip above
+    /// the rows for a video track, below them for an audio track.
+    pub fn phantom(&self, track: &str) -> TrackRect {
+        let (top, bottom) = self.span();
+        let rect = if track.starts_with('V') {
+            Rect::from_min_max(
+                pos2(
+                    self.area.left(),
+                    (top - NEW_TRACK_STRIP).max(self.area.top()),
+                ),
+                pos2(self.area.right(), top - 1.0),
+            )
+        } else {
+            Rect::from_min_max(
+                pos2(self.area.left(), bottom + 1.0),
+                pos2(
+                    self.area.right(),
+                    (bottom + 30.0).min(self.area.bottom().max(bottom + 8.0)),
+                ),
+            )
+        };
+        TrackRect::new(rect, if track.starts_with('A') { 1.0 } else { 0.3 })
+    }
+
+    /// The row for `track`, real or phantom.
+    pub fn rect_of(&self, track: &str) -> TrackRect {
+        self.get(track)
+            .map_or_else(|| self.phantom(track), |r| r.rect)
+    }
+}
+
 /// What the pointer is over on a track (spec §8.1, §8.6: the pointer
 /// position picks the operation).
 #[derive(Debug, Clone, PartialEq)]
@@ -127,6 +269,7 @@ pub fn hit(track: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Hit {
     if !tr.rect.contains(pos) {
         return Hit::Empty;
     }
+    // On audio tracks the whole row is the audio band.
     let frame = scale.frame(pos.x);
     // Clips near the pointer (edges may be a few pixels outside a clip).
     let slack = (f64::from(EDGE) / scale.ppf).ceil() as i64 + 1;
@@ -139,7 +282,10 @@ pub fn hit(track: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Hit {
     // neighbor.
     let range = range.start.saturating_sub(1)..(range.end + 1).min(track.clips.len());
     let clips = &track.clips[range];
-    let audio = tr.in_audio(pos.y);
+    // Rows with a picture band above the sound band (video tracks); on audio
+    // rows the whole row is sound and works like a picture band.
+    let banded = tr.audio_top > tr.rect.top();
+    let audio = banded && tr.in_audio(pos.y);
 
     // The audio band at an edit with a J/L cut moves only the audio edit.
     if audio {
@@ -199,13 +345,31 @@ pub fn hit(track: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Hit {
             continue;
         }
         let center = (x0 + x1) / 2.0;
-        let handle_bottom = tr.rect.top() + (tr.audio_top - tr.rect.top()) * 0.45;
+        let band_bottom = if banded {
+            tr.audio_top
+        } else {
+            tr.rect.bottom()
+        };
+        let handle_bottom = tr.rect.top() + (band_bottom - tr.rect.top()) * 0.45;
         if x1 - x0 >= 48.0 && (pos.x - center).abs() <= SLIP && pos.y <= handle_bottom {
             return Hit::Slip(c.id.clone());
         }
         return Hit::Clip(c.id.clone());
     }
     Hit::Empty
+}
+
+/// What is under `pos` on whichever row it is over: the track and the hit.
+pub fn hit_rows(p: &Project, rows: &Rows, scale: &Scale, pos: Pos2) -> (Option<String>, Hit) {
+    match rows.at(pos.y) {
+        Some(r) => {
+            let what = p
+                .track(&r.track)
+                .map_or(Hit::Empty, |t| hit(t, scale, &r.rect, pos));
+            (Some(r.track.clone()), what)
+        }
+        None => (None, Hit::Empty),
+    }
 }
 
 /// Where an edit point is near `x` (within `px`): the boundary between two
@@ -327,16 +491,12 @@ mod tests {
         // c1 0..100 | c2 100..150 (L-cut: c1's audio runs 10 frames into c2),
         // gap, c3 200..300.
         Track {
-            id: "V1".into(),
-            kind: TrackKind::Video,
             clips: vec![
                 clip("c1", 0, 100, Some((0, 10))),
                 clip("c2", 100, 50, Some((10, 0))),
                 clip("c3", 200, 100, None),
             ],
-            locked: false,
-            muted: false,
-            video_enabled: true,
+            ..Track::new("V1", TrackKind::Video)
         }
     }
 

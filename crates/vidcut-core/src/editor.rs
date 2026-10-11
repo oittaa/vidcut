@@ -367,6 +367,8 @@ fn source(p: &Project, params: &SourceParams) -> Result<Source> {
         media: params.media.clone(),
         range,
         video_only: params.video_only,
+        audio_only: params.audio_only,
+        track: params.track.clone(),
     })
 }
 
@@ -402,12 +404,31 @@ fn mutate(
             project_set(p, set)?;
             Value::Null
         }
-        Request::MediaAdd { paths } => {
+        Request::MediaAdd { paths, bin } => {
             let mut ids = Vec::new();
             for path in paths {
                 ids.push(add_media(p, env.probe(path)?));
             }
+            if let Some(bin) = bin {
+                ops::move_media(p, &ids, bin)?;
+            }
             json!({ "media": ids })
+        }
+        Request::MediaMove { media, bin } => {
+            ops::move_media(p, &media.to_vec(), bin)?;
+            Value::Null
+        }
+        Request::BinsAdd { path } => {
+            ops::add_bin(p, path)?;
+            Value::Null
+        }
+        Request::BinsRemove { path } => {
+            ops::remove_bin(p, path)?;
+            Value::Null
+        }
+        Request::BinsRename { path, to } => {
+            ops::rename_bin(p, path, to)?;
+            Value::Null
         }
         Request::MediaRemove { media, force } => {
             p.media(media)
@@ -512,6 +533,30 @@ fn mutate(
             let clip = without_marks(p, !use_marks, |p| ops::overwrite(p, &s, at))?;
             json!({ "clip": clip })
         }
+        Request::EditPlaceOnTop {
+            source: src,
+            at,
+            use_marks,
+        } => {
+            if src.track.is_some() {
+                return Err(Error::usage(
+                    "Place On Top picks its own track (p. 699); leave out `track`",
+                ));
+            }
+            let at = match at {
+                Some(t) => Some(resolve(p, t, playhead)?),
+                None => playhead,
+            };
+            let marked = *use_marks && (p.marks.mark_in.is_some() || p.marks.mark_out.is_some());
+            let at = if marked {
+                at.unwrap_or(0)
+            } else {
+                need(at, "at")?
+            };
+            let s = source(p, src)?;
+            let (clip, track) = without_marks(p, !use_marks, |p| ops::place_on_top(p, &s, at))?;
+            json!({ "clip": clip, "track": track })
+        }
         Request::EditRippleOverwrite {
             source: src,
             at,
@@ -555,10 +600,15 @@ fn mutate(
             ops::close_gap(p, at)?;
             Value::Null
         }
-        Request::EditMove { clips, to, mode } => {
+        Request::EditMove {
+            clips,
+            to,
+            mode,
+            track,
+        } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             let to = resolve(p, to, playhead)?;
-            ops::move_clips(p, &ids, to, *mode)?;
+            ops::move_clips(p, &ids, to, *mode, track.as_deref())?;
             Value::Null
         }
         Request::EditReplace { clip, onto } => {
@@ -708,9 +758,31 @@ fn mutate(
             track,
             locked,
             muted,
+            solo,
+            volume_db,
             video_enabled,
+            name,
         } => {
-            ops::set_track(p, track, *locked, *muted, *video_enabled)?;
+            let props = ops::TrackProps {
+                locked: *locked,
+                muted: *muted,
+                solo: *solo,
+                volume_db: *volume_db,
+                video_enabled: *video_enabled,
+                name: name.as_ref().map(|n| (!n.is_empty()).then(|| n.clone())),
+            };
+            ops::set_track(p, track, &props)?;
+            Value::Null
+        }
+        Request::TrackAdd { kind, count } => {
+            if !(1..=16).contains(count) {
+                return Err(Error::usage("count must be 1..16"));
+            }
+            let ids: Vec<String> = (0..*count).map(|_| ops::add_track(p, *kind)).collect();
+            json!({ "tracks": ids })
+        }
+        Request::TrackRemove { track, force } => {
+            ops::remove_track(p, track, *force)?;
             Value::Null
         }
         Request::MarkersRemove { marker } => {
@@ -787,6 +859,7 @@ fn add_media(p: &mut Project, probed: ProbedMedia) -> String {
         mtime_ns: probed.mtime_ns,
         info: probed.info,
         marks: Default::default(),
+        bin: String::new(),
     });
     id
 }
@@ -929,15 +1002,39 @@ fn import_timeline(
     let to = p.settings.fps;
     let conv = |f: i64| rescale(f, from, to);
     let offset = if empty { 0 } else { p.end() };
-    let v1 = p
-        .track(ops::MAIN)
-        .ok_or_else(|| Error::internal("no V1 track"))?;
-    let mut audio_floor = v1
-        .clips
+    // The tracks first (making video tracks moves the audio tracks' indexes).
+    let mut needed: Vec<&str> = t.clips.iter().map(|c| c.track.as_str()).collect();
+    needed.extend(t.tracks.iter().map(|t| t.id.as_str()));
+    needed.sort_by_key(|id| (!id.starts_with('V'), id[1..].parse::<usize>().unwrap_or(0)));
+    needed.dedup();
+    for id in needed {
+        ops::ensure_track(p, id)?;
+    }
+    if empty {
+        for s in &t.tracks {
+            if let Some(track) = p.track_mut(&s.id) {
+                track.locked = s.locked;
+                track.muted = s.muted;
+                track.solo = s.solo;
+                track.volume_db = s.volume_db.clamp(-60.0, 24.0);
+                track.video_enabled = s.video_enabled;
+                track.name = s.name.clone();
+            }
+        }
+    }
+    // Where audio may start on each track without overlapping.
+    let mut floors: HashMap<String, i64> = p
+        .tracks
         .iter()
-        .filter_map(|c| c.audio_range().map(|r| r.1))
-        .max()
-        .unwrap_or(0);
+        .map(|t| {
+            let end = t
+                .clips
+                .iter()
+                .filter_map(|c| c.audio_range().map(|r| r.1))
+                .max();
+            (t.id.clone(), end.unwrap_or(0))
+        })
+        .collect();
 
     let mut clips = Vec::new();
     for c in &t.clips {
@@ -984,7 +1081,8 @@ fn import_timeline(
         let audio = audio
             .filter(|_| !m.info.audio.is_empty())
             .and_then(|(h, tl)| {
-                let h = h.max(-source_in).max(audio_floor - start);
+                let floor = floors.get(&c.track).copied().unwrap_or(0);
+                let h = h.max(-source_in).max(floor - start);
                 let tl = tl.min(frames - source_in - duration);
                 (duration + tl - h >= 1).then_some(ClipAudio {
                     stream: if (c.stream as usize) < m.info.audio.len() {
@@ -1003,7 +1101,7 @@ fn import_timeline(
             continue;
         }
         if let Some(a) = &audio {
-            audio_floor = start + duration + a.tail;
+            floors.insert(c.track.clone(), start + duration + a.tail);
         }
         let name = (!c.name.is_empty()
             && c.name != m.name
@@ -1011,7 +1109,7 @@ fn import_timeline(
         .then(|| c.name.clone());
         let id = p.alloc_clip_id();
         clips.push(id.clone());
-        let track = p.track_mut(ops::MAIN).expect("checked");
+        let track = p.track_mut(&c.track).expect("made above");
         track.clips.push(Clip {
             id,
             media: m.id.clone(),
@@ -1130,6 +1228,7 @@ pub fn query(
             "duration_tc": tc(p.end()),
             "marks": p.marks,
             "markers": p.markers.len(),
+            "bins": p.bins,
         }),
         Request::MediaList {} => {
             json!(p.media.iter().map(|m| media_json(p, m)).collect::<Vec<_>>())
@@ -1240,6 +1339,9 @@ fn media_json(p: &Project, m: &Media) -> Value {
     if !m.marks.is_empty() {
         v["marks"] = json!(m.marks);
     }
+    if !m.bin.is_empty() {
+        v["bin"] = json!(m.bin);
+    }
     v
 }
 
@@ -1287,7 +1389,20 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
                 }
                 at = c.end();
             }
-            json!({ "id": t.id, "kind": t.kind, "locked": t.locked, "muted": t.muted, "items": items })
+            let mut v = json!({ "id": t.id, "kind": t.kind, "locked": t.locked, "muted": t.muted, "items": items });
+            if t.solo {
+                v["solo"] = json!(true);
+            }
+            if t.volume_db != 0.0 {
+                v["volume_db"] = json!(t.volume_db);
+            }
+            if t.kind == crate::model::TrackKind::Video && !t.video_enabled {
+                v["video_enabled"] = json!(false);
+            }
+            if let Some(n) = &t.name {
+                v["name"] = json!(n);
+            }
+            v
         })
         .collect();
     json!({

@@ -66,7 +66,14 @@ pub struct AudioStreamInfo {
     pub start_pts: Option<i64>,
     /// Stream start in seconds, if known.
     pub start_secs: Option<f64>,
-    /// Stream duration in seconds, if known.
+    /// Samples the encoder put before the content (AAC priming), which
+    /// decoders still output (`initial_padding`).
+    pub padding: u32,
+    /// Where the content starts, seconds: the start plus the padding,
+    /// rounded to the stream's time base. Containers that keep the padding
+    /// give it negative timestamps (Matroska: the first packet at −21 ms).
+    pub first_secs: Option<f64>,
+    /// Stream duration in seconds, if known (padding included).
     pub duration_secs: Option<f64>,
 }
 
@@ -157,6 +164,13 @@ pub fn probe(path: &Path) -> Result<MediaInfo> {
                 let raw = unsafe { &*params.as_ptr() };
                 let tb = stream.time_base();
                 let start_pts = opt_ts(stream.start_time());
+                let padding = raw.initial_padding.max(0) as u32;
+                let tick = f64::from(tb.numerator()) / f64::from(tb.denominator());
+                let first_secs = start_pts.map(|t| {
+                    let rate = f64::from(raw.sample_rate.max(1));
+                    let first = t as f64 * tick + f64::from(padding) / rate;
+                    (first / tick).round() * tick
+                });
                 audio.push(AudioStreamInfo {
                     index: stream.index(),
                     codec,
@@ -164,9 +178,9 @@ pub fn probe(path: &Path) -> Result<MediaInfo> {
                     channels: raw.ch_layout.nb_channels as u16,
                     time_base: ratio(tb),
                     start_pts,
-                    start_secs: start_pts.map(|t| {
-                        t as f64 * f64::from(tb.numerator()) / f64::from(tb.denominator())
-                    }),
+                    start_secs: start_pts.map(|t| t as f64 * tick),
+                    padding,
+                    first_secs,
                     duration_secs: stream_duration(&stream).or(duration),
                 });
             }

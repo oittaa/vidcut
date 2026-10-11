@@ -41,6 +41,8 @@ impl PlayerId {
 pub struct PlayerSnap {
     /// Something is loaded (otherwise the viewer shows black).
     pub loaded: bool,
+    /// The monitoring mute is on (p. 642).
+    pub muted: bool,
     /// Length of the content in frames.
     pub frames: i64,
     /// The playhead frame.
@@ -62,6 +64,39 @@ pub struct ProjectSnap {
     /// Undo and redo labels, newest first.
     pub undo: Vec<String>,
     pub redo: Vec<String>,
+}
+
+/// The Media Pool view: the bin shown and the order of its media. Source
+/// Tape strings together that bin's media, and its bins', in that order
+/// (p. 696).
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct PoolView {
+    /// A bin path; empty: the top level (all media).
+    pub bin: String,
+    pub sort: vidcut_core::request::PoolSort,
+    pub descending: bool,
+}
+
+impl PoolView {
+    /// The media shown, in order: those in the bin or bins inside it.
+    pub fn media(&self, p: &Project) -> Vec<String> {
+        let inside = |b: &str| {
+            self.bin.is_empty() || b == self.bin || b.starts_with(&format!("{}/", self.bin))
+        };
+        let mut media: Vec<&vidcut_core::model::Media> =
+            p.media.iter().filter(|m| inside(&m.bin)).collect();
+        use vidcut_core::request::PoolSort;
+        match self.sort {
+            PoolSort::Added => {}
+            PoolSort::Name => media.sort_by_key(|m| m.name.to_lowercase()),
+            PoolSort::Duration => media.sort_by_key(|m| p.media_frames(m)),
+            PoolSort::Date => media.sort_by_key(|m| m.mtime_ns),
+        }
+        if self.descending {
+            media.reverse();
+        }
+        media.into_iter().map(|m| m.id.clone()).collect()
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -127,6 +162,7 @@ pub struct Snapshot {
     /// Media layout of the Source Tape.
     pub tape: Arc<Vec<TapeEntry>>,
     pub selection: Selection,
+    pub pool: PoolView,
     /// Clips on the clipboard.
     pub clipboard: usize,
     pub log: Arc<VecDeque<LogEntry>>,

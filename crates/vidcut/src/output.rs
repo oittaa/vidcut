@@ -14,7 +14,18 @@ pub fn print(method: &str, r: &Response, json: bool) {
     }
     let mutation = matches!(
         method.split('.').next(),
-        Some("edit" | "clip" | "marks" | "markers" | "history" | "apply" | "media" | "project")
+        Some(
+            "edit"
+                | "clip"
+                | "marks"
+                | "markers"
+                | "history"
+                | "apply"
+                | "media"
+                | "project"
+                | "track"
+                | "bins"
+        )
     ) && !matches!(
         method,
         "media.list" | "media.get" | "project.get" | "project.summary" | "history.get"
@@ -40,6 +51,13 @@ pub fn print(method: &str, r: &Response, json: bool) {
         if let Some(media) = r.result.get("media").and_then(Value::as_array) {
             let ids: Vec<&str> = media.iter().filter_map(Value::as_str).collect();
             println!("  media    {}", ids.join(" "));
+        }
+        if let Some(tracks) = r.result.get("tracks").and_then(Value::as_array) {
+            let ids: Vec<&str> = tracks.iter().filter_map(Value::as_str).collect();
+            println!("  tracks   {}", ids.join(" "));
+        }
+        if let Some(track) = r.result.get("track").and_then(Value::as_str) {
+            println!("  on       {track}");
         }
         if let Some(undone) = r
             .result
@@ -240,7 +258,7 @@ fn live(method: &str, r: &Response) -> Option<()> {
     let v = &r.result;
     match method {
         "player.state" | "player.play" | "player.pause" | "player.toggle" | "player.seek"
-        | "player.step" | "viewer.set" | "viewer.load" | "project.open" => {
+        | "player.step" | "player.mute" | "viewer.set" | "viewer.load" | "project.open" => {
             println!("{}", state_line(v));
         }
         "gui.screenshot" => println!(
@@ -288,6 +306,16 @@ fn live(method: &str, r: &Response) -> Option<()> {
             v["clips"].as_array().map_or(0, Vec::len)
         ),
         "gui.quit" | "gui.window" | "gui.show" => println!("ok {method}"),
+        "pool.set" => println!(
+            "pool: bin {:?}, sorted by {}{}",
+            v["bin"].as_str().unwrap_or_default(),
+            v["sort"].as_str().unwrap_or_default(),
+            if v["descending"] == true {
+                " (descending)"
+            } else {
+                ""
+            }
+        ),
         "jobs.list" => {
             let jobs = v.as_array().cloned().unwrap_or_default();
             if jobs.is_empty() {
@@ -463,8 +491,12 @@ fn media_list(m: &Value) {
                 v["codec"].as_str().unwrap_or_default()
             ),
         };
+        let bin = match i["bin"].as_str() {
+            Some(b) if !b.is_empty() => format!("  [{b}]"),
+            _ => String::new(),
+        };
         println!(
-            "{:<5} {:<30} {} ({} frames)  {}, {} audio",
+            "{:<5} {:<30} {} ({} frames)  {}, {} audio{bin}",
             i["id"].as_str().unwrap_or_default(),
             i["name"].as_str().unwrap_or_default(),
             i["duration_tc"].as_str().unwrap_or_default(),

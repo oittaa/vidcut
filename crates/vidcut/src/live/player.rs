@@ -12,6 +12,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use vidcut_core::preview::Preview;
 use vidcut_core::time::Rational;
 use vidcut_mpv::{Event, Format, Mpv, Value};
 
@@ -81,8 +82,10 @@ pub struct Player {
     mpv: Option<Mpv>,
     edl_path: PathBuf,
     fps: Rational,
-    /// EDL text loaded (or being loaded).
-    loaded: Option<String>,
+    /// The EDL and audio graph loaded (or being loaded).
+    loaded: Option<Preview>,
+    /// The monitoring mute (p. 642).
+    muted: bool,
     /// The load command while mpv opens the file (it rejects seeks until then).
     loading: Option<u64>,
     pub frames: i64,
@@ -125,6 +128,7 @@ impl Player {
             edl_path,
             fps: Rational::new(30, 1).expect("valid"),
             loaded: None,
+            muted: false,
             loading: None,
             frames: 0,
             position: 0,
@@ -185,11 +189,31 @@ impl Player {
         format!("{:.9}", self.fps.frames_to_secs(frame.max(0)))
     }
 
-    /// Shows `edl` (content `frames` long at `fps`) with the playhead at
+    /// Mutes what the player plays (the monitoring mute, p. 642).
+    pub fn set_muted(&mut self, muted: bool) {
+        self.muted = muted;
+        if let Some(m) = &self.mpv
+            && let Err(e) = m.set_property_flag("mute", muted)
+        {
+            self.error = Some(e.to_string());
+        }
+    }
+
+    pub fn muted(&self) -> bool {
+        self.muted
+    }
+
+    /// Shows `preview` (content `frames` long at `fps`) with the playhead at
     /// `position`. Returns the motion id, or `None` if it is already showing.
-    pub fn load(&mut self, edl: String, frames: i64, fps: Rational, position: i64) -> Option<u64> {
+    pub fn load(
+        &mut self,
+        preview: Preview,
+        frames: i64,
+        fps: Rational,
+        position: i64,
+    ) -> Option<u64> {
         let position = position.clamp(0, frames);
-        if self.loaded.as_deref() == Some(edl.as_str()) && self.fps == fps {
+        if self.loaded.as_ref() == Some(&preview) && self.fps == fps {
             self.frames = frames;
             return (position != self.position).then(|| self.seek(position, false));
         }
@@ -199,14 +223,14 @@ impl Player {
         self.reverse = None;
         if self.mpv.is_some() {
             let tmp = self.edl_path.with_extension("edl.tmp");
-            let written =
-                std::fs::write(&tmp, &edl).and_then(|()| std::fs::rename(&tmp, &self.edl_path));
+            let written = std::fs::write(&tmp, &preview.edl)
+                .and_then(|()| std::fs::rename(&tmp, &self.edl_path));
             if let Err(e) = written {
                 self.error = Some(format!("writing {}: {e}", self.edl_path.display()));
                 return None;
             }
         }
-        self.loaded = Some(edl);
+        self.loaded = Some(preview);
         self.error = None;
         Some(self.loadfile())
     }
@@ -214,11 +238,16 @@ impl Player {
     /// (Re)opens the EDL file at the playhead.
     fn loadfile(&mut self) -> u64 {
         let path = self.edl_path.to_string_lossy().into_owned();
-        let options = format!(
+        let mut options = format!(
             "start={},pause={}",
             self.secs(self.position),
             if self.speed > 0.0 { "no" } else { "yes" }
         );
+        // Mixes the audio streams and applies gains (preview.md §10), for
+        // this file only.
+        if let Some(graph) = self.loaded.as_ref().and_then(|p| p.audio_graph.as_ref()) {
+            options.push_str(&format!(",lavfi-complex=%{}%{graph}", graph.len()));
+        }
         let id = self.command(&["loadfile", &path, "replace", "-1", &options]);
         self.tracking = self.speed > 0.0;
         if self.mpv.is_some() {
@@ -436,6 +465,7 @@ impl Player {
     pub fn snap(&self) -> PlayerSnap {
         PlayerSnap {
             loaded: self.loaded.is_some(),
+            muted: self.muted,
             frames: self.frames,
             position: self.position,
             playing: self.speed != 0.0,

@@ -20,7 +20,7 @@ use vidcut_core::ops::{self, Edge, MAIN};
 use crate::gui::theme;
 use crate::gui::workspace::{Workspace, dim};
 use crate::live::PlayerId;
-use geometry::{Hit, Scale, Snap, TrackRect, hit};
+use geometry::{Hit, NEW_TRACK_STRIP, Rows, Scale, Snap, hit_rows};
 use gesture::{Ctx, Drag, Gesture, Preview};
 use paint::{Assets, Look};
 
@@ -131,18 +131,24 @@ pub struct MarkerDialog {
 }
 
 /// Where things were drawn last frame (hit testing for new presses).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Layout {
     pub upper_ruler: Rect,
-    pub upper: TrackRect,
+    /// The upper timeline's rows: Track 1 and a thin row per other track.
+    pub upper: Rows,
     pub upper_scale: Scale,
     pub lower_ruler: Rect,
-    pub lower: TrackRect,
+    /// The lower timeline's rows, one per track.
+    pub lower: Rows,
     pub lower_scale: Scale,
 }
 
 const UPPER_RULER: f32 = 16.0;
 const UPPER_TRACK: f32 = 30.0;
+/// Upper timeline rows for tracks other than Track 1.
+const UPPER_OTHER: f32 = 9.0;
+/// Preferred lower timeline row heights: Track 1, other video, audio.
+const LOWER_ROWS: [f32; 3] = [100.0, 60.0, 46.0];
 const LOWER_RULER: f32 = 22.0;
 const HEADER: f32 = 58.0;
 
@@ -189,8 +195,14 @@ impl Workspace {
         };
         self.timeline_toolbar(ui, &p);
         let full = ui.available_rect_before_wrap();
-        let upper_rect =
-            Rect::from_min_size(full.min, vec2(full.width(), UPPER_RULER + UPPER_TRACK));
+        let others = p.tracks.len().saturating_sub(1).min(6) as f32;
+        let upper_rect = Rect::from_min_size(
+            full.min,
+            vec2(
+                full.width(),
+                UPPER_RULER + UPPER_TRACK + UPPER_OTHER * others,
+            ),
+        );
         let lower_rect = Rect::from_min_max(pos2(full.left(), upper_rect.bottom() + 6.0), full.max);
         let upper_resp = ui.allocate_rect(upper_rect, Sense::click_and_drag());
         let lower_resp = ui.allocate_rect(lower_rect, Sense::click_and_drag());
@@ -208,22 +220,27 @@ impl Workspace {
         let lower_scale = self.lower_scale(content, playhead);
         let upper_ruler =
             Rect::from_min_size(upper_rect.min, vec2(upper_rect.width(), UPPER_RULER));
-        let upper = TrackRect::new(
+        let upper = Rows::layout(
+            &p,
             Rect::from_min_max(
                 pos2(upper_rect.left(), upper_ruler.bottom() + 1.0),
                 upper_rect.max,
             ),
-            0.3,
+            [UPPER_TRACK, UPPER_OTHER, UPPER_OTHER],
+            4.0,
+            0.0,
         );
         let lower_ruler = Rect::from_min_size(content.min, vec2(content.width(), LOWER_RULER));
-        let lower_track = Rect::from_min_max(
-            pos2(content.left(), lower_ruler.bottom() + 4.0),
-            pos2(
-                content.right(),
-                (lower_ruler.bottom() + 4.0 + 110.0).min(content.bottom() - 2.0),
+        let lower = Rows::layout(
+            &p,
+            Rect::from_min_max(
+                pos2(content.left(), lower_ruler.bottom() + 2.0),
+                pos2(content.right(), content.bottom() - 2.0),
             ),
+            LOWER_ROWS,
+            22.0,
+            NEW_TRACK_STRIP,
         );
-        let lower = TrackRect::new(lower_track, 0.32);
         let layout = Layout {
             upper_ruler,
             upper,
@@ -232,7 +249,7 @@ impl Workspace {
             lower,
             lower_scale,
         };
-        self.timeline.layout = Some(layout);
+        self.timeline.layout = Some(layout.clone());
 
         // Draw.
         let thumbs = std::mem::take(&mut self.thumbs);
@@ -244,20 +261,23 @@ impl Workspace {
         let look = self.look();
         let smart = (end > 0).then(|| ops::nearest_edit(&p, playhead));
         let selected = self.snap.selection.clips.clone();
-        let v1 = p.track(MAIN).cloned();
         {
             let painter = ui.painter_at(upper_rect);
             paint::ruler(&painter, upper_ruler, &upper_scale, &p, smart, true);
-            if let Some(t) = &v1 {
+            for row in &layout.upper.rows {
+                let Some(t) = p.track(&row.track) else {
+                    continue;
+                };
                 let compact = Look {
                     filmstrips: false,
                     waveforms: false,
                     durations: false,
+                    names: look.names && row.track == MAIN,
                     ..look
                 };
                 paint::track(
                     &painter,
-                    &upper,
+                    &row.rect,
                     &upper_scale,
                     &p,
                     t,
@@ -270,7 +290,7 @@ impl Workspace {
                 &painter,
                 upper_scale.xf(playhead),
                 upper_ruler,
-                upper.rect.bottom(),
+                layout.upper.span().1,
             );
         }
         {
@@ -284,10 +304,19 @@ impl Workspace {
                 theme::PANEL_DARK,
             );
             paint::ruler(&painter, lower_ruler, &lower_scale, &p, smart, false);
-            if let Some(t) = &v1 {
+            for row in &layout.lower.rows {
+                let Some(t) = p.track(&row.track) else {
+                    continue;
+                };
+                let look = Look {
+                    // Small rows show less.
+                    filmstrips: look.filmstrips && row.rect.rect.height() >= 40.0,
+                    durations: look.durations && row.rect.rect.height() >= 40.0,
+                    ..look
+                };
                 paint::track(
                     &painter,
-                    &lower,
+                    &row.rect,
                     &lower_scale,
                     &p,
                     t,
@@ -296,7 +325,7 @@ impl Workspace {
                     look,
                 );
             }
-            if let Some(e) = self.timeline.edit {
+            if let (Some(e), Some(v1)) = (self.timeline.edit, layout.lower.get(MAIN)) {
                 let x = lower_scale.xf(e.at);
                 let (a, b) = match e.side {
                     Side::Out => (x - 6.0, x),
@@ -304,7 +333,7 @@ impl Workspace {
                     Side::Both => (x - 4.0, x + 4.0),
                 };
                 painter.rect_filled(
-                    Rect::from_x_y_ranges(a..=b, lower.rect.y_range()),
+                    Rect::from_x_y_ranges(a..=b, v1.rect.rect.y_range()),
                     0.0,
                     Color32::from_rgb(90, 200, 90),
                 );
@@ -313,28 +342,26 @@ impl Workspace {
                 &painter,
                 lower_scale.xf(playhead),
                 lower_ruler,
-                lower.rect.bottom(),
+                layout.lower.span().1,
             );
         }
         self.thumbs = thumbs;
-        self.track_header(ui, lower_rect, lower, &p);
+        self.track_headers(ui, lower_rect, &layout.lower, &p);
 
         // The pointer shows what a drag would do (p. 726–728).
         if self.timeline.drag.is_none()
-            && let (Some(t), Some(pos)) = (&v1, ui.input(|i| i.pointer.hover_pos()))
+            && let Some(pos) = ui.input(|i| i.pointer.hover_pos())
         {
-            for (tr, scale) in [(&upper, &upper_scale), (&lower, &lower_scale)] {
-                if tr.rect.contains(pos) {
-                    let icon = match hit(t, scale, tr, pos) {
-                        Hit::Edge(..) => Some(egui::CursorIcon::ResizeHorizontal),
-                        Hit::Roll { .. } => Some(egui::CursorIcon::ResizeColumn),
-                        Hit::AudioEdit { .. } => Some(egui::CursorIcon::ResizeColumn),
-                        Hit::Slip(_) => Some(egui::CursorIcon::Grab),
-                        _ => None,
-                    };
-                    if let Some(i) = icon {
-                        ui.ctx().set_cursor_icon(i);
-                    }
+            for (rows, scale) in [(&layout.upper, &upper_scale), (&layout.lower, &lower_scale)] {
+                let icon = match hit_rows(&p, rows, scale, pos).1 {
+                    Hit::Edge(..) => Some(egui::CursorIcon::ResizeHorizontal),
+                    Hit::Roll { .. } => Some(egui::CursorIcon::ResizeColumn),
+                    Hit::AudioEdit { .. } => Some(egui::CursorIcon::ResizeColumn),
+                    Hit::Slip(_) => Some(egui::CursorIcon::Grab),
+                    _ => None,
+                };
+                if let Some(i) = icon {
+                    ui.ctx().set_cursor_icon(i);
                 }
             }
         }
@@ -351,13 +378,13 @@ impl Workspace {
         }
         self.run_drag(ui, &p, &layout, now);
         if let Some(d) = &self.timeline.drag {
-            let (tr, scale) = if d.upper {
-                (&upper, &upper_scale)
+            let (rows, scale) = if d.upper {
+                (&layout.upper, &layout.upper_scale)
             } else {
-                (&lower, &lower_scale)
+                (&layout.lower, &layout.lower_scale)
             };
             let painter = ui.painter_at(if d.upper { upper_rect } else { lower_rect });
-            paint::preview(&painter, tr, scale, &p, &d.preview);
+            paint::preview(&painter, rows, scale, &p, &d.preview);
             self.drag_tooltip(ui, &d.preview);
         }
         self.marker_window(ui.ctx());
@@ -492,38 +519,97 @@ impl Workspace {
         });
     }
 
-    /// Track 1's header: lock, mute, video enable (pp. 647, 717).
-    fn track_header(&mut self, ui: &mut egui::Ui, lower_rect: Rect, tr: TrackRect, p: &Project) {
-        let Some(t) = p.track(MAIN) else { return };
-        let rect = Rect::from_min_max(
-            pos2(lower_rect.left() + 2.0, tr.rect.top()),
-            pos2(lower_rect.left() + HEADER - 4.0, tr.rect.bottom()),
-        );
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-        child.label(RichText::new("1").strong());
-        child.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            for (label, value, key, tip) in [
-                ("L", t.locked, "locked", "Lock the track"),
-                ("M", t.muted, "muted", "Mute its audio"),
-                ("V", t.video_enabled, "video_enabled", "Show its video"),
-            ] {
-                if ui
-                    .selectable_label(value, RichText::new(label).small())
-                    .on_hover_text(tip)
-                    .clicked()
-                {
-                    self.send("track.set", json!({ "track": "V1", key: !value }));
+    /// Track headers (pp. 647, 696): the number picks the target track for
+    /// edit functions; lock, mute and video enable; a menu to add and remove
+    /// tracks.
+    fn track_headers(&mut self, ui: &mut egui::Ui, lower_rect: Rect, rows: &Rows, p: &Project) {
+        for row in &rows.rows {
+            let Some(t) = p.track(&row.track) else {
+                continue;
+            };
+            let r = row.rect.rect;
+            let rect = Rect::from_min_max(
+                pos2(lower_rect.left() + 2.0, r.top()),
+                pos2(lower_rect.left() + HEADER - 4.0, r.bottom()),
+            );
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+            let is_target = self.target.as_deref() == Some(t.id.as_str())
+                || (self.target.is_none() && t.id == MAIN);
+            let label = t.name.clone().unwrap_or_else(|| t.id.clone());
+            let tall = r.height() >= 40.0;
+            let buttons = |ui: &mut egui::Ui, ws: &Self| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                let mut toggles = vec![
+                    ("L", t.locked, "locked", "Lock the track"),
+                    ("M", t.muted, "muted", "Mute its audio"),
+                ];
+                if t.kind == vidcut_core::model::TrackKind::Video {
+                    toggles.push(("V", t.video_enabled, "video_enabled", "Show its video"));
                 }
+                for (text, value, key, tip) in toggles {
+                    if ui
+                        .selectable_label(value, RichText::new(text).small())
+                        .on_hover_text(tip)
+                        .clicked()
+                    {
+                        ws.send("track.set", json!({ "track": t.id, key: !value }));
+                    }
+                }
+            };
+            let pick = |ui: &mut egui::Ui, ws: &mut Self| {
+                let r = ui
+                    .selectable_label(is_target, RichText::new(&label).strong().small())
+                    .on_hover_text("The target track for edit functions (p. 696)");
+                if r.clicked() {
+                    ws.target = if t.id == MAIN || is_target {
+                        None
+                    } else {
+                        Some(t.id.clone())
+                    };
+                }
+                r.context_menu(|ui| {
+                    if ui.button("Add Video Track").clicked() {
+                        ws.send("track.add", json!({ "kind": "video" }));
+                        ui.close();
+                    }
+                    if ui.button("Add Audio Track").clicked() {
+                        ws.send("track.add", json!({ "kind": "audio" }));
+                        ui.close();
+                    }
+                    if t.id != MAIN {
+                        let n = t.clips.len();
+                        let text = if n == 0 {
+                            "Remove Track".to_string()
+                        } else {
+                            format!("Remove Track and Its {n} Clip(s)")
+                        };
+                        if ui.button(text).clicked() {
+                            ws.send("track.remove", json!({ "track": t.id, "force": true }));
+                            if ws.target.as_deref() == Some(t.id.as_str()) {
+                                ws.target = None;
+                            }
+                            ui.close();
+                        }
+                    }
+                });
+            };
+            if tall {
+                pick(&mut child, self);
+                child.horizontal(|ui| buttons(ui, self));
+            } else {
+                child.horizontal(|ui| {
+                    pick(ui, self);
+                    buttons(ui, self);
+                });
             }
-        });
+        }
     }
 
     fn ctx_for<'a>(
         &'a self,
         p: &'a Project,
         upper: bool,
-        layout: &Layout,
+        layout: &'a Layout,
         snap: Option<&'a Snap>,
     ) -> Ctx<'a> {
         Ctx {
@@ -533,7 +619,7 @@ impl Workspace {
             } else {
                 layout.lower_scale
             },
-            track: if upper { layout.upper } else { layout.lower },
+            rows: if upper { &layout.upper } else { &layout.lower },
             snap: snap.filter(|_| self.snapping()),
             safe_edit: self.timeline.options.safe_edit,
             selected: &self.snap.selection.clips,
@@ -546,15 +632,15 @@ impl Workspace {
             return;
         };
         let mods = ui.input(|i| i.modifiers);
-        let (ruler, tr, scale) = if upper {
-            (layout.upper_ruler, layout.upper, layout.upper_scale)
+        let (ruler, rows, scale) = if upper {
+            (layout.upper_ruler, &layout.upper, layout.upper_scale)
         } else {
-            (layout.lower_ruler, layout.lower, layout.lower_scale)
+            (layout.lower_ruler, &layout.lower, layout.lower_scale)
         };
         let fixed = !upper && self.timeline.options.fixed_playhead;
         let playhead = self.snap.timeline.position;
-        let gesture = if ruler.expand2(vec2(0.0, 2.0)).contains(press)
-            || !tr.rect.contains(press) && !upper
+        let (track, what) = hit_rows(p, rows, &scale, press);
+        let gesture = if ruler.expand2(vec2(0.0, 2.0)).contains(press) || track.is_none() && !upper
         {
             let near = |f: i64| (scale.xf(f) - press.x).abs() <= 5.0;
             if let Some(k) = p.markers.iter().find(|k| near(k.at)) {
@@ -579,15 +665,23 @@ impl Workspace {
                 }
             }
         } else {
-            let Some(t) = p.track(MAIN) else { return };
-            match hit(t, &scale, &tr, press) {
+            let track = track.unwrap_or_else(|| MAIN.to_string());
+            // Other tracks ripple only where Track 1 has nothing (p. 721).
+            let ripples = |clip: &str| {
+                track == MAIN
+                    || p.clip(clip).is_some_and(|c| {
+                        p.track(MAIN)
+                            .is_none_or(|v1| v1.clips.iter().all(|x| x.end() <= c.start))
+                    })
+            };
+            match what {
                 Hit::Edge(clip, edge) => Gesture::Trim {
                     from: p
                         .clip(&clip)
                         .map_or(0, |c| if edge == Edge::Head { c.start } else { c.end() }),
+                    ripple: p.settings.ripple_on && !mods.alt && ripples(&clip),
                     clip,
                     edge,
-                    ripple: p.settings.ripple_on && !mods.alt,
                 },
                 Hit::Roll { outgoing, .. } => Gesture::Roll {
                     from: p.clip(&outgoing).map_or(0, |c| c.end()),
@@ -623,6 +717,7 @@ impl Workspace {
                         .sum();
                     Gesture::Move {
                         clips,
+                        from: track,
                         grab: scale.frame(press.x),
                         start,
                         len,
@@ -678,9 +773,24 @@ impl Workspace {
             self.timeline.drag = Some(d);
             return;
         };
+        if released
+            && let Gesture::Media { media, .. } = &d.drag.gesture
+            && let Some((_, bin)) = self.bins.targets.iter().find(|(r, _)| r.contains(pos))
+        {
+            // Dropped on a bin in the pool: the clips move into it (p. 655).
+            let ids = if self.snap.selection.media.contains(media) {
+                self.snap.selection.media.clone()
+            } else {
+                vec![media.clone()]
+            };
+            let bin = bin.clone();
+            self.send("media.move", json!({ "media": ids, "bin": bin }));
+            self.timeline.snap_flipped = false;
+            return;
+        }
         // Pool drags follow the pointer to whichever timeline it is over.
         if matches!(d.drag.gesture, Gesture::Media { .. }) {
-            d.upper = layout.upper.rect.expand(8.0).contains(pos);
+            d.upper = layout.upper.area.expand(8.0).contains(pos);
         }
         let moving: Vec<String> = match &d.drag.gesture {
             Gesture::Move { clips, .. } => clips.clone(),
@@ -734,10 +844,10 @@ impl Workspace {
         upper: bool,
         layout: &Layout,
     ) {
-        let (ruler, tr, scale) = if upper {
-            (layout.upper_ruler, layout.upper, layout.upper_scale)
+        let (ruler, rows, scale) = if upper {
+            (layout.upper_ruler, &layout.upper, layout.upper_scale)
         } else {
-            (layout.lower_ruler, layout.lower, layout.lower_scale)
+            (layout.lower_ruler, &layout.lower, layout.lower_scale)
         };
         // Ctrl+wheel zooms the lower timeline.
         if !upper && resp.hovered() {
@@ -756,8 +866,7 @@ impl Workspace {
         };
         let mods = ui.input(|i| i.modifiers);
         let on_ruler = ruler.expand2(vec2(0.0, 2.0)).contains(pos);
-        let t = p.track(MAIN);
-        let what = t.map_or(Hit::Empty, |t| hit(t, &scale, &tr, pos));
+        let what = hit_rows(p, rows, &scale, pos).1;
         if resp.double_clicked() {
             if on_ruler {
                 if let Some(k) = p
@@ -843,7 +952,9 @@ impl Workspace {
                 None => sel.push(id.to_string()),
             }
         } else if mods.shift
-            && let (Some(t), Some(last)) = (p.track(MAIN), sel.last().cloned())
+            && let Some(last) = sel.last().cloned()
+            && let Some((ti, _)) = p.find_clip(id)
+            && let Some(t) = p.tracks.get(ti)
         {
             let ids: Vec<&str> = t.clips.iter().map(|c| c.id.as_str()).collect();
             if let (Some(a), Some(b)) = (
@@ -959,6 +1070,7 @@ impl Workspace {
                     media: media.to_string(),
                     range,
                     video_only: self.video_only,
+                    audio_only: self.audio_only,
                 },
                 press,
             ),

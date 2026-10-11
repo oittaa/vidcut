@@ -179,44 +179,58 @@ pub fn flatten(p: &Project, a: i64, b: i64) -> Result<RenderPlan> {
     let s = &p.settings;
     let sample = |t: i64| s.fps.frame_to_sample(t - a, s.sample_rate);
 
-    // Video: the topmost enabled video track with a clip shows (spec §6).
-    // M1/M2 timelines have only V1, so this walks V1.
-    let mut video = Vec::new();
+    // Video: at every frame the highest video track with a visible clip
+    // there shows; clips above cover the ones below (p. 647).
+    let visible = |t: &crate::model::Track, c: &Clip| t.video_enabled && c.enabled && c.video;
     let tracks: Vec<_> = p
         .tracks
         .iter()
         .filter(|t| t.kind == TrackKind::Video)
         .collect();
-    let mut t = a;
-    let v1 = tracks
-        .first()
-        .ok_or_else(|| Error::internal("no video track"))?;
-    for c in v1.clips.iter().filter(|c| c.end() > a && c.start < b) {
-        let (s0, e0) = (c.start.max(a), c.end().min(b));
-        push_video(&mut video, VideoPiece::Black { frames: s0 - t });
-        if c.enabled && v1.video_enabled && c.video {
-            let (path, origin) = p.media_origin(&c.media)?;
-            push_video(
-                &mut video,
-                VideoPiece::Source {
-                    media: c.media.clone(),
-                    path,
-                    origin,
-                    source_frame: c.source_at(s0),
-                    frames: e0 - s0,
-                },
-            );
-        } else {
-            push_video(&mut video, VideoPiece::Black { frames: e0 - s0 });
+    let mut cuts = vec![a, b];
+    for t in &tracks {
+        for c in t
+            .clips
+            .iter()
+            .filter(|c| c.end() > a && c.start < b && visible(t, c))
+        {
+            cuts.push(c.start.max(a));
+            cuts.push(c.end().min(b));
         }
-        t = e0;
     }
-    push_video(&mut video, VideoPiece::Black { frames: b - t });
+    cuts.sort_unstable();
+    cuts.dedup();
+    let mut video = Vec::new();
+    for w in cuts.windows(2) {
+        let (x, y) = (w[0], w[1]);
+        let top = tracks.iter().rev().find_map(|t| {
+            t.clip_covering(x)
+                .map(|ci| &t.clips[ci])
+                .filter(|c| visible(t, c))
+        });
+        match top {
+            Some(c) => {
+                let (path, origin) = p.media_origin(&c.media)?;
+                push_video(
+                    &mut video,
+                    VideoPiece::Source {
+                        media: c.media.clone(),
+                        path,
+                        origin,
+                        source_frame: c.source_at(x),
+                        frames: y - x,
+                    },
+                );
+            }
+            None => push_video(&mut video, VideoPiece::Black { frames: y - x }),
+        }
+    }
 
-    // Audio: one lane per track that carries audio.
+    // Audio: one lane per heard track (mute, solo, p. 650), with its fader.
+    let any_solo = p.any_solo();
     let mut audio = Vec::new();
     for track in &p.tracks {
-        if track.clips.iter().all(|c| c.audio.is_none()) {
+        if !track.audible(any_solo) || track.clips.iter().all(|c| c.audio.is_none()) {
             continue;
         }
         let mut lane = Vec::new();
@@ -236,7 +250,7 @@ pub fn flatten(p: &Project, a: i64, b: i64) -> Result<RenderPlan> {
                 },
             );
             let audio = c.audio.as_ref().expect("has audio");
-            if audio.muted || track.muted {
+            if audio.muted {
                 push_audio(
                     &mut lane,
                     AudioPiece::Silence {
@@ -244,7 +258,11 @@ pub fn flatten(p: &Project, a: i64, b: i64) -> Result<RenderPlan> {
                     },
                 );
             } else {
-                push_audio(&mut lane, source_audio(p, c, x, sample(y) - sample(x))?);
+                let mut piece = source_audio(p, c, x, sample(y) - sample(x))?;
+                if let AudioPiece::Source { gain_db, .. } = &mut piece {
+                    *gain_db += track.volume_db;
+                }
+                push_audio(&mut lane, piece);
             }
             t = y;
         }
@@ -254,7 +272,12 @@ pub fn flatten(p: &Project, a: i64, b: i64) -> Result<RenderPlan> {
                 samples: sample(b) - sample(t),
             },
         );
-        audio.push(lane);
+        if lane
+            .iter()
+            .any(|piece| matches!(piece, AudioPiece::Source { .. }))
+        {
+            audio.push(lane);
+        }
     }
 
     Ok(RenderPlan {
@@ -583,5 +606,101 @@ mod tests {
             }
         ));
         assert_eq!(plan.name, "2");
+    }
+
+    fn frames_of(plan: &RenderPlan) -> Vec<(Option<&str>, i64, i64)> {
+        plan.video
+            .iter()
+            .map(|v| match v {
+                VideoPiece::Source {
+                    media,
+                    source_frame,
+                    frames,
+                    ..
+                } => (Some(media.as_str()), *source_frame, *frames),
+                VideoPiece::Black { frames } => (None, 0, *frames),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_highest_visible_track_shows() {
+        // p. 647: clips on higher tracks cover the ones below.
+        let mut f = fixture();
+        f.append("m1", 0, 100);
+        req(
+            &mut f,
+            "edit.overwrite",
+            json!({"media": "m3", "range": "0f..20f", "at": 30, "track": "V2"}),
+        );
+        req(
+            &mut f,
+            "edit.overwrite",
+            json!({"media": "m2", "range": "50f..60f", "at": 35, "track": "V3"}),
+        );
+        let plan = flatten(f.editor.project(), 0, 100).unwrap();
+        assert_eq!(
+            frames_of(&plan),
+            vec![
+                (Some("m1"), 0, 30),
+                (Some("m3"), 0, 5),
+                (Some("m2"), 50, 10),
+                (Some("m3"), 15, 5),
+                (Some("m1"), 50, 50)
+            ]
+        );
+        // A disabled clip, or a track with its video off, shows what is under it.
+        req(&mut f, "clip.set", json!({"clips": "c3", "enabled": false}));
+        req(
+            &mut f,
+            "track.set",
+            json!({"track": "V2", "video_enabled": false}),
+        );
+        let plan = flatten(f.editor.project(), 0, 100).unwrap();
+        assert_eq!(frames_of(&plan), vec![(Some("m1"), 0, 100)]);
+    }
+
+    #[test]
+    fn tracks_mix_with_mute_solo_and_faders() {
+        // p. 650: mute and solo also apply to export; the fader adds gain.
+        let mut f = fixture();
+        f.append("m1", 0, 100);
+        let music = f.add_music("music.wav", 20.0);
+        req(
+            &mut f,
+            "edit.overwrite",
+            json!({"media": music, "range": "0f..100f", "at": 0}),
+        );
+        req(
+            &mut f,
+            "track.set",
+            json!({"track": "A1", "volume_db": -6.0}),
+        );
+        let lanes = |f: &Fixture| -> Vec<(String, f64)> {
+            flatten(f.editor.project(), 0, 100)
+                .unwrap()
+                .audio
+                .iter()
+                .map(|lane| match &lane[0] {
+                    AudioPiece::Source { media, gain_db, .. } => (media.clone(), *gain_db),
+                    AudioPiece::Silence { .. } => ("silence".into(), 0.0),
+                })
+                .collect()
+        };
+        assert_eq!(
+            lanes(&f),
+            vec![("m1".to_string(), 0.0), (music.clone(), -6.0)]
+        );
+        req(&mut f, "track.set", json!({"track": "A1", "solo": true}));
+        assert_eq!(lanes(&f), vec![(music.clone(), -6.0)]);
+        req(&mut f, "track.set", json!({"track": "A1", "muted": true}));
+        assert_eq!(lanes(&f), Vec::<(String, f64)>::new(), "solo and muted");
+        req(
+            &mut f,
+            "track.set",
+            json!({"track": "A1", "solo": false, "muted": false}),
+        );
+        req(&mut f, "track.set", json!({"track": "V1", "muted": true}));
+        assert_eq!(lanes(&f), vec![(music, -6.0)]);
     }
 }

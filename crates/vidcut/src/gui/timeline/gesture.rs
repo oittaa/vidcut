@@ -8,12 +8,12 @@
 
 use std::time::{Duration, Instant};
 
-use eframe::egui::{Pos2, Rect};
+use eframe::egui::{Pos2, Rect, vec2};
 use serde_json::{Value, json};
-use vidcut_core::model::{Clip, Project, Track};
+use vidcut_core::model::{Clip, Project, Track, TrackKind};
 use vidcut_core::ops::{Edge, MAIN};
 
-use super::geometry::{Hit, SNAP_PX, Scale, Snap, TrackRect, clips_in, edit_near, hit};
+use super::geometry::{Hit, Rows, SNAP_PX, Scale, Snap, clips_in, edit_near, hit_rows};
 
 /// Hovering over a clip this long turns a drop from Replace into Overwrite
 /// (decision D11).
@@ -34,6 +34,8 @@ pub enum Gesture {
     /// Dragging clips (p. 720–723).
     Move {
         clips: Vec<String>,
+        /// The track of the clip grabbed.
+        from: String,
         /// Frame under the pointer at the press.
         grab: f64,
         /// The block's first frame and length.
@@ -64,6 +66,7 @@ pub enum Gesture {
         media: String,
         range: (i64, i64),
         video_only: bool,
+        audio_only: bool,
     },
 }
 
@@ -99,13 +102,16 @@ pub struct Preview {
     pub marquee: Option<Rect>,
     /// Safe Edit stopped the trim at a neighbor (p. 732).
     pub blocked: bool,
+    /// The track whose row shows the target and ghost (maybe a new one).
+    pub row: Option<String>,
 }
 
 /// What a gesture needs to know about the timeline.
 pub struct Ctx<'a> {
     pub project: &'a Project,
     pub scale: Scale,
-    pub track: TrackRect,
+    /// The timeline's track rows.
+    pub rows: &'a Rows,
     /// Snap targets, or `None` with snapping off.
     pub snap: Option<&'a Snap>,
     pub safe_edit: bool,
@@ -120,6 +126,13 @@ impl Ctx<'_> {
 
     fn clip(&self, id: &str) -> Option<&Clip> {
         self.project.clip(id)
+    }
+
+    /// The track a clip is on.
+    fn track_of(&self, id: &str) -> Option<&Track> {
+        self.project
+            .find_clip(id)
+            .map(|(ti, _)| &self.project.tracks[ti])
     }
 
     fn media_frames(&self, c: &Clip) -> i64 {
@@ -164,12 +177,10 @@ impl Drag {
     /// Tracks the pointer and says what releasing at `pos` would do.
     pub fn update(&mut self, pos: Pos2, now: Instant, ctx: &Ctx) -> Preview {
         // Hover bookkeeping for drop targets.
-        let under = ctx
-            .v1()
-            .and_then(|t| match hit(t, &ctx.scale, &ctx.track, pos) {
-                Hit::Clip(id) | Hit::Slip(id) | Hit::Edge(id, _) => Some(id),
-                _ => None,
-            });
+        let under = match hit_rows(ctx.project, ctx.rows, &ctx.scale, pos).1 {
+            Hit::Clip(id) | Hit::Slip(id) | Hit::Edge(id, _) => Some(id),
+            _ => None,
+        };
         match (&self.hover, &under) {
             (Some((h, _)), Some(u)) if h == u => {}
             (_, Some(u)) => self.hover = Some((u.clone(), now)),
@@ -199,15 +210,25 @@ impl Drag {
             }
             Gesture::Move {
                 clips,
+                from,
                 grab,
                 start,
                 len,
-            } => move_preview(ctx, pos, clips, *grab, *start, *len, &under, &hovered),
+            } => move_preview(ctx, pos, clips, from, *grab, *start, *len, &under, &hovered),
             Gesture::Media {
                 media,
                 range,
                 video_only,
-            } => media_preview(ctx, pos, media, *range, *video_only, &under, &hovered),
+                audio_only,
+            } => media_preview(
+                ctx,
+                pos,
+                media,
+                *range,
+                (*video_only, *audio_only),
+                &under,
+                &hovered,
+            ),
             Gesture::Trim {
                 clip,
                 edge,
@@ -268,9 +289,10 @@ impl Drag {
         from: i64,
         ripple: bool,
     ) -> Preview {
-        let (Some(c), Some(t)) = (ctx.clip(id), ctx.v1()) else {
+        let (Some(c), Some(t)) = (ctx.clip(id), ctx.track_of(id)) else {
             return Preview::default();
         };
+        let row = Some(t.id.clone());
         let (target, snapped) = ctx.snapped(from + moved(ctx, self.press, pos));
         let mut delta = target - from;
         // Media limits.
@@ -333,6 +355,7 @@ impl Drag {
             snapped,
             delta: Some((delta, Some(duration))),
             blocked,
+            row,
             ..Preview::default()
         }
     }
@@ -348,17 +371,29 @@ fn move_preview(
     ctx: &Ctx,
     pos: Pos2,
     clips: &[String],
+    from: &str,
     grab: f64,
     start: i64,
     len: i64,
     under: &Option<String>,
     hovered: &dyn Fn(&str) -> Duration,
 ) -> Preview {
-    let Some(t) = ctx.v1() else {
+    // Dragged away from the timeline: no change (decision D18).
+    let Some(dest) = ctx
+        .rows
+        .target(ctx.project, pos.y)
+        .filter(|_| ctx.rows.area.expand2(vec2(24.0, 0.0)).contains(pos))
+    else {
         return Preview::default();
     };
-    if !ctx.track.rect.expand(24.0).contains(pos) {
-        return Preview::default(); // dragged away: no change
+    // Clips from several tracks only move sideways, each on its own track.
+    let one_track = clips
+        .iter()
+        .all(|c| ctx.track_of(c).is_some_and(|t| t.id == from));
+    let dest = if one_track { dest } else { from.to_string() };
+    // Only audio goes on audio tracks.
+    if dest.starts_with('A') && clips.iter().any(|c| ctx.clip(c).is_some_and(|c| c.video)) {
+        return Preview::default();
     }
     let delta = (ctx.scale.frame(pos.x) - grab).round() as i64;
     let raw = (start + delta).max(0);
@@ -367,68 +402,108 @@ fn move_preview(
         None => (raw, None),
     };
     let ghost = ghost.max(0);
-    let own = |f: i64| f == start || f == start + len;
-    let end = t.end();
-    // Dropping on an edit point inserts there (p. 723).
-    if let Some(e) = edit_near(t, &ctx.scale, pos.x, DROP_EDIT_PX).filter(|&e| !own(e)) {
-        return Preview {
-            request: request(
-                "edit.move",
-                json!({ "clips": clips, "to": e, "mode": "insert" }),
-            ),
-            target: Target::Insert(e),
-            ghost: Some((e, e + len)),
-            ..Preview::default()
-        };
-    }
-    // Over another clip: replace it right away, overwrite after hovering.
-    if let Some(id) = under.as_ref().filter(|u| !clips.contains(u)) {
-        if clips.len() == 1 && hovered(id) < HOVER {
-            let target = ctx
-                .clip(id)
-                .map_or((ghost, ghost + len), |c| (c.start, c.end()));
+    let row = Some(dest.clone());
+    let elsewhere = (dest != from).then(|| dest.clone());
+    let with_track = |mut params: Value| {
+        if let Some(t) = &elsewhere {
+            params["track"] = json!(t);
+        }
+        params
+    };
+    let Some(t) = ctx.v1() else {
+        return Preview::default();
+    };
+    if dest == MAIN {
+        let own = |f: i64| from == MAIN && (f == start || f == start + len);
+        let end = t.end();
+        // Dropping on an edit point inserts there (p. 723).
+        if let Some(e) = edit_near(t, &ctx.scale, pos.x, DROP_EDIT_PX).filter(|&e| !own(e)) {
             return Preview {
-                request: request("edit.replace", json!({ "clip": clips[0], "onto": id })),
-                target: Target::Replace(id.clone()),
-                ghost: Some((target.0, target.0 + len)),
+                request: request(
+                    "edit.move",
+                    with_track(json!({ "clips": clips, "to": e, "mode": "insert" })),
+                ),
+                target: Target::Insert(e),
+                ghost: Some((e, e + len)),
+                row,
                 ..Preview::default()
             };
         }
-        return overwrite_move(clips, ghost, len, snapped);
+        // Over another Track 1 clip: replace it right away, overwrite after
+        // hovering. Clips from other tracks only overwrite (p. 721).
+        let on_main = under
+            .as_ref()
+            .filter(|u| !clips.contains(u))
+            .filter(|u| ctx.track_of(u).is_some_and(|t| t.id == MAIN));
+        if let Some(id) = on_main {
+            if from == MAIN && clips.len() == 1 && hovered(id) < HOVER {
+                let target = ctx
+                    .clip(id)
+                    .map_or((ghost, ghost + len), |c| (c.start, c.end()));
+                return Preview {
+                    request: request("edit.replace", json!({ "clip": clips[0], "onto": id })),
+                    target: Target::Replace(id.clone()),
+                    ghost: Some((target.0, target.0 + len)),
+                    row,
+                    ..Preview::default()
+                };
+            }
+            return overwrite_move(clips, ghost, len, snapped, &elsewhere);
+        }
+        if from == MAIN && ghost == start {
+            return Preview {
+                ghost: Some((start, start + len)),
+                snapped,
+                row,
+                ..Preview::default()
+            };
+        }
+        // Past the end: move to the end.
+        if pos.x > ctx.scale.xf(end) + DROP_EDIT_PX && (from != MAIN || start + len < end) {
+            return Preview {
+                request: request(
+                    "edit.move",
+                    with_track(json!({ "clips": clips, "to": end, "mode": "insert" })),
+                ),
+                target: Target::Append,
+                ghost: Some((end, end + len)),
+                row,
+                ..Preview::default()
+            };
+        }
+        // Elsewhere (over itself, a gap, or a neighbor's edge without the
+        // pointer reaching it): overwrite at the new position (p. 722).
+        return overwrite_move(clips, ghost, len, snapped, &elsewhere);
     }
-    if ghost == start {
+    // Other tracks don't ripple: the clips go where they are dropped.
+    if elsewhere.is_none() && ghost == start {
         return Preview {
             ghost: Some((start, start + len)),
             snapped,
+            row,
             ..Preview::default()
         };
     }
-    // Past the end: move to the end.
-    if pos.x > ctx.scale.xf(end) + DROP_EDIT_PX && start + len < end {
-        return Preview {
-            request: request(
-                "edit.move",
-                json!({ "clips": clips, "to": end, "mode": "insert" }),
-            ),
-            target: Target::Append,
-            ghost: Some((end, end + len)),
-            ..Preview::default()
-        };
-    }
-    // Elsewhere (over itself, a gap, or a neighbor's edge without the pointer
-    // reaching it): overwrite at the new position (p. 722).
-    overwrite_move(clips, ghost, len, snapped)
+    overwrite_move(clips, ghost, len, snapped, &elsewhere)
 }
 
-fn overwrite_move(clips: &[String], ghost: i64, len: i64, snapped: Option<i64>) -> Preview {
+fn overwrite_move(
+    clips: &[String],
+    ghost: i64,
+    len: i64,
+    snapped: Option<i64>,
+    track: &Option<String>,
+) -> Preview {
+    let mut params = json!({ "clips": clips, "to": ghost, "mode": "overwrite" });
+    if let Some(t) = track {
+        params["track"] = json!(t);
+    }
     Preview {
-        request: request(
-            "edit.move",
-            json!({ "clips": clips, "to": ghost, "mode": "overwrite" }),
-        ),
+        request: request("edit.move", params),
         target: Target::Overwrite(ghost, ghost + len),
         ghost: Some((ghost, ghost + len)),
         snapped,
+        row: track.clone(),
         ..Preview::default()
     }
 }
@@ -438,20 +513,39 @@ fn media_preview(
     pos: Pos2,
     media: &str,
     range: (i64, i64),
-    video_only: bool,
+    (video_only, audio_only): (bool, bool),
     under: &Option<String>,
     hovered: &dyn Fn(&str) -> Duration,
 ) -> Preview {
+    let Some(mut dest) = ctx
+        .rows
+        .target(ctx.project, pos.y)
+        .filter(|_| ctx.rows.area.expand2(vec2(24.0, 0.0)).contains(pos))
+    else {
+        return Preview::default();
+    };
     let Some(t) = ctx.v1() else {
         return Preview::default();
     };
-    if !ctx.track.rect.expand(24.0).contains(pos) {
-        return Preview::default();
-    }
     let len = range.1 - range.0;
+    let has_video = !audio_only
+        && ctx
+            .project
+            .media(media)
+            .is_some_and(|m| m.info.video.is_some());
+    // Sound alone goes on an audio track (p. 648).
+    if !has_video && dest.starts_with('V') {
+        let audio = ctx.project.tracks_of(TrackKind::Audio);
+        dest = audio
+            .first()
+            .map_or("A1".to_string(), |&i| ctx.project.tracks[i].id.clone());
+    }
     let mut source = json!({ "media": media, "range": format!("{}f..{}f", range.0, range.1) });
     if video_only {
         source["video_only"] = json!(true);
+    }
+    if audio_only {
+        source["audio_only"] = json!(true);
     }
     let with = |mut v: Value, extra: Value| {
         if let (Some(o), Some(e)) = (v.as_object_mut(), extra.as_object()) {
@@ -459,6 +553,30 @@ fn media_preview(
         }
         v
     };
+    let row = Some(dest.clone());
+    if dest != MAIN {
+        // Other tracks: written where it is dropped (made if new, p. 648).
+        let raw = ctx.scale.boundary(pos.x).max(0);
+        let (at, snapped) = match ctx.snap {
+            Some(s) => s.snap_block(raw, len, &ctx.scale, SNAP_PX),
+            None => (raw, None),
+        };
+        let at = at.max(0);
+        return Preview {
+            request: request(
+                "edit.overwrite",
+                with(
+                    source,
+                    json!({ "at": at, "use_marks": false, "track": dest }),
+                ),
+            ),
+            target: Target::Overwrite(at, at + len),
+            ghost: Some((at, at + len)),
+            snapped,
+            row,
+            ..Preview::default()
+        };
+    }
     let end = t.end();
     // An empty timeline, or past the last clip: append (spec §7.3).
     if t.clips.is_empty() || pos.x > ctx.scale.xf(end) + DROP_EDIT_PX {
@@ -466,6 +584,7 @@ fn media_preview(
             request: request("edit.append", source),
             target: Target::Append,
             ghost: Some((end, end + len)),
+            row,
             ..Preview::default()
         };
     }
@@ -476,6 +595,7 @@ fn media_preview(
             request: request("edit.insert", with(source, json!({ "at": first }))),
             target: Target::Insert(first),
             ghost: Some((first, first + len)),
+            row,
             ..Preview::default()
         };
     }
@@ -484,11 +604,14 @@ fn media_preview(
             request: request("edit.insert", with(source, json!({ "at": e }))),
             target: Target::Insert(e),
             ghost: Some((e, e + len)),
+            row,
             ..Preview::default()
         };
     }
     if let Some(id) = under
-        && let Some(c) = ctx.clip(id)
+        && let Some(c) = ctx
+            .clip(id)
+            .filter(|_| ctx.track_of(id).is_some_and(|t| t.id == MAIN))
     {
         if hovered(id) < HOVER {
             return Preview {
@@ -498,6 +621,7 @@ fn media_preview(
                 ),
                 target: Target::Replace(id.clone()),
                 ghost: Some((c.start, c.start + len)),
+                row,
                 ..Preview::default()
             };
         }
@@ -514,6 +638,7 @@ fn media_preview(
             target: Target::Overwrite(at, at + len),
             ghost: Some((at, at + len)),
             snapped,
+            row,
             ..Preview::default()
         };
     }
@@ -526,6 +651,7 @@ fn media_preview(
         ),
         target: Target::Overwrite(at, at + len),
         ghost: Some((at, at + len)),
+        row,
         ..Preview::default()
     }
 }
@@ -537,7 +663,7 @@ fn moved(ctx: &Ctx, press: Pos2, pos: Pos2) -> i64 {
 }
 
 fn roll_preview(ctx: &Ctx, target: i64, outgoing: &str, from: i64) -> Preview {
-    let (Some(t), Some(a)) = (ctx.v1(), ctx.clip(outgoing)) else {
+    let (Some(t), Some(a)) = (ctx.track_of(outgoing), ctx.clip(outgoing)) else {
         return Preview::default();
     };
     let Some(b) = t.clips.iter().find(|c| c.start == a.end()) else {
@@ -559,6 +685,7 @@ fn roll_preview(ctx: &Ctx, target: i64, outgoing: &str, from: i64) -> Preview {
         snapped,
         delta: Some((delta, None)),
         ghost: Some((a.start, a.end() + delta)),
+        row: Some(t.id.clone()),
         ..Preview::default()
     }
 }
@@ -596,7 +723,7 @@ fn slip_preview(ctx: &Ctx, pos: Pos2, press: Pos2, clips: &[String]) -> Preview 
 }
 
 fn audio_roll_preview(ctx: &Ctx, target: i64, outgoing: &str, from: i64) -> Preview {
-    let (Some(t), Some(a)) = (ctx.v1(), ctx.clip(outgoing)) else {
+    let (Some(t), Some(a)) = (ctx.track_of(outgoing), ctx.clip(outgoing)) else {
         return Preview::default();
     };
     let Some(b) = t.clips.iter().find(|c| c.start == a.end()) else {
@@ -625,17 +752,19 @@ fn audio_roll_preview(ctx: &Ctx, target: i64, outgoing: &str, from: i64) -> Prev
 
 fn marquee_preview(ctx: &Ctx, press: Pos2, pos: Pos2, additive: bool) -> Preview {
     let rect = Rect::from_two_pos(press, pos);
-    let Some(t) = ctx.v1() else {
-        return Preview::default();
-    };
     let (a, b) = ctx.scale.visible(rect.left(), rect.right());
-    let touches = rect.intersects(ctx.track.rect);
     let mut clips: Vec<String> = if additive {
         ctx.selected.to_vec()
     } else {
         Vec::new()
     };
-    if touches {
+    for row in &ctx.rows.rows {
+        let Some(t) = ctx.project.track(&row.track) else {
+            continue;
+        };
+        if !rect.intersects(row.rect.rect) {
+            continue;
+        }
         for c in &t.clips[clips_in(t, a, b)] {
             let (x0, x1) = (ctx.scale.xf(c.start), ctx.scale.xf(c.end()));
             if x0 < rect.right() && rect.left() < x1 && !clips.contains(&c.id) {
@@ -692,6 +821,7 @@ mod tests {
                 }],
             },
             marks: Marks::default(),
+            bin: String::new(),
         }
     }
 
@@ -726,16 +856,12 @@ mod tests {
         p.media.push(media("m1", 500));
         p.media.push(media("m2", 300));
         p.tracks[0] = Track {
-            id: "V1".into(),
-            kind: TrackKind::Video,
             clips: vec![
                 clip("c1", 0, 100, 0),
                 clip("c2", 100, 50, 200),
                 clip("c3", 150, 100, 300),
             ],
-            locked: false,
-            muted: false,
-            video_enabled: true,
+            ..Track::new("V1", TrackKind::Video)
         };
         p
     }
@@ -745,6 +871,35 @@ mod tests {
         snap: Snap,
         snapping: bool,
         safe_edit: bool,
+        rows: Rows,
+    }
+
+    /// V1 at y 100..200, V2 above it at 40..90 when there is one, and the
+    /// strip for a new video track above that.
+    fn rows(p: &Project) -> Rows {
+        let mut rows = vec![super::super::geometry::Row {
+            track: "V1".into(),
+            rect: super::super::geometry::TrackRect::new(
+                Rect::from_min_size(pos2(0.0, 100.0), vec2(1000.0, 100.0)),
+                0.3,
+            ),
+        }];
+        if p.track("V2").is_some() {
+            rows.insert(
+                0,
+                super::super::geometry::Row {
+                    track: "V2".into(),
+                    rect: super::super::geometry::TrackRect::new(
+                        Rect::from_min_size(pos2(0.0, 40.0), vec2(1000.0, 50.0)),
+                        0.3,
+                    ),
+                },
+            );
+        }
+        Rows {
+            rows,
+            area: Rect::from_min_max(pos2(0.0, 26.0), pos2(1000.0, 260.0)),
+        }
     }
 
     impl World {
@@ -752,6 +907,26 @@ mod tests {
             let p = project();
             Self {
                 snap: Snap::new(&p, None, &[]),
+                rows: rows(&p),
+                p,
+                snapping: false,
+                safe_edit: false,
+            }
+        }
+
+        /// With a V2 track holding `clips`.
+        fn with_v2(clips: Vec<Clip>) -> Self {
+            let mut p = project();
+            p.tracks.insert(
+                1,
+                Track {
+                    clips,
+                    ..Track::new("V2", TrackKind::Video)
+                },
+            );
+            Self {
+                snap: Snap::new(&p, None, &[]),
+                rows: rows(&p),
                 p,
                 snapping: false,
                 safe_edit: false,
@@ -762,10 +937,7 @@ mod tests {
             Ctx {
                 project: &self.p,
                 scale: Scale::fit(0.0, 1000.0, 500),
-                track: TrackRect::new(
-                    Rect::from_min_size(pos2(0.0, 100.0), vec2(1000.0, 100.0)),
-                    0.3,
-                ),
+                rows: &self.rows,
                 snap: self.snapping.then_some(&self.snap),
                 safe_edit: self.safe_edit,
                 selected: &[],
@@ -797,6 +969,7 @@ mod tests {
     fn mv(clips: &[&str], grab_x: f32, start: i64, len: i64) -> Gesture {
         Gesture::Move {
             clips: clips.iter().map(|s| s.to_string()).collect(),
+            from: "V1".into(),
             grab: f64::from(grab_x) / 2.0,
             start,
             len,
@@ -1038,6 +1211,7 @@ mod tests {
             media: "m2".into(),
             range: (0, 40),
             video_only: false,
+            audio_only: false,
         };
         let at = |x: f32, pause: Duration| w.drag(g(), pos2(x, 150.0), &[pos2(x, 150.0)], pause);
         let method = |v: Option<Value>| v.map(|v| (v["method"].clone(), v["params"].clone()));
@@ -1091,5 +1265,140 @@ mod tests {
             r,
             Some(json!({"method": "selection.set", "params": {"clips": ["c2", "c3"]}}))
         );
+    }
+
+    #[test]
+    fn clips_and_media_go_to_the_track_under_the_pointer() {
+        // M6: rows for V2 (y 40..90) over V1 (100..200); a new video track
+        // above them, a new audio track below (p. 648).
+        let mut b = clip("b1", 300, 40, 0);
+        b.audio = None;
+        let w = World::with_v2(vec![b]);
+        let method = |v: Option<Value>| v.map(|v| (v["method"].clone(), v["params"].clone()));
+        // A Track 1 clip dragged up into V2 overwrites there.
+        let (m, p) = method(w.drag(
+            mv(&["c2"], 250.0, 100, 50),
+            pos2(250.0, 150.0),
+            &[pos2(250.0, 120.0), pos2(260.0, 60.0)],
+            Duration::ZERO,
+        ))
+        .unwrap();
+        assert_eq!(m, "edit.move");
+        assert_eq!(
+            (p["track"].clone(), p["mode"].clone(), p["to"].clone()),
+            (json!("V2"), json!("overwrite"), json!(105))
+        );
+        // Above every track: a new one.
+        let (_, p) = method(w.drag(
+            mv(&["c2"], 250.0, 100, 50),
+            pos2(250.0, 150.0),
+            &[pos2(250.0, 30.0)],
+            Duration::ZERO,
+        ))
+        .unwrap();
+        assert_eq!(p["track"], "V3");
+        // The V2 clip moves along its own track without a track change...
+        let from_v2 = Gesture::Move {
+            clips: vec!["b1".into()],
+            from: "V2".into(),
+            grab: 320.0,
+            start: 300,
+            len: 40,
+        };
+        let (m, p) = method(w.drag(
+            from_v2.clone(),
+            pos2(640.0, 60.0),
+            &[pos2(700.0, 60.0)],
+            Duration::ZERO,
+        ))
+        .unwrap();
+        assert_eq!(
+            (m, p.get("track").is_none(), p["to"].clone()),
+            (json!("edit.move"), true, json!(330))
+        );
+        // ...and down into a Track 1 edit point it inserts there.
+        let (_, p) = method(w.drag(
+            from_v2.clone(),
+            pos2(640.0, 60.0),
+            &[pos2(300.0, 150.0)],
+            Duration::ZERO,
+        ))
+        .unwrap();
+        assert_eq!(
+            (p["track"].clone(), p["mode"].clone(), p["to"].clone()),
+            (json!("V1"), json!("insert"), json!(150))
+        );
+        // Pictures don't go on audio tracks.
+        assert!(
+            w.drag(
+                mv(&["c2"], 250.0, 100, 50),
+                pos2(250.0, 150.0),
+                &[pos2(250.0, 230.0)],
+                Duration::ZERO
+            )
+            .is_none()
+        );
+        // Media dropped on V2 is written there; below the rows it makes an
+        // audio track and brings only its sound.
+        let media = || Gesture::Media {
+            media: "m2".into(),
+            range: (0, 40),
+            video_only: false,
+            audio_only: false,
+        };
+        let (m, p) = method(w.drag(
+            media(),
+            pos2(100.0, 60.0),
+            &[pos2(100.0, 60.0)],
+            Duration::ZERO,
+        ))
+        .unwrap();
+        assert_eq!(
+            (m, p["track"].clone(), p["at"].clone()),
+            (json!("edit.overwrite"), json!("V2"), json!(50))
+        );
+        let (_, p) = method(w.drag(
+            media(),
+            pos2(100.0, 230.0),
+            &[pos2(100.0, 230.0)],
+            Duration::ZERO,
+        ))
+        .unwrap();
+        assert_eq!(p["track"], "A1");
+    }
+
+    #[test]
+    fn sound_alone_goes_on_an_audio_track() {
+        // p. 648: music dropped on a video track goes to an audio track.
+        let mut w = World::new();
+        let mut music = media("m3", 500);
+        music.info.video = None;
+        w.p.media.push(music);
+        let g = Gesture::Media {
+            media: "m3".into(),
+            range: (0, 100),
+            video_only: false,
+            audio_only: false,
+        };
+        let r = w
+            .drag(g, pos2(100.0, 150.0), &[pos2(100.0, 150.0)], Duration::ZERO)
+            .unwrap();
+        assert_eq!(r["params"]["track"], "A1");
+    }
+
+    #[test]
+    fn marquee_selects_across_rows() {
+        let mut b = clip("b1", 40, 30, 0);
+        b.audio = None;
+        let w = World::with_v2(vec![b]);
+        let r = w
+            .drag(
+                Gesture::Marquee { additive: false },
+                pos2(60.0, 30.0),
+                &[pos2(120.0, 180.0)],
+                Duration::ZERO,
+            )
+            .unwrap();
+        assert_eq!(r["params"]["clips"], json!(["b1", "c1"]));
     }
 }

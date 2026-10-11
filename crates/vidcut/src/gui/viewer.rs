@@ -52,10 +52,20 @@ impl Workspace {
         // as export will fit them.
         let below = 34.0 + 36.0;
         let avail = ui.available_rect_before_wrap();
+        // The audio meter and monitoring mute on the right (p. 642).
+        let meter_w = 16.0;
         let area = Rect::from_min_max(
             avail.min,
-            Pos2::new(avail.max.x, (avail.max.y - below).max(avail.min.y + 40.0)),
+            Pos2::new(
+                avail.max.x - meter_w - 6.0,
+                (avail.max.y - below).max(avail.min.y + 40.0),
+            ),
         );
+        let meter = Rect::from_min_max(
+            Pos2::new(avail.max.x - meter_w, area.top()),
+            Pos2::new(avail.max.x, area.bottom()),
+        );
+        self.viewer_meter(ui, meter);
         let aspect = self.project().map_or(16.0 / 9.0, |p| {
             p.settings.width as f32 / p.settings.height.max(1) as f32
         });

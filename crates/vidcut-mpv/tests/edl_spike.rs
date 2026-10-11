@@ -645,3 +645,182 @@ fn demuxer_offset_seek_cost() {
         assert_eq!(bad, 0);
     }
 }
+
+/// M6: one `!new_stream` per audio track, mixed by `lavfi-complex` (an
+/// `amix` with only audio pads). The video must stay frame-exact, and both
+/// streams must be heard: lane 2 is lane 1's beeps half a second later.
+#[test]
+fn edl_audio_streams_mix_with_lavfi_complex() {
+    let src = source(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (30, 1),
+        90,
+    ));
+    let f = 30.0;
+    let one = 1.0 / f;
+    let (black, silence) = fillers((30, 1));
+    let mut body = String::from("!new_stream\n");
+    body += &edl_entry(&src.path, src.o - 0.5 / f, 3.0, "");
+    body += &edl_entry(&black, 0.0, one, ",layout=this");
+    body += "!new_stream\n";
+    body += &edl_entry(&src.path, src.o, 3.0, "");
+    body += &edl_entry(&silence, 0.0, one, ",layout=this");
+    body += "!new_stream\n";
+    body += &edl_entry(&silence, 0.0, 0.5, "");
+    body += &edl_entry(&src.path, src.o, 2.5, "");
+    body += &edl_entry(&silence, 0.0, one, ",layout=this");
+    let edl = write_edl("two-audio.edl", &body);
+    let wav = edl.with_file_name("mix.wav");
+    let _ = std::fs::remove_file(&wav);
+    let wav_opt = wav.to_str().unwrap().to_string();
+    let Some(mut p) = Probe::new(&[
+        ("ao", "pcm"),
+        ("ao-pcm-file", &wav_opt),
+        ("audio-format", "s16"),
+        ("audio-samplerate", "48000"),
+        ("audio-channels", "stereo"),
+    ]) else {
+        return;
+    };
+    let graph = "[aid1][aid2]amix=inputs=2:normalize=0[ao]";
+    let options = format!("lavfi-complex=%{}%{graph}", graph.len());
+    p.command(&["loadfile", edl.to_str().unwrap(), "replace", "-1", &options]);
+    p.wait_for("file loaded", |e| matches!(e, Event::FileLoaded));
+    p.wait_for("first frame", |e| matches!(e, Event::PlaybackRestart));
+    p.wait_for_any(Duration::from_millis(50));
+    let tracks = p.prop_string("track-list");
+    let count = |kind: &str| tracks.matches(&format!("\"type\":\"{kind}\"")).count();
+    assert_eq!((count("video"), count("audio")), (1, 2), "{tracks}");
+    for j in [0u32, 1, 45, 89] {
+        p.seek(f64::from(j) / f);
+        assert_eq!(p.barcode(), Some(j), "frame {j} with lavfi-complex");
+    }
+    p.seek(0.0);
+    p.command(&["set", "pause", "no"]);
+    let started = Instant::now();
+    let mut last_report = Instant::now();
+    while p.time_pos() < 3.0 - 2.0 / f && started.elapsed() < Duration::from_secs(15) {
+        match p.mpv.wait_event(0.02) {
+            Some(Event::EndFile { reason: 4, error }) => panic!("playback error {error}"),
+            Some(Event::PropertyChange { name, value, .. }) => {
+                p.props.insert(name, value);
+            }
+            _ => {}
+        }
+        if p.sw.update() & MPV_RENDER_UPDATE_FRAME != 0 {
+            p.render();
+        }
+        if last_report.elapsed() > Duration::from_millis(500) {
+            last_report = Instant::now();
+            eprintln!(
+                "  t={:.2}s time-pos {:.3}",
+                started.elapsed().as_secs_f64(),
+                p.time_pos()
+            );
+        }
+    }
+    eprintln!(
+        "played 3 s with two mixed audio streams in {:.2} s (time-pos {:.3})",
+        started.elapsed().as_secs_f64(),
+        p.time_pos()
+    );
+    drop(p);
+    let bytes = std::fs::read(&wav).expect("mpv wrote the mix");
+    let data = bytes
+        .windows(4)
+        .position(|w| w == b"data")
+        .expect("a WAV data chunk")
+        + 8;
+    let left: Vec<f32> = bytes[data..]
+        .chunks_exact(4)
+        .map(|s| f32::from(i16::from_le_bytes([s[0], s[1]])) / 32768.0)
+        .collect();
+    let found = vidcut_av::beep::onsets(&left, 0.1, 4800);
+    eprintln!("beep onsets in the mix (samples): {found:?}");
+    // Playback starts at the first video frame, half a frame (800 samples)
+    // in: the beep at 0 s is before it, and the beeps of both lanes follow
+    // every half second. Audio segment edges inside an EDL are exact to
+    // about 10 ms (lane 2's first beep comes after a filler).
+    let want = [23_200, 47_200, 71_200, 95_200, 119_200];
+    assert_eq!(found.len(), want.len(), "{found:?}");
+    for (w, got) in want.iter().zip(&found) {
+        assert!(
+            (*got as i64 - w).abs() < 480,
+            "onset {got}, want {w}: {found:?}"
+        );
+    }
+}
+
+/// M6: per-clip gain in preview: a `volume` filter whose expression switches
+/// on the EDL timeline's time `t`, also after a seek.
+#[test]
+fn edl_volume_follows_timeline_time() {
+    let src = source(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (30, 1),
+        90,
+    ));
+    let f = 30.0;
+    let one = 1.0 / f;
+    let (black, silence) = fillers((30, 1));
+    let mut body = String::from("!new_stream\n");
+    body += &edl_entry(&src.path, src.o - 0.5 / f, 3.0, "");
+    body += &edl_entry(&black, 0.0, one, ",layout=this");
+    body += "!new_stream\n";
+    body += &edl_entry(&src.path, src.o, 3.0, "");
+    body += &edl_entry(&silence, 0.0, one, ",layout=this");
+    let edl = write_edl("volume.edl", &body);
+    let wav = edl.with_file_name("volume.wav");
+    let _ = std::fs::remove_file(&wav);
+    let wav_opt = wav.to_str().unwrap().to_string();
+    let Some(mut p) = Probe::new(&[
+        ("ao", "pcm"),
+        ("ao-pcm-file", &wav_opt),
+        ("audio-format", "s16"),
+        ("audio-samplerate", "48000"),
+        ("audio-channels", "stereo"),
+    ]) else {
+        return;
+    };
+    let graph = "[aid1]volume=volume='if(between(t,1.9,2.5),0.25,1)':eval=frame[ao]";
+    let options = format!("lavfi-complex=%{}%{graph}", graph.len());
+    p.command(&["loadfile", edl.to_str().unwrap(), "replace", "-1", &options]);
+    p.wait_for("file loaded", |e| matches!(e, Event::FileLoaded));
+    p.wait_for("first frame", |e| matches!(e, Event::PlaybackRestart));
+    // Start from a seek, as preview does.
+    p.seek(0.5);
+    p.command(&["set", "pause", "no"]);
+    let started = Instant::now();
+    while p.time_pos() < 3.0 - 2.0 / f && started.elapsed() < Duration::from_secs(15) {
+        match p.mpv.wait_event(0.02) {
+            Some(Event::EndFile { reason: 4, error }) => panic!("playback error {error}"),
+            Some(Event::PropertyChange { name, value, .. }) => {
+                p.props.insert(name, value);
+            }
+            _ => {}
+        }
+        if p.sw.update() & MPV_RENDER_UPDATE_FRAME != 0 {
+            p.render();
+        }
+    }
+    drop(p);
+    let bytes = std::fs::read(&wav).expect("mpv wrote the audio");
+    let data = bytes.windows(4).position(|w| w == b"data").unwrap() + 8;
+    let left: Vec<f32> = bytes[data..]
+        .chunks_exact(4)
+        .map(|s| f32::from(i16::from_le_bytes([s[0], s[1]])) / 32768.0)
+        .collect();
+    // Peak of each beep: at 1 s and 2 s of the timeline, i.e. 0.5 s and
+    // 1.5 s into the recording (it starts at the seek).
+    let peak = |at: usize| left[at..at + 2400].iter().fold(0f32, |m, s| m.max(s.abs()));
+    let (one_s, two_s) = (peak(23_000), peak(71_000));
+    eprintln!("beep peaks: 1 s {one_s:.3}, 2 s {two_s:.3}");
+    assert!((one_s - 0.5).abs() < 0.05, "{one_s}");
+    assert!((two_s - 0.125).abs() < 0.03, "{two_s}");
+}

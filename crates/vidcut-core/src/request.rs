@@ -11,7 +11,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::export::{EncoderChoice, ExportSettings};
-use crate::model::Clip;
+use crate::model::{TrackClip, TrackKind};
 use crate::ops::{Edge, MoveMode};
 use crate::time::{RangeSpec, Rational, TimeSpec};
 
@@ -36,7 +36,12 @@ pub enum Request {
     // ---------------------------------------------------------------- media pool
     /// Add files to the media pool (probing them); returns their media ids.
     #[serde(rename = "media.add")]
-    MediaAdd { paths: Vec<PathBuf> },
+    MediaAdd {
+        paths: Vec<PathBuf>,
+        /// Into this bin (default: the top level).
+        #[serde(default)]
+        bin: Option<String>,
+    },
     #[serde(rename = "media.list")]
     MediaList {},
     #[serde(rename = "media.get")]
@@ -67,6 +72,22 @@ pub enum Request {
     /// Clear a media item's source In and Out.
     #[serde(rename = "media.marks.clear")]
     MediaMarksClear { media: String },
+    /// Put media into a bin (`""`: the top level).
+    #[serde(rename = "media.move")]
+    MediaMove {
+        media: OneOrMany<String>,
+        bin: String,
+    },
+    /// Add a Media Pool bin (p. 655), like `Interviews/Day 1`; missing
+    /// parents are added too.
+    #[serde(rename = "bins.add")]
+    BinsAdd { path: String },
+    /// Remove a bin and the bins inside it; their media move to its parent.
+    #[serde(rename = "bins.remove")]
+    BinsRemove { path: String },
+    /// Rename or move a bin, with everything inside it.
+    #[serde(rename = "bins.rename")]
+    BinsRename { path: String, to: String },
     /// Probe a file without adding it.
     #[serde(rename = "probe")]
     Probe { path: PathBuf },
@@ -147,6 +168,21 @@ pub enum Request {
         use_marks: bool,
     },
 
+    /// Place On Top (F12, pp. 699–700): on the first track above every clip
+    /// in its span (made if needed), never rippling. Lines up with the
+    /// timeline In, a lone Out, the edit nearest `at` (within 5 frames), or
+    /// `at`. Returns the clip and its track.
+    #[serde(rename = "edit.place_on_top")]
+    EditPlaceOnTop {
+        #[serde(flatten)]
+        source: SourceParams,
+        #[serde(default)]
+        at: Option<TimeSpec>,
+        /// `false` ignores the timeline In/Out.
+        #[serde(default = "yes")]
+        use_marks: bool,
+    },
+
     // ---------------------------------------------------------------- timeline editing (spec §8)
     /// Split at one or more frames (Ctrl+\).
     #[serde(rename = "edit.split")]
@@ -156,14 +192,15 @@ pub enum Request {
         #[serde(default)]
         clips: Vec<ClipRef>,
     },
-    /// Delete clips; ripples on V1 unless `lift`.
+    /// Delete clips. On V1 it ripples unless `lift`, and the other tracks
+    /// follow; elsewhere gaps close only where V1 has nothing (p. 721).
     #[serde(rename = "edit.delete")]
     EditDelete {
         clips: OneOrMany<ClipRef>,
         #[serde(default)]
         lift: bool,
     },
-    /// Delete a range on V1; ripples unless `lift`.
+    /// Delete a range on every unlocked track; ripples unless `lift`.
     #[serde(rename = "edit.delete_range")]
     EditDeleteRange {
         range: RangeSpec,
@@ -173,13 +210,18 @@ pub enum Request {
     /// Close the gap containing `at`.
     #[serde(rename = "edit.close_gap")]
     EditCloseGap { at: TimeSpec },
-    /// Move clips to an edit point (`insert`) or over whatever is there (`overwrite`).
+    /// Move clips to an edit point (`insert`) or over whatever is there
+    /// (`overwrite`). `to` is where the first clip starts, in the timeline as
+    /// it is before the move; `track` moves them to another track (the next
+    /// new track is made). Only V1 inserts; elsewhere clips overwrite.
     #[serde(rename = "edit.move")]
     EditMove {
         clips: OneOrMany<ClipRef>,
         to: TimeSpec,
         #[serde(default = "insert_mode")]
         mode: MoveMode,
+        #[serde(default)]
+        track: Option<String>,
     },
     /// Move a clip onto another, replacing it (rippling the difference).
     #[serde(rename = "edit.replace")]
@@ -233,25 +275,42 @@ pub enum Request {
         #[serde(default)]
         ripple: Option<bool>,
     },
-    /// Copy clips (Ctrl+C): returns them as `clips`, ready for `edit.paste`.
-    /// The GUI also keeps them on its clipboard.
+    /// Copy clips (Ctrl+C): returns them with their tracks as `clips`,
+    /// ready for `edit.paste`. The GUI also keeps them on its clipboard.
     #[serde(rename = "edit.copy")]
     EditCopy { clips: OneOrMany<ClipRef> },
     /// Cut clips (Ctrl+X): copy, then delete with ripple on Track 1.
     #[serde(rename = "edit.cut")]
     EditCut { clips: OneOrMany<ClipRef> },
-    /// Paste clips (Ctrl+V) over Track 1 at `at`, keeping their spacing.
-    /// Defaults: the GUI's clipboard and playhead.
+    /// Paste clips (Ctrl+V) at `at`, each over its own track (p. 723),
+    /// keeping their spacing. Defaults: the GUI's clipboard and playhead.
     #[serde(rename = "edit.paste")]
     EditPaste {
         #[serde(default)]
-        clips: Option<Vec<Clip>>,
+        clips: Option<Vec<TrackClip>>,
         #[serde(default)]
         at: Option<TimeSpec>,
     },
 
     // ---------------------------------------------------------------- tracks, clips, marks, markers
-    /// Track header toggles: lock, mute (audio) and video enable (pp. 647, 717).
+    /// Add tracks (Timeline Actions > Add Track, p. 645): video tracks go on
+    /// top, audio tracks at the bottom. Returns their ids.
+    #[serde(rename = "track.add")]
+    TrackAdd {
+        kind: TrackKind,
+        #[serde(default = "one")]
+        count: u32,
+    },
+    /// Remove a track; one with clips needs `force`. V1 stays. Tracks above
+    /// (or below) it are renumbered.
+    #[serde(rename = "track.remove")]
+    TrackRemove {
+        track: String,
+        #[serde(default)]
+        force: bool,
+    },
+    /// Track header toggles (lock, mute, video enable; pp. 647, 717) and the
+    /// mixer (solo, volume in dB; p. 650).
     #[serde(rename = "track.set")]
     TrackSet {
         track: String,
@@ -260,7 +319,14 @@ pub enum Request {
         #[serde(default)]
         muted: Option<bool>,
         #[serde(default)]
+        solo: Option<bool>,
+        #[serde(default)]
+        volume_db: Option<f64>,
+        #[serde(default)]
         video_enabled: Option<bool>,
+        /// Empty string clears the name.
+        #[serde(default)]
+        name: Option<String>,
     },
     /// Enable/disable video (D), mute, gain (dB, -60..24) and name.
     #[serde(rename = "clip.set")]
@@ -454,6 +520,25 @@ pub enum Request {
     /// Viewer mode, both playheads, the source clip and selection.
     #[serde(rename = "player.state")]
     PlayerState {},
+    /// Mute what the viewer plays, without changing the project (the
+    /// monitoring mute next to the meter, p. 642). Without `mute`, toggles.
+    #[serde(rename = "player.mute")]
+    PlayerMute {
+        #[serde(default)]
+        mute: Option<bool>,
+    },
+    /// The Media Pool view: the bin shown and the sort order. Source Tape
+    /// strings together that bin's media, and its bins', in that order
+    /// (p. 696).
+    #[serde(rename = "pool.set")]
+    PoolSet {
+        #[serde(default)]
+        bin: Option<String>,
+        #[serde(default)]
+        sort: Option<PoolSort>,
+        #[serde(default)]
+        descending: Option<bool>,
+    },
     #[serde(rename = "selection.get")]
     SelectionGet {},
     /// Select timeline clips and/or pool media (omitted parts stay as they are).
@@ -597,6 +682,21 @@ pub enum GuiPanel {
     Jobs,
     /// The command log.
     Log,
+    /// The Mixer: track faders, mute, solo and meters (p. 649).
+    Mixer,
+}
+
+/// Media Pool sort orders.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PoolSort {
+    /// Import order.
+    #[default]
+    Added,
+    Name,
+    Duration,
+    /// The file's modification time.
+    Date,
 }
 
 /// What `gui.screenshot` captures.
@@ -626,17 +726,26 @@ fn one() -> u32 {
     1
 }
 
-/// What to put on the timeline: a media range.
+/// What to put on the timeline: a media range, and where.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SourceParams {
     /// Media id (`m1`).
     pub media: String,
-    /// Source range (TimeSpecs relative to the media's start). Default: all of it.
+    /// Source range (TimeSpecs relative to the media's start). Default: the
+    /// media's source marks, or all of it.
     #[serde(default)]
     pub range: Option<RangeSpec>,
-    /// Leave the audio out (Video Only).
+    /// Leave the audio out (Video Only, p. 694).
     #[serde(default)]
     pub video_only: bool,
+    /// Leave the video out (Audio Only, p. 694).
+    #[serde(default)]
+    pub audio_only: bool,
+    /// The target track (spec §7). Default: V1, or A1 for audio-only clips.
+    /// The next new track (`V3` when there are two) is made. On an audio
+    /// track only the audio is used.
+    #[serde(default)]
+    pub track: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -757,6 +866,8 @@ impl Request {
                 | Self::PlayerSeek { .. }
                 | Self::PlayerStep { .. }
                 | Self::PlayerState {}
+                | Self::PlayerMute { .. }
+                | Self::PoolSet { .. }
                 | Self::SelectionGet {}
                 | Self::SelectionSet { .. }
                 | Self::GuiScreenshot { .. }

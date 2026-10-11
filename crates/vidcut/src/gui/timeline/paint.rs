@@ -12,7 +12,7 @@ use vidcut_av::waveform::Waveform;
 use vidcut_core::model::{Clip, Project, Track};
 use vidcut_core::time::{Rational, format_timecode};
 
-use super::geometry::{Scale, TrackRect, clips_in};
+use super::geometry::{Rows, Scale, TrackRect, clips_in};
 use super::gesture::{Preview, Target};
 use crate::gui::pool::elide;
 use crate::gui::theme;
@@ -256,9 +256,20 @@ fn clip(
     } else {
         theme::CLIP_DISABLED
     };
-    painter.rect_filled(video.shrink2(vec2(0.5, 0.0)), CornerRadius::same(2), fill);
+    // Audio-only clips (and audio tracks) have no picture band.
+    let has_picture = c.video && video.height() > 2.0;
+    if has_picture {
+        painter.rect_filled(video.shrink2(vec2(0.5, 0.0)), CornerRadius::same(2), fill);
+    } else if video.height() > 2.0 {
+        painter.rect_stroke(
+            video.shrink(1.0),
+            CornerRadius::same(2),
+            Stroke::new(1.0, theme::CLIP_DISABLED),
+            StrokeKind::Inside,
+        );
+    }
     let width = x1 - x0;
-    if look.filmstrips && enabled && video.height() >= 24.0 && width > 24.0 {
+    if look.filmstrips && enabled && has_picture && video.height() >= 24.0 && width > 24.0 {
         filmstrip(
             &painter,
             video.shrink2(vec2(1.0, 1.0)),
@@ -304,7 +315,8 @@ fn clip(
         let left = x0.max(painter.clip_rect().left());
         let room = x1 - left;
         let label = elide(&name, ((room - 8.0) / 6.5).max(3.0) as usize);
-        let pos = pos2(left + 4.0, video.top() + 2.0);
+        // On audio rows the name sits on the audio band.
+        let pos = pos2(left + 4.0, video.top().min(tr.audio_top) + 2.0);
         let galley = painter.layout_no_wrap(label, FontId::proportional(11.0), Color32::WHITE);
         painter.rect_filled(
             Rect::from_min_size(pos - vec2(2.0, 0.0), galley.size() + vec2(4.0, 1.0)),
@@ -328,7 +340,7 @@ fn clip(
             Color32::from_white_alpha(200),
         );
     }
-    if look.status && !c.enabled && width > 40.0 {
+    if look.status && !c.enabled && has_picture && width > 40.0 {
         painter.text(
             video.center(),
             Align2::CENTER_CENTER,
@@ -459,9 +471,22 @@ pub fn playhead(painter: &Painter, x: f32, ruler: Rect, bottom: f32) {
     ));
 }
 
-/// What a gesture would do: drop targets, the moved block, snap lines.
-pub fn preview(painter: &Painter, tr: &TrackRect, scale: &Scale, p: &Project, pv: &Preview) {
+/// What a gesture would do: drop targets, the moved block, snap lines. A
+/// target on a track that doesn't exist yet shows where it will be made.
+pub fn preview(painter: &Painter, rows: &Rows, scale: &Scale, p: &Project, pv: &Preview) {
+    let track = pv.row.as_deref().unwrap_or(vidcut_core::ops::MAIN);
+    let tr = rows.rect_of(track);
     let rect = tr.rect;
+    if rows.get(track).is_none() && (pv.ghost.is_some() || pv.request.is_some()) {
+        painter.rect_filled(rect, CornerRadius::ZERO, Color32::from_white_alpha(18));
+        painter.text(
+            pos2(rows.area.left() + 4.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            format!("new track {track}"),
+            FontId::proportional(10.0),
+            theme::TEXT_DIM,
+        );
+    }
     let span = |a: i64, b: i64| Rect::from_x_y_ranges(scale.xf(a)..=scale.xf(b), rect.y_range());
     match &pv.target {
         Target::Insert(e) => {

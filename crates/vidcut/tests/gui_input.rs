@@ -93,7 +93,8 @@ fn drag(harness: &mut Harness<'_, Workspace>, from: Pos2, to: Pos2, mods: Modifi
 /// The lower timeline position of `frame`, `dy` pixels into the track.
 fn at(harness: &Harness<'_, Workspace>, frame: i64, dy: f32) -> Pos2 {
     let l = harness.state().timeline_layout().expect("drawn");
-    pos2(l.lower_scale.xf(frame), l.lower.rect.top() + dy)
+    let v1 = l.lower.get("V1").expect("Track 1's row").rect.rect;
+    pos2(l.lower_scale.xf(frame), v1.top() + dy)
 }
 
 fn v1(h: &live::Handle) -> Vec<(String, i64, i64)> {
@@ -243,7 +244,8 @@ fn gestures_send_one_request_each() {
     // Dropped on the upper timeline (the whole program), past the last clip.
     let end = v1(&h).iter().map(|c| c.1 + c.2).max().unwrap();
     let l = harness.state().timeline_layout().unwrap();
-    let past = pos2(l.upper_scale.xf(end) + 20.0, l.upper.rect.center().y);
+    let upper_v1 = l.upper.get("V1").unwrap().rect.rect;
+    let past = pos2(l.upper_scale.xf(end) + 20.0, upper_v1.center().y);
     drag(&mut harness, row, past, Modifiers::NONE);
     settle(&h, &mut harness);
     assert_eq!(gui_edits(&h).last().unwrap().0, "edit.append");

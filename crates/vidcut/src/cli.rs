@@ -87,6 +87,17 @@ pub enum Command {
     /// Timeline In/Out marks.
     #[command(subcommand)]
     Marks(MarksCmd),
+    /// Tracks: add and remove them, and their header and mixer settings
+    /// (list them without a subcommand).
+    Track {
+        #[command(subcommand)]
+        cmd: Option<TrackCmd>,
+    },
+    /// Media Pool bins (list them without a subcommand).
+    Bins {
+        #[command(subcommand)]
+        cmd: Option<BinsCmd>,
+    },
     /// Timeline markers.
     #[command(subcommand)]
     Markers(MarkersCmd),
@@ -293,8 +304,84 @@ pub enum Command {
     },
     /// Close the GUI.
     Quit,
-    /// Open a window in the GUI: quick-export, export, jobs or log.
+    /// The GUI's Media Pool view: the bin shown and the sort order. Source
+    /// Tape follows it.
+    Pool {
+        /// A bin path ("" for the top level).
+        #[arg(long)]
+        bin: Option<String>,
+        /// added, name, duration or date.
+        #[arg(long)]
+        sort: Option<String>,
+        #[arg(long, conflicts_with = "ascending")]
+        descending: bool,
+        #[arg(long)]
+        ascending: bool,
+    },
+    /// Mute what the GUI's viewer plays (on, off; default: toggle).
+    Mute { state: Option<String> },
+    /// Open a window in the GUI: quick-export, export, jobs, log or mixer.
     Show { panel: String },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TrackCmd {
+    /// List the tracks with their settings.
+    #[command(visible_alias = "ls")]
+    List,
+    /// Add tracks: video tracks go on top, audio tracks at the bottom.
+    Add {
+        /// video or audio.
+        kind: String,
+        #[arg(long, default_value_t = 1)]
+        count: u32,
+    },
+    /// Remove a track (--force also deletes its clips). Later tracks are renumbered.
+    #[command(visible_alias = "rm")]
+    Remove {
+        track: String,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Track header buttons and mixer settings.
+    #[command(
+        after_help = "Examples:\n  vidcut track set A1 --volume -6 --name Music\n  vidcut track set V2 --lock\n  vidcut track set A2 --solo"
+    )]
+    Set {
+        track: String,
+        #[arg(long, conflicts_with = "unlock")]
+        lock: bool,
+        #[arg(long)]
+        unlock: bool,
+        #[arg(long, conflicts_with = "unmute")]
+        mute: bool,
+        #[arg(long)]
+        unmute: bool,
+        #[arg(long, conflicts_with = "unsolo")]
+        solo: bool,
+        #[arg(long)]
+        unsolo: bool,
+        /// Fader in dB (-60..24).
+        #[arg(long, allow_hyphen_values = true)]
+        volume: Option<f64>,
+        /// Show the track's video (true/false).
+        #[arg(long)]
+        video: Option<bool>,
+        /// A name ("" clears it).
+        #[arg(long)]
+        name: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum BinsCmd {
+    /// Add a bin, like "Interviews/Day 1" (parents too).
+    Add { path: String },
+    /// Remove a bin and the bins in it; their media move up a level.
+    #[command(visible_alias = "rm")]
+    Remove { path: String },
+    /// Rename or move a bin.
+    Rename { path: String, to: String },
 }
 
 #[derive(Subcommand, Debug)]
@@ -371,6 +458,16 @@ pub enum MediaCmd {
     /// Add files to the pool.
     Add {
         files: Vec<PathBuf>,
+        /// Into this bin.
+        #[arg(long)]
+        bin: Option<String>,
+    },
+    /// Put media into a bin ("" for the top level).
+    Move {
+        #[arg(required = true)]
+        media: Vec<String>,
+        #[arg(long)]
+        bin: String,
     },
     /// List the pool.
     #[command(visible_alias = "ls")]
@@ -414,9 +511,16 @@ pub struct SourceArgs {
     /// Source range, e.g. 10s..+20s (default: all of it).
     #[arg(long, allow_hyphen_values = true)]
     range: Option<String>,
-    /// Leave the audio out.
-    #[arg(long)]
+    /// Leave the audio out (Video Only).
+    #[arg(long, conflicts_with = "audio_only")]
     video_only: bool,
+    /// Leave the video out (Audio Only).
+    #[arg(long)]
+    audio_only: bool,
+    /// Target track (default: V1, or A1 for audio-only clips). The next new
+    /// track, like V3 above V2, is made.
+    #[arg(long)]
+    track: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -468,6 +572,13 @@ pub enum EditCmd {
         #[arg(long, allow_hyphen_values = true)]
         at: Option<String>,
     },
+    /// Place On Top (F12): on the first track above everything there.
+    PlaceOnTop {
+        #[command(flatten)]
+        source: SourceArgs,
+        #[arg(long, allow_hyphen_values = true)]
+        at: Option<String>,
+    },
     /// Split at one or more frames (comma-separated).
     Split {
         #[arg(
@@ -507,6 +618,9 @@ pub enum EditCmd {
         to: String,
         #[arg(long)]
         overwrite: bool,
+        /// Move them to this track.
+        #[arg(long)]
+        track: Option<String>,
     },
     /// Replace a clip with another clip from the timeline.
     Replace {
@@ -665,6 +779,10 @@ pub enum Action {
     ShowMarks(Envelope),
     /// List markers (from `timeline.get`).
     ListMarkers(Envelope),
+    /// List tracks (from `timeline.get`).
+    ListTracks(Envelope),
+    /// List bins (from `project.summary`).
+    ListBins(Envelope),
     /// Start the GUI.
     Gui { project: Option<PathBuf> },
     /// List running GUIs.
@@ -676,9 +794,12 @@ fn time(s: &str) -> Value {
 }
 
 fn source(s: &SourceArgs) -> Value {
-    let mut v = json!({ "media": s.media, "video_only": s.video_only });
+    let mut v = json!({ "media": s.media, "video_only": s.video_only, "audio_only": s.audio_only });
     if let Some(r) = &s.range {
         v["range"] = json!(r);
+    }
+    if let Some(t) = &s.track {
+        v["track"] = json!(t);
     }
     v
 }
@@ -831,7 +952,13 @@ impl Cli {
             }
             Command::Probe { file } => req("probe", json!({ "path": file }))?,
             Command::Media(m) => match m {
-                MediaCmd::Add { files } => req("media.add", json!({ "paths": absolute(files)? }))?,
+                MediaCmd::Add { files, bin } => req(
+                    "media.add",
+                    json!({ "paths": absolute(files)?, "bin": bin }),
+                )?,
+                MediaCmd::Move { media, bin } => {
+                    req("media.move", json!({ "media": media, "bin": bin }))?
+                }
                 MediaCmd::List => req("media.list", json!({}))?,
                 MediaCmd::Show { media } => req("media.get", json!({ "media": media }))?,
                 MediaCmd::Remove { media, force } => {
@@ -861,6 +988,55 @@ impl Cli {
                 }
             },
             Command::Timeline { range } => req("timeline.get", json!({ "range": range }))?,
+            Command::Track { cmd } => match cmd.as_ref().unwrap_or(&TrackCmd::List) {
+                TrackCmd::List => {
+                    return Ok(Some(Action::ListTracks(
+                        self.envelope(req("timeline.get", json!({}))?),
+                    )));
+                }
+                TrackCmd::Add { kind, count } => {
+                    req("track.add", json!({ "kind": kind, "count": count }))?
+                }
+                TrackCmd::Remove { track, force } => {
+                    req("track.remove", json!({ "track": track, "force": force }))?
+                }
+                TrackCmd::Set {
+                    track,
+                    lock,
+                    unlock,
+                    mute,
+                    unmute,
+                    solo,
+                    unsolo,
+                    volume,
+                    video,
+                    name,
+                } => {
+                    let flag = |on: bool, off: bool| match (on, off) {
+                        (true, _) => json!(true),
+                        (_, true) => json!(false),
+                        _ => Value::Null,
+                    };
+                    req(
+                        "track.set",
+                        json!({ "track": track, "locked": flag(*lock, *unlock),
+                                "muted": flag(*mute, *unmute), "solo": flag(*solo, *unsolo),
+                                "volume_db": volume, "video_enabled": video, "name": name }),
+                    )?
+                }
+            },
+            Command::Bins { cmd } => match cmd {
+                None => {
+                    return Ok(Some(Action::ListBins(
+                        self.envelope(req("project.summary", json!({}))?),
+                    )));
+                }
+                Some(BinsCmd::Add { path }) => req("bins.add", json!({ "path": path }))?,
+                Some(BinsCmd::Remove { path }) => req("bins.remove", json!({ "path": path }))?,
+                Some(BinsCmd::Rename { path, to }) => {
+                    req("bins.rename", json!({ "path": path, "to": to }))?
+                }
+            },
             Command::At { at } => req("timeline.at", json!({ "at": time(at) }))?,
             Command::Cuts => req("timeline.edit_points", json!({}))?,
             Command::Edit(e) => match e {
@@ -882,6 +1058,9 @@ impl Cli {
                     "edit.ripple_overwrite",
                     with(source(s), json!({ "at": at })),
                 )?,
+                EditCmd::PlaceOnTop { source: s, at } => {
+                    req("edit.place_on_top", with(source(s), json!({ "at": at })))?
+                }
                 EditCmd::Split { at, clips } => {
                     req("edit.split", json!({ "at": at, "clips": clips }))?
                 }
@@ -896,9 +1075,11 @@ impl Cli {
                     clips,
                     to,
                     overwrite,
+                    track,
                 } => req(
                     "edit.move",
-                    json!({ "clips": clips, "to": time(to), "mode": if *overwrite { "overwrite" } else { "insert" } }),
+                    json!({ "clips": clips, "to": time(to), "track": track,
+                            "mode": if *overwrite { "overwrite" } else { "insert" } }),
                 )?,
                 EditCmd::Replace { clip, onto } => {
                     req("edit.replace", json!({ "clip": clip, "onto": onto }))?
@@ -1166,6 +1347,33 @@ impl Cli {
                 )?
             }
             Command::Quit => req("gui.quit", json!({}))?,
+            Command::Pool {
+                bin,
+                sort,
+                descending,
+                ascending,
+            } => {
+                let order = match (*descending, *ascending) {
+                    (true, _) => json!(true),
+                    (_, true) => json!(false),
+                    _ => Value::Null,
+                };
+                req(
+                    "pool.set",
+                    json!({ "bin": bin, "sort": sort, "descending": order }),
+                )?
+            }
+            Command::Mute { state } => {
+                let mute = match state.as_deref() {
+                    None => Value::Null,
+                    Some("on") => json!(true),
+                    Some("off") => json!(false),
+                    Some(other) => {
+                        return Err(Error::usage(format!("mute {other:?}: use on or off")));
+                    }
+                };
+                req("player.mute", json!({ "mute": mute }))?
+            }
             Command::Show { panel } => req("gui.show", json!({ "panel": panel }))?,
         };
         Ok(Some(Action::Run(self.envelope(request))))

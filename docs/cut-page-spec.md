@@ -61,11 +61,17 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
     - clicking the thumbnail's lower-right corner shows its metadata
   - **List (v1)** (p. 665): sortable columns.
   - **Filmstrip** and **Metadata** cards (later).
-- **Sort and search (v1)** (pp. 666–667):
-  - Sort Media By: Clip Name, Date Imported, Date Modified, Duration (ours), Timecode, ascending or descending.
+- **Sort and search (v1; sort M6)** (pp. 666–667):
+  - Sort Media By: Clip Name, Date Imported, Date Modified, Duration (ours), Timecode, ascending or descending. vidcut sorts by date added (the default), name, duration or file date.
   - The sort order is also the Source Tape order.
-  - The search field filters live.
-- **Bins (later)** (pp. 655–656): nested bins, a breadcrumb, Create Bin With Selected Clips. In v1 the pool is flat.
+  - The search field filters live. It looks through the open bin and the bins inside it.
+- **Bins (M6)** (pp. 655–656, 377):
+  - The Master bin is the top level. The pool shows the open bin's own clips and the bins inside it as folders. A path at the top (Master › Interviews › Day 1) opens any level, and the Bins menu lists every bin as a hierarchy.
+  - Double-click a bin to open it. New Bin is on the File menu (Shift+Ctrl+N), the Bins menu and the pool's right-click menu. Right-clicking a bin offers Rename Bin and Remove Bin.
+  - Drag clips onto a bin (or onto a level of the path) to move them into it. A clip's menu offers Move to Bin and Create Bin With Selected Clips ("Bin N", p. 656).
+  - Imports go into the open bin (p. 377).
+  - Source Tape strings together the open bin's clips and its bins' clips, in the sort order (pp. 680, 696).
+  - Removing a bin keeps its clips (deviation X6). Dragging a bin into another bin is `bins.rename` (later in the GUI).
 - **Clip color (later)** (pp. 667–668).
 - **Interaction:**
   - **Click:** selects. In Source Clip mode the Viewer shows the clip; in Source Tape mode the playhead jumps to the clip's first frame (pp. 680, 704).
@@ -163,10 +169,13 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
   - holding Alt while trimming turns rippling off temporarily
 - **Tracks 2+ are B-roll (M6):**
   - they never ripple themselves, and clips sit freely with gaps
-  - each higher-track clip is attached to the Track 1 clip under its In point and follows that clip when Track 1 ripples
+  - each higher-track clip is attached to the Track 1 clip under its In point and follows that clip when Track 1 ripples (p. 649; D21)
   - trimming the anchor's Out to before the attached clip's In deletes the attached clip (p. 727)
-  - higher tracks only ripple where there is no Track 1 video under them (p. 721)
-- **Overlapping video:** the highest enabled track is visible (p. 647).
+  - higher tracks only ripple where there is no Track 1 video under them (p. 721; D22)
+- **Audio tracks (M6):** A1, A2, … sit below the video tracks and hold sound alone, such as music. Media without video go there by default (D26).
+- **Track header** (p. 647): the target-track toggle (D3), lock, mute and video on/off. Right-click adds a video or audio track or removes one (D27).
+- **Overlapping video:** the highest enabled track is visible (p. 647). A disabled clip or a track with its video off shows what is under it.
+- **Sound:** every audible track plays, mixed; mute and solo (§9) decide which are audible.
 - **Linking:** video and audio of a clip are one combined clip. Trims move both, except that a J/L cut moves only the audio edit (§8.7). There is no link/unlink on the Cut page.
 
 ## 7. Edit functions (pp. 696–701)
@@ -198,7 +207,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - writes over the target track at the playhead, at the timeline In, or backtimed to a lone timeline Out
   - other clips don't move
 - **Place On Top (M6)** (F12; pp. 699–700):
-  - goes to the first track above every clip at that position, creating one if needed
+  - goes to the first track above every clip at that position, creating one if needed (D24)
   - ignores the selected track and never ripples
   - **Alignment priority:**
     1. A timeline In lines up with the source In.
@@ -214,6 +223,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 - **Onto a clip after hovering briefly** (the highlight narrows to the incoming footprint): a plain Overwrite with no ripple, which may split the target.
 - **Onto an edit point:** insert at that edit.
 - **Into the gray area above the top track:** creates a new video+audio track (M6). Below the bottom track, an audio clip creates an audio-only track (M6).
+- **Onto another track (M6):** an overwrite there, never a ripple (only Track 1 pushes; D23). Sound alone dropped on a video track goes to the first audio track instead.
 
 ## 8. Timeline editing (Ch. 36, pp. 715–732)
 
@@ -234,8 +244,8 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 - **After hovering first:** overwrites the middle of the target, splitting it; the gap left behind closes on Track 1.
 - **Over a neighbor's edge, the pointer not reaching it** (p. 722): the overlapping part of the neighbor is overwritten and the gap left behind closes, so the neighbor ends up shorter.
 - **Onto an edit point** (it highlights): insert-at-edit. The gap left behind closes, and later clips (with their attached higher-track clips) shift. Works with several clips.
-- **Track 1 clip dropped onto another track:** can only overwrite.
-- **Higher-track clips:** move freely and leave gaps (M6).
+- **Track 1 clip dropped onto another track:** can only overwrite (p. 721). Track 1 closes up behind it.
+- **Higher-track clips:** move freely and leave gaps (M6). Moves between tracks: D25.
 
 ### 8.3 Copy, cut, paste (v1) (p. 723)
 - Ctrl+C copies.
@@ -294,7 +304,8 @@ Hover the lower audio part of a clip at an edit until the cursor shows a note, t
 ## 9. Audio (pp. 642, 649–650, 743, 771, 773)
 
 - **Meter (v1):** green is safe, yellow is near the limit, red risks clipping.
-- **Mixer (M6):** per-track mute/solo, fader and meters. Solo silences the non-soloed tracks, and mute/solo affect export.
+- **Mixer (M6)** (pp. 649–650): the Mixer button opens a channel strip per track with sound: name, meter, fader (dB) and mute/solo, plus the mix's meter. Solo silences the tracks that aren't soloed, and mute/solo apply to export too (p. 650). Track pan and FX are out of scope.
+- **Viewer meter and monitoring mute (M6)** (p. 642): a meter beside the viewer shows what it plays. Its speaker button mutes playback only, not the export.
 - **Clip volume (v1):** one gain value per clip, and clip mute.
 - **Ripple Delete Silence (M7)** (p. 773):
   - settings: threshold (dB), pre-head, post-tail, minimum silence (frames), crossfade
@@ -353,6 +364,7 @@ Keys from the Cut chapters, with Edit-page keys filling the gaps (marked †).
 | W | Dynamic Trim (M7) | 731 |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / redo | 651 |
 | Ctrl+I | Import media | 654 |
+| Shift+Ctrl+N | New bin | 655 |
 | Alt+F / Shift+F / Esc | Enhanced viewer / full screen / exit (later) | 688, 40† |
 
 ## 12. Decisions on gaps and contradictions
@@ -361,7 +373,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
 
 - **D1. Fixed playhead.** The lower timeline's playhead is fixed by default, with a Timeline Options toggle. The manual calls it fixed on p. 689 but describes a toggle on pp. 645 and 716.
 - **D2. What Split cuts.** If some selected clips are under the playhead, only those are split. Otherwise every clip under the playhead on every unlocked track is split. This is a simplification of the Edit-page Auto Select rule (p. 950). Afterwards, the left halves are selected.
-- **D3. Target track.** Smart Insert, Ripple Overwrite and Overwrite use the selected target track (V1 by default). Append always uses Track 1. The manual doesn't say which track Append uses.
+- **D3. Target track.** Smart Insert, Ripple Overwrite and Overwrite use the selected target track (V1 by default; A1 for sound alone, D26). Append always uses Track 1, and Place On Top picks its own track (D24). The manual doesn't say which track Append uses.
 - **D4. Trim Start/End to Playhead.** Applies to the selected clips; with no selection, to the Track 1 clip under the playhead.
 - **D5. Missing source marks.**
   - No source In means the clip's first frame; no source Out means its last frame.
@@ -383,7 +395,8 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - Within 6 px of an edit point a drop inserts there; the moved clips' own edges don't count.
   - On another clip: replace if released within 0.8 s of reaching it (D11), else overwrite at the block's position. Several clips always overwrite (Replace takes one clip).
   - Past the last clip: the clips move (or the media is appended) to the end. Left of the first clip: inserted at the start.
-  - Dragged more than 24 px off the track, or Esc during the drag: cancelled, nothing changes.
+  - The row under the pointer is the destination track (M6). The strip above the top row means a new video track, and the strip below the bottom row a new audio track.
+  - Dragged off the tracks (more than 24 px to either side, or past those strips), or Esc during the drag: cancelled, nothing changes.
 - **D19. Trimming with the pointer.**
   - Edges follow the pointer's movement from the press (they don't jump to it), snapped to targets (§8.8).
   - A trim, roll, slip or J/L cut stops where the media runs out instead of failing.
@@ -394,3 +407,21 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - A J/L cut (§8.7) is stored as matching audio offsets on the two clips that meet there: the outgoing clip's `tail` equals the incoming clip's `head`.
   - When an edit gives a clip a different neighbor at that point, the J/L cut resets to a straight cut. Examples: a delete, a move, or a split inside the overlap zone, where one half would otherwise be left without audio of its own.
   - The manual doesn't cover this. Without the rule, audio could overlap on a track or extend into gaps.
+- **D21. Following Track 1** (pp. 649, 727). A clip on another track is attached to the Track 1 picture under its first frame: that clip and source frame. Nothing is stored; each edit works it out from the timeline before and after.
+  - When that picture moves (later clips shift, or its clip moves, even to another track), the attached clip moves with it. Split parts count as the same picture.
+  - When its clip's tail is trimmed past it, it is deleted (p. 727). When its clip's head is trimmed past it, it moves to the clip's new start.
+  - When its clip is replaced (Ripple Overwrite, Replace), it stays where it is.
+  - When its clip is deleted, it moves to where Track 1 closed up.
+  - Over a gap or past the end of Track 1, it keeps its distance to the next Track 1 clip (or from the end of the one before).
+  - Clips on locked tracks don't follow. A clip that would land on another clip moves up to the first free unlocked track of its kind (audio tracks: down), which is created if needed.
+- **D22. Rippling other tracks** (p. 721). With Ripple On, deleting or trimming a clip on another track ripples that track only when Track 1 has no clips from that clip's start on. Otherwise it leaves a gap. Deleting a timeline In–Out range takes it out of every unlocked track and closes them together (p. 725).
+- **D23. Edit functions on other tracks.** Only Track 1 pushes clips (p. 697). On another track, Smart Insert and insert overwrite, and Ripple Overwrite replaces without moving anything else. Paste puts each clip back on its own track (p. 723), creating tracks that are missing. Split follows D2 on every unlocked track.
+- **D24. Where Place On Top goes** (pp. 699–700). Onto the video track above the highest one with clips in the incoming span, created if needed; onto Track 1 only if nothing is there (where D10 applies). Sound alone goes to the first audio track with room, created if needed.
+- **D25. Moving clips between tracks.**
+  - Moves are given in timeline positions from before the move.
+  - A Track 1 clip moved to another track lifts out; with Ripple On, Track 1 closes up and the moved clips land where they were dropped.
+  - Clips moved onto Track 1 insert or overwrite there (§8.2).
+  - Video can't go onto an audio track. A selection spanning several tracks moves along its tracks only.
+- **D26. Sound alone.** An edit without picture (media without video, or the Audio Only toggle, p. 694) goes to A1 unless a target track is given. A clip on an audio track keeps only its audio. In the GUI, sound alone dragged onto a video track lands on the first audio track.
+- **D27. Track numbers are positions.** Video tracks are V1, V2, … from the bottom; audio tracks A1, A2, … from the top. Removing a track renumbers the ones after it. Edits and moves may name the next track (one past the last) to create it. Track 1 can't be removed, and removing a track with clips must be confirmed (`--force`). Track volume runs from −60 dB to +24 dB, like clip gain (D12).
+- **D28. Meters read the waveforms.** Meters show the peak level at the playhead, taken from the media waveforms (one peak per 10 ms) with clip gain, faders, mute and solo applied. They work while paused and while scrubbing. Each track has one bar (its loudest channel), not one per channel as on p. 649.

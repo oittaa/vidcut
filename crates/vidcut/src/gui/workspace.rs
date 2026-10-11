@@ -73,6 +73,8 @@ pub struct Workspace {
     // View state (not part of the project).
     pub(super) pool_view: PoolView,
     pub(super) search: String,
+    /// Bins in the pool: drop targets, the order shown, renaming.
+    pub(super) bins: super::pool::BinsUi,
     pub(super) timecode: Option<TimecodeEntry>,
     pub(super) duration_text: Option<String>,
     pub(super) show_log: bool,
@@ -88,6 +90,11 @@ pub struct Workspace {
     title: String,
     /// Edits take only the video (the Cut page's Video Only toggle, p. 694).
     pub(super) video_only: bool,
+    /// Edits take only the audio (Audio Only, p. 694).
+    pub(super) audio_only: bool,
+    /// The target track picked in a track header (p. 696); `None`: the
+    /// default (Track 1, or A1 for sound alone).
+    pub(super) target: Option<String>,
     /// What a press in the viewer's scroll bar is dragging.
     pub(super) drag: Option<Drag>,
     /// The timeline area's view state (zoom, options, the gesture in progress).
@@ -98,6 +105,9 @@ pub struct Workspace {
     pub(super) stills: Option<super::stills::Stills>,
     /// Quick Export, the Export dialog, jobs and timeline interchange.
     pub(super) export: super::export::ExportUi,
+    /// The Mixer panel is open (p. 649), and its meters' state.
+    pub(super) show_mixer: bool,
+    pub(super) mixer: super::mixer::Mixer,
     pub(super) dialogs: Arc<dyn super::export::Dialogs>,
 }
 
@@ -111,6 +121,7 @@ impl Workspace {
             wants: [[640, 360]; 2],
             pool_view: PoolView::Thumbnails,
             search: String::new(),
+            bins: Default::default(),
             timecode: None,
             duration_text: None,
             show_log: false,
@@ -121,6 +132,8 @@ impl Workspace {
             flash: None,
             title: String::new(),
             video_only: false,
+            audio_only: false,
+            target: None,
             drag: None,
             timeline: TimelineView {
                 options: super::timeline::Options::load(),
@@ -129,6 +142,8 @@ impl Workspace {
             trim_editor: None,
             stills: None,
             export: Default::default(),
+            show_mixer: false,
+            mixer: Default::default(),
             dialogs: Arc::new(super::export::RfdDialogs),
         }
     }
@@ -136,7 +151,12 @@ impl Workspace {
     /// Opens a window (`gui.show`).
     pub fn show_panel(&mut self, panel: vidcut_core::request::GuiPanel, ctx: &egui::Context) {
         use vidcut_core::request::GuiPanel;
-        if self.project().is_none() && matches!(panel, GuiPanel::QuickExport | GuiPanel::Export) {
+        if self.project().is_none()
+            && matches!(
+                panel,
+                GuiPanel::QuickExport | GuiPanel::Export | GuiPanel::Mixer
+            )
+        {
             return;
         }
         match panel {
@@ -144,6 +164,7 @@ impl Workspace {
             GuiPanel::Export => self.open_export(ctx),
             GuiPanel::Jobs => self.export.show_jobs = true,
             GuiPanel::Log => self.show_log = true,
+            GuiPanel::Mixer => self.show_mixer = true,
         }
     }
 
@@ -154,7 +175,7 @@ impl Workspace {
 
     /// Where the timelines were drawn last frame (for tests).
     pub fn timeline_layout(&self) -> Option<super::timeline::Layout> {
-        self.timeline.layout
+        self.timeline.layout.clone()
     }
 
     /// Timeline Options (for tests and settings).
@@ -233,17 +254,32 @@ impl Workspace {
         let with_position = |mut s: Value| {
             match method {
                 "edit.smart_insert" => s["playhead"] = json!(playhead),
-                "edit.overwrite" | "edit.ripple_overwrite" => s["at"] = json!(playhead),
+                "edit.overwrite" | "edit.ripple_overwrite" | "edit.place_on_top" => {
+                    s["at"] = json!(playhead)
+                }
                 _ => {}
             }
             s
         };
-        let video_only = self.video_only;
+        let (video_only, audio_only) = (self.video_only, self.audio_only);
+        // Append always goes after Track 1's last clip (decision D3), and
+        // Place On Top picks its own track.
+        let target = self
+            .target
+            .clone()
+            .filter(|_| !matches!(method, "edit.append" | "edit.place_on_top"))
+            .filter(|t| self.project().is_some_and(|p| p.track(t).is_some()));
         let sources: Vec<Value> = sources
             .into_iter()
             .map(|mut s| {
                 if video_only {
                     s["video_only"] = json!(true);
+                }
+                if audio_only {
+                    s["audio_only"] = json!(true);
+                }
+                if let Some(t) = &target {
+                    s["track"] = json!(t);
                 }
                 s
             })
@@ -365,6 +401,13 @@ impl Workspace {
                     self.import_media();
                 }
                 if ui
+                    .add_enabled(open, egui::Button::new("New Bin"))
+                    .on_hover_text("Shift+Ctrl+N: a bin in the bin the pool shows")
+                    .clicked()
+                {
+                    self.new_bin();
+                }
+                if ui
                     .add_enabled(open, egui::Button::new("Import Timeline (OTIO)…"))
                     .clicked()
                 {
@@ -446,6 +489,10 @@ impl Workspace {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.toggle_value(&mut self.show_log, "Command log");
+                if self.project().is_some() {
+                    ui.toggle_value(&mut self.show_mixer, "Mixer")
+                        .on_hover_text("Track faders, mute, solo and meters (p. 649)");
+                }
                 let running = self.snap.jobs.iter().filter(|j| j.running()).count();
                 let jobs = if running > 0 {
                     format!("Jobs ({running})")
@@ -603,6 +650,8 @@ impl Workspace {
             return;
         }
         let live = self.live.clone();
+        // Into the bin the pool shows (p. 655).
+        let bin = self.snap.pool.bin.clone();
         std::thread::spawn(move || {
             if let Some(files) = rfd::FileDialog::new()
                 .add_filter(
@@ -615,7 +664,8 @@ impl Workspace {
                 .add_filter("all files", &["*"])
                 .pick_files()
             {
-                live.request("media.add", json!({ "paths": files }));
+                let bin = (!bin.is_empty()).then_some(bin);
+                live.request("media.add", json!({ "paths": files, "bin": bin }));
             }
         });
     }
@@ -643,8 +693,9 @@ impl Workspace {
                     let clips = self.snap.selection.clips.clone();
                     // Also put the clips on the system clipboard as JSON (paste
                     // them into another project with `edit paste --clips`).
-                    if let Some(p) = self.project() {
-                        let data: Vec<_> = clips.iter().filter_map(|c| p.clip(c)).collect();
+                    if let Some(p) = self.project()
+                        && let Ok(data) = vidcut_core::ops::copy_clips(p, &clips)
+                    {
                         ctx.copy_text(json!(data).to_string());
                     }
                     let method = if matches!(e, egui::Event::Cut) {
@@ -746,8 +797,12 @@ impl Workspace {
                 "edit.overwrite"
             });
         }
-        if pressed(Key::F12) && m.shift {
-            self.edit_function("edit.append");
+        if pressed(Key::F12) {
+            self.edit_function(if m.shift {
+                "edit.append"
+            } else {
+                "edit.place_on_top"
+            });
         }
         if pressed(Key::Backslash) && m.command {
             self.send(
@@ -770,6 +825,9 @@ impl Workspace {
         }
         if pressed(Key::I) && m.command {
             self.import_media();
+        }
+        if pressed(Key::N) && m.command && m.shift {
+            self.new_bin();
         }
         if pressed(Key::M) && !m.command {
             if m.alt {
@@ -1010,10 +1068,16 @@ impl Workspace {
         }
         egui::Panel::bottom("timeline")
             .resizable(true)
-            .default_size(240.0)
+            .default_size(300.0)
             .min_size(140.0)
             .frame(egui::Frame::new().fill(theme::PANEL).inner_margin(6))
             .show(ui, |ui| self.timeline_panel(ui));
+        if self.show_mixer {
+            egui::Panel::right("mixer")
+                .resizable(true)
+                .default_size(320.0)
+                .show(ui, |ui| self.mixer_panel(ui));
+        }
         egui::Panel::left("pool")
             .resizable(true)
             .default_size(430.0)

@@ -641,3 +641,114 @@ fn presets_save_and_delete() {
     sb.fails(4, &["presets", "delete", "h264-master"]);
     sb.fails(3, &["presets", "delete", "web"]);
 }
+
+/// The left channel of a 16-bit stereo WAV, as `f32`.
+fn wav_left(path: &Path) -> Vec<f32> {
+    let bytes = std::fs::read(path).unwrap();
+    let data = bytes.windows(4).position(|w| w == b"data").unwrap() + 8;
+    bytes[data..]
+        .chunks_exact(4)
+        .map(|s| f32::from(i16::from_le_bytes([s[0], s[1]])) / 32768.0)
+        .collect()
+}
+
+fn peak(samples: &[f32], at: usize) -> f32 {
+    samples[at..at + 960]
+        .iter()
+        .fold(0f32, |m, s| m.max(s.abs()))
+}
+
+#[test]
+fn b_roll_and_music_export_correctly() {
+    // M6 acceptance: B-roll on V2 covers Track 1 (p. 647), music on A1 mixes
+    // with Track 1's audio, and the mixer's fader, solo and mute apply to
+    // export (p. 650).
+    let sb = Sandbox::new("multitrack");
+    let a = fixture(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (30, 1),
+        90,
+    ));
+    let b = fixture(
+        FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 300).no_audio(),
+    );
+    let music = fixture(
+        FixtureSpec::new(VideoCodec::H264, Container::Mkv, 320, 180, (30, 1), 120).audio_only(),
+    );
+    sb.cmd(&["new"]).arg(sb.project()).output().unwrap();
+    sb.ok(&["media", "add", s(&a), s(&b), s(&music)]);
+    sb.ok(&["edit", "append", "m1"]);
+    sb.ok(&[
+        "edit",
+        "overwrite",
+        "m2",
+        "--range",
+        "150f..180f",
+        "--at",
+        "30f",
+        "--track",
+        "V2",
+    ]);
+    let r = sb.ok(&[
+        "edit",
+        "overwrite",
+        "m3",
+        "--range",
+        "0f..60f",
+        "--at",
+        "15f",
+    ]);
+    assert_eq!(r["result"]["clip"], "c3");
+    let tracks = sb.ok(&["track", "list"])["result"].clone();
+    assert_eq!(tracks.as_array().unwrap().len(), 3);
+
+    let video = sb.dir.join("v.mkv");
+    sb.ok(&[
+        "export",
+        s(&video),
+        "--encoder",
+        "cpu",
+        "--set",
+        "video.quality=0",
+        "--set",
+        "video.speed=ultrafast",
+    ]);
+    let want: Vec<Option<u32>> = (0..30).chain(150..180).chain(60..90).map(Some).collect();
+    assert_eq!(barcodes(&video), want, "the B-roll covers frames 30..60");
+
+    let mix = |name: &str| {
+        let out = sb.dir.join(name);
+        sb.ok(&["export", s(&out), "--set", "audio.codec=pcm_s16"]);
+        wav_left(&out)
+    };
+    // Track 1 beeps at 0, 1 and 2 s; the music (from 0.5 s) at 0.5 and 1.5 s.
+    let l = mix("mix.wav");
+    let found = vidcut_av::beep::onsets(&l, 0.1, 4800);
+    assert_eq!(found.len(), 5, "{found:?}");
+    for (got, want) in found.iter().zip([0, 24_000, 48_000, 72_000, 96_000]) {
+        assert!(
+            (*got as i64 - want).abs() <= 48,
+            "beep at {got}, want {want}"
+        );
+    }
+    let level = peak(&l, 24_000) / peak(&l, 48_000);
+    // The fader takes the music 6 dB down.
+    sb.ok(&["track", "set", "A1", "--volume", "-6"]);
+    let l = mix("fader.wav");
+    let ratio = peak(&l, 24_000) / peak(&l, 48_000) / level;
+    assert!((ratio - 0.501).abs() < 0.03, "fader: {ratio}");
+
+    sb.ok(&["track", "set", "A1", "--solo"]);
+    let l = mix("solo.wav");
+    let found = vidcut_av::beep::onsets(&l, 0.1, 4800);
+    assert_eq!(found.len(), 2, "only the music: {found:?}");
+    sb.ok(&["track", "set", "A1", "--mute"]);
+    let l = mix("muted.wav");
+    assert!(
+        l.iter().all(|s| s.abs() < 1e-3),
+        "soloed but muted: silence"
+    );
+}

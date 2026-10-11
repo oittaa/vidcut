@@ -95,6 +95,55 @@ fn run(cli: &Cli) -> Result<()> {
             }
             Ok(())
         }
+        Action::ListTracks(envelope) => {
+            let r = execute(cli, envelope)?;
+            let tracks = &r.result["tracks"];
+            if cli.json {
+                println!("{}", json!({ "rev": r.rev, "result": tracks }));
+            } else {
+                for t in tracks.as_array().into_iter().flatten() {
+                    let clips = t["items"]
+                        .as_array()
+                        .map_or(0, |i| i.iter().filter(|i| i["type"] == "clip").count());
+                    let mut flags = Vec::new();
+                    for (key, label) in [("locked", "locked"), ("muted", "muted"), ("solo", "solo")]
+                    {
+                        if t[key] == true {
+                            flags.push(label.to_string());
+                        }
+                    }
+                    if t["video_enabled"] == false {
+                        flags.push("video off".into());
+                    }
+                    if let Some(v) = t["volume_db"].as_f64() {
+                        flags.push(format!("{v:+} dB"));
+                    }
+                    println!(
+                        "{:<4} {:>4} clip(s)  {}{}",
+                        t["id"].as_str().unwrap_or_default(),
+                        clips,
+                        t["name"]
+                            .as_str()
+                            .map(|n| format!("{n:?}  "))
+                            .unwrap_or_default(),
+                        flags.join(", ")
+                    );
+                }
+            }
+            Ok(())
+        }
+        Action::ListBins(envelope) => {
+            let r = execute(cli, envelope)?;
+            let bins = &r.result["bins"];
+            if cli.json {
+                println!("{}", json!({ "rev": r.rev, "result": bins }));
+            } else {
+                for b in bins.as_array().into_iter().flatten() {
+                    println!("{}", b.as_str().unwrap_or_default());
+                }
+            }
+            Ok(())
+        }
         Action::ListMarkers(envelope) => {
             let r = execute(cli, envelope)?;
             let markers = &r.result["markers"];

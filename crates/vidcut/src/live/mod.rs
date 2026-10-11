@@ -126,6 +126,9 @@ pub(crate) struct Job {
     params: Value,
     origin: Origin,
     reply: Option<Reply>,
+    /// The project's revision when a request answered at once started: a
+    /// different one at the end means it changed the project.
+    rev: Option<u64>,
 }
 
 pub(crate) enum Msg {
@@ -227,6 +230,7 @@ impl Handle {
                         params,
                         origin: Origin::Gui,
                         reply: None,
+                        rev: None,
                     },
                     result: Err(Error::internal(e)),
                 });
@@ -322,6 +326,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         source_media: None,
         tape: Arc::new(Vec::new()),
         selection: Selection::default(),
+        pool: PoolView::default(),
         clipboard: 0,
         log: Arc::new(VecDeque::new()),
         notices: Arc::new(VecDeque::new()),
@@ -351,6 +356,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         tape_media: None,
         players,
         selection: Selection::default(),
+        pool: PoolView::default(),
         clipboard: Vec::new(),
         log: Arc::new(VecDeque::new()),
         log_seq: 0,
@@ -492,7 +498,8 @@ struct Live {
     tape_media: Option<String>,
     players: [Player; 2],
     selection: Selection,
-    clipboard: Vec<Clip>,
+    pool: PoolView,
+    clipboard: Vec<vidcut_core::model::TrackClip>,
     log: Arc<VecDeque<LogEntry>>,
     log_seq: u64,
     notices: Arc<VecDeque<Notice>>,
@@ -798,6 +805,7 @@ impl Live {
             source_media: self.source_media.clone(),
             tape: self.tape.clone(),
             selection: self.selection.clone(),
+            pool: self.pool.clone(),
             clipboard: self.clipboard.len(),
             log: self.log.clone(),
             notices: self.notices.clone(),
@@ -857,6 +865,7 @@ impl Live {
             params,
             origin,
             reply,
+            rev: self.project.as_ref().map(|p| p.project().rev),
         };
         if let Some(expected) = expected {
             let open = self.project.as_ref().map(|p| p.store.path());
@@ -892,12 +901,13 @@ impl Live {
         let result = self.dispatch(envelope, &job);
         match result {
             Step::Now(r) => self.finish(job, r),
+            // Other changes may come before these end.
             Step::Wait(until) => self.waits.push(Wait {
-                job,
+                job: Job { rev: None, ..job },
                 until,
                 deadline: limit.map(|l| Instant::now() + l),
             }),
-            Step::Task(task) => self.spawn_task(job, task),
+            Step::Task(task) => self.spawn_task(Job { rev: None, ..job }, task),
         }
     }
 
@@ -1074,7 +1084,12 @@ impl Live {
                 ok: result.is_ok(),
                 error: result.as_ref().err().map(|e| e.message.clone()),
                 rev,
-                changed: result.as_ref().is_ok_and(|r| !r.changes.is_empty()),
+                // Track settings, bins and marks change the project without
+                // touching media, clips or markers.
+                changed: result.as_ref().is_ok_and(|r| !r.changes.is_empty())
+                    || (result.is_ok()
+                        && job.method != "project.open"
+                        && job.rev.is_some_and(|before| before != rev)),
             };
             let log = Arc::make_mut(&mut self.log);
             log.push_back(entry);
@@ -1184,6 +1199,38 @@ impl Live {
                 self.shown(id, Some(motion))
             }
             Request::PlayerState {} => Step::Now(Ok(self.state_response())),
+            Request::PlayerMute { mute } => {
+                let mute = mute.unwrap_or(!self.players[TIMELINE].muted());
+                for p in &mut self.players {
+                    p.set_muted(mute);
+                }
+                Step::Now(Ok(self.state_response()))
+            }
+            Request::PoolSet {
+                bin,
+                sort,
+                descending,
+            } => {
+                if let Some(b) = bin {
+                    let known = b.is_empty()
+                        || self
+                            .project
+                            .as_ref()
+                            .is_some_and(|o| o.project().bins.contains(&b));
+                    if !known {
+                        return Step::Now(Err(Error::not_found(format!("no bin {b:?}"))));
+                    }
+                    self.pool.bin = b;
+                }
+                if let Some(s) = sort {
+                    self.pool.sort = s;
+                }
+                if let Some(d) = descending {
+                    self.pool.descending = d;
+                }
+                self.refresh_source();
+                Step::Now(Ok(answer(json!(self.pool))))
+            }
             Request::SelectionGet {} => Step::Now(Ok(answer(json!(self.selection)))),
             Request::SelectionSet { clips, media } => Step::Now(
                 self.set_selection(clips, media)
@@ -1358,6 +1405,14 @@ impl Live {
         };
         let request = envelope.request.clone();
         let (result, changed) = open.apply(envelope, &AvEnv, Some(playhead));
+        if changed
+            && let Request::BinsRename { path, to } = &request
+            && let Some(rest) = self.pool.bin.strip_prefix(path.as_str())
+            && (rest.is_empty() || rest.starts_with('/'))
+        {
+            // The pool keeps showing the bin under its new name.
+            self.pool.bin = format!("{to}{rest}");
+        }
         if changed {
             self.project_changed(result.as_ref().ok());
         }
@@ -1676,11 +1731,11 @@ impl Live {
     }
 
     /// EDL for `plan`, or `None` while fillers are being made.
-    fn edl(&mut self, plan: RenderPlan) -> Option<String> {
+    fn edl(&mut self, plan: RenderPlan) -> Option<preview::Preview> {
         let p = self.project.as_ref()?.project().clone();
         let fillers = self.fillers(&p)?;
         let plan = self.preview_plan(plan);
-        Some(preview::edl(&plan, &fillers))
+        Some(preview::build(&plan, &fillers))
     }
 
     /// Reloads the timeline soon: at once if the last reload was a while
@@ -1719,7 +1774,13 @@ impl Live {
     /// (nothing happens if that is already loaded).
     fn refresh_source(&mut self) -> Option<u64> {
         let p = self.project.as_ref()?.project().clone();
-        let all: Vec<String> = p.media.iter().map(|m| m.id.clone()).collect();
+        // Source Tape: the pool view's bin, in its order (p. 696). A removed
+        // bin's media went to its parent, so the pool shows that.
+        while !self.pool.bin.is_empty() && !p.bins.contains(&self.pool.bin) {
+            let parent = self.pool.bin.rsplit_once('/').map_or("", |(a, _)| a);
+            self.pool.bin = parent.to_string();
+        }
+        let all: Vec<String> = self.pool.media(&p);
         let tape = render::tape(&p, &all).map(|(_, e)| e).unwrap_or_default();
         self.tape = Arc::new(tape);
         let want = match self.last_source {
@@ -2066,6 +2127,8 @@ impl Live {
             "source": source,
             "timeline": player(&self.players[TIMELINE], p.map_or(0, |p| p.settings.start_tc)),
             "selection": self.selection,
+            "pool": self.pool,
+            "muted": self.players[TIMELINE].muted(),
             "clipboard": self.clipboard.len(),
             "preview": self.preview_error.as_deref().map_or(json!(true), |e| json!(e)),
             "preview_pending": self.tails_pending(),

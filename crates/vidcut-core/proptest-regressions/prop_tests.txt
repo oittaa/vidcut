@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 4a57296f8d6ce8f605059123b2994fc037a9d31465bbc45e7690145435fc57d2 # shrinks to ops = [Append { media: 0, a: 0, len: 1 }, DeleteRange { a: 1, len: 1, lift: false }, Overwrite { media: 2, a: 0, len: 67, at: 1 }, Marks { a: 132, len: 1 }, Delete { pick: 20, lift: false }, RippleOverwrite { media: 0, a: 0, len: 49, at: 0 }, Delete { pick: 68, lift: true }, SmartInsert { media: 0, a: 0, len: 17, playhead: 92 }, AudioRoll { pick: 74, head: false, by: 16 }, Overwrite { media: 0, a: 0, len: 1, at: 0 }]
+cc f7e31db5cc75c9e7385875d875e9d18e4885f40c1b24d27cfddf11da41aeb923 # shrinks to ops = [SmartInsert { media: 3, a: 0, len: 1, playhead: 0, to: To { track: None, audio_only: false } }, MoveTo { pick: 0, to: 0, track: 1, overwrite: false }]
