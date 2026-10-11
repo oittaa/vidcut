@@ -16,10 +16,80 @@ use crate::ffmpeg::{self, codec, filter, format, frame, media, software::scaling
 /// Smaller differences are timestamp rounding (Matroska keeps ms).
 pub(crate) const AUDIO_GAP: f64 = 0.002;
 
+/// Longest gap (s) kept when the container's end is unknown.
+///
+/// A longer jump is a broken timestamp and plays in order, as a frame past
+/// a known end does. Filling it would silence the rest of the piece, a
+/// second at a time, for as long as the timestamp says.
+pub(crate) const AUDIO_GAP_BOUND: f64 = 1.0;
+
 /// Damaged frames a decoder may report in a row before reading gives up.
 /// It reads on after each one, so only a decoder that reports nothing else
 /// reaches this.
 pub(crate) const DAMAGED_IN_A_ROW: u32 = 100;
+
+/// End of a file in seconds, on the clock packet timestamps use.
+///
+/// `start` and `duration` are the container's (`None` when unset).
+/// `duration` is a length. A known start places it at `start + duration`.
+/// With no start, `origin` does (the stream's start): counting the length
+/// from zero puts an offset clock past the end, a real gap is dropped, and
+/// later audio shifts early. No positive duration, or no start at all, means
+/// the end is unknown.
+pub(crate) fn file_end(
+    start: Option<f64>,
+    duration: Option<f64>,
+    origin: Option<f64>,
+) -> Option<f64> {
+    let duration = duration.filter(|d| *d > 0.0)?;
+    Some(start.or(origin)? + duration)
+}
+
+/// Silence, in seconds, before a frame at `t` when the previous frame ended
+/// at `next`. `end` is [`file_end`], if the container has one.
+///
+/// A frame past a known end plays in order. So does a jump longer than
+/// [`AUDIO_GAP_BOUND`] when the end is unknown: one far timestamp must not
+/// become silence for the rest of the piece.
+pub(crate) fn audio_gap(next: f64, t: f64, end: Option<f64>) -> f64 {
+    let jump = t - next;
+    if jump <= AUDIO_GAP {
+        return 0.0;
+    }
+    match end {
+        Some(end) if t <= end => jump,
+        Some(_) => 0.0,
+        None if jump <= AUDIO_GAP_BOUND => jump,
+        None => 0.0,
+    }
+}
+
+/// Stream start in seconds, if the demuxer recorded one. `tick` is the
+/// stream time base in seconds.
+pub(crate) fn stream_origin(start_pts: i64, tick: f64) -> Option<f64> {
+    (start_pts != ffmpeg::ffi::AV_NOPTS_VALUE).then_some(start_pts as f64 * tick)
+}
+
+fn opt_av_time(ts: i64) -> Option<f64> {
+    (ts != ffmpeg::ffi::AV_NOPTS_VALUE).then_some(ts as f64 / f64::from(ffmpeg::ffi::AV_TIME_BASE))
+}
+
+/// [`file_end`] for an open input.
+///
+/// `stream_start` is that stream's `start_time` (stream time base) and
+/// `tick` its time base in seconds. When the container has a duration but
+/// no start, the length is placed on the stream's clock.
+pub(crate) fn container_end(
+    input: &format::context::Input,
+    stream_start: i64,
+    tick: f64,
+) -> Option<f64> {
+    let (start, duration) = unsafe {
+        let ctx = &*input.as_ptr();
+        (opt_av_time(ctx.start_time), opt_av_time(ctx.duration))
+    };
+    file_end(start, duration, stream_origin(stream_start, tick))
+}
 
 /// Sends `packet` to `decoder`. A damaged packet, one the decoder can't
 /// read, is skipped as players skip it: the picture before it stays, and
@@ -52,6 +122,9 @@ where
 {
     let mut damaged = 0;
     let mut drain = |decoder: &mut ffmpeg::decoder::Opened, frame: &mut F| loop {
+        // The same flag the export frame loop loads, so a client that left
+        // stops a measurement between frames.
+        crate::cancel::stop()?;
         match decoder.receive_frame(frame) {
             Ok(()) => {
                 damaged = 0;
@@ -73,6 +146,7 @@ where
         }
     };
     for (s, packet) in input.packets() {
+        crate::cancel::stop()?;
         if s.index() == index {
             send_packet(decoder, &packet)?;
             drain(decoder, frame)?;
@@ -125,6 +199,9 @@ fn open_sequence(pattern: &Path, first: u64, rate: (i32, i32)) -> Result<format:
     let mut options = ffmpeg::Dictionary::new();
     options.set("pattern_type", "sequence");
     options.set("start_number", &first.to_string());
+    // The default range is 5: a missing first file is skipped when any of
+    // the next four numbers exists, and picture 0 is that later file.
+    options.set("start_number_range", "1");
     options.set("framerate", &format!("{}/{}", rate.0, rate.1));
     let path = std::ffi::CString::new(pattern.as_os_str().as_encoded_bytes())
         .map_err(|_| Error::Invalid(format!("{}: a NUL in the name", pattern.display())))?;
@@ -513,6 +590,7 @@ impl VideoReader {
         let first = self.first_pts.unwrap_or(i64::MIN);
         let mut back = 0i64;
         loop {
+            crate::cancel::stop()?;
             let ts = target.saturating_sub(back);
             let at_start = ts <= first
                 || back > 3600 * one_second
@@ -565,6 +643,7 @@ impl VideoReader {
     fn decode_one(&mut self) -> Result<Option<frame::Video>> {
         let mut damaged = 0;
         loop {
+            crate::cancel::stop()?;
             let mut frame = frame::Video::empty();
             match self.decoder.receive_frame(&mut frame) {
                 Ok(()) => {
@@ -592,6 +671,7 @@ impl VideoReader {
                 return Ok(None);
             }
             loop {
+                crate::cancel::stop()?;
                 let mut packet = ffmpeg::Packet::empty();
                 match packet.read(&mut self.input) {
                     Ok(()) if packet.stream() == self.stream => {
@@ -648,5 +728,45 @@ pub fn read_barcode(frame: &frame::Video) -> Result<Option<u32>> {
                 .ctx(|| "converting frame to gray".into())?;
             Ok(crate::barcode::read(gray.data(0), w, h, gray.stride(0)))
         }
+    }
+}
+
+#[cfg(test)]
+mod gap_tests {
+    use super::{AUDIO_GAP, AUDIO_GAP_BOUND, audio_gap, file_end};
+
+    #[test]
+    fn a_missing_duration_does_not_honor_a_far_timestamp() {
+        assert_eq!(file_end(None, None, Some(10.0)), None);
+        assert_eq!(file_end(Some(0.0), Some(0.0), Some(10.0)), None);
+        assert_eq!(file_end(Some(1.0), Some(-1.0), None), None);
+        let short = AUDIO_GAP + 0.02;
+        assert!((audio_gap(1.0, 1.0 + short, None) - short).abs() < 1e-12);
+        // Past the bound: play in order, rather than silence for the timestamp.
+        assert_eq!(audio_gap(1.0, 1.0 + AUDIO_GAP_BOUND + 0.001, None), 0.0);
+        assert_eq!(audio_gap(0.0, 10_000.0, None), 0.0);
+    }
+
+    #[test]
+    fn a_missing_start_keeps_duration_on_the_stream_clock() {
+        // The length sits at the stream origin, not at zero.
+        assert_eq!(file_end(None, Some(10.0), Some(3_600.0)), Some(3_610.0));
+        let end = file_end(None, Some(10.0), Some(3_600.0));
+        assert!((audio_gap(3_601.0, 3_601.05, end) - 0.05).abs() < 1e-12);
+        // A known container start wins over the stream origin.
+        assert_eq!(file_end(Some(1.0), Some(10.0), Some(3_600.0)), Some(11.0));
+        // The old clock (end = duration from zero) drops that same gap.
+        assert_eq!(audio_gap(3_601.0, 3_601.05, Some(10.0)), 0.0);
+    }
+
+    #[test]
+    fn a_frame_past_a_known_end_is_not_a_gap() {
+        assert!(audio_gap(9.0, 9.05, Some(10.0)) > 0.0);
+        assert_eq!(audio_gap(9.0, 10.5, Some(10.0)), 0.0);
+        // Inside the file, longer than the unknown-end bound, still a gap.
+        assert!((audio_gap(0.0, 5.0, Some(10.0)) - 5.0).abs() < 1e-12);
+        // Equal to the rounding allowance: not a gap. Adding the constant
+        // onto another timestamp is not exact in f64.
+        assert_eq!(audio_gap(0.0, AUDIO_GAP, Some(100.0)), 0.0);
     }
 }

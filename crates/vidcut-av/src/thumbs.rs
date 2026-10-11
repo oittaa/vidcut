@@ -22,12 +22,46 @@ pub struct Image {
 /// of each of `count` equal parts), each fitted into `max_w`×`max_h` keeping
 /// the display aspect. Returns the pictures and their times in seconds from
 /// the first frame. A still gives its one picture.
+///
+/// An image sequence is read by FFmpeg's image2 demuxer, which continues
+/// while the file numbers do. Pass the sequence's own length to
+/// [`filmstrip_pictures`].
 pub fn filmstrip(
     source: &crate::decode::Input,
     count: usize,
     max_w: u32,
     max_h: u32,
 ) -> Result<(Vec<Image>, Vec<f64>)> {
+    filmstrip_inner(source, count, max_w, max_h, None)
+}
+
+/// [`filmstrip`] of the first `pictures` frames of `source`.
+///
+/// `pictures` is an image sequence's length. image2 does not take it, so a
+/// sequence that is only the start of a longer numbered run would otherwise
+/// last as long as that run, and the strip would show the later files. A
+/// sample past the last of these pictures stays on the last one: the next
+/// file is not opened, and a missing next file does not fail the strip.
+pub fn filmstrip_pictures(
+    source: &crate::decode::Input,
+    pictures: u64,
+    count: usize,
+    max_w: u32,
+    max_h: u32,
+) -> Result<(Vec<Image>, Vec<f64>)> {
+    filmstrip_inner(source, count, max_w, max_h, Some(pictures))
+}
+
+fn filmstrip_inner(
+    source: &crate::decode::Input,
+    count: usize,
+    max_w: u32,
+    max_h: u32,
+    pictures: Option<u64>,
+) -> Result<(Vec<Image>, Vec<f64>)> {
+    if pictures == Some(0) {
+        return Ok((Vec::new(), Vec::new()));
+    }
     let path = source.path();
     let mut input = source.open()?;
     let stream = input
@@ -39,7 +73,7 @@ pub fn filmstrip(
     let start = Some(stream.start_time())
         .filter(|&t| t != ffmpeg::ffi::AV_NOPTS_VALUE)
         .map_or(0.0, |t| t as f64 * tb);
-    let duration = match stream.duration() {
+    let mut duration = match stream.duration() {
         d if d > 0 => d as f64 * tb,
         _ => input.duration().max(0) as f64 / f64::from(ffmpeg::ffi::AV_TIME_BASE),
     };
@@ -73,6 +107,20 @@ pub fn filmstrip(
     // Export's normalizer: upright, tone-mapped to SDR, as RGBA.
     let mut normalizer: Option<crate::export::video::Normalizer> = None;
 
+    // image2's duration counts every numbered file after the first. A
+    // sequence is only its own pictures, at `rate`.
+    let rate = stream_rate(&input.stream(index).expect("found"));
+    let pictures = pictures.filter(|n| *n > 0);
+    if let Some(n) = pictures
+        && rate > 0.0
+    {
+        let span = n as f64 / rate;
+        duration = if duration > 0.0 {
+            duration.min(span)
+        } else {
+            span
+        };
+    }
     let spacing = duration / count.max(1) as f64;
     let mut images = Vec::with_capacity(count);
     let mut times = Vec::with_capacity(count);
@@ -80,6 +128,33 @@ pub fn filmstrip(
     let mut position: Option<f64> = None;
     for i in 0..count {
         let t = duration * (i as f64 + 0.5) / count as f64;
+        // The picture a sequence sample shows. Seeking by a rounded
+        // timestamp names the next file, which is not part of the sequence
+        // and may not exist; that open fails the whole strip.
+        if let Some(n) = pictures
+            && rate > 0.0
+        {
+            let k = ((t * rate).floor().max(0.0) as u64).min(n - 1);
+            match one_sequence_picture(&mut input, &mut decoder, index, k) {
+                Some(decoded) => keep(
+                    &mut images,
+                    &mut times,
+                    &mut normalizer,
+                    &decoded,
+                    (rotation, tw, th),
+                    t,
+                )?,
+                None => {
+                    if let Some(prev) = images.last() {
+                        images.push(prev.clone());
+                        times.push(t);
+                        continue;
+                    }
+                    break;
+                }
+            }
+            continue;
+        }
         let near_ahead = position.is_some_and(|p| p <= t && t - p <= 3.0);
         if !near_ahead {
             // Keyframe at or before the target; demuxers that can't do that
@@ -102,21 +177,108 @@ pub fn filmstrip(
             }
         }
         let Some(decoded) = picked else { break };
-        let n = match &mut normalizer {
-            Some(n) if n.matches(&decoded, rotation) => n,
-            _ => normalizer.insert(crate::export::video::Normalizer::new(
-                &decoded,
-                rotation,
-                tw,
-                th,
-                format::Pixel::RGBA,
-                None,
-            )?),
-        };
-        images.push(packed(&n.run(&decoded)?));
-        times.push(t);
+        keep(
+            &mut images,
+            &mut times,
+            &mut normalizer,
+            &decoded,
+            (rotation, tw, th),
+            t,
+        )?;
     }
     Ok((images, times))
+}
+
+/// Appends one fitted picture and the sample time it stands for.
+fn keep(
+    images: &mut Vec<Image>,
+    times: &mut Vec<f64>,
+    normalizer: &mut Option<crate::export::video::Normalizer>,
+    decoded: &frame::Video,
+    place: (u16, u32, u32),
+    t: f64,
+) -> Result<()> {
+    let (rotation, tw, th) = place;
+    let n = match normalizer {
+        Some(n) if n.matches(decoded, rotation) => n,
+        _ => normalizer.insert(crate::export::video::Normalizer::new(
+            decoded,
+            rotation,
+            tw,
+            th,
+            format::Pixel::RGBA,
+            None,
+        )?),
+    };
+    images.push(packed(&n.run(decoded)?));
+    times.push(t);
+    Ok(())
+}
+
+/// Frames per second of `stream`, from its average rate or its time base.
+fn stream_rate(stream: &format::stream::Stream) -> f64 {
+    let avg = f64::from(stream.avg_frame_rate());
+    if avg.is_finite() && avg > 0.0 {
+        return avg;
+    }
+    let tb = f64::from(stream.time_base());
+    if tb > 0.0 { 1.0 / tb } else { 0.0 }
+}
+
+/// Picture `index` of an image sequence (0 is its first file), and nothing
+/// after it.
+///
+/// image2's seek takes a frame index. One packet is that one file: the
+/// packet after it would be the next number, which a sequence does not
+/// include. `None` when the picture is not there — a sample past the
+/// sequence must not fail the strip, and must not open a path it does not
+/// have.
+fn one_sequence_picture(
+    input: &mut format::context::Input,
+    decoder: &mut ffmpeg::decoder::Video,
+    stream: usize,
+    index: u64,
+) -> Option<frame::Video> {
+    decoder.flush();
+    let found = unsafe {
+        ffmpeg::ffi::avformat_seek_file(
+            input.as_mut_ptr(),
+            stream as i32,
+            i64::MIN,
+            index as i64,
+            index as i64,
+            0,
+        ) >= 0
+    };
+    decoder.flush();
+    if !found {
+        return None;
+    }
+    let mut packet = ffmpeg::Packet::empty();
+    loop {
+        match packet.read(input) {
+            Ok(()) if packet.stream() == stream => break,
+            Ok(()) => continue,
+            Err(_) => return None,
+        }
+    }
+    if decoder.send_packet(&packet).is_err() {
+        return None;
+    }
+    let mut frame = frame::Video::empty();
+    match decoder.receive_frame(&mut frame) {
+        Ok(()) => Some(frame),
+        Err(ffmpeg::Error::Other {
+            errno: ffmpeg::util::error::EAGAIN,
+        }) => {
+            // A picture decoder can hold its frame until the stream ends.
+            if decoder.send_eof().is_err() {
+                return None;
+            }
+            decoder.receive_frame(&mut frame).ok().map(|()| frame)
+        }
+        Err(_) => None,
+    }
 }
 
 /// The start of a filmstrip's cache form.
@@ -396,5 +558,89 @@ mod tests {
         assert!(from_bytes(b"vct1").is_none());
         assert!(from_bytes(&[b"xxxx".as_slice(), &bytes[4..]].concat()).is_none());
         assert!(to_bytes(&images, &times[..2]).is_err(), "a time each");
+    }
+
+    /// Barcode pictures numbered from `first` in `dir`. Picture `k` shows
+    /// barcode `k`. Returns the image2 pattern.
+    fn numbered_pngs(dir: &std::path::Path, first: u32, n: u32) -> std::path::PathBuf {
+        std::fs::create_dir_all(dir).unwrap();
+        let (w, h) = (320u32, 180u32);
+        let mut luma = vec![0u8; w as usize * h as usize];
+        for k in 0..n {
+            crate::barcode::paint(k, &mut luma, w as usize, h as usize, w as usize);
+            let rgba: Vec<u8> = luma.iter().flat_map(|&y| [y, y, y, 255]).collect();
+            let png = crate::export::still::png_rgba(w, h, &rgba).unwrap();
+            std::fs::write(dir.join(format!("img_{:04}.png", first + k)), png).unwrap();
+        }
+        dir.join("img_%04d.png")
+    }
+
+    fn codes(images: &[Image]) -> Vec<u32> {
+        images
+            .iter()
+            .map(|img| {
+                crate::barcode::read_packed(
+                    &img.rgba,
+                    img.width as usize,
+                    img.height as usize,
+                    img.width as usize * 4,
+                    4,
+                    1,
+                )
+                .unwrap_or_else(|| panic!("{}x{} unreadable", img.width, img.height))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_sequence_prefix_stops_at_its_count() {
+        // Eight numbered files. The clip is the first four: image2 would
+        // keep going, and the strip would show the later pictures. A sample
+        // past those four must not open the next path (it is removed below)
+        // and must not fail the strip.
+        let dir = std::env::temp_dir().join(format!(
+            "vidcut-seq-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let pattern = numbered_pngs(&dir, 1000, 8);
+        let input = crate::decode::Input::Sequence {
+            pattern,
+            first: 1000,
+            rate: (24, 1),
+        };
+        let (wide, wide_times) = filmstrip(&input, 4, 320, 180).unwrap();
+        let wide_codes = codes(&wide);
+        assert!(
+            wide_codes.iter().any(|c| *c >= 4),
+            "the longer run is visible without a count: {wide_codes:?} at {wide_times:?}"
+        );
+        let (images, times) = filmstrip_pictures(&input, 4, 4, 320, 180).unwrap();
+        assert_eq!(codes(&images), vec![0, 1, 2, 3], "{times:?}");
+        assert!(
+            *times.last().unwrap() < 4.0 / 24.0,
+            "spread over the four pictures, not the eight files: {times:?}"
+        );
+        let stats = crate::analysis::picture_stats(&input, Some(4)).unwrap();
+        assert_eq!(stats.pts.len(), 4);
+        assert_eq!(
+            crate::analysis::picture_stats(&input, None)
+                .unwrap()
+                .pts
+                .len(),
+            8,
+            "without a count, image2 measures the files that follow"
+        );
+
+        for k in 4..8 {
+            std::fs::remove_file(dir.join(format!("img_{:04}.png", 1000 + k))).unwrap();
+        }
+        let (tail, _) = filmstrip_pictures(&input, 4, 24, 320, 180).unwrap();
+        assert_eq!(tail.len(), 24);
+        assert!(codes(&tail).iter().all(|c| *c < 4), "{:?}", codes(&tail));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

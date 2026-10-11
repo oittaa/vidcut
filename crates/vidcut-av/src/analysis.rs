@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use vidcut_core::analysis::{AudioLevels, Loudness, PictureStats};
 use vidcut_core::render::{AudioPiece, RenderPlan};
 
-use crate::decode::{AUDIO_GAP, decode_stream};
+use crate::decode::decode_stream;
 use crate::error::{Context, Error, Result};
 use crate::export::audio::{AudioMix, Resampler, discard_others};
 use crate::ffmpeg::{self, codec, filter, format, frame, media, software::scaling};
@@ -17,6 +17,7 @@ use crate::ffmpeg::{self, codec, filter, format, frame, media, software::scaling
 /// only): the largest absolute sample of any channel in each
 /// `1 / per_second` of a second.
 pub fn audio_levels(path: &Path, ordinal: u32, per_second: u32) -> Result<AudioLevels> {
+    crate::cancel::stop()?;
     crate::init();
     let mut input = format::input(path).ctx(|| format!("opening {}", path.display()))?;
     let stream = input
@@ -24,10 +25,13 @@ pub fn audio_levels(path: &Path, ordinal: u32, per_second: u32) -> Result<AudioL
         .filter(|s| s.parameters().medium() == media::Type::Audio)
         .nth(ordinal as usize)
         .ok_or_else(|| Error::Invalid(format!("{}: no audio stream {ordinal}", path.display())))?;
-    let (index, tb) = (stream.index(), stream.time_base());
+    let (index, tb, start_pts) = (stream.index(), stream.time_base(), stream.start_time());
+    let params = stream.parameters();
     let tick = f64::from(tb);
     discard_others(&input, index);
-    let mut decoder = codec::context::Context::from_parameters(stream.parameters())
+    // Same end as export: a past-end timestamp is not a hole in the levels.
+    let file_end = crate::decode::container_end(&input, start_pts, tick);
+    let mut decoder = codec::context::Context::from_parameters(params)
         .and_then(|mut c| {
             unsafe { (*c.as_mut_ptr()).pkt_timebase = tb.into() };
             c.decoder().audio()
@@ -54,13 +58,14 @@ pub fn audio_levels(path: &Path, ordinal: u32, per_second: u32) -> Result<AudioL
             ));
         }
         let (r, rate, channels) = resampler.as_mut().expect("set");
-        // A gap (a damaged or missing packet) lasts as its timestamps say,
-        // as in export.
-        let end = t.map(|t| t + f.samples() as f64 / f64::from(*rate));
-        if let (Some(t), Some(next)) = (t, std::mem::replace(&mut next_in, end))
-            && t - next > AUDIO_GAP
-        {
-            n += ((t - next) * f64::from(*rate)).round() as u64;
+        // A gap lasts as its timestamps say, as in export: not past the
+        // file's end, and not for a far jump when that end is unknown.
+        let frame_end = t.map(|t| t + f.samples() as f64 / f64::from(*rate));
+        if let (Some(t), Some(next)) = (t, std::mem::replace(&mut next_in, frame_end)) {
+            let gap = crate::decode::audio_gap(next, t, file_end);
+            if gap > 0.0 {
+                n += (gap * f64::from(*rate)).round() as u64;
+            }
         }
         samples.clear();
         r.convert(Some(f), &mut samples)?;
@@ -100,7 +105,15 @@ const MEASURE: (u32, u32) = (96, 54);
 /// is FFmpeg scdet's: the mean absolute difference from the previous frame
 /// (0..100), or its change from the previous difference if smaller, so a
 /// steady pan doesn't read as a cut.
-pub fn picture_stats(source: &crate::decode::Input) -> Result<PictureStats> {
+///
+/// An image sequence is read by image2, which continues while the file
+/// numbers do. Pass that sequence's own length as `pictures`; frames after
+/// it are not measured and not opened. `None` reads the whole source.
+pub fn picture_stats(source: &crate::decode::Input, pictures: Option<u64>) -> Result<PictureStats> {
+    crate::cancel::stop()?;
+    if pictures == Some(0) {
+        return Ok(PictureStats::default());
+    }
     let path = source.path();
     let mut input = source.open()?;
     let stream = input
@@ -181,14 +194,79 @@ pub fn picture_stats(source: &crate::decode::Input) -> Result<PictureStats> {
         prev = Some(luma);
         Ok(())
     };
-    decode_stream(
-        &mut input,
-        index,
-        &mut decoder,
-        &mut frame::Video::empty(),
-        handle,
-    )?;
+    match pictures {
+        Some(n) => decode_pictures(&mut input, index, &mut decoder, n, handle)?,
+        None => decode_stream(
+            &mut input,
+            index,
+            &mut decoder,
+            &mut frame::Video::empty(),
+            handle,
+        )?,
+    }
     Ok(stats)
+}
+
+/// Decodes at most `pictures` frames. The packet after the last one is not
+/// read: for an image sequence that packet is the next numbered file.
+fn decode_pictures(
+    input: &mut format::context::Input,
+    index: usize,
+    decoder: &mut ffmpeg::decoder::Opened,
+    pictures: u64,
+    mut each: impl FnMut(&frame::Video) -> Result<()>,
+) -> Result<()> {
+    let mut frame = frame::Video::empty();
+    let mut damaged = 0u32;
+    let mut got = 0u64;
+    let mut eof = false;
+    loop {
+        if got >= pictures {
+            return Ok(());
+        }
+        match decoder.receive_frame(&mut frame) {
+            Ok(()) => {
+                damaged = 0;
+                each(&frame)?;
+                got += 1;
+                continue;
+            }
+            Err(ffmpeg::Error::InvalidData) if damaged < crate::decode::DAMAGED_IN_A_ROW => {
+                damaged += 1;
+                continue;
+            }
+            Err(ffmpeg::Error::Eof) => return Ok(()),
+            Err(ffmpeg::Error::Other {
+                errno: ffmpeg::util::error::EAGAIN,
+            }) => {}
+            Err(e) => {
+                return Err(Error::Ffmpeg {
+                    context: "decoding".into(),
+                    source: e,
+                });
+            }
+        }
+        if eof || got >= pictures {
+            return Ok(());
+        }
+        let mut packet = ffmpeg::Packet::empty();
+        match packet.read(input) {
+            Ok(()) if packet.stream() == index => {
+                crate::decode::send_packet(decoder, &packet)?;
+            }
+            Ok(()) => continue,
+            Err(ffmpeg::Error::Eof) => {
+                decoder.send_eof().ctx(|| "flushing decoder".into())?;
+                eof = true;
+            }
+            Err(e) => {
+                return Err(Error::Ffmpeg {
+                    context: "reading packet".into(),
+                    source: e,
+                });
+            }
+        }
+    }
 }
 
 /// Loudness of `plan`'s audio mixed as an export mixes it (FFmpeg's
@@ -204,6 +282,11 @@ pub fn loudness(plan: &RenderPlan) -> Result<Loudness> {
     )
 }
 
+/// The export's own flag, or the one installed on this thread for an analysis.
+fn stopped(cancel: Option<&AtomicBool>) -> bool {
+    crate::cancel::cancelled() || cancel.is_some_and(|c| c.load(Ordering::Relaxed))
+}
+
 /// Loudness of `total` samples of `lanes` mixed at `rate` into `channels`
 /// (the export's own mix, before any normalization). `cancel` stops it.
 pub fn mix_loudness(
@@ -214,6 +297,11 @@ pub fn mix_loudness(
     total: i64,
     cancel: Option<&AtomicBool>,
 ) -> Result<Loudness> {
+    // The export passes its flag; an analysis relies on the thread's guard.
+    // Either one stopping the client stops the measure.
+    if stopped(cancel) {
+        return Err(Error::Invalid(crate::export::CANCELLED.into()));
+    }
     crate::init();
     let channels = channels.max(1);
     let mut mix = AudioMix::new(lanes, rate, channels, declick_ms);
@@ -284,7 +372,7 @@ pub fn mix_loudness(
     let ch = usize::from(channels);
     let mut done = 0i64;
     while done < total {
-        if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
+        if stopped(cancel) {
             return Err(Error::Invalid(crate::export::CANCELLED.into()));
         }
         let n = (total - done).min(4096) as usize;

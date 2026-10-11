@@ -16,7 +16,8 @@
 //!   `code` is the CLI exit code; `data.code` the stable error name.
 //! - Long requests (`export.start`) first send notifications:
 //!   `{"jsonrpc":"2.0","method":"progress","params":{...}}`. Closing the
-//!   connection cancels them.
+//!   connection cancels them, and also a frame, a storyboard, an analysis
+//!   or the loudness measure before an export, which send no progress.
 
 pub mod client;
 pub mod registry;
@@ -47,13 +48,14 @@ pub struct RouteOptions {
 /// Runs `envelope` where [`route`] says: in the GUI that has `project` open,
 /// or headless. `progress` gets export progress as
 /// `{"output", "outputs", "path", "frames", "total", "elapsed"}`. `cancel`
-/// stops a headless export; for a GUI it closes the connection, which ends
-/// the wait and stops a foreground export there.
+/// stops a headless export, frame, storyboard or analysis. For a GUI it
+/// closes the connection, which ends the wait and stops that work there
+/// (a background export job keeps going; `jobs.cancel` stops it).
 pub fn run(
     project: Option<&Path>,
     options: &RouteOptions,
     envelope: Envelope,
-    cancel: &std::sync::atomic::AtomicBool,
+    cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     progress: &mut dyn FnMut(&Value),
 ) -> Result<vidcut_core::Response> {
     match route(project, options, &envelope.request)? {
@@ -78,7 +80,7 @@ pub fn run(
                 &envelope,
                 project.as_deref(),
                 progress,
-                Some(cancel),
+                Some(&**cancel),
             )
         }
     }
@@ -257,7 +259,7 @@ mod tests {
                 match envelope.request.method().as_str() {
                     "export.start" => {
                         for i in 0..3 {
-                            assert!(progress(json!({ "frames": i, "total": 3 })));
+                            assert!(progress(Some(json!({ "frames": i, "total": 3 }))));
                         }
                         Ok(vidcut_core::Response {
                             rev: 7,
@@ -265,6 +267,7 @@ mod tests {
                             result: json!({ "project": project }),
                             dry_run: false,
                             via: "gui:1".into(),
+                            warnings: Vec::new(),
                         })
                     }
                     _ => Err(Error::invalid("nope")),
@@ -309,13 +312,14 @@ mod tests {
             connections: 1,
         };
         let handler = Arc::new(
-            |_: Envelope, _: Option<PathBuf>, _: &mut dyn FnMut(Value) -> bool| {
+            |_: Envelope, _: Option<PathBuf>, _: &mut dyn FnMut(Option<Value>) -> bool| {
                 Ok(vidcut_core::Response {
                     rev: 1,
                     changes: Default::default(),
                     result: json!("ok"),
                     dry_run: false,
                     via: "gui:1".into(),
+                    warnings: Vec::new(),
                 })
             },
         );
@@ -412,13 +416,14 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("vidcut-ipc-refused-{}", std::process::id()));
         let socket = dir.join("test.sock");
         let handler = Arc::new(
-            |_: Envelope, _: Option<PathBuf>, _: &mut dyn FnMut(Value) -> bool| {
+            |_: Envelope, _: Option<PathBuf>, _: &mut dyn FnMut(Option<Value>) -> bool| {
                 Ok(vidcut_core::Response {
                     rev: 1,
                     changes: Default::default(),
                     result: json!("ok"),
                     dry_run: false,
                     via: "gui:1".into(),
+                    warnings: Vec::new(),
                 })
             },
         );
@@ -458,7 +463,7 @@ mod tests {
         server::start(
             &socket,
             Arc::new(
-                move |_: Envelope, _: Option<PathBuf>, _: &mut dyn FnMut(Value) -> bool| {
+                move |_: Envelope, _: Option<PathBuf>, _: &mut dyn FnMut(Option<Value>) -> bool| {
                     seen.fetch_add(1, Ordering::SeqCst);
                     Ok(vidcut_core::Response {
                         rev: 1,
@@ -466,6 +471,7 @@ mod tests {
                         result: json!("ok"),
                         dry_run: false,
                         via: "gui:1".into(),
+                        warnings: Vec::new(),
                     })
                 },
             ),
@@ -496,5 +502,122 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(route(None, &opts, &r).unwrap(), Route::Headless);
+    }
+
+    #[test]
+    fn a_closed_connection_fails_a_progress_probe() {
+        use std::io::Write;
+        use std::net::Shutdown;
+        use std::os::unix::net::UnixStream;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::time::{Duration, Instant};
+
+        let dir = std::env::temp_dir().join(format!("vidcut-ipc-probe-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let socket = dir.join("t.sock");
+        let probes = Arc::new(AtomicU64::new(0));
+        let stopped = Arc::new(AtomicU64::new(u64::MAX));
+        let (probes_h, stopped_h) = (probes.clone(), stopped.clone());
+        server::start(
+            &socket,
+            Arc::new(move |_envelope, _project, progress| {
+                let start = Instant::now();
+                while start.elapsed() < Duration::from_secs(2) {
+                    if !progress(None) {
+                        stopped_h.store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
+                        return Err(Error::new(ErrorCode::Cancelled, "cancelled"));
+                    }
+                    probes_h.fetch_add(1, Ordering::Relaxed);
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                stopped_h.store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
+                Err(Error::internal("the probe never saw the client go"))
+            }),
+        )
+        .unwrap();
+        let mut stream = None;
+        for _ in 0..50 {
+            if let Ok(s) = UnixStream::connect(&socket) {
+                stream = Some(s);
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let mut stream = stream.expect("connect");
+        stream.write_all(b"{\"method\":\"project.get\"}\n").unwrap();
+        stream.flush().unwrap();
+        let mut live = false;
+        for _ in 0..100 {
+            if probes.load(Ordering::Relaxed) > 0 {
+                live = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(live, "the handler never probed a connected client");
+        assert_eq!(
+            stopped.load(Ordering::Relaxed),
+            u64::MAX,
+            "stopped while the client was still connected"
+        );
+        stream.shutdown(Shutdown::Both).unwrap();
+        let mut ms = u64::MAX;
+        for _ in 0..100 {
+            ms = stopped.load(Ordering::Relaxed);
+            if ms != u64::MAX {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(ms < 1000, "still running after the client left: {ms} ms");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_client_that_only_stops_writing_still_gets_its_answer() {
+        // `printf '...' | socat - UNIX:...` shuts down its writing once the
+        // request is sent, and reads on. That is not a client that left.
+        use std::io::{BufRead, BufReader, Write};
+        use std::net::Shutdown;
+        use std::os::unix::net::UnixStream;
+        use std::sync::Arc;
+        use std::time::Duration;
+        let dir = std::env::temp_dir().join(format!("vidcut-ipc-half-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let socket = dir.join("t.sock");
+        server::start(
+            &socket,
+            Arc::new(
+                |_: Envelope,
+                 _: Option<PathBuf>,
+                 progress: &mut dyn FnMut(Option<Value>) -> bool| {
+                    for _ in 0..10 {
+                        if !progress(None) {
+                            return Err(Error::new(ErrorCode::Cancelled, "cancelled"));
+                        }
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Ok(vidcut_core::Response {
+                        rev: 1,
+                        changes: Default::default(),
+                        result: json!("ok"),
+                        dry_run: false,
+                        via: "gui:1".into(),
+                        warnings: Vec::new(),
+                    })
+                },
+            ),
+        )
+        .unwrap();
+        let mut stream = UnixStream::connect(&socket).unwrap();
+        stream.write_all(b"{\"method\":\"project.get\"}\n").unwrap();
+        stream.shutdown(Shutdown::Write).unwrap();
+        let mut reply = String::new();
+        BufReader::new(stream).read_line(&mut reply).unwrap();
+        assert!(reply.contains("\"ok\""), "{reply}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
