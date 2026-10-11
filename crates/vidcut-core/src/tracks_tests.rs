@@ -297,6 +297,27 @@ fn video_tracks_ripple_only_where_track_one_is_empty() {
     let b = put(&mut f, "m3", 20, 40, 160, "V2");
     f.ok(req("edit.delete", json!({"clips": a})));
     assert_eq!(f.track("V2"), vec![row(&b, 160, 20, 20)], "the gap stays");
+
+    // Starting over Track 1 and running past its end still counts as over
+    // Track 1: ripple looks at the clip's start, so the gap stays.
+    let mut f = three_clips(); // Track 1 is solid through 200
+    let over = put(&mut f, "m3", 0, 40, 180, "V2"); // 180..220
+    let later = put(&mut f, "m3", 40, 60, 250, "V2");
+    f.ok(req(
+        "edit.trim",
+        json!({"clip": over, "edge": "head", "by": 5}),
+    ));
+    assert_eq!(
+        f.track("V2"),
+        vec![row(&over, 185, 35, 5), row(&later, 250, 20, 40)],
+        "a head trim leaves a gap when the clip starts over Track 1"
+    );
+    f.ok(req("edit.delete", json!({"clips": over})));
+    assert_eq!(
+        f.track("V2"),
+        vec![row(&later, 250, 20, 40)],
+        "deleting it leaves the gap too"
+    );
 }
 
 #[test]
