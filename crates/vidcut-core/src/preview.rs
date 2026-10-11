@@ -92,7 +92,8 @@ fn linear(db: f64) -> f64 {
 /// its gains start, `(start s, dB)` in order: a binary search over them.
 /// It nests only log2(n) deep; FFmpeg's expression parser refuses some 100
 /// levels, so one `if` per span stopped working past a few dozen changes.
-/// Between spans the lane is silent, and any gain does.
+/// A gain holds until the next start: between clips the lane is silent, so
+/// it may reach over the silence.
 fn gain_at(spans: &[(f64, f64)]) -> String {
     if let [(_, db)] = spans {
         return format!("{:.6}", linear(*db));
@@ -378,9 +379,92 @@ mod tests {
                 assert!((v - linear(db[i % 4])).abs() < 1e-5, "span {i} at {t}: {v}");
             }
         }
-        // Before the first clip the lane is silent: its gain does.
+        // Before the first span the first gain applies.
         assert!((gain.at(-1.0) - linear(db[0])).abs() < 1e-5);
+        // A time after the last span still gets the last gain.
+        assert!((gain.at(spans.last().unwrap().0 + 10.0) - linear(db[1999 % 4])).abs() < 1e-5);
         // Gaps are silent: a gain reaches over them to the next clip with it.
         assert_eq!(gain_at(&[(0.0, -6.0)]), "0.501187");
+    }
+
+    fn source(samples: i64, gain_db: f64) -> AudioPiece {
+        AudioPiece::Source {
+            media: "m1".into(),
+            path: "/media/a.wav".into(),
+            stream: 0,
+            origin: 0.0,
+            source_sample: 0,
+            samples,
+            gain_db,
+        }
+    }
+
+    fn lane_plan(lane: Vec<AudioPiece>) -> RenderPlan {
+        RenderPlan {
+            fps: crate::time::Rational::new(25, 1).unwrap(),
+            width: 320,
+            height: 180,
+            sample_rate: 48_000,
+            channels: 1,
+            frames: 1,
+            video: Vec::new(),
+            audio: vec![lane],
+            range: (0, 1),
+            name: "gains".into(),
+        }
+    }
+
+    #[test]
+    fn silence_holds_the_gain_until_the_next_start() {
+        // 48 kHz. Leading silence, two -6 dB clips with a gap between them
+        // (equal gains merge), a shorter gap, then +6 dB, then trailing
+        // silence. The +6 dB clip therefore starts at 4.5 s.
+        let sec = 48_000;
+        let lane = vec![
+            AudioPiece::Silence { samples: sec },
+            source(sec, -6.0),
+            AudioPiece::Silence { samples: sec },
+            source(sec, -6.0),
+            AudioPiece::Silence { samples: sec / 2 },
+            source(sec, 6.0),
+            AudioPiece::Silence { samples: sec },
+        ];
+        let graph = audio_graph(&lane_plan(lane)).unwrap();
+        assert_eq!(
+            graph,
+            "[aid1]volume=volume='if(lt(t,4.500000),0.501187,1.995262)':eval=frame[ao]"
+        );
+        let (gain, rest) = Gain::parse(
+            graph
+                .strip_prefix("[aid1]volume=volume='")
+                .unwrap()
+                .strip_suffix("':eval=frame[ao]")
+                .unwrap(),
+        );
+        assert!(rest.is_empty(), "{rest}");
+        // Before the first span (the first clip starts at 1 s).
+        assert!((gain.at(0.0) - linear(-6.0)).abs() < 1e-5);
+        // Across the equal-gain gap, and in the gap before the next gain.
+        assert!((gain.at(2.5) - linear(-6.0)).abs() < 1e-5);
+        assert!((gain.at(4.0) - linear(-6.0)).abs() < 1e-5);
+        // From the +6 dB clip on, including after the lane ends.
+        assert!((gain.at(4.5) - linear(6.0)).abs() < 1e-5);
+        assert!((gain.at(6.0) - linear(6.0)).abs() < 1e-5);
+        assert!((gain.at(100.0) - linear(6.0)).abs() < 1e-5);
+
+        // One gain is a constant, including over the leading silence.
+        assert_eq!(
+            audio_graph(&lane_plan(vec![
+                AudioPiece::Silence { samples: sec },
+                source(sec, -6.0),
+            ]))
+            .unwrap(),
+            "[aid1]volume=0.501187[ao]"
+        );
+        // Silence alone needs no graph.
+        assert_eq!(
+            audio_graph(&lane_plan(vec![AudioPiece::Silence { samples: sec }])),
+            None
+        );
     }
 }
