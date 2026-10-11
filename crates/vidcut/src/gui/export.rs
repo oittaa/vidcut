@@ -676,7 +676,6 @@ impl Workspace {
         };
         let mut open = true;
         let mut export = false;
-        let mut more = false;
         egui::Window::new("Quick Export")
             .collapsible(false)
             .resizable(false)
@@ -722,18 +721,13 @@ impl Workspace {
                 if let Some(e) = &q.error {
                     ui.label(RichText::new(e).color(theme::ERROR));
                 }
-                ui.horizontal(|ui| {
-                    let busy = self.export.starting.is_some();
-                    if ui
-                        .add_enabled(!busy && q.selected.is_some(), egui::Button::new("Export…"))
-                        .clicked()
-                    {
-                        export = true;
-                    }
-                    if ui.button("More Settings…").clicked() {
-                        more = true;
-                    }
-                });
+                let busy = self.export.starting.is_some();
+                if ui
+                    .add_enabled(!busy && q.selected.is_some(), egui::Button::new("Export…"))
+                    .clicked()
+                {
+                    export = true;
+                }
             });
         if export && let Some(name) = q.selected.clone() {
             let ext = presets
@@ -753,10 +747,6 @@ impl Workspace {
                 picking: Some(picking),
                 ask: None,
             });
-        }
-        if more {
-            self.open_export(ctx);
-            return;
         }
         if open {
             self.export.quick = Some(q);
