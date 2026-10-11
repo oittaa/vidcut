@@ -930,6 +930,95 @@ fn tape_marks_clear() {
     assert!(f.editor.project().tape_marks.is_empty());
 }
 
+/// Tape marks over m1 200..250 and m2 0..50 (100 frames, two pieces) on
+/// the three-clip timeline.
+fn tape_span() -> Fixture {
+    let mut f = three_clips();
+    f.ok(req(
+        "tape.marks.set",
+        json!({"in": 200, "out": 300, "order": tape_order()}),
+    ));
+    f
+}
+
+#[test]
+fn a_tape_span_placed_on_top_is_one_block() {
+    // D17 with Place On Top (pp. 699–700): the span lines up once and goes
+    // on one track, its pieces end to end. Piece by piece, the second piece
+    // (at 102) would snap to Track 1's edit at 100 and land on V3.
+    let mut f = tape_span();
+    let r = f.ok(req("edit.place_on_top", json!({"tape": true, "at": 52})));
+    assert_eq!(r.result["track"], "V2");
+    assert_eq!(r.result["clips"], json!(["c4", "c5"]));
+    assert_eq!(
+        f.track("V2"),
+        vec![row("c4", 52, 50, 200), row("c5", 102, 50, 0)]
+    );
+}
+
+#[test]
+fn a_tape_span_inserts_and_ripples_as_one_block() {
+    // D17 with Insert (p. 697): later clips move by the whole span.
+    let mut f = tape_span();
+    f.ok(req("edit.insert", json!({"tape": true, "at": 100})));
+    assert_eq!(
+        f.v1(),
+        vec![
+            row("c1", 0, 100, 0),
+            row("c4", 100, 50, 200),
+            row("c5", 150, 50, 0),
+            row("c2", 200, 50, 10),
+            row("c3", 250, 50, 100),
+        ]
+    );
+}
+
+#[test]
+fn a_tape_span_ripple_overwrites_a_clip() {
+    // D17 with Ripple Overwrite (p. 698): the span replaces c2, and what
+    // follows moves by the length difference.
+    let mut f = tape_span();
+    f.ok(req(
+        "edit.ripple_overwrite",
+        json!({"tape": true, "at": 120}),
+    ));
+    assert_eq!(
+        f.v1(),
+        vec![
+            row("c1", 0, 100, 0),
+            row("c4", 100, 50, 200),
+            row("c5", 150, 50, 0),
+            row("c3", 200, 50, 100),
+        ]
+    );
+}
+
+#[test]
+fn a_tape_span_fills_the_timeline_marks() {
+    // D17 with D7: both timeline marks make a three-point edit, so the span
+    // is cut to the 70 marked frames: all of the first piece, 20 of the
+    // second.
+    let mut f = tape_span();
+    f.ok(req("marks.set", json!({"in": 10, "out": 80})));
+    let r = f.ok(req("edit.overwrite", json!({"tape": true})));
+    assert_eq!(r.result["clips"], json!(["c4", "c5"]));
+    let p = f.editor.project();
+    let placed = |id: &str| {
+        let c = p.clip(id).unwrap();
+        (c.media.clone(), c.start, c.duration, c.source_in)
+    };
+    assert_eq!(placed("c4"), ("m1".into(), 10, 50, 200));
+    assert_eq!(placed("c5"), ("m2".into(), 60, 20, 0));
+}
+
+#[test]
+fn removing_media_on_the_tape_clears_its_marks() {
+    // The marks count frames along a tape that held m3.
+    let mut f = tape_span();
+    f.ok(req("media.remove", json!({"media": "m3"})));
+    assert!(f.editor.project().tape_marks.is_empty());
+}
+
 #[test]
 fn copy_cut_and_paste() {
     // p. 723: Ctrl+C copies, Ctrl+X cuts and ripples, Ctrl+V pastes at the

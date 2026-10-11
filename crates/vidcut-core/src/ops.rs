@@ -267,26 +267,62 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
     })
 }
 
-/// The track an edit puts `clip` on (spec §7 step 3, decision D3): the
-/// source's track, else Track 1 for clips with video and A1 for audio-only
-/// clips. On an audio track only the audio is used.
-fn home(p: &mut Project, clip: &mut Clip, src: &Source) -> Result<usize> {
+/// The track an edit puts `clips` on (spec §7 step 3, decision D3): the
+/// source's track, else Track 1 when any of them has video and A1 when none
+/// does. On an audio track only their audio is used.
+fn home(p: &mut Project, clips: &mut [Clip], src: &Source) -> Result<usize> {
     let ti = match &src.track {
         Some(id) => tracks::resolve(p, id)?,
-        None if clip.video => main_index(p),
+        None if clips.iter().any(|c| c.video) => main_index(p),
         None => tracks::nth(p, TrackKind::Audio, 0),
     };
-    if p.tracks[ti].kind == TrackKind::Audio && clip.video {
-        if clip.audio.is_none() {
-            return Err(Error::invalid(format!(
-                "{} has no audio for audio track {}",
-                clip.media, p.tracks[ti].id
-            )));
+    if p.tracks[ti].kind == TrackKind::Audio {
+        for clip in clips.iter_mut().filter(|c| c.video) {
+            if clip.audio.is_none() {
+                return Err(Error::invalid(format!(
+                    "{} has no audio for audio track {}",
+                    clip.media, p.tracks[ti].id
+                )));
+            }
+            clip.video = false;
         }
-        clip.video = false;
     }
     unlocked(p, ti)?;
     Ok(ti)
+}
+
+/// A clip for each of `srcs`: one source, or the pieces of a Source Tape
+/// span across clips (decision D17), which an edit places end to end as one
+/// block, by the same rules as one clip.
+fn make_clips(p: &mut Project, srcs: &[Source]) -> Result<Vec<Clip>> {
+    if srcs.is_empty() {
+        return Err(Error::invalid("nothing to edit in"));
+    }
+    srcs.iter().map(|s| make_clip(p, s)).collect()
+}
+
+fn block_len(clips: &[Clip]) -> i64 {
+    clips.iter().map(|c| c.duration).sum()
+}
+
+/// Places `clips` end to end from `start` on track `ti`; returns their ids.
+fn place_block(p: &mut Project, ti: usize, clips: Vec<Clip>, start: i64) -> Vec<String> {
+    let mut at = start;
+    clips
+        .into_iter()
+        .map(|mut clip| {
+            clip.start = at;
+            at += clip.duration;
+            let id = clip.id.clone();
+            place(p, ti, clip);
+            id
+        })
+        .collect()
+}
+
+/// The one clip a one-source edit made.
+fn only(ids: Vec<String>) -> String {
+    ids.into_iter().next().expect("one source makes one clip")
 }
 
 /// Index of track `id` (`V3`, `A2`), adding tracks up to it.
@@ -312,13 +348,17 @@ fn is_main(p: &Project, ti: usize) -> bool {
 
 /// Append (Shift+F12, p. 697): after the last clip of the target track.
 pub fn append(p: &mut Project, src: &Source) -> Result<String> {
-    let mut clip = make_clip(p, src)?;
-    let ti = home(p, &mut clip, src)?;
-    clip.start = p.tracks[ti].end();
-    let id = clip.id.clone();
-    place(p, ti, clip);
+    append_block(p, std::slice::from_ref(src)).map(only)
+}
+
+/// [`append`] for sources placed end to end.
+pub fn append_block(p: &mut Project, srcs: &[Source]) -> Result<Vec<String>> {
+    let mut clips = make_clips(p, srcs)?;
+    let ti = home(p, &mut clips, &srcs[0])?;
+    let start = p.tracks[ti].end();
+    let ids = place_block(p, ti, clips, start);
     fix_audio(p, ti);
-    Ok(id)
+    Ok(ids)
 }
 
 /// The edit point on V1 nearest `playhead` (the Smart Indicator, p. 696);
@@ -352,8 +392,13 @@ pub fn edit_has_handles(p: &Project, e: i64) -> bool {
 
 /// Smart Insert: insert at the edit nearest the playhead (p. 697).
 pub fn smart_insert(p: &mut Project, src: &Source, playhead: i64) -> Result<String> {
+    smart_insert_block(p, std::slice::from_ref(src), playhead).map(only)
+}
+
+/// [`smart_insert`] for sources placed end to end.
+pub fn smart_insert_block(p: &mut Project, srcs: &[Source], playhead: i64) -> Result<Vec<String>> {
     let at = nearest_edit(p, playhead);
-    insert_at(p, src, at)
+    insert_at_block(p, srcs, at)
 }
 
 /// Insert at an exact frame (API-only, deviation X5). On Track 1 later clips
@@ -361,18 +406,22 @@ pub fn smart_insert(p: &mut Project, src: &Source, playhead: i64) -> Result<Stri
 /// with Ripple On a position past the end means the end. On other tracks
 /// nothing is pushed (p. 697): the clip writes over what is there.
 pub fn insert_at(p: &mut Project, src: &Source, at: i64) -> Result<String> {
+    insert_at_block(p, std::slice::from_ref(src), at).map(only)
+}
+
+/// [`insert_at`] for sources placed end to end.
+pub fn insert_at_block(p: &mut Project, srcs: &[Source], at: i64) -> Result<Vec<String>> {
     if at < 0 {
         return Err(Error::invalid("insert position before 0"));
     }
-    let mut clip = make_clip(p, src)?;
-    let ti = home(p, &mut clip, src)?;
-    let id = clip.id.clone();
+    let mut clips = make_clips(p, srcs)?;
+    let ti = home(p, &mut clips, &srcs[0])?;
+    let len = block_len(&clips);
     if !is_main(p, ti) {
-        clear_range(p, ti, at, at + clip.duration);
-        clip.start = at;
-        place(p, ti, clip);
+        clear_range(p, ti, at, at + len);
+        let ids = place_block(p, ti, clips, at);
         fix_audio(p, ti);
-        return Ok(id);
+        return Ok(ids);
     }
     let before = Before::of(p);
     let at = if p.settings.ripple_on {
@@ -381,61 +430,81 @@ pub fn insert_at(p: &mut Project, src: &Source, at: i64) -> Result<String> {
         at
     };
     split_at(p, ti, at);
-    shift_from(p, ti, at, clip.duration);
-    clip.start = at;
-    place(p, ti, clip);
+    shift_from(p, ti, at, len);
+    let ids = place_block(p, ti, clips, at);
     fix_audio(p, ti);
     follow::follow(
         p,
         &before,
         &Edit {
-            created: std::slice::from_ref(&id),
+            created: &ids,
             ..Edit::default()
         },
     );
-    Ok(id)
+    Ok(ids)
 }
 
-/// Where an Overwrite or Place On Top goes, and the source range it takes:
-/// the timeline In; else backtimed to a lone timeline Out; else `at`. With
-/// both marks set it is a three-point edit: the marked range sets the length
-/// (decision D7).
-fn marked_start(p: &Project, src: &Source, at: i64) -> (i64, Source) {
-    let mut src = src.clone();
-    let len = src.range.1 - src.range.0;
-    let start = match (p.marks.mark_in, p.marks.mark_out) {
-        (Some(i), Some(o)) => {
-            src.range.1 = src.range.0 + (o - i);
-            i
+/// Where an Overwrite or Place On Top goes, and the sources it takes (laid
+/// end to end): the timeline In; else backtimed to a lone timeline Out; else
+/// `at`. With both marks set it is a three-point edit: the marked range sets
+/// the length (decision D7), cutting the sources short or running the last
+/// one on.
+fn marked_start(p: &Project, srcs: &[Source], at: i64) -> (i64, Vec<Source>) {
+    let len: i64 = srcs.iter().map(|s| s.range.1 - s.range.0).sum();
+    match (p.marks.mark_in, p.marks.mark_out) {
+        (Some(i), Some(o)) => (i, fit_to(srcs, o - i)),
+        (Some(i), None) => (i, srcs.to_vec()),
+        (None, Some(o)) => (o - len, srcs.to_vec()),
+        (None, None) => (at, srcs.to_vec()),
+    }
+}
+
+/// `srcs` laid end to end and cut to `len` frames, or with the last one
+/// running on to `len`.
+fn fit_to(srcs: &[Source], len: i64) -> Vec<Source> {
+    let mut out: Vec<Source> = Vec::new();
+    let mut left = len;
+    for s in srcs {
+        if left <= 0 {
+            break;
         }
-        (Some(i), None) => i,
-        (None, Some(o)) => o - len,
-        (None, None) => at,
-    };
-    (start, src)
+        let mut s = s.clone();
+        s.range.1 = s.range.1.min(s.range.0 + left);
+        left -= s.range.1 - s.range.0;
+        out.push(s);
+    }
+    if left > 0
+        && let Some(last) = out.last_mut()
+    {
+        last.range.1 += left;
+    }
+    out
 }
 
 /// Overwrite (F10, p. 701): writes over the target track without moving
 /// other clips.
 pub fn overwrite(p: &mut Project, src: &Source, at: i64) -> Result<String> {
-    let (start, src) = marked_start(p, src, at);
+    overwrite_block(p, std::slice::from_ref(src), at).map(only)
+}
+
+/// [`overwrite`] for sources placed end to end.
+pub fn overwrite_block(p: &mut Project, srcs: &[Source], at: i64) -> Result<Vec<String>> {
+    let (start, srcs) = marked_start(p, srcs, at);
     if start < 0 {
         return Err(Error::invalid("overwrite would start before 0"));
     }
-    let mut clip = make_clip(p, &src)?;
-    let ti = home(p, &mut clip, &src)?;
+    let mut clips = make_clips(p, &srcs)?;
+    let ti = home(p, &mut clips, &srcs[0])?;
     // Decision D10: with Ripple On, Track 1 stays gapless.
     let start = if is_main(p, ti) && p.settings.ripple_on {
         start.min(p.tracks[ti].end())
     } else {
         start
     };
-    clear_range(p, ti, start, start + clip.duration);
-    clip.start = start;
-    let id = clip.id.clone();
-    place(p, ti, clip);
+    clear_range(p, ti, start, start + block_len(&clips));
+    let ids = place_block(p, ti, clips, start);
     fix_audio(p, ti);
-    Ok(id)
+    Ok(ids)
 }
 
 /// Ripple Overwrite (Shift+F10, p. 698): replaces the timeline In–Out range,
@@ -444,8 +513,13 @@ pub fn overwrite(p: &mut Project, src: &Source, at: i64) -> Result<String> {
 /// wins, decision D8), and what was over the replaced clips stays. On other
 /// tracks nothing moves: a longer clip writes over what follows.
 pub fn ripple_overwrite(p: &mut Project, src: &Source, at: i64) -> Result<String> {
-    let mut clip = make_clip(p, src)?;
-    let ti = home(p, &mut clip, src)?;
+    ripple_overwrite_block(p, std::slice::from_ref(src), at).map(only)
+}
+
+/// [`ripple_overwrite`] for sources placed end to end.
+pub fn ripple_overwrite_block(p: &mut Project, srcs: &[Source], at: i64) -> Result<Vec<String>> {
+    let mut clips = make_clips(p, srcs)?;
+    let ti = home(p, &mut clips, &srcs[0])?;
     let (a, b) = match (p.marks.mark_in, p.marks.mark_out) {
         (Some(i), Some(o)) => (i, o),
         _ => {
@@ -456,14 +530,12 @@ pub fn ripple_overwrite(p: &mut Project, src: &Source, at: i64) -> Result<String
             (t.clips[ci].start, t.clips[ci].end())
         }
     };
-    let id = clip.id.clone();
-    let len = clip.duration;
+    let len = block_len(&clips);
     if !is_main(p, ti) {
         clear_range(p, ti, a, b.max(a + len));
-        clip.start = a;
-        place(p, ti, clip);
+        let ids = place_block(p, ti, clips, a);
         fix_audio(p, ti);
-        return Ok(id);
+        return Ok(ids);
     }
     // A marked range past the end of a magnetic V1 replaces nothing: the clip
     // goes at the end so V1 stays gapless (like decision D10).
@@ -476,19 +548,18 @@ pub fn ripple_overwrite(p: &mut Project, src: &Source, at: i64) -> Result<String
     let before = Before::of(p);
     clear_range(p, ti, a, b);
     shift_from(p, ti, b, len - (b - a));
-    clip.start = a;
-    place(p, ti, clip);
+    let ids = place_block(p, ti, clips, a);
     fix_audio(p, ti);
     follow::follow(
         p,
         &before,
         &Edit {
-            created: std::slice::from_ref(&id),
+            created: &ids,
             kept: &[(a, a + len.min(b - a))],
             ..Edit::default()
         },
     );
-    Ok(id)
+    Ok(ids)
 }
 
 /// Place On Top (F12, pp. 699–700): the clip goes on the first track above
@@ -498,6 +569,17 @@ pub fn ripple_overwrite(p: &mut Project, src: &Source, at: i64) -> Result<String
 /// playhead. Audio-only clips go on the first audio track with room.
 /// Returns the clip and the track it went on.
 pub fn place_on_top(p: &mut Project, src: &Source, playhead: i64) -> Result<(String, String)> {
+    let (ids, track) = place_on_top_block(p, std::slice::from_ref(src), playhead)?;
+    Ok((only(ids), track))
+}
+
+/// [`place_on_top`] for sources placed end to end: one block, lined up once
+/// and on one track.
+pub fn place_on_top_block(
+    p: &mut Project,
+    srcs: &[Source],
+    playhead: i64,
+) -> Result<(Vec<String>, String)> {
     let marked = p.marks.mark_in.is_some() || p.marks.mark_out.is_some();
     let at = if marked {
         playhead
@@ -509,14 +591,14 @@ pub fn place_on_top(p: &mut Project, src: &Source, playhead: i64) -> Result<(Str
             playhead
         }
     };
-    let (start, src) = marked_start(p, src, at);
+    let (start, srcs) = marked_start(p, srcs, at);
     if start < 0 {
         return Err(Error::invalid("the clip would start before 0"));
     }
-    let mut clip = make_clip(p, &src)?;
-    let end = start + clip.duration;
+    let clips = make_clips(p, &srcs)?;
+    let end = start + block_len(&clips);
     let busy = |t: &Track| t.clips.iter().any(|c| c.start < end && start < c.end());
-    let ti = if clip.video {
+    let ti = if clips.iter().any(|c| c.video) {
         let video = p.tracks_of(TrackKind::Video);
         let top = video.iter().rposition(|&i| busy(&p.tracks[i]));
         tracks::nth(p, TrackKind::Video, top.map_or(0, |k| k + 1))
@@ -533,12 +615,10 @@ pub fn place_on_top(p: &mut Project, src: &Source, playhead: i64) -> Result<(Str
     } else {
         start
     };
-    clear_range(p, ti, start, start + clip.duration);
-    clip.start = start;
-    let id = clip.id.clone();
-    place(p, ti, clip);
+    clear_range(p, ti, start, start + block_len(&clips));
+    let ids = place_block(p, ti, clips, start);
     fix_audio(p, ti);
-    Ok((id, p.tracks[ti].id.clone()))
+    Ok((ids, p.tracks[ti].id.clone()))
 }
 
 // ---------------------------------------------------------------- timeline editing (spec §8)
