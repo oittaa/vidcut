@@ -285,21 +285,29 @@ impl Workspace {
         self.timeline_toolbar(ui, &p);
         let full = ui.available_rect_before_wrap();
         let others = p.tracks.len().saturating_sub(1).min(6) as f32;
+        // The overview starts after the track header column, lined up with
+        // the detailed timeline, and leaves only a sliver after the end:
+        // the window's left edge is easy to miss, its right edge isn't.
         let upper_rect = Rect::from_min_size(
-            full.min,
+            pos2(full.left() + HEADER, full.top()),
             vec2(
-                full.width(),
+                full.width() - HEADER,
                 UPPER_RULER + UPPER_TRACK + UPPER_OTHER * others,
             ),
         );
         let lower_rect = Rect::from_min_max(pos2(full.left(), upper_rect.bottom() + 6.0), full.max);
+        ui.painter().rect_filled(
+            Rect::from_min_max(full.min, pos2(upper_rect.left() - 1.0, upper_rect.bottom())),
+            0.0,
+            theme::PANEL_DARK,
+        );
         let upper_resp = ui.allocate_rect(upper_rect, Sense::click_and_drag());
         let lower_resp = ui.allocate_rect(lower_rect, Sense::click_and_drag());
 
         // Scales.
         let fps = p.settings.fps.as_f64();
         let end = p.end();
-        let span = ((end as f64 * 1.04).max(fps * 10.0)).ceil() as i64;
+        let span = ((end as f64 * 1.01).max(fps * 10.0)).ceil() as i64;
         let upper_scale = Scale::fit(upper_rect.left(), upper_rect.width(), span);
         let content = Rect::from_min_max(
             pos2(lower_rect.left() + HEADER, lower_rect.top()),
