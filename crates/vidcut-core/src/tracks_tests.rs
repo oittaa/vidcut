@@ -255,6 +255,42 @@ fn other_tracks_ripple_only_where_track_one_is_empty() {
 }
 
 #[test]
+fn video_tracks_ripple_only_where_track_one_is_empty() {
+    // p. 721, decision D22, on V2: over Track 1's picture a delete or trim
+    // leaves a gap; past Track 1's end the clips after it close up.
+    let mut f = three_clips(); // Track 1 ends at 200
+    let a = put(&mut f, "m3", 0, 20, 20, "V2");
+    let b = put(&mut f, "m3", 20, 40, 60, "V2");
+    let c = put(&mut f, "m3", 40, 60, 210, "V2");
+    let d = put(&mut f, "m3", 60, 80, 240, "V2");
+    f.ok(req("edit.delete", json!({"clips": a})));
+    assert_eq!(
+        f.track("V2")[0],
+        row(&b, 60, 20, 20),
+        "over Track 1: the gap stays"
+    );
+    f.ok(req("edit.delete", json!({"clips": c})));
+    assert_eq!(
+        f.track("V2"),
+        vec![row(&b, 60, 20, 20), row(&d, 220, 20, 60)],
+        "past Track 1: it closes"
+    );
+    f.ok(req(
+        "edit.trim",
+        json!({"clip": b, "edge": "head", "by": 5}),
+    ));
+    f.ok(req(
+        "edit.trim",
+        json!({"clip": d, "edge": "head", "by": 5}),
+    ));
+    assert_eq!(
+        f.track("V2"),
+        vec![row(&b, 65, 15, 25), row(&d, 220, 15, 65)],
+        "a head trim leaves a gap over Track 1, and ripples past it"
+    );
+}
+
+#[test]
 fn place_on_top_goes_above_everything_there() {
     // pp. 699–700: Place On Top.
     let mut f = three_clips();
