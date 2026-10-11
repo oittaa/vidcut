@@ -261,6 +261,11 @@ impl Workspace {
             .collect()
     }
 
+    /// How often live meters ask for a frame: they move smoothly at 30 a
+    /// second. Asking for every frame instead redraws as fast as the CPU
+    /// allows, since vsync stays off.
+    const METER_FRAME: std::time::Duration = std::time::Duration::from_millis(33);
+
     fn meters_live(&self, levels: &[f32], playing: bool) -> bool {
         playing
             || levels.iter().any(|l| *l > 0.0)
@@ -302,7 +307,7 @@ impl Workspace {
             });
         });
         if self.meters_live(&meters.mix, self.snap.timeline.playing) {
-            ui.ctx().request_repaint();
+            ui.ctx().request_repaint_after(Self::METER_FRAME);
         }
     }
 
@@ -431,7 +436,7 @@ impl Workspace {
         }
         let playing = self.snap.active().playing;
         if self.meters_live(&level, playing) {
-            ui.ctx().request_repaint();
+            ui.ctx().request_repaint_after(Self::METER_FRAME);
         }
     }
 }
