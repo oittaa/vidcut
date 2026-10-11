@@ -69,9 +69,16 @@ impl Origin {
 /// Called with a captured picture (or why there is none).
 pub type Capture = Box<dyn FnOnce(Result<Image>) + Send>;
 
+/// Called once a player was presented.
+pub type Presented = Box<dyn FnOnce() + Send>;
+
 /// What the session needs from whoever renders the players: the GUI, or a
 /// test harness.
 pub trait Renderer: Send + Sync {
+    /// Draw `player`'s current picture now, even if mpv has nothing new for
+    /// it, then call `done`. The session asks once a seek or load has
+    /// finished: the viewer then shows its frame (docs/decisions/gui.md §4).
+    fn present(&self, player: PlayerId, done: Presented);
     /// The picture `player` shows, as displayed.
     fn capture_viewer(&self, player: PlayerId, done: Capture);
     /// The whole window.
@@ -142,8 +149,11 @@ pub(crate) enum Msg {
         reply: Option<Reply>,
     },
     Mpv(PlayerId),
-    /// A frame was drawn; `true` if it was a new picture.
-    Rendered(PlayerId, bool),
+    /// The renderer presented `player` after `motion` finished.
+    Presented {
+        player: PlayerId,
+        motion: u64,
+    },
     Captured {
         id: u64,
         result: Result<Image>,
@@ -280,12 +290,6 @@ impl Handle {
                 Err(_) => return Err(Error::no_instance("the vidcut GUI is shutting down")),
             }
         }
-    }
-
-    /// The renderer drew a frame of `player`: a new picture (`new`), or a
-    /// redraw of the last one.
-    pub fn rendered(&self, player: PlayerId, new: bool) {
-        let _ = self.tx.send(Msg::Rendered(player, new));
     }
 
     /// Stops the session thread.
@@ -619,9 +623,20 @@ impl Live {
                 project,
                 reply,
             } => self.request(envelope, origin, project, reply),
-            Msg::Mpv(id) => changed = self.players[id.index()].pump(),
-            Msg::Rendered(id, new) => {
-                self.players[id.index()].rendered(new);
+            Msg::Mpv(id) => {
+                changed = self.players[id.index()].pump();
+                if let Some(motion) = self.players[id.index()].present_due() {
+                    let tx = self.tx.clone();
+                    self.renderer.present(
+                        id,
+                        Box::new(move || {
+                            let _ = tx.send(Msg::Presented { player: id, motion });
+                        }),
+                    );
+                }
+            }
+            Msg::Presented { player, motion } => {
+                self.players[player.index()].presented(motion);
                 changed = false;
             }
             Msg::Captured { id, result } => self.captured(id, result),
@@ -798,15 +813,6 @@ impl Live {
                     i += 1;
                 }
             }
-        }
-        // Waiters on frames are checked again when renders arrive; poll a
-        // little while any exist in case the renderer is slow.
-        if self
-            .waits
-            .iter()
-            .any(|w| !matches!(w.until, Until::Job { .. }))
-        {
-            soonest(now + Duration::from_millis(20));
         }
         next
     }

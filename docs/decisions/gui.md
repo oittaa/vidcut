@@ -1,9 +1,9 @@
 # GUI and live control: decisions from M3
 
-**Status:** accepted (M3, October 2026); §8 added in M4, §9 in M5.
+**Status:** accepted (M3, October 2026); §8 added in M4, §9 in M5, §10 in M7; §4 revised after M7.
 
 **Evidence** (all rerunnable):
-- [`crates/vidcut/tests/live.rs`](../../crates/vidcut/tests/live.rs): the live session with software-rendered players and no window. Covers frame-exact seeks at every boundary, the source viewers, the clipboard, edits from other processes, and errors.
+- [`crates/vidcut/tests/live.rs`](../../crates/vidcut/tests/live.rs): the live session with software-rendered players and no window. Covers frame-exact seeks at every boundary (also with a late renderer), the source viewers, the clipboard, edits from other processes, and errors.
 - [`crates/vidcut/tests/gui.rs`](../../crates/vidcut/tests/gui.rs) (`--features vidcut/gui-tests`, needs a display): the real GUI driven through the CLI. Covers edit latency, screenshot vs `vidcut frame`, and a minimized window.
 - `ipc::tests` in [`crates/vidcut/src/ipc/mod.rs`](../../crates/vidcut/src/ipc/mod.rs): the JSON-RPC wire format.
 - [`crates/vidcut/tests/jobs.rs`](../../crates/vidcut/tests/jobs.rs) and [`gui_export.rs`](../../crates/vidcut/tests/gui_export.rs): export jobs, and the export windows under simulated input (§9).
@@ -22,7 +22,7 @@
 - **One inbox.** Everyone talks to the session through one `mpsc` inbox (`Handle`).
 - **Snapshots out.** After each batch of messages, the session publishes an immutable `Arc<Snapshot>`, and the UI reads the latest one each frame. Publishing is a pointer swap under a mutex.
 - **No blocking.** The UI therefore never blocks on the session, and the session never blocks on the UI.
-- **Repaints.** The session calls `request_repaint` when it publishes, and mpv's render update callback does too. Nothing else wakes the UI.
+- **Repaints.** The session calls `request_repaint` when it publishes or asks the UI for something (a present, a capture, a window change), and mpv's render update callback does too. Nothing else wakes the UI.
 
 ## 2. One request path
 
@@ -55,15 +55,16 @@ Every action is a [`Request`](../../crates/vidcut-core/src/request.rs), the same
 
 mpv runs async commands in order. A reply to command `n` therefore means every command up to `n` has been queued.
 
-A seek or load ("motion") is shown when two things have happened:
-1. a `playback-restart` arrived after the motion's reply;
-2. the renderer drew a **new picture** since the motion was issued.
+A seek or load ("motion") is shown after two steps:
+1. **mpv finished it.** A `playback-restart` arrived after the `seek` (or `start-file`) event that mpv sent after the motion's reply. mpv begins a seek only after replying to the command. A late restart of an earlier seek therefore doesn't count for a newer motion (mpv doesn't always drop it, for instance once the audio has ended).
+2. **The renderer presented it.** The session then asks the renderer to present the player: draw mpv's current picture now, whether or not mpv has a new frame for it. After the restart, mpv's current picture is the motion's first frame, so the viewer shows exactly that frame.
 
-"New picture" comes from `MPV_RENDER_PARAM_NEXT_FRAME_INFO`: present, and not a redraw or repeat. While paused, the only new picture after a seek is the seek's own frame.
+**Why not wait for a new picture.** Until October 2026 the second step was "the renderer drew a new picture since the motion was issued" (`MPV_RENDER_PARAM_NEXT_FRAME_INFO`: not a redraw or repeat), with a 250 ms fallback. A late UI thread broke it:
+- libmpv waits only 200 ms for `mpv_render_context_render` to take a frame. Then it keeps the frame as its current picture, counts it as dropped and finishes the seek anyway, so the renderer never sees a new frame.
+- The fallback then reported the seek as shown while the viewer still held the previous picture. That can also be black: mpv sends an empty redraw when it reconfigures its output, for instance between a tail patch and the H.264 around it.
+- Conversely, a redraw after a dropped frame is flagged as new, and a picture rendered just before the seek could be counted for it.
 
-**The older rule failed.** We first counted any render after the restart, but the render can happen before the session sees the restart event. The fallback then made seeks take 250 ms.
-
-**Fallback.** If no new picture comes within 250 ms of the restart, the motion counts as shown anyway. This covers no renderer, the same picture again, or a window that renders only every 100 ms.
+`tests/live.rs` ("A late renderer") stalls the render thread for 500 ms when a seek's frame arrives, and the seek still returns with that frame on screen.
 
 **More waiting.** A seek also waits for the player's newest motion (a preview reload replaces what was asked for) and for pending tail patches (preview.md §9). Seek-then-screenshot is therefore exact without sleeps. Over IPC it takes about 10–15 ms.
 

@@ -11,7 +11,7 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use serde_json::{Value, json};
 use vidcut::gui::workspace::Workspace;
-use vidcut::live::{self, Capture, Origin, PlayerId, WindowChange};
+use vidcut::live::{self, Capture, Origin, PlayerId, Presented, WindowChange};
 use vidcut_av::fixture::{self, Container, FixtureSpec, Picture, VideoCodec};
 use vidcut_core::model::Settings;
 use vidcut_core::time::Rational;
@@ -20,6 +20,9 @@ use vidcut_core::{Envelope, Project, Response, Store};
 struct NoRenderer;
 
 impl live::Renderer for NoRenderer {
+    fn present(&self, _: PlayerId, done: Presented) {
+        done();
+    }
     fn capture_viewer(&self, _: PlayerId, done: Capture) {
         done(Err(vidcut_core::Error::usage("no renderer in tests")));
     }
