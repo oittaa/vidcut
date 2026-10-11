@@ -1,0 +1,43 @@
+# Real-world test clips (never committed). `scripts/fetch-test-media.sh`
+# downloads them into $VIDCUT_TEST_DATA/media/<name>/ (default
+# ~/Downloads/vidcut-tmp/media). sha256 is of the extracted media file.
+
+[[clip]]
+name = "bbb-1080p30"
+file = "bbb_sunflower_1080p_30fps_normal.mp4"
+url = "https://download.blender.org/demo/movies/BBB/bbb_sunflower_1080p_30fps_normal.mp4.zip"
+license = "CC BY 3.0, (c) 2013 Blender Foundation, https://peach.blender.org"
+purpose = "typical H.264 1080p30 clip for everyday GUI work"
+sha256 = "ae51005850b0ff757fe60c3dd7a12d754d3cd2397d87d939b55235e457f97658"
+
+[[clip]]
+name = "bbb-2160p60"
+file = "bbb_sunflower_2160p_60fps_normal.mp4"
+url = "https://download.blender.org/demo/movies/BBB/bbb_sunflower_2160p_60fps_normal.mp4.zip"
+license = "CC BY 3.0, (c) 2013 Blender Foundation, https://peach.blender.org"
+purpose = "4K60 H.264: playback and hardware decoding stress"
+sha256 = "35db9a007021f1b0066993e1d2c4448c83a8b279f799c97d33cbba73980a8a36"
+
+[[clip]]
+name = "tos-720p-mov"
+file = "tears_of_steel_720p.mov"
+url = "https://download.blender.org/demo/movies/ToS/tears_of_steel_720p.mov"
+license = "CC BY 3.0, (c) Blender Foundation, https://mango.blender.org"
+purpose = "24 fps QuickTime: mixed frame rates on a 30 fps timeline"
+sha256 = "efa9062d9cdb7a338e40ad530dfdf234806743f29ae6a1a136b97ece4e588e8f"
+
+[[clip]]
+name = "tos-surround-webm"
+file = "tears_of_steel_surround.webm"
+url = "https://download.blender.org/demo/movies/ToS/tears_of_steel_surround.webm.zip"
+license = "CC BY 3.0, (c) Blender Foundation, https://mango.blender.org"
+purpose = "WebM with 5.1 audio: surround downmix"
+sha256 = "5ec8242afe9013cf6179d6452838f04b4837cc86bb5e0d60a8f6f08696ff77a3"
+
+[[clip]]
+name = "bbb-hevc-1080p-10s"
+file = "Big_Buck_Bunny_1080_10s_30MB.mp4"
+url = "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h265/1080/Big_Buck_Bunny_1080_10s_30MB.mp4"
+license = "Big Buck Bunny CC BY 3.0 (c) Blender Foundation; encode by test-videos.co.uk"
+purpose = "short HEVC 1080p clip: quick HEVC decode and preview tests"
+sha256 = "054fda19ab2c9f24d4524ffc33bfba9620b11e488ab813004dbe952fff26868d"
