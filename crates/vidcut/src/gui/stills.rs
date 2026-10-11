@@ -1,7 +1,13 @@
-//! Exact single frames for the GUI (the Trim Editor), rendered by the export
-//! engine on a background thread so they match export and never block the UI.
+//! Exact single frames for the GUI (the Trim Editor and Dynamic Trim's
+//! two-up), rendered by the export engine on a background thread so they
+//! match export and never block the UI.
+//!
+//! A running Dynamic Trim asks for new frames on every redraw, far faster
+//! than they render. So the thread renders only the newest frame each cell
+//! asked for and skips the rest, and a cell keeps its last picture until
+//! the next one is ready.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use eframe::egui;
@@ -39,25 +45,74 @@ enum State {
     Failed,
 }
 
+/// A frame to render, for one of the cells showing them.
+struct Job {
+    key: Key,
+    still: Still,
+    cell: usize,
+}
+
+enum Outcome {
+    Rendered(Result<vidcut_av::thumbs::Image, String>),
+    /// Its cell asked for a newer frame first.
+    Skipped,
+}
+
 pub struct Stills {
-    jobs: Sender<(Key, Still)>,
-    done: Receiver<(Key, Result<vidcut_av::thumbs::Image, String>)>,
+    jobs: Sender<Job>,
+    done: Receiver<(Key, Outcome)>,
     cache: HashMap<Key, State>,
+    /// The picture each cell showed last, kept while its next one renders.
+    shown: Vec<Option<egui::TextureHandle>>,
+}
+
+/// Splits `jobs` (oldest first) into the newest one of each cell and the
+/// outdated rest, both oldest first.
+fn newest_per_cell(jobs: Vec<Job>) -> (Vec<Job>, Vec<Job>) {
+    let mut seen = HashSet::new();
+    let (mut newest, mut outdated) = (Vec::new(), Vec::new());
+    for job in jobs.into_iter().rev() {
+        if seen.insert(job.cell) {
+            newest.push(job);
+        } else {
+            outdated.push(job);
+        }
+    }
+    newest.reverse();
+    outdated.reverse();
+    (newest, outdated)
 }
 
 impl Stills {
     pub fn new(ctx: egui::Context) -> Self {
-        let (jobs, rx) = channel::<(Key, Still)>();
+        let (jobs, rx) = channel::<Job>();
         let (tx, done) = channel();
         // The Trim Editor's frames: someone waits for them.
         let _ = crate::threads::spawn(
             "vidcut-stills",
             crate::threads::Work::Interactive,
             move || {
-                while let Ok((key, s)) = rx.recv() {
+                let mut queue: Vec<Job> = Vec::new();
+                loop {
+                    if queue.is_empty() {
+                        match rx.recv() {
+                            Ok(job) => queue.push(job),
+                            Err(_) => return,
+                        }
+                    }
+                    queue.extend(rx.try_iter());
+                    let (mut newest, outdated) = newest_per_cell(std::mem::take(&mut queue));
+                    for job in outdated {
+                        if tx.send((job.key, Outcome::Skipped)).is_err() {
+                            return;
+                        }
+                    }
+                    let job = newest.remove(0);
+                    queue = newest;
+                    let s = &job.still;
                     let r = vidcut_av::export::still::rgba(&s.piece, s.fps, s.width, s.height)
                         .map_err(|e| e.to_string());
-                    if tx.send((key, r)).is_err() {
+                    if tx.send((job.key, Outcome::Rendered(r))).is_err() {
                         return;
                     }
                     ctx.request_repaint();
@@ -68,14 +123,21 @@ impl Stills {
             jobs,
             done,
             cache: HashMap::new(),
+            shown: Vec::new(),
         }
     }
 
-    /// The still's texture, rendering it in the background if needed.
-    pub fn get(&mut self, ctx: &egui::Context, still: &Still) -> Option<egui::TextureId> {
-        while let Ok((key, result)) = self.done.try_recv() {
-            let state = match result {
-                Ok(img) => State::Ready(ctx.load_texture(
+    /// The picture for `cell`: the still's texture, rendering it in the
+    /// background if needed, and until then the cell's last picture.
+    pub fn get(
+        &mut self,
+        ctx: &egui::Context,
+        cell: usize,
+        still: &Still,
+    ) -> Option<egui::TextureId> {
+        while let Ok((key, outcome)) = self.done.try_recv() {
+            let state = match outcome {
+                Outcome::Rendered(Ok(img)) => State::Ready(ctx.load_texture(
                     format!("still-{}", self.cache.len()),
                     egui::ColorImage::from_rgba_unmultiplied(
                         [img.width as usize, img.height as usize],
@@ -83,22 +145,66 @@ impl Stills {
                     ),
                     egui::TextureOptions::LINEAR,
                 )),
-                Err(_) => State::Failed,
+                Outcome::Rendered(Err(_)) => State::Failed,
+                // Asked for again, it renders then.
+                Outcome::Skipped => {
+                    self.cache.remove(&key);
+                    continue;
+                }
             };
             self.cache.insert(key, state);
         }
+        if self.shown.len() <= cell {
+            self.shown.resize(cell + 1, None);
+        }
         let key = still.key();
         match self.cache.get(&key) {
-            Some(State::Ready(t)) => Some(t.id()),
-            Some(State::Pending | State::Failed) => None,
+            Some(State::Ready(t)) => {
+                self.shown[cell] = Some(t.clone());
+                return Some(t.id());
+            }
+            Some(State::Failed) => return None,
+            Some(State::Pending) => {}
             None => {
                 if self.cache.len() > 64 {
                     self.cache.retain(|_, s| matches!(s, State::Pending));
                 }
                 self.cache.insert(key.clone(), State::Pending);
-                let _ = self.jobs.send((key, still.clone()));
-                None
+                let _ = self.jobs.send(Job {
+                    key,
+                    still: still.clone(),
+                    cell,
+                });
             }
         }
+        self.shown[cell].as_ref().map(|t| t.id())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn job(n: i64, cell: usize) -> Job {
+        Job {
+            key: Key(n.to_string()),
+            still: Still {
+                piece: VideoPiece::Black { frames: 1 },
+                fps: Rational::new(30, 1).unwrap(),
+                width: 2,
+                height: 2,
+            },
+            cell,
+        }
+    }
+
+    #[test]
+    fn only_the_newest_frame_of_each_cell_renders() {
+        // A running trim: both cells ask for a new frame on every redraw.
+        let jobs = vec![job(1, 0), job(2, 1), job(3, 0), job(4, 1), job(5, 0)];
+        let (newest, outdated) = newest_per_cell(jobs);
+        let keys = |v: &[Job]| v.iter().map(|j| j.key.0.clone()).collect::<Vec<_>>();
+        assert_eq!(keys(&newest), ["4", "5"]);
+        assert_eq!(keys(&outdated), ["1", "2", "3"]);
     }
 }

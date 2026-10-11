@@ -373,7 +373,7 @@ impl Workspace {
                     width: w,
                     height: h,
                 };
-                if let Some(tex) = stills.get(&ctx, &still) {
+                if let Some(tex) = stills.get(&ctx, i, &still) {
                     painter.image(
                         tex,
                         picture,
