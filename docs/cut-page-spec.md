@@ -372,3 +372,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
 - **D11. Hover time.** 0.8 s of hovering turns a drop or move onto a clip from "replace" into "overwrite". The manual doesn't give a value.
 - **D12. Clip gain range.** −60 dB to +24 dB, plus mute. The manual gives no range.
 - **D13. Keys.** Shortcuts the Cut chapters don't give come from the Edit page (marked † in §11). Mac → Linux mapping: Command → Ctrl, Option → Alt.
+- **D14. J/L cuts belong to an edit point.**
+  - A J/L cut (§8.7) is stored as matching audio offsets on the two clips that meet there: the outgoing clip's `tail` equals the incoming clip's `head`.
+  - When an edit gives a clip a different neighbor at that point, the J/L cut resets to a straight cut. Examples: a delete, a move, or a split inside the overlap zone, where one half would otherwise be left without audio of its own.
+  - The manual doesn't cover this. Without the rule, audio could overlap on a track or extend into gaps.

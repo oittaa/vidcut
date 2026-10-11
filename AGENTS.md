@@ -94,24 +94,72 @@ These are mandatory.
   - The video is a **barcode**: the frame index encoded as luma blocks, which survives lossy codecs, so frame-exactness can be asserted after any decode or encode.
   - The audio carries a 1 kHz beep at the start of every second, for measuring A/V offset.
 - **Edit-operation tests** cite the spec section or manual page they check.
-- **Golden tests** (insta snapshots) cover protocol and plan output; review snapshot changes deliberately.
+- **Golden tests** (insta snapshots in `src/snapshots/`) cover protocol output that agents parse.
+  - After an intended change, regenerate with `INSTA_UPDATE=always cargo test`.
+  - Review the diff before committing.
+- **Property tests** (proptest) run random edit sequences.
+  - Failing seeds land in `proptest-regressions/`. Commit them, so they replay forever.
+  - For a deeper run: `PROPTEST_CASES=5000 cargo test -p vidcut-core prop_tests`.
 - **Test outputs** go to temp dirs (`tempfile`), never into the repo.
 
 ## Driving vidcut as an agent
 
-*Status: planned. M0 (scaffold and spikes) is done; the CLI lands in M1, the live socket in M3, MCP in M7. Update this section as each part lands.*
+*Status: the headless CLI works (M1). Live control of a running GUI arrives in M3, MCP in M7.*
 
-- **Headless:** `vidcut -p project.vidcut <command> --json` edits a project file. Exit codes are stable:
-  - 0 ok, 1 internal, 2 usage, 3 not found, 4 invalid edit, 5 conflict
-  - 6 no instance, 7 media, 8 export, 9 cancelled, 10 dependency
-- **Discover commands:** `vidcut schema [method]` prints JSON Schemas.
-- **Batches:** `vidcut -p p.vidcut apply cmds.jsonl` applies them atomically, as one undo step.
-- **Look at frames:** `vidcut -p p.vidcut frame --at 00:00:10:00 -o f.png`.
-- **Live GUI:**
-  - If the GUI has the project open, CLI commands are routed to it automatically.
-  - Live-only commands: `vidcut seek …`, `vidcut screenshot -o ui.png`.
-  - Raw JSON-RPC: `vidcut rpc <method> '<json>'`.
-- **Concurrency:** pass `--if-rev N` to avoid clobbering concurrent edits.
+**Discovering commands:**
+- Every CLI subcommand is one JSON-RPC method on one `Request`.
+- `vidcut schema` prints the whole protocol as JSON Schema; `vidcut schema edit.trim` prints one method's params.
+- `vidcut --help` and `vidcut <cmd> --help` show examples.
+
+**Basic use:**
+
+```bash
+vidcut new talk.vidcut                      # format comes from the first video added
+export VIDCUT_PROJECT=talk.vidcut           # or pass -p FILE every time
+vidcut media add cam.mp4 screen.mkv --json  # -> media ids m1, m2
+vidcut edit append m1 --range 10s..2m
+vidcut edit split --at 1m,1m30s
+vidcut edit delete V1@1m10s                 # the clip under 1m10s; ripples Track 1
+vidcut timeline --json                      # clips and gaps with frames and timecodes
+vidcut undo                                 # works across separate runs
+```
+
+**Times:**
+- In strings, every time needs a unit: `450f`, `15s`, `1m30s`, `250ms`, `00:01:00:00` (non-drop-frame timecode), `HH:MM:SS.mmm`, `start`, `end`, `in`, `out`.
+- In JSON params, a bare integer is a frame number.
+- Ranges are half-open: `A..B` excludes B; `A..+D` is D long.
+
+**Clips:** refer to them by id (`c17`) or by position (`V1@<time>`).
+
+**JSON output:**
+- `--json` prints `{"rev", "changes": {"created", "modified", "deleted"}, "result", "via"}`.
+- Errors print `{"error": {"code", "message"}}` and exit with the matching code:
+
+| Code | Error |
+|---|---|
+| 0 | ok |
+| 1 | `INTERNAL` |
+| 2 | `USAGE` |
+| 3 | `NOT_FOUND` |
+| 4 | `INVALID_EDIT` |
+| 5 | `CONFLICT` |
+| 6 | `NO_INSTANCE` |
+| 7 | `MEDIA` |
+| 8 | `EXPORT` |
+| 9 | `CANCELLED` |
+| 10 | `DEPENDENCY` |
+
+**Safe automation:**
+- `--dry-run` reports `changes` without writing anything.
+- `--if-rev N` fails with `CONFLICT` if someone else changed the project after you read revision `N`.
+- `vidcut apply edits.jsonl` (or `-` for stdin) applies many requests atomically, as one undo step. The format is one `{"method", "params"}` object per line.
+- Parallel `vidcut` processes on one project are serialized by a lock and never corrupt it.
+
+**Raw requests:** `vidcut rpc edit.split '{"at": ["1m", 2700]}'` sends one exactly as written.
+
+**Still to come:**
+- `frame` to render a still: M2.
+- Live GUI control (`seek`, `screenshot`, auto-routing): M3.
 
 ## Tools
 

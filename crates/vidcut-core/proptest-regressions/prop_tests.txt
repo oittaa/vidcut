@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 4a57296f8d6ce8f605059123b2994fc037a9d31465bbc45e7690145435fc57d2 # shrinks to ops = [Append { media: 0, a: 0, len: 1 }, DeleteRange { a: 1, len: 1, lift: false }, Overwrite { media: 2, a: 0, len: 67, at: 1 }, Marks { a: 132, len: 1 }, Delete { pick: 20, lift: false }, RippleOverwrite { media: 0, a: 0, len: 49, at: 0 }, Delete { pick: 68, lift: true }, SmartInsert { media: 0, a: 0, len: 17, playhead: 92 }, AudioRoll { pick: 74, head: false, by: 16 }, Overwrite { media: 0, a: 0, len: 1, at: 0 }]

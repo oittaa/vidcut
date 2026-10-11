@@ -2,7 +2,11 @@
 
 A simple, fully scriptable video cutting tool for Linux, modeled on DaVinci Resolve's **Cut page**.
 
-> **Status: early development.** M0 is done: the workspace is scaffolded, and spikes have proven frame-exact decoding and mpv preview (see `docs/decisions/preview.md`). Nothing is usable yet; see the milestones below.
+> **Status: early development.**
+> - Done:
+>   - **M0:** spikes proved frame-exact decoding and mpv preview.
+>   - **M1:** the project model, Cut-page edit operations and the headless CLI. Timelines can be built and edited from the command line.
+> - Not yet: export and the GUI. See the milestones below.
 
 ## What it will do
 
@@ -32,9 +36,22 @@ Rust 1.93 or newer (the distro `rustc`/`cargo` packages are fine).
 
 ```bash
 cargo build --release
-./target/release/vidcut            # GUI
-./target/release/vidcut --help     # CLI
+./target/release/vidcut --help     # CLI (the GUI arrives in M3)
 ```
+
+## Try the CLI
+
+```bash
+vidcut new talk.vidcut
+vidcut -p talk.vidcut media add cam.mp4 screen.mkv
+vidcut -p talk.vidcut edit append m1 --range 10s..2m
+vidcut -p talk.vidcut edit split --at 1m
+vidcut -p talk.vidcut edit delete V1@1m10s       # ripple delete the clip under 1m10s
+vidcut -p talk.vidcut timeline
+vidcut -p talk.vidcut undo
+```
+
+Every command takes `--json` for machine-readable output. `vidcut schema` lists the full protocol.
 
 ## Planned milestones
 

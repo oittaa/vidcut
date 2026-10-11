@@ -50,6 +50,10 @@ pub struct VideoStreamInfo {
     pub start_pts: Option<i64>,
     /// Stream duration in `time_base` units, if known.
     pub duration_pts: Option<i64>,
+    /// Raw timestamp of the first decodable frame, seconds (`o` in the time map).
+    pub first_frame_time: Option<f64>,
+    /// Seconds from the first frame to the end of the stream.
+    pub duration_secs: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -60,9 +64,31 @@ pub struct AudioStreamInfo {
     pub channels: u16,
     pub time_base: Ratio,
     pub start_pts: Option<i64>,
+    /// Stream start in seconds, if known.
+    pub start_secs: Option<f64>,
+    /// Stream duration in seconds, if known.
+    pub duration_secs: Option<f64>,
 }
 
-/// Probes `path`.
+/// Stream duration in seconds: the container's value, else Matroska's
+/// `DURATION` tag (`HH:MM:SS.nnnnnnnnn`), else `None`.
+fn stream_duration(stream: &ffmpeg::format::stream::Stream) -> Option<f64> {
+    let tb = stream.time_base();
+    if let Some(d) = opt_ts(stream.duration()).filter(|d| *d > 0) {
+        return Some(d as f64 * f64::from(tb.numerator()) / f64::from(tb.denominator()));
+    }
+    let tag = stream.metadata().get("DURATION").map(str::to_string)?;
+    let mut parts = tag.split(':');
+    let (h, m, s) = (
+        parts.next()?.parse::<f64>().ok()?,
+        parts.next()?.parse::<f64>().ok()?,
+        parts.next()?.parse::<f64>().ok()?,
+    );
+    Some(h * 3600.0 + m * 60.0 + s)
+}
+
+/// Probes `path`, including the first decodable video frame (one frame is
+/// decoded) and stream durations.
 pub fn probe(path: &Path) -> Result<MediaInfo> {
     crate::init();
     let input = ffmpeg::format::input(path).ctx(|| format!("opening {}", path.display()))?;
@@ -87,6 +113,26 @@ pub fn probe(path: &Path) -> Result<MediaInfo> {
                     .and_then(|c| c.decoder().video())
                     .map(|d| d.format())
                     .ctx(|| format!("reading video parameters of {}", path.display()))?;
+                let tb = stream.time_base();
+                let secs =
+                    |t: i64| t as f64 * f64::from(tb.numerator()) / f64::from(tb.denominator());
+                let start = opt_ts(stream.start_time()).map(secs);
+                let first_frame_time = crate::decode::VideoReader::open(path)
+                    .ok()
+                    .and_then(|r| r.first_pts())
+                    .map(secs);
+                // Duration from the first frame: the stream's end (start + its
+                // duration) minus the first frame's time; else the container's.
+                let end = match (start, stream_duration(&stream)) {
+                    (Some(s), Some(d)) => Some(s + d),
+                    (None, Some(d)) => Some(d),
+                    _ => duration.map(|d| d + start_time.unwrap_or(0.0)),
+                };
+                let duration_secs = match (end, first_frame_time.or(start)) {
+                    (Some(e), Some(o)) => Some(e - o),
+                    (Some(e), None) => Some(e),
+                    _ => None,
+                };
                 video = Some(VideoStreamInfo {
                     index: stream.index(),
                     codec,
@@ -103,17 +149,25 @@ pub fn probe(path: &Path) -> Result<MediaInfo> {
                     frames: (stream.frames() > 0).then_some(stream.frames()),
                     start_pts: opt_ts(stream.start_time()),
                     duration_pts: opt_ts(stream.duration()).filter(|d| *d > 0),
+                    first_frame_time,
+                    duration_secs,
                 });
             }
             media::Type::Audio => {
                 let raw = unsafe { &*params.as_ptr() };
+                let tb = stream.time_base();
+                let start_pts = opt_ts(stream.start_time());
                 audio.push(AudioStreamInfo {
                     index: stream.index(),
                     codec,
                     sample_rate: raw.sample_rate as u32,
                     channels: raw.ch_layout.nb_channels as u16,
-                    time_base: ratio(stream.time_base()),
-                    start_pts: opt_ts(stream.start_time()),
+                    time_base: ratio(tb),
+                    start_pts,
+                    start_secs: start_pts.map(|t| {
+                        t as f64 * f64::from(tb.numerator()) / f64::from(tb.denominator())
+                    }),
+                    duration_secs: stream_duration(&stream).or(duration),
                 });
             }
             _ => {}

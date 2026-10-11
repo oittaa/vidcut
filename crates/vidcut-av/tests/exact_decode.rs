@@ -125,3 +125,25 @@ fn fixtures_decode_frame_exact() {
         }
     }
 }
+
+#[test]
+fn probe_reports_first_frame_and_duration() {
+    for spec in matrix() {
+        let path = fixture::ensure(&spec).unwrap();
+        let v = probe::probe(&path).unwrap().video.unwrap();
+        let o = v.first_frame_time.expect("first frame");
+        let want_o = f64::from(spec.start_offset_ms) / 1000.0;
+        assert!(
+            (o - want_o).abs() < 1e-3,
+            "{}: o = {o}, want {want_o}",
+            spec.file_name()
+        );
+        let d = v.duration_secs.expect("duration");
+        assert!(
+            (d - spec.duration()).abs() < 2e-3,
+            "{}: duration {d}, want {}",
+            spec.file_name(),
+            spec.duration()
+        );
+    }
+}

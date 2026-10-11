@@ -1,0 +1,88 @@
+---
+source: crates/vidcut-core/src/ops_tests.rs
+expression: r.result
+---
+{
+  "duration": 200,
+  "duration_tc": "00:00:08:00",
+  "end": 200,
+  "fps": "25",
+  "markers": [
+    {
+      "at": 5,
+      "color": "blue",
+      "id": "k1",
+      "name": "intro",
+      "note": ""
+    }
+  ],
+  "marks": {
+    "in": 10,
+    "out": 20
+  },
+  "start": 0,
+  "tracks": [
+    {
+      "id": "V1",
+      "items": [
+        {
+          "audio": {
+            "gain_db": 0.0,
+            "head": 0,
+            "muted": false,
+            "stream": 0,
+            "tail": 0
+          },
+          "duration": 100,
+          "enabled": true,
+          "end": 100,
+          "end_tc": "00:00:04:00",
+          "id": "c1",
+          "media": "m1",
+          "name": "1.mp4",
+          "source_in": 0,
+          "source_in_tc": "00:00:00:00",
+          "source_out": 100,
+          "start": 0,
+          "start_tc": "00:00:00:00",
+          "track": "V1",
+          "type": "clip"
+        },
+        {
+          "duration": 50,
+          "end": 150,
+          "end_tc": "00:00:06:00",
+          "start": 100,
+          "start_tc": "00:00:04:00",
+          "type": "gap"
+        },
+        {
+          "audio": {
+            "gain_db": 0.0,
+            "head": 0,
+            "muted": false,
+            "stream": 0,
+            "tail": 0
+          },
+          "duration": 50,
+          "enabled": true,
+          "end": 200,
+          "end_tc": "00:00:08:00",
+          "id": "c3",
+          "media": "m1",
+          "name": "1.mp4",
+          "source_in": 100,
+          "source_in_tc": "00:00:04:00",
+          "source_out": 150,
+          "start": 150,
+          "start_tc": "00:00:06:00",
+          "track": "V1",
+          "type": "clip"
+        }
+      ],
+      "kind": "video",
+      "locked": false,
+      "muted": false
+    }
+  ]
+}

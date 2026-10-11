@@ -1,0 +1,34 @@
+---
+source: crates/vidcut-core/src/ops_tests.rs
+expression: r.result
+---
+{
+  "at": 155,
+  "at_tc": "00:00:06:05",
+  "clips": [
+    {
+      "audio": {
+        "gain_db": 0.0,
+        "head": 0,
+        "muted": false,
+        "stream": 0,
+        "tail": 0
+      },
+      "duration": 50,
+      "enabled": true,
+      "end": 200,
+      "end_tc": "00:00:08:00",
+      "id": "c3",
+      "media": "m1",
+      "name": "1.mp4",
+      "source_frame": 105,
+      "source_in": 100,
+      "source_in_tc": "00:00:04:00",
+      "source_out": 150,
+      "start": 150,
+      "start_tc": "00:00:06:00",
+      "track": "V1",
+      "type": "clip"
+    }
+  ]
+}

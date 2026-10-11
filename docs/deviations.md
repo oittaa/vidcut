@@ -41,3 +41,8 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 - **Resolve:** nested bins and a breadcrumb (pp. 655–656).
 - **vidcut v1:** one flat pool. Source Tape covers the whole pool.
 - **Why:** temporary scope cut. Bins are scheduled for the multi-track milestone.
+
+## X7. Timelines start at 00:00:00:00
+- **Resolve:** new timelines start at record timecode 01:00:00:00 (p. 678).
+- **vidcut:** the start timecode defaults to 00:00:00:00, and `project.set --start-tc 01:00:00:00` changes it. Timecodes typed into commands are record timecodes, so they follow the setting.
+- **Why:** with a zero start, timecode, seconds and frame numbers all count from the same point. Scripts and agents mix all three, and a hidden one-hour offset would make `00:01:00:00` and `60s` mean different frames.

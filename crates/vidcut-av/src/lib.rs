@@ -32,3 +32,16 @@ pub fn init() {
         ffmpeg::util::log::set_level(level);
     });
 }
+
+/// Versions of the linked FFmpeg libraries, e.g. `{"libavcodec": "62.11.100"}`.
+pub fn library_versions() -> std::collections::BTreeMap<&'static str, String> {
+    let v = |n: u32| format!("{}.{}.{}", n >> 16, (n >> 8) & 0xff, n & 0xff);
+    [
+        ("libavcodec", v(ffmpeg::codec::version())),
+        ("libavformat", v(ffmpeg::format::version())),
+        ("libavfilter", v(ffmpeg::filter::version())),
+        ("libavutil", v(ffmpeg::util::version())),
+    ]
+    .into_iter()
+    .collect()
+}

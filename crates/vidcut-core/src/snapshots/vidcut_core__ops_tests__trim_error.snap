@@ -1,0 +1,8 @@
+---
+source: crates/vidcut-core/src/ops_tests.rs
+expression: e
+---
+{
+  "code": "INVALID_EDIT",
+  "message": "c1 would need source frames -1..100, but m1 has 0..250"
+}
