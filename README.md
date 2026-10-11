@@ -108,6 +108,7 @@ Typed timecodes fill from the right: 100 is 1 second, 10000 is 1 minute.
 | Key | Does |
 |---|---|
 | Ctrl+\\ | Split at the playhead |
+| Ctrl+B | Split at the playhead (no AltGr needed on any keyboard layout) |
 | Delete | Delete the selected clips and close the gap (with In and Out set: delete that range) |
 | Alt+Delete | Delete the selected clips and leave the gap (lift) |
 | Ctrl+C | Copy |

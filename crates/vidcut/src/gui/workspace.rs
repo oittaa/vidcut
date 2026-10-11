@@ -686,6 +686,24 @@ impl Workspace {
 
     /// Keyboard shortcuts (spec §11). Ignored while a text field has focus.
     fn keys(&mut self, ctx: &egui::Context) {
+        // `VIDCUT_DEBUG_PLAYER=1` traces key presses too: what a keyboard
+        // layout sends for a shortcut.
+        if crate::live::debug() {
+            ctx.input(|i| {
+                for e in &i.events {
+                    if let egui::Event::Key {
+                        key,
+                        physical_key,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } = e
+                    {
+                        eprintln!("[keys] {key:?} (physical {physical_key:?}) {modifiers:?}");
+                    }
+                }
+            });
+        }
         if ctx.egui_wants_keyboard_input() {
             return;
         }
@@ -862,7 +880,9 @@ impl Workspace {
                 "edit.place_on_top"
             });
         }
-        if pressed(Key::Backslash) && m.command {
+        // Ctrl+\ splits; Ctrl+B too, which every keyboard layout
+        // types without AltGr.
+        if (pressed(Key::Backslash) || pressed(Key::B)) && m.command {
             self.send(
                 "edit.split",
                 json!({ "at": self.snap.timeline.position, "clips": self.snap.selection.clips }),
