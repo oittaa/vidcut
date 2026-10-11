@@ -19,7 +19,7 @@ use super::geometry::{Hit, Rows, SNAP_PX, Scale, Snap, clips_in, edit_near, hit_
 /// (decision D11).
 pub const HOVER: Duration = Duration::from_millis(800);
 
-/// Pushing against a neighbor this long overrides Safe Edit (p. 732).
+/// Pushing against a neighbor this long overrides Safe Edit.
 pub const SAFE_EDIT_HOLD: Duration = Duration::from_millis(600);
 
 /// Pixels around an edit point that make a drop an insert.
@@ -29,9 +29,9 @@ const DROP_EDIT_PX: f32 = 6.0;
 pub enum Gesture {
     /// Moving the playhead. With `drag_content` (the lower timeline with a
     /// fixed playhead) dragging moves the clips under the playhead instead
-    /// (p. 716).
+    ///.
     Scrub { drag_content: bool, from: f64 },
-    /// Dragging clips (p. 720–723).
+    /// Dragging clips.
     Move {
         clips: Vec<String>,
         /// The track of the clip grabbed.
@@ -42,24 +42,24 @@ pub enum Gesture {
         start: i64,
         len: i64,
     },
-    /// Resizing a clip edge (p. 726). `ripple` is false with Alt held.
+    /// Resizing a clip edge. `ripple` is false with Alt held.
     Trim {
         clip: String,
         edge: Edge,
         from: i64,
         ripple: bool,
     },
-    /// Rolling an edit (p. 727).
+    /// Rolling an edit.
     Roll { outgoing: String, from: i64 },
-    /// Slipping clips' content (p. 727).
+    /// Slipping clips' content.
     Slip { clips: Vec<String> },
-    /// Moving only the audio edit: a J/L cut (p. 728).
+    /// Moving only the audio edit: a J/L cut.
     AudioRoll { outgoing: String, from: i64 },
-    /// Selecting clips with a rectangle (p. 719).
+    /// Selecting clips with a rectangle.
     Marquee { additive: bool },
-    /// Dragging a marker on the ruler (p. 718).
+    /// Dragging a marker on the ruler.
     Marker { id: String, from: i64 },
-    /// Dragging the timeline In or Out on the ruler (p. 692).
+    /// Dragging the timeline In or Out on the ruler.
     Mark { is_in: bool, from: i64 },
     /// Dragging media from the pool (spec §7.3).
     Media {
@@ -78,11 +78,11 @@ pub enum Gesture {
 pub enum Target {
     #[default]
     None,
-    /// Insert at an edit point (it highlights, p. 723).
+    /// Insert at an edit point (it highlights).
     Insert(i64),
-    /// Replace a clip (the whole clip highlights, p. 720).
+    /// Replace a clip (the whole clip highlights).
     Replace(String),
-    /// Write over `[a, b)` (the footprint highlights, p. 721).
+    /// Write over `[a, b)` (the footprint highlights).
     Overwrite(i64, i64),
     /// After the last clip.
     Append,
@@ -96,14 +96,14 @@ pub struct Preview {
     pub target: Target,
     /// Frames the moved or incoming block would cover.
     pub ghost: Option<(i64, i64)>,
-    /// A frame being snapped to (the white line, p. 716).
+    /// A frame being snapped to (the white line).
     pub snapped: Option<i64>,
-    /// Frames moved and the new duration, for the tooltip (p. 726).
+    /// Frames moved and the new duration, for the tooltip.
     pub delta: Option<(i64, Option<i64>)>,
     /// Where the playhead should be (scrubbing).
     pub seek: Option<i64>,
     pub marquee: Option<Rect>,
-    /// Safe Edit stopped the trim at a neighbor (p. 732).
+    /// Safe Edit stopped the trim at a neighbor.
     pub blocked: bool,
     /// The track whose row shows the target and ghost (maybe a new one).
     pub row: Option<String>,
@@ -421,7 +421,7 @@ fn move_preview(
     if dest == MAIN {
         let own = |f: i64| from == MAIN && (f == start || f == start + len);
         let end = t.end();
-        // Dropping on an edit point inserts there (p. 723).
+        // Dropping on an edit point inserts there.
         if let Some(e) = edit_near(t, &ctx.scale, pos.x, DROP_EDIT_PX).filter(|&e| !own(e)) {
             return Preview {
                 request: request(
@@ -435,7 +435,7 @@ fn move_preview(
             };
         }
         // Over another Track 1 clip: replace it right away, overwrite after
-        // hovering. Clips from other tracks only overwrite (p. 721).
+        // hovering. Clips from other tracks only overwrite.
         let on_main = under
             .as_ref()
             .filter(|u| !clips.contains(u))
@@ -477,7 +477,7 @@ fn move_preview(
             };
         }
         // Elsewhere (over itself, a gap, or a neighbor's edge without the
-        // pointer reaching it): overwrite at the new position (p. 722).
+        // pointer reaching it): overwrite at the new position.
         return overwrite_move(clips, ghost, len, snapped, &elsewhere);
     }
     // Other tracks don't ripple: the clips go where they are dropped.
@@ -538,7 +538,7 @@ fn media_preview(
             .project
             .media(media)
             .is_some_and(|m| m.info.video.is_some());
-    // Sound alone goes on an audio track (p. 648).
+    // Sound alone goes on an audio track.
     if !has_video && dest.starts_with('V') {
         let audio = ctx.project.tracks_of(TrackKind::Audio);
         dest = audio
@@ -560,7 +560,7 @@ fn media_preview(
     };
     let row = Some(dest.clone());
     if dest != MAIN {
-        // Other tracks: written where it is dropped (made if new, p. 648).
+        // Other tracks: written where it is dropped (made if new).
         let raw = ctx.scale.boundary(pos.x).max(0);
         let (at, snapped) = match ctx.snap {
             Some(s) => s.snap_block(raw, len, &ctx.scale, SNAP_PX),
@@ -990,7 +990,7 @@ mod tests {
 
     #[test]
     fn dropping_a_clip_on_an_edit_inserts_there() {
-        // p. 723: the edit highlights; the clip is inserted there.
+        // The edit highlights; the clip is inserted there.
         let w = World::new();
         let r = w.drag(
             mv(&["c3"], 400.0, 150, 100),
@@ -1008,7 +1008,7 @@ mod tests {
 
     #[test]
     fn dropping_on_a_clip_replaces_it_and_hovering_overwrites() {
-        // p. 720–721 and decision D11.
+        // Decision D11.
         let w = World::new();
         let quick = w.drag(
             mv(&["c3"], 400.0, 150, 100),
@@ -1037,7 +1037,7 @@ mod tests {
 
     #[test]
     fn a_small_drag_overwrites_the_neighbors_edge() {
-        // p. 722: c2 dragged 10 frames right, the pointer still over c2.
+        // C2 dragged 10 frames right, the pointer still over c2.
         let w = World::new();
         let r = w.drag(
             mv(&["c2"], 250.0, 100, 50),
@@ -1090,7 +1090,7 @@ mod tests {
 
     #[test]
     fn trims_ripple_unless_alt_and_respect_media() {
-        // p. 726: dragging c2's tail 10 frames right.
+        // Dragging c2's tail 10 frames right.
         let w = World::new();
         let tail = Gesture::Trim {
             clip: "c2".into(),
@@ -1144,7 +1144,7 @@ mod tests {
 
     #[test]
     fn safe_edit_stops_at_the_neighbor_until_pushed() {
-        // p. 732, with Ripple Off: c2 (100..150) ends where c3 starts, so
+        // With Ripple Off: c2 (100..150) ends where c3 starts, so
         // extending its tail stops at once; pushing on overrides it.
         let mut w = World::new();
         w.safe_edit = true;
@@ -1168,7 +1168,7 @@ mod tests {
     #[test]
     fn rolls_slips_and_audio_rolls() {
         let w = World::new();
-        // p. 727: roll the c1|c2 edit 5 frames left.
+        // Roll the c1|c2 edit 5 frames left.
         let r = w.drag(
             Gesture::Roll {
                 outgoing: "c1".into(),
@@ -1184,7 +1184,7 @@ mod tests {
                 json!({"method": "edit.roll", "params": {"clip": "c1", "edge": "tail", "by": -5}})
             )
         );
-        // p. 727: dragging c2's slip handle 4 frames right shows earlier media.
+        // Dragging c2's slip handle 4 frames right shows earlier media.
         let r = w.drag(
             Gesture::Slip {
                 clips: vec!["c2".into()],
@@ -1197,7 +1197,7 @@ mod tests {
             r,
             Some(json!({"method": "edit.slip", "params": {"clip": "c2", "by": -4}}))
         );
-        // p. 728: an L-cut, c1's audio 6 frames into c2.
+        // An L-cut, c1's audio 6 frames into c2.
         let r = w.drag(
             Gesture::AudioRoll {
                 outgoing: "c1".into(),
@@ -1281,8 +1281,8 @@ mod tests {
 
     #[test]
     fn clips_and_media_go_to_the_track_under_the_pointer() {
-        // M6: rows for V2 (y 40..90) over V1 (100..200); a new video track
-        // above them, a new audio track below (p. 648).
+        // Rows for V2 (y 40..90) over V1 (100..200); a new video track
+        // above them, a new audio track below.
         let mut b = clip("b1", 300, 40, 0);
         b.audio = None;
         let w = World::with_v2(vec![b]);
@@ -1381,7 +1381,7 @@ mod tests {
 
     #[test]
     fn sound_alone_goes_on_an_audio_track() {
-        // p. 648: music dropped on a video track goes to an audio track.
+        // Music dropped on a video track goes to an audio track.
         let mut w = World::new();
         let mut music = media("m3", 500);
         music.info.video = None;

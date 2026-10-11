@@ -1,4 +1,4 @@
-//! Stills and image sequences (M9). Each test cites the manual page or
+//! Stills and image sequences. Each test cites the spec section or
 //! decision it checks. Media: m1 = 10 s of video with audio (25 fps).
 
 use std::path::PathBuf;
@@ -26,8 +26,8 @@ fn with_still() -> Fixture {
 
 #[test]
 fn a_still_lasts_the_still_duration_and_as_long_as_an_edit_makes_it() {
-    // p. 114: edited without a range a still lasts the standard still
-    // duration (5 s); p. 1194: it can be made up to 17 h 40 min long.
+    // Edited without a range a still lasts the standard still
+    // duration (5 s); it can be made up to 17 h 40 min long.
     let mut f = with_still();
     let p = f.editor.project();
     let m = p.media("m2").unwrap();
@@ -88,7 +88,7 @@ fn a_still_leaves_the_project_format_to_video() {
 
 #[test]
 fn numbered_images_make_one_clip_at_a_rate() {
-    // p. 366: a numbered sequence is one clip; decision D39: added with
+    // A numbered sequence is one clip; decision D39: added with
     // `sequence`, at the project's rate unless `fps` says otherwise.
     let mut f = Fixture::new(&[(10.0, true)]);
     f.env = std::mem::take(&mut f.env)
@@ -169,7 +169,7 @@ fn plans_say_how_pictures_are_read() {
 #[test]
 fn stills_and_sequences_travel_through_otio() {
     // Deviation X9: a sequence as OTIO's ImageSequenceReference, a still as
-    // a file available for one frame (as Resolve writes stills); both come
+    // a file available for one frame; both come
     // back as they were.
     let mut f = with_still();
     f.env = std::mem::take(&mut f.env).with_sequence("/renders", "frame_%04d.png", 100, 50);

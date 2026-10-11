@@ -25,16 +25,17 @@ It is written in Rust:
    - Deviate only when you have a clearly better idea, and record it in [docs/deviations.md](docs/deviations.md) with Resolve's behavior and page, our behavior, and the justification.
    - When the manual is silent or contradictory, add a decision to §12 of the spec.
    - The manual is `DaVinci_Resolve_21.1_Reference_Manual.pdf` in `$VIDCUT_TEST_DATA`. Read pages with `pdftotext -f N -l N <pdf> -`; the Cut page is pp. 635–790. Never paste manual text into the repo; describe behavior in your own words.
-2. **One mutation path.**
+2. **The code never names DaVinci Resolve.** Nothing in `crates/`, comments included, mentions Resolve or cites its manual's pages, and neither does anything vidcut shows or prints (GUI text, `--help`, the schema, MCP text, errors). Cite the spec instead (`spec §7`, `decision D41`, `deviation X9`); the spec maps to the manual. The only exception is file-format data other editors need, such as the OTIO metadata keys they read.
+3. **One mutation path.**
    - Every feature is a `Request` handled by the core Session, so the GUI, CLI, IPC and MCP have identical capabilities.
    - GUI gestures emit one Request when they complete.
    - Never mutate project state from GUI code directly.
-3. **No media in git.**
+4. **No media in git.**
    - Test media, generated fixtures and the manual live in `$VIDCUT_TEST_DATA` (default `~/Downloads/vidcut-tmp`), the one place for test data. Test outputs go to temp dirs.
    - `scripts/check.sh` (the pre-commit hook and CI) refuses any binary file, whatever its name, so `.gitignore` lists no file types.
    - Real-world clips are listed in `tests/media-manifest.toml` (URL, license, sha256) and fetched by `scripts/fetch-test-media.sh`.
-4. **No ffmpeg/ffprobe subprocesses.** Use `vidcut-av`, the FFmpeg libraries. libmpv is used only for interactive preview.
-5. **License:** MIT. Don't add dependencies with licenses incompatible with MIT distribution of our source.
+5. **No ffmpeg/ffprobe subprocesses.** Use `vidcut-av`, the FFmpeg libraries. libmpv is used only for interactive preview.
+6. **License:** MIT. Don't add dependencies with licenses incompatible with MIT distribution of our source.
 
 ## Workspace layout
 
@@ -123,7 +124,7 @@ These are mandatory.
   - Stills and image sequences: `fixture::ensure_images` writes barcode pictures as PNG or JPEG files, one or numbered (`ImageSpec::still`, `ImageSpec::sequence`).
   - Damaged files: `fixture::spoil` copies one with a packet left out or zeroed.
 - **Real-world clips:** `scripts/fetch-test-media.sh` downloads the clips in `tests/media-manifest.toml` to `$VIDCUT_TEST_DATA/media/<name>/<file>` and checks their sha256. They cover H.264 1080p30 and 2160p60 (two audio streams each, stereo MP3 and 5.1 AC-3), a 24000/1001 QuickTime file with 44.1 kHz audio, VP8/Vorbis 5.1 WebM with an unknown sample aspect ratio, and a short HEVC clip.
-- **Edit-operation tests** cite the spec section or manual page they check.
+- **Edit-operation tests** cite the spec section or decision they check.
 - **Golden tests** (insta snapshots in `src/snapshots/`) cover protocol output that agents parse.
   - After an intended change, regenerate with `INSTA_UPDATE=always cargo test`.
   - Review the diff before committing.

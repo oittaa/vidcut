@@ -1,6 +1,6 @@
 //! The project model: settings, media pool, tracks and clips.
 //!
-//! The track model follows the Cut page (spec §6): numbered tracks `V1…Vn`
+//! The track model (spec §6): numbered tracks `V1…Vn`
 //! hold combined video+audio clips, `A1…An` hold audio-only clips, and V1 is
 //! magnetic while Ripple On is set. All positions and lengths are integer
 //! frames at the project frame rate; `source_in` counts project frames from the
@@ -16,8 +16,7 @@ use crate::time::{Rational, TimeContext};
 /// Version of the project file format.
 pub const FORMAT_VERSION: u32 = 1;
 
-/// How long a still may last in the timeline, seconds: 17 h 40 min, as in
-/// Resolve (p. 1194).
+/// How long a still may last in the timeline, seconds: 17 h 40 min.
 pub const STILL_LIMIT_SECS: f64 = 63_600.0;
 
 /// A whole project: one timeline (deviation X2) plus its media pool.
@@ -42,7 +41,7 @@ pub struct Project {
     pub tape_marks: TapeMarks,
     pub markers: Vec<Marker>,
     pub next_id: NextIds,
-    /// Media Pool bins (p. 655), as `/`-separated paths below the top level
+    /// Media Pool bins, as `/`-separated paths below the top level
     /// (`Interviews`, `Interviews/Day 1`), sorted.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bins: Vec<String>,
@@ -55,15 +54,14 @@ pub struct Settings {
     pub height: u32,
     pub sample_rate: u32,
     pub channels: u16,
-    /// Track 1 ripples on insert, delete, move and trim (the Cut page's Ripple On).
+    /// Track 1 ripples on insert, delete, move and trim (Ripple On).
     pub ripple_on: bool,
     /// Record timecode of timeline frame 0, in frames (deviation X7: 0, not 01:00:00:00).
     pub start_tc: i64,
     /// Format not chosen yet: the first video media added sets fps and size.
     pub auto_format: bool,
     /// How long a still lasts when edited without a range or marks, and
-    /// what the viewer shows of it, in seconds: Resolve's standard still
-    /// duration (p. 114; decision D38).
+    /// what the viewer shows of it, in seconds (decision D38).
     pub still_secs: f64,
     /// The preview plays a fresh proxy instead of the original picture
     /// (decision D41). Export, frames, analysis and OTIO ignore this.
@@ -169,7 +167,7 @@ impl Media {
     }
 }
 
-/// Numbered image files making one clip (p. 366): the pictures of a render
+/// Numbered image files making one clip: the pictures of a render
 /// or a scan, one file per frame.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct ImageSequence {
@@ -222,7 +220,7 @@ impl ImageSequence {
         self.fill(|w| format!("{n:0w$}"))
     }
 
-    /// The pool's name for it, as Resolve shows one: `frame_[000-119].png`.
+    /// The pool's name for it: `frame_[000-119].png`.
     pub fn display(&self) -> String {
         let last = self.first + self.count.saturating_sub(1);
         self.fill(|w| format!("[{:0w$}-{last:0w$}]", self.first))
@@ -373,8 +371,7 @@ pub struct Track {
     pub locked: bool,
     /// Audio of this track is silent.
     pub muted: bool,
-    /// While any track is soloed, only soloed tracks are heard (the mixer,
-    /// p. 650).
+    /// While any track is soloed, only soloed tracks are heard (the mixer).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub solo: bool,
     /// The mixer fader, in dB (decision D12's range, -60..24).
@@ -410,14 +407,14 @@ pub struct Clip {
     /// The clip's audio, if it carries any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio: Option<ClipAudio>,
-    /// Disabled clips are kept but not shown (the Cut page's D key).
+    /// Disabled clips are kept but not shown (the D key).
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 }
 
-/// A clip with the track it is on: what `edit.copy` returns and
-/// `edit.paste` takes (paste puts clips back on their own tracks, p. 723).
+/// A clip with the track it is on: what `edit.copy` returns and `edit.paste`
+/// takes (paste puts clips back on their own tracks).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TrackClip {
     pub track: String,
@@ -589,7 +586,7 @@ impl Project {
     /// takes without a range or marks, and what the viewer shows. A frame
     /// counts if it is at least 95% present, so container timestamp rounding
     /// (1 ms in Matroska) doesn't lose the last frame. A still lasts the
-    /// project's still duration here (p. 114), though a clip may make it
+    /// project's still duration here, though a clip may make it
     /// longer ([`media_limit`](Self::media_limit)).
     pub fn media_frames(&self, media: &Media) -> i64 {
         let secs = match (&media.info.video, media.info.audio.first()) {
@@ -602,7 +599,7 @@ impl Project {
     }
 
     /// The source frames clips of `media` may use: [`media_frames`]
-    /// (Self::media_frames), or for a still up to 17 h 40 min (p. 1194).
+    /// (Self::media_frames), or for a still up to 17 h 40 min.
     pub fn media_limit(&self, media: &Media) -> i64 {
         if media.is_still() {
             self.frames_in(STILL_LIMIT_SECS)

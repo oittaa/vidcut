@@ -202,10 +202,10 @@ fn missing_media_is_an_error_unless_found_by_name() {
     assert_eq!(e.code, crate::ErrorCode::Usage);
 }
 
-/// A file as Resolve writes it: `Clip.1`, source ranges in the media's
+/// A file as editors write one: `Clip.1`, source ranges in the media's
 /// timecode relative to its available range, float rates, a transition,
 /// music on the audio track.
-fn resolve_style() -> Value {
+fn editor_style() -> Value {
     let t = |v: f64| json!({"OTIO_SCHEMA": "RationalTime.1", "rate": 24.0, "value": v});
     let r = |s: f64, d: f64| json!({"OTIO_SCHEMA": "TimeRange.1", "start_time": t(s), "duration": t(d)});
     let reference = |file: &str, available: Option<Value>| {
@@ -247,8 +247,8 @@ fn resolve_style() -> Value {
 }
 
 #[test]
-fn reads_resolve_style_files() {
-    let t = import(&resolve_style(), None).unwrap();
+fn reads_editor_style_files() {
+    let t = import(&editor_style(), None).unwrap();
     assert_eq!(t.fps, Rational::new(24, 1).unwrap());
     assert_eq!(t.start_tc, 86400);
     let v1: Vec<&ImportedClip> = t.clips.iter().filter(|c| c.track == "V1").collect();
@@ -293,7 +293,7 @@ fn reads_resolve_style_files() {
         .with("/media/A001.mov", media_info(1000.0 / 24.0, fps, true))
         .with("/media/A002.mov", media_info(10.0, fps, false))
         .with("/media/music.wav", music);
-    let r = f.ok(req("timeline.import", json!({ "otio": resolve_style() })));
+    let r = f.ok(req("timeline.import", json!({ "otio": editor_style() })));
     let p = f.editor.project();
     assert_eq!((p.settings.fps, p.settings.start_tc), (fps, 86400));
     assert_eq!(
@@ -357,7 +357,7 @@ fn imported_gains_stay_within_range() {
 
 #[test]
 fn files_without_audio_tracks_bring_media_audio() {
-    let mut doc = resolve_style();
+    let mut doc = editor_style();
     let tracks = doc["tracks"]["children"].as_array_mut().unwrap();
     tracks.retain(|t| t["kind"] == "Video");
     let fps = Rational::new(24, 1).unwrap();
@@ -396,7 +396,7 @@ fn media_urls_and_paths() {
     );
     assert_eq!(paths("file:///a b/c #1.mov", None), ["/a b/c #1.mov"]);
     assert_eq!(paths("file://localhost/a/b.mov", None), ["/a/b.mov"]);
-    // Plain paths as Resolve writes them: as they are first.
+    // Plain paths: as they are first.
     assert_eq!(paths("/plain/50%.mov", None), ["/plain/50%.mov"]);
     assert_eq!(paths("/a/b%20c.mov", None), ["/a/b%20c.mov", "/a/b c.mov"]);
     assert!(locate("file://server/share/a.mov", None, fps).is_none());
@@ -426,7 +426,7 @@ fn media_urls_and_paths() {
             "/home/me/Proj/A001.mov"
         ]
     );
-    // Windows paths, as Resolve on Windows writes them: only near the file
+    // Windows paths, as editors on Windows write them: only near the file
     // here, and by name.
     let w = locate(
         "E:\\subMedia\\Mel\\Mel q7-camera2.mp4",
@@ -447,7 +447,7 @@ fn media_urls_and_paths() {
     );
     let w = locate("file:///C:/Users/me/a%20b.mov", None, fps).unwrap();
     assert_eq!((w.file_name.as_str(), w.paths.len()), ("a b.mov", 0));
-    // An image sequence named as Resolve shows one.
+    // An image sequence named by its range.
     let s = locate("/renders/frame_[0001-0120].png", None, fps).unwrap();
     assert_eq!(s.paths, [PathBuf::from("/renders/frame_0001.png")]);
     assert_eq!(
@@ -472,7 +472,7 @@ fn rates_become_exact() {
 
 #[test]
 fn several_tracks_round_trip() {
-    // M6: B-roll on V2, music on A1, track settings, an audio-only clip on
+    // B-roll on V2, music on A1, track settings, an audio-only clip on
     // V2 and a muted, soloed, faded track.
     let mut f = busy();
     let music = f.add_music("music.wav", 20.0);
@@ -558,10 +558,10 @@ fn several_tracks_round_trip() {
 }
 
 #[test]
-fn resolve_style_tracks_map_onto_ours() {
-    // A Resolve-style file: B-roll with linked audio on Video 2/Audio 2,
+fn editor_style_tracks_map_onto_ours() {
+    // An editor's file: B-roll with linked audio on Video 2/Audio 2,
     // and music alone on Audio 3.
-    let doc = resolve_style();
+    let doc = editor_style();
     let mut doc = doc;
     let tracks = doc["tracks"]["children"].as_array_mut().unwrap();
     // Video 2 gets a clip of A002 over A001, with its audio on a new
@@ -640,10 +640,10 @@ fn otio_clips(track: &Value) -> Vec<&Value> {
 }
 
 #[test]
-fn writes_what_resolve_reads() {
-    // Resolve places sources by timecode, links a clip's video and audio by
-    // a group number, reads plain paths, its own clip volume and track
-    // settings (deviation X9).
+fn writes_what_editors_read() {
+    // Sources placed by timecode, a clip's video and audio linked by a group
+    // number, plain paths, the clip volume and track settings in the editor
+    // metadata (deviation X9).
     let f = busy();
     let mut p = f.editor.project().clone();
     p.media[0].info.timecode = Some(crate::model::StartTimecode {
@@ -684,7 +684,7 @@ fn writes_what_resolve_reads() {
             {"Source Channel ID": 1, "Source Track ID": 0}
         ])
     );
-    // c2's -6 dB as Resolve's clip volume.
+    // c2's -6 dB as the clip volume.
     let volume = &audio[1]["effects"][0]["metadata"]["Resolve_OTIO"];
     assert_eq!(volume["Effect Name"], "Fairlight Clip Volume and Fades");
     assert_eq!(volume["Parameters"][0]["Parameter Value"], -6.0);
@@ -692,7 +692,7 @@ fn writes_what_resolve_reads() {
     let sound = &otio_track(&doc, "V1 audio")["metadata"]["Resolve_OTIO"];
     assert_eq!(sound["Audio Type"], "Stereo");
     assert_eq!(sound["Locked"], false);
-    // Markers: a frame long, the note where Resolve keeps it too.
+    // Markers: a frame long, the note in the editor metadata too.
     let marker = &doc["tracks"]["markers"][1];
     assert_eq!(marker["marked_range"]["duration"]["value"], 1.0);
     assert_eq!(marker["comment"], "check");
@@ -708,8 +708,8 @@ fn writes_what_resolve_reads() {
 
 #[test]
 fn stills_and_sequences_round_trip() {
-    // A still is available for one frame, as Resolve writes it; a numbered
-    // sequence is an ImageSequenceReference (M9).
+    // A still is available for one frame; a numbered sequence is an
+    // ImageSequenceReference.
     let mut f = Fixture::new(&[(10.0, true)]);
     f.env = std::mem::take(&mut f.env)
         .with(
@@ -777,23 +777,19 @@ fn stills_and_sequences_round_trip() {
     );
 }
 
-/// A timeline as DaVinci Resolve exports one (the shapes of real exports,
-/// cut down): `Clip.2` with Resolve's effects, Windows paths, a link group
+/// A timeline as an editor exports one (the shapes of real exports, cut
+/// down): `Clip.2` with the editor's effects, Windows paths, a link group
 /// number on each clip's video and audio, the stream in a channel map,
-/// clip volume, media Resolve had offline, a clip marker, timecode source
+/// clip volume, media the editor had offline, a clip marker, timecode source
 /// ranges with float noise, no timeline name.
-fn resolve_export() -> Value {
+fn editor_export() -> Value {
     let t = |v: f64| json!({"OTIO_SCHEMA": "RationalTime.1", "rate": 24.0, "value": v});
     let r = |s: f64, d: f64| json!({"OTIO_SCHEMA": "TimeRange.1", "start_time": t(s), "duration": t(d)});
     let effect = |meta: Value| json!({"OTIO_SCHEMA": "Effect.1", "name": "", "effect_name": "Resolve Effect", "metadata": {"Resolve_OTIO": meta}});
-    let clip = |name: &str,
-                source: Value,
-                reference: Value,
-                resolve: Value,
-                effects: Vec<Value>| {
+    let clip = |name: &str, source: Value, reference: Value, editor: Value, effects: Vec<Value>| {
         json!({
             "OTIO_SCHEMA": "Clip.2", "name": name, "source_range": source, "effects": effects,
-            "markers": [], "enabled": true, "metadata": {"Resolve_OTIO": resolve},
+            "markers": [], "enabled": true, "metadata": {"Resolve_OTIO": editor},
             "media_references": {"DEFAULT_MEDIA": reference}, "active_media_reference_key": "DEFAULT_MEDIA"
         })
     };
@@ -858,8 +854,8 @@ fn resolve_export() -> Value {
 }
 
 #[test]
-fn reads_resolve_exports() {
-    let t = import(&resolve_export(), None).unwrap();
+fn reads_editor_exports() {
+    let t = import(&editor_export(), None).unwrap();
     assert_eq!((t.fps, t.start_tc), (Rational::new(24, 1).unwrap(), 86_400));
     let on =
         |id: &str| -> Vec<&ImportedClip> { t.clips.iter().filter(|c| c.track == id).collect() };
@@ -887,10 +883,11 @@ fn reads_resolve_exports() {
     assert_eq!((a1[0].start, a1[0].video, a1[0].stream), (48, false, 1));
     assert!(
         t.tracks.iter().any(|s| s.id == "V1" && s.locked),
-        "Resolve's track lock"
+        "the editor's track lock"
     );
     assert!(t.tracks.iter().any(|s| s.id == "A1" && s.solo));
-    // The clip marker lands where it is in the clip; the note is Resolve's.
+    // The clip marker lands where it is in the clip; the note is the
+    // editor's.
     assert_eq!(
         t.markers,
         vec![
@@ -920,11 +917,11 @@ fn reads_resolve_exports() {
     f.env = FakeEnv::default()
         .with("/footage/day1/A001.mov", two)
         .with("/Volumes/Shoot/B002.mov", media_info(10.0, fps, false));
-    let e = f.err(req("timeline.import", json!({ "otio": resolve_export() })));
+    let e = f.err(req("timeline.import", json!({ "otio": editor_export() })));
     assert!(e.message.contains("E:\\Shoot\\Day 1\\A001.mov"), "{e}");
     let r = f.ok(req(
         "timeline.import",
-        json!({ "otio": resolve_export(), "search": ["/footage"] }),
+        json!({ "otio": editor_export(), "search": ["/footage"] }),
     ));
     assert_eq!(r.result["media"], json!(["m1", "m2"]));
     let p = f.editor.project();
@@ -948,7 +945,7 @@ fn relative_paths_count_from_the_file() {
     let bundle = dir.join("cut.otiod");
     std::fs::create_dir_all(&bundle).unwrap();
     let fps = Rational::new(25, 1).unwrap();
-    let mut doc = resolve_style();
+    let mut doc = editor_style();
     let urls = [
         "media/A001.mov",
         "/Volumes/Proj/A002.mov",
@@ -1020,8 +1017,7 @@ fn relative_paths_count_from_the_file() {
 #[test]
 fn source_timecode_without_available_ranges() {
     // A writer that leaves out available ranges still counts sources in the
-    // media's timecode, as Resolve does: the media's start timecode comes
-    // off them.
+    // media's timecode: the media's start timecode comes off them.
     let t = |v: f64| json!({"OTIO_SCHEMA": "RationalTime.1", "rate": 25.0, "value": v});
     let r = |s: f64, d: f64| json!({"OTIO_SCHEMA": "TimeRange.1", "start_time": t(s), "duration": t(d)});
     let clip = |file: &str, s: f64| {

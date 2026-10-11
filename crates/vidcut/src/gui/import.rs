@@ -1,4 +1,4 @@
-//! Importing media (Ctrl+I, p. 654). Numbered images among the files are
+//! Importing media (Ctrl+I). Numbered images among the files are
 //! asked about: one clip per numbered run (an image sequence, decision D39)
 //! or separate stills (deviation X17). Either way the import is one
 //! request.
@@ -188,8 +188,8 @@ fn guard_import_shortcuts(ui: &mut egui::Ui) {
 }
 
 impl Workspace {
-    /// Ctrl+I: pick media files to import (p. 654), into the bin the pool
-    /// shows (p. 655).
+    /// Ctrl+I: pick media files to import, into the bin the pool
+    /// shows.
     pub(super) fn import_media(&self) {
         if self.project().is_none() {
             return;

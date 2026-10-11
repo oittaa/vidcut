@@ -1,4 +1,4 @@
-//! M7 acceptance: an agent drives vidcut over MCP (`vidcut mcp`). Headless
+//! An agent drives vidcut over MCP (`vidcut mcp`). Headless
 //! it makes a project and looks at a frame; against a live session (the
 //! GUI's core, serving IPC) it imports, ripple-deletes the silences longer
 //! than 0.7 s, exports and checks a storyboard, while the session shows the

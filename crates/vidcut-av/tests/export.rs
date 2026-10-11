@@ -1385,7 +1385,7 @@ fn pictures(path: &Path, image: Image, source_frame: i64, frames: i64) -> VideoP
 
 #[test]
 fn stills_show_one_picture_for_as_long_as_they_last() {
-    // A still lasts as long as its clip (p. 1194), from any source frame:
+    // A still lasts as long as its clip, from any source frame:
     // every frame is its one picture. PNG and JPEG alike.
     let fps = Rational::new(30, 1).unwrap();
     let png = fixture::ensure_images(&ImageSpec::still(77, 320, 180, "png")).unwrap();
@@ -1423,7 +1423,7 @@ fn stills_show_one_picture_for_as_long_as_they_last() {
 
 #[test]
 fn sequences_play_their_pictures_at_their_rate() {
-    // Numbered images are one clip (p. 366) at a rate: here 30 fps on a 30
+    // Numbered images are one clip at a rate: here 30 fps on a 30
     // fps timeline, frame for frame, then 24 fps, by the sampling rule.
     let fps = Rational::new(30, 1).unwrap();
     let files = fixture::ensure_images(&ImageSpec::sequence(1000, 60, 4, 320, 180)).unwrap();

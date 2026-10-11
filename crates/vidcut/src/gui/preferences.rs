@@ -1,6 +1,5 @@
-//! File > Preferences (Ctrl+,): application preferences, like Resolve's
-//! Preferences window (p. 94) but holding only what vidcut needs. Each change
-//! is one `preferences.set`, sent when it is made.
+//! File > Preferences (Ctrl+,): application preferences, holding only what
+//! vidcut needs. Each change is one `preferences.set`, sent when it is made.
 
 use eframe::egui::{self, RichText};
 use serde_json::{Value, json};

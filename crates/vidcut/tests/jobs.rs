@@ -1,4 +1,4 @@
-//! Export jobs in the live session (M5): foreground exports with progress,
+//! Export jobs in the live session: foreground exports with progress,
 //! background exports, waiting and cancelling, as `vidcut jobs` sees them.
 //! No players and no display.
 
@@ -210,7 +210,7 @@ fn export_jobs() {
     assert_eq!(ok(&h, "jobs.list", json!({})).as_array().unwrap().len(), 4);
 
     // 5. An export the person at the GUI started can be cancelled from the
-    // CLI (M5 acceptance). A long timeline keeps it running meanwhile.
+    // CLI. A long timeline keeps it running meanwhile.
     for _ in 0..10 {
         ok(&h, "edit.append", json!({ "media": "m1" }));
     }

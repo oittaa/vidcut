@@ -1,4 +1,4 @@
-//! The mixer (pp. 649–650) and the audio meters (p. 642): a channel strip
+//! The mixer and the audio meters: a channel strip
 //! per track with a meter, a fader, mute and solo, and the viewer's meter
 //! with the monitoring mute.
 //!
@@ -267,14 +267,14 @@ impl Workspace {
             || self.mixer.holds.values().any(|(h, _)| *h > 0.0)
     }
 
-    /// The Mixer panel (p. 649): a strip per track and the mix.
+    /// The Mixer panel: a strip per track and the mix.
     pub(super) fn mixer_panel(&mut self, ui: &mut egui::Ui) {
         let Some(p) = self.project().cloned() else {
             return;
         };
         ui.horizontal(|ui| {
             ui.heading("Mixer");
-            ui.label(dim("Mute and solo apply to export too (p. 650)"));
+            ui.label(dim("Mute and solo apply to export too"));
         });
         ui.separator();
         let meters = self.timeline_levels();
@@ -409,7 +409,7 @@ impl Workspace {
         });
     }
 
-    /// The meter beside the viewer with the monitoring mute (p. 642).
+    /// The meter beside the viewer with the monitoring mute.
     pub(super) fn viewer_meter(&mut self, ui: &mut egui::Ui, rect: Rect) {
         let level = self.viewer_channels();
         let held = self.hold_channels("viewer", &level);
@@ -436,7 +436,7 @@ impl Workspace {
     }
 }
 
-/// A vertical meter: green, yellow from −12 dBFS, red from −3 dBFS (p. 642),
+/// A vertical meter: green, yellow from −12 dBFS, red from −3 dBFS,
 /// with a peak-hold line.
 fn meter(painter: &egui::Painter, rect: Rect, level: f32, hold: f32) {
     painter.rect_filled(rect, CornerRadius::same(2), theme::PANEL_DARK);

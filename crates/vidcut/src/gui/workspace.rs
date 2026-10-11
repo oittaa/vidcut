@@ -20,7 +20,7 @@ use super::theme;
 use super::timeline::TimelineView;
 use crate::live::{self, Filmstrip, PlayerId, Snapshot};
 
-/// Text being typed into the viewer's timecode field (`=`, `+`, `-`, p. 688).
+/// Text being typed into the viewer's timecode field (`=`, `+`, `-`).
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct TimecodeEntry {
     /// `None`: absolute; `Some(1)` / `Some(-1)`: relative.
@@ -91,24 +91,24 @@ pub struct Workspace {
     pub(super) flash: Option<(String, std::time::Instant)>,
     /// The window title last set.
     title: String,
-    /// Edits take only the video (the Cut page's Video Only toggle, p. 694).
+    /// Edits take only the video (the Video Only toggle).
     pub(super) video_only: bool,
-    /// Edits take only the audio (Audio Only, p. 694).
+    /// Edits take only the audio (Audio Only).
     pub(super) audio_only: bool,
-    /// The target track picked in a track header (p. 696); `None`: the
+    /// The target track picked in a track header; `None`: the
     /// default (Track 1, or A1 for sound alone).
     pub(super) target: Option<String>,
     /// What a press in the viewer's scroll bar is dragging.
     pub(super) drag: Option<Drag>,
     /// The timeline area's view state (zoom, options, the gesture in progress).
     pub(super) timeline: TimelineView,
-    /// The edit the Trim Editor shows, if it is open (p. 729).
+    /// The edit the Trim Editor shows, if it is open.
     pub(super) trim_editor: Option<i64>,
     /// Exact frames for the Trim Editor (created on first use).
     pub(super) stills: Option<super::stills::Stills>,
     /// Quick Export, the Export dialog, jobs and timeline interchange.
     pub(super) export: super::export::ExportUi,
-    /// The Mixer panel is open (p. 649), and its meters' state.
+    /// The Mixer panel is open, and its meters' state.
     pub(super) show_mixer: bool,
     pub(super) mixer: super::mixer::Mixer,
     /// File > Preferences.
@@ -539,7 +539,7 @@ impl Workspace {
                 ui.toggle_value(&mut self.show_log, "Command log");
                 if self.project().is_some() {
                     ui.toggle_value(&mut self.show_mixer, "Mixer")
-                        .on_hover_text("Track faders, mute, solo and meters (p. 649)");
+                        .on_hover_text("Track faders, mute, solo and meters");
                 }
                 let running = self.snap.jobs.iter().filter(|j| j.running()).count();
                 let jobs = if running > 0 {
@@ -591,7 +591,7 @@ impl Workspace {
         ui.vertical_centered(|ui| {
             ui.add_space(ui.available_height() * 0.25);
             ui.label(RichText::new("vidcut").size(36.0).strong());
-            ui.label(RichText::new("a scriptable cut-page editor").color(theme::TEXT_DIM));
+            ui.label(RichText::new("a scriptable video editor").color(theme::TEXT_DIM));
             ui.add_space(24.0);
             ui.horizontal(|ui| {
                 ui.add_space((ui.available_width() - 260.0).max(0.0) / 2.0);
@@ -738,7 +738,7 @@ impl Workspace {
             }
         }
 
-        // Transport; in Dynamic Trim mode J/K/L and Space trim instead (p. 731).
+        // Transport; in Dynamic Trim mode J/K/L and Space trim instead.
         let dynamic = self.timeline.dynamic.is_some();
         if dynamic {
             self.dynamic_keys(&input);
@@ -758,7 +758,7 @@ impl Workspace {
                 if k_down {
                     self.send("player.step", json!({ "frames": dir as i64 }));
                 } else {
-                    // Repeated J/L doubles the speed (p. 696).
+                    // Repeated J/L doubles the speed.
                     let speed = if player.speed * dir > 0.0 {
                         (player.speed * 2.0).clamp(-8.0, 8.0)
                     } else {
@@ -784,7 +784,7 @@ impl Workspace {
         }
         if pressed(Key::ArrowUp) || pressed(Key::ArrowDown) {
             let up = pressed(Key::ArrowUp);
-            // Dynamic Trim moves along the track of its edit (p. 732), on
+            // Dynamic Trim moves along the track of its edit, on
             // the timeline whatever the viewer shows.
             let dynamic_track = self.timeline.edit.filter(|_| dynamic).map(|e| e.track);
             let (id, player) = match dynamic_track {
@@ -806,7 +806,7 @@ impl Workspace {
             };
             if let Some(&f) = target {
                 self.seek(id, f, false);
-                // Dynamic Trim moves on to that edit (p. 732).
+                // Dynamic Trim moves on to that edit.
                 if dynamic && !m.shift {
                     self.dynamic_commit();
                     let (side, track) = self.timeline.edit.map_or(
@@ -839,7 +839,7 @@ impl Workspace {
             self.send("viewer.set", json!({ "mode": mode }));
         }
 
-        // Marks (p. 691). Out marks the frame under the playhead as the last
+        // Marks. Out marks the frame under the playhead as the last
         // one in the range; ranges are half-open, so the stored Out is one more.
         // (Ctrl+I imports.)
         if (pressed(Key::I) || pressed(Key::O)) && !m.command {
@@ -907,7 +907,7 @@ impl Workspace {
                     self.send("markers.remove", json!({ "marker": k.id }));
                 }
             } else {
-                // M on a marker edits it; elsewhere it adds one (p. 718).
+                // M on a marker edits it; elsewhere it adds one.
                 let at = self.snap.timeline.position;
                 let existing = self
                     .project()
@@ -959,7 +959,7 @@ impl Workspace {
             self.send("selection.set", json!({ "clips": clips }));
         }
 
-        // Timecode entry: `=` absolute, `+`/`-` relative (p. 688).
+        // Timecode entry: `=` absolute, `+`/`-` relative.
         let typed: Option<char> = input.events.iter().find_map(|e| match e {
             egui::Event::Text(t) if t == "=" || t == "+" || t == "-" => t.chars().next(),
             _ => None,
@@ -977,7 +977,7 @@ impl Workspace {
         }
     }
 
-    /// Edit points to jump between with Up/Down (p. 640).
+    /// Edit points to jump between with Up/Down.
     /// The edit points of one track (its clip edges), in order.
     fn track_edit_points(&self, track: &str) -> Vec<i64> {
         self.project()
@@ -1036,7 +1036,7 @@ impl Workspace {
 
     /// I/O: marks the source clip in Source Clip mode, the tape in Source
     /// Tape mode (decision D17), the timeline otherwise. While the pointer
-    /// is over a pool thumbnail, marks that clip there (p. 691).
+    /// is over a pool thumbnail, marks that clip there.
     pub(super) fn mark(&self, is_in: bool) {
         if self.hover.is_none() && self.snap.viewer == ViewerMode::SourceTape {
             let order = self.tape_order();
@@ -1124,7 +1124,7 @@ impl Workspace {
         }
     }
 
-    /// Delete: the timeline In–Out range if set (p. 725), else the selected
+    /// Delete: the timeline In–Out range if set, else the selected
     /// clips. Ripples Track 1 unless `lift` (Alt, decision D9).
     fn delete(&self, lift: bool) {
         let Some(p) = self.project() else { return };

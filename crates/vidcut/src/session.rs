@@ -1,4 +1,4 @@
-//! Runs requests: headless against a project file (M1), live in the GUI (M3).
+//! Runs requests: headless against a project file, live in the GUI.
 
 use std::path::Path;
 use std::sync::Arc;

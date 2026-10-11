@@ -1,4 +1,4 @@
-//! Adding, removing and setting tracks (spec §6, pp. 647–650).
+//! Adding, removing and setting tracks (spec §6).
 //!
 //! Track ids are positional: video tracks are `V1…Vn` from the bottom up and
 //! audio tracks `A1…An` from the top down, so removing a track renumbers the
@@ -16,7 +16,7 @@ fn prefix(kind: TrackKind) -> char {
     }
 }
 
-/// Adds a track of `kind` (Timeline Actions > Add Track, p. 645): a video
+/// Adds a track of `kind` (Timeline Actions > Add Track): a video
 /// track above the others, an audio track below them. Returns its id.
 pub fn add_track(p: &mut Project, kind: TrackKind) -> String {
     let n = p.tracks_of(kind).len() + 1;
@@ -42,7 +42,7 @@ pub(crate) fn nth(p: &mut Project, kind: TrackKind, n: usize) -> usize {
 
 /// The track `id`. One past the last track of its kind (`V3` when there are
 /// two video tracks) is created: that is how edits make new tracks, like
-/// dropping into the gray area above or below the tracks (p. 648).
+/// dropping into the gray area above or below the tracks.
 pub(crate) fn resolve(p: &mut Project, id: &str) -> Result<usize> {
     if let Some(i) = p.track_index(id) {
         return Ok(i);
@@ -102,7 +102,7 @@ pub fn remove_track(p: &mut Project, id: &str, force: bool) -> Result<()> {
     Ok(())
 }
 
-/// What `track.set` changes (track header buttons, p. 647; mixer, p. 650).
+/// What `track.set` changes (track header buttons; mixer).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TrackProps {
     pub locked: Option<bool>,
@@ -119,9 +119,7 @@ pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
     if let Some(v) = props.volume_db
         && !(-60.0..=24.0).contains(&v)
     {
-        return Err(Error::invalid(format!(
-            "volume {v} dB outside -60..24 dB (decision D12)"
-        )));
+        return Err(Error::invalid(format!("volume {v} dB outside -60..24 dB")));
     }
     let t = p
         .track_mut(id)

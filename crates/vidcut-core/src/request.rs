@@ -41,8 +41,8 @@ pub enum Request {
         /// Into this bin (default: the top level).
         #[serde(default)]
         bin: Option<String>,
-        /// Each path is a file of a numbered image sequence, added as one
-        /// clip: the files numbered in a row around it (p. 366).
+        /// Each path is a file of a numbered image sequence, added as one clip:
+        /// the files numbered in a row around it.
         #[serde(default)]
         sequence: bool,
         /// Frame rate of the image sequences (default: the project's).
@@ -65,9 +65,10 @@ pub enum Request {
     MediaRelink { media: String, path: PathBuf },
     #[serde(rename = "media.rename")]
     MediaRename { media: String, name: String },
+    // Decisions D5, D6.
     /// Set a media item's source In and/or Out (I/O in a source viewer or over
-    /// a pool thumbnail). Source time, `out` exclusive. Edits without a
-    /// `range` use these marks (decisions D5, D6).
+    /// a pool thumbnail). Source time, `out` exclusive. Edits without a `range`
+    /// use these marks.
     #[serde(rename = "media.marks.set")]
     MediaMarksSet {
         media: String,
@@ -79,11 +80,11 @@ pub enum Request {
     /// Clear a media item's source In and Out.
     #[serde(rename = "media.marks.clear")]
     MediaMarksClear { media: String },
-    /// Set Source Tape In and/or Out (decision D17). `in` and `out` are tape
-    /// frames of `order` (the media ids in tape order); `out` is exclusive
-    /// (D16). A span on one clip is stored as that clip's source marks. A
-    /// span across clips is stored as tape marks and is not written onto one
-    /// clip.
+    // Decisions D16, D17.
+    /// Set Source Tape In and/or Out. `in` and `out` are tape frames of `order`
+    /// (the media ids in tape order); `out` is exclusive. A span on one clip is
+    /// stored as that clip's source marks. A span across clips is stored as
+    /// tape marks and is not written onto one clip.
     #[serde(rename = "tape.marks.set")]
     TapeMarksSet {
         #[serde(rename = "in", default)]
@@ -106,9 +107,10 @@ pub enum Request {
         media: OneOrMany<String>,
         bin: String,
     },
-    /// Write playback proxies for video and image sequences (decision D41).
-    /// With no `media`, every such item in the pool. Stills and audio-only
-    /// files are skipped then; naming one is an error.
+    // Decision D41.
+    /// Write playback proxies for video and image sequences. With no `media`,
+    /// every such item in the pool. Stills and audio-only files are skipped
+    /// then; naming one is an error.
     #[serde(rename = "proxy.generate")]
     ProxyGenerate {
         /// Media ids. Absent: every video and image sequence.
@@ -127,8 +129,8 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         media: Option<OneOrMany<String>>,
     },
-    /// Add a Media Pool bin (p. 655), like `Interviews/Day 1`; missing
-    /// parents are added too.
+    /// Add a Media Pool bin, like `Interviews/Day 1`; missing parents are added
+    /// too.
     #[serde(rename = "bins.add")]
     BinsAdd { path: String },
     /// Remove a bin and the bins inside it; their media move to its parent.
@@ -154,8 +156,8 @@ pub enum Request {
     /// Edit points of V1 (clip boundaries), as the Smart Indicator sees them.
     #[serde(rename = "timeline.edit_points")]
     TimelineEditPoints {},
-    /// The Boring Detector (p. 690): clips on video tracks longer than
-    /// `boring`, and shorter than `jump` (jump cuts, flash frames).
+    /// The Boring Detector: clips on video tracks longer than `boring`, and
+    /// shorter than `jump` (jump cuts, flash frames).
     #[serde(rename = "timeline.boring")]
     TimelineBoring {
         #[serde(default = "boring_length")]
@@ -165,9 +167,9 @@ pub enum Request {
     },
 
     // ---------------------------------------------------------------- analysis
-    /// Silent stretches (as Ripple Delete Silence finds them, p. 773) in
-    /// `media` (source frames), in `clips` (timeline frames), or in every
-    /// clip with sound.
+    /// Silent stretches (as Ripple Delete Silence finds them) in `media`
+    /// (source frames), in `clips` (timeline frames), or in every clip with
+    /// sound.
     #[serde(rename = "analyze.silence")]
     AnalyzeSilence {
         #[serde(default)]
@@ -181,9 +183,9 @@ pub enum Request {
         #[serde(default = "silence_min")]
         min: TimeSpec,
     },
-    /// Shot changes (as Detect Scene Cuts finds them, p. 690) in `media`,
-    /// in `clips`, or in every clip with video: the first frame of each new
-    /// shot with its scene score.
+    /// Shot changes (as Detect Scene Cuts finds them) in `media`, in `clips`,
+    /// or in every clip with video: the first frame of each new shot with its
+    /// scene score.
     #[serde(rename = "analyze.scenes")]
     AnalyzeScenes {
         #[serde(default)]
@@ -215,13 +217,13 @@ pub enum Request {
         #[serde(default)]
         range: Option<RangeSpec>,
     },
-    /// Import an OpenTimelineIO timeline (deviation X9): an `.otio` file,
-    /// an `.otioz` bundle (its media are unpacked first) or an `.otiod`
-    /// bundle folder, as DaVinci Resolve and other editors write them. Its
-    /// media join the pool, and its tracks go on V1, V2, … and A1, A2, …
-    /// after the last clip (or instead of the timeline, with `replace`). An
-    /// empty timeline takes the file's frame rate and start timecode. What
-    /// can't be imported is listed in `warnings`.
+    // Deviation X9.
+    /// Import an OpenTimelineIO timeline: an `.otio` file, an `.otioz` bundle
+    /// (its media are unpacked first) or an `.otiod` bundle folder, as other
+    /// editors write them. Its media join the pool, and its tracks go on V1,
+    /// V2, … and A1, A2, … after the last clip (or instead of the timeline,
+    /// with `replace`). An empty timeline takes the file's frame rate and start
+    /// timecode. What can't be imported is listed in `warnings`.
     #[serde(rename = "timeline.import")]
     TimelineImport {
         /// The `.otio`, `.otioz` or `.otiod` file, read by the process that
@@ -268,8 +270,9 @@ pub enum Request {
         source: SourceParams,
         #[serde(default)]
         at: Option<TimeSpec>,
+        // Spec §7.3.
         /// `false` ignores the timeline In/Out and writes at `at` (drag and
-        /// drop places by position, spec §7.3).
+        /// drop places by position).
         #[serde(default = "yes")]
         use_marks: bool,
     },
@@ -285,10 +288,10 @@ pub enum Request {
         use_marks: bool,
     },
 
-    /// Place On Top (F12, pp. 699–700): on the first track above every clip
-    /// in its span (made if needed), never rippling. Lines up with the
-    /// timeline In, a lone Out, the edit nearest `at` (within 5 frames), or
-    /// `at`. Returns the clip and its track.
+    /// Place On Top (F12): on the first track above every clip in its span
+    /// (made if needed), never rippling. Lines up with the timeline In, a lone
+    /// Out, the edit nearest `at` (within 5 frames), or `at`. Returns the clip
+    /// and its track.
     #[serde(rename = "edit.place_on_top")]
     EditPlaceOnTop {
         #[serde(flatten)]
@@ -305,12 +308,13 @@ pub enum Request {
     #[serde(rename = "edit.split")]
     EditSplit {
         at: OneOrMany<TimeSpec>,
-        /// Only split these clips (decision D2).
+        // Decision D2.
+        /// Only split these clips.
         #[serde(default)]
         clips: Vec<ClipRef>,
     },
     /// Delete clips. On V1 it ripples unless `lift`, and the other tracks
-    /// follow; elsewhere gaps close only where V1 has nothing (p. 721).
+    /// follow; elsewhere gaps close only where V1 has nothing.
     #[serde(rename = "edit.delete")]
     EditDelete {
         clips: OneOrMany<ClipRef>,
@@ -366,14 +370,14 @@ pub enum Request {
     /// Slip a clip's content.
     #[serde(rename = "edit.slip")]
     EditSlip { clip: ClipRef, by: TimeSpec },
-    /// Slide a clip (Dynamic Trim's Slide mode, p. 731): it keeps its media
-    /// and moves, the clip before it getting longer and the one after it
-    /// shorter (or the reverse).
+    /// Slide a clip (Dynamic Trim's Slide mode): it keeps its media and moves,
+    /// the clip before it getting longer and the one after it shorter (or the
+    /// reverse).
     #[serde(rename = "edit.slide")]
     EditSlide { clip: ClipRef, by: TimeSpec },
-    /// Ripple Delete Silence (p. 773): cut the silent parts out of `clips`
-    /// and close the gaps, as one undo step. `dry_run` reports the parts
-    /// without cutting (the red stripes).
+    /// Ripple Delete Silence: cut the silent parts out of `clips` and close the
+    /// gaps, as one undo step. `dry_run` reports the parts without cutting (the
+    /// red stripes).
     #[serde(rename = "edit.ripple_delete_silence")]
     EditRippleDeleteSilence {
         clips: OneOrMany<ClipRef>,
@@ -390,7 +394,7 @@ pub enum Request {
         #[serde(default = "silence_min")]
         min: TimeSpec,
     },
-    /// Detect Scene Cuts (p. 690): split `clips` where their shots change.
+    /// Detect Scene Cuts: split `clips` where their shots change.
     #[serde(rename = "edit.detect_scene_cuts")]
     EditDetectSceneCuts {
         clips: OneOrMany<ClipRef>,
@@ -431,8 +435,8 @@ pub enum Request {
     /// Cut clips (Ctrl+X): copy, then delete with ripple on Track 1.
     #[serde(rename = "edit.cut")]
     EditCut { clips: OneOrMany<ClipRef> },
-    /// Paste clips (Ctrl+V) at `at`, each over its own track (p. 723),
-    /// keeping their spacing. Defaults: the GUI's clipboard and playhead.
+    /// Paste clips (Ctrl+V) at `at`, each over its own track, keeping their
+    /// spacing. Defaults: the GUI's clipboard and playhead.
     #[serde(rename = "edit.paste")]
     EditPaste {
         #[serde(default)]
@@ -442,8 +446,8 @@ pub enum Request {
     },
 
     // ---------------------------------------------------------------- tracks, clips, marks, markers
-    /// Add tracks (Timeline Actions > Add Track, p. 645): video tracks go on
-    /// top, audio tracks at the bottom. Returns their ids.
+    /// Add tracks (Timeline Actions > Add Track): video tracks go on top, audio
+    /// tracks at the bottom. Returns their ids.
     #[serde(rename = "track.add")]
     TrackAdd {
         kind: TrackKind,
@@ -458,8 +462,8 @@ pub enum Request {
         #[serde(default)]
         force: bool,
     },
-    /// Track header toggles (lock, mute, video enable; pp. 647, 717) and the
-    /// mixer (solo, volume in dB; p. 650).
+    /// Track header toggles (lock, mute, video on or off) and the mixer (solo,
+    /// volume in dB).
     #[serde(rename = "track.set")]
     TrackSet {
         track: String,
@@ -514,7 +518,7 @@ pub enum Request {
     },
     #[serde(rename = "markers.move")]
     MarkersMove { marker: String, to: TimeSpec },
-    /// Change a marker's name, color or note (M on a marker, p. 718).
+    /// Change a marker's name, color or note (M on a marker).
     #[serde(rename = "markers.set")]
     MarkersSet {
         marker: String,
@@ -533,7 +537,7 @@ pub enum Request {
     #[serde(rename = "export.plan")]
     ExportPlan(ExportParams),
     /// Export. Quick Export semantics: the timeline In–Out range when both
-    /// marks are set, otherwise the whole timeline (p. 789).
+    /// marks are set, otherwise the whole timeline.
     #[serde(rename = "export.start")]
     ExportStart(ExportParams),
     /// Render one frame as PNG: the timeline at `at`, or with `media` that
@@ -573,7 +577,7 @@ pub enum Request {
     PresetsGet { name: String },
     /// Save a user preset (`~/.config/vidcut/presets/NAME.toml`): `settings`,
     /// or preset `from` with `set` overrides. `quick_export` puts it in Quick
-    /// Export (p. 790).
+    /// Export.
     #[serde(rename = "presets.save")]
     PresetsSave {
         /// File-name safe: letters, digits, `-`, `_` and `.`.
@@ -605,8 +609,8 @@ pub enum Request {
         #[serde(default)]
         refresh: bool,
     },
-    /// Application preferences (`~/.config/vidcut/preferences.toml`; Resolve's
-    /// Preferences, p. 94) and what the thumbnail cache holds.
+    /// Application preferences (`~/.config/vidcut/preferences.toml`) and what
+    /// the thumbnail cache holds.
     #[serde(rename = "preferences.get")]
     PreferencesGet {},
     /// Change application preferences; what is left out stays. Turning the
@@ -695,16 +699,15 @@ pub enum Request {
     /// Viewer mode, both playheads, the source clip and selection.
     #[serde(rename = "player.state")]
     PlayerState {},
-    /// Mute what the viewer plays, without changing the project (the
-    /// monitoring mute next to the meter, p. 642). Without `mute`, toggles.
+    /// Mute what the viewer plays, without changing the project (the monitoring
+    /// mute next to the meter). Without `mute`, toggles.
     #[serde(rename = "player.mute")]
     PlayerMute {
         #[serde(default)]
         mute: Option<bool>,
     },
     /// The Media Pool view: the bin shown and the sort order. Source Tape
-    /// strings together that bin's media, and its bins', in that order
-    /// (p. 696).
+    /// strings together that bin's media, and its bins', in that order.
     #[serde(rename = "pool.set")]
     PoolSet {
         #[serde(default)]
@@ -791,10 +794,10 @@ pub enum Request {
 /// What to export and how.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ExportParams {
-    /// Output file; for `per_clip`, a directory. A timeline for other
-    /// editors instead of media (deviation X9): `.otio` (the edit),
-    /// `.otioz` (a zip bundle of the edit and its media, as DaVinci Resolve
-    /// reads one) or `.otiod` (the same as a folder).
+    // Deviation X9.
+    /// Output file; for `per_clip`, a directory. A timeline for other editors
+    /// instead of media: `.otio` (the edit), `.otioz` (a zip bundle of the edit
+    /// and its media) or `.otiod` (the same as a folder).
     pub output: PathBuf,
     /// Preset name (see `presets.list`). Default: from the output extension
     /// (`h264-master` settings for video, the matching `audio-*` preset for audio).
@@ -830,7 +833,8 @@ pub struct ExportParams {
     pub background: bool,
 }
 
-/// What the single viewer shows (spec §4.1).
+// Spec §4.1.
+/// What the single viewer shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ViewerMode {
@@ -851,7 +855,7 @@ impl ViewerMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum GuiPanel {
-    /// Quick Export (p. 788).
+    /// Quick Export.
     #[serde(alias = "quick-export")]
     QuickExport,
     /// The Export dialog.
@@ -860,9 +864,9 @@ pub enum GuiPanel {
     Jobs,
     /// The command log.
     Log,
-    /// The Mixer: track faders, mute, solo and meters (p. 649).
+    /// The Mixer: track faders, mute, solo and meters.
     Mixer,
-    /// Application preferences (p. 94).
+    /// Application preferences.
     Preferences,
 }
 
@@ -954,23 +958,25 @@ pub struct SourceParams {
     /// Media id (`m1`). Omitted when `tape` is set.
     #[serde(default)]
     pub media: String,
-    /// Edit the Source Tape In–Out span instead of one media item
-    /// (decision D17). Both marks must be set.
+    // Decision D17.
+    /// Edit the Source Tape In–Out span instead of one media item. Both marks
+    /// must be set.
     #[serde(default)]
     pub tape: bool,
     /// Source range (TimeSpecs relative to the media's start). Default: the
     /// media's source marks, or all of it.
     #[serde(default)]
     pub range: Option<RangeSpec>,
-    /// Leave the audio out (Video Only, p. 694).
+    /// Leave the audio out (Video Only).
     #[serde(default)]
     pub video_only: bool,
-    /// Leave the video out (Audio Only, p. 694).
+    /// Leave the video out (Audio Only).
     #[serde(default)]
     pub audio_only: bool,
-    /// The target track (spec §7). Default: V1, or A1 for audio-only clips.
-    /// The next new track (`V3` when there are two) is made. On an audio
-    /// track only the audio is used.
+    // Spec §7.
+    /// The target track. Default: V1, or A1 for audio-only clips. The next new
+    /// track (`V3` when there are two) is made. On an audio track only the
+    /// audio is used.
     #[serde(default)]
     pub track: Option<String>,
 }
@@ -992,12 +998,12 @@ pub struct ProjectSet {
     /// Record timecode of the first frame, e.g. `01:00:00:00`.
     #[serde(default)]
     pub start_tc: Option<TimeSpec>,
-    /// How long a still lasts when edited without a range, e.g. `5s`
-    /// (decision D38).
+    // Decision D38.
+    /// How long a still lasts when edited without a range, e.g. `5s`.
     #[serde(default)]
     pub still_duration: Option<TimeSpec>,
-    /// Play fresh proxies in the preview (decision D41). Export still
-    /// reads the originals.
+    // Decision D41.
+    /// Play fresh proxies in the preview. Export still reads the originals.
     #[serde(default)]
     pub use_proxies: Option<bool>,
 }

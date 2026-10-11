@@ -13,8 +13,8 @@ use vidcut_core::{Envelope, Error, Request, Result};
 #[command(
     name = "vidcut",
     version,
-    about = "A simple, fully scriptable video cutting tool modeled on DaVinci Resolve's Cut page.",
-    long_about = "A simple, fully scriptable video cutting tool modeled on DaVinci Resolve's Cut page.\n\n\
+    about = "A simple, fully scriptable video cutting tool.",
+    long_about = "A simple, fully scriptable video cutting tool.\n\n\
         Times: 450f (frames), 15s, 1m30s, 250ms, HH:MM:SS:FF (timecode), HH:MM:SS.mmm, start, end, in, out.\n\
         Ranges are half-open: A..B (B excluded) or A..+D. Clips: c17, or V1@<time> for the clip under a frame.\n\
         Every command is also a JSON-RPC method: see `vidcut schema`. With --json, output is the response object.",
@@ -110,7 +110,7 @@ pub enum Command {
     Markers(MarkersCmd),
     /// Export the timeline (In–Out if both marks are set, else all of it).
     /// With --dry-run, print the plan instead. A `.otio` output writes the
-    /// edit as OpenTimelineIO for DaVinci Resolve and other editors (the
+    /// edit as OpenTimelineIO for other editors (the
     /// whole timeline unless --range); `.otioz` bundles the edit with its
     /// media in one zip file, `.otiod` in a folder.
     #[command(
@@ -148,10 +148,10 @@ pub enum Command {
         background: bool,
     },
     /// Import an OpenTimelineIO timeline (.otio, or a bundle with its media:
-    /// .otioz, .otiod), from DaVinci Resolve or another editor: media join
+    /// .otioz, .otiod), from another editor: media join
     /// the pool, clips go after the last clip (or replace the timeline).
     #[command(
-        after_help = "Examples:\n  vidcut new cut.vidcut && vidcut -p cut.vidcut import resolve-cut.otio\n  vidcut -p cut.vidcut import cut.otio --replace --search /mnt/footage\n  vidcut -p cut.vidcut import cut.otioz --unpack /mnt/fast/cut-media"
+        after_help = "Examples:\n  vidcut new cut.vidcut && vidcut -p cut.vidcut import their-cut.otio\n  vidcut -p cut.vidcut import cut.otio --replace --search /mnt/footage\n  vidcut -p cut.vidcut import cut.otioz --unpack /mnt/fast/cut-media"
     )]
     Import {
         file: PathBuf,

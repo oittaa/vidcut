@@ -1,4 +1,4 @@
-//! The M7 timeline tools under simulated input (egui_kittest): Ripple Delete
+//! The timeline tools under simulated input (egui_kittest): Ripple Delete
 //! Silence previews its parts and removes them, Detect Scene Cuts, Dynamic
 //! Trim (W, then L/K) and the Boring Detector's settings. Each gesture
 //! changes the project with exactly one request.
@@ -181,7 +181,7 @@ fn tools_send_one_request_each() {
         .unwrap()
         .len();
 
-    // 1. Ripple Delete Silence (p. 773): the dialog previews the parts (a
+    // 1. Ripple Delete Silence: the dialog previews the parts (a
     // dry run, not an edit), then Remove sends one request.
     call(&h, "selection.set", json!({ "clips": ["c1"] }));
     settle(&h, &mut harness);
@@ -200,7 +200,7 @@ fn tools_send_one_request_each() {
     assert_eq!(clips(&h).iter().filter(|c| c.0 != "c2").count(), 10);
     assert!(!has(&harness, "Removes 10 parts"), "the dialog closed");
 
-    // 2. Detect Scene Cuts (p. 690) on the shots clip.
+    // 2. Detect Scene Cuts on the shots clip.
     call(&h, "selection.set", json!({ "clips": ["c2"] }));
     settle(&h, &mut harness);
     menu_item(&mut harness, "Actions", "Detect Scene Cuts");
@@ -208,7 +208,7 @@ fn tools_send_one_request_each() {
     let (m, _) = gui_edits(&h).last().cloned().unwrap();
     assert_eq!(m, "edit.detect_scene_cuts");
 
-    // 3. Dynamic Trim (p. 731): W on the edit before the third shot, then L
+    // 3. Dynamic Trim: W on the edit before the third shot, then L
     // runs a roll for half a second and K applies it as one request.
     let shot3 = clips(&h).iter().find(|c| c.3 == 60).unwrap().1;
     call(
@@ -237,7 +237,7 @@ fn tools_send_one_request_each() {
     harness.step();
     assert!(!has(&harness, "Dynamic Trim +"), "W leaves");
 
-    // 4. The Boring Detector's settings (p. 690) are view options, not edits.
+    // 4. The Boring Detector's settings are view options, not edits.
     menu_item(&mut harness, "Options", "Analyze Timeline Edits…");
     harness.step();
     harness.get_by_label("Analyze").click();

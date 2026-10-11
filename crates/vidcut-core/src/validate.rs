@@ -33,7 +33,7 @@ pub fn violations(p: &Project) -> Vec<String> {
         }
         if !GAIN.contains(&t.volume_db) {
             v.push(format!(
-                "track {} volume {} dB outside -60..24 dB (decision D12)",
+                "track {} volume {} dB outside -60..24 dB",
                 t.id, t.volume_db
             ));
         }
@@ -72,7 +72,7 @@ pub fn violations(p: &Project) -> Vec<String> {
                     if let Some(a) = &c.audio {
                         if !GAIN.contains(&a.gain_db) {
                             v.push(format!(
-                                "{}: gain {} dB outside -60..24 dB (decision D12)",
+                                "{}: gain {} dB outside -60..24 dB",
                                 c.id, a.gain_db
                             ));
                         }

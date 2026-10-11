@@ -1,6 +1,6 @@
 //! The export windows under simulated input (egui_kittest, no window):
 //! Quick Export, the Export dialog, progress and jobs, timeline interchange.
-//! M5 acceptance: the dialog's command makes the same request, and so the
+//! The dialog's command makes the same request, and so the
 //! same plan, as the GUI.
 
 use std::path::{Path, PathBuf};
@@ -168,7 +168,7 @@ fn export_windows() {
         .build_ui_state(|ui, ws: &mut Workspace| ws.ui(ui), ws);
     harness.step();
 
-    // 1. Quick Export (p. 788): a preset tile, Export…, the file dialog, then
+    // 1. Quick Export: a preset tile, Export…, the file dialog, then
     // a progress window. The marks are set, so it exports In–Out.
     harness.get_by_label("Quick Export").click();
     until(&mut harness, "preset tiles", |h| has(h, "ProRes 422 HQ\n"));
@@ -285,7 +285,7 @@ fn export_windows() {
     });
 
     // 5. Media that moved: the import asks for a folder and looks in its
-    // subfolders (p. 529).
+    // subfolders.
     let fixtures = media.parent().unwrap();
     let moved = dir.join("moved.otio");
     let text = std::fs::read_to_string(dir.join("quick-p.otio"))

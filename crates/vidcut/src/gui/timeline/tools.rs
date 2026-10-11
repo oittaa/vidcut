@@ -1,5 +1,5 @@
-//! The timeline's automatic tools (M7): Ripple Delete Silence (p. 773), the
-//! Boring Detector (p. 690) and Dynamic Trim (pp. 730–732). Detect Scene
+//! The timeline's automatic tools: Ripple Delete Silence, the
+//! Boring Detector and Dynamic Trim. Detect Scene
 //! Cuts is one request from the Actions menu.
 
 use eframe::egui::{self, Color32, CornerRadius, Painter, Rect, RichText};
@@ -16,7 +16,7 @@ use crate::live::PlayerId;
 
 // ---------------------------------------------------------------- silence
 
-/// The Ripple Delete Silence dialog (p. 773): its settings, and the parts
+/// The Ripple Delete Silence dialog: its settings, and the parts
 /// the last dry run found, drawn as red stripes while it is open.
 #[derive(Debug)]
 pub struct SilenceDialog {
@@ -80,7 +80,7 @@ pub enum DynamicMode {
     Slide,
 }
 
-/// Dynamic Trim mode (W, pp. 730–732): J/K/L trim the selected edit (or
+/// Dynamic Trim mode (W): J/K/L trim the selected edit (or
 /// slip/slide the selected clips) instead of playing. The trim shows in the
 /// two-up viewer as it goes and is sent as one request when it stops.
 #[derive(Debug, Default)]
@@ -340,7 +340,7 @@ impl Workspace {
 
     // ------------------------------------------------------------ boring detector
 
-    /// The Boring Detector's highlights on the upper timeline (p. 690): too
+    /// The Boring Detector's highlights on the upper timeline: too
     /// long in light gray, too short (jump cuts) in red.
     pub(super) fn paint_boring(&self, painter: &Painter, rows: &Rows, scale: &Scale, p: &Project) {
         let o = &self.timeline.options;
@@ -371,7 +371,7 @@ impl Workspace {
         }
     }
 
-    /// Analyze Timeline Edits: the Boring Detector's settings (p. 690).
+    /// Analyze Timeline Edits: the Boring Detector's settings.
     pub(super) fn boring_window(&mut self, ctx: &egui::Context) {
         let Some((mut secs, mut frames)) = self.timeline.boring_dialog else {
             return;
@@ -489,7 +489,7 @@ impl Workspace {
         }
     }
 
-    /// Keys while Dynamic Trim is on (p. 731): L/J trim forward/back
+    /// Keys while Dynamic Trim is on: L/J trim forward/back
     /// (repeat for speed), K stops and sends, K with L/J trims one frame,
     /// Space plays around the selection.
     pub(crate) fn dynamic_keys(&mut self, input: &egui::InputState) {

@@ -1,4 +1,4 @@
-//! Tests of the edits and queries built on media analysis (M7): Ripple
+//! Tests of the edits and queries built on media analysis: Ripple
 //! Delete Silence, Detect Scene Cuts, the analysis queries, the Boring
 //! Detector and slides. The fake media layer reports made-up levels and
 //! pictures. Media: m1 = 250 frames with audio, m2 = 100 frames without
@@ -32,7 +32,7 @@ fn fixture() -> Fixture {
 
 #[test]
 fn ripple_delete_silence_cuts_out_the_silences() {
-    // p. 773: the red stripes are cut out and the rest closes up.
+    // The red stripes are cut out and the rest closes up.
     let mut f = fixture();
     f.append("m1", 0, 250);
     let params = json!({"clips": "c1", "pre_head": "5f", "post_tail": "5f", "min": "0.7s"});
@@ -113,7 +113,7 @@ fn ripple_delete_silence_ripples_even_with_ripple_off() {
 
 #[test]
 fn detect_scene_cuts_splits_where_shots_change() {
-    // p. 690: clips cut back into their shots.
+    // Clips cut back into their shots.
     let mut f = fixture();
     f.append("m1", 25, 250);
     let r = f.ok(req("edit.detect_scene_cuts", json!({"clips": "c1"})));
@@ -191,7 +191,7 @@ fn loudness_measures_the_mix() {
 
 #[test]
 fn the_boring_detector_flags_long_and_short_clips() {
-    // p. 690: longer than "boring clips" or shorter than "jump cuts".
+    // Longer than "boring clips" or shorter than "jump cuts".
     let mut f = Fixture::new(&[(60.0, true)]);
     f.append("m1", 0, 900);
     f.append("m1", 900, 905);
@@ -210,7 +210,7 @@ fn the_boring_detector_flags_long_and_short_clips() {
 
 #[test]
 fn a_slide_moves_a_clip_between_its_neighbors() {
-    // p. 731: the clip keeps its media; the neighbors give and take.
+    // The clip keeps its media; the neighbors give and take.
     let mut f = fixture();
     f.append("m1", 0, 50);
     f.append("m1", 100, 150);

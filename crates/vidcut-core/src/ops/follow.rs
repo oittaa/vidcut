@@ -6,7 +6,7 @@
 //! edit ripples Track 1, the clip moves so it starts over the same picture:
 //! - **The picture moved** (later clips shifted, or its clip was moved, even
 //!   to another track): the clip moves with it.
-//! - **Its clip's Out was trimmed to before it:** the clip is deleted (p. 727).
+//! - **Its clip's Out was trimmed to before it:** the clip is deleted.
 //! - **Its clip's head was trimmed past it:** it moves to the clip's new start.
 //! - **Its clip was replaced** (Ripple Overwrite, Replace): it stays where it
 //!   is while the new clip reaches it.
@@ -58,7 +58,7 @@ pub(crate) struct Edit<'a> {
     /// Track 1 spans `[a, b)` whose clips were replaced in place: clips over
     /// them keep their position.
     pub kept: &'a [(i64, i64)],
-    /// The Track 1 clip whose edge was trimmed, if any (p. 727).
+    /// The Track 1 clip whose edge was trimmed, if any.
     pub trimmed: Option<&'a str>,
 }
 
@@ -107,7 +107,7 @@ impl Mapper<'_> {
     }
 
     /// The new place of a clip that started at old position `x`; `None`: it
-    /// goes (p. 727). `own` is the clip itself (which may have left Track 1).
+    /// goes. `own` is the clip itself (which may have left Track 1).
     fn map(&self, x: i64, own: &str) -> Option<i64> {
         if self.edit.kept.iter().any(|&(a, b)| a <= x && x < b) {
             return Some(x);

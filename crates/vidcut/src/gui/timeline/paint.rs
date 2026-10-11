@@ -19,7 +19,7 @@ use crate::gui::pool::elide;
 use crate::gui::theme;
 use crate::gui::workspace::Thumbs;
 
-/// What clips show (Timeline Options, p. 645).
+/// What clips show (Timeline Options).
 #[derive(Debug, Clone, Copy)]
 pub struct Look {
     pub names: bool,
@@ -168,7 +168,7 @@ pub fn ruler(
         }
     }
     if let Some(e) = smart {
-        // The Smart Indicator (p. 696): red where a clip has no media past
+        // The Smart Indicator: red where a clip has no media past
         // the edit. It holds still (deviation X15).
         let x = scale.xf(e);
         let color = if ops::edit_has_handles(p, e) {
@@ -219,7 +219,7 @@ pub fn track(
         );
     }
     if t.locked {
-        // Stippled: clips can't be changed (p. 717).
+        // Stippled: clips can't be changed.
         let mut x = rect.left() - rect.height();
         while x < rect.right() {
             painter.line_segment(
@@ -333,7 +333,7 @@ fn clip(
         painter.galley(pos, galley, Color32::WHITE);
     }
     if look.durations && width > 70.0 && video.height() > 30.0 {
-        // Seconds:frames, bottom left (p. 689).
+        // Seconds:frames, bottom left.
         let f = fps.as_f64().round().max(1.0) as i64;
         let text = format!("{}:{:02}", c.duration / f, c.duration % f);
         painter.text(
@@ -497,7 +497,7 @@ pub fn preview(painter: &Painter, rows: &Rows, scale: &Scale, p: &Project, pv: &
     let span = |a: i64, b: i64| Rect::from_x_y_ranges(scale.xf(a)..=scale.xf(b), rect.y_range());
     match &pv.target {
         Target::Insert(e) => {
-            // The edit point turns purple (p. 723).
+            // The edit point turns purple.
             let x = scale.xf(*e);
             painter.line_segment(
                 [pos2(x, rect.top() - 4.0), pos2(x, rect.bottom() + 4.0)],

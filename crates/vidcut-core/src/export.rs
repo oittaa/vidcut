@@ -1,8 +1,8 @@
 //! Export settings and presets (pure data; the encoder engine is in vidcut-av).
 //!
-//! Built-in presets mirror Resolve's Quick Export set (Ch. 39, p. 789 and the
-//! Deliver presets on pp. 4104–4109) plus a few more (AV1, VP9, DNxHR and
-//! audio-only). User presets are TOML files with the same fields.
+//! Built-in presets follow the Quick Export set of spec §10, plus a few more
+//! (AV1, VP9, DNxHR and audio-only). User presets are TOML files with the
+//! same fields.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

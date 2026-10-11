@@ -567,7 +567,7 @@ fn live_session() {
     }
 
     step("Several tracks: B-roll on top, music mixed");
-    // M6: B-roll on V2 covers Track 1 in the preview, frame-exactly.
+    // B-roll on V2 covers Track 1 in the preview, frame-exactly.
     h.ok(
         "edit.overwrite",
         json!({ "media": "m1", "range": "250f..270f", "at": 30, "track": "V2" }),
@@ -608,7 +608,7 @@ fn live_session() {
     assert_eq!(h.shown(dir), Some(250), "the B-roll moved with Track 1");
     h.ok("player.seek", json!({ "at": 20, "viewer": "timeline" }));
     assert_eq!(h.shown(dir), Some(220));
-    // The monitoring mute (p. 642) changes nothing in the project.
+    // The monitoring mute changes nothing in the project.
     let rev = h.ok("project.summary", json!({})).rev;
     let s = h.ok("player.mute", json!({}));
     assert_eq!(s.result["muted"], true);
@@ -616,7 +616,7 @@ fn live_session() {
 
     step("Interlaced sources are deinterlaced");
     // Both fields show the frame's barcode; in the top eighth a block moves
-    // each field, so a frame shown woven combs there (M8).
+    // each field, so a frame shown woven combs there.
     let interlaced = fixture::ensure(
         &FixtureSpec::new(
             VideoCodec::H264,
@@ -652,7 +652,7 @@ fn live_session() {
 
     step("HDR sources are tone-mapped");
     // The barcode's white is SDR reference white in PQ: shown without tone
-    // mapping it is gray and doesn't read (M8).
+    // mapping it is gray and doesn't read.
     let pq = fixture::ensure(
         &FixtureSpec::new(
             VideoCodec::Hevc10,

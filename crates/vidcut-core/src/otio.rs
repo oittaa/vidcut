@@ -1,5 +1,5 @@
 //! OpenTimelineIO interchange (deviations.md X9): writes the timeline as
-//! OTIO and reads OTIO back, in the shapes DaVinci Resolve writes and reads.
+//! OTIO and reads OTIO back, in the shapes other editors write and read.
 //!
 //! **Writing** ([`export`]):
 //! - Each video track becomes an OTIO video track of clips and gaps.
@@ -7,40 +7,38 @@
 //!   and each audio track (`A1`, …) one more. Each audio clip covers its
 //!   clip's audio range, so J/L cuts show up as audio edits offset from the
 //!   video edits, which is what other editors expect.
-//! - Media are named by plain absolute path, as Resolve, Kdenlive and
-//!   Blender write them (Resolve doesn't read `file://` URLs), or in a
+//! - Media are named by plain absolute path, as editors write them (not
+//!   every editor reads `file://` URLs), or in a
 //!   bundle by a path relative to it. Image sequences are
 //!   `ImageSequenceReference`s.
 //! - Times are frames at the project rate. Source ranges count from the
-//!   media's own start timecode, as their available ranges do: Resolve
-//!   places sources by timecode. A still's available range is one frame,
-//!   as Resolve writes it. An image sequence's available range counts its
+//!   media's own start timecode, as their available ranges do: editors
+//!   place sources by timecode. A still's available range is one frame. An image sequence's available range counts its
 //!   pictures at the sequence's own rate, as OpenTimelineIO counts them.
-//! - What Resolve reads besides (`metadata.Resolve_OTIO`): a link group
-//!   joining each clip's video and audio, the stream and channels its audio
-//!   plays, clip gain as Resolve's clip volume, track lock and solo, marker
-//!   notes.
+//! - Editor metadata besides ([`EDITOR`]): a link group joining each clip's
+//!   video and audio, the stream and channels its audio plays, clip gain as
+//!   a clip volume, track lock and solo, marker notes.
 //! - Timeline markers go on the top-level stack, one frame long.
 //! - Details OTIO has no field for (clip gain, mute and audio stream, track
 //!   settings, marker colors, the In/Out marks) are kept under
 //!   `metadata.vidcut`.
 //!
-//! **Reading** ([`import`]) accepts what Resolve, Kdenlive, Blender, Premiere
-//! and the OTIO library write:
+//! **Reading** ([`import`]) accepts what other editors and the OTIO library
+//! write:
 //! - `Clip.1` and `Clip.2`; source ranges in the media's own timecode
 //!   (relative to the reference's available range); float rates, snapped to
 //!   exact rationals.
 //! - Media as `file://` URLs (percent-encoded or not), plain paths, Windows
-//!   paths, paths relative to the file, image sequences, and the media
-//!   Resolve had offline (`MissingReference` with a `Media Url`). Each
+//!   paths, paths relative to the file, image sequences, and media the
+//!   editor had offline (`MissingReference` with a `Media Url`). Each
 //!   gives the places to look ([`MediaRef::paths`]), including where a
 //!   project folder moved with the timeline file would have put it.
 //! - Video tracks become V1, V2, … An audio clip that lines up with a video
-//!   clip of the same media (on any video track, in the same Resolve link
-//!   group if it has one) becomes that clip's audio, J/L offsets included.
+//!   clip of the same media (on any video track, in the same link group if
+//!   it has one) becomes that clip's audio, J/L offsets included.
 //!   Other audio clips go on audio tracks A1, A2, … (files vidcut wrote say
-//!   which track each audio track belongs to). Resolve's channel map picks
-//!   the stream, its clip volume the gain.
+//!   which track each audio track belongs to). The editor metadata's channel
+//!   map picks the stream, its clip volume the gain.
 //! - Markers on the timeline, on tracks and on clips become timeline
 //!   markers.
 //! - Everything else is left out with a warning: transitions (cuts instead),
@@ -60,8 +58,9 @@ mod tests;
 
 /// Where vidcut keeps its own details in OTIO metadata.
 const VIDCUT: &str = "vidcut";
-/// Where Resolve keeps its own.
-const RESOLVE: &str = "Resolve_OTIO";
+/// Where other editors keep their own details: the key and values are
+/// theirs, so that they read what vidcut writes.
+const EDITOR: &str = "Resolve_OTIO";
 
 fn rt(value: f64, rate: f64) -> Value {
     json!({ "OTIO_SCHEMA": "RationalTime.1", "rate": rate, "value": value })
@@ -192,13 +191,13 @@ fn media_reference(p: &Project, m: &Media, locations: Locations, rate: f64) -> V
     })
 }
 
-/// Resolve's clip volume (a Fairlight effect) at `db`.
-fn resolve_volume(db: f64) -> Value {
+/// A clip volume effect at `db`, in the editor metadata.
+fn editor_volume(db: f64) -> Value {
     json!({
         "OTIO_SCHEMA": "Effect.1",
         "name": "",
         "effect_name": "Resolve Effect",
-        "metadata": { RESOLVE: {
+        "metadata": { EDITOR: {
             "Effect Name": "Fairlight Clip Volume and Fades",
             "Enabled": true,
             "Name": "Volume",
@@ -309,7 +308,7 @@ pub fn export(
             let shows = c.video && e > s;
             let sounds = audio_part(c, a, b).map(|(s, e)| (s.max(ta), e));
             let sounds = sounds.filter(|(s, e)| e > s);
-            // Resolve links a clip's video and audio by a group number.
+            // A link group number joins a clip's video and audio.
             let group = (shows && sounds.is_some()).then(|| {
                 groups += 1;
                 groups
@@ -329,7 +328,7 @@ pub fn export(
                 }
                 let mut metadata = json!({ VIDCUT: meta });
                 if let Some(g) = group {
-                    metadata[RESOLVE] = json!({ "Link Group ID": g });
+                    metadata[EDITOR] = json!({ "Link Group ID": g });
                 }
                 video.push(item(
                     &label,
@@ -353,18 +352,18 @@ pub fn export(
                     .get(au.stream as usize)
                     .map_or(2, |x| x.channels);
                 channels.push(n);
-                let mut resolve = json!({
+                let mut editor = json!({
                     "Channels": (0..n)
                         .map(|ch| json!({ "Source Channel ID": ch, "Source Track ID": au.stream }))
                         .collect::<Vec<_>>(),
                 });
                 if let Some(g) = group {
-                    resolve["Link Group ID"] = json!(g);
+                    editor["Link Group ID"] = json!(g);
                 }
                 let effects = if au.gain_db == 0.0 {
                     vec![]
                 } else {
-                    vec![resolve_volume(au.gain_db)]
+                    vec![editor_volume(au.gain_db)]
                 };
                 audio.push(item(
                     &label,
@@ -372,7 +371,7 @@ pub fn export(
                     c.source_at(s),
                     e - s,
                     !au.muted,
-                    json!({ VIDCUT: meta, RESOLVE: resolve }),
+                    json!({ VIDCUT: meta, EDITOR: editor }),
                     effects,
                 ));
                 ta = e;
@@ -393,9 +392,9 @@ pub fn export(
         {
             sound["Audio Type"] = json!(kind);
         }
-        let sound = json!({ VIDCUT: meta, RESOLVE: sound });
+        let sound = json!({ VIDCUT: meta, EDITOR: sound });
         if t.kind == TrackKind::Video {
-            let picture = json!({ VIDCUT: meta, RESOLVE: { "Locked": t.locked } });
+            let picture = json!({ VIDCUT: meta, EDITOR: { "Locked": t.locked } });
             video_tracks.push(track(&t.id, "Video", video, t.video_enabled, picture));
             if !audio.is_empty() {
                 let name = format!("{} audio", t.id);
@@ -415,9 +414,9 @@ pub fn export(
                 "name": k.name,
                 "comment": k.note,
                 "color": otio_color(&k.color),
-                // Markers are one frame long, as in Resolve.
+                // Markers are one frame long.
                 "marked_range": range((k.at - a) as f64, 1.0, rate),
-                "metadata": { VIDCUT: { "color": k.color }, RESOLVE: { "Note": k.note } },
+                "metadata": { VIDCUT: { "color": k.color }, EDITOR: { "Note": k.note } },
             })
         })
         .collect();
@@ -449,7 +448,7 @@ pub fn export(
         },
         "metadata": {
             VIDCUT: { "fps": p.settings.fps, "marks": marks },
-            RESOLVE: { "Resolve OTIO Meta Version": "1.0" },
+            EDITOR: { "Resolve OTIO Meta Version": "1.0" },
         },
     }))
 }
@@ -486,7 +485,7 @@ pub struct ImportedClip {
     /// midnight of its timecode.
     pub source_in: i64,
     /// No available range says where the media start: the source range
-    /// counts in the media's own timecode, as Resolve counts.
+    /// counts in the media's own timecode.
     pub timecoded: bool,
     /// False for audio-only clips.
     pub video: bool,
@@ -496,7 +495,7 @@ pub struct ImportedClip {
     pub stream: u32,
     pub gain_db: f64,
     pub muted: bool,
-    /// Resolve's link group, joining a clip's video and audio.
+    /// The link group joining a clip's video and audio.
     pub link: Option<i64>,
 }
 
@@ -523,22 +522,22 @@ pub struct ImportedTrack {
 }
 
 impl ImportedTrack {
-    /// From vidcut's metadata, else Resolve's, else the OTIO track's
+    /// From vidcut's metadata, else the editor metadata, else the OTIO track's
     /// `enabled`.
     fn of(otio: &Value, id: &str, audio: bool) -> Self {
         let meta = &otio["metadata"][VIDCUT];
-        let resolve = &otio["metadata"][RESOLVE];
+        let editor = &otio["metadata"][EDITOR];
         let enabled = otio["enabled"].as_bool().unwrap_or(true);
         Self {
             id: id.to_string(),
             locked: meta["locked"]
                 .as_bool()
-                .or(resolve["Locked"].as_bool())
+                .or(editor["Locked"].as_bool())
                 .unwrap_or(false),
             muted: meta["muted"].as_bool().unwrap_or(audio && !enabled),
             solo: meta["solo"]
                 .as_bool()
-                .or(resolve["SoloOn"].as_bool().filter(|_| audio))
+                .or(editor["SoloOn"].as_bool().filter(|_| audio))
                 .unwrap_or(false),
             volume_db: meta["volume_db"].as_f64().unwrap_or(0.0),
             video_enabled: meta["video_enabled"].as_bool().unwrap_or(audio || enabled),
@@ -707,8 +706,8 @@ fn is_windows_absolute(s: &str) -> bool {
         || (s.len() > 2 && is_drive(&s[..2]) && matches!(s.as_bytes()[2], b'\\' | b'/'))
 }
 
-/// The first picture's name for an image sequence named as Resolve shows
-/// one (`frame_[0001-0120].png` → `frame_0001.png`).
+/// The first picture's name for an image sequence named by its range
+/// (`frame_[0001-0120].png` → `frame_0001.png`).
 fn bracketed(name: &str) -> Option<String> {
     let open = name.rfind('[')?;
     let close = open + name[open..].find(']')?;
@@ -726,8 +725,8 @@ fn locate(url: &str, base: Option<&Path>, fps: Rational) -> Option<MediaRef> {
         return None;
     }
     // file:///p, file://localhost/p, file:/p and file:///C:/p are local;
-    // OTIO's Python library leaves them unescaped. Plain paths are as Resolve
-    // writes them: not escaped either, but some tools do.
+    // OTIO's Python library leaves them unescaped. Plain paths are usually
+    // not escaped either, but some tools do.
     let (first, second) = match written.strip_prefix("file:") {
         Some(rest) => {
             let path = match rest.strip_prefix("//") {
@@ -757,7 +756,7 @@ fn locate(url: &str, base: Option<&Path>, fps: Rational) -> Option<MediaRef> {
     let mut shown = forms.first()?.clone();
     let mut file_name = shown.rsplit(['/', '\\']).next().unwrap_or("").to_string();
     let mut sequence = None;
-    // An image sequence named as Resolve shows one: its first picture.
+    // An image sequence named by its range: its first picture.
     if let Some(first) = bracketed(&file_name) {
         for f in &mut forms {
             let dir = f.len() - f.rsplit(['/', '\\']).next().unwrap_or("").len();
@@ -840,7 +839,7 @@ fn sequence_ref(r: &Value, base: Option<&Path>, fps: Rational) -> Result<MediaRe
 
 /// A clip's media and source start, in frames from the media's first
 /// frame. Source ranges count from the available range's start, which
-/// Resolve sets to the media's timecode; without one, from the timecode's
+/// editors set to the media's timecode; without one, from the timecode's
 /// midnight (the flag: the importer subtracts the media's timecode).
 fn clip_source(item: &Value, fps: Rational, base: Option<&Path>) -> Result<(MediaRef, i64, bool)> {
     let reference = media_reference_of(item);
@@ -854,11 +853,11 @@ fn clip_source(item: &Value, fps: Rational, base: Option<&Path>) -> Result<(Medi
     } else if s.starts_with("ImageSequenceReference") {
         sequence_ref(reference, base, fps)
             .map_err(|e| Error::media(format!("clip {name:?}: {}", e.message)))?
-    } else if let Some(url) = reference["metadata"][RESOLVE]["Media Url"]
+    } else if let Some(url) = reference["metadata"][EDITOR]["Media Url"]
         .as_str()
         .filter(|_| s.starts_with("MissingReference"))
     {
-        // Media Resolve had offline: they may be here.
+        // Media the editor had offline: they may be here.
         locate(url, base, fps).ok_or_else(|| unsupported(url))?
     } else {
         return Err(Error::media(format!(
@@ -879,22 +878,22 @@ fn clip_source(item: &Value, fps: Rational, base: Option<&Path>) -> Result<(Medi
     )
 }
 
-/// Resolve's link group of a clip.
+/// The link group of a clip.
 fn link_group(item: &Value) -> Option<i64> {
-    item["metadata"][RESOLVE]["Link Group ID"].as_i64()
+    item["metadata"][EDITOR]["Link Group ID"].as_i64()
 }
 
-/// The audio stream Resolve's channel map plays.
-fn resolve_stream(item: &Value) -> Option<u32> {
-    let channels = item["metadata"][RESOLVE]["Channels"].as_array()?;
+/// The audio stream the channel map plays.
+fn editor_stream(item: &Value) -> Option<u32> {
+    let channels = item["metadata"][EDITOR]["Channels"].as_array()?;
     let track = channels.first()?["Source Track ID"].as_u64()?;
     u32::try_from(track).ok()
 }
 
-/// Resolve's clip volume in dB, noting what of it is left out.
-fn resolve_gain(item: &Value, warnings: &mut Vec<String>) -> Option<f64> {
+/// The clip volume in dB, noting what of it is left out.
+fn editor_gain(item: &Value, warnings: &mut Vec<String>) -> Option<f64> {
     for e in item["effects"].as_array().into_iter().flatten() {
-        let r = &e["metadata"][RESOLVE];
+        let r = &e["metadata"][EDITOR];
         if r["Effect Name"] != "Fairlight Clip Volume and Fades" || r["Enabled"] == false {
             continue;
         }
@@ -917,7 +916,7 @@ fn resolve_gain(item: &Value, warnings: &mut Vec<String>) -> Option<f64> {
                 _ => {}
             }
         }
-        // Resolve writes -16.999998 for -17.
+        // Editors write -16.999998 for -17.
         return gain.map(|g| (g * 100.0).round() / 100.0);
     }
     None
@@ -1004,11 +1003,11 @@ fn marker(k: &Value, at: i64) -> ImportedMarker {
         Some(c) if crate::ops::MARKER_COLORS.contains(&c) => c.to_string(),
         _ => our_color(k["color"].as_str().unwrap_or("")).to_string(),
     };
-    // Resolve keeps marker notes in its own metadata.
+    // Marker notes may be in the editor metadata.
     let note = k["comment"]
         .as_str()
         .filter(|c| !c.is_empty())
-        .or(k["metadata"][RESOLVE]["Note"].as_str())
+        .or(k["metadata"][EDITOR]["Note"].as_str())
         .unwrap_or("");
     ImportedMarker {
         at,
@@ -1106,7 +1105,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         }
     }
     // An audio clip lining up with a video clip of the same media (on the
-    // track vidcut named, else on any; in its Resolve link group if both
+    // track vidcut named, else on any; in its link group if both
     // have one) is that clip's audio. Others are audio-only clips: on the
     // track vidcut named, else on audio tracks A1, A2… in the file's order.
     let mut foreign_audio = 0;
@@ -1132,11 +1131,11 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             let link = link_group(item);
             let gain = meta["gain_db"]
                 .as_f64()
-                .or_else(|| resolve_gain(item, &mut warnings));
+                .or_else(|| editor_gain(item, &mut warnings));
             let stream = meta["stream"]
                 .as_u64()
                 .map(|s| s as u32)
-                .or_else(|| resolve_stream(item));
+                .or_else(|| editor_stream(item));
             let pairs = |c: &ImportedClip| {
                 c.video
                     && c.audio.is_none()

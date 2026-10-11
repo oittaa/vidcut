@@ -1,4 +1,4 @@
-//! The multi-track GUI under simulated input (egui_kittest, M6): the target
+//! The multi-track GUI under simulated input (egui_kittest): the target
 //! track, drags onto a new track, Place On Top, the mixer and bins. Each
 //! gesture changes the project with exactly one request.
 
@@ -245,7 +245,7 @@ fn track_gestures_send_one_request_each() {
     let mut gestures = 0;
     let last = |h: &live::Handle| gui_edits(h).last().cloned().unwrap();
 
-    // 1. V2's header makes it the target track (p. 696): F10 overwrites
+    // 1. V2's header makes it the target track: F10 overwrites
     // there, not on Track 1.
     harness.get_by_label("V2").click();
     harness.step();
@@ -268,7 +268,7 @@ fn track_gestures_send_one_request_each() {
     assert_eq!(gui_edits(&h).len() - edits0, gestures, "step 1");
 
     // 2. Dragging c2 off Track 1 into the strip above the top track: a new
-    // track V3 (p. 723); Track 1 closes up.
+    // track V3; Track 1 closes up.
     let l = harness.state().timeline_layout().unwrap();
     let v1 = l.lower.get("V1").unwrap().rect.rect;
     let grab = pos2(l.lower_scale.xf(70), v1.top() + 20.0);
@@ -290,7 +290,7 @@ fn track_gestures_send_one_request_each() {
     assert_eq!(gui_edits(&h).len() - edits0, gestures, "step 2");
 
     // 3. Place On Top at 100: above the highest track with clips there
-    // (V3), so on a new V4 (pp. 699–700).
+    // (V3), so on a new V4.
     call(
         &h,
         "media.marks.set",
@@ -313,7 +313,7 @@ fn track_gestures_send_one_request_each() {
     gestures += 1;
     assert_eq!(gui_edits(&h).len() - edits0, gestures, "step 3");
 
-    // 3b. A track header's V turns its video off (p. 647), and on again;
+    // 3b. A track header's V turns its video off, and on again;
     // it is lit only while the video is off, like L and M.
     let v1_toggle = |harness: &Harness<'_, Workspace>| {
         harness
@@ -347,7 +347,7 @@ fn track_gestures_send_one_request_each() {
     harness.step();
     harness.step();
     // Stereo project, no player: one bar per channel on each strip and the
-    // mix (p. 649). Four video tracks carry sound here.
+    // mix. Four video tracks carry sound here.
     assert_eq!(
         harness.query_all_by_label("mix meter").count(),
         2,
@@ -409,7 +409,7 @@ fn track_gestures_send_one_request_each() {
     gestures += 2;
     assert_eq!(gui_edits(&h).len() - edits0, gestures, "step 4");
 
-    // 5. Bins (p. 655): File > New Bin, then a pool clip dropped on it
+    // 5. Bins: File > New Bin, then a pool clip dropped on it
     // moves into it.
     harness.get_by_label("File").click();
     harness.step();
@@ -443,7 +443,7 @@ fn track_gestures_send_one_request_each() {
     };
     assert_eq!(bin_of(&h, "m2"), json!("Bin 1"));
     assert!(harness.query_by_label(&label).is_none(), "gone from Master");
-    // Opening the bin shows it, and Source Tape follows (p. 696).
+    // Opening the bin shows it, and Source Tape follows.
     harness.get_by_label("📁 Bin 1").click_secondary();
     harness.step();
     harness.get_by_label("Open").click();

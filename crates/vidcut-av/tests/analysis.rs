@@ -1,4 +1,4 @@
-//! Media measurements (M7) on generated fixtures: the beeps in the audio
+//! Media measurements on generated fixtures: the beeps in the audio
 //! levels, scene scores and black shares of shots, and the loudness of a
 //! tone whose level BS.1770 defines.
 

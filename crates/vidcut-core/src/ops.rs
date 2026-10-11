@@ -1,4 +1,4 @@
-//! Cut-page edit operations (spec §6–§8) as functions on a [`Project`].
+//! Edit operations (spec §6–§8) as functions on a [`Project`].
 //!
 //! Every operation works on resolved frame numbers; parsing TimeSpecs and
 //! ClipRefs happens in the request layer. Operations may leave the project
@@ -8,7 +8,7 @@
 //! Inserts, deletes, moves and trims there ripple, and the clips on every
 //! other track follow the Track 1 picture under their first frame
 //! ([`follow`], decision D21). Other tracks never ripple themselves, except
-//! where Track 1 has nothing under them (p. 721).
+//! where Track 1 has nothing under them.
 
 mod follow;
 mod tracks;
@@ -30,9 +30,9 @@ pub struct Source {
     pub media: String,
     /// Source frames `[start, end)` (project frames from the media's first frame).
     pub range: (i64, i64),
-    /// Leave the audio out (the Cut page's Video Only toggle, p. 694).
+    /// Leave the audio out (the Video Only toggle).
     pub video_only: bool,
-    /// Leave the video out (Audio Only, p. 694).
+    /// Leave the video out (Audio Only).
     pub audio_only: bool,
     /// The target track (spec §7 step 3). Default: Track 1 for clips with
     /// video, A1 for audio-only clips. The next new track (`V3` above V2) is
@@ -93,7 +93,7 @@ fn clip_index(t: &Track, id: &str) -> usize {
 }
 
 /// Whether Track 1 has nothing at or after `t`: other tracks may ripple
-/// there (p. 721).
+/// there.
 fn main_empty_from(p: &Project, t: i64) -> bool {
     p.tracks[main_index(p)].clips.iter().all(|c| c.end() <= t)
 }
@@ -346,7 +346,7 @@ fn is_main(p: &Project, ti: usize) -> bool {
 
 // ---------------------------------------------------------------- edit functions (spec §7)
 
-/// Append (Shift+F12, p. 697): after the last clip of the target track.
+/// Append (Shift+F12): after the last clip of the target track.
 pub fn append(p: &mut Project, src: &Source) -> Result<String> {
     append_block(p, std::slice::from_ref(src)).map(only)
 }
@@ -361,7 +361,7 @@ pub fn append_block(p: &mut Project, srcs: &[Source]) -> Result<Vec<String>> {
     Ok(ids)
 }
 
-/// The edit point on V1 nearest `playhead` (the Smart Indicator, p. 696);
+/// The edit point on V1 nearest `playhead` (the Smart Indicator);
 /// ties go to the earlier edit.
 pub fn nearest_edit(p: &Project, playhead: i64) -> i64 {
     let points = p
@@ -376,7 +376,7 @@ pub fn nearest_edit(p: &Project, playhead: i64) -> i64 {
 
 /// Whether the clips at Track 1's edit `e` have media past it: not when the
 /// clip ending there shows its media's last frame, or the clip starting
-/// there its first. The Smart Indicator then turns red (p. 696).
+/// there its first. The Smart Indicator then turns red.
 pub fn edit_has_handles(p: &Project, e: i64) -> bool {
     let Some(t) = p.track(MAIN) else {
         return true;
@@ -390,7 +390,7 @@ pub fn edit_has_handles(p: &Project, e: i64) -> bool {
     })
 }
 
-/// Smart Insert: insert at the edit nearest the playhead (p. 697).
+/// Smart Insert: insert at the edit nearest the playhead.
 pub fn smart_insert(p: &mut Project, src: &Source, playhead: i64) -> Result<String> {
     smart_insert_block(p, std::slice::from_ref(src), playhead).map(only)
 }
@@ -404,7 +404,7 @@ pub fn smart_insert_block(p: &mut Project, srcs: &[Source], playhead: i64) -> Re
 /// Insert at an exact frame (API-only, deviation X5). On Track 1 later clips
 /// move right, splitting a clip there if needed, and other tracks follow;
 /// with Ripple On a position past the end means the end. On other tracks
-/// nothing is pushed (p. 697): the clip writes over what is there.
+/// nothing is pushed: the clip writes over what is there.
 pub fn insert_at(p: &mut Project, src: &Source, at: i64) -> Result<String> {
     insert_at_block(p, std::slice::from_ref(src), at).map(only)
 }
@@ -481,7 +481,7 @@ fn fit_to(srcs: &[Source], len: i64) -> Vec<Source> {
     out
 }
 
-/// Overwrite (F10, p. 701): writes over the target track without moving
+/// Overwrite (F10): writes over the target track without moving
 /// other clips.
 pub fn overwrite(p: &mut Project, src: &Source, at: i64) -> Result<String> {
     overwrite_block(p, std::slice::from_ref(src), at).map(only)
@@ -507,7 +507,7 @@ pub fn overwrite_block(p: &mut Project, srcs: &[Source], at: i64) -> Result<Vec<
     Ok(ids)
 }
 
-/// Ripple Overwrite (Shift+F10, p. 698): replaces the timeline In–Out range,
+/// Ripple Overwrite (Shift+F10): replaces the timeline In–Out range,
 /// or else the whole clip under `at`, on the target track. On Track 1
 /// everything after moves by the length difference (the source length always
 /// wins, decision D8), and what was over the replaced clips stays. On other
@@ -562,7 +562,7 @@ pub fn ripple_overwrite_block(p: &mut Project, srcs: &[Source], at: i64) -> Resu
     Ok(ids)
 }
 
-/// Place On Top (F12, pp. 699–700): the clip goes on the first track above
+/// Place On Top (F12): the clip goes on the first track above
 /// every clip in its span (made if needed), ignoring the target track and
 /// never rippling. It lines up with the timeline In, a lone Out
 /// (backtimed), the edit nearest the playhead when within 5 frames, or the
@@ -623,7 +623,7 @@ pub fn place_on_top_block(
 
 // ---------------------------------------------------------------- timeline editing (spec §8)
 
-/// Split (Ctrl+\, p. 723) at each of `at`. Decision D2: where some of
+/// Split (Ctrl+\) at each of `at`. Decision D2: where some of
 /// `selected` lie under a split point, only those are split there; otherwise
 /// every clip under it on every unlocked track. Returns the new right-hand
 /// ids.
@@ -677,10 +677,10 @@ pub fn split(p: &mut Project, at: &[i64], selected: &[String]) -> Result<Vec<Str
     Ok(created)
 }
 
-/// Delete clips (pp. 721, 724–725). On Track 1 with ripple (Ripple On unless
+/// Delete clips. On Track 1 with ripple (Ripple On unless
 /// `lift`) later clips move left to close each gap and other tracks follow;
 /// a lift leaves the gaps. Other tracks close their gaps only where Track 1
-/// has nothing under them (p. 721).
+/// has nothing under them.
 pub fn delete(p: &mut Project, ids: &[String], lift: bool) -> Result<()> {
     let ripple = !lift && p.settings.ripple_on;
     delete_clips(p, ids, ripple)
@@ -735,7 +735,7 @@ fn delete_clips(p: &mut Project, ids: &[String], ripple: bool) -> Result<()> {
 }
 
 /// Splits clip `id` at each of `at` that falls strictly inside it (Detect
-/// Scene Cuts, p. 690); returns the new clips, left to right.
+/// Scene Cuts); returns the new clips, left to right.
 pub fn split_clip(p: &mut Project, id: &str, at: &[i64]) -> Result<Vec<String>> {
     let (ti, ci) = locate(p, id)?;
     let (start, end) = {
@@ -757,10 +757,10 @@ pub fn split_clip(p: &mut Project, id: &str, at: &[i64]) -> Result<Vec<String>> 
     Ok(created)
 }
 
-/// Cuts parts out of clips and closes the gaps (Ripple Delete Silence,
-/// p. 773): each clip is split at its parts' edges, and the pieces inside
-/// go as Delete with ripple removes clips, whatever Ripple On says (Track 1
-/// closes up and other tracks follow; elsewhere p. 721 applies). Parts are
+/// Cuts parts out of clips and closes the gaps (Ripple Delete Silence): each
+/// clip is split at its parts' edges, and the pieces inside go as Delete
+/// with ripple removes clips, whatever Ripple On says (Track 1 closes up and
+/// other tracks follow; elsewhere decision D22 applies). Parts are
 /// frame ranges inside their clip. Returns the pieces removed.
 pub fn remove_parts(p: &mut Project, parts: &[(String, Vec<(i64, i64)>)]) -> Result<Vec<String>> {
     let mut doomed = Vec::new();
@@ -781,7 +781,7 @@ pub fn remove_parts(p: &mut Project, parts: &[(String, Vec<(i64, i64)>)]) -> Res
     Ok(doomed)
 }
 
-/// Slide (Dynamic Trim's Slide mode, p. 731): clip `id` keeps its media and
+/// Slide (Dynamic Trim's Slide mode): clip `id` keeps its media and
 /// moves `by` frames; the clip before it gets longer and the one after it
 /// shorter, or the reverse. Both must touch it, so the program length stays.
 pub fn slide(p: &mut Project, id: &str, by: i64) -> Result<()> {
@@ -819,7 +819,7 @@ pub fn slide(p: &mut Project, id: &str, by: i64) -> Result<()> {
 }
 
 /// Delete the range `[a, b)` on every unlocked track (Delete with timeline
-/// In/Out set, p. 725); with ripple (unless `lift`) everything after moves
+/// In/Out set); with ripple (unless `lift`) everything after moves
 /// left on those tracks.
 pub fn delete_range(p: &mut Project, a: i64, b: i64, lift: bool) -> Result<()> {
     if a >= b {
@@ -879,7 +879,7 @@ fn extract(p: &mut Project, ti: usize, clips: &[Clip], to: i64) -> Result<i64> {
     Ok(mapped)
 }
 
-/// Move clips (pp. 720–723). `to` is where the first of them starts, in the
+/// Move clips. `to` is where the first of them starts, in the
 /// timeline as it is before the move; `track` is the track it goes to (the
 /// others keep theirs: with `track`, the clips must all be on one track).
 ///
@@ -888,12 +888,12 @@ fn extract(p: &mut Project, ti: usize, clips: &[Clip], to: i64) -> Result<i64> {
 ///   they leave close, and they go in at `to`, pushing later clips right.
 /// - `Overwrite` (dropping after hovering, or over the edge of a neighbor):
 ///   the clips are lifted, written over whatever is at `to`, and then, with
-///   Ripple On, what remains of the spans they left closes (p. 722: moving a
+///   Ripple On, what remains of the spans they left closes (moving a
 ///   clip a few frames onto its neighbor shortens the neighbor).
 ///
 /// Other tracks don't ripple: clips write over what is at their new place.
 /// Clips moved off Track 1 leave a gap that closes with Ripple On, and a
-/// Track 1 clip dropped on another track can only overwrite (p. 721). Clips
+/// Track 1 clip dropped on another track can only overwrite. Clips
 /// on other tracks follow Track 1 (decision D21).
 pub fn move_clips(
     p: &mut Project,
@@ -1015,7 +1015,7 @@ pub fn move_clips(
         place(p, ti, c);
     }
     if from == main && p.settings.ripple_on {
-        // The spans left on Track 1 close (p. 649), and what was over them
+        // The spans left on Track 1 close, and what was over them
         // follows; the moved clips themselves sit where they were dropped.
         let mut spans: Vec<(i64, i64)> = clips.iter().map(|(_, c)| (c.start, c.end())).collect();
         spans.sort_unstable();
@@ -1116,7 +1116,7 @@ fn move_overwrite(p: &mut Project, ti: usize, clips: &[Clip], to: i64) {
 }
 
 /// Move a clip onto another on Track 1 and replace it, rippling the
-/// difference (dropping on a clip right away, p. 721). What was over the
+/// difference (dropping on a clip right away). What was over the
 /// replaced clip stays.
 pub fn move_replace(p: &mut Project, id: &str, onto: &str) -> Result<()> {
     let main = main_index(p);
@@ -1127,7 +1127,7 @@ pub fn move_replace(p: &mut Project, id: &str, onto: &str) -> Result<()> {
     let (ui, _) = locate(p, onto)?;
     if ti != main || ui != main {
         return Err(Error::invalid(
-            "Replace works on Track 1; on other tracks a dropped clip overwrites (p. 721)",
+            "Replace works on Track 1; on other tracks a dropped clip overwrites",
         ));
     }
     let clip = p.tracks[main].clips[ci].clone();
@@ -1188,12 +1188,12 @@ fn check_source(p: &Project, c: &Clip) -> Result<()> {
     Ok(())
 }
 
-/// Resize a clip edge by `delta` frames (positive = later), p. 726.
+/// Resize a clip edge by `delta` frames (positive = later).
 ///
 /// On Track 1 with ripple (Ripple On unless overridden), the clip keeps its
 /// start, later clips move, and other tracks follow (a clip whose first
-/// frame was over the trimmed-off tail goes, p. 727). Other tracks ripple
-/// only where Track 1 has nothing under them (p. 721). Without ripple the
+/// frame was over the trimmed-off tail goes). Other tracks ripple
+/// only where Track 1 has nothing under them. Without ripple the
 /// edge moves in place, writing over a neighbor when extending into it.
 pub fn trim(p: &mut Project, id: &str, edge: Edge, delta: i64, ripple: Option<bool>) -> Result<()> {
     let (ti, ci) = locate(p, id)?;
@@ -1262,7 +1262,7 @@ fn edit_pair(p: &Project, ti: usize, id: &str, edge: Edge) -> Result<(usize, usi
     Ok((a, b))
 }
 
-/// Roll the edit at a clip's edge by `delta` (p. 727): the outgoing clip's end
+/// Roll the edit at a clip's edge by `delta`: the outgoing clip's end
 /// and the incoming clip's start move together; the program length stays.
 pub fn roll(p: &mut Project, id: &str, edge: Edge, delta: i64) -> Result<()> {
     let (ti, _) = locate(p, id)?;
@@ -1280,7 +1280,7 @@ pub fn roll(p: &mut Project, id: &str, edge: Edge, delta: i64) -> Result<()> {
     Ok(())
 }
 
-/// Slip a clip's content by `delta` source frames (p. 727); position and
+/// Slip a clip's content by `delta` source frames; position and
 /// length stay.
 pub fn slip(p: &mut Project, id: &str, delta: i64) -> Result<()> {
     let (ti, ci) = locate(p, id)?;
@@ -1291,7 +1291,7 @@ pub fn slip(p: &mut Project, id: &str, delta: i64) -> Result<()> {
     Ok(())
 }
 
-/// Audio-only roll at a clip's edge: a J/L cut (p. 728). Only the audio edit
+/// Audio-only roll at a clip's edge: a J/L cut. Only the audio edit
 /// moves; positive `delta` lets the outgoing audio run longer.
 pub fn audio_roll(p: &mut Project, id: &str, edge: Edge, delta: i64) -> Result<()> {
     let (ti, _) = locate(p, id)?;
@@ -1312,7 +1312,7 @@ pub fn audio_roll(p: &mut Project, id: &str, edge: Edge, delta: i64) -> Result<(
     Ok(())
 }
 
-/// Trim Start/End to Playhead (p. 729): moves the clips' head or tail to
+/// Trim Start/End to Playhead: moves the clips' head or tail to
 /// `at`. Decision D4: the given clips, or the V1 clip under `at`.
 pub fn trim_to(
     p: &mut Project,
@@ -1353,7 +1353,7 @@ pub fn trim_to(
     Ok(())
 }
 
-/// Change Clip Duration (Ctrl+D, p. 693) for each clip.
+/// Change Clip Duration (Ctrl+D) for each clip.
 pub fn change_duration(
     p: &mut Project,
     ids: &[String],
@@ -1395,9 +1395,7 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
     if let Some(g) = props.gain_db
         && !(-60.0..=24.0).contains(&g)
     {
-        return Err(Error::invalid(format!(
-            "gain {g} dB outside -60..24 dB (decision D12)"
-        )));
+        return Err(Error::invalid(format!("gain {g} dB outside -60..24 dB")));
     }
     for id in ids {
         let (ti, ci) = locate(p, id)?;
@@ -1471,7 +1469,7 @@ pub fn set_marks(
     Ok(())
 }
 
-/// Marker colors, as in Resolve (p. 718).
+/// Marker colors.
 pub const MARKER_COLORS: &[&str] = &[
     "blue", "cyan", "green", "yellow", "red", "pink", "purple", "fuchsia", "rose", "lavender",
     "sky", "mint", "lemon", "sand", "cocoa", "cream",
@@ -1488,7 +1486,7 @@ fn check_color(color: &str) -> Result<()> {
     }
 }
 
-/// Adds a marker (M, p. 718); returns its id.
+/// Adds a marker (M); returns its id.
 pub fn add_marker(
     p: &mut Project,
     at: i64,
@@ -1727,7 +1725,7 @@ pub fn clear_tape_marks(p: &mut Project, media: Option<&str>) -> Result<()> {
 // ---------------------------------------------------------------- clipboard
 
 /// The clips `ids` in timeline order with their tracks, as the clipboard
-/// holds them (Ctrl+C, p. 723).
+/// holds them (Ctrl+C).
 pub fn copy_clips(p: &Project, ids: &[String]) -> Result<Vec<TrackClip>> {
     if ids.is_empty() {
         return Err(Error::usage("no clips to copy"));
@@ -1748,7 +1746,7 @@ pub fn copy_clips(p: &Project, ids: &[String]) -> Result<Vec<TrackClip>> {
     Ok(clips)
 }
 
-/// Paste (Ctrl+V, p. 723): copies of `clips` overwrite their own tracks
+/// Paste (Ctrl+V): copies of `clips` overwrite their own tracks
 /// (made if missing) from `at`, keeping their spacing and properties. J/L
 /// cuts reset to straight cuts (decision D14); with Ripple On a paste past
 /// the end of Track 1 starts there (like decision D10). Returns the new ids.
@@ -1837,7 +1835,7 @@ fn within(path: &str, bin: &str) -> bool {
     path == bin || path.starts_with(&format!("{bin}/"))
 }
 
-/// Adds a bin, and any missing parents (p. 655).
+/// Adds a bin, and any missing parents.
 pub fn add_bin(p: &mut Project, path: &str) -> Result<()> {
     check_bin(path)?;
     let mut prefix = String::new();

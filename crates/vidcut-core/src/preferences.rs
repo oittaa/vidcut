@@ -1,5 +1,4 @@
-//! Application preferences, the counterpart of Resolve's Preferences window
-//! (p. 94): kept in `~/.config/vidcut/preferences.toml`, read with
+//! Application preferences, kept in `~/.config/vidcut/preferences.toml`, read with
 //! `preferences.get` and changed with `preferences.set`. Project settings
 //! (frame rate, size) belong to the project instead.
 

@@ -216,7 +216,7 @@ pub fn flatten(p: &Project, a: i64, b: i64) -> Result<RenderPlan> {
     let sample = |t: i64| s.fps.frame_to_sample(t - a, s.sample_rate);
 
     // Video: at every frame the highest video track with a visible clip
-    // there shows; clips above cover the ones below (p. 647).
+    // there shows; clips above cover the ones below.
     let visible = |t: &crate::model::Track, c: &Clip| t.video_enabled && c.enabled && c.video;
     let tracks: Vec<_> = p
         .tracks
@@ -263,7 +263,7 @@ pub fn flatten(p: &Project, a: i64, b: i64) -> Result<RenderPlan> {
         }
     }
 
-    // Audio: one lane per heard track (mute, solo, p. 650), with its fader.
+    // Audio: one lane per heard track (mute, solo), with its fader.
     let any_solo = p.any_solo();
     let mut audio = Vec::new();
     for track in &p.tracks {
@@ -742,7 +742,7 @@ mod tests {
 
     #[test]
     fn the_highest_visible_track_shows() {
-        // p. 647: clips on higher tracks cover the ones below.
+        // Clips on higher tracks cover the ones below.
         let mut f = fixture();
         f.append("m1", 0, 100);
         req(
@@ -779,7 +779,7 @@ mod tests {
 
     #[test]
     fn tracks_mix_with_mute_solo_and_faders() {
-        // p. 650: mute and solo also apply to export; the fader adds gain.
+        // Mute and solo also apply to export; the fader adds gain.
         let mut f = fixture();
         f.append("m1", 0, 100);
         let music = f.add_music("music.wav", 20.0);

@@ -92,7 +92,7 @@ pub struct Row {
 }
 
 /// A timeline's rows, top to bottom: the video tracks from the top one down
-/// to V1, then the audio tracks A1, A2… (p. 648). Above the rows is room for
+/// to V1, then the audio tracks A1, A2…. Above the rows is room for
 /// a new video track, below them for a new audio track.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rows {
@@ -179,7 +179,7 @@ impl Rows {
     }
 
     /// The track a drop at `y` goes to: the row's track, or a new video
-    /// track above the rows, or a new audio track below them (p. 648).
+    /// track above the rows, or a new audio track below them.
     pub fn target(&self, p: &Project, y: f32) -> Option<String> {
         if let Some(r) = self.at(y) {
             return Some(r.track.clone());
@@ -404,8 +404,7 @@ pub fn edit_near(track: &Track, scale: &Scale, x: f32, px: f32) -> Option<i64> {
 }
 
 /// Snap targets (spec §8.8): clip edges, markers, the timeline marks and the
-/// playhead (not when it is fixed: clips don't snap to a fixed playhead,
-/// p. 717).
+/// playhead (not when it is fixed: clips don't snap to a fixed playhead).
 #[derive(Debug, Clone, Default)]
 pub struct Snap {
     points: Vec<i64>,
@@ -522,7 +521,7 @@ mod tests {
 
     #[test]
     fn the_pointer_position_picks_the_operation() {
-        // Spec §8.6, p. 726–728.
+        // Spec §8.6.
         let (t, s, tr) = setup();
         let at = |x: f32, y: f32| hit(&t, &s, &tr, pos2(x, y));
         // The edit between c1 and c2 is at x = 200.

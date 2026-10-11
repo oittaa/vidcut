@@ -1,4 +1,4 @@
-//! Numbered image sequences (p. 366): the run of files a numbered image
+//! Numbered image sequences: the run of files a numbered image
 //! belongs to, as one clip.
 
 use std::collections::HashSet;

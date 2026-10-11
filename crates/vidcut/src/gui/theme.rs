@@ -1,5 +1,4 @@
-//! A dark theme close to Resolve's (spec §2: the Cut page is dark gray, with a
-//! red playhead and colored clips).
+//! A dark theme (spec §2: dark gray, with a red playhead and colored clips).
 
 use eframe::egui::{self, Color32, CornerRadius, Stroke, Visuals};
 

@@ -1,6 +1,6 @@
 //! Measurements of media and the edits made from them: silences (Ripple
-//! Delete Silence, p. 773), shot changes (Detect Scene Cuts, p. 690), black
-//! stretches, loudness, and clip lengths (the Boring Detector, p. 690).
+//! Delete Silence), shot changes (Detect Scene Cuts), black
+//! stretches, loudness, and clip lengths (the Boring Detector).
 //!
 //! The media layer measures, through [`Env`](crate::editor::Env); everything
 //! here is arithmetic on those measurements, so it is tested without media.
@@ -206,7 +206,7 @@ pub fn silences(
     out
 }
 
-/// Ripple Delete Silence's settings (p. 773), in frames.
+/// Ripple Delete Silence's settings, in frames.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SilenceSettings {
     /// Audio below this level (dBFS) is silence.
@@ -269,7 +269,7 @@ fn shown(span: &Span, stats: &PictureStats, t: i64) -> usize {
 
 /// Frames of `span` where a new shot starts, with their scores: the first
 /// frame showing a source frame that scores at least `threshold` against the
-/// one before it (Detect Scene Cuts, p. 690). Frames skipped between two
+/// one before it (Detect Scene Cuts). Frames skipped between two
 /// shown ones count too. The span's own first frame never counts.
 pub fn scene_cuts(span: &Span, stats: &PictureStats, threshold: f64) -> Vec<(i64, f32)> {
     let mut cuts = Vec::new();
@@ -314,7 +314,7 @@ pub fn black_parts(span: &Span, stats: &PictureStats, share: f64, min: i64) -> V
     out
 }
 
-/// The Boring Detector (p. 690): clips on video tracks longer than
+/// The Boring Detector: clips on video tracks longer than
 /// `boring` frames, and clips shorter than `jump` frames (jump cuts and
 /// flash frames).
 pub fn boring(p: &Project, boring: i64, jump: i64) -> (Vec<&Clip>, Vec<&Clip>) {
@@ -393,7 +393,7 @@ mod tests {
 
     #[test]
     fn silent_parts_keep_heads_and_tails() {
-        // p. 773: speech at 1.0–1.5 s and 3.0–3.2 s of a 4 s clip at 10 fps.
+        // Speech at 1.0–1.5 s and 3.0–3.2 s of a 4 s clip at 10 fps.
         let l = levels(4.0, &[(1.0, 1.5), (3.0, 3.2)]);
         let span = Span {
             start: 100,

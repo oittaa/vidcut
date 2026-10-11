@@ -1,5 +1,5 @@
-//! Edit operation tests. Each cites the Cut-page spec (docs/cut-page-spec.md)
-//! or manual page it checks. Media: m1 = 250 frames with audio, m2 = 100
+//! Edit operation tests. Each cites the spec section or decision
+//! (docs/cut-page-spec.md) it checks. Media: m1 = 250 frames with audio, m2 = 100
 //! frames with audio, m3 = 200 frames without audio (25 fps).
 
 use serde_json::json;
@@ -26,7 +26,7 @@ fn req(method: &str, params: serde_json::Value) -> serde_json::Value {
 
 #[test]
 fn append_places_clips_back_to_back() {
-    // p. 697: Append ignores the playhead and goes after the last clip.
+    // Append ignores the playhead and goes after the last clip.
     let f = three_clips();
     assert_eq!(
         f.v1(),
@@ -40,7 +40,7 @@ fn append_places_clips_back_to_back() {
 
 #[test]
 fn the_smart_indicator_is_red_without_media_past_the_edit() {
-    // p. 696: red where a clip shows its media's first or last frame.
+    // Red where a clip shows its media's first or last frame.
     let mut f = three_clips();
     f.append("m2", 0, 100); // all of m2, at 200..300
     f.append("m1", 100, 150); // at 300..350
@@ -93,7 +93,7 @@ fn the_smart_indicator_goes_by_track_one_alone() {
 
 #[test]
 fn smart_insert_uses_the_nearest_edit() {
-    // p. 696–697: Smart Insert inserts at the edit point nearest the playhead
+    // Smart Insert inserts at the edit point nearest the playhead
     // and ripples Track 1.
     let mut f = three_clips();
     let r = f.ok(req(
@@ -139,7 +139,7 @@ fn insert_at_splits_the_clip_under_it() {
 
 #[test]
 fn overwrite_writes_in_place() {
-    // p. 701: Overwrite replaces material without moving other clips.
+    // Overwrite replaces material without moving other clips.
     let mut f = three_clips();
     f.ok(req(
         "edit.overwrite",
@@ -164,7 +164,7 @@ fn overwrite_writes_in_place() {
 
 #[test]
 fn overwrite_uses_timeline_marks() {
-    // p. 701 and decision D7: In places the source In; a lone Out backtimes;
+    // Decision D7: In places the source In; a lone Out backtimes;
     // both marks make a three-point edit.
     let mut f = three_clips();
     f.ok(req("marks.set", json!({"in": 20, "out": 50})));
@@ -192,7 +192,7 @@ fn overwrite_uses_timeline_marks() {
 
 #[test]
 fn ripple_overwrite_replaces_and_ripples() {
-    // p. 698: replaces the clip under the playhead; later clips move by the
+    // Replaces the clip under the playhead; later clips move by the
     // length difference.
     let mut f = three_clips();
     f.ok(req(
@@ -234,7 +234,7 @@ fn ripple_overwrite_replaces_and_ripples() {
 
 #[test]
 fn split_at_points() {
-    // p. 723: Split at the playhead; several points at once for scripts.
+    // Split at the playhead; several points at once for scripts.
     let mut f = fixture();
     f.append("m1", 0, 100);
     let r = f.ok(req("edit.split", json!({"at": [30, "60f"]})));
@@ -259,7 +259,7 @@ fn split_at_points() {
 
 #[test]
 fn delete_ripples_on_track_one_and_lift_leaves_a_gap() {
-    // p. 724–725: Delete ripples Track 1; decision D9: lift leaves a gap.
+    // Delete ripples Track 1; decision D9: lift leaves a gap.
     let mut f = three_clips();
     f.ok(req("edit.delete", json!({"clips": "c2"})));
     assert_eq!(f.v1(), vec![row("c1", 0, 100, 0), row("c3", 100, 50, 100)]);
@@ -277,7 +277,7 @@ fn delete_ripples_on_track_one_and_lift_leaves_a_gap() {
 
 #[test]
 fn delete_range_and_close_gap() {
-    // p. 725: Delete with timeline In/Out removes the range.
+    // Delete with timeline In/Out removes the range.
     let mut f = three_clips();
     f.ok(req("edit.delete_range", json!({"range": "80f..120f"})));
     assert_eq!(
@@ -297,7 +297,7 @@ fn delete_range_and_close_gap() {
 
 #[test]
 fn move_inserts_at_an_edit_and_closes_the_gap() {
-    // p. 721–722: dropping on an edit point inserts there; Track 1 closes the
+    // Dropping on an edit point inserts there; Track 1 closes the
     // gap the clip leaves.
     let mut f = three_clips();
     f.ok(req("edit.move", json!({"clips": "c3", "to": 0})));
@@ -325,7 +325,7 @@ fn move_inserts_at_an_edit_and_closes_the_gap() {
 
 #[test]
 fn move_overwrite_and_replace() {
-    // p. 721: hovering before dropping overwrites; dropping straight onto a
+    // Hovering before dropping overwrites; dropping straight onto a
     // clip replaces it and ripples.
     let mut f = three_clips();
     f.ok(req(
@@ -349,7 +349,7 @@ fn move_overwrite_and_replace() {
 
 #[test]
 fn trim_ripples_on_track_one() {
-    // p. 716, 726: resizing on Track 1 with Ripple On moves later clips.
+    // Resizing on Track 1 with Ripple On moves later clips.
     let mut f = three_clips();
     f.ok(req(
         "edit.trim",
@@ -385,7 +385,7 @@ fn trim_ripples_on_track_one() {
 
 #[test]
 fn trim_without_ripple_overwrites_neighbors() {
-    // p. 716: Alt (ripple off) trims in place; extending writes over the neighbor.
+    // Alt (ripple off) trims in place; extending writes over the neighbor.
     let mut f = three_clips();
     f.ok(req(
         "edit.trim",
@@ -441,7 +441,7 @@ fn trims_respect_source_media() {
 
 #[test]
 fn roll_and_slip() {
-    // p. 727: roll moves an edit, keeping the program length; slip changes
+    // Roll moves an edit, keeping the program length; slip changes
     // which source frames a clip shows.
     let mut f = three_clips();
     f.ok(req(
@@ -464,7 +464,7 @@ fn roll_and_slip() {
 
 #[test]
 fn audio_roll_makes_j_and_l_cuts() {
-    // p. 728: dragging the audio edit moves only the audio.
+    // Dragging the audio edit moves only the audio.
     let mut f = three_clips();
     f.ok(req(
         "edit.audio_roll",
@@ -534,7 +534,7 @@ fn a_clip_heard_only_past_its_picture_keeps_its_audio() {
 
 #[test]
 fn trim_to_playhead_and_change_duration() {
-    // p. 729 and decision D4; p. 693 Change Clip Duration.
+    // Decision D4; Change Clip Duration.
     let mut f = three_clips();
     f.ok(req(
         "edit.trim_to_playhead",
@@ -705,7 +705,7 @@ fn bad_requests_are_usage_errors() {
 
 #[test]
 fn first_video_sets_the_project_format() {
-    // p. 654: importing into an empty project offers the media's frame rate.
+    // Importing into an empty project offers the media's frame rate.
     let mut f = Fixture::new(&[]);
     f.env = std::mem::take(&mut f.env).with(
         "/media/a.mp4",
@@ -943,7 +943,7 @@ fn tape_span() -> Fixture {
 
 #[test]
 fn a_tape_span_placed_on_top_is_one_block() {
-    // D17 with Place On Top (pp. 699–700): the span lines up once and goes
+    // D17 with Place On Top: the span lines up once and goes
     // on one track, its pieces end to end. Piece by piece, the second piece
     // (at 102) would snap to Track 1's edit at 100 and land on V3.
     let mut f = tape_span();
@@ -958,7 +958,7 @@ fn a_tape_span_placed_on_top_is_one_block() {
 
 #[test]
 fn a_tape_span_inserts_and_ripples_as_one_block() {
-    // D17 with Insert (p. 697): later clips move by the whole span.
+    // D17 with Insert: later clips move by the whole span.
     let mut f = tape_span();
     f.ok(req("edit.insert", json!({"tape": true, "at": 100})));
     assert_eq!(
@@ -975,7 +975,7 @@ fn a_tape_span_inserts_and_ripples_as_one_block() {
 
 #[test]
 fn a_tape_span_ripple_overwrites_a_clip() {
-    // D17 with Ripple Overwrite (p. 698): the span replaces c2, and what
+    // D17 with Ripple Overwrite: the span replaces c2, and what
     // follows moves by the length difference.
     let mut f = tape_span();
     f.ok(req(
@@ -1021,7 +1021,7 @@ fn removing_media_on_the_tape_clears_its_marks() {
 
 #[test]
 fn copy_cut_and_paste() {
-    // p. 723: Ctrl+C copies, Ctrl+X cuts and ripples, Ctrl+V pastes at the
+    // Ctrl+C copies, Ctrl+X cuts and ripples, Ctrl+V pastes at the
     // playhead on the original track, overwriting.
     let mut f = three_clips();
     f.ok(req(
@@ -1120,7 +1120,7 @@ fn drag_and_drop_edits_ignore_timeline_marks() {
 
 #[test]
 fn markers_and_track_toggles() {
-    // p. 718: edit a marker's name, color and note; pp. 647, 717: track lock,
+    // Edit a marker's name, color and note; track lock,
     // mute and video enable.
     let mut f = three_clips();
     let k = f.ok(req("markers.add", json!({"at": 30, "color": "red"})));
@@ -1163,7 +1163,7 @@ fn markers_and_track_toggles() {
 
 #[test]
 fn moving_onto_a_neighbor_overwrites_and_closes_the_gap() {
-    // p. 722: dragging c2 (100..150) 10 frames right over c3's head, without
+    // Dragging c2 (100..150) 10 frames right over c3's head, without
     // the pointer reaching c3, overwrites c3's first 10 frames; the 10 frames
     // c2 vacated close, so c2 stays put and c3 is 10 frames shorter.
     let mut f = three_clips();
@@ -1179,7 +1179,7 @@ fn moving_onto_a_neighbor_overwrites_and_closes_the_gap() {
             row("c4", 150, 40, 110)
         ]
     );
-    // p. 721: hovering over c1's middle and dropping c3 there splits c1; the
+    // Hovering over c1's middle and dropping c3 there splits c1; the
     // span c3 left at the end closes (nothing after it).
     let mut f = three_clips();
     f.ok(req(
@@ -1228,7 +1228,7 @@ fn moving_onto_a_neighbor_overwrites_and_closes_the_gap() {
 
 #[test]
 fn change_duration_to_the_end_of_the_media() {
-    // p. 693: End extends a clip to the end of its media.
+    // End extends a clip to the end of its media.
     let mut f = three_clips();
     f.ok(req(
         "edit.change_duration",

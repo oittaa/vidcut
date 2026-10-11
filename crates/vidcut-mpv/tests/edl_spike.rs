@@ -1,4 +1,4 @@
-//! M0 spike: how mpv's EDL and seeking behave, measured with barcode fixtures
+//! Spike: how mpv's EDL and seeking behave, measured with barcode fixtures
 //! rendered through the software renderer. Run with `--nocapture` to see the
 //! findings; assertions pin down the behavior vidcut's time map relies on.
 //!
@@ -660,7 +660,7 @@ fn demuxer_offset_seek_cost() {
     }
 }
 
-/// M6: one `!new_stream` per audio track, mixed by `lavfi-complex` (an
+/// One `!new_stream` per audio track, mixed by `lavfi-complex` (an
 /// `amix` with only audio pads). The video must stay frame-exact, and both
 /// streams must be heard: lane 2 is lane 1's beeps half a second later.
 #[test]
@@ -770,7 +770,7 @@ fn edl_audio_streams_mix_with_lavfi_complex() {
     }
 }
 
-/// M6: per-clip gain in preview: a `volume` filter whose expression switches
+/// Per-clip gain in preview: a `volume` filter whose expression switches
 /// on the EDL timeline's time `t`, also after a seek.
 #[test]
 fn edl_volume_follows_timeline_time() {
@@ -857,7 +857,7 @@ fn ffconcat(files: &[PathBuf], fps: f64) -> String {
     out
 }
 
-/// M9 spike: ways for a still image and a numbered image sequence to play in
+/// Spike: ways for a still image and a numbered image sequence to play in
 /// the EDL frame-exactly. Barcode PNGs of a fixture's frames stand in for
 /// the images: "still.png" shows 77, frame_0000kk.png shows kk.
 #[test]

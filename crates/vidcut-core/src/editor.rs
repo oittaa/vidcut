@@ -53,8 +53,7 @@ pub trait Env {
     fn probe_sequence(&self, path: &Path, rate: Rational) -> Result<ProbedMedia>;
 
     /// Files named `name` in `dirs` or their subfolders, nearest first: how
-    /// an import finds media that moved (Resolve searches subfolders too,
-    /// p. 530).
+    /// an import finds media that moved.
     fn find_file(&self, dirs: &[PathBuf], name: &std::ffi::OsStr) -> Vec<PathBuf> {
         let mut found = Vec::new();
         for dir in dirs {
@@ -486,9 +485,7 @@ fn resolve_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
 fn tape_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
     let tm = &p.tape_marks;
     let (Some(mark_in), Some(mark_out)) = (tm.mark_in, tm.mark_out) else {
-        return Err(Error::invalid(
-            "a Source Tape edit needs both In and Out (decision D17)",
-        ));
+        return Err(Error::invalid("a Source Tape edit needs both In and Out"));
     };
     if tm.order.is_empty() {
         return Err(Error::invalid("Source Tape marks have no media order"));
@@ -817,7 +814,7 @@ fn mutate(
         } => {
             if src.track.is_some() {
                 return Err(Error::usage(
-                    "Place On Top picks its own track (p. 699); leave out `track`",
+                    "Place On Top picks its own track; leave out `track`",
                 ));
             }
             let at = match at {
@@ -1017,7 +1014,7 @@ fn mutate(
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             if matches!(duration, TimeSpec::Keyword(crate::time::Keyword::End)) {
-                // "End": each clip runs to the end of its media (p. 693).
+                // "End": each clip runs to the end of its media.
                 ops::extend_to_media_end(p, &ids, *ripple)?;
             } else {
                 let frames = length(p, duration)?;
@@ -1203,7 +1200,6 @@ fn add_media(p: &mut Project, probed: ProbedMedia) -> String {
         && let Some(v) = probed.info.video.as_ref().filter(|v| !v.still)
     {
         // The first video sets the project format, with no prompt (D37).
-        // Resolve offers a format change on the first import (p. 654).
         p.settings.fps = v.fps;
         adopt_size(p, v);
     }
@@ -1285,7 +1281,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         }
     };
     let t = otio::import(&doc, file.as_ref().map(|f| f.base.as_path()))?;
-    // Resolve writes no timeline names: the file's then.
+    // Some editors write no timeline name: the file's then.
     let name = match (t.name.as_str(), path) {
         ("", Some(path)) => path
             .file_stem()
@@ -2107,7 +2103,7 @@ fn targets<'a>(
     }
 }
 
-/// Ripple Delete Silence's parts of `target` (p. 773).
+/// Ripple Delete Silence's parts of `target`.
 fn silent_parts(
     p: &Project,
     env: &dyn Env,
@@ -2139,7 +2135,7 @@ fn silent_parts(
     ))
 }
 
-/// Detect Scene Cuts' frames in `target`, with their scores (p. 690).
+/// Detect Scene Cuts' frames in `target`, with their scores.
 fn scene_cuts(
     p: &Project,
     env: &dyn Env,

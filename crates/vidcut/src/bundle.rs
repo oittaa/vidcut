@@ -1,5 +1,5 @@
 //! OpenTimelineIO bundles (deviation X9): a timeline with its media, as an
-//! `.otioz` zip file (what DaVinci Resolve exports and imports) or an
+//! `.otioz` zip file or an
 //! `.otiod` folder. Both are laid out as OpenTimelineIO's own adapters lay
 //! them out: `content.otio` and, in a zip, `version.txt` at the top, the
 //! media under `media/`, named by paths relative to the bundle. Media are

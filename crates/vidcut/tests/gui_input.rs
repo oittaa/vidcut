@@ -1,7 +1,7 @@
 //! The GUI under simulated input (egui_kittest, no window or renderer): the
 //! real panels against a live session without players. Each gesture must
 //! change the project with exactly one request, and the command log must
-//! match the undo history (M4 acceptance).
+//! match the undo history.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -216,7 +216,7 @@ fn gestures_send_one_request_each() {
     settle(&h, &mut harness);
 
     // 2. Dragging c1's tail 5 frames right in the lower timeline: a rippled
-    // trim (p. 726).
+    // trim.
     let from = at(&harness, 60, 40.0) - vec2(4.0, 0.0);
     drag(&mut harness, from, from + vec2(20.0, 0.0), Modifiers::NONE);
     settle(&h, &mut harness);
@@ -228,7 +228,7 @@ fn gestures_send_one_request_each() {
     assert_eq!(v1(&h)[0], ("c1".into(), 0, 65));
 
     // 3. Dragging c3 (now 125..185) onto the c1|c2 edit (65): insert there
-    // (p. 723).
+    //.
     let grab = at(&harness, 150, 40.0);
     let edit = at(&harness, 65, 40.0);
     drag(&mut harness, grab, edit, Modifiers::NONE);
@@ -291,7 +291,7 @@ fn gestures_send_one_request_each() {
     assert_eq!(edits.len() - edits0, 6, "{edits:#?}");
     assert_eq!(undo_steps(&h), undo0 + 4);
 
-    // Smooth with 1,000 clips (M4): split the long clip into 1,000 pieces
+    // Smooth with 1,000 clips: split the long clip into 1,000 pieces
     // and time whole frames of the GUI (layout, timelines, pool, viewer).
     for _ in 0..4 {
         call(&h, "edit.append", json!({ "media": "m1" }));

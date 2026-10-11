@@ -514,7 +514,7 @@ fn timeline_shape(sb: &Sandbox, project: &Path) -> Value {
 
 #[test]
 fn otio_round_trips_frame_exactly() {
-    // M5 acceptance: export → import reproduces the timeline frame-exactly.
+    // Export → import reproduces the timeline frame-exactly.
     let sb = Sandbox::new("otio");
     let a = fixture(FixtureSpec::new(
         VideoCodec::H264,
@@ -581,7 +581,7 @@ fn otio_round_trips_frame_exactly() {
     // Moved media: an error naming the files, unless found by name.
     let fixtures = a.parent().unwrap();
     let moved = sb.dir.path().join("moved.otio");
-    // (Media are named by plain path, as Resolve names them.)
+    // (Media are named by plain path.)
     let text = std::fs::read_to_string(&cut)
         .unwrap()
         .replace(&format!("\"{}/", s(fixtures)), "\"/nonexistent/footage/");
@@ -596,7 +596,7 @@ fn otio_round_trips_frame_exactly() {
             .contains("/nonexistent/footage/"),
         "{e}"
     );
-    // Found by name in a subfolder (as Resolve relinks, p. 530).
+    // Found by name in a subfolder.
     let above = fixtures.parent().unwrap();
     sb.ok_in(&third, &["import", s(&moved), "--search", s(above)]);
     assert_eq!(
@@ -648,7 +648,7 @@ fn same_frames(sb: &Sandbox, a: &Path, b: &Path, frames: &[&str]) {
 #[test]
 fn otio_bundles_and_timecode() {
     // Deviation X9: `.otioz` and `.otiod` bundles carry the media along;
-    // source ranges count from the media's timecode, as Resolve reads them.
+    // source ranges count from the media's timecode.
     let sb = Sandbox::new("otioz");
     let tc = fixture(
         FixtureSpec::new(VideoCodec::H264, Container::Mov, 320, 180, (25, 1), 75)
@@ -899,9 +899,9 @@ fn peak(samples: &[f32], at: usize) -> f32 {
 
 #[test]
 fn b_roll_and_music_export_correctly() {
-    // M6 acceptance: B-roll on V2 covers Track 1 (p. 647), music on A1 mixes
+    // B-roll on V2 covers Track 1, music on A1 mixes
     // with Track 1's audio, and the mixer's fader, solo and mute apply to
-    // export (p. 650).
+    // export.
     let sb = Sandbox::new("multitrack");
     let a = fixture(FixtureSpec::new(
         VideoCodec::H264,
@@ -1057,7 +1057,7 @@ fn loudness_normalized_exports_meet_their_target() {
 
 #[test]
 fn scene_cuts_split_encoded_shots_exactly() {
-    // p. 690: a clip of five 30-frame shots splits at each shot change;
+    // A clip of five 30-frame shots splits at each shot change;
     // the fourth shot is black.
     let sb = Sandbox::new("scenes");
     let shots = fixture(
@@ -1104,8 +1104,8 @@ fn scene_cuts_split_encoded_shots_exactly() {
 
 #[test]
 fn stills_and_sequences_edit_and_export() {
-    // M9: a still and a numbered image sequence, added, edited and
-    // exported (pp. 114, 366, 1194; decisions D38, D39).
+    // A still and a numbered image sequence, added, edited and
+    // exported (decisions D38, D39).
     let sb = Sandbox::new("images");
     let still = fixture::ensure_images(&ImageSpec::still(77, 320, 180, "png")).unwrap();
     let seq = fixture::ensure_images(&ImageSpec::sequence(1, 60, 6, 320, 180)).unwrap();

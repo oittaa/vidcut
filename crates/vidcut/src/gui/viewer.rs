@@ -116,7 +116,7 @@ impl Workspace {
         // as export will fit them.
         let below = 34.0 + 36.0;
         let avail = ui.available_rect_before_wrap();
-        // The audio meter and monitoring mute on the right (p. 642): one
+        // The audio meter and monitoring mute on the right: one
         // bar per project channel.
         let meter_w = self.viewer_meter_width();
         let area = Rect::from_min_max(
@@ -217,7 +217,7 @@ impl Workspace {
         self.transport(ui, id);
     }
 
-    /// The Trim Editor (p. 729): the outgoing clip's last frame beside the
+    /// The Trim Editor: the outgoing clip's last frame beside the
     /// incoming clip's first frame, with one-frame trims of the Out, the In
     /// and both (a roll). Esc or Close leaves it.
     fn trim_editor_view(&mut self, ui: &mut egui::Ui, area: Rect, aspect: f32) {
@@ -274,7 +274,7 @@ impl Workspace {
         });
     }
 
-    /// Dynamic Trim's two-up (p. 730): the frames on both sides of the
+    /// Dynamic Trim's two-up: the frames on both sides of the
     /// edit (or of the slipped or sliding clip) as the trim so far leaves them.
     fn dynamic_view(&mut self, ui: &mut egui::Ui, area: Rect, aspect: f32) {
         use crate::gui::timeline::tools::{DynamicTarget, dynamic_preview};
@@ -413,7 +413,7 @@ impl Workspace {
     }
 
     /// Source Clip and Source Tape: the whole clip or tape, with the playhead
-    /// and draggable In/Out handles (p. 680, 692).
+    /// and draggable In/Out handles.
     fn scroll_bar(&mut self, ui: &mut egui::Ui) {
         let (rect, resp) =
             ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::click_and_drag());
@@ -616,7 +616,7 @@ impl Workspace {
     }
 
     /// Timeline mode has no scroll bar; it shows when the playhead sits on a
-    /// clip's first or last frame (p. 681).
+    /// clip's first or last frame.
     fn clip_edge_hint(&self, ui: &mut egui::Ui) {
         let at = self.snap.timeline.position;
         let text = self
@@ -706,7 +706,7 @@ impl Workspace {
         self.seek(id, target, false);
     }
 
-    /// The playhead timecode; click, `=`, `+` or `-` to type one (p. 688).
+    /// The playhead timecode; click, `=`, `+` or `-` to type one.
     fn timecode_field(&mut self, ui: &mut egui::Ui, id: PlayerId) {
         let position = self.snap.player(id).position;
         let current = match self.snap.viewer {
@@ -758,7 +758,7 @@ impl Workspace {
         }
     }
 
-    /// The marked duration; editing it moves the Out mark (p. 693).
+    /// The marked duration; editing it moves the Out mark.
     fn duration_field(&mut self, ui: &mut egui::Ui) {
         let Some(p) = self.project() else { return };
         let (start, end, media) = match self.snap.source_at() {
@@ -830,7 +830,7 @@ impl Workspace {
 }
 
 /// What was typed into a timecode field, as a TimeSpec: digits fill a
-/// timecode from the right as in Resolve ("100" is 00:00:01:00, p. 688);
+/// timecode from the right ("100" is 00:00:01:00);
 /// anything else (`5s`, `1m30s`, `450f`, `00:01:00:00`) is used as is.
 pub(super) fn timecode_input(text: &str) -> Option<String> {
     let t = text.trim().trim_start_matches(['+', '-', '=']);

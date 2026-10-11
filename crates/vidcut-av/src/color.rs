@@ -2,8 +2,7 @@
 //! that convert between them, and the tags an encoder writes.
 //!
 //! HDR into SDR is tone-mapped. SDR into HDR puts SDR white at 203 nits,
-//! the reference white of ITU-R BT.2408 (Resolve's "203 nits" option,
-//! p. 238). Untagged pictures are BT.709 when HD by mpv's rule (1280 wide,
+//! the reference white of ITU-R BT.2408. Untagged pictures are BT.709 when HD by mpv's rule (1280 wide,
 //! or over 576 lines), else BT.601: mpv shows the preview, so the export
 //! then matches it.
 

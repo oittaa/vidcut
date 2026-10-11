@@ -1,4 +1,4 @@
-//! M3 acceptance against the real GUI (needs a Wayland or X11 display and
+//! Checks against the real GUI (needs a Wayland or X11 display and
 //! libmpv; run with `--features vidcut/gui-tests`). Starts `vidcut -p FILE`,
 //! drives it through the CLI like an agent would, and checks:
 //! - a CLI edit is applied by the GUI and shows in its window in < 100 ms;
@@ -151,7 +151,7 @@ fn gui_acceptance() {
     };
     let out = Command::new(BIN).arg("new").arg(&project).output().unwrap();
     assert!(out.status.success());
-    // A phone-style clip, stored sideways with a rotation (M8): the preview
+    // A phone-style clip, stored sideways with a rotation: the preview
     // turns it upright on the GPU, like export. (mpv's software renderer,
     // which tests/live.rs uses, aborts on rotated video.)
     let rotated = fixture::ensure(

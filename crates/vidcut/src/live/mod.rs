@@ -2512,7 +2512,7 @@ impl Live {
     /// (nothing happens if that is already loaded).
     fn refresh_source(&mut self) -> Option<u64> {
         let p = self.project.as_ref()?.project().clone();
-        // Source Tape: the pool view's bin, in its order (p. 696). A removed
+        // Source Tape: the pool view's bin, in its order. A removed
         // bin's media went to its parent, so the pool shows that.
         while !self.pool.bin.is_empty() && !p.bins.contains(&self.pool.bin) {
             let parent = self.pool.bin.rsplit_once('/').map_or("", |(a, _)| a);
@@ -2617,7 +2617,7 @@ impl Live {
         }
     }
 
-    /// Opens `media` as Source Clip (double-click in the pool, p. 680).
+    /// Opens `media` as Source Clip (double-click in the pool).
     fn load_source(&mut self, media: &str, at: Option<&TimeSpec>) -> Result<Option<u64>> {
         let open = self.project.as_ref().ok_or_else(no_project)?;
         let p = open.project();

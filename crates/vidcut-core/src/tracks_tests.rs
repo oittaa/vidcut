@@ -1,5 +1,5 @@
-//! Multi-track editing tests (M6). Each cites the manual page or decision it
-//! checks. Media: m1 = 250 frames with audio, m2 = 100 frames with audio,
+//! Multi-track editing tests. Each cites the spec section or decision
+//! it checks. Media: m1 = 250 frames with audio, m2 = 100 frames with audio,
 //! m3 = 200 frames without audio (25 fps).
 
 use serde_json::json;
@@ -35,7 +35,7 @@ fn put(f: &mut Fixture, media: &str, a: i64, b: i64, at: i64, track: &str) -> St
 
 #[test]
 fn tracks_are_added_removed_and_renumbered() {
-    // p. 648: Add Track; ids are positional, so removing renumbers.
+    // Add Track; ids are positional, so removing renumbers.
     let mut f = fixture();
     let r = f.ok(req("track.add", json!({"kind": "video", "count": 2})));
     assert_eq!(r.result["tracks"], json!(["V2", "V3"]));
@@ -51,7 +51,7 @@ fn tracks_are_added_removed_and_renumbered() {
     f.err(req("track.remove", json!({"track": "V1", "force": true})));
     f.ok(req("track.remove", json!({"track": "V2", "force": true})));
     assert_eq!(f.track_ids(), ["V1", "V2", "A1"]);
-    // The mixer (p. 650): solo, fader, name.
+    // The mixer: solo, fader, name.
     f.ok(req(
         "track.set",
         json!({"track": "A1", "solo": true, "volume_db": -6.0, "name": "Music"}),
@@ -67,7 +67,7 @@ fn tracks_are_added_removed_and_renumbered() {
 
 #[test]
 fn edit_functions_use_the_target_track() {
-    // p. 696 step 3: pick the track; p. 697: only Track 1 is pushed by an
+    // Pick the track; only Track 1 is pushed by an
     // insert.
     let mut f = three_clips();
     // The next new track is made on the way.
@@ -96,7 +96,7 @@ fn edit_functions_use_the_target_track() {
 
 #[test]
 fn audio_only_clips_go_on_audio_tracks() {
-    // p. 648: music and narration go on audio-only tracks; p. 694: Audio Only.
+    // Music and narration go on audio-only tracks; Audio Only.
     let mut f = three_clips();
     let music = f.add_music("music.wav", 20.0);
     let r = f.ok(req(
@@ -136,8 +136,8 @@ fn audio_only_clips_go_on_audio_tracks() {
 
 #[test]
 fn clips_on_other_tracks_follow_track_one() {
-    // p. 649: superimposed clips stay in sync with Track 1 when it ripples;
-    // p. 723: they travel with Track 1 clips that move; p. 727: trimming the
+    // Superimposed clips stay in sync with Track 1 when it ripples;
+    // They travel with Track 1 clips that move; trimming the
     // picture under one away deletes it. Decision D21.
     let mut f = three_clips();
     put(&mut f, "m3", 0, 20, 110, "V2"); // c4 over c2
@@ -203,7 +203,7 @@ fn trimming_a_head_moves_what_started_over_it() {
 
 #[test]
 fn deleting_a_range_takes_it_out_of_every_track() {
-    // p. 725: Delete with In/Out set removes that part of the timeline.
+    // Delete with In/Out set removes that part of the timeline.
     let mut f = three_clips();
     put(&mut f, "m3", 0, 40, 40, "V2"); // c4 40..80
     put(&mut f, "m3", 0, 20, 170, "V2"); // c5 170..190
@@ -229,7 +229,7 @@ fn deleting_a_range_takes_it_out_of_every_track() {
 
 #[test]
 fn other_tracks_ripple_only_where_track_one_is_empty() {
-    // p. 721: ripple on other tracks only without Track 1 video under them.
+    // Ripple on other tracks only without Track 1 video under them.
     let mut f = three_clips(); // Track 1 ends at 200
     let music = f.add_music("music.wav", 20.0);
     for at in [0, 220, 260] {
@@ -256,7 +256,7 @@ fn other_tracks_ripple_only_where_track_one_is_empty() {
 
 #[test]
 fn video_tracks_ripple_only_where_track_one_is_empty() {
-    // p. 721, decision D22, on V2: over Track 1's picture a delete or trim
+    // Decision D22, on V2: over Track 1's picture a delete or trim
     // leaves a gap; past Track 1's end the clips after it close up.
     let mut f = three_clips(); // Track 1 ends at 200
     let a = put(&mut f, "m3", 0, 20, 20, "V2");
@@ -322,7 +322,7 @@ fn video_tracks_ripple_only_where_track_one_is_empty() {
 
 #[test]
 fn place_on_top_goes_above_everything_there() {
-    // pp. 699–700: Place On Top.
+    // Place On Top.
     let mut f = three_clips();
     let r = f.ok(req(
         "edit.place_on_top",
@@ -406,7 +406,7 @@ fn split_cuts_every_unlocked_track_and_locked_tracks_stay() {
 
 #[test]
 fn paste_puts_clips_back_on_their_tracks() {
-    // p. 723: paste goes to the tracks the clips were copied from.
+    // Paste goes to the tracks the clips were copied from.
     let mut f = three_clips();
     put(&mut f, "m3", 0, 20, 10, "V2"); // c4
     let r = f.ok(req("edit.copy", json!({"clips": ["c1", "c4"]})));
@@ -425,7 +425,7 @@ fn paste_puts_clips_back_on_their_tracks() {
 
 #[test]
 fn clips_move_between_tracks() {
-    // p. 721: a Track 1 clip dropped on another track overwrites there, and
+    // A Track 1 clip dropped on another track overwrites there, and
     // Track 1 closes up.
     let mut f = three_clips();
     f.ok(req(
@@ -457,7 +457,7 @@ fn clips_move_between_tracks() {
 
 #[test]
 fn bins_hold_media() {
-    // p. 655: bins in the Media Pool. Removing a bin keeps its media.
+    // Bins in the Media Pool. Removing a bin keeps its media.
     let mut f = fixture();
     f.ok(req("bins.add", json!({"path": "Interviews/Day 1"})));
     assert_eq!(f.editor.project().bins, ["Interviews", "Interviews/Day 1"]);

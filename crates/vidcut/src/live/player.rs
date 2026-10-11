@@ -153,7 +153,7 @@ pub struct Player {
     fps: Rational,
     /// The EDL and audio graph loaded (or being loaded).
     loaded: Option<Preview>,
-    /// The monitoring mute (p. 642).
+    /// The monitoring mute.
     muted: bool,
     /// The load command while mpv opens the file (it rejects seeks until then).
     loading: Option<u64>,
@@ -262,7 +262,7 @@ impl Player {
         format!("{:.9}", self.fps.frames_to_secs(frame.max(0)))
     }
 
-    /// Mutes what the player plays (the monitoring mute, p. 642).
+    /// Mutes what the player plays (the monitoring mute).
     pub fn set_muted(&mut self, muted: bool) {
         self.muted = muted;
         if let Some(m) = &self.mpv

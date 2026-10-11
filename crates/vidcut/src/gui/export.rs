@@ -1,4 +1,4 @@
-//! Quick Export (Ch. 39, p. 788), the Export dialog (deviation X3), timeline
+//! Quick Export, the Export dialog (deviation X3), timeline
 //! interchange (OpenTimelineIO, X9) and the jobs panel. All of it is a view
 //! over requests: `presets.list`, `export.plan`, `export.start`,
 //! `presets.save`, `presets.delete`, `timeline.import` and the session's
@@ -213,7 +213,7 @@ enum Otio {
         path: PathBuf,
         replace: bool,
     },
-    /// Media files weren't where the file says: look in a folder? (p. 529)
+    /// Media files weren't where the file says: look in a folder?
     Missing {
         path: PathBuf,
         replace: bool,
@@ -549,7 +549,7 @@ impl Dialog {
 // ---------------------------------------------------------------- windows
 
 impl Workspace {
-    /// Quick Export, opened from the top bar (p. 788).
+    /// Quick Export, opened from the top bar.
     pub(super) fn open_quick_export(&mut self, ctx: &egui::Context) {
         self.refresh_presets(ctx);
         self.export.quick = Some(Quick {
@@ -741,7 +741,7 @@ impl Workspace {
             });
             q.error = None;
             self.export.starting = Some(Starting {
-                // Quick Export semantics: In–Out if set, else everything (p. 789).
+                // Quick Export semantics: In–Out if set, else everything.
                 params: json!({ "preset": name, "overwrite": true, "background": true }),
                 from: From::Quick,
                 picking: Some(picking),
@@ -1174,7 +1174,7 @@ impl Workspace {
         }
     }
 
-    /// A progress window for each export started here (p. 790).
+    /// A progress window for each export started here.
     fn progress_windows(&mut self, ctx: &egui::Context) {
         let jobs = self.snap.jobs.clone();
         let mut close = Vec::new();
@@ -1252,8 +1252,7 @@ impl Workspace {
         })));
     }
 
-    /// The edit alone (`.otio`), or with its media in a bundle (`.otioz`, as
-    /// Resolve's File > Export > Timeline offers both).
+    /// The edit alone (`.otio`), or with its media in a bundle (`.otioz`).
     pub(super) fn export_timeline(&mut self, ctx: &egui::Context, bundle: bool) {
         let (dialogs, folder) = (self.dialogs.clone(), self.export_folder());
         let ext = if bundle { "otioz" } else { "otio" };

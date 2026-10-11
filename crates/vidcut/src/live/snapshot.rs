@@ -41,7 +41,7 @@ impl PlayerId {
 pub struct PlayerSnap {
     /// Something is loaded (otherwise the viewer shows black).
     pub loaded: bool,
-    /// The monitoring mute is on (p. 642).
+    /// The monitoring mute is on.
     pub muted: bool,
     /// Length of the content in frames.
     pub frames: i64,
@@ -68,7 +68,7 @@ pub struct ProjectSnap {
 
 /// The Media Pool view: the bin shown and the order of its media. Source
 /// Tape strings together that bin's media, and its bins', in that order
-/// (p. 696).
+///.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct PoolView {
     /// A bin path; empty: the top level (all media).

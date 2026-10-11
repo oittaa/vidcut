@@ -1,4 +1,4 @@
-//! The Media Pool (spec §3): bins (p. 655), thumbnails with hover
+//! The Media Pool (spec §3): bins, thumbnails with hover
 //! scrubbing, a list view, search and sort, and the edit-function buttons
 //! below it (spec §2, §7).
 
@@ -75,7 +75,7 @@ fn bin_drop_to(from: &str, onto: &str) -> Option<String> {
     }
 }
 
-/// "Bin N" in `bin`, with the next number not taken (p. 656).
+/// "Bin N" in `bin`, with the next number not taken.
 fn new_bin(p: &Project, bin: &str) -> String {
     (1..)
         .map(|n| join(bin, &format!("Bin {n}")))
@@ -180,7 +180,7 @@ impl Workspace {
             .min_scrolled_height(height)
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                // Right-click on empty space: New Bin, Import (p. 655).
+                // Right-click on empty space: New Bin, Import.
                 let background =
                     ui.interact(ui.max_rect(), ui.id().with("background"), Sense::click());
                 if let Some(p) = project {
@@ -238,7 +238,7 @@ impl Workspace {
     }
 
     /// The bin dropdown and the path to the open bin, each level of which
-    /// opens it (p. 655), and the sort order Source Tape follows (p. 680).
+    /// opens it, and the sort order Source Tape follows.
     fn bin_bar(&mut self, ui: &mut egui::Ui, p: &Project) {
         let view = self.snap.pool.clone();
         ui.horizontal(|ui| {
@@ -365,7 +365,7 @@ impl Workspace {
     }
 
     /// A bin in the pool: double-click opens it, dragging it onto another
-    /// bin moves it, and clips dropped on it move into it (p. 655).
+    /// bin moves it, and clips dropped on it move into it.
     fn folder_tile(&mut self, ui: &mut egui::Ui, p: &Project, path: &str) {
         let (rect, resp) =
             ui.allocate_exact_size(vec2(TILE.x, TILE.y + 30.0), Sense::click_and_drag());
@@ -435,7 +435,7 @@ impl Workspace {
         });
     }
 
-    /// The Rename Bin window (p. 656).
+    /// The Rename Bin window.
     fn rename_bin_window(&mut self, ctx: &egui::Context) {
         let Some(r) = &mut self.bins.rename else {
             return;
@@ -472,7 +472,7 @@ impl Workspace {
         }
     }
 
-    /// File > New Bin (Shift+Ctrl+N): a bin in the open bin (p. 655).
+    /// File > New Bin (Shift+Ctrl+N): a bin in the open bin.
     pub(super) fn new_bin(&mut self) {
         if let Some(p) = self.project() {
             let path = new_bin(p, &self.snap.pool.bin);
@@ -480,7 +480,7 @@ impl Workspace {
         }
     }
 
-    /// One thumbnail with hover scrubbing and source marks (p. 664, 691).
+    /// One thumbnail with hover scrubbing and source marks.
     fn tile(&mut self, ui: &mut egui::Ui, m: &Media) {
         let (rect, resp) =
             ui.allocate_exact_size(vec2(TILE.x, TILE.y + 30.0), Sense::click_and_drag());
@@ -746,7 +746,7 @@ impl Workspace {
                 ui.close();
             }
             ui.separator();
-            // Bins (p. 655): the selected clips, or this one.
+            // Bins: the selected clips, or this one.
             let ids = if self.snap.selection.media.contains(&m.id) {
                 self.snap.selection.media.clone()
             } else {
@@ -827,7 +827,7 @@ impl Workspace {
             }
             if ui
                 .toggle_value(&mut self.video_only, "Video Only")
-                .on_hover_text("Edits take only the picture (p. 694)")
+                .on_hover_text("Edits take only the picture")
                 .changed()
                 && self.video_only
             {
@@ -835,7 +835,7 @@ impl Workspace {
             }
             if ui
                 .toggle_value(&mut self.audio_only, "Audio Only")
-                .on_hover_text("Edits take only the sound (p. 694)")
+                .on_hover_text("Edits take only the sound")
                 .changed()
                 && self.audio_only
             {
