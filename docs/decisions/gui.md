@@ -69,15 +69,15 @@ A seek or load ("motion") is shown after two steps:
 
 `tests/live.rs` ("A late renderer") stalls the render thread for 500 ms when a seek's frame arrives, and the seek still returns with that frame on screen.
 
-**More waiting.** A seek also waits for the player's newest motion (a preview reload replaces what was asked for) and for the tail checks and patches (preview.md §9) that could change its frame: those of cuts at most 64 frames (the longest patch) after it. Checks start nearest the playhead first, so a timeline with many cuts doesn't hold up the first seek until every cut is checked. Seek-then-screenshot is therefore exact without sleeps. Over IPC it takes about 10–15 ms.
+**More waiting.** A seek also waits for the player's newest motion (a preview reload replaces what was asked for) and for the tail checks and patches (preview.md §9) that could change its frame: those of cuts at most 64 frames (the longest patch) after it. The frame that matters is the one the seek asked for. While playing, `time-pos` moves the playhead, and a later sample can leave that window; the seek still waits while a check, patch, or retry for its frame is pending. Checks start nearest the playhead first, so a timeline with many cuts doesn't hold up the first seek until every cut is checked. Seek-then-screenshot is therefore exact without sleeps. Over IPC it takes about 10–15 ms.
 
 **Overtaken seeks fail.** A waiting seek, step or viewer change remembers the frame it asked for, and whether exactly. If a later seek asks for another frame before it shows (another client, a person scrubbing), the frame never will. The request then fails with `CONFLICT` and names the frame asked for since, rather than reporting the other frame as its own.
 - A fast seek to the same frame overtakes an exact one too: it may show a keyframe instead.
 - Playback moving on from the frame doesn't count, so a seek while playing returns once its frame has shown. Stepped reverse playback (J) seeks, so it overtakes.
-- A reload at the same frame still counts as that frame.
+- A reload at the same frame still counts as that frame. A continuation reload samples the playhead, which while playing is `time-pos` and has moved off the frame the seek asked for. While that frame is still owed (not on screen yet, a tail retry covers it, or the seek has not replied), the reload keeps opening there and keeps the seek's target. Adopting the playhead sample would look like another seek and name the playback frame in the conflict.
 - The GUI's own overtaken seeks raise no notice.
 
-**Seeks while loading.** mpv rejects seeks until a freshly loaded file is open. A seek in that window opens the file again at the new position instead.
+**Seeks while loading.** mpv rejects seeks until a freshly loaded file is open. A seek in that window opens the file again at the new position (`loadfile` with `start=`). That lands on the frame, so it is exact: a fast seek there does not overtake an exact seek to the same frame, and the conflict text does not call it a keyframe.
 
 ## 5. Rendering and screenshots
 

@@ -984,7 +984,16 @@ impl Live {
                             p.target.0
                         ))))
                     } else {
-                        (p.shown >= motion && self.settled(player)).then(|| match &p.error {
+                        // `frame` is what the seek asked for. `position` follows
+                        // time-pos while playing and can leave the tail window
+                        // while a retry for `frame` is still pending.
+                        let ready = seek_may_reply(
+                            p.shown >= p.motion && p.shown >= motion,
+                            frame,
+                            p.position,
+                            |f| self.tail_near(player, f),
+                        );
+                        ready.then(|| match &p.error {
                             Some(e) => Err(Error::media(format!("preview: {e}"))),
                             None => Ok(self.state_response()),
                         })
@@ -2286,6 +2295,12 @@ impl Live {
     }
 
     fn refresh_timeline(&mut self) -> Option<u64> {
+        self.refresh_timeline_at(None)
+    }
+
+    /// Reloads the timeline. `at` is a seek loading at its own frame; other
+    /// reloads sample the playhead, which while playing is `time-pos`.
+    fn refresh_timeline_at(&mut self, at: Option<i64>) -> Option<u64> {
         let p = self.project.as_ref()?.project().clone();
         let end = p.end();
         if end == 0 {
@@ -2299,7 +2314,10 @@ impl Live {
                 return None;
             }
         };
-        let position = self.players[TIMELINE].position;
+        let position = match at {
+            Some(frame) => frame,
+            None => self.preview_frame(PlayerId::Timeline, self.players[TIMELINE].position),
+        };
         let edl = self.edl(plan, PlayerId::Timeline, position)?;
         self.timeline_loaded_at = Some(Instant::now());
         self.players[TIMELINE].load(edl, end, p.settings.fps, position)
@@ -2341,7 +2359,9 @@ impl Live {
         };
         let position = if self.source_content.as_ref() == Some(&want) {
             // Same content (perhaps changed media): stay where we are.
-            self.players[SOURCE].position
+            // While playing, that playhead is time-pos; a seek still owed
+            // its frame keeps that frame instead.
+            self.preview_frame(PlayerId::Source, self.players[SOURCE].position)
         } else {
             self.stash_source_position();
             match &want {
@@ -2448,8 +2468,11 @@ impl Live {
     fn seek(&mut self, id: PlayerId, frame: i64, fast: bool) -> u64 {
         if id == PlayerId::Timeline && self.timeline_due.take().is_some() {
             // A reload is pending: do it now, loading at the new position.
-            self.players[TIMELINE].position = frame.max(0);
-            if let Some(motion) = self.refresh_timeline() {
+            // This frame is the request. A continuation reload must not
+            // substitute the previous target for it.
+            let frame = frame.max(0);
+            self.players[TIMELINE].position = frame;
+            if let Some(motion) = self.refresh_timeline_at(Some(frame)) {
                 return motion;
             }
         }
@@ -2619,10 +2642,33 @@ impl Live {
     }
 
     /// Whether `player` shows its latest motion (seek or load), with no tail
-    /// check or patch pending that could still change that frame.
+    /// check or patch pending that could still change the frame on screen.
+    /// Screenshots use the playhead. A seek waits on the frame it asked for
+    /// ([`seek_may_reply`]), which playback may already have left.
     fn settled(&self, player: PlayerId) -> bool {
         let p = &self.players[player.index()];
-        p.shown >= p.motion && !self.tail_near(player, p.position)
+        seek_may_reply(p.shown >= p.motion, p.position, p.position, |f| {
+            self.tail_near(player, f)
+        })
+    }
+
+    /// Frame a continuation reload should open at. A seek writes its frame
+    /// into the playhead itself and does not come through here.
+    fn preview_frame(&self, id: PlayerId, sampled: i64) -> i64 {
+        let p = &self.players[id.index()];
+        let (latest_shown, target) = (p.shown >= p.motion, p.target.0);
+        let waiter_holding = self.waits.iter().any(|w| {
+            matches!(
+                w.until,
+                Until::Shown {
+                    player,
+                    at: (frame, _),
+                    ..
+                } if player == id && frame == target
+            )
+        });
+        let keep = reload_keeps_target(latest_shown, self.tail_near(id, target), waiter_holding);
+        reload_frame(sampled, target, keep)
     }
 
     /// Asks the renderer for a picture of `player`; the answer comes as
@@ -2759,6 +2805,37 @@ fn job_answer(j: &JobInfo) -> Result<Response> {
     }
 }
 
+/// Whether a waiting seek may reply. `playback` is the playhead (`time-pos`
+/// while playing). A tail check, patch, or retry is judged against `asked`,
+/// the frame the seek requested: playback can leave the 64-frame window
+/// while that retry is still pending.
+fn seek_may_reply(
+    latest_shown: bool,
+    asked: i64,
+    _playback: i64,
+    tail_near: impl Fn(i64) -> bool,
+) -> bool {
+    latest_shown && !tail_near(asked)
+}
+
+/// Whether a continuation reload should keep the frame a seek asked for.
+/// The playhead sample is `time-pos` while playing. The requested frame is
+/// still owed until it is on screen, tail work for it has finished, and the
+/// seek that asked for it has replied.
+fn reload_keeps_target(latest_shown: bool, tail_near_target: bool, waiter_holding: bool) -> bool {
+    !latest_shown || tail_near_target || waiter_holding
+}
+
+/// Frame a continuation reload opens at. When the requested frame is still
+/// owed, a `time-pos` sample does not replace it.
+fn reload_frame(sampled: i64, target: i64, keep: bool) -> i64 {
+    if keep && sampled != target {
+        target
+    } else {
+        sampled
+    }
+}
+
 fn no_project() -> Error {
     Error::usage("no project is open in this vidcut GUI (project.open opens one)")
 }
@@ -2814,5 +2891,44 @@ fn remove_stale_runtime_dirs() {
         if gone {
             let _ = std::fs::remove_dir_all(e.path());
         }
+    }
+}
+
+#[cfg(test)]
+mod seek_wait_tests {
+    use super::{reload_frame, reload_keeps_target, seek_may_reply};
+
+    // Cuts lose at most MAX_TAIL frames. The window is what `tail_near` tests.
+    fn near_cut(frame: i64) -> bool {
+        (100 - super::MAX_TAIL..100).contains(&frame)
+    }
+
+    #[test]
+    fn a_retry_for_the_asked_frame_holds_after_playback_leaves_the_window() {
+        let asked = 90;
+        let played = 130;
+        assert!(near_cut(asked));
+        assert!(!near_cut(played));
+        // The frame is on screen, but the retry still covers what was asked.
+        assert!(!seek_may_reply(true, asked, played, near_cut));
+        // Judging the window by the playhead would let the seek return.
+        assert!(seek_may_reply(true, played, asked, near_cut));
+        // Once the retry is gone, playback having moved is not a conflict.
+        assert!(seek_may_reply(true, asked, played, |_| false));
+        assert!(!seek_may_reply(false, asked, asked, |_| false));
+    }
+
+    #[test]
+    fn a_reload_keeps_the_requested_frame_while_the_seek_is_owed() {
+        // time-pos has moved to 140; the seek asked for 40.
+        assert_eq!(reload_frame(140, 40, true), 40);
+        assert_eq!(reload_frame(140, 40, false), 140);
+        assert_eq!(reload_frame(40, 40, true), 40);
+        // Not on screen yet, or a tail still covers the target, or the
+        // reply has not gone out: keep it. After that, follow playback.
+        assert!(reload_keeps_target(false, false, false));
+        assert!(reload_keeps_target(true, true, false));
+        assert!(reload_keeps_target(true, false, true));
+        assert!(!reload_keeps_target(true, false, false));
     }
 }
