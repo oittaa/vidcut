@@ -188,6 +188,7 @@ impl Editor {
                 result,
                 dry_run: false,
                 via: String::new(),
+                warnings: Vec::new(),
             });
         }
         match request {
@@ -214,6 +215,7 @@ impl Editor {
                 result,
                 dry_run: true,
                 via: String::new(),
+                warnings: Vec::new(),
             });
         }
         working.rev = self.project.rev + 1;
@@ -232,6 +234,7 @@ impl Editor {
             result,
             dry_run: false,
             via: String::new(),
+            warnings: Vec::new(),
         })
     }
 
@@ -286,6 +289,7 @@ impl Editor {
                 result,
                 dry_run: true,
                 via: String::new(),
+                warnings: Vec::new(),
             });
         }
         // Revisions only grow, even when undoing back to an older state.
@@ -298,6 +302,7 @@ impl Editor {
             result,
             dry_run: false,
             via: String::new(),
+            warnings: Vec::new(),
         })
     }
 }

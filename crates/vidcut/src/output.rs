@@ -9,6 +9,9 @@ pub fn print(method: &str, r: &Response, json: bool) {
         println!("{}", serde_json::to_string_pretty(r).unwrap_or_default());
         return;
     }
+    for w in &r.warnings {
+        eprintln!("vidcut: warning: {w}");
+    }
     if let Some(()) = live(method, r) {
         return;
     }

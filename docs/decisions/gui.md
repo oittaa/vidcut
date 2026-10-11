@@ -50,7 +50,7 @@ Every action is a [`Request`](../../crates/vidcut-core/src/request.rs), the same
 **Watching.** The session watches the project's directory (`notify`, non-recursive, ignoring access events). Changes made by other processes are read back under the lock, so the project file and its history sidecar are always seen together.
 
 **Write order.** `Store::save` writes the history sidecar before the project file. The new state then shows up with its history; otherwise a headless edit would be mistaken for an "external change" and lose its undo label.
-- If the sidecar can't be written, the edit is saved all the same, with a warning (stderr headless, a notice in the GUI). The old sidecar stays whole, so another run sees the edit as one outside change, or starts with no history if there was none. The GUI that made the edit keeps its undo history in memory.
+- If the sidecar can't be written, the edit is saved all the same, and the command's JSON result says so in `warnings` (stderr without `--json`; a GUI also shows a notice), routed into the GUI or not. The old sidecar stays whole, so another run sees the edit as one outside change, or starts with no history if there was none. The GUI that made the edit keeps its undo history in memory.
 
 **Locking.** The lock is retried every 5 ms. An edit made by another process shows up in the GUI within about 6 ms (`tests/live.rs`).
 
@@ -69,15 +69,15 @@ A seek or load ("motion") is shown after two steps:
 
 `tests/live.rs` ("A late renderer") stalls the render thread for 500 ms when a seek's frame arrives, and the seek still returns with that frame on screen.
 
-**More waiting.** A seek also waits for the player's newest motion (a preview reload replaces what was asked for) and for the tail checks and patches (preview.md §9) that could change its frame: those of cuts at most 64 frames (the longest patch) after it. Checks start nearest the playhead first, so a timeline with many cuts doesn't hold up the first seek until every cut is checked. Seek-then-screenshot is therefore exact without sleeps. Over IPC it takes about 10–15 ms.
+**More waiting.** A seek also waits for the player's newest motion (a preview reload replaces what was asked for) and for the tail checks and patches (preview.md §9) that could change its frame: those of cuts at most 64 frames (the longest patch) after it. Paused, that is the frame the seek asked for. A seek while playing returns once its frame has shown: playback has moved on, and tail work on that frame no longer bears on it. Checks start nearest the playhead first, so a timeline with many cuts doesn't hold up the first seek until every cut is checked. Seek-then-screenshot is therefore exact without sleeps. Over IPC it takes about 10–15 ms.
 
 **Overtaken seeks fail.** A waiting seek, step or viewer change remembers the frame it asked for, and whether exactly. If a later seek asks for another frame before it shows (another client, a person scrubbing), the frame never will. The request then fails with `CONFLICT` and names the frame asked for since, rather than reporting the other frame as its own.
 - A fast seek to the same frame overtakes an exact one too: it may show a keyframe instead.
 - Playback moving on from the frame doesn't count, so a seek while playing returns once its frame has shown. Stepped reverse playback (J) seeks, so it overtakes.
-- A reload at the same frame still counts as that frame.
+- A reload at the same frame still counts as that frame. A continuation reload samples the playhead, which while playing is `time-pos` and has moved off the frame the seek asked for. Until that frame is on screen and the seek has replied, the reload keeps opening there and keeps the seek's target: adopting the playhead sample would look like another seek and name the playback frame in the conflict. After that the reload follows playback, so playback doesn't jump back to the seek's frame.
 - The GUI's own overtaken seeks raise no notice.
 
-**Seeks while loading.** mpv rejects seeks until a freshly loaded file is open. A seek in that window opens the file again at the new position instead.
+**Seeks while loading.** mpv rejects seeks until a freshly loaded file is open. A seek in that window opens the file again at the new position (`loadfile` with `start=`). That lands on the frame, so it is exact: a fast seek there does not overtake an exact seek to the same frame, and the conflict text does not call it a keyframe.
 
 ## 5. Rendering and screenshots
 
@@ -125,7 +125,7 @@ A seek or load ("motion") is shown after two steps:
 
 **Fillers.** Fillers are generated on demand, synchronously (once per size and rate, then cached), so the preview is never half-loaded.
 
-**Stills and image sequences (M9).** The players show them through image lists that the session writes into its runtime folder (preview.md §11). The pool's thumbnails of a sequence spread over its pictures; a still has its one picture.
+**Stills and image sequences (M9).** The players show them through image lists that the session writes into its runtime folder (preview.md §11). The pool's thumbnails of a sequence spread over its own pictures — its count, even when more numbered files follow in the same folder — and picture measurements stop at that count. A still has its one picture. A thumbnail time past the last of those pictures stays on the last one and does not open the next path.
 
 **Importing numbered images (M9).** Import Media (Ctrl+I, `gui/import.rs`) looks for numbered runs among the files picked, counting each run on disk. If there are any, it asks once:
 - **One clip each, at a frame rate:** an image sequence per run (`media.add sequence`), at the project's rate unless typed over. Offered first when a run is of a frame type (PNG, TIFF, EXR, DPX, TGA, BMP).
@@ -179,7 +179,7 @@ A seek or load ("motion") is shown after two steps:
 
 **Jobs.** Every media export in a running GUI is a job (`live/jobs.rs`), whoever started it:
 - **A thread per job** prepares the export from a copy of the project (§2), reports its files and their lengths (`JobPlanned`), then encodes, sending progress about ten times a second. The session keeps each job's state for `jobs.*` and the snapshot.
-- **Foreground** (an IPC client without `background`): progress notifications carry the job id, the reply comes when the job ends, and a closed connection cancels it, as in M3.
+- **Foreground** (an IPC client without `background`): progress notifications carry the job id, the reply comes when the job ends, and a closed connection cancels it, as in M3. That same closed connection cancels a `frame.render`, a storyboard, an analysis and the loudness measure before the export, which send no progress of their own. A background job is cancelled only by `jobs.cancel`.
 - **Background** (`background: true`, and every GUI export): the reply comes once the files are planned, so mistakes (an unknown preset, an existing file) still fail the request itself. The job goes on without the client.
 - **`jobs.wait`** is a wait-list entry like a seek's (§2), without the 10 s limit unless given a `timeout`; it fails the way the job failed. `jobs.cancel` sets the job's cancel flag, and the engine removes partial files.
 - **Kept:** running jobs and the 50 most recent finished ones.

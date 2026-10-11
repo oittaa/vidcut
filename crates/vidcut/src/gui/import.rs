@@ -41,6 +41,8 @@ pub(super) struct ImportUi {
     /// The dialog's answer, filled in by its thread.
     picked: Arc<Mutex<Option<Picked>>>,
     choice: Option<Choice>,
+    /// The keyboard guard is registered once, on the first frame.
+    guard: bool,
 }
 
 /// The files picked, and the bin to put them in.
@@ -108,23 +110,70 @@ fn runs(files: &[PathBuf]) -> (Vec<Run>, Vec<PathBuf>, bool) {
 }
 
 /// The one request that imports `choice` as it stands.
-fn request(choice: &Choice, fps: Rational) -> (&'static str, Value) {
+///
+/// Separate stills ignore the rate, so a cleared or invalid field still
+/// imports. The rate is parsed only when the numbered runs come in as
+/// sequences.
+fn request(choice: &Choice) -> Result<(&'static str, Value), String> {
     let bin = &choice.bin;
     if !choice.sequences {
-        return ("media.add", json!({ "paths": choice.files, "bin": bin }));
+        return Ok(("media.add", json!({ "paths": choice.files, "bin": bin })));
     }
+    let fps = choice
+        .fps
+        .trim()
+        .parse::<Rational>()
+        .ok()
+        .filter(|fps| fps.as_f64() > 0.0)
+        .ok_or_else(|| format!("{:?} isn't a frame rate", choice.fps))?;
     let sequences: Vec<&PathBuf> = choice.runs.iter().map(|r| &r.file).collect();
     let add = json!({ "paths": sequences, "bin": bin, "sequence": true, "fps": fps.to_string() });
     if choice.others.is_empty() {
-        return ("media.add", add);
+        return Ok(("media.add", add));
     }
-    (
+    Ok((
         "apply",
         json!({ "commands": [
             { "method": "media.add", "params": add },
             { "method": "media.add", "params": { "paths": choice.others, "bin": bin } },
         ], "label": "import media" }),
-    )
+    ))
+}
+
+/// Id of the flag the shortcut guard reads at the start of each pass.
+fn question_id() -> egui::Id {
+    egui::Id::new("vidcut-import-question")
+}
+
+fn question_open(ctx: &egui::Context, open: bool) {
+    ctx.data_mut(|data| data.insert_temp(question_id(), open));
+}
+
+/// Shortcuts are handled before this modal is shown, so while the question
+/// is up they are dropped at the start of the pass. Escape is left, and the
+/// modal cancels on it. A focused rate field keeps its keys.
+fn guard_import_shortcuts(ui: &mut egui::Ui) {
+    let ctx = ui.ctx();
+    let open = ctx.data(|data| data.get_temp::<bool>(question_id()).unwrap_or(false));
+    if !open || ctx.text_edit_focused() {
+        return;
+    }
+    ctx.input_mut(|input| {
+        input.events.retain(|event| match event {
+            egui::Event::Key {
+                key: egui::Key::Escape,
+                pressed: true,
+                modifiers,
+                ..
+            } if !modifiers.any() => true,
+            egui::Event::Key { .. }
+            | egui::Event::Text(_)
+            | egui::Event::Copy
+            | egui::Event::Cut
+            | egui::Event::Paste(_) => false,
+            _ => true,
+        });
+    });
 }
 
 impl Workspace {
@@ -155,6 +204,10 @@ impl Workspace {
     /// The import's answer, and the window asking about numbered images.
     pub(super) fn import_window(&mut self, ctx: &egui::Context) {
         self.import.ctx = Some(ctx.clone());
+        if !self.import.guard {
+            self.import.guard = true;
+            ctx.on_begin_pass("vidcut-import-question", Arc::new(guard_import_shortcuts));
+        }
         let picked = self
             .import
             .picked
@@ -178,10 +231,12 @@ impl Workspace {
             }
         }
         let Some(choice) = self.import.choice.as_mut() else {
+            question_open(ctx, false);
             return;
         };
+        question_open(ctx, true);
         let mut done = None;
-        egui::Modal::new(egui::Id::new("import-numbered-images")).show(ctx, |ui| {
+        let modal = egui::Modal::new(egui::Id::new("import-numbered-images")).show(ctx, |ui| {
             ui.set_max_width(480.0);
             ui.label(egui::RichText::new("Numbered images").strong());
             for run in choice.runs.iter().take(6) {
@@ -213,16 +268,28 @@ impl Workspace {
                 }
             });
         });
+        // Escape cancels like Cancel: import nothing. It is consumed so the
+        // timeline does not also see it.
+        if done.is_none()
+            && modal.is_top_modal
+            && !modal.any_popup_open
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            done = Some(false);
+        }
         match done {
-            Some(true) => match choice.fps.trim().parse::<Rational>() {
-                Ok(fps) if fps.as_f64() > 0.0 => {
-                    let (method, params) = request(choice, fps);
+            Some(true) => match request(choice) {
+                Ok((method, params)) => {
                     self.send(method, params);
                     self.import.choice = None;
+                    question_open(ctx, false);
                 }
-                _ => choice.error = Some(format!("{:?} isn't a frame rate", choice.fps)),
+                Err(message) => choice.error = Some(message),
             },
-            Some(false) => self.import.choice = None,
+            Some(false) => {
+                self.import.choice = None;
+                question_open(ctx, false);
+            }
             None => {}
         }
     }
@@ -267,7 +334,7 @@ mod tests {
         let (runs, _, frames) = super::runs(&[dir.join("IMG_0005.JPG")]);
         assert_eq!(runs.len(), 1);
         assert!(!frames);
-        let choice = Choice {
+        let mut choice = Choice {
             runs: vec![Run {
                 name: String::new(),
                 count: 3,
@@ -277,13 +344,27 @@ mod tests {
             files: Vec::new(),
             bin: None,
             sequences: true,
-            fps: String::new(),
+            fps: "24".into(),
             error: None,
         };
-        let (method, params) = request(&choice, Rational::new(24, 1).unwrap());
+        let (method, params) = request(&choice).unwrap();
         assert_eq!(method, "apply");
         assert_eq!(params["commands"][0]["params"]["sequence"], true);
         assert_eq!(params["commands"][0]["params"]["fps"], "24");
+        // Separate stills ignore a cleared or invalid rate.
+        choice.sequences = false;
+        choice.fps.clear();
+        choice.files = vec![dir.join("logo_1.png")];
+        let (method, params) = request(&choice).unwrap();
+        assert_eq!(method, "media.add");
+        assert!(params.get("fps").is_none());
+        choice.fps = "nope".into();
+        assert!(request(&choice).is_ok());
+        choice.sequences = true;
+        choice.fps.clear();
+        assert!(request(&choice).is_err());
+        choice.fps = "0".into();
+        assert!(request(&choice).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

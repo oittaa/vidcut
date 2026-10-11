@@ -143,7 +143,7 @@ These are mandatory.
 
 *Status: the CLI edits and exports headless (M1, M2), controls a running GUI (M3), exports in the background and exchanges OTIO timelines (M5), edits several tracks with a mixer and bins (M6), serves MCP with automatic tools and storyboards (M7), handles rotated, interlaced and HDR media (M8), and stills and image sequences (M9).*
 
-**MCP** (docs/decisions/agents.md, deviation X10): `vidcut mcp [-p FILE]` serves the Model Context Protocol on stdin/stdout. Every command is a tool (`edit.split` is `edit_split`, with its JSON Schema), plus `use_project` to pick or create the project. Calls run like the CLI's: inside the GUI that has the project open, or headless. `frame_render`, `gui_screenshot` and `storyboard_render` return images. To add it to Claude Code: `claude mcp add vidcut -- vidcut mcp -p /abs/talk.vidcut`; other clients take `{"command": "vidcut", "args": ["mcp", "-p", "/abs/talk.vidcut"]}`.
+**MCP** (docs/decisions/agents.md, deviation X10): `vidcut mcp [-p FILE]` serves the Model Context Protocol on stdin/stdout. Every command is a tool (`edit.split` is `edit_split`, with its JSON Schema), plus `use_project` to pick or create the project. Calls run like the CLI's: inside the GUI that has the project open, or headless. `frame_render`, `gui_screenshot` and `storyboard_render` return images. Cancelling a call stops a headless export; routed into the GUI, it also stops a frame, a storyboard, an analysis and the loudness measure before a foreground export. A background export job stops only with `jobs.cancel`. To add it to Claude Code: `claude mcp add vidcut -- vidcut mcp -p /abs/talk.vidcut`; other clients take `{"command": "vidcut", "args": ["mcp", "-p", "/abs/talk.vidcut"]}`.
 
 **Discovering commands:**
 - Every CLI subcommand is one JSON-RPC method on one `Request`.
@@ -180,7 +180,7 @@ vidcut undo                                 # works across separate runs
 
 **Stills and image sequences (M9, spec D38, D39):**
 - `vidcut media add photo.jpg` adds a still. Edited without `--range` it lasts the project's still duration (5 s; `vidcut set --still-duration 3s`); a range or trim makes it up to 17 h 40 min long.
-- `vidcut media add renders/frame_000001.png --sequence [--fps 60]` adds the numbered files in a row around it as one clip (`frame_[000001-010560].png`), at the project's rate unless `--fps` is given. Without `--sequence` a numbered image is a still.
+- `vidcut media add renders/frame_000001.png --sequence [--fps 60]` adds the numbered files in a row around it as one clip (`frame_[000001-010560].png`), at the project's rate unless `--fps` is given. Without `--sequence` a numbered image is a still. Exporting a sequence fails if a frame's file is missing, rather than repeating the picture before it.
 - `media get` reports `still: true`, or `sequence: {pattern, first, count}`.
 
 **Proxies (spec D40, deviation X18):**
@@ -191,7 +191,7 @@ vidcut undo                                 # works across separate runs
 **Bins (M6):** `vidcut bins` lists them. `bins add "Interviews/Day 1"` (parents too), `bins rename A B`, `bins remove A` (its media move up a level, deviation X6), `media add FILE --bin A`, `media move m1 m2 --bin A` (`""` is the top level). `media list` shows each item's bin.
 
 **JSON output:**
-- `--json` prints `{"rev", "changes": {"created", "modified", "deleted"}, "result", "via"}`.
+- `--json` prints `{"rev", "changes": {"created", "modified", "deleted"}, "result", "via"}`. When the undo history could not be saved, `warnings` says so; the edit is in the file.
 - Errors print `{"error": {"code", "message"}}` and exit with the matching code:
 
 | Code | Error |

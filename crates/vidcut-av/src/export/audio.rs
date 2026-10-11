@@ -89,11 +89,8 @@ impl Resampler {
             let room = ffi::swr_get_out_samples(self.swr, in_count).max(0) as usize + 32;
             let start = out.len();
             out.resize(start + room * self.channels, 0.0);
-            // Bindgen's `swr_convert` takes `*mut *mut u8` and `*mut *const u8`
-            // on current FFmpeg headers (`*const` for the input pointer on
-            // older ones). A mut outer pointer still coerces to const.
-            let mut dst = out[start..].as_mut_ptr() as *mut u8;
-            let n = ffi::swr_convert(self.swr, &mut dst, room as i32, inp.cast_mut(), in_count);
+            let dst = out[start..].as_mut_ptr() as *mut u8;
+            let n = ffi::swr_convert(self.swr, &dst, room as i32, inp, in_count);
             if n < 0 {
                 out.truncate(start);
                 return Err(Error::Ffmpeg {
@@ -136,9 +133,11 @@ struct SourceAudio {
     next_in: Option<f64>,
     gap: usize,
     held: Option<frame::Audio>,
-    /// Raw time (s) where the file ends: a frame stamped later has a broken
-    /// timestamp, and plays in order rather than after a gap.
-    end: f64,
+    /// Where the file ends (s) on the packet clock, if the container says.
+    /// A frame stamped later has a broken timestamp and plays in order.
+    /// Unknown (no positive duration): a jump longer than
+    /// [`crate::decode::AUDIO_GAP_BOUND`] plays in order too.
+    end: Option<f64>,
     eof: bool,
 }
 
@@ -150,26 +149,29 @@ impl SourceAudio {
     fn open(path: &Path, ordinal: u32, start: f64, rate: u32, channels: u16) -> Result<Self> {
         crate::init();
         let input = format::input(path).ctx(|| format!("opening {}", path.display()))?;
-        let stream = input
-            .streams()
-            .filter(|s| s.parameters().medium() == media::Type::Audio)
-            .nth(ordinal as usize)
-            .ok_or_else(|| {
-                Error::Invalid(format!("{}: no audio stream {ordinal}", path.display()))
-            })?;
-        let index = stream.index();
-        let tb = stream.time_base();
-        let tick = f64::from(tb.numerator()) / f64::from(tb.denominator());
-        let end = unsafe {
-            let ctx = &*input.as_ptr();
-            match (ctx.start_time, ctx.duration) {
-                (_, d) if d == ffi::AV_NOPTS_VALUE || d <= 0 => f64::INFINITY,
-                (s, d) if s == ffi::AV_NOPTS_VALUE => d as f64 / f64::from(ffi::AV_TIME_BASE),
-                (s, d) => (s + d) as f64 / f64::from(ffi::AV_TIME_BASE),
-            }
+        let (index, tb, tick, stream_start, params) = {
+            let stream = input
+                .streams()
+                .filter(|s| s.parameters().medium() == media::Type::Audio)
+                .nth(ordinal as usize)
+                .ok_or_else(|| {
+                    Error::Invalid(format!("{}: no audio stream {ordinal}", path.display()))
+                })?;
+            let tb = stream.time_base();
+            let tick = f64::from(tb.numerator()) / f64::from(tb.denominator());
+            (
+                stream.index(),
+                tb,
+                tick,
+                stream.start_time(),
+                stream.parameters(),
+            )
         };
         discard_others(&input, index);
-        let decoder = codec::context::Context::from_parameters(stream.parameters())
+        // Duration is a length on the packet clock, not an end at zero, and
+        // a missing duration does not mean the file goes on forever.
+        let end = crate::decode::container_end(&input, stream_start, tick);
+        let decoder = codec::context::Context::from_parameters(params)
             .and_then(|mut c| {
                 // Without the packet time base, FFmpeg can't shift a frame's
                 // timestamp past skipped priming samples (Opus pre-skip, AAC
@@ -325,18 +327,18 @@ impl SourceAudio {
     /// Takes a decoded frame: converts it, or holds it back behind a gap.
     fn push(&mut self, f: frame::Audio) -> Result<()> {
         let start = f.timestamp().map(|t| t as f64 * self.tick);
-        let end = start.map(|t| t + f.samples() as f64 / f64::from(f.rate().max(1)));
-        if let (Some(t), Some(next)) = (start, std::mem::replace(&mut self.next_in, end))
-            && t - next > crate::decode::AUDIO_GAP
-            && t <= self.end
-        {
-            // The samples before the gap first, all of them.
-            if let Some(mut r) = self.resampler.take() {
-                r.convert(None, &mut self.pending)?;
+        let frame_end = start.map(|t| t + f.samples() as f64 / f64::from(f.rate().max(1)));
+        if let (Some(t), Some(next)) = (start, std::mem::replace(&mut self.next_in, frame_end)) {
+            let gap = crate::decode::audio_gap(next, t, self.end);
+            if gap > 0.0 {
+                // The samples before the gap first, all of them.
+                if let Some(mut r) = self.resampler.take() {
+                    r.convert(None, &mut self.pending)?;
+                }
+                self.gap = (gap * f64::from(self.rate)).round() as usize;
+                self.held = Some(f);
+                return Ok(());
             }
-            self.gap = ((t - next) * f64::from(self.rate)).round() as usize;
-            self.held = Some(f);
-            return Ok(());
         }
         self.convert(&f)
     }

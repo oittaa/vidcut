@@ -14,6 +14,7 @@ use super::video::VideoFrames;
 /// Renders one video piece frame (a single-frame piece) as PNG bytes at
 /// `width`×`height` (the picture fit inside, padded black).
 pub fn png(piece: &VideoPiece, fps: Rational, width: u32, height: u32) -> Result<Vec<u8>> {
+    crate::cancel::stop()?;
     crate::init();
     let mut frames = VideoFrames::new(
         std::slice::from_ref(piece),
@@ -54,6 +55,7 @@ pub fn rgba(
     width: u32,
     height: u32,
 ) -> Result<crate::thumbs::Image> {
+    crate::cancel::stop()?;
     crate::init();
     let mut frames = VideoFrames::new(
         std::slice::from_ref(piece),

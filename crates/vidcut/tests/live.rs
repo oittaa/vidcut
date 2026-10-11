@@ -355,6 +355,24 @@ fn live_session() {
         h.stall_next(Duration::from_millis(400));
         h.ok("player.seek", json!({ "at": at }));
     }
+    // A preview reload while that seek is in flight samples the playhead.
+    // Playback has moved it off the asked frame; adopting the sample would
+    // fail the seek and name the playback frame as another seek.
+    h.stall_next(Duration::from_millis(800));
+    let handle = h.handle.clone();
+    let a = std::thread::spawn(move || {
+        let e = Envelope::from_json(json!({
+            "method": "player.seek",
+            "params": { "at": 20 }
+        }))
+        .unwrap();
+        handle.call(e, Origin::Ipc, None, &mut |_| true)
+    });
+    std::thread::sleep(Duration::from_millis(200));
+    h.ok("track.set", json!({ "track": "V1", "volume_db": -6.0 }));
+    a.join()
+        .unwrap()
+        .unwrap_or_else(|e| panic!("reload while playing must not retarget the seek: {e}"));
     h.ok("player.pause", json!({}));
     // Back to 149 for what follows.
     h.ok("player.seek", json!({ "at": 149 }));
