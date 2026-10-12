@@ -232,6 +232,9 @@ pub fn print(method: &str, r: &Response, json: bool) {
                     enc.join(" + "),
                     o["seconds"].as_f64().unwrap_or(0.0)
                 );
+                if let Some(n) = o["gpu_frames"].as_i64().filter(|n| *n > 0) {
+                    println!("  {n} of the frames decoded and scaled on the GPU (NVDEC)");
+                }
             }
         }
         "export.plan"

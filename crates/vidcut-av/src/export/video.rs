@@ -231,6 +231,37 @@ struct Source {
     /// A still keeps its one picture and is never sought; a sequence knows
     /// how many pictures it has.
     pictures: Pictures,
+    /// Decoded on NVDEC, and scaled on the GPU by `scaler` (built for the
+    /// first frame), when the export's frames stay on the GPU.
+    on_gpu: bool,
+    scaler: Option<crate::cuda::CudaPictures>,
+}
+
+/// What a source needs to decode on NVDEC for an export whose frames stay
+/// on the GPU: the device, and the output's size.
+#[derive(Clone)]
+pub(crate) struct GpuSide {
+    device: crate::cuda::CudaDevice,
+    out: (u32, u32),
+}
+
+/// `input` opened on NVDEC, when its pictures go through the GPU as they
+/// would through the CPU: as for proxies (upright, SDR, BT.709), and also
+/// progressive (frames are picked before any scaling, so a deinterlacer
+/// would see gaps) and filling the output, which the GPU can't pad.
+fn gpu_reader(input: &Input, gpu: &GpuSide) -> Option<VideoReader> {
+    let reader = VideoReader::open_cuda(input, &gpu.device).ok()?;
+    let first = reader.peek()?;
+    let sar = first.aspect_ratio();
+    let fills = fit(
+        first.width(),
+        first.height(),
+        (sar.numerator(), sar.denominator()),
+        gpu.out.0,
+        gpu.out.1,
+    ) == gpu.out;
+    (crate::proxy::gpu_suitable(first, reader.rotation()) && !reader.interlaced() && fills)
+        .then_some(reader)
 }
 
 /// How far past the current frame (seconds) a later piece of the same file
@@ -251,8 +282,15 @@ impl Source {
         source_frame: i64,
         target: f64,
         pictures: Pictures,
+        gpu: Option<&GpuSide>,
     ) -> Result<Source> {
-        let reader = VideoReader::open_input(input)?;
+        let on_gpu = gpu
+            .filter(|_| pictures == Pictures::Video)
+            .and_then(|g| gpu_reader(input, g));
+        let (reader, on_gpu) = match on_gpu {
+            Some(r) => (r, true),
+            None => (VideoReader::open_input(input)?, false),
+        };
         let tb = reader.time_base();
         let mut source = Source {
             reader,
@@ -263,6 +301,8 @@ impl Source {
             current: None,
             normalized: None,
             pictures,
+            on_gpu,
+            scaler: None,
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
@@ -286,6 +326,8 @@ impl Source {
             current: None,
             normalized: None,
             pictures,
+            on_gpu: false,
+            scaler: None,
         })
     }
 
@@ -384,6 +426,17 @@ pub struct VideoFrames {
     black: Option<frame::Video>,
     /// The output's dynamic range (`None`: SDR BT.709).
     target: Option<Hdr>,
+    /// Frames for NVENC in GPU memory (`with_gpu`).
+    gpu: Option<Gpu>,
+}
+
+/// The GPU side of an export whose frames stay there.
+struct Gpu {
+    side: GpuSide,
+    /// Where pictures made on the CPU, black among them, go up.
+    frames: crate::cuda::CudaFrames,
+    /// Frames decoded and scaled on the GPU so far.
+    made: i64,
 }
 
 impl VideoFrames {
@@ -407,7 +460,34 @@ impl VideoFrames {
             normalizer: None,
             black: None,
             target,
+            gpu: None,
         }
+    }
+
+    /// Every frame in GPU memory, from `frames` (made for this output's
+    /// size and format, which must be NV12 or P010): pieces the GPU shows
+    /// as the CPU would decode on NVDEC and scale there; the rest, and
+    /// black, are made on the CPU and go up.
+    pub fn with_gpu(
+        mut self,
+        device: crate::cuda::CudaDevice,
+        frames: crate::cuda::CudaFrames,
+    ) -> Self {
+        let (w, h, _) = self.out;
+        self.gpu = Some(Gpu {
+            side: GpuSide {
+                device,
+                out: (w, h),
+            },
+            frames,
+            made: 0,
+        });
+        self
+    }
+
+    /// Frames decoded and scaled on the GPU so far.
+    pub fn gpu_frames(&self) -> i64 {
+        self.gpu.as_ref().map_or(0, |g| g.made)
     }
 
     /// The next output frame (pts unset), or `None` after the last one.
@@ -425,7 +505,13 @@ impl VideoFrames {
             let k = self.k;
             self.k += 1;
             return match piece.clone() {
-                VideoPiece::Black { .. } => frame_ref(self.black()?).map(Some),
+                VideoPiece::Black { .. } => {
+                    let black = frame_ref(self.black()?)?;
+                    match &self.gpu {
+                        Some(g) => g.frames.upload(&black).map(Some),
+                        None => Ok(Some(black)),
+                    }
+                }
                 VideoPiece::Source {
                     path,
                     origin,
@@ -515,7 +601,14 @@ impl VideoFrames {
             }
             _ => match self.ahead.take(self.piece) {
                 Some(opened) => opened?,
-                None => Source::open(input, origin, source_frame, target, pictures)?,
+                None => Source::open(
+                    input,
+                    origin,
+                    source_frame,
+                    target,
+                    pictures,
+                    self.gpu.as_ref().map(|g| &g.side),
+                )?,
             },
         };
         self.source = Some(source);
@@ -557,8 +650,9 @@ impl VideoFrames {
             return;
         }
         let target = self.target(origin, source_frame);
+        let gpu = self.gpu.as_ref().map(|g| g.side.clone());
         self.ahead.start(i, move || {
-            Source::open(&input, origin, source_frame, target, pictures)
+            Source::open(&input, origin, source_frame, target, pictures, gpu.as_ref())
         });
     }
 
@@ -570,7 +664,24 @@ impl VideoFrames {
         let target =
             src.origin + fps.frames_to_secs(src.source_frame + k) - 0.5 * fps.frames_to_secs(1);
         let changed = src.advance(target)?;
-        if changed || src.normalized.is_none() {
+        if src.on_gpu && (changed || src.normalized.is_none()) {
+            let (frame, _) = src.current.as_ref().expect("have a frame");
+            let scaler = match &mut src.scaler {
+                Some(s) => s,
+                None => src.scaler.insert(crate::cuda::CudaPictures::new(
+                    frame,
+                    src.reader.time_base(),
+                    (out_w, out_h),
+                    out_fmt,
+                    false,
+                )?),
+            };
+            scaler.push(Some(frame))?;
+            let picture = scaler
+                .pull()?
+                .ok_or_else(|| Error::Invalid("the GPU scaler gave no picture".into()))?;
+            src.normalized = Some(picture);
+        } else if changed || src.normalized.is_none() {
             let (frame, _) = src.current.as_ref().expect("have a frame");
             let rotation = src.reader.rotation();
             let rebuild = self
@@ -589,7 +700,15 @@ impl VideoFrames {
             }
             src.normalized = Some(self.normalizer.as_mut().expect("built").run(frame)?);
         }
-        frame_ref(src.normalized.as_ref().expect("normalized"))
+        let picture = frame_ref(src.normalized.as_ref().expect("normalized"))?;
+        match &mut self.gpu {
+            Some(g) if src.on_gpu => {
+                g.made += 1;
+                Ok(picture)
+            }
+            Some(g) => g.frames.upload(&picture),
+            None => Ok(picture),
+        }
     }
 }
 

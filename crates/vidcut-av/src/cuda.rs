@@ -55,10 +55,77 @@ impl Drop for CudaDevice {
     }
 }
 
+/// GPU frames of one size and format: what NVENC is opened with, and where
+/// pictures made on the CPU go up to the GPU.
+pub struct CudaFrames(*mut ffi::AVBufferRef);
+
+// SAFETY: as for the device.
+unsafe impl Send for CudaFrames {}
+
+impl CudaFrames {
+    /// `width`×`height` frames of `sw` (NV12 or P010) on `device`.
+    pub fn new(device: &CudaDevice, sw: format::Pixel, width: u32, height: u32) -> Result<Self> {
+        unsafe {
+            let mut frames = ffi::av_hwframe_ctx_alloc(device.as_ptr());
+            if frames.is_null() {
+                return Err(Error::Invalid("no memory for GPU frames".into()));
+            }
+            let fc = &mut *((*frames).data as *mut ffi::AVHWFramesContext);
+            fc.format = ffi::AVPixelFormat::AV_PIX_FMT_CUDA;
+            fc.sw_format = sw.into();
+            fc.width = width as i32;
+            fc.height = height as i32;
+            let ret = ffi::av_hwframe_ctx_init(frames);
+            if ret < 0 {
+                ffi::av_buffer_unref(&mut frames);
+                return Err(Error::Ffmpeg {
+                    context: "setting up GPU frames".into(),
+                    source: ffmpeg::Error::from(ret),
+                });
+            }
+            Ok(Self(frames))
+        }
+    }
+
+    pub fn as_ptr(&self) -> *mut ffi::AVBufferRef {
+        self.0
+    }
+
+    /// `src` (in memory, of this pool's format and size) copied into a GPU
+    /// frame, keeping its timestamp.
+    pub fn upload(&self, src: &frame::Video) -> Result<frame::Video> {
+        let mut hw = frame::Video::empty();
+        unsafe {
+            let ret = ffi::av_hwframe_get_buffer(self.0, hw.as_mut_ptr(), 0);
+            if ret < 0 {
+                return Err(Error::Ffmpeg {
+                    context: "getting a GPU frame".into(),
+                    source: ffmpeg::Error::from(ret),
+                });
+            }
+            let ret = ffi::av_hwframe_transfer_data(hw.as_mut_ptr(), src.as_ptr(), 0);
+            if ret < 0 {
+                return Err(Error::Ffmpeg {
+                    context: "uploading to the GPU".into(),
+                    source: ffmpeg::Error::from(ret),
+                });
+            }
+        }
+        hw.set_pts(src.pts());
+        Ok(hw)
+    }
+}
+
+impl Drop for CudaFrames {
+    fn drop(&mut self) {
+        unsafe { ffi::av_buffer_unref(&mut self.0) };
+    }
+}
+
 /// Pictures for NVENC from frames NVDEC decoded: deinterlaced when the
 /// source is (one frame per frame, as the CPU reader makes them), scaled to
-/// `width`×`height` as 8-bit 4:2:0 (NV12), square pixels, all in GPU
-/// memory. Timestamps stay the source's.
+/// `width`×`height` as `format` (8-bit NV12 or 10-bit P010), square
+/// pixels, all in GPU memory. Timestamps stay the source's.
 pub struct CudaPictures {
     graph: filter::Graph,
     time_base: ffmpeg::Rational,
@@ -69,7 +136,7 @@ pub struct CudaPictures {
 /// aliases when it shrinks a lot (4K to 960 wide): halvings first, each a
 /// bilinear sample between four pixels, so their average, then one bicubic
 /// step to the size.
-fn filters(w: u32, h: u32, width: u32, height: u32, deinterlace: bool) -> String {
+fn filters(w: u32, h: u32, (width, height, out): (u32, u32, &str), deinterlace: bool) -> String {
     let mut steps = Vec::new();
     if deinterlace {
         steps.push("bwdif_cuda=mode=send_frame:parity=auto:deint=interlaced".to_string());
@@ -80,7 +147,7 @@ fn filters(w: u32, h: u32, width: u32, height: u32, deinterlace: bool) -> String
         steps.push(format!("scale_cuda=w={w}:h={h}:interp_algo=bilinear"));
     }
     steps.push(format!(
-        "scale_cuda=w={width}:h={height}:format=nv12:interp_algo=bicubic"
+        "scale_cuda=w={width}:h={height}:format={out}:interp_algo=bicubic"
     ));
     steps.join(",")
 }
@@ -90,8 +157,8 @@ impl CudaPictures {
     pub fn new(
         first: &frame::Video,
         time_base: ffmpeg::Rational,
-        width: u32,
-        height: u32,
+        (width, height): (u32, u32),
+        format: format::Pixel,
         deinterlace: bool,
     ) -> Result<Self> {
         if first.format() != format::Pixel::CUDA {
@@ -144,7 +211,16 @@ impl CudaPictures {
         graph
             .add(&find("buffersink")?, "out", "")
             .ctx(|| "creating the GPU sink".into())?;
-        let spec = filters(first.width(), first.height(), width, height, deinterlace);
+        let out = match format {
+            format::Pixel::P010LE => "p010le",
+            _ => "nv12",
+        };
+        let spec = filters(
+            first.width(),
+            first.height(),
+            (width, height, out),
+            deinterlace,
+        );
         graph
             .output("in", 0)
             .and_then(|p| p.input("out", 0))
@@ -210,13 +286,13 @@ mod tests {
     #[test]
     fn big_shrinks_halve_first() {
         assert_eq!(
-            filters(3840, 2160, 960, 540, false),
+            filters(3840, 2160, (960, 540, "nv12"), false),
             "scale_cuda=w=1920:h=1080:interp_algo=bilinear,\
              scale_cuda=w=960:h=540:interp_algo=bilinear,\
              scale_cuda=w=960:h=540:format=nv12:interp_algo=bicubic"
         );
         assert_eq!(
-            filters(1280, 720, 960, 540, true),
+            filters(1280, 720, (960, 540, "nv12"), true),
             "bwdif_cuda=mode=send_frame:parity=auto:deint=interlaced,\
              scale_cuda=w=960:h=540:format=nv12:interp_algo=bicubic"
         );
