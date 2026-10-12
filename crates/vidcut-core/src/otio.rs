@@ -922,7 +922,10 @@ fn editor_gain(item: &Value, warnings: &mut Vec<String>) -> Option<f64> {
     None
 }
 
-/// Notes the effects of `item` that are left out.
+/// Notes the effects of `item` that are left out: speed changes, and clip
+/// effects in use. The editor writes its whole stack of clip effects on
+/// every clip (Transform, Cropping, Pan, …), untouched ones included:
+/// those are nothing to note. The clip volume is read (`editor_gain`).
 fn note_effects(item: &Value, warnings: &mut Vec<String>) {
     for e in item["effects"].as_array().into_iter().flatten() {
         let s = schema(e);
@@ -934,7 +937,58 @@ fn note_effects(item: &Value, warnings: &mut Vec<String>) {
                 warnings,
                 "speed changes were left out (those clips play at normal speed)",
             );
+        } else if let Some(name) = effect_in_use(e) {
+            warn(warnings, &format!("the {name} clip effect was left out"));
         }
+    }
+}
+
+/// The name of clip effect `e` if it changes the clip: one of the editor's
+/// switched on with a setting off its default (Dynamic Zoom moves the
+/// picture whenever it is on), or another program's, which says nothing
+/// of its defaults.
+fn effect_in_use(e: &Value) -> Option<String> {
+    let r = &e["metadata"][EDITOR];
+    let Some(name) = r["Effect Name"].as_str() else {
+        return e["effect_name"]
+            .as_str()
+            .or_else(|| e["name"].as_str())
+            .filter(|n| !n.is_empty())
+            .map(String::from);
+    };
+    if r["Enabled"] == false || name == "Fairlight Clip Volume and Fades" {
+        return None;
+    }
+    let off = |v: &Value, default: &Value| !same_value(v, default);
+    let changed = name == "Dynamic Zoom"
+        || r["Parameters"].as_array().into_iter().flatten().any(|p| {
+            let default = &p["Default Parameter Value"];
+            off(&p["Parameter Value"], default)
+                || p["Key Frames"]
+                    .as_object()
+                    .into_iter()
+                    .flatten()
+                    .any(|(_, k)| off(&k["Value"], default))
+        });
+    let shown = r["Name"].as_str().filter(|n| !n.is_empty()).unwrap_or(name);
+    changed.then(|| shown.to_string())
+}
+
+/// Whether two parameter values are the same, numbers to a millionth
+/// (editors write -16.999998 for -17).
+fn same_value(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => {
+            let (x, y) = (
+                x.as_f64().unwrap_or(f64::NAN),
+                y.as_f64().unwrap_or(f64::NAN),
+            );
+            (x - y).abs() <= 1e-6 * x.abs().max(y.abs()).max(1.0)
+        }
+        (Value::Array(x), Value::Array(y)) => {
+            x.len() == y.len() && x.iter().zip(y).all(|(x, y)| same_value(x, y))
+        }
+        _ => a == b,
     }
 }
 

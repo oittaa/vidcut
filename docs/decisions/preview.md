@@ -90,6 +90,9 @@ keep-open=always idle=yes pause=yes video-timing-offset=0
 
 For single-file sources, also `rebase-start-time=no`.
 
+**The audio output keeps the project's format.** The software player mixes every clip to the plan's sample rate and channel count (the project's) and opens the playback device at that format. A cut from stereo into 5.1, or from 48 kHz into 44.1 kHz, does not reopen it. The earlier libmpv player pinned the same format with per-file `audio-samplerate` and `audio-channels`: without that, it drained and reopened the device (about 260 ms on PipeWire) and then dropped frames.
+- `tests/preview.rs` plays across a cut from 48 kHz stereo into 44.1 kHz 5.1 and checks the mix stays 48 kHz stereo.
+
 **Interlaced sources** load with `vf=bwdif=mode=send_frame:deint=interlaced`, as a per-file option, whenever the plan has an interlaced clip (spec D34).
 - **Why not mpv's own deinterlacer:** `deinterlace=yes` makes one frame per field, and the half-frame bias of every seek (§1) would land on the previous frame's second field.
 - **Cost:** the software filter takes the whole file. With hardware decoding, every frame of a timeline holding an interlaced clip goes through system memory; timelines without one are unaffected.
@@ -101,7 +104,7 @@ For single-file sources, also `rebase-start-time=no`.
 
 ## 6. OpenGL embedding (eframe glow, GNOME Wayland, NVIDIA)
 
-Found with eframe 0.35 in M0 and unchanged with 0.36: `tests/gui.rs` (`--features vidcut/gui-tests`) compares the viewer's GL picture with `vidcut frame`.
+Found with eframe 0.35 in M0 and unchanged with 0.36: `tests/gui.rs` (`--features vidcut/gui-tests`) compares the viewer's GL picture with `vidcut frame render`.
 
 **Render target:**
 - Each player renders into its own FBO with an RGBA8 texture.
@@ -184,7 +187,7 @@ Found with eframe 0.35 in M0 and unchanged with 0.36: `tests/gui.rs` (`--feature
   - With FFmpeg's `azmq` filter (built with ZeroMQ) and `libzmq.so.5` loadable, the timeline's graph keeps each lane's fader apart from its clip gains, as a filter of its own named for the track (`volume@fader_V2`), and ends in `azmq=bind_address=ipc\\:///…/mix-N`. `render::flatten_lanes` says which track each lane is.
   - The address needs two levels of escaping, the filter's options and then the graph (`preview::lavfi_value`): with one, `azmq` fails to load, and so does the graph and its sound. `tests/preview_gains.rs` binds it in real FFmpeg.
   - Every load gets a new address (`mix-1`, `mix-2`, …): mpv may build the new graph before it frees the old one's address.
-  - `mixer.preview` (the Mixer's fader while dragged, `vidcut fader`) sends `volume@fader_A1 volume <linear>` from a thread of its own (`live/mixctl.rs`), which loads libzmq at run time as libmpv is loaded, keeps only each fader's latest level, and waits at most 0.5 s for the answer. `azmq` reads commands as sound passes through it, so while paused a command waits for playback; nothing is heard then anyway, and releasing the fader saves the level with `track.set`, which reloads the timeline with it.
+  - `mixer.preview` (the Mixer's fader while dragged, `vidcut mixer preview`) sends `volume@fader_A1 volume <linear>` from a thread of its own (`live/mixctl.rs`), which loads libzmq at run time as libmpv is loaded, keeps only each fader's latest level, and waits at most 0.5 s for the answer. `azmq` reads commands as sound passes through it, so while paused a command waits for playback; nothing is heard then anyway, and releasing the fader saves the level with `track.set`, which reloads the timeline with it.
   - Without ZeroMQ or `azmq`, the graph is as before and `mixer.preview` answers `live: false`; the fader is heard when released.
   - `tests/live.rs` sends a level to the running player's graph and gets the filter's answer.
 - **Monitoring mute** (`player.mute`, the speaker by the viewer) mutes both players. It changes neither the project nor the export.
@@ -216,13 +219,19 @@ An image in an EDL entry is a source with one frame at time 0. Seeking into the 
 
 ## 12. Proxies
 
-A proxy is a smaller H.264 file (8-bit 4:2:0, no B-frames) of a pool item's pictures. `proxy.generate` writes one for a video or an image sequence.
+A proxy is a smaller AV1 or H.264 file (8-bit 4:2:0, closed GOPs of 60 frames, every frame coded in the order it shows) of a pool item's pictures. `proxy.generate` writes one for a video or an image sequence, with the encoder the preferences' `proxies.codec` picks: hardware AV1 when one works (NVENC, VAAPI), then x264 (`auto`) or SVT-AV1 (`av1`); x264 for `h264`. Measured on 60 s of 4K60 (960 px proxies): x264 23.1 MB in 7.1 s, NVENC AV1 22.8 MB in 6.3 s at a higher SSIM, SVT-AV1 16.4 MB in 16.7 s; every one decodes at over 1,000 fps on the CPU.
 
 **Encoding.** The request first runs on a copy of the project, which writes the files: in the GUI on a worker thread (the measure step that analysis edits use), headless before the project is locked. Then it runs for real and finds the files there, so recording them is quick. The encode reports progress through `vidcut_av::progress` and stops on the `vidcut_av::cancel` flag; a stopped encode removes its temporary file. The preview plays it only when `settings.use_proxies` is set and the proxy is fresh: same source size and modification time as when it was made, and the file is there. Otherwise the original plays, image lists included.
 
 **Timestamps.** Each proxy frame is given the source frame's presentation timestamp (the source time base, or microseconds when that base is not a sane clock). The live session swaps only the video piece's path and clears `image`, and leaves `origin` and `source_frame` alone. The EDL `start` is still `origin + source_frame/fps − ½ frame`, so the seek lands on the same frame. Matroska rounds timestamps to 1 ms, which the half-frame bias absorbs. An image sequence's proxy is picture `k` at `k/rate` with origin 0, and the preview plays that video instead of the `mf://` list.
 
 **What does not change.** `render::flatten`, frame render, analysis and OTIO keep the original paths. Preview audio entries keep the original file too, so proxy video is not mixed with a second clock. Export never reads a proxy. A proxy is already progressive and upright, so the preview does not deinterlace it again and does not rely on the source's rotation metadata.
+
+**On the GPU.** With NVENC, a proxy is decoded on NVDEC and scaled there (`vidcut_av::cuda`), the frames never copied to memory, when that gives the pictures the CPU would: a video file, upright (the GPU can't turn pictures), SDR (it can't tone-map), BT.709 or untagged HD in video range, progressive or interlaced (`bwdif_cuda`, one frame per frame, as the CPU reader). Anything else, and streams NVDEC can't decode (ProRes, or a profile the GPU lacks), decode on the CPU, still encoding on NVENC.
+- **The decoder:** `VideoReader::open_cuda` uses a decoder that can use NVDEC, FFmpeg's own: FFmpeg would pick libdav1d for AV1, which decodes on the CPU only.
+- **Scaling:** `scale_cuda` samples a fixed few pixels per output pixel, so a big shrink aliases (4K to 960 made frames sharper than the CPU's and files 33% bigger). It halves with bilinear steps first, each the average of four pixels, then scales to the size with bicubic: as sharp as the CPU's, files 7% bigger.
+- **Measured** on 176 s of 4K60 10-bit AV1 to a 960 px AV1 proxy: 107 s and 381 CPU-seconds decoding on the CPU, 37 s and 2.6 CPU-seconds on the GPU, with NVDEC 96–99% busy. Pictures match the CPU's within a level on average (10 to 8 bits is truncated, where the CPU rounds).
+- **Tests:** `tests/proxy.rs` (`--features gpu-tests`) makes NVENC proxies of 720p H.264, 10-bit HEVC, VP9, 10-bit AV1, an MPEG-TS starting at 1.4 s and interlaced H.264, each on the GPU with every frame's barcode and timestamp the source's; turned and ProRes sources go to the CPU. `proxy.generate` says how each proxy was made (`made_with`).
 
 **Where.** Beside the project, in `proxies/`, when the session knows the project path; otherwise `~/.cache/vidcut/proxies`. The stored path is absolute. Stills are not proxied: one picture is not the real-time problem.
 

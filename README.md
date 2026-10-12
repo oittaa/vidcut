@@ -53,7 +53,7 @@ Everything you, scripts and agents do is listed in the **Command log** (top righ
 
 **Exporting.** **Quick Export** (top bar) exports the In–Out range, or the whole timeline when no marks are set, with one of the presets shown as tiles. **Export** opens every setting: start from a preset, change the codec, quality, size, range or output, and see the plan (the encoder that will run, the files and their lengths) and the same export as a shell command before you start. Save the settings as your own preset, optionally added to Quick Export. Exports run in the background; **Jobs** (top right) shows their progress and lets you cancel them. Phone video shows upright, interlaced video is deinterlaced, and HDR video is tone-mapped for ordinary (SDR) exports; choose an HDR range in Export (HEVC, AV1 or VP9) to keep it HDR. **File > Import/Export Timeline** reads and writes OpenTimelineIO files.
 
-**Preferences.** **File > Preferences** (Ctrl+,) holds settings for vidcut as a whole, kept in `~/.config/vidcut/preferences.toml`. The pool's thumbnails are kept on disk (`~/.cache/vidcut/thumbs`, 512 MB by default), so a project opens with its thumbnails shown instead of decoding every clip again; you can change the limit or turn the cache off, which empties it. With **Proxies** ticked in the Media Pool, vidcut makes playback proxies by itself for heavy media: image sequences, video larger than 4K, and files above 150 Mb/s. Preferences sets those rules and the proxy size, or turns this off. `vidcut preferences` shows and changes the same settings.
+**Preferences.** **File > Preferences** (Ctrl+,) holds settings for vidcut as a whole, kept in `~/.config/vidcut/preferences.toml`. The pool's thumbnails are kept on disk (`~/.cache/vidcut/thumbs`, 512 MB by default), so a project opens with its thumbnails shown instead of decoding every clip again; you can change the limit or turn the cache off, which empties it. With **Proxies** ticked in the Media Pool, vidcut makes playback proxies by itself for heavy media: image sequences, video larger than 4K, and files above 150 Mb/s. Preferences sets those rules, the proxy size and the codec, or turns this off. Proxies are AV1 when the machine has a hardware AV1 encoder, H.264 otherwise; each choice in Preferences says what it uses. `vidcut preferences get` and `vidcut preferences set` show and change the same settings.
 
 ### Keys
 
@@ -162,17 +162,17 @@ Typed timecodes fill from the right: 100 is 1 second, 10000 is 1 minute.
 
 ```bash
 vidcut -p talk.vidcut edit split --at 1m          # shows up in the GUI immediately
-vidcut -p talk.vidcut seek 1m                     # moves the GUI's playhead
-vidcut -p talk.vidcut screenshot -o shot.png      # what the viewer shows, frame-exact
-vidcut -p talk.vidcut log                         # what was done, by whom
-vidcut -p talk.vidcut export talk.mp4 --background   # shows in the GUI's Jobs window
+vidcut -p talk.vidcut player seek 1m              # moves the GUI's playhead
+vidcut -p talk.vidcut gui screenshot --out shot.png   # what the viewer shows, frame-exact
+vidcut -p talk.vidcut gui log                     # what was done, by whom
+vidcut -p talk.vidcut export start talk.mp4 --background   # shows in the GUI's Jobs window
 vidcut -p talk.vidcut jobs wait j1                # blocks until that export is done
 ```
 
 ## Try the CLI
 
 ```bash
-vidcut new talk.vidcut
+vidcut project create talk.vidcut
 vidcut -p talk.vidcut media add cam.mp4 screen.mkv
 vidcut -p talk.vidcut edit append m1 --range 10s..2m
 vidcut -p talk.vidcut edit split --at 1m
@@ -180,22 +180,22 @@ vidcut -p talk.vidcut edit delete V1@1m10s       # ripple delete the clip under 
 vidcut -p talk.vidcut edit place-on-top m2 --range 5s..+3s --at 30s   # B-roll over Track 1
 vidcut -p talk.vidcut media add music.flac       # m3
 vidcut -p talk.vidcut edit overwrite m3 --at start   # sound alone lands on audio track A1
-vidcut -p talk.vidcut track set A1 --volume -12 --name Music
-vidcut -p talk.vidcut timeline
-vidcut -p talk.vidcut undo
-vidcut -p talk.vidcut export talk.mp4 --preset youtube-1080p   # GPU-encoded when available
-vidcut -p talk.vidcut export talk.flac                          # audio only
-vidcut -p talk.vidcut frame --at 1m -o check.png                # look at a frame
-vidcut -p talk.vidcut export cut.otio                           # the edit, for another editor
-vidcut -p talk.vidcut export cut.otioz                          # the edit and its media, in one file
-vidcut new cut2.vidcut && vidcut -p cut2.vidcut import cut.otio  # and back in
+vidcut -p talk.vidcut track set A1 --volume-db -12 --name Music
+vidcut -p talk.vidcut timeline get
+vidcut -p talk.vidcut history undo
+vidcut -p talk.vidcut export start talk.mp4 --preset youtube-1080p   # GPU-encoded when available
+vidcut -p talk.vidcut export start talk.flac                          # audio only
+vidcut -p talk.vidcut frame render --at 1m --out check.png            # look at a frame
+vidcut -p talk.vidcut export start cut.otio                           # the edit, for another editor
+vidcut -p talk.vidcut export start cut.otioz                          # the edit and its media, in one file
+vidcut project create cut2.vidcut && vidcut -p cut2.vidcut timeline import cut.otio  # and back in
 vidcut presets save web --from youtube-1080p --set video.quality=22 --quick-export
 vidcut -p talk.vidcut edit ripple-delete-silence c1   # cut the pauses (0.5 s and longer)
-vidcut -p talk.vidcut storyboard -o board.png                   # every shot on one page
-vidcut -p talk.vidcut export talk.mp4 --set audio.loudness=-14  # YouTube loudness
+vidcut -p talk.vidcut storyboard render --out board.png             # every shot on one page
+vidcut -p talk.vidcut export start talk.mp4 --set audio.loudness=-14  # YouTube loudness
 ```
 
-Every command takes `--json` for machine-readable output. `vidcut schema` lists the full protocol. Add `--headless` to work on the file directly even while a GUI has it open.
+Every command is a method of the protocol: `vidcut edit split` is `edit.split`, and its flags are the method's parameters (`--volume-db` for `volume_db`). Every command takes `--json` for machine-readable output. `vidcut schema` lists the full protocol. Add `--headless` to work on the file directly even while a GUI has it open.
 
 ## Use with AI agents
 

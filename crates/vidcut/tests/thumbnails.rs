@@ -148,6 +148,44 @@ fn thumbnails_come_back_from_the_disk_cache_until_it_is_turned_off() {
         assert!(diff < 4.0, "JPEG kept the pictures: mean difference {diff}");
     }
 
+    // Another project's m1 is another file: its own thumbnails and sound,
+    // never those of the m1 before it. And back again.
+    let longer = fixture::ensure(&FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (30, 1),
+        300,
+    ))
+    .unwrap();
+    call(
+        &h,
+        "project.open",
+        json!({ "path": dir.join("other.vidcut"), "create": true }),
+    );
+    call(&h, "media.add", json!({ "paths": [longer] }));
+    let last = |strip: &Filmstrip| strip.times.last().copied().unwrap_or(0.0);
+    // 24 pictures over 10 s; the 3 s clip's end before 3 s.
+    let strip = thumbs(&h, "m1");
+    assert!(last(&strip) > 5.0, "{:?}", strip.times);
+    let started = Instant::now();
+    let sound = loop {
+        if let Some(w) = h.snapshot().waveforms.get("m1") {
+            break w.clone();
+        }
+        assert!(started.elapsed() < Duration::from_secs(30), "no waveform");
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let secs = sound.peaks.len() as f64 / f64::from(sound.per_second);
+    assert!(
+        (9.5..10.5).contains(&secs),
+        "the 10 s file's sound: {secs} s"
+    );
+    call(&h, "project.open", json!({ "path": path }));
+    let strip = thumbs(&h, "m1");
+    assert!(last(&strip) < 3.0, "{:?}", strip.times);
+
     // File > Preferences: turning the cache off is one request, and empties it.
     let ws = Workspace::new(h.clone());
     let mut harness = Harness::builder()

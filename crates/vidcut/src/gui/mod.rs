@@ -4,12 +4,14 @@
 
 mod app;
 pub mod export;
+mod folders;
 mod import;
 mod mixer;
 mod pool;
 mod preferences;
 mod stills;
 mod theme;
+mod tiles;
 mod timeline;
 mod video;
 mod viewer;

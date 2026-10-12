@@ -33,6 +33,24 @@ const HOLD_SECS: f32 = 1.5;
 /// Width of one channel bar.
 const BAR_W: f32 = 10.0;
 
+/// A fader's range, dB.
+const FADER_DB: std::ops::RangeInclusive<f64> = -60.0..=24.0;
+
+/// The dB marks beside a fader, in the order they are kept when there
+/// isn't room for all: 0 dB first.
+const FADER_MARKS: [f32; 7] = [0.0, 12.0, -12.0, -24.0, 24.0, -60.0, -40.0];
+
+/// Width of the numbers' column beside a fader.
+const FADER_SCALE_W: f32 = 26.0;
+
+/// Height a strip keeps for its name, value, and mute and solo buttons.
+const STRIP_ROOM: f32 = 106.0;
+
+/// Font of the scales' numbers.
+fn scale_font() -> egui::FontId {
+    egui::FontId::proportional(10.0)
+}
+
 fn linear(db: f64) -> f32 {
     10f64.powf(db / 20.0) as f32
 }
@@ -49,6 +67,87 @@ fn db(level: f32) -> f32 {
 /// Where a level sits on a meter, 0..1 over −60..0 dBFS.
 fn position(level: f32) -> f32 {
     ((db(level) + 60.0) / 60.0).clamp(0.0, 1.0)
+}
+
+/// The marks that fit along a scale, as `(dB, y)`: each at least `gap`
+/// from the ones kept before it, taken in `marks` order (the first always
+/// fits).
+fn fitting_marks(marks: &[f32], y: impl Fn(f32) -> f32, gap: f32) -> Vec<(f32, f32)> {
+    let mut kept: Vec<(f32, f32)> = Vec::new();
+    for &m in marks {
+        let at = y(m);
+        if kept.iter().all(|&(_, k)| (k - at).abs() >= gap) {
+            kept.push((m, at));
+        }
+    }
+    kept
+}
+
+/// A scale's number: `+12`, `0`, `−12`.
+fn mark_text(db: f32) -> String {
+    match db {
+        d if d > 0.0 => format!("+{d}"),
+        d if d < 0.0 => format!("−{}", -d),
+        _ => "0".to_string(),
+    }
+}
+
+/// Where `db` sits on a vertical slider over [`FADER_DB`] in `rect`, as
+/// egui places its handle: the travel is the rect less the handle's half
+/// length at each end, the top end the most.
+fn fader_y(db: f32, rect: Rect, handle: egui::style::HandleShape) -> f32 {
+    let mut radius = rect.width() / 2.5;
+    if let egui::style::HandleShape::Rect { aspect_ratio } = handle {
+        radius *= aspect_ratio;
+    }
+    let (lo, hi) = (*FADER_DB.start() as f32, *FADER_DB.end() as f32);
+    let t = (db.clamp(lo, hi) - lo) / (hi - lo);
+    let (bottom, top) = (rect.bottom() - radius, rect.top() + radius);
+    bottom + (top - bottom) * t
+}
+
+/// A tick across a fader's slider at each mark, to go under its rail and
+/// handle: 0 dB is longer and thicker, in the accent color.
+fn fader_ticks(slider: Rect, marks: &[(f32, f32)]) -> egui::Shape {
+    let ticks = marks
+        .iter()
+        .map(|&(db, y)| {
+            let (reach, stroke) = if db == 0.0 {
+                (3.0, Stroke::new(2.0, theme::ACCENT))
+            } else {
+                (-2.0, Stroke::new(1.0, theme::TEXT_DIM))
+            };
+            egui::Shape::line_segment(
+                [
+                    pos2(slider.left() - reach, y),
+                    pos2(slider.right() + reach, y),
+                ],
+                stroke,
+            )
+        })
+        .collect();
+    egui::Shape::Vec(ticks)
+}
+
+/// The marks' numbers in `column`, right of a fader, each centered on its
+/// level; 0 in the accent color.
+fn fader_numbers(painter: &egui::Painter, column: Rect, marks: &[(f32, f32)]) {
+    for &(db, y) in marks {
+        let color = if db == 0.0 {
+            theme::ACCENT
+        } else {
+            theme::TEXT_DIM
+        };
+        // The ends' numbers stay whole inside the column.
+        let y = y.clamp(column.top() + 5.0, column.bottom() - 5.0);
+        painter.text(
+            pos2(column.left() + 4.0, y),
+            egui::Align2::LEFT_CENTER,
+            mark_text(db),
+            scale_font(),
+            color,
+        );
+    }
 }
 
 /// The project's channel count, at least one. Stereo is the usual case.
@@ -324,12 +423,14 @@ impl Workspace {
     fn strip(&mut self, ui: &mut egui::Ui, t: &Track, level: &[f32], height: f32) {
         let n = level.len().max(1);
         ui.vertical(|ui| {
-            ui.set_width(64.0 + meter_column_width(n));
+            ui.set_width(meter_column_width(n) + FADER_SCALE_W + 40.0);
             let name = t.name.clone().unwrap_or_else(|| t.id.clone());
             ui.label(RichText::new(name).strong()).on_hover_text(&t.id);
             let held = self.hold_channels(&t.id, level);
-            ui.horizontal(|ui| {
-                self.channel_bars(ui, level, &held, height - 90.0, "track meter");
+            let bars = height - STRIP_ROOM;
+            // Top-aligned: the bars, fader and scale share one top and height.
+            let value = ui.horizontal_top(|ui| {
+                self.channel_bars(ui, level, &held, bars, "track meter");
                 // The fader: heard at once while dragged (`mixer.preview`),
                 // kept when it is let go (one `track.set`).
                 let mut value = self
@@ -339,15 +440,29 @@ impl Workspace {
                     .copied()
                     .unwrap_or(t.volume_db);
                 // A vertical slider is `slider_width` long.
-                ui.spacing_mut().slider_width = height - 90.0;
+                ui.spacing_mut().slider_width = bars;
+                // The ticks go under the slider's rail and handle.
+                let under = ui.painter().add(egui::Shape::Noop);
                 let r = ui
                     .add(
-                        egui::Slider::new(&mut value, -60.0..=24.0)
+                        egui::Slider::new(&mut value, FADER_DB)
                             .vertical()
                             .show_value(false)
                             .step_by(0.5),
                     )
                     .on_hover_text("Track volume; double-click for 0 dB");
+                let handle = ui.style().visuals.handle_shape;
+                let marks = fitting_marks(
+                    &FADER_MARKS,
+                    |db| fader_y(db, r.rect, handle),
+                    scale_font().size + 4.0,
+                );
+                ui.painter().set(under, fader_ticks(r.rect, &marks));
+                let (column, _) = ui.allocate_exact_size(
+                    vec2(FADER_SCALE_W, r.rect.height()),
+                    egui::Sense::hover(),
+                );
+                fader_numbers(ui.painter(), column, &marks);
                 if r.double_clicked() {
                     self.mixer.dragging.remove(&t.id);
                     self.send("track.set", json!({ "track": t.id, "volume_db": 0.0 }));
@@ -366,8 +481,13 @@ impl Workspace {
                 {
                     self.send("track.set", json!({ "track": t.id, "volume_db": v }));
                 }
-                ui.label(RichText::new(format!("{value:+.1}")).small().monospace());
+                value
             });
+            ui.label(
+                RichText::new(format!("{:+.1} dB", value.inner))
+                    .small()
+                    .monospace(),
+            );
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
                 if ui
@@ -390,19 +510,20 @@ impl Workspace {
 
     fn master_strip(&mut self, ui: &mut egui::Ui, level: &[f32], height: f32) {
         ui.vertical(|ui| {
-            ui.label(RichText::new("Mix").strong());
+            // Its own width, as the track strips have: last in the row, it
+            // would otherwise get what is left, a letter wide.
+            ui.set_width(meter_column_width(level.len()).max(48.0));
+            ui.add(egui::Label::new(RichText::new("Mix").strong()).extend());
             let held = self.hold_channels("mix", level);
-            self.channel_bars(ui, level, &held, height - 90.0, "mix meter");
+            let bars = height - STRIP_ROOM;
+            self.channel_bars(ui, level, &held, bars, "mix meter");
             let peak = db(loudest(&held));
-            ui.label(
-                RichText::new(if peak.is_finite() {
-                    format!("{peak:.1}")
-                } else {
-                    "-∞".into()
-                })
-                .small()
-                .monospace(),
-            );
+            let text = if peak.is_finite() {
+                format!("{peak:.1} dB")
+            } else {
+                "-∞ dB".into()
+            };
+            ui.add(egui::Label::new(RichText::new(text).small().monospace()).extend());
         });
     }
 
@@ -415,7 +536,7 @@ impl Workspace {
         height: f32,
         label: &str,
     ) {
-        ui.horizontal(|ui| {
+        ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             let n = levels.len().max(1);
             for i in 0..n {
@@ -575,6 +696,40 @@ mod tests {
         assert_eq!(position(1.0), 1.0);
         assert_eq!(position(0.0), 0.0);
         assert!((position(linear(-30.0)) - 0.5).abs() < 1e-3);
+    }
+
+    #[test]
+    fn fader_marks_sit_where_the_handle_goes() {
+        // A slider 18 wide and 200 long: egui's rect handle is 18 / 2.5 *
+        // 0.75 = 5.4 long either side of its center.
+        let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(18.0, 200.0));
+        let handle = egui::style::HandleShape::Rect { aspect_ratio: 0.75 };
+        assert!((fader_y(24.0, rect, handle) - 5.4).abs() < 1e-4);
+        assert!((fader_y(-60.0, rect, handle) - 194.6).abs() < 1e-4);
+        // 0 dB is 60 of the 84 dB up from the bottom.
+        let zero = 194.6 - (194.6 - 5.4) * 60.0 / 84.0;
+        assert!((fader_y(0.0, rect, handle) - zero).abs() < 1e-3);
+    }
+
+    #[test]
+    fn scales_keep_zero_and_drop_numbers_that_would_overlap() {
+        let kept = |px: f32| -> Vec<f32> {
+            let y = |db: f32| px - (db + 60.0) * px / 84.0;
+            fitting_marks(&FADER_MARKS, y, 14.0)
+                .into_iter()
+                .map(|(db, _)| db)
+                .collect()
+        };
+        // A full-height fader (214 px) has room for every number.
+        assert_eq!(kept(214.0), FADER_MARKS);
+        // A short one (54 px) keeps those 14 px apart: 12 dB is 7.7 px.
+        assert_eq!(kept(54.0), [0.0, -24.0, 24.0, -60.0]);
+        // Squeezed to almost nothing, 0 dB stays.
+        let kept = fitting_marks(&FADER_MARKS, |db| db / 100.0, 11.0);
+        assert_eq!(kept, [(0.0, 0.0)]);
+        assert_eq!(mark_text(12.0), "+12");
+        assert_eq!(mark_text(0.0), "0");
+        assert_eq!(mark_text(-6.0), "−6");
     }
 
     #[test]

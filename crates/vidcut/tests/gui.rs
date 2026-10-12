@@ -2,7 +2,7 @@
 //! `--features vidcut/gui-tests`). Starts `vidcut -p FILE`,
 //! drives it through the CLI like an agent would, and checks:
 //! - a CLI edit is applied by the GUI and shows in its window in < 100 ms;
-//! - after `seek`, the viewer screenshot shows exactly the frame `vidcut frame`
+//! - after `seek`, the viewer screenshot shows exactly the frame `vidcut frame render`
 //!   renders headless;
 //! - live control keeps working while the window is minimized.
 //!
@@ -51,17 +51,24 @@ impl Gui {
     }
 
     /// Seeks the timeline, screenshots the viewer, and compares with a
-    /// headless `vidcut frame`.
+    /// headless `vidcut frame render`.
     fn check_frame(&self, frame: i64) {
         let at = format!("{frame}f");
-        self.cli(&["seek", &at, "--viewer", "timeline"]);
+        self.cli(&["player", "seek", &at, "--viewer", "timeline"]);
         let shot = self.dir.path().join(format!("shot-{frame}.png"));
-        self.cli(&["screenshot", "-o", shot.to_str().unwrap()]);
+        self.cli(&["gui", "screenshot", "--out", shot.to_str().unwrap()]);
         let reference = self.dir.path().join(format!("frame-{frame}.png"));
         let out = Command::new(BIN)
             .args(["--headless", "-p"])
             .arg(&self.project)
-            .args(["frame", "--at", &at, "-o", reference.to_str().unwrap()])
+            .args([
+                "frame",
+                "render",
+                "--at",
+                &at,
+                "--out",
+                reference.to_str().unwrap(),
+            ])
             .env("XDG_STATE_HOME", self.dir.path().join("state"))
             .output()
             .unwrap();
@@ -69,7 +76,7 @@ impl Gui {
         assert_eq!(
             self.barcode(&shot),
             self.barcode(&reference),
-            "timeline frame {frame}: viewer vs vidcut frame"
+            "timeline frame {frame}: viewer vs vidcut frame render"
         );
     }
 
@@ -144,7 +151,11 @@ fn gui_acceptance() {
             String::from_utf8_lossy(&out.stderr)
         );
     };
-    let out = Command::new(BIN).arg("new").arg(&project).output().unwrap();
+    let out = Command::new(BIN)
+        .args(["project", "create"])
+        .arg(&project)
+        .output()
+        .unwrap();
     assert!(out.status.success());
     // A phone-style clip, stored sideways with a rotation: the preview
     // turns it upright, like export.
@@ -189,10 +200,10 @@ fn gui_acceptance() {
         std::thread::sleep(Duration::from_millis(50));
     }
     // A fixed window size keeps screenshots comparable.
-    gui.cli(&["window", "--size", "1280x800"]);
+    gui.cli(&["gui", "window", "--size", "1280,800"]);
     std::thread::sleep(Duration::from_millis(500));
 
-    // 1. Seek + screenshot shows exactly what `vidcut frame` renders.
+    // 1. Seek + screenshot shows exactly what `vidcut frame render` renders.
     // Frames 150..170 are the rotated clip.
     for f in [0, 1, 45, 89, 90, 91, 149, 150, 155, 169] {
         gui.check_frame(f);
@@ -201,23 +212,37 @@ fn gui_acceptance() {
     // 2. A CLI edit is applied by the GUI (the command returns after the GUI
     // saved it) and the window shows it in under 100 ms.
     let before = dir.join("before.png");
-    gui.cli(&["screenshot", "--window", "-o", before.to_str().unwrap()]);
+    gui.cli(&[
+        "gui",
+        "screenshot",
+        "--target",
+        "window",
+        "--out",
+        before.to_str().unwrap(),
+    ]);
     let (r, took) = gui.cli(&["edit", "split", "--at", "45f"]);
     assert!(r["via"].as_str().unwrap().starts_with("gui:"), "{r}");
     let after = dir.join("after.png");
-    let (_, shot_took) = gui.cli(&["screenshot", "--window", "-o", after.to_str().unwrap()]);
+    let (_, shot_took) = gui.cli(&[
+        "gui",
+        "screenshot",
+        "--target",
+        "window",
+        "--out",
+        after.to_str().unwrap(),
+    ]);
     eprintln!("edit round trip {took:?}; window screenshot {shot_took:?}");
     assert!(took < Duration::from_millis(100), "edit took {took:?}");
     assert!(
         gui.window_diff(&before, &after) > 0,
         "the window doesn't show the split"
     );
-    let (tl, _) = gui.cli(&["timeline"]);
+    let (tl, _) = gui.cli(&["timeline", "get"]);
     let clips = tl["result"]["tracks"][0]["items"].as_array().unwrap().len();
     assert_eq!(clips, 4, "{tl}");
 
     // 3. Minimized, the GUI still answers, seeks and renders frame-exactly.
-    gui.cli(&["window", "--minimize"]);
+    gui.cli(&["gui", "window", "--minimized", "true"]);
     std::thread::sleep(Duration::from_millis(500));
     gui.check_frame(100);
     let (r, took) = gui.cli(&["edit", "split", "--at", "120f"]);
@@ -230,7 +255,7 @@ fn gui_acceptance() {
     gui.check_frame(121);
 
     // Quit cleanly: the instance unregisters.
-    gui.cli(&["quit"]);
+    gui.cli(&["gui", "quit"]);
     let started = Instant::now();
     while vidcut::ipc::registry::list().iter().any(|i| i.pid == pid) {
         assert!(

@@ -31,7 +31,16 @@ pub fn print(method: &str, r: &Response, json: bool) {
         )
     ) && !matches!(
         method,
-        "media.list" | "media.get" | "project.get" | "project.summary" | "history.get"
+        "media.list"
+            | "media.get"
+            | "project.get"
+            | "project.summary"
+            | "project.create"
+            | "history.get"
+            | "track.list"
+            | "bins.list"
+            | "marks.get"
+            | "markers.list"
     );
     if mutation {
         if r.dry_run {
@@ -101,6 +110,59 @@ pub fn print(method: &str, r: &Response, json: bool) {
         return;
     }
     match method {
+        "project.create" => {
+            let verb = if r.dry_run { "would create" } else { "created" };
+            println!(
+                "{verb} {}",
+                r.result["project"].as_str().unwrap_or_default()
+            );
+        }
+        "track.list" => {
+            for t in r.result.as_array().into_iter().flatten() {
+                let mut flags = Vec::new();
+                for key in ["locked", "muted", "solo"] {
+                    if t[key] == true {
+                        flags.push(key.to_string());
+                    }
+                }
+                if t["video_enabled"] == false {
+                    flags.push("video off".into());
+                }
+                if let Some(v) = t["volume_db"].as_f64().filter(|v| *v != 0.0) {
+                    flags.push(format!("{v:+} dB"));
+                }
+                println!(
+                    "{:<4} {:>4} clip(s)  {}{}",
+                    t["id"].as_str().unwrap_or_default(),
+                    t["clips"],
+                    t["name"]
+                        .as_str()
+                        .map(|n| format!("{n:?}  "))
+                        .unwrap_or_default(),
+                    flags.join(", ")
+                );
+            }
+        }
+        "bins.list" => {
+            for b in r.result.as_array().into_iter().flatten() {
+                println!("{}", b.as_str().unwrap_or_default());
+            }
+        }
+        "markers.list" => {
+            for k in r.result.as_array().into_iter().flatten() {
+                println!(
+                    "{} at {} {} {}",
+                    k["id"].as_str().unwrap_or_default(),
+                    k["at_tc"].as_str().unwrap_or_default(),
+                    k["color"].as_str().unwrap_or_default(),
+                    k["name"].as_str().unwrap_or_default()
+                );
+            }
+        }
+        "marks.get" => {
+            let tc = |k: &str| r.result[k]["tc"].as_str().unwrap_or("-").to_string();
+            println!("in {}  out {}", tc("in"), tc("out"));
+        }
         "timeline.import" => {
             let n = |k: &str| r.result[k].as_array().map_or(0, Vec::len);
             let verb = if r.dry_run {
@@ -114,7 +176,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 n("media"),
                 n("markers"),
                 r.result["name"].as_str().unwrap_or_default(),
-                r.result["fps"].as_str().unwrap_or_default(),
+                rate(&r.result["fps"]),
                 r.rev
             );
             let b = &r.result["bundle"];
@@ -337,6 +399,13 @@ pub fn print(method: &str, r: &Response, json: bool) {
             for line in lines {
                 println!("{line}");
             }
+            for c in r.result["proxy_codecs"].as_array().into_iter().flatten() {
+                println!(
+                    "proxies.codec={} makes proxies with {}",
+                    c["codec"].as_str().unwrap_or_default(),
+                    c["uses"].as_str().unwrap_or("nothing that works here")
+                );
+            }
             let c = &r.result["thumbnail_cache"];
             println!(
                 "thumbnail cache: {} MB in {} files ({})",
@@ -376,6 +445,9 @@ pub fn print(method: &str, r: &Response, json: bool) {
                     p["height"],
                     r.rev
                 );
+                if let Some(how) = p["made_with"].as_str() {
+                    println!("  {how}");
+                }
             }
         }
         "proxy.remove" => {
@@ -612,12 +684,20 @@ fn clip_line(c: &Value) -> String {
     )
 }
 
+/// A frame rate as people write it (`23.976`); JSON keeps the exact
+/// `24000/1001`.
+fn rate(v: &Value) -> String {
+    let text = v.as_str().unwrap_or_default();
+    text.parse::<vidcut_core::time::Rational>()
+        .map_or_else(|_| text.to_string(), |r| r.decimal())
+}
+
 fn timeline(t: &Value) {
     println!(
         "duration {} ({} frames at {} fps)",
         t["duration_tc"].as_str().unwrap_or_default(),
         t["duration"],
-        t["fps"].as_str().unwrap_or_default()
+        rate(&t["fps"])
     );
     for track in t["tracks"].as_array().into_iter().flatten() {
         println!("{}", track["id"].as_str().unwrap_or_default());
@@ -669,7 +749,7 @@ fn media_list(m: &Value) {
                 "{}x{} {} fps {}",
                 v["width"],
                 v["height"],
-                v["fps"].as_str().unwrap_or_default(),
+                rate(&v["fps"]),
                 v["codec"].as_str().unwrap_or_default()
             ),
         };
@@ -701,7 +781,7 @@ fn summary(s: &Value) {
         s["rev"],
         st["width"],
         st["height"],
-        st["fps"].as_str().unwrap_or_default(),
+        rate(&st["fps"]),
         st["sample_rate"],
         st["channels"],
         if st["ripple_on"] == true { "on" } else { "off" }

@@ -52,7 +52,7 @@ pub fn set(patch: &PreferencesPatch, dry_run: bool) -> Result<Value> {
     let path = path();
     let dir = path.parent().expect("in the config dir");
     let text = format!(
-        "# vidcut preferences: `vidcut preferences --help`, or File > Preferences.\n\n{}",
+        "# vidcut preferences: `vidcut preferences set --help`, or File > Preferences.\n\n{}",
         toml::to_string(&p).map_err(|e| Error::internal(e.to_string()))?
     );
     let part = path.with_extension("part");
@@ -73,7 +73,20 @@ pub fn set(patch: &PreferencesPatch, dry_run: bool) -> Result<Value> {
 }
 
 fn describe(p: &Preferences) -> Value {
+    use vidcut_core::preferences::ProxyCodec;
     let (files, bytes) = thumbcache::usage();
+    // What each proxy codec choice makes proxies with on this machine.
+    let codecs: Vec<Value> = [ProxyCodec::Auto, ProxyCodec::Av1, ProxyCodec::H264]
+        .into_iter()
+        .map(|c| {
+            let encoders = crate::env::proxy_encoders(c);
+            json!({
+                "codec": c,
+                "encoder": encoders.first().map(|e| e.name.clone()),
+                "uses": encoders.first().map(|e| e.label()),
+            })
+        })
+        .collect();
     json!({
         "path": path(),
         "preferences": p,
@@ -82,5 +95,6 @@ fn describe(p: &Preferences) -> Value {
             "files": files,
             "mb": (bytes as f64 / f64::from(1 << 20) * 10.0).round() / 10.0,
         },
+        "proxy_codecs": codecs,
     })
 }

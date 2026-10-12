@@ -7,7 +7,7 @@
 //! session (AGENTS.md rule 2), the same requests the CLI and IPC clients send.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use eframe::egui::{self, Key, RichText};
@@ -31,7 +31,7 @@ pub(super) struct TimecodeEntry {
 
 /// Pool thumbnails as textures.
 pub(super) struct Thumbs {
-    strip: Arc<Filmstrip>,
+    pub strip: Arc<Filmstrip>,
     pub textures: Vec<egui::TextureHandle>,
 }
 
@@ -128,6 +128,10 @@ pub struct Workspace {
     pub(super) preferences: super::preferences::PreferencesUi,
     pub(super) import: super::import::ImportUi,
     pub(super) dialogs: Arc<dyn super::export::Dialogs>,
+    /// Where file dialogs start, remembered across runs.
+    pub(super) folders: super::folders::Folders,
+    /// The timeline's filmstrip pictures (out while the timeline paints).
+    pub(super) tiles: Option<super::tiles::Tiles>,
 }
 
 impl Workspace {
@@ -169,7 +173,20 @@ impl Workspace {
             preferences: Default::default(),
             import: Default::default(),
             dialogs: Arc::new(super::export::RfdDialogs),
+            folders: super::folders::Folders::load(),
+            tiles: Some(super::tiles::Tiles::new(
+                &crate::preferences::load().unwrap_or_default().thumbnails,
+            )),
         }
+    }
+
+    /// The open project's folder.
+    pub(super) fn project_folder(&self) -> Option<PathBuf> {
+        self.snap
+            .project
+            .as_ref()
+            .and_then(|p| p.path.parent().map(Path::to_path_buf))
+            .filter(|d| !d.as_os_str().is_empty())
     }
 
     /// Opens a window (`gui.show`).
@@ -201,6 +218,14 @@ impl Workspace {
     /// Where the timelines were drawn last frame (for tests).
     pub fn timeline_layout(&self) -> Option<super::timeline::Layout> {
         self.timeline.layout.clone()
+    }
+
+    /// How many timeline filmstrip pictures are kept, and their bytes (for
+    /// tests).
+    pub fn timeline_tiles(&self) -> (usize, usize) {
+        self.tiles
+            .as_ref()
+            .map_or((0, 0), super::tiles::Tiles::usage)
     }
 
     /// The frame of the selected edit, if one is selected (for tests).
@@ -581,6 +606,29 @@ impl Workspace {
         ui.horizontal(|ui| {
             self.notices(ui);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // What this is built on, for reports: the full versions on
+                // hover.
+                static VERSIONS: std::sync::OnceLock<(String, String)> = std::sync::OnceLock::new();
+                let (short, long) = VERSIONS.get_or_init(|| {
+                    let mut long = format!(
+                        "vidcut {}\nFFmpeg {}",
+                        env!("CARGO_PKG_VERSION"),
+                        vidcut_av::ffmpeg_version()
+                    );
+                    for (lib, v) in vidcut_av::library_versions() {
+                        if lib != "version" {
+                            long.push_str(&format!("\n  {lib} {v}"));
+                        }
+                    }
+                    let short = format!(
+                        "vidcut {} · FFmpeg {}",
+                        env!("CARGO_PKG_VERSION"),
+                        vidcut_av::ffmpeg_release()
+                    );
+                    (short, long)
+                });
+                ui.label(RichText::new(short.as_str()).color(theme::TEXT_DIM))
+                    .on_hover_text(long.as_str());
                 if let Some(socket) = &self.snap.socket {
                     ui.label(
                         RichText::new(format!("pid {}", self.snap.pid)).color(theme::TEXT_DIM),
@@ -595,13 +643,21 @@ impl Workspace {
                     ui.label(RichText::new(format!("hwdec {hw}")).color(theme::TEXT_DIM));
                 }
                 if let Some(p) = self.project() {
-                    ui.label(
+                    let fps = p.settings.fps;
+                    // `rev`: the project's edits so far (scripts use it).
+                    let format = ui.label(
                         RichText::new(format!(
                             "{}x{} {} fps  rev {}",
-                            p.settings.width, p.settings.height, p.settings.fps, p.rev
+                            p.settings.width,
+                            p.settings.height,
+                            fps.decimal(),
+                            p.rev
                         ))
                         .color(theme::TEXT_DIM),
                     );
+                    if !fps.is_whole() {
+                        format.on_hover_text(format!("{fps} fps"));
+                    }
                 }
             });
         });
@@ -709,22 +765,38 @@ impl Workspace {
     // ---------------------------------------------------------------- dialogs
 
     /// Asks for a project file (on a helper thread: portal dialogs block).
+    /// The dialog starts where a project was last opened or created, else
+    /// in the open project's folder, else the most recent project's.
     fn pick_project(&self, new: bool) {
-        let live = self.live.clone();
+        use super::folders::Kind;
+        let (live, dialogs, folders) = (
+            self.live.clone(),
+            self.dialogs.clone(),
+            self.folders.clone(),
+        );
+        let folder = folders
+            .get(Kind::Projects)
+            .or_else(|| self.project_folder())
+            .or_else(|| {
+                self.recent
+                    .first()
+                    .and_then(|p| p.parent().map(Path::to_path_buf))
+            })
+            .unwrap_or_default();
         let _ = crate::threads::spawn(
             "vidcut-project-dialog",
             crate::threads::Work::Interactive,
             move || {
-                let dialog = rfd::FileDialog::new().add_filter("vidcut project", &["vidcut"]);
                 let path = if new {
-                    dialog.set_file_name("untitled.vidcut").save_file()
+                    dialogs.save_file("New Project", &folder, "untitled.vidcut", &["vidcut"])
                 } else {
-                    dialog.pick_file()
+                    dialogs.pick_file("Open Project", &folder, &["vidcut"])
                 };
                 if let Some(mut path) = path {
                     if new && path.extension().is_none() {
                         path.set_extension("vidcut");
                     }
+                    folders.remember(Kind::Projects, &path);
                     live.request("project.open", json!({ "path": path, "create": new }));
                 }
             },
@@ -1239,6 +1311,9 @@ impl Workspace {
             self.title = title;
         }
         self.sync_textures(&ctx);
+        if let Some(tiles) = &mut self.tiles {
+            tiles.begin_frame(&ctx, self.snap.project());
+        }
         self.keys(&ctx);
         self.export_windows(&ctx);
         self.preferences_window(&ctx);
@@ -1265,6 +1340,9 @@ impl Workspace {
             .min_size(140.0)
             .frame(egui::Frame::new().fill(theme::PANEL).inner_margin(6))
             .show(ui, |ui| self.timeline_panel(ui));
+        if let Some(tiles) = &mut self.tiles {
+            tiles.end_frame();
+        }
         if self.show_mixer {
             egui::Panel::right("mixer")
                 .resizable(true)

@@ -1,7 +1,11 @@
-# GPU decoding for proxies and exports
+# GPU decoding for exports and pictures
 
 **When:** later.
 
-vidcut's own decoding (`vidcut-av`) runs on the CPU; only the preview player decodes on the GPU. Measured on 2026-10-11 with a 4K60 HEVC file: the CPU decodes it at about 240 fps, and the whole proxy encode ran at about 190 fps on every core. NVDEC (or VAAPI) decoding with scaling on the GPU would leave the CPU nearly idle and probably be faster. Frames must stay exact: the same pictures and timestamps as the software decoder, checked with the barcode fixtures.
+Proxies made with NVENC decode on NVDEC and scale on the GPU (preview.md §12): 4K60 AV1 to a proxy went from 107 s and 381 CPU-seconds to 37 s and 2.6. Everything else vidcut decodes itself still runs on the CPU:
+- **Exports:** the same NVDEC → CUDA → NVENC path, where the plan allows it. Export pieces cut, mix sources and fit frames, so the CUDA graph needs padding, frame-rate conversion and more than one source at a time; color and HDR conversions still need the CPU (or libplacebo on Vulkan).
+- **Timeline tiles** (`export/renderer.rs`): far-apart tiles cost 40 ms on 1080p H.264 and 105–170 ms on 4K60 on the CPU; NVDEC would cut that, the frames then copied down once at their small size.
+- **Playback** (`play.rs`): the viewer's picture, playing and paused, is still a software frame.
+- **VAAPI** (AMD, Intel): the same path with VAAPI decoding, `scale_vaapi` and VAAPI encoders, for proxies first.
 
-It doesn't help image sequences: GPUs don't decode PNG, and decoding a 16-bit 4K PNG sequence (51 fps) was most of its proxy's time (41 fps).
+Frames must stay exact: the same pictures and timestamps as the software decoder, checked with the barcode fixtures. It doesn't help image sequences: GPUs don't decode PNG.

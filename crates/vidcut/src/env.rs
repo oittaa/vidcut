@@ -219,24 +219,46 @@ impl Env for AvEnv {
         })?;
         let (w, h) = v.display_size();
         let (w, h) = proxy_size(w, h, longest);
-        let path = dir.join(format!(
-            "{:016x}-{}-{}-{}x{h}.mkv",
-            paths::fnv1a(media.path.as_os_str().as_encoded_bytes()),
-            media.size,
-            media.mtime_ns,
-            w,
-        ));
+        // The codec is in the name: changing the preference makes a new file.
+        let name = |codec: &str| {
+            dir.join(format!(
+                "{:016x}-{}-{}-{w}x{h}-{codec}.mkv",
+                paths::fnv1a(media.path.as_os_str().as_encoded_bytes()),
+                media.size,
+                media.mtime_ns,
+            ))
+        };
+        let encoders = proxy_encoders(self.proxy_rules().codec);
+        let planned = encoders.first().map_or("h264", |e| e.codec);
+        let mut path = name(planned);
+        let mut codec = planned;
+        let mut made_with = None;
         if !dry_run && !path.is_file() {
             std::fs::create_dir_all(dir)
                 .map_err(|e| Error::media(format!("{}: {e}", dir.display())))?;
             let total = Some((v.duration * v.fps.as_f64()).round().max(0.0) as u64);
-            vidcut_av::proxy::write(&input_of(media), w, h, &path, total).map_err(av_error)?;
+            let written = vidcut_av::proxy::write(&input_of(media), w, h, &path, total, &encoders)
+                .map_err(av_error)?;
+            made_with = Some(format!(
+                "decoded on the {}, {}",
+                if written.on_gpu { "GPU (NVDEC)" } else { "CPU" },
+                written.encoder.label()
+            ));
+            // A hardware encoder that wouldn't open gave way to another codec.
+            codec = written.encoder.codec;
+            if codec != planned {
+                let actual = name(codec);
+                std::fs::rename(&path, &actual)
+                    .map_err(|e| Error::media(format!("{}: {e}", actual.display())))?;
+                path = actual;
+            }
         }
         Ok(GeneratedProxy {
             path,
             width: w,
             height: h,
-            codec: "h264".into(),
+            codec: codec.into(),
+            made_with,
         })
     }
 
@@ -252,6 +274,14 @@ impl Env for AvEnv {
             vidcut_core::editor::read_timeline_file(path)
         }
     }
+}
+
+/// The encoders proxies are made with here for the `codec` preference, best
+/// first.
+pub fn proxy_encoders(
+    codec: vidcut_core::preferences::ProxyCodec,
+) -> Vec<vidcut_av::proxy::ProxyEncoder> {
+    vidcut_av::proxy::encoders(codec, &crate::export::availability(false))
 }
 
 /// A measurement's failure. Cancellation uses the same flag as an export, so

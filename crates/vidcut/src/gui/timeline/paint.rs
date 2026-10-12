@@ -17,6 +17,7 @@ use super::geometry::{Rows, Scale, TrackRect, clips_in};
 use super::gesture::{Preview, Target};
 use crate::gui::pool::elide;
 use crate::gui::theme;
+use crate::gui::tiles::{self, TileKey, Tiles};
 use crate::gui::workspace::Thumbs;
 
 /// What clips show (Timeline Options).
@@ -27,12 +28,16 @@ pub struct Look {
     pub status: bool,
     pub filmstrips: bool,
     pub waveforms: bool,
+    /// The edit functions' target track: its row is lighter.
+    pub target: bool,
 }
 
 /// Media pictures and sounds to draw clips with.
 pub struct Assets<'a> {
     pub thumbs: &'a HashMap<String, Thumbs>,
     pub waveforms: &'a HashMap<String, Arc<Waveform>>,
+    /// Each tile's own frame (`None` in windows without them).
+    pub tiles: Option<&'a Tiles>,
 }
 
 pub fn marker_color(name: &str) -> Color32 {
@@ -201,7 +206,12 @@ pub fn track(
     look: Look,
 ) {
     let rect = tr.rect;
-    painter.rect_filled(rect, CornerRadius::ZERO, theme::TRACK);
+    let fill = if look.target {
+        theme::TRACK_TARGET
+    } else {
+        theme::TRACK
+    };
+    painter.rect_filled(rect, CornerRadius::ZERO, fill);
     let (a, b) = scale.visible(rect.left(), rect.right());
     let fps = p.settings.fps;
     for c in &t.clips[clips_in(t, a - 1, b + 1)] {
@@ -376,20 +386,32 @@ fn filmstrip(
     assets: &Assets,
     fps: Rational,
 ) {
-    let Some(t) = assets.thumbs.get(&c.media) else {
+    let Some(m) = p.media(&c.media) else {
         return;
     };
-    let Some(first) = t.textures.first() else {
-        return;
-    };
-    let size = first.size_vec2();
-    let tile_w = (rect.height() * size.x / size.y.max(1.0)).max(8.0);
-    let media_secs = p
-        .media(&c.media)
-        .and_then(|m| m.info.video.as_ref().map(|v| v.duration))
-        .unwrap_or(1.0)
-        .max(1e-3);
-    let n = t.textures.len();
+    let pool = assets.thumbs.get(&c.media);
+    // Tiles keep the picture's shape: the pool's pictures have it, else
+    // the media's display size.
+    let aspect = pool
+        .and_then(|t| t.textures.first())
+        .map(|t| t.size_vec2().x / t.size_vec2().y.max(1.0))
+        .or_else(|| {
+            let v = m.info.video.as_ref()?;
+            let sar = if v.sar[0] > 0 && v.sar[1] > 0 {
+                v.sar[0] as f32 / v.sar[1] as f32
+            } else {
+                1.0
+            };
+            let (w, h) = (v.width as f32 * sar, v.height.max(1) as f32);
+            Some(if v.rotation % 180 == 90 { h / w } else { w / h })
+        })
+        .unwrap_or(16.0 / 9.0)
+        .clamp(0.1, 10.0);
+    let tile_w = (rect.height() * aspect).max(8.0);
+    let height = tiles::tile_height(rect.height() * painter.ctx().pixels_per_point());
+    let width = (height as f32 * aspect).round().max(1.0) as u32;
+    let step = tiles::tile_step(f64::from(tile_w) / scale.ppf);
+    let last = c.source_in + c.duration - 1;
     let clip_rect = painter.clip_rect().intersect(rect);
     let mut x = rect.left();
     // Start at the first tile that is visible.
@@ -397,18 +419,43 @@ fn filmstrip(
         x += ((clip_rect.left() - x) / tile_w).floor() * tile_w;
     }
     while x < rect.right().min(clip_rect.right()) {
-        let frame = scale.frame(x + tile_w / 2.0) - c.start as f64 + c.source_in as f64;
-        let secs = frame / fps.as_f64();
-        let i = ((secs / media_secs) * n as f64)
-            .floor()
-            .clamp(0.0, (n - 1) as f64) as usize;
-        let tile = Rect::from_min_size(pos2(x, rect.top()), vec2(tile_w, rect.height()));
-        painter.image(
-            t.textures[i].id(),
-            tile,
-            Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
-            Color32::from_white_alpha(225),
-        );
+        let offset = f64::from(x - rect.left()) / scale.ppf;
+        let first = x <= rect.left();
+        let frame = tiles::tile_frame(c.source_in, offset, step, first).min(last);
+        let key = TileKey {
+            media: c.media.clone(),
+            frame,
+            height,
+        };
+        // Its own frame, else the nearest kept one within a tile or two,
+        // else the pool's nearest.
+        let texture = assets
+            .tiles
+            .and_then(|t| {
+                t.want(&key, || t.job(p, &key, width))
+                    .or_else(|| t.nearest(&c.media, height, frame, 2 * step.max(1)))
+            })
+            .or_else(|| {
+                let t = pool?;
+                let secs = fps.frames_to_secs(frame);
+                let i = t
+                    .strip
+                    .times
+                    .iter()
+                    .enumerate()
+                    .min_by(|a, b| (a.1 - secs).abs().total_cmp(&(b.1 - secs).abs()))?
+                    .0;
+                t.textures.get(i).map(egui::TextureHandle::id)
+            });
+        if let Some(texture) = texture {
+            let tile = Rect::from_min_size(pos2(x, rect.top()), vec2(tile_w, rect.height()));
+            painter.image(
+                texture,
+                tile,
+                Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
+                Color32::from_white_alpha(225),
+            );
+        }
         x += tile_w;
     }
 }

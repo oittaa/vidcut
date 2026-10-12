@@ -16,9 +16,11 @@ pub(super) struct PreferencesUi {
     /// The latest answer (`preferences.get`'s result).
     state: Option<Value>,
     error: Option<String>,
-    /// The number fields as typed: the thumbnail cache limit (MB), the
-    /// proxy rules' picture size and bitrate, and the proxy size.
+    /// The number fields as typed: the thumbnail cache limit and the
+    /// timeline's picture memory (MB), the proxy rules' picture size and
+    /// bitrate, and the proxy size.
     limit: String,
+    memory: String,
     larger_w: String,
     larger_h: String,
     mbps: String,
@@ -56,6 +58,15 @@ impl NumberField<'_> {
         if !r.lost_focus() {
             return None;
         }
+        // egui reports a focus given up mid-frame (Enter, a click elsewhere)
+        // in that frame and the next one: the number goes once.
+        let frame = ui.ctx().cumulative_frame_nr();
+        let key = r.id.with("lost focus");
+        let before = ui.data_mut(|d| d.get_temp::<u64>(key));
+        ui.data_mut(|d| d.insert_temp(key, frame));
+        if before.is_some_and(|b| b + 1 == frame) {
+            return None;
+        }
         match text.parse::<u64>() {
             Ok(n) if self.range.contains(&n) => (n != self.saved).then_some(n),
             _ => {
@@ -85,6 +96,14 @@ impl Workspace {
                     let p = &r.result["preferences"];
                     let n = |v: &Value| v.as_u64().unwrap_or(0).to_string();
                     ui_state.limit = n(&p["thumbnails"]["cache_limit_mb"]);
+                    ui_state.memory = n(&p["thumbnails"]["timeline_memory_mb"]);
+                    // The timeline's pictures follow at once.
+                    if let (Some(tiles), Ok(t)) = (
+                        &mut self.tiles,
+                        serde_json::from_value(p["thumbnails"].clone()),
+                    ) {
+                        tiles.set_prefs(&t);
+                    }
                     ui_state.larger_w = n(&p["proxies"]["larger_than"][0]);
                     ui_state.larger_h = n(&p["proxies"]["larger_than"][1]);
                     ui_state.mbps = n(&p["proxies"]["above_mbps"]);
@@ -162,6 +181,25 @@ impl Workspace {
                             .color(theme::TEXT_DIM),
                         );
                         ui.end_row();
+                        let label = ui.label("Timeline memory");
+                        ui.horizontal(|ui| {
+                            let field = NumberField {
+                                label: label.id,
+                                saved: thumbs["timeline_memory_mb"].as_u64().unwrap_or(16),
+                                range: 16..=1_000_000,
+                                enabled: !busy,
+                                tip: "The timeline's filmstrip pictures kept in memory: above \
+                                      it, those shown least recently go first",
+                                refusal: "The timeline memory is 16 to 1000000 MB",
+                            };
+                            if let Some(mb) =
+                                field.show(ui, &mut ui_state.memory, &mut ui_state.error)
+                            {
+                                patch = Some(json!({ "thumbnails": { "timeline_memory_mb": mb } }));
+                            }
+                            ui.label("MB");
+                        });
+                        ui.end_row();
                     });
                 ui.add_space(8.0);
                 ui.label(RichText::new("Proxies").strong());
@@ -190,6 +228,50 @@ impl Workspace {
                                 }
                             }
                             ui.label("px, longest side");
+                        });
+                        ui.end_row();
+                        // Each choice says what it makes proxies with here.
+                        ui.label("Codec");
+                        let current = proxies["codec"].as_str().unwrap_or("auto");
+                        let choices = state["proxy_codecs"]
+                            .as_array()
+                            .cloned()
+                            .unwrap_or_default();
+                        let text = |c: &Value| {
+                            let uses = c["uses"].as_str().unwrap_or("nothing that works here");
+                            match c["codec"].as_str().unwrap_or_default() {
+                                "auto" => format!("Automatic: {uses}"),
+                                "av1" => format!("AV1: {}", uses.trim_start_matches("AV1, ")),
+                                "h264" => format!("H.264: {}", uses.trim_start_matches("H.264, ")),
+                                other => format!("{other}: {uses}"),
+                            }
+                        };
+                        let shown = choices
+                            .iter()
+                            .find(|c| c["codec"] == current)
+                            .map(text)
+                            .unwrap_or_else(|| current.to_string());
+                        ui.add_enabled_ui(!busy, |ui| {
+                            egui::ComboBox::from_id_salt("proxy-codec")
+                                .selected_text(shown)
+                                .show_ui(ui, |ui| {
+                                    for c in &choices {
+                                        if ui
+                                            .selectable_label(c["codec"] == current, text(c))
+                                            .clicked()
+                                        {
+                                            patch =
+                                                Some(json!({ "proxies": { "codec": c["codec"] } }));
+                                        }
+                                    }
+                                })
+                                .response
+                                .on_hover_text(
+                                    "Automatic: AV1 on a hardware encoder when there is one, \
+                                     else H.264 with x264, which stays quick on old computers. \
+                                     AV1 files are smaller; making them in software (SVT-AV1) is \
+                                     slower than x264",
+                                );
                         });
                         ui.end_row();
                         let mut auto = proxies["auto"] == true;

@@ -50,7 +50,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 ## 3. Media Pool (Ch. 34, pp. 653–675)
 
 - **Import (v1)** (p. 654):
-  - Ctrl+I, the Import Media button, or right-click > Import Media opens a file dialog with multi-select.
+  - Ctrl+I, the Import Media button, or right-click > Import Media opens a file dialog with multi-select. It starts in the folder media were last imported from, remembered across runs, else in the project's folder. Open Project and New Project start where a project was last opened or created, and exports where the last one went, the same way.
   - Import Media Folder imports a whole folder.
   - The first import into an empty project offers to change the project frame rate to match the media.
 - **Stills and image sequences (M9)** (pp. 114, 366, 1194):
@@ -153,7 +153,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 
 **Track display:**
 - Combined video+audio tracks are numbered 1, 2, …; audio-only tracks A1, A2, … sit below them.
-- A video clip shows a filmstrip. Its audio shows as a waveform band along the bottom, which is enlarged when the track is enlarged (p. 647).
+- A video clip shows a filmstrip. Its audio shows as a waveform band along the bottom, which is enlarged when the track is enlarged (p. 647). Each picture of the filmstrip is the frame under it, the first one the clip's first frame.
 - Display toggles: clip names; durations (seconds:frames, bottom-left); status icons.
 - **States:**
   - locked track: clips are stippled
@@ -180,7 +180,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
   - trimming the anchor's Out to before the attached clip's In deletes the attached clip (p. 727)
   - higher tracks only ripple where there is no Track 1 video under them (p. 721; D22)
 - **Audio tracks (M6):** A1, A2, … sit below the video tracks and hold sound alone, such as music. Media without video go there by default (D26).
-- **Track header** (p. 647): the target-track toggle (D3), lock, mute and video on/off. Right-click adds a video or audio track or removes one (D27).
+- **Track header** (p. 647): the target-track toggle (D3), lock, mute and video on/off. The target track's header and row are lighter, the header with an accent edge. Right-click adds a video or audio track or removes one (D27).
 - **Overlapping video:** the highest enabled track is visible (p. 647). A disabled clip or a track with its video off shows what is under it.
 - **Sound:** every audible track plays, mixed; mute and solo (§9) decide which are audible.
 - **Linking:** video and audio of a clip are one combined clip. Trims move both, except that a J/L cut moves only the audio edit (§8.7). There is no link/unlink on the Cut page.
@@ -311,7 +311,7 @@ Hover the lower audio part of a clip at an edit until the cursor shows a note, t
 ## 9. Audio (pp. 642, 649–650, 743, 771, 773)
 
 - **Meter (v1):** green is safe, yellow is near the limit, red risks clipping.
-- **Mixer (M6)** (pp. 649–650): the Mixer button opens a channel strip per track with sound: name, meter, fader (dB) and mute/solo, plus the mix's meter. Solo silences the tracks that aren't soloed, and mute/solo apply to export too (p. 650). A fader is heard as it is dragged (`mixer.preview`, preview.md §10) and saved when it is let go, as one `track.set`. Track pan and FX are out of scope.
+- **Mixer (M6)** (pp. 649–650): the Mixer button opens a channel strip per track with sound: name, meter, fader (dB) and mute/solo, plus the mix's meter. A dB scale stands beside each fader, its numbers thinned out when the fader is short, with 0 dB in the accent color and a line across the fader. Solo silences the tracks that aren't soloed, and mute/solo apply to export too (p. 650). A fader is heard as it is dragged (`mixer.preview`, preview.md §10) and saved when it is let go, as one `track.set`. Track pan and FX are out of scope.
 - **Viewer meter and monitoring mute (M6)** (p. 642): a meter beside the viewer shows what it plays. Its speaker button mutes playback only, not the export.
 - **Clip volume (v1):** one gain value per clip, and clip mute.
 - **Ripple Delete Silence (M7)** (p. 773): select clips, then Clip > Audio Operations > Ripple Delete Silence (vidcut: the clip's right-click menu or Timeline Actions).
@@ -488,6 +488,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - **Bundles:** `.otioz` as OpenTimelineIO's adapter writes it (what Resolve imports); `.otiod` the same as a folder. Unpacked into a folder named after the bundle, not next to it as Resolve does (deviation X9).
 - **D41. Proxies** (pp. 207–218 are outside the Cut page; deviation X18). The manual's proxy chapters are not what the Cut page specifies, so the playback rules are fixed here.
   - **What gets one:** video and image sequences, generated on demand (`proxy.generate`). Stills and audio-only media do not. Naming a still or an audio-only file is an error; generating with no ids skips them.
+  - **Codec:** the preferences' `proxies.codec`. `auto` (the default) makes AV1 on a hardware encoder (NVENC, then VAAPI) when one works here, else H.264 with x264, which stays quick on old computers; `av1` makes AV1 with SVT-AV1 when there's no hardware for it; `h264` uses x264. Every proxy has a closed GOP of 60 frames and codes each frame in the order it shows. The codec is part of the file name.
   - **Size:** the longest side is the preferences' proxy size (`proxies.size`, 960 pixels unless changed), even, from 16 to 7680; `width` overrides it. Aspect is kept. A picture already smaller stays its size.
   - **Automatic:** with `proxies.auto` (on by default), while `use_proxies` is on, the running GUI makes proxies by itself for the media the rules pick: image sequences (`proxies.image_sequences`), videos with more pixels than `proxies.larger_than` (3840×2160: a GPU plays 4K), and video files averaging more than `proxies.above_mbps` (150 Mb/s: camera and editing formats a GPU can't decode). It checks the media an import adds, and the whole pool when `use_proxies` is turned on, never otherwise: a proxy someone removed stays removed until then. The request is the session's own `proxy.generate` with `auto: true` and the media named (origin `session` in the log), a job like any proxy encode; media already being encoded are left out. Headless runs never start encodes by themselves: scripts and agents don't need proxies. `auto: true` on any `proxy.generate` (`vidcut proxy generate --auto`) takes only what the rules pick and has no fresh proxy; finding nothing is fine.
   - **Encoding** runs beside the session, like an export: progress is shown, cancelling (Ctrl-C, or a client that leaves) stops it and leaves no file, and the proxies are recorded on the project once their files are written. The GUI keeps working meanwhile, and a headless run takes the project's lock only to record them. In a running GUI the encode is a job (gui.md §9): the Jobs window, which Generate Proxy opens, shows its progress and cancels it, and so does `jobs.cancel`.

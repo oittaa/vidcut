@@ -376,6 +376,34 @@ fn gestures_send_one_request_each() {
     harness.key_press(egui::Key::Escape);
     harness.step();
 
+    // Ctrl+C, then Ctrl+V over the middle of a longer clip: the playhead
+    // goes to the end of the pasted clip, not to the end of what is left of
+    // the clip it cut into (D15).
+    let (copied, _, len) = v1(&h).last().unwrap().clone();
+    let (_, start, dur) = v1(&h).into_iter().max_by_key(|c| c.2).unwrap();
+    assert!(dur > 3 * len, "a clip to paste into");
+    call(&h, "selection.set", json!({ "clips": [copied] }));
+    settle(&h, &mut harness);
+    harness.event(egui::Event::Copy);
+    harness.step();
+    let into = start + dur / 3;
+    call(
+        &h,
+        "player.seek",
+        json!({ "at": into, "viewer": "timeline" }),
+    );
+    settle(&h, &mut harness);
+    harness.event(egui::Event::Paste(String::new()));
+    harness.step();
+    settle(&h, &mut harness);
+    assert_eq!(gui_edits(&h).last().unwrap().0, "edit.paste");
+    assert!(
+        v1(&h)
+            .iter()
+            .any(|c| c.1 == into + len && c.1 + c.2 == start + dur)
+    );
+    assert_eq!(playhead(&h), into + len, "after the pasted clip (D15)");
+
     // Smooth with 1,000 clips: split the long clip into 1,000 pieces
     // and time whole frames of the GUI (layout, timelines, pool, viewer).
     for _ in 0..4 {

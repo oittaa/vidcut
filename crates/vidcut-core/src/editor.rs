@@ -38,6 +38,10 @@ pub struct GeneratedProxy {
     pub width: u32,
     pub height: u32,
     pub codec: String,
+    /// How it was made, when it was made now: where it was decoded and
+    /// with what (`decoded on the GPU (NVDEC), AV1, NVIDIA hardware
+    /// (NVENC)`).
+    pub made_with: Option<String>,
 }
 
 /// What the editor needs from the outside world.
@@ -1755,12 +1759,16 @@ fn proxy_generate(
             env.remove_proxy_file(&old.path)?;
         }
         m.proxy = Some(entry);
-        proxies.push(json!({
+        let mut done = json!({
             "media": id,
             "path": made.path,
             "width": made.width,
             "height": made.height,
-        }));
+        });
+        if let Some(how) = made.made_with {
+            done["made_with"] = json!(how);
+        }
+        proxies.push(done);
     }
     Ok(json!({ "proxies": proxies }))
 }
@@ -1891,6 +1899,40 @@ pub fn query(
                     .map(|&f| json!({ "frame": f, "tc": tc(f) }))
                     .collect::<Vec<_>>()
             )
+        }
+        Request::TrackList {} => json!(
+            p.tracks
+                .iter()
+                .map(|t| {
+                    let mut v = json!({
+                        "id": t.id, "kind": t.kind, "clips": t.clips.len(),
+                        "locked": t.locked, "muted": t.muted, "solo": t.solo,
+                        "volume_db": t.volume_db,
+                    });
+                    if t.kind == crate::model::TrackKind::Video {
+                        v["video_enabled"] = json!(t.video_enabled);
+                    }
+                    if let Some(n) = &t.name {
+                        v["name"] = json!(n);
+                    }
+                    v
+                })
+                .collect::<Vec<_>>()
+        ),
+        Request::BinsList {} => json!(p.bins),
+        Request::MarkersList {} => json!(
+            p.markers
+                .iter()
+                .map(|k| {
+                    let mut v = serde_json::to_value(k).unwrap_or_default();
+                    v["at_tc"] = json!(tc(k.at));
+                    v
+                })
+                .collect::<Vec<_>>()
+        ),
+        Request::MarksGet {} => {
+            let mark = |f: Option<i64>| f.map(|f| json!({ "frame": f, "tc": tc(f) }));
+            json!({ "in": mark(p.marks.mark_in), "out": mark(p.marks.mark_out) })
         }
         Request::HistoryGet {} => json!({
             "undo": history.undo.iter().rev().map(|e| &e.label).collect::<Vec<_>>(),

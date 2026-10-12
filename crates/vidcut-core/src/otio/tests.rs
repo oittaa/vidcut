@@ -1053,3 +1053,71 @@ fn source_timecode_without_available_ranges() {
         "its own audio"
     );
 }
+
+#[test]
+fn notes_clip_effects_in_use() {
+    let effect = |meta: Value| json!({"OTIO_SCHEMA": "Effect.1", "name": "", "effect_name": "Resolve Effect", "metadata": {"Resolve_OTIO": meta}});
+    // The editor's stack on every clip, untouched: nothing to note.
+    let zoom = |on: bool| {
+        effect(
+            json!({"Effect Name": "Dynamic Zoom", "Enabled": on, "Name": "Dynamic Zoom", "Type": 59,
+            "Parameters": [{"Parameter ID": "dynamicZoomScale", "Default Parameter Value": 1.0, "Parameter Value": 1.0,
+                "Key Frames": {"0": {"Value": 0.8, "Variant Type": "Double"}, "1000": {"Value": 1.0, "Variant Type": "Double"}},
+                "Variant Type": "Double"}]}),
+        )
+    };
+    let untouched = vec![
+        effect(
+            json!({"Effect Name": "Transform", "Enabled": true, "Name": "Transform", "Parameters": [], "Type": 2}),
+        ),
+        zoom(false),
+        effect(
+            json!({"Effect Name": "Fairlight Equaliser Band", "Enabled": true, "Name": "Equalizer Band", "Type": 63,
+            "Parameters": [{"Parameter ID": "eq band index", "Default Parameter Value": 1, "Parameter Value": 1, "Variant Type": "Int"}]}),
+        ),
+    ];
+    let with = |video: Vec<Value>, audio: Vec<Value>| {
+        let mut doc = editor_export();
+        let tracks = doc["tracks"]["children"].as_array_mut().unwrap();
+        tracks[0]["children"][0]["effects"] = json!(video);
+        tracks[1]["children"][0]["effects"] = json!(audio);
+        import(&doc, None).unwrap().warnings
+    };
+    let noted = |w: &[String]| -> Vec<String> {
+        w.iter()
+            .filter(|w| w.contains("clip effect"))
+            .cloned()
+            .collect()
+    };
+    assert!(noted(&with(untouched.clone(), vec![])).is_empty());
+
+    // In use: a setting off its default, Dynamic Zoom switched on, a
+    // setting that moves, and another program's effect.
+    let zoomed = effect(
+        json!({"Effect Name": "Transform", "Enabled": true, "Name": "Transform", "Type": 2,
+        "Parameters": [{"Parameter ID": "transformationZoomX", "Default Parameter Value": 1.0, "Parameter Value": 1.25, "Variant Type": "Double"}]}),
+    );
+    let panned = effect(
+        json!({"Effect Name": "Fairlight Clip Pan", "Enabled": true, "Name": "Pan", "Type": 72,
+        "Parameters": [{"Parameter ID": "pan", "Default Parameter Value": 0.0, "Parameter Value": 0.0,
+            "Key Frames": {"0": {"Value": 0.0}, "24": {"Value": -0.5}}, "Variant Type": "Double"}]}),
+    );
+    let blur = json!({"OTIO_SCHEMA": "Effect.1", "name": "", "effect_name": "Gaussian Blur", "metadata": {}});
+    let w = with(vec![zoomed, zoom(true), blur], vec![panned]);
+    assert_eq!(
+        noted(&w),
+        [
+            "the Transform clip effect was left out",
+            "the Dynamic Zoom clip effect was left out",
+            "the Gaussian Blur clip effect was left out",
+            "the Pan clip effect was left out",
+        ],
+        "{w:?}"
+    );
+    // Switched off, a changed setting changes nothing.
+    let off = effect(
+        json!({"Effect Name": "Cropping", "Enabled": false, "Name": "Cropping", "Type": 3,
+        "Parameters": [{"Parameter ID": "cropLeft", "Default Parameter Value": 0.0, "Parameter Value": 0.2}]}),
+    );
+    assert!(noted(&with(vec![off], vec![])).is_empty());
+}

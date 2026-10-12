@@ -189,12 +189,18 @@ fn guard_import_shortcuts(ui: &mut egui::Ui) {
 
 impl Workspace {
     /// Ctrl+I: pick media files to import, into the bin the pool
-    /// shows.
+    /// shows. The dialog starts where media were last imported from, else in
+    /// the project's folder.
     pub(super) fn import_media(&self) {
         if self.project().is_none() {
             return;
         }
         let bin = Some(self.snap.pool.bin.clone()).filter(|b| !b.is_empty());
+        let folder = self
+            .folders
+            .get(super::folders::Kind::Media)
+            .or_else(|| self.project_folder())
+            .unwrap_or_default();
         let (dialogs, slot, ctx) = (
             self.dialogs.clone(),
             self.import.picked.clone(),
@@ -209,7 +215,7 @@ impl Workspace {
                     .iter()
                     .map(|(name, types)| (*name, types.as_slice()))
                     .collect();
-                let files = dialogs.pick_files("Import Media", &filters);
+                let files = dialogs.pick_files("Import Media", &folder, &filters);
                 *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some((files, bin));
                 if let Some(ctx) = ctx {
                     ctx.request_repaint();
@@ -232,6 +238,8 @@ impl Workspace {
             .unwrap_or_else(|e| e.into_inner())
             .take();
         if let Some((files, bin)) = picked.filter(|(files, _)| !files.is_empty()) {
+            self.folders
+                .remember(super::folders::Kind::Media, &files[0]);
             let (runs, others, frames) = runs(&files);
             if runs.is_empty() {
                 self.send("media.add", json!({ "paths": files, "bin": bin }));
@@ -242,7 +250,7 @@ impl Workspace {
                     files,
                     bin,
                     sequences: frames,
-                    fps: self.fps().to_string(),
+                    fps: self.fps().decimal(),
                     error: None,
                 });
             }

@@ -57,6 +57,8 @@ pub enum VideoCodec {
     Vp9,
     /// FFV1, lossless 8-bit 4:2:0, intra-only.
     Ffv1,
+    /// libsvtav1, 10-bit 4:2:0, as cameras and renders make AV1.
+    Av1,
 }
 
 impl VideoCodec {
@@ -67,6 +69,7 @@ impl VideoCodec {
             Self::ProRes422Hq => "prores",
             Self::Vp9 => "vp9",
             Self::Ffv1 => "ffv1",
+            Self::Av1 => "av1",
         }
     }
 
@@ -77,13 +80,14 @@ impl VideoCodec {
             Self::ProRes422Hq => "prores_ks",
             Self::Vp9 => "libvpx-vp9",
             Self::Ffv1 => "ffv1",
+            Self::Av1 => "libsvtav1",
         }
     }
 
     fn pixel(self) -> format::Pixel {
         match self {
             Self::H264 | Self::Vp9 | Self::Ffv1 => format::Pixel::YUV420P,
-            Self::Hevc10 => format::Pixel::YUV420P10LE,
+            Self::Hevc10 | Self::Av1 => format::Pixel::YUV420P10LE,
             Self::ProRes422Hq => format::Pixel::YUV422P10LE,
         }
     }
@@ -836,6 +840,13 @@ impl VideoTrack {
                 opts.set("b", "0");
             }
             VideoCodec::Ffv1 => {}
+            VideoCodec::Av1 => {
+                // Temporal filtering blends neighbors: barcodes stay sharp
+                // without it.
+                opts.set("preset", "10");
+                opts.set("crf", "18");
+                opts.set("svtav1-params", "scd=0:enable-tf=0");
+            }
         }
         let encoder = enc
             .open_as_with(codec, opts)

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 use vidcut::env::AvEnv;
-use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
+use vidcut_av::fixture::{self, AudioCodec, Container, FixtureSpec, VideoCodec};
 use vidcut_core::model::Settings;
 use vidcut_core::render::{VideoPiece, flatten};
 use vidcut_core::time::Rational;
@@ -223,4 +223,160 @@ fn product_edl_plays_frame_exactly_with_gaps() {
         }
     }
     assert!(bad.is_empty(), "{bad:#?}");
+}
+
+/// Proxies play frame-exactly in the timeline's EDL, whichever encoder made
+/// them (decision D41): the preview swaps the path and keeps the source
+/// frame mapping.
+#[test]
+fn proxies_play_frame_exactly() {
+    use vidcut_av::export::encode::Availability;
+    use vidcut_core::preferences::ProxyCodec;
+    let Some(mut player) = Player::new() else {
+        return;
+    };
+    // B-frames and keyframes 30 frames apart in the source.
+    let a = fixture::ensure(&FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (30, 1),
+        150,
+    ))
+    .unwrap();
+    let fps = Rational::new(30, 1).unwrap();
+    let settings = Settings {
+        fps,
+        width: 320,
+        height: 180,
+        auto_format: false,
+        ..Settings::default()
+    };
+    let mut ed = Editor::new(Project::new(settings), Default::default());
+    req(
+        &mut ed,
+        json!({"method": "media.add", "params": {"paths": [a.clone()]}}),
+    );
+    req(
+        &mut ed,
+        json!({"method": "edit.append", "params": {"media": "m1", "range": "10f..70f"}}),
+    );
+    req(
+        &mut ed,
+        json!({"method": "edit.append", "params": {"media": "m1", "range": "100f..140f"}}),
+    );
+    let p = ed.project();
+    let plan = flatten(p, 0, p.end()).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-preview-proxies-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
+    let fillers = vidcut_av::filler::ensure(&dir.join("fillers"), 320, 180, fps).unwrap();
+    let none = Availability::default();
+    let mut encoders = vidcut_av::proxy::encoders(ProxyCodec::H264, &none);
+    encoders.extend(vidcut_av::proxy::encoders(ProxyCodec::Av1, &none));
+    for enc in encoders {
+        let proxy = dir.join(format!("proxy-{}.mkv", enc.name));
+        vidcut_av::proxy::write(
+            &vidcut_av::decode::Input::File(a.clone()),
+            320,
+            180,
+            &proxy,
+            None,
+            std::slice::from_ref(&enc),
+        )
+        .unwrap();
+        // As `preview::apply_proxies` swaps it.
+        let mut plan = plan.clone();
+        for piece in &mut plan.video {
+            if let VideoPiece::Source { path, image, .. } = piece {
+                *path = proxy.clone();
+                *image = None;
+            }
+        }
+        let edl = dir.join(format!("timeline-{}.edl", enc.name));
+        std::fs::write(&edl, vidcut_core::preview::edl(&plan, &fillers)).unwrap();
+        player.load(edl.to_str().unwrap());
+        let mut bad = Vec::new();
+        for (j, want) in [
+            (0, 10),
+            (1, 11),
+            (19, 29),
+            (20, 30),
+            (21, 31),
+            (49, 59),
+            (50, 60),
+            (59, 69),
+            (60, 100),
+            (61, 101),
+            (79, 119),
+            (99, 139),
+        ] {
+            let got = player.frame_at(j as f64 / 30.0);
+            if got != Some(want) {
+                bad.push(format!("timeline frame {j}: got {got:?}, want {want}"));
+            }
+        }
+        assert!(bad.is_empty(), "{}: {bad:#?}", enc.name);
+    }
+}
+
+/// Playing across a cut into a clip with other audio (5.1 at 44.1 kHz after
+/// stereo at 48 kHz) keeps one mix, in the project's format. The device
+/// opens at that rate and channel count and is not reopened at the cut.
+#[test]
+fn a_cut_into_other_audio_keeps_the_audio_output() {
+    let spec = || FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 60);
+    let a = fixture::ensure(&spec()).unwrap();
+    let b = fixture::ensure(&spec().with_audio(AudioCodec::Aac, 44_100, 6)).unwrap();
+    let fps = Rational::new(30, 1).unwrap();
+    let settings = Settings {
+        fps,
+        width: 320,
+        height: 180,
+        auto_format: false,
+        ..Settings::default()
+    };
+    let mut ed = Editor::new(Project::new(settings), Default::default());
+    req(
+        &mut ed,
+        json!({"method": "media.add", "params": {"paths": [a, b]}}),
+    );
+    req(
+        &mut ed,
+        json!({"method": "edit.append", "params": {"media": "m1", "range": "0f..30f"}}),
+    );
+    req(
+        &mut ed,
+        json!({"method": "edit.append", "params": {"media": "m2", "range": "0f..60f"}}),
+    );
+    let p = ed.project();
+    let plan = flatten(p, 0, p.end()).unwrap();
+    assert_eq!((plan.sample_rate, plan.channels), (48_000, 2));
+    let mut play = vidcut_av::play::Player::new(plan).unwrap();
+    // Half a second before the cut at frame 30.
+    play.seek(15).unwrap();
+    play.set_speed(1.0).unwrap();
+    let mut got = 0usize;
+    let mut frame = play.frame();
+    for _ in 0..4 {
+        let pulled = play.pull(24_000).unwrap();
+        assert_eq!(
+            pulled.samples.len(),
+            24_000 * 2,
+            "the mix left the project's stereo layout"
+        );
+        got += pulled.samples.len();
+        frame = play.frame();
+        if frame >= 45 {
+            break;
+        }
+    }
+    assert!(
+        frame >= 45,
+        "did not play across the cut into the 5.1 clip, frame {frame}"
+    );
+    assert!(got >= 48_000 * 2, "short mix: {got}");
 }

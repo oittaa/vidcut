@@ -39,20 +39,24 @@ struct FakeDialogs {
     files: Arc<Mutex<Vec<PathBuf>>>,
     /// How many times the dialog was opened.
     picks: Arc<Mutex<u32>>,
+    /// The folder each one started in.
+    folders: Arc<Mutex<Vec<PathBuf>>>,
 }
 
 impl Dialogs for FakeDialogs {
     fn save_file(&self, _: &str, _: &Path, _: &str, _: &[&str]) -> Option<PathBuf> {
         None
     }
-    fn pick_file(&self, _: &str, _: &Path, _: &[&str]) -> Option<PathBuf> {
+    fn pick_file(&self, _: &str, folder: &Path, _: &[&str]) -> Option<PathBuf> {
+        self.folders.lock().unwrap().push(folder.to_path_buf());
         None
     }
     fn pick_folder(&self, _: &str, _: &Path) -> Option<PathBuf> {
         None
     }
-    fn pick_files(&self, _: &str, _: &[(&str, &[&str])]) -> Vec<PathBuf> {
+    fn pick_files(&self, _: &str, folder: &Path, _: &[(&str, &[&str])]) -> Vec<PathBuf> {
         *self.picks.lock().unwrap() += 1;
+        self.folders.lock().unwrap().push(folder.to_path_buf());
         self.files.lock().unwrap().clone()
     }
 }
@@ -155,11 +159,14 @@ fn numbered_images_are_asked_about() {
     });
     let picked = Arc::new(Mutex::new(Vec::new()));
     let picks = Arc::new(Mutex::new(0));
-    let mut ws = Workspace::new(h.clone());
-    ws.set_dialogs(Arc::new(FakeDialogs {
+    let folders = Arc::new(Mutex::new(Vec::new()));
+    let dialogs = Arc::new(FakeDialogs {
         files: picked.clone(),
         picks: picks.clone(),
-    }));
+        folders: folders.clone(),
+    });
+    let mut ws = Workspace::new(h.clone());
+    ws.set_dialogs(dialogs.clone());
     let mut harness = Harness::builder()
         .with_size(egui::vec2(1600.0, 1000.0))
         .with_step_dt(1.0 / 60.0)
@@ -200,9 +207,19 @@ fn numbered_images_are_asked_about() {
     assert_eq!(media["name"], "img_[0001-0024].png");
     assert_eq!(media["frames"], 30, "24 pictures at 24 fps: a second");
 
-    // 2. The same frames as separate stills: each one a still.
+    // 2. The same frames as separate stills: each one a still. The dialog
+    // starts where the last files came from; the first one started in the
+    // project's folder.
     *picked.lock().unwrap() = vec![frames[0].clone(), frames[1].clone()];
     harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::I);
+    until(&mut harness, "the second dialog", |_| {
+        folders.lock().unwrap().len() == 2
+    });
+    let images = frames[0].parent().unwrap().to_path_buf();
+    assert_eq!(
+        *folders.lock().unwrap(),
+        [dir.to_path_buf(), images.clone()]
+    );
     until(&mut harness, "the question", |h| has(h, "Numbered images"));
     harness.step();
     harness.get_by_label("Separate stills").click();
@@ -298,6 +315,36 @@ fn numbered_images_are_asked_about() {
         .unwrap();
     let media = call(&h, "media.get", json!({ "media": id })).result;
     assert_eq!(media["still"], true);
+
+    // 6. Open Project starts in the project's folder: none was opened from a
+    // dialog yet. Media imports remember their folder across runs: a new
+    // window starts where the last files came from.
+    folders.lock().unwrap().clear();
+    harness.get_by_label("File").click();
+    // A menu ignores input in the frame it opens in.
+    harness.step();
+    harness.step();
+    harness.get_by_label("Open Project…").click();
+    until(&mut harness, "the project dialog", |_| {
+        !folders.lock().unwrap().is_empty()
+    });
+    assert_eq!(*folders.lock().unwrap(), [dir.to_path_buf()]);
+    drop(harness);
+    folders.lock().unwrap().clear();
+    picked.lock().unwrap().clear();
+    let mut ws = Workspace::new(h.clone());
+    ws.set_dialogs(dialogs);
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1600.0, 1000.0))
+        .with_step_dt(1.0 / 60.0)
+        .with_max_steps(50)
+        .build_ui_state(|ui, ws: &mut Workspace| ws.ui(ui), ws);
+    harness.step();
+    harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::I);
+    until(&mut harness, "the import dialog", |_| {
+        !folders.lock().unwrap().is_empty()
+    });
+    assert_eq!(*folders.lock().unwrap(), [images]);
 
     drop(harness);
     h.shutdown();

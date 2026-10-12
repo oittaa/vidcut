@@ -45,6 +45,63 @@ pub fn load(media: &Media, count: usize, size: (u32, u32)) -> Option<(Vec<Image>
     Some(strip)
 }
 
+/// Source frames per file of timeline tiles.
+pub const TILE_BLOCK: i64 = 64;
+
+/// The cache file of `media`'s timeline tiles `height` pixels tall for the
+/// source frames from `block * TILE_BLOCK` to the next block.
+pub fn tile_block(media: &Media, height: u32, block: i64) -> PathBuf {
+    paths::media_cache("thumbs", media, &format!("t{height}-b{block}.thumbs"))
+}
+
+/// The tiles kept in the block file `path`, by source frame; marks it as
+/// used.
+pub fn load_tiles(path: &Path) -> Option<Vec<(i64, Image)>> {
+    let (images, frames) = vidcut_av::thumbs::from_bytes(&std::fs::read(path).ok()?)?;
+    if let Ok(f) = std::fs::File::options().write(true).open(path) {
+        let _ = f.set_modified(SystemTime::now());
+    }
+    Some(frames.into_iter().map(|f| f as i64).zip(images).collect())
+}
+
+/// Adds `tiles` to the block file `path`, with what it holds. Failing only
+/// costs decoding them again.
+pub fn store_tiles(path: &Path, tiles: &[(i64, Image)]) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    // Another thread may write the same block: each writes its own part.
+    static PARTS: AtomicU64 = AtomicU64::new(0);
+    let mut all = load_tiles(path).unwrap_or_default();
+    for (frame, image) in tiles {
+        if !all.iter().any(|(f, _)| f == frame) {
+            all.push((*frame, image.clone()));
+        }
+    }
+    // One size per block: a picture of another (the media changed shape)
+    // replaces what was there.
+    if let Some((_, last)) = tiles.last() {
+        all.retain(|(_, i)| (i.width, i.height) == (last.width, last.height));
+    }
+    all.sort_by_key(|(f, _)| *f);
+    let (frames, images): (Vec<f64>, Vec<Image>) =
+        all.into_iter().map(|(f, i)| (f as f64, i)).unzip();
+    let Ok(bytes) = vidcut_av::thumbs::to_bytes(&images, &frames) else {
+        return;
+    };
+    let part = path.with_extension(format!(
+        "part{}-{}",
+        std::process::id(),
+        PARTS.fetch_add(1, Ordering::Relaxed)
+    ));
+    let written = path
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| std::fs::write(&part, &bytes))
+        .and_then(|()| std::fs::rename(&part, path));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&part);
+    }
+}
+
 /// Keeps `media`'s filmstrip, then trims the cache to `limit_mb`. Failing
 /// to keep it only costs decoding it again next time.
 pub fn store(
@@ -124,6 +181,29 @@ fn cached(dir: &Path) -> Vec<(SystemTime, u64, PathBuf)> {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn tile_blocks_gather_their_frames() {
+        let tmp = tempfile::Builder::new()
+            .prefix("vidcut-thumbcache-tiles-")
+            .tempdir()
+            .unwrap();
+        let path = tmp.path().join("m.t56-b0.thumbs");
+        let tile = |v: u8| Image {
+            width: 4,
+            height: 2,
+            rgba: vec![v; 4 * 2 * 4],
+        };
+        store_tiles(&path, &[(8, tile(200))]);
+        store_tiles(&path, &[(0, tile(10)), (8, tile(0))]);
+        let kept = load_tiles(&path).unwrap();
+        // Ordered by frame; the first picture kept for a frame stays.
+        assert_eq!(kept.iter().map(|t| t.0).collect::<Vec<_>>(), [0, 8]);
+        assert!(kept[1].1.rgba[0] > 150, "JPEG keeps it near 200");
+        // Nothing left of the parts.
+        let names: Vec<_> = std::fs::read_dir(tmp.path()).unwrap().flatten().collect();
+        assert_eq!(names.len(), 1);
+    }
 
     #[test]
     fn eviction_drops_the_least_recently_used_first() {

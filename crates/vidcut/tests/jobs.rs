@@ -1,5 +1,5 @@
 //! Export jobs in the live session: foreground exports with progress,
-//! background exports, waiting and cancelling, as `vidcut jobs` sees them.
+//! background exports, waiting and cancelling, as `vidcut jobs` commands see them.
 //! No players and no display.
 
 use std::path::Path;
