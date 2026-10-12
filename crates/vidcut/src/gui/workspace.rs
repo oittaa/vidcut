@@ -4,7 +4,7 @@
 //!
 //! The UI is a thin view. Each frame it reads the session's latest
 //! [`Snapshot`] and draws it; every user action becomes one request sent to the
-//! session (AGENTS.md rule 2), the same requests the CLI and IPC clients send.
+//! session (AGENTS.md rule 3), the same requests the CLI and IPC clients send.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

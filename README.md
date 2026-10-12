@@ -210,7 +210,7 @@ Every command is a method of the protocol: `vidcut edit split` is `edit.split`, 
 claude mcp add vidcut -- vidcut mcp -p /path/to/talk.vidcut
 ```
 
-Agents can look at their work: frames, screenshots and storyboards come back as images. AGENTS.md has the details.
+Agents can look at their work: frames, screenshots and storyboards come back as images. [docs/cli.md](docs/cli.md) has the details.
 
 ## What's next
 

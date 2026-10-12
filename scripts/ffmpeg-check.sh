@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds and tests vidcut in a container against one FFmpeg per target.
-# See AGENTS.md ("Quality gates").
+# See docs/tools.md.
 #
 #   scripts/ffmpeg-check.sh [--fast] [TARGET...] [-- COMMAND...]
 #
