@@ -23,6 +23,10 @@ const AHEAD_SECS: f64 = 0.1;
 /// Sound mixed at a time.
 const CHUNK_SECS: f64 = 0.01;
 
+/// Room in the ring a chunk needs, with what the tempo filter may give at
+/// once.
+const MIN_ROOM_SECS: f64 = 0.1;
+
 /// What is being played.
 struct Run {
     epoch: u64,
@@ -167,7 +171,11 @@ impl Producer {
         };
         let ring = self.shared.ring.clone();
         let rate = f64::from(self.plan.rate());
-        if run.ended || ring.queued() as f64 >= AHEAD_SECS * rate {
+        // Room for the chunk, whatever the tempo makes of it: a device that
+        // stopped pulling leaves none, and the thread waits for it rather
+        // than for room.
+        let short = ring.queued() as f64 >= AHEAD_SECS * rate;
+        if run.ended || short || (ring.room() as f64) < MIN_ROOM_SECS * rate {
             return Ok(false);
         }
         let chunk = (CHUNK_SECS * rate).round() as i64;
@@ -227,16 +235,11 @@ impl Producer {
     }
 }
 
-/// Queues all of `samples`, waiting for room if it must: a chunk is never
-/// dropped.
+/// Queues all of `samples`, never dropping any: `produce` made sure of the
+/// room.
 fn push(ring: &super::ring::Ring, samples: &[f32]) {
-    let mut done = 0;
-    while done < samples.len() {
-        done += ring.push(&samples[done..]) * ring.channels();
-        if done < samples.len() {
-            std::thread::sleep(Duration::from_millis(1));
-        }
-    }
+    let pushed = ring.push(samples) * ring.channels();
+    debug_assert_eq!(pushed, samples.len(), "no room for a chunk");
 }
 
 /// Marks the run's end at ring position `counter`: the clock holds at

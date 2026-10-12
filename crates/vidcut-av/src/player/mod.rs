@@ -379,8 +379,10 @@ impl Shared {
 pub struct Player {
     shared: Arc<Shared>,
     threads: Vec<JoinHandle<()>>,
-    /// Dropped after the threads end: the device stops last.
-    output: Option<Box<dyn AudioOutput>>,
+    /// Dropped after the threads end: the device stops last. In a mutex,
+    /// so a player can be shared between threads (the session sends
+    /// requests, the renderer presents).
+    output: Mutex<Option<Box<dyn AudioOutput>>>,
 }
 
 impl Player {
@@ -428,7 +430,7 @@ impl Player {
         let mut player = Self {
             shared: shared.clone(),
             threads: Vec::new(),
-            output: Some(output),
+            output: Mutex::new(Some(output)),
         };
         let s = shared.clone();
         player.threads.push(
@@ -716,6 +718,17 @@ impl Drop for Player {
         for t in self.threads.drain(..) {
             let _ = t.join();
         }
-        self.output.take();
+        lock(&self.output).take();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_player_is_shared_between_threads() {
+        // The session sends requests while the renderer presents.
+        fn shared<T: Send + Sync>() {}
+        shared::<super::Player>();
+        shared::<super::Shown>();
     }
 }
