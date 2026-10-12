@@ -42,7 +42,7 @@ It is written in Rust:
 | Crate | Purpose | Depends on |
 |---|---|---|
 | `crates/vidcut-core` | Project model, time and timecode math, edit operations (`ops.rs`; tracks in `ops/tracks.rs`, clips following Track 1 in `ops/follow.rs`), Request/Response protocol, Editor (undo/rev), project store, render plans (`render.rs`: top-wins video, mixed audio lanes), preview EDLs (`preview.rs`), OpenTimelineIO reading and writing (`otio.rs`, tests in `otio/tests.rs`), what the automatic tools decide from measurements (`analysis.rs`), application preferences (`preferences.rs`) | — (pure Rust; fast to build and test) |
-| `crates/vidcut-av` | FFmpeg layer: probe (start timecodes too), exact-seek decode (on NVDEC too, `cuda.rs` for the GPU pipeline), encode/mux, export engine (with loudness normalization; the next piece's file opens ahead in `export/ahead.rs`), the renderer of paused and two-up pictures that decodes each frame once either way, and the frame reader of timeline tiles (`export/renderer.rs`), thumbnails (and their JPEG cache form), waveforms, still frames, measurements for the automatic tools (`analysis.rs`), encoder detection, test-fixture generator | ffmpeg-next |
+| `crates/vidcut-av` | FFmpeg layer: probe (start timecodes too), exact-seek decode (on NVDEC too, `cuda.rs` for the GPU pipeline), encode/mux, export engine (with loudness normalization; the next piece's file opens ahead in `export/ahead.rs`), the renderer of paused and two-up pictures that decodes each frame once either way, and the frame reader of timeline tiles (`export/renderer.rs`), thumbnails (and their JPEG cache form), waveforms, still frames, measurements for the automatic tools (`analysis.rs`), encoder detection, test-fixture generator, the player engine (`player/`: a decode thread keeping pictures ahead of the clock and windows for going back, the audio mix into a lock-free ring, the device callback as the clock, outputs through cpal) | ffmpeg-next, cpal |
 | `crates/vidcut-mpv` | libmpv via `dlopen` (`libloading`): client API and render API (OpenGL and software) | libmpv.so.2 at runtime only |
 | `crates/vidcut` | The `vidcut` binary: Session/host, IPC, CLI (clap), GUI (eframe), MCP server | all of the above |
 
@@ -68,7 +68,7 @@ Docs:
 - `docs/deviations.md`: intentional differences from Resolve.
 - `docs/roadmap.md`: the use cases vidcut is for, and the order of what comes next.
 - `docs/todo/`: open work, **one file per item**: add a file for new work, and delete it in the pull request that finishes the work. There is no list to edit, so pull requests don't conflict over it. Keep lists that pull requests edit one item per line, never several items in one line.
-- `docs/decisions/`: short architecture decision records (preview, export, GUI and live control, agents: MCP and measurements).
+- `docs/decisions/`: short architecture decision records (preview, export, GUI and live control, agents: MCP and measurements, the player engine).
 
 ## Build and run
 
@@ -100,6 +100,7 @@ These are mandatory.
 | After a **bigger change**, and before a milestone is called done | `scripts/check.sh full` | the above plus all integration/e2e tests and doc tests |
 | Also, when encoders, hwdec or real-media paths change | `scripts/check.sh full --features vidcut-av/gpu-tests` | GPU encode tests (NVENC/VAAPI) |
 | Also, when the GUI, live session, IPC or preview change | `scripts/check.sh full --features vidcut/gui-tests` | the real GUI driven through the CLI (needs a display; opens a window briefly) |
+| Also, when the player's audio output changes | `scripts/check.sh full --features vidcut-av/audio-tests` | the player engine on the system's audio device (plays silence) |
 
 **Enable the hook once per clone:** `git config core.hooksPath .githooks`.
 
@@ -144,6 +145,10 @@ These are mandatory.
 - **Export jobs** (`crates/vidcut/tests/jobs.rs`) run the live session without players: foreground, background, cancel and wait.
 - **Live session tests** (`crates/vidcut/tests/live.rs`) run the GUI's core thread without a window: a harness thread renders both players with mpv's software renderer and answers screenshots, and requests go through `Handle::call` like IPC. Prefer them over GUI tests; they need libmpv but no display.
 - **Frame checks** compare barcodes: screenshot the viewer, decode the PNG with `vidcut_av::decode`, and compare with `vidcut frame render` (export's renderer).
+- **Player engine tests** (`crates/vidcut-av/tests/player*.rs`, shared helpers in `tests/player_support/`) run headless and compare each picture's barcode with `frame render`'s (`export::still`).
+  - The sound is the clock, so a test drives it with an output: `ManualOutput` pulls when the test says (`pull_full`: a buffer as if just heard, so the clock stands at its end until the next), `PacedOutput` pulls in real time with a set latency and can record what it pulled and when it would be heard (A/V offset from the beeps).
+  - Decode counts (`vidcut_av::decode::frames_decoded`, process-wide) stay in `player_decodes.rs`, one test in its own binary. Work out expected pictures before counting: `frame render` decodes too.
+  - `player_media.rs` prints seek, step and play numbers on the real 1080p30 and 2160p60 clips (`--nocapture`); `player_device.rs` (`audio-tests`) plays silence on the system's device.
 - **Test outputs** go to temp dirs, never into the repo. Make test temp dirs with `tempfile` (`tempfile::Builder::new().prefix("vidcut-…").tempdir()`), which removes them when they drop, also when the test fails. Tests that open projects set `XDG_STATE_HOME` to a temp dir so undo history, recent projects and the folders file dialogs remember stay out of the user's state, tests that save presets or preferences set `XDG_CONFIG_HOME`, and tests that check thumbnails set `XDG_CACHE_HOME`.
 
 ## Driving vidcut as an agent
@@ -311,7 +316,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `tiles FILE [HEIGHT]`: timeline filmstrip tiles, timed at spacings from 0.25 to 30 s.
 
 **Preview debugging:**
-- `VIDCUT_DEBUG_PLAYER=1` traces every player command, mpv event, render and timeline gesture to stderr.
+- `VIDCUT_DEBUG_PLAYER=1` traces every player command, mpv event, render and timeline gesture to stderr, and what the player engine (`vidcut_av::player`) decodes.
 - `VIDCUT_MPV_OPTIONS="hwdec=no,ao=null"` overrides mpv options.
 - `VIDCUT_MPV_LOG_DIR=DIR` makes each GUI player write mpv's own log, at debug level, to `DIR/<pid>-source.log` and `DIR/<pid>-timeline.log`. `VIDCUT_MPV_OPTIONS=msg-level=all=trace` adds more.
   - FFmpeg's messages are all in the timeline's log: both players' and those of vidcut's own FFmpeg work in the GUI process (thumbnails, waveforms, exports). FFmpeg has one log callback per process, and the first mpv instance (the timeline's) takes it.
@@ -323,7 +328,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 
 ## Gotchas
 
-The preview findings and the time-mapping rules are in [docs/decisions/preview.md](docs/decisions/preview.md); the export engine, sampling rule and encoder decisions are in [docs/decisions/export.md](docs/decisions/export.md). Read them before touching preview, seeking, time conversion or export.
+The preview findings and the time-mapping rules are in [docs/decisions/preview.md](docs/decisions/preview.md); the export engine, sampling rule and encoder decisions are in [docs/decisions/export.md](docs/decisions/export.md); the player engine (threads, requests, the audio clock) is in [docs/decisions/player.md](docs/decisions/player.md). Read them before touching preview, seeking, time conversion, export or the player.
 
 - **libmpv needs `LC_NUMERIC=C`.** `Mpv::new` calls `setlocale` before `mpv_create`.
 - **mpv's render thread (the GUI's UI thread) may only call render-thread-safe client functions:**
@@ -337,6 +342,7 @@ The preview findings and the time-mapping rules are in [docs/decisions/preview.m
 - **Never lower a thread's priority with nice.** NVIDIA's driver, opening NVENC, copies the calling thread's nice value onto the process id, which is the main thread, and an unprivileged process can't raise it again: a proxy job at nice 19 left the GUI at nice 19. The idle class leaves the nice value alone.
 - **A paused viewer shows vidcut-av's renderer, not mpv's picture** (preview.md §13): the same frame, decoded once whichever way it steps. Playing shows mpv. `gui.screenshot` captures mpv's picture, which differs by a couple of levels in fine detail. The renderer's tests count decoded frames with `vidcut_av::decode::frames_decoded()`, a process-wide count, so they stay one test in their own binary.
 - **One CUDA device per process** (`cuda::CudaDevice::open`), with its Vulkan device: the Vulkan loader crashes (a null function in `vkEnumerateInstanceExtensionProperties`) when two threads make instances at once.
+- **The player engine's clock is its audio output's callback** (player.md §4). Playing, the position is the sample the device has heard: with no output pulling, it never moves. Headless, give it a `PacedOutput`; a `ManualOutput` moves only when pulled. The device's data callback (`AudioSource::fill`) must never lock, allocate or decode.
 - **libplacebo (turning, other matrices and HDR on the GPU, `cuda.rs`) keeps a frame back and snaps times within a millisecond to a frame.** Exports push a filler after each frame; the timestamps it sees are counts a second apart. Frames go in without side data (their display matrix would cancel the turn, HDR metadata would change the tone mapping), and 10-bit ones as P016, not P010, whose planes it reads and writes wrongly on a Vulkan device made from CUDA. It can't clear borders in FFmpeg's Vulkan frames, so it pads over a black frame. Its own HDR conversion isn't the CPU's (it lifts black for an SDR display, maps the curve on intensity, clips nothing): HDR goes through a user shader with the CPU's math, and libplacebo is told the picture is already in the output's colors. It keeps pictures between passes in half floats, stored rounded toward zero; the shader corrects by half a step (export.md §5).
 - **FFmpeg's `scale` converts the matrix unless told it:** a graph whose source carries no colorspace gets BT.601 out of swscale, so the normalizer names the matrix for both sides, also where it only scales (before `zscale`). `zscale` can't write NV12 or P010; it writes their planar layouts, or FFmpeg converts its RGB with swscale (export.md §4).
 - **Players render in `App::logic`, not `App::ui`.** eframe skips `ui` for hidden windows but always calls `logic`.
