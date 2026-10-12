@@ -105,33 +105,6 @@ fn real_footage_seeks_steps_and_plays() {
             steps.push(ms(start.elapsed()));
         }
 
-        // Five seconds of play, a display presenting at 60 Hz.
-        let from = frames / 3;
-        player.seek(from);
-        assert!(player.wait_ready(from, Duration::from_secs(20)));
-        let (cpu, wall) = (cpu_seconds(), Instant::now());
-        player.play(1.0);
-        let mut first_move = None;
-        let mut shown = std::collections::BTreeSet::new();
-        let mut exact = 0u32;
-        let mut presents = 0u32;
-        while wall.elapsed() < Duration::from_secs(5) {
-            if let Some(s) = player.present(Instant::now()) {
-                presents += 1;
-                if s.exact {
-                    exact += 1;
-                    shown.insert(s.frame);
-                }
-                if s.frame != from && first_move.is_none() {
-                    first_move = Some(wall.elapsed());
-                }
-            }
-            std::thread::sleep(Duration::from_micros(16_667));
-        }
-        let status = player.status();
-        let (cpu, wall) = (cpu_seconds() - cpu, wall.elapsed().as_secs_f64());
-        player.pause();
-        let due = status.position - from + 1;
         eprintln!(
             "{name}: seek to picture median {:.0} ms, max {:.0} ms; step back first {:.0} ms, \
              then median {:.1} ms, max {:.1} ms",
@@ -141,29 +114,102 @@ fn real_footage_seeks_steps_and_plays() {
             median(steps[1..].to_vec()),
             steps[1..].iter().cloned().fold(0.0, f64::max),
         );
-        eprintln!(
-            "{name}: played {due} frames in {wall:.2} s: {} shown, {exact} of {presents} \
-             presents on time, {} late, {} skipped; clock moved after {:.0} ms; \
-             {cpu:.1} CPU-seconds ({:.1} cores)",
-            shown.len(),
-            status.late,
-            status.skipped,
-            first_move.map_or(f64::NAN, ms),
-            cpu / wall,
-        );
-        assert!(status.error.is_none(), "{:?}", status.error);
-        assert!(
-            due as f64 >= 0.95 * 5.0 * fps as f64,
-            "{name}: the clock ran slow: {due} frames in 5 s"
-        );
+
+        // Five seconds of play forward, three backward.
+        let forward = play(&player, frames / 3, 1.0, 5.0);
+        eprintln!("{name}: forward {forward}");
+        let backward = play(&player, frames / 3, -1.0, 3.0);
+        eprintln!("{name}: backward {backward}");
+        for p in [&forward, &backward] {
+            assert!(
+                p.due as f64 >= 0.95 * p.secs * fps as f64,
+                "{name}: the clock ran slow: {p}"
+            );
+        }
+        assert!(player.status().error.is_none(), "{:?}", player.status());
         if fps == 30 {
             // A 60 Hz display sees each 30 fps frame twice: every one of
             // them shows.
             assert!(
-                shown.len() as f64 >= 0.95 * due as f64,
-                "{name}: {} of {due} frames shown",
-                shown.len()
+                forward.shown as f64 >= 0.95 * forward.due as f64,
+                "{name}: {forward}"
             );
         }
+    }
+}
+
+/// What a display saw of a stretch of play.
+struct Played {
+    secs: f64,
+    /// Frames the clock went through, and how many of them were shown.
+    due: i64,
+    shown: usize,
+    /// Presents, and those that showed the clock's own frame.
+    presents: u32,
+    exact: u32,
+    late: u64,
+    skipped: u64,
+    /// From play until the picture changed.
+    moved: Option<Duration>,
+    cpu: f64,
+}
+
+impl std::fmt::Display for Played {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} frames in {:.2} s: {} shown, {} of {} presents on time ({} late), {} skipped; \
+             the picture moved after {:.0} ms; {:.1} CPU-seconds ({:.1} cores)",
+            self.due,
+            self.secs,
+            self.shown,
+            self.exact,
+            self.presents,
+            self.late,
+            self.skipped,
+            self.moved.map_or(f64::NAN, ms),
+            self.cpu,
+            self.cpu / self.secs,
+        )
+    }
+}
+
+/// Plays from `from` at `speed` for `secs`, a display presenting at 60 Hz.
+fn play(player: &Player, from: i64, speed: f64, secs: f64) -> Played {
+    player.pause();
+    player.seek(from);
+    assert!(player.wait_ready(from, Duration::from_secs(20)));
+    let before = player.status();
+    let (cpu, wall) = (cpu_seconds(), Instant::now());
+    player.play(speed);
+    let mut moved = None;
+    let mut shown = std::collections::BTreeSet::new();
+    let (mut exact, mut presents) = (0, 0);
+    while wall.elapsed() < Duration::from_secs_f64(secs) {
+        if let Some(s) = player.present(Instant::now()) {
+            presents += 1;
+            if s.exact {
+                exact += 1;
+                shown.insert(s.frame);
+            }
+            if s.frame != from && moved.is_none() {
+                moved = Some(wall.elapsed());
+            }
+        }
+        std::thread::sleep(Duration::from_micros(16_667));
+    }
+    let status = player.status();
+    let (cpu, secs) = (cpu_seconds() - cpu, wall.elapsed().as_secs_f64());
+    player.pause();
+    Played {
+        secs,
+        due: (status.position - from).abs() + 1,
+        shown: shown.len(),
+        presents,
+        exact,
+        late: status.late - before.late,
+        skipped: status.skipped - before.skipped,
+        moved,
+        cpu,
     }
 }
