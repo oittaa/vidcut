@@ -31,7 +31,7 @@ Ubuntu 26.04 (or similar) with FFmpeg:
 sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libasound2-dev libclang-dev rustup
 ```
 
-The GUI draws with Vulkan (the driver any desktop has: Mesa's for AMD and Intel, NVIDIA's own) and plays sound through ALSA, which PipeWire and PulseAudio serve. Nothing else is needed at run time: vidcut plays video with its own player, on the FFmpeg libraries. On NVIDIA GPUs the player decodes HEVC, AV1 and VP9 on the GPU.
+The GUI draws with Vulkan (the driver any desktop has: Mesa's for AMD and Intel, NVIDIA's own) and plays sound through ALSA, which PipeWire and PulseAudio serve. Nothing else is needed at run time: vidcut plays video with its own player, on the FFmpeg libraries. On NVIDIA GPUs the player decodes H.264, HEVC, AV1 and VP9 on the GPU.
 
 vidcut works with FFmpeg 8.0 (Ubuntu 26.04 LTS) up to the newest release, 9.0; both ends are tested.
 

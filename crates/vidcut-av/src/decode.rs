@@ -413,15 +413,6 @@ impl Deinterlacer {
     }
 }
 
-/// Whether NVDEC decodes `id` faster than a CPU: the newer codecs, which
-/// are costly in software (HEVC, AV1, VP9). Measured on 4K60 with 16 CPU
-/// threads: HEVC 10-bit 594 frames a second on NVDEC against 497, seeks
-/// into 4 s GOPs about half as long; H.264 253 against 1,014, seeks three
-/// to four times as long (docs/decisions/preview.md §3).
-pub fn nvdec_is_faster(id: codec::Id) -> bool {
-    matches!(id, codec::Id::HEVC | codec::Id::AV1 | codec::Id::VP9)
-}
-
 /// A decoder for `id` that can decode on NVDEC: FFmpeg's own, whose CUDA
 /// frames come through `get_format` like any other (not a library's such
 /// as libdav1d, which decodes on the CPU only, nor a `_cuvid` wrapper).
@@ -547,32 +538,15 @@ impl VideoReader {
         }
     }
 
-    /// Decoding on NVDEC the codecs it decodes faster than the CPU (HEVC,
-    /// AV1, VP9: [`nvdec_is_faster`]), frames in GPU memory; anything else
-    /// on the CPU, frames in memory. For a player, which seeks as much as
-    /// it plays: a CPU's cores decode H.264 several times faster than
-    /// NVDEC's one engine (docs/decisions/preview.md).
-    pub fn open_fastest(source: &Input, device: &crate::cuda::CudaDevice) -> Result<Self> {
-        let reader = Self::open_with_policy(source, Some(device), true)?;
-        match reader.pending.as_ref().map(|f| f.format()) {
-            Some(format::Pixel::CUDA) => Ok(reader),
-            _ if !reader.on_nvdec() => Ok(reader),
-            // NVDEC was offered and turned the stream down.
-            _ => Self::open_input(source),
-        }
+    /// Decoding on NVDEC when it decodes the stream (frames in GPU
+    /// memory), on the CPU otherwise (frames in memory): ProRes, VP8, a
+    /// profile the GPU lacks.
+    pub fn open_nvdec_or_cpu(source: &Input, device: &crate::cuda::CudaDevice) -> Result<Self> {
+        Self::open_cuda(source, device).or_else(|_| Self::open_input(source))
     }
 
     fn open_with(source: &Input, device: Option<&crate::cuda::CudaDevice>) -> Result<Self> {
-        Self::open_with_policy(source, device, false)
-    }
-
-    /// `faster_only`: the device decodes only what [`nvdec_is_faster`].
-    fn open_with_policy(
-        source: &Input,
-        device: Option<&crate::cuda::CudaDevice>,
-        faster_only: bool,
-    ) -> Result<Self> {
-        let mut reader = Self::open_raw(source, device, faster_only)?;
+        let mut reader = Self::open_raw(source, device)?;
         // Learn `o` up front; keep the frame as look-ahead so reading from the
         // start still returns it.
         reader.pending = reader.decode_one()?;
@@ -602,18 +576,13 @@ impl VideoReader {
         Ok(reader)
     }
 
-    fn open_raw(
-        source: &Input,
-        device: Option<&crate::cuda::CudaDevice>,
-        faster_only: bool,
-    ) -> Result<Self> {
+    fn open_raw(source: &Input, device: Option<&crate::cuda::CudaDevice>) -> Result<Self> {
         let path = source.path();
         let input = source.open()?;
         let stream = input
             .streams()
             .best(media::Type::Video)
             .ok_or_else(|| Error::Invalid(format!("{}: no video stream", path.display())))?;
-        let device = device.filter(|_| !faster_only || nvdec_is_faster(stream.parameters().id()));
         let index = stream.index();
         let time_base = stream.time_base();
         let start_pts = Some(stream.start_time()).filter(|&t| t != ffmpeg::ffi::AV_NOPTS_VALUE);
@@ -841,7 +810,7 @@ impl VideoReader {
 
     /// Reopens the input at its very beginning.
     fn rewind(&mut self) -> Result<()> {
-        let fresh = Self::open_raw(&self.source, self.cuda.as_ref(), false)?;
+        let fresh = Self::open_raw(&self.source, self.cuda.as_ref())?;
         self.input = fresh.input;
         self.decoder = fresh.decoder;
         self.draining = false;

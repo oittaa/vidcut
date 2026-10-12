@@ -195,7 +195,7 @@ fn decoding(hwdec: &str) -> Option<(String, String)> {
         "no" => (
             "decoding on the CPU".into(),
             "The viewer decodes in software: GPU acceleration is off in File > Preferences, \
-             the GPU can't decode this file, or the CPU decodes it faster (H.264)"
+             or the GPU can't decode this file"
                 .into(),
         ),
         "nvdec" => gpu("NVDEC"),
