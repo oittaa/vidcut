@@ -44,9 +44,14 @@ pub struct JobInfo {
     pub outputs: Vec<JobOutput>,
     /// Index of the file being written.
     pub output: usize,
-    /// Frames written over all files, and their total.
+    /// Frames done over all files, and their total. A file encoded in two
+    /// runs (decision D45) counts each frame half in each.
     pub frames: i64,
     pub total: i64,
+    /// The run over the current file's range, of `passes`: 2 of 2 is the
+    /// second pass of a two-pass export.
+    pub pass: u8,
+    pub passes: u8,
     /// 0..1 over all files.
     pub progress: f64,
     /// Seconds since the job started.
@@ -92,6 +97,8 @@ impl JobInfo {
             output: 0,
             frames: 0,
             total: 0,
+            pass: 1,
+            passes: 1,
             progress: 0.0,
             elapsed: 0.0,
             eta: None,
@@ -126,14 +133,30 @@ impl JobInfo {
             .collect();
     }
 
-    /// Output `output` has `frames` of `total` frames written.
-    pub(crate) fn progressed(&mut self, output: usize, frames: i64, total: i64) {
+    /// Output `output` has `frames` of `total` frames done in run `pass`
+    /// of `passes`.
+    pub(crate) fn progressed(
+        &mut self,
+        output: usize,
+        frames: i64,
+        total: i64,
+        (pass, passes): (u8, u8),
+    ) {
         let before: i64 = self.outputs.iter().take(output).map(|o| o.frames).sum();
         if self.outputs.is_empty() {
             self.total = total;
         }
         self.output = output;
-        self.frames = (before + frames).min(self.total);
+        (self.pass, self.passes) = (pass, passes);
+        let done = vidcut_av::export::Progress {
+            frames,
+            total,
+            elapsed: Default::default(),
+            pass,
+            passes,
+        }
+        .done();
+        self.frames = (before + done).min(self.total);
         self.elapsed = self.clock.elapsed().as_secs_f64();
         self.progress = if self.total > 0 {
             self.frames as f64 / self.total as f64

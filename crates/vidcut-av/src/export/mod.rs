@@ -22,7 +22,7 @@ use vidcut_core::export::{EncoderChoice, ExportSettings, HdrMode, validate};
 use vidcut_core::render::{RenderPlan, VideoPiece};
 
 use crate::error::{Context, Error, Result};
-use crate::ffmpeg::{self, encoder, format, frame};
+use crate::ffmpeg::{self, encoder, ffi, format, frame};
 use audio::AudioMix;
 use encode::{AudioEncoder, Availability, Vaapi};
 use video::VideoFrames;
@@ -30,9 +30,35 @@ use video::VideoFrames;
 /// Progress of a running export.
 #[derive(Debug, Clone, Copy)]
 pub struct Progress {
+    /// Frames done in this pass, of `total`.
     pub frames: i64,
     pub total: i64,
+    /// Since the export started, over all passes.
     pub elapsed: Duration,
+    /// The run over the range (1 or 2), of `passes`: an encoder that makes
+    /// two passes by encoding twice reports both (decision D45).
+    pub pass: u8,
+    pub passes: u8,
+}
+
+impl Progress {
+    /// Progress of a single pass.
+    pub fn single(frames: i64, total: i64, elapsed: Duration) -> Self {
+        Self {
+            frames,
+            total,
+            elapsed,
+            pass: 1,
+            passes: 1,
+        }
+    }
+
+    /// Frames done over all passes, as frames of one: half the total
+    /// when the first of two is done.
+    pub fn done(&self) -> i64 {
+        let passes = i64::from(self.passes.max(1));
+        (i64::from(self.pass.max(1) - 1) * self.total + self.frames) / passes
+    }
 }
 
 /// What an export produced.
@@ -43,6 +69,9 @@ pub struct Report {
     pub samples: i64,
     pub video_encoder: Option<String>,
     pub audio_encoder: Option<String>,
+    /// Passes the video encoder made over each frame (decision D45).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub passes: Option<u8>,
     /// Video frames decoded and scaled on the GPU (NVDEC, CUDA) on their way
     /// to NVENC; the rest were made on the CPU.
     pub gpu_frames: i64,
@@ -205,6 +234,95 @@ pub fn run(
     }
 }
 
+/// The hidden folder beside `output` that holds a two-pass export's
+/// statistics while it runs; removed when it ends, however it ends.
+pub fn passes_path(output: &Path) -> PathBuf {
+    let name = output
+        .file_name()
+        .map_or_else(|| "export".into(), |n| n.to_string_lossy().into_owned());
+    output.with_file_name(format!(".{name}.passes"))
+}
+
+/// A two-pass export's statistics folder ([`passes_path`]), removed when
+/// dropped: after the second pass, or on failure or cancellation.
+struct PassFiles {
+    dir: PathBuf,
+}
+
+impl PassFiles {
+    fn new(output: &Path) -> Result<Self> {
+        let dir = passes_path(output);
+        // A run that was killed may have left one.
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir)?;
+        Ok(Self { dir })
+    }
+
+    fn stats(&self) -> PathBuf {
+        self.dir.join("stats")
+    }
+}
+
+impl Drop for PassFiles {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+/// The first of two runs (decision D45): every frame of the range through
+/// the encoder opened for it, its packets dropped, so it writes its
+/// statistics. Returns the ones it hands back in memory (libvpx); x264 and
+/// x265 finish their files as the encoder closes, here.
+#[allow(clippy::too_many_arguments)]
+fn first_run(
+    plan: &RenderPlan,
+    enc: &encode::VideoEncoder,
+    mut encoder: encoder::Video,
+    (w, h): (u32, u32),
+    cancel: &AtomicBool,
+    started: Instant,
+    progress: &mut dyn FnMut(Progress),
+) -> Result<Option<String>> {
+    let mut frames = VideoFrames::new(&plan.video, plan.fps, w, h, enc.pixel, enc.hdr);
+    let mut p = ffmpeg::Packet::empty();
+    for j in 0..plan.frames {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(Error::Invalid(CANCELLED.into()));
+        }
+        let mut f = frames
+            .next_frame()?
+            .ok_or_else(|| Error::Invalid("plan has fewer video frames than expected".into()))?;
+        f.set_pts(Some(j));
+        f.set_kind(ffmpeg::picture::Type::None);
+        encoder
+            .send_frame(&f)
+            .ctx(|| format!("first pass: frame {j} with {}", enc.name))?;
+        while encoder.receive_packet(&mut p).is_ok() {}
+        progress(Progress {
+            frames: j + 1,
+            total: plan.frames,
+            elapsed: started.elapsed(),
+            pass: 1,
+            passes: 2,
+        });
+    }
+    encoder
+        .send_eof()
+        .ctx(|| "flushing the first pass".into())?;
+    while encoder.receive_packet(&mut p).is_ok() {}
+    // Ours to free; the encoder leaves it when it closes.
+    let stats = unsafe {
+        let raw = encoder.as_mut_ptr();
+        let out = (*raw).stats_out;
+        let text =
+            (!out.is_null()).then(|| std::ffi::CStr::from_ptr(out).to_string_lossy().into_owned());
+        ffi::av_freep(&mut (*raw).stats_out as *mut *mut std::ffi::c_char as *mut _);
+        text
+    };
+    drop(encoder);
+    Ok(stats)
+}
+
 /// The hidden file an export of `output` is written to, renamed into place
 /// once it succeeds.
 pub fn partial_path(output: &Path) -> PathBuf {
@@ -233,6 +351,10 @@ struct VideoOut {
     enc_tb: ffmpeg::Rational,
     stream_tb: ffmpeg::Rational,
     name: String,
+    passes: encode::Passes,
+    /// Kept until the export ends: x264 and x265 read their statistics
+    /// as they encode the second pass.
+    _pass_files: Option<PassFiles>,
 }
 
 impl VideoOut {
@@ -359,6 +481,7 @@ fn encode(
             // The first encoder that opens; if none does, why each didn't.
             let mut failed: Vec<(Option<String>, Error)> = Vec::new();
             let mut opened = None;
+            let mut pass_files = None;
             for candidate in encode::video_encoders(v, available) {
                 let enc = match candidate {
                     Ok(enc) => enc,
@@ -367,16 +490,37 @@ fn encode(
                         continue;
                     }
                 };
+                // Two runs open it for the first, writing statistics.
+                let stats = match enc.passes {
+                    encode::Passes::TwoRuns { .. } => {
+                        let files = PassFiles::new(output)?;
+                        let stats = files.stats();
+                        pass_files = Some(files);
+                        Some(stats)
+                    }
+                    _ => None,
+                };
+                let pass = match &stats {
+                    Some(stats) => encode::Pass::First { stats },
+                    None => encode::Pass::Only,
+                };
                 // NVENC with SDR output takes frames in GPU memory, so pieces
                 // decoded on NVDEC never leave it; frames in memory if not.
                 if let Some((device, frames)) = gpu_output(&enc, w, h)
-                    && let Ok(o) =
-                        encode::open_video(&enc, w, h, fps, global_header, Some(frames.as_ptr()))
+                    && let Ok(o) = encode::open_video(
+                        &enc,
+                        w,
+                        h,
+                        fps,
+                        global_header,
+                        Some(frames.as_ptr()),
+                        pass,
+                    )
                 {
                     opened = Some((enc, o, Some((device, frames))));
                     break;
                 }
-                match encode::open_video(&enc, w, h, fps, global_header, None) {
+                match encode::open_video(&enc, w, h, fps, global_header, None, pass) {
                     Ok(o) => {
                         opened = Some((enc, o, None));
                         break;
@@ -400,6 +544,20 @@ fn encode(
                     why.join("; ")
                 )));
             };
+            // Two runs: the first measures, then the encoder opens again
+            // for the second with what it wrote.
+            let (encoder, vaapi) = match &pass_files {
+                Some(files) if enc.passes.runs() == 2 => {
+                    let buffer = first_run(plan, &enc, encoder, (w, h), cancel, started, progress)?;
+                    let stats = files.stats();
+                    let second = encode::Pass::Second {
+                        stats: &stats,
+                        buffer: buffer.as_deref(),
+                    };
+                    encode::open_video(&enc, w, h, fps, global_header, None, second)?
+                }
+                _ => (encoder, vaapi),
+            };
             let mut ost = octx
                 .add_stream(encoder::find_by_name(&enc.name))
                 .ctx(|| "adding video stream".into())?;
@@ -420,6 +578,8 @@ fn encode(
                 enc_tb: fps.invert(),
                 stream_tb: fps.invert(),
                 name: enc.name.clone(),
+                passes: enc.passes,
+                _pass_files: pass_files,
             })
         }
         None => None,
@@ -517,6 +677,8 @@ fn encode(
     }
 
     let mut produced = 0i64;
+    // This is the last run over the range: the second of two, or the only.
+    let runs = video.as_ref().map_or(1, |v| v.passes.runs());
     for j in 0..plan.frames {
         if cancel.load(Ordering::Relaxed) {
             return Err(Error::Invalid(CANCELLED.into()));
@@ -550,6 +712,8 @@ fn encode(
             frames: j + 1,
             total: plan.frames,
             elapsed: started.elapsed(),
+            pass: runs,
+            passes: runs,
         });
     }
     if let Some(a) = audio.as_mut() {
@@ -571,6 +735,7 @@ fn encode(
         frames: plan.frames,
         samples: if audio.is_some() { plan.samples() } else { 0 },
         gpu_frames: video.as_ref().map_or(0, |v| v.frames.gpu_frames()),
+        passes: video.as_ref().map(|v| v.passes.count()),
         video_encoder: video.map(|v| v.name),
         audio_encoder: audio.map(|a| a.spec.name),
         seconds: started.elapsed().as_secs_f64(),

@@ -193,12 +193,19 @@ fn export_windows() {
     until(&mut harness, "the dialog", |h| has(h, "Start Export"));
     harness.step();
     harness.get_by_label("Bitrate").click();
+    // A bitrate adds the passes row, moving what is below it.
+    harness.step();
     harness.get_by_label("Whole timeline").click();
     harness.get_by_label("Replace existing files").click();
     until(&mut harness, "a plan", |h| {
         h.query_by_label("Start Export")
             .is_some_and(|b| !b.accesskit_node().is_disabled())
     });
+    // At a bitrate: the passes, and how the planned encoder makes them
+    // (decision D45), left at their defaults.
+    harness.step();
+    assert!(has(&harness, "passes"));
+    assert!(has(&harness, "first pass") || has(&harness, "first look"));
     // Labels keep their text in the AccessKit value.
     let command = harness
         .get_by_label_contains("vidcut -p ")

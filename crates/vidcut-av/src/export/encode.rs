@@ -3,7 +3,9 @@
 
 use serde::{Deserialize, Serialize};
 use vidcut_core::export::color::Abilities;
-use vidcut_core::export::{AudioCodec, AudioSettings, EncoderChoice, VideoCodec, VideoSettings};
+use vidcut_core::export::{
+    AudioCodec, AudioSettings, EncoderChoice, FirstPass, Multipass, VideoCodec, VideoSettings,
+};
 
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, codec, encoder, ffi, format, frame};
@@ -21,6 +23,85 @@ pub struct VideoEncoder {
     pub options: Vec<(String, String)>,
     /// HDR output with this transfer; `None`: SDR BT.709.
     pub hdr: Option<vidcut_core::model::Hdr>,
+    /// How it makes its passes (decision D45).
+    pub passes: Passes,
+}
+
+/// How a video encoder makes its passes (decision D45).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum Passes {
+    One,
+    /// The range is encoded twice: first to write statistics (nothing is
+    /// muxed), then for real from them. x264, x265, VP9.
+    TwoRuns {
+        /// The first with faster settings (`video.first_pass = fast`).
+        fast_first: bool,
+    },
+    /// Two passes over each frame within one encode: NVENC's `multipass`.
+    TwoInside,
+}
+
+impl Passes {
+    /// Passes over each frame.
+    pub fn count(self) -> u8 {
+        match self {
+            Self::One => 1,
+            Self::TwoRuns { .. } | Self::TwoInside => 2,
+        }
+    }
+
+    /// Times the range is encoded.
+    pub fn runs(self) -> u8 {
+        match self {
+            Self::TwoRuns { .. } => 2,
+            Self::One | Self::TwoInside => 1,
+        }
+    }
+}
+
+/// Which pass an encoder is opened for.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Pass<'a> {
+    /// The only one.
+    Only,
+    /// The first of two runs, writing statistics under `stats` (a file the
+    /// encoder names itself, or nothing: some hand them back in memory).
+    First { stats: &'a std::path::Path },
+    /// The second, reading them: the same file, or the statistics the
+    /// first handed back.
+    Second {
+        stats: &'a std::path::Path,
+        buffer: Option<&'a str>,
+    },
+}
+
+/// The passes `v` asks of an encoder `name`, or why it can't make them:
+/// two with a target bitrate unless `passes` says otherwise.
+fn passes(v: &VideoSettings, name: &str) -> Result<Passes> {
+    let two = match v.passes {
+        Some(n) => n == 2,
+        None => v.bitrate.is_some(),
+    };
+    if !two {
+        return Ok(Passes::One);
+    }
+    let fast_first = v.first_pass == FirstPass::Fast;
+    match name {
+        "libx264" | "libx265" | "libvpx-vp9" => Ok(Passes::TwoRuns { fast_first }),
+        n if n.ends_with("_nvenc") => Ok(Passes::TwoInside),
+        // Unset passes stay one where there's no second.
+        _ if v.passes.is_none() => Ok(Passes::One),
+        n if n.ends_with("_vaapi") => Err(Error::Invalid(format!(
+            "{n} makes one pass; two need encoder cpu or nvenc"
+        ))),
+        "libsvtav1" => Err(Error::Invalid(
+            "libsvtav1 makes one pass in this FFmpeg (its rate control looks ahead on its \
+             own); for two, use encoder nvenc or another codec"
+                .into(),
+        )),
+        n => Err(Error::Invalid(format!("{n} makes one pass"))),
+    }
 }
 
 /// A resolved audio encoder.
@@ -240,11 +321,25 @@ fn video_encoder(
         VideoCodec::Av1 => 30,
         _ => 20,
     });
+    let passes = passes(v, name)?;
     let mut options = Vec::new();
     if kind == EncoderChoice::Nvenc {
         options.push(opt("preset", v.speed.as_deref().unwrap_or("p5")));
         options.push(opt("tune", "hq"));
         options.push(opt("rc", "vbr"));
+        if passes == Passes::TwoInside {
+            let first = match v.multipass {
+                Multipass::Quarter => "qres",
+                Multipass::Full => "fullres",
+            };
+            options.push(opt("multipass", first));
+        }
+        let lookahead = v
+            .lookahead
+            .unwrap_or(vidcut_core::export::DEFAULT_LOOKAHEAD);
+        if lookahead > 0 {
+            options.push(opt("rc-lookahead", lookahead));
+        }
         match v.bitrate {
             Some(b) => {
                 options.push(opt("b", b));
@@ -280,6 +375,7 @@ fn video_encoder(
         device: status.device.clone(),
         options,
         hdr: v.hdr.transfer(),
+        passes,
     }))
 }
 
@@ -383,6 +479,7 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
         device: None,
         options,
         hdr: v.hdr.transfer(),
+        passes: passes(v, name)?,
     })
 }
 
@@ -507,6 +604,7 @@ pub(crate) fn open_video(
     fps: ffmpeg::Rational,
     global_header: bool,
     gpu_frames: Option<*mut ffi::AVBufferRef>,
+    pass: Pass<'_>,
 ) -> Result<(encoder::Video, Option<Vaapi>)> {
     let codec = encoder::find_by_name(&enc.name)
         .ok_or_else(|| Error::Invalid(format!("no {} encoder", enc.name)))?;
@@ -519,9 +617,16 @@ pub(crate) fn open_video(
     ctx.set_time_base(fps.invert());
     ctx.set_frame_rate(Some(fps));
     crate::color::tag(unsafe { ctx.as_mut_ptr() }, enc.hdr);
+    let mut flags = codec::Flags::empty();
     if global_header {
-        ctx.set_flags(codec::Flags::GLOBAL_HEADER);
+        flags |= codec::Flags::GLOBAL_HEADER;
     }
+    match pass {
+        Pass::Only => {}
+        Pass::First { .. } => flags |= codec::Flags::PASS1,
+        Pass::Second { .. } => flags |= codec::Flags::PASS2,
+    }
+    ctx.set_flags(flags);
     let vaapi = match &enc.device {
         _ if gpu_frames.is_some() => {
             ctx.set_format(format::Pixel::CUDA);
@@ -548,13 +653,93 @@ pub(crate) fn open_video(
         }
     };
     let mut dict = ffmpeg::Dictionary::new();
-    for (k, v) in &enc.options {
-        dict.set(k, v);
+    for (k, v) in pass_options(enc, pass) {
+        dict.set(&k, &v);
     }
-    let opened = ctx
-        .open_as_with(codec, dict)
-        .ctx(|| format!("opening {}", enc.name))?;
+    // The first run's statistics in memory (libvpx), read once opened.
+    if let Pass::Second {
+        buffer: Some(stats),
+        ..
+    } = pass
+    {
+        unsafe {
+            let raw = ctx.as_mut_ptr();
+            ffi::av_freep(&mut (*raw).stats_in as *mut *mut std::ffi::c_char as *mut _);
+            let copy = ffi::av_malloc(stats.len() + 1) as *mut u8;
+            if copy.is_null() {
+                return Err(Error::Invalid(
+                    "no memory for the first pass's statistics".into(),
+                ));
+            }
+            std::ptr::copy_nonoverlapping(stats.as_ptr(), copy, stats.len());
+            *copy.add(stats.len()) = 0;
+            (*raw).stats_in = copy as *mut std::ffi::c_char;
+        }
+    }
+    let opened = ctx.open_as_with(codec, dict);
+    let mut opened = opened.ctx(|| format!("opening {}", enc.name))?;
+    unsafe {
+        // Read when the encoder opened; ours to free.
+        let raw = opened.as_mut_ptr();
+        ffi::av_freep(&mut (*raw).stats_in as *mut *mut std::ffi::c_char as *mut _);
+    }
     Ok((opened, vaapi))
+}
+
+/// The encoder's options for `pass`: the statistics file and the first
+/// run's speed where it has its own.
+fn pass_options(enc: &VideoEncoder, pass: Pass<'_>) -> Vec<(String, String)> {
+    let mut options = enc.options.clone();
+    let fast = matches!(enc.passes, Passes::TwoRuns { fast_first: true });
+    let set = |options: &mut Vec<(String, String)>, k: &str, v: String| {
+        options.retain(|(key, _)| key != k);
+        options.push((k.to_string(), v));
+    };
+    let (stats, first) = match pass {
+        Pass::Only => return options,
+        Pass::First { stats } => (stats, true),
+        Pass::Second { stats, .. } => (stats, false),
+    };
+    match enc.name.as_str() {
+        "libx264" => {
+            set(&mut options, "stats", stats.display().to_string());
+            if first {
+                set(&mut options, "fastfirstpass", u8::from(fast).to_string());
+            }
+        }
+        "libx265" => {
+            // x265 takes its passes in x265-params, `:`-separated `k=v`.
+            let escaped: String = stats
+                .display()
+                .to_string()
+                .chars()
+                .flat_map(|c| match c {
+                    ':' | '=' | '\\' | '\'' => vec!['\\', c],
+                    c => vec![c],
+                })
+                .collect();
+            let mut params = options
+                .iter()
+                .find(|(k, _)| k == "x265-params")
+                .map_or(String::new(), |(_, v)| format!("{v}:"));
+            params += &format!("pass={}:stats={escaped}", if first { 1 } else { 2 });
+            if first && fast {
+                params += ":slow-firstpass=0";
+            }
+            set(&mut options, "x265-params", params);
+        }
+        "libvpx-vp9" if first && fast => {
+            // libvpx's measuring pass at speed 4, unless the encode is faster.
+            let speed = options
+                .iter()
+                .find(|(k, _)| k == "cpu-used")
+                .and_then(|(_, v)| v.parse::<i32>().ok())
+                .unwrap_or(0);
+            set(&mut options, "cpu-used", speed.max(4).to_string());
+        }
+        _ => {}
+    }
+    options
 }
 
 /// Test-encodes a few frames to see whether a GPU encoder works.
@@ -571,9 +756,11 @@ fn try_gpu(
         device: device.map(String::from),
         options: Vec::new(),
         hdr: None,
+        passes: Passes::One,
     };
     let (w, h) = (640, 360);
-    let (mut encoder, vaapi) = open_video(&enc, w, h, ffmpeg::Rational(30, 1), false, None)?;
+    let (mut encoder, vaapi) =
+        open_video(&enc, w, h, ffmpeg::Rational(30, 1), false, None, Pass::Only)?;
     let mut sw = frame::Video::new(pixel, w, h);
     crate::export::video::fill_black(&mut sw)?;
     let mut packets = 0;
@@ -669,4 +856,170 @@ pub fn detect() -> Availability {
         }
     }
     Availability { encoders }
+}
+
+#[cfg(test)]
+mod tests {
+    use vidcut_core::export::{HdrMode, Multipass};
+
+    use super::*;
+
+    fn video(codec: VideoCodec, encoder: EncoderChoice, bitrate: Option<u64>) -> VideoSettings {
+        VideoSettings {
+            codec,
+            encoder,
+            quality: None,
+            bitrate,
+            speed: None,
+            profile: None,
+            bit_depth: Some(8),
+            width: None,
+            height: None,
+            hdr: HdrMode::Sdr,
+            passes: None,
+            first_pass: FirstPass::Fast,
+            multipass: Multipass::Quarter,
+            lookahead: None,
+        }
+    }
+
+    fn nvenc_here() -> Availability {
+        Availability {
+            encoders: ["h264_nvenc", "hevc_vaapi"]
+                .into_iter()
+                .map(|name| EncoderStatus {
+                    encoder: name.into(),
+                    kind: if name.ends_with("nvenc") {
+                        EncoderChoice::Nvenc
+                    } else {
+                        EncoderChoice::Vaapi
+                    },
+                    device: name
+                        .ends_with("vaapi")
+                        .then(|| "/dev/dri/renderD129".into()),
+                    pixel: if name.ends_with("nvenc") {
+                        "yuv420p".into()
+                    } else {
+                        "nv12".into()
+                    },
+                    ok: true,
+                    error: None,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn passes_follow_the_rate_control() {
+        // Decision D45: two with a bitrate where the encoder makes them.
+        crate::init();
+        let none = Availability::default();
+        let passes = |v: &VideoSettings, a: &Availability| resolve_video(v, a).map(|e| e.passes);
+        let cpu = |codec, bitrate| video(codec, EncoderChoice::Cpu, bitrate);
+        for codec in [VideoCodec::H264, VideoCodec::Hevc, VideoCodec::Vp9] {
+            assert_eq!(
+                passes(&cpu(codec, Some(4_000_000)), &none).unwrap(),
+                Passes::TwoRuns { fast_first: true },
+                "{codec:?}"
+            );
+            assert_eq!(passes(&cpu(codec, None), &none).unwrap(), Passes::One);
+        }
+        // SVT-AV1 makes one here: unset passes are one, two are an error.
+        let mut av1 = cpu(VideoCodec::Av1, Some(4_000_000));
+        assert_eq!(passes(&av1, &none).unwrap(), Passes::One);
+        av1.passes = Some(2);
+        assert!(passes(&av1, &none).is_err());
+        // One asked for: one.
+        let mut one = cpu(VideoCodec::H264, Some(4_000_000));
+        one.passes = Some(1);
+        assert_eq!(passes(&one, &none).unwrap(), Passes::One);
+        // NVENC looks twice inside one encode, at a quarter of the size
+        // unless told; VAAPI makes one.
+        let mut nvenc = video(VideoCodec::H264, EncoderChoice::Auto, Some(4_000_000));
+        let e = resolve_video(&nvenc, &nvenc_here()).unwrap();
+        assert_eq!(
+            (e.name.as_str(), e.passes),
+            ("h264_nvenc", Passes::TwoInside)
+        );
+        assert!(
+            e.options.contains(&opt("multipass", "qres")),
+            "{:?}",
+            e.options
+        );
+        // It looks 32 frames ahead unless told otherwise, 0 not at all.
+        assert!(e.options.contains(&opt("rc-lookahead", 32)));
+        nvenc.multipass = Multipass::Full;
+        nvenc.lookahead = Some(16);
+        let e = resolve_video(&nvenc, &nvenc_here()).unwrap();
+        assert!(e.options.contains(&opt("multipass", "fullres")));
+        assert!(e.options.contains(&opt("rc-lookahead", 16)));
+        nvenc.lookahead = Some(0);
+        nvenc.bitrate = None;
+        let e = resolve_video(&nvenc, &nvenc_here()).unwrap();
+        assert_eq!(e.passes, Passes::One);
+        assert!(
+            !e.options
+                .iter()
+                .any(|(k, _)| k == "rc-lookahead" || k == "multipass")
+        );
+        let mut vaapi = video(VideoCodec::Hevc, EncoderChoice::Vaapi, Some(4_000_000));
+        assert_eq!(passes(&vaapi, &nvenc_here()).unwrap(), Passes::One);
+        vaapi.passes = Some(2);
+        assert!(passes(&vaapi, &nvenc_here()).is_err());
+        // With `auto`, an encoder that can't make two gives way to one
+        // that can.
+        vaapi.encoder = EncoderChoice::Auto;
+        let e = resolve_video(&vaapi, &nvenc_here()).unwrap();
+        assert_eq!((e.name.as_str(), e.passes.runs()), ("libx265", 2));
+    }
+
+    #[test]
+    fn each_pass_gets_its_statistics() {
+        crate::init();
+        let stats = std::path::Path::new("/tmp/a:b=c/stats");
+        let enc = |codec| {
+            resolve_video(
+                &video(codec, EncoderChoice::Cpu, Some(1_000_000)),
+                &Availability::default(),
+            )
+            .unwrap()
+        };
+        let x264 = enc(VideoCodec::H264);
+        let first = pass_options(&x264, Pass::First { stats });
+        assert!(first.contains(&opt("stats", stats.display())));
+        assert!(first.contains(&opt("fastfirstpass", 1)));
+        let second = pass_options(
+            &x264,
+            Pass::Second {
+                stats,
+                buffer: None,
+            },
+        );
+        assert!(second.contains(&opt("stats", stats.display())));
+        assert!(!second.iter().any(|(k, _)| k == "fastfirstpass"));
+        // x265 in its parameters, the path's separators escaped.
+        let x265 = enc(VideoCodec::Hevc);
+        let params = |options: Vec<(String, String)>| {
+            options
+                .into_iter()
+                .find(|(k, _)| k == "x265-params")
+                .unwrap()
+                .1
+        };
+        assert_eq!(
+            params(pass_options(&x265, Pass::First { stats })),
+            r"log-level=error:pass=1:stats=/tmp/a\:b\=c/stats:slow-firstpass=0"
+        );
+        assert_eq!(
+            params(pass_options(
+                &x265,
+                Pass::Second {
+                    stats,
+                    buffer: None
+                }
+            )),
+            r"log-level=error:pass=2:stats=/tmp/a\:b\=c/stats"
+        );
+        assert_eq!(pass_options(&x265, Pass::Only), x265.options);
+    }
 }
