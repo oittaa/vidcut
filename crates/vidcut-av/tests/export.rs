@@ -1673,12 +1673,12 @@ fn sequences_play_their_pictures_at_their_rate() {
     assert_eq!(barcodes(&out), want);
 }
 
-/// With NVENC, pieces the GPU shows as the CPU would decode on NVDEC and
-/// scale there, padded to the output when their aspect differs (4:3 and
-/// 2.4:1 in 16:9; in 8 bits); the rest (SD, which needs a matrix change)
-/// and black are made on the CPU and uploaded. Every frame is the
-/// one the CPU export shows: across cuts, files, a seek back, 10-bit and
-/// AV1 sources, and other rates (60 and 24 fps into 30), in 8 and 10 bits.
+/// With NVENC, video pieces decode on NVDEC and scale there, padded to the
+/// output when their aspect differs (4:3 and 2.4:1 in 16:9), turned and
+/// converted (SD) by libplacebo, deinterlaced by the reader; black is made
+/// on the CPU and uploaded. Every frame is the one the CPU export shows:
+/// across cuts, files, a seek back, 10-bit and AV1 sources, other rates (60,
+/// 25 interlaced and 24 fps into 30), in 8 and 10 bits.
 #[cfg(feature = "gpu-tests")]
 #[test]
 fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
@@ -1737,7 +1737,19 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
             FixtureSpec::new(VideoCodec::Hevc10, Container::Mp4, 1280, 720, (30, 1), 30)
                 .rotation(90),
         );
+    // Interlaced: the reader deinterlaces on the GPU in decode order, so
+    // other rates and a seek back pick the frames the CPU does.
+    let interlaced = |w, h, rate| {
+        src(FixtureSpec::new(VideoCodec::H264, Container::Mkv, w, h, rate, 50).interlaced(true))
+    };
+    let (inter, inter_sd) = (
+        interlaced(1280, 720, (25, 1)),
+        interlaced(640, 360, (30, 1)),
+    );
     let video = vec![
+        v(&inter, 5, 20),
+        v(&inter_sd, 0, 10),
+        v(&inter, 2, 10),
         v(&a, 10, 30),
         VideoPiece::Black { frames: 10 },
         v(&b, 5, 30),
@@ -1753,10 +1765,10 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
         v(&e, 0, 20),
         v(&a, 50, 20),
     ];
-    // All but black. The small untagged piece is BT.601 and the turned
+    // All but black. The small untagged pieces are BT.601 and the turned
     // ones need turning, which libplacebo does; in 10 bits it pads too
     // (FFmpeg's pad_cuda takes 8 bits only).
-    let on_gpu = |_bits| 235;
+    let on_gpu = |_bits| 275;
     let p = plan(fps, 1280, 720, video, vec![]);
     let dir = out_dir("gpu-pipeline");
     let mut reference = lossless();
@@ -1764,7 +1776,7 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
     let cpu = dir.path().join("cpu.mkv");
     render(&p, &reference, &cpu);
     let want = barcodes(&cpu);
-    assert_eq!(want.len(), 245);
+    assert_eq!(want.len(), 285);
     for (codec, bits) in [(VCodec::H264, 8), (VCodec::Hevc, 10)] {
         let settings = ExportSettings {
             container: OutContainer::Mp4,
@@ -1803,9 +1815,17 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
         for (k, (g, w)) in got.iter().zip(&want).enumerate() {
             assert_eq!(g, w, "{bits}-bit: frame {k}");
         }
+        // The interlaced pieces are deinterlaced: no combing.
+        if bits == 8 {
+            let mut r = VideoReader::open(&out).unwrap();
+            for k in 0..40 {
+                let c = combing(&r.next_frame().unwrap().unwrap());
+                assert!(c < 10.0, "frame {k} combs: {c:.1}");
+            }
+        }
         // The pillarboxed and letterboxed pictures start where the CPU's
         // do (at even offsets).
-        for k in [150, 160] {
+        for k in [190, 200] {
             assert_eq!(
                 picture_starts(&frame_at(&out, k)),
                 picture_starts(&frame_at(&cpu, k)),
@@ -1815,7 +1835,7 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
         // Black is video-range black in 10 bits too: P010 keeps its 10 bits
         // high.
         let mut r = VideoReader::open(&out).unwrap();
-        let black = (0..=35).map(|_| r.next_frame().unwrap().unwrap()).last();
+        let black = (0..=75).map(|_| r.next_frame().unwrap().unwrap()).last();
         let m = region_means(&black.unwrap(), (0, 1280));
         let near = |v: f64, want: f64| (v - want).abs() <= 1.0;
         assert!(

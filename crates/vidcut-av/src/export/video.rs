@@ -247,16 +247,12 @@ pub(crate) struct GpuSide {
     target: Option<Hdr>,
 }
 
-/// `input` opened on NVDEC, and the scaler to the output, when its pictures
-/// go through the GPU as they would through the CPU: progressive (frames
-/// are picked before any scaling, so a deinterlacer would see gaps), and
-/// when the scaler builds (libplacebo needs Vulkan for turned pictures,
-/// other matrices than BT.709, and HDR).
+/// `input` opened on NVDEC, and the scaler to the output, when the scaler
+/// builds (libplacebo needs Vulkan for turned pictures, other matrices than
+/// BT.709, and HDR). The reader deinterlaces interlaced frames on the GPU
+/// in decode order, before the sampling rule picks them, as on the CPU.
 fn gpu_reader(input: &Input, gpu: &GpuSide) -> Option<(VideoReader, crate::cuda::CudaPictures)> {
     let reader = VideoReader::open_cuda(input, &gpu.device).ok()?;
-    if reader.interlaced() {
-        return None;
-    }
     let scaler =
         crate::cuda::CudaPictures::new(&gpu.device, &reader, gpu.out, gpu.format, gpu.target, true)
             .ok()?;

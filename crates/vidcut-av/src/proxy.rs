@@ -160,12 +160,11 @@ pub struct WrittenProxy {
 /// [`crate::progress`] guard, out of `total` (the source's frame count, when
 /// known); this thread's [`crate::cancel`] flag stops it, leaving no file.
 ///
-/// With NVENC, the frames are decoded on NVDEC and scaled on the GPU, never
-/// copied to memory, when that gives the same pictures as the CPU: an SDR
-/// video file, progressive, or interlaced, upright and BT.709 in video
-/// range ([`CudaPictures`](crate::cuda::CudaPictures)). Otherwise, or when
-/// NVDEC can't decode the stream, they are decoded and scaled on the CPU as
-/// for every other encoder.
+/// With NVENC, the frames of a video file are decoded on NVDEC, deinterlaced,
+/// turned, converted and scaled on the GPU, never copied to memory
+/// ([`CudaPictures`](crate::cuda::CudaPictures)). Image sequences, and
+/// streams NVDEC can't decode, are decoded and scaled on the CPU as for
+/// every other encoder.
 pub fn write(
     input: &Input,
     width: u32,

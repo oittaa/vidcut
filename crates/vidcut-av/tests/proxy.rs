@@ -221,13 +221,12 @@ fn a_sequence_proxy_uses_the_sequence_timestamps() {
     }
 }
 
-/// With NVENC, sources the GPU shows as the CPU would are decoded on NVDEC
-/// and scaled there, frames never leaving it: each proxy frame is still
-/// the source frame with its timestamp (interlaced ones deinterlaced one
-/// frame per frame, as the CPU reader does; BT.601 and HDR ones converted
-/// by libplacebo, which turns turned ones upright). Interlaced ones in
-/// BT.601, and ones NVDEC can't decode, are made on the CPU, still with
-/// NVENC.
+/// With NVENC, video files are decoded on NVDEC and scaled there, frames
+/// never leaving it: each proxy frame is still the source frame with its
+/// timestamp (interlaced ones deinterlaced one frame per frame, as the CPU
+/// reader does; BT.601 and HDR ones converted by libplacebo, which turns
+/// turned ones upright). Ones NVDEC can't decode are made on the CPU, still
+/// with NVENC.
 #[cfg(feature = "gpu-tests")]
 #[test]
 fn nvenc_proxies_decode_on_the_gpu_and_stay_exact() {
@@ -262,7 +261,8 @@ fn nvenc_proxies_decode_on_the_gpu_and_stay_exact() {
         ),
         // Untagged SD is BT.601: libplacebo converts it first.
         ("BT.601", sd.clone(), true),
-        ("interlaced BT.601", sd.interlaced(true), false),
+        // Deinterlaced by the reader, then converted by libplacebo.
+        ("interlaced BT.601", sd.interlaced(true), true),
         (
             "turned",
             hd(VideoCodec::H264, Container::Mp4).rotation(90),
