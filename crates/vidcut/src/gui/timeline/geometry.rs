@@ -605,9 +605,44 @@ mod tests {
     }
 }
 
+/// Where a track header's parts go, on one line centered in the row: the
+/// name on the left, then the L, A and V buttons in fixed columns ending at
+/// the header's right edge. Every row puts each button in the same column,
+/// whatever its height or kind.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HeaderParts {
+    pub name: Rect,
+    /// L, A and V, left to right.
+    pub toggles: [Rect; 3],
+}
+
+/// A header button's width, and the space between two.
+const HEADER_TOGGLE: f32 = 17.0;
+const HEADER_GAP: f32 = 2.0;
+/// The height of a header's line, where the row has room for it.
+const HEADER_LINE: f32 = 18.0;
+
+pub fn header_parts(header: Rect) -> HeaderParts {
+    let h = HEADER_LINE.min(header.height() - 2.0).max(1.0);
+    let top = (header.center().y - h / 2.0).round();
+    let right = header.right().round();
+    let toggle = |i: u8| {
+        let end = right - f32::from(2 - i) * (HEADER_TOGGLE + HEADER_GAP);
+        Rect::from_min_max(pos2(end - HEADER_TOGGLE, top), pos2(end, top + h))
+    };
+    let toggles = [toggle(0), toggle(1), toggle(2)];
+    HeaderParts {
+        name: Rect::from_min_max(
+            pos2(header.left(), top),
+            pos2(toggles[0].left() - 2.0 * HEADER_GAP, top + h),
+        ),
+        toggles,
+    }
+}
+
 #[cfg(test)]
 mod row_tests {
-    use super::{NEW_TRACK_STRIP, Rows};
+    use super::{NEW_TRACK_STRIP, Rows, header_parts};
     use eframe::egui::{Rect, pos2};
     use vidcut_core::model::{Project, Settings, Track, TrackKind};
 
@@ -637,5 +672,28 @@ mod row_tests {
             "{top}"
         );
         assert_eq!(bottom, 300.0 - NEW_TRACK_STRIP - 1.0);
+    }
+
+    /// Rows of any height put L, A and V in the same columns, at the
+    /// header's right edge, level with the name and inside the header.
+    #[test]
+    fn header_buttons_line_up_in_columns() {
+        let header = |top: f32, h: f32| Rect::from_min_max(pos2(2.0, top), pos2(96.0, top + h));
+        let short = header_parts(header(800.0, 29.0));
+        for h in [22.0, 46.0, 60.0, 100.0] {
+            let row = header(900.0, h);
+            let parts = header_parts(row);
+            for (a, b) in parts.toggles.iter().zip(short.toggles) {
+                assert_eq!((a.left(), a.right()), (b.left(), b.right()), "height {h}");
+                assert!(row.contains_rect(*a), "height {h}");
+                assert_eq!(a.center().y, parts.name.center().y, "height {h}");
+            }
+            assert!((parts.name.center().y - row.center().y).abs() <= 0.5);
+            assert_eq!(parts.name.left(), row.left());
+        }
+        assert_eq!(short.toggles[2].right(), 96.0);
+        assert!(short.toggles[0].left() > short.name.right());
+        assert!(short.toggles[0].right() < short.toggles[1].left());
+        assert!(short.name.width() >= 30.0, "{}", short.name.width());
     }
 }

@@ -270,8 +270,7 @@ const UPPER_OTHER: f32 = 9.0;
 const LOWER_ROWS: [f32; 3] = [100.0, 60.0, 46.0];
 const LOWER_RULER: f32 = 22.0;
 /// The track header column: wide enough for a track's name with its L, A
-/// and V buttons on one line (short rows), which must not reach into the
-/// timeline.
+/// and V buttons on one line, which must not reach into the timeline.
 const HEADER: f32 = 100.0;
 
 /// The icons of the timeline's controls.
@@ -299,9 +298,6 @@ fn icon_menu(ui: &mut egui::Ui, icon: &str, name: &str, menu: impl FnOnce(&mut e
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
     r.on_hover_text(name);
 }
-
-/// Room one of a header's L, A and V buttons takes, with the space after it.
-const TOGGLE: f32 = 21.0;
 
 fn options_path() -> std::path::PathBuf {
     crate::paths::config_dir().join("timeline.json")
@@ -1056,120 +1052,98 @@ impl Workspace {
             child.spacing_mut().button_padding.x = 3.0;
             let is_target = self.is_target(&t.id);
             let label = t.name.clone().unwrap_or_else(|| t.id.clone());
-            let tall = r.height() >= 40.0;
-            let buttons = |ui: &mut egui::Ui, ws: &Self| {
-                ui.spacing_mut().item_spacing.x = 2.0;
-                // Lit means on, as for the target track: L while locked, A
-                // while the audio plays, V while the video shows. A and V
-                // are struck through while off.
-                let mut toggles = vec![
-                    (
-                        "L",
-                        t.locked,
-                        if t.locked {
-                            "Unlock the track"
-                        } else {
-                            "Lock the track"
-                        },
-                    ),
-                    (
-                        "A",
-                        !t.muted,
-                        if t.muted {
-                            "Turn its audio back on"
-                        } else {
-                            "Mute its audio"
-                        },
-                    ),
-                ];
-                if t.kind == vidcut_core::model::TrackKind::Video {
-                    let tip = if t.video_enabled {
-                        "Turn its video off"
+            let parts = geometry::header_parts(rect);
+            // A long name is cut short rather than the toggles.
+            let mut name = child.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(parts.name)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            );
+            let r = name
+                .add(
+                    egui::Button::selectable(is_target, RichText::new(&label).strong().small())
+                        .truncate(),
+                )
+                .on_hover_text("The target track for edit functions");
+            // A click makes the track the target, however often it comes;
+            // V1, the default, is no target of its own.
+            if r.clicked() {
+                self.target = (t.id != MAIN).then(|| t.id.clone());
+            }
+            r.context_menu(|ui| {
+                if ui.button("Add Video Track").clicked() {
+                    self.send("track.add", json!({ "kind": "video" }));
+                    ui.close();
+                }
+                if ui.button("Add Audio Track").clicked() {
+                    self.send("track.add", json!({ "kind": "audio" }));
+                    ui.close();
+                }
+                if t.id != MAIN {
+                    let n = t.clips.len();
+                    let text = if n == 0 {
+                        "Remove Track".to_string()
                     } else {
-                        "Turn its video back on"
+                        format!("Remove Track and Its {n} Clip(s)")
                     };
-                    toggles.push(("V", t.video_enabled, tip));
-                }
-                for (name, lit, tip) in toggles {
-                    let mut text = RichText::new(name).small();
-                    if !lit && name != "L" {
-                        text = text.strikethrough();
-                    }
-                    if ui.selectable_label(lit, text).on_hover_text(tip).clicked() {
-                        let change = match name {
-                            "L" => json!({ "track": t.id, "locked": !lit }),
-                            "A" => json!({ "track": t.id, "muted": lit }),
-                            _ => json!({ "track": t.id, "video_enabled": !lit }),
-                        };
-                        ws.send("track.set", change);
-                    }
-                }
-            };
-            let pick = |ui: &mut egui::Ui, ws: &mut Self| {
-                // A long name is cut short rather than the toggles.
-                let r = ui
-                    .add(
-                        egui::Button::selectable(is_target, RichText::new(&label).strong().small())
-                            .truncate(),
-                    )
-                    .on_hover_text("The target track for edit functions");
-                // A click makes the track the target, however often it comes;
-                // V1, the default, is no target of its own.
-                if r.clicked() {
-                    ws.target = (t.id != MAIN).then(|| t.id.clone());
-                }
-                r.context_menu(|ui| {
-                    if ui.button("Add Video Track").clicked() {
-                        ws.send("track.add", json!({ "kind": "video" }));
-                        ui.close();
-                    }
-                    if ui.button("Add Audio Track").clicked() {
-                        ws.send("track.add", json!({ "kind": "audio" }));
-                        ui.close();
-                    }
-                    if t.id != MAIN {
-                        let n = t.clips.len();
-                        let text = if n == 0 {
-                            "Remove Track".to_string()
-                        } else {
-                            format!("Remove Track and Its {n} Clip(s)")
-                        };
-                        if ui.button(text).clicked() {
-                            ws.send("track.remove", json!({ "track": t.id, "force": true }));
-                            if ws.target.as_deref() == Some(t.id.as_str()) {
-                                ws.target = None;
-                            }
-                            ui.close();
+                    if ui.button(text).clicked() {
+                        self.send("track.remove", json!({ "track": t.id, "force": true }));
+                        if self.target.as_deref() == Some(t.id.as_str()) {
+                            self.target = None;
                         }
+                        ui.close();
                     }
-                });
-            };
-            if tall {
-                pick(&mut child, self);
-                child.horizontal(|ui| buttons(ui, self));
-            } else {
-                // One line: the name in what the toggles leave, cut short if
-                // need be, so the toggles always show.
-                child.horizontal(|ui| {
-                    // Room for L, A and V on every row, so an audio
-                    // track's L and A sit under the video tracks'.
-                    let width = (ui.available_width() - 3.0 * TOGGLE).max(16.0);
-                    let used = ui
-                        .allocate_ui_with_layout(
-                            vec2(width, ui.available_height()),
-                            egui::Layout::left_to_right(egui::Align::Center),
-                            |ui| {
-                                ui.set_max_width(width);
-                                pick(ui, self);
-                            },
-                        )
-                        .response
-                        .rect
-                        .width();
-                    // The toggles line up in columns, row under row.
-                    ui.add_space((width - used).max(0.0));
-                    buttons(ui, self);
-                });
+                }
+            });
+            // Lit means on, as for the target track: L while locked, A
+            // while the audio plays, V while the video shows. A and V are
+            // struck through while off. Each has its own column, so an
+            // audio track's L and A sit under the video tracks'.
+            let mut toggles = vec![
+                (
+                    "L",
+                    t.locked,
+                    if t.locked {
+                        "Unlock the track"
+                    } else {
+                        "Lock the track"
+                    },
+                ),
+                (
+                    "A",
+                    !t.muted,
+                    if t.muted {
+                        "Turn its audio back on"
+                    } else {
+                        "Mute its audio"
+                    },
+                ),
+            ];
+            if t.kind == vidcut_core::model::TrackKind::Video {
+                let tip = if t.video_enabled {
+                    "Turn its video off"
+                } else {
+                    "Turn its video back on"
+                };
+                toggles.push(("V", t.video_enabled, tip));
+            }
+            for ((name, lit, tip), at) in toggles.into_iter().zip(parts.toggles) {
+                let mut text = RichText::new(name).small();
+                if !lit && name != "L" {
+                    text = text.strikethrough();
+                }
+                if child
+                    .put(at, egui::Button::selectable(lit, text))
+                    .on_hover_text(tip)
+                    .clicked()
+                {
+                    let change = match name {
+                        "L" => json!({ "track": t.id, "locked": !lit }),
+                        "A" => json!({ "track": t.id, "muted": lit }),
+                        _ => json!({ "track": t.id, "video_enabled": !lit }),
+                    };
+                    self.send("track.set", change);
+                }
             }
         }
     }
