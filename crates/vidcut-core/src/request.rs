@@ -685,6 +685,17 @@ pub enum Request {
         path: PathBuf,
         #[serde(default)]
         create: bool,
+        /// With `create`, the new project's frame rate, like `25`, `29.97`
+        /// or `30000/1001`. Without a rate and a size, the first video added
+        /// sets the format.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fps: Option<String>,
+        /// With `create`, the new project's frame width; give the height too.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        width: Option<u32>,
+        /// With `create`, the new project's frame height; give the width too.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        height: Option<u32>,
     },
     /// Show the viewer in a mode: `source_clip`, `source_tape` or `timeline`.
     #[serde(rename = "viewer.set")]

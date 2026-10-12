@@ -63,21 +63,8 @@ pub fn run_with(
             sample_rate,
             channels,
         } => {
-            let mut settings = vidcut_core::model::Settings::default();
-            if let Some(f) = fps {
-                settings.fps = f
-                    .parse::<vidcut_core::time::Rational>()
-                    .map_err(|e| Error::usage(e.to_string()))?;
-                settings.auto_format = false;
-            }
-            match (width, height) {
-                (Some(w), Some(h)) => {
-                    (settings.width, settings.height) = (*w, *h);
-                    settings.auto_format = false;
-                }
-                (None, None) => {}
-                _ => return Err(Error::usage("give both width and height, or neither")),
-            }
+            let mut settings =
+                vidcut_core::model::Settings::with_format(fps.as_deref(), size(*width, *height)?)?;
             if let Some(r) = sample_rate {
                 settings.sample_rate = *r;
             }
@@ -403,6 +390,15 @@ fn watches_cancel(request: &Request) -> bool {
             | Request::AnalyzeBlack { .. }
             | Request::AnalyzeLoudness { .. }
     )
+}
+
+/// A new project's picture size from `width` and `height`: both or neither.
+pub fn size(width: Option<u32>, height: Option<u32>) -> Result<Option<(u32, u32)>> {
+    match (width, height) {
+        (Some(w), Some(h)) => Ok(Some((w, h))),
+        (None, None) => Ok(None),
+        _ => Err(Error::usage("give both width and height, or neither")),
+    }
 }
 
 fn answer(result: Value) -> Response {

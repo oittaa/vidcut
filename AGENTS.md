@@ -59,7 +59,7 @@ Inside `crates/vidcut`:
 | `threads.rs` | the one way the app starts threads: `threads::spawn(name, Work::Job \| Work::Interactive, f)`; media work runs at the lowest CPU priority |
 | `live/` | the GUI's core thread: open project, players, viewer state, waits, command log, export jobs (`jobs.rs`); publishes `Snapshot`s |
 | `ipc/` | JSON-RPC over a Unix socket, the instance registry, CLI routing |
-| `gui/` | `app.rs`: eframe and GL glue; `workspace.rs`: all panels and UI state (testable without GL); `timeline/`: geometry, gestures, drawing; `export.rs`: Quick Export, the Export dialog, jobs and OTIO windows; `mixer.rs`: the Mixer and meters; `preferences.rs`: File > Preferences; `timeline/tools.rs`: Ripple Delete Silence, the Boring Detector, Dynamic Trim; `tiles.rs`: the timeline's filmstrip pictures, each tile's own frame; `folders.rs`: where file dialogs start; `pool.rs` (with bins), `viewer.rs`, `video.rs`, `stills.rs` |
+| `gui/` | `app.rs`: eframe and GL glue; `workspace.rs`: all panels and UI state (testable without GL); `timeline/`: geometry, gestures, drawing; `export.rs`: Quick Export, the Export dialog, jobs and OTIO windows; `mixer.rs`: the Mixer and meters; `preferences.rs`: File > Preferences; `project.rs`: New Project's format and File > Project Settings; `timeline/tools.rs`: Ripple Delete Silence, the Boring Detector, Dynamic Trim; `tiles.rs`: the timeline's filmstrip pictures, each tile's own frame; `folders.rs`: where file dialogs start; `pool.rs` (with bins), `viewer.rs`, `video.rs`, `stills.rs` |
 | `export.rs` | presets (built-in and user), outputs, export plans and timeline (`.otio`, bundle) exports as the session runs them |
 | `bundle.rs` | OpenTimelineIO bundles: writing `.otioz` (zip) and `.otiod` (folder) with their media, unpacking `.otioz` for import |
 
@@ -138,7 +138,7 @@ These are mandatory.
 - **Property tests** (proptest) run random edit sequences.
   - Failing seeds land in `proptest-regressions/`. Commit them, so they replay forever.
   - For a deeper run: `PROPTEST_CASES=5000 cargo test -p vidcut-core prop_tests`.
-- **GUI input tests** (`crates/vidcut/tests/gui_input.rs`, `gui_export.rs`, `gui_tracks.rs`, `gui_tools.rs`, `gui_import.rs`, `gui_tiles.rs`) drive the real panels and windows with egui_kittest (clicks, drags, keys; no window or renderer) against a live session without players. Each gesture must change the project with exactly one request. Timeline gesture logic itself is unit-tested in `gui/timeline/gesture.rs` from pointer positions.
+- **GUI input tests** (`crates/vidcut/tests/gui_input.rs`, `gui_export.rs`, `gui_tracks.rs`, `gui_tools.rs`, `gui_import.rs`, `gui_tiles.rs`, `gui_project.rs`) drive the real panels and windows with egui_kittest (clicks, drags, keys; no window or renderer) against a live session without players. Each gesture must change the project with exactly one request. Timeline gesture logic itself is unit-tested in `gui/timeline/gesture.rs` from pointer positions.
   - File dialogs are replaced with `Workspace::set_dialogs`.
   - A new window or modal is measured in its first frame and placed in the next: step once more after it appears before clicking in it.
   - Windows that ask the session (presets, plans, imports) answer on helper threads, so wait with a loop of `harness.step()`, not a fixed number of steps.
@@ -173,7 +173,7 @@ These are mandatory.
 **Basic use:**
 
 ```bash
-vidcut project create talk.vidcut           # format comes from the first video added
+vidcut project create talk.vidcut           # format from the first video added, or --fps 25 --width 1920 --height 1080
 export VIDCUT_PROJECT=talk.vidcut           # or pass -p FILE every time
 vidcut media add cam.mp4 screen.mkv --json  # -> media ids m1, m2
 vidcut edit append m1 --range 10s..2m
@@ -290,7 +290,7 @@ vidcut history undo                         # works across separate runs
 | `vidcut selection set --clips c1,c2 --media m3`, `selection get` | the selection |
 | `vidcut gui screenshot --out v.png [--target window]` | the viewer picture as shown (works while minimized), or the whole window |
 | `vidcut gui log [--since N]` | what everyone (the human too) did: each entry's `summary` in words, and the request as sent |
-| `vidcut gui window --size 1600,1000`, `project open FILE [--create]`, `gui quit` | window and project |
+| `vidcut gui window --size 1600,1000`, `project open FILE [--create [--fps 25 --width 1920 --height 1080]]`, `gui quit` | window and project |
 | `vidcut jobs list`, `jobs get\|wait\|cancel J [--timeout S]` | export and proxy jobs, the GUI's own included; `wait` fails like the job did |
 | `vidcut pool set --bin A --sort name --descending true` | the bin the Media Pool shows and its order; Source Tape follows it |
 | `vidcut player mute [true\|false]` | the viewer's monitoring mute (not the export); without a value, toggles |

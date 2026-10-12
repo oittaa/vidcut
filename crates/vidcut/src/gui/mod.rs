@@ -9,6 +9,7 @@ mod import;
 mod mixer;
 mod pool;
 mod preferences;
+mod project;
 mod stills;
 mod theme;
 mod tiles;

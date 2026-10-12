@@ -124,6 +124,7 @@ pub struct Workspace {
     pub(super) mixer: super::mixer::Mixer,
     /// File > Preferences.
     pub(super) preferences: super::preferences::PreferencesUi,
+    pub(super) project_ui: super::project::ProjectUi,
     pub(super) import: super::import::ImportUi,
     pub(super) dialogs: Arc<dyn super::export::Dialogs>,
     /// Where file dialogs start, remembered across runs.
@@ -249,6 +250,7 @@ impl Workspace {
             show_mixer: false,
             mixer: Default::default(),
             preferences: Default::default(),
+            project_ui: Default::default(),
             import: Default::default(),
             dialogs: Arc::new(super::export::RfdDialogs),
             folders: super::folders::Folders::load(),
@@ -557,10 +559,10 @@ impl Workspace {
         ui.horizontal(|ui| {
             ui.menu_button("File", |ui| {
                 if ui.button("New Project…").clicked() {
-                    self.pick_project(true);
+                    self.open_new_project();
                 }
                 if ui.button("Open Project…").clicked() {
-                    self.pick_project(false);
+                    self.pick_project(None);
                 }
                 ui.menu_button("Open Recent", |ui| {
                     for p in self.recent.clone() {
@@ -571,6 +573,13 @@ impl Workspace {
                 });
                 ui.separator();
                 let open = self.project().is_some();
+                if ui
+                    .add_enabled(open, egui::Button::new("Project Settings…"))
+                    .clicked()
+                {
+                    self.open_project_settings();
+                }
+                ui.separator();
                 if ui
                     .add_enabled(open, egui::Button::new("Import Media…"))
                     .clicked()
@@ -779,10 +788,10 @@ impl Workspace {
             ui.horizontal(|ui| {
                 ui.add_space((ui.available_width() - 260.0).max(0.0) / 2.0);
                 if ui.button("New Project…").clicked() {
-                    self.pick_project(true);
+                    self.open_new_project();
                 }
                 if ui.button("Open Project…").clicked() {
-                    self.pick_project(false);
+                    self.pick_project(None);
                 }
             });
             if !self.recent.is_empty() {
@@ -871,10 +880,12 @@ impl Workspace {
 
     // ---------------------------------------------------------------- dialogs
 
-    /// Asks for a project file (on a helper thread: portal dialogs block).
-    /// The dialog starts where a project was last opened or created, else
-    /// in the open project's folder, else the most recent project's.
-    fn pick_project(&self, new: bool) {
+    /// Asks for a project file to open, or with `new` to create with those
+    /// `project.open` params (its format), on a helper thread: portal
+    /// dialogs block. The dialog starts where a project was last opened or
+    /// created, else in the open project's folder, else the most recent
+    /// project's.
+    pub(super) fn pick_project(&self, new: Option<Value>) {
         use super::folders::Kind;
         let (live, dialogs, folders) = (
             self.live.clone(),
@@ -894,17 +905,24 @@ impl Workspace {
             "vidcut-project-dialog",
             crate::threads::Work::Interactive,
             move || {
-                let path = if new {
+                let path = if new.is_some() {
                     dialogs.save_file("New Project", &folder, "untitled.vidcut", &["vidcut"])
                 } else {
                     dialogs.pick_file("Open Project", &folder, &["vidcut"])
                 };
                 if let Some(mut path) = path {
-                    if new && path.extension().is_none() {
-                        path.set_extension("vidcut");
+                    let mut params = json!({ "path": path });
+                    if let Some(format) = new {
+                        if path.extension().is_none() {
+                            path.set_extension("vidcut");
+                        }
+                        params = json!({ "path": path, "create": true });
+                        if let (Some(p), Some(f)) = (params.as_object_mut(), format.as_object()) {
+                            p.extend(f.clone());
+                        }
                     }
                     folders.remember(Kind::Projects, &path);
-                    live.request("project.open", json!({ "path": path, "create": new }));
+                    live.request("project.open", params);
                 }
             },
         );
@@ -1424,6 +1442,7 @@ impl Workspace {
         self.keys(&ctx);
         self.export_windows(&ctx);
         self.preferences_window(&ctx);
+        self.project_windows(&ctx);
         self.import_window(&ctx);
         egui::Panel::top("top")
             .frame(egui::Frame::new().fill(theme::BG).inner_margin(4))

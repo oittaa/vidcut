@@ -1622,16 +1622,12 @@ fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
         p.settings.auto_format = false;
     }
     if let Some(w) = set.width {
-        if w < 16 || w % 2 != 0 {
-            return Err(Error::invalid("width must be even and at least 16"));
-        }
+        crate::model::check_side("width", w)?;
         p.settings.width = w;
         p.settings.auto_format = false;
     }
     if let Some(h) = set.height {
-        if h < 16 || h % 2 != 0 {
-            return Err(Error::invalid("height must be even and at least 16"));
-        }
+        crate::model::check_side("height", h)?;
         p.settings.height = h;
         p.settings.auto_format = false;
     }

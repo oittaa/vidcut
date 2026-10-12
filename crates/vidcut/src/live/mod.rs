@@ -29,7 +29,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::{Value, json};
 use vidcut_core::editor::{media_context, resolve_clip};
-use vidcut_core::model::Clip;
+use vidcut_core::model::{Clip, Settings};
 use vidcut_core::preview::{self, Fillers};
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{GuiPanel, OneOrMany, ScreenshotTarget, ViewerMode};
@@ -480,7 +480,8 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     let create = config.create;
     let thread = crate::threads::spawn("vidcut-session", Work::Interactive, move || {
         if let Some(path) = project
-            && let Err(e) = live.open_project(&path, create)
+            && let Err(e) = new_settings(&path, create, None, None, None)
+                .and_then(|settings| live.open_project(&path, settings))
         {
             live.notice(
                 format!("can't open {}: {}", path.display(), e.message),
@@ -1811,8 +1812,15 @@ impl Live {
                 Work::Interactive,
                 Box::new(move |_| crate::session::run(None, envelope)),
             ),
-            Request::ProjectOpen { path, create } => Step::Now(
-                self.open_project(&path, create)
+            Request::ProjectOpen {
+                path,
+                create,
+                fps,
+                width,
+                height,
+            } => Step::Now(
+                new_settings(&path, create, fps.as_deref(), width, height)
+                    .and_then(|settings| self.open_project(&path, settings))
                     .map(|()| self.state_response()),
             ),
             Request::ViewerSet { mode } => {
@@ -2242,7 +2250,9 @@ impl Live {
 
     // ---------------------------------------------------------------- project
 
-    fn open_project(&mut self, path: &Path, create: bool) -> Result<()> {
+    /// Opens `path`, first creating it with `create`'s settings if it
+    /// doesn't exist.
+    fn open_project(&mut self, path: &Path, create: Option<Settings>) -> Result<()> {
         let open = OpenProject::open(path, create, self.tx.clone())?;
         self.project = Some(open);
         self.selection = Selection::default();
@@ -3356,6 +3366,36 @@ fn reload_frame(sampled: i64, target: i64, keep: bool) -> i64 {
     } else {
         sampled
     }
+}
+
+/// What `project.open` creates: with `create` and no file at `path`, a
+/// project with the format given; `None` opens an existing file. A format
+/// needs `create`, and a file that isn't there yet.
+fn new_settings(
+    path: &Path,
+    create: bool,
+    fps: Option<&str>,
+    width: Option<u32>,
+    height: Option<u32>,
+) -> Result<Option<Settings>> {
+    let size = crate::session::size(width, height)?;
+    let format = fps.is_some() || size.is_some();
+    if format && !create {
+        return Err(Error::usage("a frame rate or size needs create"));
+    }
+    if !create {
+        return Ok(None);
+    }
+    if path.exists() {
+        if format {
+            return Err(Error::invalid(format!(
+                "{} already exists: open it, or create another file",
+                path.display()
+            )));
+        }
+        return Ok(None);
+    }
+    Settings::with_format(fps, size).map(Some)
 }
 
 fn no_project() -> Error {

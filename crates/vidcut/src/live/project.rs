@@ -29,9 +29,10 @@ pub struct OpenProject {
 impl OpenProject {
     /// Opens `path` (creating an empty project there if `create` and it is
     /// missing) and watches it for outside changes.
-    pub fn open(path: &Path, create: bool, inbox: Sender<Msg>) -> Result<Self> {
-        if create && !path.exists() {
-            Store::create(path, &Project::new(Settings::default()))?;
+    /// Opens `path`, first creating it with `create`'s settings when given.
+    pub fn open(path: &Path, create: Option<Settings>, inbox: Sender<Msg>) -> Result<Self> {
+        if let Some(settings) = create {
+            Store::create(path, &Project::new(settings))?;
         }
         let store = Store::open(path)?;
         let disk = store.read()?;

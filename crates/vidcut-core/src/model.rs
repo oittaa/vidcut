@@ -91,6 +91,39 @@ impl Default for Settings {
     }
 }
 
+impl Settings {
+    /// A new project's settings with the frame rate (`25`, `29.97`,
+    /// `30000/1001`, any positive rate) and the picture size given. Either
+    /// one fixes the format: the first video added then sets neither
+    /// (decision D37).
+    pub fn with_format(fps: Option<&str>, size: Option<(u32, u32)>) -> crate::error::Result<Self> {
+        let mut s = Self::default();
+        if let Some(f) = fps {
+            s.fps = f
+                .parse()
+                .map_err(|e: crate::time::TimeError| crate::error::Error::usage(e.to_string()))?;
+            s.auto_format = false;
+        }
+        if let Some((w, h)) = size {
+            check_side("width", w)?;
+            check_side("height", h)?;
+            (s.width, s.height) = (w, h);
+            s.auto_format = false;
+        }
+        Ok(s)
+    }
+}
+
+/// A picture side the encoders take: even, at least 16 pixels.
+pub fn check_side(name: &str, px: u32) -> crate::error::Result<()> {
+    if px < 16 || !px.is_multiple_of(2) {
+        return Err(crate::error::Error::invalid(format!(
+            "{name} must be even and at least 16"
+        )));
+    }
+    Ok(())
+}
+
 /// Default longest side of a generated proxy, in pixels (decision D41).
 pub const PROXY_LONGEST: u32 = 960;
 
