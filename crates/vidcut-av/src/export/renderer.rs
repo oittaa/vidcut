@@ -5,13 +5,14 @@
 //! Forward, the file and its decoder stay open and the next frame decodes
 //! on from the one before, as every player does. Back, there is nothing to
 //! decode on from: a seek, and decoding from the keyframe before, can't be
-//! avoided. So going back renders a whole window at once, from a keyframe
-//! up to the frame asked for, and keeps it. While the position works
-//! through that window, the window before it renders on another thread
-//! ([`Prefetch`]), so stepping and playing back don't wait. A window starts
-//! on a keyframe, so nothing in it decodes twice; it reaches back over more
+//! avoided. So a window renders at once, from a keyframe up to a frame, and
+//! is kept, on another thread ([`Prefetch`]) ahead of need: wherever the
+//! position is, at least two seconds behind it, and going back, a whole
+//! window more, so stepping and playing back don't wait. A window starts on
+//! a keyframe, so nothing in it decodes twice; it reaches back over more
 //! keyframes to hold at least two seconds where they are close, and a
-//! memory budget caps it.
+//! memory budget caps it. Over the budget, the pictures looked at least
+//! recently go first.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -53,11 +54,12 @@ struct Shared {
 }
 
 struct Store {
-    pictures: HashMap<(String, i64), Arc<Image>>,
+    /// Pictures by source and position, with when each was last kept or
+    /// looked at (`clock`).
+    pictures: HashMap<(String, i64), (Arc<Image>, u64)>,
+    clock: u64,
     bytes: usize,
     budget: usize,
-    /// The position asked for last: pictures nearest it are kept longest.
-    near: Option<(String, i64)>,
     /// A prefetch on its way: its source and the frames it renders, first
     /// to last (the first is the last until its window is known).
     prefetching: Option<(String, i64, i64)>,
@@ -77,9 +79,9 @@ impl StillRenderer {
             shared: Arc::new(Shared {
                 store: Mutex::new(Store {
                     pictures: HashMap::new(),
+                    clock: 0,
                     bytes: 0,
                     budget,
-                    near: None,
                     prefetching: None,
                 }),
                 landed: Condvar::new(),
@@ -90,10 +92,13 @@ impl StillRenderer {
         }
     }
 
-    /// Renders `piece`'s first frame at `width`×`height`.
+    /// Renders `piece`'s first frame at `width`×`height`. `floor` is the
+    /// first source position worth keeping frames behind it for: where the
+    /// shown stretch of the file starts (0: the whole file).
     pub fn rgba(
         &mut self,
         piece: &VideoPiece,
+        floor: i64,
         fps: Rational,
         width: u32,
         height: u32,
@@ -125,13 +130,13 @@ impl StillRenderer {
             _ => false,
         };
         self.last = Some((key.clone(), pos));
+        let floor = floor.min(pos);
         let (min, max) = window_sizes(self.shared.budget(), width, height, fps);
-        self.shared.lock().near = Some((key.clone(), pos));
         let img = match self.shared.get_or_wait(&key, pos, max) {
             Some(img) => img,
             None if self.back && video => {
                 let (.., frames) = self.frames.as_mut().expect("set above");
-                let start = window(frames, piece, pos, fps, min, max)?;
+                let start = window(frames, piece, pos, floor, fps, min, max)?;
                 let n = pos - start + 1;
                 let mut shown = None;
                 for (j, img) in (start..).zip(self.render(&at(piece, start, n), n)?) {
@@ -149,40 +154,45 @@ impl StillRenderer {
                 img
             }
         };
-        if self.back && video {
-            self.plan_prefetch(piece, &key, pos, fps, (width, height), (min, max));
+        if video {
+            self.plan_prefetch(piece, &key, pos, floor, (min, max));
         }
         Ok(img)
     }
 
-    /// The window to render before the last one asked for, found while
-    /// going back: run it on another thread, while this renderer goes on.
-    /// Untaken, it is dropped with the next request.
+    /// The window to render behind the last frame asked for: run it on
+    /// another thread, while this renderer goes on. Untaken, it is dropped
+    /// with the next request.
     pub fn take_prefetch(&mut self) -> Option<Prefetch> {
         self.prefetch.take()
     }
 
-    /// Plans the window before the frames kept below `pos` while fewer than
-    /// a whole window of them are left, so the next one back renders while
-    /// the position goes through this one; one prefetch at a time.
+    /// Plans the window before the frames kept below `pos` while too few of
+    /// them are left: two seconds wherever the position is, and going back
+    /// a whole window, so the next one back renders while the position goes
+    /// through this one. Never below `floor`; one prefetch at a time.
     fn plan_prefetch(
         &mut self,
         piece: &VideoPiece,
         key: &str,
         pos: i64,
-        fps: Rational,
-        (width, height): (u32, u32),
+        floor: i64,
         (min, max): (i64, i64),
     ) {
+        let Some((fps, width, height, _)) = &self.frames else {
+            return;
+        };
+        let (fps, width, height) = (*fps, *width, *height);
         let mut store = self.shared.lock();
         if store.prefetching.is_some() || self.prefetch.is_some() {
             return;
         }
         let mut low = pos;
-        while low > 0 && store.pictures.contains_key(&(key.to_string(), low - 1)) {
+        while low > floor && store.pictures.contains_key(&(key.to_string(), low - 1)) {
             low -= 1;
         }
-        if low == 0 || pos - low >= max {
+        let wanted = if self.back { max } else { min };
+        if low <= floor || pos - low >= wanted {
             return;
         }
         store.prefetching = Some((key.to_string(), low - 1, low - 1));
@@ -191,6 +201,7 @@ impl StillRenderer {
             piece: at(piece, low - 1, 1),
             key: key.to_string(),
             end: low - 1,
+            floor,
             fps,
             width,
             height,
@@ -217,13 +228,15 @@ impl StillRenderer {
     }
 }
 
-/// A window of frames to render ahead of a renderer going back, on a thread
+/// A window of frames to render behind a renderer's position, on a thread
 /// of its own; what it renders lands in that renderer's pictures.
 pub struct Prefetch {
     /// The window's last frame.
     piece: VideoPiece,
     key: String,
     end: i64,
+    /// The window starts no earlier.
+    floor: i64,
     fps: Rational,
     width: u32,
     height: u32,
@@ -249,6 +262,7 @@ impl Prefetch {
             &mut frames,
             &self.piece,
             self.end,
+            self.floor,
             self.fps,
             self.min,
             self.max,
@@ -302,7 +316,10 @@ impl Shared {
     fn get_or_wait(&self, key: &str, pos: i64, max: i64) -> Option<Arc<Image>> {
         let mut store = self.lock();
         loop {
-            if let Some(img) = store.pictures.get(&(key.to_string(), pos)) {
+            store.clock += 1;
+            let now = store.clock;
+            if let Some((img, used)) = store.pictures.get_mut(&(key.to_string(), pos)) {
+                *used = now;
                 return Some(img.clone());
             }
             match &store.prefetching {
@@ -318,27 +335,25 @@ impl Shared {
         }
     }
 
-    /// Keeps `img` as `pos` of `key`. Over the budget, other sources' pictures
-    /// go first, then those farthest from the position asked for last.
+    /// Keeps `img` as `pos` of `key`. Over the budget, the pictures kept or
+    /// looked at least recently go first: whatever the position moves
+    /// between, its pictures stay whole.
     fn put(&self, key: &str, pos: i64, img: Arc<Image>) {
         let mut store = self.lock();
-        let size = img.rgba.len();
-        if let Some(old) = store.pictures.insert((key.to_string(), pos), img) {
+        store.clock += 1;
+        let (size, now) = (img.rgba.len(), store.clock);
+        if let Some((old, _)) = store.pictures.insert((key.to_string(), pos), (img, now)) {
             store.bytes -= old.rgba.len();
         }
         store.bytes += size;
         while store.bytes > store.budget && store.pictures.len() > 1 {
-            let near = store.near.clone();
-            let far = store
+            let oldest = store
                 .pictures
-                .keys()
-                .max_by_key(|(k, p)| match &near {
-                    Some((nk, np)) if nk == k => (0, (p - np).abs()),
-                    _ => (1, 0),
-                })
-                .cloned()
+                .iter()
+                .min_by_key(|(_, (_, used))| *used)
+                .map(|(k, _)| k.clone())
                 .expect("not empty");
-            if let Some(old) = store.pictures.remove(&far) {
+            if let Some((old, _)) = store.pictures.remove(&oldest) {
                 store.bytes -= old.rgba.len();
             }
         }
@@ -356,11 +371,13 @@ fn window_sizes(budget: usize, width: u32, height: u32, fps: Rational) -> (i64, 
 
 /// The first frame of the window to render together for `pos`, going back:
 /// from a keyframe, so nothing in it decodes twice, reaching back over more
-/// keyframes to hold `min` frames, and holding at most `max`.
+/// keyframes to hold `min` frames, holding at most `max`, and starting no
+/// earlier than `floor`.
 fn window(
     frames: &mut VideoFrames,
     piece: &VideoPiece,
     pos: i64,
+    floor: i64,
     fps: Rational,
     min: i64,
     max: i64,
@@ -380,12 +397,12 @@ fn window(
         // so seeking for it starts from that keyframe, not the one before.
         let first = ((key - origin) * rate + 0.5 + 1e-6).ceil() as i64;
         start = first.clamp(0, probe);
-        if pos - start + 1 >= min || start == 0 {
+        if pos - start + 1 >= min || start <= floor {
             break;
         }
         probe = start - 1;
     }
-    Ok(start.max(pos - max + 1).max(0))
+    Ok(start.max(pos - max + 1).max(floor).max(0))
 }
 
 /// `piece` from source position `pos`, `frames` long.

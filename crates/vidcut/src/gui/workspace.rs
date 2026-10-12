@@ -114,9 +114,9 @@ pub struct Workspace {
     /// The viewer mode whose frame the paused viewer last showed exactly:
     /// its picture may stand in while the next frame renders.
     pub(super) paused_shown: Option<ViewerMode>,
-    /// The paused viewer's frame as a piece, and what it was worked out
-    /// from (revision, mode, position, source clip, proxies).
-    pub(super) paused_piece: Option<(PausedAt, vidcut_core::render::VideoPiece)>,
+    /// The paused viewer's frame as a piece, where the shown stretch of its
+    /// file starts, and what they were worked out from.
+    pub(super) paused_piece: Option<(PausedAt, vidcut_core::render::VideoPiece, i64)>,
     /// Quick Export, the Export dialog, jobs and timeline interchange.
     pub(super) export: super::export::ExportUi,
     /// The Mixer panel is open, and its meters' state.

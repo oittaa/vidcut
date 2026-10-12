@@ -25,6 +25,9 @@ use vidcut_core::time::Rational;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Still {
     pub piece: VideoPiece,
+    /// Where the shown stretch of the file starts: frames behind it aren't
+    /// worth rendering ahead (0: the whole file).
+    pub floor: i64,
     pub fps: Rational,
     pub width: u32,
     pub height: u32,
@@ -131,10 +134,14 @@ impl Stills {
                 crate::threads::Work::Interactive,
                 move || {
                     while let Ok(p) = ahead.recv() {
-                        if let Err(e) = p.run()
-                            && crate::live::debug()
-                        {
-                            eprintln!("[stills] cell {n}: prefetch: {e}");
+                        let started = std::time::Instant::now();
+                        let r = p.run();
+                        if crate::live::debug() {
+                            eprintln!(
+                                "[stills] cell {n}: window behind in {:.1} ms{}",
+                                started.elapsed().as_secs_f64() * 1000.0,
+                                r.err().map_or(String::new(), |e| format!(": {e}"))
+                            );
                         }
                     }
                 },
@@ -168,7 +175,7 @@ impl Stills {
                         let (key, s) = job;
                         let started = std::time::Instant::now();
                         let r = renderer
-                            .rgba(&s.piece, s.fps, s.width, s.height)
+                            .rgba(&s.piece, s.floor, s.fps, s.width, s.height)
                             .map_err(|e| e.to_string());
                         if crate::live::debug() {
                             let at = match &s.piece {

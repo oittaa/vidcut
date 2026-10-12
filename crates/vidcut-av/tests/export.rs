@@ -1086,7 +1086,7 @@ fn a_still_renderer_reads_on_and_back_exactly() {
         .chain(back)
         .enumerate()
     {
-        let img = renderer.rgba(&v(&a1, frame, 1), fps, 320, 180).unwrap();
+        let img = renderer.rgba(&v(&a1, frame, 1), 0, fps, 320, 180).unwrap();
         let png = vidcut_av::export::still::png_rgba(img.width, img.height, &img.rgba).unwrap();
         let path = dir.path().join(format!("{i}.png"));
         std::fs::write(&path, &png).unwrap();

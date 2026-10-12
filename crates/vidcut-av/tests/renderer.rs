@@ -63,13 +63,13 @@ fn frames_decode_once_both_ways() {
     // Forward a frame at a time decodes one frame a step.
     let mut r = StillRenderer::default();
     assert_eq!(
-        code(&r.rgba(&v(&long, 10), fps, 320, 180).unwrap()),
+        code(&r.rgba(&v(&long, 10), 0, fps, 320, 180).unwrap()),
         Some(10)
     );
     let before = frames_decoded();
     for f in 11..=60 {
         assert_eq!(
-            code(&r.rgba(&v(&long, f), fps, 320, 180).unwrap()),
+            code(&r.rgba(&v(&long, f), 0, fps, 320, 180).unwrap()),
             Some(f as u32)
         );
     }
@@ -85,12 +85,12 @@ fn frames_decode_once_both_ways() {
     // (seeking from a keyframe for each frame would be thousands).
     let mut r = StillRenderer::default();
     assert_eq!(
-        code(&r.rgba(&v(&long, 299), fps, 320, 180).unwrap()),
+        code(&r.rgba(&v(&long, 299), 0, fps, 320, 180).unwrap()),
         Some(299)
     );
     let before = frames_decoded();
     for f in (0..299).rev() {
-        let img = r.rgba(&v(&long, f), fps, 320, 180).unwrap();
+        let img = r.rgba(&v(&long, f), 0, fps, 320, 180).unwrap();
         assert_eq!(code(&img), Some(f as u32), "frame {f} going back");
     }
     let decoded = frames_decoded() - before;
@@ -102,15 +102,15 @@ fn frames_decode_once_both_ways() {
 
     // A prefetched window: the steps back through it decode nothing.
     let mut r = StillRenderer::default();
-    r.rgba(&v(&long, 299), fps, 320, 180).unwrap();
-    r.rgba(&v(&long, 298), fps, 320, 180).unwrap();
+    r.rgba(&v(&long, 299), 0, fps, 320, 180).unwrap();
+    r.rgba(&v(&long, 298), 0, fps, 320, 180).unwrap();
     let prefetch = r
         .take_prefetch()
         .expect("going back plans the window before");
     prefetch.run().unwrap();
     let before = frames_decoded();
     for f in (1..298).rev() {
-        let img = r.rgba(&v(&long, f), fps, 320, 180).unwrap();
+        let img = r.rgba(&v(&long, f), 0, fps, 320, 180).unwrap();
         assert_eq!(code(&img), Some(f as u32), "frame {f} after the prefetch");
         // Prefetches past the start aren't run here: dropped untaken.
     }
@@ -123,14 +123,14 @@ fn frames_decode_once_both_ways() {
     // A prefetch running on another thread: asked for a frame it is
     // rendering, the renderer waits for it instead of rendering it too.
     let mut r = StillRenderer::default();
-    r.rgba(&v(&long, 299), fps, 320, 180).unwrap();
-    r.rgba(&v(&long, 298), fps, 320, 180).unwrap();
+    r.rgba(&v(&long, 299), 0, fps, 320, 180).unwrap();
+    r.rgba(&v(&long, 298), 0, fps, 320, 180).unwrap();
     let prefetch = r.take_prefetch().unwrap();
     let t = std::thread::spawn(move || prefetch.run().unwrap());
     let before = frames_decoded();
     for f in (100..=120).rev() {
         assert_eq!(
-            code(&r.rgba(&v(&long, f), fps, 320, 180).unwrap()),
+            code(&r.rgba(&v(&long, f), 0, fps, 320, 180).unwrap()),
             Some(f as u32)
         );
     }
@@ -142,6 +142,72 @@ fn frames_decode_once_both_ways() {
         "{decoded}: the prefetch's window decoded once"
     );
 
+    // After a jump, two seconds behind the position render ahead of need:
+    // the first steps back decode nothing.
+    let mut r = StillRenderer::default();
+    r.rgba(&v(&long, 250), 0, fps, 320, 180).unwrap();
+    r.take_prefetch()
+        .expect("a jump keeps two seconds behind")
+        .run()
+        .unwrap();
+    let before = frames_decoded();
+    for f in (190..250).rev() {
+        let img = r.rgba(&v(&long, f), 0, fps, 320, 180).unwrap();
+        assert_eq!(code(&img), Some(f as u32), "frame {f} behind a jump");
+    }
+    assert_eq!(frames_decoded() - before, 0, "the two seconds were ready");
+
+    // Nothing behind the floor, where the shown stretch of the file starts.
+    let mut r = StillRenderer::default();
+    r.rgba(&v(&long, 205), 200, fps, 320, 180).unwrap();
+    r.take_prefetch()
+        .expect("frames 200 to 204 are worth keeping")
+        .run()
+        .unwrap();
+    let before = frames_decoded();
+    for f in (200..205).rev() {
+        let img = r.rgba(&v(&long, f), 200, fps, 320, 180).unwrap();
+        assert_eq!(code(&img), Some(f as u32));
+        assert!(
+            r.take_prefetch().is_none(),
+            "nothing behind the floor at {f}"
+        );
+    }
+    assert_eq!(frames_decoded() - before, 0);
+
+    // Between two files on a tight budget: what was looked at last stays
+    // whole, and the oldest pictures go. (Going back in the second file
+    // renders its windows, which pushes the budget over.)
+    let other =
+        src(FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 300).gop(30));
+    let mut r = StillRenderer::with_budget(100 * 320 * 180 * 4);
+    for f in 10..=60 {
+        r.rgba(&v(&long, f), 0, fps, 320, 180).unwrap();
+    }
+    for f in 100..=130 {
+        r.rgba(&v(&other, f), 0, fps, 320, 180).unwrap();
+    }
+    for f in (100..=129).rev() {
+        r.rgba(&v(&other, f), 0, fps, 320, 180).unwrap();
+        if let Some(p) = r.take_prefetch() {
+            p.run().unwrap();
+        }
+    }
+    let before = frames_decoded();
+    for f in (45..=60).rev() {
+        let img = r.rgba(&v(&long, f), 0, fps, 320, 180).unwrap();
+        assert_eq!(
+            code(&img),
+            Some(f as u32),
+            "frame {f} back in the first file"
+        );
+    }
+    assert_eq!(
+        frames_decoded() - before,
+        0,
+        "the first file's frames looked at last were kept"
+    );
+
     // A 24 fps file in a 30 fps project: some frames repeat. Stepping back
     // gives exactly the frames rendered one by one.
     let slow = src(
@@ -151,7 +217,7 @@ fn frames_decode_once_both_ways() {
     );
     let mut r = StillRenderer::default();
     for f in (0..290).rev() {
-        let stepped = code(&r.rgba(&v(&slow, f), fps, 320, 180).unwrap());
+        let stepped = code(&r.rgba(&v(&slow, f), 0, fps, 320, 180).unwrap());
         let alone = code(&vidcut_av::export::still::rgba(&v(&slow, f), fps, 320, 180).unwrap());
         assert_eq!(stepped, alone, "project frame {f} of a 24 fps file");
     }

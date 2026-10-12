@@ -55,7 +55,7 @@ pub fn rgba(
     width: u32,
     height: u32,
 ) -> Result<crate::thumbs::Image> {
-    let img = super::renderer::StillRenderer::with_budget(0).rgba(piece, fps, width, height)?;
+    let img = super::renderer::StillRenderer::with_budget(0).rgba(piece, 0, fps, width, height)?;
     Ok(std::sync::Arc::try_unwrap(img).unwrap_or_else(|img| (*img).clone()))
 }
 

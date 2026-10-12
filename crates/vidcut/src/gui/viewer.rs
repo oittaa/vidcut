@@ -283,11 +283,12 @@ impl Workspace {
             self.paused_shown = None;
             return None;
         }
-        let piece = self.paused_piece(id)?;
+        let (piece, floor) = self.paused_piece(id)?;
         let fps = self.project()?.settings.fps;
         let [w, h] = self.wants[id.index()];
         let still = Still {
             piece,
+            floor,
             fps,
             width: w.max(2) as u32,
             height: h.max(2) as u32,
@@ -303,9 +304,12 @@ impl Workspace {
         }
     }
 
-    /// The piece the viewer shows now: the timeline's top picture, or the
-    /// source clip's frame, with a fresh proxy when proxies play.
-    fn paused_piece(&mut self, id: PlayerId) -> Option<vidcut_core::render::VideoPiece> {
+    /// The piece the viewer shows now, the timeline's top picture or the
+    /// source clip's frame, with a fresh proxy when proxies play; and where
+    /// the shown stretch of its file starts (the renderer keeps frames back
+    /// to there, no further).
+    fn paused_piece(&mut self, id: PlayerId) -> Option<(vidcut_core::render::VideoPiece, i64)> {
+        use vidcut_core::render::VideoPiece;
         let snap = self.snap.clone();
         let p = snap.project()?;
         let at = (
@@ -315,28 +319,52 @@ impl Workspace {
             snap.source_media.clone(),
             p.settings.use_proxies,
         );
-        if let Some((cached, piece)) = &self.paused_piece
+        if let Some((cached, piece, floor)) = &self.paused_piece
             && *cached == at
         {
-            return Some(piece.clone());
+            return Some((piece.clone(), *floor));
         }
-        let mut piece = match snap.viewer {
+        let (mut piece, floor) = match snap.viewer {
             ViewerMode::Timeline => {
+                // The stretch of the timeline that runs on in one file up to
+                // the playhead (pieces of a file that follow on merge), as far
+                // back as a minute: its first frame is the floor.
                 let pos = snap.timeline.position;
-                vidcut_core::render::flatten(p, pos, pos + 1)
+                let back = (p.settings.fps.as_f64() * 60.0) as i64;
+                let run = vidcut_core::render::flatten(p, (pos - back).max(0), pos + 1)
                     .ok()?
                     .video
-                    .into_iter()
-                    .next()?
+                    .pop()?;
+                match run {
+                    VideoPiece::Source {
+                        media,
+                        path,
+                        origin,
+                        source_frame,
+                        frames,
+                        image,
+                    } => (
+                        VideoPiece::Source {
+                            media,
+                            path,
+                            origin,
+                            source_frame: source_frame + frames - 1,
+                            frames: 1,
+                            image,
+                        },
+                        source_frame,
+                    ),
+                    VideoPiece::Black { .. } => (VideoPiece::Black { frames: 1 }, 0),
+                }
             }
             _ => {
                 let (media, frame) = snap.source_at()?;
-                vidcut_core::render::media_frame(p, media, frame).ok()?
+                (vidcut_core::render::media_frame(p, media, frame).ok()?, 0)
             }
         };
         vidcut_core::preview::proxy_piece(&mut piece, p, |path| path.is_file());
-        self.paused_piece = Some((at, piece.clone()));
-        Some(piece)
+        self.paused_piece = Some((at, piece.clone(), floor));
+        Some((piece, floor))
     }
 
     /// Dynamic Trim's two-up: the frames on both sides of the
@@ -440,6 +468,7 @@ impl Workspace {
             if let Some(piece) = piece {
                 let still = crate::gui::stills::Still {
                     piece,
+                    floor: 0,
                     fps,
                     width: w,
                     height: h,
