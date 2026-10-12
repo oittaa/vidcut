@@ -27,6 +27,8 @@ pub struct Look {
     pub status: bool,
     pub filmstrips: bool,
     pub waveforms: bool,
+    /// The edit functions' target track: its row is lighter.
+    pub target: bool,
 }
 
 /// Media pictures and sounds to draw clips with.
@@ -201,7 +203,12 @@ pub fn track(
     look: Look,
 ) {
     let rect = tr.rect;
-    painter.rect_filled(rect, CornerRadius::ZERO, theme::TRACK);
+    let fill = if look.target {
+        theme::TRACK_TARGET
+    } else {
+        theme::TRACK
+    };
+    painter.rect_filled(rect, CornerRadius::ZERO, fill);
     let (a, b) = scale.visible(rect.left(), rect.right());
     let fps = p.settings.fps;
     for c in &t.clips[clips_in(t, a - 1, b + 1)] {

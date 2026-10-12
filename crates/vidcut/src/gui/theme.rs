@@ -6,6 +6,9 @@ pub const BG: Color32 = Color32::from_rgb(28, 28, 30);
 pub const PANEL: Color32 = Color32::from_rgb(38, 38, 41);
 pub const PANEL_DARK: Color32 = Color32::from_rgb(24, 24, 26);
 pub const TRACK: Color32 = Color32::from_rgb(20, 20, 22);
+/// The target track's row and header: a little lighter and warmer.
+pub const TRACK_TARGET: Color32 = Color32::from_rgb(38, 35, 31);
+pub const PANEL_TARGET: Color32 = Color32::from_rgb(60, 53, 44);
 pub const TEXT: Color32 = Color32::from_rgb(205, 205, 210);
 pub const TEXT_DIM: Color32 = Color32::from_rgb(130, 130, 138);
 pub const ACCENT: Color32 = Color32::from_rgb(232, 150, 52);

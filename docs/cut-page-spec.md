@@ -180,7 +180,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
   - trimming the anchor's Out to before the attached clip's In deletes the attached clip (p. 727)
   - higher tracks only ripple where there is no Track 1 video under them (p. 721; D22)
 - **Audio tracks (M6):** A1, A2, … sit below the video tracks and hold sound alone, such as music. Media without video go there by default (D26).
-- **Track header** (p. 647): the target-track toggle (D3), lock, mute and video on/off. Right-click adds a video or audio track or removes one (D27).
+- **Track header** (p. 647): the target-track toggle (D3), lock, mute and video on/off. The target track's header and row are lighter, the header with an accent edge. Right-click adds a video or audio track or removes one (D27).
 - **Overlapping video:** the highest enabled track is visible (p. 647). A disabled clip or a track with its video off shows what is under it.
 - **Sound:** every audible track plays, mixed; mute and solo (§9) decide which are audible.
 - **Linking:** video and audio of a clip are one combined clip. Trims move both, except that a J/L cut moves only the audio edit (§8.7). There is no link/unlink on the Cut page.

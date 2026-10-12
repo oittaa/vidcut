@@ -307,7 +307,14 @@ impl Workspace {
             status: o.status,
             filmstrips: o.filmstrips,
             waveforms: o.waveforms,
+            target: false,
         }
+    }
+
+    /// Whether `track` is where edit functions go: the one picked, else
+    /// Track 1.
+    fn is_target(&self, track: &str) -> bool {
+        self.target.as_deref() == Some(track) || (self.target.is_none() && track == MAIN)
     }
 
     /// The project as shown: with the trims on their way.
@@ -434,6 +441,7 @@ impl Workspace {
                     waveforms: false,
                     durations: false,
                     names: look.names && row.track == MAIN,
+                    target: self.is_target(&row.track),
                     ..look
                 };
                 paint::track(
@@ -469,12 +477,22 @@ impl Workspace {
             );
             // Each track's header is a band beside its row, with the rows'
             // gaps between them, so a header reads as its track's.
+            // The target track's band is lighter, with an accent edge.
             for row in &layout.lower.rows {
                 let band = Rect::from_min_max(
                     pos2(lower_rect.left() + 1.0, row.rect.rect.top()),
                     pos2(content.left() - 2.0, row.rect.rect.bottom()),
                 );
-                painter.rect_filled(band, 2.0, theme::PANEL);
+                if self.is_target(&row.track) {
+                    painter.rect_filled(band, 2.0, theme::PANEL_TARGET);
+                    painter.rect_filled(
+                        Rect::from_min_size(band.min, vec2(3.0, band.height())),
+                        2.0,
+                        theme::ACCENT,
+                    );
+                } else {
+                    painter.rect_filled(band, 2.0, theme::PANEL);
+                }
             }
             paint::ruler(&painter, lower_ruler, &lower_scale, drawn, smart, false);
             for row in &layout.lower.rows {
@@ -485,6 +503,7 @@ impl Workspace {
                     // Small rows show less.
                     filmstrips: look.filmstrips && row.rect.rect.height() >= 40.0,
                     durations: look.durations && row.rect.rect.height() >= 40.0,
+                    target: self.is_target(&row.track),
                     ..look
                 };
                 paint::track(
@@ -903,8 +922,7 @@ impl Workspace {
             // Nothing in a header reaches past it, to be hovered or clicked
             // over a clip.
             child.set_clip_rect(rect.intersect(child.clip_rect()));
-            let is_target = self.target.as_deref() == Some(t.id.as_str())
-                || (self.target.is_none() && t.id == MAIN);
+            let is_target = self.is_target(&t.id);
             let label = t.name.clone().unwrap_or_else(|| t.id.clone());
             let tall = r.height() >= 40.0;
             let buttons = |ui: &mut egui::Ui, ws: &Self| {
