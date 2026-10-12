@@ -305,6 +305,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `read_barcode FILE...`: the barcode index in images or video (compare screenshots with `vidcut frame render`).
 - `packets FILE [FROM TO]`: video packets in decode order, with pts, dts and keyframe flags (open-GOP questions).
 - `filmstrip FILE OUTDIR [N]`: pool thumbnails, timed.
+- `tiles FILE [HEIGHT]`: timeline filmstrip tiles, timed at spacings from 0.25 to 30 s.
 
 **Preview debugging:**
 - `VIDCUT_DEBUG_PLAYER=1` traces every player command, mpv event, render and timeline gesture to stderr.
