@@ -93,16 +93,30 @@ impl Stills {
                 move || {
                     let mut renderer = vidcut_av::export::still::StillRenderer::default();
                     while let Ok(mut job) = rx.recv() {
+                        let mut skipped = 0;
                         for newer in rx.try_iter() {
                             if tx.send((job.0, n, Outcome::Skipped)).is_err() {
                                 return;
                             }
                             job = newer;
+                            skipped += 1;
                         }
                         let (key, s) = job;
+                        let started = std::time::Instant::now();
                         let r = renderer
                             .rgba(&s.piece, s.fps, s.width, s.height)
                             .map_err(|e| e.to_string());
+                        if crate::live::debug() {
+                            let at = match &s.piece {
+                                VideoPiece::Source { source_frame, .. } => *source_frame,
+                                VideoPiece::Black { .. } => -1,
+                            };
+                            eprintln!(
+                                "[stills] cell {n}: source frame {at} in {:.1} ms ({skipped} skipped){}",
+                                started.elapsed().as_secs_f64() * 1000.0,
+                                r.as_ref().err().map_or(String::new(), |e| format!(": {e}"))
+                            );
+                        }
                         if tx.send((key, n, Outcome::Rendered(r))).is_err() {
                             return;
                         }
