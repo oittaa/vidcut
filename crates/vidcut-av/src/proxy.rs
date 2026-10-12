@@ -571,9 +571,14 @@ fn encode_on_gpu(
         )));
     }
     let src_tb = reader.time_base();
-    let mut pictures =
-        crate::cuda::CudaPictures::new(first, src_tb, width, height, reader.interlaced())
-            .map_err(Failed::Unsuitable)?;
+    let mut pictures = crate::cuda::CudaPictures::new(
+        first,
+        src_tb,
+        (width, height),
+        format::Pixel::NV12,
+        reader.interlaced(),
+    )
+    .map_err(Failed::Unsuitable)?;
     let frames = pictures.frames_ctx();
     if frames.is_null() {
         return Err(Failed::Unsuitable(Error::Invalid(

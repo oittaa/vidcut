@@ -1515,3 +1515,101 @@ fn sequences_play_their_pictures_at_their_rate() {
     }));
     assert_eq!(barcodes(&out), want);
 }
+
+/// With NVENC, pieces the GPU shows as the CPU would decode on NVDEC and
+/// scale there; the rest (SD, which needs a matrix change; 4:3, which needs
+/// padding) and black are made on the CPU and uploaded. Every frame is the
+/// one the CPU export shows: across cuts, files, a seek back, 10-bit and
+/// AV1 sources, and other rates (60 and 24 fps into 30), in 8 and 10 bits.
+#[cfg(feature = "gpu-tests")]
+#[test]
+fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
+    let available = vidcut_av::export::encode::detect();
+    let fps = Rational::new(30, 1).unwrap();
+    let hd = |codec, rate: (u32, u32), frames| {
+        src(FixtureSpec::new(
+            codec,
+            Container::Mkv,
+            1280,
+            720,
+            rate,
+            frames,
+        ))
+    };
+    let a = hd(VideoCodec::H264, (30, 1), 90);
+    let b = hd(VideoCodec::Hevc10, (30, 1), 60);
+    let c = hd(VideoCodec::H264, (60, 1), 120);
+    let d = hd(VideoCodec::H264, (24, 1), 48);
+    let e = hd(VideoCodec::Av1, (30, 1), 30);
+    let sd = src(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (30, 1),
+        30,
+    ));
+    let four_three = src(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        640,
+        480,
+        (30, 1),
+        30,
+    ));
+    let video = vec![
+        v(&a, 10, 30),
+        VideoPiece::Black { frames: 10 },
+        v(&b, 5, 30),
+        v(&c, 0, 30),
+        v(&sd, 0, 15),
+        v(&d, 0, 30),
+        v(&four_three, 0, 10),
+        v(&e, 0, 20),
+        v(&a, 50, 20),
+    ];
+    let on_gpu = 30 + 30 + 30 + 30 + 20 + 20;
+    let p = plan(fps, 1280, 720, video, vec![]);
+    let dir = out_dir("gpu-pipeline");
+    let mut reference = lossless();
+    reference.audio = None;
+    let cpu = dir.path().join("cpu.mkv");
+    render(&p, &reference, &cpu);
+    let want = barcodes(&cpu);
+    assert_eq!(want.len(), 195);
+    for (codec, bits) in [(VCodec::H264, 8), (VCodec::Hevc, 10)] {
+        let settings = ExportSettings {
+            container: OutContainer::Mp4,
+            video: Some(VideoSettings {
+                codec,
+                encoder: EncoderChoice::Nvenc,
+                quality: Some(18),
+                bitrate: None,
+                speed: None,
+                profile: None,
+                bit_depth: Some(bits),
+                width: None,
+                height: None,
+                hdr: None,
+            }),
+            audio: None,
+            declick: false,
+        };
+        let out = dir.path().join(format!("gpu-{bits}.mp4"));
+        let report = export::run(
+            &p,
+            &settings,
+            &out,
+            &available,
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap_or_else(|e| panic!("{bits}-bit: {e}"));
+        assert_eq!(report.gpu_frames, on_gpu, "{bits}-bit: frames on the GPU");
+        let got = barcodes(&out);
+        assert_eq!(got.len(), want.len(), "{bits}-bit");
+        for (k, (g, w)) in got.iter().zip(&want).enumerate() {
+            assert_eq!(g, w, "{bits}-bit: frame {k}");
+        }
+    }
+}

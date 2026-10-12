@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use vidcut_core::export::{ExportSettings, validate};
+use vidcut_core::export::{EncoderChoice, ExportSettings, validate};
 use vidcut_core::render::RenderPlan;
 
 use crate::error::{Context, Error, Result};
@@ -42,6 +42,9 @@ pub struct Report {
     pub samples: i64,
     pub video_encoder: Option<String>,
     pub audio_encoder: Option<String>,
+    /// Video frames decoded and scaled on the GPU (NVDEC, CUDA) on their way
+    /// to NVENC; the rest were made on the CPU.
+    pub gpu_frames: i64,
     pub seconds: f64,
     /// What loudness normalization did (`audio.loudness`).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -85,6 +88,31 @@ pub fn is_cancelled(e: &Error) -> bool {
 }
 
 pub(crate) const CANCELLED: &str = "export cancelled";
+
+/// The format of frames in GPU memory for `enc`: 10-bit P010 for 10-bit
+/// output, else NV12.
+fn gpu_pixel(enc: &encode::VideoEncoder) -> format::Pixel {
+    if enc.pixel == format::Pixel::P010LE {
+        format::Pixel::P010LE
+    } else {
+        format::Pixel::NV12
+    }
+}
+
+/// A CUDA device and frames for NVENC with SDR output; `None` for other
+/// encoders, HDR output (tone mapping is the CPU's) or without a device.
+fn gpu_output(
+    enc: &encode::VideoEncoder,
+    w: u32,
+    h: u32,
+) -> Option<(crate::cuda::CudaDevice, crate::cuda::CudaFrames)> {
+    if enc.kind != EncoderChoice::Nvenc || enc.hdr.is_some() {
+        return None;
+    }
+    let device = crate::cuda::CudaDevice::open().ok()?;
+    let frames = crate::cuda::CudaFrames::new(&device, gpu_pixel(enc), w, h).ok()?;
+    Some((device, frames))
+}
 
 /// Encodes `plan` with `settings` into `output`.
 ///
@@ -284,15 +312,24 @@ fn encode(
                         continue;
                     }
                 };
-                match encode::open_video(&enc, w, h, fps, global_header) {
+                // NVENC with SDR output takes frames in GPU memory, so pieces
+                // decoded on NVDEC never leave it; frames in memory if not.
+                if let Some((device, frames)) = gpu_output(&enc, w, h)
+                    && let Ok(o) =
+                        encode::open_video(&enc, w, h, fps, global_header, Some(frames.as_ptr()))
+                {
+                    opened = Some((enc, o, Some((device, frames))));
+                    break;
+                }
+                match encode::open_video(&enc, w, h, fps, global_header, None) {
                     Ok(o) => {
-                        opened = Some((enc, o));
+                        opened = Some((enc, o, None));
                         break;
                     }
                     Err(e) => failed.push((Some(enc.name.clone()), e)),
                 }
             }
-            let Some((enc, (encoder, vaapi))) = opened else {
+            let Some((enc, (encoder, vaapi), gpu)) = opened else {
                 if failed.len() == 1 {
                     return Err(failed.remove(0).1);
                 }
@@ -314,10 +351,17 @@ fn encode(
             ost.set_parameters(&encoder);
             ost.set_time_base(fps.invert());
             ost.set_avg_frame_rate(fps);
+            let frames = match gpu {
+                Some((device, frames)) => {
+                    VideoFrames::new(&plan.video, plan.fps, w, h, gpu_pixel(&enc), enc.hdr)
+                        .with_gpu(device, frames)
+                }
+                None => VideoFrames::new(&plan.video, plan.fps, w, h, enc.pixel, enc.hdr),
+            };
             Some(VideoOut {
                 encoder,
                 vaapi,
-                frames: VideoFrames::new(&plan.video, plan.fps, w, h, enc.pixel, enc.hdr),
+                frames,
                 enc_tb: fps.invert(),
                 stream_tb: fps.invert(),
                 name: enc.name.clone(),
@@ -471,6 +515,7 @@ fn encode(
         output: output.to_path_buf(),
         frames: plan.frames,
         samples: if audio.is_some() { plan.samples() } else { 0 },
+        gpu_frames: video.as_ref().map_or(0, |v| v.frames.gpu_frames()),
         video_encoder: video.map(|v| v.name),
         audio_encoder: audio.map(|a| a.spec.name),
         seconds: started.elapsed().as_secs_f64(),

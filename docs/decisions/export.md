@@ -117,6 +117,13 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
 - VAAPI: H.264 and HEVC on `renderD129` (AMD). Not on `renderD128` (the NVIDIA node), and no VAAPI AV1.
 - All 8 working configurations export frame-exactly (`gpu-tests`).
 
+**Frames on the GPU (NVENC, SDR output):**
+- NVENC is opened on frames in GPU memory (`cuda::CudaFrames`, NV12, or P010 for 10-bit output). Each source piece that the GPU shows as the CPU would decodes on NVDEC and scales with `scale_cuda` (`VideoFrames::with_gpu`); frames are picked by the sampling rule as on the CPU, so other rates repeat or skip GPU frames the same way.
+- **A piece qualifies** as for proxies (a video file, upright, SDR, BT.709 or untagged HD in video range), and also when it is progressive (frames are picked before scaling, so a deinterlacer would see gaps) and fills the output (the GPU can't pad: a 1920×800 film in a 1920×1080 export takes the CPU). Other pieces, stills and sequences decode and normalize on the CPU as before, and black frames are made there; they are uploaded to the encoder's frames. HDR output stays on the CPU (tone mapping), as do VAAPI and software encoders.
+- **Measured**, 60 s of 4K60 10-bit AV1: to 1080p H.264 34.7 s and 129 CPU-seconds before, 16.4 s and 3.3 now; to 2160p 53.7 s and 149 before, 51.9 s and 3.9 now, NVENC's default preset (p5) setting the pace. 1080p H.264 sources: the same time (NVENC-bound), 8.3 CPU-seconds down to 3.2.
+- The report counts the frames made on the GPU (`gpu_frames`).
+- **Tests:** `tests/export.rs` (`gpu-tests`) exports a plan of 720p H.264, 10-bit HEVC, 10-bit AV1, 60 and 24 fps sources, a seek back, black, an SD piece and a 4:3 one through NVENC in 8 and 10 bits: every frame's barcode is the CPU export's, and the qualifying pieces' frames were made on the GPU.
+
 **Details:**
 - Quality 0 with libx264 means lossless, which requires the High 4:4:4 Predictive profile.
 - SVT-AV1's info logging is silenced through `SVT_LOG=2`, set by the binary at startup.

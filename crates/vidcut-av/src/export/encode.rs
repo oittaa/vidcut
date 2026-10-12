@@ -438,12 +438,15 @@ impl Vaapi {
 
 /// Opens a video encoder for `enc` at `width`×`height` and `fps`.
 /// Returns the opened encoder and, for VAAPI, the upload context.
+/// With `gpu_frames` (NVENC), the encoder takes frames in GPU memory of
+/// that frames context.
 pub(crate) fn open_video(
     enc: &VideoEncoder,
     width: u32,
     height: u32,
     fps: ffmpeg::Rational,
     global_header: bool,
+    gpu_frames: Option<*mut ffi::AVBufferRef>,
 ) -> Result<(encoder::Video, Option<Vaapi>)> {
     let codec = encoder::find_by_name(&enc.name)
         .ok_or_else(|| Error::Invalid(format!("no {} encoder", enc.name)))?;
@@ -460,6 +463,15 @@ pub(crate) fn open_video(
         ctx.set_flags(codec::Flags::GLOBAL_HEADER);
     }
     let vaapi = match &enc.device {
+        _ if gpu_frames.is_some() => {
+            ctx.set_format(format::Pixel::CUDA);
+            let frames = unsafe { ffi::av_buffer_ref(gpu_frames.expect("checked")) };
+            if frames.is_null() {
+                return Err(Error::Invalid("no memory for the GPU frames".into()));
+            }
+            unsafe { (*ctx.as_mut_ptr()).hw_frames_ctx = frames };
+            None
+        }
         Some(node) if enc.kind == EncoderChoice::Vaapi => {
             let v = Vaapi::new(node, enc.pixel, width, height)?;
             ctx.set_format(format::Pixel::VAAPI);
@@ -501,7 +513,7 @@ fn try_gpu(
         hdr: None,
     };
     let (w, h) = (640, 360);
-    let (mut encoder, vaapi) = open_video(&enc, w, h, ffmpeg::Rational(30, 1), false)?;
+    let (mut encoder, vaapi) = open_video(&enc, w, h, ffmpeg::Rational(30, 1), false, None)?;
     let mut sw = frame::Video::new(pixel, w, h);
     crate::export::video::fill_black(&mut sw)?;
     let mut packets = 0;
