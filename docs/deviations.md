@@ -13,6 +13,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 - **Resolve:** projects live in a project database and are saved explicitly; Live Save is an option (manual, Project Manager chapters).
 - **vidcut:** a project is one `.vidcut` JSON file, written atomically after every committed change. There is no "unsaved changes" state.
 - **Why:** agents and scripts edit projects headless through the CLI, sometimes while the GUI has the same project open. One always-current file means the GUI, the CLI and the user never disagree about what the project contains. JSON is also diffable and readable for agents.
+- **Paths:** media go offline in Resolve when they move, and are found again with Relink Media or Relink Selected Clips (p. 668–669). vidcut's file stores the media and proxies in or under the project's folder relative to it, so moving or copying the folder, to another computer too, keeps them linked. Media elsewhere stay absolute, relinked with `vidcut media relink`.
 
 ## X2. One timeline per project file
 - **Resolve:** a project holds many timelines, listed in the Master bin (p. 655, 678).
