@@ -228,7 +228,7 @@ vidcut history undo                         # works across separate runs
 - `vidcut export start out.mp4` renders the timeline: its In–Out range when both marks are set, else everything.
   - The extension picks the container, and also the preset unless `--preset` is given.
   - Extra options: `--preset youtube-1080p`, `--encoder nvenc|vaapi|cpu|auto`, `--set video.quality=20`, `--range 1m..2m`, `--per-clip`, `--audio-only`, `--overwrite`.
-  - With NVENC (and `gpu.acceleration` on), progressive pieces decode on NVDEC and scale and pad on the GPU, turned upright and BT.601, full range and HDR (tone mapping, HDR output) converted there by libplacebo (which also pads in 10 bits; HDR by a shader doing the CPU's math); the rest decode on the CPU and go up. The result's `gpu_frames` counts the frames made on the GPU (export.md §5).
+  - With NVENC (and `gpu.acceleration` on), video pieces decode on NVDEC and deinterlace, scale and pad on the GPU, turned upright and BT.601, full range and HDR (tone mapping, HDR output) converted there by libplacebo (which also pads in 10 bits; HDR by a shader doing the CPU's math); the rest decode on the CPU and go up. The result's `gpu_frames` counts the frames made on the GPU (export.md §5).
   - `vidcut export plan out.mp4` (or `export start` with `--dry-run`) prints the plan and the chosen encoder without encoding.
   - Ctrl-C cancels cleanly (exit 9, no partial file).
   - With a GUI running, `--background` returns a job id at once; follow it with `vidcut jobs` commands (below).
@@ -353,7 +353,7 @@ The preview findings and the time-mapping rules are in [docs/decisions/preview.m
 - **Set `pkt_timebase` on every decoder** (`codec_ctx.pkt_timebase = stream.time_base`). Without it, FFmpeg can't adjust timestamps when it skips priming samples, and audio drifts by the codec delay.
 - **Color goes through `vidcut_av::color`** (export.md §4): HDR sources are tone-mapped for SDR output, SDR sources sit at 203 nits in HDR output, untagged HD is BT.709. Rotation metadata is applied everywhere (spec D33).
 - **`zscale` needs explicit output primaries** when converting to linear light: for untagged frames it otherwise fails with "no path between colorspaces".
-- **Interlaced sources are deinterlaced inside `VideoReader`** (`bwdif`, one frame per frame), before frames are picked. The preview adds the same filter per file (preview.md §5); mpv's own `deinterlace` makes one frame per field, which breaks frame-exact seeks.
+- **Interlaced sources are deinterlaced inside `VideoReader`** (`bwdif`, one frame per frame; `bwdif_cuda` for frames NVDEC decodes), before frames are picked. The preview adds the same filter per file (preview.md §5); mpv's own `deinterlace` makes one frame per field, which breaks frame-exact seeks.
 - **mpv's software renderer aborts on rotated video** (an assertion in `mp_image_crop`). The GUI renders with OpenGL, which rotates on the GPU, so `tests/live.rs` (software rendering) leaves rotated clips to `tests/gui.rs`.
 - **GPUs on the dev machine:**
   - NVIDIA on `renderD128`: NVENC works, VAAPI doesn't.

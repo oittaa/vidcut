@@ -258,8 +258,8 @@ pub struct VideoReader {
     rotation: u16,
     /// What the first decodable frame says about fields and color.
     first_props: Option<FrameProps>,
-    /// For interlaced streams: every decoded frame goes through it (on the
-    /// CPU; frames NVDEC decodes are the caller's to deinterlace).
+    /// For interlaced streams: every decoded frame goes through it, before
+    /// anyone picks frames (on the GPU for frames NVDEC decodes).
     deinterlacer: Option<Deinterlacer>,
     /// The stream's frames are interlaced.
     interlaced: bool,
@@ -267,9 +267,10 @@ pub struct VideoReader {
     cuda: Option<crate::cuda::CudaDevice>,
 }
 
-/// `bwdif` over a stream's frames in order: one progressive frame for each
-/// interlaced one, made from both its fields with the frames around it
-/// (send_frame); progressive frames pass through. Holds one frame back.
+/// `bwdif` (or `bwdif_cuda`) over a stream's frames in order: one
+/// progressive frame for each interlaced one, made from both its fields with
+/// the frames around it (send_frame); progressive frames pass through. Holds
+/// one frame back.
 struct Deinterlacer {
     graph: Option<filter::Graph>,
     /// The stream's time base, and the parameters the graph was built for.
@@ -292,29 +293,53 @@ impl Deinterlacer {
         }
     }
 
+    /// The graph for frames like `f`: `bwdif`, or for frames NVDEC decoded,
+    /// `bwdif_cuda` on the GPU, with the same options and so the same
+    /// frames.
     fn build(&mut self, f: &frame::Video) -> Result<()> {
         let sar = f.aspect_ratio();
-        let args = format!(
-            "video_size={}x{}:pix_fmt={}:time_base={}/{}:pixel_aspect={}/{}",
-            f.width(),
-            f.height(),
-            ffmpeg::ffi::AVPixelFormat::from(f.format()) as i32,
-            self.time_base.numerator(),
-            self.time_base.denominator(),
-            sar.numerator().max(1),
-            sar.denominator().max(1)
-        );
         let mut graph = filter::Graph::new();
         let find = |name: &str| {
             filter::find(name).ok_or_else(|| Error::Invalid(format!("no {name} filter")))
         };
-        graph
-            .add(&find("buffer")?, "in", &args)
-            .ctx(|| "creating deinterlacer source".into())?;
+        let on_gpu = f.format() == format::Pixel::CUDA;
+        if on_gpu {
+            let frames = unsafe { (*f.as_ptr()).hw_frames_ctx };
+            if frames.is_null() {
+                return Err(Error::Invalid("GPU frames without a frames context".into()));
+            }
+            crate::cuda::add_source(
+                &mut graph,
+                c"in",
+                ffmpeg::ffi::AVPixelFormat::AV_PIX_FMT_CUDA,
+                (f.width(), f.height()),
+                (self.time_base.into(), sar),
+                frames,
+                None,
+            )?;
+        } else {
+            let args = format!(
+                "video_size={}x{}:pix_fmt={}:time_base={}/{}:pixel_aspect={}/{}",
+                f.width(),
+                f.height(),
+                ffmpeg::ffi::AVPixelFormat::from(f.format()) as i32,
+                self.time_base.numerator(),
+                self.time_base.denominator(),
+                sar.numerator().max(1),
+                sar.denominator().max(1)
+            );
+            graph
+                .add(&find("buffer")?, "in", &args)
+                .ctx(|| "creating deinterlacer source".into())?;
+        }
         graph
             .add(&find("buffersink")?, "out", "")
             .ctx(|| "creating deinterlacer sink".into())?;
-        let spec = "bwdif=mode=send_frame:parity=auto:deint=interlaced";
+        let spec = if on_gpu {
+            "bwdif_cuda=mode=send_frame:parity=auto:deint=interlaced"
+        } else {
+            "bwdif=mode=send_frame:parity=auto:deint=interlaced"
+        };
         graph
             .output("in", 0)
             .and_then(|p| p.input("out", 0))
@@ -499,8 +524,8 @@ impl VideoReader {
     }
 
     /// Decoding on NVDEC: frames stay in GPU memory (`Pixel::CUDA`), the same
-    /// frames with the same timestamps as decoding on the CPU. Interlaced
-    /// frames come as they are ([`interlaced`](Self::interlaced) says so).
+    /// frames with the same timestamps as decoding on the CPU, interlaced
+    /// ones deinterlaced on the GPU as the CPU reader deinterlaces them.
     /// Fails when NVDEC can't decode the stream.
     pub fn open_cuda(source: &Input, device: &crate::cuda::CudaDevice) -> Result<Self> {
         let reader = Self::open_with(source, Some(device))?;
@@ -538,7 +563,7 @@ impl VideoReader {
             .first_props
             .is_some_and(|p| p.top_field_first.is_some());
         reader.interlaced = interlaced;
-        if interlaced && device.is_none() {
+        if interlaced {
             reader.deinterlacer = Some(Deinterlacer::new(reader.time_base));
         }
         Ok(reader)
@@ -611,8 +636,8 @@ impl VideoReader {
         })
     }
 
-    /// The stream's frames are interlaced: deinterlaced here when decoding
-    /// on the CPU, the caller's to deinterlace when decoding on NVDEC.
+    /// The stream's frames are interlaced (and deinterlaced here, on the
+    /// GPU when decoding on NVDEC).
     pub fn interlaced(&self) -> bool {
         self.interlaced
     }

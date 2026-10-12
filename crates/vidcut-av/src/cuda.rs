@@ -1,6 +1,6 @@
 //! The NVIDIA GPU as one pipeline: frames NVDEC decodes stay in GPU memory,
-//! are scaled there (`scale_cuda`, after `bwdif_cuda` for interlaced
-//! sources, then `pad_cuda`) and go to NVENC as they are. Pictures stored
+//! are deinterlaced there by the reader (`bwdif_cuda`), scaled (`scale_cuda`,
+//! then `pad_cuda`) and go to NVENC as they are. Pictures stored
 //! turned (spec D33), in another matrix than BT.709 (BT.601 SD, VP8), in
 //! full range, or in HDR or for HDR output (spec D35) are turned upright and
 //! converted first by libplacebo on Vulkan, on the same GPU. Proxies
@@ -227,15 +227,14 @@ fn shader_cache() -> Option<String> {
     Some(format!("{}/", dir.to_str()?))
 }
 
-/// Pictures for NVENC from frames NVDEC decoded: deinterlaced when the
-/// source is (one frame per frame, as the CPU reader makes them), scaled to
+/// Pictures for NVENC from frames NVDEC decoded (and the reader
+/// deinterlaced, one frame per frame, as the CPU reader does): scaled to
 /// fit `width`×`height` keeping the display aspect and padded with black to
 /// it, as the CPU's normalizer does, as `format` (8-bit NV12 or 10-bit
 /// P010) in the output's colors, square pixels, all in GPU memory.
 /// Timestamps stay the source's.
 pub struct CudaPictures {
     graph: filter::Graph,
-    time_base: ffmpeg::Rational,
     placebo: Option<Placebo>,
 }
 
@@ -298,12 +297,8 @@ fn filters(
     (w, h): (u32, u32),
     (fit_w, fit_h): (u32, u32),
     (width, height, out): (u32, u32, &str),
-    deinterlace: bool,
 ) -> String {
     let mut steps = Vec::new();
-    if deinterlace {
-        steps.push("bwdif_cuda=mode=send_frame:parity=auto:deint=interlaced".to_string());
-    }
     let (mut w, mut h) = (w, h);
     while w >= 2 * fit_w && h >= 2 * fit_h && w >= 4 && h >= 4 {
         (w, h) = ((w / 2) & !1, (h / 2) & !1);
@@ -425,7 +420,7 @@ fn placebo_options(
 /// `pixel` in GPU memory from `frames`, timed in `time_base`, with sample
 /// aspect `sar`. It needs to know where they are before it starts, so it is
 /// made by hand.
-fn add_source(
+pub(crate) fn add_source(
     graph: &mut filter::Graph,
     name: &std::ffi::CStr,
     pixel: ffi::AVPixelFormat,
@@ -506,7 +501,7 @@ fn take(graph: &mut filter::Graph, what: &str) -> Result<Option<(frame::Video, f
 
 impl CudaPictures {
     /// The pictures for the frames `reader` decodes on `device`, shown as
-    /// its stream says (turned upright, deinterlaced), for an output of
+    /// its stream says (turned upright), for an output of
     /// `target`'s dynamic range (`None`: SDR BT.709). `at_once`: each
     /// frame's picture is ready as soon as the frame is in, as an export
     /// picks them one by one; otherwise one may come with the next frame,
@@ -523,7 +518,6 @@ impl CudaPictures {
             .peek()
             .ok_or_else(|| Error::Invalid("no frames".into()))?;
         let (time_base, rotation) = (reader.time_base(), reader.rotation());
-        let deinterlace = reader.interlaced();
         if first.format() != format::Pixel::CUDA {
             return Err(Error::Invalid("not frames in GPU memory".into()));
         }
@@ -576,11 +570,6 @@ impl CudaPictures {
         } else {
             Some(Layout::Upright)
         };
-        if layout.is_some() && deinterlace {
-            return Err(Error::Invalid(
-                "no deinterlacer before libplacebo on the GPU".into(),
-            ));
-        }
         let placebo = match layout {
             Some(layout) => {
                 let stream = (stored, sar, rotation);
@@ -594,7 +583,7 @@ impl CudaPictures {
         let (size, spec, sar) = if let Some(Layout::Placed { .. }) = layout {
             ((width, height), "null".to_string(), ffmpeg::Rational(1, 1))
         } else {
-            let spec = filters(size, fitted, (width, height, out), deinterlace);
+            let spec = filters(size, fitted, (width, height, out));
             (size, spec, shown_sar)
         };
         let frames = placebo.as_ref().map_or(decoded, |p| p.output.0);
@@ -615,11 +604,7 @@ impl CudaPictures {
             .and_then(|p| p.parse(&spec))
             .ctx(|| format!("building {spec}"))?;
         graph.validate().ctx(|| format!("configuring {spec}"))?;
-        Ok(Self {
-            graph,
-            time_base,
-            placebo,
-        })
+        Ok(Self { graph, placebo })
     }
 
     /// The frames context of the pictures: what NVENC is opened with.
@@ -659,15 +644,9 @@ impl CudaPictures {
 
     /// The next picture, if one is ready: timed in the source's time base.
     pub fn pull(&mut self) -> Result<Option<frame::Video>> {
-        let Some((mut out, tb)) = take(&mut self.graph, "scaling on the GPU")? else {
+        let Some((mut out, _)) = take(&mut self.graph, "scaling on the GPU")? else {
             return Ok(None);
         };
-        // bwdif halves the time base (for field rates): back to the
-        // stream's.
-        let pts = out
-            .pts()
-            .map(|p| unsafe { ffi::av_rescale_q(p, tb.into(), self.time_base.into()) });
-        out.set_pts(pts);
         unsafe {
             (*out.as_mut_ptr()).sample_aspect_ratio = ffi::AVRational { num: 1, den: 1 };
         }
@@ -990,26 +969,25 @@ mod tests {
     #[test]
     fn big_shrinks_halve_first() {
         assert_eq!(
-            filters((3840, 2160), (960, 540), (960, 540, "nv12"), false),
+            filters((3840, 2160), (960, 540), (960, 540, "nv12")),
             "scale_cuda=w=1920:h=1080:interp_algo=bilinear,\
              scale_cuda=w=960:h=540:interp_algo=bilinear,\
              scale_cuda=w=960:h=540:format=nv12:interp_algo=bicubic"
         );
         assert_eq!(
-            filters((1280, 720), (960, 540), (960, 540, "nv12"), true),
-            "bwdif_cuda=mode=send_frame:parity=auto:deint=interlaced,\
-             scale_cuda=w=960:h=540:format=nv12:interp_algo=bicubic"
+            filters((1280, 720), (960, 540), (960, 540, "nv12")),
+            "scale_cuda=w=960:h=540:format=nv12:interp_algo=bicubic"
         );
         // A 2.4:1 film in 16:9: fitted, then centered on black.
         assert_eq!(
-            filters((1920, 800), (1920, 800), (1920, 1080, "nv12"), false),
+            filters((1920, 800), (1920, 800), (1920, 1080, "nv12")),
             "scale_cuda=w=1920:h=800:format=nv12:interp_algo=bicubic,\
              pad_cuda=w=1920:h=1080:x=0:y=140:color=black"
         );
         // An odd margin starts a row early, on the chroma grid, as on the
         // CPU.
         assert_eq!(
-            filters((1280, 534), (1280, 534), (1280, 720, "nv12"), false),
+            filters((1280, 534), (1280, 534), (1280, 720, "nv12")),
             "scale_cuda=w=1280:h=534:format=nv12:interp_algo=bicubic,\
              pad_cuda=w=1280:h=720:x=0:y=92:color=black"
         );
