@@ -72,6 +72,9 @@ pub struct Preview {
     /// them one file a frame at the project rate. Set by the host, which
     /// writes the lists.
     pub images: bool,
+    /// The project's sample rate and channel count, which the player's
+    /// audio output keeps whatever a clip has (preview.md §5).
+    pub audio_out: (u32, u16),
 }
 
 /// Plays fresh proxies in `plan` when the project asks for them (decision
@@ -116,6 +119,7 @@ pub fn build(plan: &RenderPlan, fillers: &Fillers, control: Option<FaderControl<
         read_ahead: false,
         deinterlace: false,
         images: false,
+        audio_out: (plan.sample_rate, plan.channels),
     }
 }
 

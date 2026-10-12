@@ -197,6 +197,41 @@ pub struct Player {
     pub error: Option<String>,
 }
 
+/// The options a preview file opens with (mpv's per-file `loadfile`
+/// options), at `start` seconds, playing or paused, images at `fps`.
+pub fn file_options(p: &Preview, start: &str, playing: bool, fps: Rational) -> String {
+    let mut options = format!("start={start},pause={}", if playing { "no" } else { "yes" });
+    // The output keeps the project's sample rate and channels whatever a
+    // clip has: at a cut into a clip with others (5.1 after stereo, 44.1 kHz
+    // after 48) mpv would otherwise drain and reopen the audio device, which
+    // stalls the picture and then drops frames to catch up.
+    let (rate, channels) = p.audio_out;
+    options.push_str(&format!(
+        ",audio-samplerate={rate},audio-channels={channels}"
+    ));
+    // Mixes the audio streams and applies gains (preview.md §10), for this
+    // file only.
+    if let Some(graph) = &p.audio_graph {
+        options.push_str(&format!(",lavfi-complex=%{}%{graph}", graph.len()));
+    }
+    // Network shares: read ahead, and keep what was read for seeking back
+    // and forth (mpv's cache stays off for local files).
+    if p.read_ahead {
+        options.push_str(",cache=yes,demuxer-max-back-bytes=150MiB");
+    }
+    // Interlaced sources: one frame per frame, as export makes them. (mpv's
+    // own deinterlacer makes one per field, and the half-frame bias of seeks
+    // would land on the previous frame's second field.)
+    if p.deinterlace {
+        options.push_str(",vf=bwdif=mode=send_frame:deint=interlaced");
+    }
+    // Image lists show a file a frame at the project rate.
+    if p.images {
+        options.push_str(&format!(",mf-fps={}", fps.as_f64()));
+    }
+    options
+}
+
 /// How long a seek may decode before seeks after it stop waiting for it.
 const STUCK_SEEK: Duration = Duration::from_secs(1);
 
@@ -354,31 +389,11 @@ impl Player {
     /// (Re)opens the EDL file at the playhead.
     fn loadfile(&mut self) -> u64 {
         let path = self.edl_path.to_string_lossy().into_owned();
-        let mut options = format!(
-            "start={},pause={}",
-            self.secs(self.position),
-            if self.speed > 0.0 { "no" } else { "yes" }
-        );
-        // Mixes the audio streams and applies gains (preview.md §10), for
-        // this file only.
-        if let Some(graph) = self.loaded.as_ref().and_then(|p| p.audio_graph.as_ref()) {
-            options.push_str(&format!(",lavfi-complex=%{}%{graph}", graph.len()));
-        }
-        // Network shares: read ahead, and keep what was read for seeking back
-        // and forth (mpv's cache stays off for local files).
-        if self.loaded.as_ref().is_some_and(|p| p.read_ahead) {
-            options.push_str(",cache=yes,demuxer-max-back-bytes=150MiB");
-        }
-        // Interlaced sources: one frame per frame, as export makes them.
-        // (mpv's own deinterlacer makes one per field, and the half-frame
-        // bias of seeks would land on the previous frame's second field.)
-        if self.loaded.as_ref().is_some_and(|p| p.deinterlace) {
-            options.push_str(",vf=bwdif=mode=send_frame:deint=interlaced");
-        }
-        // Image lists show a file a frame at the project rate.
-        if self.loaded.as_ref().is_some_and(|p| p.images) {
-            options.push_str(&format!(",mf-fps={}", self.fps.as_f64()));
-        }
+        let Some(preview) = &self.loaded else {
+            return self.instant_motion();
+        };
+        let start = self.secs(self.position);
+        let options = file_options(preview, &start, self.speed > 0.0, self.fps);
         let id = self.command(&["loadfile", &path, "replace", "-1", &options]);
         self.tracking = self.speed > 0.0;
         if self.mpv.is_some() {
@@ -674,6 +689,7 @@ mod tests {
             read_ahead: false,
             deinterlace: false,
             images: false,
+            audio_out: (48000, 2),
         }
     }
 

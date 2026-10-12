@@ -334,6 +334,7 @@ The preview findings and the time-mapping rules are in [docs/decisions/preview.m
 - **Players render in `App::logic`, not `App::ui`.** eframe skips `ui` for hidden windows but always calls `logic`.
 - **libmpv waits only 200 ms for the renderer to take a new frame.** Then it keeps the frame as its current picture and finishes the seek anyway, so "a new frame was rendered" doesn't prove a seek is on screen. The session counts a seek as shown only after the renderer presents the player following mpv's restart (docs/decisions/gui.md §4).
 - **mpv's EDL drops leading pictures at segment ends.** Encodes that decode a keyframe before the frames shown just ahead of it lose those frames in the preview when a cut ends there. The live session patches such tails (preview.md §9). Test cuts against fixtures with B-frames and real media, not only small fixtures.
+- **Timeline files pin mpv's audio output to the project's rate and channels** (`live::file_options`). At a cut into a clip with other audio, mpv otherwise drains and reopens the device, and the picture drops frames to catch up (preview.md §5).
 - **Only the session thread calls mpv's client API.** Seeks while a file is still loading are rejected by mpv; `Player::seek` reloads instead.
 - **File watching:** `notify` reports reads as access events. Ignore them, or a reload re-triggers itself forever.
 - **The half-frame bias is applied exactly once.** mpv EDL `start` values are raw source timestamps and carry it, so timeline seeks to frame `j` go to exactly `j/f`.

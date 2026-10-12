@@ -88,6 +88,11 @@ keep-open=always idle=yes pause=yes video-timing-offset=0
 
 For single-file sources, also `rebase-start-time=no`.
 
+**The audio output keeps the project's format.** Timeline files load with `audio-samplerate` and `audio-channels` set to the project's sample rate and channel count (`live::file_options`), so mpv converts each clip's audio to them, as export's mix does.
+- **Why:** mpv keeps its audio output through a change of decoded format only when the rate and channels stay the same. Otherwise it drains what it queued, closes the device and opens a new one: about 260 ms with PipeWire at a cut from stereo into 5.1. The picture waits for the audio clock, then drops frames to catch up.
+- **Between files too:** the output stays open through the `loadfile` that follows each edit.
+- `tests/preview.rs` plays across a cut from 48 kHz stereo into 44.1 kHz 5.1 and checks that mpv opened one output.
+
 **Interlaced sources** load with `vf=bwdif=mode=send_frame:deint=interlaced`, as a per-file option, whenever the plan has an interlaced clip (spec D34).
 - **Why not mpv's own deinterlacer:** `deinterlace=yes` makes one frame per field, and the half-frame bias of every seek (§1) would land on the previous frame's second field.
 - **Cost:** the software filter takes the whole file. With hardware decoding, every frame of a timeline holding an interlaced clip goes through system memory; timelines without one are unaffected.

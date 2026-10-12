@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 use vidcut::env::AvEnv;
-use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
+use vidcut_av::fixture::{self, AudioCodec, Container, FixtureSpec, VideoCodec};
 use vidcut_core::model::Settings;
 use vidcut_core::render::{VideoPiece, flatten};
 use vidcut_core::time::Rational;
@@ -321,4 +321,92 @@ fn proxies_play_frame_exactly() {
         }
         assert!(bad.is_empty(), "{}: {bad:#?}", enc.name);
     }
+}
+
+/// Playing across a cut into a clip with other audio (5.1 at 44.1 kHz after
+/// stereo at 48 kHz) keeps the one audio output, in the project's format:
+/// reopening it stalls the picture, then drops frames to catch up.
+#[test]
+fn a_cut_into_other_audio_keeps_the_audio_output() {
+    let Some(mut player) = Player::new() else {
+        return;
+    };
+    let spec = || FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 60);
+    let a = fixture::ensure(&spec()).unwrap();
+    let b = fixture::ensure(&spec().with_audio(AudioCodec::Aac, 44_100, 6)).unwrap();
+    let fps = Rational::new(30, 1).unwrap();
+    let settings = Settings {
+        fps,
+        width: 320,
+        height: 180,
+        auto_format: false,
+        ..Settings::default()
+    };
+    let mut ed = Editor::new(Project::new(settings), Default::default());
+    req(
+        &mut ed,
+        json!({"method": "media.add", "params": {"paths": [a, b]}}),
+    );
+    req(
+        &mut ed,
+        json!({"method": "edit.append", "params": {"media": "m1", "range": "0f..30f"}}),
+    );
+    req(
+        &mut ed,
+        json!({"method": "edit.append", "params": {"media": "m2", "range": "0f..60f"}}),
+    );
+    let p = ed.project();
+    let plan = flatten(p, 0, p.end()).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-preview-audio-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
+    let fillers = vidcut_av::filler::ensure(&dir.join("fillers"), 320, 180, fps).unwrap();
+    let preview = vidcut_core::preview::build(&plan, &fillers, None);
+    let edl = dir.join("timeline.edl");
+    std::fs::write(&edl, &preview.edl).unwrap();
+
+    player.mpv.request_log_messages("info").unwrap();
+    player
+        .mpv
+        .observe_property(2, "time-pos", Format::Double)
+        .unwrap();
+    // Playing from half a second before the cut to half a second after it.
+    let options = vidcut::live::file_options(&preview, "0.5", true, fps);
+    player
+        .mpv
+        .command_async(
+            0,
+            &["loadfile", edl.to_str().unwrap(), "replace", "-1", &options],
+        )
+        .unwrap();
+    let mut opened = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "playback stalled; audio outputs: {opened:#?}"
+        );
+        match player.mpv.wait_event(0.002) {
+            Some(Event::LogMessage { text, .. }) if text.starts_with("AO: [") => {
+                opened.push(text.trim().to_string());
+            }
+            Some(Event::PropertyChange {
+                id: 2,
+                value: Value::Double(t),
+                ..
+            }) if t > 1.5 => break,
+            Some(Event::EndFile { reason: 4, .. }) => panic!("mpv failed to play"),
+            _ => {}
+        }
+        if player.sw.update() & MPV_RENDER_UPDATE_FRAME != 0 {
+            player
+                .sw
+                .render_rgb0(320, 180, 320 * 4, &mut player.buf)
+                .unwrap();
+        }
+    }
+    assert_eq!(opened.len(), 1, "{opened:#?}");
+    assert!(opened[0].contains("48000Hz stereo 2ch"), "{opened:#?}");
 }
