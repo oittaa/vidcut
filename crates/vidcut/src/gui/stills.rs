@@ -10,7 +10,8 @@
 //! and shows its last picture until the next one is ready.
 
 use std::collections::HashMap;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
+use std::time::Duration;
 
 use eframe::egui;
 use vidcut_core::render::VideoPiece;
@@ -53,6 +54,10 @@ enum Outcome {
     Skipped,
 }
 
+/// How long a cell keeps its file and decoder open without being asked for
+/// a frame: a decoder holds frame buffers and a thread per core.
+const IDLE: Duration = Duration::from_secs(10);
+
 /// A cell's renderer thread, and the picture it showed last.
 struct Cell {
     jobs: Sender<(Key, Still)>,
@@ -92,7 +97,18 @@ impl Stills {
                 crate::threads::Work::Interactive,
                 move || {
                     let mut renderer = vidcut_av::export::still::StillRenderer::default();
-                    while let Ok(mut job) = rx.recv() {
+                    loop {
+                        let mut job = match rx.recv_timeout(IDLE) {
+                            Ok(job) => job,
+                            Err(RecvTimeoutError::Timeout) => {
+                                renderer = Default::default();
+                                match rx.recv() {
+                                    Ok(job) => job,
+                                    Err(_) => return,
+                                }
+                            }
+                            Err(RecvTimeoutError::Disconnected) => return,
+                        };
                         let mut skipped = 0;
                         for newer in rx.try_iter() {
                             if tx.send((job.0, n, Outcome::Skipped)).is_err() {

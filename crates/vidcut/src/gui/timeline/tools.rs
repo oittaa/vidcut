@@ -92,6 +92,8 @@ pub struct Dynamic {
     pub pending: i64,
     /// Play Around Current Selection (Space) pauses at this frame.
     around_until: Option<i64>,
+    /// Why the last run stopped by itself: the media or a neighbor ran out.
+    pub stopped: Option<String>,
 }
 
 /// What Dynamic Trim works on.
@@ -564,6 +566,7 @@ impl Workspace {
                     _ => dir,
                 };
                 d.run = Some((speed, now, d.pending));
+                d.stopped = None;
             }
         }
         if pressed(egui::Key::K)
@@ -616,8 +619,9 @@ impl Workspace {
             let mut last = d.pending;
             let step = if want > last { 1 } else { -1 };
             while last != want {
-                if dynamic_preview(&mut p.clone(), &target, mode, last + step).is_err() {
+                if let Err(e) = dynamic_preview(&mut p.clone(), &target, mode, last + step) {
                     d.run = None;
+                    d.stopped = Some(e.message);
                     break;
                 }
                 last += step;

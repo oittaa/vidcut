@@ -316,7 +316,13 @@ impl Workspace {
                     .monospace()
                     .color(Color32::from_rgb(240, 200, 40)),
             );
-            ui.label(dim("L/J trim (repeat for speed), K stops and applies, K+L/J one frame, Space plays around it, W leaves"));
+            match self.timeline.dynamic.as_ref().and_then(|d| d.stopped.as_ref()) {
+                Some(why) => ui.label(
+                    RichText::new(format!("Stopped here: {why}. K applies, J goes back"))
+                        .color(theme::ERROR),
+                ),
+                None => ui.label(dim("L/J trim (repeat for speed), K stops and applies, K+L/J one frame, Space plays around it, W leaves")),
+            };
         });
     }
 

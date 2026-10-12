@@ -451,7 +451,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - **Measurement:** pictures are measured at 96×54 and sounds in 10 ms peaks. Measurements are cached per file, so trying other thresholds is instant.
 - **D31. Boring Detector defaults** (p. 690). The manual gives none. Clips over 30 s are boring and clips under 10 frames are jump cuts (2 frames finds flash frames, p. 690). The detector looks at clips on video tracks, and its settings are view options kept between runs, not part of the project.
 - **D32. Dynamic Trim** (pp. 730–732).
-  - **Running:** L or J runs the trim at the shuttle speed (repeat for 2×, 4×, 8×), as playback would move. The run stops where the media or a neighbor runs out.
+  - **Running:** L or J runs the trim at the shuttle speed (repeat for 2×, 4×, 8×), as playback would move. The run stops where the media or a neighbor runs out, and shows it: the selected cut turns red and the viewer says why.
   - **Seeing it:** the viewer shows the two-up: the frames on both sides of the edit, or of the slipped or sliding clip, as the trim leaves them (exact frames, as the Trim Editor shows). The timeline draws the clips as the trim leaves them, so the cut moves while the run goes on.
   - **The selection:** the selected edit follows the trim. An undo, or someone else's edit, that takes the selected cut away clears the selection.
   - **Applying it:** K stops the run and applies it as one request (`edit.trim`, `edit.roll`, `edit.slip`, `edit.slide`, or `edit.audio_roll` when the selected edit is the J/L handle). K held with a tap of J or L applies one frame. W also applies what is pending before leaving.

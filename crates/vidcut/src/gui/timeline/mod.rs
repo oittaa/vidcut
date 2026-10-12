@@ -478,10 +478,20 @@ impl Workspace {
                 } else {
                     v1.rect.rect.y_range()
                 };
+                // Red where a Dynamic Trim run stopped at a limit.
+                let stopped = self
+                    .timeline
+                    .dynamic
+                    .as_ref()
+                    .is_some_and(|d| d.stopped.is_some());
                 painter.rect_filled(
                     Rect::from_x_y_ranges(a..=b, y),
                     0.0,
-                    Color32::from_rgb(90, 200, 90),
+                    if stopped {
+                        theme::ERROR
+                    } else {
+                        Color32::from_rgb(90, 200, 90)
+                    },
                 );
             }
             self.paint_silence(&painter, &layout.lower, &lower_scale, drawn);
