@@ -488,6 +488,23 @@ pub(crate) struct Conversion {
     pub after: String,
 }
 
+/// `scale` options that keep a YUV picture's matrix and range (its tags,
+/// or what is assumed without them) while it is resampled: told nothing,
+/// swscale converts to BT.601. Empty for RGB pictures.
+pub(crate) fn keep(f: &frame::Video) -> String {
+    let src = Source::of(f);
+    if src.rgb {
+        return String::new();
+    }
+    let matrix = match src.matrix {
+        Matrix::Bt601 => "bt601",
+        Matrix::Bt709 => "bt709",
+        Matrix::Bt2020 => "bt2020",
+    };
+    let range = if src.full_range { "full" } else { "limited" };
+    format!("in_color_matrix={matrix}:in_range={range}:out_color_matrix={matrix}:out_range={range}")
+}
+
 /// The conversion from `src` to an `out` picture of `target`'s dynamic
 /// range (`None`: SDR BT.709).
 pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -> Conversion {
