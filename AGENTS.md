@@ -185,13 +185,13 @@ vidcut undo                                 # works across separate runs
 **Stills and image sequences (spec D38, D39):**
 - `vidcut media add photo.jpg` adds a still. Edited without `--range` it lasts the project's still duration (5 s; `vidcut set --still-duration 3s`); a range or trim makes it up to 17 h 40 min long.
 - `vidcut media add renders/frame_000001.png --sequence [--fps 60]` adds the numbered files in a row around it as one clip (`frame_[000001-010560].png`), at the project's rate unless `--fps` is given. Without `--sequence` a numbered image is a still. Exporting a sequence fails if a frame's file is missing, rather than repeating the picture before it.
-- `media get` reports `still: true`, or `sequence: {pattern, first, count}`.
+- `media show` reports `still: true`, or `sequence: {pattern, first, count}`.
 
 **Proxies (spec D41, deviation X18):**
 - `vidcut proxy generate [m1 m2…] [--width 960]` writes an H.264 8-bit 4:2:0 proxy for each video or image sequence (default longest side 960; smaller pictures stay their size). With no ids, every such clip in the pool. Naming a still or an audio-only file is an error; those are skipped when generating everything. It shows progress like an export, Ctrl-C stops it without leaving a file, and the GUI and other `vidcut` runs aren't held up while it encodes. In a running GUI the encode is a job, like an export: the Jobs window shows its progress and Cancel, and `vidcut jobs` lists it (`kind: "proxy"`).
 - Automatic proxies (preferences `proxies.*`, File > Preferences): while `--proxies` is on, a running GUI makes them by itself for image sequences, videos over 3840×2160 and files over 150 Mb/s, after an import and when proxies are turned on; these jobs show `origin: "session"`. Headless runs never do. `vidcut proxy generate --auto` takes only what those rules pick; the proxy size default is `proxies.size`.
 - `vidcut proxy remove [m1…]` deletes the proxy files and clears them. `vidcut set --proxies true` plays fresh proxies in the preview (the Media Pool has the same switch). Export, `frame`, analysis and OTIO keep the original paths. Preview audio stays on the original file.
-- Proxy frames keep the source's presentation timestamps, so swapping the preview path stays frame-exact. `media get` reports the proxy path and `stale: true` when the source size or modification time no longer matches. Files live in `proxies/` beside the project (or `~/.cache/vidcut/proxies` when the project path is unknown).
+- Proxy frames keep the source's presentation timestamps, so swapping the preview path stays frame-exact. `media show` reports the proxy path and `stale: true` when the source size or modification time no longer matches. Files live in `proxies/` beside the project (or `~/.cache/vidcut/proxies` when the project path is unknown).
 
 **Bins:** `vidcut bins` lists them. `bins add "Interviews/Day 1"` (parents too), `bins rename A B`, `bins remove A` (its media move up a level, deviation X6), `media add FILE --bin A`, `media move m1 m2 --bin A` (`""` is the top level). `media list` shows each item's bin.
 
@@ -241,7 +241,7 @@ vidcut undo                                 # works across separate runs
 - `vidcut boring [--boring 30s --jump 10f]` lists clips too long and too short (the Boring Detector).
 - `vidcut storyboard -o board.png [--every 5s --columns 4 --width 320]` draws a picture of every shot with timecode and clip id: the quickest way to look at a whole edit.
 - `vidcut export out.mp4 --set audio.loudness=-14` normalizes the mix to −14 LUFS (one gain, true peak ≤ −1 dBTP); the result reports the gain.
-- `vidcut export out.mp4 --set video.codec=hevc --set video.hdr=pq` (or `hlg`) exports HDR in 10 bits (HEVC, AV1 or VP9). Without it, HDR sources are tone-mapped to SDR. `media get` reports each clip's `hdr`, `rotation` and interlaced `fields`.
+- `vidcut export out.mp4 --set video.codec=hevc --set video.hdr=pq` (or `hlg`) exports HDR in 10 bits (HEVC, AV1 or VP9). Without it, HDR sources are tone-mapped to SDR. `media show` reports each clip's `hdr`, `rotation` and interlaced `fields`.
 - `vidcut edit slide c3 --by 5f` moves a clip keeping its media; its neighbors give and take.
 - Measuring decodes a file once; the results are cached (`~/.cache/vidcut/analysis/`), so trying other settings is quick.
 

@@ -124,7 +124,7 @@ pub enum Request {
         /// Only the media the automatic proxy rules pick (preferences
         /// `proxies`) that have no fresh proxy, of `media` or of the pool;
         /// none is fine.
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        #[serde(default)]
         auto: bool,
     },
     /// Delete proxy files and clear them from the pool. With no `media`,
@@ -1081,7 +1081,8 @@ impl Request {
             }
         })?;
         // serde can't deny unknown fields next to `flatten`, so compare keys:
-        // a mistyped parameter must fail rather than be silently ignored.
+        // a mistyped parameter must fail rather than be silently ignored. A
+        // null is no value: an optional parameter left out on the way back.
         if let (Some(given), Ok(serde_json::Value::Object(parsed))) =
             (params.as_object(), serde_json::to_value(&request))
         {
@@ -1091,9 +1092,9 @@ impl Request {
                 .map(|p| p.keys().map(String::as_str).collect())
                 .unwrap_or_default();
             let unknown: Vec<&str> = given
-                .keys()
-                .map(String::as_str)
-                .filter(|k| !known.contains(k))
+                .iter()
+                .filter(|(k, v)| !v.is_null() && !known.contains(&k.as_str()))
+                .map(|(k, _)| k.as_str())
                 .collect();
             if !unknown.is_empty() {
                 return Err(format!(
@@ -1328,6 +1329,26 @@ pub struct Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_parameter_given_is_known() {
+        use serde_json::json;
+        // What a client may send for leaving things at their defaults: a
+        // flag that is false, an optional parameter that is null.
+        for params in [
+            json!({ "auto": false }),
+            json!({ "media": null, "width": null, "auto": false }),
+            json!({ "media": ["m1"], "auto": true }),
+        ] {
+            Request::from_parts("proxy.generate", Some(params.clone()))
+                .unwrap_or_else(|e| panic!("{params}: {e}"));
+        }
+        // A mistyped parameter fails, whatever its value.
+        for params in [json!({ "autoo": true }), json!({ "autoo": false })] {
+            let e = Request::from_parts("proxy.generate", Some(params)).unwrap_err();
+            assert!(e.contains("unknown parameter(s) autoo"), "{e}");
+        }
+    }
 
     #[test]
     fn parses_methods_with_and_without_params() {

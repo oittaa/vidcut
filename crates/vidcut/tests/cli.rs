@@ -195,6 +195,34 @@ fn builds_and_edits_a_timeline() {
 }
 
 #[test]
+fn proxies_from_the_command_line() {
+    let sb = Sandbox::new("proxy");
+    let a = fixture(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (30, 1),
+        30,
+    ));
+    assert!(
+        sb.cmd(&["new"])
+            .arg(sb.project())
+            .status()
+            .unwrap()
+            .success()
+    );
+    sb.ok(&["media", "add", s(&a)]);
+    // Plain and automatic: both send `auto`, false or true.
+    sb.ok(&["proxy", "generate"]);
+    let m = sb.ok(&["media", "show", "m1"]);
+    assert_eq!(m["result"]["proxy"]["stale"], false, "{m}");
+    sb.ok(&["proxy", "generate", "--auto"]);
+    sb.ok(&["proxy", "remove"]);
+    assert!(sb.ok(&["media", "show", "m1"])["result"]["proxy"].is_null());
+}
+
+#[test]
 fn errors_have_stable_exit_codes() {
     let sb = Sandbox::new("errors");
     let a = fixture(FixtureSpec::new(
