@@ -306,6 +306,12 @@ impl Workspace {
             .map_or((0, 0), super::tiles::Tiles::usage)
     }
 
+    /// How many timeline filmstrip pictures are on their way: asked for and
+    /// not made yet, or being made (for tests).
+    pub fn timeline_tiles_pending(&self) -> usize {
+        self.tiles.as_ref().map_or(0, super::tiles::Tiles::pending)
+    }
+
     /// The frame of the selected edit, if one is selected (for tests).
     pub fn selected_edit(&self) -> Option<i64> {
         self.timeline.edit.map(|e| e.at)

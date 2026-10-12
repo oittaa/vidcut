@@ -4,6 +4,7 @@
 //! time); above `thumbnails.cache_limit_mb` the least recently used go first.
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::SystemTime;
 
 use vidcut_av::thumbs::Image;
@@ -67,9 +68,10 @@ pub fn load_tiles(path: &Path) -> Option<Vec<(i64, Image)>> {
 /// Adds `tiles` to the block file `path`, with what it holds. Failing only
 /// costs decoding them again.
 pub fn store_tiles(path: &Path, tiles: &[(i64, Image)]) {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    // Another thread may write the same block: each writes its own part.
-    static PARTS: AtomicU64 = AtomicU64::new(0);
+    // Workers write blocks one at a time: two reading the same block before
+    // either renames would each write it without the other's tiles.
+    static WRITING: Mutex<()> = Mutex::new(());
+    let _writing = WRITING.lock().unwrap_or_else(|e| e.into_inner());
     let mut all = load_tiles(path).unwrap_or_default();
     for (frame, image) in tiles {
         if !all.iter().any(|(f, _)| f == frame) {
@@ -87,11 +89,7 @@ pub fn store_tiles(path: &Path, tiles: &[(i64, Image)]) {
     let Ok(bytes) = vidcut_av::thumbs::to_bytes(&images, &frames) else {
         return;
     };
-    let part = path.with_extension(format!(
-        "part{}-{}",
-        std::process::id(),
-        PARTS.fetch_add(1, Ordering::Relaxed)
-    ));
+    let part = path.with_extension(format!("part{}", std::process::id()));
     let written = path
         .parent()
         .map_or(Ok(()), std::fs::create_dir_all)
@@ -203,6 +201,35 @@ mod tests {
         // Nothing left of the parts.
         let names: Vec<_> = std::fs::read_dir(tmp.path()).unwrap().flatten().collect();
         assert_eq!(names.len(), 1);
+    }
+
+    #[test]
+    fn tiles_written_at_once_all_stay() {
+        let tmp = tempfile::Builder::new()
+            .prefix("vidcut-thumbcache-race-")
+            .tempdir()
+            .unwrap();
+        let tile = Image {
+            width: 4,
+            height: 2,
+            rgba: vec![128; 4 * 2 * 4],
+        };
+        for round in 0..20 {
+            // Four workers write their tiles of one block at the same time.
+            let path = tmp.path().join(format!("m.t16-b{round}.thumbs"));
+            let start = std::sync::Barrier::new(4);
+            std::thread::scope(|s| {
+                for frame in 0..4 {
+                    let (path, tile, start) = (&path, &tile, &start);
+                    s.spawn(move || {
+                        start.wait();
+                        store_tiles(path, &[(frame, tile.clone())]);
+                    });
+                }
+            });
+            let kept = load_tiles(&path).unwrap();
+            assert_eq!(kept.iter().map(|t| t.0).collect::<Vec<_>>(), [0, 1, 2, 3]);
+        }
     }
 
     #[test]

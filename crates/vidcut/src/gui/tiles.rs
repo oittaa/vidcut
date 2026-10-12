@@ -91,6 +91,8 @@ pub struct Tiles {
     /// Asked for while painting this frame, and kept ones shown.
     asked: RefCell<Vec<Job>>,
     shown: RefCell<Vec<TileKey>>,
+    /// Asked for in the last frame, except those that couldn't be made.
+    missing: HashSet<TileKey>,
     queue: Arc<Queue>,
     results: Receiver<(TileKey, Image)>,
     sender: Sender<(TileKey, Image)>,
@@ -109,6 +111,7 @@ impl Tiles {
             disk: None,
             asked: RefCell::default(),
             shown: RefCell::default(),
+            missing: HashSet::new(),
             queue: Arc::new(Queue {
                 waiting: Mutex::default(),
                 ready: Condvar::new(),
@@ -273,6 +276,11 @@ impl Tiles {
         }
         let asked = std::mem::take(self.asked.get_mut());
         let mut w = self.queue.waiting.lock().unwrap_or_else(|e| e.into_inner());
+        self.missing = asked
+            .iter()
+            .map(|j| j.key.clone())
+            .filter(|k| !w.failed.contains(k))
+            .collect();
         let mut seen = HashSet::new();
         let jobs = asked
             .into_iter()
@@ -335,6 +343,13 @@ impl Tiles {
     /// How many pictures are kept and their bytes.
     pub fn usage(&self) -> (usize, usize) {
         (self.kept.values().map(BTreeMap::len).sum(), self.bytes)
+    }
+
+    /// How many tiles are on their way: asked for in the last frame and not
+    /// made yet, or being made.
+    pub fn pending(&self) -> usize {
+        let w = self.queue.waiting.lock().unwrap_or_else(|e| e.into_inner());
+        self.missing.union(&w.busy).count()
     }
 }
 
