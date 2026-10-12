@@ -547,6 +547,163 @@ fn hdr_is_tone_mapped_for_sdr_and_kept_for_hdr() {
     assert_eq!(n, 30);
 }
 
+/// (Y, Cb, Cr) in 8-bit video range BT.709 of a BT.2020 PQ color given as
+/// 10-bit video-range codes, as the export converts HDR into SDR: linear
+/// light with the reference white (203 nits) at 1.0, BT.709 primaries, the
+/// mobius curve (knee 0.8, peak 1000 nits) on the brightest channel,
+/// negative channels black, a 2.4 power.
+fn pq_to_sdr((y, cb, cr): (u16, u16, u16)) -> [f64; 3] {
+    let y = (f64::from(y) - 64.0) / 876.0;
+    let (cb, cr) = (
+        (f64::from(cb) - 512.0) / 896.0,
+        (f64::from(cr) - 512.0) / 896.0,
+    );
+    let (kr, kb) = (0.2627, 0.0593);
+    let r = y + 2.0 * (1.0 - kr) * cr;
+    let b = y + 2.0 * (1.0 - kb) * cb;
+    let g = (y - kr * r - kb * b) / (1.0 - kr - kb);
+    let linear = |v: f64| {
+        let p = v.max(0.0).powf(1.0 / 78.84375);
+        let l = ((p - 0.8359375).max(0.0) / (18.8515625 - 18.6875 * p)).powf(1.0 / 0.1593017578125);
+        l * 10000.0 / 203.0
+    };
+    let lin = [linear(r), linear(g), linear(b)];
+    const TO_709: [[f64; 3]; 3] = [
+        [1.660491, -0.587641, -0.072850],
+        [-0.124550, 1.132900, -0.008349],
+        [-0.018151, -0.100579, 1.118730],
+    ];
+    let c = TO_709.map(|row| row[0] * lin[0] + row[1] * lin[1] + row[2] * lin[2]);
+    let (j, peak) = (0.8, 4.9261);
+    let a = -j * j * (peak - 1.0) / (j * j - 2.0 * j + peak);
+    let b = (j * j - 2.0 * j * peak + peak) / (peak - 1.0);
+    let scale = (b * b + 2.0 * b * j + j * j) / (b - a);
+    let sig = c[0].max(c[1]).max(c[2]).max(1e-6);
+    let mapped = if sig <= j {
+        sig
+    } else {
+        scale * (sig + a) / (sig + b)
+    };
+    let v = c.map(|c| (c * mapped / sig).max(0.0).powf(1.0 / 2.4));
+    let y = 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+    [
+        16.0 + 219.0 * y,
+        128.0 + 224.0 * (v[2] - y) / 1.8556,
+        128.0 + 224.0 * (v[0] - y) / 1.5748,
+    ]
+}
+
+/// HDR colors are read with their own matrix (BT.2020): `scale`, which
+/// only scales them before `zscale` converts, is told it, or swscale took
+/// them to BT.601 and saturated colors came out tens of levels off. PQ
+/// stripes into SDR come out as the math says, and kept in PQ they stay as
+/// they were.
+#[test]
+fn hdr_colors_keep_their_matrix() {
+    use vidcut_av::fixture::Picture;
+    use vidcut_core::model::Hdr;
+    let fps = Rational::new(30, 1).unwrap();
+    let colors = src(
+        FixtureSpec::new(VideoCodec::Hevc10, Container::Mkv, 640, 480, (30, 1), 10)
+            .hdr(Hdr::Pq)
+            .picture(Picture::Colors)
+            .no_audio(),
+    );
+    let p = plan(fps, 640, 480, vec![v(&colors, 0, 10)], vec![]);
+    let dir = out_dir("hdr-colors");
+    // The middle half of each of the four stripes.
+    let stripes = |path: &Path| -> Vec<[f64; 3]> {
+        let f = frame_at(path, 5);
+        (0..4)
+            .map(|i| region_means(&f, (i * 160 + 40, i * 160 + 120)))
+            .collect()
+    };
+    let codes = Picture::COLORS
+        .map(|(y, cb, cr)| (u16::from(y) << 2, u16::from(cb) << 2, u16::from(cr) << 2));
+    let sdr = dir.path().join("sdr.mkv");
+    render(&p, &lossless(), &sdr);
+    // Within rounding and zimg's float approximations.
+    for (i, (got, color)) in stripes(&sdr).iter().zip(codes).enumerate() {
+        let want = pq_to_sdr(color);
+        for c in 0..3 {
+            assert!(
+                (got[c] - want[c]).abs() <= 1.5,
+                "SDR stripe {i}: {got:?}, not {want:?}"
+            );
+        }
+    }
+    let mut settings = lossless();
+    let video = settings.video.as_mut().unwrap();
+    video.codec = VCodec::Hevc;
+    video.quality = Some(4);
+    video.hdr = Some(Hdr::Pq);
+    let pq = dir.path().join("pq.mkv");
+    render(&p, &settings, &pq);
+    for (i, (got, (y, cb, cr))) in stripes(&pq).iter().zip(codes).enumerate() {
+        let want = [y, cb, cr].map(|c| f64::from(c) / 4.0);
+        for c in 0..3 {
+            assert!(
+                (got[c] - want[c]).abs() <= 1.0,
+                "PQ stripe {i}: {got:?}, not {want:?}"
+            );
+        }
+    }
+    // Frames for NVENC (NV12, P010) are the planar ones interleaved: zimg
+    // writes the YUV, not swscale.
+    use vidcut_av::export::video::VideoFrames;
+    use vidcut_av::ffmpeg::format::Pixel;
+    let sdr_source = src(
+        FixtureSpec::new(VideoCodec::H264, Container::Mp4, 640, 480, (30, 1), 10)
+            .picture(Picture::Colors)
+            .no_audio(),
+    );
+    for (source, target, planar, semi) in [
+        (&colors, None, Pixel::YUV420P, Pixel::NV12),
+        (
+            &sdr_source,
+            Some(Hdr::Pq),
+            Pixel::YUV420P10LE,
+            Pixel::P010LE,
+        ),
+    ] {
+        let first = |pixel| {
+            VideoFrames::new(&[v(source, 0, 1)], fps, 640, 480, pixel, target)
+                .next_frame()
+                .unwrap()
+                .unwrap()
+        };
+        let (a, b) = (first(planar), first(semi));
+        // Samples of a plane, 10-bit ones shifted to the low bits.
+        let samples = |f: &vidcut_av::ffmpeg::frame::Video, p: usize, step: usize| {
+            let (w, h) = (f.plane_width(p) as usize, f.plane_height(p) as usize);
+            let (data, stride) = (f.data(p), f.stride(p));
+            let bytes = if matches!(f.format(), Pixel::YUV420P | Pixel::NV12) {
+                1
+            } else {
+                2
+            };
+            let shift = if f.format() == Pixel::P010LE { 6 } else { 0 };
+            let mut out = Vec::new();
+            for y in 0..h {
+                for x in 0..w * step {
+                    let at = y * stride + x * bytes;
+                    let v = if bytes == 1 {
+                        u16::from(data[at])
+                    } else {
+                        u16::from_le_bytes([data[at], data[at + 1]])
+                    };
+                    out.push(v >> shift);
+                }
+            }
+            out
+        };
+        assert_eq!(samples(&a, 0, 1), samples(&b, 0, 1), "{semi:?}: luma");
+        let (cb, cr) = (samples(&a, 1, 1), samples(&a, 2, 1));
+        let interleaved: Vec<u16> = cb.iter().zip(&cr).flat_map(|(b, r)| [*b, *r]).collect();
+        assert_eq!(interleaved, samples(&b, 1, 2), "{semi:?}: chroma");
+    }
+}
+
 #[test]
 fn a_failed_rename_leaves_no_part_file() {
     // The finished file can't take the output's name (a folder is there):
@@ -1669,7 +1826,6 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
 }
 
 /// Frame `k` of `path`.
-#[cfg(feature = "gpu-tests")]
 fn frame_at(path: &Path, k: usize) -> vidcut_av::ffmpeg::frame::Video {
     let mut r = VideoReader::open(path).unwrap();
     (0..=k)
@@ -1704,7 +1860,6 @@ fn picture_starts(f: &vidcut_av::ffmpeg::frame::Video) -> (usize, usize) {
 
 /// The mean (Y, Cb, Cr) in 8-bit units of the columns from `a` to `b` of
 /// `f`, in its middle rows.
-#[cfg(feature = "gpu-tests")]
 fn region_means(f: &vidcut_av::ffmpeg::frame::Video, (a, b): (usize, usize)) -> [f64; 3] {
     use vidcut_av::ffmpeg::format::Pixel;
     let ten = f.format() == Pixel::YUV420P10LE;

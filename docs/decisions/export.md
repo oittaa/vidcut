@@ -91,6 +91,7 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
   - **Into HDR** (`video.hdr = pq` or `hlg`): the same linear light, SDR white at 203 nits (BT.2408), then BT.2020 and the transfer. An SDR source's white lands at PQ code 573 of 1023, exactly 203 nits.
   - **Output tags:** encoders tag what they write: BT.709, or BT.2020 with PQ or HLG.
   - **zimg detail:** `zscale` needs explicit output primaries when it converts to linear. Untagged frames otherwise give it no path.
+  - **swscale only scales what `zscale` converts:** `scale` is told the source's matrix and range for both sides. Told nothing, it converted the matrix to BT.601 (the graph's source carries no colorspace), and `zscale` then read BT.601 numbers as BT.2020: saturated HDR colors came out up to 70 levels off, and HDR kept as HDR was rewritten in BT.601 under a BT.2020 tag. `zscale` writes the YUV itself, for NVENC's NV12 and P010 in their planar layouts, which swscale only interleaves: left to choose, it wrote RGB, and swscale's conversion to YUV came out over half a level brighter than zimg's.
   - **Cost at 4K60 with NVENC:** about 31 frames a second with conversion, against 50 for plain SDR.
   - **Real footage:** a 4K60 SDR clip exported as PQ and tone-mapped back differs from the original by about 6 of 255 on average.
   - **Not done:** mastering-display and content-light metadata aren't written. Players then assume their own peak.

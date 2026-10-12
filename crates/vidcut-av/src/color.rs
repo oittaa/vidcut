@@ -178,6 +178,17 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
         scale: String::new(),
         after: String::new(),
     };
+    // swscale only scales YUV that `zscale` converts, or that stays as it
+    // is: told nothing, it converts the matrix to BT.601 (the graph's
+    // source carries no colorspace), and BT.2020 colors came out wrong.
+    let keep = if src.rgb {
+        String::new()
+    } else {
+        format!(
+            ":in_color_matrix={in_matrix}:in_range={in_range}\
+             :out_color_matrix={in_matrix}:out_range={in_range}"
+        )
+    };
     match (src.hdr, target) {
         // SDR to SDR: swscale converts the matrix and range as it scales.
         (None, None) if src.rgb && rgb_out => none(),
@@ -199,17 +210,20 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
             after: String::new(),
         },
         // The same HDR transfer: nothing to convert.
-        (Some(s), Some(t)) if s == t && !src.rgb && src.matrix == Matrix::Bt2020 => none(),
+        (Some(s), Some(t)) if s == t && !src.rgb && src.matrix == Matrix::Bt2020 => Conversion {
+            scale: keep,
+            after: String::new(),
+        },
         // HDR into SDR: linear light with the reference white at 1.0, BT.709
         // primaries, the tone curve, BT.709's transfer.
         (Some(_), None) => {
             let back = if rgb_out {
-                "zscale=t=709:p=709:r=full,format=gbrp16le"
+                "zscale=t=709:p=709:r=full,format=gbrp16le".to_string()
             } else {
-                "zscale=t=709:m=709:r=limited"
+                format!("zscale=t=709:m=709:r=limited{}", zscale_writes(out))
             };
             Conversion {
-                scale: String::new(),
+                scale: keep,
                 after: format!(
                     ",zscale={},format=gbrpf32le,zscale=p=709,\
                      tonemap=tonemap=mobius:param=0.8:desat=0:peak={:.4},{back}",
@@ -220,14 +234,27 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
         }
         // Into HDR: linear light with SDR white at the reference white.
         (_, Some(t)) => Conversion {
-            scale: String::new(),
+            scale: keep,
             after: format!(
                 ",zscale={},format=gbrpf32le,\
-                 zscale=p=2020:t={}:m=2020_ncl:r=limited:npl={REFERENCE_WHITE}",
+                 zscale=p=2020:t={}:m=2020_ncl:r=limited:npl={REFERENCE_WHITE}{}",
                 src.to_linear(),
-                transfer(Some(t))
+                transfer(Some(t)),
+                zscale_writes(out)
             ),
         },
+    }
+}
+
+/// The format `zscale` is to write YUV for `out` in: NV12 and P010 (frames
+/// for NVENC), which it can't write, as their planar layouts, which swscale
+/// only interleaves. Left to choose, it wrote RGB, and swscale's conversion
+/// to YUV came out over half a level brighter than zimg's.
+fn zscale_writes(out: format::Pixel) -> &'static str {
+    match out {
+        format::Pixel::NV12 => ",format=yuv420p",
+        format::Pixel::P010LE => ",format=yuv420p10le",
+        _ => "",
     }
 }
 
@@ -267,6 +294,56 @@ pub(crate) fn tag(ctx: *mut ffi::AVCodecContext, hdr: Option<Hdr>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A 4:2:0 picture of `w`×`h` in `hdr`'s transfer (`None`: untagged).
+    fn picture(w: u32, h: u32, hdr: Option<Hdr>) -> frame::Video {
+        use ffi::AVColorTransferCharacteristic as T;
+        let mut f = frame::Video::new(format::Pixel::YUV420P10LE, w, h);
+        unsafe {
+            (*f.as_mut_ptr()).color_trc = match hdr {
+                Some(Hdr::Pq) => T::AVCOL_TRC_SMPTE2084,
+                Some(Hdr::Hlg) => T::AVCOL_TRC_ARIB_STD_B67,
+                None => T::AVCOL_TRC_UNSPECIFIED,
+            };
+        }
+        f
+    }
+
+    #[test]
+    fn hdr_is_scaled_in_its_own_matrix_and_zscale_writes_the_yuv() {
+        use format::Pixel as P;
+        // swscale keeps BT.2020 for zscale to read; zscale writes NV12's
+        // planar layout.
+        let pq = Source::of(&picture(3840, 2160, Some(Hdr::Pq)));
+        let c = conversion(pq, P::NV12, None);
+        assert!(c.scale.contains(":in_color_matrix=bt2020:in_range=limited"));
+        assert!(
+            c.scale
+                .contains(":out_color_matrix=bt2020:out_range=limited")
+        );
+        assert!(
+            c.after
+                .contains("tonemap=mobius:param=0.8:desat=0:peak=4.9261")
+        );
+        assert!(
+            c.after
+                .ends_with("zscale=t=709:m=709:r=limited,format=yuv420p")
+        );
+        // Kept as PQ: only scaled.
+        let c = conversion(pq, P::P010LE, Some(Hdr::Pq));
+        assert!(c.scale.contains(":out_color_matrix=bt2020"));
+        assert_eq!(c.after, "");
+        // SD into HLG for NVENC: BT.601 kept, P010's planar layout.
+        let sd = Source::of(&picture(720, 480, None));
+        let c = conversion(sd, P::P010LE, Some(Hdr::Hlg));
+        assert!(c.scale.contains(":in_color_matrix=bt601"));
+        assert!(c.scale.contains(":out_color_matrix=bt601"));
+        assert!(c.after.contains("p=170m"));
+        assert!(
+            c.after
+                .ends_with("t=arib-std-b67:m=2020_ncl:r=limited:npl=203,format=yuv420p10le")
+        );
+    }
 
     #[test]
     fn untagged_pictures_are_guessed_as_mpv_guesses() {
