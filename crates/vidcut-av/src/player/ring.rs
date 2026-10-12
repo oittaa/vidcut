@@ -58,6 +58,12 @@ impl Ring {
         w.saturating_sub(from)
     }
 
+    /// Frames the writer can write now. Dropped frames the reader hasn't
+    /// passed yet still take room: it may be reading them.
+    pub(crate) fn room(&self) -> u64 {
+        self.capacity - (self.written() - self.read_position())
+    }
+
     /// Writes as much of `samples` (interleaved) as there is room for;
     /// returns the frames written. The writer's side.
     pub(crate) fn push(&self, samples: &[f32]) -> usize {

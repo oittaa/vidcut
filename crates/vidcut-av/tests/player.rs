@@ -381,6 +381,37 @@ fn a_fader_and_the_mute_change_the_sound_while_it_plays() {
 }
 
 #[test]
+fn a_device_that_stops_pulling_holds_nothing_up() {
+    // Seeks while playing drop what was queued; a device that pulls
+    // nothing leaves the dropped sound in the ring. The player must neither
+    // block on it nor play the sound from before the last seek.
+    let a = pcm();
+    let (player, out) = manual(plan(&[clip(&a, 0, 90)], 0));
+    player.play(1.0);
+    for k in 0..40 {
+        player.seek(k * 2);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    player.seek(60);
+    // The device comes back. Its first buffer passes over the dropped sound
+    // and may find nothing yet: the ring was full of it. Then the sound is
+    // the last seek's, from the beep that starts source second 2, and the
+    // clock waited for it.
+    let mut sound = out.pull(480, Instant::now() - Duration::from_millis(10));
+    sound.extend(pull_full(&out, 480));
+    let mono: Vec<f32> = sound.chunks(2).map(|c| c[0]).collect();
+    let onsets = beep::onsets(&mono, 0.1, 400);
+    assert!(
+        onsets == [0] || onsets == [480],
+        "frame 60's beep: {onsets:?}"
+    );
+    assert_eq!(player.status().position, 60, "in frame 60");
+    let start = Instant::now();
+    drop(player);
+    assert!(start.elapsed() < Duration::from_secs(2), "closing waited");
+}
+
+#[test]
 fn requests_return_at_once_and_seeks_merge() {
     // 1080p frames that take a while to decode; the caller never waits.
     let big = src(
