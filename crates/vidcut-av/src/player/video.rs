@@ -7,11 +7,15 @@
 //! up to the frame wanted, and is kept (as the two-up's renderer does,
 //! preview.md §9); playing backwards, the window before renders while this
 //! one is shown.
+//!
+//! Paused with nothing else to decode, it decodes the frame prepared of the
+//! plan played next, on a reader of its own made for that picture, so the
+//! reader it plays with stays where it stands.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use vidcut_core::render::VideoPiece;
+use vidcut_core::render::{RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
 
 use super::frame::Picture;
@@ -71,6 +75,9 @@ struct Decoder {
     /// The frame a late player caught up at, ahead of the clock: decoding
     /// goes on from there while the clock comes.
     caught_up: Option<i64>,
+    /// The prepared frame failed to decode after this change: not tried
+    /// again until something changes.
+    prepared_failed: Option<u64>,
 }
 
 pub(crate) fn run(shared: Arc<Shared>) {
@@ -91,6 +98,7 @@ pub(crate) fn run(shared: Arc<Shared>) {
         failed: None,
         seek_cost: Duration::ZERO,
         caught_up: None,
+        prepared_failed: None,
     };
     while let Some(snap) = shared.snap() {
         if d.plan_gen != Some(snap.plan_gen) {
@@ -99,6 +107,11 @@ pub(crate) fn run(shared: Arc<Shared>) {
             // The reader keeps its file open; where it stands in the new
             // plan is found by reading pieces of it again.
             d.next = None;
+            // Frames of another plan say nothing of which way the viewer
+            // goes in this one (a switch to the other thing a viewer
+            // shows): no window behind until it steps back here.
+            d.last_focus = None;
+            d.back = false;
         }
         if d.hardware != snap.hardware {
             // Another decoder: its pictures, from the one shown on.
@@ -240,8 +253,41 @@ impl Decoder {
                 self.decode(snap, t, back)?;
                 Ok(true)
             }
+            None if dir == Direction::Paused => self.prepare(snap),
             None => Ok(false),
         }
+    }
+
+    /// Decodes the prepared frame of the plan played next, when it isn't
+    /// kept; whether it did. A failure isn't the viewer's: it is traced,
+    /// and the frame tried again once something changes.
+    fn prepare(&mut self, snap: &Snap) -> Result<bool> {
+        let Some((plan, t)) = &snap.prepared else {
+            return Ok(false);
+        };
+        let id = plan.id(*t);
+        if self.shared.store.contains(&id) || self.prepared_failed == Some(snap.version) {
+            return Ok(false);
+        }
+        trace!("prepare {t} of the plan played next");
+        let picture = (|| {
+            let mut frames = self.new_reader(&plan.plan);
+            frames.read_pieces(&plan.pieces_from(*t));
+            let frame = frames
+                .next_frame()?
+                .ok_or_else(|| Error::Invalid(format!("no frame {t} to prepare")))?;
+            Ok(picture(&frames, plan, *t, frame))
+        })();
+        match picture {
+            Ok(p) => self.shared.store.put(id, Arc::new(p)),
+            // Something new is wanted: the reader played with didn't move.
+            Err(e) if is_cancelled(&e) => {}
+            Err(e) => {
+                trace!("preparing {t} failed: {e}");
+                self.prepared_failed = Some(snap.version);
+            }
+        }
+        Ok(true)
     }
 
     /// The reader gives `t` by decoding on from where it stands.
@@ -269,24 +315,30 @@ impl Decoder {
     /// The reader, made anew when the rate, the size of black or the
     /// decoding changed.
     fn reader(&mut self) -> &mut VideoFrames {
-        let p = &self.plan.plan;
+        let plan = self.plan.clone();
+        let p = &plan.plan;
         let key = (p.fps, p.width, p.height, self.hardware);
         if self.frames.as_ref().is_none_or(|(k, _)| *k != key) {
-            let mut frames =
-                VideoFrames::new(&[], p.fps, p.width, p.height, format::Pixel::YUV420P, None)
-                    .decoded();
-            if self.hardware {
-                let cuda = self
-                    .cuda
-                    .get_or_insert_with(|| crate::cuda::CudaDevice::open().ok());
-                if let Some(device) = cuda {
-                    frames = frames.decode_on(device.clone());
-                }
-            }
+            let frames = self.new_reader(p);
             self.frames = Some((key, frames));
             self.next = None;
         }
         &mut self.frames.as_mut().expect("just made").1
+    }
+
+    /// A reader of `p`'s pictures, decoding as asked last.
+    fn new_reader(&mut self, p: &RenderPlan) -> VideoFrames {
+        let mut frames =
+            VideoFrames::new(&[], p.fps, p.width, p.height, format::Pixel::YUV420P, None).decoded();
+        if self.hardware {
+            let cuda = self
+                .cuda
+                .get_or_insert_with(|| crate::cuda::CudaDevice::open().ok());
+            if let Some(device) = cuda {
+                frames = frames.decode_on(device.clone());
+            }
+        }
+        frames
     }
 
     /// Decodes timeline frame `t`, and on the way what is worth keeping:
@@ -316,14 +368,7 @@ impl Decoder {
                 let frame = frames
                     .next_frame()?
                     .ok_or_else(|| Error::Invalid(format!("no frame {i} to play")))?;
-                let decoder = plan.shows_a_file(i).then(|| {
-                    if frames.on_nvdec() {
-                        Decoding::Nvdec
-                    } else {
-                        Decoding::Cpu
-                    }
-                });
-                let picture = Picture::new(frame, frames.rotation(), decoder);
+                let picture = picture(frames, &plan, i, frame);
                 self.next = Some(i + 1);
                 self.picture_bytes = picture.bytes();
                 self.shared.store.put(plan.id(i), Arc::new(picture));
@@ -372,4 +417,21 @@ impl Decoder {
         self.next = None;
         Ok(t - (pos - start))
     }
+}
+
+/// The picture of timeline frame `t` of `plan`, decoded by `frames`.
+fn picture(
+    frames: &VideoFrames,
+    plan: &Plan,
+    t: i64,
+    frame: crate::ffmpeg::frame::Video,
+) -> Picture {
+    let decoder = plan.shows_a_file(t).then(|| {
+        if frames.on_nvdec() {
+            Decoding::Nvdec
+        } else {
+            Decoding::Cpu
+        }
+    });
+    Picture::new(frame, frames.rotation(), decoder)
 }

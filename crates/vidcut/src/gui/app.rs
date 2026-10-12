@@ -1,6 +1,6 @@
 //! The eframe app on wgpu: the [`Workspace`], window commands and window
-//! captures. The viewers' pictures are presented by a thread of their own
-//! ([`Viewer`]); the UI only shows them (docs/decisions/preview.md §4).
+//! captures. The viewer's picture is presented by a thread of its own
+//! ([`Viewer`]); the UI only shows it (docs/decisions/preview.md §4).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -14,7 +14,7 @@ use vidcut_core::request::GuiPanel;
 use super::theme;
 use super::video::{Viewer, ViewerHandle};
 use super::workspace::{Picture, Workspace};
-use crate::live::{self, Capture, Image, PlayerId, Presented};
+use crate::live::{self, Capture, Image, Presented};
 
 /// Work the session asks of the UI thread.
 enum UiTask {
@@ -50,16 +50,16 @@ impl Port {
 }
 
 impl live::Renderer for Port {
-    fn attach(&self, player: PlayerId, engine: Option<Arc<vidcut_av::player::Player>>) {
-        self.viewer.attach(player, engine);
+    fn attach(&self, engine: Option<Arc<vidcut_av::player::Player>>) {
+        self.viewer.attach(engine);
     }
 
-    fn present(&self, player: PlayerId, done: Presented) {
-        self.viewer.present(player, done);
+    fn present(&self, done: Presented) {
+        self.viewer.present(done);
     }
 
-    fn capture_viewer(&self, player: PlayerId, done: Capture) {
-        self.viewer.capture(player, done);
+    fn capture_viewer(&self, done: Capture) {
+        self.viewer.capture(done);
     }
 
     fn capture_window(&self, done: Capture) {
@@ -109,7 +109,7 @@ pub struct App {
 /// ends without it.
 const QUIT_PATIENCE: Duration = Duration::from_secs(5);
 
-/// The players' sound: the system's default device.
+/// The player's sound: the system's default device.
 fn audio_device() -> Box<dyn vidcut_av::player::AudioOutput> {
     Box::new(vidcut_av::player::CpalOutput::new())
 }
@@ -146,8 +146,8 @@ impl App {
         let (handle, session) = live::start(live::Config {
             project,
             create,
-            players: Some(live::Players {
-                audio: Arc::new(|_| audio_device()),
+            player: Some(live::PlayerConfig {
+                audio: Arc::new(audio_device),
                 budget: vidcut_av::player::DEFAULT_BUDGET,
             }),
             preview_error: None,
@@ -254,11 +254,8 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let pictures = self.viewer.sync(&self.render, self.ws.wants);
-        for id in PlayerId::ALL {
-            let (texture, has_frame) = pictures[id.index()];
-            self.ws.pictures[id.index()] = Picture { texture, has_frame };
-        }
+        let (texture, has_frame) = self.viewer.sync(&self.render, self.ws.want);
+        self.ws.picture = Picture { texture, has_frame };
         let ctx = ui.ctx().clone();
         self.window_screenshots(&ctx);
         self.ws.ui(ui);

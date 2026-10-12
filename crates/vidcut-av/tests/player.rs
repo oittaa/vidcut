@@ -536,6 +536,70 @@ fn a_device_that_stops_pulling_holds_nothing_up() {
 }
 
 #[test]
+fn the_plan_played_next_shows_its_prepared_frame_at_once() {
+    // A viewer's source and timeline through one player: the frame of the
+    // one not shown is prepared, decoded while the player is paused with
+    // nothing else to decode, and held whatever the budget, so switching
+    // to it shows it at once.
+    let (a, b) = (h264(), hevc());
+    let timeline = plan(&[clip(&a, 0, 30), clip(&b, 10, 30)], 0);
+    let source = plan(&[clip(&b, 0, 90)], 0);
+    let wait_prepared = |player: &Player| {
+        let started = Instant::now();
+        while !player.status().prepared {
+            assert!(
+                started.elapsed() < Duration::from_secs(10),
+                "never prepared: {:?}",
+                player.status()
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    };
+    // Room for a few pictures (10-bit ones are 173 kB here): those not
+    // held go as others come.
+    let config = Config {
+        budget: 1 << 20,
+        audio_scrubbing: false,
+        ..Config::default()
+    };
+    let player = Player::new(timeline.clone(), config, Box::new(ManualOutput::new())).unwrap();
+    player.seek(20);
+    assert_eq!(shown_at(&player, 20), rendered(&timeline, 20));
+    player.prepare(Some((source.clone(), 70)));
+    wait_prepared(&player);
+    // The timeline's pictures fill the budget many times over; the
+    // prepared one stays.
+    for t in 21..60 {
+        player.step(1);
+        assert_eq!(shown_at(&player, t), rendered(&timeline, t), "step to {t}");
+    }
+    assert!(player.status().prepared, "held whatever the budget");
+    // Switching shows it before the decode thread could have run.
+    player.set_plan_at(source.clone(), 70).unwrap();
+    let shown = player.present(Instant::now()).expect("a picture");
+    assert_eq!((shown.frame, shown.exact), (70, true));
+    assert_eq!(code(&shown.picture), rendered(&source, 70));
+    // And back: the timeline's frame prepared in turn (decoded again, if
+    // the source's pictures pushed it out).
+    player.prepare(Some((timeline.clone(), 25)));
+    wait_prepared(&player);
+    player.set_plan_at(timeline.clone(), 25).unwrap();
+    let shown = player.present(Instant::now()).expect("a picture");
+    assert_eq!((shown.frame, shown.exact), (25, true));
+    assert_eq!(code(&shown.picture), rendered(&timeline, 25));
+    // A frame not decoded yet: the picture shown before stays until it is.
+    player.prepare(None);
+    assert!(!player.status().prepared);
+    player.set_plan_at(source.clone(), 5).unwrap();
+    let shown = player.present(Instant::now()).expect("a picture");
+    if !shown.exact {
+        assert_eq!(code(&shown.picture), rendered(&timeline, 25));
+    }
+    assert_eq!(shown_at(&player, 5), rendered(&source, 5));
+    assert_eq!(player.status().error, None);
+}
+
+#[test]
 fn requests_return_at_once_and_seeks_merge() {
     // 1080p frames that take a while to decode; the caller never waits.
     let big = src(

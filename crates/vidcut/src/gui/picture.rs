@@ -17,7 +17,7 @@ use vidcut_av::player::{Layout, Memory, Picture};
 use vidcut_av::thumbs::Image;
 use vidcut_core::model::Hdr;
 
-/// The GPU and the shader pass, shared by both viewers' screens.
+/// The GPU and the shader pass the viewer's screen draws with.
 pub struct Gpu {
     device: wgpu::Device,
     queue: wgpu::Queue,

@@ -1,5 +1,5 @@
 //! The GUI: eframe on wgpu (Vulkan on Linux) on the UI thread; the
-//! project, players and everything else in the live session (crate::live).
+//! project, the player and everything else in the live session (crate::live).
 //! See docs/decisions/gui.md.
 
 mod app;

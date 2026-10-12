@@ -12,7 +12,7 @@ use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use vidcut::live::{self, Capture, Origin, PlayerId, Presented, WindowChange};
+use vidcut::live::{self, Capture, Origin, Presented, WindowChange};
 use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
 use vidcut_core::model::Settings;
 use vidcut_core::time::Rational;
@@ -23,10 +23,10 @@ const BIN: &str = env!("CARGO_BIN_EXE_vidcut");
 struct NoRenderer;
 
 impl live::Renderer for NoRenderer {
-    fn present(&self, _: PlayerId, done: Presented) {
+    fn present(&self, done: Presented) {
         done(None);
     }
-    fn capture_viewer(&self, _: PlayerId, done: Capture) {
+    fn capture_viewer(&self, done: Capture) {
         done(Err(vidcut_core::Error::usage("no renderer in tests")));
     }
     fn capture_window(&self, done: Capture) {
@@ -253,7 +253,7 @@ fn an_agent_cuts_silence_over_mcp_live_in_the_gui() {
     let (h, session) = live::start(live::Config {
         project: Some(path.clone()),
         create: false,
-        players: None,
+        player: None,
         preview_error: Some("no preview in tests".into()),
         renderer: Arc::new(NoRenderer),
         notify: Arc::new(|| {}),

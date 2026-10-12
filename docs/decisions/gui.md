@@ -13,9 +13,9 @@
 | Thread | Owns | Never does |
 |---|---|---|
 | **UI** (eframe on wgpu) | the egui context and its window; shows the viewer's targets as textures | draw a viewer picture, wait for the session |
-| **Viewer** (`gui/video.rs`) | presents both players' engines: draws their pictures, answers presents and viewer screenshots | wait for the UI |
-| **Session** (`live`) | the open project, both players' engines, viewer/selection/clipboard state, the command log | touch the GPU |
-| **Engines** (per player, player.md §1) | decoding, the mix, the audio device | touch shared state |
+| **Viewer** (`gui/video.rs`) | presents the player's engine: draws its picture, answers presents and viewer screenshots | wait for the UI |
+| **Session** (`live`) | the open project, the player's engine, viewer/selection/clipboard state, the command log | touch the GPU |
+| **Engine** (player.md §1) | decoding, the mix, the audio device | touch shared state |
 | **IPC** | one listener plus one thread per connection | anything but forward requests and wait for answers |
 | **Workers** (2) | thumbnails and waveforms | touch shared state (they report back by message) |
 | **Tasks** | one thread per export job, frame render, screenshot encode or project-less request | touch the session's state |
@@ -77,7 +77,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 ## 5. Rendering and screenshots
 
 **Rendering** (preview.md §4).
-- The viewer thread draws each player's picture with the shader into a target the viewer's size, and the UI shows the targets. Not the UI thread: on GNOME Wayland with NVIDIA, presenting a hidden window blocks that thread until the window shows again, and Wayland can't show it by request. Seeks, screenshots and edits keep working meanwhile (`tests/gui.rs`); what needs the UI (window screenshots, opening windows) waits. `gui.quit` ends the process without the window when it hasn't closed in 5 s.
+- The viewer thread draws the player's picture with the shader into a target the viewer's size, and the UI shows the target. Not the UI thread: on GNOME Wayland with NVIDIA, presenting a hidden window blocks that thread until the window shows again, and Wayland can't show it by request. Seeks, screenshots and edits keep working meanwhile (`tests/gui.rs`); what needs the UI (window screenshots, opening windows) waits. `gui.quit` ends the process without the window when it hasn't closed in 5 s.
 
 **`gui.screenshot` targets:**
 - **`viewer`** (the default) reads the player's target back: the picture exactly as the viewer shows it, at the viewer's size. It works while the window is hidden.
@@ -108,16 +108,15 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 
 ## 7. Previews
 
-**Players.**
-- **Source player:** Source Clip and Source Tape share it.
-- **Timeline player:** the program.
-- Switching modes pauses the player being left, and each content type keeps its own playhead.
+**One player.**
+- **The source** (Source Clip and Source Tape) and **the timeline** (the program) each keep their own playhead.
+- One engine plays whichever the viewer shows. Switching pauses it and plays the other from its playhead; the frame of the one not shown is kept ready, so it shows at once (preview.md §1).
 
 **Source Tape span marks (D17).** In Source Tape mode, I and O set `tape.marks.set` with the pool's media ids in tape order and tape-frame `in`/`out` (half-open, D16). A span on one clip is stored on the project as both tape marks and that clip's source marks; the scroll bar still shows the clip's handles offset onto the tape. A span across clips is stored only in `tape_marks` on the project (with the order snapshot); the bar draws one shaded range in tape frames and edit gestures send `{"tape": true}` so the core turns the span into one source range per touched clip in a single request. Alt+X sends `tape.marks.clear` with the clip under the playhead when the span is one clip. Crossing spans clear only the tape marks.
 
-**What they load.** Each player is an engine (`vidcut_av::player`) playing a render plan the export would render: `render::tape` for sources and `render::flatten_lanes` for the timeline, fresh proxies swapped in (preview.md §1). Source time therefore maps to frames exactly as the timeline's does: the source viewer counts project frames (deviation X8).
+**What it loads.** The engine (`vidcut_av::player`) plays a render plan the export would render: `render::tape` for sources and `render::flatten_lanes` for the timeline, fresh proxies swapped in (preview.md §1). Source time therefore maps to frames exactly as the timeline's does: the source viewer counts project frames (deviation X8).
 
-**Reloads.** Timeline reloads are coalesced: one at once, then at most one per 100 ms while edits keep coming. Every live request (state, screenshots, playback, viewer changes) applies a pending reload first, so it sees the timeline as edited; a seek or step loads straight at its target. A reload gives the engine the new plan: its position, open files and kept pictures stay, and it plays on if it plays.
+**Reloads.** Timeline reloads are coalesced: one at once, then at most one per 100 ms while edits keep coming. Every live request (state, screenshots, playback, viewer changes) applies a pending reload first, so it sees the timeline as edited; a seek or step loads straight at its target. A reload gives the engine the new plan: its position, open files and kept pictures stay, and it plays on if it plays. While the source is shown, the timeline's new frame is prepared instead.
 
 **Stills and image sequences (M9).** The engine reads them as export does. The pool's thumbnails of a sequence spread over its own pictures — its count, even when more numbered files follow in the same folder — and picture measurements stop at that count. A still has its one picture. A thumbnail time past the last of those pictures stays on the last one and does not open the next path.
 
@@ -215,7 +214,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 - **Filmstrips are kept on disk** (`thumbcache.rs`): 24 pictures of a media file, fitted in 192×108, as one JPEG strip in `~/.cache/vidcut/thumbs` (about 6 KB a picture, where the RGBA in memory takes 83 KB). The file name holds the media file's path hash, size and modification time, and the strip's layout, so a changed file or another layout never reads a stale strip.
 - **Eviction:** a strip's modification time is its last use. After each new strip, the least recently used go until the rest fit `thumbnails.cache_limit_mb` (512 MB by default, about 3,000 media files).
 - **Why:** decoding 24 pictures takes from a tenth of a second to seconds per clip, much more from a network share, and it ran again for every clip each time a project opened. The project still keeps no pictures (deviation X1).
-- **Preferences** (`preferences.toml`, deviation X12) are read whenever a thumbnail job, an export or a proxy runs, so a change from the CLI applies to a running GUI at once. GPU acceleration also reaches the players at once: the session watches the preferences file, and when the preference changed, whoever changed it (the Preferences window, a CLI run, the file by hand), each player's engine switches its decoder and decodes its pictures anew, the one shown first (preview.md §3). `preferences.set` empties the cache when it is turned off and trims it when the limit drops.
+- **Preferences** (`preferences.toml`, deviation X12) are read whenever a thumbnail job, an export or a proxy runs, so a change from the CLI applies to a running GUI at once. GPU acceleration also reaches the player at once: the session watches the preferences file, and when the preference changed, whoever changed it (the Preferences window, a CLI run, the file by hand), the engine switches its decoder and decodes its pictures anew, the one shown first (preview.md §3). `preferences.set` empties the cache when it is turned off and trims it when the limit drops.
 - **Tests:** `tests/thumbnails.rs` opens a project whose media moved away and still gets its thumbnails, then turns the cache off in the Preferences window with one request.
 
 **Timeline filmstrips** (`gui/tiles.rs`): each tile shows the frame under it.

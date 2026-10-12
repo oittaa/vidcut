@@ -141,7 +141,7 @@ impl Workspace {
             use eframe::emath::GuiRounding;
             fit(area.shrink(2.0), aspect).round_to_pixels(ppp)
         };
-        self.wants[id.index()] = [
+        self.want = [
             (picture.width() * ppp).round() as i32,
             (picture.height() * ppp).round() as i32,
         ];
@@ -172,7 +172,7 @@ impl Workspace {
         let painter = ui.painter_at(area);
         painter.rect_filled(area, CornerRadius::ZERO, Color32::from_rgb(12, 12, 13));
         let player = self.snap.player(id).clone();
-        let video = self.pictures[id.index()];
+        let video = self.picture;
         let played = video.texture.filter(|_| player.loaded && video.has_frame);
         match played {
             Some(tex) => {

@@ -1,16 +1,17 @@
 //! The live session: the running GUI's core thread.
 //!
-//! One thread owns the open project, both players and everything the
+//! One thread owns the open project, the viewer's player and everything the
 //! viewer shows. The GUI, IPC clients and background jobs reach it only
 //! through messages ([`Handle`]). After every change it publishes an
 //! immutable [`Snapshot`], which the UI thread reads without waiting: the UI
-//! never blocks on the session. The players are vidcut's own engine
-//! (`vidcut_av::player`): the session sends them requests, which return at
-//! once, and the renderer presents their pictures.
+//! never blocks on the session. The player is vidcut's own engine
+//! (`vidcut_av::player`), one for the source and the timeline: the session
+//! sends it requests, which return at once, and the renderer presents its
+//! pictures.
 //!
 //! Requests are the same [`Request`]s the CLI runs headless. Project edits go
 //! through the project's [`Editor`](vidcut_core::Editor) and are saved before
-//! the reply; live-only requests (viewer, players, selection, screenshots)
+//! the reply; live-only requests (viewer, player, selection, screenshots)
 //! act on the session. Requests that wait for something (a seek waits until
 //! its frame is on screen, a screenshot for the picture, an export for the
 //! encoder) reply later, without blocking other requests.
@@ -79,19 +80,19 @@ pub type Capture = Box<dyn FnOnce(Result<Image>) + Send>;
 /// (`None`: the frame's picture wasn't decoded yet).
 pub type Presented = Box<dyn FnOnce(Option<i64>) + Send>;
 
-/// What the session needs from whoever renders the players: the GUI, or a
+/// What the session needs from whoever renders the viewer: the GUI, or a
 /// test harness.
 pub trait Renderer: Send + Sync {
-    /// The engine `player` shows from now on (`None`: nothing). The
-    /// renderer presents it: draws the picture `present` gives as the clock
-    /// moves.
-    fn attach(&self, _player: PlayerId, _engine: Option<Arc<vidcut_av::player::Player>>) {}
-    /// Draw `player`'s current picture now, then call `done` with the frame
-    /// shown. The session asks once a seek or load has its picture: the
-    /// viewer then shows its frame (docs/decisions/gui.md §4).
-    fn present(&self, player: PlayerId, done: Presented);
-    /// The picture `player` shows, as displayed.
-    fn capture_viewer(&self, player: PlayerId, done: Capture);
+    /// The engine the viewer shows from now on (`None`: nothing, black).
+    /// The renderer presents it: draws the picture `present` gives as the
+    /// clock moves.
+    fn attach(&self, _engine: Option<Arc<vidcut_av::player::Player>>) {}
+    /// Draw the engine's current picture now, then call `done` with the
+    /// frame shown. The session asks once a seek or load has its picture:
+    /// the viewer then shows its frame (docs/decisions/gui.md §4).
+    fn present(&self, done: Presented);
+    /// The picture the viewer shows, as displayed.
+    fn capture_viewer(&self, done: Capture);
     /// The whole window.
     fn capture_window(&self, done: Capture);
     /// Change the window.
@@ -115,8 +116,8 @@ pub struct Config {
     pub project: Option<PathBuf>,
     /// Create the project file if it doesn't exist.
     pub create: bool,
-    /// Source and timeline players; `None` runs without preview.
-    pub players: Option<Players>,
+    /// The viewer's player; `None` runs without preview.
+    pub player: Option<PlayerConfig>,
     /// Why there is no preview, if so.
     pub preview_error: Option<String>,
     pub renderer: Arc<dyn Renderer>,
@@ -126,12 +127,12 @@ pub struct Config {
     pub socket: Option<PathBuf>,
 }
 
-/// What the preview's two players need.
-pub struct Players {
-    /// Makes each player's audio output: the system's device in the GUI
-    /// (a silent stand-in when it won't open), a stand-in in tests.
+/// What the viewer's player needs.
+pub struct PlayerConfig {
+    /// Makes its audio output: the system's device in the GUI (a silent
+    /// stand-in when it won't open), a stand-in in tests.
     pub audio: MakeOutput,
-    /// Memory for each player's pictures.
+    /// Memory for its pictures: what is shown, and the frame of what isn't.
     pub budget: usize,
 }
 
@@ -168,12 +169,11 @@ pub(crate) enum Msg {
         project: Option<PathBuf>,
         reply: Option<Reply>,
     },
-    /// The picture `player`'s viewer is at landed (or failed).
-    Picture(PlayerId),
-    /// The renderer presented `player` after `motion` was asked, showing
+    /// The picture the viewer is at landed (or failed).
+    Picture,
+    /// The renderer presented the engine after `motion` was asked, showing
     /// `frame` exactly.
     Presented {
-        player: PlayerId,
         motion: u64,
         frame: Option<i64>,
     },
@@ -358,24 +358,22 @@ impl Handle {
 pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     let (tx, rx) = channel();
     let pid = std::process::id();
-    let (audio, budget) = match config.players {
+    let (audio, budget) = match config.player {
         Some(p) => (Some(p.audio), p.budget),
         None => (None, 0),
     };
-    let player = |id: PlayerId| {
+    let player = {
         let (tx, notify) = (tx.clone(), config.notify.clone());
         Player::new(
-            id,
-            audio.clone(),
+            audio,
             budget,
             config.renderer.clone(),
             Arc::new(move || {
-                let _ = tx.send(Msg::Picture(id));
+                let _ = tx.send(Msg::Picture);
                 notify();
             }),
         )
     };
-    let players = [player(PlayerId::Source), player(PlayerId::Timeline)];
     let instance = config.socket.clone().map(|socket| Instance {
         pid,
         socket,
@@ -428,7 +426,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         tape_position: 0,
         tape: Arc::new(Vec::new()),
         tape_media: None,
-        players,
+        player,
         selection: Selection::default(),
         pool: PoolView::default(),
         clipboard: Vec::new(),
@@ -447,7 +445,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         next_job: 1,
         audio_scrubbing: true,
         audio_noticed: false,
-        playing: [false; 2],
+        playing: false,
         waits: Vec::new(),
         next_capture: 1,
         timeline_due: None,
@@ -476,7 +474,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     (Handle { tx, shared }, thread)
 }
 
-/// What the source player has loaded.
+/// What the source has loaded.
 #[derive(Debug, Clone, PartialEq)]
 enum SourceContent {
     Clip(String),
@@ -485,23 +483,19 @@ enum SourceContent {
 
 /// What a request waits for before replying.
 enum Until {
-    /// Motion `motion` of `player` is on screen, showing the player's
-    /// `target` as it was then. If a later seek asks for another frame
-    /// first (another client, a person scrubbing), that frame won't show:
-    /// the request fails with CONFLICT. Playback moving on from it doesn't
+    /// Motion `motion` is on screen, showing the player's `target` as it
+    /// was then. If a later seek or switch asks for another frame first
+    /// (another client, a person scrubbing), that frame won't show: the
+    /// request fails with CONFLICT. Playback moving on from it doesn't
     /// count.
-    Shown {
-        player: PlayerId,
-        motion: u64,
-        at: i64,
-    },
+    Shown { motion: u64, at: i64 },
     /// Job `id` ended (`jobs.wait`).
     Job { id: String },
-    /// `player` shows its latest motion (after an edit's reload, say);
-    /// then the viewer is captured to `out`.
-    Settled { player: PlayerId, out: PathBuf },
+    /// The viewer shows its latest motion (after an edit's reload, say);
+    /// then it is captured to `out`.
+    Settled { out: PathBuf },
     /// Capture `id` arrives; then it is written to `out`. For a viewer
-    /// capture, `player` is the player shown.
+    /// capture, `player` is what the viewer shows.
     Capture {
         id: u64,
         out: PathBuf,
@@ -600,7 +594,7 @@ const RELOAD_EVERY: Duration = Duration::from_millis(100);
 struct Live {
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
-    /// Watches the preferences file: GPU acceleration reaches the players
+    /// Watches the preferences file: GPU acceleration reaches the player
     /// at once, whoever changes it.
     _preferences: Option<notify::RecommendedWatcher>,
     shared: Arc<Mutex<Arc<Snapshot>>>,
@@ -618,7 +612,8 @@ struct Live {
     tape: Arc<Vec<TapeEntry>>,
     /// The media under the Source Tape playhead (selection sync).
     tape_media: Option<String>,
-    players: [Player; 2],
+    /// The viewer's player: the source and the timeline.
+    player: Player,
     selection: Selection,
     pool: PoolView,
     clipboard: Vec<vidcut_core::model::TrackClip>,
@@ -645,8 +640,8 @@ struct Live {
     audio_scrubbing: bool,
     /// The audio device's failure was told once.
     audio_noticed: bool,
-    /// Whether each player played when last looked at.
-    playing: [bool; 2],
+    /// Whether the viewer played when last looked at.
+    playing: bool,
     waits: Vec<Wait>,
     next_capture: u64,
     timeline_due: Option<Instant>,
@@ -659,8 +654,8 @@ struct Live {
     preview_error: Option<String>,
 }
 
-const SOURCE: usize = 0;
-const TIMELINE: usize = 1;
+const SOURCE: PlayerId = PlayerId::Source;
+const TIMELINE: PlayerId = PlayerId::Timeline;
 
 impl Live {
     // ---------------------------------------------------------------- loop
@@ -784,17 +779,13 @@ impl Live {
                 project,
                 reply,
             } => self.request(envelope, origin, project, reply),
-            Msg::Picture(id) => {
+            Msg::Picture => {
                 // Waits look again in `tick`; a present may be due.
-                self.present_due(id);
+                self.present_due();
                 changed = false;
             }
-            Msg::Presented {
-                player,
-                motion,
-                frame,
-            } => {
-                self.players[player.index()].presented(motion, frame);
+            Msg::Presented { motion, frame } => {
+                self.player.presented(motion, frame);
                 changed = false;
             }
             Msg::Captured { id, result } => self.captured(id, result),
@@ -823,10 +814,7 @@ impl Live {
             }
             Msg::PreferencesChanged => {
                 let gpu = crate::preferences::gpu_acceleration();
-                changed = false;
-                for p in &mut self.players {
-                    changed |= p.follow_gpu(gpu);
-                }
+                changed = self.player.follow_gpu(gpu);
             }
             Msg::FileChanged => {
                 let refreshed = match self.project.as_mut().map(OpenProject::reload) {
@@ -891,26 +879,19 @@ impl Live {
         true
     }
 
-    /// Asks the renderer to present `id` when a motion of it waits for its
-    /// picture and the engine has it.
-    fn present_due(&mut self, id: PlayerId) {
-        let Some(motion) = self.players[id.index()].present_due(Instant::now()) else {
+    /// Asks the renderer to present when a motion waits for its picture
+    /// and the engine has it.
+    fn present_due(&mut self) {
+        let Some(motion) = self.player.present_due(Instant::now()) else {
             return;
         };
         if debug() {
-            eprintln!("[{id:?}] present motion {motion}");
+            eprintln!("[{:?}] present motion {motion}", PlayerId::of(self.viewer));
         }
         let tx = self.tx.clone();
-        self.renderer.present(
-            id,
-            Box::new(move |frame| {
-                let _ = tx.send(Msg::Presented {
-                    player: id,
-                    motion,
-                    frame,
-                });
-            }),
-        );
+        self.renderer.present(Box::new(move |frame| {
+            let _ = tx.send(Msg::Presented { motion, frame });
+        }));
     }
 
     /// Timed work; returns when it next needs to run.
@@ -925,33 +906,31 @@ impl Live {
                 soonest(due);
             }
         }
-        for id in PlayerId::ALL {
-            self.present_due(id);
-            let p = &self.players[id.index()];
-            // A motion not on screen yet: look again soon (its picture may
-            // be decoding, or the renderer busy).
-            if p.shown < p.motion {
-                soonest(now + Duration::from_millis(5));
-            }
-            // Playing: the playhead moves with the clock; the snapshot
-            // follows it frame by frame, and shows when play stops by
-            // itself (at the end).
-            let playing = p.playing();
-            if playing != self.playing[id.index()] {
-                self.playing[id.index()] = playing;
-                self.dirty = true;
-            }
-            if let Some(d) = p.next_change(now) {
-                self.dirty = true;
-                soonest(now + d.max(Duration::from_millis(2)));
-            } else if playing {
-                soonest(now + Duration::from_millis(10));
-            }
+        self.present_due();
+        let p = &self.player;
+        // A motion not on screen yet: look again soon (its picture may be
+        // decoding, or the renderer busy).
+        if p.shown < p.motion {
+            soonest(now + Duration::from_millis(5));
+        }
+        // Playing: the playhead moves with the clock; the snapshot follows
+        // it frame by frame, and shows when play stops by itself (at the
+        // end).
+        let playing = p.playing();
+        if playing != self.playing {
+            self.playing = playing;
+            self.dirty = true;
+        }
+        if let Some(d) = p.next_change(now) {
+            self.dirty = true;
+            soonest(now + d.max(Duration::from_millis(2)));
+        } else if playing {
+            soonest(now + Duration::from_millis(10));
         }
         if let Some(e) = self
-            .players
-            .iter()
-            .find_map(|p| p.audio_error.clone())
+            .player
+            .audio_error
+            .clone()
             .filter(|_| !self.audio_noticed)
         {
             self.audio_noticed = true;
@@ -961,27 +940,23 @@ impl Live {
         // Requests waiting for frames or captures.
         let mut i = 0;
         while i < self.waits.len() {
-            let settled = match &self.waits[i].until {
-                Until::Settled { player, .. } if self.settled(*player) => Some(*player),
-                _ => None,
-            };
-            if let Some(player) = settled {
-                let id = self.capture_viewer(player);
-                if let Until::Settled { out, .. } = &mut self.waits[i].until {
+            if matches!(self.waits[i].until, Until::Settled { .. }) && self.settled() {
+                let id = self.capture_viewer();
+                if let Until::Settled { out } = &mut self.waits[i].until {
                     let out = std::mem::take(out);
                     self.waits[i].until = Until::Capture {
                         id,
                         out,
-                        player: Some(player),
+                        player: Some(PlayerId::of(self.viewer)),
                     };
                 }
             }
             let w = &self.waits[i];
             let outcome = match w.until {
-                Until::Shown { player, motion, at } => {
+                Until::Shown { motion, at } => {
                     // The latest motion counts too: a reload after an edit
                     // replaces what was asked for, at the same frame.
-                    let p = &self.players[player.index()];
+                    let p = &self.player;
                     let overtaken = p.target != at;
                     if overtaken && matches!(w.job.origin, Origin::Gui { .. }) {
                         // The GUI's steps and seeks overtake each other as a
@@ -996,7 +971,7 @@ impl Live {
                     } else if let Some(e) = p.failure() {
                         Some(Err(Error::media(format!("preview: {e}"))))
                     } else if p.shown >= p.motion && p.shown >= motion {
-                        Some(match &p.error {
+                        Some(match p.error() {
                             Some(e) => Err(Error::media(format!("preview: {e}"))),
                             None => Ok(self.state_response()),
                         })
@@ -1060,8 +1035,8 @@ impl Live {
             project: self.project_snap.clone(),
             viewer: self.viewer,
             last_source: self.last_source,
-            source: self.players[SOURCE].snap(),
-            timeline: self.players[TIMELINE].snap(),
+            source: self.player.snap(SOURCE),
+            timeline: self.player.snap(TIMELINE),
             source_media: self.source_media.clone(),
             tape: self.tape.clone(),
             selection: self.selection.clone(),
@@ -1209,7 +1184,7 @@ impl Live {
     /// of the clips it names, whose measurements the media layer then keeps.
     fn measuring(&self, envelope: &Envelope) -> Option<Measure> {
         let p = self.project.as_ref()?.project();
-        let playhead = Some(self.players[TIMELINE].position());
+        let playhead = Some(self.player.position(TIMELINE));
         let (clips, sound) = match &envelope.request {
             Request::EditRippleDeleteSilence { clips, .. } => (clips.to_vec(), true),
             Request::EditDetectSceneCuts { clips, .. } => (clips.to_vec(), false),
@@ -1254,7 +1229,7 @@ impl Live {
         let project_path = open.store.path().to_path_buf();
         let context = open
             .project()
-            .time_context(Some(self.players[TIMELINE].position()));
+            .time_context(Some(self.player.position(TIMELINE)));
         let Request::ExportStart(mut params) = bind_playhead(envelope, &context).request else {
             unreachable!("checked by the caller");
         };
@@ -1685,7 +1660,7 @@ impl Live {
 
     fn dispatch(&mut self, envelope: Envelope, job: &Job) -> Step {
         let request = envelope.request.clone();
-        // Live requests look at or move the players: they see the timeline
+        // Live requests look at or move the player: they see the timeline
         // as edited, not as last loaded (a reload after edits waits up to
         // RELOAD_EVERY to coalesce them). Seeks and steps load at their
         // target themselves; opening a project replaces it.
@@ -1714,10 +1689,10 @@ impl Live {
             ),
             Request::ViewerSet { mode } => {
                 let motion = self.set_viewer(mode);
-                self.shown(PlayerId::of(mode), motion)
+                self.shown(motion)
             }
             Request::ViewerLoad { media, at } => match self.load_source(&media, at.as_ref()) {
-                Ok(motion) => self.shown(PlayerId::Source, motion),
+                Ok(motion) => self.shown(motion),
                 Err(e) => Step::Now(Err(e)),
             },
             Request::PlayerPlay { speed, viewer } => {
@@ -1728,28 +1703,24 @@ impl Live {
                 if !speed.is_finite() || speed == 0.0 || speed.abs() > 64.0 {
                     return Step::Now(Err(Error::usage("speed must be non-zero, within ±64")));
                 }
-                let id = PlayerId::of(self.viewer);
-                self.pause_other(id);
-                self.players[id.index()].play(speed);
+                self.player.play(speed);
                 Step::Now(Ok(self.state_response()))
             }
             Request::PlayerPause { viewer } => {
                 if let Some(v) = viewer {
                     self.set_viewer(v);
                 }
-                self.players[PlayerId::of(self.viewer).index()].pause();
+                self.player.pause();
                 Step::Now(Ok(self.state_response()))
             }
             Request::PlayerToggle { viewer } => {
                 if let Some(v) = viewer {
                     self.set_viewer(v);
                 }
-                let id = PlayerId::of(self.viewer);
-                if self.players[id.index()].playing() {
-                    self.players[id.index()].pause();
+                if self.player.playing() {
+                    self.player.pause();
                 } else {
-                    self.pause_other(id);
-                    self.players[id.index()].play(1.0);
+                    self.player.play(1.0);
                 }
                 Step::Now(Ok(self.state_response()))
             }
@@ -1759,13 +1730,13 @@ impl Live {
                 }
                 let id = PlayerId::of(self.viewer);
                 let target = match self.viewer_context() {
-                    Ok(c) => c.resolve_from(&at, self.players[id.index()].position()),
+                    Ok(c) => c.resolve_from(&at, self.player.position(id)),
                     Err(e) => return Step::Now(Err(e)),
                 };
                 match target {
                     Ok(frame) => {
                         let motion = self.seek(id, frame, true);
-                        self.shown(id, Some(motion))
+                        self.shown(motion)
                     }
                     Err(e) => Step::Now(Err(e.into())),
                 }
@@ -1778,12 +1749,12 @@ impl Live {
                 if id == PlayerId::Timeline && self.timeline_due.take().is_some() {
                     self.refresh_timeline();
                 }
-                let motion = self.players[id.index()].step(frames);
-                self.shown(id, Some(motion))
+                let motion = self.player.step(frames);
+                self.shown(Some(motion))
             }
             Request::PlayerState {} => Step::Now(Ok(self.state_response())),
             Request::MixerPreview { track, volume_db } => {
-                match self.players[TIMELINE].preview_fader(&track, volume_db) {
+                match self.player.preview_fader(&track, volume_db) {
                     None => Step::Now(Ok(answer(json!({ "live": false })))),
                     Some(true) => Step::Now(Ok(answer(json!({ "live": true })))),
                     Some(false) => Step::Now(Err(Error::media(format!(
@@ -1793,16 +1764,12 @@ impl Live {
             }
             Request::PlayerAudioScrubbing { on } => {
                 self.audio_scrubbing = on.unwrap_or(!self.audio_scrubbing);
-                for p in &mut self.players {
-                    p.set_scrubbing(self.audio_scrubbing);
-                }
+                self.player.set_scrubbing(self.audio_scrubbing);
                 Step::Now(Ok(self.state_response()))
             }
             Request::PlayerMute { mute } => {
-                let mute = mute.unwrap_or(!self.players[TIMELINE].muted());
-                for p in &mut self.players {
-                    p.set_muted(mute);
-                }
+                let mute = mute.unwrap_or(!self.player.muted());
+                self.player.set_muted(mute);
                 Step::Now(Ok(self.state_response()))
             }
             Request::PoolSet {
@@ -1839,16 +1806,15 @@ impl Live {
                 // The picture as shown once the player has settled (a seek
                 // already waited for that; a reload may still be on its way).
                 ScreenshotTarget::Viewer => {
-                    let player = PlayerId::of(self.viewer);
-                    if self.settled(player) {
-                        let id = self.capture_viewer(player);
+                    if self.settled() {
+                        let id = self.capture_viewer();
                         Step::Wait(Until::Capture {
                             id,
                             out,
-                            player: Some(player),
+                            player: Some(PlayerId::of(self.viewer)),
                         })
                     } else {
-                        Step::Wait(Until::Settled { player, out })
+                        Step::Wait(Until::Settled { out })
                     }
                 }
                 ScreenshotTarget::Window => {
@@ -1968,13 +1934,12 @@ impl Live {
         }
     }
 
-    /// Replies once `motion` of `player` is on screen.
-    fn shown(&mut self, player: PlayerId, motion: Option<u64>) -> Step {
+    /// Replies once `motion` is on screen.
+    fn shown(&mut self, motion: Option<u64>) -> Step {
         match motion {
             Some(m) => Step::Wait(Until::Shown {
-                player,
                 motion: m,
-                at: self.players[player.index()].target,
+                at: self.player.target,
             }),
             None => Step::Now(Ok(self.state_response())),
         }
@@ -1991,7 +1956,7 @@ impl Live {
         let path = open.store.path().to_path_buf();
         let context = open
             .project()
-            .time_context(Some(self.players[TIMELINE].position()));
+            .time_context(Some(self.player.position(TIMELINE)));
         let envelope = bind_playhead(envelope, &context);
         // Measurements decode whole files: jobs. Frames and plans are quick,
         // and someone waits for them.
@@ -2040,7 +2005,7 @@ impl Live {
 
     /// Project requests: edits and queries through the editor.
     fn edit(&mut self, mut envelope: Envelope, origin: Origin) -> Result<Response> {
-        let playhead = self.players[TIMELINE].position();
+        let playhead = self.player.position(TIMELINE);
         match &mut envelope.request {
             Request::EditPaste { clips, .. } if clips.is_none() => {
                 if self.clipboard.is_empty() {
@@ -2135,8 +2100,8 @@ impl Live {
         self.source_content = None;
         self.source_positions.clear();
         self.tape_position = 0;
-        self.players[SOURCE].unload();
-        self.players[TIMELINE].unload();
+        self.player.unload(SOURCE);
+        self.player.unload(TIMELINE);
         // The last project's pictures and sounds: its media ids name other
         // files here.
         self.thumbs = Arc::new(HashMap::new());
@@ -2293,7 +2258,7 @@ impl Live {
         let p = self.project.as_ref()?.project().clone();
         let end = p.end();
         if end == 0 {
-            self.players[TIMELINE].unload();
+            self.player.unload(TIMELINE);
             return None;
         }
         let (plan, lanes) = match render::flatten_lanes(&p, 0, end) {
@@ -2305,11 +2270,12 @@ impl Live {
         };
         let plan = self.preview_plan(plan);
         self.timeline_loaded_at = Some(Instant::now());
-        self.players[TIMELINE].load(plan, lanes, at)
+        self.player.load(TIMELINE, plan, lanes, at)
     }
 
-    /// Makes the source player show what the current source mode wants
-    /// (nothing happens if that is already loaded).
+    /// Loads what the current source mode wants as the source (nothing
+    /// happens if that is already loaded). Shown or not: the frame of what
+    /// isn't shown is kept ready.
     fn refresh_source(&mut self) -> Option<u64> {
         let p = self.project.as_ref()?.project().clone();
         // Source Tape: the pool view's bin, in its order. A removed
@@ -2328,7 +2294,7 @@ impl Live {
                 None => {
                     self.stash_source_position();
                     self.source_content = None;
-                    self.players[SOURCE].unload();
+                    self.player.unload(SOURCE);
                     return None;
                 }
             },
@@ -2339,7 +2305,7 @@ impl Live {
         };
         let Ok((plan, _)) = render::tape(&p, &ids) else {
             self.source_content = None;
-            self.players[SOURCE].unload();
+            self.player.unload(SOURCE);
             return None;
         };
         // Same content (perhaps changed media): stay where it is, playing
@@ -2355,12 +2321,12 @@ impl Live {
         };
         let plan = self.preview_plan(plan);
         self.source_content = Some(want);
-        self.players[SOURCE].load(plan, Vec::new(), at)
+        self.player.load(SOURCE, plan, Vec::new(), at)
     }
 
     /// Remembers the source playhead of the content being replaced.
     fn stash_source_position(&mut self) {
-        let pos = self.players[SOURCE].position();
+        let pos = self.player.position(SOURCE);
         match &self.source_content {
             Some(SourceContent::Clip(m)) => {
                 self.source_positions.insert(m.clone(), pos);
@@ -2378,7 +2344,7 @@ impl Live {
             self.tape_media = None;
             return;
         }
-        let under = tape_at(&self.tape, self.players[SOURCE].position()).map(|e| e.media.clone());
+        let under = tape_at(&self.tape, self.player.position(SOURCE)).map(|e| e.media.clone());
         if under != self.tape_media {
             self.tape_media = under.clone();
             if let Some(m) = under {
@@ -2390,29 +2356,20 @@ impl Live {
 
     // ---------------------------------------------------------------- viewer
 
+    /// Shows `mode`. Switching between the source and the timeline pauses
+    /// the one left and shows the other where its playhead is.
     fn set_viewer(&mut self, mode: ViewerMode) -> Option<u64> {
         if mode == self.viewer && (!mode.is_source() || mode == self.last_source) {
             return None;
         }
-        let leaving = PlayerId::of(self.viewer);
-        let entering = PlayerId::of(mode);
-        if leaving != entering {
-            self.players[leaving.index()].pause();
-        }
         self.viewer = mode;
         if mode.is_source() {
             self.last_source = mode;
-            return self.refresh_source();
+            // Loaded first: switching then plays it.
+            let loaded = self.refresh_source();
+            return self.player.show(SOURCE).or(loaded);
         }
-        None
-    }
-
-    fn pause_other(&mut self, id: PlayerId) {
-        for p in &mut self.players {
-            if p.id != id {
-                p.pause();
-            }
-        }
+        self.player.show(TIMELINE)
     }
 
     /// Opens `media` as Source Clip (double-click in the pool).
@@ -2433,32 +2390,31 @@ impl Live {
         if let Some(pos) = position {
             self.source_positions.insert(media.to_string(), pos);
         }
-        if self.viewer.is_source() || self.viewer == ViewerMode::Timeline {
-            self.players[TIMELINE].pause();
-        }
         self.source_media = Some(media.to_string());
         self.viewer = ViewerMode::SourceClip;
         self.last_source = ViewerMode::SourceClip;
-        let motion = self.refresh_source();
+        let loaded = self.refresh_source();
+        let motion = self.player.show(SOURCE).or(loaded);
         Ok(match (motion, position) {
             (Some(m), _) => Some(m),
-            // Same clip already loaded: just move to the requested frame.
-            (None, Some(pos)) => Some(self.seek(PlayerId::Source, pos, true)),
+            // Same clip already shown: just move to the requested frame.
+            (None, Some(pos)) => self.seek(SOURCE, pos, true),
             (None, None) => None,
         })
     }
 
     /// Moves `id`'s playhead to `frame`; `sound`: a seek someone asked for,
     /// which plays its frame's sound while paused (audio scrubbing), where
-    /// the viewer's own moves (after an edit) play none.
-    fn seek(&mut self, id: PlayerId, frame: i64, sound: bool) -> u64 {
-        if id == PlayerId::Timeline && self.timeline_due.take().is_some() {
+    /// the viewer's own moves (after an edit) play none. The motion, when
+    /// the viewer shows `id`.
+    fn seek(&mut self, id: PlayerId, frame: i64, sound: bool) -> Option<u64> {
+        if id == TIMELINE && self.timeline_due.take().is_some() {
             // A reload is pending: do it now, loading at the new position.
             if let Some(motion) = self.refresh_timeline_at(Some(frame.max(0))) {
-                return motion;
+                return Some(motion);
             }
         }
-        self.players[id.index()].seek(frame, sound)
+        self.player.seek(id, frame, sound)
     }
 
     /// The context for times typed at the viewer: timeline times, or source
@@ -2467,16 +2423,16 @@ impl Live {
         let open = self.project.as_ref().ok_or_else(no_project)?;
         let p = open.project();
         Ok(match self.viewer {
-            ViewerMode::Timeline => p.time_context(Some(self.players[TIMELINE].position())),
+            ViewerMode::Timeline => p.time_context(Some(self.player.position(TIMELINE))),
             ViewerMode::SourceClip => {
-                let position = self.players[SOURCE].position();
+                let position = self.player.position(SOURCE);
                 match self.source_media.as_ref().and_then(|m| p.media(m)) {
                     Some(m) => media_context(p, m, Some(position)),
                     None => return Err(Error::usage("no source clip is open")),
                 }
             }
             ViewerMode::SourceTape => {
-                let position = self.players[SOURCE].position();
+                let position = self.player.position(SOURCE);
                 let entry = tape_at(&self.tape, position);
                 let marks = entry
                     .and_then(|e| Some((e, p.media(&e.media)?)))
@@ -2502,7 +2458,7 @@ impl Live {
     /// The source frame of `media` under the source playhead, if the viewer
     /// shows that media.
     fn source_frame_of(&self, media: &str) -> Option<i64> {
-        let position = self.players[SOURCE].position();
+        let position = self.player.position(SOURCE);
         match (&self.source_content, self.viewer) {
             (Some(SourceContent::Clip(m)), ViewerMode::SourceClip) if m == media => Some(position),
             (Some(SourceContent::Tape), ViewerMode::SourceTape) => tape_at(&self.tape, position)
@@ -2529,7 +2485,7 @@ impl Live {
             .map(Clip::end)
             .max();
         if let Some(end) = end {
-            self.seek(PlayerId::Timeline, end, false);
+            self.seek(TIMELINE, end, false);
         }
     }
 
@@ -2540,7 +2496,7 @@ impl Live {
     ) -> Result<()> {
         let open = self.project.as_ref().ok_or_else(no_project)?;
         let p = open.project();
-        let playhead = Some(self.players[TIMELINE].position());
+        let playhead = Some(self.player.position(TIMELINE));
         let clips = clips
             .map(|c| {
                 c.to_vec()
@@ -2581,7 +2537,7 @@ impl Live {
         };
         // The viewer shows black when its player has nothing loaded (the
         // render target may still hold an older picture).
-        let blank = player.is_some_and(|p| !self.players[p.index()].is_loaded());
+        let blank = player.is_some_and(|p| !self.player.is_loaded(p));
         let result = result.map(|mut image| {
             if blank {
                 image.rgba.as_chunks_mut::<4>().0.fill([0, 0, 0, 255]);
@@ -2612,25 +2568,22 @@ impl Live {
         );
     }
 
-    /// Whether `player` shows its latest motion (a seek, a step, an edit's
-    /// reload).
-    fn settled(&self, player: PlayerId) -> bool {
-        let p = &self.players[player.index()];
+    /// Whether the viewer shows its latest motion (a seek, a step, an
+    /// edit's reload, a switch).
+    fn settled(&self) -> bool {
+        let p = &self.player;
         p.shown >= p.motion || p.failure().is_some()
     }
 
-    /// Asks the renderer for a picture of `player`; the answer comes as
+    /// Asks the renderer for the viewer's picture; the answer comes as
     /// `Msg::Captured` with the returned id.
-    fn capture_viewer(&mut self, player: PlayerId) -> u64 {
+    fn capture_viewer(&mut self) -> u64 {
         let id = self.next_capture;
         self.next_capture += 1;
         let tx = self.tx.clone();
-        self.renderer.capture_viewer(
-            player,
-            Box::new(move |result| {
-                let _ = tx.send(Msg::Captured { id, result });
-            }),
-        );
+        self.renderer.capture_viewer(Box::new(move |result| {
+            let _ = tx.send(Msg::Captured { id, result });
+        }));
         id
     }
 
@@ -2647,9 +2600,9 @@ impl Live {
         let p = self.project.as_ref().map(|o| o.project());
         let fps = p.map_or(Rational::new(30, 1).expect("valid"), |p| p.settings.fps);
         let tc = |f: i64, stc: i64| format_timecode(f, fps, stc);
-        let player = |pl: &Player, stc: i64| {
-            let snap = pl.snap();
-            let (late, skipped) = pl.misses();
+        let (late, skipped) = self.player.misses();
+        let player = |id: PlayerId, stc: i64| {
+            let snap = self.player.snap(id);
             json!({
                 "late": late,
                 "skipped": skipped,
@@ -2657,14 +2610,15 @@ impl Live {
                 "frames": snap.frames,
                 "position": snap.position,
                 "position_tc": tc(snap.position, stc),
+                "ready": snap.ready,
                 "playing": snap.playing,
                 "speed": snap.speed,
                 "hwdec": snap.hwdec,
                 "error": snap.error,
             })
         };
-        let mut source = player(&self.players[SOURCE], 0);
-        let position = self.players[SOURCE].position();
+        let mut source = player(SOURCE, 0);
+        let position = self.player.position(SOURCE);
         let under = match &self.source_content {
             Some(SourceContent::Clip(m)) => Some((m.clone(), position)),
             Some(SourceContent::Tape) => {
@@ -2687,10 +2641,10 @@ impl Live {
             "last_source": self.last_source,
             "source_media": self.source_media,
             "source": source,
-            "timeline": player(&self.players[TIMELINE], p.map_or(0, |p| p.settings.start_tc)),
+            "timeline": player(TIMELINE, p.map_or(0, |p| p.settings.start_tc)),
             "selection": self.selection,
             "pool": self.pool,
-            "muted": self.players[TIMELINE].muted(),
+            "muted": self.player.muted(),
             "audio_scrubbing": self.audio_scrubbing,
             "clipboard": self.clipboard.len(),
             "preview": self.preview_error.as_deref().map_or(json!(true), |e| json!(e)),

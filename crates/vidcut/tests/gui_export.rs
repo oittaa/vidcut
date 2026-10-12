@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use vidcut::cli::{Action, Cli};
 use vidcut::gui::export::Dialogs;
 use vidcut::gui::workspace::Workspace;
-use vidcut::live::{self, Capture, Origin, PlayerId, Presented, WindowChange};
+use vidcut::live::{self, Capture, Origin, Presented, WindowChange};
 use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
 use vidcut_core::model::Settings;
 use vidcut_core::time::Rational;
@@ -23,10 +23,10 @@ use vidcut_core::{Envelope, Project, Request, Response, Store};
 struct NoRenderer;
 
 impl live::Renderer for NoRenderer {
-    fn present(&self, _: PlayerId, done: Presented) {
+    fn present(&self, done: Presented) {
         done(None);
     }
-    fn capture_viewer(&self, _: PlayerId, done: Capture) {
+    fn capture_viewer(&self, done: Capture) {
         done(Err(vidcut_core::Error::usage("no renderer in tests")));
     }
     fn capture_window(&self, done: Capture) {
@@ -134,7 +134,7 @@ fn export_windows() {
     let (h, session) = live::start(live::Config {
         project: Some(project.clone()),
         create: false,
-        players: None,
+        player: None,
         preview_error: Some("no preview in tests".into()),
         renderer: Arc::new(NoRenderer),
         notify: Arc::new(|| {}),

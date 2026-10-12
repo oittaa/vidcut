@@ -1159,7 +1159,7 @@ impl Request {
         Ok(request)
     }
 
-    /// Whether the request only makes sense in a running GUI (viewer, players,
+    /// Whether the request only makes sense in a running GUI (viewer, player,
     /// selection, window). Headless runs reject these with `NO_INSTANCE`.
     pub fn is_live(&self) -> bool {
         matches!(

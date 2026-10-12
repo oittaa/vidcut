@@ -1,5 +1,6 @@
 //! Decoded pictures, kept by what they show within a memory budget: those
-//! ahead of the clock, those just shown, and windows decoded for going back.
+//! ahead of the clock, those just shown, and windows decoded for going back;
+//! and one held whatever the budget, the frame of the plan played next.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -20,6 +21,8 @@ struct Inner {
     clock: u64,
     bytes: usize,
     budget: usize,
+    /// Never let go for the budget.
+    held: Option<Id>,
 }
 
 impl Store {
@@ -30,6 +33,7 @@ impl Store {
                 clock: 0,
                 bytes: 0,
                 budget,
+                held: None,
             }),
             landed: Condvar::new(),
         }
@@ -58,8 +62,15 @@ impl Store {
         self.lock().pictures.contains_key(id)
     }
 
+    /// Holds `id`'s picture whatever the budget (once it is kept), until
+    /// another is held; `None` holds none.
+    pub(crate) fn hold(&self, id: Option<Id>) {
+        self.lock().held = id;
+    }
+
     /// Keeps `picture` as `id`'s. Over the budget, the pictures kept or
-    /// looked at least recently go first, never the one just kept.
+    /// looked at least recently go first, never the one just kept nor the
+    /// one held.
     pub(crate) fn put(&self, id: Id, picture: Arc<Picture>) {
         let mut inner = self.lock();
         inner.clock += 1;
@@ -69,10 +80,11 @@ impl Store {
         }
         inner.bytes += size;
         while inner.bytes > inner.budget && inner.pictures.len() > 1 {
+            let held = inner.held.as_ref();
             let oldest = inner
                 .pictures
                 .iter()
-                .filter(|(_, (_, used))| *used != now)
+                .filter(|(k, (_, used))| *used != now && Some(*k) != held)
                 .min_by_key(|(_, (_, used))| *used)
                 .map(|(k, _)| k.clone());
             let Some(oldest) = oldest else { break };

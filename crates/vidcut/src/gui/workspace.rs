@@ -1,6 +1,6 @@
 //! The GUI's state and panels, apart from the eframe and OpenGL glue: so
 //! the whole interface can run in tests (egui_kittest) against a live session
-//! without players.
+//! without a player.
 //!
 //! The UI is a thin view. Each frame it reads the session's latest
 //! [`Snapshot`] and draws it; every user action becomes one request sent to the
@@ -57,7 +57,7 @@ pub(super) enum Drag {
     TapeMark { is_in: bool, frame: i64 },
 }
 
-/// What the viewer can show of one player (from the GPU glue).
+/// What the viewer can show of the player (from the GPU glue).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Picture {
     pub texture: Option<egui::TextureId>,
@@ -69,10 +69,10 @@ pub struct Workspace {
     pub(super) live: live::Handle,
     pub(super) snap: Arc<Snapshot>,
     pub(super) thumbs: HashMap<String, Thumbs>,
-    /// The players' pictures, and the sizes (physical pixels) the viewer
-    /// wants them rendered at.
-    pub pictures: [Picture; 2],
-    pub wants: [[i32; 2]; 2],
+    /// The player's picture, and the size (physical pixels) the viewer
+    /// wants it rendered at.
+    pub picture: Picture,
+    pub want: [i32; 2],
     /// The GPU the window draws on, for the status bar's versions.
     pub display: Option<String>,
     // View state (not part of the project).
@@ -209,8 +209,8 @@ impl Workspace {
             snap: live.snapshot(),
             live,
             thumbs: HashMap::new(),
-            pictures: [Picture::default(); 2],
-            wants: [[640, 360]; 2],
+            picture: Picture::default(),
+            want: [640, 360],
             display: None,
             pool_view: PoolView::Thumbnails,
             search: String::new(),
