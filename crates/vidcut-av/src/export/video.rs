@@ -238,26 +238,28 @@ struct Source {
 }
 
 /// What a source needs to decode on NVDEC for an export whose frames stay
-/// on the GPU: the device, and the output's size and format.
+/// on the GPU: the device, and the output's size, format and dynamic range.
 #[derive(Clone)]
 pub(crate) struct GpuSide {
     device: crate::cuda::CudaDevice,
     out: (u32, u32),
     format: format::Pixel,
+    target: Option<Hdr>,
 }
 
 /// `input` opened on NVDEC, and the scaler to the output, when its pictures
-/// go through the GPU as they would through the CPU: SDR, progressive
-/// (frames are picked before any scaling, so a deinterlacer would see
-/// gaps), and when the scaler builds (libplacebo needs Vulkan for turned
-/// pictures and other matrices than BT.709).
+/// go through the GPU as they would through the CPU: progressive (frames
+/// are picked before any scaling, so a deinterlacer would see gaps), and
+/// when the scaler builds (libplacebo needs Vulkan for turned pictures,
+/// other matrices than BT.709, and HDR).
 fn gpu_reader(input: &Input, gpu: &GpuSide) -> Option<(VideoReader, crate::cuda::CudaPictures)> {
     let reader = VideoReader::open_cuda(input, &gpu.device).ok()?;
     if reader.interlaced() {
         return None;
     }
     let scaler =
-        crate::cuda::CudaPictures::new(&gpu.device, &reader, gpu.out, gpu.format, true).ok()?;
+        crate::cuda::CudaPictures::new(&gpu.device, &reader, gpu.out, gpu.format, gpu.target, true)
+            .ok()?;
     Some((reader, scaler))
 }
 
@@ -493,6 +495,7 @@ impl VideoFrames {
                 device,
                 out: (self.out.0, self.out.1),
                 format: self.out.2,
+                target: self.target,
             },
             frames,
             made: 0,

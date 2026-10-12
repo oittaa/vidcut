@@ -551,6 +551,7 @@ fn encode_on_gpu(
         &reader,
         (width, height),
         format::Pixel::NV12,
+        None,
         false,
     )
     .map_err(Failed::Unsuitable)?;
