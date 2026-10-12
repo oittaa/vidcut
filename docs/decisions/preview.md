@@ -1,255 +1,126 @@
-# Preview with libmpv: decisions from the M0 spike
+# The preview: vidcut's own player, drawn with wgpu
 
-**Status:** accepted (M0, October 2026).
+**Status:** accepted (October 2026). The GUI previews through the player engine ([player.md](player.md)) and draws with eframe on wgpu.
 
 **Evidence** (all rerunnable):
-- [`crates/vidcut-mpv/tests/edl_spike.rs`](../../crates/vidcut-mpv/tests/edl_spike.rs): EDL and seek semantics, software renderer plus barcode readout.
-- [`crates/vidcut-av/tests/exact_decode.rs`](../../crates/vidcut-av/tests/exact_decode.rs): our own exact-seek decoder.
-- [`crates/vidcut/examples/mpv_gl_spike.rs`](../../crates/vidcut/examples/mpv_gl_spike.rs): OpenGL embedding in eframe.
+- [`crates/vidcut/tests/live.rs`](../../crates/vidcut/tests/live.rs): the live session with both engines, a stand-in renderer and recording stand-in devices, no window, GPU or audio device. Seeks frame-exact at every boundary (also with a late renderer), overtaken seeks, seeks while playing and while an edit reloads, pictures against beeps as heard, every frame shown in order, audio scrubbing, backward play, the source viewers, stills and sequences, interlaced, HDR and turned clips, proxies, several tracks and faders, an unreadable file.
+- [`crates/vidcut/tests/gui.rs`](../../crates/vidcut/tests/gui.rs) (`--features vidcut/gui-tests`, needs a display): the real window. Screenshots of the shader's picture against `vidcut frame render` (H.264, a turned clip, 10-bit HEVC on NVDEC), edits, a minimized window, playing, the GPU preference.
+- [`crates/vidcut/tests/picture.rs`](../../crates/vidcut/tests/picture.rs): the shader against the export's conversion on any wgpu adapter (lavapipe too).
+- [`crates/vidcut-av/tests/player_gpu.rs`](../../crates/vidcut-av/tests/player_gpu.rs) (`--features vidcut-av/gpu-tests`): pictures decoded on NVDEC against the CPU's; the engine's own tests in player.md.
+- `cargo run -p vidcut-av --example decode_speed -- FILE`: raw decoding speed on the CPU and on NVDEC.
 
-## 1. Time mapping (normative)
+## 1. What plays
 
-**Symbols:**
-- `f`: project frame rate.
-- `o`: raw timestamp in seconds of the source's first video frame (`VideoReader::first_pts`). This is not the container start time.
-- `b`: half a frame, `½·(1/f)`.
+- **Plans.** The timeline viewer plays `render::flatten_lanes(project, 0, end)`, the source viewer `render::tape` (one clip, or the Source Tape): the plans export renders, so every picture is the one `frame render` makes (the engine reads them with the export's readers). Fresh proxies replace their media's pictures where the project plays proxies (§6). A frame of black and silence follows the content, where the playhead stands at the end (after an append, decision D15).
+- **Edits** give the engine a new plan (`set_plan`): it keeps its position, open files and kept pictures, and plays on if it plays. Reloads after edits coalesce as before (gui.md §7). Another sample rate or channel count makes a new engine (its device was opened for them).
+- **Nothing to convert.** Index-less containers (MPEG-TS), stills, image sequences at any rate, interlaced sources, turned pictures and HDR play as export reads them; the engine needs no remuxes, image lists, filler media or patches at cuts.
 
-**The rules:**
-1. **EDL entry** for a clip that shows source time `[t, t + n/f)`: `start = o + t − b`, `length = n/f`, written with ≥ 9 decimals.
-   - `start` is a raw source timestamp. A start without `o` showed the wrong frames.
-2. **Seeking the timeline:** to show timeline frame `j`, seek to exactly `j/f` with `absolute+exact`.
-   - The bias in `start` already places each segment's frames half a frame late in EDL time.
-   - Applying the bias again in the seek shows the previous frame. **Apply the bias exactly once.**
-3. **`time-pos` → timeline frame:** `floor(time_pos·f + 1e-6)`.
-4. **Single-file source playback** uses `rebase-start-time=no`, so `time-pos` is raw. Frame `k` is reached by seeking to `o + k/f − b`.
-   - M3 may instead load sources as one-entry EDLs with `start = o − b`. That gives the same mapping as the timeline.
-5. **Never seek to a negative absolute time.** mpv treats it as relative to the end of the file. Clamp to ≥ 0.
-6. **vidcut-av's decoder** uses the same rule: the first frame with `pts ≥ o + t − b`.
+## 2. Threads
 
-## 2. What was verified (all frame-exact)
+| Thread | Does | Never |
+|---|---|---|
+| **Session** (`live`) | owns both players' engines: loads plans, seeks, steps, plays; asks for presents; waits for frames | decodes, draws |
+| **Engine** (per player: decode, audio, the device's callback, openers; player.md §1) | decodes pictures ahead of the clock, mixes the sound | touches the GPU's queue |
+| **Viewer** (`vidcut-viewer`, `gui/video.rs`) | presents both engines: draws the picture each clock is at, answers presents and viewer screenshots | waits for the UI |
+| **UI** (eframe) | shows the viewer's targets as egui textures, registers them; window screenshots | draws a viewer picture |
 
-**Timeline boundaries:**
-- Sources: H.264/MP4, HEVC 10-bit/MKV, VP9/WebM, H.264/MP4 without audio, and MPEG-TS (via §3).
-- Every checked frame at every segment boundary is exact.
-- `frame-step` and `frame-back-step` across every boundary are exact.
+**Why the viewer has a thread of its own.** On GNOME Wayland with NVIDIA's driver, presenting a hidden window (minimized) blocks the UI thread until the window shows again, with Mailbox and FIFO alike (the only present modes there): measured, a seek took 2.8 s and a viewer screenshot never came. Submissions to the same device from another thread go on meanwhile, so presents, seeks and screenshots don't depend on the UI. Wayland can't show a minimized window again by request, so `gui.quit` ends the process without the window when the window hasn't closed in 5 s.
 
-**Container quirks the half-frame bias absorbs:**
-- Matroska/WebM store timestamps rounded to 1 ms.
-- AAC priming puts the container start 21 ms before the first video frame.
-- Opus pre-skip shifts it by 7 ms.
-- An MPEG-TS start offset of 1.4 s.
+## 3. Decoding: the CPU, or NVDEC where it is faster
 
-**Reload latency:** `loadfile` to first frame took 14 ms, and a seek near the end 44 ms, whether the EDL had 20, 100 or 400 entries. Regenerating the EDL after each edit (debounced ~100 ms) is cheap.
+- **The codec decides**, while GPU acceleration is on (the preferences' `gpu.acceleration`, the default): HEVC, AV1 and VP9 decode on NVDEC (`VideoReader::open_fastest`), H.264 and everything else on the CPU. Measured with `decode_speed` on this machine (16 threads, RTX 4080 SUPER):
 
-**Long-GOP seeks:** exact seeks into 4 s GOPs at 640×360 took ~43 ms each (software decode and render).
+| Stream | CPU | NVDEC |
+|---|---|---|
+| 2160p60 H.264 (bbb) | 1,014 frames/s; seeks into the GOP 56–255 ms | 253 frames/s; 262–874 ms |
+| 2160p60 10-bit HEVC (bbb, NVENC) | 497 frames/s; 157–454 ms | 594 frames/s; 59–305 ms |
+| 1080p30 H.264 (bbb) | 2,439 frames/s; 24–89 ms | 913 frames/s; 54–329 ms |
 
-## 3. Index-less containers: preview plays an MKV remux
+  FFmpeg's NVDEC path decodes one frame at a time and waits for each, so a CPU with many cores decodes H.264 several times faster; HEVC, AV1 and VP9 are costly in software. Streams NVDEC doesn't decode (ProRes, VP8, a profile the GPU lacks) fall back to the CPU, as do stills and image sequences.
+- **Copied down.** A frame NVDEC decoded is copied to memory at its own size (NV12 or P010) with its properties, then kept like a CPU picture: the decoder has only a few surfaces, and the engine keeps up to a gigabyte of pictures. A 2160p P010 picture is 24.9 MB; with the copy down and the upload (§4) the whole GUI plays 4K60 on 0.25–0.3 cores (§8). Frames passed over on the way to a seek are decoded and not copied.
+- **Not done: zero-copy.** Importing NVDEC's CUDA frames (or Vulkan Video's images) into wgpu's device without the round trip needs external-memory interop between CUDA or FFmpeg's Vulkan device and wgpu's, which wgpu doesn't expose; kept pictures would then live in video memory. The copy keeps 4K60 smooth (§8), so it waits (own-player.md).
+- **Not done: VAAPI.** The same path with VAAPI frames (AMD, Intel) would follow `open_fastest`.
+- **Switching.** The session watches the preferences file; a change, from anywhere, switches both engines' decoder at once (`Player::set_hardware`), and they decode their pictures anew, the one shown first. `player.state`'s `hwdec` says what decoded the picture shown: `nvdec` or `no`.
+- **Frame-exact:** NVDEC's pictures are the CPU's, barcode for barcode, and within two levels in their pixels (`player_gpu.rs`: HEVC, VP9, AV1, HEVC in MPEG-TS and turned).
 
-**The problem:**
-- mpv cannot seek frame-exactly in MPEG-TS and other containers without a seek index.
-- Its demuxer lands after the target and shows the next keyframe.
-- Inside an EDL, the segment is skipped entirely.
-- `hr-seek-demuxer-offset=1.5` fixes single files but not EDL segments.
+## 4. The picture on screen
 
-**The decision:**
-- Preview plays a stream-copy MKV remux of such sources, created in the media cache at import. It uses `vidcut_av::remux::to_mkv`, keeps timestamps, and `remux::needs_index` decides which sources need it.
-- Export keeps reading the original through vidcut-av, whose seek backs off until it lands before the target.
+- **One pass** (`gui/picture.rs`, `picture.wgsl`). A picture's planes go up as textures at its own size: Y, then U and V (8-bit planar) or UV interleaved (NV12, and P010 in 16-bit textures where the adapter has `TEXTURE_FORMAT_16BIT_NORM`; without them P010 goes up as its high bytes). One draw into an RGBA8 target the size of the viewer's picture in physical pixels:
+  - **placed** as export fits it (`Picture::placement`), black around it;
+  - **turned** upright by the display matrix (`Picture::rotation`);
+  - **scaled in YUV**, as export scales before converting: going down, the average of up to 8×8 bilinear taps over the samples a pixel covers; going up, bilinear;
+  - **converted** with the export's math (`vidcut_av::color::shader_colors`): the picture's matrix and range to BT.709 RGB; HDR (PQ, HLG) to linear light with the reference white at 1.0, BT.2020 to BT.709, the mobius curve on the brightest channel and BT.709's transfer as a 2.4 power: the GPU export shader's math (export.md §5), in 32-bit floats throughout.
+- **Shown one to one.** egui shows the target as a native texture, nearest-sampled, in a rectangle rounded to physical pixels. A target is drawn again only when the engine's picture or the size changes.
+- **Against the export** (`tests/picture.rs`): at a picture's own size, flat areas are within a level of `Picture::to_rgba` (the export's filters), PQ and HLG too; SDR stripes are within a level of the matrix's exact numbers, where swscale runs up to two or three levels low. Edges differ: at its own size the export repeats each chroma sample, the shader interpolates; scaled, swscale's bicubic is sharper than the box. Barcodes read the same at every size.
+- **Present mode:** Mailbox (Immediate where there is one), so a new picture shows at the next refresh and no frames queue.
 
-## 4. Track layout
+## 5. When a frame is on screen
 
-```text
-# mpv EDL v0
-!new_stream
-<video entries; gaps = black filler>
-<black filler, 1 frame, layout=this>
-!new_stream
-<A1 audio entries; gaps and clips without audio = silence filler>
-<silence filler, 1 frame, layout=this>
-```
+The contract is gui.md §4's: a seek, step or viewer change returns once its frame is on screen.
+- Each seek, step, load and edit's reload is a **motion**. When the engine has the picture of the frame asked for (it calls back on its decode thread), the session asks the viewer thread to present; the viewer presents the engine at that moment, draws, and answers with the frame it showed exactly. Paused, the motion is on screen when that is the frame asked for; playing, when any frame showed after it (the clock starts at the frame asked for).
+- A present that showed an older picture (the frame wasn't decoded yet) is asked again; a present unanswered for 50 ms too.
+- **Overtaken:** a seek whose frame another seek replaced before it showed fails with `CONFLICT`, naming the other frame (the GUI's own are no errors). Every seek is exact; `fast` (a scrub) only keeps it out of the command log.
+- **Failed:** a picture that fails to decode (an unreadable file) fails the waiting seek with the reason, and `player.state` shows it.
+- **Held keys:** the engine merges requests, and a paused seek finishes before the newest runs unless it has decoded for a second (player.md §2), so the picture moves at the speed frames decode and the last step lands exactly.
 
-**Result:**
-- Exactly one video and one audio track (`vid=1`, `aid=1`).
-- Real-time playback across every boundary without stalls (3.70 s of timeline in 3.70 s).
-
-**Notes:**
-- **Generator:** `vidcut_core::preview::edl` builds this from a render plan. `vidcut_av::filler::ensure` makes the fillers.
-- **Filler start:** video filler entries start half a frame into the filler file. Otherwise Matroska's 1 ms timestamp rounding lets one extra black frame into a gap segment, showing black on the first frame after the gap. The product test `crates/vidcut/tests/preview.rs` caught this.
-- **Length:** the trailing one-frame fillers make the EDL one frame longer than the timeline. The GUI clamps the playhead.
-- **Filler media:** generated by vidcut-av and cached per (size, fps): black H.264 video-only, and silent audio-only.
-- **More audio tracks** become more `!new_stream` groups, mixed with `lavfi-complex` (§10).
-
-## 5. Player options
-
-```text
-vo=libmpv hwdec=auto-safe config=no load-scripts=no ytdl=no terminal=no
-input-default-bindings=no osc=no hr-seek=yes hr-seek-framedrop=no
-keep-open=always idle=yes pause=yes video-timing-offset=0
-```
-
-For single-file sources, also `rebase-start-time=no`. With the preferences' `gpu.acceleration` off, `hwdec=no`. The live session watches the preferences file: when the preference changes, from anywhere, each player sets `hwdec` and opens its file again where it is; a player also reads it as it opens each file. Players whose renderer can't show GPU frames (mpv's software renderer, `Players::hwdec`) keep the options they were made with.
-
-**The audio output keeps the project's format.** Timeline files load with `audio-samplerate` and `audio-channels` set to the project's sample rate and channel count (`live::file_options`), so mpv converts each clip's audio to them, as export's mix does.
-- **Why:** mpv keeps its audio output through a change of decoded format only when the rate and channels stay the same. Otherwise it drains what it queued, closes the device and opens a new one: about 260 ms with PipeWire at a cut from stereo into 5.1. The picture waits for the audio clock, then drops frames to catch up.
-- **Between files too:** the output stays open through the `loadfile` that follows each edit.
-- `tests/preview.rs` plays across a cut from 48 kHz stereo into 44.1 kHz 5.1 and checks that mpv opened one output.
-
-**Interlaced sources** load with `vf=bwdif=mode=send_frame:deint=interlaced`, as a per-file option, whenever the plan has an interlaced clip (spec D34).
-- **Why not mpv's own deinterlacer:** `deinterlace=yes` makes one frame per field, and the half-frame bias of every seek (§1) would land on the previous frame's second field.
-- **Cost:** the software filter takes the whole file. With hardware decoding, every frame of a timeline holding an interlaced clip goes through system memory; timelines without one are unaffected.
-
-**Network shares read ahead.** When a source of the EDL is on a network file system, the file loads with `cache=yes,demuxer-max-back-bytes=150MiB`. That covers NFS, SMB/CIFS, Ceph, AFS, 9P, and FUSE, which GNOME's mounted shares and sshfs use. mpv then reads ahead during playback and keeps what it read, so scrubbing back over it doesn't go to the share again.
-- **Local files keep the cache off**, so a reload after every edit doesn't read ahead needlessly.
-- **The check (`statfs`) runs on a worker** when media are added: a share that doesn't answer would block the session thread.
-- **Frame-exactness:** the live and preview tests pass with the cache forced on for every file.
-
-## 6. OpenGL embedding (eframe glow, GNOME Wayland, NVIDIA)
-
-Found with eframe 0.35 in M0 and unchanged with 0.36: `tests/gui.rs` (`--features vidcut/gui-tests`) compares the viewer's GL picture with `vidcut frame render`.
-
-**Render target:**
-- Each player renders into its own FBO with an RGBA8 texture.
-- The texture is registered once with `Frame::register_native_glow_texture` (eframe can't unregister). Its storage is re-specified on resize.
-
-**Orientation:** with `flip_y=false`, FBO rows come out top-first, which matches egui's UVs. This was verified by reading the FBO back and decoding the barcode.
-
-**GL state:** after mpv renders, rebind framebuffer 0 and reset the pixel-unpack buffer, `UNPACK_ROW_LENGTH`, the active texture unit, the bound texture, the VAO and the program.
-
-**Hardware decoding:**
-- `nvdec` with `cuda` frames, i.e. zero-copy into GL, for both 10-bit HEVC and H.264.
-- 4K60 10-bit HEVC plays at 60 fps steady state with 0 drops.
-- One run had a single burst of 15 dropped frames about 3 s after start. Watch for this in M3.
-
-**Threading (critical):**
-- The UI thread is mpv's render thread. It may only call the client functions libmpv declares render-thread-safe:
-  - `mpv_command_async`, `mpv_set_property_async`, `mpv_get_property_async`
-  - `mpv_observe_property`, `mpv_wakeup`
-  - `mpv_wait_event(…, 0)`
-- Synchronous `mpv_command` or `mpv_get_property` on that thread deadlocked the spike against the video output.
-- In the headless harness, these calls didn't hang, but they made seeks about 3× slower until mpv's internal timeouts fired.
-- In the app, the core thread owns the client API.
-
-**vsync off:**
-- With vsync on, NVIDIA's EGL on Wayland blocks `eglSwapBuffers` until the compositor sends a frame callback.
-- GNOME withholds frame callbacks while the window is hidden or occluded, so the UI (render) thread froze.
-- We use `GlowConfiguration { vsync: false, .. }`. Repaints are driven by mpv's update callbacks.
-
-**Shutdown:**
-1. Free the render contexts in `App::on_exit`, while the GL context is still current.
-2. Then drop the mpv handles.
-
-## 7. Reverse playback (J)
-
-- **Unreliable:** `play-direction=backward` decoded frames 51→45 in one run and stalled in another.
-- **v1:** J uses stepped reverse, i.e. exact seeks backwards at a reduced rate.
-- Revisit later.
-
-## 8. Settled in M3
-
-- **Mixed rates and VFR:** settled in M2. Preview and export share the sampling rule ([export.md](export.md) §2).
-- **Source viewer mapping:** sources play as EDLs too (`render::tape`), one entry per clip, using the same formulas as the timeline. Source times are project frames (deviation X8). See [gui.md](gui.md) §7.
-- **Multi-track audio preview:** settled in M6 (§10).
-
-## 9. Segment ends before open-GOP keyframes: tail patches
-
-**The problem** (found in M3; the M0 fixtures happened not to show it):
-- **Leading pictures.** In many encodes, a keyframe is decoded *before* the frames displayed just ahead of it. These are open GOPs, and x264 also places B-frames before a keyframe. Big Buck Bunny, Tears of Steel, and our own 640×360 H.264 fixture all do this.
-- **mpv's heuristic.** mpv's EDL demuxer ends a segment at the first keyframe whose timestamp is past the segment's end. A segment that ends within the leading pictures therefore never sends its last 1–3 frames to the decoder.
-- **The symptom.** The viewer shows the next segment's first frame in their place. Seeks there and playback across the cut are both wrong.
-- **Export is unaffected:** our decoder selects frames by timestamp after decoding.
-
-**Why EDL parameters can't fix it:**
-- Including that keyframe in the segment means lengthening it by at least half a frame.
-- Shifting the next segment back to compensate would drop that segment's own first frame.
-
-**The fix (`vidcut_av::tails`, used by the live session's `preview_plan`):**
-1. **Scan.** For every video segment end, check the packets around the cut (`lost_before`) on a worker. The scan runs once per (file, end frame, rate, size) and is cached.
-2. **Patch.** If frames would be lost, render the segment's last frames with the export engine itself (`render_patch`): lossless FFV1, all-intra, Matroska, timestamps from 0, the project's size. Patches are cached in `~/.cache/vidcut/tails/`.
-3. **Splice.** The EDL plays the segment shortened by the patch's length, then the patch. Preview equals export by construction.
-
-**Waiting.** A seek waits until the checks and patches that could change its frame are done: those of cuts at most 64 frames after it ([gui.md](gui.md) §4). Checks start nearest the playhead first. The state reports all that are still running as `preview_pending`.
-
-**Failures are tried again.** A check whose seek fails reports an error rather than "nothing lost". A failed check or patch is tried once more 2 s later; a network share may just have hiccuped. After that the cut stays unpatched, with a notice that the preview may drop its last frames.
-
-**Evidence:**
-- `crates/vidcut-av/tests/tails.rs`: frames 88–89 are lost before keyframe 90 and patched exactly.
-- `crates/vidcut/tests/live.rs` (clip from the first frame of a 640×360 file) and `tests/gui.rs`: frames 88–90 are exact.
-
-## 10. Several tracks (M6)
-
-**Video needs nothing new.** `render::flatten` picks the highest visible clip at every frame, as export does, so the single video stream already shows what export writes.
-
-**Audio: one stream per lane, mixed by mpv.**
-- Each audible track is a lane: a video track's clip audio, or an audio track. A muted track, a track left out by solo (p. 650), and a lane with nothing but silence are dropped, as in export. With no lanes, the EDL has one silence stream.
-- Each lane is a `!new_stream` group, pinned by its trailing `layout=this` silence entry (§4).
-- mpv plays one audio track at a time, so a file with several lanes is loaded with a `lavfi-complex` graph (`preview::audio_graph`), passed as a per-file `loadfile` option with `%len%` quoting: `[aid1][aid2]amix=inputs=2:normalize=0[ao]`. `normalize=0` sums the lanes the way export does.
-- **Gains:** clip gain plus the track fader. A lane with one gain gets `volume=<linear>`. A lane whose gain changes from clip to clip gets `volume=volume='if(lt(t,s),A,B)':eval=frame`, where `t` is timeline time: a binary search over the starts of its gain spans, so the expression nests only log₂(n) deep. FFmpeg's expression parser refuses some 100 nested levels; one `if` per change, as first written, failed past a few dozen and fell back to one gain. A span reaches over silence to the next clip with the same gain. `tests/preview_gains.rs` runs 2000 changes through the real filter. A single lane at 0 dB needs no graph.
-- **Live faders:** a fader being dragged is heard at once, without reloading the timeline (a reload is a short hiccup):
-  - With FFmpeg's `azmq` filter (built with ZeroMQ) and `libzmq.so.5` loadable, the timeline's graph keeps each lane's fader apart from its clip gains, as a filter of its own named for the track (`volume@fader_V2`), and ends in `azmq=bind_address=ipc\\:///…/mix-N`. `render::flatten_lanes` says which track each lane is.
-  - The address needs two levels of escaping, the filter's options and then the graph (`preview::lavfi_value`): with one, `azmq` fails to load, and so does the graph and its sound. `tests/preview_gains.rs` binds it in real FFmpeg.
-  - Every load gets a new address (`mix-1`, `mix-2`, …): mpv may build the new graph before it frees the old one's address.
-  - `mixer.preview` (the Mixer's fader while dragged, `vidcut mixer preview`) sends `volume@fader_A1 volume <linear>` from a thread of its own (`live/mixctl.rs`), which loads libzmq at run time as libmpv is loaded, keeps only each fader's latest level, and waits at most 0.5 s for the answer. `azmq` reads commands as sound passes through it, so while paused a command waits for playback; nothing is heard then anyway, and releasing the fader saves the level with `track.set`, which reloads the timeline with it.
-  - Without ZeroMQ or `azmq`, the graph is as before and `mixer.preview` answers `live: false`; the fader is heard when released.
-  - `tests/live.rs` sends a level to the running player's graph and gets the filter's answer.
-- **Monitoring mute** (`player.mute`, the speaker by the viewer) mutes both players. It changes neither the project nor the export.
-
-**Verified:**
-- `edl_spike.rs` `edl_audio_streams_mix_with_lavfi_complex`: three lanes of beeps mixed through `ao=pcm`. Every onset lands where the plan puts it.
-- `edl_spike.rs` `edl_volume_follows_timeline_time`: the gain switches at the right timeline times (peaks 0.5 and 0.125).
-- `tests/live.rs` "Several tracks": B-roll on V2 shows frame-exact over Track 1, and music on A1 with a −6 dB fader plays without a preview error. After an edit on Track 1 the B-roll follows (D21).
-- **Accuracy:** EDL audio segment edges are within about 10 ms (export is sample-exact). Preview audio leads the picture by half a frame, the bias of §1. That was already so with one stream.
-
-**Audio-only media start after the encoder priming.** An audio-only Matroska file with AAC starts with a priming packet 21 ms (1024 samples) before the content. The probe now takes the content start as the stream start plus `initial_padding` and shortens the duration to match, so export and preview line it up with video clips' sound. Files with video are unchanged, because the video's first frame sets the origin.
-
-## 11. Stills and image sequences (M9)
-
-An image in an EDL entry is a source with one frame at time 0. Seeking into the middle of a still's entry finds no frame there, so mpv goes on to the next entry and shows its first frame (`tests/edl_spike.rs`, `edl_stills_and_image_sequences`).
-
-**Image lists.** The live session gives mpv image pieces as image lists instead (`mf://@list`), one file a frame, with `mf-fps` at the project rate (`Preview::images`). The EDL then plays a list like a video file whose frame `m` is at `m / fps`: same `start` arithmetic, same half-frame bias.
-- **A sequence's list** covers all of it at the project rate. Line `m` holds the picture the export's sampling rule picks for project frame `m`, so a 24 fps sequence on a 30 fps timeline shows what the export shows.
-- **A still's list** is the still repeated for 10 s at the project rate. Longer still pieces chain it like the black filler: every frame is alike, so any part of the list will do.
-- **Where:** lists go in the runtime folder (`<pid>/images/`), written the first time they are needed, keyed by the files, the rates and the project rate.
-- **No tail patches:** pictures aren't decoded ahead of each other, so a cut loses no frames.
-- **Verified:** seeks to every boundary and into the middle of stills, sequences and resampled sequences show the export's frame (the spike, and `tests/live.rs`).
-
-**Not used, from the spike:**
-- **FFmpeg concat scripts** (`.ffconcat` listing files with durations) take the first file's time base (25 fps for a PNG) unless each file gets a `framerate` option, and then seeking inside them falls through to the next entry at some frames.
-- **mpv's `mf-fps`** is one rate for the whole file, so a sequence's own rate can't be given per entry. Lists at the project rate need only one.
-
-**Playing sequences.** Big pictures decode slowly: a 4K 16-bit PNG takes about 100 ms, so such a sequence can't play in real time, and mpv drops frames. Scrubbing and seeking are fine. A proxy (§12) is what plays instead.
-
-## 12. Proxies
+## 6. Proxies
 
 A proxy is a smaller AV1 or H.264 file (8-bit 4:2:0, closed GOPs of 60 frames, every frame coded in the order it shows) of a pool item's pictures. `proxy.generate` writes one for a video or an image sequence, with the encoder the preferences' `proxies.codec` picks: hardware AV1 when one works (NVENC, VAAPI), then x264 (`auto`) or SVT-AV1 (`av1`); x264 for `h264`. Measured on 60 s of 4K60 (960 px proxies): x264 23.1 MB in 7.1 s, NVENC AV1 22.8 MB in 6.3 s at a higher SSIM, SVT-AV1 16.4 MB in 16.7 s; every one decodes at over 1,000 fps on the CPU.
 
-**Encoding.** The request first runs on a copy of the project, which writes the files: in the GUI on a worker thread (the measure step that analysis edits use), headless before the project is locked. Then it runs for real and finds the files there, so recording them is quick. The encode reports progress through `vidcut_av::progress` and stops on the `vidcut_av::cancel` flag; a stopped encode removes its temporary file. The preview plays it only when `settings.use_proxies` is set and the proxy is fresh: same source size and modification time as when it was made, and the file is there. Otherwise the original plays, image lists included.
+**Encoding.** The request first runs on a copy of the project, which writes the files: in the GUI on a worker thread (the measure step that analysis edits use), headless before the project is locked. Then it runs for real and finds the files there, so recording them is quick. The encode reports progress through `vidcut_av::progress` and stops on the `vidcut_av::cancel` flag; a stopped encode removes its temporary file. The viewer plays it only when `settings.use_proxies` is set and the proxy is fresh: same source size and modification time as when it was made, and the file is there. Otherwise the original plays.
 
-**Timestamps.** Each proxy frame is given the source frame's presentation timestamp (the source time base, or microseconds when that base is not a sane clock). The live session swaps only the video piece's path and clears `image`, and leaves `origin` and `source_frame` alone. The EDL `start` is still `origin + source_frame/fps − ½ frame`, so the seek lands on the same frame. Matroska rounds timestamps to 1 ms, which the half-frame bias absorbs. An image sequence's proxy is picture `k` at `k/rate` with origin 0, and the preview plays that video instead of the `mf://` list.
+**Timestamps.** Each proxy frame is given the source frame's presentation timestamp (the source time base, or microseconds when that base is not a sane clock). The viewer's plan swaps only the video piece's path (`vidcut_core::preview::apply_proxies`) and keeps `origin` and `source_frame`, so the export's sampling rule picks the same frames from the proxy. An image sequence's proxy is picture `k` at `k/rate` with origin 0, and the viewer plays that video instead of the pictures.
 
-**What does not change.** `render::flatten`, frame render, analysis and OTIO keep the original paths. Preview audio entries keep the original file too, so proxy video is not mixed with a second clock. Export never reads a proxy. A proxy is already progressive and upright, so the preview does not deinterlace it again and does not rely on the source's rotation metadata.
+**What does not change.** Export, frame render, analysis and OTIO keep the original paths. The viewer's sound stays on the original file. A proxy is already progressive and upright.
 
 **On the GPU.** With NVENC, a proxy is decoded on NVDEC and scaled there (`vidcut_av::cuda`), the frames never copied to memory, when that gives the pictures the CPU would: a video file, interlaced ones deinterlaced by the reader (`bwdif_cuda`, one frame per frame, as the CPU reader). Turned pictures, other matrices (BT.601 SD, VP8), full range and HDR (tone-mapped by the CPU's curve in a shader) go through libplacebo on Vulkan first (export.md §5). Anything else, and streams NVDEC can't decode (ProRes, or a profile the GPU lacks), decode on the CPU, still encoding on NVENC.
 - **The decoder:** `VideoReader::open_cuda` uses a decoder that can use NVDEC, FFmpeg's own: FFmpeg would pick libdav1d for AV1, which decodes on the CPU only.
 - **Scaling:** `scale_cuda` samples a fixed few pixels per output pixel, so a big shrink aliases (4K to 960 made frames sharper than the CPU's and files 33% bigger). It halves with bilinear steps first, each the average of four pixels, then scales to the size with bicubic: as sharp as the CPU's, files 7% bigger.
 - **Measured** on 176 s of 4K60 10-bit AV1 to a 960 px AV1 proxy: 107 s and 381 CPU-seconds decoding on the CPU, 37 s and 2.6 CPU-seconds on the GPU, with NVDEC 96–99% busy. Pictures match the CPU's within a level on average (10 to 8 bits is truncated, where the CPU rounds). 12 min of VP8 (BT.601) 1920×800 to 960 px: 14.4 s and 104 CPU-seconds on the CPU, 18.1 s and 7 on the GPU, NVDEC 70% busy. 30 s of 4K60 H.264: 4.2 s and 34 CPU-seconds on the CPU, 7.5 s and 0.5 on the GPU (8.1 s turned): NVDEC decodes 4K H.264 at 240 fps, the CPU's 16 threads at 430. 30 s of 4K60 PQ HEVC (SDR white at 1000 nits): 7.3 s and 66 CPU-seconds on the CPU, 4.0 s and 1.5 on the GPU (libplacebo scales it and tone-maps it in one pass).
-- **Tests:** `tests/proxy.rs` (`--features gpu-tests`) makes NVENC proxies of 720p H.264, 10-bit HEVC, VP9, 10-bit AV1, an MPEG-TS starting at 1.4 s, interlaced H.264, BT.601 SD, sources turned 90° and 180°, PQ, and HLG turned 90°, each on the GPU with every frame's barcode and timestamp the source's (turned upright, tone-mapped); interlaced BT.601 stays on the GPU too, ProRes goes to the CPU. `proxy.generate` says how each proxy was made (`made_with`).
+- **Tests:** `tests/proxy.rs` (`--features gpu-tests`) makes NVENC proxies of 720p H.264, 10-bit HEVC, VP9, 10-bit AV1, an MPEG-TS starting at 1.4 s, interlaced H.264, BT.601 SD, sources turned 90° and 180°, PQ, and HLG turned 90°, each on the GPU with every frame's barcode and timestamp the source's (turned upright, tone-mapped); interlaced BT.601 stays on the GPU too, ProRes goes to the CPU. `proxy.generate` says how each proxy was made (`made_with`). `tests/live.rs` plays a proxy in the viewer frame for frame.
 
 **Where.** Beside the project, in `proxies/`, when the session knows the project path; otherwise `~/.cache/vidcut/proxies`. The stored path is absolute. Stills are not proxied: one picture is not the real-time problem.
 
+## 7. Sound
 
-## 13. Paused frames: decoded once either way
+- **The device.** Each player's engine plays to the system's default output through cpal (ALSA, which PipeWire and PulseAudio serve); its callback is the clock, its latency made up for, so pictures keep with the sound as it is heard (player.md §4). When the device won't open, the engine plays to a silent stand-in and the status bar says why, once: the picture plays all the same.
+- **Every lane mixed** as export mixes them: clip gains, faders, mute and solo (spec D28), de-click fades at cuts.
+- **Faders while dragged** (`mixer.preview`): a gain on top of the track's lane in the timeline's engine, heard within a tenth of a second; releasing saves the level with `track.set`, whose new plan has it. A track with no sound in the mix (muted, left out by solo, empty) is an error; nothing playing the timeline answers `live: false`.
+- **Monitoring mute** (`player.mute`) silences both engines; the clock runs on. Neither the project nor the export changes.
+- **Audio scrubbing** (decision D42): steps and paused seeks play their frame's sound; `player.audio_scrubbing`, Shift+S or Timeline > Audio Scrubbing turn it off and on (on when the GUI starts). The viewer's own moves (opening at a remembered frame, after an edit) play none.
+- **Backward and other speeds** (J/K/L) play the sound reversed or stretched, keeping its pitch (player.md §4).
 
-**The problem.** A paused viewer steps with exact seeks. mpv decodes each one from the keyframe before it, and drops what it decoded on the way. On files with keyframes seconds apart (common for web encodes), every step decoded up to a few hundred frames again, about 0.1–0.15 s on the GPU; going back was the same. Seeks queue behind a decoding one (gui.md §4), so a held arrow key keeps the picture moving, but only as fast as those decodes.
+## 8. Measured
 
-**How others go back.** mpv's backward playback (`play-direction=backward`) decodes forward from a keyframe up to where it is, keeps everything in a reversal queue, hands it out last first, then does the same for the range before. Only after the queue is empty does it decode the next range, so it stalls at every keyframe; its own manual calls it fragile, says hardware decoding may exhaust GPU memory, and says editors can do better (§7: it stalled for us too). FFmpeg's `reverse` filter keeps a whole clip's decoded frames (850 MB more for 10 s of 1080p) and reverses them; reversing itself costs nothing, the decoding does.
+The real GUI, a debug build of vidcut's crates (dependencies optimized), the viewer's picture about 1000×560, on this machine; CPU is every thread of the process while it plays, seeks are `vidcut player seek` until the frame shows (a CLI process each, about 15 ms of it).
 
-**The decision.** While the player is paused, the viewer shows frames from `vidcut_av::export::renderer::StillRenderer`, the export engine's renderer, at the viewer's pixel size. Playing, it shows mpv's picture, as before; mpv still seeks in the background, so play starts at once.
+| Stream | Decoded on | Played | CPU | Seeks (10 far apart) |
+|---|---|---|---|---|
+| 1080p30 H.264 | CPU | 299 frames in 10.0 s, none late or skipped | 0.07 cores | 17–33 ms, 160 ms far from a keyframe |
+| 1080p30 HEVC | NVDEC / CPU | 179 in 6.0 s, none late | 0.04 / 0.47 cores | 17–22 ms either |
+| 2160p60 H.264 | CPU | 599 in 10.1 s, none late or skipped | 0.55 cores | 199–418 ms |
+| 2160p60 10-bit HEVC | NVDEC / CPU | 598 in 10.1 s, none late | 0.29 / 2.0 cores | 57–417 / 144–535 ms |
+| 2160p60 10-bit AV1 | NVDEC / CPU | 598 in 10.1 s, none late | 0.25 / 2.1 cores | 69–465 / 143–553 ms |
+
+- **Steps back** from the middle of a GOP: the first 150–500 ms (a window decodes from the keyframe), then 17–35 ms each (the CLI's own round trip).
+- **Picture against sound** (`tests/live.rs`, a stand-in device heard 30 ms after it pulls): the picture changed 0.4–1.4 ms after each beep was heard; every frame of 150 showed, in order. The engine's own measurements are in player.md §7.
+- **Minimized** (GNOME Wayland, NVIDIA): a seek 25 ms, a viewer screenshot 23 ms.
+- **Seeks after an edit of 120 cuts** wait for nothing: 6 ms to the first.
+
+## 9. Exact frames for the two-up: decoded once either way
+
+The Trim Editor's and Dynamic Trim's two-up show frames of a copy of the project that the players don't play: `vidcut_av::export::renderer::StillRenderer`, the export engine's renderer, draws them at the cell's size (`gui/stills.rs`), a thread per cell. The engine's pictures going back follow its rule.
+
+- **The problem it solves.** Stepping back with exact seeks decodes each step from the keyframe before it; on files with keyframes seconds apart that is a few hundred frames again for every step.
 - **Forward:** the file and decoder stay open, and the next frame decodes on from the one before.
-- **Back:** a window renders at once, from a keyframe up to the frame asked for, and is kept. The keyframe is found with one seek and one decoded frame (where the seek lands), and the window starts at the first frame sampled at or after it, so a seek for it lands on that keyframe and nothing in the window decodes twice. A window reaches back over more keyframes to hold at least 2 s, and holds at most half the memory budget (512 MB for the viewer, 256 MB for each two-up cell).
+- **Back:** a window renders at once, from a keyframe up to the frame asked for, and is kept. The keyframe is found with one seek and one decoded frame (where the seek lands), and the window starts at the first frame sampled at or after it, so a seek for it lands on that keyframe and nothing in the window decodes twice. A window reaches back over more keyframes to hold at least 2 s, and holds at most half the memory budget (256 MB a cell).
 - **Ahead:** windows render on a second thread (`Prefetch`) before they are needed. Wherever the position is, even after a jump, at least 2 s behind it are kept; going back, a whole window more, so the next window back renders while the position goes through this one. Asked for a frame a window is rendering, the renderer waits for it instead of rendering it too.
-- **Floor:** the viewer says where the shown stretch of the file starts (the timeline run ending at the playhead, as far back as a minute). Windows never reach behind it: frames before a clip's first one aren't shown there.
-- **Eviction:** over the budget, the pictures kept or looked at least recently go first. Moving back and forth over a cut keeps both sides whole: a hole in the kept frames would decode from a keyframe while the viewer waits.
+- **Floor:** the cell says where the shown stretch of the file starts. Windows never reach behind it: frames before a clip's first one aren't shown there.
+- **Eviction:** over the budget, the pictures kept or looked at least recently go first. Moving back and forth over a cut keeps both sides whole: a hole in the kept frames would decode from a keyframe while the cell waits.
 - **Measured** (`tests/renderer.rs`, keyframes 120 frames apart, with B-frames): 50 steps forward decode 50 frames; 299 steps back decode 306. On a 1080p HEVC file with keyframes 8 s apart, a step back takes under 5 ms except once a window, and the first picture after a seek about 0.7 s.
 
-The same renderer draws the Trim Editor's and Dynamic Trim's two-up. Image sequences render a picture at a time (each picture stands alone), and stills once.
+## 10. Still open
 
-**Differences from mpv's picture.** The frames are the same ones (both follow the sampling rule, §1). The pixels differ by about 2 of 255 on average in fine detail: the export engine's FFmpeg scaling and YUV-to-RGB conversion against mpv's GPU shaders. `gui.screenshot` still captures mpv's picture.
+- Zero-copy GPU frames, VAAPI and Vulkan Video decoding, Metal and D3D frames on other systems: own-player.md.
+- Choosing the audio device: the default one plays.
+- The meters show the edit's levels, not the engine's output: todo/meters-tap-player-output.md.

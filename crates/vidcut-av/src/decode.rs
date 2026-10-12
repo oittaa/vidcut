@@ -1,6 +1,6 @@
 //! Video decoding with frame-exact seeking.
 //!
-//! Seek semantics match mpv's hr-seek and FFmpeg's accurate seek: after
+//! Seek semantics match FFmpeg's accurate seek: after
 //! [`VideoReader::seek`] to `target`, the next frame returned is the first frame
 //! whose presentation timestamp is `>= target`. Callers put the half-frame bias
 //! into `target` (see the time map), so that rounding in timestamps never selects

@@ -217,7 +217,8 @@ impl Screen {
         width: u32,
         height: u32,
     ) -> Drawn {
-        let size = (width.max(2), height.max(2));
+        let max = gpu.device.limits().max_texture_dimension_2d;
+        let size = (width.clamp(2, max), height.clamp(2, max));
         let mut drawn = Drawn::Picture;
         if self.target.as_ref().is_none_or(|t| t.size != size) {
             self.target = Some(make_target(&gpu.device, size));
@@ -232,7 +233,11 @@ impl Screen {
                 return Drawn::Same;
             }
         }
-        let picture = picture.filter(|p| p.memory() == Memory::Cpu);
+        // Pictures in GPU memory have no planes here, and one larger than
+        // the device's textures can't go up (wgpu would panic): black.
+        let limit = gpu.device.limits().max_texture_dimension_2d;
+        let picture = picture
+            .filter(|p| p.memory() == Memory::Cpu && p.width() <= limit && p.height() <= limit);
         let mut encoder = gpu
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {

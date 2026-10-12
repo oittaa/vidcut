@@ -40,7 +40,7 @@ fi
 
 # Ubuntu's FFmpeg (`ffmpeg -buildconf`) enables much more; these are the
 # parts vidcut uses: encoders and decoders of its presets, proxies and test
-# fixtures, zscale and libplacebo for color, azmq for live faders, NVENC,
+# fixtures, zscale and libplacebo for color, NVENC,
 # NVDEC, the CUDA filters and VAAPI for the GPU paths. --enable-cuda-llvm
 # compiles the CUDA filters with clang, as Ubuntu's build does: no CUDA
 # toolkit. No debug info keeps the CI cache small.
@@ -69,15 +69,14 @@ fi
   --enable-libopus \
   --enable-libmp3lame \
   --enable-libvorbis \
-  --enable-libzimg \
-  --enable-libzmq
+  --enable-libzimg
 
 make -j"$(nproc)"
 make install
 
 # Fail here, not in vidcut's tests, if a filter vidcut needs didn't build.
 filters=$("$prefix/bin/ffmpeg" -hide_banner -filters)
-for f in zscale libplacebo azmq bwdif scale_cuda pad_cuda bwdif_cuda; do
+for f in zscale libplacebo bwdif scale_cuda pad_cuda bwdif_cuda; do
   if ! grep -qE "^ [A-Z.]+ $f " <<<"$filters"; then
     echo "FFmpeg was built without the $f filter" >&2
     exit 1

@@ -5,15 +5,14 @@
 #   scripts/ffmpeg-check.sh [--fast] [TARGET...] [-- COMMAND...]
 #
 # Targets (default: lts release):
-#   lts      Ubuntu 26.04 with its own FFmpeg 8.0 and libmpv: the oldest FFmpeg vidcut supports
+#   lts      Ubuntu 26.04 with its own FFmpeg 8.0: the oldest FFmpeg vidcut supports
 #   release  the newest FFmpeg release (scripts/ffmpeg/release.env), built from source
 #   master   FFmpeg's git master, built from source: an early warning, allowed to fail
 #
 # Each target runs `cargo build --workspace` and `scripts/check.sh full`
 # (fmt, clippy, unit, integration and doc tests; --fast: `scripts/check.sh`).
 # Without a GPU, display or audio device in the container, the GPU, GUI and
-# audio-device tests stay off (they are features), and tests that need
-# libmpv skip outside `lts`.
+# audio-device tests stay off (they are features).
 # `-- COMMAND...` runs that instead, e.g. `-- bash` or `-- cargo test -p vidcut-av`.
 #
 # Caches are Docker volumes, never the repository: vidcut-ffmpeg-cargo (the

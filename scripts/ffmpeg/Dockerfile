@@ -2,7 +2,7 @@
 # Images for building and testing vidcut against one FFmpeg each; run them
 # with scripts/ffmpeg-check.sh, which mounts the source and the caches.
 #
-#   lts    Ubuntu 26.04 with its own FFmpeg 8.0 and libmpv (the baseline)
+#   lts    Ubuntu 26.04 with its own FFmpeg 8.0 (the baseline)
 #   built  Ubuntu 26.04 with FFmpeg built from source (build arg FFMPEG:
 #          `release` for release.env, or a commit of FFmpeg's git)
 #
@@ -50,8 +50,6 @@ RUN test -n "$RUST" \
  && CARGO_HOME=/tmp/cargo rustup toolchain install "$RUST" --profile minimal --component rustfmt,clippy \
  && chmod -R a+rX "$RUSTUP_HOME" && rm -rf /tmp/cargo
 COPY --from=ffmpeg /opt/ffmpeg /opt/ffmpeg
-# No libmpv: Ubuntu's links Ubuntu's FFmpeg 8.0, which would be a second
-# FFmpeg in the process. The tests that need libmpv skip.
 ENV PATH=/opt/ffmpeg/bin:$PATH \
     PKG_CONFIG_PATH=/opt/ffmpeg/lib/pkgconfig \
     LD_LIBRARY_PATH=/opt/ffmpeg/lib
@@ -63,7 +61,7 @@ FROM os AS lts
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev \
-      libswresample-dev libavdevice-dev libasound2-dev libmpv2 \
+      libswresample-dev libavdevice-dev libasound2-dev \
  && rm -rf /var/lib/apt/lists/*
 ARG RUST
 RUN test -n "$RUST" \

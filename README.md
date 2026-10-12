@@ -25,11 +25,13 @@ A simple, fully scriptable video cutting tool for Linux, modeled on DaVinci Reso
 
 ## Requirements
 
-Ubuntu 26.04 (or similar) with FFmpeg and libmpv:
+Ubuntu 26.04 (or similar) with FFmpeg:
 
 ```bash
-sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libasound2-dev libclang-dev libmpv2 rustup
+sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libasound2-dev libclang-dev rustup
 ```
+
+The GUI draws with Vulkan (the driver any desktop has: Mesa's for AMD and Intel, NVIDIA's own) and plays sound through ALSA, which PipeWire and PulseAudio serve. Nothing else is needed at run time: vidcut plays video with its own player, on the FFmpeg libraries. On NVIDIA GPUs the player decodes HEVC, AV1 and VP9 on the GPU.
 
 vidcut works with FFmpeg 8.0 (Ubuntu 26.04 LTS) up to the newest release, 9.0; both ends are tested.
 
@@ -82,6 +84,7 @@ Everything you, scripts and agents do is listed in the **Command log** (top righ
 | + | Go forward by the time you type |
 | − | Go back by the time you type |
 | Q | Switch the viewer between Timeline and the last source |
+| Shift+S | Audio scrubbing on or off: steps and drags of a paused playhead play the sound under them |
 
 Typed timecodes fill from the right: 100 is 1 second, 10000 is 1 minute.
 
@@ -221,4 +224,4 @@ Read [AGENTS.md](AGENTS.md) first; it's written for AI agents but applies to hum
 
 vidcut's source code is released under the [MIT License](LICENSE).
 
-vidcut links the FFmpeg libraries and loads libmpv at runtime. Both are LGPL or GPL depending on how they were built, and Ubuntu's builds are GPL. Binaries you distribute together with those libraries must therefore comply with their licenses. vidcut's own source stays MIT.
+vidcut links the FFmpeg libraries, which are LGPL or GPL depending on how they were built; Ubuntu's builds are GPL. Binaries you distribute together with them must therefore comply with their licenses. vidcut's own source stays MIT.

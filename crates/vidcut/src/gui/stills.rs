@@ -5,7 +5,7 @@
 //!
 //! Each cell showing frames has a thread of its own, so the cells render at
 //! once, and a renderer that decodes each frame once whichever way the
-//! position moves (docs/decisions/preview.md §13). Going back, the renderer
+//! position moves (docs/decisions/preview.md §9). Going back, the renderer
 //! plans the window before the one it is in, and a second thread of the
 //! cell's renders it meanwhile. The position moves faster than frames
 //! render, so a cell renders only the newest frame it asked for, skipping

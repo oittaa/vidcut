@@ -48,8 +48,7 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
 - A sequence is read by FFmpeg's `image2` demuxer (`decode::Input::Sequence`): picture `k` has timestamp `k` in a time base of one frame at the sequence's rate, so the rule above picks pictures as from a video file, frame for frame at the project's rate and nearest-frame otherwise. The run is the contiguous files from its first number: image2's `start_number_range` is 1, so a missing first file fails the open instead of starting a few numbers later. The last picture lasts its own frame, as a video's does: at a project rate above the sequence's, the last output frame or two sample a time just past it. A run that ends before the sequence's count (a missing file) fails the export instead of repeating the picture before the hole.
 
 **Preview vs export:**
-- Preview (mpv EDL, see [preview.md](preview.md)) follows the same rule through the half-frame bias in segment starts.
-- At mismatched rates, mpv's 5 ms hr-seek tolerance can make a paused preview differ from the export by one frame at exact ties. Accepted.
+- The preview (the player engine, [preview.md](preview.md)) reads with these same readers, so it shows the export's frames at every rate.
 
 ## 3. Audio
 
@@ -83,7 +82,7 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
   - It runs `bwdif=mode=send_frame:deint=interlaced`: one frame per frame, with the first field kept, and progressive frames passing through. Frames NVDEC decodes go through `bwdif_cuda` with the same options, on the GPU, the same way (§5).
   - A seek starts it over, and frames decoded on the way to the target feed it. `bwdif` halves its output time base, so timestamps are rescaled back to the stream's.
   - Thumbnails aren't deinterlaced: at pool size, combing barely shows.
-- **Color** (`color.rs`, spec D35). Every picture is converted to the output's colors, from its tags or else what players assume (untagged: BT.709 when 1280 wide or over 576 lines, BT.601 otherwise, as mpv guesses for the preview; HDR untagged in BT.2020):
+- **Color** (`color.rs`, spec D35). Every picture is converted to the output's colors, from its tags or else what players assume (untagged: BT.709 when 1280 wide or over 576 lines, BT.601 otherwise, as players commonly guess and the viewer reads them; HDR untagged in BT.2020):
   - **SDR into SDR:** `scale` converts the YUV matrix and range to BT.709 limited as it scales. SD sources become BT.709, and full-range sources limited.
   - **HDR into SDR:** `zscale` takes the picture to linear light, with the reference white (203 nits) at 1.0, then to BT.709 primaries. `tonemap=mobius` (transition 0.8, peak 1000 nits) maps it, and `zscale` gives BT.709's transfer.
     - Everything up to 0.8 of the reference white stays as it was, so SDR-graded material in an HDR file looks as it did, and highlights roll off above it. PQ's 203 nits and HLG's 75% both come out at about 95% white.

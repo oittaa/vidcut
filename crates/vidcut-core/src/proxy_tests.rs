@@ -139,7 +139,7 @@ fn preview_swaps_a_fresh_proxy_and_leaves_a_stale_or_missing_one() {
         other => panic!("{other:?}"),
     }
 
-    // The switch off, or a missing file: the original, image list included.
+    // The switch off, or a missing file: the original, a sequence as one.
     let mut off = before.clone();
     let mut settings = project.clone();
     settings.settings.use_proxies = false;
