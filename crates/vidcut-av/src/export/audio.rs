@@ -434,6 +434,8 @@ struct Lane {
     ahead: Ahead<SourceAudio>,
     declick: i64,
     scratch: Vec<f32>,
+    /// Heard gain on top of each piece's own gain (a fader moved while playing).
+    trim: f32,
 }
 
 impl Lane {
@@ -494,6 +496,25 @@ impl Lane {
         });
     }
 
+    /// The next read continues at plan sample `sample`.
+    fn seek(&mut self, sample: i64) {
+        self.ahead = Ahead::new();
+        self.source = None;
+        self.scratch.clear();
+        let mut left = sample.max(0);
+        for (i, piece) in self.pieces.iter().enumerate() {
+            let n = piece.samples();
+            if left < n {
+                self.piece = i;
+                self.pos = left;
+                return;
+            }
+            left -= n;
+        }
+        self.piece = self.pieces.len();
+        self.pos = 0;
+    }
+
     /// Adds the lane's next `n` samples into `out` (interleaved, `n * ch` long).
     fn mix_into(&mut self, out: &mut [f32], rate: u32, channels: u16) -> Result<()> {
         let ch = usize::from(channels);
@@ -514,8 +535,10 @@ impl Lane {
                 ..
             } = &piece
             {
-                if self.pos == 0 && take > 0 {
-                    let start = origin + *source_sample as f64 / f64::from(rate);
+                // A piece starts at its first sample. A seek that lands in
+                // the middle has no open stream yet, and opens there.
+                if take > 0 && (self.pos == 0 || self.source.is_none()) {
+                    let start = origin + (*source_sample + self.pos) as f64 / f64::from(rate);
                     self.start_piece(path, *stream, start, rate, channels)?;
                 }
                 self.scratch.clear();
@@ -523,7 +546,7 @@ impl Lane {
                     .as_mut()
                     .expect("open")
                     .read(take, &mut self.scratch)?;
-                let gain = 10f32.powf(*gain_db as f32 / 20.0);
+                let gain = 10f32.powf(*gain_db as f32 / 20.0) * self.trim;
                 // De-click fades at cuts inside the lane (not at the plan's ends).
                 let fade = self.declick.min(len / 2).max(1);
                 let fade_in = self.piece > 0;
@@ -578,6 +601,7 @@ impl AudioMix {
                     ahead: Ahead::new(),
                     declick,
                     scratch: Vec::new(),
+                    trim: 1.0,
                 })
                 .collect(),
             rate,
@@ -593,6 +617,24 @@ impl AudioMix {
     /// Changes the whole mix by `db`.
     pub fn set_gain_db(&mut self, db: f64) {
         self.gain = 10f64.powf(db / 20.0) as f32;
+    }
+
+    /// Extra gain on lane `lane`, on top of the gains in its pieces. Heard on
+    /// the next [`read`](Self::read); the pieces stay as they are.
+    pub fn set_lane_db(&mut self, lane: usize, db: f64) -> Result<()> {
+        let Some(lane) = self.lanes.get_mut(lane) else {
+            return Err(Error::Invalid(format!("no audio lane {lane}")));
+        };
+        lane.trim = 10f64.powf(db / 20.0) as f32;
+        Ok(())
+    }
+
+    /// Next reads continue at plan sample `sample` (0 is the start of the
+    /// plan). Each lane opens there on its next read.
+    pub fn seek(&mut self, sample: i64) {
+        for lane in &mut self.lanes {
+            lane.seek(sample);
+        }
     }
 
     /// The next `n` mixed samples, interleaved.
