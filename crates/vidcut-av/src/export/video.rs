@@ -235,6 +235,9 @@ struct Source {
     /// first frame), when the export's frames stay on the GPU.
     on_gpu: bool,
     scaler: Option<crate::cuda::CudaPictures>,
+    /// The reader decodes on NVDEC: for an export on the GPU (`on_gpu`), or
+    /// for frames as decoded, copied down from the GPU (`decode_on`).
+    nvdec: bool,
 }
 
 /// What a source needs to decode on NVDEC for an export whose frames stay
@@ -278,15 +281,20 @@ impl Source {
         target: f64,
         pictures: Pictures,
         gpu: Option<&GpuSide>,
+        nvdec: Option<&crate::cuda::CudaDevice>,
     ) -> Result<Source> {
-        let on_gpu = gpu
-            .filter(|_| pictures == Pictures::Video)
-            .and_then(|g| gpu_reader(input, g));
+        let video = pictures == Pictures::Video;
+        let on_gpu = gpu.filter(|_| video).and_then(|g| gpu_reader(input, g));
         let (reader, scaler) = match on_gpu {
             Some((r, s)) => (r, Some(s)),
-            None => (VideoReader::open_input(input)?, None),
+            // Frames as decoded: on NVDEC when it decodes the stream faster.
+            None => match nvdec.filter(|_| video) {
+                Some(d) => (VideoReader::open_fastest(input, d)?, None),
+                None => (VideoReader::open_input(input)?, None),
+            },
         };
         let on_gpu = scaler.is_some();
+        let nvdec = reader.on_nvdec();
         let tb = reader.time_base();
         let mut source = Source {
             reader,
@@ -299,6 +307,7 @@ impl Source {
             pictures,
             on_gpu,
             scaler,
+            nvdec,
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
@@ -326,9 +335,19 @@ impl Source {
         Ok(())
     }
 
-    /// Opens `input` without decoding anything yet.
-    fn bare(input: &Input, origin: f64, pictures: Pictures) -> Result<Source> {
-        let reader = VideoReader::open_input(input)?;
+    /// Opens `input` without decoding anything yet: on NVDEC (`nvdec`)
+    /// when it decodes the stream.
+    fn bare(
+        input: &Input,
+        origin: f64,
+        pictures: Pictures,
+        nvdec: Option<&crate::cuda::CudaDevice>,
+    ) -> Result<Source> {
+        let reader = match nvdec {
+            Some(d) => VideoReader::open_fastest(input, d)?,
+            None => VideoReader::open_input(input)?,
+        };
+        let nvdec = reader.on_nvdec();
         let tb = reader.time_base();
         Ok(Source {
             reader,
@@ -341,6 +360,7 @@ impl Source {
             pictures,
             on_gpu: false,
             scaler: None,
+            nvdec,
         })
     }
 
@@ -445,8 +465,13 @@ pub struct VideoFrames {
     /// Frames as decoded (`decoded`): each picture's own size and colors,
     /// in a layout a display takes.
     decoded: Option<Relayout>,
+    /// Frames as decoded come from NVDEC where it decodes the stream, and
+    /// are copied down from the GPU (`decode_on`).
+    nvdec: Option<crate::cuda::CudaDevice>,
     /// The clockwise turn that shows the last frame given upright.
     rotation: u16,
+    /// The last frame given was decoded on NVDEC.
+    last_nvdec: bool,
 }
 
 /// The layouts a display takes: 8-bit 4:2:0 (planar, or NV12 as hardware
@@ -579,7 +604,9 @@ impl VideoFrames {
             target,
             gpu: None,
             decoded: None,
+            nvdec: None,
             rotation: 0,
+            last_nvdec: false,
         }
     }
 
@@ -592,6 +619,22 @@ impl VideoFrames {
         self.decoded = Some(Relayout::new());
         self.out.2 = format::Pixel::YUV420P;
         self
+    }
+
+    /// Frames as decoded ([`decoded`](Self::decoded)) decode on NVDEC
+    /// (`device`) where it decodes the stream faster than the CPU
+    /// ([`VideoReader::open_fastest`]), and are copied down to memory at
+    /// their own size: the same frames, with the same timestamps and
+    /// colors. Other streams, stills and image sequences decode on the CPU.
+    pub fn decode_on(mut self, device: crate::cuda::CudaDevice) -> Self {
+        self.nvdec = Some(device);
+        self
+    }
+
+    /// The last frame given was decoded on NVDEC (false for black, and for
+    /// frames decoded on the CPU).
+    pub fn on_nvdec(&self) -> bool {
+        self.last_nvdec
     }
 
     /// The clockwise turn (0, 90, 180 or 270) that shows the last frame
@@ -664,6 +707,7 @@ impl VideoFrames {
                 VideoPiece::Black { .. } if !picture => Ok(Some(None)),
                 VideoPiece::Black { .. } => {
                     self.rotation = 0;
+                    self.last_nvdec = false;
                     let black = frame_ref(self.black()?)?;
                     match &self.gpu {
                         Some(g) => g.frames.upload(&black).map(|f| Some(Some(f))),
@@ -688,6 +732,7 @@ impl VideoFrames {
                     let k = if still { 0 } else { k };
                     if picture {
                         self.rotation = self.source.as_ref().map_or(0, |s| s.reader.rotation());
+                        self.last_nvdec = self.source.as_ref().is_some_and(|s| s.nvdec);
                         self.source_frame(k).map(|f| Some(Some(f)))
                     } else {
                         self.pass_source_frame(k).map(|()| Some(None))
@@ -727,11 +772,13 @@ impl VideoFrames {
         let target = self.target(*origin, *source_frame);
         let mut source = match self.source.take() {
             Some(s) if s.reader.input() == &input => s,
-            _ => Source::bare(&input, *origin, Pictures::Video)?,
+            _ => Source::bare(&input, *origin, Pictures::Video, self.nvdec.as_ref())?,
         };
-        source.seek(target)?;
+        // Interrupted, the file stays open, its position unknown.
+        let sought = source.seek(target);
         let at = source.reader.pending_pts().map(|p| p as f64 * source.tick);
         self.source = Some(source);
+        sought?;
         Ok(at)
     }
 
@@ -799,6 +846,7 @@ impl VideoFrames {
                     target,
                     pictures,
                     self.gpu.as_ref().map(|g| &g.side),
+                    self.nvdec.as_ref(),
                 )?,
             },
         };
@@ -842,9 +890,18 @@ impl VideoFrames {
         }
         let target = self.target(origin, source_frame);
         let gpu = self.gpu.as_ref().map(|g| g.side.clone());
+        let nvdec = self.nvdec.clone();
         let key = (input.clone(), origin.to_bits(), source_frame);
         self.ahead.start(i, key, move || {
-            Source::open(&input, origin, source_frame, target, pictures, gpu.as_ref())
+            Source::open(
+                &input,
+                origin,
+                source_frame,
+                target,
+                pictures,
+                gpu.as_ref(),
+                nvdec.as_ref(),
+            )
         });
     }
 
@@ -872,7 +929,13 @@ impl VideoFrames {
         if let Some(relayout) = self.decoded.as_mut() {
             if changed || src.normalized.is_none() {
                 let (frame, _) = src.current.as_ref().expect("have a frame");
-                src.normalized = Some(relayout.run(frame)?);
+                // Frames NVDEC decoded come down to memory at their size:
+                // the decoder's frames are few, and pictures are kept.
+                src.normalized = Some(if frame.format() == format::Pixel::CUDA {
+                    relayout.run(&crate::cuda::download(frame)?)?
+                } else {
+                    relayout.run(frame)?
+                });
             }
         } else if src.on_gpu && (changed || src.normalized.is_none()) {
             src.scale_on_gpu()?;
