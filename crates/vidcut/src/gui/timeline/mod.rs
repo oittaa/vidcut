@@ -423,7 +423,7 @@ impl Workspace {
             &p,
             Rect::from_min_max(
                 pos2(content.left(), lower_ruler.bottom() + 2.0),
-                pos2(content.right(), content.bottom() - 2.0),
+                content.max,
             ),
             LOWER_ROWS,
             22.0,

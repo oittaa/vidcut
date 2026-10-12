@@ -415,6 +415,32 @@ fn track_gestures_send_one_request_each() {
     gestures += 2;
     assert_eq!(gui_edits(&h).len() - edits0, gestures, "step 4");
 
+    // 4b. The bottom track sits on the timeline's lower edge: a sound clip
+    // dragged just below it goes to a new audio track.
+    call(
+        &h,
+        "edit.append",
+        json!({ "media": "m2", "range": "0f..30f" }),
+    );
+    settle(&h, &mut harness);
+    let (id, start, _) = clips(&h, "A1")[0].clone();
+    let l = harness.state().timeline_layout().unwrap();
+    let a1 = l.lower.get("A1").unwrap().rect.rect;
+    assert_eq!(l.lower.span().1, a1.bottom(), "A1 is the bottom row");
+    assert_eq!(a1.bottom(), l.lower.area.bottom(), "on the lower edge");
+    let grab = pos2(l.lower_scale.xf(start + 6), a1.center().y);
+    drag(&mut harness, grab, pos2(grab.x, a1.bottom() + 10.0));
+    settle(&h, &mut harness);
+    let (m, p) = last(&h);
+    assert_eq!(
+        (m.as_str(), &p["clips"], &p["track"]),
+        ("edit.move", &json!([id]), &json!("A2"))
+    );
+    assert_eq!(clips(&h, "A2").len(), 1);
+
+    gestures += 1;
+    assert_eq!(gui_edits(&h).len() - edits0, gestures, "step 4b");
+
     // 5. Bins: File > New Bin asks for a name (offering the next free
     // "Bin N", selected so typing replaces it), then a pool clip dropped on
     // the bin moves into it.

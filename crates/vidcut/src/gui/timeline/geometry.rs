@@ -1,7 +1,7 @@
 //! Timeline geometry: frames ↔ pixels, what the pointer is over, snapping.
 //! Pure functions over the project, testable without a window.
 
-use eframe::egui::{Pos2, Rect, pos2};
+use eframe::egui::{Pos2, Rect, pos2, vec2};
 use vidcut_core::model::{Clip, Project, Track, TrackKind};
 use vidcut_core::ops::{Edge, MAIN};
 
@@ -102,15 +102,17 @@ pub struct Rows {
     pub area: Rect,
 }
 
-/// Height of the gray strip above the rows where a drop makes a new video
+/// Height of the strip above the rows where a drop makes a new video track,
+/// and of the one drawn below them while a drop there makes a new audio
 /// track.
 pub const NEW_TRACK_STRIP: f32 = 14.0;
 
 impl Rows {
-    /// Lays out `p`'s tracks in `area`, `strip` above the area's bottom (room
-    /// for a new audio track) and at least `strip` below its top (a new
-    /// video track); what's spare goes above them. Track 1 gets the most
-    /// room; rows shrink (to `min` pixels) when many tracks share the area.
+    /// Lays out `p`'s tracks in `area`, the last on its bottom and the first
+    /// at least `strip` below its top (a new video track); what's spare goes
+    /// above them. A new audio track is dropped just below the area. Track 1
+    /// gets the most room; rows shrink (to `min` pixels) when many tracks
+    /// share the area.
     pub fn layout(p: &Project, area: Rect, heights: [f32; 3], min: f32, strip: f32) -> Self {
         let [v1, video, audio] = heights;
         let mut order: Vec<&Track> = p
@@ -132,13 +134,13 @@ impl Rows {
                 TrackKind::Video => video,
             })
             .collect();
-        let room = (area.height() - 2.0 * strip).max(1.0);
+        let room = (area.height() - strip).max(1.0);
         let total: f32 = want.iter().sum();
         let factor = if total > room { room / total } else { 1.0 };
-        // Rounded down, so shrunk rows never reach past the bottom strip.
+        // Rounded down, so shrunk rows never reach past the bottom.
         let heights: Vec<f32> = want.iter().map(|h| (h * factor).floor().max(min)).collect();
         let used: f32 = heights.iter().sum();
-        let mut y = (area.bottom() - strip - used).max(area.top() + strip);
+        let mut y = (area.bottom() + 1.0 - used).max(area.top() + strip);
         let rows = order
             .iter()
             .zip(heights)
@@ -183,6 +185,16 @@ impl Rows {
         )
     }
 
+    /// Whether a drag at `pos` is still on the timeline: over the area, or
+    /// up to 24 px beside it or below it (a new audio track; decision D18).
+    pub fn reaches(&self, pos: Pos2) -> bool {
+        Rect::from_min_max(
+            self.area.min - vec2(24.0, 0.0),
+            self.area.max + vec2(24.0, 24.0),
+        )
+        .contains(pos)
+    }
+
     /// The track a drop at `y` goes to: the row's track, or a new video
     /// track above the rows, or a new audio track below them.
     pub fn target(&self, p: &Project, y: f32) -> Option<String> {
@@ -201,7 +213,8 @@ impl Rows {
     }
 
     /// Where a track that doesn't exist yet would be drawn: the strip above
-    /// the rows for a video track, below them for an audio track.
+    /// the rows for a video track, a strip below them, outside the area, for
+    /// an audio track.
     pub fn phantom(&self, track: &str) -> TrackRect {
         let (top, bottom) = self.span();
         let rect = if track.starts_with('V') {
@@ -215,10 +228,7 @@ impl Rows {
         } else {
             Rect::from_min_max(
                 pos2(self.area.left(), bottom + 1.0),
-                pos2(
-                    self.area.right(),
-                    (bottom + 30.0).min(self.area.bottom().max(bottom + 8.0)),
-                ),
+                pos2(self.area.right(), bottom + NEW_TRACK_STRIP),
             )
         };
         TrackRect::new(rect, if track.starts_with('A') { 1.0 } else { 0.3 })
@@ -646,9 +656,9 @@ mod row_tests {
     use eframe::egui::{Rect, pos2};
     use vidcut_core::model::{Project, Settings, Track, TrackKind};
 
-    /// The last row sits a strip above the area's bottom whatever its
-    /// height, spare room above the rows; many tracks shrink to fit
-    /// between the strips.
+    /// The last row sits on the area's bottom whatever its height, spare
+    /// room above the rows; many tracks shrink to fit below the strip for a
+    /// new video track.
     #[test]
     fn rows_sit_on_the_bottom() {
         let mut p = Project::new(Settings::default());
@@ -657,8 +667,8 @@ mod row_tests {
         for h in [300.0, 400.0, 700.0] {
             let rows = Rows::layout(&p, area(h), heights, 22.0, NEW_TRACK_STRIP);
             let (top, bottom) = rows.span();
-            assert_eq!(bottom, h - NEW_TRACK_STRIP - 1.0, "height {h}");
-            assert_eq!(top, h - NEW_TRACK_STRIP - 100.0, "height {h}");
+            assert_eq!(bottom, h, "height {h}");
+            assert_eq!(top, h + 1.0 - 100.0, "height {h}");
         }
         for i in 2..=6 {
             p.tracks
@@ -671,7 +681,30 @@ mod row_tests {
             (NEW_TRACK_STRIP..NEW_TRACK_STRIP + 8.0).contains(&top),
             "{top}"
         );
-        assert_eq!(bottom, 300.0 - NEW_TRACK_STRIP - 1.0);
+        assert_eq!(bottom, 300.0);
+    }
+
+    /// With the last row on the area's bottom, a drop up to 24 px below it
+    /// makes a new audio track, drawn there; further down it is off the
+    /// timeline.
+    #[test]
+    fn below_the_last_row_is_a_new_audio_track() {
+        let mut p = Project::new(Settings::default());
+        p.tracks.push(Track::new("A1", TrackKind::Audio));
+        let area = Rect::from_min_max(pos2(100.0, 0.0), pos2(600.0, 400.0));
+        let rows = Rows::layout(&p, area, [100.0, 60.0, 46.0], 22.0, NEW_TRACK_STRIP);
+        let (_, bottom) = rows.span();
+        let below = pos2(300.0, bottom + 10.0);
+        assert!(rows.reaches(below));
+        assert_eq!(rows.target(&p, below.y).as_deref(), Some("A2"));
+        let phantom = rows.rect_of("A2").rect;
+        assert!(
+            phantom.top() > bottom && phantom.contains(below),
+            "{phantom:?}"
+        );
+        assert!(!rows.reaches(pos2(300.0, bottom + 30.0)));
+        assert!(rows.reaches(pos2(80.0, bottom - 10.0)));
+        assert!(!rows.reaches(pos2(70.0, bottom - 10.0)));
     }
 
     /// Rows of any height put L, A and V in the same columns, at the

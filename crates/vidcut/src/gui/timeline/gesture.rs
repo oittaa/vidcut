@@ -8,7 +8,7 @@
 
 use std::time::{Duration, Instant};
 
-use eframe::egui::{Pos2, Rect, vec2};
+use eframe::egui::{Pos2, Rect};
 use serde_json::{Value, json};
 use vidcut_core::model::{Clip, Project, Track, TrackKind};
 use vidcut_core::ops::{Edge, MAIN};
@@ -387,7 +387,7 @@ fn move_preview(
     let Some(dest) = ctx
         .rows
         .target(ctx.project, pos.y)
-        .filter(|_| ctx.rows.area.expand2(vec2(24.0, 0.0)).contains(pos))
+        .filter(|_| ctx.rows.reaches(pos))
     else {
         return Preview::default();
     };
@@ -525,7 +525,7 @@ fn media_preview(
     let Some(mut dest) = ctx
         .rows
         .target(ctx.project, pos.y)
-        .filter(|_| ctx.rows.area.expand2(vec2(24.0, 0.0)).contains(pos))
+        .filter(|_| ctx.rows.reaches(pos))
     else {
         return Preview::default();
     };

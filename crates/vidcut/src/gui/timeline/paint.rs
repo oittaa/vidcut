@@ -531,7 +531,14 @@ pub fn preview(painter: &Painter, rows: &Rows, scale: &Scale, p: &Project, pv: &
     let track = pv.row.as_deref().unwrap_or(vidcut_core::ops::MAIN);
     let tr = rows.rect_of(track);
     let rect = tr.rect;
-    if rows.get(track).is_none() && (pv.ghost.is_some() || pv.request.is_some()) {
+    let new_track = rows.get(track).is_none();
+    // A new audio track shows below the timeline, where it is dropped.
+    let mut painter = painter.clone();
+    if new_track {
+        painter.set_clip_rect(painter.clip_rect().union(rect));
+    }
+    let painter = &painter;
+    if new_track && (pv.ghost.is_some() || pv.request.is_some()) {
         painter.rect_filled(rect, CornerRadius::ZERO, Color32::from_white_alpha(18));
         painter.text(
             pos2(rows.area.left() + 4.0, rect.center().y),

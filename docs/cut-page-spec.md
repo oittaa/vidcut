@@ -406,8 +406,8 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - Within 6 px of an edit point a drop inserts there; the moved clips' own edges don't count.
   - On another clip: replace if released within 0.8 s of reaching it (D11), else overwrite at the block's position. Several clips always overwrite (Replace takes one clip).
   - Past the last clip: the clips move (or the media is appended) to the end. Left of the first clip: inserted at the start.
-  - The row under the pointer is the destination track (M6). The strip above the top row means a new video track, and the strip below the bottom row a new audio track.
-  - Dragged off the tracks (more than 24 px to either side, or past those strips), or Esc during the drag: cancelled, nothing changes.
+  - The row under the pointer is the destination track (M6). The strip above the top row means a new video track. The bottom row sits on the timeline's lower edge, and up to 24 px below it means a new audio track, shown there while the drag lasts.
+  - Dragged off the tracks (more than 24 px to either side, above the top strip or further below), or Esc during the drag: cancelled, nothing changes.
 - **D19. Trimming with the pointer.**
   - Edges follow the pointer's movement from the press (they don't jump to it), snapped to targets (§8.8).
   - A trim, roll, slip or J/L cut stops where the media runs out instead of failing.
