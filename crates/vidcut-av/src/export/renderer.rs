@@ -406,7 +406,7 @@ impl Shared {
 
 /// The shortest and longest windows back: two seconds, and half the budget
 /// (the other half holds the window before it), in frames.
-fn window_sizes(budget: usize, width: u32, height: u32, fps: Rational) -> (i64, i64) {
+pub(crate) fn window_sizes(budget: usize, width: u32, height: u32, fps: Rational) -> (i64, i64) {
     let frame = (width as usize * height as usize * 4).max(1);
     let max = ((budget / frame / 2) as i64).max(1);
     let min = ((fps.as_f64() * WINDOW_SECS).round() as i64).clamp(1, max);
@@ -417,7 +417,7 @@ fn window_sizes(budget: usize, width: u32, height: u32, fps: Rational) -> (i64, 
 /// from a keyframe, so nothing in it decodes twice, reaching back over more
 /// keyframes to hold `min` frames, holding at most `max`, and starting no
 /// earlier than `floor`.
-fn window(
+pub(crate) fn window(
     frames: &mut VideoFrames,
     piece: &VideoPiece,
     pos: i64,
@@ -450,7 +450,7 @@ fn window(
 }
 
 /// `piece` from source position `pos`, `frames` long.
-fn at(piece: &VideoPiece, pos: i64, frames: i64) -> VideoPiece {
+pub(crate) fn at(piece: &VideoPiece, pos: i64, frames: i64) -> VideoPiece {
     let mut p = piece.clone();
     match &mut p {
         VideoPiece::Source {
