@@ -162,7 +162,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
   - muted clip: a mute icon
 
 **Track headers:**
-- Enlarge (one track at a time), Lock, Mute (audio), Video Enable (pp. 647, 717).
+- Enlarge (one track at a time), Lock, Mute (audio), Video Enable (pp. 647, 678, 717): icons, enlarge on the left of the name, the others in columns at the right (D43).
 
 **Automatic tools (M7):**
 - **Boring Detector** (Timeline Options, p. 690): highlights clips longer than "Boring Clips" (light gray) and shorter than "Jump Cuts" (red) on the upper timeline, live as you edit. Analyze Timeline Edits sets both (D31).
@@ -500,3 +500,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - **Forward, either way:** a step back plays its frame forward too. A frame is 33–42 ms: reversed, it isn't heard as backward, and forward the start of a word stays recognizable.
   - **One at a time:** a frame's sound plays whole. A newer one waits for it and replaces any still waiting, so a held key plays frame after frame and nothing piles up behind it.
   - **Playing backward** plays the sound reversed (J), at other speeds keeping its pitch as forward play does.
+- **D43. Enlarging a track** (pp. 647, 678). The manual says a track's sizing button enlarges it, showing its pictures and sound full size, one track at a time.
+  - **Size:** the enlarged track is three times its usual height, and at least 180 px. In a timeline too short for that, the other tracks shrink first, down to one line each, and the enlarged track takes what they leave.
+  - **View, not edit:** it is how the lower timeline shows the tracks, like its zoom: no request, nothing in the project or the undo history, and it ends with the window. The upper timeline doesn't change.
+  - **Buttons:** the header's buttons are icons that show the state: a lock closed or open, a speaker and an eye crossed out when off. A button is lit when its track is out of the ordinary: locked, muted, video off, enlarged.

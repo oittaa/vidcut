@@ -315,22 +315,9 @@ fn track_gestures_send_one_request_each() {
     gestures += 1;
     assert_eq!(gui_edits(&h).len() - edits0, gestures, "step 3");
 
-    // 3b. A track header's V turns its video off, and on again; it is lit
-    // while the video is on, as A is while the audio is.
-    let v1_toggle = |harness: &Harness<'_, Workspace>| {
-        harness
-            .query_all_by_label("V")
-            .max_by(|a, b| a.rect().top().total_cmp(&b.rect().top()))
-            .expect("V1's V")
-            .rect()
-    };
+    // 3b. A track header's video button turns its video off, and on again.
     for (n, enabled) in [false, true].into_iter().enumerate() {
-        let at = v1_toggle(&harness);
-        harness
-            .get_all_by_label("V")
-            .find(|v| v.rect() == at)
-            .unwrap()
-            .click();
+        harness.get_by_label("Video V1").click();
         harness.step();
         settle(&h, &mut harness);
         let (m, p) = last(&h);
@@ -342,6 +329,40 @@ fn track_gestures_send_one_request_each() {
     }
     gestures += 2;
     assert_eq!(gui_edits(&h).len() - edits0, gestures, "step 3b");
+
+    // 3c. Enlarge makes one track at a time three times its height; it
+    // changes the view, not the project.
+    let height = |harness: &Harness<'_, Workspace>, t: &str| {
+        let l = harness.state().timeline_layout().unwrap();
+        l.lower.get(t).unwrap().rect.rect.height()
+    };
+    let (v1, v2) = (height(&harness, "V1"), height(&harness, "V2"));
+    harness.get_by_label("Enlarge V2").click();
+    harness.step();
+    harness.step();
+    assert!(
+        height(&harness, "V2") > 2.0 * v2,
+        "{v2} → {}",
+        height(&harness, "V2")
+    );
+    harness.get_by_label("Enlarge V1").click();
+    harness.step();
+    harness.step();
+    // V2 is no longer enlarged. This timeline is short: the others give
+    // way to V1, down to their least height, and V1 takes the rest.
+    assert!(
+        height(&harness, "V1") > v1 + 20.0,
+        "{v1} → {}",
+        height(&harness, "V1")
+    );
+    for t in ["V2", "V3", "V4"] {
+        assert_eq!(height(&harness, t), 21.0, "{t}");
+    }
+    harness.get_by_label("Enlarge V1").click();
+    harness.step();
+    harness.step();
+    assert_eq!((height(&harness, "V1"), height(&harness, "V2")), (v1, v2));
+    assert_eq!(gui_edits(&h).len() - edits0, gestures, "step 3c");
 
     // 4. The mixer: dragging Track 1's fader is one track.set, sent on
     // release (one undo step); S solos the track.

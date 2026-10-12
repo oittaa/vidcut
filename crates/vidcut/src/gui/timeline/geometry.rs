@@ -107,13 +107,26 @@ pub struct Rows {
 /// track.
 pub const NEW_TRACK_STRIP: f32 = 14.0;
 
+/// An enlarged track's height: this many times its usual one, and at least
+/// [`ENLARGED_MIN`] pixels (decision D43).
+const ENLARGE: f32 = 3.0;
+const ENLARGED_MIN: f32 = 180.0;
+
 impl Rows {
     /// Lays out `p`'s tracks in `area`, the last on its bottom and the first
     /// at least `strip` below its top (a new video track); what's spare goes
     /// above them. A new audio track is dropped just below the area. Track 1
     /// gets the most room; rows shrink (to `min` pixels) when many tracks
-    /// share the area.
-    pub fn layout(p: &Project, area: Rect, heights: [f32; 3], min: f32, strip: f32) -> Self {
+    /// share the area. The `enlarged` track is three times its height, and
+    /// the others give way to it first.
+    pub fn layout(
+        p: &Project,
+        area: Rect,
+        heights: [f32; 3],
+        min: f32,
+        strip: f32,
+        enlarged: Option<&str>,
+    ) -> Self {
         let [v1, video, audio] = heights;
         let mut order: Vec<&Track> = p
             .tracks_of(TrackKind::Video)
@@ -126,19 +139,43 @@ impl Rows {
                 .into_iter()
                 .map(|i| &p.tracks[i]),
         );
+        let big = order.iter().position(|t| Some(t.id.as_str()) == enlarged);
         let want: Vec<f32> = order
             .iter()
-            .map(|t| match t.kind {
-                TrackKind::Audio => audio,
-                TrackKind::Video if t.id == MAIN => v1,
-                TrackKind::Video => video,
+            .enumerate()
+            .map(|(i, t)| {
+                let h = match t.kind {
+                    TrackKind::Audio => audio,
+                    TrackKind::Video if t.id == MAIN => v1,
+                    TrackKind::Video => video,
+                };
+                if Some(i) == big {
+                    (h * ENLARGE).max(ENLARGED_MIN)
+                } else {
+                    h
+                }
             })
             .collect();
         let room = (area.height() - strip).max(1.0);
         let total: f32 = want.iter().sum();
-        let factor = if total > room { room / total } else { 1.0 };
+        // The others shrink first, to make room for the enlarged track.
+        let kept = big.map_or(0.0, |b| want[b]);
+        let factor = if total > room {
+            ((room - kept) / (total - kept)).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
         // Rounded down, so shrunk rows never reach past the bottom.
-        let heights: Vec<f32> = want.iter().map(|h| (h * factor).floor().max(min)).collect();
+        let mut heights: Vec<f32> = want.iter().map(|h| (h * factor).floor().max(min)).collect();
+        if let Some(b) = big {
+            // What the others leave, while they fit; then its own height.
+            let others: f32 = heights.iter().sum::<f32>() - heights[b];
+            heights[b] = if total > room {
+                (room - others).floor().max(min)
+            } else {
+                want[b]
+            };
+        }
         let used: f32 = heights.iter().sum();
         let mut y = (area.bottom() + 1.0 - used).max(area.top() + strip);
         let rows = order
@@ -616,13 +653,15 @@ mod tests {
 }
 
 /// Where a track header's parts go, on one line centered in the row: the
-/// name on the left, then the L, A and V buttons in fixed columns ending at
-/// the header's right edge. Every row puts each button in the same column,
-/// whatever its height or kind.
+/// enlarge button on the left, the name, then the lock, audio and video
+/// buttons in fixed columns ending at the header's right edge (spec §5).
+/// Every row puts each button in the same column, whatever its height or
+/// kind.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HeaderParts {
+    pub enlarge: Rect,
     pub name: Rect,
-    /// L, A and V, left to right.
+    /// Lock, audio and video, left to right.
     pub toggles: [Rect; 3],
 }
 
@@ -641,9 +680,12 @@ pub fn header_parts(header: Rect) -> HeaderParts {
         Rect::from_min_max(pos2(end - HEADER_TOGGLE, top), pos2(end, top + h))
     };
     let toggles = [toggle(0), toggle(1), toggle(2)];
+    let left = header.left().round();
+    let enlarge = Rect::from_min_max(pos2(left, top), pos2(left + HEADER_TOGGLE, top + h));
     HeaderParts {
+        enlarge,
         name: Rect::from_min_max(
-            pos2(header.left(), top),
+            pos2(enlarge.right() + 2.0 * HEADER_GAP, top),
             pos2(toggles[0].left() - 2.0 * HEADER_GAP, top + h),
         ),
         toggles,
@@ -665,7 +707,7 @@ mod row_tests {
         let area = |h: f32| Rect::from_min_max(pos2(0.0, 0.0), pos2(500.0, h));
         let heights = [100.0, 60.0, 46.0];
         for h in [300.0, 400.0, 700.0] {
-            let rows = Rows::layout(&p, area(h), heights, 22.0, NEW_TRACK_STRIP);
+            let rows = Rows::layout(&p, area(h), heights, 22.0, NEW_TRACK_STRIP, None);
             let (top, bottom) = rows.span();
             assert_eq!(bottom, h, "height {h}");
             assert_eq!(top, h + 1.0 - 100.0, "height {h}");
@@ -675,13 +717,40 @@ mod row_tests {
                 .insert(0, Track::new(format!("V{i}"), TrackKind::Video));
         }
         p.tracks.push(Track::new("A1", TrackKind::Audio));
-        let rows = Rows::layout(&p, area(300.0), heights, 22.0, NEW_TRACK_STRIP);
+        let rows = Rows::layout(&p, area(300.0), heights, 22.0, NEW_TRACK_STRIP, None);
         let (top, bottom) = rows.span();
         assert!(
             (NEW_TRACK_STRIP..NEW_TRACK_STRIP + 8.0).contains(&top),
             "{top}"
         );
         assert_eq!(bottom, 300.0);
+    }
+
+    /// An enlarged track is three times its height while there is room;
+    /// in a short area the others shrink to their least first, and it takes
+    /// what they leave. Only that track changes.
+    #[test]
+    fn an_enlarged_track_takes_the_room() {
+        let mut p = Project::new(Settings::default());
+        p.tracks.insert(0, Track::new("V2", TrackKind::Video));
+        p.tracks.push(Track::new("A1", TrackKind::Audio));
+        let heights = [100.0, 60.0, 46.0];
+        let area = |h: f32| Rect::from_min_max(pos2(0.0, 0.0), pos2(500.0, h));
+        let height = |rows: &Rows, t: &str| rows.get(t).unwrap().rect.rect.height() + 1.0;
+        let tall = Rows::layout(&p, area(900.0), heights, 22.0, NEW_TRACK_STRIP, Some("V1"));
+        assert_eq!(height(&tall, "V1"), 300.0);
+        assert_eq!((height(&tall, "V2"), height(&tall, "A1")), (60.0, 46.0));
+        let audio = Rows::layout(&p, area(900.0), heights, 22.0, NEW_TRACK_STRIP, Some("A1"));
+        assert_eq!(height(&audio, "A1"), 180.0, "at least 180 px");
+        assert_eq!(height(&audio, "V1"), 100.0);
+        let short = Rows::layout(&p, area(200.0), heights, 22.0, NEW_TRACK_STRIP, Some("V1"));
+        assert_eq!((height(&short, "V2"), height(&short, "A1")), (22.0, 22.0));
+        assert_eq!(height(&short, "V1"), 200.0 - NEW_TRACK_STRIP - 44.0);
+        assert_eq!(short.span().1, 200.0);
+        let none = Rows::layout(&p, area(200.0), heights, 22.0, NEW_TRACK_STRIP, None);
+        assert!(height(&none, "V1") < 100.0, "all shrink alike");
+        let gone = Rows::layout(&p, area(900.0), heights, 22.0, NEW_TRACK_STRIP, Some("V9"));
+        assert_eq!(height(&gone, "V1"), 100.0, "a removed track enlarges none");
     }
 
     /// With the last row on the area's bottom, a drop up to 24 px below it
@@ -692,7 +761,7 @@ mod row_tests {
         let mut p = Project::new(Settings::default());
         p.tracks.push(Track::new("A1", TrackKind::Audio));
         let area = Rect::from_min_max(pos2(100.0, 0.0), pos2(600.0, 400.0));
-        let rows = Rows::layout(&p, area, [100.0, 60.0, 46.0], 22.0, NEW_TRACK_STRIP);
+        let rows = Rows::layout(&p, area, [100.0, 60.0, 46.0], 22.0, NEW_TRACK_STRIP, None);
         let (_, bottom) = rows.span();
         let below = pos2(300.0, bottom + 10.0);
         assert!(rows.reaches(below));
@@ -707,24 +776,27 @@ mod row_tests {
         assert!(!rows.reaches(pos2(70.0, bottom - 10.0)));
     }
 
-    /// Rows of any height put L, A and V in the same columns, at the
-    /// header's right edge, level with the name and inside the header.
+    /// Rows of any height put the buttons in the same columns: enlarge at
+    /// the header's left edge, lock, audio and video at its right, level
+    /// with the name and inside the header.
     #[test]
     fn header_buttons_line_up_in_columns() {
-        let header = |top: f32, h: f32| Rect::from_min_max(pos2(2.0, top), pos2(96.0, top + h));
+        let header = |top: f32, h: f32| Rect::from_min_max(pos2(2.0, top), pos2(116.0, top + h));
         let short = header_parts(header(800.0, 29.0));
         for h in [22.0, 46.0, 60.0, 100.0] {
             let row = header(900.0, h);
             let parts = header_parts(row);
-            for (a, b) in parts.toggles.iter().zip(short.toggles) {
+            let buttons = parts.toggles.iter().chain([&parts.enlarge]);
+            for (a, b) in buttons.zip(short.toggles.iter().chain([&short.enlarge])) {
                 assert_eq!((a.left(), a.right()), (b.left(), b.right()), "height {h}");
                 assert!(row.contains_rect(*a), "height {h}");
                 assert_eq!(a.center().y, parts.name.center().y, "height {h}");
             }
             assert!((parts.name.center().y - row.center().y).abs() <= 0.5);
-            assert_eq!(parts.name.left(), row.left());
+            assert_eq!(parts.enlarge.left(), row.left());
         }
-        assert_eq!(short.toggles[2].right(), 96.0);
+        assert_eq!(short.toggles[2].right(), 116.0);
+        assert!(short.enlarge.right() < short.name.left());
         assert!(short.toggles[0].left() > short.name.right());
         assert!(short.toggles[0].right() < short.toggles[1].left());
         assert!(short.name.width() >= 30.0, "{}", short.name.width());

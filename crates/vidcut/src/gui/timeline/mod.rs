@@ -216,6 +216,9 @@ pub struct TimelineView {
     pub rev: u64,
     /// Trims sent that haven't landed yet.
     pub sent_trim: Option<SentTrim>,
+    /// The track shown enlarged in the lower timeline (decision D43), if
+    /// any.
+    pub enlarged: Option<String>,
 }
 
 impl Default for TimelineView {
@@ -230,6 +233,7 @@ impl Default for TimelineView {
             scrub_sent: None,
             marker_dialog: None,
             duration_dialog: None,
+            enlarged: None,
             silence: None,
             boring_dialog: None,
             dynamic: None,
@@ -269,16 +273,19 @@ const UPPER_OTHER: f32 = 9.0;
 /// Preferred lower timeline row heights: Track 1, other video, audio.
 const LOWER_ROWS: [f32; 3] = [100.0, 60.0, 46.0];
 const LOWER_RULER: f32 = 22.0;
-/// The track header column: wide enough for a track's name with its L, A
-/// and V buttons on one line, which must not reach into the timeline.
-const HEADER: f32 = 100.0;
+/// The track header column: wide enough for a track's name with its four
+/// buttons on one line, which must not reach into the timeline.
+const HEADER: f32 = 120.0;
 
 /// The icons of the timeline's controls.
 mod icon {
     pub use egui_phosphor::regular::{
-        ARROWS_IN_LINE_HORIZONTAL as RIPPLE, ARROWS_OUT_LINE_HORIZONTAL as DYNAMIC_TRIM,
-        BOOKMARK_SIMPLE as MARKER, LIGHTNING as TIMELINE_ACTIONS, MAGNET as SNAP,
-        PENCIL_SIMPLE as EDIT_ACTIONS, SCISSORS as SPLIT, SLIDERS_HORIZONTAL as OPTIONS,
+        ARROWS_IN_LINE_HORIZONTAL as RIPPLE, ARROWS_IN_LINE_VERTICAL as SHRINK,
+        ARROWS_OUT_LINE_HORIZONTAL as DYNAMIC_TRIM, ARROWS_OUT_LINE_VERTICAL as ENLARGE,
+        BOOKMARK_SIMPLE as MARKER, EYE as VIDEO_ON, EYE_SLASH as VIDEO_OFF,
+        LIGHTNING as TIMELINE_ACTIONS, LOCK_SIMPLE as LOCKED, LOCK_SIMPLE_OPEN as UNLOCKED,
+        MAGNET as SNAP, PENCIL_SIMPLE as EDIT_ACTIONS, SCISSORS as SPLIT,
+        SLIDERS_HORIZONTAL as OPTIONS, SPEAKER_HIGH as AUDIO_ON, SPEAKER_SLASH as AUDIO_OFF,
     };
 }
 
@@ -287,6 +294,23 @@ mod icon {
 fn icon_toggle(ui: &mut egui::Ui, icon: &str, name: &str, on: bool, tip: &str) -> egui::Response {
     let r = ui.add(egui::Button::selectable(on, RichText::new(icon).size(15.0)));
     r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, name));
+    r.on_hover_text(tip)
+}
+
+/// A track header's icon button at `at`, lit while `lit`, read by `name`.
+fn header_button(
+    ui: &mut egui::Ui,
+    at: Rect,
+    icon: &str,
+    name: &str,
+    lit: bool,
+    tip: &str,
+) -> egui::Response {
+    let r = ui.put(
+        at,
+        egui::Button::selectable(lit, RichText::new(icon).size(13.0)),
+    );
+    r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, lit, name));
     r.on_hover_text(tip)
 }
 
@@ -417,6 +441,7 @@ impl Workspace {
             [UPPER_TRACK, UPPER_OTHER, UPPER_OTHER],
             4.0,
             0.0,
+            None,
         );
         let lower_ruler = Rect::from_min_size(content.min, vec2(content.width(), LOWER_RULER));
         let lower = Rows::layout(
@@ -428,6 +453,7 @@ impl Workspace {
             LOWER_ROWS,
             22.0,
             NEW_TRACK_STRIP,
+            self.timeline.enlarged.as_deref(),
         );
         let layout = Layout {
             upper_ruler,
@@ -1095,53 +1121,60 @@ impl Workspace {
                     }
                 }
             });
-            // Lit means on, as for the target track: L while locked, A
-            // while the audio plays, V while the video shows. A and V are
-            // struck through while off. Each has its own column, so an
-            // audio track's L and A sit under the video tracks'.
-            let mut toggles = vec![
+            // The enlarge button: one track at a time.
+            let enlarged = self.timeline.enlarged.as_deref() == Some(t.id.as_str());
+            let (glyph, tip) = if enlarged {
+                (icon::SHRINK, "Back to its usual height")
+            } else {
                 (
-                    "L",
+                    icon::ENLARGE,
+                    "Enlarge the track, to see its pictures and sound",
+                )
+            };
+            let name = format!("Enlarge {}", t.id);
+            if header_button(&mut child, parts.enlarge, glyph, &name, enlarged, tip).clicked() {
+                self.timeline.enlarged = (!enlarged).then(|| t.id.clone());
+            }
+            // The icon says the state; the button is lit when it is out of
+            // the ordinary: locked, muted, video off. Each has its own
+            // column, so an audio track's lock and audio sit under the video
+            // tracks'.
+            let lock = if t.locked {
+                (icon::LOCKED, "Unlock the track")
+            } else {
+                (icon::UNLOCKED, "Lock the track")
+            };
+            let sound = if t.muted {
+                (icon::AUDIO_OFF, "Turn its audio back on")
+            } else {
+                (icon::AUDIO_ON, "Mute its audio")
+            };
+            let mut buttons = vec![
+                (
+                    "Lock",
                     t.locked,
-                    if t.locked {
-                        "Unlock the track"
-                    } else {
-                        "Lock the track"
-                    },
+                    lock,
+                    json!({ "track": t.id, "locked": !t.locked }),
                 ),
                 (
-                    "A",
-                    !t.muted,
-                    if t.muted {
-                        "Turn its audio back on"
-                    } else {
-                        "Mute its audio"
-                    },
+                    "Audio",
+                    t.muted,
+                    sound,
+                    json!({ "track": t.id, "muted": !t.muted }),
                 ),
             ];
             if t.kind == vidcut_core::model::TrackKind::Video {
-                let tip = if t.video_enabled {
-                    "Turn its video off"
+                let picture = if t.video_enabled {
+                    (icon::VIDEO_ON, "Turn its video off")
                 } else {
-                    "Turn its video back on"
+                    (icon::VIDEO_OFF, "Turn its video back on")
                 };
-                toggles.push(("V", t.video_enabled, tip));
+                let change = json!({ "track": t.id, "video_enabled": !t.video_enabled });
+                buttons.push(("Video", !t.video_enabled, picture, change));
             }
-            for ((name, lit, tip), at) in toggles.into_iter().zip(parts.toggles) {
-                let mut text = RichText::new(name).small();
-                if !lit && name != "L" {
-                    text = text.strikethrough();
-                }
-                if child
-                    .put(at, egui::Button::selectable(lit, text))
-                    .on_hover_text(tip)
-                    .clicked()
-                {
-                    let change = match name {
-                        "L" => json!({ "track": t.id, "locked": !lit }),
-                        "A" => json!({ "track": t.id, "muted": lit }),
-                        _ => json!({ "track": t.id, "video_enabled": !lit }),
-                    };
+            for ((what, lit, (glyph, tip), change), at) in buttons.into_iter().zip(parts.toggles) {
+                let name = format!("{what} {}", t.id);
+                if header_button(&mut child, at, glyph, &name, lit, tip).clicked() {
                     self.send("track.set", change);
                 }
             }
