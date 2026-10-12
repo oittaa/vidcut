@@ -3,7 +3,7 @@
 **When:** later.
 
 Proxies and exports made with NVENC decode on NVDEC and scale on the GPU (preview.md §12, export.md §5). Still on the CPU:
-- **Exports' other pieces:** padding (`overlay_cuda` onto a black frame would do it), interlaced sources (deinterlacing before frames are picked), and HDR output (tone mapping, libplacebo on Vulkan perhaps).
+- **Exports' other pieces:** BT.601 sources (SD, VP8) need a matrix change, padding in 10-bit output (`pad_cuda` takes 8 bits only), interlaced sources (deinterlacing before frames are picked), and HDR output (tone mapping). libplacebo on Vulkan could do the color work.
 - **Timeline tiles and the paused viewer** (`export/renderer.rs`): far-apart tiles cost 40 ms on 1080p H.264 and 105–170 ms on 4K60 on the CPU; NVDEC would cut that, the frames then copied down once at their small size.
 - **VAAPI** (AMD, Intel): the same paths with VAAPI decoding, `scale_vaapi` and VAAPI encoders.
 

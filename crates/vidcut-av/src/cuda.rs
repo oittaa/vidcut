@@ -124,8 +124,9 @@ impl Drop for CudaFrames {
 
 /// Pictures for NVENC from frames NVDEC decoded: deinterlaced when the
 /// source is (one frame per frame, as the CPU reader makes them), scaled to
-/// `width`×`height` as `format` (8-bit NV12 or 10-bit P010), square
-/// pixels, all in GPU memory. Timestamps stay the source's.
+/// fit `width`×`height` keeping the display aspect and padded with black to
+/// it, as the CPU's normalizer does, as `format` (8-bit NV12 or 10-bit
+/// P010), square pixels, all in GPU memory. Timestamps stay the source's.
 pub struct CudaPictures {
     graph: filter::Graph,
     time_base: ffmpeg::Rational,
@@ -136,19 +137,32 @@ pub struct CudaPictures {
 /// aliases when it shrinks a lot (4K to 960 wide): halvings first, each a
 /// bilinear sample between four pixels, so their average, then one bicubic
 /// step to the size.
-fn filters(w: u32, h: u32, (width, height, out): (u32, u32, &str), deinterlace: bool) -> String {
+fn filters(
+    (w, h): (u32, u32),
+    (fit_w, fit_h): (u32, u32),
+    (width, height, out): (u32, u32, &str),
+    deinterlace: bool,
+) -> String {
     let mut steps = Vec::new();
     if deinterlace {
         steps.push("bwdif_cuda=mode=send_frame:parity=auto:deint=interlaced".to_string());
     }
     let (mut w, mut h) = (w, h);
-    while w >= 2 * width && h >= 2 * height && w >= 4 && h >= 4 {
+    while w >= 2 * fit_w && h >= 2 * fit_h && w >= 4 && h >= 4 {
         (w, h) = ((w / 2) & !1, (h / 2) & !1);
         steps.push(format!("scale_cuda=w={w}:h={h}:interp_algo=bilinear"));
     }
     steps.push(format!(
-        "scale_cuda=w={width}:h={height}:format={out}:interp_algo=bicubic"
+        "scale_cuda=w={fit_w}:h={fit_h}:format={out}:interp_algo=bicubic"
     ));
+    // Centered on black, as the CPU's normalizer pads.
+    if (fit_w, fit_h) != (width, height) {
+        steps.push(format!(
+            "pad_cuda=w={width}:h={height}:x={}:y={}:color=black",
+            (width - fit_w) / 2,
+            (height - fit_h) / 2
+        ));
+    }
     steps.join(",")
 }
 
@@ -215,9 +229,17 @@ impl CudaPictures {
             format::Pixel::P010LE => "p010le",
             _ => "nv12",
         };
-        let spec = filters(
+        let sar = first.aspect_ratio();
+        let fitted = crate::export::video::fit(
             first.width(),
             first.height(),
+            (sar.numerator(), sar.denominator()),
+            width,
+            height,
+        );
+        let spec = filters(
+            (first.width(), first.height()),
+            fitted,
             (width, height, out),
             deinterlace,
         );
@@ -286,15 +308,21 @@ mod tests {
     #[test]
     fn big_shrinks_halve_first() {
         assert_eq!(
-            filters(3840, 2160, (960, 540, "nv12"), false),
+            filters((3840, 2160), (960, 540), (960, 540, "nv12"), false),
             "scale_cuda=w=1920:h=1080:interp_algo=bilinear,\
              scale_cuda=w=960:h=540:interp_algo=bilinear,\
              scale_cuda=w=960:h=540:format=nv12:interp_algo=bicubic"
         );
         assert_eq!(
-            filters(1280, 720, (960, 540, "nv12"), true),
+            filters((1280, 720), (960, 540), (960, 540, "nv12"), true),
             "bwdif_cuda=mode=send_frame:parity=auto:deint=interlaced,\
              scale_cuda=w=960:h=540:format=nv12:interp_algo=bicubic"
+        );
+        // A 2.4:1 film in 16:9: fitted, then centered on black.
+        assert_eq!(
+            filters((1920, 800), (1920, 800), (1920, 1080, "nv12"), false),
+            "scale_cuda=w=1920:h=800:format=nv12:interp_algo=bicubic,\
+             pad_cuda=w=1920:h=1080:x=0:y=140:color=black"
         );
     }
 }

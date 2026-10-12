@@ -238,30 +238,29 @@ struct Source {
 }
 
 /// What a source needs to decode on NVDEC for an export whose frames stay
-/// on the GPU: the device, and the output's size.
+/// on the GPU: the device, and the output's size and format.
 #[derive(Clone)]
 pub(crate) struct GpuSide {
     device: crate::cuda::CudaDevice,
     out: (u32, u32),
+    format: format::Pixel,
 }
 
-/// `input` opened on NVDEC, when its pictures go through the GPU as they
-/// would through the CPU: as for proxies (upright, SDR, BT.709), and also
-/// progressive (frames are picked before any scaling, so a deinterlacer
-/// would see gaps) and filling the output, which the GPU can't pad.
-fn gpu_reader(input: &Input, gpu: &GpuSide) -> Option<VideoReader> {
+/// `input` opened on NVDEC, and the scaler to the output, when its pictures
+/// go through the GPU as they would through the CPU: as for proxies
+/// (upright, SDR, BT.709), progressive (frames are picked before any
+/// scaling, so a deinterlacer would see gaps), and with filters the GPU
+/// has for them (no `pad_cuda` for 10 bits).
+fn gpu_reader(input: &Input, gpu: &GpuSide) -> Option<(VideoReader, crate::cuda::CudaPictures)> {
     let reader = VideoReader::open_cuda(input, &gpu.device).ok()?;
     let first = reader.peek()?;
-    let sar = first.aspect_ratio();
-    let fills = fit(
-        first.width(),
-        first.height(),
-        (sar.numerator(), sar.denominator()),
-        gpu.out.0,
-        gpu.out.1,
-    ) == gpu.out;
-    (crate::proxy::gpu_suitable(first, reader.rotation()) && !reader.interlaced() && fills)
-        .then_some(reader)
+    if !crate::proxy::gpu_suitable(first, reader.rotation()) || reader.interlaced() {
+        return None;
+    }
+    let scaler =
+        crate::cuda::CudaPictures::new(first, reader.time_base(), gpu.out, gpu.format, false)
+            .ok()?;
+    Some((reader, scaler))
 }
 
 /// How far past the current frame (seconds) a later piece of the same file
@@ -287,10 +286,11 @@ impl Source {
         let on_gpu = gpu
             .filter(|_| pictures == Pictures::Video)
             .and_then(|g| gpu_reader(input, g));
-        let (reader, on_gpu) = match on_gpu {
-            Some(r) => (r, true),
-            None => (VideoReader::open_input(input)?, false),
+        let (reader, scaler) = match on_gpu {
+            Some((r, s)) => (r, Some(s)),
+            None => (VideoReader::open_input(input)?, None),
         };
+        let on_gpu = scaler.is_some();
         let tb = reader.time_base();
         let mut source = Source {
             reader,
@@ -302,7 +302,7 @@ impl Source {
             normalized: None,
             pictures,
             on_gpu,
-            scaler: None,
+            scaler,
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
@@ -473,11 +473,11 @@ impl VideoFrames {
         device: crate::cuda::CudaDevice,
         frames: crate::cuda::CudaFrames,
     ) -> Self {
-        let (w, h, _) = self.out;
         self.gpu = Some(Gpu {
             side: GpuSide {
                 device,
-                out: (w, h),
+                out: (self.out.0, self.out.1),
+                format: self.out.2,
             },
             frames,
             made: 0,
@@ -666,16 +666,7 @@ impl VideoFrames {
         let changed = src.advance(target)?;
         if src.on_gpu && (changed || src.normalized.is_none()) {
             let (frame, _) = src.current.as_ref().expect("have a frame");
-            let scaler = match &mut src.scaler {
-                Some(s) => s,
-                None => src.scaler.insert(crate::cuda::CudaPictures::new(
-                    frame,
-                    src.reader.time_base(),
-                    (out_w, out_h),
-                    out_fmt,
-                    false,
-                )?),
-            };
+            let scaler = src.scaler.as_mut().expect("built at opening");
             scaler.push(Some(frame))?;
             let picture = scaler
                 .pull()?

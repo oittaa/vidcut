@@ -227,7 +227,7 @@ vidcut history undo                         # works across separate runs
 - `vidcut export start out.mp4` renders the timeline: its In–Out range when both marks are set, else everything.
   - The extension picks the container, and also the preset unless `--preset` is given.
   - Extra options: `--preset youtube-1080p`, `--encoder nvenc|vaapi|cpu|auto`, `--set video.quality=20`, `--range 1m..2m`, `--per-clip`, `--audio-only`, `--overwrite`.
-  - With NVENC and SDR output, pieces that are upright, progressive, SDR BT.709 and fill the frame decode on NVDEC and scale on the GPU; the rest decode on the CPU and go up. The result's `gpu_frames` counts the frames made on the GPU (export.md §5).
+  - With NVENC and SDR output, pieces that are upright, progressive and SDR BT.709 decode on NVDEC and scale (and in 8 bits pad) on the GPU; the rest decode on the CPU and go up. The result's `gpu_frames` counts the frames made on the GPU (export.md §5).
   - `vidcut export plan out.mp4` (or `export start` with `--dry-run`) prints the plan and the chosen encoder without encoding.
   - Ctrl-C cancels cleanly (exit 9, no partial file).
   - With a GUI running, `--background` returns a job id at once; follow it with `vidcut jobs` commands (below).

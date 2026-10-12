@@ -1517,8 +1517,9 @@ fn sequences_play_their_pictures_at_their_rate() {
 }
 
 /// With NVENC, pieces the GPU shows as the CPU would decode on NVDEC and
-/// scale there; the rest (SD, which needs a matrix change; 4:3, which needs
-/// padding) and black are made on the CPU and uploaded. Every frame is the
+/// scale there, padded to the output when their aspect differs (4:3 and
+/// 2.4:1 in 16:9; in 8 bits); the rest (SD, which needs a matrix change)
+/// and black are made on the CPU and uploaded. Every frame is the
 /// one the CPU export shows: across cuts, files, a seek back, 10-bit and
 /// AV1 sources, and other rates (60 and 24 fps into 30), in 8 and 10 bits.
 #[cfg(feature = "gpu-tests")]
@@ -1549,11 +1550,20 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
         (30, 1),
         30,
     ));
+    // Black at the sides, and above and below.
     let four_three = src(FixtureSpec::new(
         VideoCodec::H264,
         Container::Mp4,
-        640,
-        480,
+        1440,
+        1080,
+        (30, 1),
+        30,
+    ));
+    let scope = src(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        1920,
+        800,
         (30, 1),
         30,
     ));
@@ -1565,10 +1575,12 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
         v(&sd, 0, 15),
         v(&d, 0, 30),
         v(&four_three, 0, 10),
+        v(&scope, 0, 10),
         v(&e, 0, 20),
         v(&a, 50, 20),
     ];
-    let on_gpu = 30 + 30 + 30 + 30 + 20 + 20;
+    // The padded pieces in 8 bits; FFmpeg's pad_cuda takes no 10-bit frames.
+    let on_gpu = |bits| if bits == 8 { 180 } else { 160 };
     let p = plan(fps, 1280, 720, video, vec![]);
     let dir = out_dir("gpu-pipeline");
     let mut reference = lossless();
@@ -1576,7 +1588,7 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
     let cpu = dir.path().join("cpu.mkv");
     render(&p, &reference, &cpu);
     let want = barcodes(&cpu);
-    assert_eq!(want.len(), 195);
+    assert_eq!(want.len(), 205);
     for (codec, bits) in [(VCodec::H264, 8), (VCodec::Hevc, 10)] {
         let settings = ExportSettings {
             container: OutContainer::Mp4,
@@ -1605,7 +1617,11 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
             &mut |_| {},
         )
         .unwrap_or_else(|e| panic!("{bits}-bit: {e}"));
-        assert_eq!(report.gpu_frames, on_gpu, "{bits}-bit: frames on the GPU");
+        assert_eq!(
+            report.gpu_frames,
+            on_gpu(bits),
+            "{bits}-bit: frames on the GPU"
+        );
         let got = barcodes(&out);
         assert_eq!(got.len(), want.len(), "{bits}-bit");
         for (k, (g, w)) in got.iter().zip(&want).enumerate() {
