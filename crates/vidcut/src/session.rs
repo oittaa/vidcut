@@ -366,7 +366,8 @@ pub fn export_media(
     let reports = export::run(&prepared, &available, hooks.cancel, &mut |i, path, pr| {
         (hooks.progress)(i, count, path, pr)
     })?;
-    let mut r = answer(json!({ "outputs": reports, "notes": export::notes(&prepared) }));
+    let mut r =
+        answer(json!({ "outputs": reports, "notes": export::notes(&prepared, &available) }));
     r.rev = p.rev;
     Ok(r)
 }
