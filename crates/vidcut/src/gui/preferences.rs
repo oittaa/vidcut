@@ -56,6 +56,15 @@ impl NumberField<'_> {
         if !r.lost_focus() {
             return None;
         }
+        // egui reports a focus given up mid-frame (Enter, a click elsewhere)
+        // in that frame and the next one: the number goes once.
+        let frame = ui.ctx().cumulative_frame_nr();
+        let key = r.id.with("lost focus");
+        let before = ui.data_mut(|d| d.get_temp::<u64>(key));
+        ui.data_mut(|d| d.insert_temp(key, frame));
+        if before.is_some_and(|b| b + 1 == frame) {
+            return None;
+        }
         match text.parse::<u64>() {
             Ok(n) if self.range.contains(&n) => (n != self.saved).then_some(n),
             _ => {
