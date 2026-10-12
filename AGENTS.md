@@ -255,7 +255,7 @@ vidcut history undo                         # works across separate runs
 - `vidcut timeline import cut.otio` (or `.otioz`, or an `.otiod` folder) adds the file's media to the pool and the file's tracks after the last clip: video tracks onto V1, V2, … with the audio that belongs to their clips, other audio tracks onto A1, A2, …. `--replace` replaces the timeline instead. An empty timeline takes the file's frame rate, start timecode and track settings.
   - An `.otioz`'s media unpack next to it, into a folder named after it (`cut/media/…`), or into `--unpack DIR`. A dry run unpacks nothing and says what it would.
   - Media that moved: paths relative to the file and a project folder moved with the file are found by themselves; otherwise `--search /mnt/footage` looks for them by file name, subfolders too. Missing media fail the import (exit 7) with the list of files.
-  - What can't be imported (transitions, compound clips, generators, speed changes, clips overlapping others on their track) is listed in `warnings`.
+  - What can't be imported (transitions, compound clips, generators, speed changes, clip effects in use such as a zoom, crop or pan, clips overlapping others on their track) is listed in `warnings`.
 - Raw: `timeline.import` also takes the document inline as `otio` (relative media paths then can't be found but by `search`).
 - `tests/cli.rs` checks the files against OpenTimelineIO's own Python library when one is installed (`pip install opentimelineio`; `VIDCUT_OTIO_PYTHON` names the Python); otherwise that part skips.
 

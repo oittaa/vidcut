@@ -103,7 +103,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
     - Only local regular files count as media: a device or a pipe counts as missing, and a clip whose `file://` URL names another host is left out with a warning.
   - **Bundles:** an `.otioz` import unpacks the media into a folder named after the bundle, next to it (`cut.otioz` → `cut/media/…`), or where `--unpack` says. Files already there are kept if they are the bundle's (by CRC-32); other files in the way are an error. A dry run unpacks nothing.
   - **Accepts what Resolve writes:** `Clip.1` and `Clip.2`, source ranges in media timecode, float rates (snapped to exact rationals such as 24000/1001), Resolve's effect lists.
-  - **Left out, with a warning each:** transitions (cuts instead), nested stacks (compound clips), generators, speed changes, clip volume keyframes and fades, and clips that would overlap others on their track.
+  - **Left out, with a warning each:** transitions (cuts instead), nested stacks (compound clips), generators, speed changes, clip volume keyframes and fades, clip effects in use (named; Resolve's own count when switched on with a setting off its default, Dynamic Zoom whenever it is on, so the untouched stack it writes on every clip says nothing), and clips that would overlap others on their track.
   - Export → import reproduces a timeline frame for frame, through all three formats and through OpenTimelineIO's own Python library (`tests/cli.rs`, `otio/tests.rs`).
 - **Why:**
   - OTIO is the user's choice: an open standard that Resolve and other editors read and write, so a cut can move to a finishing tool and back, and agents can write timelines in a documented format instead of vidcut's own.
