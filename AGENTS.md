@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guide for AI agents (and humans) working on this repository. Keep it current: when behavior, commands or conventions change, update this file in the same change.
+Guide for AI agents (and humans) working on this repository.
 
 ## What vidcut is
 
@@ -23,19 +23,14 @@ It is written in Rust:
 
 1. **The Cut page is the spec.** Default behavior is whatever Resolve's Cut page does; see [docs/cut-page-spec.md](docs/cut-page-spec.md) (with manual page numbers).
    - Deviate only when you have a clearly better idea, and record it in [docs/deviations.md](docs/deviations.md) with Resolve's behavior and page, our behavior, and the justification.
-   - When the manual is silent or contradictory, add a decision to §12 of the spec.
-   - The manual is `DaVinci_Resolve_21.1_Reference_Manual.pdf` in `$VIDCUT_TEST_DATA`. Read pages with `pdftotext -f N -l N <pdf> -`; the Cut page is pp. 635–790. Never paste manual text into the repo; describe behavior in your own words.
 2. **The code never names DaVinci Resolve.** Nothing in `crates/`, comments included, mentions Resolve or cites its manual's pages, and neither does anything vidcut shows or prints (GUI text, `--help`, the schema, MCP text, errors). Cite the spec instead (`spec §7`, `decision D41`, `deviation X9`); the spec maps to the manual. The only exception is file-format data other editors need, such as the OTIO metadata keys they read.
-3. **One mutation path.**
-   - Every feature is a `Request` handled by the core Session, so the GUI, CLI, IPC and MCP have identical capabilities.
-   - GUI gestures emit one Request when they complete.
-   - Never mutate project state from GUI code directly.
+3. **Everything is scriptable:** every GUI action can also be done from the CLI, IPC and MCP.
 4. **No media in git.**
    - Test media, generated fixtures and the manual live in `$VIDCUT_TEST_DATA` (default `~/Downloads/vidcut-tmp`), the one place for test data. Test outputs go to temp dirs.
    - `scripts/check.sh` (the pre-commit hook and CI) refuses any binary file, whatever its name, so `.gitignore` lists no file types.
    - Real-world clips are listed in `tests/media-manifest.toml` (URL, license, sha256) and fetched by `scripts/fetch-test-media.sh`.
 5. **No ffmpeg/ffprobe subprocesses.** Use `vidcut-av`, the FFmpeg libraries, for exports and the preview alike.
-6. **License:** MIT. Don't add dependencies with licenses incompatible with MIT distribution of our source.
+6. **License:** MIT.
 
 ## Workspace layout
 
@@ -66,7 +61,7 @@ Docs:
 - `docs/cut-page-spec.md`: the behavioral spec.
 - `docs/deviations.md`: intentional differences from Resolve.
 - `docs/roadmap.md`: the use cases vidcut is for, and the order of what comes next.
-- `docs/todo/`: open work, **one file per item**: add a file for new work, and delete it in the pull request that finishes the work. There is no list to edit, so pull requests don't conflict over it. Keep lists that pull requests edit one item per line, never several items in one line.
+- `docs/todo/`: open work, one file per item.
 - `docs/decisions/`: short architecture decision records (preview, export, GUI and live control, agents: MCP and measurements, the player engine).
 
 ## Build and run
@@ -85,11 +80,10 @@ sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev li
 
 At run time the GUI needs a Vulkan driver (wgpu loads `libvulkan` at run time; Mesa's or NVIDIA's) and ALSA (`libasound2`), nothing beyond FFmpeg that a desktop lacks.
 
-**Supported FFmpeg:** 8.0, the one in the latest Ubuntu LTS (26.04), up to the newest FFmpeg release (9.0.2, `scripts/ffmpeg/release.env`). Both are tested (`scripts/ffmpeg-check.sh`, the weekly FFmpeg workflow); nothing older needs to work, so add no code for FFmpeg before 8.0. Where FFmpeg versions in that range behave differently, handle both by what the file or stream reports, not by version numbers.
+**Supported FFmpeg:** 8.0, the one in the latest Ubuntu LTS (26.04), up to the newest FFmpeg release (9.0.2, `scripts/ffmpeg/release.env`). Both are tested (`scripts/ffmpeg-check.sh`, the weekly FFmpeg workflow); nothing older needs to work, so add no code for FFmpeg before 8.0.
 
 **Toolchain notes:**
 - **Rust comes from rustup.** `rust-toolchain.toml` pins the version (with rustfmt and clippy), and rustup installs it on the first cargo command in the checkout, whatever rustc the distro ships. `rust-version` in Cargo.toml matches it, so the MSRV-aware resolver picks crates that build with it.
-- **Upgrading Rust** is a change of its own: raise `channel` in `rust-toolchain.toml` and `rust-version` together, then fix what the new clippy finds (`scripts/check.sh full`).
 - ffmpeg-next is 9.x. Its version numbers follow FFmpeg's, but it detects the installed FFmpeg and compiles only what that version has, so it builds against FFmpeg 8.0 and 9.0 alike.
 - Dependencies build with `opt-level = 2` even in dev, while our crates stay unoptimized.
 
@@ -100,66 +94,13 @@ These are mandatory.
 | When | Command | Runs |
 |---|---|---|
 | Before **every commit** (enforced by `.githooks/pre-commit`) | `scripts/check.sh` | no binary files in git, `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, unit tests (`--lib --bins`) |
-| After a **bigger change**, and before a milestone is called done | `scripts/check.sh full` | the above plus all integration/e2e tests and doc tests |
-| Also, when encoders, hwdec or real-media paths change | `scripts/check.sh full --features vidcut-av/gpu-tests` | GPU encode tests (NVENC/VAAPI), the player decoding on NVDEC |
-| Also, when the GUI, live session, IPC or preview change | `scripts/check.sh full --features vidcut/gui-tests` | the real GUI driven through the CLI (needs a display and an unlocked session: window screenshots need the window shown; opens a window briefly) |
-| Also, when the player's audio output changes | `scripts/check.sh full --features vidcut-av/audio-tests` | the player engine on the system's audio device (plays silence) |
-| Also, when FFmpeg-facing code changes (probe, decode, encode, filters, ffmpeg-next upgrades) | `scripts/ffmpeg-check.sh` | `cargo build` and `scripts/check.sh full` in containers, against Ubuntu 26.04's FFmpeg 8.0 and the newest FFmpeg release (Tools, below) |
+| After a **bigger change** | `scripts/check.sh full` | the above plus all integration/e2e tests and doc tests |
 
 **Enable the hook once per clone:** `git config core.hooksPath .githooks`.
 
 **CI** (`.github/workflows/check.yml`) runs the fast gate on pull requests and on pushes to master, on `ubuntu-26.04` with Ubuntu's FFmpeg 8.0: older images ship FFmpeg 6. The compiled dependencies are cached (`Swatinem/rust-cache`), so a run builds only vidcut's own crates and the dependencies `Cargo.lock` changed; after a toolchain upgrade it builds everything once. The full gate, GPU and GUI tests run only locally. Dependabot opens weekly update pull requests.
 
 **The FFmpeg workflow** (`.github/workflows/ffmpeg.yml`) runs weekly (Mondays) and on demand (Actions > ffmpeg > Run workflow), never on pull requests or pushes. It builds the newest FFmpeg release and FFmpeg's master from source with `scripts/ffmpeg/build-ffmpeg.sh` (about ten minutes on a runner, cached), then runs `cargo build` and the fast gate against each. A master failure doesn't fail the run.
-
-**A bigger change** is anything touching:
-- time mapping, decode/seek, the export engine
-- the player engine or the viewer's shader, the Request/IPC protocol
-- the project file format or store, or edit-operation semantics
-- more than one crate
-
-**Rules:**
-- **Never commit with failing checks.** Don't skip, ignore or delete tests, or add `#[allow(clippy::...)]`, to get green, unless there's a comment justifying it.
-- **Unit tests** (`#[cfg(test)]` in `src/`) must not need media files, a GPU, a display or the network, so the fast gate stays fast and deterministic.
-- **Integration tests** (`tests/`) may generate fixtures or use downloaded media. They skip with a clear message when something isn't available.
-
-## Testing conventions
-
-- **Fixtures:** generated by `vidcut-av` into `$VIDCUT_TEST_DATA/fixtures/` and cached by spec hash.
-  - The video is a **barcode**: the frame index encoded as luma blocks, which survives lossy codecs, so frame-exactness can be asserted after any decode or encode.
-  - The audio carries a 1 kHz beep at the start of every second, for measuring A/V offset.
-  - `.timecode("10:00:00:00")` records a camera start timecode (a `tmcd` track in MP4/MOV), for timeline interchange tests.
-  - Stills and image sequences: `fixture::ensure_images` writes barcode pictures as PNG or JPEG files, one or numbered (`ImageSpec::still`, `ImageSpec::sequence`).
-  - Damaged files: `fixture::spoil` copies one with a packet left out or zeroed.
-- **Real-world clips:** `scripts/fetch-test-media.sh` downloads the clips in `tests/media-manifest.toml` to `$VIDCUT_TEST_DATA/media/<name>/<file>` and checks their sha256. They cover H.264 1080p30 and 2160p60 (two audio streams each, stereo MP3 and 5.1 AC-3), a 24000/1001 QuickTime file with 44.1 kHz audio, VP8/Vorbis 5.1 WebM with an unknown sample aspect ratio, and a short HEVC clip.
-- **Edit-operation tests** cite the spec section or decision they check.
-- **Golden tests** (insta snapshots in `src/snapshots/`) cover protocol output that agents parse.
-  - After an intended change, regenerate with `INSTA_UPDATE=always cargo test`.
-  - Review the diff before committing.
-- **Property tests** (proptest) run random edit sequences.
-  - Failing seeds land in `proptest-regressions/`. Commit them, so they replay forever.
-  - For a deeper run: `PROPTEST_CASES=5000 cargo test -p vidcut-core prop_tests`.
-- **GUI input tests** (`crates/vidcut/tests/gui_input.rs`, `gui_export.rs`, `gui_tracks.rs`, `gui_tools.rs`, `gui_import.rs`, `gui_tiles.rs`, `gui_project.rs`) drive the real panels and windows with egui_kittest (clicks, drags, keys; no window or renderer) against a live session without players. Each gesture must change the project with exactly one request. Timeline gesture logic itself is unit-tested in `gui/timeline/gesture.rs` from pointer positions.
-  - File dialogs are replaced with `Workspace::set_dialogs`.
-  - A new window or modal is measured in its first frame and placed in the next: step once more after it appears before clicking in it.
-  - Windows that ask the session (presets, plans, imports) answer on helper threads, so wait with a loop of `harness.step()`, not a fixed number of steps.
-  - `Work::Job` threads (timeline tiles, thumbnails) run in the idle class, which a busy machine starves for seconds: wait for the state the test checks (`Workspace::timeline_tiles_pending`, the files on disk) with a generous deadline, never for a quiet spell.
-  - egui widgets such as sliders only see a drag that spans several frames: step between press, moves and release (`drag_slowly` in `gui_tracks.rs`). Timeline gestures work either way.
-  - A freshly opened menu ignores input in its first frame: step twice before clicking an item (`menu_item` in `gui_tools.rs`).
-- **MCP** (`crates/vidcut/tests/mcp.rs`) runs `vidcut mcp` as a child process and talks JSON-RPC to it, headless and against a live session serving IPC.
-- **Color fixtures:** `Picture::Colors` paints four colored stripes (`Picture::COLORS`, in Y′CbCr) for color conversion tests.
-- **Measurement fixtures:** `Picture::Shots` (a new shot every N frames, every fourth one black) and `Sound::Tone` (a steady 1 kHz sine at −20 dBFS, −20 LUFS in stereo) have known answers for scene, black and loudness tests. In core tests, `FakeEnv` takes made-up levels and pictures (`test_support::levels`, `pictures`).
-- **Export jobs** (`crates/vidcut/tests/jobs.rs`) run the live session without players: foreground, background, cancel and wait.
-- **Live session tests** (`crates/vidcut/tests/live.rs`) run the GUI's core thread without a window: both players are engines, a harness thread stands in for the viewer thread (it presents them every 2 ms, converts their pictures with `Picture::to_rgba` and answers presents and screenshots), their sound goes to recording `PacedOutput`s (`live::Players::audio` makes each player's output), and requests go through `Handle::call` like IPC. Prefer them over GUI tests; they need no display, GPU or audio device (they turn GPU acceleration off in their preferences).
-- **The viewer's shader** (`crates/vidcut/tests/picture.rs`) draws pictures on a wgpu device of its own (`gui::picture::Gpu::headless`, any adapter, lavapipe too; skips without one) and compares them with `Picture::to_rgba` and `frame render`. The WGSL is checked by naga in a unit test.
-- **Frame checks** compare barcodes: screenshot the viewer, decode the PNG with `vidcut_av::decode`, and compare with `vidcut frame render` (export's renderer).
-- **Player engine tests** (`crates/vidcut-av/tests/player*.rs`, shared helpers in `tests/player_support/`) run headless and compare each picture's barcode with `frame render`'s (`export::still`). Pictures are decoded YUV at the source's size: `read_barcode` reads any layout, and `Picture::to_rgba` gives what `frame render` does.
-  - The sound is the clock, so a test drives it with an output: `ManualOutput` pulls when the test says (`pull_full`: a buffer as if just heard, so the clock stands at its end until the next), `PacedOutput` pulls in real time with a set latency and can record what it pulled and when it would be heard (A/V offset from the beeps).
-  - Measure picture against sound with `ClockTrace` (the clock read at exact instants through `Player::frame_at`), not by when a polling loop saw a frame: a loaded machine runs the test thread late, not the clock.
-  - Audio scrubbing is on by default, so a seek before play queues that frame's sound ahead of the play's: tests that count samples from play turn it off (`Config { audio_scrubbing: false, .. }`). `player_sound.rs` checks reversed sound and scrubbing against the beeps.
-  - Decode counts (`vidcut_av::decode::frames_decoded`, process-wide) stay in `player_decodes.rs`, one test in its own binary. Work out expected pictures before counting: `frame render` decodes too.
-  - `player_media.rs` prints seek, step and play numbers on the real 1080p30 and 2160p60 clips (`--nocapture`), on NVDEC too with `gpu-tests`, and on any files in `VIDCUT_PLAYER_MEDIA`; `player_device.rs` (`audio-tests`) plays silence on the system's device; `player_gpu.rs` (`gpu-tests`) checks NVDEC's pictures against the CPU's.
-- **Test outputs** go to temp dirs, never into the repo. Make test temp dirs with `tempfile` (`tempfile::Builder::new().prefix("vidcut-…").tempdir()`), which removes them when they drop, also when the test fails. Tests that open projects set `XDG_STATE_HOME` to a temp dir so undo history, recent projects and the folders file dialogs remember stay out of the user's state, tests that save presets or preferences set `XDG_CONFIG_HOME`, and tests that check thumbnails set `XDG_CACHE_HOME`.
 
 ## Driving vidcut as an agent
 
