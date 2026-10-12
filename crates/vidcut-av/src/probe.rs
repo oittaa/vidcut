@@ -84,8 +84,9 @@ pub struct AudioStreamInfo {
     pub start_pts: Option<i64>,
     /// Stream start in seconds, if known.
     pub start_secs: Option<f64>,
-    /// Samples the encoder put before the content (AAC priming), which
-    /// decoders still output (`initial_padding`).
+    /// Samples the encoder put before the content (AAC priming, Opus
+    /// pre-skip) that decoders still output: the stream's `initial_padding`
+    /// less what the demuxer has the decoder skip (see [`start_skips`]).
     pub padding: u32,
     /// Where the content starts, seconds: the start plus the padding,
     /// rounded to the stream's time base. Containers that keep the padding
@@ -196,7 +197,8 @@ fn sequence_frames(info: &MediaInfo, rate: (i32, i32)) -> Option<u64> {
 
 fn probe_input(source: &Input) -> Result<MediaInfo> {
     let path = source.path();
-    let input = source.open()?;
+    let mut input = source.open()?;
+    let skips = start_skips(&mut input);
     let still = matches!(source, Input::File(_)) && image_format(input.format().name());
     let (duration, start_time) = unsafe {
         let ctx = input.as_ptr();
@@ -290,7 +292,12 @@ fn probe_input(source: &Input) -> Result<MediaInfo> {
                 let raw = unsafe { &*params.as_ptr() };
                 let tb = stream.time_base();
                 let start_pts = opt_ts(stream.start_time());
-                let padding = raw.initial_padding.max(0) as u32;
+                // The stream's start already counts the samples skipped.
+                let skipped = skips
+                    .iter()
+                    .find_map(|&(i, n)| (i == stream.index()).then_some(n));
+                let padding =
+                    (raw.initial_padding.max(0) as u32).saturating_sub(skipped.unwrap_or(0));
                 let tick = f64::from(tb.numerator()) / f64::from(tb.denominator());
                 let first_secs = start_pts.map(|t| {
                     let rate = f64::from(raw.sample_rate.max(1));
@@ -330,6 +337,44 @@ fn probe_input(source: &Input) -> Result<MediaInfo> {
         timecode,
         time_reference,
     })
+}
+
+/// The samples the demuxer has the decoder skip at the start of each audio
+/// stream with priming (`initial_padding`), as (stream index, samples):
+/// the skip-samples side data of the stream's first packet. Matroska keeps
+/// AAC and Opus priming as a codec delay, which FFmpeg 8.1 and later skip
+/// this way and 8.0 leaves in the decoded audio. Reads packets only when a
+/// stream has priming, and at most a few hundred.
+fn start_skips(input: &mut ffmpeg::format::context::Input) -> Vec<(usize, u32)> {
+    let mut want: Vec<usize> = input
+        .streams()
+        .filter(|s| {
+            let params = s.parameters();
+            params.medium() == media::Type::Audio
+                && unsafe { (*params.as_ptr()).initial_padding } > 0
+        })
+        .map(|s| s.index())
+        .collect();
+    let mut skips = Vec::new();
+    if want.is_empty() {
+        return skips;
+    }
+    for (stream, packet) in input.packets().take(500) {
+        let Some(at) = want.iter().position(|&i| i == stream.index()) else {
+            continue;
+        };
+        want.swap_remove(at);
+        let skip = packet
+            .side_data()
+            .find(|d| d.kind() == ffmpeg::packet::side_data::Type::SkipSamples)
+            .and_then(|d| d.data().first_chunk::<4>().map(|b| u32::from_le_bytes(*b)))
+            .unwrap_or(0);
+        skips.push((stream.index(), skip));
+        if want.is_empty() {
+            break;
+        }
+    }
+    skips
 }
 
 /// The start timecode and broadcast WAV time reference an opened file
