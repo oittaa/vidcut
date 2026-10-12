@@ -91,12 +91,12 @@ On the dev machine (16 threads), decoding on the CPU; YUV pictures at the clips'
 | Decoded playing 0→150, an edit on the way | 149–154 frames |
 | Decoded playing 299→0 backward, keyframes 120 apart | 306 frames |
 | 1080p30 H.264 pictures | 3.1 MB each; a window back holds 57 at 512 MB |
-| 1080p30: seek to picture | median 110 ms, max 221 ms |
+| 1080p30: seek to picture | median 96–110 ms, max 209–221 ms |
 | 1080p30: 5 s forward / 3 s backward | 150 of 150 shown, 0.1 cores / 90 of 91, 0.4 cores |
 | 2160p60 H.264 pictures (keyframes 4 s apart) | 12.4 MB each; a window back holds 14 at 512 MB, 28 at 1 GB |
 | 2160p60: seek to picture | median 188 ms, max 373 ms |
 | 2160p60: 5 s forward | 298 of 300 shown, none late, 0.4 cores |
-| 2160p60: 3 s backward at 512 MB | 159 of 181 shown, 19 presents late, 7.1 cores |
+| 2160p60: 3 s backward at 512 MB | 153–159 of 180 shown, 19–24 presents late, 7.1–7.2 cores |
 | 2160p60: 3 s backward at 1 GB | 178 of 181 shown, none late, 4.3 cores |
 | System device (PipeWire) | 37 ms latency; the picture moves 81 ms after play |
 
