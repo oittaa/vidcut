@@ -450,6 +450,18 @@ pub fn schema(method: Option<&str>) -> Result<Value> {
     }))
 }
 
+/// The GPUs the GUI can draw on (wgpu's Vulkan, Metal or DX12 adapters).
+fn display_gpus() -> Vec<String> {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    pollster::block_on(instance.enumerate_adapters(wgpu::Backends::PRIMARY))
+        .iter()
+        .map(|a| {
+            let info = a.get_info();
+            format!("{} ({:?}, {})", info.name, info.backend, info.driver)
+        })
+        .collect()
+}
+
 /// Dependencies and environment, for humans and agents debugging setups.
 pub fn doctor() -> Value {
     let gpus: Vec<Value> = std::fs::read_dir("/sys/class/drm")
@@ -471,8 +483,9 @@ pub fn doctor() -> Value {
     json!({
         "vidcut": env!("CARGO_PKG_VERSION"),
         "ffmpeg": vidcut_av::library_versions(),
-        "libmpv": match vidcut_mpv::available() { Ok(()) => json!("ok"), Err(e) => json!(e) },
+        "audio_output": match vidcut_av::player::output_device() { Ok(d) => json!(d), Err(e) => json!(e.to_string()) },
         "gpus": gpus,
+        "display_gpus": display_gpus(),
         "state_dir": state_dir(),
         "test_data": vidcut_av::testdata::root(),
     })

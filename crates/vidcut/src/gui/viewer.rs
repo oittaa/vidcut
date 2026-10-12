@@ -134,8 +134,13 @@ impl Workspace {
         let aspect = self.project().map_or(16.0 / 9.0, |p| {
             p.settings.width as f32 / p.settings.height.max(1) as f32
         });
-        let picture = fit(area.shrink(2.0), aspect);
         let ppp = ui.ctx().pixels_per_point();
+        // On whole physical pixels: the player's picture is drawn at this
+        // size and shown one to one.
+        let picture = {
+            use eframe::emath::GuiRounding;
+            fit(area.shrink(2.0), aspect).round_to_pixels(ppp)
+        };
         self.wants[id.index()] = [
             (picture.width() * ppp).round() as i32,
             (picture.height() * ppp).round() as i32,
@@ -169,7 +174,7 @@ impl Workspace {
         let player = self.snap.player(id).clone();
         let video = self.pictures[id.index()];
         let played = video.texture.filter(|_| player.loaded && video.has_frame);
-        match self.paused_frame(ui.ctx(), id).or(played) {
+        match played {
             Some(tex) => {
                 painter.image(
                     tex,
@@ -269,102 +274,6 @@ impl Workspace {
                 ui.label(RichText::new(format!("edit at {}", self.tc(e.at))).monospace());
             });
         });
-    }
-
-    /// The paused viewer's frame, from the renderer that decodes each frame
-    /// once whichever way the viewer steps (docs/decisions/preview.md §13).
-    /// Playing, the player's picture shows instead; so it does while the
-    /// first frame after playing renders, rather than a picture from before.
-    fn paused_frame(&mut self, ctx: &egui::Context, id: PlayerId) -> Option<egui::TextureId> {
-        use super::stills::{Shown, Still, Stills, VIEWER};
-        let mode = self.snap.viewer;
-        let player = self.snap.player(id);
-        if player.playing || !player.loaded {
-            self.paused_shown = None;
-            return None;
-        }
-        let (piece, floor) = self.paused_piece(id)?;
-        let fps = self.project()?.settings.fps;
-        let [w, h] = self.wants[id.index()];
-        let still = Still {
-            piece,
-            floor,
-            fps,
-            width: w.max(2) as u32,
-            height: h.max(2) as u32,
-        };
-        let stills = self.stills.get_or_insert_with(|| Stills::new(ctx.clone()));
-        match stills.get(ctx, VIEWER, &still)? {
-            Shown::Exact(t) => {
-                self.paused_shown = Some(mode);
-                Some(t)
-            }
-            Shown::Previous(t) if self.paused_shown == Some(mode) => Some(t),
-            Shown::Previous(_) => None,
-        }
-    }
-
-    /// The piece the viewer shows now, the timeline's top picture or the
-    /// source clip's frame, with a fresh proxy when proxies play; and where
-    /// the shown stretch of its file starts (the renderer keeps frames back
-    /// to there, no further).
-    fn paused_piece(&mut self, id: PlayerId) -> Option<(vidcut_core::render::VideoPiece, i64)> {
-        use vidcut_core::render::VideoPiece;
-        let snap = self.snap.clone();
-        let p = snap.project()?;
-        let at = (
-            p.rev,
-            snap.viewer,
-            snap.player(id).position,
-            snap.source_media.clone(),
-            p.settings.use_proxies,
-        );
-        if let Some((cached, piece, floor)) = &self.paused_piece
-            && *cached == at
-        {
-            return Some((piece.clone(), *floor));
-        }
-        let (mut piece, floor) = match snap.viewer {
-            ViewerMode::Timeline => {
-                // The stretch of the timeline that runs on in one file up to
-                // the playhead (pieces of a file that follow on merge), as far
-                // back as a minute: its first frame is the floor.
-                let pos = snap.timeline.position;
-                let back = (p.settings.fps.as_f64() * 60.0) as i64;
-                let run = vidcut_core::render::flatten(p, (pos - back).max(0), pos + 1)
-                    .ok()?
-                    .video
-                    .pop()?;
-                match run {
-                    VideoPiece::Source {
-                        media,
-                        path,
-                        origin,
-                        source_frame,
-                        frames,
-                        image,
-                    } => (
-                        VideoPiece::Source {
-                            media,
-                            path,
-                            origin,
-                            source_frame: source_frame + frames - 1,
-                            frames: 1,
-                            image,
-                        },
-                        source_frame,
-                    ),
-                    VideoPiece::Black { .. } => (VideoPiece::Black { frames: 1 }, 0),
-                }
-            }
-            _ => {
-                let (media, frame) = snap.source_at()?;
-                (vidcut_core::render::media_frame(p, media, frame).ok()?, 0)
-            }
-        };
-        vidcut_core::preview::proxy_piece(&mut piece, p, |path| path.is_file());
-        self.paused_piece = Some((at, piece.clone(), floor));
-        Some((piece, floor))
     }
 
     /// Dynamic Trim's two-up: the frames on both sides of the

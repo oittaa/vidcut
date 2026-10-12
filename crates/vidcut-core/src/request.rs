@@ -728,7 +728,8 @@ pub enum Request {
     },
     /// Move the playhead and wait until the frame is shown. Times are relative
     /// to the viewer's content (`+10f` and `-2s` are relative to the playhead).
-    /// `fast` seeks to a keyframe (scrubbing).
+    /// `fast` marks a scrub (a drag of the playhead): it is left out of the
+    /// command log. Every seek shows its exact frame.
     #[serde(rename = "player.seek")]
     PlayerSeek {
         at: TimeSpec,
@@ -755,11 +756,19 @@ pub enum Request {
         #[serde(default)]
         mute: Option<bool>,
     },
+    /// Audio scrubbing (decision D42): frame steps and moves of a paused
+    /// playhead play the sound of the frame arrived at. On by default; not
+    /// saved with the project. Without `on`, toggles (Shift+S).
+    #[serde(rename = "player.audio_scrubbing")]
+    PlayerAudioScrubbing {
+        #[serde(default)]
+        on: Option<bool>,
+    },
     /// Hear `track`'s fader at `volume_db` in the timeline preview at once,
     /// without changing the project: what the Mixer's fader does while it is
-    /// dragged; `track.set` keeps a level. `live: false` in the result: this
-    /// system can't change the level while playing (no ZeroMQ, or an FFmpeg
-    /// without `azmq`), and only `track.set` changes what is heard.
+    /// dragged; `track.set` keeps a level. `live: false` in the result:
+    /// nothing plays the timeline now. A track with no sound in the
+    /// timeline's mix (muted, left out by solo, or empty) is an error.
     #[serde(rename = "mixer.preview")]
     MixerPreview { track: String, volume_db: f64 },
     /// The Media Pool view: the bin shown and the sort order. Source Tape
@@ -1165,6 +1174,7 @@ impl Request {
                 | Self::PlayerStep { .. }
                 | Self::PlayerState {}
                 | Self::PlayerMute { .. }
+                | Self::PlayerAudioScrubbing { .. }
                 | Self::MixerPreview { .. }
                 | Self::PoolSet { .. }
                 | Self::SelectionGet {}

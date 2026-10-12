@@ -1,194 +1,308 @@
-//! libmpv's OpenGL renderer drawing into textures egui shows
-//! (docs/decisions/preview.md §6).
+//! The viewers' pictures (docs/decisions/preview.md §4): a thread of their
+//! own presents both players' engines, drawing the picture each one's
+//! clock is at with the GPU shader ([`super::picture`]) into a target the
+//! size of the viewer's picture in physical pixels, and answers the
+//! session's presents and screenshots. egui shows the targets as native
+//! textures.
 //!
-//! Each player renders into its own framebuffer object. Its texture is
-//! registered with egui once (egui can't unregister native textures) and
-//! re-specified when the viewer size changes. Rendering happens in
-//! `App::logic`, which eframe calls even while the window is hidden, so
-//! players keep running and the viewer can be captured at any time.
+//! Not on the UI thread: while the window is hidden, presenting the window
+//! may block that thread for as long as it stays hidden (NVIDIA on
+//! Wayland), and a seek must still show its frame and the viewer be
+//! captured. The viewer thread's submissions to the same device go on
+//! meanwhile.
+
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use eframe::egui;
-use eframe::glow::{self, HasContext};
-use vidcut_mpv::GlRenderer;
-use vidcut_mpv::ffi::MPV_RENDER_UPDATE_FRAME;
+use eframe::egui_wgpu::RenderState;
+use eframe::wgpu;
+use vidcut_av::player::Player;
+use vidcut_core::Error;
 
-use crate::live::Image;
+use super::picture::{Drawn, Gpu, Screen};
+use crate::live::{Capture, PlayerId, Presented};
 
+type Engine = Arc<Player>;
+
+/// What the session asks of the viewer thread.
+enum Task {
+    Present(PlayerId, Presented),
+    Capture(PlayerId, Capture),
+}
+
+/// A viewer's target as the UI shows it: counted anew with each new target.
+#[derive(Clone)]
 struct Target {
-    texture: glow::Texture,
-    fbo: glow::Framebuffer,
-    size: [i32; 2],
+    generation: u64,
+    view: wgpu::TextureView,
 }
 
-/// One player's render context and target.
-pub struct Video {
-    renderer: Option<GlRenderer>,
-    target: Option<Target>,
-    pub texture_id: Option<egui::TextureId>,
-    /// Size the viewer last asked for, in physical pixels.
-    pub want: [i32; 2],
-    /// The target holds a rendered frame.
-    pub has_frame: bool,
+#[derive(Default)]
+struct State {
+    tasks: Vec<Task>,
+    engines: [Option<Engine>; 2],
+    /// The sizes (physical pixels) the viewer shows each player's picture
+    /// at.
+    wants: [[i32; 2]; 2],
+    targets: [Option<Target>; 2],
+    /// A target holds a picture (not black for want of one).
+    has_frame: [bool; 2],
+    woken: bool,
+    stop: bool,
 }
 
-impl Video {
-    pub fn new(renderer: Option<GlRenderer>) -> Self {
+struct Shared {
+    state: Mutex<State>,
+    wake: Condvar,
+}
+
+impl Shared {
+    fn lock(&self) -> MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn change(&self, f: impl FnOnce(&mut State)) {
+        let mut s = self.lock();
+        f(&mut s);
+        s.woken = true;
+        drop(s);
+        self.wake.notify_all();
+    }
+}
+
+/// The viewer thread, and what the UI shows of it.
+pub struct Viewer {
+    shared: Arc<Shared>,
+    thread: Option<JoinHandle<()>>,
+    /// The egui texture of each target, and the target's generation.
+    textures: [Option<(u64, egui::TextureId)>; 2],
+}
+
+/// Asks things of the viewer thread from anywhere (the session's side).
+#[derive(Clone)]
+pub struct ViewerHandle {
+    shared: Arc<Shared>,
+}
+
+/// When the viewer thread looks again without being woken.
+const IDLE: Duration = Duration::from_millis(100);
+
+impl Viewer {
+    /// Starts the viewer thread on eframe's device; `repaint` asks the UI
+    /// to show a changed picture.
+    pub fn start(render: &RenderState, repaint: impl Fn() + Send + 'static) -> Self {
+        let shared = Arc::new(Shared {
+            state: Mutex::new(State {
+                wants: [[640, 360]; 2],
+                ..State::default()
+            }),
+            wake: Condvar::new(),
+        });
+        let gpu = Gpu::new(&render.device, &render.queue);
+        let s = shared.clone();
+        let thread = crate::threads::spawn(
+            "vidcut-viewer",
+            crate::threads::Work::Interactive,
+            move || run(&s, &gpu, &repaint),
+        )
+        .ok();
         Self {
-            renderer,
-            target: None,
-            texture_id: None,
-            want: [640, 360],
-            has_frame: false,
+            shared,
+            thread,
+            textures: [None, None],
         }
     }
 
-    /// Draws mpv's picture when it has a frame for us, the target was
-    /// resized, or `present` asks for its current picture again (it then
-    /// redraws that even with nothing new).
-    pub fn render(&mut self, gl: &glow::Context, frame: &mut eframe::Frame, present: bool) {
-        if self.renderer.is_none() {
-            return;
+    pub fn handle(&self) -> ViewerHandle {
+        ViewerHandle {
+            shared: self.shared.clone(),
         }
-        let resized = self.ensure_target(gl, frame);
-        let (Some(renderer), Some(target)) = (&self.renderer, &self.target) else {
-            return;
+    }
+}
+
+impl ViewerHandle {
+    /// The engine `player` shows from now on.
+    pub fn attach(&self, player: PlayerId, engine: Option<Engine>) {
+        self.shared.change(|s| s.engines[player.index()] = engine);
+    }
+
+    /// Draw `player`'s picture now and say which frame it showed.
+    pub fn present(&self, player: PlayerId, done: Presented) {
+        self.shared
+            .change(|s| s.tasks.push(Task::Present(player, done)));
+    }
+
+    /// The picture `player`'s viewer shows, as drawn.
+    pub fn capture(&self, player: PlayerId, done: Capture) {
+        self.shared
+            .change(|s| s.tasks.push(Task::Capture(player, done)));
+    }
+
+    /// Looks again (a picture landed, or the session changed something).
+    pub fn wake(&self) {
+        self.shared.change(|_| {});
+    }
+}
+
+impl Viewer {
+    /// The UI's side, each frame: the sizes the viewer shows the pictures
+    /// at, and for each player its picture's egui texture (registered
+    /// anew with each new target) and whether it holds a picture.
+    pub fn sync(
+        &mut self,
+        render: &RenderState,
+        wants: [[i32; 2]; 2],
+    ) -> [(Option<egui::TextureId>, bool); 2] {
+        let (targets, has_frame) = {
+            let mut s = self.shared.lock();
+            let changed = s.wants != wants;
+            s.wants = wants;
+            if changed {
+                s.woken = true;
+                self.shared.wake.notify_all();
+            }
+            (s.targets.clone(), s.has_frame)
         };
-        // `update` must run whenever mpv asked for it, even if we redraw anyway.
-        let update = renderer.update() & MPV_RENDER_UPDATE_FRAME != 0;
-        if !(update || present || resized && self.has_frame) {
-            return;
-        }
-        if crate::live::debug() {
-            eprintln!("[gl] render update={update} resized={resized} present={present}");
-        }
-        if let Err(e) = renderer.render(target.fbo.0.get(), target.size[0], target.size[1], false) {
-            eprintln!("vidcut: mpv render failed: {e}");
-            return;
-        }
-        self.has_frame = true;
-        // SAFETY: plain GL state calls on the thread that owns the context.
-        unsafe {
-            // mpv leaves GL state behind; egui's painter resets most of it but
-            // never rebinds the default framebuffer.
-            gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-            gl.bind_buffer(glow::PIXEL_UNPACK_BUFFER, None);
-            gl.pixel_store_i32(glow::UNPACK_ROW_LENGTH, 0);
-            gl.active_texture(glow::TEXTURE0);
-            gl.bind_texture(glow::TEXTURE_2D, None);
-            gl.bind_vertex_array(None);
-            gl.use_program(None);
-        }
-    }
-
-    /// (Re)creates the target at `want`; returns whether it changed. The
-    /// texture name stays the same, so egui's registration stays valid.
-    fn ensure_target(&mut self, gl: &glow::Context, frame: &mut eframe::Frame) -> bool {
-        let size = [self.want[0].max(16), self.want[1].max(16)];
-        if self.target.as_ref().is_some_and(|t| t.size == size) {
-            return false;
-        }
-        // SAFETY: GL calls on the thread that owns the context; the objects
-        // created here are owned by this target (the texture by egui once
-        // registered).
-        unsafe {
-            let texture = match &self.target {
-                Some(t) => t.texture,
-                None => match gl.create_texture() {
-                    Ok(t) => t,
-                    Err(e) => {
-                        eprintln!("vidcut: creating a GL texture: {e}");
-                        return false;
+        let mut out = [(None, false); 2];
+        for id in PlayerId::ALL {
+            let i = id.index();
+            if let Some(t) = &targets[i] {
+                // Drawn one to one: the viewer's picture rectangle is the
+                // target's size in physical pixels.
+                let filter = wgpu::FilterMode::Nearest;
+                match self.textures[i] {
+                    Some((g, _)) if g == t.generation => {}
+                    Some((_, tex)) => {
+                        render
+                            .renderer
+                            .write()
+                            .update_egui_texture_from_wgpu_texture(
+                                &render.device,
+                                &t.view,
+                                filter,
+                                tex,
+                            );
+                        self.textures[i] = Some((t.generation, tex));
                     }
-                },
-            };
-            gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-            gl.tex_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                glow::RGBA8 as i32,
-                size[0],
-                size[1],
-                0,
-                glow::RGBA,
-                glow::UNSIGNED_BYTE,
-                glow::PixelUnpackData::Slice(None),
-            );
-            for (param, value) in [
-                (glow::TEXTURE_MIN_FILTER, glow::LINEAR),
-                (glow::TEXTURE_MAG_FILTER, glow::LINEAR),
-                (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
-                (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
-            ] {
-                gl.tex_parameter_i32(glow::TEXTURE_2D, param, value as i32);
-            }
-            gl.bind_texture(glow::TEXTURE_2D, None);
-            let fbo = match &self.target {
-                Some(t) => t.fbo,
-                None => match gl.create_framebuffer() {
-                    Ok(f) => f,
-                    Err(e) => {
-                        eprintln!("vidcut: creating a GL framebuffer: {e}");
-                        return false;
+                    None => {
+                        let tex = render.renderer.write().register_native_texture(
+                            &render.device,
+                            &t.view,
+                            filter,
+                        );
+                        self.textures[i] = Some((t.generation, tex));
                     }
-                },
-            };
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(fbo));
-            gl.framebuffer_texture_2d(
-                glow::FRAMEBUFFER,
-                glow::COLOR_ATTACHMENT0,
-                glow::TEXTURE_2D,
-                Some(texture),
-                0,
-            );
-            // Black until mpv draws.
-            gl.clear_color(0.0, 0.0, 0.0, 1.0);
-            gl.clear(glow::COLOR_BUFFER_BIT);
-            gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-            if self.texture_id.is_none() {
-                self.texture_id = Some(frame.register_native_glow_texture(texture));
+                }
             }
-            self.target = Some(Target { texture, fbo, size });
+            out[i] = (self.textures[i].map(|(_, t)| t), has_frame[i]);
         }
-        true
+        out
     }
+}
 
-    /// Reads the picture back as displayed (rows top to bottom).
-    pub fn read_back(&self, gl: &glow::Context) -> Option<Image> {
-        let t = self.target.as_ref()?;
-        let [w, h] = t.size;
-        let mut rgba = vec![0u8; (w * h * 4) as usize];
-        // SAFETY: reads `w`×`h` RGBA pixels into a buffer of exactly that size.
-        unsafe {
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(t.fbo));
-            gl.pixel_store_i32(glow::PACK_ALIGNMENT, 1);
-            gl.read_pixels(
-                0,
-                0,
-                w,
-                h,
-                glow::RGBA,
-                glow::UNSIGNED_BYTE,
-                glow::PixelPackData::Slice(Some(&mut rgba)),
+impl Drop for Viewer {
+    fn drop(&mut self) {
+        self.shared.change(|s| {
+            s.stop = true;
+            s.engines = [None, None];
+        });
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+/// The viewer thread: presents both engines whenever woken, and as the
+/// clocks of those playing move.
+fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
+    let mut screens = [Screen::new(), Screen::new()];
+    // Counts each player's new targets: the UI registers each anew.
+    let mut generations = [0u64; 2];
+    let mut next: Option<Instant> = None;
+    loop {
+        let (tasks, engines, wants) = {
+            let mut s = shared.lock();
+            while !s.woken && !s.stop {
+                let wait = next.map_or(IDLE, |n| n.saturating_duration_since(Instant::now()));
+                if wait.is_zero() {
+                    break;
+                }
+                s = shared
+                    .wake
+                    .wait_timeout(s, wait)
+                    .unwrap_or_else(|e| e.into_inner())
+                    .0;
+            }
+            if s.stop {
+                return;
+            }
+            s.woken = false;
+            (std::mem::take(&mut s.tasks), s.engines.clone(), s.wants)
+        };
+        let now = Instant::now();
+        let mut presented = [None; 2];
+        let mut changed = false;
+        let mut targets = [None, None];
+        let mut has_frame = [false; 2];
+        next = None;
+        for id in PlayerId::ALL {
+            let i = id.index();
+            let engine = engines[i].as_deref();
+            let shown = engine.and_then(|e| e.present(now));
+            let [w, h] = wants[i];
+            let drawn = screens[i].draw(
+                gpu,
+                shown.as_ref().map(|s| &s.picture),
+                w.max(2) as u32,
+                h.max(2) as u32,
             );
-            gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+            if drawn != Drawn::Same {
+                changed = true;
+                if crate::live::debug() {
+                    eprintln!(
+                        "[viewer] {id:?} drew {:?} at {w}x{h}",
+                        shown.as_ref().map(|s| (s.frame, s.exact))
+                    );
+                }
+            }
+            if drawn == Drawn::Target {
+                generations[i] += 1;
+            }
+            targets[i] = screens[i].view().map(|view| Target {
+                generation: generations[i],
+                view: view.clone(),
+            });
+            has_frame[i] = shown.is_some();
+            presented[i] = shown.filter(|s| s.exact).map(|s| s.frame);
+            // Playing: look again when the clock moves to the next frame.
+            if let Some(d) = engine.and_then(|e| e.next_change(now)) {
+                let at = now + d.max(Duration::from_millis(1));
+                next = Some(next.map_or(at, |n| n.min(at)));
+            }
         }
-        // mpv's alpha is undefined outside the picture; the viewer is opaque.
-        for px in rgba.as_chunks_mut::<4>().0 {
-            px[3] = 255;
+        {
+            let mut s = shared.lock();
+            s.targets = targets;
+            s.has_frame = has_frame;
         }
-        Some(Image {
-            width: w as u32,
-            height: h as u32,
-            rgba,
-        })
-    }
-
-    /// Frees the render context (GL context current) and the framebuffer.
-    pub fn destroy(&mut self, gl: Option<&glow::Context>) {
-        self.renderer = None;
-        if let (Some(gl), Some(t)) = (gl, self.target.take()) {
-            // SAFETY: the framebuffer belongs to us; the texture to egui.
-            unsafe { gl.delete_framebuffer(t.fbo) };
+        for task in tasks {
+            match task {
+                Task::Present(id, done) => done(presented[id.index()]),
+                Task::Capture(id, done) => {
+                    let image = screens[id.index()].read(gpu);
+                    done(image.ok_or_else(|| {
+                        Error::new(
+                            vidcut_core::ErrorCode::Internal,
+                            "the viewer has no picture",
+                        )
+                    }));
+                }
+            }
+        }
+        if changed {
+            repaint();
         }
     }
 }

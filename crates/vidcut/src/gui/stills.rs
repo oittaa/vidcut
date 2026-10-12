@@ -1,6 +1,7 @@
-//! Exact single frames for the GUI (the paused viewer, the Trim Editor and
-//! Dynamic Trim's two-up), rendered by the export engine so they match
-//! export and never block the UI.
+//! Exact single frames for the GUI (the Trim Editor's and Dynamic Trim's
+//! two-up, on a copy of the project), rendered by the export engine so they
+//! match export and never block the UI. The viewer itself shows the
+//! player's pictures (docs/decisions/preview.md §4).
 //!
 //! Each cell showing frames has a thread of its own, so the cells render at
 //! once, and a renderer that decodes each frame once whichever way the
@@ -65,13 +66,8 @@ enum Outcome {
 /// a frame: a decoder holds frame buffers and a thread per core.
 const IDLE: Duration = Duration::from_secs(10);
 
-/// The cell showing the paused viewer's frames.
-pub const VIEWER: usize = 2;
-
-/// Memory for a cell's kept pictures: the viewer's are the largest.
-fn budget(cell: usize) -> usize {
-    if cell == VIEWER { 512 << 20 } else { 256 << 20 }
-}
+/// Memory for a cell's kept pictures.
+const BUDGET: usize = 256 << 20;
 
 /// Textures kept for frames shown before: the renderer keeps the pictures,
 /// so one shown again is only uploaded again.
@@ -151,12 +147,12 @@ impl Stills {
                 format!("vidcut-stills-{n}"),
                 crate::threads::Work::Interactive,
                 move || {
-                    let mut renderer = StillRenderer::with_budget(budget(n));
+                    let mut renderer = StillRenderer::with_budget(BUDGET);
                     loop {
                         let mut job = match rx.recv_timeout(IDLE) {
                             Ok(job) => job,
                             Err(RecvTimeoutError::Timeout) => {
-                                renderer = StillRenderer::with_budget(budget(n));
+                                renderer = StillRenderer::with_budget(BUDGET);
                                 match rx.recv() {
                                     Ok(job) => job,
                                     Err(_) => return,

@@ -1,6 +1,6 @@
-//! The GUI: eframe (glow) on the UI thread; the project, players and
-//! everything else in the live session (crate::live). See
-//! docs/decisions/gui.md.
+//! The GUI: eframe on wgpu (Vulkan on Linux) on the UI thread; the
+//! project, players and everything else in the live session (crate::live).
+//! See docs/decisions/gui.md.
 
 mod app;
 pub mod export;
@@ -27,14 +27,38 @@ use vidcut_core::{Error, ErrorCode, Result};
 /// Runs the GUI until its window closes, optionally opening `project`
 /// (created if it doesn't exist).
 pub fn run(project: Option<PathBuf>) -> Result<()> {
+    use eframe::egui_wgpu::{WgpuConfiguration, WgpuSetup, WgpuSetupCreateNew};
+    use eframe::wgpu;
     let options = eframe::NativeOptions {
-        renderer: eframe::Renderer::Glow,
-        // With vsync, NVIDIA's EGL on Wayland blocks eglSwapBuffers until the
-        // compositor sends a frame callback, which GNOME withholds while the
-        // window is hidden: the UI (= mpv render) thread would hang
-        // (docs/decisions/preview.md §6). Repaints follow mpv's frames anyway.
-        glow_options: eframe::egui_glow::GlowConfiguration {
-            vsync: false,
+        renderer: eframe::Renderer::Wgpu,
+        wgpu_options: WgpuConfiguration {
+            // Mailbox (or Immediate where there is one): a new picture shows
+            // at the next refresh, no frames queued. Presenting a hidden
+            // window can still block the UI thread (NVIDIA on Wayland), so
+            // the viewer presents on a thread of its own
+            // (docs/decisions/preview.md §4).
+            surface: eframe::SurfaceConfig {
+                present_mode: wgpu::PresentMode::AutoNoVsync,
+                desired_maximum_frame_latency: Some(1),
+            },
+            wgpu_setup: WgpuSetup::CreateNew(WgpuSetupCreateNew {
+                instance_descriptor: wgpu::InstanceDescriptor {
+                    backends: wgpu::Backends::from_env().unwrap_or(wgpu::Backends::PRIMARY),
+                    ..wgpu::InstanceDescriptor::new_without_display_handle_from_env()
+                },
+                // 16-bit textures for P010 pictures, and pictures as large
+                // as the GPU takes.
+                device_descriptor: std::sync::Arc::new(|adapter| wgpu::DeviceDescriptor {
+                    label: Some("vidcut"),
+                    required_features: picture::features(adapter),
+                    required_limits: wgpu::Limits {
+                        max_texture_dimension_2d: adapter.limits().max_texture_dimension_2d,
+                        ..wgpu::Limits::default()
+                    },
+                    ..Default::default()
+                }),
+                ..WgpuSetupCreateNew::without_display_handle()
+            }),
             ..Default::default()
         },
         viewport: egui::ViewportBuilder::default()

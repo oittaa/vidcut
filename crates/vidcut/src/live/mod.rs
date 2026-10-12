@@ -1,10 +1,12 @@
 //! The live session: the running GUI's core thread.
 //!
-//! One thread owns the open project, both mpv players and everything the
+//! One thread owns the open project, both players and everything the
 //! viewer shows. The GUI, IPC clients and background jobs reach it only
 //! through messages ([`Handle`]). After every change it publishes an
 //! immutable [`Snapshot`], which the UI thread reads without waiting: the UI
-//! never blocks on the session and never calls mpv's client API.
+//! never blocks on the session. The players are vidcut's own engine
+//! (`vidcut_av::player`): the session sends them requests, which return at
+//! once, and the renderer presents their pictures.
 //!
 //! Requests are the same [`Request`]s the CLI runs headless. Project edits go
 //! through the project's [`Editor`](vidcut_core::Editor) and are saved before
@@ -14,7 +16,6 @@
 //! encoder) reply later, without blocking other requests.
 
 mod jobs;
-mod mixctl;
 mod player;
 mod project;
 pub mod snapshot;
@@ -30,15 +31,13 @@ use std::time::{Duration, Instant, SystemTime};
 use serde_json::{Value, json};
 use vidcut_core::editor::{media_context, resolve_clip};
 use vidcut_core::model::{Clip, Settings};
-use vidcut_core::preview::{self, Fillers};
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{GuiPanel, OneOrMany, ScreenshotTarget, ViewerMode};
 use vidcut_core::time::{Keyword, Rational, TimeContext, TimeSpec, format_timecode};
 use vidcut_core::{Envelope, Error, Project, Request, Response, Result};
-use vidcut_mpv::Mpv;
 
 pub use jobs::{JobInfo, JobOutput, JobState};
-pub use player::{debug, file_options, mpv_log_options, mpv_options};
+pub use player::{MakeOutput, debug};
 pub use snapshot::*;
 pub use vidcut_av::thumbs::Image;
 
@@ -76,15 +75,20 @@ impl Origin {
 /// Called with a captured picture (or why there is none).
 pub type Capture = Box<dyn FnOnce(Result<Image>) + Send>;
 
-/// Called once a player was presented.
-pub type Presented = Box<dyn FnOnce() + Send>;
+/// Called once a player was presented, with the frame it showed exactly
+/// (`None`: the frame's picture wasn't decoded yet).
+pub type Presented = Box<dyn FnOnce(Option<i64>) + Send>;
 
 /// What the session needs from whoever renders the players: the GUI, or a
 /// test harness.
 pub trait Renderer: Send + Sync {
-    /// Draw `player`'s current picture now, even if mpv has nothing new for
-    /// it, then call `done`. The session asks once a seek or load has
-    /// finished: the viewer then shows its frame (docs/decisions/gui.md §4).
+    /// The engine `player` shows from now on (`None`: nothing). The
+    /// renderer presents it: draws the picture `present` gives as the clock
+    /// moves.
+    fn attach(&self, _player: PlayerId, _engine: Option<Arc<vidcut_av::player::Player>>) {}
+    /// Draw `player`'s current picture now, then call `done` with the frame
+    /// shown. The session asks once a seek or load has its picture: the
+    /// viewer then shows its frame (docs/decisions/gui.md §4).
     fn present(&self, player: PlayerId, done: Presented);
     /// The picture `player` shows, as displayed.
     fn capture_viewer(&self, player: PlayerId, done: Capture);
@@ -122,15 +126,13 @@ pub struct Config {
     pub socket: Option<PathBuf>,
 }
 
-/// The preview's two mpv players, and what their renderer can show.
+/// What the preview's two players need.
 pub struct Players {
-    pub source: Mpv,
-    pub timeline: Mpv,
-    /// The renderer shows frames decoded on the GPU (OpenGL does, mpv's
-    /// software renderer can't), so the GPU acceleration preference decides
-    /// how the players decode. Otherwise they keep the options they were
-    /// made with.
-    pub hwdec: bool,
+    /// Makes each player's audio output: the system's device in the GUI
+    /// (a silent stand-in when it won't open), a stand-in in tests.
+    pub audio: MakeOutput,
+    /// Memory for each player's pictures.
+    pub budget: usize,
 }
 
 /// Progress and the final answer of one request.
@@ -166,11 +168,14 @@ pub(crate) enum Msg {
         project: Option<PathBuf>,
         reply: Option<Reply>,
     },
-    Mpv(PlayerId),
-    /// The renderer presented `player` after `motion` finished.
+    /// The picture `player`'s viewer is at landed (or failed).
+    Picture(PlayerId),
+    /// The renderer presented `player` after `motion` was asked, showing
+    /// `frame` exactly.
     Presented {
         player: PlayerId,
         motion: u64,
+        frame: Option<i64>,
     },
     Captured {
         id: u64,
@@ -202,29 +207,6 @@ pub(crate) enum Msg {
         media: String,
         wanted: String,
         result: std::result::Result<vidcut_av::waveform::Waveform, String>,
-    },
-    Remuxed {
-        source: PathBuf,
-        result: std::result::Result<PathBuf, String>,
-    },
-    /// Whether a media file is on a network file system.
-    Storage {
-        path: PathBuf,
-        network: bool,
-    },
-    /// A tail check finished: the earliest timestamp mpv would drop, if any.
-    TailChecked {
-        key: TailKey,
-        origin: f64,
-        lost: std::result::Result<Option<f64>, String>,
-    },
-    /// A tail patch was rendered: its file and length in frames. `origin`
-    /// and `lost` are what it was rendered from.
-    TailRendered {
-        key: TailKey,
-        origin: f64,
-        lost: f64,
-        result: std::result::Result<(PathBuf, i64), String>,
     },
     /// An export job planned its files: paths and lengths in frames.
     JobPlanned {
@@ -358,36 +340,39 @@ impl Handle {
     pub fn shutdown(&self) {
         let _ = self.tx.send(Msg::Shutdown);
     }
+
+    /// Stops the session thread and waits until it has ended (jobs
+    /// cancelled, the instance unregistered), up to `timeout`.
+    pub fn shutdown_and_wait(&self, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        while self.tx.send(Msg::Shutdown).is_ok() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
 }
 
 /// Starts the session thread.
 pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     let (tx, rx) = channel();
     let pid = std::process::id();
-    remove_stale_runtime_dirs();
-    let edl_dir = ipc::runtime_dir().join(pid.to_string());
-    let _ = ipc::private_dir(&edl_dir);
-    let (source, timeline, hwdec) = match config.players {
-        Some(p) => (Some(p.source), Some(p.timeline), p.hwdec),
-        None => (None, None, false),
+    let (audio, budget) = match config.players {
+        Some(p) => (Some(p.audio), p.budget),
+        None => (None, 0),
     };
-    for (id, mpv) in [(PlayerId::Source, &source), (PlayerId::Timeline, &timeline)] {
-        if let Some(m) = mpv {
-            let tx = tx.clone();
-            m.set_wakeup_callback(move || {
-                let _ = tx.send(Msg::Mpv(id));
-            });
-        }
-    }
-    let players = [
-        Player::new(PlayerId::Source, source, edl_dir.join("source.edl"), hwdec),
+    let player = |id: PlayerId| {
+        let (tx, notify) = (tx.clone(), config.notify.clone());
         Player::new(
-            PlayerId::Timeline,
-            timeline,
-            edl_dir.join("timeline.edl"),
-            hwdec,
-        ),
-    ];
+            id,
+            audio.clone(),
+            budget,
+            config.renderer.clone(),
+            Arc::new(move || {
+                let _ = tx.send(Msg::Picture(id));
+                notify();
+            }),
+        )
+    };
+    let players = [player(PlayerId::Source), player(PlayerId::Timeline)];
     let instance = config.socket.clone().map(|socket| Instance {
         pid,
         socket,
@@ -413,6 +398,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         thumbs: Arc::new(HashMap::new()),
         waveforms: Arc::new(HashMap::new()),
         jobs: Arc::new(Vec::new()),
+        audio_scrubbing: true,
         preview_error: config.preview_error.clone(),
     };
     let shared = Arc::new(Mutex::new(Arc::new(empty)));
@@ -429,7 +415,6 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         notify: config.notify,
         renderer: config.renderer,
         instance,
-        edl_dir,
         project: None,
         project_snap: None,
         viewer: ViewerMode::Timeline,
@@ -452,21 +437,14 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         thumbs_wanted: HashMap::new(),
         waveforms: Arc::new(HashMap::new()),
         waveforms_wanted: HashMap::new(),
-        fillers: HashMap::new(),
-        remux: HashMap::new(),
-        network: HashMap::new(),
-        tails: HashMap::new(),
-        tail_failures: HashMap::new(),
-        tail_retries: Vec::new(),
-        tail_spots: [Vec::new(), Vec::new()],
         workers: Workers::new(2),
         jobs: Arc::new(Vec::new()),
         job_cancels: HashMap::new(),
         job_replies: HashMap::new(),
         next_job: 1,
-        mixer: mixctl::Mixer::start(),
-        mix_endpoint: None,
-        mix_loads: 0,
+        audio_scrubbing: true,
+        audio_noticed: false,
+        playing: [false; 2],
         waits: Vec::new(),
         next_capture: 1,
         timeline_due: None,
@@ -495,50 +473,6 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     (Handle { tx, shared }, thread)
 }
 
-/// Generated filler media, by (width, height, fps).
-pub(crate) type FillerKey = (u32, u32, Rational);
-
-enum RemuxState {
-    Pending,
-    Ready(PathBuf),
-    Failed,
-}
-
-/// A preview segment end: (file mpv plays, end in project frames from the
-/// media's first frame, project fps, project size).
-pub(crate) type TailKey = (PathBuf, i64, Rational, u32, u32);
-
-/// Whether mpv would drop the last frames of segments ending there, and the
-/// patch that replaces them (docs/decisions/preview.md §9).
-enum TailState {
-    Checking,
-    Clean,
-    Rendering,
-    Ready { path: PathBuf, frames: i64 },
-    Failed,
-}
-
-/// Longest tail patch: leading pictures span a few frames at most.
-const MAX_TAIL: i64 = 64;
-
-/// Attempts at a tail's check and patch before the preview gives up on it.
-const TAIL_TRIES: u8 = 2;
-
-/// Wait before trying a failed tail again.
-const TAIL_RETRY: Duration = Duration::from_secs(2);
-
-/// Seconds of a still in its preview image list; longer stills chain it.
-const STILL_LIST_SECS: i64 = 10;
-
-/// A failed tail check (`lost: None`) or patch, to try again at `at`.
-struct TailRetry {
-    at: Instant,
-    key: TailKey,
-    origin: f64,
-    /// For a patch: where the cut starts losing frames (s).
-    lost: Option<f64>,
-}
-
 /// What the source player has loaded.
 #[derive(Debug, Clone, PartialEq)]
 enum SourceContent {
@@ -549,20 +483,19 @@ enum SourceContent {
 /// What a request waits for before replying.
 enum Until {
     /// Motion `motion` of `player` is on screen, showing the player's
-    /// `target` as it was then: a frame, and whether exactly. If a later
-    /// seek asks for another frame first (another client, a person
-    /// scrubbing), that frame won't show: the request fails with CONFLICT.
-    /// Playback moving on from it doesn't count.
+    /// `target` as it was then. If a later seek asks for another frame
+    /// first (another client, a person scrubbing), that frame won't show:
+    /// the request fails with CONFLICT. Playback moving on from it doesn't
+    /// count.
     Shown {
         player: PlayerId,
         motion: u64,
-        at: (i64, bool),
+        at: i64,
     },
     /// Job `id` ended (`jobs.wait`).
     Job { id: String },
-    /// `player` shows its latest motion with no tail patch pending near it;
-    /// then the viewer is captured to `out` (a reload in flight, such as a
-    /// patch arriving after a seek returned, may draw black for a moment).
+    /// `player` shows its latest motion (after an edit's reload, say);
+    /// then the viewer is captured to `out`.
     Settled { player: PlayerId, out: PathBuf },
     /// Capture `id` arrives; then it is written to `out`. For a viewer
     /// capture, `player` is the player shown.
@@ -671,7 +604,6 @@ struct Live {
     notify: Arc<dyn Fn() + Send + Sync>,
     renderer: Arc<dyn Renderer>,
     instance: Option<Instance>,
-    edl_dir: PathBuf,
     project: Option<OpenProject>,
     project_snap: Option<ProjectSnap>,
     viewer: ViewerMode,
@@ -699,22 +631,6 @@ struct Live {
     thumbs_wanted: HashMap<String, String>,
     waveforms: Arc<HashMap<String, Arc<vidcut_av::waveform::Waveform>>>,
     waveforms_wanted: HashMap<String, String>,
-    /// Filler media by format (`None`: generating them failed).
-    fillers: HashMap<FillerKey, Option<Fillers>>,
-    remux: HashMap<PathBuf, RemuxState>,
-    /// Media files on network file systems (true) or not, asked on a worker:
-    /// a share that doesn't answer must not stall the session.
-    network: HashMap<PathBuf, bool>,
-    tails: HashMap<TailKey, TailState>,
-    /// How often each tail's check or patch has failed: it is tried again
-    /// up to [`TAIL_TRIES`] times (a share may have had a hiccup). A
-    /// success clears the count.
-    tail_failures: HashMap<TailKey, u8>,
-    /// Failed checks and patches waiting to be tried again.
-    tail_retries: Vec<TailRetry>,
-    /// Where each player's segments end (frames in what it plays) and the
-    /// tail that ends there: a seek waits only for checks near its frame.
-    tail_spots: [Vec<(i64, TailKey)>; 2],
     workers: Workers,
     /// Export jobs, oldest first.
     jobs: Arc<Vec<JobInfo>>,
@@ -722,12 +638,12 @@ struct Live {
     /// Requests answered when their job is planned (`background`) or done.
     job_replies: HashMap<String, (Job, bool)>,
     next_job: u64,
-    /// Live track faders (preview.md §10), when this system has them; the
-    /// control address of the timeline's audio graph as last loaded, and
-    /// how many graphs were loaded.
-    mixer: Option<mixctl::Mixer>,
-    mix_endpoint: Option<String>,
-    mix_loads: u64,
+    /// Steps and paused seeks play their frame's sound (decision D42).
+    audio_scrubbing: bool,
+    /// The audio device's failure was told once.
+    audio_noticed: bool,
+    /// Whether each player played when last looked at.
+    playing: [bool; 2],
     waits: Vec<Wait>,
     next_capture: u64,
     timeline_due: Option<Instant>,
@@ -851,7 +767,6 @@ impl Live {
         if let Some(i) = &self.instance {
             ipc::registry::unregister(i.pid);
         }
-        let _ = std::fs::remove_dir_all(&self.edl_dir);
     }
 
     /// Handles one message; false ends the session.
@@ -866,20 +781,17 @@ impl Live {
                 project,
                 reply,
             } => self.request(envelope, origin, project, reply),
-            Msg::Mpv(id) => {
-                changed = self.players[id.index()].pump();
-                if let Some(motion) = self.players[id.index()].present_due() {
-                    let tx = self.tx.clone();
-                    self.renderer.present(
-                        id,
-                        Box::new(move || {
-                            let _ = tx.send(Msg::Presented { player: id, motion });
-                        }),
-                    );
-                }
+            Msg::Picture(id) => {
+                // Waits look again in `tick`; a present may be due.
+                self.present_due(id);
+                changed = false;
             }
-            Msg::Presented { player, motion } => {
-                self.players[player.index()].presented(motion);
+            Msg::Presented {
+                player,
+                motion,
+                frame,
+            } => {
+                self.players[player.index()].presented(motion, frame);
                 changed = false;
             }
             Msg::Captured { id, result } => self.captured(id, result),
@@ -908,6 +820,7 @@ impl Live {
             }
             Msg::PreferencesChanged => {
                 let gpu = crate::preferences::gpu_acceleration();
+                changed = false;
                 for p in &mut self.players {
                     changed |= p.follow_gpu(gpu);
                 }
@@ -952,69 +865,6 @@ impl Live {
                 }
                 Err(e) => self.notice(format!("thumbnails for {media}: {e}"), true),
             },
-            Msg::Storage { path, network } => {
-                self.network.insert(path, network);
-                if network {
-                    self.schedule_timeline();
-                    self.refresh_source();
-                } else {
-                    changed = false;
-                }
-            }
-            Msg::Remuxed { source, result } => {
-                match result {
-                    Ok(p) => {
-                        self.remux.insert(source, RemuxState::Ready(p));
-                    }
-                    Err(e) => {
-                        self.remux.insert(source.clone(), RemuxState::Failed);
-                        self.notice(format!("preview remux of {}: {e}", source.display()), true);
-                    }
-                }
-                self.refresh_timeline();
-                self.refresh_source();
-            }
-            Msg::TailChecked { key, origin, lost } => match lost {
-                Ok(None) => {
-                    self.tail_failures.remove(&key);
-                    self.tails.insert(key, TailState::Clean);
-                    changed = false;
-                }
-                Ok(Some(t)) => self.render_tail(key, origin, t),
-                Err(e) => self.tail_failed(
-                    TailRetry {
-                        at: Instant::now() + TAIL_RETRY,
-                        key,
-                        origin,
-                        lost: None,
-                    },
-                    &format!("checking a preview cut: {e}"),
-                ),
-            },
-            Msg::TailRendered {
-                key,
-                origin,
-                lost,
-                result,
-            } => {
-                match result {
-                    Ok((path, frames)) => {
-                        self.tail_failures.remove(&key);
-                        self.tails.insert(key, TailState::Ready { path, frames });
-                    }
-                    Err(e) => self.tail_failed(
-                        TailRetry {
-                            at: Instant::now() + TAIL_RETRY,
-                            key,
-                            origin,
-                            lost: Some(lost),
-                        },
-                        &format!("preview patch: {e}"),
-                    ),
-                }
-                self.refresh_timeline();
-                self.refresh_source();
-            }
             Msg::JobPlanned { id, outputs } => self.job_planned(id, outputs),
             Msg::JobProgress {
                 id,
@@ -1036,15 +886,32 @@ impl Live {
         true
     }
 
+    /// Asks the renderer to present `id` when a motion of it waits for its
+    /// picture and the engine has it.
+    fn present_due(&mut self, id: PlayerId) {
+        let Some(motion) = self.players[id.index()].present_due(Instant::now()) else {
+            return;
+        };
+        if debug() {
+            eprintln!("[{id:?}] present motion {motion}");
+        }
+        let tx = self.tx.clone();
+        self.renderer.present(
+            id,
+            Box::new(move |frame| {
+                let _ = tx.send(Msg::Presented {
+                    player: id,
+                    motion,
+                    frame,
+                });
+            }),
+        );
+    }
+
     /// Timed work; returns when it next needs to run.
     fn tick(&mut self, now: Instant) -> Option<Instant> {
         let mut next: Option<Instant> = None;
         let mut soonest = |t: Instant| next = Some(next.map_or(t, |n| n.min(t)));
-        for p in &mut self.players {
-            if let Some(t) = p.tick(now) {
-                soonest(t);
-            }
-        }
         if let Some(due) = self.timeline_due {
             if now >= due {
                 self.timeline_due = None;
@@ -1053,19 +920,37 @@ impl Live {
                 soonest(due);
             }
         }
-        // Tail checks and patches that failed, tried again.
-        let (due, later): (Vec<_>, Vec<_>) = std::mem::take(&mut self.tail_retries)
-            .into_iter()
-            .partition(|r| r.at <= now);
-        self.tail_retries = later;
-        for r in &self.tail_retries {
-            soonest(r.at);
-        }
-        for r in due {
-            match r.lost {
-                None => self.check_tail(r.key, r.origin),
-                Some(lost) => self.render_tail(r.key, r.origin, lost),
+        for id in PlayerId::ALL {
+            self.present_due(id);
+            let p = &self.players[id.index()];
+            // A motion not on screen yet: look again soon (its picture may
+            // be decoding, or the renderer busy).
+            if p.shown < p.motion {
+                soonest(now + Duration::from_millis(5));
             }
+            // Playing: the playhead moves with the clock; the snapshot
+            // follows it frame by frame, and shows when play stops by
+            // itself (at the end).
+            let playing = p.playing();
+            if playing != self.playing[id.index()] {
+                self.playing[id.index()] = playing;
+                self.dirty = true;
+            }
+            if let Some(d) = p.next_change(now) {
+                self.dirty = true;
+                soonest(now + d.max(Duration::from_millis(2)));
+            } else if playing {
+                soonest(now + Duration::from_millis(10));
+            }
+        }
+        if let Some(e) = self
+            .players
+            .iter()
+            .find_map(|p| p.audio_error.clone())
+            .filter(|_| !self.audio_noticed)
+        {
+            self.audio_noticed = true;
+            self.notice(format!("no sound: {e}"), true);
         }
         self.sync_tape_selection();
         // Requests waiting for frames or captures.
@@ -1089,36 +974,29 @@ impl Live {
             let w = &self.waits[i];
             let outcome = match w.until {
                 Until::Shown { player, motion, at } => {
-                    // The latest motion counts too: a preview reload (say, a
-                    // tail patch arriving) replaces what was asked for, at
-                    // the same frame.
+                    // The latest motion counts too: a reload after an edit
+                    // replaces what was asked for, at the same frame.
                     let p = &self.players[player.index()];
-                    let (frame, exact) = at;
-                    let overtaken = p.target.0 != frame || (exact && !p.target.1);
+                    let overtaken = p.target != at;
                     if overtaken && matches!(w.job.origin, Origin::Gui { .. }) {
                         // The GUI's steps and seeks overtake each other as a
                         // key repeats or a drag goes on: not an error there.
                         Some(Ok(self.state_response()))
                     } else if overtaken {
                         Some(Err(Error::conflict(format!(
-                            "another seek moved the viewer to {}frame {} before frame \
-                             {frame} showed",
-                            if p.target.1 { "" } else { "a keyframe near " },
-                            p.target.0
+                            "another seek moved the viewer to frame {} before frame {at} \
+                             showed",
+                            p.target
                         ))))
-                    } else {
-                        // `frame` is what the seek asked for; while playing,
-                        // `position` has moved on from it.
-                        let ready = seek_may_reply(
-                            p.shown >= p.motion && p.shown >= motion,
-                            p.playing(),
-                            frame,
-                            |f| self.tail_near(player, f),
-                        );
-                        ready.then(|| match &p.error {
+                    } else if let Some(e) = p.failure() {
+                        Some(Err(Error::media(format!("preview: {e}"))))
+                    } else if p.shown >= p.motion && p.shown >= motion {
+                        Some(match &p.error {
                             Some(e) => Err(Error::media(format!("preview: {e}"))),
                             None => Ok(self.state_response()),
                         })
+                    } else {
+                        None
                     }
                 }
                 Until::Capture { .. } | Until::Settled { .. } => None,
@@ -1189,6 +1067,7 @@ impl Live {
             thumbs: self.thumbs.clone(),
             waveforms: self.waveforms.clone(),
             jobs: self.jobs.clone(),
+            audio_scrubbing: self.audio_scrubbing,
             preview_error: self.preview_error.clone(),
         };
         *self.shared.lock().unwrap_or_else(|e| e.into_inner()) = Arc::new(snap);
@@ -1325,7 +1204,7 @@ impl Live {
     /// of the clips it names, whose measurements the media layer then keeps.
     fn measuring(&self, envelope: &Envelope) -> Option<Measure> {
         let p = self.project.as_ref()?.project();
-        let playhead = Some(self.players[TIMELINE].position);
+        let playhead = Some(self.players[TIMELINE].position());
         let (clips, sound) = match &envelope.request {
             Request::EditRippleDeleteSilence { clips, .. } => (clips.to_vec(), true),
             Request::EditDetectSceneCuts { clips, .. } => (clips.to_vec(), false),
@@ -1370,7 +1249,7 @@ impl Live {
         let project_path = open.store.path().to_path_buf();
         let context = open
             .project()
-            .time_context(Some(self.players[TIMELINE].position));
+            .time_context(Some(self.players[TIMELINE].position()));
         let Request::ExportStart(mut params) = bind_playhead(envelope, &context).request else {
             unreachable!("checked by the caller");
         };
@@ -1864,18 +1743,18 @@ impl Live {
                 }
                 Step::Now(Ok(self.state_response()))
             }
-            Request::PlayerSeek { at, viewer, fast } => {
+            Request::PlayerSeek { at, viewer, .. } => {
                 if let Some(v) = viewer {
                     self.set_viewer(v);
                 }
                 let id = PlayerId::of(self.viewer);
                 let target = match self.viewer_context() {
-                    Ok(c) => c.resolve_from(&at, self.players[id.index()].position),
+                    Ok(c) => c.resolve_from(&at, self.players[id.index()].position()),
                     Err(e) => return Step::Now(Err(e)),
                 };
                 match target {
                     Ok(frame) => {
-                        let motion = self.seek(id, frame, fast);
+                        let motion = self.seek(id, frame, true);
                         self.shown(id, Some(motion))
                     }
                     Err(e) => Step::Now(Err(e.into())),
@@ -1886,43 +1765,28 @@ impl Live {
                     self.set_viewer(v);
                 }
                 let id = PlayerId::of(self.viewer);
-                let p = &mut self.players[id.index()];
-                p.pause();
-                let target = p.position + frames;
-                let motion = self.seek(id, target, false);
+                if id == PlayerId::Timeline && self.timeline_due.take().is_some() {
+                    self.refresh_timeline();
+                }
+                let motion = self.players[id.index()].step(frames);
                 self.shown(id, Some(motion))
             }
             Request::PlayerState {} => Step::Now(Ok(self.state_response())),
             Request::MixerPreview { track, volume_db } => {
-                let (Some(mixer), Some(endpoint)) = (&self.mixer, &self.mix_endpoint) else {
-                    return Step::Now(Ok(answer(json!({ "live": false }))));
-                };
-                let filter = preview::fader_filter(&track);
-                let gain = 10f64.powf(volume_db / 20.0);
-                if job.reply.is_none() {
-                    // The GUI's drag doesn't wait for the answer.
-                    mixer.set(endpoint, filter, gain, None);
-                    return Step::Now(Ok(answer(json!({ "live": true }))));
+                match self.players[TIMELINE].preview_fader(&track, volume_db) {
+                    None => Step::Now(Ok(answer(json!({ "live": false })))),
+                    Some(true) => Step::Now(Ok(answer(json!({ "live": true })))),
+                    Some(false) => Step::Now(Err(Error::media(format!(
+                        "{track} has no sound in the timeline's mix"
+                    )))),
                 }
-                // A client hears whether the filter took it; a task waits
-                // for that, so the session doesn't.
-                let (tx, rx) = std::sync::mpsc::channel();
-                mixer.set(
-                    endpoint,
-                    filter,
-                    gain,
-                    Some(Box::new(move |result| {
-                        let _ = tx.send(result);
-                    })),
-                );
-                Step::Task(
-                    Work::Interactive,
-                    Box::new(move |_| match rx.recv() {
-                        Ok(Ok(())) => Ok(answer(json!({ "live": true }))),
-                        Ok(Err(e)) => Err(Error::media(e)),
-                        Err(_) => Err(Error::internal("the mixer thread stopped")),
-                    }),
-                )
+            }
+            Request::PlayerAudioScrubbing { on } => {
+                self.audio_scrubbing = on.unwrap_or(!self.audio_scrubbing);
+                for p in &mut self.players {
+                    p.set_scrubbing(self.audio_scrubbing);
+                }
+                Step::Now(Ok(self.state_response()))
             }
             Request::PlayerMute { mute } => {
                 let mute = mute.unwrap_or(!self.players[TIMELINE].muted());
@@ -2117,7 +1981,7 @@ impl Live {
         let path = open.store.path().to_path_buf();
         let context = open
             .project()
-            .time_context(Some(self.players[TIMELINE].position));
+            .time_context(Some(self.players[TIMELINE].position()));
         let envelope = bind_playhead(envelope, &context);
         // Measurements decode whole files: jobs. Frames and plans are quick,
         // and someone waits for them.
@@ -2165,7 +2029,7 @@ impl Live {
 
     /// Project requests: edits and queries through the editor.
     fn edit(&mut self, mut envelope: Envelope, origin: Origin) -> Result<Response> {
-        let playhead = self.players[TIMELINE].position;
+        let playhead = self.players[TIMELINE].position();
         match &mut envelope.request {
             Request::EditPaste { clips, .. } if clips.is_none() => {
                 if self.clipboard.is_empty() {
@@ -2321,7 +2185,7 @@ impl Live {
         self.dirty = true;
     }
 
-    /// Starts thumbnails and preview remuxes for new media.
+    /// Starts thumbnails and waveforms for new media.
     fn check_media(&mut self) {
         let Some(open) = &self.project else { return };
         let media: Vec<_> = open.project().media.clone();
@@ -2382,405 +2246,18 @@ impl Live {
                     });
                 });
             }
-            if !self.network.contains_key(&m.path) {
-                self.network.insert(m.path.clone(), false);
-                let (tx, path) = (self.tx.clone(), m.path.clone());
-                self.workers.run(move || {
-                    let network = player::on_network(&path);
-                    let _ = tx.send(Msg::Storage { path, network });
-                });
-            }
-            if vidcut_av::remux::needs_index(&m.info.format) && !self.remux.contains_key(&m.path) {
-                self.remux.insert(m.path.clone(), RemuxState::Pending);
-                let tx = self.tx.clone();
-                let out = paths::media_cache("preview", &m, "mkv");
-                let source = m.path.clone();
-                self.workers.run(move || {
-                    let result = if out.exists() {
-                        Ok(out)
-                    } else {
-                        std::fs::create_dir_all(out.parent().expect("in the cache"))
-                            .map_err(|e| e.to_string())
-                            .and_then(|()| {
-                                let tmp = out.with_extension("part.mkv");
-                                vidcut_av::remux::to_mkv(&source, &tmp)
-                                    .map_err(|e| e.to_string())?;
-                                std::fs::rename(&tmp, &out).map_err(|e| e.to_string())?;
-                                Ok(out)
-                            })
-                    };
-                    let _ = tx.send(Msg::Remuxed { source, result });
-                });
-            }
         }
     }
 
     // ---------------------------------------------------------------- previews
 
-    /// Filler media for the project's format. Generated here, synchronously,
-    /// the first time a format needs them (then cached on disk): the preview
-    /// is never in a half-loaded state that seeks would have to wait for.
-    fn fillers(&mut self, p: &Project) -> Option<Fillers> {
-        let key = (p.settings.width, p.settings.height, p.settings.fps);
-        match self.fillers.get(&key) {
-            Some(Some(f)) => return Some(f.clone()),
-            Some(None) => return None,
-            None => {}
+    /// What a player plays of `plan`: fresh proxies' pictures where the
+    /// project plays proxies (decision D41); export plans never do this.
+    fn preview_plan(&self, mut plan: RenderPlan) -> RenderPlan {
+        if let Some(open) = &self.project {
+            vidcut_core::preview::apply_proxies(&mut plan, open.project(), |path| path.is_file());
         }
-        let dir = paths::cache_dir().join("fillers");
-        let result = std::fs::create_dir_all(&dir)
-            .map_err(|e| e.to_string())
-            .and_then(|()| {
-                vidcut_av::filler::ensure(&dir, key.0, key.1, key.2).map_err(|e| e.to_string())
-            });
-        match result {
-            Ok(f) => {
-                self.fillers.insert(key, Some(f.clone()));
-                Some(f)
-            }
-            Err(e) => {
-                self.fillers.insert(key, None);
-                self.notice(format!("preview fillers: {e}"), true);
-                None
-            }
-        }
-    }
-
-    /// The plan `player` plays: media mpv can't seek exactly swapped for
-    /// their remuxes, and segment tails it would cut short replaced by
-    /// patches. Starts the checks still missing, those nearest `position`
-    /// first.
-    fn preview_plan(
-        &mut self,
-        mut plan: RenderPlan,
-        player: PlayerId,
-        position: i64,
-    ) -> RenderPlan {
-        let swap = |remux: &HashMap<PathBuf, RemuxState>, path: &mut PathBuf| {
-            if let Some(RemuxState::Ready(p)) = remux.get(path.as_path()) {
-                *path = p.clone();
-            }
-        };
-        for lane in &mut plan.audio {
-            for a in lane {
-                if let render::AudioPiece::Source { path, .. } = a {
-                    swap(&self.remux, path);
-                }
-            }
-        }
-        let mut video = Vec::with_capacity(plan.video.len());
-        let mut spots = Vec::new();
-        let mut checks = Vec::new();
-        let mut at = 0;
-        for mut piece in std::mem::take(&mut plan.video) {
-            at += piece.frames();
-            // Pictures (stills, sequences) have no frames decoded ahead of
-            // others to lose at a cut.
-            let render::VideoPiece::Source {
-                media,
-                path,
-                origin,
-                source_frame,
-                frames,
-                image: None,
-            } = &mut piece
-            else {
-                video.push(piece);
-                continue;
-            };
-            swap(&self.remux, path);
-            let key: TailKey = (
-                path.clone(),
-                *source_frame + *frames,
-                plan.fps,
-                plan.width,
-                plan.height,
-            );
-            spots.push((at, key.clone()));
-            match self.tails.get(&key) {
-                Some(TailState::Ready {
-                    path: patch,
-                    frames: n,
-                }) => {
-                    let n = *n;
-                    let keep = (*frames - n).max(0);
-                    let media = media.clone();
-                    let total = *frames;
-                    if keep > 0 {
-                        *frames = keep;
-                        video.push(piece);
-                    }
-                    // The patch's frames are the last `n` of the cut, from 0.
-                    video.push(render::VideoPiece::Source {
-                        media,
-                        path: patch.clone(),
-                        origin: 0.0,
-                        source_frame: (n - total).max(0),
-                        frames: total.min(n),
-                        image: None,
-                    });
-                }
-                Some(_) => video.push(piece),
-                None => {
-                    self.tails.insert(key.clone(), TailState::Checking);
-                    checks.push((at, key, *origin));
-                    video.push(piece);
-                }
-            }
-        }
-        checks.sort_by_key(|(end, ..)| (end - position).abs());
-        for (_, key, origin) in checks {
-            self.check_tail(key, origin);
-        }
-        self.tail_spots[player.index()] = spots;
-        plan.video = video;
         plan
-    }
-
-    /// Checks whether mpv would drop frames before the cut `key` ends.
-    fn check_tail(&mut self, key: TailKey, origin: f64) {
-        self.tails.insert(key.clone(), TailState::Checking);
-        let (tx, fps) = (self.tx.clone(), key.2);
-        let end = origin + fps.frames_to_secs(key.1) - fps.frames_to_secs(1) / 2.0;
-        self.workers.run(move || {
-            let lost = vidcut_av::tails::lost_before(&key.0, end).map_err(|e| e.to_string());
-            let _ = tx.send(Msg::TailChecked { key, origin, lost });
-        });
-    }
-
-    /// Renders the patch for a tail that loses frames from `lost` (s) on.
-    fn render_tail(&mut self, key: TailKey, origin: f64, lost: f64) {
-        let (path, end, fps, w, h) = key.clone();
-        // From the project frame whose sampling window holds `lost` (one more
-        // to be safe; patch frames are exact anyway).
-        let first = ((lost - origin) * fps.as_f64() - 0.5).floor() as i64;
-        let frames = (end - first).clamp(1, MAX_TAIL.min(end));
-        self.tails.insert(key.clone(), TailState::Rendering);
-        let dir = paths::cache_dir().join("tails");
-        let (size, mtime) = std::fs::metadata(&path)
-            .map(|m| {
-                use std::os::unix::fs::MetadataExt;
-                (m.len(), m.mtime())
-            })
-            .unwrap_or_default();
-        let name = format!(
-            "{:016x}-{end}-{frames}-{}x{h}-{}.mkv",
-            paths::fnv1a(format!("{}|{size}|{mtime}", path.display()).as_bytes()),
-            w,
-            fps.to_string().replace('/', "_")
-        );
-        let tx = self.tx.clone();
-        self.workers.run(move || {
-            let out = dir.join(name);
-            let result = if out.exists() {
-                Ok((out, frames))
-            } else {
-                let piece = render::VideoPiece::Source {
-                    media: String::new(),
-                    path,
-                    origin,
-                    source_frame: end - frames,
-                    frames,
-                    image: None,
-                };
-                std::fs::create_dir_all(&dir)
-                    .map_err(|e| e.to_string())
-                    .and_then(|()| {
-                        vidcut_av::tails::render_patch(&piece, fps, w, h, &out)
-                            .map_err(|e| e.to_string())
-                    })
-                    .map(|()| (out, frames))
-            };
-            let _ = tx.send(Msg::TailRendered {
-                key,
-                origin,
-                lost,
-                result,
-            });
-        });
-    }
-
-    /// EDL for `plan` as `player` plays it from `position`, or `None` while
-    /// fillers are being made.
-    /// `lanes`: the plan's lanes' tracks, for a timeline whose faders change
-    /// while it plays.
-    fn edl(
-        &mut self,
-        plan: RenderPlan,
-        lanes: Option<&[render::LaneTrack]>,
-        player: PlayerId,
-        position: i64,
-    ) -> Option<preview::Preview> {
-        let p = self.project.as_ref()?.project().clone();
-        let fillers = self.fillers(&p)?;
-        let mut plan = plan;
-        preview::apply_proxies(&mut plan, &p, |path| path.is_file());
-        let plan = self.preview_plan(plan, player, position);
-        let network = |path: &PathBuf| self.network.get(path).copied().unwrap_or(false);
-        let read_ahead = plan.video.iter().any(|v| match v {
-            render::VideoPiece::Source { path, .. } => network(path),
-            render::VideoPiece::Black { .. } => false,
-        }) || plan.audio.iter().flatten().any(|a| match a {
-            render::AudioPiece::Source { path, .. } => network(path),
-            render::AudioPiece::Silence { .. } => false,
-        });
-        let deinterlace = plan.video.iter().any(|v| match v {
-            render::VideoPiece::Source { media, path, .. } => {
-                let Some(m) = p.media(media) else {
-                    return false;
-                };
-                // A proxy is already progressive (and upright).
-                let proxied = m.fresh_proxy().is_some_and(|px| &px.path == path);
-                !proxied && m.info.video.as_ref().is_some_and(|v| v.fields.is_some())
-            }
-            render::VideoPiece::Black { .. } => false,
-        });
-        let mut plan = plan;
-        let images = self.image_lists(&mut plan);
-        // Each graph gets an address of its own: the one before may not
-        // have let go of its address yet.
-        let bind = match (lanes, &self.mixer) {
-            (Some(_), Some(_)) => {
-                self.mix_loads += 1;
-                let path = self.edl_dir.join(format!("mix-{}", self.mix_loads));
-                if let Some(old) = self.mix_endpoint.take() {
-                    let _ = std::fs::remove_file(old.trim_start_matches("ipc://"));
-                }
-                Some(format!("ipc://{}", path.display()))
-            }
-            _ => None,
-        };
-        let control = lanes
-            .zip(bind.as_deref())
-            .map(|(lanes, bind)| preview::FaderControl { lanes, bind });
-        let built = preview::build(&plan, &fillers, control);
-        // No graph, nothing to control (a timeline without sound).
-        self.mix_endpoint = bind
-            .filter(|_| built.audio_graph.is_some())
-            .or(self.mix_endpoint.take());
-        Some(preview::Preview {
-            read_ahead,
-            deinterlace,
-            images,
-            ..built
-        })
-    }
-
-    /// Image pieces as mpv shows them (preview.md §11): image lists
-    /// (`mf://@list`), one file a frame at the project rate, which the EDL
-    /// plays like video files. A sequence's list covers all of it, its
-    /// pictures picked by the export's sampling rule; a still's is
-    /// [`STILL_LIST_SECS`] of it, chained over longer pieces like the
-    /// fillers. Returns whether there were any.
-    fn image_lists(&mut self, plan: &mut RenderPlan) -> bool {
-        let fps = plan.fps;
-        let mut any = false;
-        let mut video = Vec::with_capacity(plan.video.len());
-        for piece in std::mem::take(&mut plan.video) {
-            let render::VideoPiece::Source {
-                media,
-                path,
-                source_frame,
-                frames,
-                image: Some(image),
-                ..
-            } = piece
-            else {
-                video.push(piece);
-                continue;
-            };
-            let listed = |list: &Path, source_frame: i64, frames: i64| render::VideoPiece::Source {
-                media: media.clone(),
-                path: PathBuf::from(format!("mf://@{}", list.display())),
-                origin: 0.0,
-                source_frame,
-                frames,
-                image: None,
-            };
-            let made = match &image {
-                render::Image::Still => {
-                    let n = fps.secs_to_frames(STILL_LIST_SECS as f64).max(2);
-                    let list = self.image_list(&format!("still|{}|{fps}", path.display()), || {
-                        vec![path.clone(); n as usize]
-                    });
-                    list.map(|list| {
-                        // All its frames are alike: any part of the list will do.
-                        let mut parts = Vec::new();
-                        let mut left = frames;
-                        while left > 0 {
-                            let part = left.min(n - 1);
-                            parts.push(listed(&list, 0, part));
-                            left -= part;
-                        }
-                        parts
-                    })
-                }
-                render::Image::Sequence {
-                    pattern,
-                    first,
-                    count,
-                    rate,
-                } => {
-                    let key = format!("seq|{}|{first}|{count}|{rate}|{fps}", pattern.display());
-                    let (first, count, rate) = (*first, *count, *rate);
-                    let dir = pattern.parent().unwrap_or(Path::new("")).to_path_buf();
-                    let files = vidcut_core::model::ImageSequence {
-                        pattern: pattern
-                            .file_name()
-                            .map(|n| n.to_string_lossy().into_owned())
-                            .unwrap_or_default(),
-                        first,
-                        count,
-                    };
-                    let list = self.image_list(&key, || {
-                        // Frame m shows the first picture at or after m's
-                        // time less half a frame, as export picks it.
-                        let secs = rate.frames_to_secs(count as i64);
-                        let m = fps.secs_to_frames(secs) + 1;
-                        (0..m)
-                            .map(|m| {
-                                let t = fps.frames_to_secs(m) - fps.frames_to_secs(1) / 2.0;
-                                let k = (t * rate.as_f64() - 1e-6).ceil().max(0.0) as u64;
-                                files.file(&dir, k.min(count - 1))
-                            })
-                            .collect()
-                    });
-                    list.map(|list| vec![listed(&list, source_frame, frames)])
-                }
-            };
-            match made {
-                Some(parts) => {
-                    any = true;
-                    video.extend(parts);
-                }
-                // No list (the runtime folder can't be written): black.
-                None => video.push(render::VideoPiece::Black { frames }),
-            }
-        }
-        plan.video = video;
-        any
-    }
-
-    /// The image list for `key` in the runtime folder, written from
-    /// `files` the first time it is asked for.
-    fn image_list(&mut self, key: &str, files: impl FnOnce() -> Vec<PathBuf>) -> Option<PathBuf> {
-        let dir = self.edl_dir.join("images");
-        let path = dir.join(format!("{:016x}.txt", paths::fnv1a(key.as_bytes())));
-        if !path.exists() {
-            let text: String = files()
-                .iter()
-                .map(|f| format!("{}\n", f.display()))
-                .collect();
-            let tmp = path.with_extension("tmp");
-            let written = std::fs::create_dir_all(&dir)
-                .and_then(|()| std::fs::write(&tmp, text))
-                .and_then(|()| std::fs::rename(&tmp, &path));
-            if let Err(e) = written {
-                self.notice(format!("preview of images: {e}"), true);
-                return None;
-            }
-        }
-        Some(path)
     }
 
     /// Reloads the timeline soon: at once if the last reload was a while
@@ -2799,8 +2276,8 @@ impl Live {
         self.refresh_timeline_at(None)
     }
 
-    /// Reloads the timeline. `at` is a seek loading at its own frame; other
-    /// reloads sample the playhead, which while playing is `time-pos`.
+    /// Reloads the timeline. `at` is a seek loading at its own frame;
+    /// otherwise the player stays where it is, playing on if it plays.
     fn refresh_timeline_at(&mut self, at: Option<i64>) -> Option<u64> {
         let p = self.project.as_ref()?.project().clone();
         let end = p.end();
@@ -2815,13 +2292,9 @@ impl Live {
                 return None;
             }
         };
-        let position = match at {
-            Some(frame) => frame,
-            None => self.preview_frame(PlayerId::Timeline, self.players[TIMELINE].position),
-        };
-        let edl = self.edl(plan, Some(&lanes), PlayerId::Timeline, position)?;
+        let plan = self.preview_plan(plan);
         self.timeline_loaded_at = Some(Instant::now());
-        self.players[TIMELINE].load(edl, end, p.settings.fps, position)
+        self.players[TIMELINE].load(plan, lanes, at)
     }
 
     /// Makes the source player show what the current source mode wants
@@ -2858,27 +2331,25 @@ impl Live {
             self.players[SOURCE].unload();
             return None;
         };
-        let position = if self.source_content.as_ref() == Some(&want) {
-            // Same content (perhaps changed media): stay where we are.
-            // While playing, that playhead is time-pos; a seek still owed
-            // its frame keeps that frame instead.
-            self.preview_frame(PlayerId::Source, self.players[SOURCE].position)
+        // Same content (perhaps changed media): stay where it is, playing
+        // on if it plays. Other content opens where it was left.
+        let at = if self.source_content.as_ref() == Some(&want) {
+            None
         } else {
             self.stash_source_position();
-            match &want {
+            Some(match &want {
                 SourceContent::Tape => self.tape_position,
                 SourceContent::Clip(m) => self.source_positions.get(m).copied().unwrap_or(0),
-            }
+            })
         };
-        let frames = plan.frames;
-        let edl = self.edl(plan, None, PlayerId::Source, position)?;
+        let plan = self.preview_plan(plan);
         self.source_content = Some(want);
-        self.players[SOURCE].load(edl, frames, p.settings.fps, position)
+        self.players[SOURCE].load(plan, Vec::new(), at)
     }
 
     /// Remembers the source playhead of the content being replaced.
     fn stash_source_position(&mut self) {
-        let pos = self.players[SOURCE].position;
+        let pos = self.players[SOURCE].position();
         match &self.source_content {
             Some(SourceContent::Clip(m)) => {
                 self.source_positions.insert(m.clone(), pos);
@@ -2896,7 +2367,7 @@ impl Live {
             self.tape_media = None;
             return;
         }
-        let under = tape_at(&self.tape, self.players[SOURCE].position).map(|e| e.media.clone());
+        let under = tape_at(&self.tape, self.players[SOURCE].position()).map(|e| e.media.clone());
         if under != self.tape_media {
             self.tape_media = under.clone();
             if let Some(m) = under {
@@ -2961,23 +2432,22 @@ impl Live {
         Ok(match (motion, position) {
             (Some(m), _) => Some(m),
             // Same clip already loaded: just move to the requested frame.
-            (None, Some(pos)) => Some(self.seek(PlayerId::Source, pos, false)),
+            (None, Some(pos)) => Some(self.seek(PlayerId::Source, pos, true)),
             (None, None) => None,
         })
     }
 
-    fn seek(&mut self, id: PlayerId, frame: i64, fast: bool) -> u64 {
+    /// Moves `id`'s playhead to `frame`; `sound`: a seek someone asked for,
+    /// which plays its frame's sound while paused (audio scrubbing), where
+    /// the viewer's own moves (after an edit) play none.
+    fn seek(&mut self, id: PlayerId, frame: i64, sound: bool) -> u64 {
         if id == PlayerId::Timeline && self.timeline_due.take().is_some() {
             // A reload is pending: do it now, loading at the new position.
-            // This frame is the request. A continuation reload must not
-            // substitute the previous target for it.
-            let frame = frame.max(0);
-            self.players[TIMELINE].position = frame;
-            if let Some(motion) = self.refresh_timeline_at(Some(frame)) {
+            if let Some(motion) = self.refresh_timeline_at(Some(frame.max(0))) {
                 return motion;
             }
         }
-        self.players[id.index()].seek(frame, fast)
+        self.players[id.index()].seek(frame, sound)
     }
 
     /// The context for times typed at the viewer: timeline times, or source
@@ -2986,16 +2456,16 @@ impl Live {
         let open = self.project.as_ref().ok_or_else(no_project)?;
         let p = open.project();
         Ok(match self.viewer {
-            ViewerMode::Timeline => p.time_context(Some(self.players[TIMELINE].position)),
+            ViewerMode::Timeline => p.time_context(Some(self.players[TIMELINE].position())),
             ViewerMode::SourceClip => {
-                let position = self.players[SOURCE].position;
+                let position = self.players[SOURCE].position();
                 match self.source_media.as_ref().and_then(|m| p.media(m)) {
                     Some(m) => media_context(p, m, Some(position)),
                     None => return Err(Error::usage("no source clip is open")),
                 }
             }
             ViewerMode::SourceTape => {
-                let position = self.players[SOURCE].position;
+                let position = self.players[SOURCE].position();
                 let entry = tape_at(&self.tape, position);
                 let marks = entry
                     .and_then(|e| Some((e, p.media(&e.media)?)))
@@ -3021,7 +2491,7 @@ impl Live {
     /// The source frame of `media` under the source playhead, if the viewer
     /// shows that media.
     fn source_frame_of(&self, media: &str) -> Option<i64> {
-        let position = self.players[SOURCE].position;
+        let position = self.players[SOURCE].position();
         match (&self.source_content, self.viewer) {
             (Some(SourceContent::Clip(m)), ViewerMode::SourceClip) if m == media => Some(position),
             (Some(SourceContent::Tape), ViewerMode::SourceTape) => tape_at(&self.tape, position)
@@ -3059,7 +2529,7 @@ impl Live {
     ) -> Result<()> {
         let open = self.project.as_ref().ok_or_else(no_project)?;
         let p = open.project();
-        let playhead = Some(self.players[TIMELINE].position);
+        let playhead = Some(self.players[TIMELINE].position());
         let clips = clips
             .map(|c| {
                 c.to_vec()
@@ -3131,48 +2601,11 @@ impl Live {
         );
     }
 
-    /// A tail's check or patch failed: tried again in a moment up to
-    /// [`TAIL_TRIES`] times (`retry`), then left unpatched with a notice.
-    /// Seeks near the cut wait for the retry, as for the first try.
-    fn tail_failed(&mut self, retry: TailRetry, what: &str) {
-        self.tails.insert(retry.key.clone(), TailState::Failed);
-        let failures = self.tail_failures.entry(retry.key.clone()).or_default();
-        *failures += 1;
-        if *failures < TAIL_TRIES {
-            self.tail_retries.push(retry);
-        } else {
-            self.notice(
-                format!("{what}; the preview may drop the last frames before that cut"),
-                true,
-            );
-        }
-    }
-
-    /// Whether `player` shows its latest motion (seek or load), with no tail
-    /// check or patch pending that could still change the frame on screen.
-    /// Screenshots use the playhead; a seek waits by [`seek_may_reply`].
+    /// Whether `player` shows its latest motion (a seek, a step, an edit's
+    /// reload).
     fn settled(&self, player: PlayerId) -> bool {
         let p = &self.players[player.index()];
-        p.shown >= p.motion && !self.tail_near(player, p.position)
-    }
-
-    /// Frame a continuation reload should open at. A seek writes its frame
-    /// into the playhead itself and does not come through here.
-    fn preview_frame(&self, id: PlayerId, sampled: i64) -> i64 {
-        let p = &self.players[id.index()];
-        let (latest_shown, target) = (p.shown >= p.motion, p.target.0);
-        let waiter_holding = self.waits.iter().any(|w| {
-            matches!(
-                w.until,
-                Until::Shown {
-                    player,
-                    at: (frame, _),
-                    ..
-                } if player == id && frame == target
-            )
-        });
-        let keep = reload_keeps_target(latest_shown, waiter_holding);
-        reload_frame(sampled, target, keep)
+        p.shown >= p.motion || p.failure().is_some()
     }
 
     /// Asks the renderer for a picture of `player`; the answer comes as
@@ -3190,27 +2623,6 @@ impl Live {
         id
     }
 
-    /// Whether a tail check or patch still running could change `player`'s
-    /// frame at `position`: a patch replaces at most [`MAX_TAIL`] frames
-    /// before the end of its segment.
-    fn tail_near(&self, player: PlayerId, position: i64) -> bool {
-        self.tail_spots[player.index()].iter().any(|(end, key)| {
-            (end - MAX_TAIL..*end).contains(&position)
-                && (matches!(
-                    self.tails.get(key),
-                    Some(TailState::Checking | TailState::Rendering)
-                ) || self.tail_retries.iter().any(|r| &r.key == key))
-        })
-    }
-
-    /// Tail checks and patches still running.
-    fn tails_pending(&self) -> usize {
-        self.tails
-            .values()
-            .filter(|t| matches!(t, TailState::Checking | TailState::Rendering))
-            .count()
-    }
-
     // ---------------------------------------------------------------- state
 
     fn state_response(&self) -> Response {
@@ -3225,19 +2637,23 @@ impl Live {
         let fps = p.map_or(Rational::new(30, 1).expect("valid"), |p| p.settings.fps);
         let tc = |f: i64, stc: i64| format_timecode(f, fps, stc);
         let player = |pl: &Player, stc: i64| {
+            let snap = pl.snap();
+            let (late, skipped) = pl.misses();
             json!({
-                "loaded": pl.is_loaded(),
-                "frames": pl.frames,
-                "position": pl.position,
-                "position_tc": tc(pl.position, stc),
-                "playing": pl.playing(),
-                "speed": pl.snap().speed,
-                "hwdec": pl.snap().hwdec,
-                "error": pl.error,
+                "late": late,
+                "skipped": skipped,
+                "loaded": snap.loaded,
+                "frames": snap.frames,
+                "position": snap.position,
+                "position_tc": tc(snap.position, stc),
+                "playing": snap.playing,
+                "speed": snap.speed,
+                "hwdec": snap.hwdec,
+                "error": snap.error,
             })
         };
         let mut source = player(&self.players[SOURCE], 0);
-        let position = self.players[SOURCE].position;
+        let position = self.players[SOURCE].position();
         let under = match &self.source_content {
             Some(SourceContent::Clip(m)) => Some((m.clone(), position)),
             Some(SourceContent::Tape) => {
@@ -3264,9 +2680,9 @@ impl Live {
             "selection": self.selection,
             "pool": self.pool,
             "muted": self.players[TIMELINE].muted(),
+            "audio_scrubbing": self.audio_scrubbing,
             "clipboard": self.clipboard.len(),
             "preview": self.preview_error.as_deref().map_or(json!(true), |e| json!(e)),
-            "preview_pending": self.tails_pending(),
         })
     }
 }
@@ -3337,37 +2753,6 @@ fn job_answer(j: &JobInfo) -> Result<Response> {
     }
 }
 
-/// Whether a waiting seek may reply: its motion is on screen, and, paused,
-/// no tail check, patch or retry could still change `asked`, the frame it
-/// asked for. Playing, playback has moved on from that frame, so tail work
-/// on it no longer bears on what the seek showed.
-fn seek_may_reply(
-    latest_shown: bool,
-    playing: bool,
-    asked: i64,
-    tail_near: impl Fn(i64) -> bool,
-) -> bool {
-    latest_shown && (playing || !tail_near(asked))
-}
-
-/// Whether a continuation reload should keep the frame a seek asked for
-/// rather than the playhead sample (`time-pos` while playing): until that
-/// frame is on screen and the seek has replied. After that the reload
-/// follows playback; going back to the frame would jump playback back.
-fn reload_keeps_target(latest_shown: bool, waiter_holding: bool) -> bool {
-    !latest_shown || waiter_holding
-}
-
-/// Frame a continuation reload opens at. When the requested frame is still
-/// owed, a `time-pos` sample does not replace it.
-fn reload_frame(sampled: i64, target: i64, keep: bool) -> i64 {
-    if keep && sampled != target {
-        target
-    } else {
-        sampled
-    }
-}
-
 /// What `project.open` creates: with `create` and no file at `path`, a
 /// project with the format given; `None` opens an existing file. A format
 /// needs `create`, and a file that isn't there yet.
@@ -3431,62 +2816,4 @@ fn bind_playhead(mut envelope: Envelope, context: &TimeContext) -> Envelope {
         *at = TimeSpec::Frames(f);
     }
     envelope
-}
-
-/// Removes the per-process preview directories (`$XDG_RUNTIME_DIR/vidcut/<pid>`)
-/// of instances that are gone without cleaning up.
-fn remove_stale_runtime_dirs() {
-    let Ok(entries) = std::fs::read_dir(ipc::runtime_dir()) else {
-        return;
-    };
-    for e in entries.flatten() {
-        let Some(pid) = e
-            .file_name()
-            .to_str()
-            .and_then(|n| n.parse::<libc::pid_t>().ok())
-        else {
-            continue;
-        };
-        // SAFETY: signal 0 only checks whether the process exists.
-        let gone = unsafe { libc::kill(pid, 0) } != 0
-            && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH);
-        if gone {
-            let _ = std::fs::remove_dir_all(e.path());
-        }
-    }
-}
-
-#[cfg(test)]
-mod seek_wait_tests {
-    use super::{reload_frame, reload_keeps_target, seek_may_reply};
-
-    // Cuts lose at most MAX_TAIL frames. The window is what `tail_near` tests.
-    fn near_cut(frame: i64) -> bool {
-        (100 - super::MAX_TAIL..100).contains(&frame)
-    }
-
-    #[test]
-    fn a_paused_seek_waits_for_tail_work_on_its_frame_and_a_playing_one_does_not() {
-        let asked = 90;
-        assert!(near_cut(asked));
-        // Paused: the frame is on screen, but a retry still covers it.
-        assert!(!seek_may_reply(true, false, asked, near_cut));
-        assert!(seek_may_reply(true, false, asked, |_| false));
-        // Playing: its frame showed, and playback has moved on.
-        assert!(seek_may_reply(true, true, asked, near_cut));
-        assert!(!seek_may_reply(false, true, asked, |_| false));
-    }
-
-    #[test]
-    fn a_reload_keeps_the_requested_frame_until_the_seek_is_answered() {
-        // time-pos has moved to 140; the seek asked for 40.
-        assert_eq!(reload_frame(140, 40, true), 40);
-        assert_eq!(reload_frame(140, 40, false), 140);
-        assert_eq!(reload_frame(40, 40, true), 40);
-        // Not on screen yet, or the reply hasn't gone out: keep it. After
-        // that, follow playback.
-        assert!(reload_keeps_target(false, false));
-        assert!(reload_keeps_target(true, true));
-        assert!(!reload_keeps_target(true, false));
-    }
 }
