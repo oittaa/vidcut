@@ -1,0 +1,47 @@
+# Ubuntu 26.04 packages for building FFmpeg from source and vidcut against it:
+# the Dockerfile's `built` image and .github/workflows/ffmpeg.yml install these.
+# One package per line; `#` starts a comment.
+
+# Tools
+build-essential
+pkg-config
+nasm
+# bindgen (ffmpeg-sys-next), and FFmpeg's CUDA filters compiled for the GPU
+# without the CUDA toolkit (scale_cuda, pad_cuda, bwdif_cuda: --enable-cuda-llvm)
+clang
+libclang-dev
+# The player's audio output (cpal builds on ALSA)
+libasound2-dev
+# FFmpeg's git master (the `master` target)
+git
+ca-certificates
+curl
+xz-utils
+
+# Libraries FFmpeg is configured with (scripts/ffmpeg/build-ffmpeg.sh):
+# the ones vidcut uses, in the versions Ubuntu's own FFmpeg links.
+# NVENC, NVDEC and the CUDA filters (headers only; the driver loads at run time)
+libffmpeg-nvenc-dev
+# VAAPI encoders
+libva-dev
+libdrm-dev
+# libplacebo on Vulkan; FFmpeg's own Vulkan shaders compile at build time
+libplacebo-dev
+libvulkan-dev
+glslc
+spirv-headers
+# Codecs
+libdav1d-dev
+libsvtav1enc-dev
+libx264-dev
+libx265-dev
+libvpx-dev
+libopus-dev
+libmp3lame-dev
+libvorbis-dev
+# zscale
+libzimg-dev
+# azmq (live fader changes)
+libzmq3-dev
+# PNG, EXR and other image formats
+zlib1g-dev

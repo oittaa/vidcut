@@ -1,0 +1,107 @@
+# vidcut against FFmpeg built from source: the newest release
+# (scripts/ffmpeg/release.env) and FFmpeg's master, an early warning whose
+# failure doesn't fail the run. Weekly and on demand (Actions > ffmpeg > Run
+# workflow), never on pull requests or pushes: building FFmpeg takes about
+# ten minutes on a runner. check.yml is the gate that runs every time;
+# scripts/ffmpeg-check.sh runs the same builds locally, with all tests.
+name: ffmpeg
+
+on:
+  schedule:
+    # Mondays: FFmpeg's master and Ubuntu's packages move without a commit here.
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ffmpeg-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # No debug info: a smaller cache and faster links. Panics still name the
+  # file and line.
+  CARGO_PROFILE_DEV_DEBUG: 0
+
+jobs:
+  ffmpeg:
+    name: FFmpeg ${{ matrix.ffmpeg }}, build, fmt, clippy, unit tests
+    runs-on: ubuntu-26.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        ffmpeg: [release, master]
+    continue-on-error: ${{ matrix.ffmpeg == 'master' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install the build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          grep -v '^\s*\(#\|$\)' scripts/ffmpeg/packages.txt \
+            | xargs sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends
+
+      - name: Pick the FFmpeg source
+        id: source
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.ffmpeg }}" = release ]; then
+            ref=release
+          else
+            ref=$(git ls-remote https://github.com/FFmpeg/FFmpeg.git refs/heads/master | cut -f1)
+          fi
+          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+          echo "prefix=${HOME}/ffmpeg" >> "$GITHUB_OUTPUT"
+
+      # The same build as the images of scripts/ffmpeg-check.sh.
+      - name: Cache FFmpeg
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ steps.source.outputs.prefix }}
+          key: ffmpeg-${{ runner.os }}-${{ steps.source.outputs.ref }}-${{ hashFiles('scripts/ffmpeg/build-ffmpeg.sh', 'scripts/ffmpeg/packages.txt', 'scripts/ffmpeg/release.env') }}
+
+      - name: Build FFmpeg
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: scripts/ffmpeg/build-ffmpeg.sh "${{ steps.source.outputs.ref }}" "${{ steps.source.outputs.prefix }}"
+
+      - name: Use it
+        run: |
+          set -euo pipefail
+          prefix="${{ steps.source.outputs.prefix }}"
+          {
+            echo "PKG_CONFIG_PATH=${prefix}/lib/pkgconfig"
+            echo "LD_LIBRARY_PATH=${prefix}/lib"
+          } >> "$GITHUB_ENV"
+          echo "${prefix}/bin" >> "$GITHUB_PATH"
+          "${prefix}/bin/ffmpeg" -hide_banner -version | head -1
+          PKG_CONFIG_PATH="${prefix}/lib/pkgconfig" pkg-config --modversion libavcodec
+
+      - name: Install the pinned Rust toolchain
+        run: |
+          set -euo pipefail
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
+          rustup show active-toolchain
+          rustc --version
+
+      # A cache per FFmpeg: ffmpeg-sys-next generates its bindings from
+      # FFmpeg's headers, and cargo doesn't notice when those change.
+      - name: Cache compiled dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ffmpeg-${{ matrix.ffmpeg }}-${{ steps.source.outputs.ref }}-${{ hashFiles('scripts/ffmpeg/release.env') }}
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          cargo build --workspace
+          target/debug/vidcut --version
+
+      - name: Fast gate
+        run: scripts/check.sh

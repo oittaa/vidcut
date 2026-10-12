@@ -25,11 +25,13 @@ A simple, fully scriptable video cutting tool for Linux, modeled on DaVinci Reso
 
 ## Requirements
 
-Ubuntu 26.04 (or similar) with FFmpeg 8 and libmpv:
+Ubuntu 26.04 (or similar) with FFmpeg and libmpv:
 
 ```bash
 sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libasound2-dev libclang-dev libmpv2 rustup
 ```
+
+vidcut works with FFmpeg 8.0 (Ubuntu 26.04 LTS) up to the newest release, 9.0; both ends are tested.
 
 Rust comes from [rustup](https://rustup.rs). The repository pins its Rust version in `rust-toolchain.toml`, and rustup downloads that toolchain the first time you build.
 

@@ -84,10 +84,12 @@ cargo run -p vidcut -- --help  # CLI
 sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libasound2-dev libclang-dev libmpv2 rustup
 ```
 
+**Supported FFmpeg:** 8.0, the one in the latest Ubuntu LTS (26.04), up to the newest FFmpeg release (9.0.2, `scripts/ffmpeg/release.env`). Both are tested (`scripts/ffmpeg-check.sh`, the weekly FFmpeg workflow); nothing older needs to work, so add no code for FFmpeg before 8.0. Where FFmpeg versions in that range behave differently, handle both by what the file or stream reports, not by version numbers.
+
 **Toolchain notes:**
 - **Rust comes from rustup.** `rust-toolchain.toml` pins the version (with rustfmt and clippy), and rustup installs it on the first cargo command in the checkout, whatever rustc the distro ships. `rust-version` in Cargo.toml matches it, so the MSRV-aware resolver picks crates that build with it.
 - **Upgrading Rust** is a change of its own: raise `channel` in `rust-toolchain.toml` and `rust-version` together, then fix what the new clippy finds (`scripts/check.sh full`).
-- ffmpeg-next is 9.x. Its version numbers follow FFmpeg's, but it detects the installed FFmpeg and compiles only what that version has, so it builds against the system FFmpeg 8.0.
+- ffmpeg-next is 9.x. Its version numbers follow FFmpeg's, but it detects the installed FFmpeg and compiles only what that version has, so it builds against FFmpeg 8.0 and 9.0 alike.
 - Dependencies build with `opt-level = 2` even in dev, while our crates stay unoptimized.
 
 ## Quality gates
@@ -101,10 +103,13 @@ These are mandatory.
 | Also, when encoders, hwdec or real-media paths change | `scripts/check.sh full --features vidcut-av/gpu-tests` | GPU encode tests (NVENC/VAAPI) |
 | Also, when the GUI, live session, IPC or preview change | `scripts/check.sh full --features vidcut/gui-tests` | the real GUI driven through the CLI (needs a display; opens a window briefly) |
 | Also, when the player's audio output changes | `scripts/check.sh full --features vidcut-av/audio-tests` | the player engine on the system's audio device (plays silence) |
+| Also, when FFmpeg-facing code changes (probe, decode, encode, filters, ffmpeg-next upgrades) | `scripts/ffmpeg-check.sh` | `cargo build` and `scripts/check.sh full` in containers, against Ubuntu 26.04's FFmpeg 8.0 and the newest FFmpeg release (Tools, below) |
 
 **Enable the hook once per clone:** `git config core.hooksPath .githooks`.
 
-**CI** (`.github/workflows/check.yml`) runs the fast gate on pull requests and on pushes to master, on `ubuntu-26.04`: older images ship FFmpeg 6. The compiled dependencies are cached (`Swatinem/rust-cache`), so a run builds only vidcut's own crates and the dependencies `Cargo.lock` changed; after a toolchain upgrade it builds everything once. The full gate, GPU and GUI tests run only locally. Dependabot opens weekly update pull requests.
+**CI** (`.github/workflows/check.yml`) runs the fast gate on pull requests and on pushes to master, on `ubuntu-26.04` with Ubuntu's FFmpeg 8.0: older images ship FFmpeg 6. The compiled dependencies are cached (`Swatinem/rust-cache`), so a run builds only vidcut's own crates and the dependencies `Cargo.lock` changed; after a toolchain upgrade it builds everything once. The full gate, GPU and GUI tests run only locally. Dependabot opens weekly update pull requests.
+
+**The FFmpeg workflow** (`.github/workflows/ffmpeg.yml`) runs weekly (Mondays) and on demand (Actions > ffmpeg > Run workflow), never on pull requests or pushes. It builds the newest FFmpeg release and FFmpeg's master from source with `scripts/ffmpeg/build-ffmpeg.sh` (about ten minutes on a runner, cached), then runs `cargo build` and the fast gate against each. A master failure doesn't fail the run.
 
 **A bigger change** is anything touching:
 - time mapping, decode/seek, the export engine
@@ -310,6 +315,14 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 
 **GPU encoders:** `cargo run -p vidcut-av --example encoders` test-encodes every NVENC/VAAPI option, uncached.
 
+**Other FFmpeg versions** (`scripts/ffmpeg-check.sh`, needs Docker): builds an image per target, then runs `cargo build --workspace` and `scripts/check.sh full` in it against the checkout (mounted read-only), and prints a summary.
+- Targets: `lts` (Ubuntu 26.04's FFmpeg 8.0 and libmpv), `release` (the newest FFmpeg release, built from the official tarball on Ubuntu 26.04) and `master` (FFmpeg's git master, the same way; an early warning, allowed to fail). Without targets: `lts release`.
+- `--fast` runs `scripts/check.sh` instead; `scripts/ffmpeg-check.sh release -- cargo test -p vidcut --test cli` runs any command, `-- bash` a shell.
+- The containers have no GPU, display or audio device: the GPU, GUI and audio-device tests stay off (they are features), and outside `lts` the tests that need libmpv skip (Ubuntu's libmpv links Ubuntu's FFmpeg).
+- FFmpeg is configured (`scripts/ffmpeg/build-ffmpeg.sh`) with what vidcut uses: x264, x265, SVT-AV1, libvpx, dav1d, Opus, LAME, Vorbis, zimg, ZeroMQ, libplacebo on Vulkan, VAAPI, NVENC/NVDEC and the CUDA filters (compiled by clang, no CUDA toolkit). Its build is a cached image layer: about a minute and a half on 16 cores, again only when `scripts/ffmpeg/` changes or master moves (`VIDCUT_FFMPEG_MASTER=COMMIT` pins one).
+- Caches are Docker volumes: `vidcut-ffmpeg-cargo` (crates), `vidcut-ffmpeg-target-TARGET` and `vidcut-ffmpeg-data-TARGET` (fixtures made with that FFmpeg; the downloaded media are mounted read-only). A target directory takes about 5.5 GB and the images about 3 GB together. On 16 cores a first run of all three targets took 7 minutes, and a repeat run of both default targets takes about a minute. To free the space: `docker volume rm $(docker volume ls -q -f name=vidcut-ffmpeg)` and `docker image rm vidcut-ffmpeg:lts vidcut-ffmpeg:release vidcut-ffmpeg:master`.
+- A newer FFmpeg release: put its version and the sha256 of its tarball, checked against its signature, in `scripts/ffmpeg/release.env` (the steps are there), then run `scripts/ffmpeg-check.sh release`.
+
 **FFmpeg logging:** quiet by default (fatal only). Set `VIDCUT_AV_LOG=error` (or `warning`, `debug`) to see FFmpeg's messages when debugging media problems.
 
 **Media inspection** (examples in `crates/vidcut-av/examples/`):
@@ -361,6 +374,7 @@ The preview findings and the time-mapping rules are in [docs/decisions/preview.m
 - **Clear a decoded frame's picture type before encoding it** (`set_kind(picture::Type::None)`). Encoders take it as an order: the output copies the source's keyframes, and x264 warns about every B-frame it can't make.
 - **Set `pkt_timebase` on every decoder** (`codec_ctx.pkt_timebase = stream.time_base`). Without it, FFmpeg can't adjust timestamps when it skips priming samples, and audio drifts by the codec delay.
 - **Whether decoders output the priming samples depends on the FFmpeg version.** Matroska's codec delay (AAC, Opus) is decoded by FFmpeg 8.0 and skipped by 8.1 and later, which then count it in the stream's start; FFmpeg 9 also reports AAC priming in MP4 as `initial_padding`. `probe` subtracts what the first packet's skip-samples side data skips (`start_skips`), so an audio-only file's sound starts at 0 with any of them.
+- **After the installed FFmpeg changes, run `cargo clean -p ffmpeg-sys-next`.** Its bindings come from FFmpeg's headers, and cargo doesn't rerun its build script when they change. The images of `scripts/ffmpeg-check.sh` do this by themselves.
 - **Color goes through `vidcut_av::color`** (export.md §4): HDR sources are tone-mapped for SDR output, SDR sources sit at 203 nits in HDR output, untagged HD is BT.709. Rotation metadata is applied everywhere (spec D33).
 - **`zscale` needs explicit output primaries** when converting to linear light: for untagged frames it otherwise fails with "no path between colorspaces".
 - **Interlaced sources are deinterlaced inside `VideoReader`** (`bwdif`, one frame per frame; `bwdif_cuda` for frames NVDEC decodes), before frames are picked. The preview adds the same filter per file (preview.md §5); mpv's own `deinterlace` makes one frame per field, which breaks frame-exact seeks.
