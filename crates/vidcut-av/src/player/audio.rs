@@ -2,22 +2,25 @@
 //! ring a tenth of a second ahead of the device, each run of samples marked
 //! with where it is on the timeline.
 //!
-//! At other speeds the mix goes through FFmpeg's `atempo`, which keeps the
-//! pitch. Backward the sound plays reversed: the mix is read forward a
-//! block at a time, from further and further back, and each block reversed.
-//! Paused, steps play their frame's sound ([`super::scrub`]).
+//! Backward the sound plays reversed: the mix is read forward a block at a
+//! time, from further and further back, and each block reversed. At other
+//! speeds, either way, it goes through [`Stretch`], which keeps the pitch
+//! and says where each of its blocks came from: each is marked as it is
+//! queued, so the clock follows what is heard at every speed. Paused,
+//! steps play their frame's sound ([`super::scrub`]).
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
 
 use super::clock::Marker;
 use super::plan::Plan;
 use super::scrub::{Waiting, snippet};
+use super::stretch::Stretch;
 use super::{AudioSnap, Mode, Shared};
-use crate::error::{Context, Error, Result};
+use crate::error::Result;
 use crate::export::DECLICK_MS;
 use crate::export::audio::AudioMix;
-use crate::ffmpeg::{self, filter, format, frame};
 
 /// Sound kept queued ahead of the device.
 const AHEAD_SECS: f64 = 0.1;
@@ -25,30 +28,45 @@ const AHEAD_SECS: f64 = 0.1;
 /// Sound mixed at a time.
 const CHUNK_SECS: f64 = 0.01;
 
-/// Room in the ring a chunk needs, with what the tempo filter may give at
-/// once.
+/// Room in the ring a chunk needs, with blocks the stretch gives at once.
 const MIN_ROOM_SECS: f64 = 0.1;
 
 /// Sound read at a time going backward, in seconds of play: each block
 /// costs a seek of every lane's stream.
 const BLOCK_SECS: f64 = 0.2;
 
+/// Sound ready to queue: samples, and where they are as stream positions
+/// (frames from the run's start, in the direction of play) when they need
+/// a mark of their own.
+struct Piece {
+    samples: Vec<f32>,
+    /// Stream position of the first sample, and stream frames per sample.
+    mark: Option<(f64, f64)>,
+}
+
 /// What is being played.
 struct Run {
     epoch: u64,
     speed: f64,
-    /// The next timeline sample to mix (from the plan's start); backward,
-    /// the next to play, the mix read up to it.
+    /// The timeline sample at stream position 0: where the run (or its
+    /// restart after an edit) began.
+    origin: i64,
+    /// The next timeline sample to mix; backward, the next to play, the mix
+    /// read up to it.
     cursor: i64,
-    tempo: Option<Tempo>,
-    /// Backward: a block mixed and reversed (and through the tempo filter),
-    /// and how much of it is queued.
-    block: Vec<f32>,
-    queued: usize,
-    /// Backward: the tempo filter gave what it held at the start.
-    flushed: bool,
-    /// The end (or the start, backwards) was reached and marked.
+    /// Other speeds than ±1.
+    stretch: Option<Stretch>,
+    pending: VecDeque<Piece>,
+    /// All of the run was mixed (and the stretch emptied).
+    exhausted: bool,
+    /// The end (or the start, backward) was reached and marked.
     ended: bool,
+}
+
+impl Run {
+    fn dir(&self) -> f64 {
+        self.speed.signum()
+    }
 }
 
 struct Producer {
@@ -159,20 +177,16 @@ impl Producer {
         Some((s.round() as i64).clamp(0, self.plan.samples))
     }
 
-    /// Starts play request `epoch`: what was queued for the device is
-    /// dropped, and the new sound marked from sample `from` on.
+    /// Starts play request `epoch` from sample `from`.
     fn start(&mut self, from: i64, speed: f64, epoch: u64) {
-        let tempo = (speed.abs() != 1.0)
-            .then(|| Tempo::new(speed.abs(), self.plan.rate(), self.plan.plan.channels).ok())
-            .flatten();
         self.run = Some(Run {
             epoch,
             speed,
+            origin: from,
             cursor: from,
-            tempo,
-            block: Vec::new(),
-            queued: 0,
-            flushed: false,
+            stretch: None,
+            pending: VecDeque::new(),
+            exhausted: false,
             ended: false,
         });
         self.restart(from);
@@ -188,153 +202,168 @@ impl Producer {
         if run.speed > 0.0 {
             self.mix.seek(at);
         }
+        run.origin = at;
         run.cursor = at;
         run.ended = false;
-        run.block.clear();
-        run.queued = 0;
-        run.flushed = false;
-        if let Some(t) = run.tempo.as_mut()
-            && let Ok(fresh) = Tempo::new(t.speed, t.rate, t.channels as u16)
-        {
-            *t = fresh;
-        }
-        self.shared.markers.push(Marker {
-            counter: ring.written(),
-            sample: at,
-            speed: run.speed,
-            epoch: run.epoch,
+        run.exhausted = false;
+        run.pending.clear();
+        run.stretch = (run.speed.abs() != 1.0).then(|| {
+            Stretch::new(
+                run.speed.abs(),
+                self.plan.rate(),
+                usize::from(self.plan.plan.channels),
+            )
         });
+        // At ±1 a stream frame is a timeline sample: one mark does. The
+        // stretch marks each of its blocks.
+        if run.stretch.is_none() {
+            self.shared.markers.push(Marker {
+                counter: ring.written(),
+                sample: at,
+                speed: run.dir(),
+                epoch: run.epoch,
+            });
+        }
     }
 
-    /// Mixes the next chunk when the device's queue is short; whether it
-    /// did.
+    /// Queues the next sound when the device's queue is short; whether
+    /// there was any.
     fn produce(&mut self) -> Result<bool> {
         let ring = self.shared.ring.clone();
-        if self.run.as_ref().is_some_and(|r| r.speed < 0.0) {
-            return self.produce_backward();
-        }
+        let rate = self.plan.rate();
         let Some(run) = self.run.as_mut() else {
-            return Ok(self.waiting.offer(&ring, self.plan.rate()));
+            return Ok(self.waiting.offer(&ring, rate));
         };
-        let rate = f64::from(self.plan.rate());
-        // Room for the chunk, whatever the tempo makes of it: a device that
-        // stopped pulling leaves none, and the thread waits for it rather
-        // than for room.
-        let short = ring.queued() as f64 >= AHEAD_SECS * rate;
-        if run.ended || short || (ring.room() as f64) < MIN_ROOM_SECS * rate {
+        // Room for what comes, however much the stretch gives at once: a
+        // device that stopped pulling leaves none, and the thread waits for
+        // it rather than for room.
+        let short = ring.queued() as f64 >= AHEAD_SECS * f64::from(rate);
+        if run.ended || short || (ring.room() as f64) < MIN_ROOM_SECS * f64::from(rate) {
             return Ok(false);
         }
-        let chunk = (CHUNK_SECS * rate).round() as i64;
-        let channels = ring.channels();
-        let total = self.plan.samples;
+        // The stretch gives nothing until it holds a fragment's worth.
         let mut failed = None;
-        let mut samples = if run.speed == 1.0 || run.tempo.is_some() {
-            let n = ((chunk as f64 * run.speed).round() as i64).min(total - run.cursor);
-            let tempo = run.tempo.as_mut();
-            if n <= 0 {
-                let tail = match tempo {
-                    Some(t) => t.flush()?,
-                    None => Vec::new(),
-                };
-                push(&ring, &tail);
-                end(&self.shared, run, total, ring.written());
-                return Ok(true);
+        while self
+            .run
+            .as_ref()
+            .is_some_and(|r| r.pending.is_empty() && !r.exhausted)
+        {
+            if let Some(e) = self.refill() {
+                failed = Some(e);
             }
-            let mixed = match self.mix.read(n as usize) {
-                Ok(s) => s,
-                // A broken file is silent; the clock goes on.
-                Err(e) => {
-                    failed = Some(e);
-                    vec![0.0; n as usize * channels]
-                }
-            };
-            run.cursor += n;
-            match tempo {
-                Some(t) => t.process(&mixed)?,
-                None => mixed,
-            }
-        } else {
-            // No tempo filter: silence, moving the clock.
-            let n = chunk.min(((total - run.cursor) as f64 / run.speed).ceil() as i64);
-            if n <= 0 {
-                end(&self.shared, run, total, ring.written());
-                return Ok(true);
-            }
-            run.cursor = (run.cursor + (n as f64 * run.speed).round() as i64).min(total);
-            vec![0.0; n as usize * channels]
-        };
-        if self.muted {
-            samples.fill(0.0);
         }
-        push(&ring, &samples);
+        let Some(run) = self.run.as_mut() else {
+            return Ok(false);
+        };
+        let Some(mut piece) = run.pending.pop_front() else {
+            // Nothing more: the end (or the start) heard last.
+            let edge = if run.speed > 0.0 {
+                self.plan.samples
+            } else {
+                0
+            };
+            self.shared.markers.push(Marker {
+                counter: ring.written(),
+                sample: edge,
+                speed: 0.0,
+                epoch: run.epoch,
+            });
+            run.ended = true;
+            return Ok(true);
+        };
+        let channels = ring.channels();
+        if let Some((at, per)) = piece.mark {
+            let dir = run.dir();
+            self.shared.markers.push(Marker {
+                counter: ring.written(),
+                sample: (run.origin as f64 + dir * at).round() as i64,
+                speed: dir * per,
+                epoch: run.epoch,
+            });
+        } else {
+            // Unmarked sound goes a chunk at a time.
+            let chunk = (CHUNK_SECS * f64::from(rate)).round() as usize * channels;
+            if piece.samples.len() > chunk {
+                let rest = piece.samples.split_off(chunk);
+                run.pending.push_front(Piece {
+                    samples: rest,
+                    mark: None,
+                });
+            }
+        }
+        if self.muted {
+            piece.samples.fill(0.0);
+        }
+        let pushed = ring.push(&piece.samples) * channels;
+        debug_assert_eq!(pushed, piece.samples.len(), "no room for a chunk");
         match failed {
             Some(e) => Err(e),
             None => Ok(true),
         }
     }
 
-    /// Backward: the next chunk of a reversed block, a new block mixed and
-    /// reversed when one is used up; whether there was one.
-    fn produce_backward(&mut self) -> Result<bool> {
-        let ring = self.shared.ring.clone();
+    /// Mixes more of the run into pieces: forward the next chunk, backward
+    /// the next block reversed, through the stretch at other speeds; at the
+    /// end what the stretch still holds. A broken file is silent, the clock
+    /// going on, and its error is given back.
+    fn refill(&mut self) -> Option<crate::error::Error> {
         let rate = f64::from(self.plan.rate());
-        let Some(run) = self.run.as_mut() else {
-            return Ok(false);
-        };
-        let short = ring.queued() as f64 >= AHEAD_SECS * rate;
-        if run.ended || short || (ring.room() as f64) < MIN_ROOM_SECS * rate {
-            return Ok(false);
-        }
-        let channels = ring.channels();
-        let mut failed = None;
-        if run.queued * channels >= run.block.len() {
-            run.queued = 0;
-            run.block.clear();
-            if run.cursor < 0 {
-                // The start: what the tempo filter still holds, then the end.
-                if let (Some(t), false) = (run.tempo.as_mut(), run.flushed) {
-                    run.block = t.flush()?;
-                    run.flushed = true;
-                }
-                if run.block.is_empty() {
-                    end(&self.shared, run, 0, ring.written());
-                    return Ok(true);
-                }
-            } else {
-                // Samples `lo..=cursor` of the mix, read forward, reversed.
-                let n = ((BLOCK_SECS * rate * run.speed.abs()).round() as i64).max(1);
-                let lo = (run.cursor + 1 - n).max(0);
-                self.mix.seek(lo);
-                let len = (run.cursor + 1 - lo) as usize;
-                let mut mixed = match self.mix.read(len) {
-                    Ok(s) => s,
-                    // A broken file is silent; the clock goes on.
-                    Err(e) => {
-                        failed = Some(e);
-                        vec![0.0; len * channels]
-                    }
-                };
-                reverse(&mut mixed, channels);
-                run.cursor = lo - 1;
-                run.block = match run.tempo.as_mut() {
-                    Some(t) => t.process(&mixed)?,
-                    None => mixed,
-                };
+        let total = self.plan.samples;
+        let run = self.run.as_mut()?;
+        let channels = usize::from(self.mix.channels());
+        let read = |mix: &mut AudioMix, n: usize, failed: &mut Option<_>| match mix.read(n) {
+            Ok(s) => s,
+            Err(e) => {
+                *failed = Some(e);
+                vec![0.0; n * channels]
             }
+        };
+        let mut failed = None;
+        let mixed = if run.speed > 0.0 {
+            let n = ((CHUNK_SECS * rate * run.speed).round() as i64)
+                .max(1)
+                .min(total - run.cursor);
+            if n <= 0 {
+                None
+            } else {
+                run.cursor += n;
+                Some(read(&mut self.mix, n as usize, &mut failed))
+            }
+        } else if run.cursor < 0 {
+            None
+        } else {
+            // Samples `lo..=cursor`, read forward, reversed.
+            let n = ((BLOCK_SECS * rate * run.speed.abs()).round() as i64).max(1);
+            let lo = (run.cursor + 1 - n).max(0);
+            self.mix.seek(lo);
+            let mut s = read(&mut self.mix, (run.cursor + 1 - lo) as usize, &mut failed);
+            reverse(&mut s, channels);
+            run.cursor = lo - 1;
+            Some(s)
+        };
+        match (mixed, run.stretch.as_mut()) {
+            (Some(s), None) => run.pending.push_back(Piece {
+                samples: s,
+                mark: None,
+            }),
+            (Some(s), Some(stretch)) => {
+                run.pending
+                    .extend(stretch.push(&s).into_iter().map(|b| Piece {
+                        samples: b.samples,
+                        mark: Some((b.at, b.rate)),
+                    }))
+            }
+            (None, Some(stretch)) => {
+                run.pending
+                    .extend(stretch.finish().into_iter().map(|b| Piece {
+                        samples: b.samples,
+                        mark: Some((b.at, b.rate)),
+                    }));
+                run.exhausted = true;
+            }
+            (None, None) => run.exhausted = true,
         }
-        let chunk = (CHUNK_SECS * rate).round() as usize;
-        let from = run.queued * channels;
-        let take = (run.block.len() - from).min(chunk * channels);
-        let mut samples = run.block[from..from + take].to_vec();
-        run.queued += take / channels;
-        if self.muted {
-            samples.fill(0.0);
-        }
-        push(&ring, &samples);
-        match failed {
-            Some(e) => Err(e),
-            None => Ok(true),
-        }
+        failed
     }
 }
 
@@ -350,207 +379,14 @@ fn reverse(samples: &mut [f32], channels: usize) {
     }
 }
 
-/// Queues all of `samples`, never dropping any: `produce` made sure of the
-/// room.
-fn push(ring: &super::ring::Ring, samples: &[f32]) {
-    let pushed = ring.push(samples) * ring.channels();
-    debug_assert_eq!(pushed, samples.len(), "no room for a chunk");
-}
-
-/// Marks the run's end at ring position `counter`: the clock holds at
-/// sample `edge` once it is heard.
-fn end(shared: &Shared, run: &mut Run, edge: i64, counter: u64) {
-    shared.markers.push(Marker {
-        counter,
-        sample: edge,
-        speed: 0.0,
-        epoch: run.epoch,
-    });
-    run.ended = true;
-}
-
-/// Plays sound faster or slower keeping its pitch: FFmpeg's `atempo`,
-/// chained so each stage stays within 0.5 to 2, where it blends rather
-/// than skips.
-struct Tempo {
-    graph: filter::Graph,
-    speed: f64,
-    rate: u32,
-    channels: usize,
-    layout: ffmpeg::ChannelLayout,
-    pts: i64,
-}
-
-impl Tempo {
-    fn new(speed: f64, rate: u32, channels: u16) -> Result<Self> {
-        let layout = ffmpeg::ChannelLayout::default(i32::from(channels));
-        let find = |name: &str| {
-            filter::find(name).ok_or_else(|| Error::Invalid(format!("no {name} filter")))
-        };
-        let mut graph = filter::Graph::new();
-        let args = format!(
-            "time_base=1/{rate}:sample_rate={rate}:sample_fmt=flt:channel_layout={}",
-            layout_name(channels)
-        );
-        graph
-            .add(&find("abuffer")?, "in", &args)
-            .ctx(|| "creating tempo source".into())?;
-        graph
-            .add(&find("abuffersink")?, "out", "")
-            .ctx(|| "creating tempo sink".into())?;
-        let mut stages = Vec::new();
-        let mut s = speed;
-        while s > 2.0 {
-            stages.push(2.0);
-            s /= 2.0;
-        }
-        while s < 0.5 {
-            stages.push(0.5);
-            s /= 0.5;
-        }
-        stages.push(s);
-        let spec = stages
-            .iter()
-            .map(|f| format!("atempo={f}"))
-            .chain(std::iter::once("aformat=sample_fmts=flt".into()))
-            .collect::<Vec<_>>()
-            .join(",");
-        graph
-            .output("in", 0)
-            .and_then(|p| p.input("out", 0))
-            .and_then(|p| p.parse(&spec))
-            .ctx(|| format!("building {spec}"))?;
-        graph.validate().ctx(|| format!("configuring {spec}"))?;
-        Ok(Self {
-            graph,
-            speed,
-            rate,
-            channels: usize::from(channels),
-            layout,
-            pts: 0,
-        })
-    }
-
-    /// Takes `input` (interleaved) and gives what is ready.
-    fn process(&mut self, input: &[f32]) -> Result<Vec<f32>> {
-        let n = input.len() / self.channels;
-        let mut f = frame::Audio::new(
-            format::Sample::F32(format::sample::Type::Packed),
-            n,
-            self.layout,
-        );
-        f.set_rate(self.rate);
-        f.set_pts(Some(self.pts));
-        self.pts += n as i64;
-        let data = f.data_mut(0);
-        for (i, s) in input.iter().enumerate() {
-            data[i * 4..i * 4 + 4].copy_from_slice(&s.to_le_bytes());
-        }
-        self.graph
-            .get("in")
-            .expect("source")
-            .source()
-            .add(&f)
-            .ctx(|| "changing the tempo".into())?;
-        self.pull()
-    }
-
-    /// The rest, at the end.
-    fn flush(&mut self) -> Result<Vec<f32>> {
-        self.graph
-            .get("in")
-            .expect("source")
-            .source()
-            .flush()
-            .ctx(|| "changing the tempo".into())?;
-        self.pull()
-    }
-
-    fn pull(&mut self) -> Result<Vec<f32>> {
-        let mut out = Vec::new();
-        let mut sink = self.graph.get("out").expect("sink");
-        loop {
-            let mut f = frame::Audio::empty();
-            match sink.sink().frame(&mut f) {
-                Ok(()) => {
-                    let n = f.samples() * self.channels;
-                    let data = f.data(0);
-                    out.extend(
-                        data[..n * 4]
-                            .as_chunks::<4>()
-                            .0
-                            .iter()
-                            .map(|b| f32::from_le_bytes(*b)),
-                    );
-                }
-                Err(ffmpeg::Error::Eof)
-                | Err(ffmpeg::Error::Other {
-                    errno: ffmpeg::util::error::EAGAIN,
-                }) => return Ok(out),
-                Err(e) => {
-                    return Err(Error::Ffmpeg {
-                        context: "changing the tempo".into(),
-                        source: e,
-                    });
-                }
-            }
-        }
-    }
-}
-
-/// FFmpeg's name for the usual layout of `channels` channels (`stereo`,
-/// `5.1`).
-fn layout_name(channels: u16) -> String {
-    use ffmpeg::ffi;
-    // SAFETY: a layout made, described into a buffer large enough for any
-    // name, and freed.
-    unsafe {
-        let mut layout: ffi::AVChannelLayout = std::mem::zeroed();
-        ffi::av_channel_layout_default(&mut layout, i32::from(channels));
-        let mut buf = [0 as std::ffi::c_char; 128];
-        ffi::av_channel_layout_describe(&layout, buf.as_mut_ptr(), buf.len());
-        ffi::av_channel_layout_uninit(&mut layout);
-        std::ffi::CStr::from_ptr(buf.as_ptr())
-            .to_string_lossy()
-            .into_owned()
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{Tempo, reverse};
+    use super::reverse;
 
     #[test]
     fn reversing_keeps_each_frames_channels_in_order() {
         let mut s = vec![1.0, -1.0, 2.0, -2.0, 3.0, -3.0];
         reverse(&mut s, 2);
         assert_eq!(s, vec![3.0, -3.0, 2.0, -2.0, 1.0, -1.0]);
-    }
-
-    #[test]
-    fn tempo_plays_faster_and_slower_keeping_length_in_step() {
-        crate::init();
-        let rate = 48_000;
-        // One second of a 1 kHz tone, in 10 ms chunks.
-        let tone: Vec<f32> = (0..rate)
-            .flat_map(|i| {
-                let v = (2.0 * std::f32::consts::PI * 1000.0 * i as f32 / rate as f32).sin();
-                [v, v]
-            })
-            .collect();
-        for speed in [2.0, 0.5, 8.0] {
-            let mut t = Tempo::new(speed, rate as u32, 2).unwrap();
-            let mut out = Vec::new();
-            for chunk in tone.chunks(960) {
-                out.extend(t.process(chunk).unwrap());
-            }
-            out.extend(t.flush().unwrap());
-            let frames = out.len() as f64 / 2.0;
-            let expected = f64::from(rate) / speed;
-            assert!(
-                (frames - expected).abs() < expected * 0.05,
-                "{speed}x made {frames} frames of {expected}"
-            );
-        }
     }
 }

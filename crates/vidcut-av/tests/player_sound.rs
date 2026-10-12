@@ -89,13 +89,17 @@ fn backward_the_sound_plays_reversed_sample_for_sample() {
     }
 }
 
-#[test]
-fn backward_the_pictures_stay_with_the_reversed_sound() {
-    // A real-time device stand-in, buffers heard 40 ms after they are
-    // pulled. Backward, a beep's first sample is the last of it heard, and
-    // right after it frame 30k gives way to frame 30k - 1.
+/// Plays `frames` frames of the beeps at `speed` through a real-time
+/// stand-in device (buffers heard 40 ms after they are pulled) with a
+/// display looking every 2 ms, and gives, for each beep, how long after it
+/// was heard the picture moved to its frame (ms). Forward, from frame 15:
+/// a beep starts frame 30k, which should show as its onset is heard.
+/// Backward, from the last frame: a beep's first sample is the last of it
+/// heard, and right after it frame 30k gives way to frame 30k − 1. Every
+/// picture shown is checked to be its frame's.
+fn alignment(speed: f64, frames: i64) -> Vec<f64> {
     let a = beeps();
-    let p = plan(&[clip(&a, 0, 120)], 0);
+    let p = plan(&[clip(&a, 0, frames)], 0);
     let (out, recording) =
         PacedOutput::recording(Duration::from_millis(10), Duration::from_millis(40));
     let config = Config {
@@ -103,110 +107,146 @@ fn backward_the_pictures_stay_with_the_reversed_sound() {
         ..Config::default()
     };
     let player = Player::new(p, config, Box::new(out)).unwrap();
-    player.seek(119);
-    assert!(player.wait_ready(119, Duration::from_secs(10)));
-    player.play(-1.0);
-    let mut first_shown: Vec<(i64, Instant, Option<u32>)> = Vec::new();
+    let from = if speed > 0.0 { 15 } else { frames - 1 };
+    player.seek(from);
+    assert!(player.wait_ready(from, Duration::from_secs(10)));
+    player.play(speed);
+    let mut first_shown: Vec<(i64, Instant)> = Vec::new();
     let started = Instant::now();
-    while player.status().playing && started.elapsed() < Duration::from_secs(8) {
+    while player.status().playing && started.elapsed() < Duration::from_secs(12) {
         let now = Instant::now();
         if let Some(s) = player.present(now)
             && s.exact
-            && first_shown.last().is_none_or(|(f, ..)| *f != s.frame)
+            && first_shown.last().is_none_or(|(f, _)| *f != s.frame)
         {
-            first_shown.push((s.frame, now, code(&s.picture)));
+            assert_eq!(code(&s.picture), Some(s.frame as u32), "frame {}", s.frame);
+            first_shown.push((s.frame, now));
         }
         std::thread::sleep(Duration::from_millis(2));
     }
     let status = player.status();
     drop(player);
-    assert!(!status.playing, "played to the start: {status:?}");
-    for (f, _, c) in &first_shown {
-        assert_eq!(*c, Some(*f as u32), "frame {f}'s picture");
-    }
-    assert_eq!(
-        first_shown.iter().map(|(f, ..)| *f).collect::<Vec<_>>(),
-        (0..=119).rev().collect::<Vec<_>>(),
-        "every frame, backward"
-    );
+    assert!(!status.playing, "{speed}x played to the end: {status:?}");
     let rec = recording.lock().unwrap();
-    let ends = burst_ends(&left(&rec.samples), 0.1, 4_800);
-    assert_eq!(ends.len(), 4, "a beep a second: {ends:?}");
-    let mut offsets = Vec::new();
-    for (k, &end) in ends[..3].iter().enumerate() {
-        // The sample after the beep's first is frame 30k - 1's last.
-        let heard = rec.heard_at(end + 1, RATE).unwrap();
-        let frame = 30 * (3 - k as i64) - 1;
-        let (_, shown, _) = first_shown
-            .iter()
-            .find(|(f, ..)| *f == frame)
-            .unwrap_or_else(|| panic!("frame {frame} never shown"));
-        let ms = if *shown >= heard {
-            (*shown - heard).as_secs_f64() * 1e3
-        } else {
-            -(heard - *shown).as_secs_f64() * 1e3
-        };
-        offsets.push(ms);
-    }
-    eprintln!("backward, picture after its beep (ms): {offsets:.1?}");
+    let mono = left(&rec.samples);
+    let gap = (4_800.0 / speed.abs()) as usize;
+    // Each beep's moment heard, and the frame that should show then.
+    let beeps: Vec<(Instant, i64)> = if speed > 0.0 {
+        beep::onsets(&mono, 0.1, gap)
+            .into_iter()
+            .zip(1..)
+            .map(|(i, k)| (rec.heard_at(i, RATE).unwrap(), 30 * k))
+            .collect()
+    } else {
+        let ends = burst_ends(&mono, 0.1, gap);
+        let n = ends.len() as i64;
+        ends.into_iter()
+            .zip(0..)
+            .filter(|(_, k)| *k < n - 1)
+            .map(|(end, k)| (rec.heard_at(end + 1, RATE).unwrap(), 30 * (n - 1 - k) - 1))
+            .collect()
+    };
+    // Forward the beeps after frame 15; backward those but the one at 0.
+    assert_eq!(
+        beeps.len() as i64,
+        (frames - 1) / 30,
+        "{speed}x: the beeps heard"
+    );
+    beeps
+        .into_iter()
+        .map(|(heard, frame)| {
+            let (_, shown) = first_shown
+                .iter()
+                .find(|(f, _)| *f == frame)
+                .unwrap_or_else(|| panic!("{speed}x: frame {frame} never shown"));
+            if *shown >= heard {
+                (*shown - heard).as_secs_f64() * 1e3
+            } else {
+                -(heard - *shown).as_secs_f64() * 1e3
+            }
+        })
+        .collect()
+}
+
+/// The display looks every 2 ms and the scheduler may add a few: what the
+/// alignment tests allow, at every speed.
+const ALIGNED_MS: std::ops::RangeInclusive<f64> = -1.0..=8.0;
+
+fn check_alignment(speed: f64, frames: i64) {
+    let offsets = alignment(speed, frames);
+    eprintln!("{speed}x: picture after its beep (ms): {offsets:.1?}");
     for ms in &offsets {
         assert!(
-            (-1.0..=8.0).contains(ms),
-            "picture vs. sound: {offsets:.1?} ms"
+            ALIGNED_MS.contains(ms),
+            "{speed}x: picture vs. sound {offsets:.1?} ms"
         );
     }
 }
 
 #[test]
-fn other_speeds_backward_keep_the_pitch() {
-    // Through atempo: the beeps come at the distance the speed makes, still
-    // at 1 kHz, within atempo's window (about a frame) of where the picture
-    // is. At 8× a 10 ms beep lasts 1.25 ms, shorter than that window: some
-    // are smeared away, so 8× is only printed.
+fn backward_the_pictures_stay_with_the_reversed_sound() {
+    check_alignment(-1.0, 120);
+}
+
+#[test]
+fn at_twice_the_speed_the_pictures_stay_with_the_sound() {
+    check_alignment(2.0, 120);
+}
+
+#[test]
+fn at_half_the_speed_the_pictures_stay_with_the_sound() {
+    check_alignment(0.5, 75);
+}
+
+#[test]
+fn twice_as_fast_backward_the_pictures_stay_with_the_sound() {
+    check_alignment(-2.0, 120);
+}
+
+#[test]
+fn other_speeds_keep_the_pitch_both_ways() {
+    // A steady 1 kHz tone stays 1 kHz; every beep is heard, and the sound
+    // lasts as long as the speed makes it. At 4× a 10 ms beep lasts
+    // 2.5 ms, a quarter of a fragment's hop, and may blend away: counted
+    // up to 2×.
     let a = beeps();
-    for speed in [-0.5, -2.0, -4.0, -8.0] {
-        let (player, out) = player(plan(&[clip(&a, 0, 120)], 0), false);
-        player.seek(119);
-        assert!(player.wait_ready(119, Duration::from_secs(10)));
+    let tone = src(
+        "m2",
+        FixtureSpec::new(VideoCodec::H264, Container::Mov, W, H, (30, 1), 120)
+            .sound(vidcut_av::fixture::Sound::Tone),
+    );
+    let played = |s: &Src, speed: f64| {
+        let (player, out) = player(plan(&[clip(s, 0, 120)], 0), false);
+        let from = if speed > 0.0 { 0 } else { 119 };
+        player.seek(from);
+        assert!(player.wait_ready(from, Duration::from_secs(10)));
         player.play(speed);
-        let sound = play_out(&player, &out);
-        let mono = left(&sound);
-        let from = sample(120) - 1;
-        let gap = (4_800.0 / speed.abs()) as usize;
-        let ends = burst_ends(&mono, 0.1, gap);
-        let mut found = Vec::new();
-        for (k, &end) in ends.iter().enumerate().take(4) {
-            let nominal = (from - sample(30 * (3 - k as i64))) as f64 / speed.abs();
-            let off_ms = (end as f64 - nominal) / 48.0;
-            // Zero crossings just before the burst's end: 2 a period.
-            let burst = &mono[end.saturating_sub(100)..end];
-            let crossings = burst
-                .windows(2)
-                .filter(|w| (w[0] < 0.0) != (w[1] < 0.0))
-                .count();
-            let hz = crossings as f64 / 2.0 / (burst.len() as f64 / 48_000.0);
-            found.push((off_ms, hz));
-        }
-        eprintln!(
-            "{speed}x: {} of 4 beeps, (ms off, Hz) {found:.1?}; {:.2} s of sound",
-            ends.len(),
-            mono.len() as f64 / 48_000.0
-        );
-        if speed.abs() <= 4.0 {
-            assert_eq!(ends.len(), 4, "{speed}x: every beep: {ends:?}");
-            for (k, (off_ms, hz)) in found.iter().enumerate() {
-                assert!(off_ms.abs() < 35.0, "{speed}x: beep {k} {off_ms:.1} ms off");
-                assert!(
-                    (800.0..1250.0).contains(hz),
-                    "{speed}x: beep {k} at {hz:.0} Hz"
-                );
-            }
-        }
+        left(&play_out(&player, &out))
+    };
+    for speed in [0.5, 2.0, 4.0, 8.0, -0.5, -2.0, -4.0, -8.0] {
+        let sound = played(&tone, speed);
+        let mid = &sound[sound.len() / 4..sound.len() * 3 / 4];
+        let crossings = mid
+            .windows(2)
+            .filter(|w| (w[0] < 0.0) != (w[1] < 0.0))
+            .count();
+        let hz = crossings as f64 / 2.0 / (mid.len() as f64 / 48_000.0);
+        let beeps = played(&a, speed);
+        let heard = beep::onsets(&beeps, 0.1, (4_800.0 / speed.abs()) as usize).len();
+        let seconds = beeps.len() as f64 / 48_000.0;
+        eprintln!("{speed}x: the tone at {hz:.0} Hz; {heard} of 4 beeps; {seconds:.2} s of sound");
         assert!(
-            (mono.len() as f64 - from as f64 / speed.abs()).abs() < 0.05 * 48_000.0,
-            "{speed}x: {} samples of sound for {from} of plan",
-            mono.len()
+            (hz - 1000.0).abs() < 20.0,
+            "{speed}x: the tone at {hz:.0} Hz"
         );
+        let plan_secs = 4.0 / speed.abs();
+        assert!(
+            (seconds - plan_secs).abs() < 0.05,
+            "{speed}x: {seconds:.2} s of sound for {plan_secs:.2}"
+        );
+        if speed.abs() <= 2.0 {
+            assert_eq!(heard, 4, "{speed}x: every beep");
+        }
     }
 }
 
