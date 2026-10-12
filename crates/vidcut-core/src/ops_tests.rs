@@ -1256,3 +1256,28 @@ fn an_edit_that_changes_nothing_is_no_undo_step() {
     let v1 = f.editor.project().track("V1").unwrap().volume_db;
     assert_eq!(v1, 0.0, "the undo took back the real change");
 }
+
+/// `edited` says when the project last changed, for people (scripts compare
+/// `rev`): every edit, undo and redo sets it; a request that fails or
+/// changes nothing leaves it.
+#[test]
+fn changes_record_when_they_were_made() {
+    let now = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+    };
+    let start = now();
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.append("m1", 0, 100);
+    let edited = f.editor.project().edited.expect("set by the edit");
+    assert!((start..=now()).contains(&edited), "{edited}");
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    f.ok(req("history.undo", json!({})));
+    let undone = f.editor.project().edited.unwrap();
+    assert!(undone > edited, "{undone} after {edited}");
+    f.err(req("edit.split", json!({"at": 5000})));
+    f.ok(req("project.set", json!({"ripple_on": true})));
+    assert_eq!(f.editor.project().edited, Some(undone));
+}

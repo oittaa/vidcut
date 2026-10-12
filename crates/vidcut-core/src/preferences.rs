@@ -23,11 +23,9 @@ pub struct Preferences {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Gpu {
-    /// Decode, scale and encode on the GPU where it gives the pictures the
-    /// CPU would: hardware encoders for exports and proxies (`auto` and
-    /// named alike), the GPU pipeline that feeds them, and the preview's
-    /// hardware decoding. Off, everything runs on the CPU, for comparing
-    /// the two or when a driver misbehaves.
+    /// Use the GPU to decode, scale and encode: in the preview, exports and
+    /// proxies. Off, all of it runs on the CPU, even when an export names a
+    /// GPU encoder.
     pub acceleration: bool,
 }
 

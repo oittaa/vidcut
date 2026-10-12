@@ -145,11 +145,9 @@ impl Workspace {
                                 egui::Checkbox::new(&mut on, "Decode, scale and encode on the GPU"),
                             )
                             .on_hover_text(
-                                "Where it gives the pictures the CPU would: hardware encoders \
-                                 for exports and proxies, the GPU pipeline that feeds them, and \
-                                 the preview's decoding. Off, \
-                                 everything runs on the CPU, slower: for comparing the two, or \
-                                 when a graphics driver misbehaves",
+                                "Use the graphics card for the viewer, exports and proxies. \
+                                 Turn off to do everything on the CPU, if a graphics driver \
+                                 causes trouble",
                             )
                             .changed()
                         {

@@ -218,7 +218,7 @@ vidcut history undo                         # works across separate runs
 
 **Safe automation:**
 - `--dry-run` reports `changes` without writing anything.
-- `--if-rev N` fails with `CONFLICT` if someone else changed the project after you read revision `N`. Every request on the project checks it: edits, exports, frames, measurements, queries, and live ones such as seeks and screenshots. An export encodes the project as it was when it started, whatever edits follow.
+- `--if-rev N` fails with `CONFLICT` if someone else changed the project after you read revision `N`. (The project's `edited`, milliseconds since 1970 UTC, says when it last changed, for people: the GUI's status bar shows it. Compare `rev`, not times.) Every request on the project checks it: edits, exports, frames, measurements, queries, and live ones such as seeks and screenshots. An export encodes the project as it was when it started, whatever edits follow.
 - `vidcut apply edits.jsonl` (or `-` for stdin) applies many requests atomically, as one undo step. The format is one `{"method", "params"}` object per line.
 - Parallel `vidcut` processes on one project are serialized by a lock and never corrupt it.
 

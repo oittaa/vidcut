@@ -27,6 +27,11 @@ pub struct Project {
     /// Increases with every change, including undo/redo. Mutations may pass
     /// `if_rev` to fail instead of clobbering a concurrent edit.
     pub rev: u64,
+    /// When the project last changed (an edit, undo or redo), in
+    /// milliseconds since 1970 UTC; `None` before its first change. For
+    /// showing people when it was edited: scripts compare `rev`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edited: Option<u64>,
     pub settings: Settings,
     /// The media pool, in pool order.
     pub media: Vec<Media>,
@@ -516,6 +521,7 @@ impl Project {
         Self {
             vidcut: FORMAT_VERSION,
             rev: 0,
+            edited: None,
             settings,
             media: Vec::new(),
             tracks: vec![Track::new("V1", TrackKind::Video)],

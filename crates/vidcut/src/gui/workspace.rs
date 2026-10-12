@@ -132,6 +132,58 @@ pub struct Workspace {
     pub(super) tiles: Option<super::tiles::Tiles>,
 }
 
+/// A moment in local time.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct LocalTime {
+    year: i32,
+    month: u32,
+    day: u32,
+    hour: u32,
+    minute: u32,
+    second: u32,
+}
+
+impl LocalTime {
+    /// `2026-10-12 14:32:05`.
+    fn full(&self) -> String {
+        format!(
+            "{}-{:02}-{:02} {:02}:{:02}:{:02}",
+            self.year, self.month, self.day, self.hour, self.minute, self.second
+        )
+    }
+}
+
+/// `ms` (since 1970 UTC) in the computer's time zone.
+fn local_time(ms: u64) -> Option<LocalTime> {
+    let secs = libc::time_t::try_from(ms / 1000).ok()?;
+    // SAFETY: localtime_r writes only the `tm` it is given.
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    if unsafe { libc::localtime_r(&secs, &mut tm) }.is_null() {
+        return None;
+    }
+    Some(LocalTime {
+        year: tm.tm_year + 1900,
+        month: u32::try_from(tm.tm_mon + 1).ok()?,
+        day: u32::try_from(tm.tm_mday).ok()?,
+        hour: u32::try_from(tm.tm_hour).ok()?,
+        minute: u32::try_from(tm.tm_min).ok()?,
+        second: u32::try_from(tm.tm_sec).ok()?,
+    })
+}
+
+/// When the project last changed, for the status bar: the time if today,
+/// else the date too.
+fn edited_text(edited: &LocalTime, today: &LocalTime) -> String {
+    if (edited.year, edited.month, edited.day) == (today.year, today.month, today.day) {
+        format!("edited {:02}:{:02}", edited.hour, edited.minute)
+    } else {
+        format!(
+            "edited {}-{:02}-{:02} {:02}:{:02}",
+            edited.year, edited.month, edited.day, edited.hour, edited.minute
+        )
+    }
+}
+
 /// How the viewer's player decodes, for the status bar, from mpv's
 /// `hwdec-current`, and what it means on hover. `None` before it has
 /// opened a file.
@@ -676,11 +728,27 @@ impl Workspace {
                 if let Some(p) = self.project() {
                     let fps = p.settings.fps;
                     ui.separator();
-                    ui.label(dim(format!("revision {}", p.rev))).on_hover_text(
-                        "The project's revision: one up with every change, undo too. \
-                         Scripts and agents give it with --if-rev, so they never overwrite \
-                         an edit made since they last looked",
+                    let revision = format!(
+                        "Revision {}: one up with every change. Scripts give it with \
+                         --if-rev so they never overwrite a newer edit",
+                        p.rev
                     );
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |d| d.as_millis() as u64);
+                    match (p.edited.and_then(local_time), local_time(now)) {
+                        (Some(edited), Some(today)) => {
+                            ui.label(dim(edited_text(&edited, &today)))
+                                .on_hover_text(format!(
+                                    "Last changed {}, local time\n{revision}",
+                                    edited.full()
+                                ));
+                        }
+                        _ => {
+                            ui.label(dim(format!("revision {}", p.rev)))
+                                .on_hover_text(revision);
+                        }
+                    }
                     ui.separator();
                     let format = ui.label(dim(format!(
                         "{}×{}, {} fps",
@@ -1432,7 +1500,25 @@ pub(super) fn dim(text: impl Into<String>) -> RichText {
 
 #[cfg(test)]
 mod tests {
-    use super::decoding;
+    use super::{LocalTime, decoding, edited_text};
+
+    #[test]
+    fn the_status_bar_says_when_the_project_changed() {
+        let at = |day, hour, minute| LocalTime {
+            year: 2026,
+            month: 10,
+            day,
+            hour,
+            minute,
+            second: 5,
+        };
+        assert_eq!(edited_text(&at(12, 9, 5), &at(12, 23, 0)), "edited 09:05");
+        assert_eq!(
+            edited_text(&at(11, 14, 32), &at(12, 9, 0)),
+            "edited 2026-10-11 14:32"
+        );
+        assert_eq!(at(12, 9, 5).full(), "2026-10-12 09:05:05");
+    }
 
     #[test]
     fn the_status_bar_says_where_the_viewer_decodes() {

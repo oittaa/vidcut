@@ -217,6 +217,13 @@ pub struct Editor {
     history: History,
 }
 
+/// Now, in milliseconds since 1970 UTC (`Project::edited`).
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
+}
+
 impl Editor {
     pub fn new(project: Project, history: History) -> Self {
         Self { project, history }
@@ -297,6 +304,7 @@ impl Editor {
             });
         }
         working.rev = self.project.rev + 1;
+        working.edited = Some(now_ms());
         let before = std::mem::replace(&mut self.project, working);
         self.history.undo.push(Entry {
             label,
@@ -321,6 +329,10 @@ impl Editor {
     pub fn record_external(&mut self, project: Project) {
         let mut project = project;
         project.rev = project.rev.max(self.project.rev + 1);
+        // The writer's time, or now for a change made by hand.
+        if project.edited == self.project.edited {
+            project.edited = Some(now_ms());
+        }
         let before = std::mem::replace(&mut self.project, project);
         self.history.undo.push(Entry {
             label: "external change".into(),
@@ -372,6 +384,7 @@ impl Editor {
         }
         // Revisions only grow, even when undoing back to an older state.
         project.rev = self.project.rev + 1;
+        project.edited = Some(now_ms());
         self.project = project;
         self.history = history;
         Ok(Response {
