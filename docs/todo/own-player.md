@@ -6,7 +6,7 @@ Playback already decodes and mixes with the FFmpeg libraries in-process (`vidcut
 
 What is left is drawing a GPU frame. The GUI is still egui on OpenGL (glow). libmpv remains only for the preview spikes, which embed through OpenGL. A GPU viewer would use wgpu (Vulkan on Linux and Windows, Metal on macOS) so the GUI can leave OpenGL. OpenGL is deprecated on macOS.
 
-The aim is one decoder for playing, paused frames, exports and thumbnails, decoding on the GPU wherever that is faster. Proxies, and NVENC exports of upright progressive SDR pieces, already decode on NVDEC.
+The aim is one decoder for playing, paused frames, exports and thumbnails, decoding on the GPU wherever that is faster. Proxies, and NVENC exports of upright progressive SDR pieces, already decode on NVDEC and scale on the GPU. 8-bit padding and BT.601 or full-range conversion stay there too.
 
 ## How
 
@@ -23,5 +23,5 @@ The aim is one decoder for playing, paused frames, exports and thumbnails, decod
 
 ## Order
 
-1. GPU decoding for what is still on the CPU: the export pieces that still upload (padding, interlaced, HDR), timeline tiles, then the playing viewer ([gpu-decoding.md](gpu-decoding.md)).
+1. GPU decoding for what is still on the CPU: 10-bit padding, turned pictures, interlaced sources, HDR, timeline tiles, then the playing viewer ([gpu-decoding.md](gpu-decoding.md)). 8-bit padding and BT.601 or full range already stay on the GPU for NVENC exports and proxies.
 2. Upload the session player's frame through wgpu, and drop the OpenGL viewer path. The libmpv spikes can stay until nothing calls them.

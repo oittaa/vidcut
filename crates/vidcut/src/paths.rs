@@ -21,8 +21,8 @@ pub fn config_dir() -> PathBuf {
     xdg("XDG_CONFIG_HOME", ".config")
 }
 
-/// `~/.cache/vidcut`: encoder detection, preview fillers, remuxes and
-/// proxies written when no project folder is known.
+/// `~/.cache/vidcut`: encoder detection, preview fillers, remuxes, the GPU
+/// converter's shaders and proxies written when no project folder is known.
 pub fn cache_dir() -> PathBuf {
     xdg("XDG_CACHE_HOME", ".cache")
 }

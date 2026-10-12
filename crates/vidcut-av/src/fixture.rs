@@ -151,12 +151,43 @@ pub enum Picture {
     /// A new shot every `frames` frames (for scene detection): a flat level
     /// per shot with a slowly moving bar; every fourth shot is black.
     Shots { frames: u32 },
+    /// Four upright stripes of [`Picture::COLORS`], left to right, in every
+    /// frame (for color conversion tests).
+    Colors,
 }
 
 impl Picture {
+    /// The (Y, Cb, Cr) of the stripes of [`Picture::Colors`], 8-bit video
+    /// range: an orange, a light blue, a green and a purple, well inside
+    /// the gamut of BT.601 and BT.709.
+    pub const COLORS: [(u8, u8, u8); 4] = [
+        (100, 90, 170),
+        (150, 160, 100),
+        (120, 100, 110),
+        (80, 150, 150),
+    ];
+
     /// Luma of shot `s` of [`Picture::Shots`]: 16 (black) for every fourth.
     pub fn shot_level(s: u32) -> u8 {
         [70, 190, 120, 16][(s % 4) as usize]
+    }
+}
+
+/// Chroma plane `p` (1: Cb, 2: Cr) of `f` painted with the stripes of
+/// [`Picture::Colors`], each sample written as `bytes` gives it.
+fn paint_chroma<const N: usize>(f: &mut frame::Video, p: usize, bytes: impl Fn(u8) -> [u8; N]) {
+    let (w, h, stride) = (
+        f.plane_width(p) as usize,
+        f.plane_height(p) as usize,
+        f.stride(p),
+    );
+    let data = f.data_mut(p);
+    for y in 0..h {
+        for x in 0..w {
+            let (_, cb, cr) = Picture::COLORS[x * 4 / w];
+            let at = y * stride + N * x;
+            data[at..at + N].copy_from_slice(&bytes(if p == 1 { cb } else { cr }));
+        }
     }
 }
 
@@ -379,6 +410,7 @@ impl FixtureSpec {
             (true, Picture::Barcode) => "bc".to_string(),
             (true, Picture::Black) => "black".to_string(),
             (true, Picture::Shots { frames }) => format!("shots{frames}-"),
+            (true, Picture::Colors) => "colors".to_string(),
         };
         let rot = match self.rotation {
             0 => String::new(),
@@ -918,6 +950,11 @@ impl VideoTrack {
             }
             Picture::Barcode => crate::barcode::paint(k, &mut self.luma8, w, h, w),
             Picture::Black => self.luma8.fill(16),
+            Picture::Colors => {
+                for (i, px) in self.luma8.iter_mut().enumerate() {
+                    *px = Picture::COLORS[(i % w) * 4 / w].0;
+                }
+            }
             Picture::Shots { frames } => {
                 let level = Picture::shot_level(k / frames.max(1));
                 self.luma8.fill(level);
@@ -972,6 +1009,9 @@ impl VideoTrack {
                 for px in frame.data_mut(p).as_chunks_mut::<2>().0 {
                     *px = 512u16.to_le_bytes();
                 }
+                if spec.picture == Picture::Colors {
+                    paint_chroma(&mut frame, p, |c| (u16::from(c) << 2).to_le_bytes());
+                }
             }
         } else {
             let stride = frame.stride(0);
@@ -981,6 +1021,9 @@ impl VideoTrack {
             }
             for p in 1..frame.planes() {
                 frame.data_mut(p).fill(128);
+                if spec.picture == Picture::Colors {
+                    paint_chroma(&mut frame, p, |c| [c]);
+                }
             }
         }
         if let Some(top) = spec.top_field_first {

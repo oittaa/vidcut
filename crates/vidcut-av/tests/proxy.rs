@@ -224,7 +224,8 @@ fn a_sequence_proxy_uses_the_sequence_timestamps() {
 /// With NVENC, sources the GPU shows as the CPU would are decoded on NVDEC
 /// and scaled there, frames never leaving it: each proxy frame is still
 /// the source frame with its timestamp (interlaced ones deinterlaced one
-/// frame per frame, as the CPU reader does). Turned sources, and ones NVDEC
+/// frame per frame, as the CPU reader does; BT.601 ones converted by
+/// libplacebo). Turned sources, interlaced ones in BT.601, and ones NVDEC
 /// can't decode, are made on the CPU, still with NVENC.
 #[cfg(feature = "gpu-tests")]
 #[test]
@@ -236,6 +237,7 @@ fn nvenc_proxies_decode_on_the_gpu_and_stay_exact() {
         .collect();
     assert!(!nvenc.is_empty(), "no NVENC here");
     let hd = |codec, container| FixtureSpec::new(codec, container, 1280, 720, (30, 1), 45);
+    let sd = FixtureSpec::new(VideoCodec::H264, Container::Mp4, 640, 360, (30, 1), 45);
     let cases = [
         (
             "H.264 with B-frames",
@@ -256,6 +258,9 @@ fn nvenc_proxies_decode_on_the_gpu_and_stay_exact() {
             hd(VideoCodec::H264, Container::Mp4).interlaced(true),
             true,
         ),
+        // Untagged SD is BT.601: libplacebo converts it first.
+        ("BT.601", sd.clone(), true),
+        ("interlaced BT.601", sd.interlaced(true), false),
         (
             "turned",
             hd(VideoCodec::H264, Container::Mp4).rotation(90),

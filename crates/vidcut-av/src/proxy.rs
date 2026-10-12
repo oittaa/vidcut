@@ -162,9 +162,10 @@ pub struct WrittenProxy {
 ///
 /// With NVENC, the frames are decoded on NVDEC and scaled on the GPU, never
 /// copied to memory, when that gives the same pictures as the CPU: a video
-/// file that is upright and SDR BT.709, progressive or interlaced
-/// ([`gpu_suitable`]). Otherwise, or when NVDEC can't decode the stream,
-/// they are decoded and scaled on the CPU as for every other encoder.
+/// file that is upright and SDR ([`gpu_suitable`]), progressive, or
+/// interlaced and BT.709 in video range. Otherwise, or when NVDEC can't
+/// decode the stream, they are decoded and scaled on the CPU as for every
+/// other encoder.
 pub fn write(
     input: &Input,
     width: u32,
@@ -252,21 +253,11 @@ pub fn write(
 }
 
 /// Whether frames like `first` can be decoded and scaled on the GPU and
-/// look as they would from the CPU: upright (the GPU can't turn them), SDR
-/// (it can't tone-map) and BT.709 or untagged HD, which needs no matrix
-/// change, in video range.
+/// look as they would from the CPU: upright (the GPU can't turn them) and
+/// SDR (it can't tone-map). [`CudaPictures`](crate::cuda::CudaPictures)
+/// converts other matrices and full range with libplacebo.
 pub fn gpu_suitable(first: &frame::Video, rotation: u16) -> bool {
-    use ffi::AVColorSpace as S;
-    let raw = unsafe { &*first.as_ptr() };
-    let bt709 = match raw.colorspace {
-        S::AVCOL_SPC_BT709 => true,
-        S::AVCOL_SPC_UNSPECIFIED => first.width() >= 1280 || first.height() > 576,
-        _ => false,
-    };
-    rotation == 0
-        && crate::color::hdr_of(first).is_none()
-        && bt709
-        && raw.color_range != ffi::AVColorRange::AVCOL_RANGE_JPEG
+    rotation == 0 && crate::color::hdr_of(first).is_none()
 }
 
 /// The encoder's time base: the source's, when its denominator is a sane
@@ -567,16 +558,18 @@ fn encode_on_gpu(
         .ok_or_else(|| Failed::Unsuitable(Error::Invalid("no frames".into())))?;
     if !gpu_suitable(first, reader.rotation()) {
         return Err(Failed::Unsuitable(Error::Invalid(
-            "turned, HDR or not BT.709: the CPU makes this proxy".into(),
+            "turned or HDR: the CPU makes this proxy".into(),
         )));
     }
     let src_tb = reader.time_base();
     let mut pictures = crate::cuda::CudaPictures::new(
+        device,
         first,
         src_tb,
         (width, height),
         format::Pixel::NV12,
         reader.interlaced(),
+        false,
     )
     .map_err(Failed::Unsuitable)?;
     let frames = pictures.frames_ctx();
