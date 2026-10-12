@@ -1078,7 +1078,14 @@ fn a_still_renderer_reads_on_and_back_exactly() {
     let mut renderer = vidcut_av::export::still::StillRenderer::default();
     // Forward a frame or a few at a time decodes on; back, or far ahead,
     // seeks. Every picture is the frame asked for.
-    for (i, frame) in [37, 38, 39, 45, 44, 10, 11, 140, 2].into_iter().enumerate() {
+    // Back a frame at a time: the frames rendered on the way to the first
+    // one back stand in for the next.
+    let back = (100..=120).rev();
+    for (i, frame) in [37, 38, 39, 45, 44, 10, 11, 140, 2]
+        .into_iter()
+        .chain(back)
+        .enumerate()
+    {
         let img = renderer.rgba(&v(&a1, frame, 1), fps, 320, 180).unwrap();
         let png = vidcut_av::export::still::png_rgba(img.width, img.height, &img.rgba).unwrap();
         let path = dir.path().join(format!("{i}.png"));
