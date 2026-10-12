@@ -25,10 +25,10 @@ A simple, fully scriptable video cutting tool for Linux, modeled on DaVinci Reso
 
 ## Requirements
 
-Ubuntu 26.04 (or similar) with FFmpeg 8 and libmpv:
+Ubuntu 26.04 (or similar) with FFmpeg 8. Playback does not need libmpv.
 
 ```bash
-sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libclang-dev libmpv2 rustup
+sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libclang-dev rustup
 ```
 
 Rust comes from [rustup](https://rustup.rs). The repository pins its Rust version in `rust-toolchain.toml`, and rustup downloads that toolchain the first time you build.
@@ -219,4 +219,4 @@ Read [AGENTS.md](AGENTS.md) first; it's written for AI agents but applies to hum
 
 vidcut's source code is released under the [MIT License](LICENSE).
 
-vidcut links the FFmpeg libraries and loads libmpv at runtime. Both are LGPL or GPL depending on how they were built, and Ubuntu's builds are GPL. Binaries you distribute together with those libraries must therefore comply with their licenses. vidcut's own source stays MIT.
+vidcut links the FFmpeg libraries. They are LGPL or GPL depending on how they were built, and Ubuntu's builds are GPL. Binaries you distribute together with those libraries must therefore comply with their licenses. vidcut's own source stays MIT. Playback does not load libmpv.

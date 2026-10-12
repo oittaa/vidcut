@@ -116,7 +116,6 @@ fn proxies_encode_beside_the_session() {
     let (h, session) = live::start(live::Config {
         project: Some(path.clone()),
         create: false,
-        players: None,
         preview_error: Some("no preview in tests".into()),
         renderer: Arc::new(NoRenderer),
         notify: Arc::new(|| {}),

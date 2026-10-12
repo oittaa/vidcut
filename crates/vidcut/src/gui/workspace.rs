@@ -76,6 +76,8 @@ pub struct Workspace {
     /// The players' pictures, and the sizes (physical pixels) the viewer
     /// wants them rendered at.
     pub pictures: [Picture; 2],
+    /// Uploaded session frames, keyed by the picture allocation.
+    pub(super) player_tex: [Option<(usize, egui::TextureHandle)>; 2],
     pub wants: [[i32; 2]; 2],
     // View state (not part of the project).
     pub(super) pool_view: PoolView,
@@ -135,6 +137,7 @@ impl Workspace {
             live,
             thumbs: HashMap::new(),
             pictures: [Picture::default(); 2],
+            player_tex: [None, None],
             wants: [[640, 360]; 2],
             pool_view: PoolView::Thumbnails,
             search: String::new(),

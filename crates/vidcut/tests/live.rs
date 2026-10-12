@@ -1,10 +1,11 @@
-//! The live session without a window: both players render through mpv's
-//! software renderer on a harness thread (standing in for the GUI), and
-//! requests go through `Handle::call` exactly as IPC clients' do. Checks that
-//! what the viewer shows after seeks and edits is frame-exact, that edits from
-//! other processes appear, and the clipboard and selection behavior.
+//! The live session without a window. Playback is the session's own player
+//! (FFmpeg, in process). A harness thread stands in for the GUI: it acks
+//! presents, and can hold one back so a later seek overtakes it. Requests go
+//! through `Handle::call` exactly as IPC clients' do. Checks that what the
+//! viewer shows after seeks and edits is frame-exact, that edits from other
+//! processes appear, and the clipboard and selection behavior.
 //!
-//! Needs libmpv (skips without it), no display.
+//! No display, and libmpv is not loaded.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -12,12 +13,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use vidcut::live::{self, Capture, Image, Origin, PlayerId, Presented, WindowChange};
-use vidcut_av::fixture::{self, Container, FixtureSpec, ImageSpec, VideoCodec};
+use vidcut::live::{self, Capture, Origin, PlayerId, Presented, WindowChange};
+use vidcut_av::fixture::{self, AudioCodec, Container, FixtureSpec, ImageSpec, Sound, VideoCodec};
 use vidcut_core::model::Settings;
 use vidcut_core::time::Rational;
 use vidcut_core::{Envelope, ErrorCode, Project, Response, Store};
-use vidcut_mpv::{Mpv, SwRenderer, ffi::MPV_RENDER_UPDATE_FRAME};
 
 const W: usize = 320;
 const H: usize = 180;
@@ -54,59 +54,35 @@ struct Harness {
 }
 
 impl Harness {
-    fn start(project: &Path) -> Option<Self> {
-        if let Err(e) = vidcut_mpv::available() {
-            eprintln!("skipping: {e}");
-            return None;
-        }
-        let mut opts = live::mpv_options(false);
-        opts.push(("hwdec".into(), "no".into()));
-        let opts: Vec<(&str, &str)> = opts.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-        let source = Mpv::new(&opts).unwrap();
-        let timeline = Mpv::new(&opts).unwrap();
+    fn start(project: &Path) -> Self {
         let port = Arc::new(Port::default());
         let stop = Arc::new(AtomicBool::new(false));
-        // The "render thread": renders both players into buffers whenever
-        // mpv has a frame or the session asks to present them, and answers
-        // captures.
+        // The "render thread" only acks presents. A stall holds the ack
+        // (cleared as the wait starts, so a second seek lands first).
         let render = {
             let (port, stop) = (port.clone(), stop.clone());
-            let players = [source.clone(), timeline.clone()];
             std::thread::spawn(move || {
-                let mut renderers: Vec<SwRenderer> = players
-                    .iter()
-                    .map(|m| SwRenderer::new(m).unwrap())
-                    .collect();
-                let mut bufs = vec![vec![0u8; W * H * 4]; 2];
                 while !stop.load(Ordering::Relaxed) {
-                    if port.stall.load(Ordering::Relaxed) > 0
-                        && renderers.iter().any(|r| r.next_frame_is_new())
-                    {
-                        let ms = port.stall.swap(0, Ordering::Relaxed);
+                    let stalled = {
+                        let pending = port.presents.lock().unwrap();
+                        if port.stall.load(Ordering::Relaxed) > 0 && !pending.is_empty() {
+                            Some(port.stall.swap(0, Ordering::Relaxed))
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some(ms) = stalled {
                         std::thread::sleep(Duration::from_millis(ms));
                     }
                     let presents: Vec<_> = port.presents.lock().unwrap().drain(..).collect();
-                    for (i, r) in renderers.iter_mut().enumerate() {
-                        let present = presents.iter().any(|(id, _)| id.index() == i);
-                        if r.update() & MPV_RENDER_UPDATE_FRAME != 0 || present {
-                            r.render_rgb0(W, H, W * 4, &mut bufs[i]).unwrap();
-                        }
-                    }
                     for (_, done) in presents {
                         done();
                     }
+                    // Captures are answered by the session. Drop any the
+                    // renderer was asked for so a waiter cannot hang.
                     let captures: Vec<_> = port.captures.lock().unwrap().drain(..).collect();
-                    for (id, done) in captures {
-                        // RGB0 → opaque RGBA.
-                        let mut rgba = bufs[id.index()].clone();
-                        for px in rgba.as_chunks_mut::<4>().0 {
-                            px[3] = 255;
-                        }
-                        done(Ok(Image {
-                            width: W as u32,
-                            height: H as u32,
-                            rgba,
-                        }));
+                    for (_, done) in captures {
+                        done(Err(vidcut_core::Error::usage("no render context")));
                     }
                     std::thread::sleep(Duration::from_millis(2));
                 }
@@ -115,19 +91,18 @@ impl Harness {
         let (handle, session) = live::start(live::Config {
             project: Some(project.to_path_buf()),
             create: false,
-            players: Some((source, timeline)),
             preview_error: None,
             renderer: port.clone(),
             notify: Arc::new(|| {}),
             socket: None,
         });
-        Some(Self {
+        Self {
             handle,
             port,
             session: Some(session),
             stop,
             render: Some(render),
-        })
+        }
     }
 
     fn call(&self, method: &str, params: Value) -> vidcut_core::Result<Response> {
@@ -171,6 +146,18 @@ impl Harness {
         let mut r = vidcut_av::decode::VideoReader::open(&out).unwrap();
         let f = r.next_frame().unwrap().unwrap();
         vidcut_av::decode::read_barcode(&f).unwrap()
+    }
+
+    fn timeline(&self) -> Value {
+        self.ok("player.state", json!({})).result["timeline"].clone()
+    }
+
+    fn position(&self) -> i64 {
+        self.timeline()["position"].as_i64().unwrap()
+    }
+
+    fn monitor(&self) -> Value {
+        self.timeline()["monitor"].clone()
     }
 
     /// Waits until `check` holds for the latest snapshot.
@@ -277,9 +264,7 @@ fn live_session() {
         ..Settings::default()
     };
     Store::create(&path, &Project::new(settings)).unwrap();
-    let Some(h) = Harness::start(&path) else {
-        return;
-    };
+    let h = Harness::start(&path);
     let t0 = Instant::now();
     let step = |name: &str| eprintln!("{:>8.1} ms  {name}", t0.elapsed().as_secs_f64() * 1e3);
 
@@ -863,4 +848,227 @@ fn live_session() {
     std::fs::set_permissions(&gone, std::fs::Permissions::from_mode(0o644)).unwrap();
 
     drop(h);
+}
+
+fn maps_contain_libmpv() -> bool {
+    std::fs::read_to_string("/proc/self/maps")
+        .unwrap()
+        .lines()
+        .any(|l| l.contains("libmpv"))
+}
+
+/// Playback through the live session with libmpv not mapped: barcodes across
+/// a cut and a gap, a step back, forward and reverse play, the fixture beep,
+/// and a lane fader that changes the next buffer.
+#[test]
+fn playback_without_libmpv() {
+    assert!(
+        !maps_contain_libmpv(),
+        "libmpv is mapped before the session starts"
+    );
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-nompv-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
+    // SAFETY: this test runs in its own process when invoked by name. The
+    // other test in this binary sets the same variable the same way.
+    unsafe { std::env::set_var("XDG_STATE_HOME", dir.join("state")) };
+    let settings = Settings {
+        fps: Rational::new(30, 1).unwrap(),
+        width: W as u32,
+        height: H as u32,
+        auto_format: false,
+        ..Settings::default()
+    };
+    let clip = fixture::ensure(
+        &FixtureSpec::new(
+            VideoCodec::H264,
+            Container::Mov,
+            W as u32,
+            H as u32,
+            (30, 1),
+            90,
+        )
+        .with_audio(AudioCodec::PcmS16, 48_000, 2),
+    )
+    .unwrap();
+    let path = dir.join("p.vidcut");
+    Store::create(&path, &Project::new(settings.clone())).unwrap();
+    let h = Harness::start(&path);
+    h.ok("media.add", json!({ "paths": [clip] }));
+    h.ok("edit.append", json!({ "media": "m1", "range": "0f..60f" }));
+    // Lift 10..20: a gap between source frame 9 and source frame 20.
+    h.ok(
+        "edit.delete_range",
+        json!({ "range": "10f..20f", "lift": true }),
+    );
+
+    let at = |frame: i64| {
+        h.ok("player.seek", json!({ "at": frame, "viewer": "timeline" }));
+        h.shown(dir)
+    };
+    assert_eq!(at(0), Some(0), "frame 0");
+    assert_eq!(at(9), Some(9), "the frame before the gap");
+    assert_eq!(at(15), None, "the gap is black");
+    assert_eq!(at(20), Some(20), "the frame after the gap");
+    h.ok("player.seek", json!({ "at": 24, "viewer": "timeline" }));
+    h.ok("player.step", json!({ "frames": -2, "viewer": "timeline" }));
+    assert_eq!(h.position(), 22);
+    assert_eq!(h.shown(dir), Some(22), "a step back");
+
+    // Forward play crosses the cut into the gap, then the next clip.
+    // Slow enough that a poll lands inside the ten-frame gap; pause before
+    // reading the picture so the playhead cannot move on.
+    h.ok("player.seek", json!({ "at": 8, "viewer": "timeline" }));
+    h.ok("player.play", json!({ "speed": 0.1 }));
+    let started = Instant::now();
+    let mut saw_gap = false;
+    let mut played = false;
+    while started.elapsed() < Duration::from_secs(12) {
+        let pos = h.position();
+        if (10..20).contains(&pos) && !saw_gap {
+            h.ok("player.pause", json!({}));
+            let pos = h.position();
+            assert!(
+                (10..20).contains(&pos),
+                "left the gap before pausing ({pos})"
+            );
+            assert_eq!(h.shown(dir), None, "playing through the gap at {pos}");
+            saw_gap = true;
+            h.ok("player.play", json!({ "speed": 0.1 }));
+        }
+        if pos >= 22 {
+            h.ok("player.pause", json!({}));
+            let pos = h.position();
+            assert!(pos >= 20, "paused before the cut ({pos})");
+            assert_eq!(
+                h.shown(dir),
+                Some(pos as u32),
+                "playing after the cut at {pos}"
+            );
+            played = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    h.ok("player.pause", json!({}));
+    assert!(saw_gap, "playback never showed the gap");
+    assert!(played, "playback never passed the cut");
+
+    // Reverse play steps back onto that same clip.
+    h.ok("player.seek", json!({ "at": 25, "viewer": "timeline" }));
+    h.ok("player.play", json!({ "speed": -1.0 }));
+    let started = Instant::now();
+    let mut reversed = None;
+    while started.elapsed() < Duration::from_secs(4) {
+        let pos = h.position();
+        if (20..25).contains(&pos) {
+            let code = h.shown(dir);
+            assert_eq!(code, Some(pos as u32), "playing backwards at {pos}");
+            reversed = code;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    h.ok("player.pause", json!({}));
+    assert!(reversed.is_some(), "reverse play did not step back");
+
+    // The beep is the first 10 ms of every source second. Frame 0 and
+    // frame 30 (one second into the source, past the gap) each start on it;
+    // a later buffer in that second is quiet.
+    let beep_at = |frame: i64| {
+        h.ok("player.seek", json!({ "at": frame, "viewer": "timeline" }));
+        let seq = h.monitor()["seq"].as_u64().unwrap();
+        h.ok("player.play", json!({ "speed": 1.0 }));
+        let started = Instant::now();
+        let mut heard = false;
+        let mut quiet = false;
+        while started.elapsed() < Duration::from_secs(2) {
+            let m = h.monitor();
+            if m["seq"].as_u64().unwrap() > seq && m["since_seek_peak"].as_f64().unwrap() > 0.2 {
+                heard = true;
+            }
+            if heard && m["peak"].as_f64().unwrap() < 0.05 && h.position() > frame {
+                quiet = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        h.ok("player.pause", json!({}));
+        assert!(heard, "no beep at frame {frame}");
+        assert!(quiet, "the beep at frame {frame} never went quiet");
+    };
+    beep_at(0);
+    beep_at(30);
+
+    // A steady tone, so the fader's next buffer is a level change and not
+    // the silence between beeps. The picture keeps moving; the project does not.
+    let tone = fixture::ensure(
+        &FixtureSpec::new(
+            VideoCodec::H264,
+            Container::Mov,
+            W as u32,
+            H as u32,
+            (30, 1),
+            90,
+        )
+        .with_audio(vidcut_av::fixture::AudioCodec::PcmS16, 48_000, 2)
+        .sound(Sound::Tone),
+    )
+    .unwrap();
+    let tone_path = dir.join("tone.vidcut");
+    Store::create(&tone_path, &Project::new(settings)).unwrap();
+    h.ok("project.open", json!({ "path": tone_path }));
+    h.ok("media.add", json!({ "paths": [tone] }));
+    h.ok("edit.append", json!({ "media": "m1", "range": "0f..90f" }));
+    h.ok("player.seek", json!({ "at": 0, "viewer": "timeline" }));
+    h.ok("player.play", json!({ "speed": 1.0 }));
+    let started = Instant::now();
+    let mut loud = 0.0;
+    while started.elapsed() < Duration::from_secs(2) {
+        loud = h.monitor()["rms"].as_f64().unwrap();
+        if loud > 0.05 && h.position() > 0 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(loud > 0.05, "the tone is not audible ({loud})");
+    let seq = h.monitor()["seq"].as_u64().unwrap();
+    let rev = h.ok("project.summary", json!({})).rev;
+    let preview = h.ok(
+        "mixer.preview",
+        json!({ "track": "V1", "volume_db": -60.0 }),
+    );
+    assert_eq!(preview.result["live"], true);
+    let started = Instant::now();
+    let mut quiet = loud;
+    while started.elapsed() < Duration::from_secs(2) {
+        let m = h.monitor();
+        quiet = m["rms"].as_f64().unwrap();
+        if m["seq"].as_u64().unwrap() > seq && quiet < loud / 100.0 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let pos = h.position();
+    let code = h.shown(dir);
+    h.ok("player.pause", json!({}));
+    assert!(
+        quiet < loud / 100.0,
+        "the fader did not drop the level ({quiet} from {loud})"
+    );
+    assert!(pos > 0, "playback stopped for the fader");
+    assert_eq!(code, Some(pos as u32), "the picture kept moving");
+    assert_eq!(h.ok("project.summary", json!({})).rev, rev);
+    let missing = h
+        .call("mixer.preview", json!({ "track": "V7", "volume_db": 0.0 }))
+        .unwrap_err();
+    assert_eq!(missing.code, ErrorCode::Media, "{missing}");
+
+    assert!(!maps_contain_libmpv(), "libmpv was loaded during playback");
+    println!("BARCODE 0 9 black 20 22");
+    println!("BEEP frame0=1 frame30=1");
+    println!("FADER drop=1");
+    println!("MAPS libmpv=absent");
 }

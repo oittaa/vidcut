@@ -1,5 +1,5 @@
-//! Checks against the real GUI (needs a Wayland or X11 display and
-//! libmpv; run with `--features vidcut/gui-tests`). Starts `vidcut -p FILE`,
+//! Checks against the real GUI (needs a Wayland or X11 display; run with
+//! `--features vidcut/gui-tests`). Starts `vidcut -p FILE`,
 //! drives it through the CLI like an agent would, and checks:
 //! - a CLI edit is applied by the GUI and shows in its window in < 100 ms;
 //! - after `seek`, the viewer screenshot shows exactly the frame `vidcut frame`
@@ -7,8 +7,7 @@
 //! - live control keeps working while the window is minimized.
 //!
 //! A failed run keeps its temp dir (it says which): the screenshots, each
-//! player's mpv log (`VIDCUT_MPV_LOG_DIR`) and the GUI's stderr with
-//! `VIDCUT_DEBUG_PLAYER` traces.
+//! GUI's stderr with `VIDCUT_DEBUG_PLAYER` traces.
 #![cfg(feature = "gui-tests")]
 
 use std::path::{Path, PathBuf};
@@ -103,7 +102,7 @@ impl Drop for Gui {
         if std::thread::panicking() {
             self.dir.disable_cleanup(true);
             eprintln!(
-                "kept {}: screenshots, mpv logs, the GUI's stderr",
+                "kept {}: screenshots and the GUI's stderr",
                 self.dir.path().display()
             );
         }
@@ -114,10 +113,6 @@ impl Drop for Gui {
 fn gui_acceptance() {
     if std::env::var_os("WAYLAND_DISPLAY").is_none() && std::env::var_os("DISPLAY").is_none() {
         eprintln!("skipping: no display");
-        return;
-    }
-    if let Err(e) = vidcut_mpv::available() {
-        eprintln!("skipping: {e}");
         return;
     }
     let media = fixture::ensure(&FixtureSpec::new(
@@ -152,8 +147,7 @@ fn gui_acceptance() {
     let out = Command::new(BIN).arg("new").arg(&project).output().unwrap();
     assert!(out.status.success());
     // A phone-style clip, stored sideways with a rotation: the preview
-    // turns it upright on the GPU, like export. (mpv's software renderer,
-    // which tests/live.rs uses, aborts on rotated video.)
+    // turns it upright, like export.
     let rotated = fixture::ensure(
         &FixtureSpec::new(VideoCodec::H264, Container::Mp4, 640, 360, (30, 1), 60)
             .rotation(90)
@@ -172,7 +166,6 @@ fn gui_acceptance() {
         .arg("-p")
         .arg(&project)
         .env("XDG_STATE_HOME", dir.join("state"))
-        .env("VIDCUT_MPV_LOG_DIR", &dir)
         .env("VIDCUT_DEBUG_PLAYER", "1")
         .stdout(Stdio::null())
         .stderr(stderr)
@@ -194,11 +187,6 @@ fn gui_acceptance() {
             "GUI did not start"
         );
         std::thread::sleep(Duration::from_millis(50));
-    }
-    // mpv opens its logs when the players are made, before the session starts.
-    for player in ["source", "timeline"] {
-        let log = dir.join(format!("{pid}-{player}.log"));
-        assert!(log.exists(), "no mpv log {}", log.display());
     }
     // A fixed window size keeps screenshots comparable.
     gui.cli(&["window", "--size", "1280x800"]);

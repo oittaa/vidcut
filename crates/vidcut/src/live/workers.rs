@@ -1,5 +1,5 @@
-//! Background threads for slow media work (thumbnails, preview fillers,
-//! remuxes). Jobs report back to the session as messages.
+//! Background threads for slow media work (thumbnails, remuxes, tail
+//! checks). Jobs report back to the session as messages.
 
 use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex};

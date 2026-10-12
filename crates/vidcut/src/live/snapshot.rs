@@ -50,11 +50,14 @@ pub struct PlayerSnap {
     pub playing: bool,
     /// Shuttle speed (negative: backwards); 0 when stopped.
     pub speed: f64,
-    /// mpv's hardware decoder in use (`nvdec`, `vaapi`, `no`).
+    /// Hardware decoder in use, when playback is on the GPU.
     pub hwdec: String,
     /// Display size of the current video frame.
     pub video_size: Option<(u32, u32)>,
     pub error: Option<String>,
+    /// The frame on screen. Not part of the serialized state.
+    #[serde(skip)]
+    pub picture: Option<Arc<vidcut_av::thumbs::Image>>,
 }
 
 #[derive(Debug, Clone)]
@@ -174,7 +177,7 @@ pub struct Snapshot {
     pub waveforms: Arc<HashMap<String, Arc<vidcut_av::waveform::Waveform>>>,
     /// Export jobs, oldest first.
     pub jobs: Arc<Vec<super::JobInfo>>,
-    /// Why there is no preview (libmpv missing), if so.
+    /// Why there is no preview, if so.
     pub preview_error: Option<String>,
 }
 

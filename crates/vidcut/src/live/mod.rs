@@ -1,10 +1,10 @@
 //! The live session: the running GUI's core thread.
 //!
-//! One thread owns the open project, both mpv players and everything the
+//! One thread owns the open project, both players and everything the
 //! viewer shows. The GUI, IPC clients and background jobs reach it only
 //! through messages ([`Handle`]). After every change it publishes an
 //! immutable [`Snapshot`], which the UI thread reads without waiting: the UI
-//! never blocks on the session and never calls mpv's client API.
+//! never blocks on the session and never decodes.
 //!
 //! Requests are the same [`Request`]s the CLI runs headless. Project edits go
 //! through the project's [`Editor`](vidcut_core::Editor) and are saved before
@@ -14,7 +14,6 @@
 //! encoder) reply later, without blocking other requests.
 
 mod jobs;
-mod mixctl;
 mod player;
 mod project;
 pub mod snapshot;
@@ -27,20 +26,18 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
+pub use jobs::{JobInfo, JobOutput, JobState};
+pub use player::debug;
 use serde_json::{Value, json};
+pub use snapshot::*;
+pub use vidcut_av::thumbs::Image;
 use vidcut_core::editor::{media_context, resolve_clip};
 use vidcut_core::model::Clip;
-use vidcut_core::preview::{self, Fillers};
+use vidcut_core::preview;
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{GuiPanel, OneOrMany, ScreenshotTarget, ViewerMode};
 use vidcut_core::time::{Keyword, Rational, TimeContext, TimeSpec, format_timecode};
 use vidcut_core::{Envelope, Error, Project, Request, Response, Result};
-use vidcut_mpv::Mpv;
-
-pub use jobs::{JobInfo, JobOutput, JobState};
-pub use player::{debug, mpv_log_options, mpv_options};
-pub use snapshot::*;
-pub use vidcut_av::thumbs::Image;
 
 use crate::env::AvEnv;
 use crate::ipc::{self, Instance};
@@ -82,9 +79,9 @@ pub type Presented = Box<dyn FnOnce() + Send>;
 /// What the session needs from whoever renders the players: the GUI, or a
 /// test harness.
 pub trait Renderer: Send + Sync {
-    /// Draw `player`'s current picture now, even if mpv has nothing new for
-    /// it, then call `done`. The session asks once a seek or load has
-    /// finished: the viewer then shows its frame (docs/decisions/gui.md §4).
+    /// Draw `player`'s current picture now, then call `done`. The session
+    /// asks once a seek or load has finished decoding: the viewer then
+    /// shows its frame.
     fn present(&self, player: PlayerId, done: Presented);
     /// The picture `player` shows, as displayed.
     fn capture_viewer(&self, player: PlayerId, done: Capture);
@@ -111,8 +108,6 @@ pub struct Config {
     pub project: Option<PathBuf>,
     /// Create the project file if it doesn't exist.
     pub create: bool,
-    /// Source and timeline players; `None` runs without preview.
-    pub players: Option<(Mpv, Mpv)>,
     /// Why there is no preview, if so.
     pub preview_error: Option<String>,
     pub renderer: Arc<dyn Renderer>,
@@ -155,7 +150,6 @@ pub(crate) enum Msg {
         project: Option<PathBuf>,
         reply: Option<Reply>,
     },
-    Mpv(PlayerId),
     /// The renderer presented `player` after `motion` finished.
     Presented {
         player: PlayerId,
@@ -350,21 +344,9 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     remove_stale_runtime_dirs();
     let edl_dir = ipc::runtime_dir().join(pid.to_string());
     let _ = ipc::private_dir(&edl_dir);
-    let (source, timeline) = match config.players {
-        Some((s, t)) => (Some(s), Some(t)),
-        None => (None, None),
-    };
-    for (id, mpv) in [(PlayerId::Source, &source), (PlayerId::Timeline, &timeline)] {
-        if let Some(m) = mpv {
-            let tx = tx.clone();
-            m.set_wakeup_callback(move || {
-                let _ = tx.send(Msg::Mpv(id));
-            });
-        }
-    }
     let players = [
-        Player::new(PlayerId::Source, source, edl_dir.join("source.edl")),
-        Player::new(PlayerId::Timeline, timeline, edl_dir.join("timeline.edl")),
+        Player::new(PlayerId::Source),
+        Player::new(PlayerId::Timeline),
     ];
     let instance = config.socket.clone().map(|socket| Instance {
         pid,
@@ -424,7 +406,6 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         thumbs_wanted: HashSet::new(),
         waveforms: Arc::new(HashMap::new()),
         waveforms_wanted: HashSet::new(),
-        fillers: HashMap::new(),
         remux: HashMap::new(),
         network: HashMap::new(),
         tails: HashMap::new(),
@@ -436,9 +417,6 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         job_cancels: HashMap::new(),
         job_replies: HashMap::new(),
         next_job: 1,
-        mixer: mixctl::Mixer::start(),
-        mix_endpoint: None,
-        mix_loads: 0,
         waits: Vec::new(),
         next_capture: 1,
         timeline_due: None,
@@ -467,8 +445,6 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
 }
 
 /// Generated filler media, by (width, height, fps).
-pub(crate) type FillerKey = (u32, u32, Rational);
-
 enum RemuxState {
     Pending,
     Ready(PathBuf),
@@ -497,9 +473,6 @@ const TAIL_TRIES: u8 = 2;
 
 /// Wait before trying a failed tail again.
 const TAIL_RETRY: Duration = Duration::from_secs(2);
-
-/// Seconds of a still in its preview image list; longer stills chain it.
-const STILL_LIST_SECS: i64 = 10;
 
 /// A failed tail check (`lost: None`) or patch, to try again at `at`.
 struct TailRetry {
@@ -651,8 +624,6 @@ struct Live {
     thumbs_wanted: HashSet<String>,
     waveforms: Arc<HashMap<String, Arc<vidcut_av::waveform::Waveform>>>,
     waveforms_wanted: HashSet<String>,
-    /// Filler media by format (`None`: generating them failed).
-    fillers: HashMap<FillerKey, Option<Fillers>>,
     remux: HashMap<PathBuf, RemuxState>,
     /// Media files on network file systems (true) or not, asked on a worker:
     /// a share that doesn't answer must not stall the session.
@@ -674,12 +645,6 @@ struct Live {
     /// Requests answered when their job is planned (`background`) or done.
     job_replies: HashMap<String, (Job, bool)>,
     next_job: u64,
-    /// Live track faders (preview.md §10), when this system has them; the
-    /// control address of the timeline's audio graph as last loaded, and
-    /// how many graphs were loaded.
-    mixer: Option<mixctl::Mixer>,
-    mix_endpoint: Option<String>,
-    mix_loads: u64,
     waits: Vec<Wait>,
     next_capture: u64,
     timeline_due: Option<Instant>,
@@ -703,6 +668,7 @@ impl Live {
             // Timers may finish requests too; then everyone hears back with
             // the snapshot showing it, before the session waits again.
             let wake = self.tick(Instant::now());
+            self.ask_present();
             self.publish();
             for (r, result) in self.answers.drain(..) {
                 let _ = r.tx.send(ReplyEvent::Done(result));
@@ -735,8 +701,25 @@ impl Live {
                     return;
                 }
             }
+            self.ask_present();
         }
         self.shutdown();
+    }
+
+    /// Asks the renderer to show a player whose latest frame is decoded
+    /// and not yet on screen.
+    fn ask_present(&mut self) {
+        for id in PlayerId::ALL {
+            if let Some(motion) = self.players[id.index()].present_due() {
+                let tx = self.tx.clone();
+                self.renderer.present(
+                    id,
+                    Box::new(move || {
+                        let _ = tx.send(Msg::Presented { player: id, motion });
+                    }),
+                );
+            }
+        }
     }
 
     fn shutdown(&mut self) {
@@ -818,18 +801,6 @@ impl Live {
                 project,
                 reply,
             } => self.request(envelope, origin, project, reply),
-            Msg::Mpv(id) => {
-                changed = self.players[id.index()].pump();
-                if let Some(motion) = self.players[id.index()].present_due() {
-                    let tx = self.tx.clone();
-                    self.renderer.present(
-                        id,
-                        Box::new(move || {
-                            let _ = tx.send(Msg::Presented { player: id, motion });
-                        }),
-                    );
-                }
-            }
             Msg::Presented { player, motion } => {
                 self.players[player.index()].presented(motion);
                 changed = false;
@@ -977,8 +948,12 @@ impl Live {
         let mut next: Option<Instant> = None;
         let mut soonest = |t: Instant| next = Some(next.map_or(t, |n| n.min(t)));
         for p in &mut self.players {
+            let (pos, seq) = (p.position, p.monitor().seq);
             if let Some(t) = p.tick(now) {
                 soonest(t);
+            }
+            if p.position != pos || p.monitor().seq != seq {
+                self.dirty = true;
             }
         }
         if let Some(due) = self.timeline_due {
@@ -1822,35 +1797,10 @@ impl Live {
             }
             Request::PlayerState {} => Step::Now(Ok(self.state_response())),
             Request::MixerPreview { track, volume_db } => {
-                let (Some(mixer), Some(endpoint)) = (&self.mixer, &self.mix_endpoint) else {
-                    return Step::Now(Ok(answer(json!({ "live": false }))));
-                };
-                let filter = preview::fader_filter(&track);
-                let gain = 10f64.powf(volume_db / 20.0);
-                if job.reply.is_none() {
-                    // The GUI's drag doesn't wait for the answer.
-                    mixer.set(endpoint, filter, gain, None);
-                    return Step::Now(Ok(answer(json!({ "live": true }))));
+                match self.players[TIMELINE].set_lane_db(&track, volume_db) {
+                    Ok(()) => Step::Now(Ok(answer(json!({ "live": true })))),
+                    Err(e) => Step::Now(Err(Error::media(e))),
                 }
-                // A client hears whether the filter took it; a task waits
-                // for that, so the session doesn't.
-                let (tx, rx) = std::sync::mpsc::channel();
-                mixer.set(
-                    endpoint,
-                    filter,
-                    gain,
-                    Some(Box::new(move |result| {
-                        let _ = tx.send(result);
-                    })),
-                );
-                Step::Task(
-                    Work::Interactive,
-                    Box::new(move |_| match rx.recv() {
-                        Ok(Ok(())) => Ok(answer(json!({ "live": true }))),
-                        Ok(Err(e)) => Err(Error::media(e)),
-                        Err(_) => Err(Error::internal("the mixer thread stopped")),
-                    }),
-                )
             }
             Request::PlayerMute { mute } => {
                 let mute = mute.unwrap_or(!self.players[TIMELINE].muted());
@@ -2317,39 +2267,9 @@ impl Live {
 
     // ---------------------------------------------------------------- previews
 
-    /// Filler media for the project's format. Generated here, synchronously,
-    /// the first time a format needs them (then cached on disk): the preview
-    /// is never in a half-loaded state that seeks would have to wait for.
-    fn fillers(&mut self, p: &Project) -> Option<Fillers> {
-        let key = (p.settings.width, p.settings.height, p.settings.fps);
-        match self.fillers.get(&key) {
-            Some(Some(f)) => return Some(f.clone()),
-            Some(None) => return None,
-            None => {}
-        }
-        let dir = paths::cache_dir().join("fillers");
-        let result = std::fs::create_dir_all(&dir)
-            .map_err(|e| e.to_string())
-            .and_then(|()| {
-                vidcut_av::filler::ensure(&dir, key.0, key.1, key.2).map_err(|e| e.to_string())
-            });
-        match result {
-            Ok(f) => {
-                self.fillers.insert(key, Some(f.clone()));
-                Some(f)
-            }
-            Err(e) => {
-                self.fillers.insert(key, None);
-                self.notice(format!("preview fillers: {e}"), true);
-                None
-            }
-        }
-    }
-
-    /// The plan `player` plays: media mpv can't seek exactly swapped for
-    /// their remuxes, and segment tails it would cut short replaced by
-    /// patches. Starts the checks still missing, those nearest `position`
-    /// first.
+    /// Applies a ready remux and any ready tail patch, and starts checks
+    /// for cuts that have not been looked at. The software player shows the
+    /// plan this returns.
     fn preview_plan(
         &mut self,
         mut plan: RenderPlan,
@@ -2437,7 +2357,7 @@ impl Live {
         plan
     }
 
-    /// Checks whether mpv would drop frames before the cut `key` ends.
+    /// Checks whether frames just before the cut `key` ends would be lost.
     fn check_tail(&mut self, key: TailKey, origin: f64) {
         self.tails.insert(key.clone(), TailState::Checking);
         let (tx, fps) = (self.tx.clone(), key.2);
@@ -2500,187 +2420,23 @@ impl Live {
         });
     }
 
-    /// EDL for `plan` as `player` plays it from `position`, or `None` while
-    /// fillers are being made.
-    /// `lanes`: the plan's lanes' tracks, for a timeline whose faders change
-    /// while it plays.
-    fn edl(
+    /// Loads `plan` into `player` at `position`. Proxies and any ready
+    /// tail patches are applied first. The picture is the software player's.
+    fn load_preview(
         &mut self,
         plan: RenderPlan,
         lanes: Option<&[render::LaneTrack]>,
         player: PlayerId,
         position: i64,
-    ) -> Option<preview::Preview> {
+    ) -> Option<u64> {
         let p = self.project.as_ref()?.project().clone();
-        let fillers = self.fillers(&p)?;
         let mut plan = plan;
         preview::apply_proxies(&mut plan, &p, |path| path.is_file());
         let plan = self.preview_plan(plan, player, position);
-        let network = |path: &PathBuf| self.network.get(path).copied().unwrap_or(false);
-        let read_ahead = plan.video.iter().any(|v| match v {
-            render::VideoPiece::Source { path, .. } => network(path),
-            render::VideoPiece::Black { .. } => false,
-        }) || plan.audio.iter().flatten().any(|a| match a {
-            render::AudioPiece::Source { path, .. } => network(path),
-            render::AudioPiece::Silence { .. } => false,
-        });
-        let deinterlace = plan.video.iter().any(|v| match v {
-            render::VideoPiece::Source { media, path, .. } => {
-                let Some(m) = p.media(media) else {
-                    return false;
-                };
-                // A proxy is already progressive (and upright).
-                let proxied = m.fresh_proxy().is_some_and(|px| &px.path == path);
-                !proxied && m.info.video.as_ref().is_some_and(|v| v.fields.is_some())
-            }
-            render::VideoPiece::Black { .. } => false,
-        });
-        let mut plan = plan;
-        let images = self.image_lists(&mut plan);
-        // Each graph gets an address of its own: the one before may not
-        // have let go of its address yet.
-        let bind = match (lanes, &self.mixer) {
-            (Some(_), Some(_)) => {
-                self.mix_loads += 1;
-                let path = self.edl_dir.join(format!("mix-{}", self.mix_loads));
-                if let Some(old) = self.mix_endpoint.take() {
-                    let _ = std::fs::remove_file(old.trim_start_matches("ipc://"));
-                }
-                Some(format!("ipc://{}", path.display()))
-            }
-            _ => None,
-        };
-        let control = lanes
-            .zip(bind.as_deref())
-            .map(|(lanes, bind)| preview::FaderControl { lanes, bind });
-        let built = preview::build(&plan, &fillers, control);
-        // No graph, nothing to control (a timeline without sound).
-        self.mix_endpoint = bind
-            .filter(|_| built.audio_graph.is_some())
-            .or(self.mix_endpoint.take());
-        Some(preview::Preview {
-            read_ahead,
-            deinterlace,
-            images,
-            ..built
-        })
-    }
-
-    /// Image pieces as mpv shows them (preview.md §11): image lists
-    /// (`mf://@list`), one file a frame at the project rate, which the EDL
-    /// plays like video files. A sequence's list covers all of it, its
-    /// pictures picked by the export's sampling rule; a still's is
-    /// [`STILL_LIST_SECS`] of it, chained over longer pieces like the
-    /// fillers. Returns whether there were any.
-    fn image_lists(&mut self, plan: &mut RenderPlan) -> bool {
-        let fps = plan.fps;
-        let mut any = false;
-        let mut video = Vec::with_capacity(plan.video.len());
-        for piece in std::mem::take(&mut plan.video) {
-            let render::VideoPiece::Source {
-                media,
-                path,
-                source_frame,
-                frames,
-                image: Some(image),
-                ..
-            } = piece
-            else {
-                video.push(piece);
-                continue;
-            };
-            let listed = |list: &Path, source_frame: i64, frames: i64| render::VideoPiece::Source {
-                media: media.clone(),
-                path: PathBuf::from(format!("mf://@{}", list.display())),
-                origin: 0.0,
-                source_frame,
-                frames,
-                image: None,
-            };
-            let made = match &image {
-                render::Image::Still => {
-                    let n = fps.secs_to_frames(STILL_LIST_SECS as f64).max(2);
-                    let list = self.image_list(&format!("still|{}|{fps}", path.display()), || {
-                        vec![path.clone(); n as usize]
-                    });
-                    list.map(|list| {
-                        // All its frames are alike: any part of the list will do.
-                        let mut parts = Vec::new();
-                        let mut left = frames;
-                        while left > 0 {
-                            let part = left.min(n - 1);
-                            parts.push(listed(&list, 0, part));
-                            left -= part;
-                        }
-                        parts
-                    })
-                }
-                render::Image::Sequence {
-                    pattern,
-                    first,
-                    count,
-                    rate,
-                } => {
-                    let key = format!("seq|{}|{first}|{count}|{rate}|{fps}", pattern.display());
-                    let (first, count, rate) = (*first, *count, *rate);
-                    let dir = pattern.parent().unwrap_or(Path::new("")).to_path_buf();
-                    let files = vidcut_core::model::ImageSequence {
-                        pattern: pattern
-                            .file_name()
-                            .map(|n| n.to_string_lossy().into_owned())
-                            .unwrap_or_default(),
-                        first,
-                        count,
-                    };
-                    let list = self.image_list(&key, || {
-                        // Frame m shows the first picture at or after m's
-                        // time less half a frame, as export picks it.
-                        let secs = rate.frames_to_secs(count as i64);
-                        let m = fps.secs_to_frames(secs) + 1;
-                        (0..m)
-                            .map(|m| {
-                                let t = fps.frames_to_secs(m) - fps.frames_to_secs(1) / 2.0;
-                                let k = (t * rate.as_f64() - 1e-6).ceil().max(0.0) as u64;
-                                files.file(&dir, k.min(count - 1))
-                            })
-                            .collect()
-                    });
-                    list.map(|list| vec![listed(&list, source_frame, frames)])
-                }
-            };
-            match made {
-                Some(parts) => {
-                    any = true;
-                    video.extend(parts);
-                }
-                // No list (the runtime folder can't be written): black.
-                None => video.push(render::VideoPiece::Black { frames }),
-            }
-        }
-        plan.video = video;
-        any
-    }
-
-    /// The image list for `key` in the runtime folder, written from
-    /// `files` the first time it is asked for.
-    fn image_list(&mut self, key: &str, files: impl FnOnce() -> Vec<PathBuf>) -> Option<PathBuf> {
-        let dir = self.edl_dir.join("images");
-        let path = dir.join(format!("{:016x}.txt", paths::fnv1a(key.as_bytes())));
-        if !path.exists() {
-            let text: String = files()
-                .iter()
-                .map(|f| format!("{}\n", f.display()))
-                .collect();
-            let tmp = path.with_extension("tmp");
-            let written = std::fs::create_dir_all(&dir)
-                .and_then(|()| std::fs::write(&tmp, text))
-                .and_then(|()| std::fs::rename(&tmp, &path));
-            if let Err(e) = written {
-                self.notice(format!("preview of images: {e}"), true);
-                return None;
-            }
-        }
-        Some(path)
+        let names = lanes
+            .map(|ls| ls.iter().map(|l| l.track.clone()).collect())
+            .unwrap_or_default();
+        self.players[player.index()].load_plan(plan, position, names)
     }
 
     /// Reloads the timeline soon: at once if the last reload was a while
@@ -2719,9 +2475,9 @@ impl Live {
             Some(frame) => frame,
             None => self.preview_frame(PlayerId::Timeline, self.players[TIMELINE].position),
         };
-        let edl = self.edl(plan, Some(&lanes), PlayerId::Timeline, position)?;
+        let motion = self.load_preview(plan, Some(&lanes), PlayerId::Timeline, position);
         self.timeline_loaded_at = Some(Instant::now());
-        self.players[TIMELINE].load(edl, end, p.settings.fps, position)
+        motion
     }
 
     /// Makes the source player show what the current source mode wants
@@ -2770,10 +2526,8 @@ impl Live {
                 SourceContent::Clip(m) => self.source_positions.get(m).copied().unwrap_or(0),
             }
         };
-        let frames = plan.frames;
-        let edl = self.edl(plan, None, PlayerId::Source, position)?;
         self.source_content = Some(want);
-        self.players[SOURCE].load(edl, frames, p.settings.fps, position)
+        self.load_preview(plan, None, PlayerId::Source, position)
     }
 
     /// Remembers the source playhead of the content being replaced.
@@ -3071,18 +2825,17 @@ impl Live {
         reload_frame(sampled, target, keep)
     }
 
-    /// Asks the renderer for a picture of `player`; the answer comes as
-    /// `Msg::Captured` with the returned id.
+    /// The player's picture, answered on the session thread. The renderer
+    /// is not asked: the frame is already decoded.
     fn capture_viewer(&mut self, player: PlayerId) -> u64 {
         let id = self.next_capture;
         self.next_capture += 1;
+        let image = self.players[player.index()].image();
         let tx = self.tx.clone();
-        self.renderer.capture_viewer(
-            player,
-            Box::new(move |result| {
-                let _ = tx.send(Msg::Captured { id, result });
-            }),
-        );
+        let _ = tx.send(Msg::Captured {
+            id,
+            result: Ok(image),
+        });
         id
     }
 
@@ -3121,6 +2874,7 @@ impl Live {
         let fps = p.map_or(Rational::new(30, 1).expect("valid"), |p| p.settings.fps);
         let tc = |f: i64, stc: i64| format_timecode(f, fps, stc);
         let player = |pl: &Player, stc: i64| {
+            let m = pl.monitor();
             json!({
                 "loaded": pl.is_loaded(),
                 "frames": pl.frames,
@@ -3129,6 +2883,13 @@ impl Live {
                 "playing": pl.playing(),
                 "speed": pl.snap().speed,
                 "error": pl.error,
+                "monitor": {
+                    "peak": m.peak,
+                    "rms": m.rms,
+                    "samples": m.samples,
+                    "seq": m.seq,
+                    "since_seek_peak": m.since_seek_peak,
+                },
             })
         };
         let mut source = player(&self.players[SOURCE], 0);

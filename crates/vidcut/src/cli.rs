@@ -263,7 +263,7 @@ pub enum Command {
         method: String,
         params: Option<String>,
     },
-    /// Check dependencies (FFmpeg, libmpv, GPUs).
+    /// Check dependencies (FFmpeg, GPUs).
     Doctor,
 
     // ------------------------------------------------------------ the GUI

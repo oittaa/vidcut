@@ -1,93 +1,18 @@
-//! One mpv player as the live session drives it: what is loaded, where the
-//! playhead is, and when a requested frame is actually on screen.
+//! The live session's player: a render plan decoded and mixed in-process.
 //!
-//! Only the session thread calls into mpv's client API (docs/decisions/preview.md
-//! §6); the UI thread renders. Every command is asynchronous and gets an id.
-//! mpv runs them in order, so a reply to command `n` means every command up to
-//! `n` has been queued. A seek or load ("motion") with id `m` has finished
-//! when a `playback-restart` arrives after the seek (or file start) that mpv
-//! began after replying to `m`. mpv's current picture is then the motion's
-//! first frame, and it is on screen once the renderer has presented the
-//! player: drawn its current picture after that restart (docs/decisions/gui.md
-//! §4).
+//! A seek or a load decodes the frame the sampling rule picks, then the
+//! renderer is asked to present it. The motion is on screen once that
+//! present finishes. Forward playback pulls the mix on a clock, and the
+//! picture advances with those samples. Reverse is stepped seeks.
 
-use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use vidcut_core::preview::Preview;
+use vidcut_av::thumbs::Image;
+use vidcut_core::render::RenderPlan;
 use vidcut_core::time::Rational;
-use vidcut_mpv::{Event, Format, Mpv, Value};
 
 use super::snapshot::{PlayerId, PlayerSnap};
-
-/// Properties every player observes.
-const OBSERVED: &[(&str, Format)] = &[
-    ("time-pos", Format::Double),
-    ("pause", Format::Flag),
-    ("hwdec-current", Format::String),
-    ("video-params/dw", Format::Int),
-    ("video-params/dh", Format::Int),
-];
-
-/// mpv options for preview players (docs/decisions/preview.md §5).
-/// `VIDCUT_MPV_OPTIONS="hwdec=no,ao=null"` adds or overrides options (for
-/// debugging).
-pub fn mpv_options(audio: bool) -> Vec<(String, String)> {
-    let mut o: Vec<(String, String)> = vec![("hwdec".into(), "auto-safe".into())];
-    for (k, v) in [
-        ("vo", "libmpv"),
-        ("config", "no"),
-        ("load-scripts", "no"),
-        ("ytdl", "no"),
-        ("terminal", "no"),
-        ("input-default-bindings", "no"),
-        ("osc", "no"),
-        ("hr-seek", "yes"),
-        ("hr-seek-framedrop", "no"),
-        ("keep-open", "always"),
-        ("idle", "yes"),
-        ("pause", "yes"),
-        ("video-timing-offset", "0"),
-        ("audio-client-name", "vidcut"),
-    ] {
-        o.push((k.into(), v.into()));
-    }
-    if !audio {
-        o.push(("ao".into(), "null".into()));
-    }
-    if let Ok(extra) = std::env::var("VIDCUT_MPV_OPTIONS") {
-        for kv in extra.split(',').filter(|s| !s.is_empty()) {
-            if let Some((k, v)) = kv.split_once('=') {
-                o.push((k.trim().into(), v.trim().into()));
-            }
-        }
-    }
-    o
-}
-
-/// Options that make `player` write mpv's own log when `VIDCUT_MPV_LOG_DIR`
-/// is set (for debugging): to `<dir>/<pid>-source.log` or
-/// `<dir>/<pid>-timeline.log`, since `VIDCUT_MPV_OPTIONS` would give both
-/// players one file. mpv logs to a file at debug level;
-/// `VIDCUT_MPV_OPTIONS=msg-level=all=trace` adds more.
-pub fn mpv_log_options(player: PlayerId) -> Vec<(String, String)> {
-    let dir = match std::env::var("VIDCUT_MPV_LOG_DIR") {
-        Ok(dir) if !dir.is_empty() => PathBuf::from(dir),
-        _ => return Vec::new(),
-    };
-    // mpv doesn't create the directory and, with its terminal off, would
-    // fail silently.
-    if let Err(e) = std::fs::create_dir_all(&dir) {
-        eprintln!("vidcut: no mpv log: can't create {}: {e}", dir.display());
-        return Vec::new();
-    }
-    let name = match player {
-        PlayerId::Source => "source",
-        PlayerId::Timeline => "timeline",
-    };
-    let file = dir.join(format!("{}-{name}.log", std::process::id()));
-    vec![("log-file".into(), file.to_string_lossy().into_owned())]
-}
 
 /// Whether `path` is on a network file system (NFS, SMB/CIFS, Ceph, AFS,
 /// 9P, or FUSE, as GNOME's mounted shares and sshfs are). Can block while a
@@ -138,7 +63,7 @@ fn network_fs(f_type: i64) -> bool {
 }
 
 /// Stepped reverse playback (J): exact seeks backwards at the shuttle speed,
-/// one in flight at a time (docs/decisions/preview.md §7).
+/// one in flight at a time.
 #[derive(Debug, Clone, Copy)]
 struct Reverse {
     speed: f64,
@@ -146,357 +71,241 @@ struct Reverse {
     from: i64,
 }
 
+/// The last mix buffer, and the loudest peak since the last seek.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Monitor {
+    pub peak: f32,
+    pub rms: f32,
+    pub samples: usize,
+    pub seq: u64,
+    /// Loudest peak of the buffers pulled since the last seek.
+    pub since_seek_peak: f32,
+}
+
 pub struct Player {
     pub id: PlayerId,
-    mpv: Option<Mpv>,
-    edl_path: PathBuf,
+    play: Option<vidcut_av::play::Player>,
+    plan: Option<RenderPlan>,
+    /// Audio-lane track ids, in lane order.
+    lanes: Vec<String>,
+    picture: Option<Arc<Image>>,
     fps: Rational,
-    /// The EDL and audio graph loaded (or being loaded).
-    loaded: Option<Preview>,
-    /// The monitoring mute.
+    rate: u32,
     muted: bool,
-    /// The load command while mpv opens the file (it rejects seeks until then).
-    loading: Option<u64>,
     pub frames: i64,
     pub position: i64,
     /// The frame the latest seek or load asked for, and whether exactly (a
-    /// fast seek shows a keyframe near it). Playback leaves it alone, so a
-    /// waiting seek is overtaken only by another seek or load. A reload that
-    /// still opens at this frame keeps it. Reopening the file is exact:
-    /// `loadfile`'s `start=` is not a keyframe seek.
+    /// fast seek is marked inexact: another exact seek to the same frame is
+    /// a different request). The picture is always the frame asked for.
     pub target: (i64, bool),
-    /// The playhead follows mpv's `time-pos` (playing) rather than the last
-    /// requested frame (paused after a seek).
-    tracking: bool,
-    paused: bool,
     speed: f64,
     reverse: Option<Reverse>,
+    /// When the forward clock last pulled.
+    clock: Option<Instant>,
     next_id: u64,
-    /// Last seek or load command.
+    /// Last seek or load.
     pub motion: u64,
-    /// Last motion command sent to mpv (`motion` unless a seek is
-    /// deferred), and when.
-    sent: u64,
-    sent_at: Instant,
-    /// A seek asked for while another was still decoding: the frame,
-    /// whether fast, and its motion id. It goes once that one finishes.
-    deferred: Option<(i64, bool, u64)>,
-    acked: u64,
-    /// Commands acked when mpv last began a seek or a file: the next restart
-    /// finishes them. (A restart of an older seek can arrive after a newer
-    /// command's reply; it doesn't finish that command.)
-    seeking: u64,
-    /// Motions up to this id have finished.
+    /// Motions up to this id have finished decoding.
     restarted: u64,
     /// The motion the renderer was last asked to present.
     presenting: u64,
     /// Motions up to this id are on screen.
     pub shown: u64,
-    hwdec: String,
-    video_size: (Option<i64>, Option<i64>),
+    monitor: Monitor,
     pub error: Option<String>,
 }
 
-/// How long a seek may decode before seeks after it stop waiting for it.
-const STUCK_SEEK: Duration = Duration::from_secs(1);
-
-/// mpv's seek flags: a keyframe near the frame (scrubbing), or the frame.
-fn seek_mode(fast: bool) -> &'static str {
-    if fast {
-        "absolute+keyframes"
-    } else {
-        "absolute+exact"
-    }
-}
-
 impl Player {
-    pub fn new(id: PlayerId, mpv: Option<Mpv>, edl_path: PathBuf) -> Self {
-        if let Some(m) = &mpv {
-            for (i, (name, format)) in OBSERVED.iter().enumerate() {
-                let _ = m.observe_property(i as u64 + 1, name, *format);
-            }
-        }
+    pub fn new(id: PlayerId) -> Self {
         Self {
             id,
-            mpv,
-            edl_path,
+            play: None,
+            plan: None,
+            lanes: Vec::new(),
+            picture: None,
             fps: Rational::new(30, 1).expect("valid"),
-            loaded: None,
+            rate: 48_000,
             muted: false,
-            loading: None,
             frames: 0,
             position: 0,
             target: (0, true),
-            tracking: false,
-            paused: true,
             speed: 0.0,
             reverse: None,
+            clock: None,
             next_id: 1,
             motion: 0,
-            sent: 0,
-            sent_at: Instant::now(),
-            deferred: None,
-            acked: 0,
-            seeking: 0,
             restarted: 0,
             presenting: 0,
             shown: 0,
-            hwdec: String::new(),
-            video_size: (None, None),
+            monitor: Monitor::default(),
             error: None,
         }
     }
 
     pub fn is_loaded(&self) -> bool {
-        self.loaded.is_some()
+        self.play.is_some()
     }
 
     pub fn playing(&self) -> bool {
         self.speed != 0.0
     }
 
-    fn command(&mut self, args: &[&str]) -> u64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.command_as(id, args);
-        id
-    }
-
-    /// Sends a command under an id already taken.
-    fn command_as(&mut self, id: u64, args: &[&str]) {
-        if debug() {
-            eprintln!("[{:?}] #{id} {args:?}", self.id);
-        }
-        if let Some(m) = &self.mpv
-            && let Err(e) = m.command_async(id, args)
-        {
-            self.error = Some(e.to_string());
-        }
-    }
-
-    /// Records a motion command; without mpv it completes at once.
-    fn moved(&mut self, id: u64) -> u64 {
-        self.motion = id;
-        self.sent = id;
-        self.sent_at = Instant::now();
-        self.deferred = None;
-        if self.mpv.is_none() {
-            self.acked = id;
-            self.restarted = id;
-            self.shown = id;
-        }
-        id
-    }
-
-    fn secs(&self, frame: i64) -> String {
-        format!("{:.9}", self.fps.frames_to_secs(frame.max(0)))
-    }
-
-    /// Mutes what the player plays (the monitoring mute).
-    pub fn set_muted(&mut self, muted: bool) {
-        self.muted = muted;
-        if let Some(m) = &self.mpv
-            && let Err(e) = m.set_property_flag("mute", muted)
-        {
-            self.error = Some(e.to_string());
-        }
-    }
-
     pub fn muted(&self) -> bool {
         self.muted
     }
 
-    /// Shows `preview` (content `frames` long at `fps`) with the playhead at
-    /// `position`. Returns the motion id, or `None` if it is already showing.
-    pub fn load(
+    pub fn monitor(&self) -> Monitor {
+        self.monitor
+    }
+
+    /// The current picture, or a black pixel when nothing is loaded.
+    pub fn image(&self) -> Image {
+        match &self.picture {
+            Some(p) => (**p).clone(),
+            None => Image {
+                width: 1,
+                height: 1,
+                rgba: vec![0, 0, 0, 255],
+            },
+        }
+    }
+
+    /// Records a motion. The renderer still has to present it.
+    fn moved(&mut self) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.motion = id;
+        self.restarted = id;
+        if debug() {
+            eprintln!("[{:?}] motion {id} at frame {}", self.id, self.position);
+        }
+        id
+    }
+
+    /// A motion with nothing to draw: already on screen.
+    fn instant_motion(&mut self) -> u64 {
+        let id = self.moved();
+        self.presenting = id;
+        self.shown = id;
+        id
+    }
+
+    fn forget_buffer(&mut self) {
+        self.monitor.peak = 0.0;
+        self.monitor.rms = 0.0;
+        self.monitor.since_seek_peak = 0.0;
+    }
+
+    /// Shows `plan` (its lanes named by `lanes`) with the playhead at
+    /// `position`. `position` may be one past the last frame. Returns the
+    /// motion id, or `None` when that picture is already showing.
+    pub fn load_plan(
         &mut self,
-        preview: Preview,
-        frames: i64,
-        fps: Rational,
+        plan: RenderPlan,
         position: i64,
+        lanes: Vec<String>,
     ) -> Option<u64> {
+        let frames = plan.frames.max(0);
         let position = position.clamp(0, frames);
-        if self.loaded.as_ref() == Some(&preview) && self.fps == fps {
+        if self.plan.as_ref() == Some(&plan) && self.lanes == lanes {
             self.frames = frames;
-            // Same picture. The sampled playhead is not a new seek when it
-            // is the frame already requested: while playing, that sample is
-            // `time-pos`, which has moved off the seek.
             if position == self.position || position == self.target.0 {
                 return None;
             }
             return Some(self.seek(position, false));
         }
-        // A reload that still shows the requested frame keeps that request,
-        // exact or not. The first open, and a reload that shows somewhere
-        // else, are exact: `loadfile` uses `start=<frame>`, not a keyframe.
-        let keep_target = self.loaded.is_some() && position == self.target.0;
-        self.fps = fps;
+        let keep_target = self.plan.is_some() && position == self.target.0;
+        self.fps = plan.fps;
+        self.rate = plan.sample_rate;
         self.frames = frames;
         self.position = position;
         if !keep_target {
             self.target = (position, true);
         }
         self.reverse = None;
-        if self.mpv.is_some() {
-            let tmp = self.edl_path.with_extension("edl.tmp");
-            let written = std::fs::write(&tmp, &preview.edl)
-                .and_then(|()| std::fs::rename(&tmp, &self.edl_path));
-            if let Err(e) = written {
-                self.error = Some(format!("writing {}: {e}", self.edl_path.display()));
-                return None;
+        self.lanes = lanes;
+        self.forget_buffer();
+        if self.speed > 0.0 {
+            self.clock = Some(Instant::now());
+        }
+        match open_player(&plan, position, self.speed) {
+            Ok((play, picture)) => {
+                self.play = Some(play);
+                self.picture = Some(picture);
+                self.plan = Some(plan);
+                self.error = None;
+            }
+            Err(e) => {
+                self.play = None;
+                self.picture = None;
+                self.plan = None;
+                self.error = Some(e);
             }
         }
-        self.loaded = Some(preview);
-        self.error = None;
-        Some(self.loadfile())
-    }
-
-    /// (Re)opens the EDL file at the playhead.
-    fn loadfile(&mut self) -> u64 {
-        let path = self.edl_path.to_string_lossy().into_owned();
-        let mut options = format!(
-            "start={},pause={}",
-            self.secs(self.position),
-            if self.speed > 0.0 { "no" } else { "yes" }
-        );
-        // Mixes the audio streams and applies gains (preview.md §10), for
-        // this file only.
-        if let Some(graph) = self.loaded.as_ref().and_then(|p| p.audio_graph.as_ref()) {
-            options.push_str(&format!(",lavfi-complex=%{}%{graph}", graph.len()));
-        }
-        // Network shares: read ahead, and keep what was read for seeking back
-        // and forth (mpv's cache stays off for local files).
-        if self.loaded.as_ref().is_some_and(|p| p.read_ahead) {
-            options.push_str(",cache=yes,demuxer-max-back-bytes=150MiB");
-        }
-        // Interlaced sources: one frame per frame, as export makes them.
-        // (mpv's own deinterlacer makes one per field, and the half-frame
-        // bias of seeks would land on the previous frame's second field.)
-        if self.loaded.as_ref().is_some_and(|p| p.deinterlace) {
-            options.push_str(",vf=bwdif=mode=send_frame:deint=interlaced");
-        }
-        // Image lists show a file a frame at the project rate.
-        if self.loaded.as_ref().is_some_and(|p| p.images) {
-            options.push_str(&format!(",mf-fps={}", self.fps.as_f64()));
-        }
-        let id = self.command(&["loadfile", &path, "replace", "-1", &options]);
-        self.tracking = self.speed > 0.0;
-        if self.mpv.is_some() {
-            self.loading = Some(id);
-        }
-        self.moved(id)
-    }
-
-    /// A motion that needs no command (nothing loaded): already complete.
-    fn instant_motion(&mut self) -> u64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.motion = id;
-        self.acked = self.acked.max(id);
-        self.restarted = self.restarted.max(id);
-        self.shown = self.shown.max(id);
-        id
+        Some(self.moved())
     }
 
     /// Shows nothing.
     pub fn unload(&mut self) {
-        self.deferred = None;
-        if self.loaded.take().is_some() {
-            self.command(&["stop"]);
-        }
-        self.loading = None;
+        self.play = None;
+        self.plan = None;
+        self.picture = None;
+        self.lanes.clear();
         self.frames = 0;
         self.position = 0;
         self.target = (0, true);
         self.speed = 0.0;
         self.reverse = None;
+        self.clock = None;
         self.instant_motion();
     }
 
-    /// Moves the playhead to `frame` (clamped to the content). `fast` seeks
-    /// to a keyframe (scrubbing), except while a file is still opening:
-    /// reopening it lands on `frame`. Returns the motion id.
+    /// Moves the playhead to `frame` (clamped to the content, including the
+    /// frame just past the end). `fast` marks the request inexact. Returns
+    /// the motion id.
     pub fn seek(&mut self, frame: i64, fast: bool) -> u64 {
-        if self.loaded.is_none() {
-            // Remembered for the next load (which clamps it).
+        if self.play.is_none() {
             self.position = frame.max(0);
             self.target = (self.position, !fast);
+            self.forget_buffer();
             return self.instant_motion();
         }
         let frame = frame.clamp(0, self.frames.max(0));
         self.position = frame;
-        if self.loading.is_some() {
-            // mpv rejects seeks while it opens the file, so open it again.
-            // `loadfile`'s `start=` is this frame, not a keyframe seek, so an
-            // exact wait for the same frame still matches.
-            self.target = (frame, true);
-            return self.loadfile();
-        }
         self.target = (frame, !fast);
-        if self.reverse.is_none() && self.speed != 0.0 {
-            // A seek while playing keeps playing from there.
-            self.tracking = true;
-        } else {
-            self.tracking = false;
+        self.forget_buffer();
+        let show = frame.min(self.frames.saturating_sub(1).max(0));
+        if let Some(play) = self.play.as_mut() {
+            match play.seek(show) {
+                Ok(()) => {
+                    self.picture = Some(Arc::new(play.picture().clone()));
+                    self.error = None;
+                }
+                Err(e) => self.error = Some(e.to_string()),
+            }
         }
-        // While a seek still decodes, a newer one waits for it and then
-        // goes straight to the newest frame. Each new seek cancelling the
-        // one before showed nothing at all while a step key was held, on
-        // files with keyframes seconds apart.
-        if self.mpv.is_some() && self.speed == 0.0 && self.decoding() {
-            let id = self.next_id;
-            self.next_id += 1;
-            self.deferred = Some((frame, fast, id));
-            self.motion = id;
-            return id;
-        }
-        let id = self.command(&["seek", &self.secs(frame), seek_mode(fast)]);
-        self.moved(id)
-    }
-
-    /// Whether the last seek sent is still decoding. One that hasn't
-    /// finished in a second holds nothing up any longer.
-    fn decoding(&self) -> bool {
-        self.restarted < self.sent && self.sent_at.elapsed() < STUCK_SEEK
-    }
-
-    /// Sends the deferred seek once the one before it has finished.
-    fn send_deferred(&mut self) {
-        let Some((frame, fast, id)) = self.deferred else {
-            return;
-        };
-        if self.decoding() {
-            return;
-        }
-        let secs = self.secs(frame);
-        self.command_as(id, &["seek", &secs, seek_mode(fast)]);
-        self.sent = id;
-        self.sent_at = Instant::now();
-        self.deferred = None;
+        self.moved()
     }
 
     /// Plays at `speed` (negative: stepped reverse).
     pub fn play(&mut self, speed: f64) {
-        if self.loaded.is_none() || speed == 0.0 {
+        if self.play.is_none() || speed == 0.0 {
             return;
-        }
-        // A deferred seek goes first: playback starts from there.
-        if let Some((frame, fast, id)) = self.deferred.take() {
-            let secs = self.secs(frame);
-            self.command_as(id, &["seek", &secs, seek_mode(fast)]);
-            self.sent = id;
-            self.sent_at = Instant::now();
         }
         self.speed = speed;
         if speed > 0.0 {
             self.reverse = None;
-            self.tracking = true;
-            let s = format!("{speed}");
-            self.command(&["set", "speed", &s]);
-            self.command(&["set", "pause", "no"]);
-        } else {
-            self.command(&["set", "pause", "yes"]);
-            self.tracking = false;
+            self.clock = Some(Instant::now());
+            if let Some(play) = self.play.as_mut()
+                && let Err(e) = play.set_speed(speed)
+            {
+                self.error = Some(e.to_string());
+            }
+        } else if let Some(play) = self.play.as_mut() {
+            if let Err(e) = play.set_speed(0.0) {
+                self.error = Some(e.to_string());
+            }
+            self.clock = None;
             self.reverse = Some(Reverse {
                 speed: -speed,
                 started: Instant::now(),
@@ -512,13 +321,32 @@ impl Player {
         }
         self.speed = 0.0;
         self.reverse = None;
-        self.command(&["set", "pause", "yes"]);
-        self.command(&["set", "speed", "1"]);
-        // `time-pos` keeps the playhead on the frame shown when mpv paused.
+        self.clock = None;
+        if let Some(play) = self.play.as_mut()
+            && let Err(e) = play.set_speed(0.0)
+        {
+            self.error = Some(e.to_string());
+        }
     }
 
-    /// The motion to ask the renderer to present, once: the latest one, when
-    /// it has finished but isn't on screen yet.
+    /// Mutes what this player would play (the monitoring mute).
+    pub fn set_muted(&mut self, muted: bool) {
+        self.muted = muted;
+    }
+
+    /// Extra gain on the lane of `track`, in dB, on top of the plan. Heard
+    /// on the next buffer.
+    pub fn set_lane_db(&mut self, track: &str, db: f64) -> Result<(), String> {
+        let Some(i) = self.lanes.iter().position(|t| t == track) else {
+            return Err(format!("no audio for track {track}"));
+        };
+        let Some(play) = self.play.as_mut() else {
+            return Err("nothing is loaded".into());
+        };
+        play.set_lane_db(i, db).map_err(|e| e.to_string())
+    }
+
+    /// The motion to ask the renderer to present, once.
     pub fn present_due(&mut self) -> Option<u64> {
         let due = self.restarted >= self.motion
             && self.shown < self.motion
@@ -529,180 +357,180 @@ impl Player {
         })
     }
 
-    /// The renderer presented this player after motion `motion` finished:
-    /// the viewer shows its frame.
+    /// The renderer presented this player after motion `motion` finished.
     pub fn presented(&mut self, motion: u64) {
         if self.restarted >= motion {
             self.shown = self.shown.max(motion);
         }
     }
 
-    /// Drains mpv's events. Returns whether anything visible changed.
-    pub fn pump(&mut self) -> bool {
-        let Some(mpv) = self.mpv.clone() else {
-            return false;
-        };
-        let mut changed = false;
-        while let Some(event) = mpv.wait_event(0.0) {
-            changed = true;
-            if debug() && !matches!(event, Event::PropertyChange { .. }) {
-                eprintln!(
-                    "[{:?}] {event:?} (motion {} acked {} loading {:?})",
-                    self.id, self.motion, self.acked, self.loading
-                );
-            }
-            match event {
-                Event::CommandReply { id, error } => {
-                    self.acked = self.acked.max(id);
-                    if error < 0 && id == self.sent {
-                        self.error = Some(format!("mpv command failed ({error})"));
-                        // Nothing will restart for it; don't keep waiters waiting.
-                        self.restarted = self.restarted.max(id);
-                        self.shown = self.shown.max(id);
-                    }
-                }
-                // mpv begins seeks (ours or a load's initial one) and files
-                // only after replying to the commands that asked for them.
-                Event::Seek | Event::StartFile => self.seeking = self.acked,
-                Event::PlaybackRestart => {
-                    self.restarted = self.restarted.max(self.seeking);
-                    if self.loading.is_some_and(|l| self.restarted >= l) {
-                        self.loading = None;
-                    }
-                }
-                Event::EndFile { reason: 4, error } => {
-                    self.loading = None;
-                    self.deferred = None;
-                    self.error = Some(format!("playback failed ({error})"));
-                    self.restarted = self.restarted.max(self.motion);
-                    self.shown = self.shown.max(self.motion);
-                }
-                Event::PropertyChange { name, value, .. } => self.property(&name, value),
-                _ => {}
-            }
-        }
-        self.send_deferred();
-        changed
-    }
-
-    fn property(&mut self, name: &str, value: Value) {
-        match (name, value) {
-            ("time-pos", Value::Double(t)) => {
-                if self.tracking {
-                    let f = (t * self.fps.as_f64() + 1e-6).floor() as i64;
-                    self.position = f.clamp(0, self.frames.max(0));
-                }
-            }
-            ("pause", Value::Flag(p)) => {
-                self.paused = p;
-                // mpv pauses by itself at the end (keep-open).
-                if p && self.speed > 0.0 {
-                    self.speed = 0.0;
-                }
-            }
-            ("hwdec-current", Value::String(s)) => self.hwdec = s,
-            ("video-params/dw", v) => self.video_size.0 = int(&v),
-            ("video-params/dh", v) => self.video_size.1 = int(&v),
-            _ => {}
-        }
-    }
-
-    /// Timed work: stepped reverse. Returns when it next needs to run.
+    /// Timed work: the forward mix, and stepped reverse. Returns when it
+    /// next needs to run.
     pub fn tick(&mut self, now: Instant) -> Option<Instant> {
-        let r = self.reverse?;
-        let elapsed = now.duration_since(r.started).as_secs_f64();
-        let target = (r.from - (elapsed * r.speed * self.fps.as_f64()) as i64).max(0);
-        if self.shown >= self.motion && target < self.position {
-            self.seek(target, false);
+        if let Some(r) = self.reverse {
+            let elapsed = now.duration_since(r.started).as_secs_f64();
+            let target = (r.from - (elapsed * r.speed * self.fps.as_f64()) as i64).max(0);
+            if self.shown >= self.motion && target < self.position {
+                self.seek(target, false);
+            }
+            if target == 0 && self.position == 0 && self.shown >= self.motion {
+                self.reverse = None;
+                self.speed = 0.0;
+                return None;
+            }
+            let step = Duration::from_secs_f64(1.0 / (self.fps.as_f64() * r.speed).max(1.0));
+            return Some(now + step.min(Duration::from_millis(40)));
         }
-        if target == 0 && self.position == 0 && self.shown >= self.motion {
-            self.reverse = None;
-            self.speed = 0.0;
-            return None;
+        if self.speed > 0.0 && self.play.is_some() {
+            let last = self.clock.replace(now).unwrap_or(now);
+            let dt = now.saturating_duration_since(last).as_secs_f64();
+            let n = (dt * f64::from(self.rate.max(1))).round() as usize;
+            let n = n.min(self.rate.max(1) as usize);
+            if n > 0 {
+                self.pull_forward(n);
+            }
+            return Some(now + Duration::from_millis(20));
         }
-        let step = Duration::from_secs_f64(1.0 / (self.fps.as_f64() * r.speed).max(1.0));
-        Some(now + step.min(Duration::from_millis(40)))
+        None
+    }
+
+    fn pull_forward(&mut self, n: usize) {
+        let outcome = {
+            let Some(play) = self.play.as_mut() else {
+                return;
+            };
+            match play.pull(n) {
+                Ok(pulled) => {
+                    let frame = play.frame();
+                    let picture = pulled
+                        .frame
+                        .is_some()
+                        .then(|| Arc::new(play.picture().clone()));
+                    Ok((frame, picture, pulled.samples))
+                }
+                Err(e) => Err(e.to_string()),
+            }
+        };
+        match outcome {
+            Ok((frame, picture, samples)) => {
+                self.position = frame;
+                if let Some(p) = picture {
+                    self.picture = Some(p);
+                }
+                self.note_audio(&samples);
+            }
+            Err(e) => {
+                self.error = Some(e);
+                self.speed = 0.0;
+                self.clock = None;
+                if let Some(play) = self.play.as_mut() {
+                    let _ = play.set_speed(0.0);
+                }
+            }
+        }
+    }
+
+    fn note_audio(&mut self, samples: &[f32]) {
+        let (mut peak, mut sum) = (0.0f32, 0.0f64);
+        for &s in samples {
+            peak = peak.max(s.abs());
+            sum += f64::from(s) * f64::from(s);
+        }
+        let rms = if samples.is_empty() {
+            0.0
+        } else {
+            (sum / samples.len() as f64).sqrt() as f32
+        };
+        if self.muted {
+            peak = 0.0;
+        }
+        let rms = if self.muted { 0.0 } else { rms };
+        self.monitor.peak = peak;
+        self.monitor.rms = rms;
+        self.monitor.samples = samples.len();
+        self.monitor.seq += 1;
+        self.monitor.since_seek_peak = self.monitor.since_seek_peak.max(peak);
     }
 
     pub fn snap(&self) -> PlayerSnap {
+        let video_size = self.picture.as_ref().map(|p| (p.width, p.height));
         PlayerSnap {
-            loaded: self.loaded.is_some(),
+            loaded: self.is_loaded(),
             muted: self.muted,
             frames: self.frames,
             position: self.position,
             playing: self.speed != 0.0,
             speed: self.speed,
-            hwdec: self.hwdec.clone(),
-            video_size: match self.video_size {
-                (Some(w), Some(h)) if w > 0 && h > 0 => Some((w as u32, h as u32)),
-                _ => None,
-            },
+            hwdec: String::new(),
+            video_size,
             error: self.error.clone(),
+            picture: self.picture.clone(),
         }
     }
 }
 
-/// `VIDCUT_DEBUG_PLAYER=1` traces player commands, events and renders to
-/// stderr.
+/// Opens `plan` at `position` (the picture is the last frame when `position`
+/// is the end). A positive `speed` keeps playing.
+fn open_player(
+    plan: &RenderPlan,
+    position: i64,
+    speed: f64,
+) -> Result<(vidcut_av::play::Player, Arc<Image>), String> {
+    let mut play = vidcut_av::play::Player::new(plan.clone()).map_err(|e| e.to_string())?;
+    let show = position.min(plan.frames.saturating_sub(1).max(0));
+    play.seek(show).map_err(|e| e.to_string())?;
+    if speed > 0.0 {
+        play.set_speed(speed).map_err(|e| e.to_string())?;
+    }
+    let picture = Arc::new(play.picture().clone());
+    Ok((play, picture))
+}
+
+/// `VIDCUT_DEBUG_PLAYER=1` traces player commands to stderr.
 pub fn debug() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("VIDCUT_DEBUG_PLAYER").is_some())
 }
 
-fn int(v: &Value) -> Option<i64> {
-    match v {
-        Value::Int(i) => Some(*i),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
-    use vidcut_core::preview::Preview;
+    use vidcut_core::render::{RenderPlan, VideoPiece};
     use vidcut_core::time::Rational;
 
     use crate::live::snapshot::PlayerId;
 
     use super::*;
 
-    fn preview(edl: &str) -> Preview {
-        Preview {
-            edl: edl.into(),
-            audio_graph: None,
-            read_ahead: false,
-            deinterlace: false,
-            images: false,
-        }
-    }
-
-    fn player() -> Player {
-        Player::new(PlayerId::Timeline, None, PathBuf::from("timeline.edl"))
-    }
-
     fn fps() -> Rational {
         Rational::new(30, 1).unwrap()
     }
 
-    #[test]
-    fn a_fast_seek_while_loading_is_exact() {
-        let mut p = player();
-        p.load(preview("a"), 300, fps(), 0).unwrap();
-        // `loadfile` sets this while mpv is opening the file. This player
-        // has no mpv, so the test arms it.
-        p.loading = Some(1);
-        p.seek(100, true);
-        assert_eq!(p.target, (100, true));
-        assert_eq!(p.position, 100);
+    fn plan(name: &str) -> RenderPlan {
+        RenderPlan {
+            fps: fps(),
+            width: 16,
+            height: 16,
+            sample_rate: 48_000,
+            channels: 2,
+            frames: 300,
+            video: vec![VideoPiece::Black { frames: 300 }],
+            audio: Vec::new(),
+            range: (0, 300),
+            name: name.into(),
+        }
+    }
+
+    fn player() -> Player {
+        Player::new(PlayerId::Timeline)
     }
 
     #[test]
-    fn a_fast_seek_asks_for_a_keyframe_and_an_exact_one_does_not() {
+    fn a_fast_seek_is_marked_inexact_and_an_exact_one_is_not() {
         let mut p = player();
-        p.load(preview("a"), 300, fps(), 0).unwrap();
+        p.load_plan(plan("a"), 0, Vec::new()).unwrap();
         p.seek(100, true);
         assert_eq!(p.target, (100, false));
+        assert_eq!(p.position, 100);
         p.seek(100, false);
         assert_eq!(p.target, (100, true));
     }
@@ -710,17 +538,17 @@ mod tests {
     #[test]
     fn a_reload_at_the_requested_frame_keeps_the_target() {
         let mut p = player();
-        p.load(preview("a"), 300, fps(), 0).unwrap();
+        p.load_plan(plan("a"), 0, Vec::new()).unwrap();
         p.seek(40, true);
-        // Playback's time-pos has moved the playhead off the seek.
+        // Playback has moved the playhead off the seek.
         p.position = 80;
         assert_eq!(p.target, (40, false));
         // Same picture: not a seek back to the request.
-        assert!(p.load(preview("a"), 300, fps(), 40).is_none());
+        assert!(p.load_plan(plan("a"), 40, Vec::new()).is_none());
         assert_eq!(p.target, (40, false));
         assert_eq!(p.position, 80);
-        // The EDL changed, still opening at the frame the seek asked for.
-        p.load(preview("b"), 300, fps(), 40).unwrap();
+        // The plan changed, still opening at the frame the seek asked for.
+        p.load_plan(plan("b"), 40, Vec::new()).unwrap();
         assert_eq!(p.target, (40, false));
         assert_eq!(p.position, 40);
     }
@@ -728,10 +556,10 @@ mod tests {
     #[test]
     fn a_reload_at_another_frame_is_a_new_exact_target() {
         let mut p = player();
-        p.load(preview("a"), 300, fps(), 0).unwrap();
+        p.load_plan(plan("a"), 0, Vec::new()).unwrap();
         p.seek(40, true);
         p.position = 80;
-        p.load(preview("b"), 300, fps(), 80).unwrap();
+        p.load_plan(plan("b"), 80, Vec::new()).unwrap();
         assert_eq!(p.target, (80, true));
         assert_eq!(p.position, 80);
     }
@@ -741,7 +569,7 @@ mod tests {
         let mut p = player();
         p.seek(10, true);
         assert_eq!(p.target, (10, false));
-        p.load(preview("a"), 300, fps(), 10).unwrap();
+        p.load_plan(plan("a"), 10, Vec::new()).unwrap();
         assert_eq!(p.target, (10, true));
     }
 }

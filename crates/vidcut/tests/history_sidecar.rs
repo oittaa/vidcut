@@ -70,7 +70,6 @@ fn gui_command_puts_the_history_warning_on_the_result() {
     let (h, session) = live::start(live::Config {
         project: Some(path.clone()),
         create: false,
-        players: None,
         preview_error: Some("no preview in tests".into()),
         renderer: Arc::new(NoRenderer),
         notify: Arc::new(|| {}),

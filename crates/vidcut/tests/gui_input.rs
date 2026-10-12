@@ -173,7 +173,6 @@ fn setup(dir: &Path) -> (live::Handle, std::thread::JoinHandle<()>) {
     let (h, t) = live::start(live::Config {
         project: Some(path),
         create: false,
-        players: None,
         preview_error: Some("no preview in tests".into()),
         renderer: Arc::new(NoRenderer),
         notify: Arc::new(|| {}),

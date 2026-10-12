@@ -428,7 +428,6 @@ pub fn doctor() -> Value {
     json!({
         "vidcut": env!("CARGO_PKG_VERSION"),
         "ffmpeg": vidcut_av::library_versions(),
-        "libmpv": match vidcut_mpv::available() { Ok(()) => json!("ok"), Err(e) => json!(e) },
         "gpus": gpus,
         "state_dir": state_dir(),
         "test_data": vidcut_av::testdata::root(),

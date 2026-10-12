@@ -1,8 +1,8 @@
-//! Minimal runtime-loaded libmpv bindings for vidcut's preview.
+//! Minimal runtime-loaded libmpv bindings.
 //!
 //! libmpv is opened with `dlopen` on first use, so programs linking this crate
-//! start (and the vidcut CLI works) on machines without libmpv. Only the GUI
-//! needs it.
+//! start on machines without libmpv. Playback does not call into it. The
+//! spikes in this crate and `vidcut`'s `mpv_gl_spike` example do.
 
 pub mod client;
 pub mod ffi;

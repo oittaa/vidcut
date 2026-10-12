@@ -798,7 +798,7 @@ pub enum Request {
         #[serde(default)]
         method: Option<String>,
     },
-    /// Report dependencies (FFmpeg, libmpv, GPUs).
+    /// Report dependencies (FFmpeg, GPUs).
     #[serde(rename = "doctor")]
     Doctor {},
 }

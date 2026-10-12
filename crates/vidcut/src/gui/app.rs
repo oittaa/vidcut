@@ -1,7 +1,6 @@
-//! The eframe app: OpenGL video, captures and window commands around the
-//! [`Workspace`]. The UI thread is also mpv's render thread, so it only
-//! renders frames and never calls mpv's client API
-//! (docs/decisions/preview.md §6).
+//! The eframe app: captures and window commands around the [`Workspace`].
+//! The viewer's picture is the session player's frame, uploaded as a
+//! texture. This thread never decodes.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -9,10 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 use eframe::glow;
-use raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 use vidcut_core::Error;
 use vidcut_core::request::GuiPanel;
-use vidcut_mpv::{Display, GlRenderer, Mpv};
 
 use super::theme;
 use super::video::Video;
@@ -95,18 +92,6 @@ impl App {
             .gl
             .clone()
             .ok_or("vidcut needs eframe's OpenGL (glow) renderer")?;
-        let display = match cc.display_handle().map(|h| h.as_raw()) {
-            Ok(RawDisplayHandle::Wayland(h)) => Display::Wayland(h.display.as_ptr()),
-            Ok(RawDisplayHandle::Xlib(h)) => {
-                Display::X11(h.display.map_or(std::ptr::null_mut(), |d| d.as_ptr()))
-            }
-            _ => Display::None,
-        };
-        let (players, renderers, preview_error) =
-            match make_players(&cc.egui_ctx, cc.get_proc_address.clone(), display) {
-                Ok((players, [s, t])) => (Some(players), [Some(s), Some(t)], None),
-                Err(e) => (None, [None, None], Some(e)),
-            };
         let port = Arc::new(Port {
             ctx: cc.egui_ctx.clone(),
             tasks: Mutex::new(Vec::new()),
@@ -117,8 +102,7 @@ impl App {
         let (handle, session) = live::start(live::Config {
             project,
             create,
-            players,
-            preview_error,
+            preview_error: None,
             renderer: port.clone(),
             notify: Arc::new(move || ctx.request_repaint()),
             socket: Some(socket.clone()),
@@ -136,12 +120,11 @@ impl App {
                 socket.display()
             );
         }
-        let [s, t] = renderers;
         Ok(Self {
             ws: Workspace::new(handle),
             port,
             gl,
-            videos: [Video::new(s), Video::new(t)],
+            videos: [Video::new(None), Video::new(None)],
             session: Some(session),
             window_captures: HashMap::new(),
             next_capture: 1,
@@ -207,7 +190,7 @@ impl eframe::App for App {
                     done(image.ok_or_else(|| {
                         Error::new(
                             vidcut_core::ErrorCode::Dependency,
-                            "the viewer has no picture (is libmpv available? see `vidcut doctor`)",
+                            "the viewer has no picture",
                         )
                     }));
                 }
@@ -271,8 +254,6 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self, gl: Option<&glow::Context>) {
-        // Render contexts go first, while the GL context is current; the mpv
-        // handles go when the session (and these) drop them.
         for v in &mut self.videos {
             v.destroy(gl);
         }
@@ -281,35 +262,4 @@ impl eframe::App for App {
             let _ = t.join();
         }
     }
-}
-
-/// eframe's OpenGL function loader.
-type GlLoader = Arc<dyn Fn(&std::ffi::CStr) -> *const std::ffi::c_void + Send + Sync>;
-
-/// Creates both players and their GL render contexts.
-fn make_players(
-    ctx: &egui::Context,
-    proc_address: Option<GlLoader>,
-    display: Display,
-) -> std::result::Result<((Mpv, Mpv), [GlRenderer; 2]), String> {
-    vidcut_mpv::available()?;
-    let lookup = proc_address.ok_or("no OpenGL function loader")?;
-    let make = |id: PlayerId| -> std::result::Result<(Mpv, GlRenderer), String> {
-        let mut opts = live::mpv_options(true);
-        opts.extend(live::mpv_log_options(id));
-        let opts: Vec<(&str, &str)> = opts.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-        let mpv = Mpv::new(&opts).map_err(|e| e.to_string())?;
-        let l = lookup.clone();
-        let renderer = GlRenderer::new(&mpv, Box::new(move |name| l(name)), display)
-            .map_err(|e| e.to_string())?;
-        let ctx = ctx.clone();
-        renderer.set_update_callback(move || ctx.request_repaint());
-        Ok((mpv, renderer))
-    };
-    // The timeline player comes first: FFmpeg has one log callback per
-    // process, which the first mpv takes, so all of FFmpeg's messages go to
-    // the timeline's log (`VIDCUT_MPV_LOG_DIR`).
-    let (t, tr) = make(PlayerId::Timeline)?;
-    let (s, sr) = make(PlayerId::Source)?;
-    Ok(((s, t), [sr, tr]))
 }

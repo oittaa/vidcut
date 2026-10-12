@@ -157,7 +157,6 @@ fn tools_send_one_request_each() {
     let (h, session) = live::start(live::Config {
         project: Some(path),
         create: false,
-        players: None,
         preview_error: Some("no preview in tests".into()),
         renderer: Arc::new(NoRenderer),
         notify: Arc::new(|| {}),

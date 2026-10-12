@@ -147,7 +147,6 @@ fn numbered_images_are_asked_about() {
     let (h, session) = live::start(live::Config {
         project: Some(project),
         create: false,
-        players: None,
         preview_error: Some("no preview in tests".into()),
         renderer: Arc::new(NoRenderer),
         notify: Arc::new(|| {}),

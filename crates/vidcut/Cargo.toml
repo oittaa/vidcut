@@ -38,5 +38,5 @@ tempfile.workspace = true
 workspace = true
 
 [features]
-# Acceptance tests against the real GUI; need a display and libmpv.
+# Acceptance tests against the real GUI; need a display.
 gui-tests = []

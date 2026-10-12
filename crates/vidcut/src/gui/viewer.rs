@@ -2,6 +2,8 @@
 //! bar with In/Out handles, the transport and the timecode and duration
 //! fields.
 
+use std::sync::Arc;
+
 use eframe::egui::{
     self, Align2, Color32, CornerRadius, FontId, Key, Pos2, Rect, RichText, Sense, Stroke, pos2,
     vec2,
@@ -169,7 +171,11 @@ impl Workspace {
         let player = self.snap.player(id).clone();
         let video = self.pictures[id.index()];
         let played = video.texture.filter(|_| player.loaded && video.has_frame);
-        match self.paused_frame(ui.ctx(), id).or(played) {
+        match self
+            .player_frame(ui.ctx(), id)
+            .or_else(|| self.paused_frame(ui.ctx(), id))
+            .or(played)
+        {
             Some(tex) => {
                 painter.image(
                     tex,
@@ -271,10 +277,30 @@ impl Workspace {
         });
     }
 
+    /// The session player's frame, uploaded for this viewer.
+    fn player_frame(&mut self, ctx: &egui::Context, id: PlayerId) -> Option<egui::TextureId> {
+        let picture = self.snap.player(id).picture.clone()?;
+        let key = Arc::as_ptr(&picture) as usize;
+        let slot = &mut self.player_tex[id.index()];
+        if slot.as_ref().is_none_or(|(k, _)| *k != key) {
+            let image = egui::ColorImage::from_rgba_unmultiplied(
+                [picture.width as usize, picture.height as usize],
+                &picture.rgba,
+            );
+            let handle = ctx.load_texture(
+                format!("viewer-{}", id.index()),
+                image,
+                egui::TextureOptions::LINEAR,
+            );
+            *slot = Some((key, handle));
+        }
+        Some(slot.as_ref()?.1.id())
+    }
+
     /// The paused viewer's frame, from the renderer that decodes each frame
     /// once whichever way the viewer steps (docs/decisions/preview.md §13).
-    /// Playing, the player's picture shows instead; so it does while the
-    /// first frame after playing renders, rather than a picture from before.
+    /// The session player's picture is preferred; this is the fallback while
+    /// that picture is not in the snapshot yet.
     fn paused_frame(&mut self, ctx: &egui::Context, id: PlayerId) -> Option<egui::TextureId> {
         use super::stills::{Shown, Still, Stills, VIEWER};
         let mode = self.snap.viewer;

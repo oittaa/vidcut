@@ -15,7 +15,7 @@ A relatively simple video cutting tool modeled on DaVinci Resolve's **Cut page**
 It is written in Rust:
 - **GUI:** egui/eframe with the glow (OpenGL) backend.
 - **Media:** the FFmpeg libraries in-process via `ffmpeg-next`. Never shell out to the `ffmpeg` CLI.
-- **Preview:** libmpv, loaded at runtime.
+- **Preview:** FFmpeg in-process (`vidcut-av`). A Linux build does not load libmpv.
 
 **Everything must be scriptable:** each GUI action is a serializable Request, also reachable from the CLI and from a JSON-RPC socket on the running GUI.
 
@@ -34,7 +34,7 @@ It is written in Rust:
    - Test media, generated fixtures and the manual live in `$VIDCUT_TEST_DATA` (default `~/Downloads/vidcut-tmp`), the one place for test data. Test outputs go to temp dirs.
    - `scripts/check.sh` (the pre-commit hook and CI) refuses any binary file, whatever its name, so `.gitignore` lists no file types.
    - Real-world clips are listed in `tests/media-manifest.toml` (URL, license, sha256) and fetched by `scripts/fetch-test-media.sh`.
-5. **No ffmpeg/ffprobe subprocesses.** Use `vidcut-av`, the FFmpeg libraries. libmpv is used only for interactive preview.
+5. **No ffmpeg/ffprobe subprocesses.** Use `vidcut-av`, the FFmpeg libraries. Playback uses them too; it does not load libmpv.
 6. **License:** MIT. Don't add dependencies with licenses incompatible with MIT distribution of our source.
 
 ## Workspace layout
@@ -42,8 +42,8 @@ It is written in Rust:
 | Crate | Purpose | Depends on |
 |---|---|---|
 | `crates/vidcut-core` | Project model, time and timecode math, edit operations (`ops.rs`; tracks in `ops/tracks.rs`, clips following Track 1 in `ops/follow.rs`), Request/Response protocol, Editor (undo/rev), project store, render plans (`render.rs`: top-wins video, mixed audio lanes), preview EDLs (`preview.rs`), OpenTimelineIO reading and writing (`otio.rs`, tests in `otio/tests.rs`), what the automatic tools decide from measurements (`analysis.rs`), application preferences (`preferences.rs`) | — (pure Rust; fast to build and test) |
-| `crates/vidcut-av` | FFmpeg layer: probe (start timecodes too), exact-seek decode, encode/mux, export engine (with loudness normalization; the next piece's file opens ahead in `export/ahead.rs`), the renderer of paused and two-up pictures that decodes each frame once either way (`export/renderer.rs`), thumbnails (and their JPEG cache form), waveforms, still frames, measurements for the automatic tools (`analysis.rs`), encoder detection, test-fixture generator | ffmpeg-next |
-| `crates/vidcut-mpv` | libmpv via `dlopen` (`libloading`): client API and render API (OpenGL and software) | libmpv.so.2 at runtime only |
+| `crates/vidcut-av` | FFmpeg layer: probe (start timecodes too), exact-seek decode, encode/mux, export engine (with loudness normalization; the next piece's file opens ahead in `export/ahead.rs`), the renderer of paused and two-up pictures that decodes each frame once either way (`export/renderer.rs`), playback (`play.rs`: the viewer's picture and mix), thumbnails (and their JPEG cache form), waveforms, still frames, measurements for the automatic tools (`analysis.rs`), encoder detection, test-fixture generator | ffmpeg-next |
+| `crates/vidcut-mpv` | Optional libmpv bindings via `dlopen` (`libloading`), kept for the preview spikes. Playback does not load them | libmpv.so.2 only if a spike calls it |
 | `crates/vidcut` | The `vidcut` binary: Session/host, IPC, CLI (clap), GUI (eframe), MCP server | all of the above |
 
 Inside `crates/vidcut`:
@@ -81,7 +81,7 @@ cargo run -p vidcut -- --help  # CLI
 **System packages** (Ubuntu 26.04):
 
 ```bash
-sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libclang-dev libmpv2 rustup
+sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libclang-dev rustup
 ```
 
 **Toolchain notes:**
@@ -141,7 +141,7 @@ These are mandatory.
 - **MCP** (`crates/vidcut/tests/mcp.rs`) runs `vidcut mcp` as a child process and talks JSON-RPC to it, headless and against a live session serving IPC.
 - **Measurement fixtures:** `Picture::Shots` (a new shot every N frames, every fourth one black) and `Sound::Tone` (a steady 1 kHz sine at −20 dBFS, −20 LUFS in stereo) have known answers for scene, black and loudness tests. In core tests, `FakeEnv` takes made-up levels and pictures (`test_support::levels`, `pictures`).
 - **Export jobs** (`crates/vidcut/tests/jobs.rs`) run the live session without players: foreground, background, cancel and wait.
-- **Live session tests** (`crates/vidcut/tests/live.rs`) run the GUI's core thread without a window: a harness thread renders both players with mpv's software renderer and answers screenshots, and requests go through `Handle::call` like IPC. Prefer them over GUI tests; they need libmpv but no display.
+- **Live session tests** (`crates/vidcut/tests/live.rs`) run the GUI's core thread without a window: a harness thread acks presents, screenshots come from the session player, and requests go through `Handle::call` like IPC. Prefer them over GUI tests. They need no display and do not load libmpv.
 - **Frame checks** compare barcodes: screenshot the viewer, decode the PNG with `vidcut_av::decode`, and compare with `vidcut frame` (export's renderer).
 - **Test outputs** go to temp dirs, never into the repo. Make test temp dirs with `tempfile` (`tempfile::Builder::new().prefix("vidcut-…").tempdir()`), which removes them when they drop, also when the test fails. Tests that open projects set `XDG_STATE_HOME` to a temp dir so undo history and recent projects stay out of the user's state, tests that save presets or preferences set `XDG_CONFIG_HOME`, and tests that check thumbnails set `XDG_CACHE_HOME`.
 
@@ -276,7 +276,7 @@ vidcut undo                                 # works across separate runs
 | `vidcut jobs`, `jobs get\|wait\|cancel J [--timeout S]` | `jobs.*` | export and proxy jobs, the GUI's own included; `wait` fails like the job did |
 | `vidcut pool --bin A --sort name --descending` | `pool.set` | the bin the Media Pool shows and its order; Source Tape follows it |
 | `vidcut mute [on\|off]` | `player.mute` | the viewer's monitoring mute (not the export) |
-| `vidcut fader A1 -12` | `mixer.preview` | a track's level heard now, without changing the project (`track set --volume` keeps one); `live: false` without ZeroMQ or FFmpeg's `azmq` |
+| `vidcut fader A1 -12` | `mixer.preview` | a track's level heard on the next buffer, without changing the project (`track set --volume` keeps one); `live: true` when that track is in the mix |
 | `vidcut show quick-export\|export\|jobs\|log\|mixer` | `gui.show` | opens that window for the person at the GUI |
 
 - **Looking at the result:** `vidcut seek 1m && vidcut screenshot -o shot.png` shows exactly what `vidcut frame --at 1m -o f.png` renders. Both are frame-exact.
@@ -305,11 +305,9 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `filmstrip FILE OUTDIR [N]`: pool thumbnails, timed.
 
 **Preview debugging:**
-- `VIDCUT_DEBUG_PLAYER=1` traces every player command, mpv event, render and timeline gesture to stderr.
-- `VIDCUT_MPV_OPTIONS="hwdec=no,ao=null"` overrides mpv options.
-- `VIDCUT_MPV_LOG_DIR=DIR` makes each GUI player write mpv's own log, at debug level, to `DIR/<pid>-source.log` and `DIR/<pid>-timeline.log`. `VIDCUT_MPV_OPTIONS=msg-level=all=trace` adds more.
-  - FFmpeg's messages are all in the timeline's log: both players' and those of vidcut's own FFmpeg work in the GUI process (thumbnails, waveforms, exports). FFmpeg has one log callback per process, and the first mpv instance (the timeline's) takes it.
-  - `tests/gui.rs` sets it and `VIDCUT_DEBUG_PLAYER` for its GUI. A failed run keeps its temp dir, which the failure names: the screenshots, both mpv logs and the GUI's stderr.
+- `VIDCUT_DEBUG_PLAYER=1` traces player seeks, loads and timeline gestures to stderr.
+- `tests/gui.rs` sets it. A failed run keeps its temp dir, which the failure names: the screenshots and the GUI's stderr.
+- `VIDCUT_MPV_OPTIONS` and `VIDCUT_MPV_LOG_DIR` apply only to the libmpv spikes below, not to playback.
 
 **Preview spikes:**
 - `cargo test -p vidcut-mpv --test edl_spike -- --nocapture` runs the mpv EDL/seek semantics experiments headless.
@@ -319,32 +317,22 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 
 The preview findings and the time-mapping rules are in [docs/decisions/preview.md](docs/decisions/preview.md); the export engine, sampling rule and encoder decisions are in [docs/decisions/export.md](docs/decisions/export.md). Read them before touching preview, seeking, time conversion or export.
 
-- **libmpv needs `LC_NUMERIC=C`.** `Mpv::new` calls `setlocale` before `mpv_create`.
-- **mpv's render thread (the GUI's UI thread) may only call render-thread-safe client functions:**
-  - async commands and property calls
-  - `mpv_observe_property`, `mpv_wakeup`
-  - `mpv_wait_event(…, 0)`
-
-  Synchronous `command`/`get_property` there deadlocks against the video output. The mpv update and wakeup callbacks must not call mpv at all.
+- **Playback does not load libmpv.** The session decodes and mixes with `vidcut_av::play`. A seek is on screen once the renderer calls the present callback (`docs/decisions/gui.md` §4). The libmpv spikes still need `LC_NUMERIC=C` (`Mpv::new` calls `setlocale` before `mpv_create`) and may only use render-thread-safe client calls on the UI thread.
 - **vsync must stay off** (`GlowConfiguration { vsync: false }`). On GNOME/Wayland with NVIDIA, a vsynced swap blocks forever while the window is hidden.
 - **Start threads with `threads::spawn`, saying what the work is.** `Work::Job` (exports, proxies, measurements, thumbnails, anything decoding media nobody watches frame by frame) runs at nice 19, and the FFmpeg threads it starts inherit that; `Work::Interactive` is for what someone waits on. A unit test fails on any other thread start in `crates/vidcut/src`.
-- **A paused viewer shows vidcut-av's renderer, not mpv's picture** (preview.md §13): the same frame, decoded once whichever way it steps. Playing shows mpv. `gui.screenshot` captures mpv's picture, which differs by a couple of levels in fine detail. The renderer's tests count decoded frames with `vidcut_av::decode::frames_decoded()`, a process-wide count, so they stay one test in their own binary.
-- **Players render in `App::logic`, not `App::ui`.** eframe skips `ui` for hidden windows but always calls `logic`.
-- **libmpv waits only 200 ms for the renderer to take a new frame.** Then it keeps the frame as its current picture and finishes the seek anyway, so "a new frame was rendered" doesn't prove a seek is on screen. The session counts a seek as shown only after the renderer presents the player following mpv's restart (docs/decisions/gui.md §4).
-- **mpv's EDL drops leading pictures at segment ends.** Encodes that decode a keyframe before the frames shown just ahead of it lose those frames in the preview when a cut ends there. The live session patches such tails (preview.md §9). Test cuts against fixtures with B-frames and real media, not only small fixtures.
-- **Only the session thread calls mpv's client API.** Seeks while a file is still loading are rejected by mpv; `Player::seek` reloads instead.
+- **The viewer shows the session player's frame**, uploaded as a texture. `gui.screenshot` of the viewer encodes that frame. The still renderer's tests count decoded frames with `vidcut_av::decode::frames_decoded()`, a process-wide count, so they stay one test in their own binary.
+- **Presents are handled in `App::logic`, not `App::ui`.** eframe skips `ui` for hidden windows but always calls `logic`.
+- **Open-GOP tails.** Encodes that need a keyframe before the frames shown just ahead of a cut can drop those frames. The live session still patches such tails (preview.md §9). Test cuts against fixtures with B-frames and real media, not only small fixtures.
 - **File watching:** `notify` reports reads as access events. Ignore them, or a reload re-triggers itself forever.
-- **The half-frame bias is applied exactly once.** mpv EDL `start` values are raw source timestamps and carry it, so timeline seeks to frame `j` go to exactly `j/f`.
-- **Never send negative absolute seeks.** mpv counts them from the end of the file.
-- **MPEG-TS and other index-less containers can't be seeked exactly by mpv.** Preview uses an MKV remux (`vidcut_av::remux`); export reads the original.
+- **The half-frame bias is applied exactly once.** Timeline frame `j` is the source frame at `j/f` under the sampling rule (export.md). The libmpv spikes count negative absolute seeks from the end of the file; playback does not.
+- **MPEG-TS and other index-less containers** are remuxed to MKV for the preview (`vidcut_av::remux`); export reads the original.
 - **Set packet durations explicitly when muxing** from delayed encoders (x264 with B-frames). Otherwise MP4 edit lists drop the last frame.
 - **Clear a decoded frame's picture type before encoding it** (`set_kind(picture::Type::None)`). Encoders take it as an order: the output copies the source's keyframes, and x264 warns about every B-frame it can't make.
 - **Set `pkt_timebase` on every decoder** (`codec_ctx.pkt_timebase = stream.time_base`). Without it, FFmpeg can't adjust timestamps when it skips priming samples, and audio drifts by the codec delay.
 - **Color goes through `vidcut_av::color`** (export.md §4): HDR sources are tone-mapped for SDR output, SDR sources sit at 203 nits in HDR output, untagged HD is BT.709. Rotation metadata is applied everywhere (spec D33).
 - **`zscale` needs explicit output primaries** when converting to linear light: for untagged frames it otherwise fails with "no path between colorspaces".
-- **Interlaced sources are deinterlaced inside `VideoReader`** (`bwdif`, one frame per frame), before frames are picked. The preview adds the same filter per file (preview.md §5); mpv's own `deinterlace` makes one frame per field, which breaks frame-exact seeks.
-- **mpv's software renderer aborts on rotated video** (an assertion in `mp_image_crop`). The GUI renders with OpenGL, which rotates on the GPU, so `tests/live.rs` (software rendering) leaves rotated clips to `tests/gui.rs`.
+- **Interlaced sources are deinterlaced inside `VideoReader`** (`bwdif`, one frame per frame), before frames are picked. Playback uses that path.
 - **GPUs on the dev machine:**
   - NVIDIA on `renderD128`: NVENC works, VAAPI doesn't.
   - AMD on `renderD129`: VAAPI H.264/HEVC.
-  - The GL context is on NVIDIA, so preview hwdec is nvdec with zero-copy CUDA frames.
+  - The GL context is on NVIDIA. Playback itself is software frames.

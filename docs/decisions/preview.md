@@ -1,5 +1,7 @@
 # Preview with libmpv: decisions from the M0 spike
 
+Playback no longer loads libmpv. The session plays a render plan with FFmpeg (`vidcut_av::play`) and the viewer uploads that frame. This file is the record of the earlier spike.
+
 **Status:** accepted (M0, October 2026).
 
 **Evidence** (all rerunnable):
