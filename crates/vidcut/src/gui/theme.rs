@@ -21,6 +21,10 @@ pub const ERROR: Color32 = Color32::from_rgb(235, 98, 88);
 pub const OK: Color32 = Color32::from_rgb(120, 190, 120);
 
 pub fn apply(ctx: &egui::Context) {
+    // Phosphor's icons, mixed into ordinary text.
+    let mut fonts = egui::FontDefinitions::default();
+    egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+    ctx.set_fonts(fonts);
     let mut v = Visuals::dark();
     v.panel_fill = PANEL;
     v.window_fill = PANEL;

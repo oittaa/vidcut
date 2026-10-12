@@ -274,6 +274,32 @@ const LOWER_RULER: f32 = 22.0;
 /// timeline.
 const HEADER: f32 = 100.0;
 
+/// The icons of the timeline's controls.
+mod icon {
+    pub use egui_phosphor::regular::{
+        ARROWS_IN_LINE_HORIZONTAL as RIPPLE, ARROWS_OUT_LINE_HORIZONTAL as DYNAMIC_TRIM,
+        BOOKMARK_SIMPLE as MARKER, LIGHTNING as TIMELINE_ACTIONS, MAGNET as SNAP,
+        PENCIL_SIMPLE as EDIT_ACTIONS, SCISSORS as SPLIT, SLIDERS_HORIZONTAL as OPTIONS,
+    };
+}
+
+/// An icon button lit while `on`, read by `name` (accessibility, tests),
+/// with `tip` on hover.
+fn icon_toggle(ui: &mut egui::Ui, icon: &str, name: &str, on: bool, tip: &str) -> egui::Response {
+    let r = ui.add(egui::Button::selectable(on, RichText::new(icon).size(15.0)));
+    r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, name));
+    r.on_hover_text(tip)
+}
+
+/// An icon that opens a menu, read and hovered as `name`.
+fn icon_menu(ui: &mut egui::Ui, icon: &str, name: &str, menu: impl FnOnce(&mut egui::Ui)) {
+    let r = ui
+        .menu_button(RichText::new(icon).size(15.0), menu)
+        .response;
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
+    r.on_hover_text(name);
+}
+
 /// Room one of a header's L, A and V buttons takes, with the space after it.
 const TOGGLE: f32 = 21.0;
 
@@ -566,6 +592,13 @@ impl Workspace {
         self.thumbs = thumbs;
         self.tiles = tiles;
         self.track_headers(ui, lower_rect, &layout.lower, &p);
+        let upper_box =
+            Rect::from_min_max(full.min, pos2(upper_rect.left() - 1.0, upper_rect.bottom()));
+        let lower_box = Rect::from_min_max(
+            lower_rect.min,
+            pos2(content.left() - 1.0, layout.lower_ruler.bottom()),
+        );
+        self.timeline_boxes(ui, upper_box, lower_box, &p);
 
         // While a trim drags, its pointer stays.
         if let Some(d) = &self.timeline.drag
@@ -753,136 +786,12 @@ impl Workspace {
         Scale::anchored(content.left(), self.timeline.scroll, ppf)
     }
 
+    /// The row above the timelines: the In/Out marks, zoom and what the
+    /// timeline holds. Its controls are in the header column's boxes
+    /// (`timeline_boxes`).
     fn timeline_toolbar(&mut self, ui: &mut egui::Ui, p: &Project) {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Timeline").strong());
-            ui.menu_button("Options", |ui| {
-                let mut ripple = p.settings.ripple_on;
-                if ui.checkbox(&mut ripple, "Ripple On").changed() {
-                    self.send("project.set", json!({ "ripple_on": ripple }));
-                }
-                let o = &mut self.timeline.options;
-                let before = *o;
-                ui.checkbox(&mut o.snapping, "Snap (N)");
-                ui.checkbox(&mut o.fixed_playhead, "Fixed Playhead");
-                ui.checkbox(&mut o.safe_edit, "Trim with Safe Edit");
-                ui.separator();
-                ui.checkbox(&mut o.names, "Display Clip Names");
-                ui.checkbox(&mut o.durations, "Display Clip Durations");
-                ui.checkbox(&mut o.status, "Display Clip Status");
-                ui.checkbox(&mut o.filmstrips, "Filmstrips");
-                ui.checkbox(&mut o.waveforms, "Waveforms");
-                ui.separator();
-                ui.checkbox(&mut o.boring, "Boring Detector")
-                    .on_hover_text("Highlights clips that are too long (gray) or too short (red)");
-                let open_boring = ui.button("Analyze Timeline Edits…").clicked();
-                if *o != before {
-                    o.save();
-                }
-                if open_boring {
-                    self.timeline.boring_dialog =
-                        Some((self.timeline.options.boring_secs, self.timeline.options.jump_frames));
-                    ui.close();
-                }
-            });
-            ui.menu_button("Actions", |ui| {
-                let at = self.snap.timeline.position;
-                if ui.button("Split Clips  (Ctrl+B)").clicked() {
-                    self.send(
-                        "edit.split",
-                        json!({ "at": at, "clips": self.snap.selection.clips }),
-                    );
-                    ui.close();
-                }
-                if ui.button("Add Marker  (M)").clicked() {
-                    self.send("markers.add", json!({ "at": at }));
-                    ui.close();
-                }
-                ui.separator();
-                for (label, edge) in [("Trim Start to Playhead", "head"), ("Trim End to Playhead", "tail")] {
-                    if ui.button(label).clicked() {
-                        self.send(
-                            "edit.trim_to_playhead",
-                            json!({ "edge": edge, "at": at, "clips": self.snap.selection.clips }),
-                        );
-                        ui.close();
-                    }
-                }
-                if ui
-                    .add_enabled(
-                        !self.snap.selection.clips.is_empty(),
-                        egui::Button::new("Change Clip Duration…  (Ctrl+D)"),
-                    )
-                    .clicked()
-                {
-                    self.timeline.duration_dialog = Some(String::new());
-                    ui.close();
-                }
-                ui.separator();
-                let selected = self.snap.selection.clips.clone();
-                let with = |want: fn(&vidcut_core::model::Clip) -> bool| {
-                    selected.iter().any(|id| p.clip(id).is_some_and(want))
-                };
-                if ui
-                    .add_enabled(with(|c| c.audio.is_some()), egui::Button::new("Ripple Delete Silence…"))
-                    .on_hover_text("Cut the silent parts out of the selected clips")
-                    .clicked()
-                {
-                    self.open_silence(selected.clone());
-                    ui.close();
-                }
-                if ui
-                    .add_enabled(with(|c| c.video), egui::Button::new("Detect Scene Cuts"))
-                    .on_hover_text("Split the selected clips where their shots change")
-                    .clicked()
-                {
-                    self.send("edit.detect_scene_cuts", json!({ "clips": selected }));
-                    ui.close();
-                }
-            });
-            let mut dynamic = self.timeline.dynamic.is_some();
-            let r = ui
-                .toggle_value(&mut dynamic, "Dynamic Trim")
-                .on_hover_text("W: J/K/L trim the selected edit (or slip/slide the selected clips) as it plays; right-click for Slip or Slide");
-            if r.clicked() {
-                self.toggle_dynamic();
-            }
-            r.context_menu(|ui| {
-                let o = &mut self.timeline.options;
-                let before = o.dynamic_mode;
-                ui.radio_value(&mut o.dynamic_mode, tools::DynamicMode::Slip, "Slip");
-                ui.radio_value(&mut o.dynamic_mode, tools::DynamicMode::Slide, "Slide");
-                if o.dynamic_mode != before {
-                    o.save();
-                    ui.close();
-                }
-            });
-            let mut ripple = p.settings.ripple_on;
-            if ui
-                .toggle_value(&mut ripple, "Ripple On")
-                .on_hover_text("Track 1 closes gaps on insert, delete, move and trim; hold Alt to trim without")
-                .changed()
-            {
-                self.send("project.set", json!({ "ripple_on": ripple }));
-            }
-            if ui.button("Split").on_hover_text("Ctrl+B").clicked() {
-                self.send(
-                    "edit.split",
-                    json!({ "at": self.snap.timeline.position, "clips": self.snap.selection.clips }),
-                );
-            }
-            if ui.button("Marker").on_hover_text("M").clicked() {
-                self.send("markers.add", json!({ "at": self.snap.timeline.position }));
-            }
-            let snap = self.snapping();
-            if ui
-                .selectable_label(snap, "Snap")
-                .on_hover_text("N toggles; during a drag only for that drag")
-                .clicked()
-            {
-                self.timeline.options.snapping = !self.timeline.options.snapping;
-                self.timeline.options.save();
-            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(dim(format!(
                     "{} clips, {}",
@@ -891,7 +800,11 @@ impl Workspace {
                 )));
                 ui.separator();
                 let o = &mut self.timeline.options;
-                if ui.small_button("+").on_hover_text("Zoom in (Ctrl+wheel)").clicked() {
+                if ui
+                    .small_button("+")
+                    .on_hover_text("Zoom in (Ctrl+wheel)")
+                    .clicked()
+                {
                     o.ppf = (o.ppf * 1.5).min(40.0);
                     o.save();
                 }
@@ -910,6 +823,217 @@ impl Workspace {
                 ui.label(dim(marks));
             });
         });
+    }
+
+    /// The header column's boxes, as the Cut page has them (spec §5): by the
+    /// overview, the Timeline Options, Timeline Actions and Edit Actions
+    /// menus and the target track for edit functions; by the lower ruler,
+    /// Ripple On, Dynamic Trim, Split, Add Marker and Snap. Icons, read by
+    /// their names; each says its name and key on hover.
+    fn timeline_boxes(&mut self, ui: &mut egui::Ui, upper: Rect, lower: Rect, p: &Project) {
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(upper.shrink(3.0)));
+        child.set_clip_rect(upper.intersect(child.clip_rect()));
+        child.spacing_mut().item_spacing = vec2(2.0, 2.0);
+        child.spacing_mut().button_padding = vec2(4.0, 1.0);
+        child.horizontal(|ui| {
+            icon_menu(ui, icon::OPTIONS, "Timeline Options", |ui| {
+                self.options_menu(ui, p)
+            });
+            icon_menu(ui, icon::TIMELINE_ACTIONS, "Timeline Actions", |ui| {
+                self.timeline_actions_menu(ui, p)
+            });
+            icon_menu(ui, icon::EDIT_ACTIONS, "Edit Actions", |ui| {
+                self.edit_actions_menu(ui)
+            });
+        });
+        child.horizontal_wrapped(|ui| {
+            for t in p.tracks.iter() {
+                let on = self.is_target(&t.id);
+                let r = ui.selectable_label(on, RichText::new(&t.id).small());
+                // Read apart from the track headers' own labels.
+                let name = format!("Target {}", t.id);
+                r.widget_info(|| {
+                    egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, &name)
+                });
+                let r = r.on_hover_text(format!("Edit functions put clips on {}", t.id));
+                if r.clicked() {
+                    self.target = (t.id != MAIN).then(|| t.id.clone());
+                }
+            }
+        });
+        let mut child =
+            ui.new_child(egui::UiBuilder::new().max_rect(lower.shrink2(vec2(3.0, 1.0))));
+        child.set_clip_rect(lower.intersect(child.clip_rect()));
+        child.spacing_mut().item_spacing = vec2(1.0, 0.0);
+        child.spacing_mut().button_padding = vec2(2.0, 0.0);
+        child.horizontal_centered(|ui| self.timeline_tools(ui, p));
+    }
+
+    /// Ripple On, Dynamic Trim, Split, Add Marker and Snap.
+    fn timeline_tools(&mut self, ui: &mut egui::Ui, p: &Project) {
+        let ripple = p.settings.ripple_on;
+        if icon_toggle(
+            ui,
+            icon::RIPPLE,
+            "Ripple On",
+            ripple,
+            "Ripple On: Track 1 closes gaps on insert, delete, move and trim; hold Alt to trim without",
+        )
+        .clicked()
+        {
+            self.send("project.set", json!({ "ripple_on": !ripple }));
+        }
+        let r = icon_toggle(
+            ui,
+            icon::DYNAMIC_TRIM,
+            "Dynamic Trim",
+            self.timeline.dynamic.is_some(),
+            "Dynamic Trim (W): J/K/L trim the selected edit, or slip or slide the selected clips, as it plays. Right-click for Slip or Slide",
+        );
+        if r.clicked() {
+            self.toggle_dynamic();
+        }
+        r.context_menu(|ui| {
+            let o = &mut self.timeline.options;
+            let before = o.dynamic_mode;
+            ui.radio_value(&mut o.dynamic_mode, tools::DynamicMode::Slip, "Slip");
+            ui.radio_value(&mut o.dynamic_mode, tools::DynamicMode::Slide, "Slide");
+            if o.dynamic_mode != before {
+                o.save();
+                ui.close();
+            }
+        });
+        if icon_toggle(ui, icon::SPLIT, "Split", false, "Split (Ctrl+B)").clicked() {
+            self.send(
+                "edit.split",
+                json!({ "at": self.snap.timeline.position, "clips": self.snap.selection.clips }),
+            );
+        }
+        if icon_toggle(ui, icon::MARKER, "Marker", false, "Add Marker (M)").clicked() {
+            self.send("markers.add", json!({ "at": self.snap.timeline.position }));
+        }
+        if icon_toggle(
+            ui,
+            icon::SNAP,
+            "Snap",
+            self.snapping(),
+            "Snap (N); during a drag only for that drag",
+        )
+        .clicked()
+        {
+            self.timeline.options.snapping = !self.timeline.options.snapping;
+            self.timeline.options.save();
+        }
+    }
+
+    /// Timeline Options: how the timeline shows and the modes of the whole
+    /// timeline.
+    fn options_menu(&mut self, ui: &mut egui::Ui, p: &Project) {
+        let mut ripple = p.settings.ripple_on;
+        if ui.checkbox(&mut ripple, "Ripple On").changed() {
+            self.send("project.set", json!({ "ripple_on": ripple }));
+        }
+        let o = &mut self.timeline.options;
+        let before = *o;
+        ui.checkbox(&mut o.snapping, "Snap (N)");
+        ui.checkbox(&mut o.fixed_playhead, "Fixed Playhead");
+        ui.checkbox(&mut o.safe_edit, "Trim with Safe Edit");
+        ui.separator();
+        ui.checkbox(&mut o.names, "Display Clip Names");
+        ui.checkbox(&mut o.durations, "Display Clip Durations");
+        ui.checkbox(&mut o.status, "Display Clip Status");
+        ui.checkbox(&mut o.filmstrips, "Filmstrips");
+        ui.checkbox(&mut o.waveforms, "Waveforms");
+        ui.separator();
+        ui.checkbox(&mut o.boring, "Boring Detector")
+            .on_hover_text("Highlights clips that are too long (gray) or too short (red)");
+        let open_boring = ui.button("Analyze Timeline Edits…").clicked();
+        if *o != before {
+            o.save();
+        }
+        if open_boring {
+            self.timeline.boring_dialog = Some((
+                self.timeline.options.boring_secs,
+                self.timeline.options.jump_frames,
+            ));
+            ui.close();
+        }
+    }
+
+    /// Timeline Actions: what adds to the timeline or changes it as a whole.
+    fn timeline_actions_menu(&mut self, ui: &mut egui::Ui, p: &Project) {
+        if ui.button("Add Video Track").clicked() {
+            self.send("track.add", json!({ "kind": "video" }));
+            ui.close();
+        }
+        if ui.button("Add Audio Track").clicked() {
+            self.send("track.add", json!({ "kind": "audio" }));
+            ui.close();
+        }
+        ui.separator();
+        let at = self.snap.timeline.position;
+        if ui.button("Split Clips  (Ctrl+B)").clicked() {
+            self.send(
+                "edit.split",
+                json!({ "at": at, "clips": self.snap.selection.clips }),
+            );
+            ui.close();
+        }
+        if ui.button("Add Marker  (M)").clicked() {
+            self.send("markers.add", json!({ "at": at }));
+            ui.close();
+        }
+        ui.separator();
+        let selected = self.snap.selection.clips.clone();
+        let with = |want: fn(&vidcut_core::model::Clip) -> bool| {
+            selected.iter().any(|id| p.clip(id).is_some_and(want))
+        };
+        if ui
+            .add_enabled(
+                with(|c| c.audio.is_some()),
+                egui::Button::new("Ripple Delete Silence…"),
+            )
+            .on_hover_text("Cut the silent parts out of the selected clips")
+            .clicked()
+        {
+            self.open_silence(selected.clone());
+            ui.close();
+        }
+        if ui
+            .add_enabled(with(|c| c.video), egui::Button::new("Detect Scene Cuts"))
+            .on_hover_text("Split the selected clips where their shots change")
+            .clicked()
+        {
+            self.send("edit.detect_scene_cuts", json!({ "clips": selected }));
+            ui.close();
+        }
+    }
+
+    /// Edit Actions: what changes the clips at the playhead or selected.
+    fn edit_actions_menu(&mut self, ui: &mut egui::Ui) {
+        let at = self.snap.timeline.position;
+        for (label, edge) in [
+            ("Trim Start to Playhead", "head"),
+            ("Trim End to Playhead", "tail"),
+        ] {
+            if ui.button(label).clicked() {
+                self.send(
+                    "edit.trim_to_playhead",
+                    json!({ "edge": edge, "at": at, "clips": self.snap.selection.clips }),
+                );
+                ui.close();
+            }
+        }
+        if ui
+            .add_enabled(
+                !self.snap.selection.clips.is_empty(),
+                egui::Button::new("Change Clip Duration…  (Ctrl+D)"),
+            )
+            .clicked()
+        {
+            self.timeline.duration_dialog = Some(String::new());
+            ui.close();
+        }
     }
 
     /// Track headers: the number picks the target track for

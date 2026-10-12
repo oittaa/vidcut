@@ -54,6 +54,8 @@ eframe = { version = "0.36", default-features = false, features = [
 # Direct dep only to keep winit's default features (client-side decorations on
 # GNOME/Wayland, runtime-loaded libwayland), which eframe enables only by default.
 winit = "0.30"
+# Icons for the timeline's controls (Phosphor). MIT or Apache-2.0.
+egui-phosphor = "0.14"
 # Platform display handle passed to libmpv for hardware-decoding interop.
 raw-window-handle = "0.6"
 notify = { version = "8.2", default-features = false }

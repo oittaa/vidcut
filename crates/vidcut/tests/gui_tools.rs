@@ -185,7 +185,7 @@ fn tools_send_one_request_each() {
     // dry run, not an edit), then Remove sends one request.
     call(&h, "selection.set", json!({ "clips": ["c1"] }));
     settle(&h, &mut harness);
-    menu_item(&mut harness, "Actions", "Ripple Delete Silence…");
+    menu_item(&mut harness, "Timeline Actions", "Ripple Delete Silence…");
     harness.step();
     until(&mut harness, "the parts", |h| has(h, "Removes 10 parts"));
     assert_eq!(gui_edits(&h).len(), edits0, "previews change nothing");
@@ -203,7 +203,7 @@ fn tools_send_one_request_each() {
     // 2. Detect Scene Cuts on the shots clip.
     call(&h, "selection.set", json!({ "clips": ["c2"] }));
     settle(&h, &mut harness);
-    menu_item(&mut harness, "Actions", "Detect Scene Cuts");
+    menu_item(&mut harness, "Timeline Actions", "Detect Scene Cuts");
     until(&mut harness, "the cuts", |_| clips(&h).len() == 15);
     let (m, _) = gui_edits(&h).last().cloned().unwrap();
     assert_eq!(m, "edit.detect_scene_cuts");
@@ -243,7 +243,7 @@ fn tools_send_one_request_each() {
     );
 
     // 4. The Boring Detector's settings are view options, not edits.
-    menu_item(&mut harness, "Options", "Analyze Timeline Edits…");
+    menu_item(&mut harness, "Timeline Options", "Analyze Timeline Edits…");
     harness.step();
     harness.get_by_label("Analyze").click();
     harness.step();
