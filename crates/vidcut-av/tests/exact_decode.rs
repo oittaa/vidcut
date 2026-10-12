@@ -149,6 +149,30 @@ fn probe_reports_first_frame_and_duration() {
 }
 
 #[test]
+fn probe_finds_where_primed_audio_starts() {
+    // AAC (in MP4 an edit list, in Matroska a codec delay) and Opus (WebM,
+    // pre-skip) put priming samples before the sound. Matroska's codec delay
+    // is skipped by some FFmpeg versions and decoded by others; either way
+    // the sound of an audio-only file starts at 0, its first beep included.
+    use Container::*;
+    for container in [Mp4, Mkv, Webm] {
+        let spec =
+            FixtureSpec::new(VideoCodec::H264, container, 320, 180, (30, 1), 60).audio_only();
+        let path = fixture::ensure(&spec).unwrap();
+        let a = probe::probe(&path).unwrap().audio.remove(0);
+        let first = a.first_secs.expect("start");
+        // Matroska and WebM count milliseconds.
+        assert!(
+            first.abs() < 1.5e-3,
+            "{}: sound starts at {first} s (start {:?}, padding {})",
+            spec.file_name(),
+            a.start_secs,
+            a.padding
+        );
+    }
+}
+
+#[test]
 fn probe_reads_start_timecodes() {
     // A camera's start timecode, from a QuickTime/MP4 `tmcd` track
     // (deviation X9: timeline interchange counts sources from it). The
