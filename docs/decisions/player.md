@@ -4,7 +4,7 @@
 
 **Evidence** (all rerunnable, no display):
 - [`crates/vidcut-av/tests/player.rs`](../../crates/vidcut-av/tests/player.rs): pictures against `frame render` at seeks and steps both ways across cuts, files, codecs, black, stills and image sequences; the YUV pictures, and their conversion against `frame render`'s to the byte; playing shows every frame in order; the beep lands on its sample; pictures against beeps through a device with latency; 2×, reverse; faders and mute while playing; calls that return at once.
-- [`tests/player_sound.rs`](../../crates/vidcut-av/tests/player_sound.rs): backward sound reversed to the sample, pictures with it through a device with latency, other speeds backward keeping the pitch; audio scrubbing: steps play their frame's sound, held steps don't pile up, the `Scrubber` alone.
+- [`tests/player_sound.rs`](../../crates/vidcut-av/tests/player_sound.rs): backward sound reversed to the sample; pictures with the sound through a device with latency at −1×, 2×, 0.5× and −2×; other speeds both ways keeping the pitch; audio scrubbing: steps play their frame's sound, held steps don't pile up, the `Scrubber` alone.
 - [`tests/player_decodes.rs`](../../crates/vidcut-av/tests/player_decodes.rs): what is decoded, playing both ways, across an edit, and for seeks in a row.
 - [`tests/player_media.rs`](../../crates/vidcut-av/tests/player_media.rs): numbers on the real 1080p30 and 2160p60 clips (§7).
 - [`tests/player_device.rs`](../../crates/vidcut-av/tests/player_device.rs) (`--features vidcut-av/audio-tests`): the system's audio device runs the clock (it plays silence).
@@ -39,7 +39,7 @@ vidcut-av starts them as it starts its other threads (`std::thread::Builder`, na
 - **Forward**, the reader decodes on from frame to frame, and the next file opens ahead on the export's opener thread. Frames the clock has already passed are decoded and not kept. A reader far behind (more than a second) seeks to where the clock will be once the seek is done (the recent seek time × speed) and goes on from there while the clock comes.
 - **Ahead:** a quarter of a second × speed while playing (at most a quarter of the budget); paused, three frames when the reader stands right there.
 - **Back:** a window from a keyframe up to the frame, kept (the paused renderer's rule, preview.md §13): at least two seconds where keyframes are close, at most a third of the budget. Playing backward, the window before decodes while this one is shown; paused after a step back, one window behind.
-- **Edits.** `set_plan` keeps the position, the open file (the reader reads the new plan's pieces: a piece of the open file decodes on or seeks) and the kept pictures. The sample rate and channels must stay: the device was opened for them.
+- **Edits.** `set_plan` keeps the position, the open file (the reader reads the new plan's pieces: a piece of the open file decodes on or seeks) and the kept pictures. The sample rate and channels must stay (the device was opened for them): another is refused before anything changes, and the same plan again changes nothing, so neither cancels a decode. Playing, the sound goes on from the same time; at another frame rate the picture shown stays until the new plan's is decoded.
 
 ## 4. Sound, and the clock
 
@@ -57,7 +57,11 @@ vidcut-av starts them as it starts its other threads (`std::thread::Builder`, na
   - Play starts by showing its first frame until that frame's first sample is heard.
   - No half-frame lead: mpv's preview sound leads its picture by half a frame (preview.md §10); the engine has no EDL and no bias.
 - **Backward** the sound plays reversed: the mix is read forward a block at a time (0.2 s of play, one seek of each lane's stream a block), from further and further back, and each block is reversed a sample frame at a time. It is the clock as forward sound is: a beep's first sample is the last of it heard, and the picture moves to the frame before right after it.
-- **Other speeds**, both ways, go through FFmpeg's `atempo`, chained in stages between 0.5 and 2 so it blends rather than skips; the pitch stays. The clock maps the output to the timeline at the nominal speed, so the sound is within `atempo`'s window (about a frame, 25 ms) of its picture. At 8× and above a sound shorter than that window is smeared or lost (a 10 ms beep lasts 1.25 ms at 8×); speech and music stay recognizable, as in any player that keeps the pitch.
+- **Other speeds**, both ways, go through the engine's own time stretch (`Stretch`, WSOLA), which keeps the pitch and says where its output came from:
+  - The mix is cut into fragments of 21 ms that overlap by half in the output, Hann-shaped and added. Fragment *k* would start *k* hops × speed into the input; it moves by up to 5 ms to where its first half best matches what would have followed the fragment before, so the overlap adds alike sound.
+  - Each output block (a hop, 10.4 ms) runs from the middle of one fragment to the middle of the next, and both input positions are known: every block is marked as it is queued, so the clock follows what is heard. A block blends two fragments a hop × |speed − 1| apart in the input, so a sound may be heard up to half that from where its block's mark puts it: 2.6 ms of play at 2×, 3.9 ms at 4×.
+  - FFmpeg's `atempo` was tried first and dropped: it moves its fragments by up to 21 ms where nothing outside can see, and its output drifted from the input by 10–20 ms over a few seconds, so its sound couldn't be clocked.
+  - At 4× and above a sound much shorter than a fragment may blend away (a 10 ms beep lasts 2.5 ms at 4×); tones, speech and music keep their pitch (a 1 kHz tone stays within 2 Hz from 0.5× to 8×, both ways).
 
 ## 5. Audio scrubbing (spec §4.5, decision D42)
 
@@ -80,10 +84,9 @@ On the dev machine (16 threads), decoding on the CPU; YUV pictures at the clips'
 
 | What | Result |
 |---|---|
-| Picture against sound, device with 40 ms latency, forward | each beep's frame shown 0.1–2 ms after the beep is heard |
-| The same backward, sound reversed | 0.9–2 ms |
+| Picture against sound through a device with 40 ms latency: when each beep's frame showed after the beep was heard (the tests allow −1 to +8 ms: the display looks every 2 ms) | 1×: 0.1–2 ms; −1× (reversed sound): 0.4–1.8 ms; 2×: 3.1–4.2 ms; 0.5×: 0.8–1.3 ms; −2×: 1.0–2.3 ms |
 | The beep through the manual output, forward and reversed | on its sample, ±1 (reversed: the whole beep, sample for sample) |
-| Backward at 0.5×, 2×, 4× | every beep, 960–1000 Hz (pitch kept), 4–26 ms from its nominal place |
+| Other speeds, both ways (0.5× to 8×) | a 1 kHz tone at 998–1000 Hz; every beep heard up to 2×; the sound as long as the speed makes it (within 20 ms) |
 | Requests while decoding 1080p | the slowest call under 0.01 ms |
 | Decoded playing 0→150, an edit on the way | 149–154 frames |
 | Decoded playing 299→0 backward, keyframes 120 apart | 306 frames |
