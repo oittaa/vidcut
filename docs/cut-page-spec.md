@@ -133,7 +133,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 - Full Screen (Shift+F) and Enhanced viewer (Alt+F) (later).
 - Safe areas (later); Fast Review (later).
 - Skimming with C held (later).
-- Audio scrubbing (Shift+S; on by default in Resolve, p. 876) (later).
+- Audio scrubbing (Shift+S; on by default, p. 876): dragging the playhead, and frame steps, play the sound under it (decision D42). The player engine does it (`audio_scrubbing`, on by default; `Scrubber` alone); the GUI's preview and Shift+S (later).
 
 ## 5. Dual timeline (pp. 643–646, 689–692, 716–718)
 
@@ -495,3 +495,8 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - **Switch:** `use_proxies` (saved on the project) makes the preview play a proxy. Export, frame render, analysis and OTIO always use the original paths.
   - **Fresh:** a proxy is used only when its stored source size and modification time match the pool item and the file is present. Otherwise the original plays. Relink drops the proxy. An image sequence's size and time are the whole run's, read once when it is added or relinked: the total of its pictures' sizes and the newest of their times, so a render that rewrites later pictures counts as a changed file. Nothing is read from disk when playback starts.
   - **Frame exact:** proxy frames carry the source's presentation timestamps. The preview keeps `origin` and `source_frame` and only replaces the video path, dropping an image list so a sequence plays as that video. Preview audio stays on the original.
+- **D42. Audio scrubbing** (§4.5; p. 876). The manual says only that dragging the playhead plays the sound when scrubbing is on, as it is by default.
+  - **What plays:** a frame step (←/→, K held with J/L tapped) and every move of a paused playhead (a drag is many) play the sound of the frame arrived at: its samples of the mix, every audible track with its gains and fader, faded in and out over 3 ms so it doesn't click. The monitoring mute silences it. Playing, nothing extra plays.
+  - **Forward, either way:** a step back plays its frame forward too. A frame is 33–42 ms: reversed, it isn't heard as backward, and forward the start of a word stays recognizable.
+  - **One at a time:** a frame's sound plays whole. A newer one waits for it and replaces any still waiting, so a held key plays frame after frame and nothing piles up behind it.
+  - **Playing backward** plays the sound reversed (J), at other speeds keeping its pitch as forward play does.
