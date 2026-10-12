@@ -102,7 +102,7 @@ These are mandatory.
 | Before **every commit** (enforced by `.githooks/pre-commit`) | `scripts/check.sh` | no binary files in git, `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, unit tests (`--lib --bins`) |
 | After a **bigger change**, and before a milestone is called done | `scripts/check.sh full` | the above plus all integration/e2e tests and doc tests |
 | Also, when encoders, hwdec or real-media paths change | `scripts/check.sh full --features vidcut-av/gpu-tests` | GPU encode tests (NVENC/VAAPI), the player decoding on NVDEC |
-| Also, when the GUI, live session, IPC or preview change | `scripts/check.sh full --features vidcut/gui-tests` | the real GUI driven through the CLI (needs a display; opens a window briefly) |
+| Also, when the GUI, live session, IPC or preview change | `scripts/check.sh full --features vidcut/gui-tests` | the real GUI driven through the CLI (needs a display and an unlocked session: window screenshots need the window shown; opens a window briefly) |
 | Also, when the player's audio output changes | `scripts/check.sh full --features vidcut-av/audio-tests` | the player engine on the system's audio device (plays silence) |
 | Also, when FFmpeg-facing code changes (probe, decode, encode, filters, ffmpeg-next upgrades) | `scripts/ffmpeg-check.sh` | `cargo build` and `scripts/check.sh full` in containers, against Ubuntu 26.04's FFmpeg 8.0 and the newest FFmpeg release (Tools, below) |
 

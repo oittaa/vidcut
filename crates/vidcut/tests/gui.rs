@@ -10,6 +10,10 @@
 //! - playing keeps with the clock;
 //! - GPU acceleration switches the viewer's decoder at once.
 //!
+//! The session must be unlocked: the window screenshots need the window
+//! shown (a hidden window doesn't paint on every system); the viewer's work
+//! without it.
+//!
 //! A failed run keeps its temp dir (it says which): the screenshots and the
 //! GUI's stderr with `VIDCUT_DEBUG_PLAYER` traces.
 #![cfg(feature = "gui-tests")]

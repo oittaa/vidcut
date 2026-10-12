@@ -12,6 +12,7 @@
 ## 1. What plays
 
 - **Plans.** The timeline viewer plays `render::flatten_lanes(project, 0, end)`, the source viewer `render::tape` (one clip, or the Source Tape): the plans export renders, so every picture is the one `frame render` makes (the engine reads them with the export's readers). Fresh proxies replace their media's pictures where the project plays proxies (§6). A frame of black and silence follows the content, where the playhead stands at the end (after an append, decision D15).
+- **Memory:** each player keeps up to 1 GB of pictures (`vidcut_av::player::DEFAULT_BUDGET`, player.md §3), the two together up to 2 GB.
 - **Edits** give the engine a new plan (`set_plan`): it keeps its position, open files and kept pictures, and plays on if it plays. Reloads after edits coalesce as before (gui.md §7). Another sample rate or channel count makes a new engine (its device was opened for them).
 - **Nothing to convert.** Index-less containers (MPEG-TS), stills, image sequences at any rate, interlaced sources, turned pictures and HDR play as export reads them; the engine needs no remuxes, image lists, filler media or patches at cuts.
 
