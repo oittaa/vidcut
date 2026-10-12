@@ -453,7 +453,7 @@ fn move_preview(
                     ..Preview::default()
                 };
             }
-            return overwrite_move(clips, ghost, len, snapped, &elsewhere);
+            return overwrite_move(clips, ghost, len, snapped, &dest, &elsewhere);
         }
         if from == MAIN && ghost == start {
             return Preview {
@@ -478,7 +478,7 @@ fn move_preview(
         }
         // Elsewhere (over itself, a gap, or a neighbor's edge without the
         // pointer reaching it): overwrite at the new position.
-        return overwrite_move(clips, ghost, len, snapped, &elsewhere);
+        return overwrite_move(clips, ghost, len, snapped, &dest, &elsewhere);
     }
     // Other tracks don't ripple: the clips go where they are dropped.
     if elsewhere.is_none() && ghost == start {
@@ -489,14 +489,17 @@ fn move_preview(
             ..Preview::default()
         };
     }
-    overwrite_move(clips, ghost, len, snapped, &elsewhere)
+    overwrite_move(clips, ghost, len, snapped, &dest, &elsewhere)
 }
 
+/// Moving `clips` to `ghost` on `dest`, overwriting; `track` names `dest`
+/// when it isn't their own track.
 fn overwrite_move(
     clips: &[String],
     ghost: i64,
     len: i64,
     snapped: Option<i64>,
+    dest: &str,
     track: &Option<String>,
 ) -> Preview {
     let mut params = json!({ "clips": clips, "to": ghost, "mode": "overwrite" });
@@ -508,7 +511,7 @@ fn overwrite_move(
         target: Target::Overwrite(ghost, ghost + len),
         ghost: Some((ghost, ghost + len)),
         snapped,
-        row: track.clone(),
+        row: Some(dest.to_string()),
         ..Preview::default()
     }
 }
@@ -1276,6 +1279,34 @@ mod tests {
         assert_eq!(
             r,
             Some(json!({"method": "selection.set", "params": {"clips": ["c2", "c3"]}}))
+        );
+    }
+
+    /// A clip moved along a track other than Track 1 shows there while it
+    /// is dragged, not on Track 1.
+    #[test]
+    fn a_moved_clip_shows_on_its_own_track() {
+        let w = World::with_v2(vec![clip("b1", 300, 40, 0)]);
+        let ctx = w.ctx();
+        let mut d = Drag::new(
+            Gesture::Move {
+                clips: vec!["b1".into()],
+                from: "V2".into(),
+                grab: 320.0,
+                start: 300,
+                len: 40,
+            },
+            pos2(640.0, 60.0),
+        );
+        let pv = d.update(pos2(700.0, 60.0), Instant::now(), &ctx);
+        assert_eq!(
+            (pv.row.as_deref(), pv.ghost),
+            (Some("V2"), Some((330, 370)))
+        );
+        assert_eq!(pv.target, Target::Overwrite(330, 370));
+        assert!(
+            pv.request
+                .is_some_and(|r| r["params"].get("track").is_none())
         );
     }
 
