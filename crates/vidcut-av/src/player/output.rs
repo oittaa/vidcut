@@ -131,6 +131,15 @@ impl Drop for CpalOutput {
     }
 }
 
+/// The system's default output device: its name, or why there is none.
+pub fn output_device() -> Result<String> {
+    use cpal::traits::HostTrait;
+    let device = cpal::default_host()
+        .default_output_device()
+        .ok_or_else(|| Error::Invalid("no audio output device".into()))?;
+    Ok(device.to_string())
+}
+
 fn open_stream(source: AudioSource) -> Result<cpal::Stream> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     let host = cpal::default_host();

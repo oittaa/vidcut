@@ -1,10 +1,13 @@
-//! The live session without a window: both players render through mpv's
-//! software renderer on a harness thread (standing in for the GUI), and
-//! requests go through `Handle::call` exactly as IPC clients' do. Checks that
-//! what the viewer shows after seeks and edits is frame-exact, that edits from
-//! other processes appear, and the clipboard and selection behavior.
+//! The live session without a window: both players are the engine, a
+//! harness thread stands in for the GUI's renderer (it presents them and
+//! converts their pictures to RGBA with the export's own filters,
+//! `Picture::to_rgba`), their sound goes to stand-in devices that record
+//! it, and requests go through `Handle::call` exactly as IPC clients' do.
+//! Checks that what the viewer shows after seeks and edits is frame-exact,
+//! that pictures keep with the sound as it is heard, that edits from other
+//! processes appear, and the clipboard and selection behavior.
 //!
-//! Needs libmpv (skips without it), no display.
+//! No display, GPU or audio device.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -14,24 +17,40 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use vidcut::live::{self, Capture, Image, Origin, PlayerId, Presented, WindowChange};
 use vidcut_av::fixture::{self, Container, FixtureSpec, ImageSpec, VideoCodec};
+use vidcut_av::player::{PacedOutput, Picture, Player, Recording};
 use vidcut_core::model::Settings;
 use vidcut_core::time::Rational;
 use vidcut_core::{Envelope, ErrorCode, Project, Response, Store};
-use vidcut_mpv::{Mpv, SwRenderer, ffi::MPV_RENDER_UPDATE_FRAME};
 
 const W: usize = 320;
 const H: usize = 180;
+const RATE: u32 = 48_000;
+
+/// How long after its buffer is due the stand-in device's sound is heard.
+const LATENCY: Duration = Duration::from_millis(30);
+
+type Engine = Arc<Player>;
+
+/// Each player's sound, as its stand-in device recorded it.
+type Sounds = Arc<Mutex<[Option<Arc<Mutex<Recording>>>; 2]>>;
 
 #[derive(Default)]
 struct Port {
+    engines: Mutex<[Option<Engine>; 2]>,
     presents: Mutex<Vec<(PlayerId, Presented)>>,
     captures: Mutex<Vec<(PlayerId, Capture)>>,
     /// Milliseconds the render thread looks away once it next finds a new
     /// picture waiting, like a UI thread busy elsewhere.
     stall: AtomicU64,
+    /// Every exact frame the timeline's viewer showed, and when it first
+    /// did.
+    shown: Mutex<Vec<(i64, Instant)>>,
 }
 
 impl live::Renderer for Port {
+    fn attach(&self, player: PlayerId, engine: Option<Engine>) {
+        self.engines.lock().unwrap()[player.index()] = engine;
+    }
     fn present(&self, player: PlayerId, done: Presented) {
         self.presents.lock().unwrap().push((player, done));
     }
@@ -45,94 +64,129 @@ impl live::Renderer for Port {
     fn quit(&self) {}
 }
 
+/// What one viewer shows: the picture, as drawn.
+#[derive(Default)]
+struct Screen {
+    picture: Option<Arc<Picture>>,
+    image: Option<Image>,
+    /// The frame the latest present showed exactly.
+    exact: Option<i64>,
+}
+
+fn black() -> Image {
+    Image {
+        width: W as u32,
+        height: H as u32,
+        rgba: [0, 0, 0, 255].repeat(W * H),
+    }
+}
+
 struct Harness {
     handle: live::Handle,
     port: Arc<Port>,
+    /// Each player's sound, as its stand-in device recorded it.
+    sound: Sounds,
     session: Option<std::thread::JoinHandle<()>>,
     stop: Arc<AtomicBool>,
     render: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Harness {
-    fn start(project: &Path) -> Option<Self> {
-        if let Err(e) = vidcut_mpv::available() {
-            eprintln!("skipping: {e}");
-            return None;
-        }
-        let opts = live::mpv_options(false, false);
-        let opts: Vec<(&str, &str)> = opts.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-        let source = Mpv::new(&opts).unwrap();
-        let timeline = Mpv::new(&opts).unwrap();
+    fn start(project: &Path) -> Self {
         let port = Arc::new(Port::default());
         let stop = Arc::new(AtomicBool::new(false));
-        // The "render thread": renders both players into buffers whenever
-        // mpv has a frame or the session asks to present them, and answers
+        // The "render thread": presents both players every 2 ms, as a
+        // display would, draws what changed, and answers presents and
         // captures.
         let render = {
             let (port, stop) = (port.clone(), stop.clone());
-            let players = [source.clone(), timeline.clone()];
             std::thread::spawn(move || {
-                let mut renderers: Vec<SwRenderer> = players
-                    .iter()
-                    .map(|m| SwRenderer::new(m).unwrap())
-                    .collect();
-                let mut bufs = vec![vec![0u8; W * H * 4]; 2];
+                let mut screens = [Screen::default(), Screen::default()];
                 while !stop.load(Ordering::Relaxed) {
+                    let engines = port.engines.lock().unwrap().clone();
+                    let waiting = |i: usize, s: &Screen| {
+                        engines[i]
+                            .as_ref()
+                            .and_then(|e| e.present(Instant::now()))
+                            .is_some_and(|p| {
+                                s.picture
+                                    .as_ref()
+                                    .is_none_or(|q| !Arc::ptr_eq(q, &p.picture))
+                            })
+                    };
                     if port.stall.load(Ordering::Relaxed) > 0
-                        && renderers.iter().any(|r| r.next_frame_is_new())
+                        && (0..2).any(|i| waiting(i, &screens[i]))
                     {
                         let ms = port.stall.swap(0, Ordering::Relaxed);
                         std::thread::sleep(Duration::from_millis(ms));
                     }
                     let presents: Vec<_> = port.presents.lock().unwrap().drain(..).collect();
-                    for (i, r) in renderers.iter_mut().enumerate() {
-                        let present = presents.iter().any(|(id, _)| id.index() == i);
-                        if r.update() & MPV_RENDER_UPDATE_FRAME != 0 || present {
-                            r.render_rgb0(W, H, W * 4, &mut bufs[i]).unwrap();
+                    for (i, s) in screens.iter_mut().enumerate() {
+                        let now = Instant::now();
+                        let shown = engines[i].as_ref().and_then(|e| e.present(now));
+                        let picture = shown.as_ref().map(|p| p.picture.clone());
+                        let same = match (&s.picture, &picture) {
+                            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                            (None, None) => s.image.is_some(),
+                            _ => false,
+                        };
+                        if !same {
+                            s.image = Some(match &picture {
+                                Some(p) => p.to_rgba(W as u32, H as u32).unwrap(),
+                                None => black(),
+                            });
+                            s.picture = picture;
+                        }
+                        s.exact = shown.filter(|p| p.exact).map(|p| p.frame);
+                        if i == PlayerId::Timeline.index()
+                            && let Some(f) = s.exact
+                        {
+                            let mut log = port.shown.lock().unwrap();
+                            if log.last().is_none_or(|(g, _)| *g != f) {
+                                log.push((f, now));
+                            }
                         }
                     }
-                    for (_, done) in presents {
-                        done();
+                    for (id, done) in presents {
+                        done(screens[id.index()].exact);
                     }
                     let captures: Vec<_> = port.captures.lock().unwrap().drain(..).collect();
                     for (id, done) in captures {
-                        // RGB0 → opaque RGBA.
-                        let mut rgba = bufs[id.index()].clone();
-                        for px in rgba.as_chunks_mut::<4>().0 {
-                            px[3] = 255;
-                        }
-                        done(Ok(Image {
-                            width: W as u32,
-                            height: H as u32,
-                            rgba,
-                        }));
+                        done(Ok(screens[id.index()].image.clone().unwrap_or_else(black)));
                     }
                     std::thread::sleep(Duration::from_millis(2));
                 }
             })
         };
+        let sound: Sounds = Arc::default();
+        let audio = {
+            let sound = sound.clone();
+            Arc::new(move |id: PlayerId| {
+                let (out, rec) = PacedOutput::recording(Duration::from_millis(10), LATENCY);
+                sound.lock().unwrap()[id.index()] = Some(rec);
+                Box::new(out) as Box<dyn vidcut_av::player::AudioOutput>
+            })
+        };
         let (handle, session) = live::start(live::Config {
             project: Some(project.to_path_buf()),
             create: false,
-            // mpv's software renderer can't show frames decoded on the
-            // GPU: they stay decoded on the CPU, whatever the preferences.
             players: Some(live::Players {
-                source,
-                timeline,
-                hwdec: false,
+                audio,
+                budget: vidcut_av::player::DEFAULT_BUDGET,
             }),
             preview_error: None,
             renderer: port.clone(),
             notify: Arc::new(|| {}),
             socket: None,
         });
-        Some(Self {
+        Self {
             handle,
             port,
+            sound,
             session: Some(session),
             stop,
             render: Some(render),
-        })
+        }
     }
 
     fn call(&self, method: &str, params: Value) -> vidcut_core::Result<Response> {
@@ -188,6 +242,13 @@ impl Harness {
             std::thread::sleep(Duration::from_millis(1));
         }
         panic!("timed out waiting for {what}");
+    }
+
+    /// The timeline player's sound so far.
+    fn timeline_sound(&self) -> Arc<Mutex<Recording>> {
+        self.sound.lock().unwrap()[PlayerId::Timeline.index()]
+            .clone()
+            .expect("the timeline plays")
     }
 }
 
@@ -251,6 +312,15 @@ fn fixture_file(frames: u32) -> PathBuf {
     .unwrap()
 }
 
+/// Milliseconds from `a` to `b`, negative when `b` is earlier.
+fn ms_between(a: Instant, b: Instant) -> f64 {
+    if b >= a {
+        (b - a).as_secs_f64() * 1e3
+    } else {
+        -(a - b).as_secs_f64() * 1e3
+    }
+}
+
 #[test]
 fn live_session() {
     let tmp = tempfile::Builder::new()
@@ -259,7 +329,17 @@ fn live_session() {
         .unwrap();
     let dir = tmp.path();
     // SAFETY: the only test in this binary; set before any thread starts.
-    unsafe { std::env::set_var("XDG_STATE_HOME", dir.join("state")) };
+    unsafe {
+        std::env::set_var("XDG_STATE_HOME", dir.join("state"));
+        std::env::set_var("XDG_CONFIG_HOME", dir.join("config"));
+    }
+    // Decoding on the CPU: no GPU needed (tests/gui.rs decodes on both).
+    std::fs::create_dir_all(dir.join("config/vidcut")).unwrap();
+    std::fs::write(
+        dir.join("config/vidcut/preferences.toml"),
+        "[gpu]\nacceleration = false\n",
+    )
+    .unwrap();
     let a = fixture_file(300);
     let b = fixture::ensure(
         &FixtureSpec::new(
@@ -278,13 +358,12 @@ fn live_session() {
         fps: Rational::new(30, 1).unwrap(),
         width: W as u32,
         height: H as u32,
+        sample_rate: RATE,
         auto_format: false,
         ..Settings::default()
     };
     Store::create(&path, &Project::new(settings)).unwrap();
-    let Some(h) = Harness::start(&path) else {
-        return;
-    };
+    let h = Harness::start(&path);
     let t0 = Instant::now();
     let step = |name: &str| eprintln!("{:>8.1} ms  {name}", t0.elapsed().as_secs_f64() * 1e3);
 
@@ -297,13 +376,14 @@ fn live_session() {
         json!({ "media": "m1", "range": "200f..260f" }),
     );
     assert!(r.via.starts_with("gui:"), "{}", r.via);
-    // Decision D15: the playhead moved past the appended clip.
-    assert_eq!(
-        h.ok("player.state", json!({})).result["timeline"]["position"],
-        150
-    );
+    // Decision D15: the playhead moved past the appended clip, to the end.
+    let state = h.ok("player.state", json!({})).result;
+    assert_eq!(state["timeline"]["position"], 150);
+    assert_eq!(state["timeline"]["frames"], 150);
+    // The end shows black.
+    assert_eq!(h.shown(dir), None, "the playhead at the end");
 
-    step("Seeks are frame-exact at every bounda");
+    step("Seeks are frame-exact at every boundary");
     // Seeks are frame-exact at every boundary, and agree with frame.render.
     let expected = |t: i64| -> u32 {
         match t {
@@ -313,13 +393,15 @@ fn live_session() {
         }
     };
     for t in [0, 1, 59, 60, 61, 89, 90, 91, 149] {
+        let started = Instant::now();
         h.ok("player.seek", json!({ "at": t, "viewer": "timeline" }));
+        let took = started.elapsed();
         assert_eq!(h.shown(dir), Some(expected(t)), "timeline frame {t}");
+        eprintln!("  seek to {t}: {:.1} ms", took.as_secs_f64() * 1e3);
     }
     step("A late renderer");
-    // A renderer that gets to a seek's frame only after libmpv stopped
-    // waiting for it (200 ms) still has that frame on screen when the seek
-    // returns (docs/decisions/gui.md §4).
+    // A renderer that gets to a seek's frame late still has that frame on
+    // screen when the seek returns (docs/decisions/gui.md §4).
     for t in [61, 149] {
         h.stall_next(Duration::from_millis(500));
         h.ok("player.seek", json!({ "at": t, "viewer": "timeline" }));
@@ -345,8 +427,8 @@ fn live_session() {
         "names the frame it moved to: {e}"
     );
     assert_eq!(h.shown(dir), Some(expected(120)));
-    // A fast seek to the same frame doesn't stand in for an exact one: it
-    // may show a keyframe instead.
+    // A scrub (fast) to the same frame shows that frame too: every seek is
+    // exact.
     h.stall_next(Duration::from_millis(400));
     let handle = h.handle.clone();
     let a = std::thread::spawn(move || {
@@ -356,9 +438,8 @@ fn live_session() {
     });
     h.wait_stalled();
     h.ok("player.seek", json!({ "at": 100, "fast": true }));
-    let e = a.join().unwrap().unwrap_err();
-    assert_eq!(e.code, vidcut_core::ErrorCode::Conflict, "{e}");
-    assert!(e.message.contains("keyframe near frame 100"), "{e}");
+    a.join().unwrap().expect("the same frame, exact either way");
+    assert_eq!(h.shown(dir), Some(expected(100)));
 
     // `if_rev` holds for live requests too.
     let rev = h.ok("project.summary", json!({})).rev;
@@ -378,9 +459,8 @@ fn live_session() {
         h.stall_next(Duration::from_millis(400));
         h.ok("player.seek", json!({ "at": at }));
     }
-    // A preview reload while that seek is in flight samples the playhead.
-    // Playback has moved it off the asked frame; adopting the sample would
-    // fail the seek and name the playback frame as another seek.
+    // An edit's reload while that seek is in flight keeps playing from
+    // where the clock is, and the seek stays the request.
     h.stall_next(Duration::from_millis(800));
     let handle = h.handle.clone();
     let a = std::thread::spawn(move || {
@@ -396,8 +476,84 @@ fn live_session() {
     a.join()
         .unwrap()
         .unwrap_or_else(|e| panic!("reload while playing must not retarget the seek: {e}"));
+    assert_eq!(
+        h.ok("player.state", json!({})).result["timeline"]["playing"],
+        true
+    );
     h.ok("player.pause", json!({}));
-    // Back to 149 for what follows.
+    h.ok("track.set", json!({ "track": "V1", "volume_db": 0.0 }));
+
+    step("Pictures keep with the sound as it is heard");
+    // Play the whole timeline from the start, the sound to a stand-in
+    // device heard 30 ms after it is due. The fixtures beep at the start
+    // of every second of source: c1's source frames 30 and 60 (timeline 0
+    // and 30), c3's 210 and 240 (timeline 100 and 130). Each beep's frame
+    // must show as its beep is heard.
+    h.ok("player.audio_scrubbing", json!({ "on": false }));
+    h.ok("player.seek", json!({ "at": 0 }));
+    let sound = h.timeline_sound();
+    let from = sound.lock().unwrap().samples.len() / 2;
+    h.port.shown.lock().unwrap().clear();
+    h.ok("player.play", json!({}));
+    h.wait_for("the end", |s| {
+        !s.timeline.playing && s.timeline.position == 150
+    });
+    let rec = sound.lock().unwrap();
+    let mono: Vec<f32> = rec.samples.chunks(2).map(|c| c[0]).collect();
+    let onsets: Vec<usize> = vidcut_av::beep::onsets(&mono[from..], 0.1, 4_800)
+        .into_iter()
+        .map(|i| i + from)
+        .collect();
+    assert_eq!(onsets.len(), 4, "a beep a second: {onsets:?}");
+    let shown = h.port.shown.lock().unwrap().clone();
+    let mut offsets = Vec::new();
+    for (&onset, frame) in onsets.iter().zip([0, 30, 100, 130]).skip(1) {
+        let heard = rec.heard_at(onset, RATE).unwrap();
+        let (_, at) = shown
+            .iter()
+            .find(|(f, _)| *f >= frame)
+            .unwrap_or_else(|| panic!("frame {frame} never showed"));
+        offsets.push(ms_between(heard, *at));
+    }
+    drop(rec);
+    eprintln!("  picture after its beep (ms): {offsets:.1?}");
+    for o in &offsets {
+        // The harness presents every 2 ms; a display at 60 Hz sees the
+        // clock's frame at its next refresh.
+        assert!(
+            (-1.0..=12.0).contains(o),
+            "picture against sound: {offsets:?}"
+        );
+    }
+    // Every frame showed, in order.
+    let frames: Vec<i64> = shown.iter().map(|(f, _)| *f).collect();
+    let missing = (1..150).filter(|f| !frames.contains(f)).count();
+    assert!(missing <= 3, "{missing} frames never showed while playing");
+    assert!(frames.windows(2).all(|w| w[0] < w[1]), "in order");
+
+    step("Audio scrubbing");
+    // Off: a step plays nothing. On (decision D42): the frame's sound.
+    let quiet_since = |n: usize| {
+        let rec = sound.lock().unwrap();
+        rec.samples[n * 2..].iter().all(|s| s.abs() < 1e-6)
+    };
+    h.ok("player.seek", json!({ "at": 29 }));
+    std::thread::sleep(Duration::from_millis(100));
+    let n = sound.lock().unwrap().samples.len() / 2;
+    h.ok("player.step", json!({ "frames": 1 }));
+    std::thread::sleep(Duration::from_millis(150));
+    assert!(quiet_since(n), "scrubbing is off");
+    let state = h.ok("player.audio_scrubbing", json!({})).result;
+    assert_eq!(state["audio_scrubbing"], true, "toggled");
+    h.ok("player.seek", json!({ "at": 29 }));
+    std::thread::sleep(Duration::from_millis(150));
+    let n = sound.lock().unwrap().samples.len() / 2;
+    h.ok("player.step", json!({ "frames": 1 }));
+    std::thread::sleep(Duration::from_millis(150));
+    assert!(!quiet_since(n), "frame 30's beep plays");
+    assert_eq!(h.shown(dir), Some(expected(30)));
+
+    step("Steps and frame.render");
     h.ok("player.seek", json!({ "at": 149 }));
     let out = dir.join("f.png");
     h.ok("frame.render", json!({ "at": "playhead", "out": out }));
@@ -430,9 +586,8 @@ fn live_session() {
     h.ok("player.seek", json!({ "at": "-1s" }));
     assert_eq!(h.shown(dir), Some(expected(117)));
     step("Quick steps");
-    // Steps quicker than frames decode, as a held arrow key makes them: a
-    // seek waits for the one still decoding instead of cancelling it, and
-    // the last lands exactly. The GUI's overtaken steps aren't errors.
+    // Steps quicker than frames decode, as a held arrow key makes them: the
+    // last lands exactly. The GUI's overtaken steps aren't errors.
     let steps: Vec<_> = (0..8)
         .map(|_| {
             let handle = h.handle.clone();
@@ -456,6 +611,12 @@ fn live_session() {
         125
     );
     assert_eq!(h.shown(dir), Some(expected(125)));
+    // Playing backward: the clock runs back.
+    h.ok("player.play", json!({ "speed": -1.0 }));
+    std::thread::sleep(Duration::from_millis(400));
+    let state = h.ok("player.pause", json!({})).result;
+    let back = state["timeline"]["position"].as_i64().unwrap();
+    assert!((100..=120).contains(&back), "played back to {back}");
 
     step("An edit reloads the preview");
     // An edit reloads the preview: split c1 and delete its first half.
@@ -565,8 +726,8 @@ fn live_session() {
     let log = h.ok("gui.log", json!({ "limit": 3 }));
     assert_eq!(log.result.as_array().unwrap().len(), 3);
 
-    // A clip from a file's very first frame: its EDL start is half a frame
-    // before the file's first timestamp.
+    // A clip from a file's very first frame, and the frames before a
+    // keyframe that a GOP decodes after it (B-frames).
     let fresh = dir.join("first.vidcut");
     h.ok("project.open", json!({ "path": fresh, "create": true }));
     let big = fixture::ensure(&FixtureSpec::new(
@@ -611,8 +772,8 @@ fn live_session() {
         h.ok("player.seek", json!({ "at": t, "viewer": "timeline" }));
         assert_eq!(h.shown(dir), Some(want), "with B-roll, timeline frame {t}");
     }
-    // Music on A1 plays as a second audio stream, mixed with Track 1's
-    // audio and turned down by its fader; the picture stays exact.
+    // Music on A1 is mixed with Track 1's audio and turned down by its
+    // fader; the picture stays exact.
     let music = fixture::ensure(
         &FixtureSpec::new(
             VideoCodec::H264,
@@ -637,24 +798,20 @@ fn live_session() {
         h.ok("player.state", json!({})).result["timeline"]["error"],
         Value::Null
     );
-    // The Mixer's fader while dragged: the running preview's level changes
-    // at once (preview.md §10), the project doesn't. The filter reads
-    // commands as sound passes, so the preview plays.
+    // The Mixer's fader while dragged: the playing preview's level changes
+    // at once, the project doesn't.
     let rev = h.ok("project.summary", json!({})).rev;
     h.ok("player.play", json!({}));
     let preview = h.ok(
         "mixer.preview",
         json!({ "track": "A1", "volume_db": -20.0 }),
     );
-    if preview.result["live"] == true {
-        // A track with no fader in the graph: the filter says so.
-        let e = h
-            .call("mixer.preview", json!({ "track": "V7", "volume_db": 0.0 }))
-            .unwrap_err();
-        assert_eq!(e.code, ErrorCode::Media, "{e}");
-    } else {
-        eprintln!("skipping live faders: no ZeroMQ, or an FFmpeg without azmq");
-    }
+    assert_eq!(preview.result["live"], true);
+    // A track with no sound in the mix: says so.
+    let e = h
+        .call("mixer.preview", json!({ "track": "V7", "volume_db": 0.0 }))
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Media, "{e}");
     h.ok("player.pause", json!({}));
     assert_eq!(h.ok("project.summary", json!({})).rev, rev);
     // Track 1 ripples: the B-roll and the music follow (decision D21).
@@ -668,6 +825,7 @@ fn live_session() {
     let s = h.ok("player.mute", json!({}));
     assert_eq!(s.result["muted"], true);
     assert_eq!(h.ok("project.summary", json!({})).rev, rev);
+    h.ok("player.mute", json!({ "mute": false }));
 
     step("Interlaced sources are deinterlaced");
     // Both fields show the frame's barcode; in the top eighth a block moves
@@ -705,7 +863,7 @@ fn live_session() {
         assert!(combing(&shot) < 10.0, "frame {t} shows woven fields");
     }
 
-    step("HDR sources are tone-mapped");
+    step("HDR sources are tone-mapped, turned ones turned upright");
     // The barcode's white is SDR reference white in PQ: shown without tone
     // mapping it is gray and doesn't read.
     let pq = fixture::ensure(
@@ -721,25 +879,49 @@ fn live_session() {
         .no_audio(),
     )
     .unwrap();
-    let added = h.ok("media.add", json!({ "paths": [pq] }));
-    let media = added.changes.created[0].clone();
+    // A phone-style clip stored sideways with a rotation.
+    let turned = fixture::ensure(
+        &FixtureSpec::new(
+            VideoCodec::H264,
+            Container::Mp4,
+            W as u32,
+            H as u32,
+            (30, 1),
+            30,
+        )
+        .rotation(90)
+        .no_audio(),
+    )
+    .unwrap();
+    let added = h.ok("media.add", json!({ "paths": [pq, turned] }));
+    let (pq_id, turned_id) = (
+        added.changes.created[0].clone(),
+        added.changes.created[1].clone(),
+    );
     let end = h.ok("project.summary", json!({})).result["duration"]
         .as_i64()
         .unwrap();
     h.ok(
         "edit.append",
-        json!({ "media": media, "range": "5f..+10f" }),
+        json!({ "media": pq_id, "range": "5f..+10f" }),
+    );
+    h.ok(
+        "edit.append",
+        json!({ "media": turned_id, "range": "3f..+10f" }),
     );
     h.ok(
         "player.seek",
         json!({ "at": end + 3, "viewer": "timeline" }),
     );
     assert_eq!(h.shown(dir), Some(8), "PQ clip in the preview");
+    h.ok(
+        "player.seek",
+        json!({ "at": end + 14, "viewer": "timeline" }),
+    );
+    assert_eq!(h.shown(dir), Some(7), "turned clip, upright");
 
-    step("Many cuts: a seek waits only for the checks near its frame");
-    // 120 clips of 4 frames from all over a long fixture, appended at once:
-    // 120 tail checks, those nearest the playhead (the end, decision D15)
-    // first. The seek there doesn't wait for the rest (gui.md §4).
+    step("Many cuts: the first seek doesn't wait for them");
+    // 120 clips of 4 frames from all over a long fixture, appended at once.
     let long = fixture_file(1600);
     let added = h.ok("media.add", json!({ "paths": [long] }));
     let media = added.changes.created[0].clone();
@@ -759,20 +941,12 @@ fn live_session() {
     assert_eq!(state["timeline"]["frames"].as_i64(), Some(total));
     let first = total - 4 * 120;
     let started = Instant::now();
-    let seek = h.ok(
+    h.ok(
         "player.seek",
         json!({ "at": total - 3, "viewer": "timeline" }),
     );
-    eprintln!(
-        "first seek after 120 cuts: {:?}, {} tail checks still running",
-        started.elapsed(),
-        seek.result["preview_pending"]
-    );
+    eprintln!("first seek after 120 cuts: {:?}", started.elapsed());
     assert_eq!(h.shown(dir), Some(13 * 119 + 5 + 1));
-    let all = h.wait_for("every tail checked", |_| {
-        h.ok("player.state", json!({})).result["preview_pending"] == 0
-    });
-    eprintln!("all tail checks done {all:?} later");
     for k in [0, 1, 37, 118, 119] {
         let at = first + 4 * k;
         for (t, want) in [(at, 13 * k + 5), (at + 3, 13 * k + 8)] {
@@ -801,8 +975,8 @@ fn live_session() {
     assert_eq!(state["timeline"]["frames"].as_i64(), Some(total - 8));
 
     step("Stills and image sequences show frame for frame");
-    // A still longer than one image list (chained), then a 24 fps sequence
-    // on the 30 fps timeline, its pictures picked as export picks them.
+    // A long still, then a 24 fps sequence on the 30 fps timeline, its
+    // pictures picked as export picks them.
     let still = fixture::ensure_images(&ImageSpec::still(77, W as u32, H as u32, "png")).unwrap();
     let seq = fixture::ensure_images(&ImageSpec::sequence(1, 60, 6, W as u32, H as u32)).unwrap();
     let r = h.ok("media.add", json!({ "paths": [still[0]] }));
@@ -845,26 +1019,44 @@ fn live_session() {
     assert_eq!(state["source"]["frames"], 150, "{state}");
     assert_eq!(h.shown(dir), Some(77));
 
-    step("A failed tail check is tried again, then reported");
-    // The source viewer's cut, which the timeline doesn't have: its retry
-    // doesn't wait for the timeline. The file can't be read any more, so the
-    // check fails twice.
-    let gone = dir.join("unreadable.mkv");
+    step("Proxies play in the viewer, frame for frame");
+    // A proxy of m1 (decision D41) shows the frames `frame render` shows
+    // from the original once the project plays proxies.
+    let rendered = |t: i64| {
+        let out = dir.join("render.png");
+        h.ok("frame.render", json!({ "at": t, "out": out }));
+        let mut r = vidcut_av::decode::VideoReader::open(&out).unwrap();
+        vidcut_av::decode::read_barcode(&r.next_frame().unwrap().unwrap()).unwrap()
+    };
+    h.ok("proxy.generate", json!({ "media": "m1" }));
+    let m1 = h.ok("media.get", json!({ "media": "m1" })).result;
+    assert!(m1["proxy"].is_object(), "{m1}");
+    h.ok("project.set", json!({ "use_proxies": true }));
+    for t in [0, 9, 10, 25, 26, 30] {
+        let want = rendered(t);
+        assert!(want.is_some(), "frame {t} shows m1");
+        h.ok("player.seek", json!({ "at": t, "viewer": "timeline" }));
+        let state = h.ok("player.state", json!({})).result;
+        assert_eq!(state["timeline"]["error"], Value::Null, "{state}");
+        assert_eq!(h.shown(dir), want, "proxy, timeline frame {t}");
+    }
+    h.ok("project.set", json!({ "use_proxies": false }));
+
+    step("An unreadable file fails the seek, with the reason");
+    let gone = dir.join("unreadable.mp4");
     std::fs::copy(fixture_file(300), &gone).unwrap();
     let added = h.ok("media.add", json!({ "paths": [gone] }));
     let media = added.changes.created[0].clone();
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&gone, std::fs::Permissions::from_mode(0o000)).unwrap();
-    let _ = h.call("viewer.load", json!({ "media": media }));
-    let took = h.wait_for("the notice", |s| {
-        s.notices
-            .iter()
-            .any(|n| n.text.contains("checking a preview cut"))
-    });
-    assert!(
-        took >= Duration::from_secs(1),
-        "tried again first: {took:?}"
-    );
+    let started = Instant::now();
+    let e = h
+        .call("viewer.load", json!({ "media": media }))
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Media, "{e}");
+    assert!(started.elapsed() < Duration::from_secs(5), "{e}");
+    let state = h.ok("player.state", json!({})).result;
+    assert!(state["source"]["error"].is_string(), "{state}");
     std::fs::set_permissions(&gone, std::fs::Permissions::from_mode(0o644)).unwrap();
 
     drop(h);

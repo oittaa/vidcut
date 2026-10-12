@@ -50,7 +50,9 @@ use std::time::{Duration, Instant};
 use vidcut_core::render::RenderPlan;
 
 pub use frame::{Layout, Memory, Picture, Shown};
-pub use output::{AudioOutput, AudioSource, CpalOutput, ManualOutput, PacedOutput, Recording};
+pub use output::{
+    AudioOutput, AudioSource, CpalOutput, ManualOutput, PacedOutput, Recording, output_device,
+};
 pub use scrub::Scrubber;
 
 use crate::error::{Error, Result};
@@ -118,6 +120,9 @@ pub struct Status {
     pub latency: Option<Duration>,
     /// What decoded the picture of a file shown last.
     pub decoder: Option<Decoder>,
+    /// The frame the viewer is at, when its picture failed to decode (it
+    /// isn't tried again until something changes); `error` says why.
+    pub failed: Option<i64>,
     /// The newest decoding or device failure.
     pub error: Option<String>,
 }
@@ -237,6 +242,8 @@ pub(crate) struct Shared {
     /// The decode thread's cancel flag (`crate::cancel`).
     pub(crate) interrupt: Arc<AtomicBool>,
     busy: Mutex<Option<(Busy, Instant)>>,
+    /// The frame whose picture failed to decode last, until one lands.
+    failed: Mutex<Option<i64>>,
     on_picture: Option<Arc<dyn Fn() + Send + Sync>>,
     presenter: Mutex<Presenter>,
     /// The audio device's failure.
@@ -407,8 +414,17 @@ impl Shared {
         self.control().error = Some(why);
     }
 
+    /// The picture of the frame the viewer is at, `frame`, failed to decode.
+    pub(crate) fn failed(&self, frame: i64) {
+        *lock(&self.failed) = Some(frame);
+        if let Some(f) = &self.on_picture {
+            f();
+        }
+    }
+
     /// The picture of the frame the viewer is at landed.
     pub(crate) fn landed(&self) {
+        lock(&self.failed).take();
         if let Some(f) = &self.on_picture {
             f();
         }
@@ -466,6 +482,7 @@ impl Player {
             markers: Markers::default(),
             interrupt: Arc::new(AtomicBool::new(false)),
             busy: Mutex::new(None),
+            failed: Mutex::new(None),
             on_picture: config.on_picture,
             presenter: Mutex::new(Presenter::default()),
             device,
@@ -532,11 +549,23 @@ impl Player {
     /// on from there; paused, the frame's sound plays when scrubbing (a
     /// drag across the timeline is seeks).
     pub fn seek(&self, frame: i64) {
+        self.seek_with(frame, true);
+    }
+
+    /// [`seek`](Self::seek) without the frame's sound: a move the viewer
+    /// makes by itself (opening at a remembered frame, after an edit).
+    pub fn seek_quietly(&self, frame: i64) {
+        self.seek_with(frame, false);
+    }
+
+    fn seek_with(&self, frame: i64, sound: bool) {
         self.shared.change(true, |ctl, _, _| {
             let t = ctl.plan.clamp(frame);
             ctl.mode = match ctl.mode {
                 Mode::Paused { .. } => {
-                    ctl.scrub(t);
+                    if sound {
+                        ctl.scrub(t);
+                    }
                     Mode::Paused { at: t }
                 }
                 Mode::Playing { speed, .. } => {
@@ -727,6 +756,7 @@ impl Player {
             kept: self.shared.store.usage(),
             latency: self.shared.heard.latency(),
             decoder: p.decoder,
+            failed: *lock(&self.shared.failed),
             error: device.or(error),
         }
     }

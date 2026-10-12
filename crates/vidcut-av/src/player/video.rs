@@ -139,6 +139,9 @@ pub(crate) fn run(shared: Arc<Shared>) {
             Err(e) if is_cancelled(&e) => d.lost_position(),
             Err(e) => {
                 shared.fail(e.to_string());
+                if !shared.store.contains(&snap.plan.id(snap.focus)) {
+                    shared.failed(snap.focus);
+                }
                 d.failed = Some((snap.version, snap.focus));
                 d.lost_position();
                 shared.wait_change(snap.version, Duration::from_millis(50));

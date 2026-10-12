@@ -57,17 +57,13 @@ pub(super) enum Drag {
     TapeMark { is_in: bool, frame: i64 },
 }
 
-/// What the viewer can show of one player (from the GL glue).
+/// What the viewer can show of one player (from the GPU glue).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Picture {
     pub texture: Option<egui::TextureId>,
     /// The texture holds a rendered frame.
     pub has_frame: bool,
 }
-
-/// What the paused viewer's frame was worked out from: the revision, the
-/// viewer mode, the position, the source clip and whether proxies play.
-pub(super) type PausedAt = (u64, ViewerMode, i64, Option<String>, bool);
 
 pub struct Workspace {
     pub(super) live: live::Handle,
@@ -77,6 +73,8 @@ pub struct Workspace {
     /// wants them rendered at.
     pub pictures: [Picture; 2],
     pub wants: [[i32; 2]; 2],
+    /// The GPU the window draws on, for the status bar's versions.
+    pub display: Option<String>,
     // View state (not part of the project).
     pub(super) pool_view: PoolView,
     pub(super) search: String,
@@ -108,15 +106,9 @@ pub struct Workspace {
     pub(super) timeline: TimelineView,
     /// The edit the Trim Editor shows, if it is open.
     pub(super) trim_editor: Option<i64>,
-    /// Exact frames for the paused viewer, the Trim Editor and Dynamic
-    /// Trim (created on first use).
+    /// Exact frames for the Trim Editor and Dynamic Trim (created on first
+    /// use).
     pub(super) stills: Option<super::stills::Stills>,
-    /// The viewer mode whose frame the paused viewer last showed exactly:
-    /// its picture may stand in while the next frame renders.
-    pub(super) paused_shown: Option<ViewerMode>,
-    /// The paused viewer's frame as a piece, where the shown stretch of its
-    /// file starts, and what they were worked out from.
-    pub(super) paused_piece: Option<(PausedAt, vidcut_core::render::VideoPiece, i64)>,
     /// Quick Export, the Export dialog, jobs and timeline interchange.
     pub(super) export: super::export::ExportUi,
     /// The Mixer panel is open, and its meters' state.
@@ -185,9 +177,9 @@ fn edited_text(edited: &LocalTime, today: &LocalTime) -> String {
     }
 }
 
-/// How the viewer's player decodes, for the status bar, from mpv's
-/// `hwdec-current`, and what it means on hover. `None` before it has
-/// opened a file.
+/// How the viewer's player decodes the picture shown, for the status bar,
+/// from `player.state`'s `hwdec`, and what it means on hover. `None`
+/// before it has shown a picture of a file.
 fn decoding(hwdec: &str) -> Option<(String, String)> {
     let gpu = |api: &str| {
         (
@@ -203,13 +195,10 @@ fn decoding(hwdec: &str) -> Option<(String, String)> {
         "no" => (
             "decoding on the CPU".into(),
             "The viewer decodes in software: GPU acceleration is off in File > Preferences, \
-             or the GPU can't decode this file"
+             the GPU can't decode this file, or the CPU decodes it faster (H.264)"
                 .into(),
         ),
-        h if h.starts_with("nvdec") || h.starts_with("cuda") => gpu("NVDEC"),
-        h if h.starts_with("vaapi") => gpu("VA-API"),
-        h if h.starts_with("vulkan") => gpu("Vulkan Video"),
-        h if h.starts_with("vdpau") => gpu("VDPAU"),
+        "nvdec" => gpu("NVDEC"),
         other => gpu(other),
     })
 }
@@ -222,6 +211,7 @@ impl Workspace {
             thumbs: HashMap::new(),
             pictures: [Picture::default(); 2],
             wants: [[640, 360]; 2],
+            display: None,
             pool_view: PoolView::Thumbnails,
             search: String::new(),
             bins: Default::default(),
@@ -244,8 +234,6 @@ impl Workspace {
             },
             trim_editor: None,
             stills: None,
-            paused_shown: None,
-            paused_piece: None,
             export: Default::default(),
             show_mixer: false,
             mixer: Default::default(),
@@ -652,6 +640,19 @@ impl Workspace {
                     self.send("history.redo", json!({}));
                 }
             });
+            ui.menu_button("Timeline", |ui| {
+                let mut on = self.snap.audio_scrubbing;
+                if ui
+                    .checkbox(&mut on, "Audio Scrubbing")
+                    .on_hover_text(
+                        "Shift+S: frame steps and drags of a paused playhead play the sound \
+                         under it",
+                    )
+                    .clicked()
+                {
+                    self.send("player.audio_scrubbing", json!({ "on": on }));
+                }
+            });
             ui.separator();
             // The project's name is in the window title.
             if self.snap.project.is_some() {
@@ -713,8 +714,8 @@ impl Workspace {
                             long.push_str(&format!("\n  {lib} {v}"));
                         }
                     }
-                    if let Some((major, minor)) = vidcut_mpv::client_api_version() {
-                        long.push_str(&format!("\nlibmpv client API {major}.{minor}"));
+                    if let Some(gpu) = &self.display {
+                        long.push_str(&format!("\nDrawing on {gpu}"));
                     }
                     let short = format!(
                         "vidcut {} · FFmpeg {}",
@@ -999,6 +1000,10 @@ impl Workspace {
         }
         if pressed(Key::Space) && !dynamic {
             self.send("player.toggle", json!({}));
+        }
+        // Audio scrubbing on and off (decision D42).
+        if pressed(Key::S) && m.shift && !m.command && !m.alt {
+            self.send("player.audio_scrubbing", json!({}));
         }
         if pressed(Key::K) && !dynamic {
             self.send("player.pause", json!({}));
@@ -1550,9 +1555,5 @@ mod tests {
         assert_eq!(decoding(""), None);
         assert_eq!(decoding("no").unwrap().0, "decoding on the CPU");
         assert_eq!(decoding("nvdec").unwrap().0, "decoding on the GPU (NVDEC)");
-        assert_eq!(
-            decoding("vaapi-copy").unwrap().0,
-            "decoding on the GPU (VA-API)"
-        );
     }
 }

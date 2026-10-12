@@ -1,38 +1,38 @@
-//! The eframe app: OpenGL video, captures and window commands around the
-//! [`Workspace`]. The UI thread is also mpv's render thread, so it only
-//! renders frames and never calls mpv's client API
-//! (docs/decisions/preview.md §6).
+//! The eframe app on wgpu: the [`Workspace`], window commands and window
+//! captures. The viewers' pictures are presented by a thread of their own
+//! ([`Viewer`]); the UI only shows them (docs/decisions/preview.md §4).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use eframe::egui;
-use eframe::glow;
-use raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
-use vidcut_core::Error;
+use eframe::egui_wgpu::RenderState;
 use vidcut_core::request::GuiPanel;
-use vidcut_mpv::{Display, GlRenderer, Mpv};
 
 use super::theme;
-use super::video::Video;
+use super::video::{Viewer, ViewerHandle};
 use super::workspace::{Picture, Workspace};
 use crate::live::{self, Capture, Image, PlayerId, Presented};
 
 /// Work the session asks of the UI thread.
 enum UiTask {
-    Present(PlayerId, Presented),
-    CaptureViewer(PlayerId, Capture),
     CaptureWindow(Capture),
     Window(live::WindowChange),
     Show(GuiPanel),
     Quit,
 }
 
-/// The session's view of the GUI ([`live::Renderer`]).
+/// The session's view of the GUI ([`live::Renderer`]): pictures go to the
+/// viewer thread, the rest to the UI thread.
 pub struct Port {
     ctx: egui::Context,
+    viewer: ViewerHandle,
     tasks: Mutex<Vec<UiTask>>,
+    /// The session, once started (for `gui.quit` when the window can't
+    /// close).
+    session: std::sync::OnceLock<live::Handle>,
 }
 
 impl Port {
@@ -50,12 +50,16 @@ impl Port {
 }
 
 impl live::Renderer for Port {
+    fn attach(&self, player: PlayerId, engine: Option<Arc<vidcut_av::player::Player>>) {
+        self.viewer.attach(player, engine);
+    }
+
     fn present(&self, player: PlayerId, done: Presented) {
-        self.push(UiTask::Present(player, done));
+        self.viewer.present(player, done);
     }
 
     fn capture_viewer(&self, player: PlayerId, done: Capture) {
-        self.push(UiTask::CaptureViewer(player, done));
+        self.viewer.capture(player, done);
     }
 
     fn capture_window(&self, done: Capture) {
@@ -68,6 +72,22 @@ impl live::Renderer for Port {
 
     fn quit(&self) {
         self.push(UiTask::Quit);
+        // A window that can't paint never gets to close: presenting it can
+        // block the UI thread for as long as it is hidden (NVIDIA on
+        // Wayland, which has no way to show a minimized window again).
+        // Then the session ends and the process with it anyway.
+        if let Some(session) = self.session.get().cloned() {
+            let _ = crate::threads::spawn(
+                "vidcut-quit",
+                crate::threads::Work::Interactive,
+                move || {
+                    std::thread::sleep(QUIT_PATIENCE);
+                    eprintln!("vidcut: the window didn't close; quitting without it");
+                    session.shutdown_and_wait(Duration::from_secs(5));
+                    std::process::exit(0);
+                },
+            );
+        }
     }
 
     fn show(&self, panel: GuiPanel) {
@@ -78,11 +98,20 @@ impl live::Renderer for Port {
 pub struct App {
     ws: Workspace,
     port: Arc<Port>,
-    gl: Arc<glow::Context>,
-    videos: [Video; 2],
+    render: RenderState,
+    viewer: Viewer,
     session: Option<std::thread::JoinHandle<()>>,
     window_captures: HashMap<u64, Capture>,
     next_capture: u64,
+}
+
+/// How long `gui.quit` waits for the window to close before the process
+/// ends without it.
+const QUIT_PATIENCE: Duration = Duration::from_secs(5);
+
+/// The players' sound: the system's default device.
+fn audio_device() -> Box<dyn vidcut_av::player::AudioOutput> {
+    Box::new(vidcut_av::player::CpalOutput::new())
 }
 
 impl App {
@@ -91,38 +120,42 @@ impl App {
         project: Option<PathBuf>,
     ) -> std::result::Result<Self, String> {
         theme::apply(&cc.egui_ctx);
-        let gl = cc
-            .gl
+        let render = cc
+            .wgpu_render_state
             .clone()
-            .ok_or("vidcut needs eframe's OpenGL (glow) renderer")?;
-        let display = match cc.display_handle().map(|h| h.as_raw()) {
-            Ok(RawDisplayHandle::Wayland(h)) => Display::Wayland(h.display.as_ptr()),
-            Ok(RawDisplayHandle::Xlib(h)) => {
-                Display::X11(h.display.map_or(std::ptr::null_mut(), |d| d.as_ptr()))
-            }
-            _ => Display::None,
-        };
-        let (players, renderers, preview_error) =
-            match make_players(&cc.egui_ctx, cc.get_proc_address.clone(), display) {
-                Ok((players, [s, t])) => (Some(players), [Some(s), Some(t)], None),
-                Err(e) => (None, [None, None], Some(e)),
-            };
+            .ok_or("vidcut needs eframe's wgpu renderer")?;
+        let ctx = cc.egui_ctx.clone();
+        let viewer = Viewer::start(&render, move || ctx.request_repaint());
         let port = Arc::new(Port {
             ctx: cc.egui_ctx.clone(),
+            viewer: viewer.handle(),
             tasks: Mutex::new(Vec::new()),
+            session: std::sync::OnceLock::new(),
         });
         let socket = crate::ipc::registry::socket_path(std::process::id());
-        let ctx = cc.egui_ctx.clone();
         let create = project.as_ref().is_some_and(|p| !p.exists());
+        let notify = {
+            let (ctx, viewer) = (cc.egui_ctx.clone(), viewer.handle());
+            // A new snapshot, or a picture landed: the UI repaints, the
+            // viewer looks again.
+            Arc::new(move || {
+                ctx.request_repaint();
+                viewer.wake();
+            })
+        };
         let (handle, session) = live::start(live::Config {
             project,
             create,
-            players,
-            preview_error,
+            players: Some(live::Players {
+                audio: Arc::new(|_| audio_device()),
+                budget: vidcut_av::player::DEFAULT_BUDGET,
+            }),
+            preview_error: None,
             renderer: port.clone(),
-            notify: Arc::new(move || ctx.request_repaint()),
+            notify,
             socket: Some(socket.clone()),
         });
+        let _ = port.session.set(handle.clone());
         let ipc = handle.clone();
         let served = crate::ipc::server::start(
             &socket,
@@ -136,12 +169,14 @@ impl App {
                 socket.display()
             );
         }
-        let [s, t] = renderers;
+        let mut ws = Workspace::new(handle);
+        let info = render.adapter.get_info();
+        ws.display = Some(format!("{} ({:?})", info.name, info.backend));
         Ok(Self {
-            ws: Workspace::new(handle),
+            ws,
             port,
-            gl,
-            videos: [Video::new(s), Video::new(t)],
+            render,
+            viewer,
             session: Some(session),
             window_captures: HashMap::new(),
             next_capture: 1,
@@ -182,35 +217,9 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        // Runs even while the window is hidden: keep rendering so mpv never
-        // waits for us and the viewer can be captured.
-        let gl = self.gl.clone();
-        let tasks = self.port.take();
-        // Players asked to present draw their current picture even if mpv
-        // has nothing new for them (a seek finished without us: mpv waits
-        // only 200 ms for a frame to be taken).
-        let mut present = [false; 2];
-        for task in &tasks {
-            if let UiTask::Present(id, _) = task {
-                present[id.index()] = true;
-            }
-        }
-        for id in PlayerId::ALL {
-            self.videos[id.index()].render(&gl, frame, present[id.index()]);
-        }
-        for task in tasks {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        for task in self.port.take() {
             match task {
-                UiTask::Present(_, done) => done(),
-                UiTask::CaptureViewer(id, done) => {
-                    let image = self.videos[id.index()].read_back(&gl);
-                    done(image.ok_or_else(|| {
-                        Error::new(
-                            vidcut_core::ErrorCode::Dependency,
-                            "the viewer has no picture (is libmpv available? see `vidcut doctor`)",
-                        )
-                    }));
-                }
                 UiTask::CaptureWindow(done) => {
                     let id = self.next_capture;
                     self.next_capture += 1;
@@ -245,24 +254,14 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let pictures = self.viewer.sync(&self.render, self.ws.wants);
         for id in PlayerId::ALL {
-            let v = &self.videos[id.index()];
-            self.ws.pictures[id.index()] = Picture {
-                texture: v.texture_id,
-                has_frame: v.has_frame,
-            };
+            let (texture, has_frame) = pictures[id.index()];
+            self.ws.pictures[id.index()] = Picture { texture, has_frame };
         }
         let ctx = ui.ctx().clone();
         self.window_screenshots(&ctx);
         self.ws.ui(ui);
-        for id in PlayerId::ALL {
-            let want = self.ws.wants[id.index()];
-            if self.videos[id.index()].want != want {
-                // The next logic() pass resizes the target and redraws.
-                self.videos[id.index()].want = want;
-                ctx.request_repaint();
-            }
-        }
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
@@ -270,52 +269,10 @@ impl eframe::App for App {
         [r, g, b, a]
     }
 
-    fn on_exit(&mut self, gl: Option<&glow::Context>) {
-        // Render contexts go first, while the GL context is current; the mpv
-        // handles go when the session (and these) drop them.
-        for v in &mut self.videos {
-            v.destroy(gl);
-        }
+    fn on_exit(&mut self) {
         self.ws.live.shutdown();
         if let Some(t) = self.session.take() {
             let _ = t.join();
         }
     }
-}
-
-/// eframe's OpenGL function loader.
-type GlLoader = Arc<dyn Fn(&std::ffi::CStr) -> *const std::ffi::c_void + Send + Sync>;
-
-/// Creates both players and their GL render contexts.
-fn make_players(
-    ctx: &egui::Context,
-    proc_address: Option<GlLoader>,
-    display: Display,
-) -> std::result::Result<(live::Players, [GlRenderer; 2]), String> {
-    vidcut_mpv::available()?;
-    let lookup = proc_address.ok_or("no OpenGL function loader")?;
-    let make = |id: PlayerId| -> std::result::Result<(Mpv, GlRenderer), String> {
-        let mut opts = live::mpv_options(true, crate::preferences::gpu_acceleration());
-        opts.extend(live::mpv_log_options(id));
-        let opts: Vec<(&str, &str)> = opts.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-        let mpv = Mpv::new(&opts).map_err(|e| e.to_string())?;
-        let l = lookup.clone();
-        let renderer = GlRenderer::new(&mpv, Box::new(move |name| l(name)), display)
-            .map_err(|e| e.to_string())?;
-        let ctx = ctx.clone();
-        renderer.set_update_callback(move || ctx.request_repaint());
-        Ok((mpv, renderer))
-    };
-    // The timeline player comes first: FFmpeg has one log callback per
-    // process, which the first mpv takes, so all of FFmpeg's messages go to
-    // the timeline's log (`VIDCUT_MPV_LOG_DIR`).
-    let (t, tr) = make(PlayerId::Timeline)?;
-    let (s, sr) = make(PlayerId::Source)?;
-    // OpenGL shows frames decoded on the GPU.
-    let players = live::Players {
-        source: s,
-        timeline: t,
-        hwdec: true,
-    };
-    Ok((players, [sr, tr]))
 }

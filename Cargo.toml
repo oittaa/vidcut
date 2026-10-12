@@ -43,11 +43,12 @@ ffmpeg-next = { version = "9.0", default-features = false, features = [
     "software-resampling",
     "software-scaling",
 ] }
-# glow (OpenGL) backend: libmpv's render API needs a GL context.
+# On wgpu (below): the viewer's pictures are textures the GUI's own GPU
+# shader converts.
 eframe = { version = "0.36", default-features = false, features = [
     "accesskit",
     "default_fonts",
-    "glow",
+    "wgpu_no_default_features",
     "wayland",
     "x11",
 ] }
@@ -70,8 +71,6 @@ naga = { version = "30", features = ["wgsl-in"] }
 winit = "0.30"
 # Icons for the timeline's controls (Phosphor). MIT or Apache-2.0.
 egui-phosphor = "0.14"
-# Platform display handle passed to libmpv for hardware-decoding interop.
-raw-window-handle = "0.6"
 notify = { version = "8.2", default-features = false }
 rfd = "0.17"
 # Shell quoting for the commands the GUI shows ("the same export from a shell").

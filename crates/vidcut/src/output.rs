@@ -518,8 +518,17 @@ pub fn print(method: &str, r: &Response, json: bool) {
 fn live(method: &str, r: &Response) -> Option<()> {
     let v = &r.result;
     match method {
-        "player.state" | "player.play" | "player.pause" | "player.toggle" | "player.seek"
-        | "player.step" | "player.mute" | "viewer.set" | "viewer.load" | "project.open" => {
+        "player.state"
+        | "player.play"
+        | "player.pause"
+        | "player.toggle"
+        | "player.seek"
+        | "player.step"
+        | "player.mute"
+        | "player.audio_scrubbing"
+        | "viewer.set"
+        | "viewer.load"
+        | "project.open" => {
             println!("{}", state_line(v));
         }
         "gui.screenshot" => println!(

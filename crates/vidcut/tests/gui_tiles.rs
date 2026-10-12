@@ -20,7 +20,7 @@ struct NoRenderer;
 
 impl live::Renderer for NoRenderer {
     fn present(&self, _: PlayerId, done: Presented) {
-        done();
+        done(None);
     }
     fn capture_viewer(&self, _: PlayerId, done: Capture) {
         done(Err(vidcut_core::Error::usage("no renderer in tests")));

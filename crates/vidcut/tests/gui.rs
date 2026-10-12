@@ -1,14 +1,17 @@
-//! Checks against the real GUI (needs a Wayland or X11 display and
-//! libmpv; run with `--features vidcut/gui-tests`). Starts `vidcut -p FILE`,
-//! drives it through the CLI like an agent would, and checks:
+//! Checks against the real GUI (needs a Wayland or X11 display and a GPU
+//! wgpu draws on, Vulkan on Linux; run with `--features vidcut/gui-tests`).
+//! Starts `vidcut -p FILE`, drives it through the CLI like an agent would,
+//! and checks:
+//! - after `seek`, the viewer screenshot (the GPU shader's picture) shows
+//!   exactly the frame `vidcut frame render` renders headless, turned
+//!   pictures and HEVC on NVDEC among them;
 //! - a CLI edit is applied by the GUI and shows in its window in < 100 ms;
-//! - after `seek`, the viewer screenshot shows exactly the frame `vidcut frame render`
-//!   renders headless;
-//! - live control keeps working while the window is minimized.
+//! - live control keeps working while the window is minimized;
+//! - playing keeps with the clock;
+//! - GPU acceleration switches the viewer's decoder at once.
 //!
-//! A failed run keeps its temp dir (it says which): the screenshots, each
-//! player's mpv log (`VIDCUT_MPV_LOG_DIR`) and the GUI's stderr with
-//! `VIDCUT_DEBUG_PLAYER` traces.
+//! A failed run keeps its temp dir (it says which): the screenshots and the
+//! GUI's stderr with `VIDCUT_DEBUG_PLAYER` traces.
 #![cfg(feature = "gui-tests")]
 
 use std::path::{Path, PathBuf};
@@ -111,7 +114,7 @@ impl Drop for Gui {
         if std::thread::panicking() {
             self.dir.disable_cleanup(true);
             eprintln!(
-                "kept {}: screenshots, mpv logs, the GUI's stderr",
+                "kept {}: screenshots, the GUI's stderr",
                 self.dir.path().display()
             );
         }
@@ -122,10 +125,6 @@ impl Drop for Gui {
 fn gui_acceptance() {
     if std::env::var_os("WAYLAND_DISPLAY").is_none() && std::env::var_os("DISPLAY").is_none() {
         eprintln!("skipping: no display");
-        return;
-    }
-    if let Err(e) = vidcut_mpv::available() {
-        eprintln!("skipping: {e}");
         return;
     }
     let media = fixture::ensure(&FixtureSpec::new(
@@ -163,20 +162,26 @@ fn gui_acceptance() {
         .output()
         .unwrap();
     assert!(out.status.success());
-    // A phone-style clip, stored sideways with a rotation: the preview
-    // turns it upright on the GPU, like export. (mpv's software renderer,
-    // which tests/live.rs uses, aborts on rotated video.)
+    // A phone-style clip, stored sideways with a rotation: the shader turns
+    // it upright, like export.
     let rotated = fixture::ensure(
         &FixtureSpec::new(VideoCodec::H264, Container::Mp4, 640, 360, (30, 1), 60)
             .rotation(90)
             .no_audio(),
     )
     .unwrap();
+    // 10-bit HEVC: P010 pictures, decoded on NVDEC where there is one.
+    let hevc = fixture::ensure(
+        &FixtureSpec::new(VideoCodec::Hevc10, Container::Mkv, 640, 360, (30, 1), 60).no_audio(),
+    )
+    .unwrap();
     headless(&["media", "add", media.to_str().unwrap()]);
     headless(&["media", "add", rotated.to_str().unwrap()]);
+    headless(&["media", "add", hevc.to_str().unwrap()]);
     headless(&["edit", "append", "m1", "--range", "0f..90f"]);
     headless(&["edit", "append", "m1", "--range", "200f..260f"]);
     headless(&["edit", "append", "m2", "--range", "10f..30f"]);
+    headless(&["edit", "append", "m3", "--range", "5f..35f"]);
 
     // Evidence for a failed run, kept in `dir`.
     let stderr = std::fs::File::create(dir.join("stderr.log")).unwrap();
@@ -185,7 +190,6 @@ fn gui_acceptance() {
         .arg(&project)
         .env("XDG_STATE_HOME", dir.join("state"))
         .env("XDG_CONFIG_HOME", dir.join("config"))
-        .env("VIDCUT_MPV_LOG_DIR", &dir)
         .env("VIDCUT_DEBUG_PLAYER", "1")
         .stdout(Stdio::null())
         .stderr(stderr)
@@ -208,18 +212,13 @@ fn gui_acceptance() {
         );
         std::thread::sleep(Duration::from_millis(50));
     }
-    // mpv opens its logs when the players are made, before the session starts.
-    for player in ["source", "timeline"] {
-        let log = dir.join(format!("{pid}-{player}.log"));
-        assert!(log.exists(), "no mpv log {}", log.display());
-    }
     // A fixed window size keeps screenshots comparable.
     gui.cli(&["gui", "window", "--size", "1280,800"]);
     std::thread::sleep(Duration::from_millis(500));
 
     // 1. Seek + screenshot shows exactly what `vidcut frame render` renders.
-    // Frames 150..170 are the rotated clip.
-    for f in [0, 1, 45, 89, 90, 91, 149, 150, 155, 169] {
+    // Frames 150..170 are the rotated clip, 170..200 the HEVC one.
+    for f in [0, 1, 45, 89, 90, 91, 149, 150, 155, 169, 170, 185, 199] {
         gui.check_frame(f);
     }
 
@@ -253,7 +252,7 @@ fn gui_acceptance() {
     );
     let (tl, _) = gui.cli(&["timeline", "get"]);
     let clips = tl["result"]["tracks"][0]["items"].as_array().unwrap().len();
-    assert_eq!(clips, 4, "{tl}");
+    assert_eq!(clips, 5, "{tl}");
 
     // 3. Minimized, the GUI still answers, seeks and renders frame-exactly.
     gui.cli(&["gui", "window", "--minimized", "true"]);
@@ -268,10 +267,30 @@ fn gui_acceptance() {
     eprintln!("edit while minimized {took:?}");
     gui.check_frame(121);
 
-    // 4. Turning GPU acceleration off, from anywhere (here the CLI, which
-    // writes the preferences file), makes the preview decode in software at
-    // once, still frame-exactly; back on, as it did.
+    // 4. Playing keeps with the clock: a second plays about 30 frames, and
+    // the viewer shows them (presents that had to show an older picture
+    // are few).
     gui.cli(&["gui", "window", "--minimized", "false"]);
+    std::thread::sleep(Duration::from_millis(300));
+    gui.cli(&["player", "seek", "0f", "--viewer", "timeline"]);
+    let state = |gui: &Gui| gui.cli(&["player", "state"]).0["result"]["timeline"].clone();
+    let before = state(&gui);
+    gui.cli(&["player", "play"]);
+    std::thread::sleep(Duration::from_secs(2));
+    let (paused, _) = gui.cli(&["player", "pause"]);
+    let after = &paused["result"]["timeline"];
+    let played = after["position"].as_i64().unwrap();
+    let late = after["late"].as_u64().unwrap() - before["late"].as_u64().unwrap();
+    eprintln!("played {played} frames in 2 s, {late} late presents");
+    assert!((50..=70).contains(&played), "played {played} frames in 2 s");
+    assert!(late <= 6, "{late} late presents");
+    gui.check_frame(played);
+
+    // 5. Turning GPU acceleration off, from anywhere (here the CLI, which
+    // writes the preferences file), makes the preview decode in software at
+    // once, still frame-exactly; back on, as it did. The HEVC clip decodes
+    // on NVDEC where there is one.
+    gui.check_frame(180);
     let hwdec = |gui: &Gui| {
         let (st, _) = gui.cli(&["player", "state"]);
         st["result"]["timeline"]["hwdec"]
@@ -294,13 +313,18 @@ fn gui_acceptance() {
         }
     };
     let before = hwdec(&gui);
+    eprintln!("the HEVC clip decodes on {before:?}");
+    if vidcut_av::cuda::CudaDevice::open().is_ok() {
+        assert_eq!(before, "nvdec");
+    }
     gui.cli(&["preferences", "set", "gpu.acceleration=false"]);
     wait_for(&gui, &|h| h == "no");
-    gui.check_frame(30);
+    gui.check_frame(180);
     gui.check_frame(95);
     gui.cli(&["preferences", "set", "gpu.acceleration=true"]);
+    gui.check_frame(181);
     wait_for(&gui, &|h| h == before);
-    gui.check_frame(30);
+    gui.check_frame(182);
 
     // Quit cleanly: the instance unregisters.
     gui.cli(&["gui", "quit"]);
