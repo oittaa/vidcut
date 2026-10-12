@@ -6,10 +6,8 @@ use std::sync::Arc;
 use vidcut_core::render::{Image, RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
 
-use super::Output;
-
 /// What a picture shows, wherever it is on a timeline: the same source
-/// position of the same file (or black), at one rate and output. Pictures
+/// position of the same file at one rate, or black of one size. Pictures
 /// with equal ids are equal, so kept pictures survive edits that move them.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct Id {
@@ -29,7 +27,7 @@ pub(crate) struct Plan {
 }
 
 impl Plan {
-    pub(crate) fn new(plan: RenderPlan, out: &Output) -> Self {
+    pub(crate) fn new(plan: RenderPlan) -> Self {
         let mut starts = Vec::with_capacity(plan.video.len());
         let mut t = 0;
         let sources = plan
@@ -38,7 +36,7 @@ impl Plan {
             .map(|piece| {
                 starts.push(t);
                 t += piece.frames();
-                source_key(piece, plan.fps, out)
+                source_key(piece, &plan)
             })
             .collect();
         let samples = plan.samples();
@@ -148,9 +146,9 @@ fn cut(piece: &VideoPiece, k: i64) -> VideoPiece {
     p
 }
 
-/// What a piece shows, apart from where in it, at a rate and output.
-fn source_key(piece: &VideoPiece, fps: Rational, out: &Output) -> Arc<str> {
-    let out = format!("{}x{}|{:?}", out.width, out.height, out.pixel);
+/// What a piece shows, apart from where in it: a file at the plan's rate,
+/// or black of the plan's size.
+fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
     match piece {
         VideoPiece::Source {
             path,
@@ -158,12 +156,13 @@ fn source_key(piece: &VideoPiece, fps: Rational, out: &Output) -> Arc<str> {
             image,
             ..
         } => format!(
-            "{}|{:x}|{image:?}|{fps}|{out}",
+            "{}|{:x}|{image:?}|{}",
             path.display(),
-            origin.to_bits()
+            origin.to_bits(),
+            plan.fps
         )
         .into(),
-        VideoPiece::Black { .. } => format!("black|{out}").into(),
+        VideoPiece::Black { .. } => format!("black|{}x{}", plan.width, plan.height).into(),
     }
 }
 
@@ -190,7 +189,6 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::ffmpeg::format::Pixel;
 
     fn source(media: &str, source_frame: i64, frames: i64) -> VideoPiece {
         VideoPiece::Source {
@@ -216,14 +214,7 @@ mod tests {
             range,
             name: "t".into(),
         };
-        Plan::new(
-            plan,
-            &Output {
-                width: 320,
-                height: 180,
-                pixel: Pixel::RGBA,
-            },
-        )
+        Plan::new(plan)
     }
 
     #[test]

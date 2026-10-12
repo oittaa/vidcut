@@ -8,16 +8,12 @@ mod player_support;
 use std::time::{Duration, Instant};
 
 use player_support::*;
-use vidcut_av::player::{Config, CpalOutput, Output, Player};
+use vidcut_av::player::{Config, CpalOutput, Player};
 
 #[test]
 fn the_device_runs_the_clock() {
     let p = plan(&[gap(150)], 0);
-    let player = match Player::new(
-        p,
-        Config::new(Output::rgba(W, H)),
-        Box::new(CpalOutput::new()),
-    ) {
+    let player = match Player::new(p, Config::default(), Box::new(CpalOutput::new())) {
         Ok(player) => player,
         Err(e) => {
             eprintln!("skipping: no audio device here ({e})");

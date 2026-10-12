@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use player_support::*;
 use vidcut_av::decode::frames_decoded;
 use vidcut_av::fixture::{Container, FixtureSpec, VideoCodec};
-use vidcut_av::player::{Config, ManualOutput, Output, Player};
+use vidcut_av::player::{Config, ManualOutput, Player};
 
 #[test]
 fn frames_decode_about_once_and_edits_keep_them() {
@@ -27,14 +27,7 @@ fn frames_decode_about_once_and_edits_keep_them() {
     );
     let p = plan(&[clip(&long, 0, 300)], 0);
     let out = ManualOutput::new();
-    let new_player = || {
-        Player::new(
-            p.clone(),
-            Config::new(Output::rgba(W, H)),
-            Box::new(out.clone()),
-        )
-        .unwrap()
-    };
+    let new_player = || Player::new(p.clone(), Config::default(), Box::new(out.clone())).unwrap();
     let play_until = |player: &Player, done: &dyn Fn(i64) -> bool| {
         let started = Instant::now();
         while player.status().playing {

@@ -42,11 +42,35 @@ pub(crate) struct Source {
     rgb: bool,
 }
 
+/// A YUV picture's matrix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Matrix {
+pub enum Matrix {
     Bt601,
     Bt709,
     Bt2020,
+}
+
+/// How a decoded picture's samples are read to get BT.709 RGB, as the
+/// export reads them: what a display's shader converts from. Untagged
+/// pictures get the export's assumptions (BT.709 when HD, else BT.601;
+/// BT.2020 when HDR).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Colors {
+    pub matrix: Matrix,
+    /// Full range (0–255) rather than video range (16–235).
+    pub full_range: bool,
+    /// PQ or HLG: tone-mapped into SDR (`conversion`'s curve).
+    pub hdr: Option<Hdr>,
+}
+
+/// How `f`'s samples are read (see [`Colors`]).
+pub fn colors_of(f: &frame::Video) -> Colors {
+    let s = Source::of(f);
+    Colors {
+        matrix: s.matrix,
+        full_range: s.full_range,
+        hdr: s.hdr,
+    }
 }
 
 fn is_rgb(p: format::Pixel) -> bool {

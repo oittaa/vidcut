@@ -193,6 +193,24 @@ pub fn pull_full(out: &ManualOutput, frames: usize) -> Vec<f32> {
     out.pull(frames, Instant::now() - length)
 }
 
+/// The first channel of interleaved stereo.
+pub fn left(stereo: &[f32]) -> Vec<f32> {
+    stereo.chunks(2).map(|c| c[0]).collect()
+}
+
+/// Where bursts of sound end: the last sample above `threshold` before at
+/// least `min_gap` quiet ones (or the end). A beep played backward ends on
+/// its first sample.
+pub fn burst_ends(mono: &[f32], threshold: f32, min_gap: usize) -> Vec<usize> {
+    let reversed: Vec<f32> = mono.iter().rev().copied().collect();
+    let mut ends: Vec<usize> = vidcut_av::beep::onsets(&reversed, threshold, min_gap)
+        .into_iter()
+        .map(|i| mono.len() - 1 - i)
+        .collect();
+    ends.reverse();
+    ends
+}
+
 /// Seconds of CPU this process has used.
 pub fn cpu_seconds() -> f64 {
     // SAFETY: getrusage fills the struct it is given.
