@@ -430,13 +430,33 @@ struct Lane {
     piece: usize,
     /// Samples of the current piece already produced.
     pos: i64,
+    /// The current piece's stream is ready at `pos`: false at a piece's
+    /// start and after a seek into one.
+    started: bool,
     source: Option<SourceAudio>,
-    ahead: Ahead<SourceAudio>,
+    /// The next stream, opened ahead; named by where it opens.
+    ahead: Ahead<SourceAudio, (PathBuf, u32, u64)>,
     declick: i64,
     scratch: Vec<f32>,
+    /// A gain on top of each piece's own (a fader moved while playing).
+    trim: f32,
 }
 
 impl Lane {
+    fn new(pieces: &[AudioPiece], declick: i64) -> Self {
+        Self {
+            pieces: pieces.to_vec(),
+            piece: 0,
+            pos: 0,
+            started: false,
+            source: None,
+            ahead: Ahead::new(),
+            declick,
+            scratch: Vec::new(),
+            trim: 1.0,
+        }
+    }
+
     /// Readies the current piece's stream: the open one if it is the same
     /// stream, the one opened ahead for this piece, or a new one. Then starts
     /// opening the next stream.
@@ -489,9 +509,29 @@ impl Lane {
             return;
         }
         let start = origin + source_sample as f64 / f64::from(rate);
-        self.ahead.start(i, move || {
+        let key = (path.clone(), stream, start.to_bits());
+        self.ahead.start(i, key, move || {
             SourceAudio::open(&path, stream, start, rate, channels)
         });
+    }
+
+    /// The next samples are the lane's from sample `sample` on. The open
+    /// stream stays open: a piece of it reads on or seeks it.
+    fn seek(&mut self, sample: i64) {
+        let mut left = sample.max(0);
+        self.ahead.forget();
+        self.started = false;
+        for (i, piece) in self.pieces.iter().enumerate() {
+            let n = piece.samples();
+            if left < n {
+                self.piece = i;
+                self.pos = left;
+                return;
+            }
+            left -= n;
+        }
+        self.piece = self.pieces.len();
+        self.pos = 0;
     }
 
     /// Adds the lane's next `n` samples into `out` (interleaved, `n * ch` long).
@@ -514,16 +554,19 @@ impl Lane {
                 ..
             } = &piece
             {
-                if self.pos == 0 && take > 0 {
-                    let start = origin + *source_sample as f64 / f64::from(rate);
+                // A piece starts at its first sample, or where a seek put
+                // the lane.
+                if take > 0 && (self.pos == 0 || !self.started) {
+                    let start = origin + (*source_sample + self.pos) as f64 / f64::from(rate);
                     self.start_piece(path, *stream, start, rate, channels)?;
+                    self.started = true;
                 }
                 self.scratch.clear();
                 self.source
                     .as_mut()
                     .expect("open")
                     .read(take, &mut self.scratch)?;
-                let gain = 10f32.powf(*gain_db as f32 / 20.0);
+                let gain = 10f32.powf(*gain_db as f32 / 20.0) * self.trim;
                 // De-click fades at cuts inside the lane (not at the plan's ends).
                 let fade = self.declick.min(len / 2).max(1);
                 let fade_in = self.piece > 0;
@@ -568,18 +611,7 @@ impl AudioMix {
     pub fn new(lanes: &[Vec<AudioPiece>], rate: u32, channels: u16, declick_ms: u32) -> Self {
         let declick = i64::from(rate) * i64::from(declick_ms) / 1000;
         Self {
-            lanes: lanes
-                .iter()
-                .map(|l| Lane {
-                    pieces: l.clone(),
-                    piece: 0,
-                    pos: 0,
-                    source: None,
-                    ahead: Ahead::new(),
-                    declick,
-                    scratch: Vec::new(),
-                })
-                .collect(),
+            lanes: lanes.iter().map(|l| Lane::new(l, declick)).collect(),
             rate,
             channels,
             gain: 1.0,
@@ -590,9 +622,53 @@ impl AudioMix {
         self.channels
     }
 
+    /// How many lanes it mixes.
+    pub fn lanes(&self) -> usize {
+        self.lanes.len()
+    }
+
     /// Changes the whole mix by `db`.
     pub fn set_gain_db(&mut self, db: f64) {
         self.gain = 10f64.powf(db / 20.0) as f32;
+    }
+
+    /// Changes lane `lane` by `db`, on top of the gains in its pieces (a
+    /// fader being moved). Heard from the next [`read`](Self::read) on.
+    pub fn set_lane_db(&mut self, lane: usize, db: f64) -> Result<()> {
+        let Some(lane) = self.lanes.get_mut(lane) else {
+            return Err(Error::Invalid(format!("no audio lane {lane}")));
+        };
+        lane.trim = 10f64.powf(db / 20.0) as f32;
+        Ok(())
+    }
+
+    /// The next reads go on from sample `sample` of the plan (0 is its
+    /// start). Each lane keeps its open stream: reading a piece of it seeks
+    /// it, or decodes on when that is quicker.
+    pub fn seek(&mut self, sample: i64) {
+        for lane in &mut self.lanes {
+            lane.seek(sample);
+        }
+    }
+
+    /// Makes `lanes` the plan, reading from sample `sample`: an edited
+    /// timeline. Lane `i` keeps the stream lane `i` had open, for a piece
+    /// of the same stream to read on with; lane gains on top
+    /// ([`set_lane_db`](Self::set_lane_db)) start over.
+    pub fn replan(&mut self, lanes: &[Vec<AudioPiece>], sample: i64) {
+        let declick = self.lanes.first().map_or(0, |l| l.declick);
+        let mut old: Vec<Option<SourceAudio>> =
+            self.lanes.iter_mut().map(|l| l.source.take()).collect();
+        self.lanes = lanes
+            .iter()
+            .enumerate()
+            .map(|(i, l)| {
+                let mut lane = Lane::new(l, declick);
+                lane.source = old.get_mut(i).and_then(Option::take);
+                lane
+            })
+            .collect();
+        self.seek(sample);
     }
 
     /// The next `n` mixed samples, interleaved.

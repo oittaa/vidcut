@@ -434,7 +434,8 @@ pub struct VideoFrames {
     /// Frame index within the current piece.
     k: i64,
     source: Option<Source>,
-    ahead: Ahead<Source>,
+    /// The next file, opened ahead; named by where it opens.
+    ahead: Ahead<Source, (Input, u64, i64)>,
     normalizer: Option<Normalizer>,
     black: Option<frame::Video>,
     /// The output's dynamic range (`None`: SDR BT.709).
@@ -504,8 +505,27 @@ impl VideoFrames {
         self.gpu.as_ref().map_or(0, |g| g.made)
     }
 
+    /// The rate frames are sampled at.
+    pub fn fps(&self) -> Rational {
+        self.fps
+    }
+
     /// The next output frame (pts unset), or `None` after the last one.
     pub fn next_frame(&mut self) -> Result<Option<frame::Video>> {
+        Ok(self
+            .next(true)?
+            .map(|f| f.expect("a picture was asked for")))
+    }
+
+    /// Moves past the next output frame without making its picture: it is
+    /// decoded, since decoding on needs it, but not scaled. Returns whether
+    /// there was a frame.
+    pub fn skip_frame(&mut self) -> Result<bool> {
+        Ok(self.next(false)?.is_some())
+    }
+
+    /// The next output frame, with its picture when `picture` is set.
+    fn next(&mut self, picture: bool) -> Result<Option<Option<frame::Video>>> {
         loop {
             let Some(piece) = self.pieces.get(self.piece) else {
                 return Ok(None);
@@ -519,11 +539,12 @@ impl VideoFrames {
             let k = self.k;
             self.k += 1;
             return match piece.clone() {
+                VideoPiece::Black { .. } if !picture => Ok(Some(None)),
                 VideoPiece::Black { .. } => {
                     let black = frame_ref(self.black()?)?;
                     match &self.gpu {
-                        Some(g) => g.frames.upload(&black).map(Some),
-                        None => Ok(Some(black)),
+                        Some(g) => g.frames.upload(&black).map(|f| Some(Some(f))),
+                        None => Ok(Some(Some(black))),
                     }
                 }
                 VideoPiece::Source {
@@ -541,9 +562,26 @@ impl VideoFrames {
                         let from = if still { 0 } else { source_frame };
                         self.start_piece(&input_of(&path, image.as_ref()), origin, from, pictures)?;
                     }
-                    self.source_frame(if still { 0 } else { k }).map(Some)
+                    let k = if still { 0 } else { k };
+                    if picture {
+                        self.source_frame(k).map(|f| Some(Some(f)))
+                    } else {
+                        self.pass_source_frame(k).map(|()| Some(None))
+                    }
                 }
             };
+        }
+    }
+
+    /// Forgets where the open file stands, so the next piece of it seeks
+    /// rather than decoding on: after decoding was interrupted (a cancel
+    /// flag), the reader may stand anywhere. A still keeps its picture.
+    pub fn forget_position(&mut self) {
+        if let Some(s) = self.source.as_mut()
+            && s.pictures != Pictures::Still
+        {
+            s.current = None;
+            s.normalized = None;
         }
     }
 
@@ -577,9 +615,17 @@ impl VideoFrames {
     /// open, so a piece of it starting shortly after the frame before
     /// decodes on to it instead of seeking.
     pub fn read_piece(&mut self, piece: &VideoPiece) {
-        self.pieces = vec![piece.clone()];
+        self.read_pieces(std::slice::from_ref(piece));
+    }
+
+    /// Makes `pieces` the plan, their frames next, as
+    /// [`read_piece`](Self::read_piece) does for one: the open file stays
+    /// open, and the next file opens ahead as it would for a new plan.
+    pub fn read_pieces(&mut self, pieces: &[VideoPiece]) {
+        self.pieces = pieces.to_vec();
         self.piece = 0;
         self.k = 0;
+        self.ahead.forget();
     }
 
     fn black(&mut self) -> Result<&frame::Video> {
@@ -610,7 +656,14 @@ impl VideoFrames {
         let target = self.target(origin, source_frame);
         let source = match self.source.take() {
             Some(mut s) if s.reader.input() == input => {
-                s.reposition(origin, source_frame, target)?;
+                if let Err(e) = s.reposition(origin, source_frame, target) {
+                    // Interrupted, say: the file stays open, its position
+                    // unknown.
+                    s.current = None;
+                    s.normalized = None;
+                    self.source = Some(s);
+                    return Err(e);
+                }
                 s
             }
             _ => match self.ahead.take(self.piece) {
@@ -665,9 +718,23 @@ impl VideoFrames {
         }
         let target = self.target(origin, source_frame);
         let gpu = self.gpu.as_ref().map(|g| g.side.clone());
-        self.ahead.start(i, move || {
+        let key = (input.clone(), origin.to_bits(), source_frame);
+        self.ahead.start(i, key, move || {
             Source::open(&input, origin, source_frame, target, pictures, gpu.as_ref())
         });
+    }
+
+    /// Moves the current source piece's file on to its output frame `k`
+    /// without making the picture.
+    fn pass_source_frame(&mut self, k: i64) -> Result<()> {
+        let fps = self.fps;
+        let src = self.source.as_mut().expect("open");
+        let target =
+            src.origin + fps.frames_to_secs(src.source_frame + k) - 0.5 * fps.frames_to_secs(1);
+        if src.advance(target)? {
+            src.normalized = None;
+        }
+        Ok(())
     }
 
     /// Output frame `k` of the current source piece.
