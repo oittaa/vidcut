@@ -35,10 +35,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install FFmpeg 8 and libclang
+      - name: Install FFmpeg 8, ALSA and libclang
         run: |
           set -euo pipefail
           # Ubuntu 26.04 (resolute) publishes FFmpeg 8 in the archive.
+          # libasound2-dev: the player's audio output (cpal) builds on ALSA.
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             libavcodec-dev \
@@ -48,6 +49,7 @@ jobs:
             libswscale-dev \
             libswresample-dev \
             libavdevice-dev \
+            libasound2-dev \
             libclang-dev \
             pkg-config
           ver=$(dpkg-query -W -f='${Version}' libavcodec-dev)
@@ -59,7 +61,7 @@ jobs:
             exit 1
           fi
           pkg-config --exists --print-errors \
-            libavcodec libavformat libavfilter libavutil libswscale libswresample libavdevice
+            libavcodec libavformat libavfilter libavutil libswscale libswresample libavdevice alsa
           pkg-config --modversion libavcodec libswresample
 
       - name: Install the pinned Rust toolchain

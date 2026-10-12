@@ -13,6 +13,7 @@ pub mod error;
 pub mod export;
 pub mod filler;
 pub mod fixture;
+pub mod player;
 pub mod probe;
 pub mod progress;
 pub mod proxy;
