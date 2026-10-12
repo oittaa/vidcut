@@ -75,7 +75,9 @@ A seek or load ("motion") is shown after two steps:
 - A fast seek to the same frame overtakes an exact one too: it may show a keyframe instead.
 - Playback moving on from the frame doesn't count, so a seek while playing returns once its frame has shown. Stepped reverse playback (J) seeks, so it overtakes.
 - A reload at the same frame still counts as that frame. A continuation reload samples the playhead, which while playing is `time-pos` and has moved off the frame the seek asked for. Until that frame is on screen and the seek has replied, the reload keeps opening there and keeps the seek's target: adopting the playhead sample would look like another seek and name the playback frame in the conflict. After that the reload follows playback, so playback doesn't jump back to the seek's frame.
-- The GUI's own overtaken seeks raise no notice.
+- The GUI's own overtaken seeks and steps are no errors: they end as if done, and the command log shows no error for them.
+
+**Seeks queue behind a decoding one.** A precise seek decodes from the keyframe before its frame, which takes a tenth of a second on files with keyframes seconds apart. A held arrow key steps faster than that. When each new seek cancelled the one decoding, nothing showed until the key was let go. So while a paused player's seek still decodes, a newer seek waits, and only the newest goes once that one finishes: the picture moves at the speed frames decode, and the last request lands exactly. A seek that hasn't finished in a second holds nothing up. Playing, seeks go at once.
 
 **Seeks while loading.** mpv rejects seeks until a freshly loaded file is open. A seek in that window opens the file again at the new position (`loadfile` with `start=`). That lands on the frame, so it is exact: a fast seek there does not overtake an exact seek to the same frame, and the conflict text does not call it a keyframe.
 
