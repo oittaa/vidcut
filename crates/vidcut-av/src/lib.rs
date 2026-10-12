@@ -11,26 +11,16 @@ pub mod cuda;
 pub mod decode;
 pub mod error;
 pub mod export;
-pub mod filler;
 pub mod fixture;
 pub mod player;
 pub mod probe;
 pub mod progress;
 pub mod proxy;
-pub mod remux;
-pub mod tails;
 pub mod testdata;
 pub mod thumbs;
 pub mod waveform;
 
 pub use error::{Error, Result};
-
-/// Whether this FFmpeg has the filter `name` (builds differ: `azmq` needs
-/// ZeroMQ, `zscale` the zimg library).
-pub fn has_filter(name: &str) -> bool {
-    init();
-    ffmpeg::filter::find(name).is_some()
-}
 
 /// Initializes FFmpeg once per process. FFmpeg's own log output is limited to
 /// fatal messages: decoders recovering after a seek log harmless errors, and

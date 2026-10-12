@@ -13,7 +13,6 @@ license = "MIT"
 [workspace.dependencies]
 vidcut-core = { path = "crates/vidcut-core" }
 vidcut-av = { path = "crates/vidcut-av" }
-vidcut-mpv = { path = "crates/vidcut-mpv" }
 
 anyhow = "1"
 thiserror = "2"
@@ -32,7 +31,6 @@ clap = { version = "4.6", features = ["env", "string"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 libc = "0.2"
-libloading = "0.9"
 # Links the system FFmpeg 8.0 via pkg-config; bindings are generated with bindgen.
 # The crate's version numbers follow FFmpeg's, but it detects the installed
 # FFmpeg and compiles only what that version has, so 9.x builds against 8.0.

@@ -1,6 +1,6 @@
 [package]
 name = "vidcut-core"
-description = "vidcut project model, edit operations and command protocol (no FFmpeg, no mpv)"
+description = "vidcut project model, edit operations and command protocol (no FFmpeg, no GPU)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
