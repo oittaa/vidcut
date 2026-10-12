@@ -27,9 +27,9 @@
 
 **Why the viewer has a thread of its own.** On GNOME Wayland with NVIDIA's driver, presenting a hidden window (minimized) blocks the UI thread until the window shows again, with Mailbox and FIFO alike (the only present modes there): measured, a seek took 2.8 s and a viewer screenshot never came. Submissions to the same device from another thread go on meanwhile, so presents, seeks and screenshots don't depend on the UI. Wayland can't show a minimized window again by request, so `gui.quit` ends the process without the window when the window hasn't closed in 5 s.
 
-## 3. Decoding: the CPU, or NVDEC where it is faster
+## 3. Decoding: on the GPU when there is one
 
-- **The codec decides**, while GPU acceleration is on (the preferences' `gpu.acceleration`, the default): HEVC, AV1 and VP9 decode on NVDEC (`VideoReader::open_fastest`), H.264 and everything else on the CPU. Measured with `decode_speed` on this machine (16 threads, RTX 4080 SUPER):
+- **NVDEC decodes every stream it can**, while GPU acceleration is on (the preferences' `gpu.acceleration`, the default): H.264, HEVC, AV1 and VP9 (`VideoReader::open_nvdec_or_cpu`). Streams NVDEC doesn't decode (ProRes, VP8, a profile the GPU lacks) decode on the CPU, as do stills and image sequences. Measured with `decode_speed` on this machine (16 threads, RTX 4080 SUPER):
 
 | Stream | CPU | NVDEC |
 |---|---|---|
@@ -37,12 +37,12 @@
 | 2160p60 10-bit HEVC (bbb, NVENC) | 497 frames/s; 157–454 ms | 594 frames/s; 59–305 ms |
 | 1080p30 H.264 (bbb) | 2,439 frames/s; 24–89 ms | 913 frames/s; 54–329 ms |
 
-  FFmpeg's NVDEC path decodes one frame at a time and waits for each, so a CPU with many cores decodes H.264 several times faster; HEVC, AV1 and VP9 are costly in software. Streams NVDEC doesn't decode (ProRes, VP8, a profile the GPU lacks) fall back to the CPU, as do stills and image sequences.
+  FFmpeg's NVDEC path decodes one frame at a time and waits for each, so a CPU with many cores decodes H.264 several times faster: on this machine H.264 seeks and backward windows take three to four times as long on NVDEC (§8), while playing forward takes half the CPU. HEVC, AV1 and VP9 are costly in software, and NVDEC is faster at everything. The GPU is the default all the same: it leaves the CPU to the rest of the work, and on a CPU with fewer cores it is the faster for H.264 too. `gpu.acceleration` off decodes everything on the CPU.
 - **Copied down.** A frame NVDEC decoded is copied to memory at its own size (NV12 or P010) with its properties, then kept like a CPU picture: the decoder has only a few surfaces, and the engine keeps up to a gigabyte of pictures. A 2160p P010 picture is 24.9 MB; with the copy down and the upload (§4) the whole GUI plays 4K60 on 0.25–0.3 cores (§8). Frames passed over on the way to a seek are decoded and not copied.
 - **Not done: zero-copy.** Importing NVDEC's CUDA frames (or Vulkan Video's images) into wgpu's device without the round trip needs external-memory interop between CUDA or FFmpeg's Vulkan device and wgpu's, which wgpu doesn't expose; kept pictures would then live in video memory. The copy keeps 4K60 smooth (§8), so it waits (own-player.md).
-- **Not done: VAAPI.** The same path with VAAPI frames (AMD, Intel) would follow `open_fastest`.
+- **Not done: VAAPI.** The same path with VAAPI frames (AMD, Intel) would follow `open_nvdec_or_cpu`.
 - **Switching.** The session watches the preferences file; a change, from anywhere, switches both engines' decoder at once (`Player::set_hardware`), and they decode their pictures anew, the one shown first. `player.state`'s `hwdec` says what decoded the picture shown: `nvdec` or `no`.
-- **Frame-exact:** NVDEC's pictures are the CPU's, barcode for barcode, and within two levels in their pixels (`player_gpu.rs`: HEVC, VP9, AV1, HEVC in MPEG-TS and turned).
+- **Frame-exact:** NVDEC's pictures are the CPU's, barcode for barcode, and within two levels in their pixels (`player_gpu.rs`: H.264, interlaced H.264, HEVC, VP9, AV1, HEVC in MPEG-TS and turned).
 
 ## 4. The picture on screen
 
@@ -97,13 +97,13 @@ The real GUI, a debug build of vidcut's crates (dependencies optimized), the vie
 
 | Stream | Decoded on | Played | CPU | Seeks (10 far apart) |
 |---|---|---|---|---|
-| 1080p30 H.264 | CPU | 299 frames in 10.0 s, none late or skipped | 0.07 cores | 17–33 ms, 160 ms far from a keyframe |
+| 1080p30 H.264 | NVDEC / CPU | 299 frames in 10.0 s, none late or skipped | 0.18 / 0.21 cores | 18–37 ms, 470–1,350 ms far from a keyframe / 18–21 ms, 104–162 ms |
 | 1080p30 HEVC | NVDEC / CPU | 179 in 6.0 s, none late | 0.04 / 0.47 cores | 17–22 ms either |
-| 2160p60 H.264 | CPU | 599 in 10.1 s, none late or skipped | 0.55 cores | 199–418 ms |
+| 2160p60 H.264 | NVDEC / CPU | 598 in 10.1 s, none late or skipped | 0.40 / 0.78 cores | 514–1,466 / 104–260 ms |
 | 2160p60 10-bit HEVC | NVDEC / CPU | 598 in 10.1 s, none late | 0.29 / 2.0 cores | 57–417 / 144–535 ms |
 | 2160p60 10-bit AV1 | NVDEC / CPU | 598 in 10.1 s, none late | 0.25 / 2.1 cores | 69–465 / 143–553 ms |
 
-- **Steps back** from the middle of a GOP: the first 150–500 ms (a window decodes from the keyframe), then 17–35 ms each (the CLI's own round trip).
+- **Steps back** from the middle of a GOP: the first 150–500 ms (a window decodes from the keyframe; 1.0–1.2 s for H.264 on NVDEC), then 17–35 ms each (the CLI's own round trip).
 - **Picture against sound** (`tests/live.rs`, a stand-in device heard 30 ms after it pulls): the picture changed 0.4–1.4 ms after each beep was heard; every frame of 150 showed, in order. The engine's own measurements are in player.md §7.
 - **Minimized** (GNOME Wayland, NVIDIA): a seek 25 ms, a viewer screenshot 23 ms.
 - **Seeks after an edit of 120 cuts** wait for nothing: 6 ms to the first.

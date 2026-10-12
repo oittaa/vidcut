@@ -1,9 +1,9 @@
-//! The player decoding on the GPU (NVDEC) the codecs it decodes faster
-//! than the CPU (HEVC, AV1, VP9): the same pictures as decoding on the CPU,
-//! frame for frame and within a level or two in their pixels, copied down
-//! to memory in P010 or NV12; H.264, streams NVDEC can't decode, stills and
-//! black on the CPU; and switching decoders while it plays. Needs an
-//! NVIDIA GPU: `--features vidcut-av/gpu-tests`.
+//! The player decoding on the GPU (NVDEC) every stream it decodes (H.264,
+//! HEVC, AV1, VP9): the same pictures as decoding on the CPU, frame for
+//! frame and within a level or two in their pixels, copied down to memory
+//! in NV12 or P010; streams NVDEC can't decode, stills and black on the
+//! CPU; and switching decoders while it plays. Needs an NVIDIA GPU:
+//! `--features vidcut-av/gpu-tests`.
 #![cfg(feature = "gpu-tests")]
 
 mod player_support;
@@ -72,7 +72,7 @@ fn nvdec_pictures_are_the_cpus() {
         FixtureSpec::new(VideoCodec::Hevc10, Container::MpegTs, W, H, (30, 1), 60)
             .start_offset_ms(1400),
     );
-    // Interlaced: on the CPU (H.264), deinterlaced as ever.
+    // Interlaced: deinterlaced on the GPU (`bwdif_cuda`) as on the CPU.
     let interlaced = src(
         "m6",
         FixtureSpec::new(VideoCodec::H264, Container::Mkv, W, H, (30, 1), 60)
@@ -137,7 +137,13 @@ fn nvdec_pictures_are_the_cpus() {
         let _ = picture_at(&gpu, t);
         gpu.status().decoder
     };
-    assert_eq!(decoder(5), Some(Decoder::Cpu), "H.264: the CPU is faster");
+    assert_eq!(decoder(5), Some(Decoder::Nvdec), "H.264");
+    assert_eq!(picture_at(&gpu, 5).layout(), Layout::Nv12);
+    assert_eq!(
+        decoder(starts[6] + 3),
+        Some(Decoder::Nvdec),
+        "interlaced H.264"
+    );
     assert_eq!(decoder(35), Some(Decoder::Nvdec), "HEVC 10-bit");
     assert_eq!(picture_at(&gpu, 35).layout(), Layout::P010);
     assert_eq!(decoder(starts[3] + 3), Some(Decoder::Nvdec), "VP9");

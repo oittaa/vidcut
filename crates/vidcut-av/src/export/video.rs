@@ -287,9 +287,9 @@ impl Source {
         let on_gpu = gpu.filter(|_| video).and_then(|g| gpu_reader(input, g));
         let (reader, scaler) = match on_gpu {
             Some((r, s)) => (r, Some(s)),
-            // Frames as decoded: on NVDEC when it decodes the stream faster.
+            // Frames as decoded: on NVDEC when it decodes the stream.
             None => match nvdec.filter(|_| video) {
-                Some(d) => (VideoReader::open_fastest(input, d)?, None),
+                Some(d) => (VideoReader::open_nvdec_or_cpu(input, d)?, None),
                 None => (VideoReader::open_input(input)?, None),
             },
         };
@@ -344,7 +344,7 @@ impl Source {
         nvdec: Option<&crate::cuda::CudaDevice>,
     ) -> Result<Source> {
         let reader = match nvdec {
-            Some(d) => VideoReader::open_fastest(input, d)?,
+            Some(d) => VideoReader::open_nvdec_or_cpu(input, d)?,
             None => VideoReader::open_input(input)?,
         };
         let nvdec = reader.on_nvdec();
@@ -622,8 +622,8 @@ impl VideoFrames {
     }
 
     /// Frames as decoded ([`decoded`](Self::decoded)) decode on NVDEC
-    /// (`device`) where it decodes the stream faster than the CPU
-    /// ([`VideoReader::open_fastest`]), and are copied down to memory at
+    /// (`device`) where it decodes the stream
+    /// ([`VideoReader::open_nvdec_or_cpu`]), and are copied down to memory at
     /// their own size: the same frames, with the same timestamps and
     /// colors. Other streams, stills and image sequences decode on the CPU.
     pub fn decode_on(mut self, device: crate::cuda::CudaDevice) -> Self {
