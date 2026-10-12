@@ -81,7 +81,7 @@ cargo run -p vidcut -- --help  # CLI
 **System packages** (Ubuntu 26.04):
 
 ```bash
-sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libclang-dev libmpv2 rustup
+sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libasound2-dev libclang-dev libmpv2 rustup
 ```
 
 **Toolchain notes:**

@@ -65,6 +65,9 @@ shlex = "2.0"
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 # Checks media already unpacked from a bundle against its CRC-32.
 crc32fast = "1.5"
+# The player's audio output (ALSA on Linux, which PipeWire and PulseAudio
+# serve). Apache-2.0; needs libasound2-dev to build.
+cpal = "0.18"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

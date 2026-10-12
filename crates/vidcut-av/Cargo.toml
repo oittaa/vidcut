@@ -12,9 +12,11 @@ ffmpeg-next.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+cpal.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+libc.workspace = true
 
 [lints]
 workspace = true
@@ -22,3 +24,5 @@ workspace = true
 [features]
 # Tests that need a working NVENC/VAAPI GPU: `cargo test -p vidcut-av --features gpu-tests`.
 gpu-tests = []
+# Tests that play on the system's audio device (silence): `--features audio-tests`.
+audio-tests = []
