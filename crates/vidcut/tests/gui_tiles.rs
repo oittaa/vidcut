@@ -51,23 +51,24 @@ fn window(h: &live::Handle) -> Harness<'static, Workspace> {
     harness
 }
 
-/// Steps until the window keeps at least `n` tiles and no more arrive for
-/// half a second; returns how many it keeps.
-fn tiles_settle(harness: &mut Harness<'_, Workspace>, n: usize) -> usize {
+/// Steps until the window keeps at least `n` tiles, none is on its way and
+/// the disk holds as many; returns how many it keeps. Idle-class threads make
+/// the tiles, and a busy machine starves them for seconds: the deadline is
+/// generous.
+fn tiles_settle(harness: &mut Harness<'_, Workspace>, cache: &Path, n: usize) -> usize {
     let started = Instant::now();
-    let mut last = (0, Instant::now());
     loop {
         harness.step();
         let kept = harness.state().timeline_tiles().0;
-        if kept != last.0 {
-            last = (kept, Instant::now());
-        }
-        if kept >= n && last.1.elapsed() > Duration::from_millis(500) {
+        let pending = harness.state().timeline_tiles_pending();
+        // The disk only once they are all made: reading it decodes them.
+        let on_disk = (kept >= n && pending == 0).then(|| blocks(cache).1);
+        if on_disk.as_ref().is_some_and(|f| f.len() >= kept) {
             return kept;
         }
         assert!(
-            started.elapsed() < Duration::from_secs(60),
-            "{kept} tiles, waiting for {n}"
+            started.elapsed() < Duration::from_secs(180),
+            "{kept} tiles, {pending} on their way, on disk {on_disk:?}, waiting for {n}"
         );
         std::thread::sleep(Duration::from_millis(5));
     }
@@ -146,7 +147,7 @@ fn tiles_are_made_kept_on_disk_and_found_again() {
     // 1. Every visible tile gets a picture of its own: the clip's first
     // frame for the first tile, frames of the clip further on for the rest.
     let mut harness = window(&h);
-    let kept = tiles_settle(&mut harness, 3);
+    let kept = tiles_settle(&mut harness, &cache, 3);
     let (files, frames) = blocks(&cache);
     assert!(files >= 1, "tiles go to disk in blocks");
     assert_eq!(frames.first(), Some(&0), "{frames:?}");
@@ -157,7 +158,7 @@ fn tiles_are_made_kept_on_disk_and_found_again() {
     // 2. A new window finds them on disk: the clip can't be decoded now.
     std::fs::rename(dir.join("clip.mp4"), dir.join("moved.mp4")).unwrap();
     let mut harness = window(&h);
-    assert_eq!(tiles_settle(&mut harness, kept), kept);
+    assert_eq!(tiles_settle(&mut harness, &cache, kept), kept);
     drop(harness);
 
     h.shutdown();

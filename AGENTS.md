@@ -137,6 +137,7 @@ These are mandatory.
   - File dialogs are replaced with `Workspace::set_dialogs`.
   - A new window or modal is measured in its first frame and placed in the next: step once more after it appears before clicking in it.
   - Windows that ask the session (presets, plans, imports) answer on helper threads, so wait with a loop of `harness.step()`, not a fixed number of steps.
+  - `Work::Job` threads (timeline tiles, thumbnails) run in the idle class, which a busy machine starves for seconds: wait for the state the test checks (`Workspace::timeline_tiles_pending`, the files on disk) with a generous deadline, never for a quiet spell.
   - egui widgets such as sliders only see a drag that spans several frames: step between press, moves and release (`drag_slowly` in `gui_tracks.rs`). Timeline gestures work either way.
   - A freshly opened menu ignores input in its first frame: step twice before clicking an item (`menu_item` in `gui_tools.rs`).
 - **MCP** (`crates/vidcut/tests/mcp.rs`) runs `vidcut mcp` as a child process and talks JSON-RPC to it, headless and against a live session serving IPC.
