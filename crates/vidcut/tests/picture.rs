@@ -1,0 +1,369 @@
+//! The viewer's shader (`gui::picture`) against the export's conversion:
+//! each kind of picture the player hands out (8-bit planar, P010, NV12,
+//! turned every way, pillarboxed, SD and HD colors, full range, PQ and HLG)
+//! drawn on the GPU shows the barcode `frame render` shows, and its pixels
+//! are within a level or so of `Picture::to_rgba`, the export's own
+//! filters. Runs on any adapter, lavapipe too; skips without one.
+
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use vidcut::gui::picture::{Drawn, Gpu, Screen};
+use vidcut_av::fixture::{self, Container, FixtureSpec, ImageSpec, Picture as Content, VideoCodec};
+use vidcut_av::player::{Config, ManualOutput, Picture, Player};
+use vidcut_core::model::Hdr;
+use vidcut_core::render::{Image, RenderPlan, VideoPiece};
+use vidcut_core::time::Rational;
+
+const W: u32 = 320;
+const H: u32 = 180;
+
+fn fps() -> Rational {
+    Rational::new(30, 1).unwrap()
+}
+
+/// A piece of `frames` frames from `spec`'s fixture.
+fn piece(spec: FixtureSpec, from: i64, frames: i64) -> VideoPiece {
+    let path = fixture::ensure(&spec).unwrap();
+    let info = vidcut_av::probe::probe(&path).unwrap();
+    let origin = info
+        .video
+        .as_ref()
+        .and_then(|v| v.first_frame_time)
+        .unwrap_or(0.0);
+    VideoPiece::Source {
+        media: "m".into(),
+        path,
+        origin,
+        source_frame: from,
+        frames,
+        image: None,
+    }
+}
+
+fn plan(video: Vec<VideoPiece>) -> RenderPlan {
+    let frames = video.iter().map(VideoPiece::frames).sum();
+    RenderPlan {
+        fps: fps(),
+        width: W,
+        height: H,
+        sample_rate: 48_000,
+        channels: 2,
+        frames,
+        video,
+        audio: Vec::new(),
+        range: (0, frames),
+        name: "pictures".into(),
+    }
+}
+
+/// The single-frame piece timeline frame `t` shows.
+fn piece_at(plan: &RenderPlan, t: i64) -> VideoPiece {
+    let mut k = t;
+    for p in &plan.video {
+        if k < p.frames() {
+            let mut one = p.clone();
+            match &mut one {
+                VideoPiece::Source {
+                    source_frame,
+                    frames,
+                    image,
+                    ..
+                } => {
+                    if !matches!(image, Some(Image::Still)) {
+                        *source_frame += k;
+                    }
+                    *frames = 1;
+                }
+                VideoPiece::Black { frames } => *frames = 1,
+            }
+            return one;
+        }
+        k -= p.frames();
+    }
+    panic!("frame {t} is outside the plan");
+}
+
+fn barcode(rgba: &[u8], w: u32, h: u32) -> Option<u32> {
+    use vidcut_av::ffmpeg::{format::Pixel, frame};
+    let mut f = frame::Video::new(Pixel::RGBA, w, h);
+    let stride = f.stride(0);
+    let row = w as usize * 4;
+    for y in 0..h as usize {
+        f.data_mut(0)[y * stride..y * stride + row].copy_from_slice(&rgba[y * row..(y + 1) * row]);
+    }
+    vidcut_av::decode::read_barcode(&f).unwrap()
+}
+
+/// Mean and largest difference of two RGBA pictures' color channels.
+fn diff(a: &[u8], b: &[u8]) -> (f64, u8) {
+    let (mut sum, mut max, mut n) = (0u64, 0u8, 0u64);
+    for (p, q) in a.chunks(4).zip(b.chunks(4)) {
+        for c in 0..3 {
+            let d = p[c].abs_diff(q[c]);
+            sum += u64::from(d);
+            max = max.max(d);
+            n += 1;
+        }
+    }
+    (sum as f64 / n as f64, max)
+}
+
+/// [`diff`] where `b` is flat: each pixel like those two away each way.
+fn flat_diff(a: &[u8], b: &[u8], w: usize) -> (f64, u8) {
+    let h = b.len() / 4 / w;
+    let px = |x: usize, y: usize| &b[(y * w + x) * 4..(y * w + x) * 4 + 3];
+    let (mut sum, mut max, mut n) = (0u64, 0u8, 0u64);
+    for y in 2..h.saturating_sub(2) {
+        for x in 2..w.saturating_sub(2) {
+            let here = px(x, y);
+            if [px(x - 2, y), px(x + 2, y), px(x, y - 2), px(x, y + 2)]
+                .iter()
+                .any(|q| *q != here)
+            {
+                continue;
+            }
+            let i = (y * w + x) * 4;
+            for c in 0..3 {
+                let d = a[i + c].abs_diff(b[i + c]);
+                sum += u64::from(d);
+                max = max.max(d);
+                n += 1;
+            }
+        }
+    }
+    (sum as f64 / n.max(1) as f64, max)
+}
+
+fn picture_at(player: &Player, t: i64) -> Arc<Picture> {
+    player.seek(t);
+    assert!(player.wait_ready(t, Duration::from_secs(20)), "frame {t}");
+    let shown = player.present(Instant::now()).unwrap();
+    assert!(shown.exact);
+    shown.picture
+}
+
+#[test]
+fn the_shader_draws_what_the_export_renders() {
+    let Some(gpu) = Gpu::headless() else {
+        eprintln!("skipping: no GPU adapter (not even a software one)");
+        return;
+    };
+    let spec = |codec, container, w, h| FixtureSpec::new(codec, container, w, h, (30, 1), 30);
+    let pieces = vec![
+        // 0: 8-bit 4:2:0, planar.
+        piece(spec(VideoCodec::H264, Container::Mp4, W, H), 3, 10),
+        // 10: 10-bit, P010.
+        piece(spec(VideoCodec::Hevc10, Container::Mkv, W, H), 4, 10),
+        // 20, 30, 40: stored turned, shown upright.
+        piece(
+            spec(VideoCodec::H264, Container::Mp4, W, H).rotation(90),
+            5,
+            10,
+        ),
+        piece(
+            spec(VideoCodec::H264, Container::Mp4, W, H).rotation(180),
+            6,
+            10,
+        ),
+        piece(
+            spec(VideoCodec::H264, Container::Mp4, W, H).rotation(270),
+            7,
+            10,
+        ),
+        // 50: 4:3, pillarboxed.
+        piece(spec(VideoCodec::H264, Container::Mp4, 240, 180), 8, 10),
+        // 60: stripes in HD (BT.709), 70: in SD (BT.601).
+        piece(
+            spec(VideoCodec::H264, Container::Mp4, 1280, 720).picture(Content::Colors),
+            0,
+            10,
+        ),
+        piece(
+            spec(VideoCodec::H264, Container::Mp4, 640, 480).picture(Content::Colors),
+            0,
+            10,
+        ),
+        // 80: PQ, 90: HLG (barcodes), 100: PQ stripes.
+        piece(
+            spec(VideoCodec::Hevc10, Container::Mkv, W, H).hdr(Hdr::Pq),
+            9,
+            10,
+        ),
+        piece(
+            spec(VideoCodec::Hevc10, Container::Mkv, W, H).hdr(Hdr::Hlg),
+            10,
+            10,
+        ),
+        piece(
+            spec(VideoCodec::Hevc10, Container::Mkv, W, H)
+                .hdr(Hdr::Pq)
+                .picture(Content::Colors),
+            0,
+            10,
+        ),
+        // 110: black.
+        VideoPiece::Black { frames: 10 },
+    ];
+    let mut pieces = pieces;
+    // 120: a still in its file's colors (RGB, coded BT.709 by the player).
+    let still = fixture::ensure_images(&ImageSpec::still(123, W, H, "png")).unwrap();
+    pieces.push(VideoPiece::Source {
+        media: "s".into(),
+        path: still[0].clone(),
+        origin: 0.0,
+        source_frame: 0,
+        frames: 10,
+        image: Some(Image::Still),
+    });
+    // 130: full-range 4:2:0 (a JPEG still).
+    let jpeg = fixture::ensure_images(&ImageSpec::still(321, W, H, "jpg")).unwrap();
+    pieces.push(VideoPiece::Source {
+        media: "j".into(),
+        path: jpeg[0].clone(),
+        origin: 0.0,
+        source_frame: 0,
+        frames: 10,
+        image: Some(Image::Still),
+    });
+    let p = plan(pieces);
+    let player = Player::new(
+        p.clone(),
+        Config {
+            audio_scrubbing: false,
+            ..Config::default()
+        },
+        Box::new(ManualOutput::new()),
+    )
+    .unwrap();
+    let mut screen = Screen::new();
+    for t in (5..140).step_by(10) {
+        let picture = picture_at(&player, t);
+        // In a target of the timeline's aspect that shows it at its own
+        // size (by its height): the export's conversion of the same
+        // picture, to within rounding. That checks the colors; scaled, the
+        // filters differ at edges.
+        let upright = if picture.rotation() % 180 == 90 {
+            picture.width()
+        } else {
+            picture.height()
+        };
+        let (w, h) = ((upright * W / H).div_ceil(2) * 2, upright);
+        let theirs = picture.to_rgba(w, h).unwrap();
+        assert_ne!(screen.draw(&gpu, Some(&picture), w, h), Drawn::Same);
+        let ours = screen.read(&gpu).unwrap();
+        assert_eq!((ours.width, ours.height), (w, h));
+        let (mean, max) = diff(&ours.rgba, &theirs.rgba);
+        let (flat, flat_max) = flat_diff(&ours.rgba, &theirs.rgba, w as usize);
+        let rendered = vidcut_av::export::still::rgba(&piece_at(&p, t), p.fps, w, h).unwrap();
+        let want = barcode(&rendered.rgba, w, h);
+        eprintln!(
+            "frame {t}: {:?} {:?} turned {} at {w}x{h}: {mean:.2} levels on average from the \
+             export's, at most {max}; where flat {flat:.2}, at most {flat_max}",
+            picture.layout(),
+            picture.colors(),
+            picture.rotation()
+        );
+        assert_eq!(barcode(&ours.rgba, w, h), want, "frame {t}'s barcode");
+        // The colors: within rounding of the export's where the picture is
+        // flat (swscale's conversion runs up to two or three levels low). At edges
+        // the filters differ: at its own size the export repeats each
+        // chroma sample, the shader interpolates between them.
+        assert!(
+            flat < 1.5 && flat_max <= 3,
+            "frame {t}: {flat:.2}, {flat_max}"
+        );
+        assert!(mean < 2.0, "frame {t}: {mean:.2} levels apart on average");
+        // SDR stripes against the matrix's exact numbers.
+        if (60..80).contains(&t) {
+            let (kr, kb) = if t < 70 {
+                (0.2126, 0.0722)
+            } else {
+                (0.299, 0.114)
+            };
+            let (x0, y0, pw, ph) = picture.placement(w, h);
+            for (k, (yy, cb, cr)) in Content::COLORS.iter().enumerate() {
+                let y = (f64::from(*yy) - 16.0) / 219.0;
+                let (cb, cr) = (
+                    (f64::from(*cb) - 128.0) / 224.0,
+                    (f64::from(*cr) - 128.0) / 224.0,
+                );
+                let r = y + (2.0 - 2.0 * kr) * cr;
+                let b = y + (2.0 - 2.0 * kb) * cb;
+                let g = (y - kr * r - kb * b) / (1.0 - kr - kb);
+                let x = x0 + pw * (2 * k as u32 + 1) / 8;
+                let i = ((y0 + ph / 2) * w + x) as usize * 4;
+                for (c, want) in [r, g, b].into_iter().enumerate() {
+                    let got = f64::from(ours.rgba[i + c]);
+                    assert!(
+                        (got - want * 255.0).abs() <= 1.0,
+                        "frame {t}, stripe {k}, channel {c}: {got} for {:.1}",
+                        want * 255.0
+                    );
+                }
+            }
+        }
+        // The same picture again draws nothing.
+        assert_eq!(screen.draw(&gpu, Some(&picture), w, h), Drawn::Same);
+        // Scaled, as the viewer usually is: the barcode frame render shows
+        // at that size.
+        for (w, h) in [(640, 360), (W, H), (200, 112)] {
+            assert_eq!(screen.draw(&gpu, Some(&picture), w, h), Drawn::Target);
+            let ours = screen.read(&gpu).unwrap();
+            let rendered = vidcut_av::export::still::rgba(&piece_at(&p, t), p.fps, w, h).unwrap();
+            assert_eq!(
+                barcode(&ours.rgba, w, h),
+                barcode(&rendered.rgba, w, h),
+                "frame {t} at {w}x{h}"
+            );
+            let (mean, _) = diff(&ours.rgba, &rendered.rgba);
+            eprintln!("  at {w}x{h}: {mean:.2} levels on average");
+            // Edges differ the most: HD stripes four times smaller, and
+            // HDR stripes, whose edges the tone curve exaggerates.
+            assert!(mean < 5.0, "frame {t} at {w}x{h}: {mean:.2} levels apart");
+        }
+    }
+    // Nothing to show: black.
+    screen.draw(&gpu, None, W, H);
+    let black = screen.read(&gpu).unwrap();
+    assert!(black.rgba.chunks(4).all(|p| p == [0, 0, 0, 255]));
+}
+
+/// NV12, as NVDEC's VP9 frames come down: needs the GPU's decoder.
+#[test]
+fn nv12_pictures_draw_as_the_export_renders_them() {
+    let Some(gpu) = Gpu::headless() else {
+        eprintln!("skipping: no GPU adapter");
+        return;
+    };
+    if vidcut_av::cuda::CudaDevice::open().is_err() {
+        eprintln!("skipping: no CUDA device for NV12 pictures");
+        return;
+    }
+    let p = plan(vec![piece(
+        FixtureSpec::new(VideoCodec::Vp9, Container::Webm, W, H, (30, 1), 30),
+        2,
+        20,
+    )]);
+    let player = Player::new(
+        p.clone(),
+        Config {
+            audio_scrubbing: false,
+            hardware: true,
+            ..Config::default()
+        },
+        Box::new(ManualOutput::new()),
+    )
+    .unwrap();
+    let mut screen = Screen::new();
+    for t in [0, 7, 19] {
+        let picture = picture_at(&player, t);
+        assert_eq!(picture.layout(), vidcut_av::player::Layout::Nv12);
+        screen.draw(&gpu, Some(&picture), W, H);
+        let ours = screen.read(&gpu).unwrap();
+        let theirs = picture.to_rgba(W, H).unwrap();
+        let (mean, _) = diff(&ours.rgba, &theirs.rgba);
+        assert!(mean < 1.5, "frame {t}: {mean:.2}");
+        assert_eq!(barcode(&ours.rgba, W, H), Some(2 + t as u32), "frame {t}");
+    }
+}

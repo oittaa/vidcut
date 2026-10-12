@@ -63,6 +63,57 @@ pub struct Colors {
     pub hdr: Option<Hdr>,
 }
 
+/// The numbers a display's shader converts a picture's YUV to BT.709 RGB
+/// with, as the export does (`conversion`): the matrix and range for SDR,
+/// and for HDR the transfer to linear light, the gamut to BT.709, the tone
+/// curve on the brightest channel and BT.709's transfer, the math of the
+/// GPU export's shader ([`gpu_color`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShaderColors {
+    /// Kr and Kb of the YUV matrix.
+    pub kr: f64,
+    pub kb: f64,
+    pub full_range: bool,
+    /// PQ or HLG: tone-mapped into SDR.
+    pub hdr: Option<Hdr>,
+    /// What linear light is multiplied by so that the reference white is
+    /// 1.0: PQ's 10,000 nits or HLG's 1,000-nit display over 203.
+    pub linear_scale: f64,
+    /// Linear BT.2020 to BT.709, by rows (HDR only; the identity for SDR).
+    pub gamut: [[f64; 3]; 3],
+    /// The tone curve: the knee, then `scale`, `a` and `b` of
+    /// `scale * (x + a) / (x + b)` above it.
+    pub tone: [f64; 4],
+}
+
+/// The shader's numbers for pictures read as `colors`.
+pub fn shader_colors(colors: Colors) -> ShaderColors {
+    let (kr, kb) = match colors.matrix {
+        Matrix::Bt601 => (0.299, 0.114),
+        Matrix::Bt709 => (0.2126, 0.0722),
+        Matrix::Bt2020 => (0.2627, 0.0593),
+    };
+    let identity = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let (scale, a, b) = mobius();
+    ShaderColors {
+        kr,
+        kb,
+        full_range: colors.full_range,
+        hdr: colors.hdr,
+        linear_scale: match colors.hdr {
+            Some(Hdr::Pq) => 10000.0 / REFERENCE_WHITE,
+            Some(Hdr::Hlg) => 1000.0 / REFERENCE_WHITE,
+            None => 1.0,
+        },
+        gamut: if colors.hdr.is_some() {
+            gamut(Primaries::Bt2020, Primaries::Bt709)
+        } else {
+            identity
+        },
+        tone: [KNEE, scale, a, b],
+    }
+}
+
 /// How `f`'s samples are read (see [`Colors`]).
 pub fn colors_of(f: &frame::Video) -> Colors {
     let s = Source::of(f);
