@@ -60,7 +60,7 @@ use ring::Ring;
 use store::Store;
 
 /// Memory for kept pictures unless the caller sets it.
-pub const DEFAULT_BUDGET: usize = 512 << 20;
+pub const DEFAULT_BUDGET: usize = 1 << 30;
 
 /// How a player works.
 #[derive(Clone)]
@@ -250,23 +250,29 @@ impl Shared {
     /// The frame the viewer is at. A play that has reached the end of the
     /// plan (forward) or its start (backward) pauses there.
     fn position(&self, ctl: &mut Control, now: Instant) -> i64 {
-        let (from, speed, epoch) = match ctl.mode {
-            Mode::Paused { at } => return at,
-            Mode::Playing { from, speed, epoch } => (from, speed, epoch),
-        };
-        let end = ctl.plan.samples as f64;
-        let s = self
-            .clock_sample(epoch, now)
-            .unwrap_or(from as f64)
-            .clamp(0.0, end);
-        let t = ctl.plan.frame_at_sample(s.floor() as i64);
-        let ended = if speed > 0.0 { s >= end } else { s <= 0.0 };
+        let (t, ended) = self.clock_frame(ctl, now);
         if ended {
             ctl.mode = Mode::Paused { at: t };
             ctl.version += 1;
             self.changed.notify_all();
         }
         t
+    }
+
+    /// The frame the clock is at at `at`, and whether a play has reached
+    /// its end (forward) or start (backward) by then.
+    fn clock_frame(&self, ctl: &Control, at: Instant) -> (i64, bool) {
+        let (from, speed, epoch) = match ctl.mode {
+            Mode::Paused { at } => return (at, false),
+            Mode::Playing { from, speed, epoch } => (from, speed, epoch),
+        };
+        let end = ctl.plan.samples as f64;
+        let s = self
+            .clock_sample(epoch, at)
+            .unwrap_or(from as f64)
+            .clamp(0.0, end);
+        let ended = if speed > 0.0 { s >= end } else { s <= 0.0 };
+        (ctl.plan.frame_at_sample(s.floor() as i64), ended)
     }
 
     /// Changes what is wanted; `video` when the decode thread should look
@@ -686,6 +692,14 @@ impl Player {
             .store
             .wait(&id, Instant::now() + timeout)
             .is_some()
+    }
+
+    /// The timeline frame the clock is at at `at`, changing nothing: now,
+    /// the display's next refresh, or a moment ago (the clock remembers the
+    /// device's last 64 buffers, about half a second).
+    pub fn frame_at(&self, at: Instant) -> i64 {
+        let ctl = self.shared.control();
+        self.shared.clock_frame(&ctl, at).0
     }
 
     /// How long from `now` until the clock moves to another frame, while
