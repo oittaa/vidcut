@@ -50,7 +50,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 ## 3. Media Pool (Ch. 34, pp. 653–675)
 
 - **Import (v1)** (p. 654):
-  - Ctrl+I, the Import Media button, or right-click > Import Media opens a file dialog with multi-select.
+  - Ctrl+I, the Import Media button, or right-click > Import Media opens a file dialog with multi-select. It starts in the folder media were last imported from, remembered across runs, else in the project's folder. Open Project and New Project start where a project was last opened or created, and exports where the last one went, the same way.
   - Import Media Folder imports a whole folder.
   - The first import into an empty project offers to change the project frame rate to match the media.
 - **Stills and image sequences (M9)** (pp. 114, 366, 1194):

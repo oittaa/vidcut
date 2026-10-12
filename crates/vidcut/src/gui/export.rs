@@ -15,6 +15,7 @@ use vidcut_core::export::{
 };
 use vidcut_core::{Envelope, Error, Response};
 
+use super::folders::Kind;
 use super::theme;
 use super::workspace::{Workspace, dim};
 use crate::live::{self, JobInfo, JobState, Origin};
@@ -67,7 +68,12 @@ pub trait Dialogs: Send + Sync {
     fn pick_file(&self, title: &str, folder: &Path, extensions: &[&str]) -> Option<PathBuf>;
     fn pick_folder(&self, title: &str, folder: &Path) -> Option<PathBuf>;
     /// Files to open, under named filters; none if cancelled.
-    fn pick_files(&self, _title: &str, _filters: &[(&str, &[&str])]) -> Vec<PathBuf> {
+    fn pick_files(
+        &self,
+        _title: &str,
+        _folder: &Path,
+        _filters: &[(&str, &[&str])],
+    ) -> Vec<PathBuf> {
         Vec::new()
     }
 }
@@ -106,8 +112,10 @@ impl Dialogs for RfdDialogs {
             .pick_folder()
     }
 
-    fn pick_files(&self, title: &str, filters: &[(&str, &[&str])]) -> Vec<PathBuf> {
-        let mut dialog = rfd::FileDialog::new().set_title(title);
+    fn pick_files(&self, title: &str, folder: &Path, filters: &[(&str, &[&str])]) -> Vec<PathBuf> {
+        let mut dialog = rfd::FileDialog::new()
+            .set_title(title)
+            .set_directory(folder);
         for (name, extensions) in filters {
             dialog = dialog.add_filter(*name, extensions);
         }
@@ -184,8 +192,6 @@ pub struct ExportUi {
     confirm_quit: bool,
     /// Closing is fine now (or was asked for by `gui.quit`).
     pub quit_confirmed: bool,
-    /// Where the last export went.
-    last_folder: Option<PathBuf>,
 }
 
 struct Quick {
@@ -552,17 +558,12 @@ impl Workspace {
         self.export.presets_ask = Some(Ask::send(&self.live, ctx, "presets.list", json!({})));
     }
 
-    /// Where exports go by default: the last folder, else the project's.
+    /// Where exports go by default: the folder of the last one (this run
+    /// or before), else the project's.
     fn export_folder(&self) -> PathBuf {
-        self.export
-            .last_folder
-            .clone()
-            .or_else(|| {
-                self.snap
-                    .project
-                    .as_ref()
-                    .and_then(|p| p.path.parent().map(Path::to_path_buf))
-            })
+        self.folders
+            .get(Kind::Exports)
+            .or_else(|| self.project_folder())
             .unwrap_or_else(|| PathBuf::from("."))
     }
 
@@ -745,7 +746,7 @@ impl Workspace {
             match choice {
                 None => return, // cancelled
                 Some(path) => {
-                    self.export.last_folder = path.parent().map(Path::to_path_buf);
+                    self.folders.remember(Kind::Exports, &path);
                     s.params["output"] = json!(path);
                     s.ask = Some(Ask::send(&self.live, ctx, "export.start", s.params.clone()));
                 }
@@ -1014,7 +1015,8 @@ impl Workspace {
             let mut params = d.params();
             params["background"] = json!(true);
             d.error = None;
-            self.export.last_folder = Path::new(d.output.trim()).parent().map(Path::to_path_buf);
+            self.folders
+                .remember(Kind::Exports, Path::new(d.output.trim()));
             self.export.starting = Some(Starting {
                 ask: Some(Ask::send(&self.live, ctx, "export.start", params.clone())),
                 params,
@@ -1418,7 +1420,7 @@ impl Workspace {
                     if path.extension().is_none() {
                         path.set_extension(ext);
                     }
-                    self.export.last_folder = path.parent().map(Path::to_path_buf);
+                    self.folders.remember(Kind::Exports, &path);
                     // A bundle copies media: a job, as media exports are.
                     let background = !crate::export::is_otio(&path);
                     Some(Otio::Exporting(Ask::send(

@@ -7,7 +7,7 @@
 //! session (AGENTS.md rule 2), the same requests the CLI and IPC clients send.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use eframe::egui::{self, Key, RichText};
@@ -126,6 +126,8 @@ pub struct Workspace {
     pub(super) preferences: super::preferences::PreferencesUi,
     pub(super) import: super::import::ImportUi,
     pub(super) dialogs: Arc<dyn super::export::Dialogs>,
+    /// Where file dialogs start, remembered across runs.
+    pub(super) folders: super::folders::Folders,
 }
 
 impl Workspace {
@@ -166,7 +168,17 @@ impl Workspace {
             preferences: Default::default(),
             import: Default::default(),
             dialogs: Arc::new(super::export::RfdDialogs),
+            folders: super::folders::Folders::load(),
         }
+    }
+
+    /// The open project's folder.
+    pub(super) fn project_folder(&self) -> Option<PathBuf> {
+        self.snap
+            .project
+            .as_ref()
+            .and_then(|p| p.path.parent().map(Path::to_path_buf))
+            .filter(|d| !d.as_os_str().is_empty())
     }
 
     /// Opens a window (`gui.show`).
@@ -706,22 +718,38 @@ impl Workspace {
     // ---------------------------------------------------------------- dialogs
 
     /// Asks for a project file (on a helper thread: portal dialogs block).
+    /// The dialog starts where a project was last opened or created, else
+    /// in the open project's folder, else the most recent project's.
     fn pick_project(&self, new: bool) {
-        let live = self.live.clone();
+        use super::folders::Kind;
+        let (live, dialogs, folders) = (
+            self.live.clone(),
+            self.dialogs.clone(),
+            self.folders.clone(),
+        );
+        let folder = folders
+            .get(Kind::Projects)
+            .or_else(|| self.project_folder())
+            .or_else(|| {
+                self.recent
+                    .first()
+                    .and_then(|p| p.parent().map(Path::to_path_buf))
+            })
+            .unwrap_or_default();
         let _ = crate::threads::spawn(
             "vidcut-project-dialog",
             crate::threads::Work::Interactive,
             move || {
-                let dialog = rfd::FileDialog::new().add_filter("vidcut project", &["vidcut"]);
                 let path = if new {
-                    dialog.set_file_name("untitled.vidcut").save_file()
+                    dialogs.save_file("New Project", &folder, "untitled.vidcut", &["vidcut"])
                 } else {
-                    dialog.pick_file()
+                    dialogs.pick_file("Open Project", &folder, &["vidcut"])
                 };
                 if let Some(mut path) = path {
                     if new && path.extension().is_none() {
                         path.set_extension("vidcut");
                     }
+                    folders.remember(Kind::Projects, &path);
                     live.request("project.open", json!({ "path": path, "create": new }));
                 }
             },
