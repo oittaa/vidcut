@@ -339,6 +339,21 @@ impl Player {
         format!("{:.9}", self.fps.frames_to_secs(frame.max(0)))
     }
 
+    /// Decodes as the GPU acceleration preference `gpu` says, when the
+    /// renderer allows it and that changed: an open file opens again where
+    /// it is, so the change shows at once. Whether anything changed.
+    pub fn follow_gpu(&mut self, gpu: bool) -> bool {
+        if !self.hwdec_allowed || self.gpu == Some(gpu) {
+            return false;
+        }
+        self.set_hwdec(gpu);
+        self.gpu = Some(gpu);
+        if self.loaded.is_some() {
+            self.loadfile();
+        }
+        true
+    }
+
     /// Decodes on the GPU or not, from the next file on.
     fn set_hwdec(&mut self, gpu: bool) {
         if let Some(m) = &self.mpv

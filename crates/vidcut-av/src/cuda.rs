@@ -46,29 +46,35 @@ pub struct CudaDevice {
 }
 
 impl CudaDevice {
-    /// The first CUDA device, when there is one that works.
+    /// The CUDA device on the first GPU that works: one for the whole
+    /// process, shared by every export and proxy, and never closed. Its
+    /// Vulkan device is made once too: the Vulkan loader crashed when two
+    /// threads made instances at the same time (two exports at once).
     pub fn open() -> Result<Self> {
-        crate::init();
-        let mut device = ptr::null_mut();
-        let ret = unsafe {
-            ffi::av_hwdevice_ctx_create(
-                &mut device,
-                ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA,
-                ptr::null(),
-                ptr::null_mut(),
-                0,
-            )
-        };
-        if ret < 0 || device.is_null() {
-            return Err(Error::Invalid(format!(
-                "no CUDA device: {}",
-                ffmpeg::Error::from(ret)
-            )));
-        }
-        Ok(Self {
-            cuda: Device(device),
-            vulkan: Arc::default(),
-        })
+        static SHARED: OnceLock<std::result::Result<CudaDevice, String>> = OnceLock::new();
+        SHARED
+            .get_or_init(|| {
+                crate::init();
+                let mut device = ptr::null_mut();
+                let ret = unsafe {
+                    ffi::av_hwdevice_ctx_create(
+                        &mut device,
+                        ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA,
+                        ptr::null(),
+                        ptr::null_mut(),
+                        0,
+                    )
+                };
+                if ret < 0 || device.is_null() {
+                    return Err(format!("no CUDA device: {}", ffmpeg::Error::from(ret)));
+                }
+                Ok(Self {
+                    cuda: Device(device),
+                    vulkan: Arc::default(),
+                })
+            })
+            .clone()
+            .map_err(Error::Invalid)
     }
 
     pub(crate) fn as_ptr(&self) -> *mut ffi::AVBufferRef {

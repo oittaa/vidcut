@@ -36,7 +36,7 @@ impl OpenProject {
         let store = Store::open(path)?;
         let disk = store.read()?;
         let editor = store.load_text(&disk)?;
-        let watcher = watch(store.path(), inbox);
+        let watcher = watch(store.path(), inbox, || Msg::FileChanged);
         Ok(Self {
             store,
             editor,
@@ -111,8 +111,13 @@ impl OpenProject {
     }
 }
 
-/// Watches the project file's directory and reports changes to the file.
-fn watch(path: &Path, inbox: Sender<Msg>) -> Option<notify::RecommendedWatcher> {
+/// Watches the directory of the file at `path` and reports changes to the
+/// file with the message `changed` makes.
+pub(super) fn watch(
+    path: &Path,
+    inbox: Sender<Msg>,
+    changed: fn() -> Msg,
+) -> Option<notify::RecommendedWatcher> {
     let dir = path.parent()?.to_path_buf();
     let name = path.file_name()?.to_os_string();
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
@@ -125,7 +130,7 @@ fn watch(path: &Path, inbox: Sender<Msg>) -> Option<notify::RecommendedWatcher> 
                 .iter()
                 .any(|p| p.file_name() == Some(name.as_os_str()))
         {
-            let _ = inbox.send(Msg::FileChanged);
+            let _ = inbox.send(changed());
         }
     })
     .ok()?;

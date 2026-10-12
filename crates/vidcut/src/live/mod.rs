@@ -189,6 +189,8 @@ pub(crate) enum Msg {
         encode: Option<String>,
     },
     FileChanged,
+    /// The preferences file changed.
+    PreferencesChanged,
     /// `wanted`: what it was made for (`media_version`), so a late answer
     /// for another file is dropped.
     Thumbs {
@@ -414,7 +416,13 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         preview_error: config.preview_error.clone(),
     };
     let shared = Arc::new(Mutex::new(Arc::new(empty)));
+    // The folder must be there to be watched.
+    let preferences = crate::preferences::path();
+    if let Some(dir) = preferences.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
     let mut live = Live {
+        _preferences: project::watch(&preferences, tx.clone(), || Msg::PreferencesChanged),
         tx: tx.clone(),
         rx,
         shared: shared.clone(),
@@ -655,6 +663,9 @@ const RELOAD_EVERY: Duration = Duration::from_millis(100);
 struct Live {
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
+    /// Watches the preferences file: GPU acceleration reaches the players
+    /// at once, whoever changes it.
+    _preferences: Option<notify::RecommendedWatcher>,
     shared: Arc<Mutex<Arc<Snapshot>>>,
     notify: Arc<dyn Fn() + Send + Sync>,
     renderer: Arc<dyn Renderer>,
@@ -893,6 +904,12 @@ impl Live {
                     self.job_ended(&id, &result);
                 }
                 self.finish(job, result);
+            }
+            Msg::PreferencesChanged => {
+                let gpu = crate::preferences::gpu_acceleration();
+                for p in &mut self.players {
+                    changed |= p.follow_gpu(gpu);
+                }
             }
             Msg::FileChanged => {
                 let refreshed = match self.project.as_mut().map(OpenProject::reload) {

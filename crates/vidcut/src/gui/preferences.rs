@@ -147,7 +147,7 @@ impl Workspace {
                             .on_hover_text(
                                 "Where it gives the pictures the CPU would: hardware encoders \
                                  for exports and proxies, the GPU pipeline that feeds them, and \
-                                 the preview's decoding (from the next clip it opens). Off, \
+                                 the preview's decoding. Off, \
                                  everything runs on the CPU, slower: for comparing the two, or \
                                  when a graphics driver misbehaves",
                             )

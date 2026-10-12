@@ -268,8 +268,9 @@ fn gui_acceptance() {
     eprintln!("edit while minimized {took:?}");
     gui.check_frame(121);
 
-    // 4. With GPU acceleration off the preview decodes in software from the
-    // next file it opens, still frame-exactly; back on, as it did.
+    // 4. Turning GPU acceleration off, from anywhere (here the CLI, which
+    // writes the preferences file), makes the preview decode in software at
+    // once, still frame-exactly; back on, as it did.
     gui.cli(&["gui", "window", "--minimized", "false"]);
     let hwdec = |gui: &Gui| {
         let (st, _) = gui.cli(&["player", "state"]);
@@ -293,15 +294,11 @@ fn gui_acceptance() {
         }
     };
     let before = hwdec(&gui);
-    // The CLI changes the file; the player reads it as it opens the next
-    // one. Deleting a clip changes the timeline's file (a split doesn't).
     gui.cli(&["preferences", "set", "gpu.acceleration=false"]);
-    gui.cli(&["edit", "delete", "V1@100f"]);
     wait_for(&gui, &|h| h == "no");
     gui.check_frame(30);
     gui.check_frame(95);
     gui.cli(&["preferences", "set", "gpu.acceleration=true"]);
-    gui.cli(&["history", "undo"]);
     wait_for(&gui, &|h| h == before);
     gui.check_frame(30);
 
