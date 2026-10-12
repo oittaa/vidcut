@@ -1,16 +1,20 @@
 //! The NVIDIA GPU as one pipeline: frames NVDEC decodes stay in GPU memory,
 //! are scaled there (`scale_cuda`, after `bwdif_cuda` for interlaced
 //! sources, then `pad_cuda`) and go to NVENC as they are. Pictures stored
-//! turned (spec D33), in another matrix than BT.709 (BT.601 SD, VP8) or in
-//! full range are turned upright and converted first by libplacebo on
-//! Vulkan, on the same GPU. Proxies (decision D41) and exports use it: the
-//! CPU only reads the file and writes the result.
+//! turned (spec D33), in another matrix than BT.709 (BT.601 SD, VP8), in
+//! full range, or in HDR or for HDR output (spec D35) are turned upright and
+//! converted first by libplacebo on Vulkan, on the same GPU. Proxies
+//! (decision D41) and exports use it: the CPU only reads the file and writes
+//! the result.
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::ptr;
 use std::sync::{Arc, OnceLock};
 
+use vidcut_core::model::Hdr;
+
+use crate::color::{GpuColor, Tags};
 use crate::decode::VideoReader;
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, ffi, filter, format, frame};
@@ -227,15 +231,15 @@ fn shader_cache() -> Option<String> {
 /// source is (one frame per frame, as the CPU reader makes them), scaled to
 /// fit `width`×`height` keeping the display aspect and padded with black to
 /// it, as the CPU's normalizer does, as `format` (8-bit NV12 or 10-bit
-/// P010) in BT.709, square pixels, all in GPU memory. Timestamps stay the
-/// source's.
+/// P010) in the output's colors, square pixels, all in GPU memory.
+/// Timestamps stay the source's.
 pub struct CudaPictures {
     graph: filter::Graph,
     time_base: ffmpeg::Rational,
     placebo: Option<Placebo>,
 }
 
-/// Pictures turned upright and in BT.709 video range, by libplacebo on
+/// Pictures turned upright and in the output's colors, by libplacebo on
 /// Vulkan (the CUDA filters neither turn pictures nor change their colors):
 /// each frame is copied to a Vulkan frame, converted and copied back to a
 /// CUDA frame, never leaving the GPU.
@@ -243,16 +247,16 @@ struct Placebo {
     graph: filter::Graph,
     input: HwFrames,
     output: HwFrames,
-    /// Black, under each picture when it is placed (`Layout::Placed`).
+    /// Black, under each picture placed on a bigger frame
+    /// (`Layout::Placed`).
     background: Option<frame::Video>,
     /// Pushed after each frame when its picture is wanted at once.
     /// libplacebo gives out a frame's picture only once it has the frame
     /// after it; the filler's own pictures are dropped. Without it, a
     /// picture comes a frame late and the GPU renders half as many.
     filler: Option<frame::Video>,
-    /// How the CPU reads the source: its matrix and range.
-    matrix: ffi::AVColorSpace,
-    range: ffi::AVColorRange,
+    /// What libplacebo reads the source as (`GpuColor::input`).
+    tags: Tags,
     /// Frames are timed by count, two apart with the filler between, as
     /// libplacebo wants rising timestamps; their own wait here.
     count: i64,
@@ -266,11 +270,12 @@ struct Placebo {
 enum Layout {
     /// Upright at its own size, for the CUDA filters to scale and pad.
     Upright,
-    /// Fitted to `fitted` in the middle of `size`, on black, as `format`:
-    /// the padding FFmpeg's `pad_cuda` can't do (10 bits). libplacebo can't
-    /// clear a border in FFmpeg's Vulkan frames (it clears with a copy
-    /// they don't allow), so a black frame of the size goes in under each
-    /// picture and leaves no border to clear.
+    /// Fitted to `fitted` in the middle of `size`, as `format`: pictures
+    /// whose transfer it converts (HDR), as the CPU converts them after
+    /// scaling, and the padding FFmpeg's `pad_cuda` can't do (10 bits).
+    /// libplacebo can't clear a border in FFmpeg's Vulkan frames (it clears
+    /// with a copy they don't allow), so when the picture leaves a border, a
+    /// black frame of the size goes in under it and leaves none to clear.
     Placed {
         size: (u32, u32),
         fitted: (u32, u32),
@@ -325,23 +330,33 @@ fn centered((fit_w, fit_h): (u32, u32), (width, height): (u32, u32)) -> (u32, u3
 }
 
 /// libplacebo's options for `width`×`height` pictures stored turned by
-/// `rotation` (clockwise), made `out` pictures laid out as `layout` says.
-/// Only the matrix and range change, as swscale converts SDR on the CPU:
-/// the input is tagged with BT.709's primaries and transfer too. It scales
-/// in the source's gamma like swscale, with the cubic `scale_cuda` uses,
-/// rounds without dithering (its dither leans bright), and leaves film
-/// grain and Dolby Vision metadata alone (the decoder applied the grain).
+/// `rotation` (clockwise), made `out` pictures laid out as `layout` says,
+/// in `color`'s output colors. Where only the matrix and range change, as
+/// swscale converts SDR on the CPU, the input is tagged with the output's
+/// primaries and transfer too; for HDR, `color`'s shader converts them,
+/// after scaling. It scales in the source's gamma like swscale, with the
+/// cubic `scale_cuda` uses, rounds without dithering (its dither leans
+/// bright), and leaves film grain and Dolby Vision metadata alone (the
+/// decoder applied the grain). Peak detection is off: the CPU's tone curve
+/// is fixed.
 fn placebo_options(
     (width, height): (u32, u32),
     rotation: u16,
     out: &str,
     layout: Layout,
+    color: &GpuColor,
 ) -> Vec<(&'static str, String)> {
     let mut options: Vec<(&str, String)> = match layout {
         Layout::Upright if rotation % 180 == 90 => {
             vec![("w", height.to_string()), ("h", width.to_string())]
         }
         Layout::Upright => vec![("w", width.to_string()), ("h", height.to_string())],
+        // The picture fills the frame.
+        Layout::Placed {
+            size: (w, h),
+            fitted,
+            ..
+        } if fitted == (w, h) => vec![("w", w.to_string()), ("h", h.to_string())],
         // Input 0 is the black frame, the whole frame; input 1 the picture.
         Layout::Placed {
             size: (w, h),
@@ -360,21 +375,46 @@ fn placebo_options(
             ]
         }
     };
+    let name = |p: *const std::ffi::c_char| {
+        if p.is_null() {
+            String::new()
+        } else {
+            unsafe { std::ffi::CStr::from_ptr(p) }
+                .to_string_lossy()
+                .into_owned()
+        }
+    };
+    let o = color.output;
     options.extend([
         ("rotate", rotation.to_string()),
         ("format", out.into()),
-        ("colorspace", "bt709".into()),
-        ("color_primaries", "bt709".into()),
-        ("color_trc", "bt709".into()),
+        (
+            "colorspace",
+            name(unsafe { ffi::av_color_space_name(o.matrix) }),
+        ),
+        (
+            "color_primaries",
+            name(unsafe { ffi::av_color_primaries_name(o.primaries) }),
+        ),
+        (
+            "color_trc",
+            name(unsafe { ffi::av_color_transfer_name(o.transfer) }),
+        ),
         ("range", "tv".into()),
         ("upscaler", "catmull_rom".into()),
         ("downscaler", "catmull_rom".into()),
         ("disable_linear", "1".into()),
         ("sigmoid", "0".into()),
         ("dithering", "none".into()),
+        ("peak_detect", "0".into()),
         ("apply_filmgrain", "0".into()),
         ("apply_dolbyvision", "0".into()),
     ]);
+    if let Some(shader) = &color.shader {
+        // A binary option: hexadecimal.
+        let hex: String = shader.bytes().map(|b| format!("{b:02x}")).collect();
+        options.push(("custom_shader_bin", hex));
+    }
     if let Some(prefix) = shader_cache() {
         options.push(("shader_cache", prefix));
     }
@@ -466,7 +506,8 @@ fn take(graph: &mut filter::Graph, what: &str) -> Result<Option<(frame::Video, f
 
 impl CudaPictures {
     /// The pictures for the frames `reader` decodes on `device`, shown as
-    /// its stream says (turned upright, deinterlaced). `at_once`: each
+    /// its stream says (turned upright, deinterlaced), for an output of
+    /// `target`'s dynamic range (`None`: SDR BT.709). `at_once`: each
     /// frame's picture is ready as soon as the frame is in, as an export
     /// picks them one by one; otherwise one may come with the next frame,
     /// leaving the GPU less to do.
@@ -475,6 +516,7 @@ impl CudaPictures {
         reader: &VideoReader,
         (width, height): (u32, u32),
         format: format::Pixel,
+        target: Option<Hdr>,
         at_once: bool,
     ) -> Result<Self> {
         let first = reader
@@ -488,8 +530,8 @@ impl CudaPictures {
         if !matches!(rotation, 0 | 90 | 180 | 270) {
             return Err(Error::Invalid(format!("a rotation of {rotation}°")));
         }
-        let (matrix, range) = crate::color::sdr_yuv(first)
-            .ok_or_else(|| Error::Invalid("HDR pictures need tone mapping".into()))?;
+        let color = crate::color::gpu_color(first, target)
+            .ok_or_else(|| Error::Invalid("RGB pictures".into()))?;
         let out = match format {
             format::Pixel::P010LE => "p010le",
             _ => "nv12",
@@ -518,16 +560,18 @@ impl CudaPictures {
                 "decoded frames without a frames context".into(),
             ));
         }
-        let bt709 = matrix == ffi::AVColorSpace::AVCOL_SPC_BT709
-            && range == ffi::AVColorRange::AVCOL_RANGE_MPEG;
-        // FFmpeg's `pad_cuda` takes no 10-bit frames: libplacebo places them.
-        let layout = if fitted != (width, height) && format == format::Pixel::P010LE {
-            Some(Layout::Placed {
-                size: (width, height),
-                fitted,
-                format,
-            })
-        } else if bt709 && rotation == 0 {
+        // libplacebo converts HDR after scaling, as the CPU does, and places
+        // 10-bit pictures: FFmpeg's `pad_cuda` takes no 10-bit frames.
+        let placed = Layout::Placed {
+            size: (width, height),
+            fitted,
+            format,
+        };
+        let layout = if color.shader.is_some()
+            || (fitted != (width, height) && format == format::Pixel::P010LE)
+        {
+            Some(placed)
+        } else if color.unchanged() && rotation == 0 {
             None
         } else {
             Some(Layout::Upright)
@@ -540,9 +584,8 @@ impl CudaPictures {
         let placebo = match layout {
             Some(layout) => {
                 let stream = (stored, sar, rotation);
-                let color = (matrix, range);
                 Some(Placebo::new(
-                    device, decoded, stream, color, layout, at_once,
+                    device, decoded, stream, &color, layout, at_once,
                 )?)
             }
             None => None,
@@ -635,12 +678,12 @@ impl CudaPictures {
 impl Placebo {
     /// The converter for frames of `decoded` (a CUDA frames context) of
     /// `width`×`height` with sample aspect `sar`, stored turned by
-    /// `rotation`, read with `matrix` and `range`, laid out as `layout`.
+    /// `rotation`, converted as `color` says, laid out as `layout`.
     fn new(
         device: &CudaDevice,
         decoded: *mut ffi::AVBufferRef,
         ((width, height), sar, rotation): ((u32, u32), ffmpeg::Rational, u16),
-        (matrix, range): (ffi::AVColorSpace, ffi::AVColorRange),
+        color: &GpuColor,
         layout: Layout,
         at_once: bool,
     ) -> Result<Self> {
@@ -683,34 +726,29 @@ impl Placebo {
             out_size.1,
         )?;
         let mut graph = filter::Graph::new();
-        let bt709 = (
-            ffi::AVColorSpace::AVCOL_SPC_BT709,
-            ffi::AVColorRange::AVCOL_RANGE_MPEG,
-        );
+        // Black in the output's colors: a shader passes it on as black.
+        let black_tags = color.output;
         let background = match layout {
-            Layout::Placed { size: (w, h), .. } => {
+            Layout::Placed {
+                size: (w, h),
+                fitted,
+                ..
+            } if fitted != (w, h) => {
                 let format = vulkan_out;
                 let frames = HwFrames::new(vulkan.0, VULKAN, format.into(), w, h)?;
                 let timing = (COUNTED, ffmpeg::Rational(1, 1));
-                add_source(
-                    &mut graph,
-                    c"bg",
-                    VULKAN,
-                    (w, h),
-                    timing,
-                    frames.0,
-                    Some(bt709),
-                )?;
+                let tags = Some((black_tags.matrix, black_tags.range));
+                add_source(&mut graph, c"bg", VULKAN, (w, h), timing, frames.0, tags)?;
                 let mut black = frame::Video::new(format, w, h);
                 crate::export::video::fill_black(&mut black)?;
                 let mut background = frames.copy(&black, "copying to Vulkan")?;
-                tag(&mut background, bt709);
+                tag(&mut background, black_tags);
                 Some(background)
             }
-            Layout::Upright => None,
+            _ => None,
         };
         let timing = (COUNTED, sar);
-        let color = Some((matrix, range));
+        let tags = color.input;
         add_source(
             &mut graph,
             c"in",
@@ -718,10 +756,10 @@ impl Placebo {
             (width, height),
             timing,
             input.0,
-            color,
+            Some((tags.matrix, tags.range)),
         )?;
         add_sink(&mut graph)?;
-        let options = placebo_options((width, height), rotation, out, layout);
+        let options = placebo_options((width, height), rotation, out, layout, color);
         // libplacebo needs the Vulkan device before it starts; given none,
         // FFmpeg would convert on the CPU in front of it.
         unsafe {
@@ -776,7 +814,7 @@ impl Placebo {
             let mut black = frame::Video::new(as_read(sw).into(), width, height);
             crate::export::video::fill_black(&mut black)?;
             let mut filler = input.copy(&black, "copying to Vulkan")?;
-            tag(&mut filler, (matrix, range));
+            tag(&mut filler, color.input);
             Some(filler)
         } else {
             None
@@ -787,8 +825,7 @@ impl Placebo {
             output,
             background,
             filler,
-            matrix,
-            range,
+            tags: color.input,
             count: 0,
             pts: VecDeque::new(),
             sar: ffi::AVRational {
@@ -814,15 +851,15 @@ impl Placebo {
         let mut v = self.input.copy(f, "copying to Vulkan")?;
         unsafe {
             ffi::av_frame_copy_props(v.as_mut_ptr(), f.as_ptr());
-            // The filter copies each frame's properties to its picture, and
-            // libplacebo turns both by their display matrices: the turns
-            // cancel. The rotation goes in the options instead.
-            ffi::av_frame_remove_side_data(
-                v.as_mut_ptr(),
-                ffi::AVFrameSideDataType::AV_FRAME_DATA_DISPLAYMATRIX,
-            );
+            // No side data: the CPU converts by the tags alone. libplacebo
+            // would tone-map by HDR metadata, read an ICC profile, and turn
+            // pictures by their display matrices: the filter copies each
+            // frame's properties to its picture, and libplacebo turns both,
+            // so the turns cancel. The rotation goes in the options instead.
+            let raw = &mut *v.as_mut_ptr();
+            ffi::av_frame_side_data_free(&mut raw.side_data, &mut raw.nb_side_data);
         }
-        tag(&mut v, (self.matrix, self.range));
+        tag(&mut v, self.tags);
         let n = 2 * self.count;
         self.count += 1;
         self.pts.push_back((n, f.pts()));
@@ -903,15 +940,14 @@ fn frame_ref(f: &frame::Video) -> frame::Video {
     r
 }
 
-/// Tags a frame for libplacebo: read with the source's matrix and range,
-/// in BT.709's primaries and transfer, one count long.
-fn tag(f: &mut frame::Video, (matrix, range): (ffi::AVColorSpace, ffi::AVColorRange)) {
+/// Tags a frame for libplacebo with `tags`, one count long.
+fn tag(f: &mut frame::Video, tags: Tags) {
     unsafe {
         let f = &mut *f.as_mut_ptr();
-        f.colorspace = matrix;
-        f.color_range = range;
-        f.color_primaries = ffi::AVColorPrimaries::AVCOL_PRI_BT709;
-        f.color_trc = ffi::AVColorTransferCharacteristic::AVCOL_TRC_BT709;
+        f.colorspace = tags.matrix;
+        f.color_range = tags.range;
+        f.color_primaries = tags.primaries;
+        f.color_trc = tags.transfer;
         f.duration = 1;
     }
 }
@@ -919,6 +955,29 @@ fn tag(f: &mut frame::Video, (matrix, range): (ffi::AVColorSpace, ffi::AVColorRa
 #[cfg(test)]
 mod tests {
     use super::{Layout, filters, placebo_options};
+    use crate::color::{GpuColor, gpu_color};
+    use crate::ffmpeg::{ffi, format::Pixel, frame};
+    use vidcut_core::model::Hdr;
+
+    /// How the GPU converts a 1080p 10-bit picture of `hdr`'s transfer
+    /// (`None`: SDR, BT.709) for an output of `target`'s.
+    fn colors(hdr: Option<Hdr>, target: Option<Hdr>) -> GpuColor {
+        use ffi::AVColorTransferCharacteristic as T;
+        let mut f = frame::Video::new(Pixel::YUV420P10LE, 1920, 1080);
+        unsafe {
+            (*f.as_mut_ptr()).color_trc = match hdr {
+                Some(Hdr::Pq) => T::AVCOL_TRC_SMPTE2084,
+                Some(Hdr::Hlg) => T::AVCOL_TRC_ARIB_STD_B67,
+                None => T::AVCOL_TRC_BT709,
+            };
+        }
+        gpu_color(&f, target).unwrap()
+    }
+
+    /// Untagged SD: BT.601, into SDR.
+    fn sd() -> GpuColor {
+        gpu_color(&frame::Video::new(Pixel::YUV420P, 720, 480), None).unwrap()
+    }
 
     /// The value libplacebo is given for option `key`.
     fn option<'a>(options: &'a [(&str, String)], key: &str) -> Option<&'a str> {
@@ -958,26 +1017,28 @@ mod tests {
 
     #[test]
     fn libplacebo_changes_only_the_colors() {
-        let options = placebo_options((720, 480), 0, "nv12", Layout::Upright);
+        let options = placebo_options((720, 480), 0, "nv12", Layout::Upright, &sd());
         let get = |k| option(&options, k);
         assert_eq!((get("w"), get("h")), (Some("720"), Some("480")));
         assert_eq!(get("rotate"), Some("0"));
         assert_eq!(get("format"), Some("nv12"));
         assert_eq!(get("colorspace"), Some("bt709"));
         assert_eq!(get("color_primaries"), Some("bt709"));
+        assert_eq!(get("color_trc"), Some("bt709"));
         assert_eq!(get("range"), Some("tv"));
         assert_eq!(get("dithering"), Some("none"));
         assert_eq!(get("inputs"), None);
+        assert_eq!(get("custom_shader_bin"), None);
     }
 
     #[test]
     fn libplacebo_turns_pictures_upright() {
         // A phone's 1920×1080 frames, stored for a quarter turn clockwise.
-        let options = placebo_options((1920, 1080), 90, "nv12", Layout::Upright);
+        let options = placebo_options((1920, 1080), 90, "nv12", Layout::Upright, &sd());
         let get = |k| option(&options, k);
         assert_eq!((get("w"), get("h")), (Some("1080"), Some("1920")));
         assert_eq!(get("rotate"), Some("90"));
-        let options = placebo_options((1920, 1080), 180, "nv12", Layout::Upright);
+        let options = placebo_options((1920, 1080), 180, "nv12", Layout::Upright, &sd());
         let get = |k| option(&options, k);
         assert_eq!((get("w"), get("h")), (Some("1920"), Some("1080")));
     }
@@ -989,9 +1050,9 @@ mod tests {
         let placed = Layout::Placed {
             size: (1920, 1080),
             fitted: (1920, 800),
-            format: crate::ffmpeg::format::Pixel::P010LE,
+            format: Pixel::P010LE,
         };
-        let options = placebo_options((3840, 1600), 0, "p010le", placed);
+        let options = placebo_options((3840, 1600), 0, "p010le", placed, &sd());
         let get = |k| option(&options, k);
         assert_eq!(get("inputs"), Some("2"));
         assert_eq!((get("w"), get("h")), (Some("1920"), Some("1080")));
@@ -999,5 +1060,46 @@ mod tests {
         assert_eq!(get("pos_y"), Some("if(eq(idx,0),0,140)"));
         assert_eq!(get("pos_w"), Some("if(eq(idx,0),1920,1920)"));
         assert_eq!(get("pos_h"), Some("if(eq(idx,0),1080,800)"));
+        // A picture that fills the frame needs no black under it.
+        let filled = Layout::Placed {
+            size: (1920, 1080),
+            fitted: (1920, 1080),
+            format: Pixel::NV12,
+        };
+        let options = placebo_options((3840, 2160), 0, "nv12", filled, &sd());
+        let get = |k| option(&options, k);
+        assert_eq!(get("inputs"), None);
+        assert_eq!((get("w"), get("h")), (Some("1920"), Some("1080")));
+        assert_eq!(get("pos_w"), None);
+    }
+
+    #[test]
+    fn hdr_is_converted_by_the_cpus_math_in_a_shader() {
+        let filled = Layout::Placed {
+            size: (1920, 1080),
+            fitted: (1920, 1080),
+            format: Pixel::P010LE,
+        };
+        // PQ into SDR: the shader tone-maps, libplacebo writes BT.709.
+        let pq = colors(Some(Hdr::Pq), None);
+        let options = placebo_options((3840, 2160), 0, "p016le", filled, &pq);
+        let get = |k| option(&options, k);
+        assert_eq!(get("colorspace"), Some("bt709"));
+        assert_eq!(get("color_trc"), Some("bt709"));
+        assert_eq!(get("peak_detect"), Some("0"));
+        let hex = get("custom_shader_bin").expect("a shader");
+        let text: Vec<u8> = (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+            .collect();
+        assert_eq!(Some(String::from_utf8(text).unwrap()), pq.shader);
+        // SDR into HLG: written as BT.2020 HLG.
+        let hlg = colors(None, Some(Hdr::Hlg));
+        let options = placebo_options((1920, 1080), 0, "p016le", filled, &hlg);
+        let get = |k| option(&options, k);
+        assert_eq!(get("colorspace"), Some("bt2020nc"));
+        assert_eq!(get("color_primaries"), Some("bt2020"));
+        assert_eq!(get("color_trc"), Some("arib-std-b67"));
+        assert!(get("custom_shader_bin").is_some());
     }
 }

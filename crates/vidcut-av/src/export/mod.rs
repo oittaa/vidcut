@@ -99,14 +99,14 @@ fn gpu_pixel(enc: &encode::VideoEncoder) -> format::Pixel {
     }
 }
 
-/// A CUDA device and frames for NVENC with SDR output; `None` for other
-/// encoders, HDR output (tone mapping is the CPU's) or without a device.
+/// A CUDA device and frames for NVENC; `None` for other encoders or
+/// without a device.
 fn gpu_output(
     enc: &encode::VideoEncoder,
     w: u32,
     h: u32,
 ) -> Option<(crate::cuda::CudaDevice, crate::cuda::CudaFrames)> {
-    if enc.kind != EncoderChoice::Nvenc || enc.hdr.is_some() {
+    if enc.kind != EncoderChoice::Nvenc {
         return None;
     }
     let device = crate::cuda::CudaDevice::open().ok()?;

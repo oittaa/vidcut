@@ -2012,3 +2012,151 @@ fn nvenc_exports_convert_bt601_on_the_gpu_as_the_cpu_does() {
         }
     }
 }
+
+/// HDR sources into SDR (tone mapping), and SDR and HDR sources into PQ and
+/// HLG, are converted on the GPU by libplacebo with a shader doing the
+/// CPU's math: every frame but black is made on the GPU, its barcode is the
+/// CPU export's, the barcode's black and white cells are within two levels
+/// of the CPU's, and so are colored stripes (BT.2020 PQ, and BT.601 SD into
+/// HDR) and the black beside them. Among the pieces: HLG stored turned (a
+/// phone's), 4:3 PQ with black bars, and 8 and 10-bit SDR output.
+#[cfg(feature = "gpu-tests")]
+#[test]
+fn nvenc_exports_convert_hdr_on_the_gpu_as_the_cpu_does() {
+    use vidcut_av::fixture::Picture;
+    use vidcut_core::model::Hdr;
+    let available = vidcut_av::export::encode::detect();
+    let fps = Rational::new(30, 1).unwrap();
+    let hdr = |w, h, hdr, rotation| {
+        src(
+            FixtureSpec::new(VideoCodec::Hevc10, Container::Mp4, w, h, (30, 1), 30)
+                .hdr(hdr)
+                .rotation(rotation)
+                .no_audio(),
+        )
+    };
+    let pq = hdr(1280, 720, Hdr::Pq, 0);
+    let hlg_turned = hdr(1280, 720, Hdr::Hlg, 90);
+    let pq_four_three = hdr(960, 720, Hdr::Pq, 0);
+    let pq_colors =
+        src(
+            FixtureSpec::new(VideoCodec::Hevc10, Container::Mkv, 640, 480, (30, 1), 30)
+                .hdr(Hdr::Pq)
+                .picture(Picture::Colors)
+                .no_audio(),
+        );
+    let sdr =
+        src(FixtureSpec::new(VideoCodec::H264, Container::Mp4, 1280, 720, (30, 1), 30).no_audio());
+    let sd_colors = src(
+        FixtureSpec::new(VideoCodec::H264, Container::Mp4, 640, 480, (30, 1), 30)
+            .picture(Picture::Colors)
+            .no_audio(),
+    );
+    let video = vec![
+        v(&pq, 5, 15),
+        v(&hlg_turned, 0, 10),
+        v(&pq_four_three, 0, 10),
+        v(&pq_colors, 0, 10),
+        v(&sdr, 0, 15),
+        v(&sd_colors, 0, 10),
+        VideoPiece::Black { frames: 5 },
+    ];
+    // Frames of barcodes, and of colored stripes.
+    let barcode_frames: Vec<usize> = (0..35).chain(45..60).collect();
+    let stripe_frames = [40, 65];
+    let p = plan(fps, 1280, 720, video, vec![]);
+    let dir = out_dir("gpu-hdr");
+    let settings = |codec, bits, hdr, encoder, quality| ExportSettings {
+        container: OutContainer::Mkv,
+        video: Some(VideoSettings {
+            codec,
+            encoder,
+            quality: Some(quality),
+            bitrate: None,
+            speed: None,
+            profile: None,
+            bit_depth: Some(bits),
+            width: None,
+            height: None,
+            hdr,
+        }),
+        audio: None,
+        declick: false,
+    };
+    for (what, codec, bits, target) in [
+        ("SDR", VCodec::H264, 8, None),
+        ("10-bit SDR", VCodec::Hevc, 10, None),
+        ("PQ", VCodec::Hevc, 10, Some(Hdr::Pq)),
+        ("HLG", VCodec::Hevc, 10, Some(Hdr::Hlg)),
+    ] {
+        let cpu = dir.path().join(format!("cpu-{what}.mkv"));
+        // Lossless H.264; HEVC nearly so.
+        let quality = if bits == 8 { 0 } else { 2 };
+        render(
+            &p,
+            &settings(codec, bits, target, EncoderChoice::Cpu, quality),
+            &cpu,
+        );
+        let gpu = dir.path().join(format!("gpu-{what}.mkv"));
+        let report = export::run(
+            &p,
+            &settings(codec, bits, target, EncoderChoice::Nvenc, 12),
+            &gpu,
+            &available,
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert_eq!(report.gpu_frames, 70, "{what}: frames on the GPU");
+        let (want, got) = (barcodes(&cpu), barcodes(&gpu));
+        assert_eq!(got.len(), 75, "{what}");
+        assert_eq!(got, want, "{what}: barcodes");
+        // Tone-mapped barcodes read (a pillarboxed one doesn't anyway).
+        if target.is_none() {
+            for k in (0..25).chain(45..60) {
+                assert!(got[k].is_some(), "{what}: frame {k} has no barcode");
+            }
+        }
+        let (mut cpu_frames, mut gpu_frames) = (Vec::new(), Vec::new());
+        for (path, frames) in [(&cpu, &mut cpu_frames), (&gpu, &mut gpu_frames)] {
+            let mut r = VideoReader::open(path).unwrap();
+            while let Some(f) = r.next_frame().unwrap() {
+                frames.push(f);
+            }
+        }
+        let mut worst = (0, 0.0f64);
+        for &k in &barcode_frames {
+            let (c, g) = (cell_levels(&cpu_frames[k]), cell_levels(&gpu_frames[k]));
+            // 10-bit codes: two levels are eight.
+            assert!(
+                c.0.abs_diff(g.0) <= 8 && c.1.abs_diff(g.1) <= 8,
+                "{what}: frame {k}: black and white {g:?}, the CPU's {c:?}"
+            );
+            worst.0 = worst.0.max(c.0.abs_diff(g.0)).max(c.1.abs_diff(g.1));
+        }
+        // The 4:3 picture starts where the CPU's does.
+        assert_eq!(
+            picture_starts(&gpu_frames[30]),
+            picture_starts(&cpu_frames[30]),
+            "{what}: black bars"
+        );
+        for k in stripe_frames {
+            // The 4:3 picture is 960 wide in the middle.
+            let c = stripe_means(&cpu_frames[k], (160, 1120));
+            let g = stripe_means(&gpu_frames[k], (160, 1120));
+            for (i, (c, g)) in c.iter().zip(&g).enumerate() {
+                for ch in 0..3 {
+                    assert!(
+                        (c[ch] - g[ch]).abs() <= 2.0,
+                        "{what}: frame {k} region {i} channel {ch}: {g:?}, the CPU's {c:?}"
+                    );
+                    worst.1 = worst.1.max((c[ch] - g[ch]).abs());
+                }
+            }
+        }
+        eprintln!(
+            "{what}: cells within {} codes of the CPU's (10-bit), stripes within {:.2} levels",
+            worst.0, worst.1
+        );
+    }
+}
