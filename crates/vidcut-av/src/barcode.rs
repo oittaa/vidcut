@@ -59,7 +59,7 @@ pub fn read(luma: &[u8], width: usize, height: usize, stride: usize) -> Option<u
     read_with(width, height, |x, y| luma[y * stride + x])
 }
 
-/// Reads the index from a packed RGB-like buffer (e.g. mpv's `rgb0`), using the
+/// Reads the index from a packed RGB-like buffer (RGBA screenshots), using the
 /// green channel at byte `offset` of each `bytes_per_pixel`-sized pixel.
 pub fn read_packed(
     data: &[u8],

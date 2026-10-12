@@ -2,10 +2,10 @@
 //! that convert between them, and the tags an encoder writes.
 //!
 //! HDR into SDR is tone-mapped. SDR into HDR puts SDR white at 203 nits,
-//! the reference white of ITU-R BT.2408. Untagged pictures are BT.709 when HD by mpv's rule (1280 wide,
-//! or over 576 lines), else BT.601: mpv shows the preview, so the export
-//! then matches it. On the GPU, libplacebo converts with the same math
-//! ([`gpu_color`]).
+//! the reference white of ITU-R BT.2408. Untagged pictures are BT.709 when
+//! HD (1280 wide, or over 576 lines), else BT.601, as players commonly take
+//! them. On the GPU, libplacebo converts with the same math
+//! ([`gpu_color`]), and so does the viewer's shader ([`shader_colors`]).
 
 use vidcut_core::model::Hdr;
 
@@ -130,8 +130,8 @@ fn is_rgb(p: format::Pixel) -> bool {
 }
 
 /// The matrix an untagged SDR picture of `width`×`height` is taken to use:
-/// mpv's guess (BT.709 from 1280 wide or over 576 lines, else BT.601), so
-/// the export decodes it as the preview shows it. A 1280×534 widescreen
+/// players' common guess (BT.709 from 1280 wide or over 576 lines, else
+/// BT.601), which the viewer reads them with too. A 1280×534 widescreen
 /// film is HD this way, though it has fewer than 720 lines.
 fn untagged_matrix(width: u32, height: u32) -> Matrix {
     if width >= 1280 || height > 576 {
@@ -796,7 +796,7 @@ mod tests {
     }
 
     #[test]
-    fn untagged_pictures_are_guessed_as_mpv_guesses() {
+    fn untagged_pictures_are_guessed_as_players_guess() {
         for (w, h, hd) in [
             (1280, 534, true), // a widescreen film in HD
             (1920, 800, true),

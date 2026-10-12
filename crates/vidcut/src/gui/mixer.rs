@@ -5,7 +5,7 @@
 //! Each meter is one bar per project channel (spec D28). The bars read the
 //! cached waveform peaks at the playhead, playing or not, with clip gain,
 //! faders, mute and solo applied: they show the edit's levels rather than
-//! the player's output, which mpv doesn't expose to the session.
+//! the player's output, and move while paused.
 
 use std::collections::HashMap;
 use std::time::Instant;
