@@ -394,6 +394,10 @@ mod tests {
             width: None,
             height: None,
             hdr: HdrMode::Auto,
+            passes: None,
+            first_pass: Default::default(),
+            multipass: Default::default(),
+            lookahead: None,
         }
     }
 

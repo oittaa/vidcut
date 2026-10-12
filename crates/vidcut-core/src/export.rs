@@ -177,6 +177,68 @@ pub struct VideoSettings {
     /// or VP9; SDR sources show their white at 203 nits). Decision D44.
     #[serde(default)]
     pub hdr: HdrMode,
+    /// 1 or 2. Two passes reach a target bitrate more closely: x264, x265
+    /// and VP9 encode the range twice, the first time to measure; NVENC
+    /// looks at each frame twice in one encode (`multipass`). They need
+    /// `bitrate`. Unset: 2 with a bitrate, 1 with constant quality
+    /// (decision D45).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub passes: Option<u8>,
+    /// The first of two passes (x264, x265, VP9): `fast` (the default)
+    /// or `full`, which costs more time for little.
+    #[serde(default, skip_serializing_if = "FirstPass::is_default")]
+    pub first_pass: FirstPass,
+    /// NVENC's first look at each frame when it makes two passes: at a
+    /// `quarter` of the resolution (the default) or `full`.
+    #[serde(default, skip_serializing_if = "Multipass::is_default")]
+    pub multipass: Multipass,
+    /// Frames NVENC looks ahead for rate control, 0 to 32 (0: none).
+    /// Unset: 32 (decision D45).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lookahead: Option<u32>,
+}
+
+/// The most frames NVENC looks ahead (`video.lookahead`).
+pub const MAX_LOOKAHEAD: u32 = 32;
+
+/// Frames NVENC looks ahead unless `video.lookahead` says otherwise: 0.1 to
+/// 0.9 dB more PSNR at the same bitrate, and at constant quality the same
+/// or smaller files, for no time (decision D45).
+pub const DEFAULT_LOOKAHEAD: u32 = 32;
+
+/// The first of two passes (`video.first_pass`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FirstPass {
+    /// Faster settings for the measuring pass (x264's fast first pass,
+    /// x265 without its slow first pass, VP9 at speed 4 or faster).
+    #[default]
+    Fast,
+    /// The second pass's settings.
+    Full,
+}
+
+impl FirstPass {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// NVENC's first pass of two (`video.multipass`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Multipass {
+    /// At a quarter of the resolution (NVENC's `qres`).
+    #[default]
+    Quarter,
+    /// At full resolution (`fullres`).
+    Full,
+}
+
+impl Multipass {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -238,6 +300,10 @@ fn video(codec: VideoCodec, quality: Option<u32>) -> VideoSettings {
         width: None,
         height: None,
         hdr: HdrMode::Auto,
+        passes: None,
+        first_pass: FirstPass::Fast,
+        multipass: Multipass::Quarter,
+        lookahead: None,
     }
 }
 
@@ -563,6 +629,28 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
                 return Err(Error::usage("HDR needs 10 bits"));
             }
         }
+        match v.passes {
+            None | Some(1) => {}
+            Some(2) if matches!(v.codec, V::Prores | V::Dnxhr) => {
+                return Err(Error::usage(format!(
+                    "{:?} has no rate control to make two passes for",
+                    v.codec
+                )));
+            }
+            Some(2) if v.bitrate.is_none() => {
+                return Err(Error::usage(
+                    "two passes need a target bitrate (video.bitrate); with constant quality \
+                     one pass gives the same quality",
+                ));
+            }
+            Some(2) => {}
+            Some(n) => return Err(Error::usage(format!("passes {n}: 1 or 2"))),
+        }
+        if v.lookahead.is_some_and(|n| n > MAX_LOOKAHEAD) {
+            return Err(Error::usage(format!(
+                "lookahead is 0 to {MAX_LOOKAHEAD} frames"
+            )));
+        }
         if v.width.is_some() != v.height.is_some() {
             return Err(Error::usage("set both video.width and video.height"));
         }
@@ -673,5 +761,56 @@ mod tests {
         s.video.as_mut().unwrap().encoder = EncoderChoice::Cpu;
         s.video.as_mut().unwrap().profile = Some("ultra".into());
         assert!(validate(&s).is_err());
+    }
+
+    #[test]
+    fn two_passes_need_a_bitrate() {
+        // Decision D45.
+        let mut s = builtin_presets()
+            .into_iter()
+            .find(|p| p.name == "youtube-1080p")
+            .unwrap()
+            .settings;
+        apply_overrides(&mut s, &["video.passes=2".into()]).unwrap();
+        let e = validate(&s).unwrap_err();
+        assert!(e.message.contains("bitrate"), "{}", e.message);
+        apply_overrides(
+            &mut s,
+            &[
+                "video.bitrate=8000000".into(),
+                "video.quality=null".into(),
+                "video.first_pass=full".into(),
+                "video.multipass=full".into(),
+                "video.lookahead=32".into(),
+            ],
+        )
+        .unwrap();
+        validate(&s).unwrap();
+        apply_overrides(&mut s, &["video.passes=3".into()]).unwrap();
+        assert!(validate(&s).is_err());
+        apply_overrides(
+            &mut s,
+            &["video.passes=1".into(), "video.lookahead=33".into()],
+        )
+        .unwrap();
+        assert!(validate(&s).is_err());
+        // Intra codecs without rate control make one.
+        let mut prores = builtin_presets()
+            .into_iter()
+            .find(|p| p.name == "prores-422hq")
+            .unwrap()
+            .settings;
+        apply_overrides(
+            &mut prores,
+            &["video.passes=2".into(), "video.bitrate=1000000".into()],
+        )
+        .unwrap();
+        assert!(validate(&prores).is_err());
+        // Defaults stay out of saved settings.
+        let text = serde_json::to_string(&builtin_presets()[0].settings).unwrap();
+        assert!(
+            !text.contains("first_pass") && !text.contains("passes"),
+            "{text}"
+        );
     }
 }

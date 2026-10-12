@@ -602,7 +602,7 @@ pub fn describe(prepared: &Prepared, available: &Availability) -> Value {
         .video
         .as_ref();
     let video_encoder = video.map(|v| match vidcut_av::export::encode::resolve_video(v, available) {
-        Ok(e) => json!({ "name": e.name, "kind": e.kind, "pixel": vidcut_av::export::encode::pixel_name(e.pixel), "device": e.device, "options": e.options }),
+        Ok(e) => json!({ "name": e.name, "kind": e.kind, "pixel": vidcut_av::export::encode::pixel_name(e.pixel), "device": e.device, "options": e.options, "passes": e.passes }),
         Err(err) => json!({ "error": err.to_string() }),
     });
     json!({

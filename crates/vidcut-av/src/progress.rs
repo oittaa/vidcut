@@ -60,11 +60,7 @@ mod tests {
     #[test]
     fn reports_reach_the_guard_only_while_held() {
         let seen = Arc::new(Mutex::new(Vec::new()));
-        let p = |frames| Progress {
-            frames,
-            total: 10,
-            elapsed: Duration::ZERO,
-        };
+        let p = |frames| Progress::single(frames, 10, Duration::ZERO);
         report(Path::new("a"), p(1));
         {
             let seen = seen.clone();
