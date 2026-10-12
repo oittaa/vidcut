@@ -229,16 +229,16 @@ pub struct CudaPictures {
     placebo: Option<Placebo>,
 }
 
-/// Pictures turned upright and in BT.709 video range, at the source's size,
-/// ahead of the CUDA filters (they neither turn pictures nor change their
-/// colors): each frame is copied to a Vulkan frame, converted by libplacebo
-/// and copied back to a CUDA frame, never leaving the GPU. libplacebo can't
-/// pad: it clears the border with a copy that FFmpeg's Vulkan frames don't
-/// allow.
+/// Pictures turned upright and in BT.709 video range, by libplacebo on
+/// Vulkan (the CUDA filters neither turn pictures nor change their colors):
+/// each frame is copied to a Vulkan frame, converted and copied back to a
+/// CUDA frame, never leaving the GPU.
 struct Placebo {
     graph: filter::Graph,
     input: HwFrames,
     output: HwFrames,
+    /// Black, under each picture when it is placed (`Layout::Placed`).
+    background: Option<frame::Video>,
     /// Pushed after each frame when its picture is wanted at once.
     /// libplacebo gives out a frame's picture only once it has the frame
     /// after it; the filler's own pictures are dropped. Without it, a
@@ -253,6 +253,23 @@ struct Placebo {
     pts: VecDeque<(i64, Option<i64>)>,
     /// The sample aspect of the upright pictures.
     sar: ffi::AVRational,
+}
+
+/// What libplacebo makes of a picture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Layout {
+    /// Upright at its own size, for the CUDA filters to scale and pad.
+    Upright,
+    /// Fitted to `fitted` in the middle of `size`, on black, as `format`:
+    /// the padding FFmpeg's `pad_cuda` can't do (10 bits). libplacebo can't
+    /// clear a border in FFmpeg's Vulkan frames (it clears with a copy
+    /// they don't allow), so a black frame of the size goes in under each
+    /// picture and leaves no border to clear.
+    Placed {
+        size: (u32, u32),
+        fitted: (u32, u32),
+        format: format::Pixel,
+    },
 }
 
 /// The time base of the counted timestamps libplacebo sees: a second
@@ -286,57 +303,88 @@ fn filters(
     ));
     // Centered on black, as the CPU's normalizer pads.
     if (fit_w, fit_h) != (width, height) {
+        let (x, y) = centered((fit_w, fit_h), (width, height));
         steps.push(format!(
-            "pad_cuda=w={width}:h={height}:x={}:y={}:color=black",
-            (width - fit_w) / 2,
-            (height - fit_h) / 2
+            "pad_cuda=w={width}:h={height}:x={x}:y={y}:color=black"
         ));
     }
     steps.join(",")
 }
 
-/// libplacebo's options for `width`×`height` pictures of `out`, stored
-/// turned by `rotation` (clockwise) and turned upright, otherwise the size
-/// they came in. Only the matrix and range change, as swscale converts SDR
-/// on the CPU: the input is tagged with BT.709's primaries and transfer
-/// too. Film grain and Dolby Vision metadata are left alone (the decoder
-/// applied the grain).
+/// Where a `fit_w`×`fit_h` picture goes in a `width`×`height` frame:
+/// centered, at even offsets as the CPU's `pad` rounds them (4:2:0 chroma
+/// covers two rows and columns).
+fn centered((fit_w, fit_h): (u32, u32), (width, height): (u32, u32)) -> (u32, u32) {
+    (((width - fit_w) / 2) & !1, ((height - fit_h) / 2) & !1)
+}
+
+/// libplacebo's options for `width`×`height` pictures stored turned by
+/// `rotation` (clockwise), made `out` pictures laid out as `layout` says.
+/// Only the matrix and range change, as swscale converts SDR on the CPU:
+/// the input is tagged with BT.709's primaries and transfer too. It scales
+/// in the source's gamma like swscale, with the cubic `scale_cuda` uses,
+/// rounds without dithering (its dither leans bright), and leaves film
+/// grain and Dolby Vision metadata alone (the decoder applied the grain).
 fn placebo_options(
-    (width, height, out): (u32, u32, &str),
+    (width, height): (u32, u32),
     rotation: u16,
+    out: &str,
+    layout: Layout,
 ) -> Vec<(&'static str, String)> {
-    let (width, height) = if rotation % 180 == 90 {
-        (height, width)
-    } else {
-        (width, height)
+    let mut options: Vec<(&str, String)> = match layout {
+        Layout::Upright if rotation % 180 == 90 => {
+            vec![("w", height.to_string()), ("h", width.to_string())]
+        }
+        Layout::Upright => vec![("w", width.to_string()), ("h", height.to_string())],
+        // Input 0 is the black frame, the whole frame; input 1 the picture.
+        Layout::Placed {
+            size: (w, h),
+            fitted: (fw, fh),
+            ..
+        } => {
+            let (x, y) = centered((fw, fh), (w, h));
+            vec![
+                ("inputs", "2".into()),
+                ("w", w.to_string()),
+                ("h", h.to_string()),
+                ("pos_x", format!("if(eq(idx,0),0,{x})")),
+                ("pos_y", format!("if(eq(idx,0),0,{y})")),
+                ("pos_w", format!("if(eq(idx,0),{w},{fw})")),
+                ("pos_h", format!("if(eq(idx,0),{h},{fh})")),
+            ]
+        }
     };
-    let mut options: Vec<(&str, String)> = vec![
-        ("w", width.to_string()),
-        ("h", height.to_string()),
+    options.extend([
         ("rotate", rotation.to_string()),
         ("format", out.into()),
         ("colorspace", "bt709".into()),
         ("color_primaries", "bt709".into()),
         ("color_trc", "bt709".into()),
         ("range", "tv".into()),
+        ("upscaler", "catmull_rom".into()),
+        ("downscaler", "catmull_rom".into()),
+        ("disable_linear", "1".into()),
+        ("sigmoid", "0".into()),
+        ("dithering", "none".into()),
         ("apply_filmgrain", "0".into()),
         ("apply_dolbyvision", "0".into()),
-    ];
+    ]);
     if let Some(prefix) = shader_cache() {
         options.push(("shader_cache", prefix));
     }
     options
 }
 
-/// The buffer source `in` of `graph`, for `width`×`height` frames of
-/// `pixel` in GPU memory from `frames`. It needs to know where they are
-/// before it starts, so it is made by hand.
+/// The buffer source `name` of `graph`, for `width`×`height` frames of
+/// `pixel` in GPU memory from `frames`, timed in `time_base`, with sample
+/// aspect `sar`. It needs to know where they are before it starts, so it is
+/// made by hand.
 fn add_source(
     graph: &mut filter::Graph,
+    name: &std::ffi::CStr,
     pixel: ffi::AVPixelFormat,
     (width, height): (u32, u32),
-    time_base: ffi::AVRational,
-    sar: ffmpeg::Rational,
+    (time_base, sar): (ffi::AVRational, ffmpeg::Rational),
     frames: *mut ffi::AVBufferRef,
     color: Option<(ffi::AVColorSpace, ffi::AVColorRange)>,
 ) -> Result<()> {
@@ -344,7 +392,7 @@ fn add_source(
         let ctx = ffi::avfilter_graph_alloc_filter(
             graph.as_mut_ptr(),
             ffi::avfilter_get_by_name(c"buffer".as_ptr()),
-            c"in".as_ptr(),
+            name.as_ptr(),
         );
         if ctx.is_null() {
             return Err(Error::Invalid("no memory for the GPU source".into()));
@@ -458,11 +506,6 @@ impl CudaPictures {
             width,
             height,
         );
-        if fitted != (width, height) && format == format::Pixel::P010LE {
-            return Err(Error::Invalid(
-                "FFmpeg's pad_cuda takes no 10-bit frames".into(),
-            ));
-        }
         let decoded = unsafe { (*first.as_ptr()).hw_frames_ctx };
         if decoded.is_null() {
             return Err(Error::Invalid(
@@ -471,30 +514,52 @@ impl CudaPictures {
         }
         let bt709 = matrix == ffi::AVColorSpace::AVCOL_SPC_BT709
             && range == ffi::AVColorRange::AVCOL_RANGE_MPEG;
-        let placebo = if bt709 && rotation == 0 {
+        // FFmpeg's `pad_cuda` takes no 10-bit frames: libplacebo places them.
+        let layout = if fitted != (width, height) && format == format::Pixel::P010LE {
+            Some(Layout::Placed {
+                size: (width, height),
+                fitted,
+                format,
+            })
+        } else if bt709 && rotation == 0 {
             None
-        } else if deinterlace {
+        } else {
+            Some(Layout::Upright)
+        };
+        if layout.is_some() && deinterlace {
             return Err(Error::Invalid(
                 "no deinterlacer before libplacebo on the GPU".into(),
             ));
+        }
+        let placebo = match layout {
+            Some(layout) => {
+                let stream = (stored, sar, rotation);
+                let color = (matrix, range);
+                Some(Placebo::new(
+                    device, decoded, stream, color, layout, at_once,
+                )?)
+            }
+            None => None,
+        };
+        // Placed pictures are done: the CUDA filters pass them on.
+        let (size, spec, sar) = if let Some(Layout::Placed { .. }) = layout {
+            ((width, height), "null".to_string(), ffmpeg::Rational(1, 1))
         } else {
-            let color = (matrix, range);
-            let stream = (stored, sar, rotation);
-            Some(Placebo::new(device, decoded, stream, color, at_once)?)
+            let spec = filters(size, fitted, (width, height, out), deinterlace);
+            (size, spec, shown_sar)
         };
         let frames = placebo.as_ref().map_or(decoded, |p| p.output.0);
         let mut graph = filter::Graph::new();
         add_source(
             &mut graph,
+            c"in",
             ffi::AVPixelFormat::AV_PIX_FMT_CUDA,
             size,
-            time_base.into(),
-            shown_sar,
+            (time_base.into(), sar),
             frames,
             None,
         )?;
         add_sink(&mut graph)?;
-        let spec = filters(size, fitted, (width, height, out), deinterlace);
         graph
             .output("in", 0)
             .and_then(|p| p.input("out", 0))
@@ -564,56 +629,93 @@ impl CudaPictures {
 impl Placebo {
     /// The converter for frames of `decoded` (a CUDA frames context) of
     /// `width`×`height` with sample aspect `sar`, stored turned by
-    /// `rotation`, read with `matrix` and `range`.
+    /// `rotation`, read with `matrix` and `range`, laid out as `layout`.
     fn new(
         device: &CudaDevice,
         decoded: *mut ffi::AVBufferRef,
         ((width, height), sar, rotation): ((u32, u32), ffmpeg::Rational, u16),
         (matrix, range): (ffi::AVColorSpace, ffi::AVColorRange),
+        layout: Layout,
         at_once: bool,
     ) -> Result<Self> {
+        use ffi::AVPixelFormat::{AV_PIX_FMT_CUDA as CUDA, AV_PIX_FMT_VULKAN as VULKAN};
         let vulkan = device.vulkan()?;
         let sw = unsafe { (*((*decoded).data as *mut ffi::AVHWFramesContext)).sw_format };
-        let deep = format::Pixel::from(sw)
-            .descriptor()
-            .is_some_and(|d| unsafe { (*d.as_ptr()).comp[0].depth } > 8);
-        let (out, out_sw) = if deep {
-            ("p010le", ffi::AVPixelFormat::AV_PIX_FMT_P010LE)
-        } else {
-            ("nv12", ffi::AVPixelFormat::AV_PIX_FMT_NV12)
-        };
-        let input = HwFrames::new(
-            vulkan.0,
-            ffi::AVPixelFormat::AV_PIX_FMT_VULKAN,
-            sw,
-            width,
-            height,
-        )?;
         let turned = rotation % 180 == 90;
-        let (up_w, up_h) = if turned {
-            (height, width)
-        } else {
-            (width, height)
+        // Upright at its own size in the source's depth, or placed.
+        let (out_size, out_pixel, out_sar) = match layout {
+            Layout::Upright => {
+                let deep = format::Pixel::from(sw)
+                    .descriptor()
+                    .is_some_and(|d| unsafe { (*d.as_ptr()).comp[0].depth } > 8);
+                let pixel = if deep {
+                    format::Pixel::P010LE
+                } else {
+                    format::Pixel::NV12
+                };
+                let (n, d) = (sar.numerator().max(1), sar.denominator().max(1));
+                if turned {
+                    ((height, width), pixel, (d, n))
+                } else {
+                    ((width, height), pixel, (n, d))
+                }
+            }
+            Layout::Placed { size, format, .. } => (size, format, (1, 1)),
         };
+        // 10-bit pictures come out as P016 too (`as_read`) and are copied
+        // into P010 frames as they are: NVENC reads the top 10 bits.
+        let (out, vulkan_out) = match out_pixel {
+            format::Pixel::P010LE => ("p016le", format::Pixel::P016LE),
+            _ => ("nv12", format::Pixel::NV12),
+        };
+        let input = HwFrames::new(vulkan.0, VULKAN, as_read(sw), width, height)?;
         let output = HwFrames::new(
             device.as_ptr(),
-            ffi::AVPixelFormat::AV_PIX_FMT_CUDA,
-            out_sw,
-            up_w,
-            up_h,
+            CUDA,
+            out_pixel.into(),
+            out_size.0,
+            out_size.1,
         )?;
         let mut graph = filter::Graph::new();
+        let bt709 = (
+            ffi::AVColorSpace::AVCOL_SPC_BT709,
+            ffi::AVColorRange::AVCOL_RANGE_MPEG,
+        );
+        let background = match layout {
+            Layout::Placed { size: (w, h), .. } => {
+                let format = vulkan_out;
+                let frames = HwFrames::new(vulkan.0, VULKAN, format.into(), w, h)?;
+                let timing = (COUNTED, ffmpeg::Rational(1, 1));
+                add_source(
+                    &mut graph,
+                    c"bg",
+                    VULKAN,
+                    (w, h),
+                    timing,
+                    frames.0,
+                    Some(bt709),
+                )?;
+                let mut black = frame::Video::new(format, w, h);
+                crate::export::video::fill_black(&mut black)?;
+                let mut background = frames.copy(&black, "copying to Vulkan")?;
+                tag(&mut background, bt709);
+                Some(background)
+            }
+            Layout::Upright => None,
+        };
+        let timing = (COUNTED, sar);
+        let color = Some((matrix, range));
         add_source(
             &mut graph,
-            ffi::AVPixelFormat::AV_PIX_FMT_VULKAN,
+            c"in",
+            VULKAN,
             (width, height),
-            COUNTED,
-            sar,
+            timing,
             input.0,
-            Some((matrix, range)),
+            color,
         )?;
         add_sink(&mut graph)?;
-        let options = placebo_options((width, height, out), rotation);
+        let options = placebo_options((width, height), rotation, out, layout);
         // libplacebo needs the Vulkan device before it starts; given none,
         // FFmpeg would convert on the CPU in front of it.
         unsafe {
@@ -639,14 +741,22 @@ impl Placebo {
                     source: ffmpeg::Error::from(ret),
                 });
             }
-            let src = graph.get("in").expect("source").as_mut_ptr();
+            // The black frame is input 0, under the picture.
+            let mut sources = Vec::new();
+            if background.is_some() {
+                sources.push(graph.get("bg").expect("background").as_mut_ptr());
+            }
+            sources.push(graph.get("in").expect("source").as_mut_ptr());
             let sink = graph.get("out").expect("sink").as_mut_ptr();
-            let ret = ffi::avfilter_link(src, 0, ctx, 0);
-            let ret = if ret < 0 {
-                ret
-            } else {
-                ffi::avfilter_link(ctx, 0, sink, 0)
-            };
+            let mut ret = 0;
+            for (pad, src) in sources.into_iter().enumerate() {
+                if ret >= 0 {
+                    ret = ffi::avfilter_link(src, 0, ctx, pad as u32);
+                }
+            }
+            if ret >= 0 {
+                ret = ffi::avfilter_link(ctx, 0, sink, 0);
+            }
             if ret < 0 {
                 return Err(Error::Ffmpeg {
                     context: "linking libplacebo".into(),
@@ -657,7 +767,7 @@ impl Placebo {
         graph.validate().ctx(|| "configuring libplacebo".into())?;
         let filler = if at_once {
             // Any picture will do: a black one.
-            let mut black = frame::Video::new(sw.into(), width, height);
+            let mut black = frame::Video::new(as_read(sw).into(), width, height);
             crate::export::video::fill_black(&mut black)?;
             let mut filler = input.copy(&black, "copying to Vulkan")?;
             tag(&mut filler, (matrix, range));
@@ -669,30 +779,31 @@ impl Placebo {
             graph,
             input,
             output,
+            background,
             filler,
             matrix,
             range,
             count: 0,
             pts: VecDeque::new(),
-            sar: if turned {
-                ffi::AVRational {
-                    num: sar.denominator().max(1),
-                    den: sar.numerator().max(1),
-                }
-            } else {
-                ffi::AVRational {
-                    num: sar.numerator().max(1),
-                    den: sar.denominator().max(1),
-                }
+            sar: ffi::AVRational {
+                num: out_sar.0,
+                den: out_sar.1,
             },
         })
     }
 
     /// Feeds `f` (a CUDA frame), or the end of the stream (`None`).
     fn push(&mut self, f: Option<&frame::Video>) -> Result<()> {
-        let mut source = self.graph.get("in").expect("source");
         let Some(f) = f else {
-            return source.source().flush().ctx(|| "flushing libplacebo".into());
+            for name in ["bg", "in"] {
+                if let Some(mut source) = self.graph.get(name) {
+                    source
+                        .source()
+                        .flush()
+                        .ctx(|| "flushing libplacebo".into())?;
+                }
+            }
+            return Ok(());
         };
         let mut v = self.input.copy(f, "copying to Vulkan")?;
         unsafe {
@@ -708,22 +819,32 @@ impl Placebo {
         tag(&mut v, (self.matrix, self.range));
         let n = 2 * self.count;
         self.count += 1;
-        v.set_pts(Some(n));
         self.pts.push_back((n, f.pts()));
-        source
-            .source()
-            .add(&v)
-            .ctx(|| "converting on the GPU".into())?;
+        self.feed(n, v)?;
         if let Some(filler) = &self.filler {
-            let mut next = frame::Video::empty();
-            unsafe { ffi::av_frame_ref(next.as_mut_ptr(), filler.as_ptr()) };
-            next.set_pts(Some(n + 1));
-            source
-                .source()
-                .add(&next)
-                .ctx(|| "converting on the GPU".into())?;
+            let next = frame_ref(filler);
+            self.feed(n + 1, next)?;
         }
         Ok(())
+    }
+
+    /// `picture` at count `n`, over the black frame when there is one.
+    fn feed(&mut self, n: i64, mut picture: frame::Video) -> Result<()> {
+        if let Some(background) = &self.background {
+            let mut black = frame_ref(background);
+            black.set_pts(Some(n));
+            let mut source = self.graph.get("bg").expect("background");
+            source
+                .source()
+                .add(&black)
+                .ctx(|| "converting on the GPU".into())?;
+        }
+        picture.set_pts(Some(n));
+        let mut source = self.graph.get("in").expect("source");
+        source
+            .source()
+            .add(&picture)
+            .ctx(|| "converting on the GPU".into())
     }
 
     /// The next converted frame, if one is ready, with its properties and
@@ -756,6 +877,26 @@ impl Placebo {
     }
 }
 
+/// The layout libplacebo is given frames of `sw` in: P010 as P016, which is
+/// laid out the same with all 16 bits used, so the frames copy as they are.
+/// A Vulkan device made from a CUDA device keeps each plane in its own
+/// image, and libplacebo misses the shift of such P010 planes: it reads
+/// them 64 times too bright, and writes a picture it blends a 64th as
+/// bright.
+fn as_read(sw: ffi::AVPixelFormat) -> ffi::AVPixelFormat {
+    match sw {
+        ffi::AVPixelFormat::AV_PIX_FMT_P010LE => ffi::AVPixelFormat::AV_PIX_FMT_P016LE,
+        other => other,
+    }
+}
+
+/// A new reference to `f`'s picture and properties.
+fn frame_ref(f: &frame::Video) -> frame::Video {
+    let mut r = frame::Video::empty();
+    unsafe { ffi::av_frame_ref(r.as_mut_ptr(), f.as_ptr()) };
+    r
+}
+
 /// Tags a frame for libplacebo: read with the source's matrix and range,
 /// in BT.709's primaries and transfer, one count long.
 fn tag(f: &mut frame::Video, (matrix, range): (ffi::AVColorSpace, ffi::AVColorRange)) {
@@ -771,7 +912,7 @@ fn tag(f: &mut frame::Video, (matrix, range): (ffi::AVColorSpace, ffi::AVColorRa
 
 #[cfg(test)]
 mod tests {
-    use super::{filters, placebo_options};
+    use super::{Layout, filters, placebo_options};
 
     /// The value libplacebo is given for option `key`.
     fn option<'a>(options: &'a [(&str, String)], key: &str) -> Option<&'a str> {
@@ -800,11 +941,18 @@ mod tests {
             "scale_cuda=w=1920:h=800:format=nv12:interp_algo=bicubic,\
              pad_cuda=w=1920:h=1080:x=0:y=140:color=black"
         );
+        // An odd margin starts a row early, on the chroma grid, as on the
+        // CPU.
+        assert_eq!(
+            filters((1280, 534), (1280, 534), (1280, 720, "nv12"), false),
+            "scale_cuda=w=1280:h=534:format=nv12:interp_algo=bicubic,\
+             pad_cuda=w=1280:h=720:x=0:y=92:color=black"
+        );
     }
 
     #[test]
     fn libplacebo_changes_only_the_colors() {
-        let options = placebo_options((720, 480, "nv12"), 0);
+        let options = placebo_options((720, 480), 0, "nv12", Layout::Upright);
         let get = |k| option(&options, k);
         assert_eq!((get("w"), get("h")), (Some("720"), Some("480")));
         assert_eq!(get("rotate"), Some("0"));
@@ -812,17 +960,38 @@ mod tests {
         assert_eq!(get("colorspace"), Some("bt709"));
         assert_eq!(get("color_primaries"), Some("bt709"));
         assert_eq!(get("range"), Some("tv"));
+        assert_eq!(get("dithering"), Some("none"));
+        assert_eq!(get("inputs"), None);
     }
 
     #[test]
     fn libplacebo_turns_pictures_upright() {
         // A phone's 1920×1080 frames, stored for a quarter turn clockwise.
-        let options = placebo_options((1920, 1080, "nv12"), 90);
+        let options = placebo_options((1920, 1080), 90, "nv12", Layout::Upright);
         let get = |k| option(&options, k);
         assert_eq!((get("w"), get("h")), (Some("1080"), Some("1920")));
         assert_eq!(get("rotate"), Some("90"));
-        let options = placebo_options((1920, 1080, "nv12"), 180);
+        let options = placebo_options((1920, 1080), 180, "nv12", Layout::Upright);
         let get = |k| option(&options, k);
         assert_eq!((get("w"), get("h")), (Some("1920"), Some("1080")));
+    }
+
+    #[test]
+    fn libplacebo_places_pictures_on_black() {
+        // A 2.4:1 film in 16:9, 10 bits: the black frame is input 0 and
+        // covers everything, the picture is centered over it.
+        let placed = Layout::Placed {
+            size: (1920, 1080),
+            fitted: (1920, 800),
+            format: crate::ffmpeg::format::Pixel::P010LE,
+        };
+        let options = placebo_options((3840, 1600), 0, "p010le", placed);
+        let get = |k| option(&options, k);
+        assert_eq!(get("inputs"), Some("2"));
+        assert_eq!((get("w"), get("h")), (Some("1920"), Some("1080")));
+        assert_eq!(get("pos_x"), Some("if(eq(idx,0),0,0)"));
+        assert_eq!(get("pos_y"), Some("if(eq(idx,0),0,140)"));
+        assert_eq!(get("pos_w"), Some("if(eq(idx,0),1920,1920)"));
+        assert_eq!(get("pos_h"), Some("if(eq(idx,0),1080,800)"));
     }
 }

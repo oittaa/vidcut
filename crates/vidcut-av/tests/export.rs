@@ -1575,6 +1575,11 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
         )
     };
     let (r90, r180, r270) = (turned(90), turned(180), turned(270));
+    let r90_deep =
+        src(
+            FixtureSpec::new(VideoCodec::Hevc10, Container::Mp4, 1280, 720, (30, 1), 30)
+                .rotation(90),
+        );
     let video = vec![
         v(&a, 10, 30),
         VideoPiece::Black { frames: 10 },
@@ -1587,13 +1592,14 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
         v(&r90, 0, 10),
         v(&r180, 5, 10),
         v(&r270, 10, 10),
+        v(&r90_deep, 0, 10),
         v(&e, 0, 20),
         v(&a, 50, 20),
     ];
-    // All but black, and in 10 bits the padded pieces (FFmpeg's pad_cuda
-    // takes no 10-bit frames). The small untagged piece is BT.601, which
-    // libplacebo converts.
-    let on_gpu = |bits| if bits == 8 { 225 } else { 205 };
+    // All but black. The small untagged piece is BT.601 and the turned
+    // ones need turning, which libplacebo does; in 10 bits it pads too
+    // (FFmpeg's pad_cuda takes 8 bits only).
+    let on_gpu = |_bits| 235;
     let p = plan(fps, 1280, 720, video, vec![]);
     let dir = out_dir("gpu-pipeline");
     let mut reference = lossless();
@@ -1601,7 +1607,7 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
     let cpu = dir.path().join("cpu.mkv");
     render(&p, &reference, &cpu);
     let want = barcodes(&cpu);
-    assert_eq!(want.len(), 235);
+    assert_eq!(want.len(), 245);
     for (codec, bits) in [(VCodec::H264, 8), (VCodec::Hevc, 10)] {
         let settings = ExportSettings {
             container: OutContainer::Mp4,
@@ -1640,17 +1646,69 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
         for (k, (g, w)) in got.iter().zip(&want).enumerate() {
             assert_eq!(g, w, "{bits}-bit: frame {k}");
         }
+        // The pillarboxed and letterboxed pictures start where the CPU's
+        // do (at even offsets).
+        for k in [150, 160] {
+            assert_eq!(
+                picture_starts(&frame_at(&out, k)),
+                picture_starts(&frame_at(&cpu, k)),
+                "{bits}-bit: frame {k}"
+            );
+        }
+        // Black is video-range black in 10 bits too: P010 keeps its 10 bits
+        // high.
+        let mut r = VideoReader::open(&out).unwrap();
+        let black = (0..=35).map(|_| r.next_frame().unwrap().unwrap()).last();
+        let m = region_means(&black.unwrap(), (0, 1280));
+        let near = |v: f64, want: f64| (v - want).abs() <= 1.0;
+        assert!(
+            near(m[0], 16.0) && near(m[1], 128.0) && near(m[2], 128.0),
+            "{bits}-bit: black is {m:?}"
+        );
     }
 }
 
-/// The mean (Y, Cb, Cr) in 8-bit units of the black left of a fitted
-/// [`Picture::Colors`] picture running from `x0` to `x1` across, then of
-/// each of its stripes: the middle half of each, in the middle rows.
+/// Frame `k` of `path`.
 #[cfg(feature = "gpu-tests")]
-fn stripe_means(f: &vidcut_av::ffmpeg::frame::Video, (x0, x1): (usize, usize)) -> Vec<[f64; 3]> {
+fn frame_at(path: &Path, k: usize) -> vidcut_av::ffmpeg::frame::Video {
+    let mut r = VideoReader::open(path).unwrap();
+    (0..=k)
+        .map(|_| r.next_frame().unwrap().unwrap())
+        .last()
+        .unwrap()
+}
+
+/// The first column and row of a picture on black: where the luma along
+/// the middle row and column first rises above black.
+#[cfg(feature = "gpu-tests")]
+fn picture_starts(f: &vidcut_av::ffmpeg::frame::Video) -> (usize, usize) {
     use vidcut_av::ffmpeg::format::Pixel;
     let ten = f.format() == Pixel::YUV420P10LE;
-    let mean = |p: usize, (a, b): (usize, usize)| {
+    let (w, h, stride, data) = (
+        f.width() as usize,
+        f.height() as usize,
+        f.stride(0),
+        f.data(0),
+    );
+    let luma = |x: usize, y: usize| {
+        if ten {
+            u16::from_le_bytes([data[y * stride + 2 * x], data[y * stride + 2 * x + 1]]) / 4
+        } else {
+            u16::from(data[y * stride + x])
+        }
+    };
+    let x = (0..w).find(|&x| luma(x, h / 2) > 40).unwrap_or(w);
+    let y = (0..h).find(|&y| luma(w / 2, y) > 40).unwrap_or(h);
+    (x, y)
+}
+
+/// The mean (Y, Cb, Cr) in 8-bit units of the columns from `a` to `b` of
+/// `f`, in its middle rows.
+#[cfg(feature = "gpu-tests")]
+fn region_means(f: &vidcut_av::ffmpeg::frame::Video, (a, b): (usize, usize)) -> [f64; 3] {
+    use vidcut_av::ffmpeg::format::Pixel;
+    let ten = f.format() == Pixel::YUV420P10LE;
+    let mean = |p: usize| {
         let sub = if p == 0 { 1 } else { 2 };
         let (stride, data) = (f.stride(p), f.data(p));
         let h = f.height() as usize / sub;
@@ -1670,13 +1728,18 @@ fn stripe_means(f: &vidcut_av::ffmpeg::frame::Video, (x0, x1): (usize, usize)) -
         }
         sum / n
     };
+    [mean(0), mean(1), mean(2)]
+}
+
+/// The mean (Y, Cb, Cr) in 8-bit units of the black left of a fitted
+/// [`Picture::Colors`] picture running from `x0` to `x1` across, then of
+/// each of its stripes: the middle half of each, in the middle rows.
+#[cfg(feature = "gpu-tests")]
+fn stripe_means(f: &vidcut_av::ffmpeg::frame::Video, (x0, x1): (usize, usize)) -> Vec<[f64; 3]> {
     let w = (x1 - x0) / 4;
     let mut regions = vec![(x0 / 4, x0 * 3 / 4)];
     regions.extend((0..4).map(|i| (x0 + i * w + w / 4, x0 + i * w + 3 * w / 4)));
-    regions
-        .into_iter()
-        .map(|r| [mean(0, r), mean(1, r), mean(2, r)])
-        .collect()
+    regions.into_iter().map(|r| region_means(f, r)).collect()
 }
 
 /// (Y, Cb, Cr) in 8-bit video range of BT.601 converted to BT.709, the
@@ -1701,79 +1764,96 @@ fn bt601_to_bt709((y, cb, cr): (u8, u8, u8)) -> [f64; 3] {
 
 /// BT.601 pictures (untagged SD) go to BT.709 on the GPU, through
 /// libplacebo, with the colors the CPU gives them: each stripe of a colored
-/// 4:3 picture and the black beside it, in 8 bits. libplacebo is the more
-/// exact (swscale is up to two levels off).
+/// 4:3 picture and the black beside it, from 8 and 10 bits, to 8 bits
+/// (libplacebo converts, the CUDA filters scale and pad) and 10 (libplacebo
+/// does it all). libplacebo is the more exact (swscale is up to two levels
+/// off).
 #[cfg(feature = "gpu-tests")]
 #[test]
 fn nvenc_exports_convert_bt601_on_the_gpu_as_the_cpu_does() {
     use vidcut_av::fixture::Picture;
     let available = vidcut_av::export::encode::detect();
     let fps = Rational::new(30, 1).unwrap();
-    let colors = src(
-        FixtureSpec::new(VideoCodec::H264, Container::Mp4, 640, 480, (30, 1), 30)
-            .picture(Picture::Colors),
-    );
-    let p = plan(fps, 1280, 720, vec![v(&colors, 0, 30)], vec![]);
-    let dir = out_dir("gpu-bt601");
-    let frame = |path: &Path| {
-        let mut r = VideoReader::open(path).unwrap();
-        let mut frames = Vec::new();
-        while let Some(f) = r.next_frame().unwrap() {
-            frames.push(f);
-        }
-        assert_eq!(frames.len(), 30, "{}", path.display());
-        frames.swap_remove(15)
-    };
-    let exact: Vec<[f64; 3]> = std::iter::once([16.0, 128.0, 128.0])
-        .chain(Picture::COLORS.into_iter().map(bt601_to_bt709))
-        .collect();
-    let near = |got: &[[f64; 3]], want: &[[f64; 3]], by: f64, what: &str| {
-        for (i, (g, w)) in got.iter().zip(want).enumerate() {
-            for c in 0..3 {
-                assert!(
-                    (g[c] - w[c]).abs() <= by,
-                    "{what}: region {i} channel {c}: {g:?}, not {w:?}"
-                );
+    // 8 and 10 bits in: libplacebo reads 10-bit frames as P016.
+    for source in [VideoCodec::H264, VideoCodec::Hevc10] {
+        let colors = src(
+            FixtureSpec::new(source, Container::Mp4, 640, 480, (30, 1), 30)
+                .picture(Picture::Colors),
+        );
+        let p = plan(fps, 1280, 720, vec![v(&colors, 0, 30)], vec![]);
+        let dir = out_dir(&format!("gpu-bt601-{source:?}"));
+        let frame = |path: &Path| {
+            let mut r = VideoReader::open(path).unwrap();
+            let mut frames = Vec::new();
+            while let Some(f) = r.next_frame().unwrap() {
+                frames.push(f);
             }
+            assert_eq!(frames.len(), 30, "{}", path.display());
+            frames.swap_remove(15)
+        };
+        let exact: Vec<[f64; 3]> = std::iter::once([16.0, 128.0, 128.0])
+            .chain(Picture::COLORS.into_iter().map(bt601_to_bt709))
+            .collect();
+        let near = |got: &[[f64; 3]], want: &[[f64; 3]], by: f64, what: &str| {
+            for (i, (g, w)) in got.iter().zip(want).enumerate() {
+                for c in 0..3 {
+                    assert!(
+                        (g[c] - w[c]).abs() <= by,
+                        "{what}: region {i} channel {c}: {g:?}, not {w:?}"
+                    );
+                }
+            }
+        };
+        let mut reference = lossless();
+        reference.audio = None;
+        let cpu = dir.path().join("cpu.mkv");
+        render(&p, &reference, &cpu);
+        // The picture is 960 wide in the middle.
+        let cpu = stripe_means(&frame(&cpu), (160, 1120));
+        near(&cpu, &exact, 2.0, &format!("{source:?} on the CPU"));
+        for (codec, bits) in [(VCodec::H264, 8), (VCodec::Hevc, 10)] {
+            let settings = ExportSettings {
+                container: OutContainer::Mp4,
+                video: Some(VideoSettings {
+                    codec,
+                    encoder: EncoderChoice::Nvenc,
+                    quality: Some(18),
+                    bitrate: None,
+                    speed: None,
+                    profile: None,
+                    bit_depth: Some(bits),
+                    width: None,
+                    height: None,
+                    hdr: None,
+                }),
+                audio: None,
+                declick: false,
+            };
+            let out = dir.path().join(format!("gpu-{bits}.mp4"));
+            let report = export::run(
+                &p,
+                &settings,
+                &out,
+                &available,
+                &AtomicBool::new(false),
+                &mut |_| {},
+            )
+            .unwrap_or_else(|e| panic!("{bits}-bit: {e}"));
+            assert_eq!(report.gpu_frames, 30, "{bits}-bit: frames on the GPU");
+            let gpu = stripe_means(&frame(&out), (160, 1120));
+            // scale_cuda truncates to 8 bits, where it could round.
+            near(
+                &gpu,
+                &exact,
+                1.5,
+                &format!("{source:?} to {bits} bits on the GPU"),
+            );
+            near(
+                &gpu,
+                &cpu,
+                2.0,
+                &format!("{source:?} to {bits} bits against the CPU"),
+            );
         }
-    };
-    let mut reference = lossless();
-    reference.audio = None;
-    let cpu = dir.path().join("cpu.mkv");
-    render(&p, &reference, &cpu);
-    // The picture is 960 wide in the middle.
-    let cpu = stripe_means(&frame(&cpu), (160, 1120));
-    near(&cpu, &exact, 2.0, "CPU");
-    let settings = ExportSettings {
-        container: OutContainer::Mp4,
-        video: Some(VideoSettings {
-            codec: VCodec::H264,
-            encoder: EncoderChoice::Nvenc,
-            quality: Some(18),
-            bitrate: None,
-            speed: None,
-            profile: None,
-            bit_depth: Some(8),
-            width: None,
-            height: None,
-            hdr: None,
-        }),
-        audio: None,
-        declick: false,
-    };
-    let out = dir.path().join("gpu.mp4");
-    let report = export::run(
-        &p,
-        &settings,
-        &out,
-        &available,
-        &AtomicBool::new(false),
-        &mut |_| {},
-    )
-    .unwrap_or_else(|e| panic!("{e}"));
-    assert_eq!(report.gpu_frames, 30, "frames on the GPU");
-    let gpu = stripe_means(&frame(&out), (160, 1120));
-    // scale_cuda truncates to 8 bits, where it could round.
-    near(&gpu, &exact, 1.5, "GPU");
-    near(&gpu, &cpu, 2.0, "GPU against the CPU");
+    }
 }

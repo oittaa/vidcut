@@ -3,7 +3,6 @@
 **When:** later.
 
 Proxies and exports made with NVENC decode on NVDEC and scale on the GPU (preview.md §12, export.md §5). Still on the CPU:
-- **Padding in 10-bit output:** `pad_cuda` takes 8 bits only, and libplacebo can't clear borders in FFmpeg's Vulkan frames. libplacebo with two inputs could draw the picture over a black frame of the output's size, which needs no clearing.
 - **HDR:** tone mapping into SDR, and SDR into HDR output. libplacebo does both; it must give the CPU's curve (`color.rs`).
 - **Interlaced sources** in exports (deinterlacing before frames are picked), and interlaced BT.601 anywhere (`bwdif_cuda` would go before libplacebo).
 - **Timeline tiles and the paused viewer** (`export/renderer.rs`): far-apart tiles cost 40 ms on 1080p H.264 and 105–170 ms on 4K60 on the CPU; NVDEC would cut that, the frames then copied down once at their small size.

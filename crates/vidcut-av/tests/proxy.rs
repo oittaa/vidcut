@@ -271,6 +271,11 @@ fn nvenc_proxies_decode_on_the_gpu_and_stay_exact() {
             hd(VideoCodec::H264, Container::Mp4).rotation(180),
             true,
         ),
+        (
+            "turned 10-bit",
+            hd(VideoCodec::Hevc10, Container::Mp4).rotation(90),
+            true,
+        ),
         ("ProRes", hd(VideoCodec::ProRes422Hq, Container::Mov), false),
     ];
     let tmp = tempfile::Builder::new()

@@ -718,11 +718,12 @@ pub(crate) fn fill_black(f: &mut frame::Video) -> Result<()> {
         .format()
         .descriptor()
         .ok_or_else(|| Error::Invalid("unknown pixel format".into()))?;
-    let (deep, rgb, alpha) = unsafe {
+    let (depth, shift, rgb, alpha) = unsafe {
         let d = &*desc.as_ptr();
         let flags = d.flags;
         (
-            d.comp[0].depth > 8,
+            d.comp[0].depth,
+            d.comp[0].shift,
             flags & (ffmpeg::ffi::AV_PIX_FMT_FLAG_RGB as u64) != 0,
             flags & (ffmpeg::ffi::AV_PIX_FMT_FLAG_ALPHA as u64) != 0,
         )
@@ -740,10 +741,15 @@ pub(crate) fn fill_black(f: &mut frame::Video) -> Result<()> {
             128
         };
         let data = f.data_mut(plane);
-        if deep {
-            let v = if is_alpha { 1023 } else { v8 << 2 };
+        if depth > 8 {
+            // In the sample's high bits for P010 and its like.
+            let v = if is_alpha {
+                (1 << depth) - 1
+            } else {
+                v8 << (depth - 8)
+            };
             for px in data.as_chunks_mut::<2>().0 {
-                *px = v.to_le_bytes();
+                *px = (v << shift).to_le_bytes();
             }
         } else {
             data.fill(v8 as u8);
@@ -754,7 +760,26 @@ pub(crate) fn fill_black(f: &mut frame::Video) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::fit;
+    use super::{fill_black, fit};
+    use crate::ffmpeg::{format::Pixel, frame};
+
+    #[test]
+    fn black_is_video_range_black_in_every_layout() {
+        let sample = |pixel, plane| {
+            let mut f = frame::Video::new(pixel, 16, 16);
+            fill_black(&mut f).unwrap();
+            let d = f.data(plane);
+            u16::from_le_bytes([d[0], d[1]])
+        };
+        // 10 bits in the low bits, and in the high bits (P010).
+        assert_eq!(sample(Pixel::YUV420P10LE, 0), 64);
+        assert_eq!(sample(Pixel::YUV420P10LE, 1), 512);
+        assert_eq!(sample(Pixel::P010LE, 0), 64 << 6);
+        assert_eq!(sample(Pixel::P010LE, 1), 512 << 6);
+        let mut f = frame::Video::new(Pixel::NV12, 16, 16);
+        fill_black(&mut f).unwrap();
+        assert_eq!((f.data(0)[0], f.data(1)[0]), (16, 128));
+    }
 
     #[test]
     fn fitting_keeps_display_aspect() {
