@@ -1,10 +1,10 @@
 # GUI and live control: decisions from M3
 
-**Status:** accepted (M3, October 2026); §8 added in M4, §9 in M5, §10 in M7; §4 revised after M7.
+**Status:** accepted (M3, October 2026); §8 added in M4, §9 in M5, §10 in M7; §1, §4, §5 and §7 revised when the viewers moved to vidcut's own player on wgpu ([preview.md](preview.md)).
 
 **Evidence** (all rerunnable):
-- [`crates/vidcut/tests/live.rs`](../../crates/vidcut/tests/live.rs): the live session with software-rendered players and no window. Covers frame-exact seeks at every boundary (also with a late renderer), the source viewers, the clipboard, edits from other processes, and errors.
-- [`crates/vidcut/tests/gui.rs`](../../crates/vidcut/tests/gui.rs) (`--features vidcut/gui-tests`, needs a display): the real GUI driven through the CLI. Covers edit latency, screenshot vs `vidcut frame render`, and a minimized window.
+- [`crates/vidcut/tests/live.rs`](../../crates/vidcut/tests/live.rs): the live session with both player engines, a stand-in renderer and stand-in audio devices, no window. Covers frame-exact seeks at every boundary (also with a late renderer), pictures against the sound, the source viewers, the clipboard, edits from other processes, and errors.
+- [`crates/vidcut/tests/gui.rs`](../../crates/vidcut/tests/gui.rs) (`--features vidcut/gui-tests`, needs a display): the real GUI driven through the CLI. Covers edit latency, screenshot vs `vidcut frame render`, a minimized window, playing and the GPU preference.
 - `ipc::tests` in [`crates/vidcut/src/ipc/mod.rs`](../../crates/vidcut/src/ipc/mod.rs): the JSON-RPC wire format.
 - [`crates/vidcut/tests/jobs.rs`](../../crates/vidcut/tests/jobs.rs) and [`gui_export.rs`](../../crates/vidcut/tests/gui_export.rs): export jobs, and the export windows under simulated input (§9).
 
@@ -12,10 +12,12 @@
 
 | Thread | Owns | Never does |
 |---|---|---|
-| **UI** (eframe) | the egui context, the GL context, mpv **render** contexts and their textures | call mpv's client API, wait for the session |
-| **Session** (`live`) | the open project, both mpv client handles, viewer/selection/clipboard state, the command log | touch GL |
+| **UI** (eframe on wgpu) | the egui context and its window; shows the viewer's targets as textures | draw a viewer picture, wait for the session |
+| **Viewer** (`gui/video.rs`) | presents both players' engines: draws their pictures, answers presents and viewer screenshots | wait for the UI |
+| **Session** (`live`) | the open project, both players' engines, viewer/selection/clipboard state, the command log | touch the GPU |
+| **Engines** (per player, player.md §1) | decoding, the mix, the audio device | touch shared state |
 | **IPC** | one listener plus one thread per connection | anything but forward requests and wait for answers |
-| **Workers** (2) | thumbnails, preview remuxes, tail checks and patches | touch shared state (they report back by message) |
+| **Workers** (2) | thumbnails and waveforms | touch shared state (they report back by message) |
 | **Tasks** | one thread per export job, frame render, screenshot encode or project-less request | touch the session's state |
 
 **How they talk:**
@@ -23,7 +25,7 @@
 - **Snapshots out.** After each batch of messages, the session publishes an immutable `Arc<Snapshot>`, and the UI reads the latest one each frame. Publishing is a pointer swap under a mutex.
 - **Answers after the snapshot.** The session sends a request's answer only once the snapshot shows its result. A client that looks right after hearing back (the GUI, a test stepping it) never sees the state from before. Answering first let a loaded test draw a stale selection and send nothing.
 - **No blocking.** The UI therefore never blocks on the session, and the session never blocks on the UI.
-- **Repaints.** The session calls `request_repaint` when it publishes or asks the UI for something (a present, a capture, a window change), and mpv's render update callback does too. Nothing else wakes the UI.
+- **Repaints.** The session calls `request_repaint` when it publishes or asks the UI for something (a capture of the window, a window change), and the viewer thread when a picture it drew changed. Nothing else wakes the UI. While playing, the session publishes as the clock moves to each frame.
 
 ## 2. One request path
 
@@ -56,39 +58,29 @@ Every action is a [`Request`](../../crates/vidcut-core/src/request.rs), the same
 
 ## 4. When a frame is "on screen"
 
-mpv runs async commands in order. A reply to command `n` therefore means every command up to `n` has been queued.
-
-A seek or load ("motion") is shown after two steps:
-1. **mpv finished it.** A `playback-restart` arrived after the `seek` (or `start-file`) event that mpv sent after the motion's reply. mpv begins a seek only after replying to the command. A late restart of an earlier seek therefore doesn't count for a newer motion (mpv doesn't always drop it, for instance once the audio has ended).
-2. **The renderer presented it.** The session then asks the renderer to present the player: draw mpv's current picture now, whether or not mpv has a new frame for it. After the restart, mpv's current picture is the motion's first frame, so the viewer shows exactly that frame.
-
-**Why not wait for a new picture.** Until October 2026 the second step was "the renderer drew a new picture since the motion was issued" (`MPV_RENDER_PARAM_NEXT_FRAME_INFO`: not a redraw or repeat), with a 250 ms fallback. A late UI thread broke it:
-- libmpv waits only 200 ms for `mpv_render_context_render` to take a frame. Then it keeps the frame as its current picture, counts it as dropped and finishes the seek anyway, so the renderer never sees a new frame.
-- The fallback then reported the seek as shown while the viewer still held the previous picture. That can also be black: mpv sends an empty redraw when it reconfigures its output, for instance between a tail patch and the H.264 around it.
-- Conversely, a redraw after a dropped frame is flagged as new, and a picture rendered just before the seek could be counted for it.
+A seek, step, load or an edit's reload is a **motion** of its player, numbered. It is on screen once the renderer presented the player after it and showed the frame it asked for:
+1. **The engine has the picture.** Its decode thread calls back when the picture of the frame the viewer is at lands; the session then asks the renderer (the viewer thread in the GUI) to present. A picture already kept is there at once.
+2. **The renderer presented it.** The renderer presents the engine at that moment (`Player::present`), draws the picture, and answers with the frame it showed exactly. Paused, the motion is on screen when that is the frame asked for; playing, when any frame showed (the clock starts at the frame asked for and moves on). A present that showed an older picture, or went unanswered for 50 ms, is asked again.
 
 `tests/live.rs` ("A late renderer") stalls the render thread for 500 ms when a seek's frame arrives, and the seek still returns with that frame on screen.
 
-**More waiting.** A seek also waits for the player's newest motion (a preview reload replaces what was asked for) and for the tail checks and patches (preview.md §9) that could change its frame: those of cuts at most 64 frames (the longest patch) after it. Paused, that is the frame the seek asked for. A seek while playing returns once its frame has shown: playback has moved on, and tail work on that frame no longer bears on it. Checks start nearest the playhead first, so a timeline with many cuts doesn't hold up the first seek until every cut is checked. Seek-then-screenshot is therefore exact without sleeps. Over IPC it takes about 10–15 ms.
+**More waiting.** A seek also waits for the player's newest motion: an edit's reload replaces what was asked for, at the same frame. Seek-then-screenshot is therefore exact without sleeps. Over IPC it takes 2–3 ms for a kept picture, a decode's time otherwise. A picture that fails to decode fails the seek with the reason (`MEDIA`), and the viewer shows it.
 
-**Overtaken seeks fail.** A waiting seek, step or viewer change remembers the frame it asked for, and whether exactly. If a later seek asks for another frame before it shows (another client, a person scrubbing), the frame never will. The request then fails with `CONFLICT` and names the frame asked for since, rather than reporting the other frame as its own.
-- A fast seek to the same frame overtakes an exact one too: it may show a keyframe instead.
-- Playback moving on from the frame doesn't count, so a seek while playing returns once its frame has shown. Stepped reverse playback (J) seeks, so it overtakes.
-- A reload at the same frame still counts as that frame. A continuation reload samples the playhead, which while playing is `time-pos` and has moved off the frame the seek asked for. Until that frame is on screen and the seek has replied, the reload keeps opening there and keeps the seek's target: adopting the playhead sample would look like another seek and name the playback frame in the conflict. After that the reload follows playback, so playback doesn't jump back to the seek's frame.
+**Overtaken seeks fail.** A waiting seek, step or viewer change remembers the frame it asked for. If a later seek asks for another frame before it shows (another client, a person scrubbing), the frame never will. The request then fails with `CONFLICT` and names the frame asked for since, rather than reporting the other frame as its own.
+- Every seek is exact: `fast` marks a scrub, which only keeps it out of the command log, so a scrub to the same frame satisfies a waiting seek.
+- Playback moving on from the frame doesn't count, so a seek while playing returns once its frame has shown.
+- An edit's reload keeps the engine where it is (`set_plan`), playing on if it plays, and keeps the seek's target.
 - The GUI's own overtaken seeks and steps are no errors: they end as if done, and the command log shows no error for them.
 
-**Seeks queue behind a decoding one.** A precise seek decodes from the keyframe before its frame, which takes a tenth of a second on files with keyframes seconds apart. A held arrow key steps faster than that. When each new seek cancelled the one decoding, nothing showed until the key was let go. So while a paused player's seek still decodes, a newer seek waits, and only the newest goes once that one finishes: the picture moves at the speed frames decode, and the last request lands exactly. A seek that hasn't finished in a second holds nothing up. Playing, seeks go at once.
-
-**Seeks while loading.** mpv rejects seeks until a freshly loaded file is open. A seek in that window opens the file again at the new position (`loadfile` with `start=`). That lands on the frame, so it is exact: a fast seek there does not overtake an exact seek to the same frame, and the conflict text does not call it a keyframe.
+**Held keys.** A precise seek decodes from the keyframe before its frame, which takes a tenth of a second on files with keyframes seconds apart. A held arrow key steps faster than that. The engine merges requests: while a paused seek decodes, newer ones wait, and only the newest goes once it finishes, unless it has decoded for a second (player.md §2). The picture moves at the speed frames decode, and the last request lands exactly.
 
 ## 5. Rendering and screenshots
 
-**Rendering.**
-- Both players render in `App::logic`, not `App::ui`. eframe calls `logic` even when it skips `ui` for a hidden window, so mpv never stalls waiting for us.
-- On Wayland, winit throttles redraws only through frame callbacks that eframe never arms. With vsync off, the GUI keeps painting while minimized, and live control keeps working (`tests/gui.rs`).
+**Rendering** (preview.md §4).
+- The viewer thread draws each player's picture with the shader into a target the viewer's size, and the UI shows the targets. Not the UI thread: on GNOME Wayland with NVIDIA, presenting a hidden window blocks that thread until the window shows again, and Wayland can't show it by request. Seeks, screenshots and edits keep working meanwhile (`tests/gui.rs`); what needs the UI (window screenshots, opening windows) waits. `gui.quit` ends the process without the window when it hasn't closed in 5 s.
 
 **`gui.screenshot` targets:**
-- **`viewer`** (the default) reads the player's render target back: the picture exactly as the viewer shows it, at the viewer's size. It works while the window is hidden.
+- **`viewer`** (the default) reads the player's target back: the picture exactly as the viewer shows it, at the viewer's size. It works while the window is hidden.
 - **`window`** uses egui's viewport screenshot of the whole window. It needs the window to paint.
 
 **Encoding.** PNG encoding runs on a task thread.
@@ -100,7 +92,7 @@ A seek or load ("motion") is shown after two steps:
 **Registry.** A running GUI writes `$XDG_RUNTIME_DIR/vidcut/instances/<pid>.json` with its pid, socket, open project and version. It serves JSON-RPC 2.0 on `<pid>.sock`, with one JSON object per line (format in `ipc/mod.rs`).
 - **Access.** The directory is mode 0700, so only the user can connect.
 - **Limits** (`ipc::server::Limits`), so a runaway client can't take the session's memory or threads: a request line up to 64 MiB (a longer one gets an error and the connection closes) and 64 connections at once (more are turned away with an error). A waiting request such as `jobs.wait` keeps its connection, as intended.
-- **Clean-up.** Stale entries, and the per-process preview directories of dead instances, are removed when they're found.
+- **Clean-up.** Stale entries are removed when they're found.
 
 **Routing.** The CLI routes each command:
 - **Project-less commands** (`schema`, `probe`, `presets`, `encoders`, `doctor`) always run in the CLI process.
@@ -123,13 +115,11 @@ A seek or load ("motion") is shown after two steps:
 
 **Source Tape span marks (D17).** In Source Tape mode, I and O set `tape.marks.set` with the pool's media ids in tape order and tape-frame `in`/`out` (half-open, D16). A span on one clip is stored on the project as both tape marks and that clip's source marks; the scroll bar still shows the clip's handles offset onto the tape. A span across clips is stored only in `tape_marks` on the project (with the order snapshot); the bar draws one shaded range in tape frames and edit gestures send `{"tape": true}` so the core turns the span into one source range per touched clip in a single request. Alt+X sends `tape.marks.clear` with the clip under the playhead when the span is one clip. Crossing spans clear only the tape marks.
 
-**What they load.** All three viewer modes play EDLs built by the same code: `render::tape` for sources and `render::flatten` for the timeline. Source time therefore maps to frames exactly as the timeline's does: the source viewer counts project frames (deviation X8).
+**What they load.** Each player is an engine (`vidcut_av::player`) playing a render plan the export would render: `render::tape` for sources and `render::flatten_lanes` for the timeline, fresh proxies swapped in (preview.md §1). Source time therefore maps to frames exactly as the timeline's does: the source viewer counts project frames (deviation X8).
 
-**Reloads.** Timeline reloads are coalesced: one at once, then at most one per 100 ms while edits keep coming. Every live request (state, screenshots, playback, viewer changes) applies a pending reload first, so it sees the timeline as edited; a seek or step loads straight at its target.
+**Reloads.** Timeline reloads are coalesced: one at once, then at most one per 100 ms while edits keep coming. Every live request (state, screenshots, playback, viewer changes) applies a pending reload first, so it sees the timeline as edited; a seek or step loads straight at its target. A reload gives the engine the new plan: its position, open files and kept pictures stay, and it plays on if it plays.
 
-**Fillers.** Fillers are generated on demand, synchronously (once per size and rate, then cached), so the preview is never half-loaded.
-
-**Stills and image sequences (M9).** The players show them through image lists that the session writes into its runtime folder (preview.md §11). The pool's thumbnails of a sequence spread over its own pictures — its count, even when more numbered files follow in the same folder — and picture measurements stop at that count. A still has its one picture. A thumbnail time past the last of those pictures stays on the last one and does not open the next path.
+**Stills and image sequences (M9).** The engine reads them as export does. The pool's thumbnails of a sequence spread over its own pictures — its count, even when more numbered files follow in the same folder — and picture measurements stop at that count. A still has its one picture. A thumbnail time past the last of those pictures stays on the last one and does not open the next path.
 
 **Importing numbered images (M9).** Import Media (Ctrl+I, `gui/import.rs`) looks for numbered runs among the files picked, counting each run on disk. If there are any, it asks once:
 - **One clip each, at a frame rate:** an image sequence per run (`media.add sequence`), at the project's rate unless typed over. Offered first when a run is of a frame type (PNG, TIFF, EXR, DPX, TGA, BMP).
@@ -141,7 +131,7 @@ A seek or load ("motion") is shown after two steps:
 - **Accuracy:** each is within half the spacing of its time, so keyframes are good enough for long clips; short clips are decoded forward.
 - **Speed:** ~0.1–3 s per clip on workers.
 
-**Stepped reverse.** Reverse shuttle (J) uses exact seeks, one in flight at a time, at the shuttle speed (preview.md §7).
+**Shuttle.** J/K/L play at their speeds, backward too, with the sound reversed or stretched at its pitch (player.md §4).
 
 ## 8. The timeline (M4)
 
@@ -173,7 +163,7 @@ A seek or load ("motion") is shown after two steps:
 **Mixer and meters (M6, `gui/mixer.rs`).**
 - **Strips:** the Mixer panel (top bar, or `gui.show mixer`) has a strip per track with sound: one meter bar per channel, a fader, M and S. The mix gets the same per-channel meter.
 - **One request per fader drag:** the fader sends `track.set` once, when it's let go, so a drag is one undo step. Double-click resets it to 0 dB.
-- **Meters** are one bar per project channel (spec D28), with a 1.5 s peak hold on each bar. They read the cached waveforms at the playhead, playing or not, so they need no audio tap in mpv, work while paused and while scrubbing, and apply the same gains, mutes and solos as the export. The waveforms' channel envelopes are mixed to the project's channels by the export's resampler, so they are measured again when that count changes.
+- **Meters** are one bar per project channel (spec D28), with a 1.5 s peak hold on each bar. They read the cached waveforms at the playhead, playing or not, so they need no tap of the player's output, work while paused and while scrubbing, and apply the same gains, mutes and solos as the export. The waveforms' channel envelopes are mixed to the project's channels by the export's resampler, so they are measured again when that count changes.
 - **Viewer:** a meter beside the viewer shows what it plays, one bar per channel, and its speaker button is `player.mute`. That mute silences the viewer meter. In source modes the meter is the source media at the source playhead.
 
 **Bins (M6).**
@@ -225,7 +215,7 @@ A seek or load ("motion") is shown after two steps:
 - **Filmstrips are kept on disk** (`thumbcache.rs`): 24 pictures of a media file, fitted in 192×108, as one JPEG strip in `~/.cache/vidcut/thumbs` (about 6 KB a picture, where the RGBA in memory takes 83 KB). The file name holds the media file's path hash, size and modification time, and the strip's layout, so a changed file or another layout never reads a stale strip.
 - **Eviction:** a strip's modification time is its last use. After each new strip, the least recently used go until the rest fit `thumbnails.cache_limit_mb` (512 MB by default, about 3,000 media files).
 - **Why:** decoding 24 pictures takes from a tenth of a second to seconds per clip, much more from a network share, and it ran again for every clip each time a project opened. The project still keeps no pictures (deviation X1).
-- **Preferences** (`preferences.toml`, deviation X12) are read whenever a thumbnail job, an export or a proxy runs, so a change from the CLI applies to a running GUI at once. GPU acceleration also reaches the players at once: the session watches the preferences file, and when the preference changed, whoever changed it (the Preferences window, a CLI run, the file by hand), each player sets mpv's `hwdec` and reopens its file where it is. `preferences.set` empties the cache when it is turned off and trims it when the limit drops.
+- **Preferences** (`preferences.toml`, deviation X12) are read whenever a thumbnail job, an export or a proxy runs, so a change from the CLI applies to a running GUI at once. GPU acceleration also reaches the players at once: the session watches the preferences file, and when the preference changed, whoever changed it (the Preferences window, a CLI run, the file by hand), each player's engine switches its decoder and decodes its pictures anew, the one shown first (preview.md §3). `preferences.set` empties the cache when it is turned off and trims it when the limit drops.
 - **Tests:** `tests/thumbnails.rs` opens a project whose media moved away and still gets its thumbnails, then turns the cache off in the Preferences window with one request.
 
 **Timeline filmstrips** (`gui/tiles.rs`): each tile shows the frame under it.

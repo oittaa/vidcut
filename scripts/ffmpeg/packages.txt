@@ -41,7 +41,5 @@ libmp3lame-dev
 libvorbis-dev
 # zscale
 libzimg-dev
-# azmq (live fader changes)
-libzmq3-dev
 # PNG, EXR and other image formats
 zlib1g-dev

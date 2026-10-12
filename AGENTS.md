@@ -13,9 +13,9 @@ A relatively simple video cutting tool modeled on DaVinci Resolve's **Cut page**
 - no effects, transitions, titles or color
 
 It is written in Rust:
-- **GUI:** egui/eframe with the glow (OpenGL) backend.
+- **GUI:** egui/eframe on wgpu (Vulkan on Linux; Metal and DX12 compiled in, no OpenGL).
 - **Media:** the FFmpeg libraries in-process via `ffmpeg-next`. Never shell out to the `ffmpeg` CLI.
-- **Preview:** libmpv, loaded at runtime.
+- **Preview:** vidcut's own player engine (`vidcut_av::player`) on those libraries; its YUV pictures are converted by our own WGSL shader, its sound goes through cpal.
 
 **Everything must be scriptable:** each GUI action is a serializable Request, also reachable from the CLI and from a JSON-RPC socket on the running GUI.
 
@@ -34,17 +34,16 @@ It is written in Rust:
    - Test media, generated fixtures and the manual live in `$VIDCUT_TEST_DATA` (default `~/Downloads/vidcut-tmp`), the one place for test data. Test outputs go to temp dirs.
    - `scripts/check.sh` (the pre-commit hook and CI) refuses any binary file, whatever its name, so `.gitignore` lists no file types.
    - Real-world clips are listed in `tests/media-manifest.toml` (URL, license, sha256) and fetched by `scripts/fetch-test-media.sh`.
-5. **No ffmpeg/ffprobe subprocesses.** Use `vidcut-av`, the FFmpeg libraries. libmpv is used only for interactive preview.
+5. **No ffmpeg/ffprobe subprocesses.** Use `vidcut-av`, the FFmpeg libraries, for exports and the preview alike.
 6. **License:** MIT. Don't add dependencies with licenses incompatible with MIT distribution of our source.
 
 ## Workspace layout
 
 | Crate | Purpose | Depends on |
 |---|---|---|
-| `crates/vidcut-core` | Project model, time and timecode math, edit operations (`ops.rs`; tracks in `ops/tracks.rs`, clips following Track 1 in `ops/follow.rs`), Request/Response protocol, Editor (undo/rev), project store, render plans (`render.rs`: top-wins video, mixed audio lanes), preview EDLs (`preview.rs`), OpenTimelineIO reading and writing (`otio.rs`, tests in `otio/tests.rs`), what the automatic tools decide from measurements (`analysis.rs`), application preferences (`preferences.rs`) | — (pure Rust; fast to build and test) |
-| `crates/vidcut-av` | FFmpeg layer: probe (start timecodes too), exact-seek decode (on NVDEC too, `cuda.rs` for the GPU pipeline), encode/mux, export engine (with loudness normalization; the next piece's file opens ahead in `export/ahead.rs`), the renderer of paused and two-up pictures that decodes each frame once either way, and the frame reader of timeline tiles (`export/renderer.rs`), thumbnails (and their JPEG cache form), waveforms, still frames, measurements for the automatic tools (`analysis.rs`), encoder detection, test-fixture generator, the player engine (`player/`: a decode thread keeping decoded YUV pictures ahead of the clock and windows for going back, the audio mix into a lock-free ring, reversed backward and time-stretched at other speeds keeping the pitch (`player/stretch.rs`, which marks each block for the clock), the device callback as the clock, outputs through cpal, audio scrubbing in `player/scrub.rs` with `Scrubber` for use without a player) | ffmpeg-next, cpal |
-| `crates/vidcut-mpv` | libmpv via `dlopen` (`libloading`): client API and render API (OpenGL and software) | libmpv.so.2 at runtime only |
-| `crates/vidcut` | The `vidcut` binary: Session/host, IPC, CLI (clap), GUI (eframe), MCP server | all of the above |
+| `crates/vidcut-core` | Project model, time and timecode math, edit operations (`ops.rs`; tracks in `ops/tracks.rs`, clips following Track 1 in `ops/follow.rs`), Request/Response protocol, Editor (undo/rev), project store, render plans (`render.rs`: top-wins video, mixed audio lanes), the proxies the viewer plays (`preview.rs`), OpenTimelineIO reading and writing (`otio.rs`, tests in `otio/tests.rs`), what the automatic tools decide from measurements (`analysis.rs`), application preferences (`preferences.rs`) | — (pure Rust; fast to build and test) |
+| `crates/vidcut-av` | FFmpeg layer: probe (start timecodes too), exact-seek decode (on NVDEC too, `cuda.rs` for the GPU pipeline; `VideoReader::open_fastest` picks NVDEC for the codecs it decodes faster), encode/mux, export engine (with loudness normalization; the next piece's file opens ahead in `export/ahead.rs`), the renderer of two-up pictures that decodes each frame once either way, and the frame reader of timeline tiles (`export/renderer.rs`), thumbnails (and their JPEG cache form), waveforms, still frames, measurements for the automatic tools (`analysis.rs`), the export's color math (`color.rs`, `shader_colors` for the viewer's shader), encoder detection, test-fixture generator, the player engine (`player/`: a decode thread keeping decoded YUV pictures ahead of the clock and windows for going back, on NVDEC where faster with the frames copied down, the audio mix into a lock-free ring, reversed backward and time-stretched at other speeds keeping the pitch (`player/stretch.rs`, which marks each block for the clock), the device callback as the clock, outputs through cpal, audio scrubbing in `player/scrub.rs` with `Scrubber` for use without a player) | ffmpeg-next, cpal |
+| `crates/vidcut` | The `vidcut` binary: Session/host, IPC, CLI (clap), GUI (eframe on wgpu), MCP server | all of the above |
 
 Inside `crates/vidcut`:
 
@@ -57,9 +56,9 @@ Inside `crates/vidcut`:
 | `session.rs` | runs requests headless against a project file |
 | `preferences.rs`, `thumbcache.rs` | `~/.config/vidcut/preferences.toml` and the pool thumbnails kept in `~/.cache/vidcut/thumbs` |
 | `threads.rs` | the one way the app starts threads: `threads::spawn(name, Work::Job \| Work::Interactive, f)`; media work runs at the lowest CPU priority |
-| `live/` | the GUI's core thread: open project, players, viewer state, waits, command log, export jobs (`jobs.rs`); publishes `Snapshot`s |
+| `live/` | the GUI's core thread: open project, both players' engines (`player.rs`: plans, motions, when a frame is on screen), viewer state, waits, command log, export jobs (`jobs.rs`); publishes `Snapshot`s |
 | `ipc/` | JSON-RPC over a Unix socket, the instance registry, CLI routing |
-| `gui/` | `app.rs`: eframe and GL glue; `workspace.rs`: all panels and UI state (testable without GL); `timeline/`: geometry, gestures, drawing; `export.rs`: Quick Export, the Export dialog, jobs and OTIO windows; `mixer.rs`: the Mixer and meters; `preferences.rs`: File > Preferences; `project.rs`: New Project's format and File > Project Settings; `timeline/tools.rs`: Ripple Delete Silence, the Boring Detector, Dynamic Trim; `tiles.rs`: the timeline's filmstrip pictures, each tile's own frame; `folders.rs`: where file dialogs start; `pool.rs` (with bins), `viewer.rs`, `video.rs`, `stills.rs` |
+| `gui/` | `app.rs`: eframe glue; `video.rs`: the viewer thread presenting both players; `picture.rs` with `picture.wgsl`: a YUV picture drawn by the GPU shader into the viewer's target, read back for screenshots (works without a window); `workspace.rs`: all panels and UI state (testable without a GPU); `timeline/`: geometry, gestures, drawing; `export.rs`: Quick Export, the Export dialog, jobs and OTIO windows; `mixer.rs`: the Mixer and meters; `preferences.rs`: File > Preferences; `project.rs`: New Project's format and File > Project Settings; `timeline/tools.rs`: Ripple Delete Silence, the Boring Detector, Dynamic Trim; `tiles.rs`: the timeline's filmstrip pictures, each tile's own frame; `folders.rs`: where file dialogs start; `pool.rs` (with bins), `viewer.rs`, `video.rs`, `stills.rs` |
 | `export.rs` | presets (built-in and user), outputs, export plans and timeline (`.otio`, bundle) exports as the session runs them |
 | `bundle.rs` | OpenTimelineIO bundles: writing `.otioz` (zip) and `.otiod` (folder) with their media, unpacking `.otioz` for import |
 
@@ -81,8 +80,10 @@ cargo run -p vidcut -- --help  # CLI
 **System packages** (Ubuntu 26.04):
 
 ```bash
-sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libasound2-dev libclang-dev libmpv2 rustup
+sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libasound2-dev libclang-dev rustup
 ```
+
+At run time the GUI needs a Vulkan driver (wgpu loads `libvulkan` at run time; Mesa's or NVIDIA's) and ALSA (`libasound2`), nothing beyond FFmpeg that a desktop lacks.
 
 **Supported FFmpeg:** 8.0, the one in the latest Ubuntu LTS (26.04), up to the newest FFmpeg release (9.0.2, `scripts/ffmpeg/release.env`). Both are tested (`scripts/ffmpeg-check.sh`, the weekly FFmpeg workflow); nothing older needs to work, so add no code for FFmpeg before 8.0. Where FFmpeg versions in that range behave differently, handle both by what the file or stream reports, not by version numbers.
 
@@ -100,7 +101,7 @@ These are mandatory.
 |---|---|---|
 | Before **every commit** (enforced by `.githooks/pre-commit`) | `scripts/check.sh` | no binary files in git, `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, unit tests (`--lib --bins`) |
 | After a **bigger change**, and before a milestone is called done | `scripts/check.sh full` | the above plus all integration/e2e tests and doc tests |
-| Also, when encoders, hwdec or real-media paths change | `scripts/check.sh full --features vidcut-av/gpu-tests` | GPU encode tests (NVENC/VAAPI) |
+| Also, when encoders, hwdec or real-media paths change | `scripts/check.sh full --features vidcut-av/gpu-tests` | GPU encode tests (NVENC/VAAPI), the player decoding on NVDEC |
 | Also, when the GUI, live session, IPC or preview change | `scripts/check.sh full --features vidcut/gui-tests` | the real GUI driven through the CLI (needs a display; opens a window briefly) |
 | Also, when the player's audio output changes | `scripts/check.sh full --features vidcut-av/audio-tests` | the player engine on the system's audio device (plays silence) |
 | Also, when FFmpeg-facing code changes (probe, decode, encode, filters, ffmpeg-next upgrades) | `scripts/ffmpeg-check.sh` | `cargo build` and `scripts/check.sh full` in containers, against Ubuntu 26.04's FFmpeg 8.0 and the newest FFmpeg release (Tools, below) |
@@ -113,7 +114,7 @@ These are mandatory.
 
 **A bigger change** is anything touching:
 - time mapping, decode/seek, the export engine
-- EDL/preview, the Request/IPC protocol
+- the player engine or the viewer's shader, the Request/IPC protocol
 - the project file format or store, or edit-operation semantics
 - more than one crate
 
@@ -149,14 +150,15 @@ These are mandatory.
 - **Color fixtures:** `Picture::Colors` paints four colored stripes (`Picture::COLORS`, in Y′CbCr) for color conversion tests.
 - **Measurement fixtures:** `Picture::Shots` (a new shot every N frames, every fourth one black) and `Sound::Tone` (a steady 1 kHz sine at −20 dBFS, −20 LUFS in stereo) have known answers for scene, black and loudness tests. In core tests, `FakeEnv` takes made-up levels and pictures (`test_support::levels`, `pictures`).
 - **Export jobs** (`crates/vidcut/tests/jobs.rs`) run the live session without players: foreground, background, cancel and wait.
-- **Live session tests** (`crates/vidcut/tests/live.rs`) run the GUI's core thread without a window: a harness thread renders both players with mpv's software renderer and answers screenshots, and requests go through `Handle::call` like IPC. Prefer them over GUI tests; they need libmpv but no display.
+- **Live session tests** (`crates/vidcut/tests/live.rs`) run the GUI's core thread without a window: both players are engines, a harness thread stands in for the viewer thread (it presents them every 2 ms, converts their pictures with `Picture::to_rgba` and answers presents and screenshots), their sound goes to recording `PacedOutput`s (`live::Players::audio` makes each player's output), and requests go through `Handle::call` like IPC. Prefer them over GUI tests; they need no display, GPU or audio device (they turn GPU acceleration off in their preferences).
+- **The viewer's shader** (`crates/vidcut/tests/picture.rs`) draws pictures on a wgpu device of its own (`gui::picture::Gpu::headless`, any adapter, lavapipe too; skips without one) and compares them with `Picture::to_rgba` and `frame render`. The WGSL is checked by naga in a unit test.
 - **Frame checks** compare barcodes: screenshot the viewer, decode the PNG with `vidcut_av::decode`, and compare with `vidcut frame render` (export's renderer).
 - **Player engine tests** (`crates/vidcut-av/tests/player*.rs`, shared helpers in `tests/player_support/`) run headless and compare each picture's barcode with `frame render`'s (`export::still`). Pictures are decoded YUV at the source's size: `read_barcode` reads any layout, and `Picture::to_rgba` gives what `frame render` does.
   - The sound is the clock, so a test drives it with an output: `ManualOutput` pulls when the test says (`pull_full`: a buffer as if just heard, so the clock stands at its end until the next), `PacedOutput` pulls in real time with a set latency and can record what it pulled and when it would be heard (A/V offset from the beeps).
   - Measure picture against sound with `ClockTrace` (the clock read at exact instants through `Player::frame_at`), not by when a polling loop saw a frame: a loaded machine runs the test thread late, not the clock.
   - Audio scrubbing is on by default, so a seek before play queues that frame's sound ahead of the play's: tests that count samples from play turn it off (`Config { audio_scrubbing: false, .. }`). `player_sound.rs` checks reversed sound and scrubbing against the beeps.
   - Decode counts (`vidcut_av::decode::frames_decoded`, process-wide) stay in `player_decodes.rs`, one test in its own binary. Work out expected pictures before counting: `frame render` decodes too.
-  - `player_media.rs` prints seek, step and play numbers on the real 1080p30 and 2160p60 clips (`--nocapture`); `player_device.rs` (`audio-tests`) plays silence on the system's device.
+  - `player_media.rs` prints seek, step and play numbers on the real 1080p30 and 2160p60 clips (`--nocapture`), on NVDEC too with `gpu-tests`, and on any files in `VIDCUT_PLAYER_MEDIA`; `player_device.rs` (`audio-tests`) plays silence on the system's device; `player_gpu.rs` (`gpu-tests`) checks NVDEC's pictures against the CPU's.
 - **Test outputs** go to temp dirs, never into the repo. Make test temp dirs with `tempfile` (`tempfile::Builder::new().prefix("vidcut-…").tempdir()`), which removes them when they drop, also when the test fails. Tests that open projects set `XDG_STATE_HOME` to a temp dir so undo history, recent projects and the folders file dialogs remember stay out of the user's state, tests that save presets or preferences set `XDG_CONFIG_HOME`, and tests that check thumbnails set `XDG_CACHE_HOME`.
 
 ## Driving vidcut as an agent
@@ -249,7 +251,7 @@ vidcut history undo                         # works across separate runs
   - `vidcut presets save web --from youtube-1080p --set video.quality=22 [--quick-export]` saves a user preset to `~/.config/vidcut/presets/web.toml`; `--settings JSON|@FILE` gives full settings instead. `vidcut presets delete web` removes it.
 - `vidcut encoders list` shows which GPU encoders work here (cached; `--refresh` re-tests), whether or not `gpu.acceleration` lets vidcut use them.
 - `vidcut preferences get` shows the application preferences (`~/.config/vidcut/preferences.toml`) and what the thumbnail cache holds; `vidcut preferences set thumbnails.cache_limit_mb=256` changes them (`preferences.set` takes `{"thumbnails": {"disk_cache": false}}`; turning the cache off empties it). The cache holds the pool's pictures and the timeline's filmstrip tiles; `thumbnails.timeline_memory_mb` (256) is the memory a running GUI keeps tiles in.
-  - `vidcut preferences set gpu.acceleration=false` (File > Preferences: GPU) turns off all GPU work: exports and proxies take software encoders whatever the settings or preset name (`export plan` shows `cpu`), so nothing decodes on NVDEC either, and the preview decodes in software at once: a running GUI watches the preferences file and reopens its players where they are (`player state` reports each player's `hwdec`). For comparing CPU and GPU pictures, or when a driver misbehaves. On by default.
+  - `vidcut preferences set gpu.acceleration=false` (File > Preferences: GPU) turns off all GPU work: exports and proxies take software encoders whatever the settings or preset name (`export plan` shows `cpu`), so nothing decodes on NVDEC either, and the preview decodes in software at once: a running GUI watches the preferences file and switches its players' decoder where they are (`player state` reports what decoded the picture shown, `hwdec`: `nvdec` or `no`). With it on, the preview decodes HEVC, AV1 and VP9 on NVDEC and H.264 on the CPU, which is faster for it. For comparing CPU and GPU pictures, or when a driver misbehaves. On by default.
 - `vidcut frame render --at 1m --out f.png [--width 640]` renders what the timeline shows at a frame. `--media m1` renders a media frame instead. Use it to look at cuts.
 
 **Automatic tools (spec D29–D32):**
@@ -283,9 +285,9 @@ vidcut history undo                         # works across separate runs
 
 | Command | What |
 |---|---|
-| `vidcut player state` | viewer mode, both playheads, the source clip, selection |
+| `vidcut player state` | viewer mode, both playheads, the source clip, selection, what decodes (`hwdec`), late presents and skipped frames while playing |
 | `vidcut player seek 10s [--viewer timeline\|source_clip\|source_tape]` | returns once the frame is on screen (`CONFLICT` if someone moved the viewer first); `+10f`/`-2s` are relative |
-| `vidcut player step [-]N`, `player play [--speed -2]`, `player pause`, `player toggle` | negative speeds play backwards |
+| `vidcut player step [-]N`, `player play [--speed -2]`, `player pause`, `player toggle` | negative speeds play backwards, the sound reversed; other speeds keep its pitch |
 | `vidcut viewer set source_clip\|source_tape\|timeline`, `viewer load m1 [--at 5s]` | what the viewer shows |
 | `vidcut selection set --clips c1,c2 --media m3`, `selection get` | the selection |
 | `vidcut gui screenshot --out v.png [--target window]` | the viewer picture as shown (works while minimized), or the whole window |
@@ -294,7 +296,8 @@ vidcut history undo                         # works across separate runs
 | `vidcut jobs list`, `jobs get\|wait\|cancel J [--timeout S]` | export and proxy jobs, the GUI's own included; `wait` fails like the job did |
 | `vidcut pool set --bin A --sort name --descending true` | the bin the Media Pool shows and its order; Source Tape follows it |
 | `vidcut player mute [true\|false]` | the viewer's monitoring mute (not the export); without a value, toggles |
-| `vidcut mixer preview A1 -12` | a track's level heard now, without changing the project (`track set --volume-db` keeps one); `live: false` without ZeroMQ or FFmpeg's `azmq` |
+| `vidcut player audio-scrubbing [true\|false]` | audio scrubbing (decision D42): steps and paused seeks play their frame's sound; without a value, toggles (Shift+S) |
+| `vidcut mixer preview A1 -12` | a track's level heard now, without changing the project (`track set --volume-db` keeps one); `live: false` when nothing plays the timeline |
 | `vidcut gui show quick_export\|export\|jobs\|log\|mixer\|preferences` | opens that window for the person at the GUI |
 
 - **Looking at the result:** `vidcut player seek 1m && vidcut gui screenshot --out shot.png` shows exactly what `vidcut frame render --at 1m --out f.png` renders. Both are frame-exact.
@@ -316,10 +319,10 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 **GPU encoders:** `cargo run -p vidcut-av --example encoders` test-encodes every NVENC/VAAPI option, uncached.
 
 **Other FFmpeg versions** (`scripts/ffmpeg-check.sh`, needs Docker): builds an image per target, then runs `cargo build --workspace` and `scripts/check.sh full` in it against the checkout (mounted read-only), and prints a summary.
-- Targets: `lts` (Ubuntu 26.04's FFmpeg 8.0 and libmpv), `release` (the newest FFmpeg release, built from the official tarball on Ubuntu 26.04) and `master` (FFmpeg's git master, the same way; an early warning, allowed to fail). Without targets: `lts release`.
+- Targets: `lts` (Ubuntu 26.04's FFmpeg 8.0), `release` (the newest FFmpeg release, built from the official tarball on Ubuntu 26.04) and `master` (FFmpeg's git master, the same way; an early warning, allowed to fail). Without targets: `lts release`.
 - `--fast` runs `scripts/check.sh` instead; `scripts/ffmpeg-check.sh release -- cargo test -p vidcut --test cli` runs any command, `-- bash` a shell.
-- The containers have no GPU, display or audio device: the GPU, GUI and audio-device tests stay off (they are features), and outside `lts` the tests that need libmpv skip (Ubuntu's libmpv links Ubuntu's FFmpeg).
-- FFmpeg is configured (`scripts/ffmpeg/build-ffmpeg.sh`) with what vidcut uses: x264, x265, SVT-AV1, libvpx, dav1d, Opus, LAME, Vorbis, zimg, ZeroMQ, libplacebo on Vulkan, VAAPI, NVENC/NVDEC and the CUDA filters (compiled by clang, no CUDA toolkit). Its build is a cached image layer: about a minute and a half on 16 cores, again only when `scripts/ffmpeg/` changes or master moves (`VIDCUT_FFMPEG_MASTER=COMMIT` pins one).
+- The containers have no GPU, display or audio device: the GPU, GUI and audio-device tests stay off (they are features), and the viewer's shader test skips without a wgpu adapter.
+- FFmpeg is configured (`scripts/ffmpeg/build-ffmpeg.sh`) with what vidcut uses: x264, x265, SVT-AV1, libvpx, dav1d, Opus, LAME, Vorbis, zimg, libplacebo on Vulkan, VAAPI, NVENC/NVDEC and the CUDA filters (compiled by clang, no CUDA toolkit). Its build is a cached image layer: about a minute and a half on 16 cores, again only when `scripts/ffmpeg/` changes or master moves (`VIDCUT_FFMPEG_MASTER=COMMIT` pins one).
 - Caches are Docker volumes: `vidcut-ffmpeg-cargo` (crates), `vidcut-ffmpeg-target-TARGET` and `vidcut-ffmpeg-data-TARGET` (fixtures made with that FFmpeg; the downloaded media are mounted read-only). A target directory takes about 5.5 GB and the images about 3 GB together. On 16 cores a first run of all three targets took 7 minutes, and a repeat run of both default targets takes about a minute. To free the space: `docker volume rm $(docker volume ls -q -f name=vidcut-ffmpeg)` and `docker image rm vidcut-ffmpeg:lts vidcut-ffmpeg:release vidcut-ffmpeg:master`.
 - A newer FFmpeg release: put its version and the sha256 of its tarball, checked against its signature, in `scripts/ffmpeg/release.env` (the steps are there), then run `scripts/ffmpeg-check.sh release`.
 
@@ -330,46 +333,32 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `packets FILE [FROM TO]`: video packets in decode order, with pts, dts and keyframe flags (open-GOP questions).
 - `filmstrip FILE OUTDIR [N]`: pool thumbnails, timed.
 - `tiles FILE [HEIGHT]`: timeline filmstrip tiles, timed at spacings from 0.25 to 30 s.
+- `decode_speed FILE [FRAMES]`: frames a second and seek times decoding on the CPU and on NVDEC.
 
 **Preview debugging:**
-- `VIDCUT_DEBUG_PLAYER=1` traces every player command, mpv event, render and timeline gesture to stderr, and what the player engine (`vidcut_av::player`) decodes.
-- `VIDCUT_MPV_OPTIONS="hwdec=no,ao=null"` overrides mpv options.
-- `VIDCUT_MPV_LOG_DIR=DIR` makes each GUI player write mpv's own log, at debug level, to `DIR/<pid>-source.log` and `DIR/<pid>-timeline.log`. `VIDCUT_MPV_OPTIONS=msg-level=all=trace` adds more.
-  - FFmpeg's messages are all in the timeline's log: both players' and those of vidcut's own FFmpeg work in the GUI process (thumbnails, waveforms, exports). FFmpeg has one log callback per process, and the first mpv instance (the timeline's) takes it.
-  - `tests/gui.rs` sets it and `VIDCUT_DEBUG_PLAYER` for its GUI. A failed run keeps its temp dir, which the failure names: the screenshots, both mpv logs and the GUI's stderr.
-
-**Preview spikes:**
-- `cargo test -p vidcut-mpv --test edl_spike -- --nocapture` runs the mpv EDL/seek semantics experiments headless.
-- `cargo run -p vidcut --example mpv_gl_spike -- FILE [FILE2] --auto-exit 8` opens a window with mpv embedded in egui and prints hwdec and drop statistics.
+- `VIDCUT_DEBUG_PLAYER=1` traces to stderr what the player engines decode, the session's presents, what the viewer thread draws, key presses and timeline gestures.
+- `tests/gui.rs` sets it for its GUI. A failed run keeps its temp dir, which the failure names: the screenshots and the GUI's stderr.
+- `WGPU_BACKEND` (`vulkan`, `metal`, `dx12`) and `WGPU_POWER_PREF` (`low`, `high`) pick wgpu's backend and adapter (eframe reads them); `WGPU_VALIDATION=0` turns the validation layers off in debug builds.
 
 ## Gotchas
 
 The preview findings and the time-mapping rules are in [docs/decisions/preview.md](docs/decisions/preview.md); the export engine, sampling rule and encoder decisions are in [docs/decisions/export.md](docs/decisions/export.md); the player engine (threads, requests, the audio clock) is in [docs/decisions/player.md](docs/decisions/player.md). Read them before touching preview, seeking, time conversion, export or the player.
 
-- **libmpv needs `LC_NUMERIC=C`.** `Mpv::new` calls `setlocale` before `mpv_create`.
-- **mpv's render thread (the GUI's UI thread) may only call render-thread-safe client functions:**
-  - async commands and property calls
-  - `mpv_observe_property`, `mpv_wakeup`
-  - `mpv_wait_event(…, 0)`
-
-  Synchronous `command`/`get_property` there deadlocks against the video output. The mpv update and wakeup callbacks must not call mpv at all.
-- **vsync must stay off** (`GlowConfiguration { vsync: false }`). On GNOME/Wayland with NVIDIA, a vsynced swap blocks forever while the window is hidden.
+- **Presenting a hidden window blocks the UI thread** on GNOME Wayland with NVIDIA's driver, with Mailbox and FIFO alike, until the window shows again (Wayland can't show it by request). So the viewer presents on its own thread (`gui/video.rs`), which keeps submitting to the same device meanwhile, and nothing the session or IPC waits for may need the UI thread, except window screenshots and windows; `gui.quit` ends the process when the window doesn't close.
+- **wgpu's default error handler panics.** A texture larger than the device allows, or a binding of the wrong format, takes the GUI down: check sizes against `device.limits()` (`Screen::draw` draws black for a picture larger than the limit), and keep the shader's bindings and `Gpu::new`'s layout together.
+- **egui-wgpu's native textures are `Rgba8Unorm` and shown as they are:** the viewer's target holds gamma-encoded BT.709 RGB, which egui puts on screen unchanged (no sRGB conversion).
 - **Start threads with `threads::spawn`, saying what the work is.** `Work::Job` (exports, proxies, measurements, thumbnails, anything decoding media nobody watches frame by frame) runs in Linux's idle scheduling class (below nice 19), and the FFmpeg threads it starts inherit that; `Work::Interactive` is for what someone waits on. A unit test fails on any other thread start in `crates/vidcut/src`.
 - **Never lower a thread's priority with nice.** NVIDIA's driver, opening NVENC, copies the calling thread's nice value onto the process id, which is the main thread, and an unprivileged process can't raise it again: a proxy job at nice 19 left the GUI at nice 19. The idle class leaves the nice value alone.
-- **A paused viewer shows vidcut-av's renderer, not mpv's picture** (preview.md §13): the same frame, decoded once whichever way it steps. Playing shows mpv. `gui.screenshot` captures mpv's picture, which differs by a couple of levels in fine detail. The renderer's tests count decoded frames with `vidcut_av::decode::frames_decoded()`, a process-wide count, so they stay one test in their own binary.
+- **The viewer shows the engine's pictures, paused and playing**, and `gui.screenshot` reads back what the shader drew. The two-up (Trim Editor, Dynamic Trim) draws with vidcut-av's renderer (preview.md §9), whose tests count decoded frames with `vidcut_av::decode::frames_decoded()`, a process-wide count, so they stay one test in their own binary.
+- **NVDEC's frames are copied down to memory as they are decoded** (`cuda::download`, in the reader's decoded mode): the decoder has a few surfaces (`extra_hw_frames`), and kept pictures would run them out.
 - **One CUDA device per process** (`cuda::CudaDevice::open`), with its Vulkan device: the Vulkan loader crashes (a null function in `vkEnumerateInstanceExtensionProperties`) when two threads make instances at once.
 - **The player engine's clock is its audio output's callback** (player.md §4). Playing, the position is the sample the device has heard: with no output pulling, it never moves. Headless, give it a `PacedOutput`; a `ManualOutput` moves only when pulled. The device's data callback (`AudioSource::fill`) must never lock, allocate or decode.
 - **libplacebo (turning, other matrices and HDR on the GPU, `cuda.rs`) keeps a frame back and snaps times within a millisecond to a frame.** Exports push a filler after each frame; the timestamps it sees are counts a second apart. Frames go in without side data (their display matrix would cancel the turn, HDR metadata would change the tone mapping), and 10-bit ones as P016, not P010, whose planes it reads and writes wrongly on a Vulkan device made from CUDA. It can't clear borders in FFmpeg's Vulkan frames, so it pads over a black frame. Its own HDR conversion isn't the CPU's (it lifts black for an SDR display, maps the curve on intensity, clips nothing): HDR goes through a user shader with the CPU's math, and libplacebo is told the picture is already in the output's colors. It keeps pictures between passes in half floats, stored rounded toward zero; the shader corrects by half a step (export.md §5).
 - **FFmpeg's `scale` converts the matrix unless told it:** a graph whose source carries no colorspace gets BT.601 out of swscale, so the normalizer names the matrix for both sides, also where it only scales (before `zscale`). `zscale` can't write NV12 or P010; it writes their planar layouts, or FFmpeg converts its RGB with swscale (export.md §4).
-- **Players render in `App::logic`, not `App::ui`.** eframe skips `ui` for hidden windows but always calls `logic`.
-- **libmpv waits only 200 ms for the renderer to take a new frame.** Then it keeps the frame as its current picture and finishes the seek anyway, so "a new frame was rendered" doesn't prove a seek is on screen. The session counts a seek as shown only after the renderer presents the player following mpv's restart (docs/decisions/gui.md §4).
-- **mpv's EDL drops leading pictures at segment ends.** Encodes that decode a keyframe before the frames shown just ahead of it lose those frames in the preview when a cut ends there. The live session patches such tails (preview.md §9). Test cuts against fixtures with B-frames and real media, not only small fixtures.
-- **Timeline files pin mpv's audio output to the project's rate and channels** (`live::file_options`). At a cut into a clip with other audio, mpv otherwise drains and reopens the device, and the picture drops frames to catch up (preview.md §5).
-- **Only the session thread calls mpv's client API.** Seeks while a file is still loading are rejected by mpv; `Player::seek` reloads instead.
+- **A seek is on screen once presented** (gui.md §4): the engine's picture of the frame is decoded and the viewer thread drew it after the seek. Don't count a seek as shown because a picture was decoded, or because a frame was drawn before it.
+- **An engine plays at its plan's sample rate and channels**: another needs a new engine (`live::player::Player::load` makes one), as the device was opened for them.
 - **File watching:** `notify` reports reads as access events. Ignore them, or a reload re-triggers itself forever.
-- **The half-frame bias is applied exactly once.** mpv EDL `start` values are raw source timestamps and carry it, so timeline seeks to frame `j` go to exactly `j/f`.
-- **Never send negative absolute seeks.** mpv counts them from the end of the file.
-- **MPEG-TS and other index-less containers can't be seeked exactly by mpv.** Preview uses an MKV remux (`vidcut_av::remux`); export reads the original.
+- **Test cuts against fixtures with B-frames and real media**, not only small fixtures: encodes that decode a keyframe before the frames shown just ahead of it (open GOPs, x264's B-frames) are where readers lose frames at cuts.
 - **Set packet durations explicitly when muxing** from delayed encoders (x264 with B-frames). Otherwise MP4 edit lists drop the last frame.
 - **Clear a decoded frame's picture type before encoding it** (`set_kind(picture::Type::None)`). Encoders take it as an order: the output copies the source's keyframes, and x264 warns about every B-frame it can't make.
 - **Set `pkt_timebase` on every decoder** (`codec_ctx.pkt_timebase = stream.time_base`). Without it, FFmpeg can't adjust timestamps when it skips priming samples, and audio drifts by the codec delay.
@@ -377,9 +366,7 @@ The preview findings and the time-mapping rules are in [docs/decisions/preview.m
 - **After the installed FFmpeg changes, run `cargo clean -p ffmpeg-sys-next`.** Its bindings come from FFmpeg's headers, and cargo doesn't rerun its build script when they change. The images of `scripts/ffmpeg-check.sh` do this by themselves.
 - **Color goes through `vidcut_av::color`** (export.md §4): HDR sources are tone-mapped for SDR output, SDR sources sit at 203 nits in HDR output, untagged HD is BT.709. Rotation metadata is applied everywhere (spec D33).
 - **`zscale` needs explicit output primaries** when converting to linear light: for untagged frames it otherwise fails with "no path between colorspaces".
-- **Interlaced sources are deinterlaced inside `VideoReader`** (`bwdif`, one frame per frame; `bwdif_cuda` for frames NVDEC decodes), before frames are picked. The preview adds the same filter per file (preview.md §5); mpv's own `deinterlace` makes one frame per field, which breaks frame-exact seeks.
-- **mpv's software renderer aborts on rotated video** (an assertion in `mp_image_crop`). The GUI renders with OpenGL, which rotates on the GPU, so `tests/live.rs` (software rendering) leaves rotated clips to `tests/gui.rs`.
+- **Interlaced sources are deinterlaced inside `VideoReader`** (`bwdif`, one frame per frame; `bwdif_cuda` for frames NVDEC decodes), before frames are picked, so the export and the viewer alike show one frame per frame.
 - **GPUs on the dev machine:**
-  - NVIDIA on `renderD128`: NVENC works, VAAPI doesn't.
+  - NVIDIA on `renderD128`: NVENC and NVDEC work, VAAPI doesn't. wgpu draws the GUI on it (Vulkan).
   - AMD on `renderD129`: VAAPI H.264/HEVC.
-  - The GL context is on NVIDIA, so preview hwdec is nvdec with zero-copy CUDA frames.

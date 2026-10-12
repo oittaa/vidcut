@@ -1,19 +1,20 @@
 # The player engine: vidcut's own playback, headless
 
-**Status:** accepted (October 2026). Step 3 of [own-player.md](../todo/own-player.md): the engine runs and is tested headless; the GUI still previews with mpv ([preview.md](preview.md)).
+**Status:** accepted (October 2026). The GUI's two viewers play through it ([preview.md](preview.md)); this record is the engine itself, tested headless.
 
 **Evidence** (all rerunnable, no display):
 - [`crates/vidcut-av/tests/player.rs`](../../crates/vidcut-av/tests/player.rs): pictures against `frame render` at seeks and steps both ways across cuts, files, codecs, black, stills and image sequences; the YUV pictures, and their conversion against `frame render`'s to the byte; playing shows every frame in order; the beep lands on its sample; pictures against beeps through a device with latency; 2×, reverse; faders and mute while playing; calls that return at once.
 - [`tests/player_sound.rs`](../../crates/vidcut-av/tests/player_sound.rs): backward sound reversed to the sample; pictures with the sound through a device with latency at −1×, 2×, 0.5× and −2×; other speeds both ways keeping the pitch; audio scrubbing: steps play their frame's sound, held steps don't pile up, the `Scrubber` alone.
 - [`tests/player_decodes.rs`](../../crates/vidcut-av/tests/player_decodes.rs): what is decoded, playing both ways, across an edit, and for seeks in a row.
-- [`tests/player_media.rs`](../../crates/vidcut-av/tests/player_media.rs): numbers on the real 1080p30 and 2160p60 clips (§7).
+- [`tests/player_media.rs`](../../crates/vidcut-av/tests/player_media.rs): numbers on the real 1080p30 and 2160p60 clips, on the CPU and with `--features gpu-tests` on NVDEC too (§7); `VIDCUT_PLAYER_MEDIA` measures other files.
+- [`tests/player_gpu.rs`](../../crates/vidcut-av/tests/player_gpu.rs) (`--features vidcut-av/gpu-tests`): pictures decoded on NVDEC are the CPU's (§3).
 - [`tests/player_device.rs`](../../crates/vidcut-av/tests/player_device.rs) (`--features vidcut-av/audio-tests`): the system's audio device runs the clock (it plays silence).
 
 ## 1. Threads
 
 | Thread | Does | Never |
 |---|---|---|
-| **The caller** (later the live session and the renderer) | sends requests, which return at once; `present` looks a picture up | decodes or waits |
+| **The caller** (the live session, which requests; the viewer thread, which presents) | sends requests, which return at once; `present` looks a picture up | decodes or waits |
 | **Decode** (`vidcut-play-video`) | the picture of the frame the viewer is at, then pictures ahead of it | touches the device |
 | **Audio** (`vidcut-play-audio`) | mixes the plan's lanes into the ring; paused, a step's frame | waits on the device |
 | **Device callback** (the output's thread) | copies from the ring, notes when it will be heard | locks, allocates or decodes |
@@ -34,11 +35,12 @@ vidcut-av starts them as it starts its other threads (`std::thread::Builder`, na
 - **Picked by the export's reader** (`export::video::VideoFrames` in its `decoded` mode): the sampling rule (export.md §2), deinterlacing, stills and image sequences, so each is the frame export shows. The tests compare every picture's barcode with `frame render`'s.
 - **As decoded.** A picture is the decoded frame, held by reference: its own size, its own colors, not turned, in a layout a display takes: 8-bit 4:2:0 (planar, or NV12 as hardware decoders give it) or P010 for more bits. Others are brought to the nearest at their own size (`Relayout`): 4:2:2, 4:4:4 and 10-bit planar are resampled to 4:2:0 keeping their matrix and range (ProRes 4:2:2 10-bit becomes P010); RGB images are coded BT.709 video range. Black is the plan's size in 8-bit 4:2:0. Nothing copies a picture's pixels after the decoder.
 - **The display does the rest**, on the GPU: fitting into the viewer as export fits (`Picture::placement`), turning (`rotation`, the display matrix), and YUV to BT.709 RGB from `Picture::colors` (matrix, range, HDR), which are `vidcut_av::color`'s reading of the frame: its tags, or for untagged pictures BT.709 when HD and BT.601 otherwise, BT.2020 when HDR. `Picture::to_rgba` is that whole path on the CPU with the export's own filters: what `frame render` gives (the tests find it equal to the byte for 8-bit sources) and what a shader must match.
-- **GPU surfaces.** `Picture::memory` and `layout` read a hardware frame's format and frames context (CUDA, VAAPI, Vulkan): a GPU surface is the same frame type, and the engine never reads pixels.
+- **Decoded on the GPU** where it is faster (`Config::hardware`, `set_hardware`; preview.md §3): HEVC, AV1 and VP9 decode on NVDEC (`VideoReader::open_fastest`), H.264 and the rest on the CPU, which decodes them several times faster. NVDEC's frames are copied down to memory at their own size, NV12 or P010, with their properties: the decoder's surfaces are few, and the store keeps many pictures. A switch of decoder decodes the pictures anew. Each picture says what decoded it (`Picture::decoder`), and `Status::decoder` is the one shown last.
+- **GPU surfaces.** `Picture::memory` and `layout` read a hardware frame's format and frames context (CUDA, VAAPI, Vulkan): a picture left on the GPU would be the same frame type, and the engine never reads pixels. None stay there yet (own-player.md).
 - **Kept by what they show:** the file, its origin, still or sequence, the source position and the rate (black by the plan's size). Pictures survive edits that move them (a ripple), and seeking to a kept one shows it without waiting for the decode thread. A memory budget holds them (`Config::budget`, 1 GB unless the caller sets less: enough for 4K played backward); the least recently kept or shown go first. A picture takes what its layout does: 3.1 MB for 1080p, 12.4 MB for 2160p 4:2:0; counts below are in pictures like the latest.
 - **Forward**, the reader decodes on from frame to frame, and the next file opens ahead on the export's opener thread. Frames the clock has already passed are decoded and not kept. A reader far behind (more than a second) seeks to where the clock will be once the seek is done (the recent seek time × speed) and goes on from there while the clock comes.
 - **Ahead:** a quarter of a second × speed while playing (at most a quarter of the budget); paused, three frames when the reader stands right there.
-- **Back:** a window from a keyframe up to the frame, kept (the paused renderer's rule, preview.md §13): at least two seconds where keyframes are close, at most a third of the budget. Playing backward, the window before decodes while this one is shown; paused after a step back, one window behind.
+- **Back:** a window from a keyframe up to the frame, kept (the two-up renderer's rule, preview.md §9): at least two seconds where keyframes are close, at most a third of the budget. Playing backward, the window before decodes while this one is shown; paused after a step back, one window behind.
 - **Edits.** `set_plan` keeps the position, the open file (the reader reads the new plan's pieces: a piece of the open file decodes on or seeks) and the kept pictures. The sample rate and channels must stay (the device was opened for them): another is refused before anything changes, and the same plan again changes nothing, so neither cancels a decode. Playing, the sound goes on from the same time; at another frame rate the picture shown stays until the new plan's is decoded.
 
 ## 4. Sound, and the clock
@@ -56,7 +58,7 @@ vidcut-av starts them as it starts its other threads (`std::thread::Builder`, na
   - At the end the clock holds and the player pauses on the last frame.
   - Play starts by showing its first frame until that frame's first sample is heard.
   - `frame_at(t)` reads the clock at any instant without changing anything: a display asks for the frame of its next refresh, a test for exact instants a moment ago (the clock remembers the device's last 64 buffers).
-  - No half-frame lead: mpv's preview sound leads its picture by half a frame (preview.md §10); the engine has no EDL and no bias.
+  - No half-frame lead: the sound and the picture meet on the frame's first sample.
 - **Backward** the sound plays reversed: the mix is read forward a block at a time (0.2 s of play, one seek of each lane's stream a block), from further and further back, and each block is reversed a sample frame at a time. It is the clock as forward sound is: a beep's first sample is the last of it heard, and the picture moves to the frame before right after it.
 - **Other speeds**, both ways, go through the engine's own time stretch (`Stretch`, WSOLA), which keeps the pitch and says where its output came from:
   - The mix is cut into fragments of 21 ms that overlap by half in the output, Hann-shaped and added. Fragment *k* would start *k* hops × speed into the input; it moves by up to 5 ms to where its first half best matches what would have followed the fragment before, so the overlap adds alike sound.
@@ -69,7 +71,8 @@ vidcut-av starts them as it starts its other threads (`std::thread::Builder`, na
 - **Frame steps and paused seeks** play the sound of the frame arrived at, when `audio_scrubbing` is on (the default; `set_audio_scrubbing`): its samples of the mix (every lane, gains, faders, lane gains on top), faded in and out over 3 ms. A drag of the playhead is paused seeks, so it scrubs too. Muted, nothing plays; playing, steps don't happen and seeks don't scrub.
 - **Forward, either way:** a step back plays its frame forward.
 - **One at a time:** the audio thread keeps the newest frame's sound until the one in the ring has (all but) played out, then queues it whole, so a sound is never cut and a newer one replaces any still waiting. Held keys play frame after frame, steps faster than that skip to the newest, and nothing piles up. The mix seeks per frame; stepping on decodes on.
-- **`Scrubber`** does the same without a player, for a viewer whose pictures come from elsewhere (the live session while mpv still shows them): `Scrubber::new(rate, channels, output)`, `set_plan` on an edit, `play(frame)` for each step, `set_lane_gain` for a fader being dragged. Its own thread mixes; its own output plays.
+- **`Scrubber`** does the same without a player, for a viewer whose pictures come from elsewhere: `Scrubber::new(rate, channels, output)`, `set_plan` on an edit, `play(frame)` for each step, `set_lane_gain` for a fader being dragged. Its own thread mixes; its own output plays.
+- **Quiet seeks:** `seek_quietly` moves without the frame's sound, for moves the viewer makes by itself (opening at a remembered frame, after an edit).
 
 ## 6. Outputs
 
@@ -100,11 +103,16 @@ On the dev machine (16 threads), decoding on the CPU; YUV pictures at the clips'
 | 2160p60: 3 s backward, at the default 1 GB | 177–178 of 180–181 shown, none late, 3.9–4.6 cores |
 | 2160p60: 3 s backward at 512 MB | 153–159 of 180 shown, 19–24 presents late, 7.1–7.2 cores |
 | System device (PipeWire) | 37 ms latency; the picture moves 81 ms after play |
+| NVDEC (`--features gpu-tests`): 1080p30 H.264, seek to picture / 5 s forward / 3 s backward | median 296 ms / 150 of 150 shown, 0.0 cores / 90 of 91, 0.1 cores |
+| NVDEC: 2160p60 H.264 | median 788 ms / 298 of 300, 0.1 cores / 56 of 181 shown, 123 presents late |
+| 2160p60 10-bit HEVC (bbb, NVENC, 24.9 MB P010 pictures), CPU / NVDEC | seeks median 238 / 108 ms; forward 2.0 / 0.1 cores, none late; backward 23 / 84 of 181 shown |
+| 2160p60 10-bit AV1, CPU / NVDEC | seeks median 208 / 115 ms; forward 1.6 / 0.1 cores, none late; backward 55 / 83 of 181 shown |
 
-Against the earlier RGBA pictures at a 1920×1080 viewer (8.3 MB each): playing forward no longer scales on the CPU (4K 1.2 cores down to 0.4, 1080p 0.2 to 0.1), 1080p keeps 2.7 times as many pictures, and 4K keeps two thirds as many (12.4 MB for the source size). Backward 4K in a 4 s GOP decodes most windows from the keyframe again, so the budget decides it: 14 pictures a window (512 MB) take 7.1 cores and drop frames, 20 (the RGBA pictures at 512 MB) took 6.1, 28 (1 GB, the default for that reason) take 4.3 and drop none. A smaller budget suits smaller sources; GPU frames (milestone 2) change it again.
+Against the earlier RGBA pictures at a 1920×1080 viewer (8.3 MB each): playing forward no longer scales on the CPU (4K 1.2 cores down to 0.4, 1080p 0.2 to 0.1), 1080p keeps 2.7 times as many pictures, and 4K keeps two thirds as many (12.4 MB for the source size). Backward 4K in a 4 s GOP decodes most windows from the keyframe again, so the budget decides it: 14 pictures a window (512 MB) take 7.1 cores and drop frames, 20 (the RGBA pictures at 512 MB) took 6.1, 28 (1 GB, the default for that reason) take 4.3 and drop none. A smaller budget suits smaller sources.
+
+NVDEC decodes one frame at a time through FFmpeg and waits for each: 4K H.264 at 253 frames a second against the CPU's 1,014, so seeks into long GOPs and backward play (windows decoded again) are the CPU's for H.264, which is why it decodes there. For 10-bit HEVC and AV1 NVDEC is the faster: seeks in half the time, forward play on a tenth of a core; backward 4K is short of real time either way (a window of 14 P010 pictures at 1 GB). The GUI's numbers are in preview.md §8.
 
 ## 8. Not yet
 
-- **GPU frames** (milestone 2): decoding on NVDEC, VAAPI or Vulkan into the engine's pictures (NV12 and P010 surfaces, the layouts above), kept in video memory. The CPU path stays for what GPUs don't decode.
-- **The display and the GUI** (own-player.md, the wgpu step): pictures as textures, placed, turned and converted to RGB in shaders that match `Picture::to_rgba`, mpv removed. The live session then seeks and presents through the engine (a seek is shown once presented: `Status::presented`), `player.state` reads `Status`, `mixer.preview` calls `set_lane_gain`, `player.mute` calls `set_muted`, Shift+S calls `set_audio_scrubbing`. Before that, the session can scrub with a `Scrubber` while mpv shows the picture.
+- **Pictures left on the GPU** (own-player.md): NVDEC's, VAAPI's or Vulkan Video's frames kept in video memory and shown without the copy down.
 - **Sound:** choosing the device, resampling for a device that won't open at the plan's rate.

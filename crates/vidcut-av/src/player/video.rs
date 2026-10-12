@@ -4,9 +4,9 @@
 //! Forward, the export's reader decodes on from frame to frame, a piece of
 //! another file opening ahead on its helper thread. Going back there is
 //! nothing to decode on from, so a window renders at once, from a keyframe
-//! up to the frame wanted, and is kept (as the paused viewer's renderer
-//! does, preview.md §13); playing backwards, the window before renders
-//! while this one is shown.
+//! up to the frame wanted, and is kept (as the two-up's renderer does,
+//! preview.md §9); playing backwards, the window before renders while this
+//! one is shown.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
