@@ -86,6 +86,70 @@ fn seeks_and_steps_show_what_frame_render_shows() {
 }
 
 #[test]
+fn stills_and_image_sequences_show_their_pictures() {
+    use vidcut_av::fixture::{self, ImageSpec};
+    use vidcut_core::render::{AudioPiece, Image, VideoPiece};
+    let a = h264();
+    let still = fixture::ensure_images(&ImageSpec::still(777, W, H, "png")).unwrap();
+    let seq = ImageSpec::sequence(1, 30, 4, W, H);
+    let files = fixture::ensure_images(&seq).unwrap();
+    let pattern = files[0].parent().unwrap().join("img_%04d.png");
+    let picture = |path: &std::path::Path, image, from, frames| VideoPiece::Source {
+        media: "i".into(),
+        path: path.to_path_buf(),
+        origin: 0.0,
+        source_frame: from,
+        frames,
+        image: Some(image),
+    };
+    // a 0..20, the still for 15 frames, sequence pictures 5..25, a 40..50.
+    let mut p = plan(&[clip(&a, 0, 20), gap(15), gap(20), clip(&a, 40, 10)], 0);
+    p.video[1] = picture(&still[0], Image::Still, 0, 15);
+    p.video[2] = picture(
+        &files[0],
+        Image::Sequence {
+            pattern,
+            first: 1,
+            count: 30,
+            rate: fps(),
+        },
+        5,
+        20,
+    );
+    assert!(matches!(p.audio[0][1], AudioPiece::Silence { .. }));
+    let expect: Vec<Option<u32>> = (0..65).map(|t| rendered(&p, t)).collect();
+    assert_eq!(expect[25], Some(777));
+    assert_eq!(expect[35], Some(5));
+    let (player, out) = manual(p);
+    for t in [19, 20, 27, 34, 35, 44, 54, 55, 64] {
+        player.seek(t);
+        assert_eq!(shown_at(&player, t), expect[t as usize], "seek to {t}");
+    }
+    for t in (0..64).rev() {
+        player.step(-1);
+        assert_eq!(shown_at(&player, t), expect[t as usize], "step back to {t}");
+    }
+    player.play(1.0);
+    let mut shown = Vec::new();
+    while player.status().playing {
+        pull_full(&out, 480);
+        let t = player.status().position;
+        assert!(player.wait_ready(t, Duration::from_secs(10)), "frame {t}");
+        let s = player.present(Instant::now()).unwrap();
+        assert_eq!(
+            code(&s.picture),
+            expect[s.frame as usize],
+            "frame {}",
+            s.frame
+        );
+        if shown.last() != Some(&s.frame) {
+            shown.push(s.frame);
+        }
+    }
+    assert_eq!(shown, (0..65).collect::<Vec<_>>());
+}
+
+#[test]
 fn playing_shows_every_frame_on_time_across_cuts_and_files() {
     let (a, b) = (pcm(), hevc());
     let p = plan(
