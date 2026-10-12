@@ -12,7 +12,7 @@ use vidcut_av::export::{
 use vidcut_av::fixture::{self, AudioCodec, Container, FixtureSpec, ImageSpec, Spoil, VideoCodec};
 use vidcut_core::export::{
     AudioCodec as ACodec, AudioSettings, Container as OutContainer, EncoderChoice, ExportSettings,
-    VideoCodec as VCodec, VideoSettings,
+    HdrMode, VideoCodec as VCodec, VideoSettings,
 };
 use vidcut_core::render::{AudioPiece, Image, RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
@@ -101,7 +101,7 @@ fn lossless() -> ExportSettings {
             bit_depth: None,
             width: None,
             height: None,
-            hdr: None,
+            hdr: HdrMode::Sdr,
         }),
         audio: Some(AudioSettings {
             codec: ACodec::PcmS16,
@@ -525,7 +525,7 @@ fn hdr_is_tone_mapped_for_sdr_and_kept_for_hdr() {
     video.codec = VCodec::Hevc;
     video.quality = Some(4);
     video.speed = Some("ultrafast".into());
-    video.hdr = Some(Hdr::Pq);
+    video.hdr = HdrMode::Pq;
     let out = dir.path().join("pq.mkv");
     render(&p, &settings, &out);
     let info = vidcut_av::probe::probe(&out).unwrap().video.unwrap();
@@ -636,7 +636,7 @@ fn hdr_colors_keep_their_matrix() {
     let video = settings.video.as_mut().unwrap();
     video.codec = VCodec::Hevc;
     video.quality = Some(4);
-    video.hdr = Some(Hdr::Pq);
+    video.hdr = HdrMode::Pq;
     let pq = dir.path().join("pq.mkv");
     render(&p, &settings, &pq);
     for (i, (got, (y, cb, cr))) in stripes(&pq).iter().zip(codes).enumerate() {
@@ -702,6 +702,122 @@ fn hdr_colors_keep_their_matrix() {
         let interleaved: Vec<u16> = cb.iter().zip(&cr).flat_map(|(b, r)| [*b, *r]).collect();
         assert_eq!(interleaved, samples(&b, 1, 2), "{semi:?}: chroma");
     }
+}
+
+/// Settings that leave the dynamic range and depth to the export
+/// (decision D44): `video.hdr = auto`, no bit depth.
+fn auto_color(codec: VCodec, encoder: EncoderChoice) -> ExportSettings {
+    let mut s = lossless();
+    s.audio = None;
+    let v = s.video.as_mut().unwrap();
+    v.codec = codec;
+    v.encoder = encoder;
+    v.hdr = HdrMode::Auto;
+    v.bit_depth = None;
+    if codec != VCodec::H264 {
+        v.quality = Some(4);
+    }
+    s
+}
+
+/// Decision D44: the engine, given `auto`, reads what the files are and
+/// chooses from the picture it shows.
+#[test]
+fn auto_color_follows_the_files() {
+    use vidcut_core::model::Hdr;
+    let fps = Rational::new(30, 1).unwrap();
+    let hevc10 = |frames| {
+        FixtureSpec::new(
+            VideoCodec::Hevc10,
+            Container::Mkv,
+            320,
+            180,
+            (30, 1),
+            frames,
+        )
+    };
+    let pq = src(hevc10(30).hdr(Hdr::Pq).no_audio());
+    let deep = src(hevc10(30).no_audio());
+    let sdr =
+        src(FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 30).no_audio());
+    let dir = out_dir("auto-color");
+    let export = |name: &str, pieces: Vec<VideoPiece>, settings: &ExportSettings| {
+        let out = dir.path().join(name);
+        let report = render(&plan(fps, 320, 180, pieces, vec![]), settings, &out);
+        let info = vidcut_av::probe::probe(&out).unwrap().video.unwrap();
+        (report.color.expect("chosen"), info)
+    };
+    // Mostly PQ into HEVC: PQ in 10 bits, every frame where it belongs.
+    let mostly_pq = vec![v(&pq, 5, 20), v(&sdr, 5, 10)];
+    let (c, info) = export(
+        "pq.mkv",
+        mostly_pq.clone(),
+        &auto_color(VCodec::Hevc, EncoderChoice::Cpu),
+    );
+    assert_eq!((c.hdr, c.bit_depth, c.picture.pq), (HdrMode::Pq, 10, 20));
+    assert_eq!(
+        (info.transfer.as_str(), info.pix_fmt.as_str()),
+        ("smpte2084", "yuv420p10le")
+    );
+    // PQ's barcodes don't read, but SDR white lands at the reference white
+    // in all of it, the SDR part too.
+    let mut r = VideoReader::open(&dir.path().join("pq.mkv")).unwrap();
+    let mut n = 0;
+    while let Some(f) = r.next_frame().unwrap() {
+        let (_, hi) = cell_levels(&f);
+        assert!(
+            hi.abs_diff(vidcut_av::fixture::PQ_WHITE) <= 12,
+            "frame {n}: white {hi}"
+        );
+        n += 1;
+    }
+    assert_eq!(n, 30);
+    // The same into H.264: tone-mapped SDR in 8 bits.
+    let (c, info) = export(
+        "sdr.mkv",
+        mostly_pq,
+        &auto_color(VCodec::H264, EncoderChoice::Cpu),
+    );
+    assert_eq!((c.hdr, c.bit_depth, c.tone_mapped), (HdrMode::Sdr, 8, 20));
+    assert!(c.worth_a_note());
+    assert_ne!(info.transfer, "smpte2084");
+    assert_eq!(info.pix_fmt, "yuv420p");
+    // Mostly SDR: SDR, the PQ part tone-mapped.
+    let (c, _) = export(
+        "mixed.mkv",
+        vec![v(&pq, 0, 10), v(&sdr, 0, 20)],
+        &auto_color(VCodec::Hevc, EncoderChoice::Cpu),
+    );
+    assert_eq!((c.hdr, c.bit_depth, c.tone_mapped), (HdrMode::Sdr, 8, 10));
+    // 10-bit SDR stays 10-bit in HEVC, and becomes 8 in H.264.
+    let (c, info) = export(
+        "deep.mkv",
+        vec![v(&deep, 0, 30)],
+        &auto_color(VCodec::Hevc, EncoderChoice::Cpu),
+    );
+    assert_eq!((c.hdr, c.bit_depth), (HdrMode::Sdr, 10));
+    assert_eq!(info.pix_fmt, "yuv420p10le");
+    assert_ne!(info.transfer, "smpte2084");
+    let (c, info) = export(
+        "deep8.mkv",
+        vec![v(&deep, 0, 30)],
+        &auto_color(VCodec::H264, EncoderChoice::Cpu),
+    );
+    assert_eq!(c.bit_depth, 8);
+    assert_eq!(info.pix_fmt, "yuv420p");
+    // Explicit values win, and then nothing is chosen.
+    let mut settings = auto_color(VCodec::Hevc, EncoderChoice::Cpu);
+    settings.video.as_mut().unwrap().hdr = HdrMode::Sdr;
+    settings.video.as_mut().unwrap().bit_depth = Some(8);
+    let out = dir.path().join("asked.mkv");
+    let report = render(
+        &plan(fps, 320, 180, vec![v(&pq, 0, 30)], vec![]),
+        &settings,
+        &out,
+    );
+    assert!(report.color.is_none());
+    let info = vidcut_av::probe::probe(&out).unwrap().video.unwrap();
+    assert_eq!(info.pix_fmt, "yuv420p");
 }
 
 #[test]
@@ -1527,7 +1643,7 @@ fn gpu_encoders_produce_valid_frame_exact_output() {
                 bit_depth: Some(if ten { 10 } else { 8 }),
                 width: None,
                 height: None,
-                hdr: None,
+                hdr: HdrMode::Sdr,
             }),
             audio: Some(AudioSettings {
                 codec: ACodec::Aac,
@@ -1790,7 +1906,7 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
                 bit_depth: Some(bits),
                 width: None,
                 height: None,
-                hdr: None,
+                hdr: HdrMode::Sdr,
             }),
             audio: None,
             declick: false,
@@ -1999,7 +2115,7 @@ fn nvenc_exports_convert_bt601_on_the_gpu_as_the_cpu_does() {
                     bit_depth: Some(bits),
                     width: None,
                     height: None,
-                    hdr: None,
+                    hdr: HdrMode::Sdr,
                 }),
                 audio: None,
                 declick: false,
@@ -2098,7 +2214,11 @@ fn nvenc_exports_convert_hdr_on_the_gpu_as_the_cpu_does() {
             bit_depth: Some(bits),
             width: None,
             height: None,
-            hdr,
+            hdr: match hdr {
+                None => HdrMode::Sdr,
+                Some(Hdr::Pq) => HdrMode::Pq,
+                Some(Hdr::Hlg) => HdrMode::Hlg,
+            },
         }),
         audio: None,
         declick: false,
@@ -2178,5 +2298,88 @@ fn nvenc_exports_convert_hdr_on_the_gpu_as_the_cpu_does() {
             "{what}: cells within {} codes of the CPU's (10-bit), stripes within {:.2} levels",
             worst.0, worst.1
         );
+    }
+}
+
+/// Decision D44 through NVENC: with `auto`, a mostly-PQ timeline stays PQ
+/// in 10 bits and a 10-bit SDR one 10-bit SDR, as on the CPU, the frames
+/// made on the GPU and within two levels of the CPU's; the `auto` encoder
+/// chooses the same.
+#[cfg(feature = "gpu-tests")]
+#[test]
+fn nvenc_auto_color_chooses_as_the_cpu_does() {
+    use vidcut_core::model::Hdr;
+    let available = vidcut_av::export::encode::detect();
+    if !available
+        .encoders
+        .iter()
+        .any(|e| e.ok && e.encoder == "hevc_nvenc" && e.pixel == "p010le")
+    {
+        eprintln!("skipping: no 10-bit hevc_nvenc here");
+        return;
+    }
+    let fps = Rational::new(30, 1).unwrap();
+    let hevc10 = || FixtureSpec::new(VideoCodec::Hevc10, Container::Mp4, 1280, 720, (30, 1), 30);
+    let pq = src(hevc10().hdr(Hdr::Pq).no_audio());
+    let deep = src(hevc10().no_audio());
+    let sdr =
+        src(FixtureSpec::new(VideoCodec::H264, Container::Mp4, 1280, 720, (30, 1), 30).no_audio());
+    let dir = out_dir("gpu-auto-color");
+    for (what, video, want) in [
+        ("PQ", vec![v(&pq, 5, 20), v(&sdr, 5, 10)], (HdrMode::Pq, 10)),
+        (
+            "10-bit SDR",
+            vec![v(&deep, 5, 25), v(&sdr, 5, 5)],
+            (HdrMode::Sdr, 10),
+        ),
+    ] {
+        let p = plan(fps, 1280, 720, video, vec![]);
+        let cpu = dir.path().join(format!("cpu-{what}.mkv"));
+        let mut settings = auto_color(VCodec::Hevc, EncoderChoice::Cpu);
+        settings.video.as_mut().unwrap().quality = Some(2);
+        let c = render(&p, &settings, &cpu).color.unwrap();
+        assert_eq!((c.hdr, c.bit_depth), want, "{what} on the CPU");
+        for encoder in [EncoderChoice::Nvenc, EncoderChoice::Auto] {
+            let gpu = dir.path().join(format!("gpu-{what}-{encoder:?}.mkv"));
+            let mut settings = auto_color(VCodec::Hevc, encoder);
+            let video = settings.video.as_mut().unwrap();
+            video.quality = Some(12);
+            video.speed = None;
+            let report = export::run(
+                &p,
+                &settings,
+                &gpu,
+                &available,
+                &AtomicBool::new(false),
+                &mut |_| {},
+            )
+            .unwrap_or_else(|e| panic!("{what}: {e}"));
+            let c = report.color.as_ref().unwrap();
+            assert_eq!((c.hdr, c.bit_depth), want, "{what} with {encoder:?}");
+            assert_eq!(report.video_encoder.as_deref(), Some("hevc_nvenc"));
+            assert_eq!(report.gpu_frames, 30, "{what}: frames on the GPU");
+            let info = vidcut_av::probe::probe(&gpu).unwrap().video.unwrap();
+            assert_eq!(info.pix_fmt, "yuv420p10le", "{what}");
+            assert_eq!(
+                info.transfer == "smpte2084",
+                want.0 == HdrMode::Pq,
+                "{what}"
+            );
+            let (mut cpu_frames, mut gpu_frames) = (Vec::new(), Vec::new());
+            for (path, frames) in [(&cpu, &mut cpu_frames), (&gpu, &mut gpu_frames)] {
+                let mut r = VideoReader::open(path).unwrap();
+                while let Some(f) = r.next_frame().unwrap() {
+                    frames.push(f);
+                }
+            }
+            assert_eq!(gpu_frames.len(), 30, "{what}");
+            for k in 0..30 {
+                let (c, g) = (cell_levels(&cpu_frames[k]), cell_levels(&gpu_frames[k]));
+                assert!(
+                    c.0.abs_diff(g.0) <= 8 && c.1.abs_diff(g.1) <= 8,
+                    "{what}: frame {k}: black and white {g:?}, the CPU's {c:?}"
+                );
+            }
+        }
     }
 }

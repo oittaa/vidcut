@@ -10,6 +10,8 @@ use serde_json::Value;
 
 use crate::error::{Error, Result};
 
+pub mod color;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Container {
@@ -101,6 +103,33 @@ pub enum AudioCodec {
     PcmS24,
 }
 
+/// The output's dynamic range (`video.hdr`, decision D44).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum HdrMode {
+    /// HDR when most of the shown picture is HDR and the codec can carry it
+    /// (PQ, or HLG when all of it is HLG); otherwise SDR.
+    #[default]
+    Auto,
+    /// SDR (BT.709): HDR pictures are tone-mapped.
+    Sdr,
+    /// HDR with the perceptual quantizer (BT.2100 PQ, HDR10).
+    Pq,
+    /// HDR with hybrid log-gamma (BT.2100 HLG).
+    Hlg,
+}
+
+impl HdrMode {
+    /// The HDR transfer this asks for; `None` for SDR and `auto`.
+    pub fn transfer(self) -> Option<crate::model::Hdr> {
+        match self {
+            Self::Pq => Some(crate::model::Hdr::Pq),
+            Self::Hlg => Some(crate::model::Hdr::Hlg),
+            Self::Auto | Self::Sdr => None,
+        }
+    }
+}
+
 /// Which encoder implementation to use.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -132,7 +161,9 @@ pub struct VideoSettings {
     /// ProRes: proxy, lt, standard, hq, 4444. DNxHR: lb, sq, hq, hqx, 444.
     #[serde(default)]
     pub profile: Option<String>,
-    /// 8 or 10; default per codec.
+    /// 8 or 10. Unset: 10 for HDR, and for SDR when most of the shown
+    /// picture has 10 bits or more and the codec's 10 bits play widely
+    /// (not H.264), else 8 (decision D44).
     #[serde(default)]
     pub bit_depth: Option<u8>,
     /// Output frame size; the picture is fit inside and padded. Default: the project's.
@@ -140,11 +171,12 @@ pub struct VideoSettings {
     pub width: Option<u32>,
     #[serde(default)]
     pub height: Option<u32>,
-    /// HDR output with this transfer (BT.2100: PQ or HLG): BT.2020 colors,
-    /// 10 bits, HEVC, AV1 or VP9. SDR sources show their white at 203 nits.
-    /// Default: SDR (BT.709), HDR sources tone-mapped to it.
+    /// Dynamic range: `auto` (HDR when most of the shown picture is HDR and
+    /// the codec carries it), `sdr` (BT.709, HDR sources tone-mapped), or
+    /// HDR with `pq` or `hlg` (BT.2100: BT.2020 colors, 10 bits, HEVC, AV1
+    /// or VP9; SDR sources show their white at 203 nits). Decision D44.
     #[serde(default)]
-    pub hdr: Option<crate::model::Hdr>,
+    pub hdr: HdrMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -205,7 +237,7 @@ fn video(codec: VideoCodec, quality: Option<u32>) -> VideoSettings {
         bit_depth: None,
         width: None,
         height: None,
-        hdr: None,
+        hdr: HdrMode::Auto,
     }
 }
 
@@ -325,7 +357,15 @@ pub fn builtin_presets() -> Vec<Preset> {
             "TikTok",
             "MP4, vertical H.264 1080×1920, AAC",
             true,
-            av(C::Mp4, sized(1080, 1920, 20), audio(A::Aac, Some(256))),
+            av(
+                C::Mp4,
+                // Shown on phones: SDR whatever the sources (decision D44).
+                VideoSettings {
+                    hdr: HdrMode::Sdr,
+                    ..sized(1080, 1920, 20)
+                },
+                audio(A::Aac, Some(256)),
+            ),
         ),
         preset(
             "h264-master",
@@ -492,14 +532,34 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
         {
             return Err(Error::usage("bit_depth must be 8 or 10"));
         }
-        if v.hdr.is_some() {
-            if !matches!(v.codec, V::Hevc | V::Av1 | V::Vp9) {
+        // A depth the codec or profile fixes can't be set otherwise.
+        let fixed = match (v.codec, v.profile.as_deref()) {
+            (V::Prores, _) | (V::Dnxhr, Some("hqx" | "444")) | (V::Hevc, Some("main10")) => {
+                Some(10)
+            }
+            (V::Dnxhr, Some("lb" | "sq")) | (V::Hevc, Some("main")) => Some(8),
+            _ => None,
+        };
+        if let (Some(d), Some(f)) = (v.bit_depth, fixed)
+            && d != f
+        {
+            let what = match (v.codec, &v.profile) {
+                (V::Prores, _) => "ProRes".to_string(),
+                (c, Some(p)) => format!("{c:?} profile {p}"),
+                (c, None) => format!("{c:?}"),
+            };
+            return Err(Error::usage(format!(
+                "{what} is {f}-bit; bit_depth {d} can't be"
+            )));
+        }
+        if v.hdr.transfer().is_some() {
+            if !color::carries_hdr(v.codec) {
                 return Err(Error::usage(format!(
                     "HDR needs HEVC, AV1 or VP9, not {:?}",
                     v.codec
                 )));
             }
-            if v.bit_depth == Some(8) {
+            if v.bit_depth.or(fixed) == Some(8) {
                 return Err(Error::usage("HDR needs 10 bits"));
             }
         }

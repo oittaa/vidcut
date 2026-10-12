@@ -82,6 +82,7 @@ vidcut history undo                         # works across separate runs
   - Extra options: `--preset youtube-1080p`, `--encoder nvenc|vaapi|cpu|auto`, `--set video.quality=20`, `--range 1m..2m`, `--per-clip`, `--audio-only`, `--overwrite`.
   - With NVENC (and `gpu.acceleration` on), video pieces decode on NVDEC and deinterlace, scale and pad on the GPU, turned upright and BT.601, full range and HDR (tone mapping, HDR output) converted there by libplacebo (which also pads in 10 bits; HDR by a shader doing the CPU's math); the rest decode on the CPU and go up. The result's `gpu_frames` counts the frames made on the GPU (export.md §5).
   - `vidcut export plan out.mp4` (or `export start` with `--dry-run`) prints the plan and the chosen encoder without encoding.
+  - Dynamic range and bit depth follow the footage (spec D44): `video.hdr` is `auto` (HDR when most of the shown picture is HDR and the codec carries it: HEVC, AV1, VP9), `sdr`, `pq` or `hlg`; an unset `video.bit_depth` is 10 for HDR, and for SDR when most of the picture has 10 bits or more (8 in H.264). Each output's `color` in the plan and the result says what was chosen and why (`hdr`, `bit_depth`, `picture`: frames of PQ, HLG and 10-bit picture, `why`). When HDR picture will be tone-mapped and SDR wasn't asked for, `notes` has `{"code": "hdr_tone_mapped", "message", "set"}`: `set` holds the `--set` overrides that keep it HDR (`video.codec=hevc`, `video.hdr=pq`), empty when no encoder the export may use writes it.
   - Ctrl-C cancels cleanly (exit 9, no partial file).
   - With a GUI running, `--background` returns a job id at once; follow it with `vidcut jobs` commands (below).
 - `vidcut presets list` lists the presets (`--json` includes their settings); `vidcut presets get NAME` shows one.
@@ -98,7 +99,7 @@ vidcut history undo                         # works across separate runs
 - `vidcut timeline boring [--boring 30s --jump 10f]` lists clips too long and too short (the Boring Detector).
 - `vidcut storyboard render --out board.png [--every 5s --columns 4 --width 320]` draws a picture of every shot with timecode and clip id: the quickest way to look at a whole edit.
 - `vidcut export start out.mp4 --set audio.loudness=-14` normalizes the mix to −14 LUFS (one gain, true peak ≤ −1 dBTP); the result reports the gain.
-- `vidcut export start out.mp4 --set video.codec=hevc --set video.hdr=pq` (or `hlg`) exports HDR in 10 bits (HEVC, AV1 or VP9). Without it, HDR sources are tone-mapped to SDR. `vidcut media get` reports each clip's `hdr`, `rotation` and interlaced `fields`.
+- `vidcut export start out.mp4 --set video.codec=hevc --set video.hdr=pq` (or `hlg`) exports HDR in 10 bits (HEVC, AV1 or VP9) whatever the footage; `video.hdr=sdr` tone-maps HDR sources to SDR. `vidcut media get` reports each clip's `hdr`, `rotation` and interlaced `fields`.
 - `vidcut edit slide c3 --by 5f` moves a clip keeping its media; its neighbors give and take.
 - Measuring decodes a file once; the results are cached (`~/.cache/vidcut/analysis/`), so trying other settings is quick.
 
