@@ -274,6 +274,38 @@ fn export_windows() {
     until(&mut harness, "the .otio file", |_| {
         dir.join("quick-p.otio").exists()
     });
+    // With the question up, shortcuts do nothing; Escape cancels it like
+    // its Cancel button.
+    call(&h, "marks.clear", json!({}));
+    let clips = |h: &live::Handle| h.snapshot().project().map(|p| p.tracks[0].clips.len());
+    let before = clips(&h);
+    harness.get_by_label("File").click();
+    until(&mut harness, "the File menu", |h| {
+        has(h, "Import Timeline (OTIO)…")
+    });
+    harness.get_by_label("Import Timeline (OTIO)…").click();
+    until(&mut harness, "the choice", |h| {
+        has(h, "Append to the Timeline")
+    });
+    harness.step();
+    harness.key_press(egui::Key::I);
+    harness.step();
+    harness.key_press(egui::Key::O);
+    harness.step();
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_millis(300) {
+        std::thread::sleep(Duration::from_millis(5));
+        harness.step();
+    }
+    let marks = h.snapshot().project().map(|p| p.marks.clone());
+    assert!(
+        marks.is_some_and(|m| m.mark_in.is_none() && m.mark_out.is_none()),
+        "I or O set a mark behind the question"
+    );
+    harness.key_press(egui::Key::Escape);
+    harness.step();
+    assert!(!has(&harness, "Append to the Timeline"));
+    assert_eq!(clips(&h), before);
     harness.get_by_label("File").click();
     until(&mut harness, "the File menu", |h| {
         has(h, "Import Timeline (OTIO)…")

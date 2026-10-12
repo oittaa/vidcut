@@ -11,7 +11,7 @@ use eframe::egui;
 use serde_json::{Value, json};
 use vidcut_core::time::Rational;
 
-use super::workspace::{Workspace, dim};
+use super::workspace::{Workspace, dim, escape_cancels};
 
 /// Video and audio files.
 const MEDIA_TYPES: &[&str] = &[
@@ -52,8 +52,13 @@ pub(super) struct ImportUi {
     /// The dialog's answer, filled in by its thread.
     picked: Arc<Mutex<Option<Picked>>>,
     choice: Option<Choice>,
-    /// The keyboard guard is registered once, on the first frame.
-    guard: bool,
+}
+
+impl ImportUi {
+    /// The question about numbered images is up.
+    pub(super) fn asking(&self) -> bool {
+        self.choice.is_some()
+    }
 }
 
 /// The files picked, and the bin to put them in.
@@ -151,42 +156,6 @@ fn request(choice: &Choice) -> Result<(&'static str, Value), String> {
     ))
 }
 
-/// Id of the flag the shortcut guard reads at the start of each pass.
-fn question_id() -> egui::Id {
-    egui::Id::new("vidcut-import-question")
-}
-
-fn question_open(ctx: &egui::Context, open: bool) {
-    ctx.data_mut(|data| data.insert_temp(question_id(), open));
-}
-
-/// Shortcuts are handled before this modal is shown, so while the question
-/// is up they are dropped at the start of the pass. Escape is left, and the
-/// modal cancels on it. A focused rate field keeps its keys.
-fn guard_import_shortcuts(ui: &mut egui::Ui) {
-    let ctx = ui.ctx();
-    let open = ctx.data(|data| data.get_temp::<bool>(question_id()).unwrap_or(false));
-    if !open || ctx.text_edit_focused() {
-        return;
-    }
-    ctx.input_mut(|input| {
-        input.events.retain(|event| match event {
-            egui::Event::Key {
-                key: egui::Key::Escape,
-                pressed: true,
-                modifiers,
-                ..
-            } if !modifiers.any() => true,
-            egui::Event::Key { .. }
-            | egui::Event::Text(_)
-            | egui::Event::Copy
-            | egui::Event::Cut
-            | egui::Event::Paste(_) => false,
-            _ => true,
-        });
-    });
-}
-
 impl Workspace {
     /// Ctrl+I: pick media files to import, into the bin the pool
     /// shows. The dialog starts where media were last imported from, else in
@@ -227,10 +196,6 @@ impl Workspace {
     /// The import's answer, and the window asking about numbered images.
     pub(super) fn import_window(&mut self, ctx: &egui::Context) {
         self.import.ctx = Some(ctx.clone());
-        if !self.import.guard {
-            self.import.guard = true;
-            ctx.on_begin_pass("vidcut-import-question", Arc::new(guard_import_shortcuts));
-        }
         let picked = self
             .import
             .picked
@@ -256,10 +221,8 @@ impl Workspace {
             }
         }
         let Some(choice) = self.import.choice.as_mut() else {
-            question_open(ctx, false);
             return;
         };
-        question_open(ctx, true);
         let mut done = None;
         let modal = egui::Modal::new(egui::Id::new("import-numbered-images")).show(ctx, |ui| {
             ui.set_max_width(480.0);
@@ -293,13 +256,8 @@ impl Workspace {
                 }
             });
         });
-        // Escape cancels like Cancel: import nothing. It is consumed so the
-        // timeline does not also see it.
-        if done.is_none()
-            && modal.is_top_modal
-            && !modal.any_popup_open
-            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
-        {
+        // Escape cancels like Cancel: import nothing.
+        if done.is_none() && escape_cancels(ctx, &modal) {
             done = Some(false);
         }
         match done {
@@ -307,14 +265,10 @@ impl Workspace {
                 Ok((method, params)) => {
                     self.send(method, params);
                     self.import.choice = None;
-                    question_open(ctx, false);
                 }
                 Err(message) => choice.error = Some(message),
             },
-            Some(false) => {
-                self.import.choice = None;
-                question_open(ctx, false);
-            }
+            Some(false) => self.import.choice = None,
             None => {}
         }
     }

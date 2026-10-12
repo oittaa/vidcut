@@ -931,7 +931,14 @@ impl Workspace {
 
     // ---------------------------------------------------------------- keys
 
-    /// Keyboard shortcuts (spec §11). Ignored while a text field has focus.
+    /// One of the workspace's questions (modal dialogs) is up.
+    fn asking(&self) -> bool {
+        self.import.asking() || self.export.asking(&self.snap.jobs)
+    }
+
+    /// Keyboard shortcuts (spec §11). Ignored while a text field has focus
+    /// or a question is up: they are read before the windows are drawn, so a
+    /// modal doesn't stop them itself.
     fn keys(&mut self, ctx: &egui::Context) {
         // `VIDCUT_DEBUG_PLAYER=1` traces key presses too: what a keyboard
         // layout sends for a shortcut.
@@ -951,7 +958,7 @@ impl Workspace {
                 }
             });
         }
-        if ctx.egui_wants_keyboard_input() {
+        if ctx.egui_wants_keyboard_input() || self.asking() {
             return;
         }
         if ctx.input(|i| i.modifiers.command && i.key_pressed(Key::Comma)) {
@@ -1526,6 +1533,14 @@ pub(super) fn fit(avail: egui::Rect, aspect: f32) -> egui::Rect {
 
 pub(super) fn dim(text: impl Into<String>) -> RichText {
     RichText::new(text.into()).color(theme::TEXT_DIM)
+}
+
+/// Escape on a question with no popup of its own open: it answers as
+/// Cancel does. Consumed, so nothing behind the question sees it.
+pub(super) fn escape_cancels<T>(ctx: &egui::Context, modal: &egui::ModalResponse<T>) -> bool {
+    modal.is_top_modal
+        && !modal.any_popup_open
+        && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape))
 }
 
 #[cfg(test)]

@@ -338,6 +338,8 @@ Hover the lower audio part of a clip at an edit until the cursor shows a note, t
 
 Keys from the Cut chapters, with Edit-page keys filling the gaps (marked †).
 
+Shortcuts do nothing while a text field has focus or a question (a modal dialog) is up. Esc answers a question as its Cancel button does.
+
 | Key | Action | Page |
 |---|---|---|
 | Space | Play / stop | 640 |

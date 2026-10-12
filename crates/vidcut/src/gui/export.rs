@@ -17,7 +17,7 @@ use vidcut_core::{Envelope, Error, Response};
 
 use super::folders::Kind;
 use super::theme;
-use super::workspace::{Workspace, dim};
+use super::workspace::{Workspace, dim, escape_cancels};
 use crate::live::{self, JobInfo, JobState, Origin};
 
 // ---------------------------------------------------------------- plumbing
@@ -192,6 +192,15 @@ pub struct ExportUi {
     confirm_quit: bool,
     /// Closing is fine now (or was asked for by `gui.quit`).
     pub quit_confirmed: bool,
+}
+
+impl ExportUi {
+    /// A question is up: append or replace an imported timeline, where its
+    /// media are, or quitting while jobs run.
+    pub(super) fn asking(&self, jobs: &[JobInfo]) -> bool {
+        matches!(self.otio, Some(Otio::Choose(_) | Otio::Missing { .. }))
+            || (self.confirm_quit && jobs.iter().any(JobInfo::running))
+    }
 }
 
 struct Quick {
@@ -1312,7 +1321,7 @@ impl Workspace {
             },
             Otio::Choose(path) => {
                 let mut choice = None;
-                egui::Modal::new(egui::Id::new("otio-import-choice")).show(ctx, |ui| {
+                let modal = egui::Modal::new(egui::Id::new("otio-import-choice")).show(ctx, |ui| {
                     ui.label(format!(
                         "Import {}:",
                         path.file_name()
@@ -1330,6 +1339,9 @@ impl Workspace {
                         }
                     });
                 });
+                if choice.is_none() && escape_cancels(ctx, &modal) {
+                    choice = Some(None);
+                }
                 match choice {
                     None => Some(Otio::Choose(path)),
                     Some(None) => None,
@@ -1342,7 +1354,7 @@ impl Workspace {
                 message,
             } => {
                 let mut choice = None;
-                egui::Modal::new(egui::Id::new("otio-missing-media")).show(ctx, |ui| {
+                let modal = egui::Modal::new(egui::Id::new("otio-missing-media")).show(ctx, |ui| {
                     ui.set_max_width(520.0);
                     ui.label(&message);
                     ui.label(dim("Choose a folder to look in (subfolders too)."));
@@ -1355,6 +1367,9 @@ impl Workspace {
                         }
                     });
                 });
+                if choice.is_none() && escape_cancels(ctx, &modal) {
+                    choice = Some(false);
+                }
                 match choice {
                     None => Some(Otio::Missing {
                         path,
@@ -1480,7 +1495,7 @@ impl Workspace {
             self.export.confirm_quit = false;
             return;
         }
-        egui::Modal::new(egui::Id::new("quit-while-exporting")).show(ctx, |ui| {
+        let modal = egui::Modal::new(egui::Id::new("quit-while-exporting")).show(ctx, |ui| {
             ui.label(format!(
                 "{running} job(s) still running. Quitting cancels them."
             ));
@@ -1495,6 +1510,10 @@ impl Workspace {
                 }
             });
         });
+        // Escape keeps them running.
+        if self.export.confirm_quit && escape_cancels(ctx, &modal) {
+            self.export.confirm_quit = false;
+        }
     }
 }
 
