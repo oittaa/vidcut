@@ -2933,14 +2933,18 @@ impl Live {
     }
 
     /// Decision D15: after an edit function the timeline playhead moves to
-    /// the frame after the new clip(s), ready for the next edit.
+    /// the frame after the new clip(s), ready for the next edit. Those are
+    /// the clips its result names: `changes.created` also has what is left
+    /// of a clip the edit cut into, after the new ones.
     fn playhead_after_edit(&mut self, r: &Response) {
         let Some(open) = &self.project else { return };
         let p = open.project();
-        let end = r
-            .changes
-            .created
-            .iter()
+        let placed: Vec<&str> = match &r.result["clips"] {
+            Value::Array(ids) => ids.iter().filter_map(Value::as_str).collect(),
+            _ => r.result["clip"].as_str().into_iter().collect(),
+        };
+        let end = placed
+            .into_iter()
             .filter_map(|id| p.clip(id))
             .map(Clip::end)
             .max();
