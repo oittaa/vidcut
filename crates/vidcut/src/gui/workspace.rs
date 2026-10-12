@@ -65,6 +65,10 @@ pub struct Picture {
     pub has_frame: bool,
 }
 
+/// What the paused viewer's frame was worked out from: the revision, the
+/// viewer mode, the position, the source clip and whether proxies play.
+pub(super) type PausedAt = (u64, ViewerMode, i64, Option<String>, bool);
+
 pub struct Workspace {
     pub(super) live: live::Handle,
     pub(super) snap: Arc<Snapshot>,
@@ -104,8 +108,15 @@ pub struct Workspace {
     pub(super) timeline: TimelineView,
     /// The edit the Trim Editor shows, if it is open.
     pub(super) trim_editor: Option<i64>,
-    /// Exact frames for the Trim Editor (created on first use).
+    /// Exact frames for the paused viewer, the Trim Editor and Dynamic
+    /// Trim (created on first use).
     pub(super) stills: Option<super::stills::Stills>,
+    /// The viewer mode whose frame the paused viewer last showed exactly:
+    /// its picture may stand in while the next frame renders.
+    pub(super) paused_shown: Option<ViewerMode>,
+    /// The paused viewer's frame as a piece, and what it was worked out
+    /// from (revision, mode, position, source clip, proxies).
+    pub(super) paused_piece: Option<(PausedAt, vidcut_core::render::VideoPiece)>,
     /// Quick Export, the Export dialog, jobs and timeline interchange.
     pub(super) export: super::export::ExportUi,
     /// The Mixer panel is open, and its meters' state.
@@ -147,6 +158,8 @@ impl Workspace {
             },
             trim_editor: None,
             stills: None,
+            paused_shown: None,
+            paused_piece: None,
             export: Default::default(),
             show_mixer: false,
             mixer: Default::default(),

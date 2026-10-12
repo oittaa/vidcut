@@ -168,8 +168,9 @@ impl Workspace {
         painter.rect_filled(area, CornerRadius::ZERO, Color32::from_rgb(12, 12, 13));
         let player = self.snap.player(id).clone();
         let video = self.pictures[id.index()];
-        match (video.texture, player.loaded && video.has_frame) {
-            (Some(tex), true) => {
+        let played = video.texture.filter(|_| player.loaded && video.has_frame);
+        match self.paused_frame(ui.ctx(), id).or(played) {
+            Some(tex) => {
                 painter.image(
                     tex,
                     picture,
@@ -177,7 +178,7 @@ impl Workspace {
                     Color32::WHITE,
                 );
             }
-            _ => {
+            None => {
                 painter.rect_filled(picture, CornerRadius::ZERO, Color32::BLACK);
                 let text = match (&self.snap.preview_error, mode) {
                     (Some(e), _) => format!("No preview: {e}"),
@@ -268,6 +269,74 @@ impl Workspace {
                 ui.label(RichText::new(format!("edit at {}", self.tc(e.at))).monospace());
             });
         });
+    }
+
+    /// The paused viewer's frame, from the renderer that decodes each frame
+    /// once whichever way the viewer steps (docs/decisions/preview.md §13).
+    /// Playing, the player's picture shows instead; so it does while the
+    /// first frame after playing renders, rather than a picture from before.
+    fn paused_frame(&mut self, ctx: &egui::Context, id: PlayerId) -> Option<egui::TextureId> {
+        use super::stills::{Shown, Still, Stills, VIEWER};
+        let mode = self.snap.viewer;
+        let player = self.snap.player(id);
+        if player.playing || !player.loaded {
+            self.paused_shown = None;
+            return None;
+        }
+        let piece = self.paused_piece(id)?;
+        let fps = self.project()?.settings.fps;
+        let [w, h] = self.wants[id.index()];
+        let still = Still {
+            piece,
+            fps,
+            width: w.max(2) as u32,
+            height: h.max(2) as u32,
+        };
+        let stills = self.stills.get_or_insert_with(|| Stills::new(ctx.clone()));
+        match stills.get(ctx, VIEWER, &still)? {
+            Shown::Exact(t) => {
+                self.paused_shown = Some(mode);
+                Some(t)
+            }
+            Shown::Previous(t) if self.paused_shown == Some(mode) => Some(t),
+            Shown::Previous(_) => None,
+        }
+    }
+
+    /// The piece the viewer shows now: the timeline's top picture, or the
+    /// source clip's frame, with a fresh proxy when proxies play.
+    fn paused_piece(&mut self, id: PlayerId) -> Option<vidcut_core::render::VideoPiece> {
+        let snap = self.snap.clone();
+        let p = snap.project()?;
+        let at = (
+            p.rev,
+            snap.viewer,
+            snap.player(id).position,
+            snap.source_media.clone(),
+            p.settings.use_proxies,
+        );
+        if let Some((cached, piece)) = &self.paused_piece
+            && *cached == at
+        {
+            return Some(piece.clone());
+        }
+        let mut piece = match snap.viewer {
+            ViewerMode::Timeline => {
+                let pos = snap.timeline.position;
+                vidcut_core::render::flatten(p, pos, pos + 1)
+                    .ok()?
+                    .video
+                    .into_iter()
+                    .next()?
+            }
+            _ => {
+                let (media, frame) = snap.source_at()?;
+                vidcut_core::render::media_frame(p, media, frame).ok()?
+            }
+        };
+        vidcut_core::preview::proxy_piece(&mut piece, p, |path| path.is_file());
+        self.paused_piece = Some((at, piece.clone()));
+        Some(piece)
     }
 
     /// Dynamic Trim's two-up: the frames on both sides of the
@@ -375,9 +444,9 @@ impl Workspace {
                     width: w,
                     height: h,
                 };
-                if let Some(tex) = stills.get(&ctx, i, &still) {
+                if let Some(shown) = stills.get(&ctx, i, &still) {
                     painter.image(
-                        tex,
+                        shown.texture(),
                         picture,
                         Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
                         Color32::WHITE,

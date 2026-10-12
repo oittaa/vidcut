@@ -229,6 +229,15 @@ fn open_sequence(pattern: &Path, first: u64, rate: (i32, i32)) -> Result<format:
     }
 }
 
+/// Video frames decoded by every reader in the process so far.
+static DECODED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// How many video frames every reader in the process has decoded so far: a
+/// measure of decoding work, for tests and diagnostics.
+pub fn frames_decoded() -> u64 {
+    DECODED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Decodes the primary video stream of a file in presentation order.
 pub struct VideoReader {
     source: Input,
@@ -529,6 +538,12 @@ impl VideoReader {
         self.first_pts
     }
 
+    /// Pts of the frame decoded and not yet returned: right after a
+    /// [`seek`](Self::seek), the keyframe decoding started from.
+    pub fn pending_pts(&self) -> Option<i64> {
+        self.pending.as_ref().and_then(|f| f.pts())
+    }
+
     /// Returns the next frame in presentation order, or `None` at end of stream.
     /// The frame's pts is its best-effort timestamp.
     pub fn next_frame(&mut self) -> Result<Option<frame::Video>> {
@@ -649,6 +664,7 @@ impl VideoReader {
                 Ok(()) => {
                     let pts = frame.timestamp();
                     frame.set_pts(pts);
+                    DECODED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     return Ok(Some(frame));
                 }
                 Err(ffmpeg::Error::Eof) => return Ok(None),

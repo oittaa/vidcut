@@ -409,6 +409,25 @@ pub fn clip_frame(p: &Project, clip: &str, at: i64) -> Result<VideoPiece> {
         .ok_or_else(|| Error::not_found(format!("no frame {at} of {clip}")))
 }
 
+/// Frame `at` of media item `media` (project frames from its first video
+/// frame), as export samples it; black for media without video.
+pub fn media_frame(p: &Project, media: &str, at: i64) -> Result<VideoPiece> {
+    let m = p
+        .media(media)
+        .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+    Ok(match &m.info.video {
+        Some(v) => VideoPiece::Source {
+            media: media.into(),
+            path: m.path.clone(),
+            origin: v.first_pts,
+            source_frame: at,
+            frames: 1,
+            image: p.media_image(media),
+        },
+        None => VideoPiece::Black { frames: 1 },
+    })
+}
+
 /// A media item's place on a source tape.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TapeEntry {

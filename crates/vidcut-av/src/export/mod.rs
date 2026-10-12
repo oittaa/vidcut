@@ -8,6 +8,7 @@
 mod ahead;
 pub mod audio;
 pub mod encode;
+pub mod renderer;
 pub mod still;
 pub mod video;
 

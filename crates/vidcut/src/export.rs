@@ -11,7 +11,7 @@ use vidcut_core::export::{
     Container, EncoderChoice, ExportSettings, Preset, apply_overrides, builtin_presets, validate,
 };
 use vidcut_core::otio::{self, Locations};
-use vidcut_core::render::{self, RenderPlan, VideoPiece};
+use vidcut_core::render::{self, RenderPlan};
 use vidcut_core::request::ExportParams;
 use vidcut_core::time::{TimeContext, TimeSpec};
 use vidcut_core::{Error, ErrorCode, Project, Result};
@@ -661,15 +661,7 @@ pub fn frame(
                     "frame {t} is outside {id} (0..{frames})"
                 )));
             }
-            let piece = VideoPiece::Source {
-                media: id.into(),
-                path: m.path.clone(),
-                origin: v.first_pts,
-                source_frame: t,
-                frames: 1,
-                image: p.media_image(id),
-            };
-            (piece, v.display_size(), t)
+            (render::media_frame(p, id, t)?, v.display_size(), t)
         }
     };
     let (w, h) = match width {

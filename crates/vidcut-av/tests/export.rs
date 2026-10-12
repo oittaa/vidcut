@@ -1075,7 +1075,7 @@ fn a_still_renderer_reads_on_and_back_exactly() {
         150,
     ));
     let dir = out_dir("still-renderer");
-    let mut renderer = vidcut_av::export::still::StillRenderer::default();
+    let mut renderer = vidcut_av::export::renderer::StillRenderer::default();
     // Forward a frame or a few at a time decodes on; back, or far ahead,
     // seeks. Every picture is the frame asked for.
     // Back a frame at a time: the frames rendered on the way to the first

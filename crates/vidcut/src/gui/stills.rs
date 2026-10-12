@@ -1,17 +1,21 @@
-//! Exact single frames for the GUI (the Trim Editor and Dynamic Trim's
-//! two-up), rendered by the export engine so they match export and never
-//! block the UI.
+//! Exact single frames for the GUI (the paused viewer, the Trim Editor and
+//! Dynamic Trim's two-up), rendered by the export engine so they match
+//! export and never block the UI.
 //!
 //! Each cell showing frames has a thread of its own, so the cells render at
-//! once, and a renderer that keeps its file open: a running Dynamic Trim
-//! asks for frame after frame, and each one decodes on from the one before
-//! instead of from a keyframe. The trim moves on faster than frames render,
-//! so a cell renders only the newest frame it asked for, skipping the rest,
-//! and shows its last picture until the next one is ready.
+//! once, and a renderer that decodes each frame once whichever way the
+//! position moves (docs/decisions/preview.md §13). Going back, the renderer
+//! plans the window before the one it is in, and a second thread of the
+//! cell's renders it meanwhile. The position moves faster than frames
+//! render, so a cell renders only the newest frame it asked for, skipping
+//! the rest, and shows its last picture until the next one is ready.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::time::Duration;
+
+use vidcut_av::export::renderer::{Prefetch, StillRenderer};
 
 use eframe::egui;
 use vidcut_core::render::VideoPiece;
@@ -49,7 +53,7 @@ enum State {
 }
 
 enum Outcome {
-    Rendered(Result<vidcut_av::thumbs::Image, String>),
+    Rendered(Result<Arc<vidcut_av::thumbs::Image>, String>),
     /// Its cell asked for a newer frame first.
     Skipped,
 }
@@ -57,6 +61,35 @@ enum Outcome {
 /// How long a cell keeps its file and decoder open without being asked for
 /// a frame: a decoder holds frame buffers and a thread per core.
 const IDLE: Duration = Duration::from_secs(10);
+
+/// The cell showing the paused viewer's frames.
+pub const VIEWER: usize = 2;
+
+/// Memory for a cell's kept pictures: the viewer's are the largest.
+fn budget(cell: usize) -> usize {
+    if cell == VIEWER { 512 << 20 } else { 256 << 20 }
+}
+
+/// Textures kept for frames shown before: the renderer keeps the pictures,
+/// so one shown again is only uploaded again.
+const TEXTURES: usize = 24;
+
+/// What a cell shows.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Shown {
+    /// The frame asked for.
+    Exact(egui::TextureId),
+    /// The cell's last picture, while the frame asked for renders.
+    Previous(egui::TextureId),
+}
+
+impl Shown {
+    pub fn texture(self) -> egui::TextureId {
+        match self {
+            Shown::Exact(t) | Shown::Previous(t) => t,
+        }
+    }
+}
 
 /// A cell's renderer thread, and the picture it showed last.
 struct Cell {
@@ -91,17 +124,32 @@ impl Stills {
             let (jobs, rx) = channel::<(Key, Still)>();
             let tx = self.finished.clone();
             let ctx = self.ctx.clone();
-            // The Trim Editor's frames: someone waits for them.
+            // The window before the one going back renders here.
+            let (prefetches, ahead) = channel::<Prefetch>();
+            let _ = crate::threads::spawn(
+                format!("vidcut-stills-{n}-ahead"),
+                crate::threads::Work::Interactive,
+                move || {
+                    while let Ok(p) = ahead.recv() {
+                        if let Err(e) = p.run()
+                            && crate::live::debug()
+                        {
+                            eprintln!("[stills] cell {n}: prefetch: {e}");
+                        }
+                    }
+                },
+            );
+            // Frames someone is looking at: they wait for them.
             let _ = crate::threads::spawn(
                 format!("vidcut-stills-{n}"),
                 crate::threads::Work::Interactive,
                 move || {
-                    let mut renderer = vidcut_av::export::still::StillRenderer::default();
+                    let mut renderer = StillRenderer::with_budget(budget(n));
                     loop {
                         let mut job = match rx.recv_timeout(IDLE) {
                             Ok(job) => job,
                             Err(RecvTimeoutError::Timeout) => {
-                                renderer = Default::default();
+                                renderer = StillRenderer::with_budget(budget(n));
                                 match rx.recv() {
                                     Ok(job) => job,
                                     Err(_) => return,
@@ -133,6 +181,9 @@ impl Stills {
                                 r.as_ref().err().map_or(String::new(), |e| format!(": {e}"))
                             );
                         }
+                        if let Some(p) = renderer.take_prefetch() {
+                            let _ = prefetches.send(p);
+                        }
                         if tx.send((key, n, Outcome::Rendered(r))).is_err() {
                             return;
                         }
@@ -147,13 +198,8 @@ impl Stills {
 
     /// The picture for `cell`: the still's texture, rendering it in the
     /// background if needed, and until then the newest picture rendered for
-    /// the cell (a running trim moves on before each frame is ready).
-    pub fn get(
-        &mut self,
-        ctx: &egui::Context,
-        cell: usize,
-        still: &Still,
-    ) -> Option<egui::TextureId> {
+    /// the cell (the position moves on before each frame is ready).
+    pub fn get(&mut self, ctx: &egui::Context, cell: usize, still: &Still) -> Option<Shown> {
         while let Ok((key, done_cell, outcome)) = self.done.try_recv() {
             let state = match outcome {
                 Outcome::Rendered(Ok(img)) => {
@@ -184,18 +230,21 @@ impl Stills {
                 let t = t.clone();
                 let id = t.id();
                 self.cell(cell).shown = Some(t);
-                return Some(id);
+                return Some(Shown::Exact(id));
             }
             Some(State::Failed) => return None,
             Some(State::Pending) => {}
             None => {
-                if self.cache.len() > 64 {
+                if self.cache.len() > TEXTURES {
                     self.cache.retain(|_, s| matches!(s, State::Pending));
                 }
                 self.cache.insert(key.clone(), State::Pending);
                 let _ = self.cell(cell).jobs.send((key, still.clone()));
             }
         }
-        self.cell(cell).shown.as_ref().map(|t| t.id())
+        self.cell(cell)
+            .shown
+            .as_ref()
+            .map(|t| Shown::Previous(t.id()))
     }
 }

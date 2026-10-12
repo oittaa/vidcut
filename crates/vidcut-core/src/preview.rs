@@ -81,22 +81,27 @@ pub struct Preview {
 /// `exists` is whether the proxy file is there: a missing file plays the
 /// original. Export plans never call this.
 pub fn apply_proxies(plan: &mut RenderPlan, project: &Project, exists: impl Fn(&Path) -> bool) {
+    for piece in &mut plan.video {
+        proxy_piece(piece, project, &exists);
+    }
+}
+
+/// [`apply_proxies`] for one piece: the viewer's paused frames show what
+/// the player would.
+pub fn proxy_piece(piece: &mut VideoPiece, project: &Project, exists: impl Fn(&Path) -> bool) {
     if !project.settings.use_proxies {
         return;
     }
-    for piece in &mut plan.video {
-        let VideoPiece::Source {
-            media, path, image, ..
-        } = piece
-        else {
-            continue;
-        };
-        let Some(proxy) = project.media(media).and_then(|m| m.fresh_proxy()) else {
-            continue;
-        };
-        if !exists(&proxy.path) {
-            continue;
-        }
+    let VideoPiece::Source {
+        media, path, image, ..
+    } = piece
+    else {
+        return;
+    };
+    let Some(proxy) = project.media(media).and_then(|m| m.fresh_proxy()) else {
+        return;
+    };
+    if exists(&proxy.path) {
         *path = proxy.path.clone();
         *image = None;
     }

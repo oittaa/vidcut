@@ -273,6 +273,22 @@ impl Source {
         Ok(source)
     }
 
+    /// Opens `input` without decoding anything yet.
+    fn bare(input: &Input, origin: f64, pictures: Pictures) -> Result<Source> {
+        let reader = VideoReader::open_input(input)?;
+        let tb = reader.time_base();
+        Ok(Source {
+            reader,
+            tick: f64::from(tb.numerator()) / f64::from(tb.denominator()),
+            origin,
+            source_frame: 0,
+            target: 0.0,
+            current: None,
+            normalized: None,
+            pictures,
+        })
+    }
+
     fn seek(&mut self, target: f64) -> Result<()> {
         self.reader.seek((target / self.tick).floor() as i64)?;
         self.target = target;
@@ -429,6 +445,32 @@ impl VideoFrames {
                 }
             };
         }
+    }
+
+    /// The time (seconds) of the keyframe decoding starts from for the
+    /// first frame of `piece`, a video file's: a seek and one decoded frame.
+    /// `None` for black, stills and image sequences.
+    pub fn keyframe_time(&mut self, piece: &VideoPiece) -> Result<Option<f64>> {
+        let VideoPiece::Source {
+            path,
+            origin,
+            source_frame,
+            image: None,
+            ..
+        } = piece
+        else {
+            return Ok(None);
+        };
+        let input = input_of(path, None);
+        let target = self.target(*origin, *source_frame);
+        let mut source = match self.source.take() {
+            Some(s) if s.reader.input() == &input => s,
+            _ => Source::bare(&input, *origin, Pictures::Video)?,
+        };
+        source.seek(target)?;
+        let at = source.reader.pending_pts().map(|p| p as f64 * source.tick);
+        self.source = Some(source);
+        Ok(at)
     }
 
     /// Makes `piece` alone the plan, its frames next: the open file stays

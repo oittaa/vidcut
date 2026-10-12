@@ -224,3 +224,19 @@ A proxy is a smaller H.264 file (8-bit 4:2:0, no B-frames) of a pool item's pict
 
 **Where.** Beside the project, in `proxies/`, when the session knows the project path; otherwise `~/.cache/vidcut/proxies`. The stored path is absolute. Stills are not proxied: one picture is not the real-time problem.
 
+
+## 13. Paused frames: decoded once either way
+
+**The problem.** A paused viewer steps with exact seeks. mpv decodes each one from the keyframe before it, and drops what it decoded on the way. On files with keyframes seconds apart (common for web encodes), every step decoded up to a few hundred frames again, about 0.1–0.15 s on the GPU; going back was the same. Seeks queue behind a decoding one (gui.md §4), so a held arrow key keeps the picture moving, but only as fast as those decodes.
+
+**How others go back.** mpv's backward playback (`play-direction=backward`) decodes forward from a keyframe up to where it is, keeps everything in a reversal queue, hands it out last first, then does the same for the range before. Only after the queue is empty does it decode the next range, so it stalls at every keyframe; its own manual calls it fragile, says hardware decoding may exhaust GPU memory, and says editors can do better (§7: it stalled for us too). FFmpeg's `reverse` filter keeps a whole clip's decoded frames (850 MB more for 10 s of 1080p) and reverses them; reversing itself costs nothing, the decoding does.
+
+**The decision.** While the player is paused, the viewer shows frames from `vidcut_av::export::renderer::StillRenderer`, the export engine's renderer, at the viewer's pixel size. Playing, it shows mpv's picture, as before; mpv still seeks in the background, so play starts at once.
+- **Forward:** the file and decoder stay open, and the next frame decodes on from the one before.
+- **Back:** a window renders at once, from a keyframe up to the frame asked for, and is kept. The keyframe is found with one seek and one decoded frame (where the seek lands), and the window starts at the first frame sampled at or after it, so a seek for it lands on that keyframe and nothing in the window decodes twice. A window reaches back over more keyframes to hold at least 2 s, and holds at most half the memory budget (512 MB for the viewer, 256 MB for each two-up cell).
+- **Ahead:** while fewer than a whole window of kept frames are left below the position, the window before renders on a second thread (`Prefetch`). Asked for a frame that window is rendering, the renderer waits for it instead of rendering it too.
+- **Measured** (`tests/renderer.rs`, keyframes 120 frames apart, with B-frames): 50 steps forward decode 50 frames; 299 steps back decode 306. On a 1080p HEVC file with keyframes 8 s apart, a step back takes under 5 ms except once a window, and the first picture after a seek about 0.7 s.
+
+The same renderer draws the Trim Editor's and Dynamic Trim's two-up. Image sequences render a picture at a time (each picture stands alone), and stills once.
+
+**Differences from mpv's picture.** The frames are the same ones (both follow the sampling rule, §1). The pixels differ by about 2 of 255 on average in fine detail: the export engine's FFmpeg scaling and YUV-to-RGB conversion against mpv's GPU shaders. `gui.screenshot` still captures mpv's picture.
