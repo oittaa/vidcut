@@ -39,6 +39,7 @@ mod plan;
 mod ring;
 mod scrub;
 mod store;
+mod stretch;
 mod video;
 
 use std::sync::atomic::AtomicBool;
@@ -209,6 +210,8 @@ pub(crate) struct Shared {
     presenter: Mutex<Presenter>,
     /// The audio device's failure.
     device: Arc<Mutex<Option<String>>>,
+    /// The sample rate and channels the device was opened for.
+    format: (u32, u16),
 }
 
 /// A paused seek that has decoded this long holds a newer one up no more.
@@ -427,6 +430,7 @@ impl Player {
             on_picture: config.on_picture,
             presenter: Mutex::new(Presenter::default()),
             device,
+            format: (rate, channels),
         });
         output.start(source)?;
         let mut player = Self {
@@ -457,27 +461,32 @@ impl Player {
         if plan.frames <= 0 {
             return Err(Error::Invalid("nothing to play".into()));
         }
-        let mut result = Ok(());
+        // Refused, or the same plan: nothing changes, nothing is cancelled.
+        let (rate, channels) = self.shared.format;
+        if (plan.sample_rate, plan.channels) != (rate, channels) {
+            return Err(Error::Invalid(format!(
+                "the player plays {rate} Hz in {channels} channels, not {} Hz in {}",
+                plan.sample_rate, plan.channels
+            )));
+        }
+        if self.shared.control().plan.plan == plan {
+            return Ok(());
+        }
         self.shared.change(true, |ctl, pos, _| {
-            let old = &ctl.plan.plan;
-            if (plan.sample_rate, plan.channels) != (old.sample_rate, old.channels) {
-                result = Err(Error::Invalid(format!(
-                    "the player plays {} Hz in {} channels, not {} Hz in {}",
-                    old.sample_rate, old.channels, plan.sample_rate, plan.channels
-                )));
-                return;
-            }
             ctl.plan = Arc::new(Plan::new(plan));
             ctl.plan_gen += 1;
             ctl.trims.clear();
             ctl.trims_gen += 1;
+            // Paused, the same frame. Playing, the sound goes on from the
+            // same time; at another frame rate, the picture shown stays
+            // until the new plan's is decoded.
             if let Mode::Paused { .. } = ctl.mode {
                 ctl.mode = Mode::Paused {
                     at: ctl.plan.clamp(pos),
                 };
             }
         });
-        result
+        Ok(())
     }
 
     /// Shows timeline frame `frame` (within the plan). Playing, play goes
@@ -730,11 +739,59 @@ impl Drop for Player {
 
 #[cfg(test)]
 mod tests {
+    use vidcut_core::render::{RenderPlan, VideoPiece};
+    use vidcut_core::time::Rational;
+
+    use super::*;
+
     #[test]
     fn a_player_is_shared_between_threads() {
         // The session sends requests while the renderer presents.
         fn shared<T: Send + Sync>() {}
-        shared::<super::Player>();
-        shared::<super::Shown>();
+        shared::<Player>();
+        shared::<Shown>();
+    }
+
+    /// Black for `frames` frames: no media needed.
+    fn black(frames: i64, rate: u32) -> RenderPlan {
+        RenderPlan {
+            fps: Rational::new(30, 1).unwrap(),
+            width: 64,
+            height: 36,
+            sample_rate: rate,
+            channels: 2,
+            frames,
+            video: vec![VideoPiece::Black { frames }],
+            audio: Vec::new(),
+            range: (0, frames),
+            name: "black".into(),
+        }
+    }
+
+    #[test]
+    fn a_refused_or_unchanged_plan_changes_nothing() {
+        let player = Player::new(
+            black(30, 48_000),
+            Config::default(),
+            Box::new(ManualOutput::new()),
+        )
+        .unwrap();
+        let state = |p: &Player| {
+            let ctl = p.shared.control();
+            (ctl.version, ctl.plan_gen, ctl.trims_gen)
+        };
+        let before = state(&player);
+        // Another sample rate: refused before anything is touched (nor a
+        // decode cancelled).
+        assert!(player.set_plan(black(30, 44_100)).is_err());
+        assert_eq!(state(&player), before);
+        // The same plan: nothing to do.
+        player.set_plan(black(30, 48_000)).unwrap();
+        assert_eq!(state(&player), before);
+        // Another: a change.
+        player.set_plan(black(40, 48_000)).unwrap();
+        let after = state(&player);
+        assert_eq!(after.1, before.1 + 1);
+        assert!(after.0 > before.0);
     }
 }
