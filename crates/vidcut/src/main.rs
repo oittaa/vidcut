@@ -19,6 +19,7 @@ fn main() -> ExitCode {
         unsafe { std::env::set_var("SVT_LOG", "2") };
     }
     let cli = Cli::parse();
+    vidcut_av::cuda::keep_shaders_in(vidcut::paths::cache_dir().join("shaders"));
     match run(&cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {

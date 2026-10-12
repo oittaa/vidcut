@@ -65,6 +65,28 @@ fn untagged_matrix(width: u32, height: u32) -> Matrix {
     }
 }
 
+/// The matrix and range an SDR YUV picture is read with: its tags, or what
+/// [`Source::of`] assumes when it has none. A converter on the GPU given
+/// these sees the picture as the CPU does. `None` for HDR and RGB pictures.
+pub(crate) fn sdr_yuv(f: &frame::Video) -> Option<(ffi::AVColorSpace, ffi::AVColorRange)> {
+    use ffi::AVColorSpace as S;
+    let src = Source::of(f);
+    if src.hdr.is_some() || src.rgb {
+        return None;
+    }
+    let matrix = match src.matrix {
+        Matrix::Bt601 => S::AVCOL_SPC_SMPTE170M,
+        Matrix::Bt709 => S::AVCOL_SPC_BT709,
+        Matrix::Bt2020 => S::AVCOL_SPC_BT2020_NCL,
+    };
+    let range = if src.full_range {
+        ffi::AVColorRange::AVCOL_RANGE_JPEG
+    } else {
+        ffi::AVColorRange::AVCOL_RANGE_MPEG
+    };
+    Some((matrix, range))
+}
+
 impl Source {
     pub(crate) fn of(f: &frame::Video) -> Self {
         use ffi::AVColorSpace as S;

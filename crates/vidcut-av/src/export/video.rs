@@ -248,18 +248,25 @@ pub(crate) struct GpuSide {
 
 /// `input` opened on NVDEC, and the scaler to the output, when its pictures
 /// go through the GPU as they would through the CPU: as for proxies
-/// (upright, SDR, BT.709), progressive (frames are picked before any
-/// scaling, so a deinterlacer would see gaps), and with filters the GPU
-/// has for them (no `pad_cuda` for 10 bits).
+/// (upright, SDR), progressive (frames are picked before any scaling, so a
+/// deinterlacer would see gaps), and when the scaler builds (libplacebo
+/// needs Vulkan for other matrices than BT.709).
 fn gpu_reader(input: &Input, gpu: &GpuSide) -> Option<(VideoReader, crate::cuda::CudaPictures)> {
     let reader = VideoReader::open_cuda(input, &gpu.device).ok()?;
     let first = reader.peek()?;
     if !crate::proxy::gpu_suitable(first, reader.rotation()) || reader.interlaced() {
         return None;
     }
-    let scaler =
-        crate::cuda::CudaPictures::new(first, reader.time_base(), gpu.out, gpu.format, false)
-            .ok()?;
+    let scaler = crate::cuda::CudaPictures::new(
+        &gpu.device,
+        first,
+        reader.time_base(),
+        gpu.out,
+        gpu.format,
+        false,
+        true,
+    )
+    .ok()?;
     Some((reader, scaler))
 }
 
@@ -310,7 +317,24 @@ impl Source {
             source.seek(target)?;
             source.advance(target)?;
         }
+        // The GPU's first picture too: libplacebo compiles its shaders for
+        // it, which is better done here, ahead of the piece.
+        if source.on_gpu {
+            source.scale_on_gpu()?;
+        }
         Ok(source)
+    }
+
+    /// `normalized` from the current frame, on the GPU.
+    fn scale_on_gpu(&mut self) -> Result<()> {
+        let (frame, _) = self.current.as_ref().expect("have a frame");
+        let scaler = self.scaler.as_mut().expect("built at opening");
+        scaler.push(Some(frame))?;
+        let picture = scaler
+            .pull()?
+            .ok_or_else(|| Error::Invalid("the GPU scaler gave no picture".into()))?;
+        self.normalized = Some(picture);
+        Ok(())
     }
 
     /// Opens `input` without decoding anything yet.
@@ -665,13 +689,7 @@ impl VideoFrames {
             src.origin + fps.frames_to_secs(src.source_frame + k) - 0.5 * fps.frames_to_secs(1);
         let changed = src.advance(target)?;
         if src.on_gpu && (changed || src.normalized.is_none()) {
-            let (frame, _) = src.current.as_ref().expect("have a frame");
-            let scaler = src.scaler.as_mut().expect("built at opening");
-            scaler.push(Some(frame))?;
-            let picture = scaler
-                .pull()?
-                .ok_or_else(|| Error::Invalid("the GPU scaler gave no picture".into()))?;
-            src.normalized = Some(picture);
+            src.scale_on_gpu()?;
         } else if changed || src.normalized.is_none() {
             let (frame, _) = src.current.as_ref().expect("have a frame");
             let rotation = src.reader.rotation();
