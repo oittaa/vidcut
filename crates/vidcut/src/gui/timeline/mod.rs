@@ -269,9 +269,13 @@ const UPPER_OTHER: f32 = 9.0;
 /// Preferred lower timeline row heights: Track 1, other video, audio.
 const LOWER_ROWS: [f32; 3] = [100.0, 60.0, 46.0];
 const LOWER_RULER: f32 = 22.0;
-/// The track header column: wide enough for the L, A and V buttons side by
-/// side, which must not reach into the timeline.
-const HEADER: f32 = 80.0;
+/// The track header column: wide enough for a track's name with its L, A
+/// and V buttons on one line (short rows), which must not reach into the
+/// timeline.
+const HEADER: f32 = 100.0;
+
+/// Room one of a header's L, A and V buttons takes, with the space after it.
+const TOGGLE: f32 = 21.0;
 
 fn options_path() -> std::path::PathBuf {
     crate::paths::config_dir().join("timeline.json")
@@ -925,6 +929,7 @@ impl Workspace {
             // Nothing in a header reaches past it, to be hovered or clicked
             // over a clip.
             child.set_clip_rect(rect.intersect(child.clip_rect()));
+            child.spacing_mut().button_padding.x = 3.0;
             let is_target = self.is_target(&t.id);
             let label = t.name.clone().unwrap_or_else(|| t.id.clone());
             let tall = r.height() >= 40.0;
@@ -977,8 +982,12 @@ impl Workspace {
                 }
             };
             let pick = |ui: &mut egui::Ui, ws: &mut Self| {
+                // A long name is cut short rather than the toggles.
                 let r = ui
-                    .selectable_label(is_target, RichText::new(&label).strong().small())
+                    .add(
+                        egui::Button::selectable(is_target, RichText::new(&label).strong().small())
+                            .truncate(),
+                    )
                     .on_hover_text("The target track for edit functions");
                 // A click makes the track the target, however often it comes;
                 // V1, the default, is no target of its own.
@@ -1015,8 +1024,26 @@ impl Workspace {
                 pick(&mut child, self);
                 child.horizontal(|ui| buttons(ui, self));
             } else {
+                // One line: the name in what the toggles leave, cut short if
+                // need be, so the toggles always show.
                 child.horizontal(|ui| {
-                    pick(ui, self);
+                    // Room for L, A and V on every row, so an audio
+                    // track's L and A sit under the video tracks'.
+                    let width = (ui.available_width() - 3.0 * TOGGLE).max(16.0);
+                    let used = ui
+                        .allocate_ui_with_layout(
+                            vec2(width, ui.available_height()),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                ui.set_max_width(width);
+                                pick(ui, self);
+                            },
+                        )
+                        .response
+                        .rect
+                        .width();
+                    // The toggles line up in columns, row under row.
+                    ui.add_space((width - used).max(0.0));
                     buttons(ui, self);
                 });
             }

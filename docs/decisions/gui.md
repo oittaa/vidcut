@@ -165,7 +165,8 @@ A seek or load ("motion") is shown after two steps:
 
 **Several tracks (M6).**
 - **Rows:** both timelines draw every track: V*n*…V1, then A1…. The upper timeline grows a little per track, and the lower one shares its height among the rows (Track 1 gets the most).
-- **Headers:** the lower timeline's track headers hold the target-track toggle, L/M/V (lock, mute, video) and a menu to add or remove tracks.
+- **Headers:** the lower timeline's track headers hold the target-track toggle, L/A/V (lock, audio, video) and a menu to add or remove tracks. A short row puts them on one line: the name takes what L, A and V leave (cut short if need be), so the toggles always show, in the same columns row under row.
+- **Rows sit on the bottom:** the lower timeline lays its rows out upward from a fixed strip above its bottom edge (room to drop a new audio track), so V1 or the last audio track stays put whatever the panel's height; the spare room is above the top track, where a drop makes a new video track. Many tracks shrink to fit between the strips.
 - **Destination row:** a drag's destination is the row under the pointer, and the strips above and below the rows stand for a new track (spec D18). `gesture.rs` turns the destination into the request (`track`, D25), and its unit tests cover the rows.
 
 **Mixer and meters (M6, `gui/mixer.rs`).**

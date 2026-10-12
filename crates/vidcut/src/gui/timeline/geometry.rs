@@ -93,7 +93,8 @@ pub struct Row {
 
 /// A timeline's rows, top to bottom: the video tracks from the top one down
 /// to V1, then the audio tracks A1, A2…. Above the rows is room for
-/// a new video track, below them for a new audio track.
+/// a new video track, below them for a new audio track. The rows sit on the
+/// bottom, so the last one stays where it is whatever the area's height.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rows {
     pub rows: Vec<Row>,
@@ -106,8 +107,10 @@ pub struct Rows {
 pub const NEW_TRACK_STRIP: f32 = 14.0;
 
 impl Rows {
-    /// Lays out `p`'s tracks in `area`. Track 1 gets the most room; rows
-    /// shrink (to `min` pixels) when many tracks share the area.
+    /// Lays out `p`'s tracks in `area`, `strip` above the area's bottom (room
+    /// for a new audio track) and at least `strip` below its top (a new
+    /// video track); what's spare goes above them. Track 1 gets the most
+    /// room; rows shrink (to `min` pixels) when many tracks share the area.
     pub fn layout(p: &Project, area: Rect, heights: [f32; 3], min: f32, strip: f32) -> Self {
         let [v1, video, audio] = heights;
         let mut order: Vec<&Track> = p
@@ -129,15 +132,17 @@ impl Rows {
                 TrackKind::Video => video,
             })
             .collect();
-        let room = (area.height() - strip).max(1.0);
+        let room = (area.height() - 2.0 * strip).max(1.0);
         let total: f32 = want.iter().sum();
         let factor = if total > room { room / total } else { 1.0 };
-        let mut y = area.top() + strip;
+        // Rounded down, so shrunk rows never reach past the bottom strip.
+        let heights: Vec<f32> = want.iter().map(|h| (h * factor).floor().max(min)).collect();
+        let used: f32 = heights.iter().sum();
+        let mut y = (area.bottom() - strip - used).max(area.top() + strip);
         let rows = order
             .iter()
-            .zip(want)
+            .zip(heights)
             .map(|(t, h)| {
-                let h = (h * factor).max(min).round();
                 let rect =
                     Rect::from_min_max(pos2(area.left(), y), pos2(area.right(), y + h - 1.0));
                 y += h;
@@ -597,5 +602,40 @@ mod tests {
         assert_eq!(s.snap_block(147, 50, &scale, 8.0), (150, Some(150)));
         assert_eq!(s.snap_block(149, 49, &scale, 8.0), (150, Some(150)));
         assert_eq!(s.snap_block(122, 80, &scale, 8.0), (120, Some(200)));
+    }
+}
+
+#[cfg(test)]
+mod row_tests {
+    use super::{NEW_TRACK_STRIP, Rows};
+    use eframe::egui::{Rect, pos2};
+    use vidcut_core::model::{Project, Settings, Track, TrackKind};
+
+    /// The last row sits a strip above the area's bottom whatever its
+    /// height, spare room above the rows; many tracks shrink to fit
+    /// between the strips.
+    #[test]
+    fn rows_sit_on_the_bottom() {
+        let mut p = Project::new(Settings::default());
+        let area = |h: f32| Rect::from_min_max(pos2(0.0, 0.0), pos2(500.0, h));
+        let heights = [100.0, 60.0, 46.0];
+        for h in [300.0, 400.0, 700.0] {
+            let rows = Rows::layout(&p, area(h), heights, 22.0, NEW_TRACK_STRIP);
+            let (top, bottom) = rows.span();
+            assert_eq!(bottom, h - NEW_TRACK_STRIP - 1.0, "height {h}");
+            assert_eq!(top, h - NEW_TRACK_STRIP - 100.0, "height {h}");
+        }
+        for i in 2..=6 {
+            p.tracks
+                .insert(0, Track::new(format!("V{i}"), TrackKind::Video));
+        }
+        p.tracks.push(Track::new("A1", TrackKind::Audio));
+        let rows = Rows::layout(&p, area(300.0), heights, 22.0, NEW_TRACK_STRIP);
+        let (top, bottom) = rows.span();
+        assert!(
+            (NEW_TRACK_STRIP..NEW_TRACK_STRIP + 8.0).contains(&top),
+            "{top}"
+        );
+        assert_eq!(bottom, 300.0 - NEW_TRACK_STRIP - 1.0);
     }
 }
