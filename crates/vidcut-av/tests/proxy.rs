@@ -220,3 +220,75 @@ fn a_sequence_proxy_uses_the_sequence_timestamps() {
         }
     }
 }
+
+/// With NVENC, sources the GPU shows as the CPU would are decoded on NVDEC
+/// and scaled there, frames never leaving it: each proxy frame is still
+/// the source frame with its timestamp (interlaced ones deinterlaced one
+/// frame per frame, as the CPU reader does). Turned sources, and ones NVDEC
+/// can't decode, are made on the CPU, still with NVENC.
+#[cfg(feature = "gpu-tests")]
+#[test]
+fn nvenc_proxies_decode_on_the_gpu_and_stay_exact() {
+    let available = vidcut_av::export::encode::detect();
+    let nvenc: Vec<ProxyEncoder> = encoders(ProxyCodec::Av1, &available)
+        .into_iter()
+        .filter(|e| e.name == "av1_nvenc")
+        .collect();
+    assert!(!nvenc.is_empty(), "no NVENC here");
+    let hd = |codec, container| FixtureSpec::new(codec, container, 1280, 720, (30, 1), 45);
+    let cases = [
+        (
+            "H.264 with B-frames",
+            hd(VideoCodec::H264, Container::Mp4),
+            true,
+        ),
+        ("HEVC 10-bit", hd(VideoCodec::Hevc10, Container::Mkv), true),
+        ("VP9", hd(VideoCodec::Vp9, Container::Mkv), true),
+        // FFmpeg decodes AV1 with libdav1d unless told otherwise.
+        ("AV1 10-bit", hd(VideoCodec::Av1, Container::Mp4), true),
+        (
+            "MPEG-TS starting at 1.4 s",
+            hd(VideoCodec::H264, Container::MpegTs).start_offset_ms(1400),
+            true,
+        ),
+        (
+            "interlaced",
+            hd(VideoCodec::H264, Container::Mp4).interlaced(true),
+            true,
+        ),
+        (
+            "turned",
+            hd(VideoCodec::H264, Container::Mp4).rotation(90),
+            false,
+        ),
+        ("ProRes", hd(VideoCodec::ProRes422Hq, Container::Mov), false),
+    ];
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-proxy-gpu-")
+        .tempdir()
+        .unwrap();
+    for (n, (what, spec, gpu)) in cases.into_iter().enumerate() {
+        let source = fixture::ensure(&spec).unwrap();
+        let dest = tmp.path().join(format!("gpu-{n}.mkv"));
+        let turned = spec.rotation % 180 == 90;
+        let (w, h) = if turned { (360, 640) } else { (640, 360) };
+        let written =
+            vidcut_av::proxy::write(&Input::File(source.clone()), w, h, &dest, None, &nvenc)
+                .unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert_eq!(written.on_gpu, gpu, "{what}: on the GPU");
+        assert_eq!(written.encoder.name, "av1_nvenc", "{what}");
+        let src = frames(&Input::File(source));
+        let got = frames(&Input::File(dest));
+        assert_eq!(got.len(), src.len(), "{what}: frames");
+        for (k, ((want_code, want_t), (got_code, got_t))) in src.iter().zip(&got).enumerate() {
+            // A turned picture's barcode reads across, not along.
+            if !turned {
+                assert_eq!(got_code, want_code, "{what}: frame {k}");
+            }
+            assert!(
+                (got_t - want_t).abs() <= 1.5e-3,
+                "{what}: frame {k} at {got_t}, source at {want_t}"
+            );
+        }
+    }
+}

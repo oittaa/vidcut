@@ -150,12 +150,21 @@ pub struct WrittenProxy {
     pub frames: u64,
     /// The encoder it was made with.
     pub encoder: ProxyEncoder,
+    /// Decoded and scaled on the GPU (NVDEC and CUDA), frames never leaving
+    /// it, rather than on the CPU.
+    pub on_gpu: bool,
 }
 
 /// Encodes `input`'s pictures to `dest` at `width`×`height` (even), with the
 /// first of `encoders` that opens. Each frame is reported to this thread's
 /// [`crate::progress`] guard, out of `total` (the source's frame count, when
 /// known); this thread's [`crate::cancel`] flag stops it, leaving no file.
+///
+/// With NVENC, the frames are decoded on NVDEC and scaled on the GPU, never
+/// copied to memory, when that gives the same pictures as the CPU: a video
+/// file that is upright and SDR BT.709, progressive or interlaced
+/// ([`gpu_suitable`]). Otherwise, or when NVDEC can't decode the stream,
+/// they are decoded and scaled on the CPU as for every other encoder.
 pub fn write(
     input: &Input,
     width: u32,
@@ -173,11 +182,6 @@ pub fn write(
     if encoders.is_empty() {
         return Err(Error::Invalid("no encoder to make the proxy with".into()));
     }
-    let mut reader = VideoReader::open_input(input)?;
-    let src_tb = reader.time_base();
-    let enc_tb = encode_time_base(src_tb);
-    let rotation = reader.rotation();
-    let rate = reader.frame_rate();
     if let Some(parent) = dest.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -190,40 +194,79 @@ pub fn write(
         total: total.map_or(0, |t| t as i64),
         started: std::time::Instant::now(),
     };
+    let done = |frames, enc: &ProxyEncoder, on_gpu| -> Result<WrittenProxy> {
+        std::fs::rename(&tmp, dest)
+            .map_err(|e| Error::Invalid(format!("replacing {}: {e}", dest.display())))?;
+        Ok(WrittenProxy {
+            path: dest.to_path_buf(),
+            width,
+            height,
+            frames,
+            encoder: enc.clone(),
+            on_gpu,
+        })
+    };
     let mut errors = Vec::new();
+    // NVDEC needs a CUDA device; one for the whole proxy.
+    let mut cuda = None;
     for enc in encoders {
-        let result = encode_into(
-            &mut reader,
-            enc,
-            (width, height, rotation),
-            (src_tb, enc_tb, rate),
-            &tmp,
-            &shown,
-        );
-        match result {
-            Ok(frames) => {
-                std::fs::rename(&tmp, dest)
-                    .map_err(|e| Error::Invalid(format!("replacing {}: {e}", dest.display())))?;
-                return Ok(WrittenProxy {
-                    path: dest.to_path_buf(),
-                    width,
-                    height,
-                    frames,
-                    encoder: enc.clone(),
-                });
+        if enc.kind == EncoderChoice::Nvenc && matches!(input, Input::File(_)) {
+            if cuda.is_none() {
+                cuda = crate::cuda::CudaDevice::open().ok();
             }
+            if let Some(device) = &cuda {
+                match encode_on_gpu(input, device, enc, (width, height), &tmp, &shown) {
+                    Ok(frames) => return done(frames, enc, true),
+                    Err(Failed::Encoding(e)) => {
+                        let _ = std::fs::remove_file(&tmp);
+                        return Err(e);
+                    }
+                    Err(Failed::Opening(e)) => {
+                        let _ = std::fs::remove_file(&tmp);
+                        errors.push(e);
+                        continue;
+                    }
+                    // Decoded on the CPU instead, still with NVENC.
+                    Err(Failed::Unsuitable(_)) => {
+                        let _ = std::fs::remove_file(&tmp);
+                    }
+                }
+            }
+        }
+        // A fresh reader: a failed attempt may have read frames already.
+        let mut reader = VideoReader::open_input(input)?;
+        match encode_into(&mut reader, enc, (width, height), &tmp, &shown) {
+            Ok(frames) => return done(frames, enc, false),
             Err(Failed::Encoding(e)) => {
                 let _ = std::fs::remove_file(&tmp);
                 return Err(e);
             }
             // An encoder that won't open makes way for the next.
-            Err(Failed::Opening(e)) => {
+            Err(Failed::Opening(e) | Failed::Unsuitable(e)) => {
                 let _ = std::fs::remove_file(&tmp);
                 errors.push(e);
             }
         }
     }
     Err(errors.remove(0))
+}
+
+/// Whether frames like `first` can be decoded and scaled on the GPU and
+/// look as they would from the CPU: upright (the GPU can't turn them), SDR
+/// (it can't tone-map) and BT.709 or untagged HD, which needs no matrix
+/// change, in video range.
+pub fn gpu_suitable(first: &frame::Video, rotation: u16) -> bool {
+    use ffi::AVColorSpace as S;
+    let raw = unsafe { &*first.as_ptr() };
+    let bt709 = match raw.colorspace {
+        S::AVCOL_SPC_BT709 => true,
+        S::AVCOL_SPC_UNSPECIFIED => first.width() >= 1280 || first.height() > 576,
+        _ => false,
+    };
+    rotation == 0
+        && crate::color::hdr_of(first).is_none()
+        && bt709
+        && raw.color_range != ffi::AVColorRange::AVCOL_RANGE_JPEG
 }
 
 /// The encoder's time base: the source's, when its denominator is a sane
@@ -268,21 +311,24 @@ impl Shown<'_> {
     }
 }
 
-/// Why [`encode_into`] failed: the encoder wouldn't open (another may), or
-/// encoding failed.
+/// Why an attempt failed: the encoder wouldn't open (another may), the
+/// source isn't for the GPU (the CPU may do it), or encoding failed.
 enum Failed {
     Opening(Error),
+    Unsuitable(Error),
     Encoding(Error),
 }
 
-/// Opens `enc` for `width`×`height` frames timed in `enc_tb`; for VAAPI,
-/// with the context that uploads them.
+/// Opens `enc` for `width`×`height` frames timed in `enc_tb`: for VAAPI,
+/// with the context that uploads them; with `gpu_frames`, for frames in
+/// GPU memory of that frames context.
 fn open(
     enc: &ProxyEncoder,
     (width, height): (u32, u32),
     enc_tb: ffmpeg::Rational,
     rate: Option<ffmpeg::Rational>,
     global: bool,
+    gpu_frames: Option<*mut ffi::AVBufferRef>,
 ) -> Result<(encoder::Video, ffmpeg::Codec, Option<Vaapi>)> {
     let codec = encoder::find_by_name(&enc.name)
         .ok_or_else(|| Error::Invalid(format!("this FFmpeg has no {} encoder", enc.name)))?;
@@ -307,15 +353,24 @@ fn open(
     }
     ctx.set_flags(flags);
     crate::color::tag(unsafe { ctx.as_mut_ptr() }, None);
-    let vaapi = match (&enc.device, enc.kind) {
-        (Some(node), EncoderChoice::Vaapi) => {
+    let hw_frames = |ctx: &mut encoder::video::Video, frames: *mut ffi::AVBufferRef| {
+        let frames = unsafe { ffi::av_buffer_ref(frames) };
+        if frames.is_null() {
+            return Err(Error::Invalid("no memory for the GPU frames".into()));
+        }
+        unsafe { (*ctx.as_mut_ptr()).hw_frames_ctx = frames };
+        Ok(())
+    };
+    let vaapi = match (&enc.device, enc.kind, gpu_frames) {
+        (_, EncoderChoice::Nvenc, Some(frames)) => {
+            ctx.set_format(format::Pixel::CUDA);
+            hw_frames(&mut ctx, frames)?;
+            None
+        }
+        (Some(node), EncoderChoice::Vaapi, _) => {
             let v = Vaapi::new(node, enc.pixel(), width, height)?;
             ctx.set_format(format::Pixel::VAAPI);
-            let frames = unsafe { ffi::av_buffer_ref(v.frames) };
-            if frames.is_null() {
-                return Err(Error::Invalid("no memory for the VAAPI frames".into()));
-            }
-            unsafe { (*ctx.as_mut_ptr()).hw_frames_ctx = frames };
+            hw_frames(&mut ctx, v.frames)?;
             Some(v)
         }
         _ => {
@@ -333,66 +388,153 @@ fn open(
     Ok((opened, codec, vaapi))
 }
 
+/// The proxy file being written: pictures go in in order, each one's
+/// duration known once the next arrives.
+struct Writer<'a> {
+    octx: format::context::Output,
+    encoder: encoder::Video,
+    vaapi: Option<Vaapi>,
+    src_tb: ffmpeg::Rational,
+    enc_tb: ffmpeg::Rational,
+    durations: HashMap<i64, i64>,
+    pending: Option<(frame::Video, i64)>,
+    last_dur: i64,
+    frames: u64,
+    shown: &'a Shown<'a>,
+}
+
+impl<'a> Writer<'a> {
+    /// Creates `tmp` and opens `enc` for pictures timed in `src_tb` (with
+    /// `gpu_frames`, pictures in GPU memory).
+    fn new(
+        tmp: &Path,
+        enc: &ProxyEncoder,
+        size: (u32, u32),
+        (src_tb, rate): (ffmpeg::Rational, Option<ffmpeg::Rational>),
+        gpu_frames: Option<*mut ffi::AVBufferRef>,
+        shown: &'a Shown<'a>,
+    ) -> std::result::Result<Self, Failed> {
+        let enc_tb = encode_time_base(src_tb);
+        let mut octx = format::output_as(tmp, "matroska")
+            .ctx(|| format!("creating {}", tmp.display()))
+            .map_err(Failed::Encoding)?;
+        let global = octx.format().flags().contains(format::Flags::GLOBAL_HEADER);
+        let (encoder, codec, vaapi) =
+            open(enc, size, enc_tb, rate, global, gpu_frames).map_err(Failed::Opening)?;
+        let mut header = || -> Result<()> {
+            let mut ost = octx
+                .add_stream(Some(codec))
+                .ctx(|| "adding the proxy stream".into())?;
+            ost.set_parameters(&encoder);
+            ost.set_time_base(enc_tb);
+            octx.write_header()
+                .ctx(|| "writing the proxy header".into())?;
+            Ok(())
+        };
+        header().map_err(Failed::Encoding)?;
+        Ok(Self {
+            octx,
+            encoder,
+            vaapi,
+            src_tb,
+            enc_tb,
+            durations: HashMap::new(),
+            pending: None,
+            last_dur: 1,
+            frames: 0,
+            shown,
+        })
+    }
+
+    /// The next picture, `pts` in the source's time base.
+    fn push(&mut self, picture: frame::Video, pts: Option<i64>) -> Result<()> {
+        let Some(raw) = pts else {
+            return Err(Error::Invalid(
+                "a source frame has no timestamp to copy onto the proxy".into(),
+            ));
+        };
+        let mut pts = scale_pts(raw, self.src_tb, self.enc_tb);
+        if let Some((_, prev)) = &self.pending
+            && pts <= *prev
+        {
+            pts = prev.saturating_add(1);
+        }
+        if let Some((prev, prev_pts)) = self.pending.take() {
+            let dur = (pts - prev_pts).max(1);
+            self.last_dur = dur;
+            self.encode(prev, prev_pts, dur)?;
+        }
+        self.pending = Some((picture, pts));
+        Ok(())
+    }
+
+    fn encode(&mut self, mut picture: frame::Video, pts: i64, dur: i64) -> Result<()> {
+        picture.set_pts(Some(pts));
+        // The source's picture type would force it on the encoder.
+        picture.set_kind(ffmpeg::picture::Type::None);
+        unsafe { (*picture.as_mut_ptr()).duration = dur };
+        let mut picture = match &self.vaapi {
+            Some(v) => v.upload(&picture)?,
+            None => picture,
+        };
+        picture.set_pts(Some(pts));
+        self.durations.insert(pts, dur);
+        self.encoder
+            .send_frame(&picture)
+            .ctx(|| "encoding a proxy frame".into())?;
+        drain(
+            &mut self.encoder,
+            &mut self.octx,
+            self.enc_tb,
+            &mut self.durations,
+        )?;
+        self.frames += 1;
+        self.shown.frame(self.frames);
+        Ok(())
+    }
+
+    /// The last picture, then the end; returns the frames written.
+    fn finish(mut self, source: &Path) -> Result<u64> {
+        if let Some((prev, prev_pts)) = self.pending.take() {
+            let dur = self.last_dur;
+            self.encode(prev, prev_pts, dur)?;
+        }
+        if self.frames == 0 {
+            return Err(Error::Invalid(format!(
+                "{}: no pictures to proxy",
+                source.display()
+            )));
+        }
+        self.encoder
+            .send_eof()
+            .ctx(|| "flushing the proxy encoder".into())?;
+        drain(
+            &mut self.encoder,
+            &mut self.octx,
+            self.enc_tb,
+            &mut self.durations,
+        )?;
+        self.octx
+            .write_trailer()
+            .ctx(|| "finishing the proxy".into())?;
+        Ok(self.frames)
+    }
+}
+
+/// Decodes on the CPU and scales with the export's normalizer.
 fn encode_into(
     reader: &mut VideoReader,
     enc: &ProxyEncoder,
-    (width, height, rotation): (u32, u32, u16),
-    (src_tb, enc_tb, rate): (ffmpeg::Rational, ffmpeg::Rational, Option<ffmpeg::Rational>),
+    (width, height): (u32, u32),
     tmp: &Path,
     shown: &Shown<'_>,
 ) -> std::result::Result<u64, Failed> {
-    let mut octx = format::output_as(tmp, "matroska")
-        .ctx(|| format!("creating {}", tmp.display()))
-        .map_err(Failed::Encoding)?;
-    let global = octx.format().flags().contains(format::Flags::GLOBAL_HEADER);
-    let (mut encoder, codec, vaapi) =
-        open(enc, (width, height), enc_tb, rate, global).map_err(Failed::Opening)?;
-    let mut encoding = || -> Result<u64> {
-        let mut ost = octx
-            .add_stream(Some(codec))
-            .ctx(|| "adding the proxy stream".into())?;
-        ost.set_parameters(&encoder);
-        ost.set_time_base(enc_tb);
-        octx.write_header()
-            .ctx(|| "writing the proxy header".into())?;
-
-        let mut normalizer: Option<Normalizer> = None;
-        let mut durations: HashMap<i64, i64> = HashMap::new();
-        let mut pending: Option<(frame::Video, i64)> = None;
-        let mut last_dur = 1i64;
-        let mut frames = 0u64;
-        let mut encode_one = |durations: &mut HashMap<i64, i64>,
-                              mut picture: frame::Video,
-                              pts: i64,
-                              dur: i64|
-         -> Result<()> {
-            picture.set_pts(Some(pts));
-            // The source's picture type would force it on the encoder.
-            picture.set_kind(ffmpeg::picture::Type::None);
-            unsafe { (*picture.as_mut_ptr()).duration = dur };
-            let mut picture = match &vaapi {
-                Some(v) => v.upload(&picture)?,
-                None => picture,
-            };
-            picture.set_pts(Some(pts));
-            durations.insert(pts, dur);
-            encoder
-                .send_frame(&picture)
-                .ctx(|| "encoding a proxy frame".into())?;
-            drain(&mut encoder, &mut octx, enc_tb, durations)
-        };
+    let rotation = reader.rotation();
+    let times = (reader.time_base(), reader.frame_rate());
+    let mut writer = Writer::new(tmp, enc, (width, height), times, None, shown)?;
+    let mut normalizer: Option<Normalizer> = None;
+    let mut encoding = || -> Result<()> {
         while let Some(src) = reader.next_frame()? {
-            let Some(raw) = src.pts() else {
-                return Err(Error::Invalid(
-                    "a source frame has no timestamp to copy onto the proxy".into(),
-                ));
-            };
-            let mut pts = scale_pts(raw, src_tb, enc_tb);
-            if let Some((_, prev)) = &pending
-                && pts <= *prev
-            {
-                pts = prev.saturating_add(1);
-            }
             let picture = scale(
                 &mut normalizer,
                 &src,
@@ -400,34 +542,63 @@ fn encode_into(
                 (width, height),
                 enc.pixel(),
             )?;
-            if let Some((prev, prev_pts)) = pending.take() {
-                let dur = (pts - prev_pts).max(1);
-                last_dur = dur;
-                encode_one(&mut durations, prev, prev_pts, dur)?;
-                frames += 1;
-                shown.frame(frames);
-            }
-            pending = Some((picture, pts));
+            writer.push(picture, src.pts())?;
         }
-        if let Some((prev, prev_pts)) = pending.take() {
-            encode_one(&mut durations, prev, prev_pts, last_dur)?;
-            frames += 1;
-            shown.frame(frames);
-        }
-        if frames == 0 {
-            return Err(Error::Invalid(format!(
-                "{}: no pictures to proxy",
-                reader.path().display()
-            )));
-        }
-        encoder
-            .send_eof()
-            .ctx(|| "flushing the proxy encoder".into())?;
-        drain(&mut encoder, &mut octx, enc_tb, &mut durations)?;
-        octx.write_trailer().ctx(|| "finishing the proxy".into())?;
-        Ok(frames)
+        Ok(())
     };
-    encoding().map_err(Failed::Encoding)
+    encoding().map_err(Failed::Encoding)?;
+    writer.finish(reader.path()).map_err(Failed::Encoding)
+}
+
+/// Decodes on NVDEC, scales on the GPU and hands NVENC the frames there.
+/// [`Failed::Unsuitable`] before anything is written when the source isn't
+/// for the GPU.
+fn encode_on_gpu(
+    input: &Input,
+    device: &crate::cuda::CudaDevice,
+    enc: &ProxyEncoder,
+    (width, height): (u32, u32),
+    tmp: &Path,
+    shown: &Shown<'_>,
+) -> std::result::Result<u64, Failed> {
+    let mut reader = VideoReader::open_cuda(input, device).map_err(Failed::Unsuitable)?;
+    let first = reader
+        .peek()
+        .ok_or_else(|| Failed::Unsuitable(Error::Invalid("no frames".into())))?;
+    if !gpu_suitable(first, reader.rotation()) {
+        return Err(Failed::Unsuitable(Error::Invalid(
+            "turned, HDR or not BT.709: the CPU makes this proxy".into(),
+        )));
+    }
+    let src_tb = reader.time_base();
+    let mut pictures =
+        crate::cuda::CudaPictures::new(first, src_tb, width, height, reader.interlaced())
+            .map_err(Failed::Unsuitable)?;
+    let frames = pictures.frames_ctx();
+    if frames.is_null() {
+        return Err(Failed::Unsuitable(Error::Invalid(
+            "the GPU scaler has no frames context".into(),
+        )));
+    }
+    let times = (src_tb, reader.frame_rate());
+    let mut writer = Writer::new(tmp, enc, (width, height), times, Some(frames), shown)?;
+    let mut encoding = || -> Result<()> {
+        let mut take = |pictures: &mut crate::cuda::CudaPictures| -> Result<()> {
+            while let Some(p) = pictures.pull()? {
+                let pts = p.pts();
+                writer.push(p, pts)?;
+            }
+            Ok(())
+        };
+        while let Some(src) = reader.next_frame()? {
+            pictures.push(Some(&src))?;
+            take(&mut pictures)?;
+        }
+        pictures.push(None)?;
+        take(&mut pictures)
+    };
+    encoding().map_err(Failed::Encoding)?;
+    writer.finish(input.path()).map_err(Failed::Encoding)
 }
 
 fn scale(

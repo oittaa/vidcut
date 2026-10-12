@@ -22,6 +22,7 @@ fn main() {
         "prores" => VideoCodec::ProRes422Hq,
         "vp9" => VideoCodec::Vp9,
         "ffv1" => VideoCodec::Ffv1,
+        "av1" => VideoCodec::Av1,
         other => panic!("unknown codec {other}; {usage}"),
     };
     let container = match container.as_str() {

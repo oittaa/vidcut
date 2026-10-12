@@ -227,6 +227,12 @@ A proxy is a smaller AV1 or H.264 file (8-bit 4:2:0, closed GOPs of 60 frames, e
 
 **What does not change.** `render::flatten`, frame render, analysis and OTIO keep the original paths. Preview audio entries keep the original file too, so proxy video is not mixed with a second clock. Export never reads a proxy. A proxy is already progressive and upright, so the preview does not deinterlace it again and does not rely on the source's rotation metadata.
 
+**On the GPU.** With NVENC, a proxy is decoded on NVDEC and scaled there (`vidcut_av::cuda`), the frames never copied to memory, when that gives the pictures the CPU would: a video file, upright (the GPU can't turn pictures), SDR (it can't tone-map), BT.709 or untagged HD in video range, progressive or interlaced (`bwdif_cuda`, one frame per frame, as the CPU reader). Anything else, and streams NVDEC can't decode (ProRes, or a profile the GPU lacks), decode on the CPU, still encoding on NVENC.
+- **The decoder:** `VideoReader::open_cuda` uses a decoder that can use NVDEC, FFmpeg's own: FFmpeg would pick libdav1d for AV1, which decodes on the CPU only.
+- **Scaling:** `scale_cuda` samples a fixed few pixels per output pixel, so a big shrink aliases (4K to 960 made frames sharper than the CPU's and files 33% bigger). It halves with bilinear steps first, each the average of four pixels, then scales to the size with bicubic: as sharp as the CPU's, files 7% bigger.
+- **Measured** on 176 s of 4K60 10-bit AV1 to a 960 px AV1 proxy: 107 s and 381 CPU-seconds decoding on the CPU, 37 s and 2.6 CPU-seconds on the GPU, with NVDEC 96–99% busy. Pictures match the CPU's within a level on average (10 to 8 bits is truncated, where the CPU rounds).
+- **Tests:** `tests/proxy.rs` (`--features gpu-tests`) makes NVENC proxies of 720p H.264, 10-bit HEVC, VP9, 10-bit AV1, an MPEG-TS starting at 1.4 s and interlaced H.264, each on the GPU with every frame's barcode and timestamp the source's; turned and ProRes sources go to the CPU. `proxy.generate` says how each proxy was made (`made_with`).
+
 **Where.** Beside the project, in `proxies/`, when the session knows the project path; otherwise `~/.cache/vidcut/proxies`. The stored path is absolute. Stills are not proxied: one picture is not the real-time problem.
 
 

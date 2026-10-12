@@ -232,12 +232,18 @@ impl Env for AvEnv {
         let planned = encoders.first().map_or("h264", |e| e.codec);
         let mut path = name(planned);
         let mut codec = planned;
+        let mut made_with = None;
         if !dry_run && !path.is_file() {
             std::fs::create_dir_all(dir)
                 .map_err(|e| Error::media(format!("{}: {e}", dir.display())))?;
             let total = Some((v.duration * v.fps.as_f64()).round().max(0.0) as u64);
             let written = vidcut_av::proxy::write(&input_of(media), w, h, &path, total, &encoders)
                 .map_err(av_error)?;
+            made_with = Some(format!(
+                "decoded on the {}, {}",
+                if written.on_gpu { "GPU (NVDEC)" } else { "CPU" },
+                written.encoder.label()
+            ));
             // A hardware encoder that wouldn't open gave way to another codec.
             codec = written.encoder.codec;
             if codec != planned {
@@ -252,6 +258,7 @@ impl Env for AvEnv {
             width: w,
             height: h,
             codec: codec.into(),
+            made_with,
         })
     }
 

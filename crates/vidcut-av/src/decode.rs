@@ -258,8 +258,13 @@ pub struct VideoReader {
     rotation: u16,
     /// What the first decodable frame says about fields and color.
     first_props: Option<FrameProps>,
-    /// For interlaced streams: every decoded frame goes through it.
+    /// For interlaced streams: every decoded frame goes through it (on the
+    /// CPU; frames NVDEC decodes are the caller's to deinterlace).
     deinterlacer: Option<Deinterlacer>,
+    /// The stream's frames are interlaced.
+    interlaced: bool,
+    /// The device NVDEC decodes on, when it does (a rewind opens it again).
+    cuda: Option<crate::cuda::CudaDevice>,
 }
 
 /// `bwdif` over a stream's frames in order: one progressive frame for each
@@ -383,6 +388,64 @@ impl Deinterlacer {
     }
 }
 
+/// A decoder for `id` that can decode on NVDEC: FFmpeg's own, whose CUDA
+/// frames come through `get_format` like any other (not a library's such
+/// as libdav1d, which decodes on the CPU only, nor a `_cuvid` wrapper).
+fn cuda_decoder(id: codec::Id) -> Option<ffmpeg::Codec> {
+    use ffmpeg::ffi;
+    let id: ffi::AVCodecID = id.into();
+    let mut opaque = std::ptr::null_mut();
+    // SAFETY: FFmpeg's codec list and each codec's hardware configs are
+    // static; the iteration ends with a null codec, the configs with null.
+    unsafe {
+        loop {
+            let c = ffi::av_codec_iterate(&mut opaque);
+            if c.is_null() {
+                return None;
+            }
+            if (*c).id != id || ffi::av_codec_is_decoder(c) == 0 {
+                continue;
+            }
+            let name = std::ffi::CStr::from_ptr((*c).name).to_string_lossy();
+            if name.ends_with("_cuvid") {
+                continue;
+            }
+            for i in 0.. {
+                let cfg = ffi::avcodec_get_hw_config(c, i);
+                if cfg.is_null() {
+                    break;
+                }
+                let by_device = ffi::AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX as i32;
+                if (*cfg).device_type == ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA
+                    && (*cfg).methods & by_device != 0
+                {
+                    return Some(ffmpeg::Codec::wrap(c));
+                }
+            }
+        }
+    }
+}
+
+/// Picks NVDEC's frames in GPU memory when the decoder offers them, else
+/// FFmpeg's choice (decoding on the CPU), which `open_cuda` refuses.
+unsafe extern "C" fn cuda_format(
+    ctx: *mut ffmpeg::ffi::AVCodecContext,
+    formats: *const ffmpeg::ffi::AVPixelFormat,
+) -> ffmpeg::ffi::AVPixelFormat {
+    use ffmpeg::ffi::AVPixelFormat as F;
+    let mut p = formats;
+    // SAFETY: FFmpeg's list ends with AV_PIX_FMT_NONE.
+    unsafe {
+        while *p != F::AV_PIX_FMT_NONE {
+            if *p == F::AV_PIX_FMT_CUDA {
+                return F::AV_PIX_FMT_CUDA;
+            }
+            p = p.add(1);
+        }
+        ffmpeg::ffi::avcodec_default_get_format(ctx, formats)
+    }
+}
+
 /// Facts carried by a decoded frame rather than the stream.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FrameProps {
@@ -432,7 +495,26 @@ impl VideoReader {
     }
 
     pub fn open_input(source: &Input) -> Result<Self> {
-        let mut reader = Self::open_raw(source)?;
+        Self::open_with(source, None)
+    }
+
+    /// Decoding on NVDEC: frames stay in GPU memory (`Pixel::CUDA`), the same
+    /// frames with the same timestamps as decoding on the CPU. Interlaced
+    /// frames come as they are ([`interlaced`](Self::interlaced) says so).
+    /// Fails when NVDEC can't decode the stream.
+    pub fn open_cuda(source: &Input, device: &crate::cuda::CudaDevice) -> Result<Self> {
+        let reader = Self::open_with(source, Some(device))?;
+        match reader.pending.as_ref().map(|f| f.format()) {
+            Some(format::Pixel::CUDA) => Ok(reader),
+            _ => Err(Error::Invalid(format!(
+                "{}: NVDEC doesn't decode this stream",
+                source.path().display()
+            ))),
+        }
+    }
+
+    fn open_with(source: &Input, device: Option<&crate::cuda::CudaDevice>) -> Result<Self> {
+        let mut reader = Self::open_raw(source, device)?;
         // Learn `o` up front; keep the frame as look-ahead so reading from the
         // start still returns it.
         reader.pending = reader.decode_one()?;
@@ -455,13 +537,14 @@ impl VideoReader {
         ) || reader
             .first_props
             .is_some_and(|p| p.top_field_first.is_some());
-        if interlaced {
+        reader.interlaced = interlaced;
+        if interlaced && device.is_none() {
             reader.deinterlacer = Some(Deinterlacer::new(reader.time_base));
         }
         Ok(reader)
     }
 
-    fn open_raw(source: &Input) -> Result<Self> {
+    fn open_raw(source: &Input, device: Option<&crate::cuda::CudaDevice>) -> Result<Self> {
         let path = source.path();
         let input = source.open()?;
         let stream = input
@@ -477,14 +560,37 @@ impl VideoReader {
         // The packet time base lets the decoder keep timestamps right when it
         // drops samples or frames (FFmpeg's CLI sets it too).
         unsafe { (*ctx.as_mut_ptr()).pkt_timebase = time_base.into() };
-        ctx.set_threading(codec::threading::Config {
-            kind: codec::threading::Type::Frame,
-            count: 0, // let FFmpeg choose
-        });
-        let decoder = ctx
-            .decoder()
-            .video()
-            .ctx(|| "opening video decoder".into())?;
+        match device {
+            // NVDEC decodes; frame threads would only add latency.
+            Some(d) => unsafe {
+                let raw = ctx.as_mut_ptr();
+                (*raw).hw_device_ctx = ffmpeg::ffi::av_buffer_ref(d.as_ptr());
+                (*raw).get_format = Some(cuda_format);
+                // Frames a filter graph and the encoder hold on to.
+                (*raw).extra_hw_frames = 8;
+                (*raw).thread_count = 1;
+            },
+            None => ctx.set_threading(codec::threading::Config {
+                kind: codec::threading::Type::Frame,
+                count: 0, // let FFmpeg choose
+            }),
+        }
+        let codec_id = stream.parameters().id();
+        let decoder = match device {
+            // FFmpeg's default decoder may decode on the CPU only (libdav1d
+            // for AV1): one that can use NVDEC, when there is one.
+            Some(_) => match cuda_decoder(codec_id) {
+                Some(codec) => ctx.decoder().open_as(codec).and_then(|d| d.video()),
+                None => {
+                    return Err(Error::Invalid(format!(
+                        "{}: no NVDEC decoder for {codec_id:?}",
+                        path.display()
+                    )));
+                }
+            },
+            None => ctx.decoder().video(),
+        }
+        .ctx(|| "opening video decoder".into())?;
         crate::export::audio::discard_others(&input, index);
         Ok(Self {
             source: source.clone(),
@@ -500,7 +606,21 @@ impl VideoReader {
             rotation,
             first_props: None,
             deinterlacer: None,
+            interlaced: false,
+            cuda: device.cloned(),
         })
+    }
+
+    /// The stream's frames are interlaced: deinterlaced here when decoding
+    /// on the CPU, the caller's to deinterlace when decoding on NVDEC.
+    pub fn interlaced(&self) -> bool {
+        self.interlaced
+    }
+
+    /// The next frame [`next_frame`](Self::next_frame) returns, right after
+    /// opening: the first one.
+    pub fn peek(&self) -> Option<&frame::Video> {
+        self.pending.as_ref()
     }
 
     /// Time base of frame timestamps.
@@ -653,7 +773,7 @@ impl VideoReader {
 
     /// Reopens the input at its very beginning.
     fn rewind(&mut self) -> Result<()> {
-        let fresh = Self::open_raw(&self.source)?;
+        let fresh = Self::open_raw(&self.source, self.cuda.as_ref())?;
         self.input = fresh.input;
         self.decoder = fresh.decoder;
         self.draining = false;

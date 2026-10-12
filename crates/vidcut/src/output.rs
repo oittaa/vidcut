@@ -445,6 +445,9 @@ pub fn print(method: &str, r: &Response, json: bool) {
                     p["height"],
                     r.rev
                 );
+                if let Some(how) = p["made_with"].as_str() {
+                    println!("  {how}");
+                }
             }
         }
         "proxy.remove" => {

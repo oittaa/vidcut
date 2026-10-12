@@ -38,6 +38,10 @@ pub struct GeneratedProxy {
     pub width: u32,
     pub height: u32,
     pub codec: String,
+    /// How it was made, when it was made now: where it was decoded and
+    /// with what (`decoded on the GPU (NVDEC), AV1, NVIDIA hardware
+    /// (NVENC)`).
+    pub made_with: Option<String>,
 }
 
 /// What the editor needs from the outside world.
@@ -1755,12 +1759,16 @@ fn proxy_generate(
             env.remove_proxy_file(&old.path)?;
         }
         m.proxy = Some(entry);
-        proxies.push(json!({
+        let mut done = json!({
             "media": id,
             "path": made.path,
             "width": made.width,
             "height": made.height,
-        }));
+        });
+        if let Some(how) = made.made_with {
+            done["made_with"] = json!(how);
+        }
+        proxies.push(done);
     }
     Ok(json!({ "proxies": proxies }))
 }

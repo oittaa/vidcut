@@ -7,6 +7,7 @@ pub mod barcode;
 pub mod beep;
 pub mod cancel;
 pub mod color;
+pub mod cuda;
 pub mod decode;
 pub mod error;
 pub mod export;
