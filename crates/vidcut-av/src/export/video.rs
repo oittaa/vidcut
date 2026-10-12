@@ -431,6 +431,20 @@ impl VideoFrames {
         }
     }
 
+    /// The first frame of `piece` alone, in place of the plan: the open
+    /// file stays open, so a piece of it starting shortly after the frame
+    /// before decodes on to it instead of seeking.
+    pub fn first_frame_of(&mut self, piece: &VideoPiece) -> Result<Option<frame::Video>> {
+        let mut one = piece.clone();
+        match &mut one {
+            VideoPiece::Source { frames, .. } | VideoPiece::Black { frames } => *frames = 1,
+        }
+        self.pieces = vec![one];
+        self.piece = 0;
+        self.k = 0;
+        self.next_frame()
+    }
+
     fn black(&mut self) -> Result<&frame::Video> {
         if self.black.is_none() {
             let (w, h, pix) = self.out;

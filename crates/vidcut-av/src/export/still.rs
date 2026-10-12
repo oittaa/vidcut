@@ -55,31 +55,54 @@ pub fn rgba(
     width: u32,
     height: u32,
 ) -> Result<crate::thumbs::Image> {
-    crate::cancel::stop()?;
-    crate::init();
-    let mut frames = VideoFrames::new(
-        std::slice::from_ref(piece),
-        fps,
-        width,
-        height,
-        format::Pixel::RGBA,
-        None,
-    );
-    let frame = frames
-        .next_frame()?
-        .ok_or_else(|| Error::Invalid("no frame to render".into()))?;
-    let stride = frame.stride(0);
-    let row = width as usize * 4;
-    let data = frame.data(0);
-    let mut out = Vec::with_capacity(row * height as usize);
-    for y in 0..height as usize {
-        out.extend_from_slice(&data[y * stride..y * stride + row]);
+    StillRenderer::default().rgba(piece, fps, width, height)
+}
+
+/// Renders frames one after another as packed RGBA, keeping the file and
+/// its decoder open between them: a frame shortly after the one before
+/// decodes on from it, where [`rgba`] would seek and decode from a keyframe
+/// again. For pictures that follow a moving position, such as a trim's.
+#[derive(Default)]
+pub struct StillRenderer {
+    /// The frames reader for one rate and size.
+    frames: Option<(Rational, u32, u32, VideoFrames)>,
+}
+
+impl StillRenderer {
+    /// Renders `piece`'s first frame at `width`×`height` (the picture fit
+    /// inside, padded black).
+    pub fn rgba(
+        &mut self,
+        piece: &VideoPiece,
+        fps: Rational,
+        width: u32,
+        height: u32,
+    ) -> Result<crate::thumbs::Image> {
+        crate::cancel::stop()?;
+        crate::init();
+        let same =
+            matches!(&self.frames, Some((f, w, h, _)) if (*f, *w, *h) == (fps, width, height));
+        if !same {
+            let frames = VideoFrames::new(&[], fps, width, height, format::Pixel::RGBA, None);
+            self.frames = Some((fps, width, height, frames));
+        }
+        let (.., frames) = self.frames.as_mut().expect("just set");
+        let frame = frames
+            .first_frame_of(piece)?
+            .ok_or_else(|| Error::Invalid("no frame to render".into()))?;
+        let stride = frame.stride(0);
+        let row = width as usize * 4;
+        let data = frame.data(0);
+        let mut out = Vec::with_capacity(row * height as usize);
+        for y in 0..height as usize {
+            out.extend_from_slice(&data[y * stride..y * stride + row]);
+        }
+        Ok(crate::thumbs::Image {
+            width,
+            height,
+            rgba: out,
+        })
     }
-    Ok(crate::thumbs::Image {
-        width,
-        height,
-        rgba: out,
-    })
 }
 
 /// Encodes a packed RGBA picture (rows top to bottom) as PNG.

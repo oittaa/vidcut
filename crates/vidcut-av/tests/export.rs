@@ -1064,6 +1064,35 @@ fn still_frames_follow_the_sampling_rule() {
 }
 
 #[test]
+fn a_still_renderer_reads_on_and_back_exactly() {
+    let fps = Rational::new(30, 1).unwrap();
+    let a1 = src(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (30, 1),
+        150,
+    ));
+    let dir = out_dir("still-renderer");
+    let mut renderer = vidcut_av::export::still::StillRenderer::default();
+    // Forward a frame or a few at a time decodes on; back, or far ahead,
+    // seeks. Every picture is the frame asked for.
+    for (i, frame) in [37, 38, 39, 45, 44, 10, 11, 140, 2].into_iter().enumerate() {
+        let img = renderer.rgba(&v(&a1, frame, 1), fps, 320, 180).unwrap();
+        let png = vidcut_av::export::still::png_rgba(img.width, img.height, &img.rgba).unwrap();
+        let path = dir.path().join(format!("{i}.png"));
+        std::fs::write(&path, &png).unwrap();
+        let f = VideoReader::open(&path)
+            .unwrap()
+            .next_frame()
+            .unwrap()
+            .unwrap();
+        assert_eq!(read_barcode(&f).unwrap(), Some(frame as u32), "picture {i}");
+    }
+}
+
+#[test]
 fn cancelling_leaves_no_files() {
     let fps = Rational::new(30, 1).unwrap();
     let a1 = src(FixtureSpec::new(
