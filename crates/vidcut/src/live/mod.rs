@@ -178,12 +178,16 @@ pub(crate) enum Msg {
         encode: Option<String>,
     },
     FileChanged,
+    /// `wanted`: what it was made for (`media_version`), so a late answer
+    /// for another file is dropped.
     Thumbs {
         media: String,
+        wanted: String,
         result: std::result::Result<Filmstrip, String>,
     },
     Waveform {
         media: String,
+        wanted: String,
         result: std::result::Result<vidcut_av::waveform::Waveform, String>,
     },
     Remuxed {
@@ -421,9 +425,9 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         notices: Arc::new(VecDeque::new()),
         notice_seq: 0,
         thumbs: Arc::new(HashMap::new()),
-        thumbs_wanted: HashSet::new(),
+        thumbs_wanted: HashMap::new(),
         waveforms: Arc::new(HashMap::new()),
-        waveforms_wanted: HashSet::new(),
+        waveforms_wanted: HashMap::new(),
         fillers: HashMap::new(),
         remux: HashMap::new(),
         network: HashMap::new(),
@@ -572,6 +576,18 @@ const WAVEFORM_RATE: u32 = 100;
 const THUMBS: usize = 24;
 const THUMB_SIZE: (u32, u32) = (192, 108);
 
+/// What a media item's thumbnails and waveform are made from: its file
+/// (path, size, modification time) and, for a sequence, its count.
+fn media_version(m: &vidcut_core::model::Media) -> String {
+    format!(
+        "{}|{}|{}|{}",
+        m.path.display(),
+        m.size,
+        m.mtime_ns,
+        m.sequence.as_ref().map_or(0, |s| s.count)
+    )
+}
+
 /// The pool's filmstrip of `media`: from the thumbnail cache when the
 /// preferences keep one, decoded (and then kept) otherwise.
 fn filmstrip(media: &vidcut_core::model::Media) -> std::result::Result<Filmstrip, String> {
@@ -648,9 +664,13 @@ struct Live {
     notices: Arc<VecDeque<Notice>>,
     notice_seq: u64,
     thumbs: Arc<HashMap<String, Arc<Filmstrip>>>,
-    thumbs_wanted: HashSet<String>,
+    /// What each media's thumbnails and waveform are being made, or were
+    /// made, for: its file as `media_version` gives it (the waveform's with
+    /// the channel count). Media ids are only a project's: another project,
+    /// or a relinked or changed file, makes them again.
+    thumbs_wanted: HashMap<String, String>,
     waveforms: Arc<HashMap<String, Arc<vidcut_av::waveform::Waveform>>>,
-    waveforms_wanted: HashSet<String>,
+    waveforms_wanted: HashMap<String, String>,
     /// Filler media by format (`None`: generating them failed).
     fillers: HashMap<FillerKey, Option<Fillers>>,
     remux: HashMap<PathBuf, RemuxState>,
@@ -872,7 +892,12 @@ impl Live {
                 }
                 changed = refreshed;
             }
-            Msg::Waveform { media, result } => match result {
+            Msg::Waveform { media, wanted, .. }
+                if self.waveforms_wanted.get(&media) != Some(&wanted) =>
+            {
+                changed = false;
+            }
+            Msg::Waveform { media, result, .. } => match result {
                 Ok(w) => {
                     let mut map = (*self.waveforms).clone();
                     map.insert(media, Arc::new(w));
@@ -880,7 +905,12 @@ impl Live {
                 }
                 Err(e) => self.notice(format!("waveform of {media}: {e}"), true),
             },
-            Msg::Thumbs { media, result } => match result {
+            Msg::Thumbs { media, wanted, .. }
+                if self.thumbs_wanted.get(&media) != Some(&wanted) =>
+            {
+                changed = false;
+            }
+            Msg::Thumbs { media, result, .. } => match result {
                 Ok(strip) => {
                     let mut map = (*self.thumbs).clone();
                     map.insert(media, Arc::new(strip));
@@ -2189,6 +2219,12 @@ impl Live {
         self.tape_position = 0;
         self.players[SOURCE].unload();
         self.players[TIMELINE].unload();
+        // The last project's pictures and sounds: its media ids name other
+        // files here.
+        self.thumbs = Arc::new(HashMap::new());
+        self.thumbs_wanted.clear();
+        self.waveforms = Arc::new(HashMap::new());
+        self.waveforms_wanted.clear();
         self.remember_recent(path);
         self.register();
         self.project_changed(None);
@@ -2250,19 +2286,35 @@ impl Live {
         // change of those measures again.
         let channels = open.project().settings.channels;
         for m in media {
-            if m.info.video.is_some() && self.thumbs_wanted.insert(m.id.clone()) {
+            let version = media_version(&m);
+            if m.info.video.is_some() && self.thumbs_wanted.get(&m.id) != Some(&version) {
+                self.thumbs_wanted.insert(m.id.clone(), version.clone());
+                // The pictures of the file it was are not this one's.
+                if self.thumbs.contains_key(&m.id) {
+                    let mut map = (*self.thumbs).clone();
+                    map.remove(&m.id);
+                    self.thumbs = Arc::new(map);
+                }
                 let (tx, id, media) = (self.tx.clone(), m.id.clone(), m.clone());
+                let wanted = version.clone();
                 self.workers.run(move || {
                     let _ = tx.send(Msg::Thumbs {
                         media: id,
+                        wanted,
                         result: filmstrip(&media),
                     });
                 });
             }
-            if !m.info.audio.is_empty()
-                && self.waveforms_wanted.insert(format!("{}:{channels}", m.id))
-            {
+            let sound = format!("{version}|{channels}ch");
+            if !m.info.audio.is_empty() && self.waveforms_wanted.get(&m.id) != Some(&sound) {
+                self.waveforms_wanted.insert(m.id.clone(), sound.clone());
+                if self.waveforms.contains_key(&m.id) {
+                    let mut map = (*self.waveforms).clone();
+                    map.remove(&m.id);
+                    self.waveforms = Arc::new(map);
+                }
                 let (tx, id, path) = (self.tx.clone(), m.id.clone(), m.path.clone());
+                let wanted = sound;
                 let cache = paths::media_cache("waveforms", &m, &format!("peaks-{channels}ch"));
                 self.workers.run(move || {
                     let cached = std::fs::read(&cache)
@@ -2280,7 +2332,11 @@ impl Live {
                                 }
                             }),
                     };
-                    let _ = tx.send(Msg::Waveform { media: id, result });
+                    let _ = tx.send(Msg::Waveform {
+                        media: id,
+                        wanted,
+                        result,
+                    });
                 });
             }
             if !self.network.contains_key(&m.path) {
