@@ -58,6 +58,18 @@ pub(crate) fn audio_edit_outgoing(t: &Track, at: i64) -> Option<String> {
     })
 }
 
+/// Trims sent that haven't landed yet, and the project as they leave it.
+/// The GUI shows that and builds on it until they land, so a trim never
+/// shows the timeline as it was for a frame, and quick trims add up. A
+/// request that fails leaves it for a second at most.
+#[derive(Debug)]
+pub struct SentTrim {
+    /// The revision once all of them have landed: each makes one.
+    until: u64,
+    project: Project,
+    since: std::time::Instant,
+}
+
 /// Whether the cut `e` selects is still on its track: an undo or someone
 /// else's edit can take it away.
 pub(crate) fn edit_exists(p: &Project, e: &EditSel) -> bool {
@@ -202,8 +214,8 @@ pub struct TimelineView {
     pub tracks: usize,
     /// The project revision of the last frame.
     pub rev: u64,
-    /// The Dynamic Trim K just sent, until it lands.
-    pub sent_trim: Option<tools::SentTrim>,
+    /// Trims sent that haven't landed yet.
+    pub sent_trim: Option<SentTrim>,
 }
 
 impl Default for TimelineView {
@@ -298,8 +310,34 @@ impl Workspace {
         }
     }
 
+    /// The project as shown: with the trims on their way.
+    pub(crate) fn shown_project(&mut self) -> Option<Project> {
+        let p = self.project()?;
+        if let Some(s) = &self.timeline.sent_trim {
+            if p.rev < s.until && s.since.elapsed() < std::time::Duration::from_secs(1) {
+                return Some(s.project.clone());
+            }
+            self.timeline.sent_trim = None;
+        }
+        self.project().cloned()
+    }
+
+    /// Records a trim just sent, as `trimmed` leaves the project shown.
+    pub(crate) fn trim_sent(&mut self, trimmed: Project) {
+        let rev = self.project().map_or(0, |p| p.rev);
+        let until = match &self.timeline.sent_trim {
+            Some(s) if rev < s.until => s.until + 1,
+            _ => rev + 1,
+        };
+        self.timeline.sent_trim = Some(SentTrim {
+            until,
+            project: trimmed,
+            since: std::time::Instant::now(),
+        });
+    }
+
     pub(crate) fn timeline_panel(&mut self, ui: &mut egui::Ui) {
-        let Some(p) = self.project().cloned() else {
+        let Some(p) = self.shown_project() else {
             return;
         };
         self.timeline_toolbar(ui, &p);
@@ -370,10 +408,7 @@ impl Workspace {
 
         // Draw. While Dynamic Trim runs, the clips are drawn as the trim
         // leaves them, so the cut moves as it runs; K sends it (spec D32).
-        let trimmed = match self.dynamic_drawn(&p) {
-            Some(t) => Some(t),
-            None => self.sent_trim(&p),
-        };
+        let trimmed = self.dynamic_drawn(&p);
         let (drawn, edit_at) = match &trimmed {
             Some((q, at)) => (q, *at),
             None => (&p, None),
@@ -1636,7 +1671,7 @@ impl Workspace {
     /// the session says why.
     pub(crate) fn nudge_edit(&mut self, side: Side, by: i64) {
         let Some(e) = self.timeline.edit else { return };
-        let Some(p) = self.project().cloned() else {
+        let Some(p) = self.shown_project() else {
             return;
         };
         let Some(t) = p.track(&e.track.id()) else {
@@ -1646,7 +1681,8 @@ impl Workspace {
             let Some(id) = audio_edit_outgoing(t, e.at) else {
                 return;
             };
-            let tried = ops::audio_roll(&mut p.clone(), &id, Edge::Tail, by);
+            let mut q = p.clone();
+            let tried = ops::audio_roll(&mut q, &id, Edge::Tail, by);
             self.send(
                 "edit.audio_roll",
                 json!({ "clip": id, "edge": "tail", "by": by }),
@@ -1654,6 +1690,7 @@ impl Workspace {
             if tried.is_err() {
                 return;
             }
+            self.trim_sent(q);
             self.timeline.edit = Some(EditSel {
                 at: e.at + by,
                 side,
@@ -1698,6 +1735,7 @@ impl Workspace {
         } else {
             q.clip(&id).map_or(e.at, |c| c.start)
         };
+        self.trim_sent(q);
         self.timeline.edit = Some(EditSel {
             at,
             side,

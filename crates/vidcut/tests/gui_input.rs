@@ -330,17 +330,20 @@ fn gestures_send_one_request_each() {
     harness.step();
     assert!(trim_editor(&harness), "a double-click on a cut opens it");
     let edits0 = gui_edits(&h).len();
-    // The Roll +1 (the buttons go Out, Roll, In).
-    harness.query_all_by_label("+1").nth(1).unwrap().click();
-    harness.step();
-    assert!(trim_editor(&harness), "open while the trim lands");
+    // The Roll +1 (the buttons go Out, Roll, In), twice without waiting:
+    // the second builds on the first even before it lands.
+    for _ in 0..2 {
+        harness.query_all_by_label("+1").nth(1).unwrap().click();
+        harness.step();
+        assert!(trim_editor(&harness), "open while the trim lands");
+    }
     settle(&h, &mut harness);
     assert!(trim_editor(&harness), "open once it landed");
     let edits = gui_edits(&h);
-    assert_eq!(edits.len(), edits0 + 1, "{edits:#?}");
-    assert_eq!(edits.last().unwrap().0, "edit.roll");
-    assert_eq!(v1(&h)[0].2, first.2 + 1, "the cut rolled");
-    assert_eq!(harness.state().selected_edit(), Some(cut + 1));
+    assert_eq!(edits.len(), edits0 + 2, "{edits:#?}");
+    assert!(edits[edits0..].iter().all(|(m, _)| m == "edit.roll"));
+    assert_eq!(v1(&h)[0].2, first.2 + 2, "the cut rolled twice");
+    assert_eq!(harness.state().selected_edit(), Some(cut + 2));
     harness.key_press(egui::Key::Escape);
     harness.step();
     assert!(!trim_editor(&harness), "Esc closes it");

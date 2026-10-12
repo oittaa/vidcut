@@ -222,7 +222,7 @@ impl Workspace {
     /// and both (a roll). Esc or Close leaves it.
     fn trim_editor_view(&mut self, ui: &mut egui::Ui, area: Rect, aspect: f32) {
         use crate::gui::timeline::Side;
-        let (Some(e), Some(p)) = (self.timeline.edit, self.project().cloned()) else {
+        let (Some(e), Some(p)) = (self.timeline.edit, self.shown_project()) else {
             self.trim_editor = None;
             return;
         };
@@ -274,7 +274,7 @@ impl Workspace {
     /// edit (or of the slipped or sliding clip) as the trim so far leaves them.
     fn dynamic_view(&mut self, ui: &mut egui::Ui, area: Rect, aspect: f32) {
         use crate::gui::timeline::tools::{DynamicTarget, dynamic_preview};
-        let (Some(target), Some(mut p)) = (self.dynamic_target(), self.project().cloned()) else {
+        let (Some(target), Some(mut p)) = (self.dynamic_target(), self.shown_project()) else {
             return;
         };
         let pending = self.timeline.dynamic.as_ref().map_or(0, |d| d.pending);

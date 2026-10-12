@@ -1201,8 +1201,8 @@ impl Workspace {
         let rev = self.project().map_or(0, |p| p.rev);
         if rev != self.timeline.rev {
             self.timeline.rev = rev;
-            if let (Some(e), Some(p)) = (self.timeline.edit, self.project())
-                && !crate::gui::timeline::edit_exists(p, &e)
+            if let (Some(e), Some(p)) = (self.timeline.edit, self.shown_project())
+                && !crate::gui::timeline::edit_exists(&p, &e)
             {
                 self.timeline.edit = None;
                 self.timeline.dynamic = None;

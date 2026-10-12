@@ -103,18 +103,6 @@ pub enum DynamicTarget {
     Clips(Vec<String>),
 }
 
-/// A Dynamic Trim sent with K, drawn until its revision arrives (or for a
-/// second, should the request fail).
-#[derive(Debug)]
-pub struct SentTrim {
-    /// The revision it was sent against.
-    rev: u64,
-    project: Project,
-    /// Where its edit is.
-    at: Option<i64>,
-    since: std::time::Instant,
-}
-
 /// Applies `by` frames of Dynamic Trim to `p` (a copy, for the preview);
 /// returns the two frames the two-up shows: an edit's last outgoing and
 /// first incoming frame, or a clip's first and last frame (slip) or the
@@ -468,17 +456,6 @@ impl Workspace {
         self.timeline.dynamic = Some(Dynamic::default());
     }
 
-    /// The trim just sent while its request is on the way: the timeline
-    /// keeps drawing it, so the cut doesn't jump back for a frame.
-    pub(crate) fn sent_trim(&mut self, p: &Project) -> Option<(Project, Option<i64>)> {
-        let s = self.timeline.sent_trim.as_ref()?;
-        if s.rev != p.rev || s.since.elapsed() > std::time::Duration::from_secs(1) {
-            self.timeline.sent_trim = None;
-            return None;
-        }
-        Some((s.project.clone(), s.at))
-    }
-
     /// The project as the running Dynamic Trim leaves it, and where its
     /// edit then is; `None` while nothing is trimmed.
     pub(crate) fn dynamic_drawn(&self, p: &Project) -> Option<(Project, Option<i64>)> {
@@ -501,15 +478,10 @@ impl Workspace {
 
     /// Sends what Dynamic Trim has trimmed: one request.
     pub(crate) fn dynamic_commit(&mut self) {
-        let sent = self.project().and_then(|p| {
-            let (project, at) = self.dynamic_drawn(p)?;
-            Some(SentTrim {
-                rev: p.rev,
-                project,
-                at,
-                since: std::time::Instant::now(),
-            })
-        });
+        let trimmed = self
+            .shown_project()
+            .and_then(|p| self.dynamic_drawn(&p))
+            .map(|(q, _)| q);
         let Some(d) = &mut self.timeline.dynamic else {
             return;
         };
@@ -518,7 +490,11 @@ impl Workspace {
         if by == 0 {
             return;
         }
-        self.timeline.sent_trim = sent;
+        if let Some(DynamicTarget::Clips(_)) = self.dynamic_target()
+            && let Some(q) = trimmed
+        {
+            self.trim_sent(q);
+        }
         match self.dynamic_target() {
             Some(DynamicTarget::Edit(e)) => self.nudge_edit(e.side, by),
             Some(DynamicTarget::Clips(ids)) => {
@@ -604,7 +580,7 @@ impl Workspace {
     pub(crate) fn dynamic_tick(&mut self, ctx: &egui::Context) {
         let fps = self.fps().as_f64();
         let now = ctx.input(|i| i.time);
-        let (Some(target), Some(p)) = (self.dynamic_target(), self.project().cloned()) else {
+        let (Some(target), Some(p)) = (self.dynamic_target(), self.shown_project()) else {
             return;
         };
         let mode = self.timeline.options.dynamic_mode;
