@@ -360,6 +360,10 @@ fn track_gestures_send_one_request_each() {
         8,
         "four strips, stereo"
     );
+    // The mix strip keeps its own width at the end of a full row: its name
+    // is one line, not a letter a line.
+    let mix = harness.get_by_label("Mix").rect();
+    assert!(mix.height() < 20.0 && mix.width() > mix.height(), "{mix:?}");
     let mut faders: Vec<egui::Rect> = harness
         .query_all_by_role(Role::Slider)
         .map(|n| n.rect())
