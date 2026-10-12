@@ -132,6 +132,35 @@ pub struct Workspace {
     pub(super) tiles: Option<super::tiles::Tiles>,
 }
 
+/// How the viewer's player decodes, for the status bar, from mpv's
+/// `hwdec-current`, and what it means on hover. `None` before it has
+/// opened a file.
+fn decoding(hwdec: &str) -> Option<(String, String)> {
+    let gpu = |api: &str| {
+        (
+            format!("decoding on the GPU ({api})"),
+            format!(
+                "The viewer decodes on the graphics card ({api}). File > Preferences: GPU \
+                 turns it off"
+            ),
+        )
+    };
+    Some(match hwdec {
+        "" => return None,
+        "no" => (
+            "decoding on the CPU".into(),
+            "The viewer decodes in software: GPU acceleration is off in File > Preferences, \
+             or the GPU can't decode this file"
+                .into(),
+        ),
+        h if h.starts_with("nvdec") || h.starts_with("cuda") => gpu("NVDEC"),
+        h if h.starts_with("vaapi") => gpu("VA-API"),
+        h if h.starts_with("vulkan") => gpu("Vulkan Video"),
+        h if h.starts_with("vdpau") => gpu("VDPAU"),
+        other => gpu(other),
+    })
+}
+
 impl Workspace {
     pub fn new(live: live::Handle) -> Self {
         Self {
@@ -627,34 +656,38 @@ impl Workspace {
                     );
                     (short, long)
                 });
-                ui.label(RichText::new(short.as_str()).color(theme::TEXT_DIM))
-                    .on_hover_text(long.as_str());
+                // Right to left: the versions, how the viewer decodes, live
+                // control, the project's revision and format, with a line
+                // between them.
+                let dim = |text: String| RichText::new(text).color(theme::TEXT_DIM);
+                ui.label(dim(short.clone())).on_hover_text(long.as_str());
                 if let Some(socket) = &self.snap.socket {
-                    ui.label(
-                        RichText::new(format!("pid {}", self.snap.pid)).color(theme::TEXT_DIM),
-                    )
-                    .on_hover_text(format!(
-                        "live control: {}\nvidcut CLI commands for this project run here",
-                        socket.display()
-                    ));
+                    ui.separator();
+                    ui.label(dim(format!("pid {}", self.snap.pid)))
+                        .on_hover_text(format!(
+                            "Live control: {}\nvidcut CLI commands for this project run here",
+                            socket.display()
+                        ));
                 }
-                let hw = &self.snap.active().hwdec;
-                if !hw.is_empty() {
-                    ui.label(RichText::new(format!("hwdec {hw}")).color(theme::TEXT_DIM));
+                if let Some((text, tip)) = decoding(&self.snap.active().hwdec) {
+                    ui.separator();
+                    ui.label(dim(text)).on_hover_text(tip);
                 }
                 if let Some(p) = self.project() {
                     let fps = p.settings.fps;
-                    // `rev`: the project's edits so far (scripts use it).
-                    let format = ui.label(
-                        RichText::new(format!(
-                            "{}x{} {} fps  rev {}",
-                            p.settings.width,
-                            p.settings.height,
-                            fps.decimal(),
-                            p.rev
-                        ))
-                        .color(theme::TEXT_DIM),
+                    ui.separator();
+                    ui.label(dim(format!("revision {}", p.rev))).on_hover_text(
+                        "The project's revision: one up with every change, undo too. \
+                         Scripts and agents give it with --if-rev, so they never overwrite \
+                         an edit made since they last looked",
                     );
+                    ui.separator();
+                    let format = ui.label(dim(format!(
+                        "{}×{}, {} fps",
+                        p.settings.width,
+                        p.settings.height,
+                        fps.decimal()
+                    )));
                     if !fps.is_whole() {
                         format.on_hover_text(format!("{fps} fps"));
                     }
@@ -1395,4 +1428,20 @@ pub(super) fn fit(avail: egui::Rect, aspect: f32) -> egui::Rect {
 
 pub(super) fn dim(text: impl Into<String>) -> RichText {
     RichText::new(text.into()).color(theme::TEXT_DIM)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decoding;
+
+    #[test]
+    fn the_status_bar_says_where_the_viewer_decodes() {
+        assert_eq!(decoding(""), None);
+        assert_eq!(decoding("no").unwrap().0, "decoding on the CPU");
+        assert_eq!(decoding("nvdec").unwrap().0, "decoding on the GPU (NVDEC)");
+        assert_eq!(
+            decoding("vaapi-copy").unwrap().0,
+            "decoding on the GPU (VA-API)"
+        );
+    }
 }
