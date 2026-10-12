@@ -100,6 +100,30 @@ fn drag(harness: &mut Harness<'_, Workspace>, from: Pos2, to: Pos2, mods: Modifi
     harness.step();
 }
 
+/// Two clicks at `pos`, each press and release a frame apart, as a mouse
+/// makes them: a double-click.
+fn double_click(harness: &mut Harness<'_, Workspace>, pos: Pos2) {
+    harness.event(egui::Event::PointerMoved(pos));
+    harness.step();
+    for pressed in [true, false, true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+        harness.step();
+    }
+}
+
+/// Whether the Trim Editor is open.
+fn trim_editor(harness: &Harness<'_, Workspace>) -> bool {
+    harness
+        .query_all_by_label_contains("edit at ")
+        .next()
+        .is_some()
+}
+
 /// The lower timeline position of `frame`, `dy` pixels into the track.
 fn at(harness: &Harness<'_, Workspace>, frame: i64, dy: f32) -> Pos2 {
     let l = harness.state().timeline_layout().expect("drawn");
@@ -290,6 +314,64 @@ fn gestures_send_one_request_each() {
     let edits = gui_edits(&h);
     assert_eq!(edits.len() - edits0, 6, "{edits:#?}");
     assert_eq!(undo_steps(&h), undo0 + 4);
+
+    // The Trim Editor: a double-click on a cut opens it. A trim moves the
+    // selection before it lands, and the editor stays open through it.
+    let first = v1(&h)[0].clone();
+    let cut = first.1 + first.2;
+    call(
+        &h,
+        "player.seek",
+        json!({ "at": cut, "viewer": "timeline" }),
+    );
+    settle(&h, &mut harness);
+    let pos = at(&harness, cut, 20.0);
+    double_click(&mut harness, pos);
+    harness.step();
+    assert!(trim_editor(&harness), "a double-click on a cut opens it");
+    let edits0 = gui_edits(&h).len();
+    // The Roll +1 (the buttons go Out, Roll, In).
+    harness.query_all_by_label("+1").nth(1).unwrap().click();
+    harness.step();
+    assert!(trim_editor(&harness), "open while the trim lands");
+    settle(&h, &mut harness);
+    assert!(trim_editor(&harness), "open once it landed");
+    let edits = gui_edits(&h);
+    assert_eq!(edits.len(), edits0 + 1, "{edits:#?}");
+    assert_eq!(edits.last().unwrap().0, "edit.roll");
+    assert_eq!(v1(&h)[0].2, first.2 + 1, "the cut rolled");
+    assert_eq!(harness.state().selected_edit(), Some(cut + 1));
+    harness.key_press(egui::Key::Escape);
+    harness.step();
+    assert!(!trim_editor(&harness), "Esc closes it");
+    // A trim that can't be made: the clip after this cut starts at its
+    // media's first frame, so its In can't move earlier. The selection
+    // stays on the cut.
+    call(
+        &h,
+        "edit.append",
+        json!({ "media": "m1", "range": "0f..30f" }),
+    );
+    let cut = v1(&h).last().unwrap().1;
+    call(
+        &h,
+        "player.seek",
+        json!({ "at": cut, "viewer": "timeline" }),
+    );
+    settle(&h, &mut harness);
+    let pos = at(&harness, cut, 20.0);
+    double_click(&mut harness, pos);
+    harness.step();
+    assert!(trim_editor(&harness));
+    let edits0 = gui_edits(&h).len();
+    harness.query_all_by_label("−1").nth(2).unwrap().click();
+    harness.step();
+    settle(&h, &mut harness);
+    assert_eq!(gui_edits(&h).len(), edits0, "nothing changed");
+    assert_eq!(harness.state().selected_edit(), Some(cut));
+    assert!(trim_editor(&harness));
+    harness.key_press(egui::Key::Escape);
+    harness.step();
 
     // Smooth with 1,000 clips: split the long clip into 1,000 pieces
     // and time whole frames of the GUI (layout, timelines, pool, viewer).

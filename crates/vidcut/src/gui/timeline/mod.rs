@@ -1247,7 +1247,9 @@ impl Workspace {
         let mods = ui.input(|i| i.modifiers);
         let on_ruler = ruler.expand2(vec2(0.0, 2.0)).contains(pos);
         let what = hit_rows(p, rows, &scale, pos).1;
-        if resp.double_clicked() {
+        // egui counts a double-click as a triple when the click before
+        // came shortly before, wherever it was: either opens.
+        if resp.double_clicked() || resp.triple_clicked() {
             if on_ruler {
                 if let Some(k) = p
                     .markers
@@ -1629,7 +1631,9 @@ impl Workspace {
 
     /// Trims the selected edit by `by` frames: the Out (outgoing tail), the
     /// In (incoming head), both (a picture roll), or the audio edit (the J/L
-    /// offset). The selection follows the edit.
+    /// offset). The selection follows the edit at once, ahead of the trim
+    /// landing; a trim that can't be made (tried on a copy) leaves it, and
+    /// the session says why.
     pub(crate) fn nudge_edit(&mut self, side: Side, by: i64) {
         let Some(e) = self.timeline.edit else { return };
         let Some(p) = self.project().cloned() else {
@@ -1642,10 +1646,14 @@ impl Workspace {
             let Some(id) = audio_edit_outgoing(t, e.at) else {
                 return;
             };
+            let tried = ops::audio_roll(&mut p.clone(), &id, Edge::Tail, by);
             self.send(
                 "edit.audio_roll",
                 json!({ "clip": id, "edge": "tail", "by": by }),
             );
+            if tried.is_err() {
+                return;
+            }
             self.timeline.edit = Some(EditSel {
                 at: e.at + by,
                 side,
@@ -1669,23 +1677,27 @@ impl Workspace {
             (Side::In | Side::Both, _, Some(i)) => (
                 "edit.trim",
                 json!({ "clip": i.id, "edge": "head", "by": by }),
-                // Where the edit ends up depends on whether the trim
-                // ripples: the same trim on a copy says.
                 false,
             ),
             _ => return,
         };
+        let id = params["clip"].as_str().unwrap_or_default().to_string();
+        let mut q = p.clone();
+        let tried = match (method, &params["edge"]) {
+            ("edit.roll", _) => ops::roll(&mut q, &id, Edge::Tail, by),
+            (_, edge) if edge == "head" => ops::trim(&mut q, &id, Edge::Head, by, None),
+            _ => ops::trim(&mut q, &id, Edge::Tail, by, None),
+        };
+        self.send(method, params);
+        if tried.is_err() {
+            return;
+        }
+        // Where an In trim leaves the edit depends on whether it ripples.
         let at = if moves {
             e.at + by
         } else {
-            let id = params["clip"].as_str().unwrap_or_default().to_string();
-            let mut q = p.clone();
-            ops::trim(&mut q, &id, Edge::Head, by, None)
-                .ok()
-                .and_then(|()| q.clip(&id).map(|c| c.start))
-                .unwrap_or(e.at)
+            q.clip(&id).map_or(e.at, |c| c.start)
         };
-        self.send(method, params);
         self.timeline.edit = Some(EditSel {
             at,
             side,

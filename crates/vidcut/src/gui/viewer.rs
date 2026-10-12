@@ -226,14 +226,10 @@ impl Workspace {
             self.trim_editor = None;
             return;
         };
-        let t = p.track(&e.track.id());
-        let out = t
-            .and_then(|t| t.clips.iter().find(|c| c.end() == e.at))
-            .cloned();
-        let inc = t
-            .and_then(|t| t.clips.iter().find(|c| c.start == e.at))
-            .cloned();
-        if (out.is_none() && inc.is_none()) || ui.input(|i| i.key_pressed(Key::Escape)) {
+        // A trim on its way moves the selection before the cut moves, so a
+        // missing cut doesn't close the editor; a cut that is gone clears the
+        // selection, which does.
+        if ui.input(|i| i.key_pressed(Key::Escape)) {
             self.trim_editor = None;
             return;
         }
