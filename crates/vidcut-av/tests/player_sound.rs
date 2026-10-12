@@ -90,13 +90,14 @@ fn backward_the_sound_plays_reversed_sample_for_sample() {
 }
 
 /// Plays `frames` frames of the beeps at `speed` through a real-time
-/// stand-in device (buffers heard 40 ms after they are pulled) with a
-/// display looking every 2 ms, and gives, for each beep, how long after it
-/// was heard the picture moved to its frame (ms). Forward, from frame 15:
+/// stand-in device (buffers heard 40 ms after they are pulled), and
+/// gives, for each beep, how long after it was heard the clock moved to
+/// its frame (ms), read at exact instants. Forward, from frame 15:
 /// a beep starts frame 30k, which should show as its onset is heard.
 /// Backward, from the last frame: a beep's first sample is the last of it
-/// heard, and right after it frame 30k gives way to frame 30k − 1. Every
-/// picture shown is checked to be its frame's.
+/// heard, and right after it frame 30k gives way to frame 30k − 1. The
+/// clock goes through every frame, and every picture a display presents
+/// meanwhile is its frame's.
 fn alignment(speed: f64, frames: i64) -> Vec<f64> {
     let a = beeps();
     let p = plan(&[clip(&a, 0, frames)], 0);
@@ -110,23 +111,32 @@ fn alignment(speed: f64, frames: i64) -> Vec<f64> {
     let from = if speed > 0.0 { 15 } else { frames - 1 };
     player.seek(from);
     assert!(player.wait_ready(from, Duration::from_secs(10)));
+    let mut trace = ClockTrace::new(Instant::now());
     player.play(speed);
-    let mut first_shown: Vec<(i64, Instant)> = Vec::new();
     let started = Instant::now();
     while player.status().playing && started.elapsed() < Duration::from_secs(12) {
-        let now = Instant::now();
-        if let Some(s) = player.present(now)
+        // What a display shows now is the frame's own picture.
+        if let Some(s) = player.present(Instant::now())
             && s.exact
-            && first_shown.last().is_none_or(|(f, _)| *f != s.frame)
         {
             assert_eq!(code(&s.picture), Some(s.frame as u32), "frame {}", s.frame);
-            first_shown.push((s.frame, now));
         }
+        trace.read(&player, Instant::now());
         std::thread::sleep(Duration::from_millis(2));
     }
+    trace.read(&player, Instant::now());
     let status = player.status();
     drop(player);
     assert!(!status.playing, "{speed}x played to the end: {status:?}");
+    // The clock went through every frame, in order.
+    let last = if speed > 0.0 { frames - 1 } else { 0 };
+    let every: Vec<i64> = if speed > 0.0 {
+        (from..=last).collect()
+    } else {
+        (last..=from).rev().collect()
+    };
+    let moved: Vec<i64> = trace.moves.iter().map(|(f, _)| *f).collect();
+    assert_eq!(moved, every, "{speed}x: every frame, in order");
     let rec = recording.lock().unwrap();
     let mono = left(&rec.samples);
     let gap = (4_800.0 / speed.abs()) as usize;
@@ -155,21 +165,17 @@ fn alignment(speed: f64, frames: i64) -> Vec<f64> {
     beeps
         .into_iter()
         .map(|(heard, frame)| {
-            let (_, shown) = first_shown
-                .iter()
-                .find(|(f, _)| *f == frame)
+            let shown = trace
+                .first_at(frame)
                 .unwrap_or_else(|| panic!("{speed}x: frame {frame} never shown"));
-            if *shown >= heard {
-                (*shown - heard).as_secs_f64() * 1e3
-            } else {
-                -(heard - *shown).as_secs_f64() * 1e3
-            }
+            ms_between(heard, shown)
         })
         .collect()
 }
 
-/// The display looks every 2 ms and the scheduler may add a few: what the
-/// alignment tests allow, at every speed.
+/// What the alignment tests allow, at every speed. The clock is read at
+/// exact instants (`ClockTrace`), so a test thread run late changes
+/// nothing; the bound keeps what the polling display of before needed.
 const ALIGNED_MS: std::ops::RangeInclusive<f64> = -1.0..=8.0;
 
 fn check_alignment(speed: f64, frames: i64) {

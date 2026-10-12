@@ -347,26 +347,25 @@ fn pictures_follow_the_sound_as_heard_through_a_device_with_latency() {
         PacedOutput::recording(Duration::from_millis(10), Duration::from_millis(40));
     let player = Player::new(p, Config::default(), Box::new(out)).unwrap();
     assert!(player.wait_ready(0, Duration::from_secs(10)));
+    // The clock is read at exact instants half a millisecond apart, so the
+    // scheduler running this thread late changes nothing; a display
+    // presents meanwhile, and what it shows is the frame's own picture.
+    let mut trace = ClockTrace::new(Instant::now());
     player.play(1.0);
-    // The display: presents every 2 ms, noting when each frame first shows.
-    let mut first_shown: Vec<(i64, Instant, Option<u32>)> = Vec::new();
     let started = Instant::now();
     while player.status().playing && started.elapsed() < Duration::from_secs(8) {
-        let now = Instant::now();
-        if let Some(s) = player.present(now)
+        if let Some(s) = player.present(Instant::now())
             && s.exact
-            && first_shown.last().is_none_or(|(f, ..)| *f != s.frame)
         {
-            first_shown.push((s.frame, now, code(&s.picture)));
+            assert_eq!(code(&s.picture), Some(s.frame as u32), "frame {}", s.frame);
         }
+        trace.read(&player, Instant::now());
         std::thread::sleep(Duration::from_millis(2));
     }
+    trace.read(&player, Instant::now());
     let status = player.status();
     drop(player);
     assert!(!status.playing, "played to the end: {status:?}");
-    for (f, _, c) in &first_shown {
-        assert_eq!(*c, Some(*f as u32), "frame {f}'s picture");
-    }
     let rec = recording.lock().unwrap();
     let mono: Vec<f32> = rec.samples.chunks(2).map(|c| c[0]).collect();
     let onsets = beep::onsets(&mono, 0.1, 4_800);
@@ -382,31 +381,26 @@ fn pictures_follow_the_sound_as_heard_through_a_device_with_latency() {
             _ => (30 * k as i64, Duration::ZERO),
         };
         let heard = heard + after;
-        let (_, shown, _) = first_shown
-            .iter()
-            .find(|(f, ..)| *f == frame)
+        let shown = trace
+            .first_at(frame)
             .unwrap_or_else(|| panic!("frame {frame} never shown"));
-        let ms = if *shown >= heard {
-            (*shown - heard).as_secs_f64() * 1e3
-        } else {
-            -(heard - *shown).as_secs_f64() * 1e3
-        };
-        offsets.push(ms);
+        offsets.push(ms_between(heard, shown));
     }
     eprintln!(
         "picture after its beep (ms): {offsets:.1?}; late presents {}",
         status.late
     );
-    // The display looks every 2 ms (and the scheduler may add a few).
+    // The bound the polling display of before needed (it looked every
+    // 2 ms), kept.
     for ms in &offsets {
         assert!(
             (-1.0..=8.0).contains(ms),
             "picture vs. sound: {offsets:.1?} ms"
         );
     }
-    // Nothing skipped while every frame was decoded in time.
+    // The clock went through every frame, in order.
     assert_eq!(
-        first_shown.iter().map(|(f, ..)| *f).collect::<Vec<_>>(),
+        trace.moves.iter().map(|(f, _)| *f).collect::<Vec<_>>(),
         (0..120).collect::<Vec<_>>()
     );
 }

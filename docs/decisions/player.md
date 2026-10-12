@@ -35,7 +35,7 @@ vidcut-av starts them as it starts its other threads (`std::thread::Builder`, na
 - **As decoded.** A picture is the decoded frame, held by reference: its own size, its own colors, not turned, in a layout a display takes: 8-bit 4:2:0 (planar, or NV12 as hardware decoders give it) or P010 for more bits. Others are brought to the nearest at their own size (`Relayout`): 4:2:2, 4:4:4 and 10-bit planar are resampled to 4:2:0 keeping their matrix and range (ProRes 4:2:2 10-bit becomes P010); RGB images are coded BT.709 video range. Black is the plan's size in 8-bit 4:2:0. Nothing copies a picture's pixels after the decoder.
 - **The display does the rest**, on the GPU: fitting into the viewer as export fits (`Picture::placement`), turning (`rotation`, the display matrix), and YUV to BT.709 RGB from `Picture::colors` (matrix, range, HDR), which are `vidcut_av::color`'s reading of the frame: its tags, or for untagged pictures BT.709 when HD and BT.601 otherwise, BT.2020 when HDR. `Picture::to_rgba` is that whole path on the CPU with the export's own filters: what `frame render` gives (the tests find it equal to the byte for 8-bit sources) and what a shader must match.
 - **GPU surfaces.** `Picture::memory` and `layout` read a hardware frame's format and frames context (CUDA, VAAPI, Vulkan): a GPU surface is the same frame type, and the engine never reads pixels.
-- **Kept by what they show:** the file, its origin, still or sequence, the source position and the rate (black by the plan's size). Pictures survive edits that move them (a ripple), and seeking to a kept one shows it without waiting for the decode thread. A memory budget (512 MB by default) holds them; the least recently kept or shown go first. A picture takes what its layout does: 3.1 MB for 1080p, 12.4 MB for 2160p 4:2:0; counts below are in pictures like the latest.
+- **Kept by what they show:** the file, its origin, still or sequence, the source position and the rate (black by the plan's size). Pictures survive edits that move them (a ripple), and seeking to a kept one shows it without waiting for the decode thread. A memory budget holds them (`Config::budget`, 1 GB unless the caller sets less: enough for 4K played backward); the least recently kept or shown go first. A picture takes what its layout does: 3.1 MB for 1080p, 12.4 MB for 2160p 4:2:0; counts below are in pictures like the latest.
 - **Forward**, the reader decodes on from frame to frame, and the next file opens ahead on the export's opener thread. Frames the clock has already passed are decoded and not kept. A reader far behind (more than a second) seeks to where the clock will be once the seek is done (the recent seek time × speed) and goes on from there while the clock comes.
 - **Ahead:** a quarter of a second × speed while playing (at most a quarter of the budget); paused, three frames when the reader stands right there.
 - **Back:** a window from a keyframe up to the frame, kept (the paused renderer's rule, preview.md §13): at least two seconds where keyframes are close, at most a third of the budget. Playing backward, the window before decodes while this one is shown; paused after a step back, one window behind.
@@ -55,6 +55,7 @@ vidcut-av starts them as it starts its other threads (`std::thread::Builder`, na
   - When the mix is late, sound and pictures stop together.
   - At the end the clock holds and the player pauses on the last frame.
   - Play starts by showing its first frame until that frame's first sample is heard.
+  - `frame_at(t)` reads the clock at any instant without changing anything: a display asks for the frame of its next refresh, a test for exact instants a moment ago (the clock remembers the device's last 64 buffers).
   - No half-frame lead: mpv's preview sound leads its picture by half a frame (preview.md §10); the engine has no EDL and no bias.
 - **Backward** the sound plays reversed: the mix is read forward a block at a time (0.2 s of play, one seek of each lane's stream a block), from further and further back, and each block is reversed a sample frame at a time. It is the clock as forward sound is: a beep's first sample is the last of it heard, and the picture moves to the frame before right after it.
 - **Other speeds**, both ways, go through the engine's own time stretch (`Stretch`, WSOLA), which keeps the pitch and says where its output came from:
@@ -84,23 +85,23 @@ On the dev machine (16 threads), decoding on the CPU; YUV pictures at the clips'
 
 | What | Result |
 |---|---|
-| Picture against sound through a device with 40 ms latency: when each beep's frame showed after the beep was heard (the tests allow −1 to +8 ms: the display looks every 2 ms) | 1×: 0.1–2 ms; −1× (reversed sound): 0.4–1.8 ms; 2×: 3.1–4.2 ms; 0.5×: 0.8–1.3 ms; −2×: 1.0–2.3 ms |
+| Picture against sound through a device with 40 ms latency: when the clock moved to each beep's frame after the beep was heard, read at exact instants half a millisecond apart (`Player::frame_at`), so a test thread run late measures the same (the tests allow −1 to +8 ms, the bound a polling display needed) | 1×: 0.3–0.5 ms; −1× (reversed sound): 0.1–0.4 ms; 2×: 2.6–3.1 ms; 0.5×: 0.2–0.4 ms; −2×: 0.6–0.9 ms, also with the CPU busy with other decoding |
 | The beep through the manual output, forward and reversed | on its sample, ±1 (reversed: the whole beep, sample for sample) |
 | Other speeds, both ways (0.5× to 8×) | a 1 kHz tone at 998–1000 Hz; every beep heard up to 2×; the sound as long as the speed makes it (within 20 ms) |
 | Requests while decoding 1080p | the slowest call under 0.01 ms |
 | Decoded playing 0→150, an edit on the way | 149–154 frames |
 | Decoded playing 299→0 backward, keyframes 120 apart | 306 frames |
-| 1080p30 H.264 pictures | 3.1 MB each; a window back holds 57 at 512 MB |
+| 1080p30 H.264 pictures | 3.1 MB each; a window back holds 114 at the default 1 GB (57 at 512 MB) |
 | 1080p30: seek to picture | median 96–110 ms, max 209–221 ms |
 | 1080p30: 5 s forward / 3 s backward | 150 of 150 shown, 0.1 cores / 90 of 91, 0.4 cores |
-| 2160p60 H.264 pictures (keyframes 4 s apart) | 12.4 MB each; a window back holds 14 at 512 MB, 28 at 1 GB |
+| 2160p60 H.264 pictures (keyframes 4 s apart) | 12.4 MB each; a window back holds 28 at the default 1 GB (14 at 512 MB) |
 | 2160p60: seek to picture | median 188 ms, max 373 ms |
 | 2160p60: 5 s forward | 298 of 300 shown, none late, 0.4 cores |
+| 2160p60: 3 s backward, at the default 1 GB | 177–178 of 180–181 shown, none late, 3.9–4.6 cores |
 | 2160p60: 3 s backward at 512 MB | 153–159 of 180 shown, 19–24 presents late, 7.1–7.2 cores |
-| 2160p60: 3 s backward at 1 GB | 178 of 181 shown, none late, 4.3 cores |
 | System device (PipeWire) | 37 ms latency; the picture moves 81 ms after play |
 
-Against the earlier RGBA pictures at a 1920×1080 viewer (8.3 MB each): playing forward no longer scales on the CPU (4K 1.2 cores down to 0.4, 1080p 0.2 to 0.1), 1080p keeps 2.7 times as many pictures, and 4K keeps two thirds as many (12.4 MB for the source size). Backward 4K in a 4 s GOP decodes most windows from the keyframe again: 20 pictures a window took 6.1 cores, 14 take 7.1 and drop frames, 28 take 4.3. GPU frames (milestone 2) or a larger budget are the ways out.
+Against the earlier RGBA pictures at a 1920×1080 viewer (8.3 MB each): playing forward no longer scales on the CPU (4K 1.2 cores down to 0.4, 1080p 0.2 to 0.1), 1080p keeps 2.7 times as many pictures, and 4K keeps two thirds as many (12.4 MB for the source size). Backward 4K in a 4 s GOP decodes most windows from the keyframe again, so the budget decides it: 14 pictures a window (512 MB) take 7.1 cores and drop frames, 20 (the RGBA pictures at 512 MB) took 6.1, 28 (1 GB, the default for that reason) take 4.3 and drop none. A smaller budget suits smaller sources; GPU frames (milestone 2) change it again.
 
 ## 8. Not yet
 
