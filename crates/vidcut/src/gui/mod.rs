@@ -7,6 +7,7 @@ pub mod export;
 mod folders;
 mod import;
 mod mixer;
+pub mod picture;
 mod pool;
 mod preferences;
 mod project;

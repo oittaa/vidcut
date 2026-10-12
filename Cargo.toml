@@ -51,6 +51,20 @@ eframe = { version = "0.36", default-features = false, features = [
     "wayland",
     "x11",
 ] }
+# The GPU the GUI draws with (eframe's renderer) and the viewer's pictures
+# are converted on: Vulkan on Linux and Windows, Metal on macOS, DX12 on
+# Windows. No OpenGL backend.
+wgpu = { version = "30", default-features = false, features = [
+    "std",
+    "wgsl",
+    "vulkan",
+    "metal",
+    "dx12",
+] }
+# Waits for wgpu's adapter and device without a window (tests).
+pollster = "1"
+# Checks the viewer's WGSL in unit tests, without a GPU (wgpu's own parser).
+naga = { version = "30", features = ["wgsl-in"] }
 # Direct dep only to keep winit's default features (client-side decorations on
 # GNOME/Wayland, runtime-loaded libwayland), which eframe enables only by default.
 winit = "0.30"
