@@ -603,6 +603,32 @@ impl Workspace {
         ui.horizontal(|ui| {
             self.notices(ui);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // What this is built on, for reports: the full versions on
+                // hover.
+                static VERSIONS: std::sync::OnceLock<(String, String)> = std::sync::OnceLock::new();
+                let (short, long) = VERSIONS.get_or_init(|| {
+                    let mut long = format!(
+                        "vidcut {}\nFFmpeg {}",
+                        env!("CARGO_PKG_VERSION"),
+                        vidcut_av::ffmpeg_version()
+                    );
+                    for (lib, v) in vidcut_av::library_versions() {
+                        if lib != "version" {
+                            long.push_str(&format!("\n  {lib} {v}"));
+                        }
+                    }
+                    if let Some((major, minor)) = vidcut_mpv::client_api_version() {
+                        long.push_str(&format!("\nlibmpv client API {major}.{minor}"));
+                    }
+                    let short = format!(
+                        "vidcut {} · FFmpeg {}",
+                        env!("CARGO_PKG_VERSION"),
+                        vidcut_av::ffmpeg_release()
+                    );
+                    (short, long)
+                });
+                ui.label(RichText::new(short.as_str()).color(theme::TEXT_DIM))
+                    .on_hover_text(long.as_str());
                 if let Some(socket) = &self.snap.socket {
                     ui.label(
                         RichText::new(format!("pid {}", self.snap.pid)).color(theme::TEXT_DIM),
@@ -618,6 +644,7 @@ impl Workspace {
                 }
                 if let Some(p) = self.project() {
                     let fps = p.settings.fps;
+                    // `rev`: the project's edits so far (scripts use it).
                     let format = ui.label(
                         RichText::new(format!(
                             "{}x{} {} fps  rev {}",

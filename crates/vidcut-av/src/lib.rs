@@ -54,10 +54,36 @@ pub fn init() {
     });
 }
 
-/// Versions of the linked FFmpeg libraries, e.g. `{"libavcodec": "62.11.100"}`.
+/// FFmpeg's version as its build says it: `8.0.1-3ubuntu2` from a
+/// distribution, `N-…-g…` from git.
+pub fn ffmpeg_version() -> String {
+    // SAFETY: a static string FFmpeg keeps for the life of the process.
+    unsafe { std::ffi::CStr::from_ptr(ffmpeg::ffi::av_version_info()) }
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// The release in [`ffmpeg_version`]: `8.0.1` of `8.0.1-3ubuntu2`; a git
+/// build's whole string.
+pub fn ffmpeg_release() -> String {
+    release_of(&ffmpeg_version())
+}
+
+fn release_of(version: &str) -> String {
+    match version.split_once('-') {
+        Some((release, _)) if release.starts_with(|c: char| c.is_ascii_digit()) => {
+            release.to_string()
+        }
+        _ => version.to_string(),
+    }
+}
+
+/// FFmpeg's version and those of the linked libraries, e.g.
+/// `{"version": "8.0.1-3ubuntu2", "libavcodec": "62.11.100"}`.
 pub fn library_versions() -> std::collections::BTreeMap<&'static str, String> {
     let v = |n: u32| format!("{}.{}.{}", n >> 16, (n >> 8) & 0xff, n & 0xff);
     [
+        ("version", ffmpeg_version()),
         ("libavcodec", v(ffmpeg::codec::version())),
         ("libavformat", v(ffmpeg::format::version())),
         ("libavfilter", v(ffmpeg::filter::version())),
@@ -65,4 +91,14 @@ pub fn library_versions() -> std::collections::BTreeMap<&'static str, String> {
     ]
     .into_iter()
     .collect()
+}
+
+#[cfg(test)]
+mod version_tests {
+    #[test]
+    fn releases_drop_the_build() {
+        assert_eq!(super::release_of("8.0.1-3ubuntu2"), "8.0.1");
+        assert_eq!(super::release_of("8.0.1"), "8.0.1");
+        assert_eq!(super::release_of("N-118451-g1a2b3c4"), "N-118451-g1a2b3c4");
+    }
 }

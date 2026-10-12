@@ -15,3 +15,11 @@ pub use render::{Display, GlRenderer, ProcAddress, SwRenderer};
 pub fn available() -> std::result::Result<(), String> {
     ffi::api().map(|_| ())
 }
+
+/// libmpv's client API version, `(major, minor)`, when it loads.
+pub fn client_api_version() -> Option<(u32, u32)> {
+    let api = ffi::api().ok()?;
+    // SAFETY: a plain query of the loaded library.
+    let v = unsafe { (api.client_api_version)() };
+    Some(((v >> 16) as u32, (v & 0xffff) as u32))
+}

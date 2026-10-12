@@ -476,7 +476,11 @@ fn cli_name(s: &str) -> String {
 /// The command line: every method, plus the commands that aren't requests.
 pub fn command() -> Command {
     let mut root = Command::new("vidcut")
-        .version(env!("CARGO_PKG_VERSION"))
+        .version(format!(
+            "{} (FFmpeg {})",
+            env!("CARGO_PKG_VERSION"),
+            vidcut_av::ffmpeg_version()
+        ))
         .about("A simple, fully scriptable video cutting tool.")
         .long_about(
             "A simple, fully scriptable video cutting tool. Without a command, the GUI starts.\n\n\
