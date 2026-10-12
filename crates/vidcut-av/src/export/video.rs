@@ -442,6 +442,115 @@ pub struct VideoFrames {
     target: Option<Hdr>,
     /// Frames for NVENC in GPU memory (`with_gpu`).
     gpu: Option<Gpu>,
+    /// Frames as decoded (`decoded`): each picture's own size and colors,
+    /// in a layout a display takes.
+    decoded: Option<Relayout>,
+    /// The clockwise turn that shows the last frame given upright.
+    rotation: u16,
+}
+
+/// The layouts a display takes: 8-bit 4:2:0 (planar, or NV12 as hardware
+/// decoders give it) and P010 for more bits.
+pub(crate) fn displayable(p: format::Pixel) -> bool {
+    use format::Pixel as P;
+    matches!(p, P::YUV420P | P::YUVJ420P | P::NV12 | P::P010LE)
+}
+
+/// Brings decoded pictures into a layout a display takes, at their own size
+/// and in their own colors: 4:2:2, 4:4:4 and 10-bit planar pictures are
+/// resampled to 4:2:0 (8 bits, or P010 for more), keeping their matrix and
+/// range; RGB pictures (images) are coded as BT.709 video range. Pictures
+/// already in such a layout pass as they are, by reference.
+pub(crate) struct Relayout {
+    graph: Option<(filter::Graph, (u32, u32, format::Pixel))>,
+}
+
+impl Relayout {
+    pub(crate) fn new() -> Self {
+        Self { graph: None }
+    }
+
+    pub(crate) fn run(&mut self, src: &frame::Video) -> Result<frame::Video> {
+        let fmt = src.format();
+        if displayable(fmt) {
+            return frame_ref(src);
+        }
+        let key = (src.width(), src.height(), fmt);
+        if self.graph.as_ref().is_none_or(|(_, k)| *k != key) {
+            self.graph = Some((Self::build(src)?, key));
+        }
+        let (graph, _) = self.graph.as_mut().expect("built");
+        graph
+            .get("in")
+            .expect("source")
+            .source()
+            .add(src)
+            .ctx(|| "converting a picture's layout".into())?;
+        let mut out = frame::Video::empty();
+        graph
+            .get("out")
+            .expect("sink")
+            .sink()
+            .frame(&mut out)
+            .ctx(|| "converting a picture's layout".into())?;
+        Ok(out)
+    }
+
+    fn build(src: &frame::Video) -> Result<filter::Graph> {
+        let desc = src
+            .format()
+            .descriptor()
+            .ok_or_else(|| Error::Invalid("unknown pixel format".into()))?;
+        let (depth, rgb) = unsafe {
+            let d = &*desc.as_ptr();
+            (
+                d.comp[0].depth,
+                d.flags & (ffmpeg::ffi::AV_PIX_FMT_FLAG_RGB as u64) != 0,
+            )
+        };
+        let target = if depth > 8 { "p010le" } else { "yuv420p" };
+        let full = unsafe { (*src.as_ptr()).color_range }
+            == ffmpeg::ffi::AVColorRange::AVCOL_RANGE_JPEG
+            || matches!(
+                src.format(),
+                format::Pixel::YUVJ422P | format::Pixel::YUVJ444P | format::Pixel::YUVJ440P
+            );
+        let spec = if rgb {
+            format!("scale=out_color_matrix=bt709:out_range=tv,format={target}")
+        } else if full {
+            format!("scale=out_range=pc,format={target}")
+        } else {
+            format!("format={target}")
+        };
+        let sar = src.aspect_ratio();
+        let args = format!(
+            "video_size={}x{}:pix_fmt={}:time_base=1/1000000:pixel_aspect={}/{}",
+            src.width(),
+            src.height(),
+            ffmpeg::ffi::AVPixelFormat::from(src.format()) as i32,
+            sar.numerator().max(1),
+            sar.denominator().max(1)
+        );
+        let find = |name: &str| {
+            filter::find(name).ok_or_else(|| Error::Invalid(format!("no {name} filter")))
+        };
+        let mut graph = filter::Graph::new();
+        graph
+            .add(&find("buffer")?, "in", &args)
+            .ctx(|| "creating video source".into())?;
+        graph
+            .add(&find("buffersink")?, "out", "")
+            .ctx(|| "creating video sink".into())?;
+        graph
+            .output("in", 0)
+            .and_then(|p| p.input("out", 0))
+            .and_then(|p| p.parse(&spec))
+            .ctx(|| format!("building filter {spec}"))?;
+        graph
+            .validate()
+            .ctx(|| format!("configuring filter {spec}"))?;
+        Ok(graph)
+    }
 }
 
 /// The GPU side of an export whose frames stay there.
@@ -475,7 +584,26 @@ impl VideoFrames {
             black: None,
             target,
             gpu: None,
+            decoded: None,
+            rotation: 0,
         }
+    }
+
+    /// Gives frames as decoded instead of fitted into the output: each at
+    /// its own size, in its own colors, upright only after
+    /// [`rotation`](Self::rotation), in a layout a display takes (8-bit
+    /// 4:2:0 or P010; see `Relayout`). Frames are still picked by the
+    /// sampling rule. Black is the output's size, in 8-bit 4:2:0.
+    pub fn decoded(mut self) -> Self {
+        self.decoded = Some(Relayout::new());
+        self.out.2 = format::Pixel::YUV420P;
+        self
+    }
+
+    /// The clockwise turn (0, 90, 180 or 270) that shows the last frame
+    /// given upright: its file's display matrix; 0 for black.
+    pub fn rotation(&self) -> u16 {
+        self.rotation
     }
 
     /// Every frame in GPU memory, from `frames` (made for this output's
@@ -541,6 +669,7 @@ impl VideoFrames {
             return match piece.clone() {
                 VideoPiece::Black { .. } if !picture => Ok(Some(None)),
                 VideoPiece::Black { .. } => {
+                    self.rotation = 0;
                     let black = frame_ref(self.black()?)?;
                     match &self.gpu {
                         Some(g) => g.frames.upload(&black).map(|f| Some(Some(f))),
@@ -564,6 +693,7 @@ impl VideoFrames {
                     }
                     let k = if still { 0 } else { k };
                     if picture {
+                        self.rotation = self.source.as_ref().map_or(0, |s| s.reader.rotation());
                         self.source_frame(k).map(|f| Some(Some(f)))
                     } else {
                         self.pass_source_frame(k).map(|()| Some(None))
@@ -745,7 +875,12 @@ impl VideoFrames {
         let target =
             src.origin + fps.frames_to_secs(src.source_frame + k) - 0.5 * fps.frames_to_secs(1);
         let changed = src.advance(target)?;
-        if src.on_gpu && (changed || src.normalized.is_none()) {
+        if let Some(relayout) = self.decoded.as_mut() {
+            if changed || src.normalized.is_none() {
+                let (frame, _) = src.current.as_ref().expect("have a frame");
+                src.normalized = Some(relayout.run(frame)?);
+            }
+        } else if src.on_gpu && (changed || src.normalized.is_none()) {
             src.scale_on_gpu()?;
         } else if changed || src.normalized.is_none() {
             let (frame, _) = src.current.as_ref().expect("have a frame");

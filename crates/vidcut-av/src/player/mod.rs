@@ -14,16 +14,22 @@
 //! has run a second (a paused seek otherwise finishes, so a held key moves
 //! the picture at the speed frames decode).
 //!
-//! **Pictures** are decoded by the export's reader (the sampling rule,
-//! fitting, colors), kept by what they show within a memory budget
-//! ([`store`]): ahead of the clock in the direction of play, those just
-//! shown, and windows decoded from a keyframe for going back.
+//! **Pictures** are picked by the export's reader (the sampling rule) and
+//! kept as decoded, in YUV, for a display's shader to fit and convert
+//! ([`frame`]); kept by what they show within a memory budget ([`store`]):
+//! ahead of the clock in the direction of play, those just shown, and
+//! windows decoded from a keyframe for going back.
 //!
 //! **Clock.** The audio thread mixes the plan's lanes into a ring the
 //! device's callback reads; the callback records which samples it took and
 //! when they are heard ([`clock`]). The position is the sample heard now,
 //! so pictures follow the sound as the listener hears it, output latency
-//! included, and stop when the sound stops.
+//! included, and stop when the sound stops. Backward, the sound plays
+//! reversed.
+//!
+//! **Scrubbing.** A frame step, and a seek while paused, play that frame's
+//! sound ([`scrub`]); [`Scrubber`] does it alone, for pictures shown by
+//! something else.
 
 mod audio;
 mod clock;
@@ -31,6 +37,7 @@ mod frame;
 mod output;
 mod plan;
 mod ring;
+mod scrub;
 mod store;
 mod video;
 
@@ -41,11 +48,11 @@ use std::time::{Duration, Instant};
 
 use vidcut_core::render::RenderPlan;
 
-pub use frame::{Memory, Picture, Shown};
+pub use frame::{Layout, Memory, Picture, Shown};
 pub use output::{AudioOutput, AudioSource, CpalOutput, ManualOutput, PacedOutput, Recording};
+pub use scrub::Scrubber;
 
 use crate::error::{Error, Result};
-use crate::ffmpeg::format;
 use clock::{Heard, Markers};
 use plan::Plan;
 use ring::Ring;
@@ -54,43 +61,24 @@ use store::Store;
 /// Memory for kept pictures unless the caller sets it.
 pub const DEFAULT_BUDGET: usize = 512 << 20;
 
-/// The pictures a player makes: fitted inside this size keeping the
-/// display aspect, padded black, in this pixel format (as export makes
-/// them).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Output {
-    pub width: u32,
-    pub height: u32,
-    pub pixel: format::Pixel,
-}
-
-impl Output {
-    /// Packed RGBA at `width`×`height`.
-    pub fn rgba(width: u32, height: u32) -> Self {
-        Self {
-            width,
-            height,
-            pixel: format::Pixel::RGBA,
-        }
-    }
-}
-
 /// How a player works.
 #[derive(Clone)]
 pub struct Config {
-    pub output: Output,
     /// Memory for kept pictures.
     pub budget: usize,
+    /// Frame steps, and seeks while paused, play the frame's sound (spec
+    /// §4.5, decision D42). On unless set otherwise.
+    pub audio_scrubbing: bool,
     /// Called on the decode thread when the picture of the frame the viewer
     /// is at lands: a display repaints.
     pub on_picture: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
-impl Config {
-    pub fn new(output: Output) -> Self {
+impl Default for Config {
+    fn default() -> Self {
         Self {
-            output,
             budget: DEFAULT_BUDGET,
+            audio_scrubbing: true,
             on_picture: None,
         }
     }
@@ -130,9 +118,8 @@ pub struct Status {
 /// What is wanted now, read by the decode and audio threads.
 pub(crate) struct Control {
     pub plan: Arc<Plan>,
-    /// Counts plan (and output) changes.
+    /// Counts plan changes.
     pub plan_gen: u64,
-    pub output: Output,
     pub mode: Mode,
     /// Counts every change the decode thread cares about.
     pub version: u64,
@@ -142,8 +129,22 @@ pub(crate) struct Control {
     pub trims: Vec<f64>,
     pub trims_gen: u64,
     pub muted: bool,
+    /// Steps and paused seeks play the frame's sound.
+    scrubbing: bool,
+    /// The frame whose sound to play, numbered so each request is new.
+    pub scrub: Option<(i64, u64)>,
     pub closed: bool,
     error: Option<String>,
+}
+
+impl Control {
+    /// Asks for the sound of frame `t`, when scrubbing.
+    fn scrub(&mut self, t: i64) {
+        if self.scrubbing {
+            let n = self.scrub.map_or(0, |(_, n)| n) + 1;
+            self.scrub = Some((t, n));
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -176,7 +177,6 @@ struct Presenter {
 pub(crate) struct Snap {
     pub plan: Arc<Plan>,
     pub plan_gen: u64,
-    pub output: Output,
     pub mode: Mode,
     pub version: u64,
     /// The frame the viewer is at.
@@ -191,6 +191,7 @@ pub(crate) struct AudioSnap {
     pub trims: Vec<f64>,
     pub trims_gen: u64,
     pub muted: bool,
+    pub scrub: Option<(i64, u64)>,
 }
 
 pub(crate) struct Shared {
@@ -313,7 +314,6 @@ impl Shared {
         Some(Snap {
             plan: ctl.plan.clone(),
             plan_gen: ctl.plan_gen,
-            output: ctl.output,
             mode: ctl.mode,
             version: ctl.version,
             focus,
@@ -333,6 +333,7 @@ impl Shared {
             trims: ctl.trims.clone(),
             trims_gen: ctl.trims_gen,
             muted: ctl.muted,
+            scrub: ctl.scrub,
         })
     }
 
@@ -403,15 +404,16 @@ impl Player {
         let at = plan.range.0;
         let shared = Arc::new(Shared {
             control: Mutex::new(Control {
-                plan: Arc::new(Plan::new(plan, &config.output)),
+                plan: Arc::new(Plan::new(plan)),
                 plan_gen: 0,
-                output: config.output,
                 mode: Mode::Paused { at },
                 version: 0,
                 epoch: 0,
                 trims: Vec::new(),
                 trims_gen: 0,
                 muted: false,
+                scrubbing: config.audio_scrubbing,
+                scrub: None,
                 closed: false,
                 error: None,
             }),
@@ -465,7 +467,7 @@ impl Player {
                 )));
                 return;
             }
-            ctl.plan = Arc::new(Plan::new(plan, &ctl.output));
+            ctl.plan = Arc::new(Plan::new(plan));
             ctl.plan_gen += 1;
             ctl.trims.clear();
             ctl.trims_gen += 1;
@@ -478,25 +480,17 @@ impl Player {
         result
     }
 
-    /// Makes pictures of another size or format from now on (the viewer
-    /// was resized). Pictures made before are dropped as they age.
-    pub fn set_output(&self, output: Output) {
-        self.shared.change(true, |ctl, _, _| {
-            if ctl.output != output {
-                ctl.output = output;
-                ctl.plan = Arc::new(Plan::new(ctl.plan.plan.clone(), &output));
-                ctl.plan_gen += 1;
-            }
-        });
-    }
-
     /// Shows timeline frame `frame` (within the plan). Playing, play goes
-    /// on from there.
+    /// on from there; paused, the frame's sound plays when scrubbing (a
+    /// drag across the timeline is seeks).
     pub fn seek(&self, frame: i64) {
         self.shared.change(true, |ctl, _, _| {
             let t = ctl.plan.clamp(frame);
             ctl.mode = match ctl.mode {
-                Mode::Paused { .. } => Mode::Paused { at: t },
+                Mode::Paused { .. } => {
+                    ctl.scrub(t);
+                    Mode::Paused { at: t }
+                }
                 Mode::Playing { speed, .. } => {
                     ctl.epoch += 1;
                     Mode::Playing {
@@ -510,12 +504,24 @@ impl Player {
     }
 
     /// Pauses and moves `frames` frames from where the viewer is (negative
-    /// back).
+    /// back), playing the frame's sound when scrubbing: forward, whichever
+    /// way the step went (decision D42).
     pub fn step(&self, frames: i64) {
         self.shared.change(true, |ctl, pos, _| {
-            ctl.mode = Mode::Paused {
-                at: ctl.plan.clamp(pos.saturating_add(frames)),
-            };
+            let t = ctl.plan.clamp(pos.saturating_add(frames));
+            ctl.scrub(t);
+            ctl.mode = Mode::Paused { at: t };
+        });
+    }
+
+    /// Turns audio scrubbing on or off (on by default): whether steps and
+    /// paused seeks play the frame's sound.
+    pub fn set_audio_scrubbing(&self, on: bool) {
+        self.shared.change(false, |ctl, _, _| {
+            ctl.scrubbing = on;
+            if !on {
+                ctl.scrub = None;
+            }
         });
     }
 

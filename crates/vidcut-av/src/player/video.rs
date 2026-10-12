@@ -12,14 +12,16 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use vidcut_core::render::VideoPiece;
+use vidcut_core::time::Rational;
 
 use super::frame::Picture;
 use super::plan::Plan;
-use super::{Busy, Mode, Output, Shared, Snap, trace};
+use super::{Busy, Mode, Shared, Snap, trace};
 use crate::error::{Error, Result};
 use crate::export::is_cancelled;
-use crate::export::renderer::{at, window, window_sizes};
+use crate::export::renderer::{at, window};
 use crate::export::video::VideoFrames;
+use crate::ffmpeg::format;
 
 /// Frames decoded ahead of a paused viewer, when decoding on is cheap.
 const PAUSED_AHEAD: i64 = 3;
@@ -31,6 +33,9 @@ const AHEAD_SECS: f64 = 0.25;
 /// (the export's reader reads on within a second, too).
 const DECODE_ON_SECS: f64 = 1.0;
 
+/// Seconds a window back holds at least, where keyframes are close.
+const WINDOW_SECS: f64 = 2.0;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Direction {
     Paused,
@@ -40,8 +45,11 @@ enum Direction {
 
 struct Decoder {
     shared: Arc<Shared>,
-    /// The reader, for the output it was made for.
-    frames: Option<(Output, VideoFrames)>,
+    /// The reader, for the rate and size (of black) it was made for.
+    frames: Option<((Rational, u32, u32), VideoFrames)>,
+    /// What the latest picture took: windows and the pictures ahead are
+    /// counted in it.
+    picture_bytes: usize,
     /// The timeline frame the reader gives next, when it is known.
     next: Option<i64>,
     plan: Arc<Plan>,
@@ -63,9 +71,11 @@ struct Decoder {
 pub(crate) fn run(shared: Arc<Shared>) {
     let _cancel = crate::cancel::Guard::set(shared.interrupt.clone());
     let Some(first) = shared.snap() else { return };
+    let p = &first.plan.plan;
     let mut d = Decoder {
         shared: shared.clone(),
         frames: None,
+        picture_bytes: (p.width as usize * p.height as usize * 3).div_ceil(2),
         next: None,
         plan: first.plan.clone(),
         plan_gen: None,
@@ -180,7 +190,7 @@ impl Decoder {
         let wanted = match dir {
             Direction::Forward(speed) => {
                 let ahead = ((AHEAD_SECS * fps * speed).ceil() as i64).max(2);
-                let ahead = ahead.min(self.frames_in(store.budget() / 4, snap));
+                let ahead = ahead.min(self.pictures_in(store.budget() / 4).max(2));
                 (anchor + 1..=plan.clamp(anchor + ahead))
                     .find(|&t| missing(t))
                     .map(|t| (t, false))
@@ -188,7 +198,7 @@ impl Decoder {
             Direction::Back => {
                 // A window behind the one being shown, so going back
                 // doesn't wait at keyframes: a third of the budget each.
-                let (_, max) = self.windows(snap, 3);
+                let (_, max) = self.windows(3);
                 (plan.clamp(focus - max)..focus)
                     .rev()
                     .find(|&t| missing(t))
@@ -199,7 +209,7 @@ impl Decoder {
                     .find(|&t| missing(t))
                     .filter(|&t| self.next == Some(t));
                 let behind = || {
-                    let (min, _) = self.windows(snap, 2);
+                    let (min, _) = self.windows(2);
                     (plan.clamp(focus - min)..focus).rev().find(|&t| missing(t))
                 };
                 match next {
@@ -224,30 +234,31 @@ impl Decoder {
         self.next.is_some_and(|r| r <= t && t - r <= limit)
     }
 
-    /// The shortest and longest windows back, in frames, for a budget
-    /// shared by `parts` of them.
-    fn windows(&self, snap: &Snap, parts: usize) -> (i64, i64) {
-        let o = snap.output;
-        window_sizes(
-            self.shared.store.budget() * 2 / parts.max(1),
-            o.width,
-            o.height,
-            self.plan.fps(),
-        )
+    /// The shortest and longest windows back, in frames, when `parts` of
+    /// them share the budget: at least two seconds where keyframes are
+    /// close, at most what fits.
+    fn windows(&self, parts: usize) -> (i64, i64) {
+        let max = self
+            .pictures_in(self.shared.store.budget() / parts.max(1))
+            .max(1);
+        let min = ((self.plan.fps().as_f64() * WINDOW_SECS).round() as i64).clamp(1, max);
+        (min, max)
     }
 
-    /// Pictures of the current output that fit in `bytes`.
-    fn frames_in(&self, bytes: usize, snap: &Snap) -> i64 {
-        let o = snap.output;
-        ((bytes / (o.width as usize * o.height as usize * 4).max(1)) as i64).max(2)
+    /// Pictures like the latest that fit in `bytes`.
+    fn pictures_in(&self, bytes: usize) -> i64 {
+        (bytes / self.picture_bytes.max(1)) as i64
     }
 
-    /// The reader for `out`, made anew when the output changed.
-    fn reader(&mut self, out: Output) -> &mut VideoFrames {
-        if self.frames.as_ref().is_none_or(|(o, _)| *o != out) {
-            let fps = self.plan.fps();
-            let frames = VideoFrames::new(&[], fps, out.width, out.height, out.pixel, None);
-            self.frames = Some((out, frames));
+    /// The reader, made anew when the rate or the size of black changed.
+    fn reader(&mut self) -> &mut VideoFrames {
+        let p = &self.plan.plan;
+        let key = (p.fps, p.width, p.height);
+        if self.frames.as_ref().is_none_or(|(k, _)| *k != key) {
+            let frames =
+                VideoFrames::new(&[], p.fps, p.width, p.height, format::Pixel::YUV420P, None)
+                    .decoded();
+            self.frames = Some((key, frames));
             self.next = None;
         }
         &mut self.frames.as_mut().expect("just made").1
@@ -257,18 +268,10 @@ impl Decoder {
     /// going `back`, a window from a keyframe up to `t`.
     fn decode(&mut self, snap: &Snap, t: i64, back: bool) -> Result<()> {
         let plan = self.plan.clone();
-        let out = snap.output;
-        if self
-            .frames
-            .as_ref()
-            .is_some_and(|(_, f)| f.fps() != plan.fps())
-        {
-            self.frames = None;
-        }
-        self.reader(out);
+        self.reader();
         if !self.reads_on(t) {
             let from = if back { self.window_start(t)? } else { t };
-            self.reader(out).read_pieces(&plan.pieces_from(from));
+            self.reader().read_pieces(&plan.pieces_from(from));
             self.next = Some(from);
         }
         let r = self.next.expect("positioned");
@@ -283,15 +286,15 @@ impl Decoder {
             // over otherwise.
             let keep =
                 i == t || back || (i >= snap.focus && !self.shared.store.contains(&plan.id(i)));
-            let frames = self.reader(out);
+            let frames = self.reader();
             if keep {
                 let frame = frames
                     .next_frame()?
                     .ok_or_else(|| Error::Invalid(format!("no frame {i} to play")))?;
+                let picture = Picture::new(frame, frames.rotation());
                 self.next = Some(i + 1);
-                self.shared
-                    .store
-                    .put(plan.id(i), Arc::new(Picture::new(frame)));
+                self.picture_bytes = picture.bytes();
+                self.shared.store.put(plan.id(i), Arc::new(picture));
                 if i == snap.focus {
                     self.shared.landed();
                 }
@@ -322,10 +325,8 @@ impl Decoder {
             return Ok(t);
         };
         let floor = pos - (t - piece_start);
-        let out = self.frames.as_ref().expect("made").0;
-        let budget = self.shared.store.budget();
-        let (min, max) = window_sizes(budget * 2 / 3, out.width, out.height, plan.fps());
-        let frames = self.reader(out);
+        let (min, max) = self.windows(3);
+        let frames = self.reader();
         let start = window(
             frames,
             &at(&piece, pos, 1),

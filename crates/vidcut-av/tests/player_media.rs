@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use player_support::cpu_seconds;
-use vidcut_av::player::{Config, Output, PacedOutput, Player};
+use vidcut_av::player::{Config, DEFAULT_BUDGET, PacedOutput, Player};
 use vidcut_core::render::{AudioPiece, RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
 
@@ -78,10 +78,28 @@ fn real_footage_seeks_steps_and_plays() {
         };
         let p = plan(&path, fps, 540);
         let frames = p.frames;
-        // A 1920×1080 viewer, sound to a stand-in device in real time.
+        // Sound to a stand-in device in real time.
         let out = PacedOutput::new(Duration::from_millis(10), Duration::ZERO);
-        let player = Player::new(p, Config::new(Output::rgba(1920, 1080)), Box::new(out)).unwrap();
+        // `VIDCUT_PLAYER_BUDGET_MB` measures another memory budget.
+        let budget = std::env::var("VIDCUT_PLAYER_BUDGET_MB")
+            .ok()
+            .and_then(|mb| mb.parse::<usize>().ok())
+            .map_or(DEFAULT_BUDGET, |mb| mb << 20);
+        let config = Config {
+            budget,
+            ..Config::default()
+        };
+        let player = Player::new(p, config, Box::new(out)).unwrap();
         assert!(player.wait_ready(0, Duration::from_secs(20)));
+        let pic = player.present(Instant::now()).unwrap().picture;
+        eprintln!(
+            "{name}: pictures {}×{} {:?}, {:.1} MB each; a window back holds up to {} (a third of the budget)",
+            pic.width(),
+            pic.height(),
+            pic.layout(),
+            pic.bytes() as f64 / 1e6,
+            budget / 3 / pic.bytes()
+        );
 
         // Seeks, paused, each waited for.
         let mut seeks = Vec::new();

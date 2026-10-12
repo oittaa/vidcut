@@ -2,15 +2,17 @@
 //! ring a tenth of a second ahead of the device, each run of samples marked
 //! with where it is on the timeline.
 //!
-//! At other forward speeds the mix goes through FFmpeg's `atempo`, which
-//! keeps the pitch. Backwards the device plays silence, which still runs
-//! the clock.
+//! At other speeds the mix goes through FFmpeg's `atempo`, which keeps the
+//! pitch. Backward the sound plays reversed: the mix is read forward a
+//! block at a time, from further and further back, and each block reversed.
+//! Paused, steps play their frame's sound ([`super::scrub`]).
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use super::clock::Marker;
 use super::plan::Plan;
+use super::scrub::{Waiting, snippet};
 use super::{AudioSnap, Mode, Shared};
 use crate::error::{Context, Error, Result};
 use crate::export::DECLICK_MS;
@@ -27,13 +29,24 @@ const CHUNK_SECS: f64 = 0.01;
 /// once.
 const MIN_ROOM_SECS: f64 = 0.1;
 
+/// Sound read at a time going backward, in seconds of play: each block
+/// costs a seek of every lane's stream.
+const BLOCK_SECS: f64 = 0.2;
+
 /// What is being played.
 struct Run {
     epoch: u64,
     speed: f64,
-    /// The next timeline sample to mix (from the plan's start).
+    /// The next timeline sample to mix (from the plan's start); backward,
+    /// the next to play, the mix read up to it.
     cursor: i64,
     tempo: Option<Tempo>,
+    /// Backward: a block mixed and reversed (and through the tempo filter),
+    /// and how much of it is queued.
+    block: Vec<f32>,
+    queued: usize,
+    /// Backward: the tempo filter gave what it held at the start.
+    flushed: bool,
     /// The end (or the start, backwards) was reached and marked.
     ended: bool,
 }
@@ -46,6 +59,8 @@ struct Producer {
     run: Option<Run>,
     trims_gen: Option<u64>,
     muted: bool,
+    /// Paused: the frame's sound waiting for the one playing.
+    waiting: Waiting,
 }
 
 pub(crate) fn run(shared: Arc<Shared>) {
@@ -60,16 +75,23 @@ pub(crate) fn run(shared: Arc<Shared>) {
         run: None,
         trims_gen: None,
         muted: false,
+        waiting: Waiting::default(),
         shared,
     };
     while let Some(snap) = p.shared.audio_snap() {
         p.sync(&snap);
+        // A frame's sound waiting: look again as the one playing ends.
+        let wait = if p.waiting.is_some() {
+            Duration::from_millis(1)
+        } else {
+            Duration::from_millis(5)
+        };
         match p.produce() {
             Ok(true) => {}
-            Ok(false) => p.shared.wait_any(Duration::from_millis(5)),
+            Ok(false) => p.shared.wait_any(wait),
             Err(e) => {
                 p.shared.fail(e.to_string());
-                p.shared.wait_any(Duration::from_millis(5));
+                p.shared.wait_any(wait);
             }
         }
     }
@@ -101,6 +123,7 @@ impl Producer {
             }
             Mode::Playing { from, speed, epoch } => {
                 if self.run.as_ref().map(|r| r.epoch) != Some(epoch) {
+                    self.waiting.clear();
                     self.start(from, speed, epoch);
                 }
             }
@@ -112,6 +135,20 @@ impl Producer {
             }
             self.muted = snap.muted;
             self.trims_gen = Some(snap.trims_gen);
+        }
+        // A step or a paused seek: its frame's sound, unless muted.
+        match snap.scrub {
+            None => self.waiting.clear(),
+            Some((t, n)) if self.waiting.served != Some(n) => {
+                self.waiting.served = Some(n);
+                if self.run.is_none() && !self.muted {
+                    match snippet(&mut self.mix, &self.plan, t) {
+                        Ok(sound) => self.waiting.replace(sound, n),
+                        Err(e) => self.shared.fail(e.to_string()),
+                    }
+                }
+            }
+            Some(_) => {}
         }
     }
 
@@ -125,14 +162,17 @@ impl Producer {
     /// Starts play request `epoch`: what was queued for the device is
     /// dropped, and the new sound marked from sample `from` on.
     fn start(&mut self, from: i64, speed: f64, epoch: u64) {
-        let tempo = (speed > 0.0 && speed != 1.0)
-            .then(|| Tempo::new(speed, self.plan.rate(), self.plan.plan.channels).ok())
+        let tempo = (speed.abs() != 1.0)
+            .then(|| Tempo::new(speed.abs(), self.plan.rate(), self.plan.plan.channels).ok())
             .flatten();
         self.run = Some(Run {
             epoch,
             speed,
             cursor: from,
             tempo,
+            block: Vec::new(),
+            queued: 0,
+            flushed: false,
             ended: false,
         });
         self.restart(from);
@@ -150,6 +190,9 @@ impl Producer {
         }
         run.cursor = at;
         run.ended = false;
+        run.block.clear();
+        run.queued = 0;
+        run.flushed = false;
         if let Some(t) = run.tempo.as_mut()
             && let Ok(fresh) = Tempo::new(t.speed, t.rate, t.channels as u16)
         {
@@ -166,10 +209,13 @@ impl Producer {
     /// Mixes the next chunk when the device's queue is short; whether it
     /// did.
     fn produce(&mut self) -> Result<bool> {
-        let Some(run) = self.run.as_mut() else {
-            return Ok(false);
-        };
         let ring = self.shared.ring.clone();
+        if self.run.as_ref().is_some_and(|r| r.speed < 0.0) {
+            return self.produce_backward();
+        }
+        let Some(run) = self.run.as_mut() else {
+            return Ok(self.waiting.offer(&ring, self.plan.rate()));
+        };
         let rate = f64::from(self.plan.rate());
         // Room for the chunk, whatever the tempo makes of it: a device that
         // stopped pulling leaves none, and the thread waits for it rather
@@ -182,7 +228,7 @@ impl Producer {
         let channels = ring.channels();
         let total = self.plan.samples;
         let mut failed = None;
-        let mut samples = if run.speed == 1.0 || (run.speed > 0.0 && run.tempo.is_some()) {
+        let mut samples = if run.speed == 1.0 || run.tempo.is_some() {
             let n = ((chunk as f64 * run.speed).round() as i64).min(total - run.cursor);
             let tempo = run.tempo.as_mut();
             if n <= 0 {
@@ -208,20 +254,13 @@ impl Producer {
                 None => mixed,
             }
         } else {
-            // Backwards: silence, moving the clock.
-            let step = run.speed.abs();
-            let left = if run.speed < 0.0 {
-                run.cursor
-            } else {
-                total - run.cursor
-            };
-            let n = chunk.min((left as f64 / step).ceil() as i64);
+            // No tempo filter: silence, moving the clock.
+            let n = chunk.min(((total - run.cursor) as f64 / run.speed).ceil() as i64);
             if n <= 0 {
-                let edge = if run.speed < 0.0 { 0 } else { total };
-                end(&self.shared, run, edge, ring.written());
+                end(&self.shared, run, total, ring.written());
                 return Ok(true);
             }
-            run.cursor = (run.cursor + (n as f64 * run.speed).round() as i64).clamp(0, total);
+            run.cursor = (run.cursor + (n as f64 * run.speed).round() as i64).min(total);
             vec![0.0; n as usize * channels]
         };
         if self.muted {
@@ -231,6 +270,82 @@ impl Producer {
         match failed {
             Some(e) => Err(e),
             None => Ok(true),
+        }
+    }
+
+    /// Backward: the next chunk of a reversed block, a new block mixed and
+    /// reversed when one is used up; whether there was one.
+    fn produce_backward(&mut self) -> Result<bool> {
+        let ring = self.shared.ring.clone();
+        let rate = f64::from(self.plan.rate());
+        let Some(run) = self.run.as_mut() else {
+            return Ok(false);
+        };
+        let short = ring.queued() as f64 >= AHEAD_SECS * rate;
+        if run.ended || short || (ring.room() as f64) < MIN_ROOM_SECS * rate {
+            return Ok(false);
+        }
+        let channels = ring.channels();
+        let mut failed = None;
+        if run.queued * channels >= run.block.len() {
+            run.queued = 0;
+            run.block.clear();
+            if run.cursor < 0 {
+                // The start: what the tempo filter still holds, then the end.
+                if let (Some(t), false) = (run.tempo.as_mut(), run.flushed) {
+                    run.block = t.flush()?;
+                    run.flushed = true;
+                }
+                if run.block.is_empty() {
+                    end(&self.shared, run, 0, ring.written());
+                    return Ok(true);
+                }
+            } else {
+                // Samples `lo..=cursor` of the mix, read forward, reversed.
+                let n = ((BLOCK_SECS * rate * run.speed.abs()).round() as i64).max(1);
+                let lo = (run.cursor + 1 - n).max(0);
+                self.mix.seek(lo);
+                let len = (run.cursor + 1 - lo) as usize;
+                let mut mixed = match self.mix.read(len) {
+                    Ok(s) => s,
+                    // A broken file is silent; the clock goes on.
+                    Err(e) => {
+                        failed = Some(e);
+                        vec![0.0; len * channels]
+                    }
+                };
+                reverse(&mut mixed, channels);
+                run.cursor = lo - 1;
+                run.block = match run.tempo.as_mut() {
+                    Some(t) => t.process(&mixed)?,
+                    None => mixed,
+                };
+            }
+        }
+        let chunk = (CHUNK_SECS * rate).round() as usize;
+        let from = run.queued * channels;
+        let take = (run.block.len() - from).min(chunk * channels);
+        let mut samples = run.block[from..from + take].to_vec();
+        run.queued += take / channels;
+        if self.muted {
+            samples.fill(0.0);
+        }
+        push(&ring, &samples);
+        match failed {
+            Some(e) => Err(e),
+            None => Ok(true),
+        }
+    }
+}
+
+/// Reverses interleaved samples a sample frame at a time: the channels of
+/// each frame stay in their order.
+fn reverse(samples: &mut [f32], channels: usize) {
+    let frames = samples.len() / channels.max(1);
+    for i in 0..frames / 2 {
+        let j = frames - 1 - i;
+        for c in 0..channels {
+            samples.swap(i * channels + c, j * channels + c);
         }
     }
 }
@@ -403,7 +518,14 @@ fn layout_name(channels: u16) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::Tempo;
+    use super::{Tempo, reverse};
+
+    #[test]
+    fn reversing_keeps_each_frames_channels_in_order() {
+        let mut s = vec![1.0, -1.0, 2.0, -2.0, 3.0, -3.0];
+        reverse(&mut s, 2);
+        assert_eq!(s, vec![3.0, -3.0, 2.0, -2.0, 1.0, -1.0]);
+    }
 
     #[test]
     fn tempo_plays_faster_and_slower_keeping_length_in_step() {
