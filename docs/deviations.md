@@ -43,14 +43,14 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 - **Command log panel:** shows every action as the request it sent, from any client (GUI or agent). A click copies it as a `vidcut rpc` command, which teaches the API.
 - **Live control of the running GUI** ([decisions/gui.md](decisions/gui.md)):
   - CLI commands for an open project run inside the GUI, so humans and agents edit the same session.
-  - Live-only commands drive it: `seek`, `play`, `viewer`, `select`, `screenshot` (the viewer picture, or the whole window), `window`, `log`, `pool` (the bin and sort order the pool shows, which Source Tape follows) and `mute` (the viewer's monitoring mute).
+  - Live-only commands drive it: `player.*` (seek, step, play, mute: the viewer's monitoring mute), `viewer.*`, `selection.*`, `gui.screenshot` (the viewer picture, or the whole window), `gui.window`, `gui.log`, and `pool.set` (the bin and sort order the pool shows, which Source Tape follows).
 - **Clipboard as data:** `edit.copy` returns the clips as JSON, and `edit.paste --clips` pastes such JSON into any project. In the GUI, Ctrl+C also puts that JSON on the system clipboard.
 - **API parameters for scripted edits:** `edit.overwrite`/`edit.ripple_overwrite` take `use_marks: false` to place by position (what a drag and drop does), `edit.change_duration` takes `end`, and `track.set`/`markers.set` cover the track header buttons, the mixer and the marker dialog. Edit functions and `edit.move` take `--track`, which may name the next new track (decision D27).
 - **Persistent source marks:** a media item's In/Out (`media.marks.set`) are saved in the project and used by edits without a range. Resolve remembers per-clip marks too (decision D6), and this makes them scriptable.
 - **Export jobs** (M5): `export --background` returns a job id at once in a running GUI, and `jobs list|get|wait|cancel` follow it. Foreground exports report progress and cancel when the client disconnects. `export.plan` (`export --dry-run`) describes an export without writing anything.
 - **User presets from scripts:** `presets save` (from settings or from another preset with `--set` overrides) and `presets delete`.
 - **`gui.show`** opens Quick Export, the Export dialog, Jobs, the command log or the Mixer for the person at the GUI.
-- **Measuring as data** (M7): `analyze silence|scenes|black|loudness` report what Ripple Delete Silence, Detect Scene Cuts, a black check and a loudness meter find, as frame ranges, without changing anything. `vidcut boring` is the Boring Detector's finding as a list. Agents use them to plan edits (markers, cuts, In/Out) before making them.
+- **Measuring as data** (M7): `analyze silence|scenes|black|loudness` report what Ripple Delete Silence, Detect Scene Cuts, a black check and a loudness meter find, as frame ranges, without changing anything. `vidcut timeline boring` is the Boring Detector's finding as a list. Agents use them to plan edits (markers, cuts, In/Out) before making them.
 - **Storyboards** (M7): `storyboard.render` writes one PNG with a labeled picture of every shot (or every N seconds), so an agent can look at a whole edit at once; over MCP it comes back as an image.
 
 ## X6. Removing a bin keeps its clips
@@ -78,7 +78,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
   - None of this is on the Cut page.
 - **vidcut:** OpenTimelineIO only, both ways (`otio.rs`, `bundle.rs`), in the shapes Resolve writes and reads:
   - **Formats:** `.otio` (the timeline), `.otioz` (a zip file of the timeline and its media) and `.otiod` (the same as a folder). They are laid out as OpenTimelineIO's own adapters lay them out: `content.otio`, `version.txt` (zip only), and the media stored uncompressed under `media/`, named by relative paths.
-  - **Exporting:** `vidcut export cut.otio` (or File > Export Timeline) writes:
+  - **Exporting:** `vidcut export start cut.otio` (or File > Export Timeline) writes:
     - each video track
     - the audio of each video track's clips, as an audio track (J/L cuts become audio clips offset from the video edits)
     - each audio track, and markers
@@ -92,7 +92,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
     - Clip gain is also written as Resolve's clip volume, track lock and solo as Resolve's.
     - Markers are one frame long, with their note where Resolve keeps it.
     - A still is available for one frame, as Resolve writes it. An image sequence is OTIO's `ImageSequenceReference` (folder, name prefix and suffix, first number, zero padding, rate), whose available range is the picture count at that rate: OTIO counts pictures by truncating the range at the reference's rate, so a project-rate length would be a different number of pictures.
-  - **Importing:** `vidcut import cut.otio` (or File > Import Timeline) adds the media to the pool.
+  - **Importing:** `vidcut timeline import cut.otio` (or File > Import Timeline) adds the media to the pool.
     - Video tracks become V1, V2, …, each with the audio that belongs to its clips (the clip's link group, if it has one). Other audio tracks become A1, A2, … (vidcut's own files map back exactly).
     - One project holds one timeline (X2), so the import goes after the last clip, or replaces the timeline with `--replace`; the GUI asks which. An empty timeline takes the file's frame rate, start timecode and track settings.
     - Resolve's channel map picks a clip's audio stream, and its clip volume the gain. Markers on clips and tracks become timeline markers.
@@ -144,7 +144,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 
 ## X16. The still duration is a project setting
 - **Resolve:** the standard still duration is a user preference (Preferences > User > Editing, p. 114).
-- **vidcut:** it is in the project's settings (`still_secs`; `vidcut set --still-duration 3s`).
+- **vidcut:** it is in the project's settings (`still_secs`; `vidcut project set --still-duration 3s`).
 - **Why:** an edit is then the same in every run, whoever makes it and on whichever computer: an agent appending a still gets the length the project says, not one set in somebody's preferences.
 
 ## X17. Image sequences are asked for, not guessed
@@ -154,5 +154,5 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 
 ## X18. Proxies keep source timestamps, and only the preview uses them
 - **Resolve:** proxies are generated from the Media Pool. Playback can switch between proxies and originals. Export always reads the originals (pp. 207–218). Resolve's proxy media is a new encode at a chosen resolution; the manual describes generation and the playback switch, not a promise that each proxy frame carries the source frame's presentation timestamp.
-- **vidcut:** `proxy.generate` (Media Pool: Generate Proxy) writes an H.264 8-bit 4:2:0 file for a video or an image sequence, on demand, or by itself in the GUI for the heavy media the preferences' rules pick (decision D41). The default longest side is 960 pixels, even, aspect kept, and a smaller picture is not enlarged. Each proxy frame keeps the source frame's presentation timestamp, so the preview EDL can swap the path and stay frame-exact (decision D41). Preview audio stays on the original file. Stills are left as originals. Files live in `proxies/` beside the project, or in `~/.cache/vidcut/proxies` when that folder is unknown. `project.set use_proxies` (the Media Pool's Proxies checkbox, `vidcut set --proxies`) is the playback switch. A proxy whose source size or modification time no longer matches is stale and is not played. Export, frames, analysis and OTIO always read the originals.
+- **vidcut:** `proxy.generate` (Media Pool: Generate Proxy) writes an H.264 8-bit 4:2:0 file for a video or an image sequence, on demand, or by itself in the GUI for the heavy media the preferences' rules pick (decision D41). The default longest side is 960 pixels, even, aspect kept, and a smaller picture is not enlarged. Each proxy frame keeps the source frame's presentation timestamp, so the preview EDL can swap the path and stay frame-exact (decision D41). Preview audio stays on the original file. Stills are left as originals. Files live in `proxies/` beside the project, or in `~/.cache/vidcut/proxies` when that folder is unknown. `project.set use_proxies` (the Media Pool's Proxies checkbox, `vidcut project set --use-proxies true`) is the playback switch. A proxy whose source size or modification time no longer matches is stale and is not played. Export, frames, analysis and OTIO always read the originals.
 - **Why:** the preview has to stay frame-exact with export, including image sequences of large pictures that cannot decode in real time. A timestamp-preserving file lets the existing EDL math stand. Leaving audio and export on the originals means a proxy cannot drift from the mix or from the delivered frames.

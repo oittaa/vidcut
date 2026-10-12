@@ -1,5 +1,5 @@
 //! Project files on disk: atomic writes, a per-project lock, and the undo
-//! history sidecar that lets `vidcut undo` work across CLI runs (deviation X4).
+//! history sidecar that lets `vidcut history undo` work across CLI runs (deviation X4).
 //!
 //! The project is one pretty-printed JSON file. History lives outside it, in
 //! `$XDG_STATE_HOME/vidcut/history/<hash of the project path>.json`, together

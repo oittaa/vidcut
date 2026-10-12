@@ -170,7 +170,7 @@ fn video_encoder(
     let Some(status) = available.find(name, pixel) else {
         if asked {
             return Err(Error::Invalid(format!(
-                "{name} ({}) is not available on this machine; see `vidcut encoders`",
+                "{name} ({}) is not available on this machine; see `vidcut encoders list`",
                 pixel_name(pixel)
             )));
         }

@@ -39,6 +39,7 @@ pub fn run_with(
     envelope: Envelope,
     hooks: &mut Hooks<'_>,
 ) -> Result<Response> {
+    let envelope = envelope.normalized();
     let open = |project: Option<&Path>| -> Result<Store> {
         let path = project
             .ok_or_else(|| Error::usage("no project: pass -p FILE or set VIDCUT_PROJECT"))?;
@@ -54,6 +55,44 @@ pub fn run_with(
     let mut response = match &envelope.request {
         Request::Schema { method } => answer(schema(method.as_deref())?),
         Request::Doctor {} => answer(doctor()),
+        Request::ProjectCreate {
+            path,
+            fps,
+            width,
+            height,
+            sample_rate,
+            channels,
+        } => {
+            let mut settings = vidcut_core::model::Settings::default();
+            if let Some(f) = fps {
+                settings.fps = f
+                    .parse::<vidcut_core::time::Rational>()
+                    .map_err(|e| Error::usage(e.to_string()))?;
+                settings.auto_format = false;
+            }
+            match (width, height) {
+                (Some(w), Some(h)) => {
+                    (settings.width, settings.height) = (*w, *h);
+                    settings.auto_format = false;
+                }
+                (None, None) => {}
+                _ => return Err(Error::usage("give both width and height, or neither")),
+            }
+            if let Some(r) = sample_rate {
+                settings.sample_rate = *r;
+            }
+            if let Some(c) = channels {
+                settings.channels = *c;
+            }
+            let path = if envelope.dry_run {
+                path.clone()
+            } else {
+                Store::create(path, &vidcut_core::Project::new(settings.clone()))?
+                    .path()
+                    .to_path_buf()
+            };
+            answer(json!({ "project": path, "settings": settings }))
+        }
         Request::PresetsList {} => answer(json!(
             export::presets()?
                 .iter()

@@ -1892,6 +1892,40 @@ pub fn query(
                     .collect::<Vec<_>>()
             )
         }
+        Request::TrackList {} => json!(
+            p.tracks
+                .iter()
+                .map(|t| {
+                    let mut v = json!({
+                        "id": t.id, "kind": t.kind, "clips": t.clips.len(),
+                        "locked": t.locked, "muted": t.muted, "solo": t.solo,
+                        "volume_db": t.volume_db,
+                    });
+                    if t.kind == crate::model::TrackKind::Video {
+                        v["video_enabled"] = json!(t.video_enabled);
+                    }
+                    if let Some(n) = &t.name {
+                        v["name"] = json!(n);
+                    }
+                    v
+                })
+                .collect::<Vec<_>>()
+        ),
+        Request::BinsList {} => json!(p.bins),
+        Request::MarkersList {} => json!(
+            p.markers
+                .iter()
+                .map(|k| {
+                    let mut v = serde_json::to_value(k).unwrap_or_default();
+                    v["at_tc"] = json!(tc(k.at));
+                    v
+                })
+                .collect::<Vec<_>>()
+        ),
+        Request::MarksGet {} => {
+            let mark = |f: Option<i64>| f.map(|f| json!({ "frame": f, "tc": tc(f) }));
+            json!({ "in": mark(p.marks.mark_in), "out": mark(p.marks.mark_out) })
+        }
         Request::HistoryGet {} => json!({
             "undo": history.undo.iter().rev().map(|e| &e.label).collect::<Vec<_>>(),
             "redo": history.redo.iter().rev().map(|e| &e.label).collect::<Vec<_>>(),

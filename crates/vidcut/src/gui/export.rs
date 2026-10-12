@@ -398,37 +398,13 @@ pub(super) fn overrides(base: &ExportSettings, settings: &ExportSettings) -> Vec
     out
 }
 
-/// The shell command that makes the same export.
+/// The shell command that makes the same export, in the foreground.
 pub(super) fn command(project: &Path, p: &Value) -> String {
-    let mut a: Vec<String> = vec![
-        "vidcut".into(),
-        "-p".into(),
-        project.display().to_string(),
-        "export".into(),
-        p["output"].as_str().unwrap_or_default().into(),
-    ];
-    if let Some(x) = p["preset"].as_str() {
-        a.extend(["--preset".into(), x.into()]);
+    let mut p = p.clone();
+    if let Some(m) = p.as_object_mut() {
+        m.remove("background");
     }
-    for s in p["set"].as_array().into_iter().flatten() {
-        a.extend(["--set".into(), s.as_str().unwrap_or_default().into()]);
-    }
-    if let Some(r) = p["range"].as_str() {
-        a.extend(["--range".into(), r.into()]);
-    }
-    if p["per_clip"] == true {
-        a.push("--per-clip".into());
-    }
-    if let Some(n) = p["name"].as_str() {
-        a.extend(["--name".into(), n.into()]);
-    }
-    if p["audio_only"] == true {
-        a.push("--audio-only".into());
-    }
-    if p["overwrite"] == true {
-        a.push("--overwrite".into());
-    }
-    shlex::try_join(a.iter().map(String::as_str)).unwrap_or_default()
+    crate::cli::command_line(project, "export.start", &p).unwrap_or_default()
 }
 
 /// Where a window of about `w`×`h` starts so it sits near the middle. Its

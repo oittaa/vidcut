@@ -1164,6 +1164,7 @@ impl Live {
         expected: Option<PathBuf>,
         reply: Option<Reply>,
     ) {
+        let envelope = envelope.normalized();
         let (method, params) = match serde_json::to_value(&envelope.request) {
             Ok(Value::Object(mut m)) => (
                 m.remove("method")

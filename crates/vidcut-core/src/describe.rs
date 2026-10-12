@@ -1,5 +1,5 @@
 //! A request in words, for people: the GUI's command log, the undo history
-//! and `vidcut log`. Times read as timecodes when the project is known,
+//! and `vidcut gui log`. Times read as timecodes when the project is known,
 //! media by their names.
 
 use serde_json::Value;
@@ -14,6 +14,7 @@ pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> Stri
     match method {
         "project.set" => format!("Project: {}", d.settings()),
         "project.open" => format!("Open {}", d.file("path")),
+        "project.create" => format!("Create {}", d.file("path")),
         "media.add" => format!("Import {}", d.files("paths")),
         "media.remove" => format!("Remove {}", d.media("media")),
         "media.relink" => format!("Relink {} to {}", d.media("media"), d.file("path")),

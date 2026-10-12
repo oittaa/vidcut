@@ -99,7 +99,7 @@ For single-file sources, also `rebase-start-time=no`.
 
 ## 6. OpenGL embedding (eframe glow, GNOME Wayland, NVIDIA)
 
-Found with eframe 0.35 in M0 and unchanged with 0.36: `tests/gui.rs` (`--features vidcut/gui-tests`) compares the viewer's GL picture with `vidcut frame`.
+Found with eframe 0.35 in M0 and unchanged with 0.36: `tests/gui.rs` (`--features vidcut/gui-tests`) compares the viewer's GL picture with `vidcut frame render`.
 
 **Render target:**
 - Each player renders into its own FBO with an RGBA8 texture.
@@ -182,7 +182,7 @@ Found with eframe 0.35 in M0 and unchanged with 0.36: `tests/gui.rs` (`--feature
   - With FFmpeg's `azmq` filter (built with ZeroMQ) and `libzmq.so.5` loadable, the timeline's graph keeps each lane's fader apart from its clip gains, as a filter of its own named for the track (`volume@fader_V2`), and ends in `azmq=bind_address=ipc\\:///…/mix-N`. `render::flatten_lanes` says which track each lane is.
   - The address needs two levels of escaping, the filter's options and then the graph (`preview::lavfi_value`): with one, `azmq` fails to load, and so does the graph and its sound. `tests/preview_gains.rs` binds it in real FFmpeg.
   - Every load gets a new address (`mix-1`, `mix-2`, …): mpv may build the new graph before it frees the old one's address.
-  - `mixer.preview` (the Mixer's fader while dragged, `vidcut fader`) sends `volume@fader_A1 volume <linear>` from a thread of its own (`live/mixctl.rs`), which loads libzmq at run time as libmpv is loaded, keeps only each fader's latest level, and waits at most 0.5 s for the answer. `azmq` reads commands as sound passes through it, so while paused a command waits for playback; nothing is heard then anyway, and releasing the fader saves the level with `track.set`, which reloads the timeline with it.
+  - `mixer.preview` (the Mixer's fader while dragged, `vidcut mixer preview`) sends `volume@fader_A1 volume <linear>` from a thread of its own (`live/mixctl.rs`), which loads libzmq at run time as libmpv is loaded, keeps only each fader's latest level, and waits at most 0.5 s for the answer. `azmq` reads commands as sound passes through it, so while paused a command waits for playback; nothing is heard then anyway, and releasing the fader saves the level with `track.set`, which reloads the timeline with it.
   - Without ZeroMQ or `azmq`, the graph is as before and `mixer.preview` answers `live: false`; the fader is heard when released.
   - `tests/live.rs` sends a level to the running player's graph and gets the filter's answer.
 - **Monitoring mute** (`player.mute`, the speaker by the viewer) mutes both players. It changes neither the project nor the export.

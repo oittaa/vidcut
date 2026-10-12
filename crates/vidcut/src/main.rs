@@ -5,13 +5,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
-use clap::Parser;
 use serde_json::{Value, json};
 use vidcut::cli::{Action, Cli};
 use vidcut::ipc::{self, Route, RouteOptions};
 use vidcut::output;
-use vidcut_core::store::Store;
-use vidcut_core::{Envelope, Error, Project, Response, Result};
+use vidcut_core::{Envelope, Error, Response, Result};
 
 fn main() -> ExitCode {
     // SVT-AV1 logs at info level to stderr unless told otherwise. Set it here,
@@ -70,103 +68,10 @@ fn run(cli: &Cli) -> Result<()> {
             }
             Ok(())
         }
-        Action::New { file, settings } => {
-            let store = Store::create(&file, &Project::new(settings.clone()))?;
-            if cli.json {
-                println!(
-                    "{}",
-                    json!({ "result": { "project": store.path(), "settings": settings } })
-                );
-            } else {
-                println!("created {}", store.path().display());
-            }
-            Ok(())
-        }
         Action::Run(envelope) => {
             let method = envelope.request.method();
-            let response = execute(cli, envelope)?;
+            let response = execute(cli, *envelope)?;
             output::print(&method, &response, cli.json);
-            Ok(())
-        }
-        Action::ShowMarks(envelope) => {
-            let r = execute(cli, envelope)?;
-            let marks = &r.result["marks"];
-            if cli.json {
-                println!("{}", json!({ "rev": r.rev, "result": marks }));
-            } else {
-                println!(
-                    "in {}  out {}",
-                    marks.get("in").unwrap_or(&json!("-")),
-                    marks.get("out").unwrap_or(&json!("-"))
-                );
-            }
-            Ok(())
-        }
-        Action::ListTracks(envelope) => {
-            let r = execute(cli, envelope)?;
-            let tracks = &r.result["tracks"];
-            if cli.json {
-                println!("{}", json!({ "rev": r.rev, "result": tracks }));
-            } else {
-                for t in tracks.as_array().into_iter().flatten() {
-                    let clips = t["items"]
-                        .as_array()
-                        .map_or(0, |i| i.iter().filter(|i| i["type"] == "clip").count());
-                    let mut flags = Vec::new();
-                    for (key, label) in [("locked", "locked"), ("muted", "muted"), ("solo", "solo")]
-                    {
-                        if t[key] == true {
-                            flags.push(label.to_string());
-                        }
-                    }
-                    if t["video_enabled"] == false {
-                        flags.push("video off".into());
-                    }
-                    if let Some(v) = t["volume_db"].as_f64() {
-                        flags.push(format!("{v:+} dB"));
-                    }
-                    println!(
-                        "{:<4} {:>4} clip(s)  {}{}",
-                        t["id"].as_str().unwrap_or_default(),
-                        clips,
-                        t["name"]
-                            .as_str()
-                            .map(|n| format!("{n:?}  "))
-                            .unwrap_or_default(),
-                        flags.join(", ")
-                    );
-                }
-            }
-            Ok(())
-        }
-        Action::ListBins(envelope) => {
-            let r = execute(cli, envelope)?;
-            let bins = &r.result["bins"];
-            if cli.json {
-                println!("{}", json!({ "rev": r.rev, "result": bins }));
-            } else {
-                for b in bins.as_array().into_iter().flatten() {
-                    println!("{}", b.as_str().unwrap_or_default());
-                }
-            }
-            Ok(())
-        }
-        Action::ListMarkers(envelope) => {
-            let r = execute(cli, envelope)?;
-            let markers = &r.result["markers"];
-            if cli.json {
-                println!("{}", json!({ "rev": r.rev, "result": markers }));
-            } else {
-                for k in markers.as_array().into_iter().flatten() {
-                    println!(
-                        "{} at {} {} {}",
-                        k["id"].as_str().unwrap_or_default(),
-                        k["at"],
-                        k["color"].as_str().unwrap_or_default(),
-                        k["name"].as_str().unwrap_or_default()
-                    );
-                }
-            }
             Ok(())
         }
     }

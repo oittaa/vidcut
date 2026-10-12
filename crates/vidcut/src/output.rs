@@ -31,7 +31,16 @@ pub fn print(method: &str, r: &Response, json: bool) {
         )
     ) && !matches!(
         method,
-        "media.list" | "media.get" | "project.get" | "project.summary" | "history.get"
+        "media.list"
+            | "media.get"
+            | "project.get"
+            | "project.summary"
+            | "project.create"
+            | "history.get"
+            | "track.list"
+            | "bins.list"
+            | "marks.get"
+            | "markers.list"
     );
     if mutation {
         if r.dry_run {
@@ -101,6 +110,59 @@ pub fn print(method: &str, r: &Response, json: bool) {
         return;
     }
     match method {
+        "project.create" => {
+            let verb = if r.dry_run { "would create" } else { "created" };
+            println!(
+                "{verb} {}",
+                r.result["project"].as_str().unwrap_or_default()
+            );
+        }
+        "track.list" => {
+            for t in r.result.as_array().into_iter().flatten() {
+                let mut flags = Vec::new();
+                for key in ["locked", "muted", "solo"] {
+                    if t[key] == true {
+                        flags.push(key.to_string());
+                    }
+                }
+                if t["video_enabled"] == false {
+                    flags.push("video off".into());
+                }
+                if let Some(v) = t["volume_db"].as_f64().filter(|v| *v != 0.0) {
+                    flags.push(format!("{v:+} dB"));
+                }
+                println!(
+                    "{:<4} {:>4} clip(s)  {}{}",
+                    t["id"].as_str().unwrap_or_default(),
+                    t["clips"],
+                    t["name"]
+                        .as_str()
+                        .map(|n| format!("{n:?}  "))
+                        .unwrap_or_default(),
+                    flags.join(", ")
+                );
+            }
+        }
+        "bins.list" => {
+            for b in r.result.as_array().into_iter().flatten() {
+                println!("{}", b.as_str().unwrap_or_default());
+            }
+        }
+        "markers.list" => {
+            for k in r.result.as_array().into_iter().flatten() {
+                println!(
+                    "{} at {} {} {}",
+                    k["id"].as_str().unwrap_or_default(),
+                    k["at_tc"].as_str().unwrap_or_default(),
+                    k["color"].as_str().unwrap_or_default(),
+                    k["name"].as_str().unwrap_or_default()
+                );
+            }
+        }
+        "marks.get" => {
+            let tc = |k: &str| r.result[k]["tc"].as_str().unwrap_or("-").to_string();
+            println!("in {}  out {}", tc("in"), tc("out"));
+        }
         "timeline.import" => {
             let n = |k: &str| r.result[k].as_array().map_or(0, Vec::len);
             let verb = if r.dry_run {

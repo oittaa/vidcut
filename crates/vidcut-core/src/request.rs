@@ -32,6 +32,26 @@ pub enum Request {
     /// Change settings. `fps` can only change while the timeline is empty.
     #[serde(rename = "project.set")]
     ProjectSet(ProjectSet),
+    /// Create a project file. Without `fps` and a size, the first video
+    /// added sets the project's format.
+    #[serde(rename = "project.create")]
+    ProjectCreate {
+        /// The new `.vidcut` file.
+        path: PathBuf,
+        /// Frame rate, like `25`, `29.97` or `30000/1001`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fps: Option<String>,
+        /// Frame width; give the height too.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        width: Option<u32>,
+        /// Frame height; give the width too.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        height: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sample_rate: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channels: Option<u16>,
+    },
 
     // ---------------------------------------------------------------- media pool
     /// Add files to the media pool (probing them); returns their media ids.
@@ -134,6 +154,9 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         media: Option<OneOrMany<String>>,
     },
+    /// The Media Pool's bins.
+    #[serde(rename = "bins.list")]
+    BinsList {},
     /// Add a Media Pool bin, like `Interviews/Day 1`; missing parents are added
     /// too.
     #[serde(rename = "bins.add")]
@@ -451,6 +474,10 @@ pub enum Request {
     },
 
     // ---------------------------------------------------------------- tracks, clips, marks, markers
+    /// The tracks, with their header and mixer settings and how many clips
+    /// each holds.
+    #[serde(rename = "track.list")]
+    TrackList {},
     /// Add tracks (Timeline Actions > Add Track): video tracks go on top, audio
     /// tracks at the bottom. Returns their ids.
     #[serde(rename = "track.add")]
@@ -500,6 +527,9 @@ pub enum Request {
         #[serde(default)]
         name: Option<String>,
     },
+    /// The timeline's In and Out marks.
+    #[serde(rename = "marks.get")]
+    MarksGet {},
     /// Set timeline marks; `out` is exclusive (the first frame after the range).
     #[serde(rename = "marks.set")]
     MarksSet {
@@ -511,6 +541,9 @@ pub enum Request {
     /// Clear timeline In and Out (Alt+X).
     #[serde(rename = "marks.clear")]
     MarksClear {},
+    /// The timeline's markers.
+    #[serde(rename = "markers.list")]
+    MarkersList {},
     #[serde(rename = "markers.add")]
     MarkersAdd {
         at: TimeSpec,
@@ -1144,6 +1177,7 @@ impl Request {
             Self::Schema { .. }
                 | Self::Doctor {}
                 | Self::Probe { .. }
+                | Self::ProjectCreate { .. }
                 | Self::PresetsList {}
                 | Self::PresetsGet { .. }
                 | Self::PresetsSave { .. }
@@ -1161,6 +1195,11 @@ impl Request {
                 self,
                 Self::ProjectGet {}
                     | Self::ProjectSummary {}
+                    | Self::ProjectCreate { .. }
+                    | Self::TrackList {}
+                    | Self::BinsList {}
+                    | Self::MarksGet {}
+                    | Self::MarkersList {}
                     | Self::MediaList {}
                     | Self::MediaGet { .. }
                     | Self::Probe { .. }
@@ -1198,7 +1237,8 @@ impl Request {
             Self::MediaAdd { paths, .. } => paths.iter_mut().collect(),
             Self::MediaRelink { path, .. }
             | Self::Probe { path }
-            | Self::ProjectOpen { path, .. } => vec![path],
+            | Self::ProjectOpen { path, .. }
+            | Self::ProjectCreate { path, .. } => vec![path],
             Self::TimelineImport {
                 path,
                 search,
@@ -1237,6 +1277,17 @@ impl Envelope {
             if_rev: None,
             dry_run: false,
         }
+    }
+
+    /// The request as it runs: a dry-run `export.start` is `export.plan`,
+    /// the plan without the export, whoever sends it.
+    pub fn normalized(mut self) -> Self {
+        if self.dry_run
+            && let Request::ExportStart(params) = self.request
+        {
+            self.request = Request::ExportPlan(params);
+        }
+        self
     }
 
     /// `CONFLICT` if `if_rev` names another revision than `rev`, the

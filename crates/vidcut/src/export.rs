@@ -314,7 +314,7 @@ fn preset(name: &str) -> Result<Preset> {
     presets()?
         .into_iter()
         .find(|p| p.name == name)
-        .ok_or_else(|| Error::not_found(format!("no preset {name:?}; see `vidcut presets`")))
+        .ok_or_else(|| Error::not_found(format!("no preset {name:?}; see `vidcut presets list`")))
 }
 
 /// The default preset for an output file extension.

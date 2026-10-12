@@ -52,7 +52,7 @@ pub fn set(patch: &PreferencesPatch, dry_run: bool) -> Result<Value> {
     let path = path();
     let dir = path.parent().expect("in the config dir");
     let text = format!(
-        "# vidcut preferences: `vidcut preferences --help`, or File > Preferences.\n\n{}",
+        "# vidcut preferences: `vidcut preferences set --help`, or File > Preferences.\n\n{}",
         toml::to_string(&p).map_err(|e| Error::internal(e.to_string()))?
     );
     let part = path.with_extension("part");

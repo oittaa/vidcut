@@ -4,7 +4,7 @@
 
 **Evidence** (all rerunnable):
 - [`crates/vidcut/tests/live.rs`](../../crates/vidcut/tests/live.rs): the live session with software-rendered players and no window. Covers frame-exact seeks at every boundary (also with a late renderer), the source viewers, the clipboard, edits from other processes, and errors.
-- [`crates/vidcut/tests/gui.rs`](../../crates/vidcut/tests/gui.rs) (`--features vidcut/gui-tests`, needs a display): the real GUI driven through the CLI. Covers edit latency, screenshot vs `vidcut frame`, and a minimized window.
+- [`crates/vidcut/tests/gui.rs`](../../crates/vidcut/tests/gui.rs) (`--features vidcut/gui-tests`, needs a display): the real GUI driven through the CLI. Covers edit latency, screenshot vs `vidcut frame render`, and a minimized window.
 - `ipc::tests` in [`crates/vidcut/src/ipc/mod.rs`](../../crates/vidcut/src/ipc/mod.rs): the JSON-RPC wire format.
 - [`crates/vidcut/tests/jobs.rs`](../../crates/vidcut/tests/jobs.rs) and [`gui_export.rs`](../../crates/vidcut/tests/gui_export.rs): export jobs, and the export windows under simulated input (§9).
 
@@ -198,7 +198,7 @@ A seek or load ("motion") is shown after two steps:
 
 **The windows only send requests:**
 - **Quick Export** (p. 788) lists the presets marked `quick_export`; Export… asks for a file name, then starts a background export and opens its progress window.
-- **The Export dialog** always starts from a preset. What the user changes becomes `--set` overrides of that preset (a JSON diff of the settings), so every GUI export reads as `vidcut export OUT --preset NAME --set …`. The dialog shows that command; `tests/gui_export.rs` parses it with the real CLI parser and checks it makes the same request as the GUI, and that the plan headless equals the plan in the GUI (M5 acceptance).
+- **The Export dialog** always starts from a preset. What the user changes becomes `--set` overrides of that preset (a JSON diff of the settings), so every GUI export reads as `vidcut export start OUT --preset NAME --set …`. The dialog shows that command; `tests/gui_export.rs` parses it with the real CLI parser and checks it makes the same request as the GUI, and that the plan headless equals the plan in the GUI (M5 acceptance).
 - **The plan** is `export.plan`, asked again whenever the params change (one request in flight). Mistakes the dialog can see itself (codec vs container) don't go to the session. Plans never change anything: per-clip folders are made when the export runs.
 - **Asking the session:** windows that need answers (presets, plans, starting an export, imports) call `Handle::call` on a helper thread and poll the result each frame (`Ask`), so the UI never waits. These lookups are left out of the command log, and their errors show in the window instead of the status bar.
 - **File dialogs** run on helper threads behind a `Dialogs` trait; tests answer them directly.
