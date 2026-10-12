@@ -88,18 +88,19 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
   - **HDR into SDR:** `zscale` takes the picture to linear light, with the reference white (203 nits) at 1.0, then to BT.709 primaries. `tonemap=mobius` (transition 0.8, peak 1000 nits) maps it, and `zscale` gives BT.709's transfer.
     - Everything up to 0.8 of the reference white stays as it was, so SDR-graded material in an HDR file looks as it did, and highlights roll off above it. PQ's 203 nits and HLG's 75% both come out at about 95% white.
     - FFmpeg's usual `hable` curve put that white at about 40% gray.
-  - **Into HDR** (`video.hdr = pq` or `hlg`): the same linear light, SDR white at 203 nits (BT.2408), then BT.2020 and the transfer. An SDR source's white lands at PQ code 573 of 1023, exactly 203 nits.
+  - **Into HDR** (PQ or HLG): the same linear light, SDR white at 203 nits (BT.2408), then BT.2020 and the transfer. An SDR source's white lands at PQ code 573 of 1023, exactly 203 nits.
   - **Output tags:** encoders tag what they write: BT.709, or BT.2020 with PQ or HLG.
+  - **Which output** (spec D44): `video.hdr = auto` (the default) and an unset `video.bit_depth` are decided per file before encoding, from the frames it shows (`vidcut_core::export::color`, a pure function, unit-tested): HDR when most of them are HDR and the codec carries it with a 10-bit encoder here, 10 bits for SDR when most have 10 bits or more and the codec isn't H.264. The session takes each media's transfer and pixel format from the project (`pixel_depth` asks FFmpeg's pixel format descriptor); the engine, given `auto` directly, probes the files. What the encoders can write comes from the encoder cache and the CPU encoders' pixel formats (`encode::abilities`): SDR takes 10 bits only from the encoder an 8-bit export starts with, so `auto` with an 8-bit-only GPU doesn't move a 10-bit SDR export to a slower CPU encoder, while HDR takes any 10-bit encoder. The plan's and the result's `outputs[].color` say what was chosen and why; `notes` carries the tone-mapping note (code `hdr_tone_mapped`) with the `set` overrides that keep the picture HDR.
   - **zimg detail:** `zscale` needs explicit output primaries when it converts to linear. Untagged frames otherwise give it no path.
   - **swscale only scales what `zscale` converts:** `scale` is told the source's matrix and range for both sides. Told nothing, it converted the matrix to BT.601 (the graph's source carries no colorspace), and `zscale` then read BT.601 numbers as BT.2020: saturated HDR colors came out up to 70 levels off, and HDR kept as HDR was rewritten in BT.601 under a BT.2020 tag. `zscale` writes the YUV itself, for NVENC's NV12 and P010 in their planar layouts, which swscale only interleaves: left to choose, it wrote RGB, and swscale's conversion to YUV came out over half a level brighter than zimg's.
   - **Cost at 4K60 with NVENC:** about 31 frames a second converting on the CPU, against 50 for plain SDR. On the GPU (§5) it converts at NVENC's pace: 71 frames a second into 2160p H.264.
   - **Real footage:** a 4K60 SDR clip exported as PQ and tone-mapped back differs from the original by about 6 of 255 on average.
-  - **Not done:** mastering-display and content-light metadata aren't written. Players then assume their own peak.
+  - **Not done:** mastering-display and content-light metadata aren't written ([todo](../todo/hdr-metadata.md)). Players then assume their own peak.
 
 ## 5. Encoders
 
 **Settings and presets:**
-- Settings are pure data in `vidcut_core::export`: container, video (codec, encoder, quality or bitrate, speed, profile, bit depth, size) and audio (codec, bitrate, rate, channels).
+- Settings are pure data in `vidcut_core::export`: container, video (codec, encoder, quality or bitrate, speed, profile, bit depth, size, dynamic range) and audio (codec, bitrate, rate, channels). The dynamic range and an unset depth are chosen per file (§4, spec D44); presets leave them to it, except TikTok's, which asks for SDR.
 - Built-in presets follow Resolve's Quick Export models: H.264/H.265 Master, ProRes 422 HQ, YouTube 720p/1080p/2160p, Vimeo, TikTok. There are also AV1, VP9, DNxHR HQ and five audio-only presets. The Quick Export row shows H.265 Master, AV1, ProRes 422 HQ, YouTube 1080p and 2160p, and TikTok (deviation X3).
 - User presets are TOML files in `~/.config/vidcut/presets/`.
 - `--set key=value` overrides any field.

@@ -240,6 +240,7 @@ pub fn render(
             } else {
                 Default::default()
             };
+            export::choose_colors(&mut prepared, project, &available);
             answer(export::describe(&prepared, &available))
         }
         Request::ExportStart(params) => export_media(project, path, params, hooks, &mut |_| {})?,
@@ -353,6 +354,7 @@ pub fn export_media(
     } else {
         Default::default()
     };
+    export::choose_colors(&mut prepared, p, &available);
     started(
         prepared
             .outputs
@@ -364,7 +366,7 @@ pub fn export_media(
     let reports = export::run(&prepared, &available, hooks.cancel, &mut |i, path, pr| {
         (hooks.progress)(i, count, path, pr)
     })?;
-    let mut r = answer(json!({ "outputs": reports }));
+    let mut r = answer(json!({ "outputs": reports, "notes": export::notes(&prepared) }));
     r.rev = p.rev;
     Ok(r)
 }

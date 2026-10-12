@@ -351,6 +351,51 @@ fn export_windows() {
         })
     });
 
+    // 7. HDR picture into H.264: one quiet line under the plan, never in
+    // the way, whose action keeps it HDR on HEVC (decision D44).
+    let pq = fixture::ensure(
+        &FixtureSpec::new(VideoCodec::Hevc10, Container::Mkv, 320, 180, (30, 1), 60)
+            .hdr(vidcut_core::model::Hdr::Pq),
+    )
+    .unwrap();
+    let added = call(&h, "media.add", json!({ "paths": [pq] })).result;
+    let end = h.snapshot().project().unwrap().end();
+    call(&h, "edit.append", json!({ "media": added["media"][0] }));
+    call(&h, "marks.set", json!({ "in": end, "out": end + 60 }));
+    harness.get_by_label("Export").click();
+    until(&mut harness, "the dialog", |h| has(h, "Start Export"));
+    harness.step();
+    harness.get_by_label("Preset").click();
+    harness.step();
+    harness.step();
+    harness.get_by_label("H.264 Master").click();
+    harness.step();
+    // p.mov is there from the second export.
+    harness.get_by_label("Replace existing files").click();
+    until(&mut harness, "the note", |h| {
+        has(h, "2.0 s of HDR picture will be tone-mapped to SDR")
+    });
+    assert!(has(&harness, "SDR, 8-bit"));
+    // The export can start as it is.
+    assert!(
+        !harness
+            .get_by_label("Start Export")
+            .accesskit_node()
+            .is_disabled()
+    );
+    harness.get_by_label("Export HDR").click();
+    until(&mut harness, "HDR", |h| {
+        has(h, "HDR (PQ), 10-bit") && !has(h, "tone-mapped")
+    });
+    let command = harness
+        .get_by_label_contains("vidcut -p ")
+        .value()
+        .expect("the command's text");
+    assert!(
+        command.contains("video.codec=hevc") && command.contains("video.hdr=pq"),
+        "{command}"
+    );
+
     drop(harness);
     h.shutdown();
     let _ = session.join();

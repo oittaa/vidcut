@@ -235,7 +235,9 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 if let Some(n) = o["gpu_frames"].as_i64().filter(|n| *n > 0) {
                     println!("  {n} of the frames decoded and scaled on the GPU (NVDEC)");
                 }
+                print_color(&o["color"]);
             }
+            print_notes(&r.result["notes"]);
         }
         "export.plan"
             if matches!(
@@ -286,7 +288,9 @@ pub fn print(method: &str, r: &Response, json: bool) {
                     o["video_pieces"],
                     o["audio_lanes"]
                 );
+                print_color(&o["color"]);
             }
+            print_notes(&r.result["notes"]);
         }
         "analyze.silence" | "analyze.black" | "analyze.scenes" => {
             for target in r.result.as_array().into_iter().flatten() {
@@ -840,5 +844,37 @@ fn size(bytes: u64) -> String {
         format!("{bytes} bytes")
     } else {
         format!("{v:.1} {}", UNITS[unit])
+    }
+}
+
+/// An output's dynamic range and depth and why (decision D44), indented:
+/// the reasons start with what was chosen.
+fn print_color(c: &Value) {
+    let why: Vec<&str> = c["why"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    if !why.is_empty() {
+        println!("    {}", why.join("; "));
+    }
+}
+
+/// An export's notes, with the overrides each suggests.
+fn print_notes(notes: &Value) {
+    for n in notes.as_array().into_iter().flatten() {
+        let set: Vec<String> = n["set"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|s| s.as_str().map(|s| format!("--set {s}")))
+            .collect();
+        let hint = if set.is_empty() {
+            String::new()
+        } else {
+            format!("; to keep it HDR: {}", set.join(" "))
+        };
+        println!("note: {}{hint}", n["message"].as_str().unwrap_or_default());
     }
 }

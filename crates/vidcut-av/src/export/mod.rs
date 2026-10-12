@@ -17,8 +17,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use vidcut_core::export::{EncoderChoice, ExportSettings, validate};
-use vidcut_core::render::RenderPlan;
+use vidcut_core::export::color::{self, ColorChoice, PictureKind};
+use vidcut_core::export::{EncoderChoice, ExportSettings, HdrMode, validate};
+use vidcut_core::render::{RenderPlan, VideoPiece};
 
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, encoder, format, frame};
@@ -49,6 +50,48 @@ pub struct Report {
     /// What loudness normalization did (`audio.loudness`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub loudness: Option<Normalized>,
+    /// The output's dynamic range and bit depth, and why (decision D44),
+    /// when the export chose them (`video.hdr = auto`, no `bit_depth`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<ColorChoice>,
+}
+
+/// What a piece's pictures are, read from its file: its HDR transfer and
+/// bit depth. Each file is probed once.
+pub fn probed_kinds() -> impl FnMut(&VideoPiece) -> PictureKind {
+    let mut known: std::collections::HashMap<PathBuf, PictureKind> = Default::default();
+    move |piece| {
+        let VideoPiece::Source { path, .. } = piece else {
+            return PictureKind::default();
+        };
+        *known.entry(path.clone()).or_insert_with(|| {
+            crate::probe::probe(path).ok().and_then(|i| i.video).map_or(
+                PictureKind::default(),
+                |v| PictureKind {
+                    hdr: match v.transfer.as_str() {
+                        "smpte2084" => Some(vidcut_core::model::Hdr::Pq),
+                        "arib-std-b67" => Some(vidcut_core::model::Hdr::Hlg),
+                        _ => None,
+                    },
+                    depth: crate::probe::pixel_depth(&v.pix_fmt),
+                },
+            )
+        })
+    }
+}
+
+/// Chooses the dynamic range and bit depth of an export of `plan` with
+/// `settings` from the pictures it shows (decision D44); `None` without
+/// video. `kind` says what a piece's pictures are.
+pub fn choose_color(
+    plan: &RenderPlan,
+    settings: &ExportSettings,
+    available: &Availability,
+    kind: impl FnMut(&VideoPiece) -> PictureKind,
+) -> Option<ColorChoice> {
+    let v = settings.video.as_ref()?;
+    let share = color::picture_share(&plan.video, kind);
+    Some(color::choose(v, &share, encode::abilities(v, available)))
 }
 
 /// Loudness normalization of an export: the mix was measured, then changed
@@ -128,6 +171,18 @@ pub fn run(
 ) -> Result<Report> {
     crate::init();
     validate(settings).map_err(|e| Error::Invalid(e.message))?;
+    // Settings left to the export choose from the files (decision D44).
+    let mut settings = settings.clone();
+    let mut chosen = None;
+    if let Some(v) = settings.video.as_mut()
+        && (v.hdr == HdrMode::Auto || v.bit_depth.is_none())
+    {
+        let c = choose_color(plan, &settings, available, probed_kinds())
+            .expect("the settings have video");
+        c.apply(settings.video.as_mut().expect("checked"));
+        chosen = Some(c);
+    }
+    let settings = &settings;
     // Nothing is made once cancelled: a GUI that quit without waiting for
     // a job removes only the partial files of what it heard was started.
     if cancel.load(Ordering::Relaxed) {
@@ -135,7 +190,7 @@ pub fn run(
     }
     let part = partial_path(output);
     let result = encode(plan, settings, &part, output, available, cancel, progress);
-    match result {
+    match result.map(|r| Report { color: chosen, ..r }) {
         Ok(report) => match std::fs::rename(&part, output) {
             Ok(()) => Ok(report),
             Err(e) => {
@@ -520,5 +575,6 @@ fn encode(
         audio_encoder: audio.map(|a| a.spec.name),
         seconds: started.elapsed().as_secs_f64(),
         loudness: normalized,
+        color: None,
     })
 }

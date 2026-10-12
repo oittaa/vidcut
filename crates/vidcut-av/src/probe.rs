@@ -119,6 +119,16 @@ fn image_format(format: &str) -> bool {
     format == "image2" || format.ends_with("_pipe")
 }
 
+/// Bits per sample of the pixel format FFmpeg names `name` (`yuv420p10le`:
+/// 10, `rgb48be`: 16); 8 when it names none.
+pub fn pixel_depth(name: &str) -> u8 {
+    use std::str::FromStr;
+    ffmpeg::format::Pixel::from_str(name)
+        .ok()
+        .and_then(|p| p.descriptor())
+        .map_or(8, |d| unsafe { (*d.as_ptr()).comp[0].depth } as u8)
+}
+
 /// Probes `path`, including the first decodable video frame (one frame is
 /// decoded) and stream durations. An image file is a still.
 pub fn probe(path: &Path) -> Result<MediaInfo> {
@@ -434,4 +444,24 @@ pub fn clock(path: &Path) -> Result<(Option<String>, Option<u64>)> {
         .find(|s| s.parameters().medium() == media::Type::Video)
         .map(|s| s.index());
     Ok(clock_tags(&input, video))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn pixel_depths_come_from_the_format() {
+        crate::init();
+        for (name, depth) in [
+            ("yuv420p", 8),
+            ("nv12", 8),
+            ("rgb24", 8),
+            ("yuv420p10le", 10),
+            ("p010le", 10),
+            ("yuv422p12le", 12),
+            ("rgb48be", 16),
+            ("no-such-format", 8),
+        ] {
+            assert_eq!(super::pixel_depth(name), depth, "{name}");
+        }
+    }
 }
