@@ -251,15 +251,53 @@ fn thumbnails_come_back_from_the_disk_cache_until_it_is_turned_off() {
         std::thread::sleep(Duration::from_millis(5));
         harness.step();
     }
-    let sets = sets(&h);
-    assert_eq!(sets.len(), 2, "{sets:#?}");
+    let made = sets(&h);
+    assert_eq!(made.len(), 2, "{made:#?}");
     assert_eq!(
-        sets[1]["params"],
+        made[1]["params"],
         json!({ "thumbnails": { "disk_cache": false } })
     );
     let saved = std::fs::read_to_string(dir.join("config/vidcut/preferences.toml")).unwrap();
     assert!(saved.contains("disk_cache = false"), "{saved}");
     assert!(saved.contains("cache_limit_mb = 256"), "{saved}");
+
+    // GPU acceleration goes off with one click, and an export then plans
+    // the CPU's encoder whatever the settings name; proxies too.
+    const GPU: &str = "Decode, scale and encode on the GPU";
+    let started = Instant::now();
+    while harness
+        .query_by_label(GPU)
+        .is_none_or(|n| n.accesskit_node().is_disabled())
+    {
+        assert!(started.elapsed() < Duration::from_secs(30), "no answer");
+        std::thread::sleep(Duration::from_millis(5));
+        harness.step();
+    }
+    harness.get_by_label(GPU).click();
+    while sets(&h).len() < 3 {
+        assert!(started.elapsed() < Duration::from_secs(30), "GPU kept");
+        std::thread::sleep(Duration::from_millis(5));
+        harness.step();
+    }
+    assert_eq!(
+        sets(&h)[2]["params"],
+        json!({ "gpu": { "acceleration": false } })
+    );
+    let saved = std::fs::read_to_string(dir.join("config/vidcut/preferences.toml")).unwrap();
+    assert!(saved.contains("acceleration = false"), "{saved}");
+    call(&h, "edit.append", json!({ "media": "m1" }));
+    let plan = call(
+        &h,
+        "export.plan",
+        json!({ "output": dir.join("out.mp4"), "encoder": "nvenc" }),
+    )
+    .result;
+    assert_eq!(plan["settings"]["video"]["encoder"], "cpu", "{plan}");
+    assert_eq!(plan["video_encoder"]["kind"], "cpu", "{plan}");
+    // Automatic proxies are H.264 with x264 then, not AV1 on NVENC.
+    let prefs = call(&h, "preferences.get", json!({})).result;
+    assert_eq!(prefs["proxy_codecs"][0]["codec"], "auto", "{prefs}");
+    assert_eq!(prefs["proxy_codecs"][0]["encoder"], "libx264", "{prefs}");
 
     drop(harness);
     h.shutdown();

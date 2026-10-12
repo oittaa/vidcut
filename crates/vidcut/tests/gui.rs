@@ -37,6 +37,7 @@ impl Gui {
             .arg(&self.project)
             .args(args)
             .env("XDG_STATE_HOME", self.dir.path().join("state"))
+            .env("XDG_CONFIG_HOME", self.dir.path().join("config"))
             .output()
             .unwrap();
         let took = started.elapsed();
@@ -183,6 +184,7 @@ fn gui_acceptance() {
         .arg("-p")
         .arg(&project)
         .env("XDG_STATE_HOME", dir.join("state"))
+        .env("XDG_CONFIG_HOME", dir.join("config"))
         .env("VIDCUT_MPV_LOG_DIR", &dir)
         .env("VIDCUT_DEBUG_PLAYER", "1")
         .stdout(Stdio::null())
@@ -265,6 +267,43 @@ fn gui_acceptance() {
     );
     eprintln!("edit while minimized {took:?}");
     gui.check_frame(121);
+
+    // 4. With GPU acceleration off the preview decodes in software from the
+    // next file it opens, still frame-exactly; back on, as it did.
+    gui.cli(&["gui", "window", "--minimized", "false"]);
+    let hwdec = |gui: &Gui| {
+        let (st, _) = gui.cli(&["player", "state"]);
+        st["result"]["timeline"]["hwdec"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string()
+    };
+    let wait_for = |gui: &Gui, want: &dyn Fn(&str) -> bool| {
+        let started = Instant::now();
+        loop {
+            let now = hwdec(gui);
+            if want(&now) {
+                return now;
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(10),
+                "hwdec stays {now:?}"
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    };
+    let before = hwdec(&gui);
+    // The CLI changes the file; the player reads it as it opens the next
+    // one. Deleting a clip changes the timeline's file (a split doesn't).
+    gui.cli(&["preferences", "set", "gpu.acceleration=false"]);
+    gui.cli(&["edit", "delete", "V1@100f"]);
+    wait_for(&gui, &|h| h == "no");
+    gui.check_frame(30);
+    gui.check_frame(95);
+    gui.cli(&["preferences", "set", "gpu.acceleration=true"]);
+    gui.cli(&["history", "undo"]);
+    wait_for(&gui, &|h| h == before);
+    gui.check_frame(30);
 
     // Quit cleanly: the instance unregisters.
     gui.cli(&["gui", "quit"]);

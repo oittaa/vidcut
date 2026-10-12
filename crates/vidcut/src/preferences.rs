@@ -32,6 +32,13 @@ pub fn load() -> Result<Preferences> {
     Ok(p)
 }
 
+/// Whether the GPU may do its share (`gpu.acceleration`). A broken
+/// preferences file fails `preferences.get` with the reason; the rest goes
+/// on with the default, on.
+pub fn gpu_acceleration() -> bool {
+    load().map_or(true, |p| p.gpu.acceleration)
+}
+
 /// `preferences.get`: the preferences, where they are kept, and what the
 /// thumbnail cache holds.
 pub fn get() -> Result<Value> {
@@ -79,7 +86,7 @@ fn describe(p: &Preferences) -> Value {
     let codecs: Vec<Value> = [ProxyCodec::Auto, ProxyCodec::Av1, ProxyCodec::H264]
         .into_iter()
         .map(|c| {
-            let encoders = crate::env::proxy_encoders(c);
+            let encoders = crate::env::proxy_encoders(c, p.gpu.acceleration);
             json!({
                 "codec": c,
                 "encoder": encoders.first().map(|e| e.name.clone()),

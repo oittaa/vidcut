@@ -560,6 +560,15 @@ pub fn availability(refresh: bool) -> Availability {
     a
 }
 
+/// The settings as the preferences allow: without GPU acceleration every
+/// video encoder choice is the CPU's, so a preset naming NVENC still
+/// exports, in software.
+pub fn as_preferred(settings: &mut ExportSettings, gpu: bool) {
+    if !gpu && let Some(v) = settings.video.as_mut() {
+        v.encoder = EncoderChoice::Cpu;
+    }
+}
+
 /// Whether the settings may pick a GPU encoder (so availability matters).
 pub fn needs_gpu_info(settings: &ExportSettings) -> bool {
     settings

@@ -228,7 +228,8 @@ impl Env for AvEnv {
                 media.mtime_ns,
             ))
         };
-        let encoders = proxy_encoders(self.proxy_rules().codec);
+        let prefs = crate::preferences::load().unwrap_or_default();
+        let encoders = proxy_encoders(prefs.proxies.codec, prefs.gpu.acceleration);
         let planned = encoders.first().map_or("h264", |e| e.codec);
         let mut path = name(planned);
         let mut codec = planned;
@@ -277,11 +278,17 @@ impl Env for AvEnv {
 }
 
 /// The encoders proxies are made with here for the `codec` preference, best
-/// first.
+/// first: software ones only without GPU acceleration (`gpu`).
 pub fn proxy_encoders(
     codec: vidcut_core::preferences::ProxyCodec,
+    gpu: bool,
 ) -> Vec<vidcut_av::proxy::ProxyEncoder> {
-    vidcut_av::proxy::encoders(codec, &crate::export::availability(false))
+    let available = if gpu {
+        crate::export::availability(false)
+    } else {
+        Default::default()
+    };
+    vidcut_av::proxy::encoders(codec, &available)
 }
 
 /// A measurement's failure. Cancellation uses the same flag as an export, so

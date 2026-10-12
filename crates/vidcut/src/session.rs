@@ -243,7 +243,11 @@ pub fn render(
             export_media(project, path, params, hooks, &mut |_| {})?
         }
         Request::ExportPlan(params) => {
-            let prepared = export::prepare(project, params, None)?;
+            let mut prepared = export::prepare(project, params, None)?;
+            export::as_preferred(
+                &mut prepared.settings,
+                crate::preferences::gpu_acceleration(),
+            );
             let available = if export::needs_gpu_info(&prepared.settings) {
                 export::availability(false)
             } else {
@@ -352,7 +356,11 @@ pub fn export_media(
         r.rev = p.rev;
         return Ok(r);
     }
-    let prepared = export::prepare(p, params, None)?;
+    let mut prepared = export::prepare(p, params, None)?;
+    export::as_preferred(
+        &mut prepared.settings,
+        crate::preferences::gpu_acceleration(),
+    );
     let available = if export::needs_gpu_info(&prepared.settings) {
         export::availability(false)
     } else {

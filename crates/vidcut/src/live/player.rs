@@ -29,11 +29,17 @@ const OBSERVED: &[(&str, Format)] = &[
     ("video-params/dh", Format::Int),
 ];
 
-/// mpv options for preview players (docs/decisions/preview.md §5).
+/// mpv's `hwdec` for the GPU acceleration preference.
+fn hwdec(gpu: bool) -> &'static str {
+    if gpu { "auto-safe" } else { "no" }
+}
+
+/// mpv options for preview players (docs/decisions/preview.md §5),
+/// decoding on the GPU when `gpu` (the GPU acceleration preference).
 /// `VIDCUT_MPV_OPTIONS="hwdec=no,ao=null"` adds or overrides options (for
 /// debugging).
-pub fn mpv_options(audio: bool) -> Vec<(String, String)> {
-    let mut o: Vec<(String, String)> = vec![("hwdec".into(), "auto-safe".into())];
+pub fn mpv_options(audio: bool, gpu: bool) -> Vec<(String, String)> {
+    let mut o: Vec<(String, String)> = vec![("hwdec".into(), hwdec(gpu).into())];
     for (k, v) in [
         ("vo", "libmpv"),
         ("config", "no"),
@@ -193,6 +199,10 @@ pub struct Player {
     /// Motions up to this id are on screen.
     pub shown: u64,
     hwdec: String,
+    /// The renderer shows frames decoded on the GPU (`Players::hwdec`).
+    hwdec_allowed: bool,
+    /// The GPU acceleration preference as last given to mpv.
+    gpu: Option<bool>,
     video_size: (Option<i64>, Option<i64>),
     pub error: Option<String>,
 }
@@ -245,7 +255,7 @@ fn seek_mode(fast: bool) -> &'static str {
 }
 
 impl Player {
-    pub fn new(id: PlayerId, mpv: Option<Mpv>, edl_path: PathBuf) -> Self {
+    pub fn new(id: PlayerId, mpv: Option<Mpv>, edl_path: PathBuf, hwdec_allowed: bool) -> Self {
         if let Some(m) = &mpv {
             for (i, (name, format)) in OBSERVED.iter().enumerate() {
                 let _ = m.observe_property(i as u64 + 1, name, *format);
@@ -277,6 +287,8 @@ impl Player {
             presenting: 0,
             shown: 0,
             hwdec: String::new(),
+            hwdec_allowed,
+            gpu: None,
             video_size: (None, None),
             error: None,
         }
@@ -325,6 +337,15 @@ impl Player {
 
     fn secs(&self, frame: i64) -> String {
         format!("{:.9}", self.fps.frames_to_secs(frame.max(0)))
+    }
+
+    /// Decodes on the GPU or not, from the next file on.
+    fn set_hwdec(&mut self, gpu: bool) {
+        if let Some(m) = &self.mpv
+            && let Err(e) = m.set_property_string("hwdec", hwdec(gpu))
+        {
+            self.error = Some(e.to_string());
+        }
     }
 
     /// Mutes what the player plays (the monitoring mute).
@@ -394,6 +415,16 @@ impl Player {
         };
         let start = self.secs(self.position);
         let options = file_options(preview, &start, self.speed > 0.0, self.fps);
+        // Decoding as the GPU acceleration preference says, read as each
+        // file opens: a change from anywhere (the GUI, the CLI, the file
+        // itself) applies from the next one.
+        if self.hwdec_allowed {
+            let gpu = crate::preferences::gpu_acceleration();
+            if self.gpu != Some(gpu) {
+                self.set_hwdec(gpu);
+                self.gpu = Some(gpu);
+            }
+        }
         let id = self.command(&["loadfile", &path, "replace", "-1", &options]);
         self.tracking = self.speed > 0.0;
         if self.mpv.is_some() {
@@ -694,7 +725,12 @@ mod tests {
     }
 
     fn player() -> Player {
-        Player::new(PlayerId::Timeline, None, PathBuf::from("timeline.edl"))
+        Player::new(
+            PlayerId::Timeline,
+            None,
+            PathBuf::from("timeline.edl"),
+            false,
+        )
     }
 
     fn fps() -> Rational {

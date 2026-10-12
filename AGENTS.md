@@ -228,14 +228,15 @@ vidcut history undo                         # works across separate runs
 - `vidcut export start out.mp4` renders the timeline: its In–Out range when both marks are set, else everything.
   - The extension picks the container, and also the preset unless `--preset` is given.
   - Extra options: `--preset youtube-1080p`, `--encoder nvenc|vaapi|cpu|auto`, `--set video.quality=20`, `--range 1m..2m`, `--per-clip`, `--audio-only`, `--overwrite`.
-  - With NVENC and SDR output, progressive SDR pieces decode on NVDEC and scale and pad on the GPU, turned upright and BT.601 and full range converted there by libplacebo (which also pads in 10 bits); the rest decode on the CPU and go up. The result's `gpu_frames` counts the frames made on the GPU (export.md §5).
+  - With NVENC and SDR output (and `gpu.acceleration` on), progressive SDR pieces decode on NVDEC and scale and pad on the GPU, turned upright and BT.601 and full range converted there by libplacebo (which also pads in 10 bits); the rest decode on the CPU and go up. The result's `gpu_frames` counts the frames made on the GPU (export.md §5).
   - `vidcut export plan out.mp4` (or `export start` with `--dry-run`) prints the plan and the chosen encoder without encoding.
   - Ctrl-C cancels cleanly (exit 9, no partial file).
   - With a GUI running, `--background` returns a job id at once; follow it with `vidcut jobs` commands (below).
 - `vidcut presets list` lists the presets (`--json` includes their settings); `vidcut presets get NAME` shows one.
   - `vidcut presets save web --from youtube-1080p --set video.quality=22 [--quick-export]` saves a user preset to `~/.config/vidcut/presets/web.toml`; `--settings JSON|@FILE` gives full settings instead. `vidcut presets delete web` removes it.
-- `vidcut encoders list` shows which GPU encoders work here (cached; `--refresh` re-tests).
+- `vidcut encoders list` shows which GPU encoders work here (cached; `--refresh` re-tests), whether or not `gpu.acceleration` lets vidcut use them.
 - `vidcut preferences get` shows the application preferences (`~/.config/vidcut/preferences.toml`) and what the thumbnail cache holds; `vidcut preferences set thumbnails.cache_limit_mb=256` changes them (`preferences.set` takes `{"thumbnails": {"disk_cache": false}}`; turning the cache off empties it). The cache holds the pool's pictures and the timeline's filmstrip tiles; `thumbnails.timeline_memory_mb` (256) is the memory a running GUI keeps tiles in.
+  - `vidcut preferences set gpu.acceleration=false` (File > Preferences: GPU) turns off all GPU work: exports and proxies take software encoders whatever the settings or preset name (`export plan` shows `cpu`), so nothing decodes on NVDEC either, and the preview decodes in software from the next file it opens (`player state` reports each player's `hwdec`). For comparing CPU and GPU pictures, or when a driver misbehaves. On by default.
 - `vidcut frame render --at 1m --out f.png [--width 640]` renders what the timeline shows at a frame. `--media m1` renders a media frame instead. Use it to look at cuts.
 
 **Automatic tools (spec D29–D32):**

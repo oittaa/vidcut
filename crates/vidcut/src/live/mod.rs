@@ -112,7 +112,7 @@ pub struct Config {
     /// Create the project file if it doesn't exist.
     pub create: bool,
     /// Source and timeline players; `None` runs without preview.
-    pub players: Option<(Mpv, Mpv)>,
+    pub players: Option<Players>,
     /// Why there is no preview, if so.
     pub preview_error: Option<String>,
     pub renderer: Arc<dyn Renderer>,
@@ -120,6 +120,17 @@ pub struct Config {
     pub notify: Arc<dyn Fn() + Send + Sync>,
     /// The IPC socket this instance serves, for the instance registry.
     pub socket: Option<PathBuf>,
+}
+
+/// The preview's two mpv players, and what their renderer can show.
+pub struct Players {
+    pub source: Mpv,
+    pub timeline: Mpv,
+    /// The renderer shows frames decoded on the GPU (OpenGL does, mpv's
+    /// software renderer can't), so the GPU acceleration preference decides
+    /// how the players decode. Otherwise they keep the options they were
+    /// made with.
+    pub hwdec: bool,
 }
 
 /// Progress and the final answer of one request.
@@ -354,9 +365,9 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     remove_stale_runtime_dirs();
     let edl_dir = ipc::runtime_dir().join(pid.to_string());
     let _ = ipc::private_dir(&edl_dir);
-    let (source, timeline) = match config.players {
-        Some((s, t)) => (Some(s), Some(t)),
-        None => (None, None),
+    let (source, timeline, hwdec) = match config.players {
+        Some(p) => (Some(p.source), Some(p.timeline), p.hwdec),
+        None => (None, None, false),
     };
     for (id, mpv) in [(PlayerId::Source, &source), (PlayerId::Timeline, &timeline)] {
         if let Some(m) = mpv {
@@ -367,8 +378,13 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         }
     }
     let players = [
-        Player::new(PlayerId::Source, source, edl_dir.join("source.edl")),
-        Player::new(PlayerId::Timeline, timeline, edl_dir.join("timeline.edl")),
+        Player::new(PlayerId::Source, source, edl_dir.join("source.edl"), hwdec),
+        Player::new(
+            PlayerId::Timeline,
+            timeline,
+            edl_dir.join("timeline.edl"),
+            hwdec,
+        ),
     ];
     let instance = config.socket.clone().map(|socket| Instance {
         pid,
@@ -3189,6 +3205,7 @@ impl Live {
                 "position_tc": tc(pl.position, stc),
                 "playing": pl.playing(),
                 "speed": pl.snap().speed,
+                "hwdec": pl.snap().hwdec,
                 "error": pl.error,
             })
         };

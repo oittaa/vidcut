@@ -59,8 +59,7 @@ impl Harness {
             eprintln!("skipping: {e}");
             return None;
         }
-        let mut opts = live::mpv_options(false);
-        opts.push(("hwdec".into(), "no".into()));
+        let opts = live::mpv_options(false, false);
         let opts: Vec<(&str, &str)> = opts.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
         let source = Mpv::new(&opts).unwrap();
         let timeline = Mpv::new(&opts).unwrap();
@@ -115,7 +114,13 @@ impl Harness {
         let (handle, session) = live::start(live::Config {
             project: Some(project.to_path_buf()),
             create: false,
-            players: Some((source, timeline)),
+            // mpv's software renderer can't show frames decoded on the
+            // GPU: they stay decoded on the CPU, whatever the preferences.
+            players: Some(live::Players {
+                source,
+                timeline,
+                hwdec: false,
+            }),
             preview_error: None,
             renderer: port.clone(),
             notify: Arc::new(|| {}),

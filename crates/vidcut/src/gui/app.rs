@@ -291,11 +291,11 @@ fn make_players(
     ctx: &egui::Context,
     proc_address: Option<GlLoader>,
     display: Display,
-) -> std::result::Result<((Mpv, Mpv), [GlRenderer; 2]), String> {
+) -> std::result::Result<(live::Players, [GlRenderer; 2]), String> {
     vidcut_mpv::available()?;
     let lookup = proc_address.ok_or("no OpenGL function loader")?;
     let make = |id: PlayerId| -> std::result::Result<(Mpv, GlRenderer), String> {
-        let mut opts = live::mpv_options(true);
+        let mut opts = live::mpv_options(true, crate::preferences::gpu_acceleration());
         opts.extend(live::mpv_log_options(id));
         let opts: Vec<(&str, &str)> = opts.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
         let mpv = Mpv::new(&opts).map_err(|e| e.to_string())?;
@@ -311,5 +311,11 @@ fn make_players(
     // the timeline's log (`VIDCUT_MPV_LOG_DIR`).
     let (t, tr) = make(PlayerId::Timeline)?;
     let (s, sr) = make(PlayerId::Source)?;
-    Ok(((s, t), [sr, tr]))
+    // OpenGL shows frames decoded on the GPU.
+    let players = live::Players {
+        source: s,
+        timeline: t,
+        hwdec: true,
+    };
+    Ok((players, [sr, tr]))
 }

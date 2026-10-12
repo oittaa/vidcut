@@ -133,6 +133,31 @@ impl Workspace {
                 let proxies = &state["preferences"]["proxies"];
                 let cache = &state["thumbnail_cache"];
                 let busy = ui_state.ask.is_some();
+                ui.label(RichText::new("GPU").strong());
+                egui::Grid::new("preferences-gpu")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        let mut on = state["preferences"]["gpu"]["acceleration"] != false;
+                        ui.label("Acceleration");
+                        if ui
+                            .add_enabled(
+                                !busy,
+                                egui::Checkbox::new(&mut on, "Decode, scale and encode on the GPU"),
+                            )
+                            .on_hover_text(
+                                "Where it gives the pictures the CPU would: hardware encoders \
+                                 for exports and proxies, the GPU pipeline that feeds them, and \
+                                 the preview's decoding (from the next clip it opens). Off, \
+                                 everything runs on the CPU, slower: for comparing the two, or \
+                                 when a graphics driver misbehaves",
+                            )
+                            .changed()
+                        {
+                            patch = Some(json!({ "gpu": { "acceleration": on } }));
+                        }
+                        ui.end_row();
+                    });
+                ui.add_space(8.0);
                 ui.label(RichText::new("Thumbnails").strong());
                 egui::Grid::new("preferences-thumbnails")
                     .num_columns(2)

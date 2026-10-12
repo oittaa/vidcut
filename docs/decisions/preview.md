@@ -86,7 +86,7 @@ input-default-bindings=no osc=no hr-seek=yes hr-seek-framedrop=no
 keep-open=always idle=yes pause=yes video-timing-offset=0
 ```
 
-For single-file sources, also `rebase-start-time=no`.
+For single-file sources, also `rebase-start-time=no`. With the preferences' `gpu.acceleration` off, `hwdec=no`: a player reads the preference as it opens each file, so a change applies from the next file it opens.
 
 **The audio output keeps the project's format.** Timeline files load with `audio-samplerate` and `audio-channels` set to the project's sample rate and channel count (`live::file_options`), so mpv converts each clip's audio to them, as export's mix does.
 - **Why:** mpv keeps its audio output through a change of decoded format only when the rate and channels stay the same. Otherwise it drains what it queued, closes the device and opens a new one: about 260 ms with PipeWire at a cut from stereo into 5.1. The picture waits for the audio clock, then drops frames to catch up.

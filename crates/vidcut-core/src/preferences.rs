@@ -14,8 +14,27 @@ use crate::model::{Media, PROXY_LONGEST};
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Preferences {
+    pub gpu: Gpu,
     pub thumbnails: Thumbnails,
     pub proxies: Proxies,
+}
+
+/// The graphics card's share of the work.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct Gpu {
+    /// Decode, scale and encode on the GPU where it gives the pictures the
+    /// CPU would: hardware encoders for exports and proxies (`auto` and
+    /// named alike), the GPU pipeline that feeds them, and the preview's
+    /// hardware decoding. Off, everything runs on the CPU, for comparing
+    /// the two or when a driver misbehaves.
+    pub acceleration: bool,
+}
+
+impl Default for Gpu {
+    fn default() -> Self {
+        Self { acceleration: true }
+    }
 }
 
 /// The Media Pool's thumbnails and the timeline's filmstrip pictures.
@@ -118,9 +137,18 @@ impl Proxies {
 #[serde(deny_unknown_fields)]
 pub struct PreferencesPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu: Option<GpuPatch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thumbnails: Option<ThumbnailsPatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxies: Option<ProxiesPatch>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GpuPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceleration: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -189,6 +217,9 @@ impl Preferences {
     /// These preferences with `patch` applied.
     pub fn patched(&self, patch: &PreferencesPatch) -> Result<Self> {
         let mut p = self.clone();
+        if let Some(g) = &patch.gpu {
+            p.gpu.acceleration = g.acceleration.unwrap_or(p.gpu.acceleration);
+        }
         if let Some(t) = &patch.thumbnails {
             if let Some(v) = t.disk_cache {
                 p.thumbnails.disk_cache = v;
@@ -242,6 +273,20 @@ impl Preferences {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gpu_acceleration_is_on_until_turned_off() {
+        let p = Preferences::default();
+        assert!(p.gpu.acceleration);
+        let off = p
+            .patched(&PreferencesPatch::from_pairs(&["gpu.acceleration=false".into()]).unwrap())
+            .unwrap();
+        assert!(!off.gpu.acceleration);
+        assert_eq!(off.thumbnails, p.thumbnails);
+        // A file without the key keeps it on.
+        let read: Preferences = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert!(read.gpu.acceleration);
+    }
 
     #[test]
     fn patches_change_only_what_they_name() {
