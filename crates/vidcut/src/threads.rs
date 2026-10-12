@@ -11,8 +11,9 @@ use std::thread::JoinHandle;
 pub enum Work {
     /// Media work nobody watches frame by frame: exports, proxies,
     /// measurements and analyses, storyboards, thumbnails, waveforms, the
-    /// preview's helper files. The lowest priority (nice 19); the threads
-    /// it starts, FFmpeg's decoders and encoders among them, inherit it.
+    /// preview's helper files. The lowest priority (Linux's idle class);
+    /// the threads it starts, FFmpeg's decoders and encoders among them,
+    /// inherit it.
     Job,
     /// Work someone waits on now: the session itself, requests and their
     /// answers, file dialogs, a frame or a plan.
@@ -35,14 +36,20 @@ pub fn spawn<T: Send + 'static>(
         })
 }
 
-/// Gives the calling thread the lowest CPU priority (nice 19). Threads it
-/// starts later inherit it. Linux only.
+/// Gives the calling thread the lowest CPU priority: the idle scheduling
+/// class, below nice 19. Threads it starts later inherit it. Linux only.
+///
+/// Not nice 19: NVIDIA's driver, opening NVENC, copies the calling thread's
+/// nice value onto the process id, which is the main thread, and nothing
+/// unprivileged raises it again. A job at nice 19 left the GUI there. In the
+/// idle class the nice value stays the process's, so the copy changes
+/// nothing.
 fn lowest_priority() {
     #[cfg(target_os = "linux")]
     // SAFETY: plain system calls on this thread's own id.
     unsafe {
-        let tid = libc::gettid();
-        libc::setpriority(libc::PRIO_PROCESS, tid as libc::id_t, 19);
+        let param = libc::sched_param { sched_priority: 0 };
+        libc::sched_setscheduler(libc::gettid(), libc::SCHED_IDLE, &param);
     }
 }
 
@@ -53,27 +60,38 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn a_job_and_the_threads_it_starts_run_at_low_priority() {
-        fn nice() -> i32 {
+        /// This thread's scheduling class and nice value.
+        fn priority() -> (i32, i32) {
             // SAFETY: plain system calls on this thread's own id.
-            unsafe { libc::getpriority(libc::PRIO_PROCESS, libc::gettid() as libc::id_t) }
+            unsafe {
+                let tid = libc::gettid();
+                (
+                    libc::sched_getscheduler(tid),
+                    libc::getpriority(libc::PRIO_PROCESS, tid as libc::id_t),
+                )
+            }
         }
-        let before = nice();
+        let before = priority();
         let job = spawn("test-job", Work::Job, || {
             (
-                nice(),
-                std::thread::scope(|s| s.spawn(nice).join().unwrap()),
+                priority(),
+                std::thread::scope(|s| s.spawn(priority).join().unwrap()),
             )
         })
         .unwrap()
         .join()
         .unwrap();
-        assert_eq!(job, (19, 19));
-        let interactive = spawn("test-interactive", Work::Interactive, nice)
+        // The idle class, and the nice value untouched: a library copying a
+        // job's nice value onto the main thread (NVIDIA's driver does,
+        // opening NVENC) leaves the GUI's priority alone.
+        let idle = (libc::SCHED_IDLE, before.1);
+        assert_eq!(job, (idle, idle));
+        let interactive = spawn("test-interactive", Work::Interactive, priority)
             .unwrap()
             .join()
             .unwrap();
         assert_eq!(interactive, before);
-        assert_eq!(nice(), before, "the caller's priority changed");
+        assert_eq!(priority(), before, "the caller's priority changed");
     }
 
     /// Every thread the app starts goes through [`spawn`], which makes each
