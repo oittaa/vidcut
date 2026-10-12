@@ -201,6 +201,50 @@ impl Workspace {
                             ui.label("px, longest side");
                         });
                         ui.end_row();
+                        // Each choice says what it makes proxies with here.
+                        ui.label("Codec");
+                        let current = proxies["codec"].as_str().unwrap_or("auto");
+                        let choices = state["proxy_codecs"]
+                            .as_array()
+                            .cloned()
+                            .unwrap_or_default();
+                        let text = |c: &Value| {
+                            let uses = c["uses"].as_str().unwrap_or("nothing that works here");
+                            match c["codec"].as_str().unwrap_or_default() {
+                                "auto" => format!("Automatic: {uses}"),
+                                "av1" => format!("AV1: {}", uses.trim_start_matches("AV1, ")),
+                                "h264" => format!("H.264: {}", uses.trim_start_matches("H.264, ")),
+                                other => format!("{other}: {uses}"),
+                            }
+                        };
+                        let shown = choices
+                            .iter()
+                            .find(|c| c["codec"] == current)
+                            .map(text)
+                            .unwrap_or_else(|| current.to_string());
+                        ui.add_enabled_ui(!busy, |ui| {
+                            egui::ComboBox::from_id_salt("proxy-codec")
+                                .selected_text(shown)
+                                .show_ui(ui, |ui| {
+                                    for c in &choices {
+                                        if ui
+                                            .selectable_label(c["codec"] == current, text(c))
+                                            .clicked()
+                                        {
+                                            patch =
+                                                Some(json!({ "proxies": { "codec": c["codec"] } }));
+                                        }
+                                    }
+                                })
+                                .response
+                                .on_hover_text(
+                                    "Automatic: AV1 on a hardware encoder when there is one, \
+                                     else H.264 with x264, which stays quick on old computers. \
+                                     AV1 files are smaller; making them in software (SVT-AV1) is \
+                                     slower than x264",
+                                );
+                        });
+                        ui.end_row();
                         let mut auto = proxies["auto"] == true;
                         ui.label("Automatic");
                         if ui

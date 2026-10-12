@@ -214,7 +214,7 @@ An image in an EDL entry is a source with one frame at time 0. Seeking into the 
 
 ## 12. Proxies
 
-A proxy is a smaller H.264 file (8-bit 4:2:0, no B-frames) of a pool item's pictures. `proxy.generate` writes one for a video or an image sequence.
+A proxy is a smaller AV1 or H.264 file (8-bit 4:2:0, closed GOPs of 60 frames, every frame coded in the order it shows) of a pool item's pictures. `proxy.generate` writes one for a video or an image sequence, with the encoder the preferences' `proxies.codec` picks: hardware AV1 when one works (NVENC, VAAPI), then x264 (`auto`) or SVT-AV1 (`av1`); x264 for `h264`. Measured on 60 s of 4K60 (960 px proxies): x264 23.1 MB in 7.1 s, NVENC AV1 22.8 MB in 6.3 s at a higher SSIM, SVT-AV1 16.4 MB in 16.7 s; every one decodes at over 1,000 fps on the CPU.
 
 **Encoding.** The request first runs on a copy of the project, which writes the files: in the GUI on a worker thread (the measure step that analysis edits use), headless before the project is locked. Then it runs for real and finds the files there, so recording them is quick. The encode reports progress through `vidcut_av::progress` and stops on the `vidcut_av::cancel` flag; a stopped encode removes its temporary file. The preview plays it only when `settings.use_proxies` is set and the proxy is fresh: same source size and modification time as when it was made, and the file is there. Otherwise the original plays, image lists included.
 

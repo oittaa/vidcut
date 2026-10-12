@@ -56,6 +56,22 @@ pub struct Proxies {
     pub above_mbps: u32,
     /// The longest side of a proxy in pixels, even, from 16 to 7680.
     pub size: u32,
+    /// The codec proxies are made with.
+    pub codec: ProxyCodec,
+}
+
+/// The codec proxies are made with (decision D41).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ProxyCodec {
+    /// AV1 on a hardware encoder when this machine has one, else H.264 with
+    /// x264, which stays quick on old computers.
+    #[default]
+    Auto,
+    /// AV1: on a hardware encoder when there is one, else with SVT-AV1.
+    Av1,
+    /// H.264 with x264.
+    H264,
 }
 
 impl Default for Proxies {
@@ -66,6 +82,7 @@ impl Default for Proxies {
             larger_than: [3840, 2160],
             above_mbps: 150,
             size: PROXY_LONGEST,
+            codec: ProxyCodec::Auto,
         }
     }
 }
@@ -118,6 +135,8 @@ pub struct ProxiesPatch {
     /// Even, from 16 to 7680.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codec: Option<ProxyCodec>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -178,6 +197,7 @@ impl Preferences {
             p.larger_than = x.larger_than.unwrap_or(p.larger_than);
             p.above_mbps = x.above_mbps.unwrap_or(p.above_mbps);
             p.size = x.size.unwrap_or(p.size);
+            p.codec = x.codec.unwrap_or(p.codec);
         }
         p.check()?;
         Ok(p)

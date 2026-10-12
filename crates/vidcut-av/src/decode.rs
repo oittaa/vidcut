@@ -523,6 +523,12 @@ impl VideoReader {
         self.rotation
     }
 
+    /// The stream's average frame rate, when the container knows it.
+    pub fn frame_rate(&self) -> Option<ffmpeg::Rational> {
+        let r = self.input.stream(self.stream)?.avg_frame_rate();
+        (r.numerator() > 0 && r.denominator() > 0).then_some(r)
+    }
+
     /// Fields and color of the first decodable frame.
     pub fn first_props(&self) -> Option<FrameProps> {
         self.first_props

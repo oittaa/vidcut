@@ -271,6 +271,58 @@ fn proxies_encode_beside_the_session() {
     ok(&h, "media.add", json!({ "paths": [third] }));
     std::thread::sleep(Duration::from_millis(200));
     assert_eq!(jobs(&h), before + 2);
+
+    // 5. Made with what the codec preference picks here (automatic: AV1 on
+    // a hardware encoder, else x264), named by its codec. H.264 instead
+    // makes a new file in place of that one.
+    ok(&h, "proxy.generate", json!({ "media": "m1" }));
+    let proxy = ok(&h, "media.get", json!({ "media": "m1" }))["proxy"].clone();
+    let file = PathBuf::from(proxy["path"].as_str().unwrap());
+    let prefs = ok(&h, "preferences.get", json!({}));
+    let auto = prefs["proxy_codecs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["codec"] == "auto")
+        .unwrap()["encoder"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let codec = if auto.starts_with("av1") {
+        "av1"
+    } else {
+        "h264"
+    };
+    assert_eq!(proxy["codec"], codec, "{proxy}");
+    assert!(
+        file.to_string_lossy().ends_with(&format!("-{codec}.mkv")),
+        "{}",
+        file.display()
+    );
+    ok(
+        &h,
+        "preferences.set",
+        json!({ "proxies": { "codec": "h264" } }),
+    );
+    ok(&h, "proxy.generate", json!({ "media": "m1" }));
+    let h264 = ok(&h, "media.get", json!({ "media": "m1" }))["proxy"].clone();
+    assert_eq!(h264["codec"], "h264", "{h264}");
+    assert!(
+        h264["path"].as_str().unwrap().ends_with("-h264.mkv"),
+        "{h264}"
+    );
+    assert_eq!(
+        files(&proxies).len(),
+        1,
+        "the replaced proxy's file went: {:?}",
+        files(&proxies)
+    );
+    ok(
+        &h,
+        "preferences.set",
+        json!({ "proxies": { "codec": "auto" } }),
+    );
+    ok(&h, "proxy.remove", json!({}));
     h.shutdown();
     let _ = session.join();
 

@@ -399,6 +399,13 @@ pub fn print(method: &str, r: &Response, json: bool) {
             for line in lines {
                 println!("{line}");
             }
+            for c in r.result["proxy_codecs"].as_array().into_iter().flatten() {
+                println!(
+                    "proxies.codec={} makes proxies with {}",
+                    c["codec"].as_str().unwrap_or_default(),
+                    c["uses"].as_str().unwrap_or("nothing that works here")
+                );
+            }
             let c = &r.result["thumbnail_cache"];
             println!(
                 "thumbnail cache: {} MB in {} files ({})",

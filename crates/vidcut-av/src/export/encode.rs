@@ -53,7 +53,7 @@ pub struct Availability {
 }
 
 impl Availability {
-    fn find(&self, name: &str, pixel: format::Pixel) -> Option<&EncoderStatus> {
+    pub(crate) fn find(&self, name: &str, pixel: format::Pixel) -> Option<&EncoderStatus> {
         let pix = pixel_name(pixel);
         self.encoders
             .iter()
