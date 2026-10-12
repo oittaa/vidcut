@@ -194,10 +194,9 @@ pub fn choose(v: &VideoSettings, share: &PictureShare, can: Abilities) -> ColorC
         HdrMode::Hlg => (Some(Hdr::Hlg), "HDR (HLG): asked for".into()),
         HdrMode::Sdr => (None, "SDR: asked for".into()),
         HdrMode::Auto if share.hdr() == 0 => (None, "SDR: no HDR picture".into()),
-        HdrMode::Auto if !share.most(share.hdr()) => (
-            None,
-            format!("SDR: only {}, less than half", hdr_part(share)),
-        ),
+        HdrMode::Auto if !share.most(share.hdr()) => {
+            (None, format!("SDR: only {}, half or less", hdr_part(share)))
+        }
         HdrMode::Auto if !carries_hdr(v.codec) => (
             None,
             format!("SDR: {} but {codec} can't carry HDR", hdr_part(share)),
@@ -240,7 +239,7 @@ pub fn choose(v: &VideoSettings, share: &PictureShare, can: Abilities) -> ColorC
     } else if share.deep == 0 {
         (8, "8 bits: no picture has more".into())
     } else if !share.most(share.deep) {
-        (8, format!("8 bits: only {}, less than half", deep()))
+        (8, format!("8 bits: only {}, half or less", deep()))
     } else if !can.ten_bit_first {
         let who = can.first.unwrap_or(codec);
         (8, format!("8 bits: {} but {who} can't write 10", deep()))
@@ -295,24 +294,35 @@ impl ColorChoice {
 /// transfer, a codec that carries it when `v`'s can't (HEVC), and no
 /// profile or depth that rules out 10 bits.
 pub fn keep_hdr(v: &VideoSettings, transfer: Hdr) -> Vec<String> {
+    keep_hdr_settings(v, transfer).0
+}
+
+/// [`keep_hdr`]'s overrides, and the settings they make of `v`.
+pub fn keep_hdr_settings(v: &VideoSettings, transfer: Hdr) -> (Vec<String>, VideoSettings) {
     let mut set = Vec::new();
+    let mut out = v.clone();
     if !carries_hdr(v.codec) {
         set.push("video.codec=hevc".to_string());
+        out.codec = VideoCodec::Hevc;
         if v.profile.is_some() {
             set.push("video.profile=null".into());
+            out.profile = None;
         }
     } else if v.codec == VideoCodec::Hevc && v.profile.as_deref() == Some("main") {
         set.push("video.profile=null".into());
+        out.profile = None;
     }
     if v.bit_depth == Some(8) {
         set.push("video.bit_depth=null".into());
+        out.bit_depth = None;
     }
-    let t = match transfer {
-        Hdr::Pq => "pq",
-        Hdr::Hlg => "hlg",
+    let (t, mode) = match transfer {
+        Hdr::Pq => ("pq", HdrMode::Pq),
+        Hdr::Hlg => ("hlg", HdrMode::Hlg),
     };
     set.push(format!("video.hdr={t}"));
-    set
+    out.hdr = mode;
+    (set, out)
 }
 
 #[cfg(test)]
@@ -437,7 +447,7 @@ mod tests {
         // Half isn't most: SDR, and the HDR half is tone-mapped.
         let c = choose(&v, &share(&[("pq", 50), ("sdr", 50)]), ALL);
         assert_eq!((c.hdr, c.tone_mapped), (HdrMode::Sdr, 50));
-        assert!(c.why[0].contains("less than half"), "{:?}", c.why);
+        assert!(c.why[0].contains("half or less"), "{:?}", c.why);
         // Black doesn't dilute it.
         let c = choose(&v, &share(&[("pq", 30), ("black", 500), ("sdr", 20)]), ALL);
         assert_eq!(c.hdr, HdrMode::Pq);

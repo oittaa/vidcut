@@ -544,8 +544,9 @@ pub fn choose_colors(prepared: &mut Prepared, p: &Project, available: &Availabil
 
 /// Quiet notes about a prepared export: HDR picture tone-mapped into SDR
 /// when SDR wasn't asked for (decision D44). Each is `{code, message,
-/// set}`, `set` the `--set` overrides that keep the picture HDR.
-pub fn notes(prepared: &Prepared) -> Vec<Value> {
+/// set}`, `set` the `--set` overrides that keep the picture HDR, empty
+/// when no encoder `available` allows writes that.
+pub fn notes(prepared: &Prepared, available: &Availability) -> Vec<Value> {
     let noted: Vec<&ColorChoice> = prepared
         .outputs
         .iter()
@@ -559,7 +560,12 @@ pub fn notes(prepared: &Prepared) -> Vec<Value> {
     for c in &noted {
         share.add(&c.picture);
     }
-    let set = color::keep_hdr(v, share.transfer());
+    let (set, hdr) = color::keep_hdr_settings(v, share.transfer());
+    let set = if vidcut_av::export::encode::abilities(&hdr, available).ten_bit {
+        set
+    } else {
+        Vec::new()
+    };
     let fps = prepared.outputs[0].plan.fps.as_f64();
     let seconds = share.hdr() as f64 / fps;
     let length = if seconds < 60.0 {
@@ -567,12 +573,17 @@ pub fn notes(prepared: &Prepared) -> Vec<Value> {
     } else {
         format!("{}:{:02}", (seconds / 60.0) as u64, seconds as u64 % 60)
     };
-    let why = first.why[0].trim_start_matches("SDR: ");
+    // The reason, when every file has the same one.
+    let why = if noted.iter().all(|c| c.why[0] == first.why[0]) {
+        format!(" ({})", first.why[0].trim_start_matches("SDR: "))
+    } else {
+        String::new()
+    };
     let message = if prepared.outputs.len() == 1 {
-        format!("{length} of HDR picture will be tone-mapped to SDR ({why})")
+        format!("{length} of HDR picture will be tone-mapped to SDR{why}")
     } else {
         format!(
-            "HDR picture in {} of {} files ({length}) will be tone-mapped to SDR ({why})",
+            "HDR picture in {} of {} files ({length} in all) will be tone-mapped to SDR{why}",
             noted.len(),
             prepared.outputs.len()
         )
@@ -598,7 +609,7 @@ pub fn describe(prepared: &Prepared, available: &Availability) -> Value {
         "preset": prepared.preset,
         "settings": prepared.settings,
         "video_encoder": video_encoder,
-        "notes": notes(prepared),
+        "notes": notes(prepared, available),
         "outputs": prepared.outputs.iter().map(|o| json!({
             "path": o.path,
             "frames": o.plan.frames,

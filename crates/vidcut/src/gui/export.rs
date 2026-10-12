@@ -1627,10 +1627,12 @@ fn plan_view(ui: &mut egui::Ui, d: &Dialog) -> Option<Vec<String>> {
                         .flatten()
                         .filter_map(|s| s.as_str().map(String::from))
                         .collect();
-                    if ui
-                        .small_button("Export HDR")
-                        .on_hover_text(set.join("  "))
-                        .clicked()
+                    // No button when no encoder allowed here writes HDR.
+                    if !set.is_empty()
+                        && ui
+                            .small_button("Export HDR")
+                            .on_hover_text(set.join("  "))
+                            .clicked()
                     {
                         action = Some(set);
                     }
