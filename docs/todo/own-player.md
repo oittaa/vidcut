@@ -15,7 +15,6 @@
   - Linux: VAAPI (AMD, Intel) by the NVDEC path (`VideoReader::open_nvdec_or_cpu`), or Vulkan Video (H.264, HEVC, AV1 on NVIDIA, AMD and Intel).
   - Windows: Vulkan Video, or D3D11/D3D12.
   - macOS: VideoToolbox, into Metal textures through IOSurface.
-- **Faster NVDEC seeks:** FFmpeg's NVDEC path decodes a frame at a time and waits for each (4K H.264 at 253 frames a second here, the CPU at 1,014), so seeks and backward windows take three to four times as long as on a CPU with many cores; a deeper decode queue would help.
 - **Encoding from GPU memory:** NVENC takes CUDA frames, VAAPI its surfaces, VideoToolbox its pixel buffers; scaling stays on the GPU (FFmpeg's CUDA, VAAPI and Vulkan scalers).
 - **Still open in the engine:** choosing the audio device.
 - **Backward 4K play in long GOPs** is short of real time: 3 s backward of 2160p60 HEVC shows 84 of 181 frames on NVDEC and 23 on the CPU.
