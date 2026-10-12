@@ -111,7 +111,7 @@ fn pictures_are_yuv_as_decoded_and_render_as_frame_render() {
     assert_eq!(pic.placement(W, H), (0, 0, W, H));
     let img = pic.to_rgba(W, H).unwrap();
     assert_eq!(code_rgba(&img.rgba, W, H), rendered(&p, 25));
-    // ProRes 4:2:2 10-bit, made P010 keeping its colors.
+    // ProRes 4:2:2 10-bit, made P010.
     let pic = picture(35);
     assert_eq!(pic.layout(), Layout::P010);
     let img = pic.to_rgba(W, H).unwrap();
@@ -129,6 +129,46 @@ fn pictures_are_yuv_as_decoded_and_render_as_frame_render() {
     assert_eq!((colors.matrix, colors.full_range), (Matrix::Bt709, false));
     let img = pic.to_rgba(W, H).unwrap();
     assert_eq!(code_rgba(&img.rgba, W, H), Some(777));
+}
+
+#[test]
+fn a_picture_brought_to_a_display_layout_keeps_its_colors() {
+    use vidcut_av::color::Matrix;
+    use vidcut_av::fixture::Picture as Content;
+    use vidcut_av::player::Layout;
+    // HD ProRes 4:2:2 in colored stripes, read as BT.709: brought to 4:2:0
+    // it must keep its matrix and range, or the stripes would come out tens
+    // of levels off what frame render makes of them.
+    let prores = src(
+        "m1",
+        FixtureSpec::new(
+            VideoCodec::ProRes422Hq,
+            Container::Mov,
+            1280,
+            720,
+            (30, 1),
+            10,
+        )
+        .picture(Content::Colors),
+    );
+    let p = plan(&[clip(&prores, 0, 10)], 0);
+    let (player, _out) = manual(p.clone());
+    player.seek(5);
+    assert!(player.wait_ready(5, Duration::from_secs(10)));
+    let pic = player.present(Instant::now()).unwrap().picture;
+    assert_eq!(pic.layout(), Layout::P010);
+    assert_eq!(pic.colors().matrix, Matrix::Bt709);
+    let ours = pic.to_rgba(W, H).unwrap();
+    let theirs = vidcut_av::export::still::rgba(&piece_at(&p, 5), p.fps, W, H).unwrap();
+    let diff: Vec<u32> = ours
+        .rgba
+        .iter()
+        .zip(&theirs.rgba)
+        .map(|(a, b)| u32::from(a.abs_diff(*b)))
+        .collect();
+    let mean = diff.iter().sum::<u32>() as f64 / diff.len() as f64;
+    // 4:2:0 instead of 4:2:2 blurs the chroma at the stripes' edges.
+    assert!(mean < 1.5, "{mean:.2} levels apart on average");
 }
 
 #[test]

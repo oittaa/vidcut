@@ -509,18 +509,12 @@ impl Relayout {
             )
         };
         let target = if depth > 8 { "p010le" } else { "yuv420p" };
-        let full = unsafe { (*src.as_ptr()).color_range }
-            == ffmpeg::ffi::AVColorRange::AVCOL_RANGE_JPEG
-            || matches!(
-                src.format(),
-                format::Pixel::YUVJ422P | format::Pixel::YUVJ444P | format::Pixel::YUVJ440P
-            );
+        // A YUV picture keeps its matrix and range, named on both sides:
+        // told nothing, swscale would convert to BT.601.
         let spec = if rgb {
-            format!("scale=out_color_matrix=bt709:out_range=tv,format={target}")
-        } else if full {
-            format!("scale=out_range=pc,format={target}")
+            format!("scale=out_color_matrix=bt709:out_range=limited,format={target}")
         } else {
-            format!("format={target}")
+            format!("scale={},format={target}", crate::color::keep(src))
         };
         let sar = src.aspect_ratio();
         let args = format!(
