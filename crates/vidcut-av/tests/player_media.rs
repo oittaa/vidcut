@@ -256,7 +256,10 @@ fn one_player_for_the_source_and_the_timeline() {
                 player.present(Instant::now());
             }
             play(&player, t, -1.0, 3.0);
+            // Where it stopped, shown (backward 4K on NVDEC runs behind):
+            // the picture a person sees before switching.
             let at = player.status().position;
+            assert!(player.wait_ready(at, Duration::from_secs(20)));
             // To the source: a seek, the timeline's frame held.
             let started = Instant::now();
             player.prepare(Some((timeline.clone(), at)));
