@@ -617,13 +617,20 @@ impl Workspace {
                     ui.label(RichText::new(format!("hwdec {hw}")).color(theme::TEXT_DIM));
                 }
                 if let Some(p) = self.project() {
-                    ui.label(
+                    let fps = p.settings.fps;
+                    let format = ui.label(
                         RichText::new(format!(
                             "{}x{} {} fps  rev {}",
-                            p.settings.width, p.settings.height, p.settings.fps, p.rev
+                            p.settings.width,
+                            p.settings.height,
+                            fps.decimal(),
+                            p.rev
                         ))
                         .color(theme::TEXT_DIM),
                     );
+                    if !fps.is_whole() {
+                        format.on_hover_text(format!("{fps} fps"));
+                    }
                 }
             });
         });

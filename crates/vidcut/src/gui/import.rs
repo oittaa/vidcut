@@ -250,7 +250,7 @@ impl Workspace {
                     files,
                     bin,
                     sequences: frames,
-                    fps: self.fps().to_string(),
+                    fps: self.fps().decimal(),
                     error: None,
                 });
             }

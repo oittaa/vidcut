@@ -700,7 +700,11 @@ impl Workspace {
                         Some(v) => {
                             let (w, h) = v.display_size();
                             ui.label(format!("{w}x{h}"));
-                            ui.label(v.fps.to_string());
+                            // 23.976 shown, 24000/1001 on hover.
+                            let rate = ui.label(v.fps.decimal());
+                            if !v.fps.is_whole() {
+                                rate.on_hover_text(format!("{} fps", v.fps));
+                            }
                             ui.label(&v.codec);
                         }
                         None => {

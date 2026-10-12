@@ -43,12 +43,13 @@ pub struct Rational {
 }
 
 /// Frame rates vidcut snaps measured rates to.
-pub const STANDARD_RATES: [(i64, i64); 12] = [
+pub const STANDARD_RATES: [(i64, i64); 13] = [
     (24000, 1001),
     (24, 1),
     (25, 1),
     (30000, 1001),
     (30, 1),
+    (48000, 1001),
     (48, 1),
     (50, 1),
     (60000, 1001),
@@ -95,6 +96,22 @@ impl Rational {
     /// Nearest whole frame to `secs` seconds.
     pub fn secs_to_frames(self, secs: f64) -> i64 {
         (secs * self.num as f64 / self.den as f64).round() as i64
+    }
+
+    /// The rate as people write it: `30`, `23.976`, `29.97`, `59.94` (at
+    /// most three decimals, no trailing zeros). It parses back to this rate
+    /// for the standard ones; `to_string` gives the exact `num/den`.
+    pub fn decimal(self) -> String {
+        if self.den == 1 {
+            return self.num.to_string();
+        }
+        let s = format!("{:.3}", self.as_f64());
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    }
+
+    /// Whether the rate is a whole number of frames a second.
+    pub fn is_whole(self) -> bool {
+        self.den == 1
     }
 
     /// Whole frames per second used for non-drop-frame timecode (30 for 29.97).
@@ -637,6 +654,20 @@ mod tests {
             Some(Rational::new(60000, 1001).unwrap())
         );
         assert_eq!(Rational::snap_standard(31.0), None);
+        // As people write them, and back.
+        for (n, d, shown) in [
+            (24000, 1001, "23.976"),
+            (30000, 1001, "29.97"),
+            (48000, 1001, "47.952"),
+            (60000, 1001, "59.94"),
+            (120000, 1001, "119.88"),
+            (25, 1, "25"),
+            (25, 2, "12.5"),
+        ] {
+            let r = Rational::new(n, d).unwrap();
+            assert_eq!(r.decimal(), shown);
+            assert_eq!(shown.parse::<Rational>().unwrap(), r, "{shown}");
+        }
     }
 
     #[test]

@@ -176,7 +176,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 n("media"),
                 n("markers"),
                 r.result["name"].as_str().unwrap_or_default(),
-                r.result["fps"].as_str().unwrap_or_default(),
+                rate(&r.result["fps"]),
                 r.rev
             );
             let b = &r.result["bundle"];
@@ -681,12 +681,20 @@ fn clip_line(c: &Value) -> String {
     )
 }
 
+/// A frame rate as people write it (`23.976`); JSON keeps the exact
+/// `24000/1001`.
+fn rate(v: &Value) -> String {
+    let text = v.as_str().unwrap_or_default();
+    text.parse::<vidcut_core::time::Rational>()
+        .map_or_else(|_| text.to_string(), |r| r.decimal())
+}
+
 fn timeline(t: &Value) {
     println!(
         "duration {} ({} frames at {} fps)",
         t["duration_tc"].as_str().unwrap_or_default(),
         t["duration"],
-        t["fps"].as_str().unwrap_or_default()
+        rate(&t["fps"])
     );
     for track in t["tracks"].as_array().into_iter().flatten() {
         println!("{}", track["id"].as_str().unwrap_or_default());
@@ -738,7 +746,7 @@ fn media_list(m: &Value) {
                 "{}x{} {} fps {}",
                 v["width"],
                 v["height"],
-                v["fps"].as_str().unwrap_or_default(),
+                rate(&v["fps"]),
                 v["codec"].as_str().unwrap_or_default()
             ),
         };
@@ -770,7 +778,7 @@ fn summary(s: &Value) {
         s["rev"],
         st["width"],
         st["height"],
-        st["fps"].as_str().unwrap_or_default(),
+        rate(&st["fps"]),
         st["sample_rate"],
         st["channels"],
         if st["ripple_on"] == true { "on" } else { "off" }
