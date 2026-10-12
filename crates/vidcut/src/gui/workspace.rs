@@ -936,8 +936,8 @@ impl Workspace {
         self.import.asking() || self.export.asking(&self.snap.jobs)
     }
 
-    /// Keyboard shortcuts (spec §11). Ignored while a text field has focus
-    /// or a question is up: they are read before the windows are drawn, so a
+    /// Keyboard shortcuts (spec §11). Ignored while a widget has focus or a
+    /// question is up: they are read before the windows are drawn, so a
     /// modal doesn't stop them itself.
     fn keys(&mut self, ctx: &egui::Context) {
         // `VIDCUT_DEBUG_PLAYER=1` traces key presses too: what a keyboard
@@ -958,7 +958,29 @@ impl Workspace {
                 }
             });
         }
-        if ctx.egui_wants_keyboard_input() || self.asking() {
+        if ctx.egui_wants_keyboard_input() {
+            return;
+        }
+        if self.asking() {
+            // Panels drawn after this read keys too (a drag in progress
+            // reads N), so nothing behind the question sees them. A pressed
+            // Escape stays for the question.
+            ctx.input_mut(|i| {
+                i.events.retain(|e| match e {
+                    egui::Event::Key {
+                        key: Key::Escape,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } => !modifiers.any(),
+                    egui::Event::Key { .. }
+                    | egui::Event::Text(_)
+                    | egui::Event::Copy
+                    | egui::Event::Cut
+                    | egui::Event::Paste(_) => false,
+                    _ => true,
+                });
+            });
             return;
         }
         if ctx.input(|i| i.modifiers.command && i.key_pressed(Key::Comma)) {
@@ -1535,8 +1557,9 @@ pub(super) fn dim(text: impl Into<String>) -> RichText {
     RichText::new(text.into()).color(theme::TEXT_DIM)
 }
 
-/// Escape on a question with no popup of its own open: it answers as
-/// Cancel does. Consumed, so nothing behind the question sees it.
+/// Escape on a question with no popup of its own open: it dismisses the
+/// question without acting (Cancel, or Keep Running on the quit question).
+/// Consumed, so nothing behind the question sees it.
 pub(super) fn escape_cancels<T>(ctx: &egui::Context, modal: &egui::ModalResponse<T>) -> bool {
     modal.is_top_modal
         && !modal.any_popup_open

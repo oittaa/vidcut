@@ -81,6 +81,33 @@ fn until(
     }
 }
 
+/// The lower timeline position of `frame`, `dy` pixels into Track 1.
+fn at(harness: &Harness<'_, Workspace>, frame: i64, dy: f32) -> egui::Pos2 {
+    let l = harness.state().timeline_layout().expect("drawn");
+    let v1 = l.lower.get("V1").expect("Track 1's row").rect.rect;
+    egui::pos2(l.lower_scale.xf(frame), v1.top() + dy)
+}
+
+/// Two clicks at `pos`, each press and release a frame apart.
+fn double_click(harness: &mut Harness<'_, Workspace>, pos: egui::Pos2) {
+    harness.event(egui::Event::PointerMoved(pos));
+    harness.step();
+    for pressed in [true, false, true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.step();
+    }
+}
+
+/// Whether the Trim Editor is open.
+fn trim_editor(harness: &Harness<'_, Workspace>) -> bool {
+    has(harness, "edit at ")
+}
+
 fn has(harness: &Harness<'_, Workspace>, text: &str) -> bool {
     harness.query_all_by_label_contains(text).next().is_some()
 }
@@ -160,11 +187,31 @@ fn export_windows() {
         saved: saved.clone(),
         folder: folder.clone(),
     }));
+    // Keys pressed that reach what is drawn after the workspace.
+    let seen = Arc::new(Mutex::new(Vec::new()));
     let mut harness = Harness::builder()
         .with_size(egui::vec2(1600.0, 1000.0))
         .with_step_dt(1.0 / 60.0)
         .with_max_steps(50)
-        .build_ui_state(|ui, ws: &mut Workspace| ws.ui(ui), ws);
+        .build_ui_state(
+            {
+                let seen = seen.clone();
+                move |ui, ws: &mut Workspace| {
+                    ws.ui(ui);
+                    ui.input(|i| {
+                        for e in &i.events {
+                            if let egui::Event::Key {
+                                key, pressed: true, ..
+                            } = e
+                            {
+                                seen.lock().unwrap().push(*key);
+                            }
+                        }
+                    });
+                }
+            },
+            ws,
+        );
     harness.step();
 
     // 1. Quick Export: a preset tile, Export…, the file dialog, then
@@ -274,9 +321,15 @@ fn export_windows() {
     until(&mut harness, "the .otio file", |_| {
         dir.join("quick-p.otio").exists()
     });
-    // With the question up, shortcuts do nothing; Escape cancels it like
-    // its Cancel button.
+    // With the question up, shortcuts do nothing and nothing behind it sees
+    // the keys. Escape dismisses it; the Trim Editor open behind it stays.
     call(&h, "marks.clear", json!({}));
+    call(&h, "player.seek", json!({ "at": 30, "viewer": "timeline" }));
+    harness.step();
+    let pos = at(&harness, 30, 20.0);
+    double_click(&mut harness, pos);
+    harness.step();
+    assert!(trim_editor(&harness), "a double-click on the cut opens it");
     let clips = |h: &live::Handle| h.snapshot().project().map(|p| p.tracks[0].clips.len());
     let before = clips(&h);
     harness.get_by_label("File").click();
@@ -288,10 +341,12 @@ fn export_windows() {
         has(h, "Append to the Timeline")
     });
     harness.step();
-    harness.key_press(egui::Key::I);
-    harness.step();
-    harness.key_press(egui::Key::O);
-    harness.step();
+    seen.lock().unwrap().clear();
+    for key in [egui::Key::I, egui::Key::O, egui::Key::N] {
+        harness.key_press(key);
+        harness.step();
+    }
+    assert_eq!(*seen.lock().unwrap(), [], "keys got past the question");
     let started = Instant::now();
     while started.elapsed() < Duration::from_millis(300) {
         std::thread::sleep(Duration::from_millis(5));
@@ -305,7 +360,11 @@ fn export_windows() {
     harness.key_press(egui::Key::Escape);
     harness.step();
     assert!(!has(&harness, "Append to the Timeline"));
+    assert!(trim_editor(&harness), "Esc closed the Trim Editor too");
     assert_eq!(clips(&h), before);
+    harness.key_press(egui::Key::Escape);
+    harness.step();
+    assert!(!trim_editor(&harness));
     harness.get_by_label("File").click();
     until(&mut harness, "the File menu", |h| {
         has(h, "Import Timeline (OTIO)…")
