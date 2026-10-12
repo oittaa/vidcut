@@ -102,6 +102,10 @@ fn lossless() -> ExportSettings {
             width: None,
             height: None,
             hdr: HdrMode::Sdr,
+            passes: None,
+            first_pass: Default::default(),
+            multipass: Default::default(),
+            lookahead: None,
         }),
         audio: Some(AudioSettings {
             codec: ACodec::PcmS16,
@@ -818,6 +822,155 @@ fn auto_color_follows_the_files() {
     assert!(report.color.is_none());
     let info = vidcut_av::probe::probe(&out).unwrap().video.unwrap();
     assert_eq!(info.pix_fmt, "yuv420p");
+}
+
+/// Settings for a target bitrate with `passes` (decision D45), on the CPU.
+fn at_bitrate(codec: VCodec, bitrate: u64, passes: u8) -> ExportSettings {
+    let mut s = lossless();
+    s.audio = None;
+    let v = s.video.as_mut().unwrap();
+    v.codec = codec;
+    v.quality = None;
+    v.bitrate = Some(bitrate);
+    v.passes = Some(passes);
+    v.speed = None;
+    v.bit_depth = Some(8);
+    s
+}
+
+/// Bits per second of a file `seconds` long.
+fn bitrate_of(path: &Path, seconds: f64) -> f64 {
+    std::fs::metadata(path).unwrap().len() as f64 * 8.0 / seconds
+}
+
+/// Decision D45: two passes come closer to a target bitrate than one in
+/// x264, x265 and VP9 (statistics in a file, in x265's parameters, and in
+/// memory), every frame where it belongs; progress counts both passes,
+/// and the statistics are gone afterwards.
+#[test]
+fn two_passes_reach_the_bitrate_and_keep_every_frame() {
+    let fps = Rational::new(30, 1).unwrap();
+    // Barcodes, easy to compress, around noise, which is hard: one pass
+    // finds out late what the noise costs, two know it from the start.
+    let barcode =
+        src(FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 300).no_audio());
+    let noise = src(
+        FixtureSpec::new(VideoCodec::Ffv1, Container::Mkv, 320, 180, (30, 1), 150)
+            .picture(vidcut_av::fixture::Picture::Noise)
+            .no_audio(),
+    );
+    let p = plan(
+        fps,
+        320,
+        180,
+        vec![
+            v(&barcode, 0, 150),
+            v(&noise, 0, 150),
+            v(&barcode, 150, 150),
+        ],
+        vec![],
+    );
+    let want: Vec<Option<u32>> = (0..150).map(Some).collect();
+    let seconds = 450.0 / 30.0;
+    let dir = out_dir("passes");
+    // One pass overshoots by 90% (x264) to 500% (VP9) here; two within 7%.
+    let target = 800_000;
+    for codec in [VCodec::H264, VCodec::Hevc, VCodec::Vp9] {
+        let mut errors = Vec::new();
+        for passes in [1, 2] {
+            let out = dir.path().join(format!("{codec:?}-{passes}.mkv"));
+            let mut seen = Vec::new();
+            let report = export::run(
+                &p,
+                &at_bitrate(codec, target, passes),
+                &out,
+                &Availability::default(),
+                &AtomicBool::new(false),
+                &mut |pr| seen.push((pr.pass, pr.passes, pr.frames)),
+            )
+            .unwrap_or_else(|e| panic!("{codec:?} in {passes}: {e}"));
+            assert_eq!(report.passes, Some(passes), "{codec:?}");
+            // Every frame of every pass, in order.
+            let runs = passes;
+            let expect: Vec<(u8, u8, i64)> = (1..=runs)
+                .flat_map(|pass| (1..=450).map(move |f| (pass, runs, f)))
+                .collect();
+            assert_eq!(seen, expect, "{codec:?} in {passes}: progress");
+            assert!(
+                !export::passes_path(&out).exists(),
+                "{codec:?}: statistics left"
+            );
+            let got = bitrate_of(&out, seconds);
+            let error = got / target as f64 - 1.0;
+            eprintln!(
+                "{codec:?} in {passes} pass(es): {:.0} kb/s for {} ({:+.1}%)",
+                got / 1000.0,
+                target / 1000,
+                error * 100.0
+            );
+            errors.push(error.abs());
+            if passes == 2 {
+                let codes = barcodes(&out);
+                assert_eq!(codes.len(), 450, "{codec:?}");
+                assert_eq!(codes[..150], want[..], "{codec:?}: barcodes");
+                assert_eq!(
+                    codes[300..],
+                    (150..300).map(Some).collect::<Vec<_>>()[..],
+                    "{codec:?}: barcodes"
+                );
+            }
+        }
+        assert!(
+            errors[1] <= errors[0].max(0.02),
+            "{codec:?}: two passes off by {:.1}%, one by {:.1}%",
+            errors[1] * 100.0,
+            errors[0] * 100.0
+        );
+        assert!(
+            errors[1] < 0.1,
+            "{codec:?}: two passes off by {:.1}%",
+            errors[1] * 100.0
+        );
+    }
+}
+
+/// Decision D45: cancelling in either pass leaves no file, no partial file
+/// and no statistics.
+#[test]
+fn cancelling_either_pass_leaves_nothing() {
+    let fps = Rational::new(30, 1).unwrap();
+    let a =
+        src(FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 90).no_audio());
+    let p = plan(fps, 320, 180, vec![v(&a, 0, 90)], vec![]);
+    let dir = out_dir("passes-cancel");
+    for codec in [VCodec::H264, VCodec::Hevc, VCodec::Vp9] {
+        for pass in [1, 2] {
+            let out = dir.path().join("out.mkv");
+            let cancel = AtomicBool::new(false);
+            let mut stats_seen = false;
+            let err = export::run(
+                &p,
+                &at_bitrate(codec, 200_000, 2),
+                &out,
+                &Availability::default(),
+                &cancel,
+                &mut |pr| {
+                    stats_seen |= export::passes_path(&out).exists();
+                    if pr.pass == pass && pr.frames == 10 {
+                        cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                },
+            )
+            .unwrap_err();
+            assert!(export::is_cancelled(&err), "{codec:?} pass {pass}: {err}");
+            assert!(stats_seen, "{codec:?}: statistics written while it ran");
+            assert_eq!(
+                std::fs::read_dir(dir.path()).unwrap().count(),
+                0,
+                "{codec:?} pass {pass}: something left"
+            );
+        }
+    }
 }
 
 #[test]
@@ -1644,6 +1797,10 @@ fn gpu_encoders_produce_valid_frame_exact_output() {
                 width: None,
                 height: None,
                 hdr: HdrMode::Sdr,
+                passes: None,
+                first_pass: Default::default(),
+                multipass: Default::default(),
+                lookahead: None,
             }),
             audio: Some(AudioSettings {
                 codec: ACodec::Aac,
@@ -1907,6 +2064,10 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
                 width: None,
                 height: None,
                 hdr: HdrMode::Sdr,
+                passes: None,
+                first_pass: Default::default(),
+                multipass: Default::default(),
+                lookahead: None,
             }),
             audio: None,
             declick: false,
@@ -2116,6 +2277,10 @@ fn nvenc_exports_convert_bt601_on_the_gpu_as_the_cpu_does() {
                     width: None,
                     height: None,
                     hdr: HdrMode::Sdr,
+                    passes: None,
+                    first_pass: Default::default(),
+                    multipass: Default::default(),
+                    lookahead: None,
                 }),
                 audio: None,
                 declick: false,
@@ -2219,6 +2384,10 @@ fn nvenc_exports_convert_hdr_on_the_gpu_as_the_cpu_does() {
                 Some(Hdr::Pq) => HdrMode::Pq,
                 Some(Hdr::Hlg) => HdrMode::Hlg,
             },
+            passes: None,
+            first_pass: Default::default(),
+            multipass: Default::default(),
+            lookahead: None,
         }),
         audio: None,
         declick: false,
@@ -2381,5 +2550,59 @@ fn nvenc_auto_color_chooses_as_the_cpu_does() {
                 );
             }
         }
+    }
+}
+
+/// Decision D45 through NVENC: a bitrate makes it look at each frame twice
+/// within one encode, the frames decoded and scaled on the GPU as in one
+/// pass, every frame where it belongs; one run, so one pass reported in
+/// progress.
+#[cfg(feature = "gpu-tests")]
+#[test]
+fn nvenc_makes_two_passes_in_one_encode() {
+    use vidcut_core::export::Multipass;
+    let available = vidcut_av::export::encode::detect();
+    if !available
+        .encoders
+        .iter()
+        .any(|e| e.ok && e.encoder == "h264_nvenc")
+    {
+        eprintln!("skipping: no h264_nvenc here");
+        return;
+    }
+    let fps = Rational::new(30, 1).unwrap();
+    let a =
+        src(FixtureSpec::new(VideoCodec::H264, Container::Mp4, 1280, 720, (30, 1), 90).no_audio());
+    let p = plan(fps, 1280, 720, vec![v(&a, 0, 90)], vec![]);
+    let dir = out_dir("gpu-passes");
+    for (multipass, passes) in [
+        (Multipass::Quarter, None),
+        (Multipass::Full, Some(2)),
+        (Multipass::Quarter, Some(1)),
+    ] {
+        let mut settings = at_bitrate(VCodec::H264, 2_000_000, 1);
+        let video = settings.video.as_mut().unwrap();
+        video.encoder = EncoderChoice::Nvenc;
+        video.passes = passes;
+        video.multipass = multipass;
+        video.lookahead = Some(16);
+        let out = dir.path().join(format!("{multipass:?}-{passes:?}.mp4"));
+        let mut runs = Vec::new();
+        let report = export::run(
+            &p,
+            &settings,
+            &out,
+            &available,
+            &AtomicBool::new(false),
+            &mut |pr| runs.push((pr.pass, pr.passes)),
+        )
+        .unwrap_or_else(|e| panic!("{multipass:?}: {e}"));
+        let want_passes = if passes == Some(1) { 1 } else { 2 };
+        assert_eq!(report.passes, Some(want_passes), "{multipass:?} {passes:?}");
+        assert!(runs.iter().all(|&r| r == (1, 1)), "one run");
+        assert_eq!(report.gpu_frames, 90, "frames on the GPU");
+        let want: Vec<Option<u32>> = (0..90).map(Some).collect();
+        assert_eq!(barcodes(&out), want, "{multipass:?} {passes:?}");
+        assert!(!export::passes_path(&out).exists());
     }
 }

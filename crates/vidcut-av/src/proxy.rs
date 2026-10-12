@@ -284,11 +284,11 @@ impl Shown<'_> {
     fn frame(&self, frames: u64) {
         crate::progress::report(
             self.dest,
-            crate::export::Progress {
-                frames: frames as i64,
-                total: self.total.max(frames as i64),
-                elapsed: self.started.elapsed(),
-            },
+            crate::export::Progress::single(
+                frames as i64,
+                self.total.max(frames as i64),
+                self.started.elapsed(),
+            ),
         );
     }
 }

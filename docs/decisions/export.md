@@ -6,7 +6,7 @@
 - [`crates/vidcut-av/tests/export.rs`](../../crates/vidcut-av/tests/export.rs): frame and sample exactness, A/V offset, rate conversion, all presets, cancellation, memory, and GPU encoders behind `--features vidcut-av/gpu-tests`.
 - [`crates/vidcut/tests/cli.rs`](../../crates/vidcut/tests/cli.rs): export through the CLI.
 
-## 1. In-process, streaming, one pass
+## 1. In-process and streaming
 
 **Where it runs:**
 - Export runs in-process on the FFmpeg libraries (`vidcut-av::export`). There are no ffmpeg CLI subprocesses (a user decision).
@@ -21,6 +21,7 @@
 - For each output frame, it pulls the next video frame from the current piece's decoder, then exactly the audio samples that frame spans from each lane, and encodes them.
 - Memory stays flat with the segment count: each reader (video, and each audio lane) has its current file open, plus the next one while it opens. The test with 400 segments verifies this, in a process of its own.
 - This replaced the plan's earlier idea of one big filter graph, which needed about 155 MB per input in measurements.
+- A two-pass export (§5, Passes) runs the video through the encoder twice: the first time to measure, muxing nothing, then as above.
 
 **Starting a piece** (`export/video.rs`, `export/audio.rs`, `export/ahead.rs`):
 - **Same file as the piece before:** the reader reads on. A piece that starts at most 1 s past where the decoder is decodes on to its first frame (or skips samples); anything else seeks the open file. A frame repeated across the cut needs neither.
@@ -131,6 +132,38 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
 - **Measured**, 60 s of VP8 (BT.601) 1920×800 through NVENC: 1438 of 1438 frames on the GPU, 15 CPU-seconds down to 3.7, the same wall time (5 s). 60 s of 1080p30 H.264 turned a quarter: 8.6 s and 10.6 CPU-seconds before, 7.1 s and 3.6 now (PSNR 48 dB against the CPU's). 30 s of 4K60 H.264 turned, to 2160×3840: 25 s either way (NVENC), 30 CPU-seconds down to 3.3. Into 1080p 10-bit HEVC with black bars: 60 s of 1280×534 H.264, 4.4 s and 16.3 CPU-seconds before, 4.3 s and 3.0 now (PSNR 55 dB against the CPU's); the VP8, 5.9 s and 27 before, 5.3 s and 4.2 now. 60 s of 4K60 10-bit AV1: to 1080p H.264 34.7 s and 129 CPU-seconds before, 16.4 s and 3.3 now; to 2160p 53.7 s and 149 before, 51.9 s and 3.9 now, NVENC's default preset (p5) setting the pace. 1080p H.264 sources: the same time (NVENC-bound), 8.3 CPU-seconds down to 3.2. HDR, on 30 s of the 4K60 clip made PQ and HLG with SDR white at 1000 nits (so most of the picture is above the knee): PQ into 1080p H.264 13.8 s and 137 CPU-seconds before, 7.1 s and 2.0 now (PSNR 48.5 dB against the CPU's); into 2160p 41.8 s and 418 before, 25.3 s and 3.4 now (51.0 dB); HLG into 1080p 14.3 s and 138 before, 7.1 s and 2.1 now (48.5 dB). Into HDR, 10-bit HEVC at 2160p: the SDR clip into PQ 24.3 s and 211 before, 19.6 s and 2.5 now (56.5 dB); PQ into HLG 25.8 s and 233 before, 17.8 s and 2.6 now (55.6 dB). 60 s of 1080i (made from the 4K60 clip, top field first) into 1080p H.264: 6.8 s and 10.8 CPU-seconds before, 6.7 s and 0.8 now (51.5 dB; the median frame 52.4, 3 of 1800 under 45).
 - The report counts the frames made on the GPU (`gpu_frames`).
 - **Tests:** `tests/export.rs` (`gpu-tests`) exports a plan of 720p H.264, 10-bit HEVC, 10-bit AV1, 60 and 24 fps sources, a seek back, black, an SD (BT.601) piece, pieces stored turned 90°, 180° and 270° (one in 10 bits), and 4:3 and 2.4:1 pieces that need black bars through NVENC in 8 and 10 bits: every frame's barcode is the CPU export's, every piece's frames but black were made on the GPU, and black is video-range black. Interlaced pieces among them (25 fps into 30, a seek back, and SD, which libplacebo converts after deinterlacing) pick the CPU's frames and don't comb. Colored 4:3 SD pictures (`Picture::Colors`) in 8 and 10 bits check the BT.601 conversion into both depths: each stripe within 1.5 levels of the exact numbers and 2 of the CPU's, and the black beside it. HDR: PQ, HLG stored turned, 4:3 PQ, colored PQ, SDR and colored SD pieces into 8 and 10-bit SDR, PQ and HLG: every frame but black made on the GPU, every barcode the CPU export's, the barcode cells' black and white and the stripes within two levels of the CPU's. Without the GPU, `hdr_colors_keep_their_matrix` checks PQ stripes into SDR against the math and kept as PQ against the source, and NV12 and P010 frames against the planar ones.
+
+**Passes** (spec D45, `video.passes`, `first_pass`, `multipass`, `lookahead`):
+- **What makes two:** x264, x265 and VP9 encode the range twice (`Passes::TwoRuns`): the first run feeds every frame to an encoder opened with `AV_CODEC_FLAG_PASS1`, drops its packets and writes nothing but statistics; the second opens the encoder again with `PASS2` and the statistics, and encodes as in one pass, with the audio. NVENC looks at each frame twice inside one encode (`multipass`, `Passes::TwoInside`). VAAPI and ProRes and DNxHR make one. SVT-AV1 makes one in FFmpeg 8.0: its wrapper ignores the pass flags, and `svtav1-params` can't hand the statistics back ([todo](../todo/svt-av1-two-passes.md)).
+- **Unset `passes`:** 2 with a target bitrate, 1 with constant quality, where the encoder makes two; one elsewhere. Two asked for where an encoder can't: an error for that encoder, so `auto` moves on to one that can (VAAPI to the CPU). Two need a bitrate (validation): at constant quality a second pass changes nothing worth the time.
+- **Statistics:** x264 writes a file it names with the `stats` option (and its MB-tree file); x265 takes `pass` and `stats` in `x265-params`, its path escaped (FFmpeg 8.0's wrapper ignores the flags), and writes a `.cutree` file beside it; both finish their files when the encoder closes, so the first run's encoder is freed before the second opens. libvpx hands its statistics back in `stats_out` (base64, at the flush); vidcut copies them into an `av_malloc`'d `stats_in` for the second, frees both itself (FFmpeg doesn't), and keeps them in memory. The files live in a hidden `.<name>.passes` folder beside the output, on the output's disk: x264's and x265's per-block statistics grow to tens of kilobytes a frame at 4K, too much for a RAM-backed `/tmp` on a long export. The folder is removed when the export ends, however it ends.
+- **First pass (`first_pass`):** `fast` (the default) is x264's `fastfirstpass`, x265 without `slow-firstpass`, and VP9 at speed 4 or faster in the first run. `full` gives the first run the second's settings.
+- **NVENC:** `multipass` `quarter` (the default, `qres`) or `full` (`fullres`) for the first look; `lookahead` (`rc-lookahead`) 32 frames unless set, 0 for none, in both rate controls.
+- **Progress** reports the run (`pass`, `passes`), each counting its frames; the CLI's bar, a job's `progress` and `eta` cover both, and the Jobs window says "pass 1 of 2". Cancelling in either run stops it, and the `.part` file and the statistics go. A per-clip export makes both runs for each file. Pieces NVDEC decodes stay on the GPU in NVENC's single run; the CPU encoders' two runs take frames from the CPU, as in one.
+- **Loudness normalization** measures the mix before the second run, as before the one; its measure decodes only audio, a small part of the time, so it isn't folded into the first run.
+- **Measured** with `examples/passes.rs` (60 s stretches; bitrate from the file size; luma PSNR against the source frames as the export reads them): Tears of Steel 720p from 2:00 at 2 Mb/s, and Big Buck Bunny 1080p30 from 1:00 at 3 Mb/s. Times on the 16-thread dev machine.
+
+| | 1 pass | 2, fast first | 2, full first |
+|---|---|---|---|
+| x264, ToS | +1.0%, 46.13 dB, 3.7 s | +0.5%, 46.14 dB, 4.7 s | +0.4%, 46.09 dB, 7.1 s |
+| x264, BBB | −3.6%, 49.19 dB (worst frame 36.7), 8.0 s | −0.4%, 49.44 dB (39.4), 10.1 s | +1.1%, 49.50 dB (39.7), 13.9 s |
+| x265, ToS | +2.5%, 47.20 dB, 16.7 s | +0.3%, 47.14 dB, 29.6 s | +0.3%, 47.14 dB, 32.8 s |
+| x265, BBB | −2.6%, 50.01 dB (37.8), 33.0 s | −1.0%, 50.31 dB (42.1), 59.1 s | −0.1%, 50.32 dB (42.6), 60.6 s |
+| VP9, ToS | +2.9%, 45.99 dB, 67.5 s | +0.1%, 46.67 dB, 118.5 s | the same (speed 4 already) |
+| VP9, BBB | +28.3%, 49.34 dB (35.7), 150.6 s | −1.0%, 49.22 dB (36.2) on 28% fewer bits, 240.9 s | |
+
+  Two passes land within about 1% of the target where one is off by up to 4% (x264, x265) and 28% (VP9), and lift the worst frames by up to 4.3 dB; they cost 25–35% more time with x264, 60–80% with x265 and VP9. The fast first pass saves a quarter to a third of x264's time (3–10% of x265's) for at most 0.06 dB. On a 15 s fixture of barcodes around noise at 800 kb/s, one pass overshoots by 87% (x264), 109% (x265) and 494% (VP9), two by 1.2%, 6.9% and 7.1% (`tests/export.rs`).
+- **NVENC**, the same stretches (decoding on NVDEC sets the pace of H.264 and HEVC, so multipass costs them nothing):
+
+| | one pass | quarter | full | one, lookahead 32 | quarter, lookahead 32 |
+|---|---|---|---|---|---|
+| H.264, BBB 3 Mb/s | +5.3%, 48.57 dB | +1.6%, 48.32 dB | +1.4%, 48.37 dB | +4.8%, 49.46 dB | +1.9%, 49.48 dB |
+| HEVC, BBB 3 Mb/s | +5.4%, 48.52 dB | +2.8%, 48.46 dB | +3.1%, 48.44 dB, +10% time | +6.1%, 49.29 dB | +4.1%, 49.37 dB |
+| AV1, BBB 3 Mb/s | +4.5%, 48.98 dB, 4.6 s | +4.0%, 48.90 dB, 4.8 s | +3.5%, 48.85 dB, 5.8 s | +3.8%, 49.81 dB | +3.3%, 49.63 dB |
+| H.264, ToS 0.8 Mb/s | +5.1%, 43.71 dB | +5.1%, 43.71 dB | +5.1%, 43.71 dB | +4.6%, 43.82 dB | +4.5%, 43.83 dB |
+| HEVC, ToS 0.8 Mb/s | +7.4%, 44.51 dB | +7.3%, 44.52 dB | +7.5%, 44.52 dB | +5.9%, 44.55 dB | +5.9%, 44.57 dB |
+
+  Multipass brings the bitrate closer on the animation and changes little on the film; full resolution adds time for nothing more, so `quarter`. Looking 32 frames ahead adds 0.1 to 0.9 dB, costing time only in AV1 on the smaller picture (1.3 s to 1.6 s); at constant quality (H.264 and HEVC at 23, AV1 at 32) it also adds 0.7 to 0.8 dB on BBB with 2.5–4% smaller files, and 0.1 to 0.2 dB with 1% larger ones on ToS. So it is on by default, whatever the rate control. NVENC overshoots by 4–8% either way, its VBR allowed up to 1.5 times the target.
 
 **Details:**
 - Quality 0 with libx264 means lossless, which requires the High 4:4:4 Predictive profile.

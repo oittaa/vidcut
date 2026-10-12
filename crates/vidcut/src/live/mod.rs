@@ -218,6 +218,9 @@ pub(crate) enum Msg {
         output: usize,
         frames: i64,
         total: i64,
+        /// The run over the range, of `passes` (decision D45).
+        pass: u8,
+        passes: u8,
     },
     JobDone {
         id: String,
@@ -871,12 +874,14 @@ impl Live {
                 output,
                 frames,
                 total,
+                pass,
+                passes,
             } => {
                 if let Some(j) = Arc::make_mut(&mut self.jobs)
                     .iter_mut()
                     .find(|j| j.id == id)
                 {
-                    j.progressed(output, frames, total);
+                    j.progressed(output, frames, total, (pass, passes));
                 }
             }
             Msg::JobDone { id, result } => self.job_done(id, result),
@@ -1288,11 +1293,14 @@ impl Live {
                     output: i,
                     frames: p.frames,
                     total: p.total,
+                    pass: p.pass,
+                    passes: p.passes,
                 });
                 if let Some(ptx) = &progress_tx {
                     let _ = ptx.send(ReplyEvent::Progress(json!({
                         "job": id, "output": i, "outputs": n, "path": out,
                         "frames": p.frames, "total": p.total,
+                        "pass": p.pass, "passes": p.passes,
                         "elapsed": p.elapsed.as_secs_f64(),
                     })));
                 }
@@ -1380,6 +1388,8 @@ impl Live {
                             output,
                             frames: p.frames,
                             total: p.total,
+                            pass: p.pass,
+                            passes: p.passes,
                         });
                         if let Some(ptx) = &progress {
                             let _ = ptx.send(ReplyEvent::Progress(json!({
@@ -2010,6 +2020,7 @@ impl Live {
                             let _ = tx.send(ReplyEvent::Progress(json!({
                                 "output": i, "outputs": n, "path": out,
                                 "frames": p.frames, "total": p.total,
+                                "pass": p.pass, "passes": p.passes,
                                 "elapsed": p.elapsed.as_secs_f64(),
                             })));
                         }

@@ -1341,3 +1341,81 @@ print(tl.find_clips()[1].media_reference.target_url_for_image_number(0))
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
 }
+
+/// Decision D45 from the command line: the plan names the passes, a
+/// bitrate makes two on the CPU encoders (one with constant quality), and
+/// a per-clip export makes two for every file, leaving no statistics.
+#[test]
+fn two_pass_exports_from_the_command_line() {
+    let sb = Sandbox::new("passes");
+    let a = fixture(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (30, 1),
+        90,
+    ));
+    sb.cmd(&["project", "create"])
+        .arg(sb.project())
+        .output()
+        .unwrap();
+    sb.ok(&["media", "add", s(&a)]);
+    sb.ok(&["edit", "append", "m1", "--range", "0f..45f"]);
+    sb.ok(&["edit", "append", "m1", "--range", "45f..90f"]);
+    let out = sb.dir.path().join("out.mp4");
+    let bitrate = [
+        "--set",
+        "video.bitrate=300000",
+        "--set",
+        "video.quality=null",
+    ];
+    let plan = |extra: &[&str]| {
+        let mut args = vec!["export", "plan", s(&out), "--encoder", "cpu"];
+        args.extend_from_slice(extra);
+        sb.ok(&args)["result"]["video_encoder"]["passes"].clone()
+    };
+    assert_eq!(
+        plan(&bitrate),
+        serde_json::json!({"kind": "two_runs", "fast_first": true})
+    );
+    assert_eq!(plan(&[]), serde_json::json!({"kind": "one"}));
+    let mut full = bitrate.to_vec();
+    full.extend(["--set", "video.first_pass=full"]);
+    assert_eq!(plan(&full)["fast_first"], false);
+    let mut one = bitrate.to_vec();
+    one.extend(["--set", "video.passes=1"]);
+    assert_eq!(plan(&one)["kind"], "one");
+    // Two passes need a bitrate.
+    let e = sb.fails(2, &["export", "plan", s(&out), "--set", "video.passes=2"]);
+    assert!(e["message"].as_str().unwrap().contains("bitrate"), "{e}");
+
+    // Per clip: two passes for each file, every frame where it belongs.
+    let clips = sb.dir.path().join("clips");
+    let mut args = vec![
+        "export",
+        "start",
+        s(&clips),
+        "--per-clip",
+        "--encoder",
+        "cpu",
+        "--set",
+        "video.speed=ultrafast",
+    ];
+    args.extend_from_slice(&bitrate);
+    let r = sb.ok(&args);
+    let outputs = r["result"]["outputs"].as_array().unwrap();
+    assert_eq!(outputs.len(), 2);
+    for (i, o) in outputs.iter().enumerate() {
+        assert_eq!(o["passes"], 2);
+        let path = PathBuf::from(o["output"].as_str().unwrap());
+        let start = 45 * i as u32;
+        let want: Vec<Option<u32>> = (start..start + 45).map(Some).collect();
+        assert_eq!(barcodes(&path), want, "{}", path.display());
+    }
+    let left: Vec<String> = std::fs::read_dir(&clips)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(left.len(), 2, "only the files: {left:?}");
+}

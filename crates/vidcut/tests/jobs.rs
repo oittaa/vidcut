@@ -163,9 +163,14 @@ fn export_jobs() {
         .collect();
     assert!(leftovers.is_empty(), "{leftovers:?}");
 
-    // 3. The GUI's exports are jobs too (it never waits for them).
+    // 3. The GUI's exports are jobs too (it never waits for them). At a
+    // bitrate, it makes two passes, which the job says (decision D45).
     let c = dir.join("c.mkv");
-    let e = Envelope::from_json(json!({ "method": "export.start", "params": quick(&c) })).unwrap();
+    let two = json!({
+        "output": c, "encoder": "cpu",
+        "set": ["video.quality=null", "video.bitrate=500000", "video.speed=ultrafast"],
+    });
+    let e = Envelope::from_json(json!({ "method": "export.start", "params": two })).unwrap();
     h.send(e);
     let mut snapshot_jobs = 0;
     for _ in 0..500 {
@@ -181,6 +186,9 @@ fn export_jobs() {
         (j3["origin"].as_str(), j3["state"].as_str()),
         (Some("gui"), Some("done"))
     );
+    assert_eq!((&j3["pass"], &j3["passes"]), (&json!(2), &json!(2)));
+    assert_eq!(j3["frames"], j3["total"]);
+    assert_eq!(j3["result"]["outputs"][0]["passes"], 2);
     assert!(c.exists());
     let snap = h.snapshot();
     assert_eq!(

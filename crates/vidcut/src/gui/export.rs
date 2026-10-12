@@ -1519,11 +1519,16 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, closable: bool, send: impl Fn(&str, 
                     .desired_width(360.0),
             );
             ui.label(dim(format!(
-                "{} / {} frames{}",
+                "{} / {} frames{}{}",
                 j.frames,
                 j.total,
                 if j.outputs.len() > 1 {
                     format!(" · file {} of {}", j.output + 1, j.outputs.len())
+                } else {
+                    String::new()
+                },
+                if j.passes > 1 {
+                    format!(" · pass {} of {}", j.pass, j.passes)
                 } else {
                     String::new()
                 }
@@ -1683,8 +1688,90 @@ fn keep_hdr(d: &mut Dialog, set: &[String]) {
     }
 }
 
+/// Passes and the settings of the encoder's way of making them (decision
+/// D45): the first run's speed for x264, x265 and VP9; for NVENC its
+/// first look and lookahead.
+fn passes_row(ui: &mut egui::Ui, v: &mut VideoSettings, planned: &Value) {
+    use vidcut_core::export::{FirstPass, Multipass};
+    let label = |p: Option<u8>| match p {
+        None => "auto".to_string(),
+        Some(n) => n.to_string(),
+    };
+    ui.label(dim("passes"));
+    egui::ComboBox::from_id_salt("export-passes")
+        .selected_text(label(v.passes))
+        .show_ui(ui, |ui| {
+            for p in [None, Some(1), Some(2)] {
+                ui.selectable_value(&mut v.passes, p, label(p));
+            }
+        })
+        .response
+        .on_hover_text(
+            "auto: two where the encoder makes them. Two reach the bitrate more closely: \
+             x264, x265 and VP9 encode twice, NVENC looks at each frame twice.",
+        );
+    match planned["passes"]["kind"].as_str() {
+        Some("two_runs") => {
+            ui.label(dim("first pass"));
+            egui::ComboBox::from_id_salt("export-first-pass")
+                .selected_text(name(&v.first_pass))
+                .show_ui(ui, |ui| {
+                    for f in [FirstPass::Fast, FirstPass::Full] {
+                        ui.selectable_value(&mut v.first_pass, f, name(&f));
+                    }
+                })
+                .response
+                .on_hover_text("fast: quicker settings for the measuring run");
+        }
+        Some("two_inside") => {
+            ui.label(dim("first look"));
+            egui::ComboBox::from_id_salt("export-multipass")
+                .selected_text(name(&v.multipass))
+                .show_ui(ui, |ui| {
+                    for m in [Multipass::Quarter, Multipass::Full] {
+                        ui.selectable_value(&mut v.multipass, m, name(&m));
+                    }
+                })
+                .response
+                .on_hover_text(
+                    "NVENC's first pass over each frame: at a quarter or full resolution",
+                );
+        }
+        _ => {}
+    }
+    if planned["name"]
+        .as_str()
+        .is_some_and(|n| n.ends_with("_nvenc"))
+    {
+        ui.label(dim("lookahead"));
+        let mut n = v
+            .lookahead
+            .unwrap_or(vidcut_core::export::DEFAULT_LOOKAHEAD);
+        let max = vidcut_core::export::MAX_LOOKAHEAD;
+        if ui
+            .add(
+                egui::DragValue::new(&mut n)
+                    .range(0..=max)
+                    .suffix(" frames"),
+            )
+            .on_hover_text("frames NVENC looks ahead for rate control; 0: none")
+            .changed()
+        {
+            v.lookahead = (n != vidcut_core::export::DEFAULT_LOOKAHEAD).then_some(n);
+        }
+    }
+}
+
 /// Container, video and audio settings.
 fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u32, u16)) {
+    // The encoder the plan says will run: its passes decide which of their
+    // settings apply (decision D45).
+    let planned = d
+        .plan_result
+        .as_ref()
+        .and_then(|r| r.as_ref().ok())
+        .map(|p| p["video_encoder"].clone())
+        .unwrap_or_default();
     egui::Grid::new("export-settings")
         .num_columns(2)
         .spacing([12.0, 6.0])
@@ -1735,6 +1822,10 @@ fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u3
                                 width: None,
                                 height: None,
                                 hdr: HdrMode::Auto,
+                                passes: None,
+                                first_pass: Default::default(),
+                                multipass: Default::default(),
+                                lookahead: None,
                             }),
                         );
                         fit_codecs(&mut d.settings);
@@ -1781,6 +1872,8 @@ fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u3
                     if ui.radio_value(&mut by_quality, true, "Quality").changed() {
                         v.bitrate = None;
                         v.quality = v.quality.or(Some(20));
+                        // Two passes are for a bitrate.
+                        v.passes = None;
                     }
                     if ui.radio_value(&mut by_quality, false, "Bitrate").changed() {
                         v.bitrate = Some(20_000_000);
@@ -1811,6 +1904,14 @@ fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u3
                     }
                 });
                 ui.end_row();
+
+                // Passes: for a bitrate, where the codec has rate control.
+                if v.bitrate.is_some() && !matches!(v.codec, VideoCodec::Prores | VideoCodec::Dnxhr)
+                {
+                    ui.label("");
+                    ui.horizontal(|ui| passes_row(ui, v, &planned));
+                    ui.end_row();
+                }
 
                 ui.label("");
                 ui.horizontal(|ui| {

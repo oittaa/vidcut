@@ -111,6 +111,10 @@ fn execute(cli: &Cli, envelope: Envelope) -> Result<Response> {
                 Path::new(v["path"].as_str().unwrap_or_default()),
                 v["frames"].as_i64().unwrap_or(0),
                 v["total"].as_i64().unwrap_or(0),
+                (
+                    v["pass"].as_u64().unwrap_or(1) as u8,
+                    v["passes"].as_u64().unwrap_or(1) as u8,
+                ),
                 v["elapsed"].as_f64().unwrap_or(0.0),
             )
         },
@@ -141,14 +145,32 @@ impl ProgressBar {
         }
     }
 
-    fn show(&mut self, i: usize, n: usize, path: &Path, frames: i64, total: i64, elapsed: f64) {
+    #[allow(clippy::too_many_arguments)]
+    fn show(
+        &mut self,
+        i: usize,
+        n: usize,
+        path: &Path,
+        frames: i64,
+        total: i64,
+        (pass, passes): (u8, u8),
+        elapsed: f64,
+    ) {
         if !self.show || (frames < total && self.last.elapsed().as_millis() < 200) {
             return;
         }
         self.last = Instant::now();
-        let pct = frames * 100 / total.max(1);
-        let rate = frames as f64 / elapsed.max(1e-3);
-        let eta = (total - frames) as f64 / rate.max(1e-3);
+        // Over both runs of a two-pass export (decision D45).
+        let passes = i64::from(passes.max(1));
+        let done = i64::from(pass.max(1) - 1) * total + frames;
+        let pct = done * 100 / (total * passes).max(1);
+        let rate = done as f64 / elapsed.max(1e-3);
+        let eta = (total * passes - done) as f64 / rate.max(1e-3);
+        let pass = if passes > 1 {
+            format!("pass {pass}/{passes}, ")
+        } else {
+            String::new()
+        };
         let file = path
             .file_name()
             .map(|f| f.to_string_lossy().into_owned())
@@ -159,7 +181,7 @@ impl ProgressBar {
             String::new()
         };
         eprint!(
-            "\r{which}{file}: {pct:3}% ({frames}/{total} frames, {rate:.0} fps, ETA {}:{:02})   ",
+            "\r{which}{file}: {pct:3}% ({pass}{frames}/{total} frames, {rate:.0} fps, ETA {}:{:02})   ",
             eta as u64 / 60,
             eta as u64 % 60
         );

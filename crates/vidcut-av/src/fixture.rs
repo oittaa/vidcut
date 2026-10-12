@@ -154,6 +154,9 @@ pub enum Picture {
     /// Four upright stripes of [`Picture::COLORS`], left to right, in every
     /// frame (for color conversion tests).
     Colors,
+    /// Luma noise, new in every frame: as hard to compress as a picture
+    /// gets (for rate control tests).
+    Noise,
 }
 
 impl Picture {
@@ -411,6 +414,7 @@ impl FixtureSpec {
             (true, Picture::Black) => "black".to_string(),
             (true, Picture::Shots { frames }) => format!("shots{frames}-"),
             (true, Picture::Colors) => "colors".to_string(),
+            (true, Picture::Noise) => "noise".to_string(),
         };
         let rot = match self.rotation {
             0 => String::new(),
@@ -950,6 +954,16 @@ impl VideoTrack {
             }
             Picture::Barcode => crate::barcode::paint(k, &mut self.luma8, w, h, w),
             Picture::Black => self.luma8.fill(16),
+            Picture::Noise => {
+                // xorshift, seeded by the frame: the same file every time.
+                let mut x = 0x9E37_79B9_7F4A_7C15u64 ^ u64::from(k).wrapping_mul(0x2545_F491);
+                for px in self.luma8.iter_mut() {
+                    x ^= x << 13;
+                    x ^= x >> 7;
+                    x ^= x << 17;
+                    *px = 16 + (x % 220) as u8;
+                }
+            }
             Picture::Colors => {
                 for (i, px) in self.luma8.iter_mut().enumerate() {
                     *px = Picture::COLORS[(i % w) * 4 / w].0;

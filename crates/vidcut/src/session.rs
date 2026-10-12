@@ -323,11 +323,7 @@ pub fn export_media(
                 0,
                 1,
                 &output,
-                Progress {
-                    frames: (frames as f64 * share) as i64,
-                    total: frames,
-                    elapsed: clock.elapsed(),
-                },
+                Progress::single((frames as f64 * share) as i64, frames, clock.elapsed()),
             );
         };
         let written = export::timeline(

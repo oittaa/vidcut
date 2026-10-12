@@ -24,6 +24,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `filmstrip FILE OUTDIR [N]`: pool thumbnails, timed.
 - `tiles FILE [HEIGHT]`: timeline filmstrip tiles, timed at spacings from 0.25 to 30 s.
 - `decode_speed FILE [FRAMES]`: frames a second and seek times decoding on the CPU and on NVDEC.
+- `passes FILE START_S SECONDS CODEC ENCODER MBPS [key=value…]` (release build): exports a stretch at a bitrate (`qN`: constant quality) with `video.*` settings such as `passes=2 first_pass=full` or `multipass=full lookahead=0`, and prints the bitrate reached, the time and the luma PSNR (spec D45).
 
 **Preview debugging:**
 - `VIDCUT_DEBUG_PLAYER=1` traces to stderr what the player engines decode, the session's presents, what the viewer thread draws, key presses and timeline gestures.
