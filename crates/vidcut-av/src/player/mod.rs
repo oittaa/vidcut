@@ -73,6 +73,9 @@ pub struct Config {
     /// Called on the decode thread when the picture of the frame the viewer
     /// is at lands: a display repaints.
     pub on_picture: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// Decode on the GPU (NVDEC) the streams it decodes, the frames copied
+    /// down to memory at their own size ([`set_hardware`](Player::set_hardware)).
+    pub hardware: bool,
 }
 
 impl Default for Config {
@@ -81,6 +84,7 @@ impl Default for Config {
             budget: DEFAULT_BUDGET,
             audio_scrubbing: true,
             on_picture: None,
+            hardware: false,
         }
     }
 }
@@ -112,8 +116,29 @@ pub struct Status {
     /// How long before it is heard the audio device takes the sound: its
     /// output latency, which the clock makes up for.
     pub latency: Option<Duration>,
+    /// What decoded the picture of a file shown last.
+    pub decoder: Option<Decoder>,
     /// The newest decoding or device failure.
     pub error: Option<String>,
+}
+
+/// What decodes a player's pictures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Decoder {
+    /// The CPU, FFmpeg's software decoders.
+    Cpu,
+    /// The GPU's NVDEC, the frames copied down to memory.
+    Nvdec,
+}
+
+impl Decoder {
+    /// A short name: `cpu` or `nvdec`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Cpu => "cpu",
+            Self::Nvdec => "nvdec",
+        }
+    }
 }
 
 /// What is wanted now, read by the decode and audio threads.
@@ -134,6 +159,8 @@ pub(crate) struct Control {
     scrubbing: bool,
     /// The frame whose sound to play, numbered so each request is new.
     pub scrub: Option<(i64, u64)>,
+    /// Decode on NVDEC where it can.
+    pub hardware: bool,
     pub closed: bool,
     error: Option<String>,
 }
@@ -170,6 +197,8 @@ pub(crate) enum Busy {
 struct Presenter {
     shown: Option<Shown>,
     presented: Option<i64>,
+    /// What decoded the picture of a file shown last.
+    decoder: Option<Decoder>,
     late: u64,
     skipped: u64,
 }
@@ -182,6 +211,8 @@ pub(crate) struct Snap {
     pub version: u64,
     /// The frame the viewer is at.
     pub focus: i64,
+    /// Decode on NVDEC where it can.
+    pub hardware: bool,
 }
 
 /// The audio thread's view.
@@ -326,6 +357,7 @@ impl Shared {
             mode: ctl.mode,
             version: ctl.version,
             focus,
+            hardware: ctl.hardware,
         })
     }
 
@@ -423,6 +455,7 @@ impl Player {
                 muted: false,
                 scrubbing: config.audio_scrubbing,
                 scrub: None,
+                hardware: config.hardware,
                 closed: false,
                 error: None,
             }),
@@ -594,6 +627,16 @@ impl Player {
         });
     }
 
+    /// Decodes on the GPU (NVDEC) the streams it decodes, or everything on
+    /// the CPU. A change decodes the pictures anew, the one shown first, so
+    /// what shows next is the new decoder's.
+    pub fn set_hardware(&self, on: bool) {
+        if self.shared.control().hardware == on {
+            return;
+        }
+        self.shared.change(true, |ctl, _, _| ctl.hardware = on);
+    }
+
     /// Silences the sound (the viewer's monitoring mute); the clock runs on.
     pub fn set_muted(&self, muted: bool) {
         self.shared.change(false, |ctl, _, _| {
@@ -629,6 +672,9 @@ impl Player {
                     }
                 }
                 p.presented = Some(pos);
+                if let Some(d) = picture.decoder() {
+                    p.decoder = Some(d);
+                }
                 let shown = Shown {
                     frame: pos,
                     picture,
@@ -680,6 +726,7 @@ impl Player {
             skipped: p.skipped,
             kept: self.shared.store.usage(),
             latency: self.shared.heard.latency(),
+            decoder: p.decoder,
             error: device.or(error),
         }
     }

@@ -94,6 +94,12 @@ impl Plan {
         Id { source, pos }
     }
 
+    /// Timeline frame `t` shows a picture of a file (not black).
+    pub(crate) fn shows_a_file(&self, t: i64) -> bool {
+        let (i, _) = self.locate(t);
+        matches!(self.plan.video.get(i), Some(VideoPiece::Source { .. }))
+    }
+
     /// The plan's video from timeline frame `t` on.
     pub(crate) fn pieces_from(&self, t: i64) -> Vec<VideoPiece> {
         let (i, k) = self.locate(t);

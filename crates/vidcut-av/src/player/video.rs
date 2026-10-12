@@ -16,7 +16,7 @@ use vidcut_core::time::Rational;
 
 use super::frame::Picture;
 use super::plan::Plan;
-use super::{Busy, Mode, Shared, Snap, trace};
+use super::{Busy, Decoder as Decoding, Mode, Shared, Snap, trace};
 use crate::error::{Error, Result};
 use crate::export::is_cancelled;
 use crate::export::renderer::{at, window};
@@ -45,8 +45,13 @@ enum Direction {
 
 struct Decoder {
     shared: Arc<Shared>,
-    /// The reader, for the rate and size (of black) it was made for.
-    frames: Option<((Rational, u32, u32), VideoFrames)>,
+    /// The reader, for the rate, the size (of black) and the decoding it
+    /// was made for.
+    frames: Option<((Rational, u32, u32, bool), VideoFrames)>,
+    /// Decode on NVDEC where it can, as last asked.
+    hardware: bool,
+    /// The GPU, once opened (`None` inside: it can't be).
+    cuda: Option<Option<crate::cuda::CudaDevice>>,
     /// What the latest picture took: windows and the pictures ahead are
     /// counted in it.
     picture_bytes: usize,
@@ -75,6 +80,8 @@ pub(crate) fn run(shared: Arc<Shared>) {
     let mut d = Decoder {
         shared: shared.clone(),
         frames: None,
+        hardware: first.hardware,
+        cuda: None,
         picture_bytes: (p.width as usize * p.height as usize * 3).div_ceil(2),
         next: None,
         plan: first.plan.clone(),
@@ -92,6 +99,12 @@ pub(crate) fn run(shared: Arc<Shared>) {
             // The reader keeps its file open; where it stands in the new
             // plan is found by reading pieces of it again.
             d.next = None;
+        }
+        if d.hardware != snap.hardware {
+            // Another decoder: its pictures, from the one shown on.
+            d.hardware = snap.hardware;
+            shared.store.clear();
+            d.failed = None;
         }
         let dir = match snap.mode {
             Mode::Paused { .. } => Direction::Paused,
@@ -250,14 +263,23 @@ impl Decoder {
         (bytes / self.picture_bytes.max(1)) as i64
     }
 
-    /// The reader, made anew when the rate or the size of black changed.
+    /// The reader, made anew when the rate, the size of black or the
+    /// decoding changed.
     fn reader(&mut self) -> &mut VideoFrames {
         let p = &self.plan.plan;
-        let key = (p.fps, p.width, p.height);
+        let key = (p.fps, p.width, p.height, self.hardware);
         if self.frames.as_ref().is_none_or(|(k, _)| *k != key) {
-            let frames =
+            let mut frames =
                 VideoFrames::new(&[], p.fps, p.width, p.height, format::Pixel::YUV420P, None)
                     .decoded();
+            if self.hardware {
+                let cuda = self
+                    .cuda
+                    .get_or_insert_with(|| crate::cuda::CudaDevice::open().ok());
+                if let Some(device) = cuda {
+                    frames = frames.decode_on(device.clone());
+                }
+            }
             self.frames = Some((key, frames));
             self.next = None;
         }
@@ -291,7 +313,14 @@ impl Decoder {
                 let frame = frames
                     .next_frame()?
                     .ok_or_else(|| Error::Invalid(format!("no frame {i} to play")))?;
-                let picture = Picture::new(frame, frames.rotation());
+                let decoder = plan.shows_a_file(i).then(|| {
+                    if frames.on_nvdec() {
+                        Decoding::Nvdec
+                    } else {
+                        Decoding::Cpu
+                    }
+                });
+                let picture = Picture::new(frame, frames.rotation(), decoder);
                 self.next = Some(i + 1);
                 self.picture_bytes = picture.bytes();
                 self.shared.store.put(plan.id(i), Arc::new(picture));

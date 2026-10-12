@@ -50,16 +50,24 @@ pub struct Picture {
     frame: frame::Video,
     rotation: u16,
     bytes: usize,
+    decoder: Option<super::Decoder>,
 }
 
 impl Picture {
-    pub(crate) fn new(frame: frame::Video, rotation: u16) -> Self {
+    /// `decoder`: what decoded it (`None` for black).
+    pub(crate) fn new(frame: frame::Video, rotation: u16, decoder: Option<super::Decoder>) -> Self {
         let bytes = bytes_of(&frame);
         Self {
             frame,
             rotation,
             bytes,
+            decoder,
         }
+    }
+
+    /// What decoded it: the CPU or the GPU; `None` for black.
+    pub fn decoder(&self) -> Option<super::Decoder> {
+        self.decoder
     }
 
     /// Stored size, before `rotation`.

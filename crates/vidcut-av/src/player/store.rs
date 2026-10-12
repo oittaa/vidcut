@@ -100,6 +100,13 @@ impl Store {
         }
     }
 
+    /// Forgets every picture (another decoder makes them from now on).
+    pub(crate) fn clear(&self) {
+        let mut inner = self.lock();
+        inner.pictures.clear();
+        inner.bytes = 0;
+    }
+
     /// How many pictures are kept, and their bytes.
     pub(crate) fn usage(&self) -> (usize, usize) {
         let inner = self.lock();

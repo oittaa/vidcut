@@ -209,6 +209,32 @@ impl CudaFrames {
     }
 }
 
+/// A frame in GPU memory copied down to memory, in its frames' layout (NV12,
+/// P010) at its own size, keeping its properties: colors, aspect,
+/// timestamp.
+pub(crate) fn download(src: &frame::Video) -> Result<frame::Video> {
+    let mut dst = frame::Video::empty();
+    // SAFETY: both frames are valid; the destination is allocated by the
+    // transfer, in the source frames' software format.
+    unsafe {
+        let ret = ffi::av_hwframe_transfer_data(dst.as_mut_ptr(), src.as_ptr(), 0);
+        if ret < 0 {
+            return Err(Error::Ffmpeg {
+                context: "copying a frame down from the GPU".into(),
+                source: ffmpeg::Error::from(ret),
+            });
+        }
+        let ret = ffi::av_frame_copy_props(dst.as_mut_ptr(), src.as_ptr());
+        if ret < 0 {
+            return Err(Error::Ffmpeg {
+                context: "copying a frame's properties".into(),
+                source: ffmpeg::Error::from(ret),
+            });
+        }
+    }
+    Ok(dst)
+}
+
 /// Where libplacebo keeps the shaders it compiles (`keep_shaders_in`).
 static SHADERS: OnceLock<PathBuf> = OnceLock::new();
 

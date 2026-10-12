@@ -1,7 +1,9 @@
-//! The player on real footage, decoding on the CPU: how long a seek takes
-//! to its picture, steps back, and whether 1080p30 and 2160p60 H.264 play
-//! in real time, with the CPU they take. Prints the numbers
-//! (`--nocapture`); skips without the clips (scripts/fetch-test-media.sh).
+//! The player on real footage, decoding on the CPU, and with
+//! `--features gpu-tests` on NVDEC too: how long a seek takes to its
+//! picture, steps back, and whether 1080p30 and 2160p60 H.264 play in real
+//! time, with the CPU they take. Prints the numbers (`--nocapture`); skips
+//! without the clips (scripts/fetch-test-media.sh).
+//! `VIDCUT_PLAYER_MEDIA=a.mkv,b.mp4` measures those files instead.
 
 mod player_support;
 
@@ -25,7 +27,8 @@ fn plan(path: &Path, fps: i64, secs: i64) -> RenderPlan {
     let info = vidcut_av::probe::probe(path).unwrap();
     let origin = info.video.as_ref().unwrap().first_frame_time.unwrap();
     let fps = Rational::new(fps, 1).unwrap();
-    let frames = fps.secs_to_frames(secs as f64);
+    let secs = (secs as f64).min(info.duration.unwrap_or(f64::MAX) - 0.5);
+    let frames = fps.secs_to_frames(secs);
     let samples = fps.frame_to_sample(frames, 48_000);
     RenderPlan {
         fps,
@@ -67,15 +70,44 @@ fn median(mut v: Vec<f64>) -> f64 {
 
 #[test]
 fn real_footage_seeks_steps_and_plays() {
-    let clips = [
-        ("bbb-1080p30", "bbb_sunflower_1080p_30fps_normal.mp4", 30),
-        ("bbb-2160p60", "bbb_sunflower_2160p_60fps_normal.mp4", 60),
+    let mut clips = vec![
+        (
+            "bbb-1080p30".to_string(),
+            media("bbb-1080p30", "bbb_sunflower_1080p_30fps_normal.mp4"),
+            30,
+        ),
+        (
+            "bbb-2160p60".to_string(),
+            media("bbb-2160p60", "bbb_sunflower_2160p_60fps_normal.mp4"),
+            60,
+        ),
     ];
-    for (name, file, fps) in clips {
-        let Some(path) = media(name, file) else {
+    if let Ok(files) = std::env::var("VIDCUT_PLAYER_MEDIA") {
+        clips = files
+            .split(',')
+            .map(|f| {
+                let path = PathBuf::from(f);
+                let info = vidcut_av::probe::probe(&path).unwrap();
+                let rate = info.video.as_ref().unwrap().avg_frame_rate;
+                let fps = (f64::from(rate.0) / f64::from(rate.1)).round() as i64;
+                (path.display().to_string(), Some(path), fps)
+            })
+            .collect();
+    }
+    let decoders: &[bool] = if cfg!(feature = "gpu-tests") {
+        &[false, true]
+    } else {
+        &[false]
+    };
+    for ((name, path, fps), &hardware) in clips
+        .iter()
+        .flat_map(|c| decoders.iter().map(move |d| (c.clone(), d)))
+    {
+        let Some(path) = path else {
             eprintln!("skipping {name}: not in the test data (scripts/fetch-test-media.sh)");
             continue;
         };
+        let name = format!("{name} ({})", if hardware { "NVDEC" } else { "CPU" });
         let p = plan(&path, fps, 540);
         let frames = p.frames;
         // Sound to a stand-in device in real time.
@@ -87,6 +119,7 @@ fn real_footage_seeks_steps_and_plays() {
             .map_or(DEFAULT_BUDGET, |mb| mb << 20);
         let config = Config {
             budget,
+            hardware,
             ..Config::default()
         };
         let player = Player::new(p, config, Box::new(out)).unwrap();
@@ -135,9 +168,15 @@ fn real_footage_seeks_steps_and_plays() {
 
         // Five seconds of play forward, three backward.
         let forward = play(&player, frames / 3, 1.0, 5.0);
-        eprintln!("{name}: forward {forward}");
+        eprintln!(
+            "{name}: forward {forward}; decoded on {:?}",
+            player.status().decoder
+        );
         let backward = play(&player, frames / 3, -1.0, 3.0);
-        eprintln!("{name}: backward {backward}");
+        eprintln!(
+            "{name}: backward {backward}; decoded on {:?}",
+            player.status().decoder
+        );
         for p in [&forward, &backward] {
             assert!(
                 p.due as f64 >= 0.95 * p.secs * fps as f64,
