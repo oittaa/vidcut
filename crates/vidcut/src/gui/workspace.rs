@@ -31,7 +31,7 @@ pub(super) struct TimecodeEntry {
 
 /// Pool thumbnails as textures.
 pub(super) struct Thumbs {
-    strip: Arc<Filmstrip>,
+    pub strip: Arc<Filmstrip>,
     pub textures: Vec<egui::TextureHandle>,
 }
 
@@ -128,6 +128,8 @@ pub struct Workspace {
     pub(super) dialogs: Arc<dyn super::export::Dialogs>,
     /// Where file dialogs start, remembered across runs.
     pub(super) folders: super::folders::Folders,
+    /// The timeline's filmstrip pictures (out while the timeline paints).
+    pub(super) tiles: Option<super::tiles::Tiles>,
 }
 
 impl Workspace {
@@ -169,6 +171,9 @@ impl Workspace {
             import: Default::default(),
             dialogs: Arc::new(super::export::RfdDialogs),
             folders: super::folders::Folders::load(),
+            tiles: Some(super::tiles::Tiles::new(
+                &crate::preferences::load().unwrap_or_default().thumbnails,
+            )),
         }
     }
 
@@ -210,6 +215,14 @@ impl Workspace {
     /// Where the timelines were drawn last frame (for tests).
     pub fn timeline_layout(&self) -> Option<super::timeline::Layout> {
         self.timeline.layout.clone()
+    }
+
+    /// How many timeline filmstrip pictures are kept, and their bytes (for
+    /// tests).
+    pub fn timeline_tiles(&self) -> (usize, usize) {
+        self.tiles
+            .as_ref()
+            .map_or((0, 0), super::tiles::Tiles::usage)
     }
 
     /// The frame of the selected edit, if one is selected (for tests).
@@ -1264,6 +1277,9 @@ impl Workspace {
             self.title = title;
         }
         self.sync_textures(&ctx);
+        if let Some(tiles) = &mut self.tiles {
+            tiles.begin_frame(&ctx, self.snap.project());
+        }
         self.keys(&ctx);
         self.export_windows(&ctx);
         self.preferences_window(&ctx);
@@ -1290,6 +1306,9 @@ impl Workspace {
             .min_size(140.0)
             .frame(egui::Frame::new().fill(theme::PANEL).inner_margin(6))
             .show(ui, |ui| self.timeline_panel(ui));
+        if let Some(tiles) = &mut self.tiles {
+            tiles.end_frame();
+        }
         if self.show_mixer {
             egui::Panel::right("mixer")
                 .resizable(true)

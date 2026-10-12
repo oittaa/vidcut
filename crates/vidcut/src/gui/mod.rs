@@ -11,6 +11,7 @@ mod pool;
 mod preferences;
 mod stills;
 mod theme;
+mod tiles;
 mod timeline;
 mod video;
 mod viewer;

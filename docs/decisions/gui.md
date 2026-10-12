@@ -148,7 +148,7 @@ A seek or load ("motion") is shown after two steps:
 **Two timelines** (spec §5):
 - **Upper:** the whole program at full width.
 - **Lower:** a detail view at a zoom you choose (Ctrl+wheel, −/+), its playhead fixed in the middle unless Timeline Options says otherwise.
-- **Shared drawing.** Both draw the same clips: names, durations, status, filmstrips from the pool thumbnails, waveforms from per-media peaks (100 per second, cached in `~/.cache/vidcut/waveforms/`).
+- **Shared drawing.** Both draw the same clips: names, durations, status, filmstrips (§11), waveforms from per-media peaks (100 per second, cached in `~/.cache/vidcut/waveforms/`).
 
 **Gestures are pure functions** (`gui/timeline/geometry.rs`, `gesture.rs`):
 - What the pointer is over picks the operation: edge, edit center, slip handle, audio edit, body.
@@ -224,6 +224,15 @@ A seek or load ("motion") is shown after two steps:
 - **Why:** decoding 24 pictures takes from a tenth of a second to seconds per clip, much more from a network share, and it ran again for every clip each time a project opened. The project still keeps no pictures (deviation X1).
 - **Preferences** (`preferences.toml`, deviation X12) are read whenever a thumbnail job runs, so a change from the CLI applies to a running GUI at once. `preferences.set` empties the cache when it is turned off and trims it when the limit drops.
 - **Tests:** `tests/thumbnails.rs` opens a project whose media moved away and still gets its thumbnails, then turns the cache off in the Preferences window with one request.
+
+**Timeline filmstrips** (`gui/tiles.rs`): each tile shows the frame under it.
+- **Why not the pool's pictures:** 24 per file is one every 30 s of a 12-minute film. A 5 s clip showed one picture over and over, often from another shot.
+- **Keys:** a tile asks for its media, source frame and height in pixels (rounded up to a multiple of 16). The first tile shows the clip's first frame; the others the first multiple of a step at or after their left edge, where the step is the largest power of two frames no wider than a tile. Zooming in or out by two keeps half of the frames.
+- **Memory:** pictures are textures, kept up to `thumbnails.timeline_memory_mb` (256 MB by default, about 12,000 tiles 56 px tall). Above it, those shown least recently go, down to nine tenths; never one shown in the last frame.
+- **Making them:** four worker threads at the lowest CPU priority take the tiles painting asked for, in its order, and replace their queue with each frame's asks, so tiles scrolled away aren't made. A worker goes on along a file while the next tile is asked for within 4 s ahead (decoding on beats a seek), and a fresh pick avoids what another worker is near. Frames come from `vidcut_av::export::renderer::FrameReader`, the export's sampling at the tile's size, from a fresh proxy when there is one.
+- **Disk:** tiles go to the thumbnail cache in blocks of 64 source frames per file (`<media>.t<height>-b<block>.thumbs`), under the same limit and switch as the pool's pictures. A JPEG tile takes 2–4 KB and decodes in 0.03 ms; decoding a far-apart tile takes 40 ms on 1080p H.264 and 105–170 ms on 4K60 H.264 (20–37 ms on their AV1 proxies), so a reopened project fills its tiles from disk.
+- **Until a tile's picture comes:** the nearest kept picture of the same media within two steps, else the pool's picture nearest in time.
+- **Tests:** `tests/gui_tiles.rs` checks that the visible tiles are made and kept on disk, then that a new window finds them there after the media moved away. `vidcut-av/tests/frames.rs` checks the frames by barcode; the grid and the eviction are unit tests.
 
 ## 12. Still open
 

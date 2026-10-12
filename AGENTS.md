@@ -42,7 +42,7 @@ It is written in Rust:
 | Crate | Purpose | Depends on |
 |---|---|---|
 | `crates/vidcut-core` | Project model, time and timecode math, edit operations (`ops.rs`; tracks in `ops/tracks.rs`, clips following Track 1 in `ops/follow.rs`), Request/Response protocol, Editor (undo/rev), project store, render plans (`render.rs`: top-wins video, mixed audio lanes), preview EDLs (`preview.rs`), OpenTimelineIO reading and writing (`otio.rs`, tests in `otio/tests.rs`), what the automatic tools decide from measurements (`analysis.rs`), application preferences (`preferences.rs`) | — (pure Rust; fast to build and test) |
-| `crates/vidcut-av` | FFmpeg layer: probe (start timecodes too), exact-seek decode, encode/mux, export engine (with loudness normalization; the next piece's file opens ahead in `export/ahead.rs`), the renderer of paused and two-up pictures that decodes each frame once either way (`export/renderer.rs`), thumbnails (and their JPEG cache form), waveforms, still frames, measurements for the automatic tools (`analysis.rs`), encoder detection, test-fixture generator | ffmpeg-next |
+| `crates/vidcut-av` | FFmpeg layer: probe (start timecodes too), exact-seek decode, encode/mux, export engine (with loudness normalization; the next piece's file opens ahead in `export/ahead.rs`), the renderer of paused and two-up pictures that decodes each frame once either way, and the frame reader of timeline tiles (`export/renderer.rs`), thumbnails (and their JPEG cache form), waveforms, still frames, measurements for the automatic tools (`analysis.rs`), encoder detection, test-fixture generator | ffmpeg-next |
 | `crates/vidcut-mpv` | libmpv via `dlopen` (`libloading`): client API and render API (OpenGL and software) | libmpv.so.2 at runtime only |
 | `crates/vidcut` | The `vidcut` binary: Session/host, IPC, CLI (clap), GUI (eframe), MCP server | all of the above |
 
@@ -59,7 +59,7 @@ Inside `crates/vidcut`:
 | `threads.rs` | the one way the app starts threads: `threads::spawn(name, Work::Job \| Work::Interactive, f)`; media work runs at the lowest CPU priority |
 | `live/` | the GUI's core thread: open project, players, viewer state, waits, command log, export jobs (`jobs.rs`); publishes `Snapshot`s |
 | `ipc/` | JSON-RPC over a Unix socket, the instance registry, CLI routing |
-| `gui/` | `app.rs`: eframe and GL glue; `workspace.rs`: all panels and UI state (testable without GL); `timeline/`: geometry, gestures, drawing; `export.rs`: Quick Export, the Export dialog, jobs and OTIO windows; `mixer.rs`: the Mixer and meters; `preferences.rs`: File > Preferences; `timeline/tools.rs`: Ripple Delete Silence, the Boring Detector, Dynamic Trim; `pool.rs` (with bins), `viewer.rs`, `video.rs`, `stills.rs` |
+| `gui/` | `app.rs`: eframe and GL glue; `workspace.rs`: all panels and UI state (testable without GL); `timeline/`: geometry, gestures, drawing; `export.rs`: Quick Export, the Export dialog, jobs and OTIO windows; `mixer.rs`: the Mixer and meters; `preferences.rs`: File > Preferences; `timeline/tools.rs`: Ripple Delete Silence, the Boring Detector, Dynamic Trim; `tiles.rs`: the timeline's filmstrip pictures, each tile's own frame; `folders.rs`: where file dialogs start; `pool.rs` (with bins), `viewer.rs`, `video.rs`, `stills.rs` |
 | `export.rs` | presets (built-in and user), outputs, export plans and timeline (`.otio`, bundle) exports as the session runs them |
 | `bundle.rs` | OpenTimelineIO bundles: writing `.otioz` (zip) and `.otiod` (folder) with their media, unpacking `.otioz` for import |
 
@@ -132,7 +132,7 @@ These are mandatory.
 - **Property tests** (proptest) run random edit sequences.
   - Failing seeds land in `proptest-regressions/`. Commit them, so they replay forever.
   - For a deeper run: `PROPTEST_CASES=5000 cargo test -p vidcut-core prop_tests`.
-- **GUI input tests** (`crates/vidcut/tests/gui_input.rs`, `gui_export.rs`, `gui_tracks.rs`, `gui_tools.rs`, `gui_import.rs`) drive the real panels and windows with egui_kittest (clicks, drags, keys; no window or renderer) against a live session without players. Each gesture must change the project with exactly one request. Timeline gesture logic itself is unit-tested in `gui/timeline/gesture.rs` from pointer positions.
+- **GUI input tests** (`crates/vidcut/tests/gui_input.rs`, `gui_export.rs`, `gui_tracks.rs`, `gui_tools.rs`, `gui_import.rs`, `gui_tiles.rs`) drive the real panels and windows with egui_kittest (clicks, drags, keys; no window or renderer) against a live session without players. Each gesture must change the project with exactly one request. Timeline gesture logic itself is unit-tested in `gui/timeline/gesture.rs` from pointer positions.
   - File dialogs are replaced with `Workspace::set_dialogs`.
   - A new window or modal is measured in its first frame and placed in the next: step once more after it appears before clicking in it.
   - Windows that ask the session (presets, plans, imports) answer on helper threads, so wait with a loop of `harness.step()`, not a fixed number of steps.
@@ -233,7 +233,7 @@ vidcut history undo                         # works across separate runs
 - `vidcut presets list` lists the presets (`--json` includes their settings); `vidcut presets get NAME` shows one.
   - `vidcut presets save web --from youtube-1080p --set video.quality=22 [--quick-export]` saves a user preset to `~/.config/vidcut/presets/web.toml`; `--settings JSON|@FILE` gives full settings instead. `vidcut presets delete web` removes it.
 - `vidcut encoders list` shows which GPU encoders work here (cached; `--refresh` re-tests).
-- `vidcut preferences get` shows the application preferences (`~/.config/vidcut/preferences.toml`) and what the thumbnail cache holds; `vidcut preferences set thumbnails.cache_limit_mb=256` changes them (`preferences.set` takes `{"thumbnails": {"disk_cache": false}}`; turning the cache off empties it).
+- `vidcut preferences get` shows the application preferences (`~/.config/vidcut/preferences.toml`) and what the thumbnail cache holds; `vidcut preferences set thumbnails.cache_limit_mb=256` changes them (`preferences.set` takes `{"thumbnails": {"disk_cache": false}}`; turning the cache off empties it). The cache holds the pool's pictures and the timeline's filmstrip tiles; `thumbnails.timeline_memory_mb` (256) is the memory a running GUI keeps tiles in.
 - `vidcut frame render --at 1m --out f.png [--width 640]` renders what the timeline shows at a frame. `--media m1` renders a media frame instead. Use it to look at cuts.
 
 **Automatic tools (spec D29–D32):**

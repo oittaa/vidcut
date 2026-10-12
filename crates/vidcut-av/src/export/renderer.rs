@@ -228,6 +228,50 @@ impl StillRenderer {
     }
 }
 
+/// Single frames as small pictures, in the order they are asked for: a
+/// timeline's filmstrip tiles. Nothing is kept. The file stays open, so a
+/// frame shortly after the one before decodes on from it instead of seeking;
+/// ask for a file's frames in order.
+#[derive(Default)]
+pub struct FrameReader {
+    frames: Option<(Rational, u32, u32, VideoFrames)>,
+}
+
+impl FrameReader {
+    /// `piece`'s first frame as export samples it, at `width`×`height`
+    /// (packed RGBA, the picture fit inside, padded black).
+    pub fn rgba(
+        &mut self,
+        piece: &VideoPiece,
+        fps: Rational,
+        width: u32,
+        height: u32,
+    ) -> Result<Image> {
+        crate::cancel::stop()?;
+        crate::init();
+        let same =
+            matches!(&self.frames, Some((f, w, h, _)) if (*f, *w, *h) == (fps, width, height));
+        if !same {
+            let frames = VideoFrames::new(&[], fps, width, height, format::Pixel::RGBA, None);
+            self.frames = Some((fps, width, height, frames));
+        }
+        let (.., frames) = self.frames.as_mut().expect("set above");
+        frames.read_piece(&at(piece, first_frame(piece), 1));
+        let frame = frames
+            .next_frame()?
+            .ok_or_else(|| Error::Invalid("no frame to render".into()))?;
+        Ok(image(&frame, width, height))
+    }
+}
+
+/// The source position a piece starts at (0 for black).
+fn first_frame(piece: &VideoPiece) -> i64 {
+    match piece {
+        VideoPiece::Source { source_frame, .. } => *source_frame,
+        VideoPiece::Black { .. } => 0,
+    }
+}
+
 /// A window of frames to render behind a renderer's position, on a thread
 /// of its own; what it renders lands in that renderer's pictures.
 pub struct Prefetch {

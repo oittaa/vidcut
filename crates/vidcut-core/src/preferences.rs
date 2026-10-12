@@ -18,7 +18,7 @@ pub struct Preferences {
     pub proxies: Proxies,
 }
 
-/// The Media Pool's thumbnails.
+/// The Media Pool's thumbnails and the timeline's filmstrip pictures.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Thumbnails {
@@ -28,6 +28,9 @@ pub struct Thumbnails {
     /// The size limit of that cache in MB: the least recently used
     /// thumbnails go first.
     pub cache_limit_mb: u64,
+    /// Memory for the timeline's filmstrip pictures in MB: above it, those
+    /// shown least recently go first.
+    pub timeline_memory_mb: u64,
 }
 
 impl Default for Thumbnails {
@@ -35,6 +38,7 @@ impl Default for Thumbnails {
         Self {
             disk_cache: true,
             cache_limit_mb: 512,
+            timeline_memory_mb: 256,
         }
     }
 }
@@ -147,6 +151,9 @@ pub struct ThumbnailsPatch {
     /// At least 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_limit_mb: Option<u64>,
+    /// At least 16.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeline_memory_mb: Option<u64>,
 }
 
 impl PreferencesPatch {
@@ -189,6 +196,9 @@ impl Preferences {
             if let Some(v) = t.cache_limit_mb {
                 p.thumbnails.cache_limit_mb = v;
             }
+            if let Some(v) = t.timeline_memory_mb {
+                p.thumbnails.timeline_memory_mb = v;
+            }
         }
         if let Some(x) = &patch.proxies {
             let p = &mut p.proxies;
@@ -207,6 +217,11 @@ impl Preferences {
     pub fn check(&self) -> Result<()> {
         if self.thumbnails.cache_limit_mb == 0 {
             return Err(Error::usage("thumbnails.cache_limit_mb must be at least 1"));
+        }
+        if self.thumbnails.timeline_memory_mb < 16 {
+            return Err(Error::usage(
+                "thumbnails.timeline_memory_mb must be at least 16",
+            ));
         }
         let x = &self.proxies;
         if x.larger_than.contains(&0) {
@@ -236,7 +251,7 @@ mod tests {
             .patched(&PreferencesPatch {
                 thumbnails: Some(ThumbnailsPatch {
                     disk_cache: Some(false),
-                    cache_limit_mb: None,
+                    ..Default::default()
                 }),
                 ..Default::default()
             })
@@ -246,12 +261,22 @@ mod tests {
         assert_eq!(p.patched(&PreferencesPatch::default()).unwrap(), p);
         let zero = PreferencesPatch {
             thumbnails: Some(ThumbnailsPatch {
-                disk_cache: None,
                 cache_limit_mb: Some(0),
+                ..Default::default()
             }),
             ..Default::default()
         };
         assert_eq!(p.patched(&zero).unwrap_err().code, crate::ErrorCode::Usage);
+        // The timeline's pictures get at least 16 MB; 256 unless set.
+        assert_eq!(p.thumbnails.timeline_memory_mb, 256);
+        let tiny = PreferencesPatch {
+            thumbnails: Some(ThumbnailsPatch {
+                timeline_memory_mb: Some(8),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(p.patched(&tiny).unwrap_err().code, crate::ErrorCode::Usage);
         // Proxies: the size must suit the encoder, the limits be positive.
         let proxies = |x: ProxiesPatch| PreferencesPatch {
             proxies: Some(x),
@@ -349,6 +374,7 @@ mod tests {
             Some(ThumbnailsPatch {
                 disk_cache: Some(false),
                 cache_limit_mb: Some(256),
+                timeline_memory_mb: None,
             })
         );
         assert_eq!(pairs(&[]).unwrap(), PreferencesPatch::default());

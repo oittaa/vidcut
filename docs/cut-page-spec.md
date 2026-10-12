@@ -153,7 +153,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 
 **Track display:**
 - Combined video+audio tracks are numbered 1, 2, …; audio-only tracks A1, A2, … sit below them.
-- A video clip shows a filmstrip. Its audio shows as a waveform band along the bottom, which is enlarged when the track is enlarged (p. 647).
+- A video clip shows a filmstrip. Its audio shows as a waveform band along the bottom, which is enlarged when the track is enlarged (p. 647). Each picture of the filmstrip is the frame under it, the first one the clip's first frame.
 - Display toggles: clip names; durations (seconds:frames, bottom-left); status icons.
 - **States:**
   - locked track: clips are stippled

@@ -16,9 +16,11 @@ pub(super) struct PreferencesUi {
     /// The latest answer (`preferences.get`'s result).
     state: Option<Value>,
     error: Option<String>,
-    /// The number fields as typed: the thumbnail cache limit (MB), the
-    /// proxy rules' picture size and bitrate, and the proxy size.
+    /// The number fields as typed: the thumbnail cache limit and the
+    /// timeline's picture memory (MB), the proxy rules' picture size and
+    /// bitrate, and the proxy size.
     limit: String,
+    memory: String,
     larger_w: String,
     larger_h: String,
     mbps: String,
@@ -94,6 +96,14 @@ impl Workspace {
                     let p = &r.result["preferences"];
                     let n = |v: &Value| v.as_u64().unwrap_or(0).to_string();
                     ui_state.limit = n(&p["thumbnails"]["cache_limit_mb"]);
+                    ui_state.memory = n(&p["thumbnails"]["timeline_memory_mb"]);
+                    // The timeline's pictures follow at once.
+                    if let (Some(tiles), Ok(t)) = (
+                        &mut self.tiles,
+                        serde_json::from_value(p["thumbnails"].clone()),
+                    ) {
+                        tiles.set_prefs(&t);
+                    }
                     ui_state.larger_w = n(&p["proxies"]["larger_than"][0]);
                     ui_state.larger_h = n(&p["proxies"]["larger_than"][1]);
                     ui_state.mbps = n(&p["proxies"]["above_mbps"]);
@@ -170,6 +180,25 @@ impl Workspace {
                             ))
                             .color(theme::TEXT_DIM),
                         );
+                        ui.end_row();
+                        let label = ui.label("Timeline memory");
+                        ui.horizontal(|ui| {
+                            let field = NumberField {
+                                label: label.id,
+                                saved: thumbs["timeline_memory_mb"].as_u64().unwrap_or(16),
+                                range: 16..=1_000_000,
+                                enabled: !busy,
+                                tip: "The timeline's filmstrip pictures kept in memory: above \
+                                      it, those shown least recently go first",
+                                refusal: "The timeline memory is 16 to 1000000 MB",
+                            };
+                            if let Some(mb) =
+                                field.show(ui, &mut ui_state.memory, &mut ui_state.error)
+                            {
+                                patch = Some(json!({ "thumbnails": { "timeline_memory_mb": mb } }));
+                            }
+                            ui.label("MB");
+                        });
                         ui.end_row();
                     });
                 ui.add_space(8.0);

@@ -421,10 +421,12 @@ impl Workspace {
             None => (&p, None),
         };
         let thumbs = std::mem::take(&mut self.thumbs);
+        let tiles = self.tiles.take();
         let waveforms = self.snap.waveforms.clone();
         let assets = Assets {
             thumbs: &thumbs,
             waveforms: &waveforms,
+            tiles: tiles.as_ref(),
         };
         let look = self.look();
         let smart = (end > 0).then(|| ops::nearest_edit(drawn, playhead));
@@ -558,6 +560,7 @@ impl Workspace {
             );
         }
         self.thumbs = thumbs;
+        self.tiles = tiles;
         self.track_headers(ui, lower_rect, &layout.lower, &p);
 
         // While a trim drags, its pointer stays.
