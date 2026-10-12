@@ -11,7 +11,8 @@ use vidcut_av::decode::{Input, VideoReader, read_barcode};
 use vidcut_av::export::{self, encode::Availability};
 use vidcut_av::fixture::{self, ImageSpec};
 use vidcut_core::export::{
-    Container as OutContainer, EncoderChoice, ExportSettings, VideoCodec as VCodec, VideoSettings,
+    Container as OutContainer, EncoderChoice, ExportSettings, HdrMode, VideoCodec as VCodec,
+    VideoSettings,
 };
 use vidcut_core::render::{Image, RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
@@ -92,7 +93,7 @@ fn settings() -> ExportSettings {
             bit_depth: None,
             width: None,
             height: None,
-            hdr: None,
+            hdr: HdrMode::Sdr,
         }),
         audio: None,
         declick: false,

@@ -7,6 +7,7 @@ use std::sync::atomic::AtomicBool;
 use serde_json::{Value, json};
 use vidcut_av::export::encode::Availability;
 use vidcut_av::export::{self as engine, Progress, Report};
+use vidcut_core::export::color::{self, ColorChoice, PictureKind, PictureShare};
 use vidcut_core::export::{
     Container, EncoderChoice, ExportSettings, Preset, apply_overrides, builtin_presets, validate,
 };
@@ -338,10 +339,16 @@ fn default_preset(output: &Path) -> &'static str {
 pub struct Output {
     pub plan: RenderPlan,
     pub path: PathBuf,
+    /// What it is encoded with: the export's settings with `video.hdr`
+    /// and an unset bit depth chosen from its pictures ([`choose_colors`]).
+    pub settings: ExportSettings,
+    /// What was chosen, and why (decision D44).
+    pub color: Option<ColorChoice>,
 }
 
 /// A checked export: settings and the files to write.
 pub struct Prepared {
+    /// The settings as asked for.
     pub settings: ExportSettings,
     pub preset: Option<String>,
     pub outputs: Vec<Output>,
@@ -476,6 +483,8 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
             outputs.push(Output {
                 path: params.output.join(format!("{name}.{ext}")),
                 plan,
+                settings: settings.clone(),
+                color: None,
             });
         }
         if outputs.is_empty() {
@@ -485,6 +494,8 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
         outputs.push(Output {
             plan: render::flatten(&proj, a, b)?,
             path: params.output.clone(),
+            settings: settings.clone(),
+            color: None,
         });
     }
     for o in &outputs {
@@ -502,9 +513,84 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
     })
 }
 
+/// What a media item's pictures are: its HDR transfer and bit depth, as
+/// probed when it was added.
+fn picture_kind(p: &Project, piece: &render::VideoPiece) -> PictureKind {
+    let render::VideoPiece::Source { media, .. } = piece else {
+        return PictureKind::default();
+    };
+    p.media(media)
+        .and_then(|m| m.info.video.as_ref())
+        .map_or(PictureKind::default(), |v| PictureKind {
+            hdr: v.hdr,
+            depth: vidcut_av::probe::pixel_depth(&v.pix_fmt),
+        })
+}
+
+/// Chooses each output's dynamic range and bit depth from the pictures it
+/// shows, where the settings leave them to the export (decision D44): with
+/// the encoders the export may use (`settings` as the preferences allow).
+pub fn choose_colors(prepared: &mut Prepared, p: &Project, available: &Availability) {
+    for o in &mut prepared.outputs {
+        o.settings = prepared.settings.clone();
+        o.color = vidcut_av::export::choose_color(&o.plan, &o.settings, available, |piece| {
+            picture_kind(p, piece)
+        });
+        if let (Some(c), Some(v)) = (&o.color, o.settings.video.as_mut()) {
+            c.apply(v);
+        }
+    }
+}
+
+/// Quiet notes about a prepared export: HDR picture tone-mapped into SDR
+/// when SDR wasn't asked for (decision D44). Each is `{code, message,
+/// set}`, `set` the `--set` overrides that keep the picture HDR.
+pub fn notes(prepared: &Prepared) -> Vec<Value> {
+    let noted: Vec<&ColorChoice> = prepared
+        .outputs
+        .iter()
+        .filter_map(|o| o.color.as_ref())
+        .filter(|c| c.worth_a_note())
+        .collect();
+    let (Some(first), Some(v)) = (noted.first(), prepared.settings.video.as_ref()) else {
+        return Vec::new();
+    };
+    let mut share = PictureShare::default();
+    for c in &noted {
+        share.add(&c.picture);
+    }
+    let set = color::keep_hdr(v, share.transfer());
+    let fps = prepared.outputs[0].plan.fps.as_f64();
+    let seconds = share.hdr() as f64 / fps;
+    let length = if seconds < 60.0 {
+        format!("{seconds:.1} s")
+    } else {
+        format!("{}:{:02}", (seconds / 60.0) as u64, seconds as u64 % 60)
+    };
+    let why = first.why[0].trim_start_matches("SDR: ");
+    let message = if prepared.outputs.len() == 1 {
+        format!("{length} of HDR picture will be tone-mapped to SDR ({why})")
+    } else {
+        format!(
+            "HDR picture in {} of {} files ({length}) will be tone-mapped to SDR ({why})",
+            noted.len(),
+            prepared.outputs.len()
+        )
+    };
+    vec![json!({ "code": "hdr_tone_mapped", "message": message, "set": set })]
+}
+
 /// A summary of a prepared export (the `export.plan` result).
 pub fn describe(prepared: &Prepared, available: &Availability) -> Value {
-    let video_encoder = prepared.settings.video.as_ref().map(|v| match vidcut_av::export::encode::resolve_video(v, available) {
+    // The encoder of the first file; with `auto` color, files may differ
+    // in depth (`outputs[].color`).
+    let video = prepared
+        .outputs
+        .first()
+        .map_or(&prepared.settings, |o| &o.settings)
+        .video
+        .as_ref();
+    let video_encoder = video.map(|v| match vidcut_av::export::encode::resolve_video(v, available) {
         Ok(e) => json!({ "name": e.name, "kind": e.kind, "pixel": vidcut_av::export::encode::pixel_name(e.pixel), "device": e.device, "options": e.options }),
         Err(err) => json!({ "error": err.to_string() }),
     });
@@ -512,12 +598,14 @@ pub fn describe(prepared: &Prepared, available: &Availability) -> Value {
         "preset": prepared.preset,
         "settings": prepared.settings,
         "video_encoder": video_encoder,
+        "notes": notes(prepared),
         "outputs": prepared.outputs.iter().map(|o| json!({
             "path": o.path,
             "frames": o.plan.frames,
             "range": o.plan.range,
             "video_pieces": o.plan.video.len(),
             "audio_lanes": o.plan.audio.len(),
+            "color": o.color,
             "plan": o.plan,
         })).collect::<Vec<_>>(),
     })
@@ -592,7 +680,7 @@ pub fn run(
         }
         let report = engine::run(
             &o.plan,
-            &prepared.settings,
+            &o.settings,
             &o.path,
             available,
             cancel,
@@ -605,7 +693,10 @@ pub fn run(
                 Error::new(ErrorCode::Export, format!("{}: {e}", o.path.display()))
             }
         })?;
-        reports.push(report);
+        reports.push(Report {
+            color: report.color.or_else(|| o.color.clone()),
+            ..report
+        });
     }
     Ok(reports)
 }

@@ -134,8 +134,8 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 
 ## X14. Color is set per export, not managed
 - **Resolve:** color management (RCM) gives the timeline a color space. Media come into it through input transforms and tone mapping, and the output color space is chosen for delivery (pp. 230–239).
-- **vidcut:** there is no timeline color space and no grading. Each export picks its output, SDR BT.709 or HDR PQ or HLG (`video.hdr`), and every clip is converted to it from its own tags: tone-mapped, or with SDR white at 203 nits (spec D35). The viewer converts each picture with the export's own math (HDR tone-mapped as into an SDR export), so HDR clips look there as they will in an SDR export.
-- **Why:** vidcut cuts, and color correction belongs in an editor like Resolve (see docs/roadmap.md). Converting each clip straight to the output keeps exports right for mixed phone, camera and screen footage without color settings.
+- **vidcut:** there is no timeline color space and no grading. Each export picks its output, SDR BT.709 or HDR PQ or HLG (`video.hdr`), and every clip is converted to it from its own tags: tone-mapped, or with SDR white at 203 nits (spec D35). By default (`auto`) the export decides from the pictures it shows, and its bit depth too (spec D44): Resolve's output is whatever the project's color management says, SDR Rec.709 unless set up otherwise. The viewer converts each picture with the export's own math (HDR tone-mapped as into an SDR export), so HDR clips look there as they will in an SDR export.
+- **Why:** vidcut cuts, and color correction belongs in an editor like Resolve (see docs/roadmap.md). Converting each clip straight to the output keeps exports right for mixed phone, camera and screen footage without color settings, and choosing the output from the footage keeps a phone's HDR video HDR without anyone setting up a color space first.
 
 ## X15. The Smart Indicator holds still
 - **Resolve:** after a few seconds of idling, the Smart Indicator moves up and down on the ruler, and the edit point strobes green, or red once the clip has reached its start or end frame (p. 696).

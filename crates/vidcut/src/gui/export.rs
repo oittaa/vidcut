@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex};
 use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
 use vidcut_core::export::{
-    AudioCodec, AudioSettings, Container, EncoderChoice, ExportSettings, VideoCodec, VideoSettings,
-    validate,
+    AudioCodec, AudioSettings, Container, EncoderChoice, ExportSettings, HdrMode, VideoCodec,
+    VideoSettings, apply_overrides, validate,
 };
 use vidcut_core::{Envelope, Error, Response};
 
@@ -823,7 +823,7 @@ impl Workspace {
                     .show(ui, |ui| {
                         // Preset.
                         ui.horizontal(|ui| {
-                            ui.label("Preset");
+                            let label = ui.label("Preset");
                             let title = presets
                                 .iter()
                                 .find(|p| p.name == d.preset)
@@ -851,7 +851,9 @@ impl Workspace {
                                             d.use_preset(p);
                                         }
                                     }
-                                });
+                                })
+                                .response
+                                .labelled_by(label.id);
                             if ui.button("Save as Preset…").clicked() {
                                 d.save = Some(SavePreset {
                                     name: String::new(),
@@ -959,7 +961,9 @@ impl Workspace {
                         }
                         ui.checkbox(&mut d.overwrite, "Replace existing files");
                         ui.separator();
-                        plan_view(ui, &d);
+                        if let Some(set) = plan_view(ui, &d) {
+                            keep_hdr(&mut d, &set);
+                        }
                         ui.separator();
                         // The same export from a shell.
                         let params = d.params();
@@ -1557,8 +1561,10 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, closable: bool, send: impl Fn(&str, 
     closed
 }
 
-/// What `export.plan` says the export will do.
-fn plan_view(ui: &mut egui::Ui, d: &Dialog) {
+/// What `export.plan` says the export will do. Returns the overrides a
+/// note's action asks for (decision D44: export HDR instead).
+fn plan_view(ui: &mut egui::Ui, d: &Dialog) -> Option<Vec<String>> {
+    let mut action = None;
     ui.label(dim("Plan"));
     match &d.plan_result {
         None => {
@@ -1592,6 +1598,9 @@ fn plan_view(ui: &mut egui::Ui, d: &Dialog) {
                 }
             }
             let outputs = plan["outputs"].as_array().cloned().unwrap_or_default();
+            if let Some(line) = color_line(&outputs) {
+                ui.label(line.0).on_hover_text(line.1);
+            }
             let frames: i64 = outputs.iter().filter_map(|o| o["frames"].as_i64()).sum();
             ui.label(format!("{} file(s), {frames} frames", outputs.len()));
             for o in outputs.iter().take(4) {
@@ -1604,7 +1613,71 @@ fn plan_view(ui: &mut egui::Ui, d: &Dialog) {
             if outputs.len() > 4 {
                 ui.label(dim(format!("… and {} more", outputs.len() - 4)));
             }
+            // A quiet note, never in the way: HDR picture that SDR output
+            // tone-maps, with a way to keep it HDR.
+            for note in plan["notes"].as_array().into_iter().flatten() {
+                if note["code"] != "hdr_tone_mapped" {
+                    continue;
+                }
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(dim(note["message"].as_str().unwrap_or_default()));
+                    let set: Vec<String> = note["set"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|s| s.as_str().map(String::from))
+                        .collect();
+                    if ui
+                        .small_button("Export HDR")
+                        .on_hover_text(set.join("  "))
+                        .clicked()
+                    {
+                        action = Some(set);
+                    }
+                });
+            }
         }
+    }
+    action
+}
+
+/// The outputs' dynamic range and depth in a few words, with the reasons
+/// to hover: one line however many files.
+fn color_line(outputs: &[Value]) -> Option<(String, String)> {
+    let mut kinds: Vec<String> = Vec::new();
+    let mut why = Vec::new();
+    for c in outputs
+        .iter()
+        .map(|o| &o["color"])
+        .filter(|c| c.is_object())
+    {
+        let range = match c["hdr"].as_str() {
+            Some("pq") => "HDR (PQ)",
+            Some("hlg") => "HDR (HLG)",
+            _ => "SDR",
+        };
+        let kind = format!("{range}, {}-bit", c["bit_depth"]);
+        if !kinds.contains(&kind) {
+            kinds.push(kind);
+            why.extend(
+                c["why"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|w| w.as_str().map(String::from)),
+            );
+        }
+    }
+    (!kinds.is_empty()).then(|| (kinds.join(" / "), why.join("\n")))
+}
+
+/// Applies a note's overrides to the dialog's settings: HDR, on a codec
+/// that carries it.
+fn keep_hdr(d: &mut Dialog, set: &[String]) {
+    let mut settings = d.settings.clone();
+    if apply_overrides(&mut settings, set).is_ok() {
+        d.settings = settings;
+        fit_codecs(&mut d.settings);
     }
 }
 
@@ -1659,7 +1732,7 @@ fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u3
                                 bit_depth: None,
                                 width: None,
                                 height: None,
-                                hdr: None,
+                                hdr: HdrMode::Auto,
                             }),
                         );
                         fit_codecs(&mut d.settings);
@@ -1677,6 +1750,10 @@ fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u3
                             for c in video_codecs(d.settings.container) {
                                 if ui.selectable_value(&mut v.codec, *c, name(c)).changed() {
                                     v.profile = None;
+                                    if matches!(c, VideoCodec::Prores | VideoCodec::Dnxhr) {
+                                        // Their profiles set the depth.
+                                        v.bit_depth = None;
+                                    }
                                 }
                             }
                         });
@@ -1775,43 +1852,50 @@ fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u3
                                 }
                             });
                     }
-                    ui.label(dim("bit depth"));
-                    egui::ComboBox::from_id_salt("export-depth")
-                        .selected_text(v.bit_depth.map_or("default".into(), |b| b.to_string()))
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut v.bit_depth, None, "default");
-                            ui.selectable_value(&mut v.bit_depth, Some(8), "8");
-                            ui.selectable_value(&mut v.bit_depth, Some(10), "10");
-                        });
+                    // ProRes and DNxHR take their depth from the profile
+                    // (DNxHR HQ becomes HQX for 10-bit sources: decision D44).
+                    if !matches!(v.codec, VideoCodec::Prores | VideoCodec::Dnxhr) {
+                        ui.label(dim("bit depth"));
+                        egui::ComboBox::from_id_salt("export-depth")
+                            .selected_text(v.bit_depth.map_or("auto".into(), |b| b.to_string()))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut v.bit_depth, None, "auto");
+                                ui.selectable_value(&mut v.bit_depth, Some(8), "8");
+                                ui.selectable_value(&mut v.bit_depth, Some(10), "10");
+                            })
+                            .response
+                            .on_hover_text(
+                                "auto: 10 bits for HDR, and when most of the picture has 10 \
+                                 bits or more (not in H.264); else 8",
+                            );
+                    }
                     // Dynamic range: HDR needs a 10-bit HEVC, AV1 or VP9.
-                    if matches!(
-                        v.codec,
-                        VideoCodec::Hevc | VideoCodec::Av1 | VideoCodec::Vp9
-                    ) {
-                        use vidcut_core::model::Hdr;
-                        let label = |h: Option<Hdr>| match h {
-                            None => "SDR",
-                            Some(Hdr::Pq) => "HDR (PQ)",
-                            Some(Hdr::Hlg) => "HDR (HLG)",
+                    if vidcut_core::export::color::carries_hdr(v.codec) {
+                        let label = |h: HdrMode| match h {
+                            HdrMode::Auto => "auto",
+                            HdrMode::Sdr => "SDR",
+                            HdrMode::Pq => "HDR (PQ)",
+                            HdrMode::Hlg => "HDR (HLG)",
                         };
                         ui.label(dim("range"));
                         egui::ComboBox::from_id_salt("export-hdr")
                             .selected_text(label(v.hdr))
                             .show_ui(ui, |ui| {
-                                for h in [None, Some(Hdr::Pq), Some(Hdr::Hlg)] {
+                                for h in [HdrMode::Auto, HdrMode::Sdr, HdrMode::Pq, HdrMode::Hlg] {
                                     ui.selectable_value(&mut v.hdr, h, label(h));
                                 }
                             })
                             .response
                             .on_hover_text(
-                                "SDR: HDR sources are tone-mapped. HDR: BT.2020 in 10 bits, \
-                                 SDR sources with their white at 203 nits.",
+                                "auto: HDR when most of the picture is HDR. SDR: HDR sources \
+                                 are tone-mapped. HDR: BT.2020 in 10 bits, SDR sources with \
+                                 their white at 203 nits.",
                             );
-                        if v.hdr.is_some() && v.bit_depth == Some(8) {
+                        if v.hdr.transfer().is_some() && v.bit_depth == Some(8) {
                             v.bit_depth = None;
                         }
-                    } else {
-                        v.hdr = None;
+                    } else if v.hdr.transfer().is_some() {
+                        v.hdr = HdrMode::Auto;
                     }
                     ui.label(dim("speed"));
                     let mut speed = v.speed.clone().unwrap_or_default();

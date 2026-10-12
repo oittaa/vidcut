@@ -2,6 +2,7 @@
 //! GPU encoders actually work on this machine (by test-encoding).
 
 use serde::{Deserialize, Serialize};
+use vidcut_core::export::color::Abilities;
 use vidcut_core::export::{AudioCodec, AudioSettings, EncoderChoice, VideoCodec, VideoSettings};
 
 use crate::error::{Context, Error, Result};
@@ -69,7 +70,66 @@ pub fn pixel_name(p: format::Pixel) -> String {
 }
 
 fn ten_bit(v: &VideoSettings) -> bool {
-    v.bit_depth == Some(10) || v.profile.as_deref() == Some("main10") || v.hdr.is_some()
+    v.bit_depth == Some(10) || v.profile.as_deref() == Some("main10") || v.hdr.transfer().is_some()
+}
+
+/// The CPU encoder of a codec.
+fn cpu_name(codec: VideoCodec) -> &'static str {
+    match codec {
+        VideoCodec::H264 => "libx264",
+        VideoCodec::Hevc => "libx265",
+        VideoCodec::Av1 => "libsvtav1",
+        VideoCodec::Vp9 => "libvpx-vp9",
+        VideoCodec::Prores => "prores_ks",
+        VideoCodec::Dnxhr => "dnxhd",
+    }
+}
+
+/// Whether this FFmpeg's `name` encoder takes 10-bit pictures.
+fn cpu_ten_bit(name: &str) -> bool {
+    use format::Pixel;
+    encoder::find_by_name(name)
+        .and_then(|c| c.video().ok())
+        .and_then(|v| v.formats())
+        .is_some_and(|mut f| f.any(|p| matches!(p, Pixel::YUV420P10LE | Pixel::YUV422P10LE)))
+}
+
+/// What the encoders `v` may use can write (decision D44): whether any of
+/// them writes 10 bits, and whether the one an 8-bit export starts with
+/// does. For `auto` that is the first working GPU encoder (NVENC, then
+/// VAAPI) and then the CPU's, as [`video_encoders`] tries them.
+pub fn abilities(v: &VideoSettings, available: &Availability) -> Abilities {
+    let kinds: &[EncoderChoice] = match v.encoder {
+        EncoderChoice::Auto => &[
+            EncoderChoice::Nvenc,
+            EncoderChoice::Vaapi,
+            EncoderChoice::Cpu,
+        ],
+        EncoderChoice::Cpu => &[EncoderChoice::Cpu],
+        EncoderChoice::Nvenc => &[EncoderChoice::Nvenc],
+        EncoderChoice::Vaapi => &[EncoderChoice::Vaapi],
+    };
+    let name = |kind: EncoderChoice| match kind {
+        EncoderChoice::Cpu => Some(cpu_name(v.codec)),
+        k => gpu_name(v.codec, k),
+    };
+    let writes = |kind: EncoderChoice, ten: bool| match (kind, name(kind)) {
+        (_, None) => false,
+        (EncoderChoice::Cpu, Some(n)) => {
+            if ten {
+                cpu_ten_bit(n)
+            } else {
+                encoder::find_by_name(n).is_some()
+            }
+        }
+        (k, Some(n)) => available.find(n, gpu_pixel(k, ten)).is_some(),
+    };
+    let first = kinds.iter().copied().find(|&k| writes(k, false));
+    Abilities {
+        ten_bit: kinds.iter().any(|&k| writes(k, true)),
+        ten_bit_first: first.is_some_and(|k| writes(k, true)),
+        first: first.and_then(name),
+    }
 }
 
 fn gpu_name(codec: VideoCodec, kind: EncoderChoice) -> Option<&'static str> {
@@ -219,7 +279,7 @@ fn video_encoder(
         pixel,
         device: status.device.clone(),
         options,
-        hdr: v.hdr,
+        hdr: v.hdr.transfer(),
     }))
 }
 
@@ -322,7 +382,7 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
         pixel,
         device: None,
         options,
-        hdr: v.hdr,
+        hdr: v.hdr.transfer(),
     })
 }
 
