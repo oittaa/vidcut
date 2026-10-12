@@ -1,16 +1,17 @@
 //! The NVIDIA GPU as one pipeline: frames NVDEC decodes stay in GPU memory,
 //! are scaled there (`scale_cuda`, after `bwdif_cuda` for interlaced
-//! sources, then `pad_cuda`) and go to NVENC as they are. Pictures in
-//! another matrix than BT.709 (BT.601 SD, VP8) or in full range are
-//! converted first by libplacebo on Vulkan, on the same GPU. Proxies
-//! (decision D41) and exports use it: the CPU only reads the file and
-//! writes the result.
+//! sources, then `pad_cuda`) and go to NVENC as they are. Pictures stored
+//! turned (spec D33), in another matrix than BT.709 (BT.601 SD, VP8) or in
+//! full range are turned upright and converted first by libplacebo on
+//! Vulkan, on the same GPU. Proxies (decision D41) and exports use it: the
+//! CPU only reads the file and writes the result.
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::ptr;
 use std::sync::{Arc, OnceLock};
 
+use crate::decode::VideoReader;
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, ffi, filter, format, frame};
 
@@ -228,11 +229,12 @@ pub struct CudaPictures {
     placebo: Option<Placebo>,
 }
 
-/// BT.709 from another matrix or full range, at the source's size, ahead
-/// of the CUDA filters (they change neither): each frame is copied to a
-/// Vulkan frame, converted by libplacebo and copied back to a CUDA frame,
-/// never leaving the GPU. libplacebo can't pad: it clears the border with
-/// a copy that FFmpeg's Vulkan frames don't allow.
+/// Pictures turned upright and in BT.709 video range, at the source's size,
+/// ahead of the CUDA filters (they neither turn pictures nor change their
+/// colors): each frame is copied to a Vulkan frame, converted by libplacebo
+/// and copied back to a CUDA frame, never leaving the GPU. libplacebo can't
+/// pad: it clears the border with a copy that FFmpeg's Vulkan frames don't
+/// allow.
 struct Placebo {
     graph: filter::Graph,
     input: HwFrames,
@@ -249,6 +251,8 @@ struct Placebo {
     /// libplacebo wants rising timestamps; their own wait here.
     count: i64,
     pts: VecDeque<(i64, Option<i64>)>,
+    /// The sample aspect of the upright pictures.
+    sar: ffi::AVRational,
 }
 
 /// The time base of the counted timestamps libplacebo sees: a second
@@ -291,15 +295,25 @@ fn filters(
     steps.join(",")
 }
 
-/// libplacebo's options for `width`×`height` pictures of `out`, the size
+/// libplacebo's options for `width`×`height` pictures of `out`, stored
+/// turned by `rotation` (clockwise) and turned upright, otherwise the size
 /// they came in. Only the matrix and range change, as swscale converts SDR
 /// on the CPU: the input is tagged with BT.709's primaries and transfer
 /// too. Film grain and Dolby Vision metadata are left alone (the decoder
 /// applied the grain).
-fn placebo_options((width, height, out): (u32, u32, &str)) -> Vec<(&'static str, String)> {
+fn placebo_options(
+    (width, height, out): (u32, u32, &str),
+    rotation: u16,
+) -> Vec<(&'static str, String)> {
+    let (width, height) = if rotation % 180 == 90 {
+        (height, width)
+    } else {
+        (width, height)
+    };
     let mut options: Vec<(&str, String)> = vec![
         ("w", width.to_string()),
         ("h", height.to_string()),
+        ("rotate", rotation.to_string()),
         ("format", out.into()),
         ("colorspace", "bt709".into()),
         ("color_primaries", "bt709".into()),
@@ -397,21 +411,28 @@ fn take(graph: &mut filter::Graph, what: &str) -> Result<Option<(frame::Video, f
 }
 
 impl CudaPictures {
-    /// The pictures for frames like `first` (decoded on `device`), timed in
-    /// `time_base`. `at_once`: each frame's picture is ready as soon as the
-    /// frame is in, as an export picks them one by one; otherwise one may
-    /// come with the next frame, leaving the GPU less to do.
+    /// The pictures for the frames `reader` decodes on `device`, shown as
+    /// its stream says (turned upright, deinterlaced). `at_once`: each
+    /// frame's picture is ready as soon as the frame is in, as an export
+    /// picks them one by one; otherwise one may come with the next frame,
+    /// leaving the GPU less to do.
     pub fn new(
         device: &CudaDevice,
-        first: &frame::Video,
-        time_base: ffmpeg::Rational,
+        reader: &VideoReader,
         (width, height): (u32, u32),
         format: format::Pixel,
-        deinterlace: bool,
         at_once: bool,
     ) -> Result<Self> {
+        let first = reader
+            .peek()
+            .ok_or_else(|| Error::Invalid("no frames".into()))?;
+        let (time_base, rotation) = (reader.time_base(), reader.rotation());
+        let deinterlace = reader.interlaced();
         if first.format() != format::Pixel::CUDA {
             return Err(Error::Invalid("not frames in GPU memory".into()));
+        }
+        if !matches!(rotation, 0 | 90 | 180 | 270) {
+            return Err(Error::Invalid(format!("a rotation of {rotation}°")));
         }
         let (matrix, range) = crate::color::sdr_yuv(first)
             .ok_or_else(|| Error::Invalid("HDR pictures need tone mapping".into()))?;
@@ -419,11 +440,21 @@ impl CudaPictures {
             format::Pixel::P010LE => "p010le",
             _ => "nv12",
         };
+        // As shown: a quarter turn swaps the sides and the pixel aspect.
+        let stored = (first.width(), first.height());
         let sar = first.aspect_ratio();
+        let (size, shown_sar) = if rotation % 180 == 90 {
+            (
+                (stored.1, stored.0),
+                ffmpeg::Rational(sar.denominator(), sar.numerator()),
+            )
+        } else {
+            (stored, sar)
+        };
         let fitted = crate::export::video::fit(
-            first.width(),
-            first.height(),
-            (sar.numerator(), sar.denominator()),
+            size.0,
+            size.1,
+            (shown_sar.numerator(), shown_sar.denominator()),
             width,
             height,
         );
@@ -432,7 +463,6 @@ impl CudaPictures {
                 "FFmpeg's pad_cuda takes no 10-bit frames".into(),
             ));
         }
-        let size = (first.width(), first.height());
         let decoded = unsafe { (*first.as_ptr()).hw_frames_ctx };
         if decoded.is_null() {
             return Err(Error::Invalid(
@@ -441,7 +471,7 @@ impl CudaPictures {
         }
         let bt709 = matrix == ffi::AVColorSpace::AVCOL_SPC_BT709
             && range == ffi::AVColorRange::AVCOL_RANGE_MPEG;
-        let placebo = if bt709 {
+        let placebo = if bt709 && rotation == 0 {
             None
         } else if deinterlace {
             return Err(Error::Invalid(
@@ -449,7 +479,8 @@ impl CudaPictures {
             ));
         } else {
             let color = (matrix, range);
-            Some(Placebo::new(device, decoded, size, sar, color, at_once)?)
+            let stream = (stored, sar, rotation);
+            Some(Placebo::new(device, decoded, stream, color, at_once)?)
         };
         let frames = placebo.as_ref().map_or(decoded, |p| p.output.0);
         let mut graph = filter::Graph::new();
@@ -458,7 +489,7 @@ impl CudaPictures {
             ffi::AVPixelFormat::AV_PIX_FMT_CUDA,
             size,
             time_base.into(),
-            sar,
+            shown_sar,
             frames,
             None,
         )?;
@@ -532,12 +563,12 @@ impl CudaPictures {
 
 impl Placebo {
     /// The converter for frames of `decoded` (a CUDA frames context) of
-    /// `size`, read with `matrix` and `range`.
+    /// `width`×`height` with sample aspect `sar`, stored turned by
+    /// `rotation`, read with `matrix` and `range`.
     fn new(
         device: &CudaDevice,
         decoded: *mut ffi::AVBufferRef,
-        (width, height): (u32, u32),
-        sar: ffmpeg::Rational,
+        ((width, height), sar, rotation): ((u32, u32), ffmpeg::Rational, u16),
         (matrix, range): (ffi::AVColorSpace, ffi::AVColorRange),
         at_once: bool,
     ) -> Result<Self> {
@@ -558,12 +589,18 @@ impl Placebo {
             width,
             height,
         )?;
+        let turned = rotation % 180 == 90;
+        let (up_w, up_h) = if turned {
+            (height, width)
+        } else {
+            (width, height)
+        };
         let output = HwFrames::new(
             device.as_ptr(),
             ffi::AVPixelFormat::AV_PIX_FMT_CUDA,
             out_sw,
-            width,
-            height,
+            up_w,
+            up_h,
         )?;
         let mut graph = filter::Graph::new();
         add_source(
@@ -576,7 +613,7 @@ impl Placebo {
             Some((matrix, range)),
         )?;
         add_sink(&mut graph)?;
-        let options = placebo_options((width, height, out));
+        let options = placebo_options((width, height, out), rotation);
         // libplacebo needs the Vulkan device before it starts; given none,
         // FFmpeg would convert on the CPU in front of it.
         unsafe {
@@ -637,6 +674,17 @@ impl Placebo {
             range,
             count: 0,
             pts: VecDeque::new(),
+            sar: if turned {
+                ffi::AVRational {
+                    num: sar.denominator().max(1),
+                    den: sar.numerator().max(1),
+                }
+            } else {
+                ffi::AVRational {
+                    num: sar.numerator().max(1),
+                    den: sar.denominator().max(1),
+                }
+            },
         })
     }
 
@@ -647,7 +695,16 @@ impl Placebo {
             return source.source().flush().ctx(|| "flushing libplacebo".into());
         };
         let mut v = self.input.copy(f, "copying to Vulkan")?;
-        unsafe { ffi::av_frame_copy_props(v.as_mut_ptr(), f.as_ptr()) };
+        unsafe {
+            ffi::av_frame_copy_props(v.as_mut_ptr(), f.as_ptr());
+            // The filter copies each frame's properties to its picture, and
+            // libplacebo turns both by their display matrices: the turns
+            // cancel. The rotation goes in the options instead.
+            ffi::av_frame_remove_side_data(
+                v.as_mut_ptr(),
+                ffi::AVFrameSideDataType::AV_FRAME_DATA_DISPLAYMATRIX,
+            );
+        }
         tag(&mut v, (self.matrix, self.range));
         let n = 2 * self.count;
         self.count += 1;
@@ -688,7 +745,10 @@ impl Placebo {
                 pts = t;
             }
             let mut c = self.output.copy(&out, "copying back from Vulkan")?;
-            unsafe { ffi::av_frame_copy_props(c.as_mut_ptr(), out.as_ptr()) };
+            unsafe {
+                ffi::av_frame_copy_props(c.as_mut_ptr(), out.as_ptr());
+                (*c.as_mut_ptr()).sample_aspect_ratio = self.sar;
+            }
             c.set_pts(pts);
             return Ok(Some(c));
         }
@@ -713,6 +773,14 @@ fn tag(f: &mut frame::Video, (matrix, range): (ffi::AVColorSpace, ffi::AVColorRa
 mod tests {
     use super::{filters, placebo_options};
 
+    /// The value libplacebo is given for option `key`.
+    fn option<'a>(options: &'a [(&str, String)], key: &str) -> Option<&'a str> {
+        options
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, v)| v.as_str())
+    }
+
     #[test]
     fn big_shrinks_halve_first() {
         assert_eq!(
@@ -736,17 +804,25 @@ mod tests {
 
     #[test]
     fn libplacebo_changes_only_the_colors() {
-        let options = placebo_options((720, 480, "nv12"));
-        let get = |k: &str| {
-            options
-                .iter()
-                .find(|(o, _)| *o == k)
-                .map(|(_, v)| v.as_str())
-        };
+        let options = placebo_options((720, 480, "nv12"), 0);
+        let get = |k| option(&options, k);
         assert_eq!((get("w"), get("h")), (Some("720"), Some("480")));
+        assert_eq!(get("rotate"), Some("0"));
         assert_eq!(get("format"), Some("nv12"));
         assert_eq!(get("colorspace"), Some("bt709"));
         assert_eq!(get("color_primaries"), Some("bt709"));
         assert_eq!(get("range"), Some("tv"));
+    }
+
+    #[test]
+    fn libplacebo_turns_pictures_upright() {
+        // A phone's 1920×1080 frames, stored for a quarter turn clockwise.
+        let options = placebo_options((1920, 1080, "nv12"), 90);
+        let get = |k| option(&options, k);
+        assert_eq!((get("w"), get("h")), (Some("1080"), Some("1920")));
+        assert_eq!(get("rotate"), Some("90"));
+        let options = placebo_options((1920, 1080, "nv12"), 180);
+        let get = |k| option(&options, k);
+        assert_eq!((get("w"), get("h")), (Some("1920"), Some("1080")));
     }
 }

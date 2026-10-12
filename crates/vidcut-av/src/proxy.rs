@@ -161,11 +161,11 @@ pub struct WrittenProxy {
 /// known); this thread's [`crate::cancel`] flag stops it, leaving no file.
 ///
 /// With NVENC, the frames are decoded on NVDEC and scaled on the GPU, never
-/// copied to memory, when that gives the same pictures as the CPU: a video
-/// file that is upright and SDR ([`gpu_suitable`]), progressive, or
-/// interlaced and BT.709 in video range. Otherwise, or when NVDEC can't
-/// decode the stream, they are decoded and scaled on the CPU as for every
-/// other encoder.
+/// copied to memory, when that gives the same pictures as the CPU: an SDR
+/// video file, progressive, or interlaced, upright and BT.709 in video
+/// range ([`CudaPictures`](crate::cuda::CudaPictures)). Otherwise, or when
+/// NVDEC can't decode the stream, they are decoded and scaled on the CPU as
+/// for every other encoder.
 pub fn write(
     input: &Input,
     width: u32,
@@ -250,14 +250,6 @@ pub fn write(
         }
     }
     Err(errors.remove(0))
-}
-
-/// Whether frames like `first` can be decoded and scaled on the GPU and
-/// look as they would from the CPU: upright (the GPU can't turn them) and
-/// SDR (it can't tone-map). [`CudaPictures`](crate::cuda::CudaPictures)
-/// converts other matrices and full range with libplacebo.
-pub fn gpu_suitable(first: &frame::Video, rotation: u16) -> bool {
-    rotation == 0 && crate::color::hdr_of(first).is_none()
 }
 
 /// The encoder's time base: the source's, when its denominator is a sane
@@ -553,22 +545,12 @@ fn encode_on_gpu(
     shown: &Shown<'_>,
 ) -> std::result::Result<u64, Failed> {
     let mut reader = VideoReader::open_cuda(input, device).map_err(Failed::Unsuitable)?;
-    let first = reader
-        .peek()
-        .ok_or_else(|| Failed::Unsuitable(Error::Invalid("no frames".into())))?;
-    if !gpu_suitable(first, reader.rotation()) {
-        return Err(Failed::Unsuitable(Error::Invalid(
-            "turned or HDR: the CPU makes this proxy".into(),
-        )));
-    }
     let src_tb = reader.time_base();
     let mut pictures = crate::cuda::CudaPictures::new(
         device,
-        first,
-        src_tb,
+        &reader,
         (width, height),
         format::Pixel::NV12,
-        reader.interlaced(),
         false,
     )
     .map_err(Failed::Unsuitable)?;

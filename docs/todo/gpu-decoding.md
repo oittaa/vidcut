@@ -3,7 +3,6 @@
 **When:** later.
 
 Proxies and exports made with NVENC decode on NVDEC and scale on the GPU (preview.md §12, export.md §5). Still on the CPU:
-- **Turned pictures:** libplacebo (already in the pipeline for BT.601, export.md §5) has `rotate` for 90° steps; phone footage would stay on the GPU.
 - **Padding in 10-bit output:** `pad_cuda` takes 8 bits only, and libplacebo can't clear borders in FFmpeg's Vulkan frames. libplacebo with two inputs could draw the picture over a black frame of the output's size, which needs no clearing.
 - **HDR:** tone mapping into SDR, and SDR into HDR output. libplacebo does both; it must give the CPU's curve (`color.rs`).
 - **Interlaced sources** in exports (deinterlacing before frames are picked), and interlaced BT.601 anywhere (`bwdif_cuda` would go before libplacebo).

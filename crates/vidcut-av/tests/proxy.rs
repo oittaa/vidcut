@@ -225,8 +225,8 @@ fn a_sequence_proxy_uses_the_sequence_timestamps() {
 /// and scaled there, frames never leaving it: each proxy frame is still
 /// the source frame with its timestamp (interlaced ones deinterlaced one
 /// frame per frame, as the CPU reader does; BT.601 ones converted by
-/// libplacebo). Turned sources, interlaced ones in BT.601, and ones NVDEC
-/// can't decode, are made on the CPU, still with NVENC.
+/// libplacebo, which turns turned ones upright). Interlaced ones in BT.601,
+/// and ones NVDEC can't decode, are made on the CPU, still with NVENC.
 #[cfg(feature = "gpu-tests")]
 #[test]
 fn nvenc_proxies_decode_on_the_gpu_and_stay_exact() {
@@ -264,7 +264,12 @@ fn nvenc_proxies_decode_on_the_gpu_and_stay_exact() {
         (
             "turned",
             hd(VideoCodec::H264, Container::Mp4).rotation(90),
-            false,
+            true,
+        ),
+        (
+            "turned upside down",
+            hd(VideoCodec::H264, Container::Mp4).rotation(180),
+            true,
         ),
         ("ProRes", hd(VideoCodec::ProRes422Hq, Container::Mov), false),
     ];
@@ -275,10 +280,9 @@ fn nvenc_proxies_decode_on_the_gpu_and_stay_exact() {
     for (n, (what, spec, gpu)) in cases.into_iter().enumerate() {
         let source = fixture::ensure(&spec).unwrap();
         let dest = tmp.path().join(format!("gpu-{n}.mkv"));
-        let turned = spec.rotation % 180 == 90;
-        let (w, h) = if turned { (360, 640) } else { (640, 360) };
+        let turned = spec.rotation != 0;
         let written =
-            vidcut_av::proxy::write(&Input::File(source.clone()), w, h, &dest, None, &nvenc)
+            vidcut_av::proxy::write(&Input::File(source.clone()), 640, 360, &dest, None, &nvenc)
                 .unwrap_or_else(|e| panic!("{what}: {e}"));
         assert_eq!(written.on_gpu, gpu, "{what}: on the GPU");
         assert_eq!(written.encoder.name, "av1_nvenc", "{what}");
@@ -286,10 +290,9 @@ fn nvenc_proxies_decode_on_the_gpu_and_stay_exact() {
         let got = frames(&Input::File(dest));
         assert_eq!(got.len(), src.len(), "{what}: frames");
         for (k, ((want_code, want_t), (got_code, got_t))) in src.iter().zip(&got).enumerate() {
-            // A turned picture's barcode reads across, not along.
-            if !turned {
-                assert_eq!(got_code, want_code, "{what}: frame {k}");
-            }
+            // A turned source's barcode reads only once turned upright.
+            let want_code = if turned { Some(k as u32) } else { *want_code };
+            assert_eq!(*got_code, want_code, "{what}: frame {k}");
             assert!(
                 (got_t - want_t).abs() <= 1.5e-3,
                 "{what}: frame {k} at {got_t}, source at {want_t}"

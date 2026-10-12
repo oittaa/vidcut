@@ -1567,6 +1567,14 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
         (30, 1),
         30,
     ));
+    // Stored turned, as phones do: libplacebo turns them upright.
+    let turned = |rotation| {
+        src(
+            FixtureSpec::new(VideoCodec::H264, Container::Mp4, 1280, 720, (30, 1), 30)
+                .rotation(rotation),
+        )
+    };
+    let (r90, r180, r270) = (turned(90), turned(180), turned(270));
     let video = vec![
         v(&a, 10, 30),
         VideoPiece::Black { frames: 10 },
@@ -1576,13 +1584,16 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
         v(&d, 0, 30),
         v(&four_three, 0, 10),
         v(&scope, 0, 10),
+        v(&r90, 0, 10),
+        v(&r180, 5, 10),
+        v(&r270, 10, 10),
         v(&e, 0, 20),
         v(&a, 50, 20),
     ];
     // All but black, and in 10 bits the padded pieces (FFmpeg's pad_cuda
     // takes no 10-bit frames). The small untagged piece is BT.601, which
     // libplacebo converts.
-    let on_gpu = |bits| if bits == 8 { 195 } else { 175 };
+    let on_gpu = |bits| if bits == 8 { 225 } else { 205 };
     let p = plan(fps, 1280, 720, video, vec![]);
     let dir = out_dir("gpu-pipeline");
     let mut reference = lossless();
@@ -1590,7 +1601,7 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
     let cpu = dir.path().join("cpu.mkv");
     render(&p, &reference, &cpu);
     let want = barcodes(&cpu);
-    assert_eq!(want.len(), 205);
+    assert_eq!(want.len(), 235);
     for (codec, bits) in [(VCodec::H264, 8), (VCodec::Hevc, 10)] {
         let settings = ExportSettings {
             container: OutContainer::Mp4,

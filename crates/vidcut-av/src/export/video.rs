@@ -247,26 +247,17 @@ pub(crate) struct GpuSide {
 }
 
 /// `input` opened on NVDEC, and the scaler to the output, when its pictures
-/// go through the GPU as they would through the CPU: as for proxies
-/// (upright, SDR), progressive (frames are picked before any scaling, so a
-/// deinterlacer would see gaps), and when the scaler builds (libplacebo
-/// needs Vulkan for other matrices than BT.709).
+/// go through the GPU as they would through the CPU: SDR, progressive
+/// (frames are picked before any scaling, so a deinterlacer would see
+/// gaps), and when the scaler builds (libplacebo needs Vulkan for turned
+/// pictures and other matrices than BT.709).
 fn gpu_reader(input: &Input, gpu: &GpuSide) -> Option<(VideoReader, crate::cuda::CudaPictures)> {
     let reader = VideoReader::open_cuda(input, &gpu.device).ok()?;
-    let first = reader.peek()?;
-    if !crate::proxy::gpu_suitable(first, reader.rotation()) || reader.interlaced() {
+    if reader.interlaced() {
         return None;
     }
-    let scaler = crate::cuda::CudaPictures::new(
-        &gpu.device,
-        first,
-        reader.time_base(),
-        gpu.out,
-        gpu.format,
-        false,
-        true,
-    )
-    .ok()?;
+    let scaler =
+        crate::cuda::CudaPictures::new(&gpu.device, &reader, gpu.out, gpu.format, true).ok()?;
     Some((reader, scaler))
 }
 
