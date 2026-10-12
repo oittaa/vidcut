@@ -174,6 +174,13 @@ pub struct Player {
     next_id: u64,
     /// Last seek or load command.
     pub motion: u64,
+    /// Last motion command sent to mpv (`motion` unless a seek is
+    /// deferred), and when.
+    sent: u64,
+    sent_at: Instant,
+    /// A seek asked for while another was still decoding: the frame,
+    /// whether fast, and its motion id. It goes once that one finishes.
+    deferred: Option<(i64, bool, u64)>,
     acked: u64,
     /// Commands acked when mpv last began a seek or a file: the next restart
     /// finishes them. (A restart of an older seek can arrive after a newer
@@ -188,6 +195,18 @@ pub struct Player {
     hwdec: String,
     video_size: (Option<i64>, Option<i64>),
     pub error: Option<String>,
+}
+
+/// How long a seek may decode before seeks after it stop waiting for it.
+const STUCK_SEEK: Duration = Duration::from_secs(1);
+
+/// mpv's seek flags: a keyframe near the frame (scrubbing), or the frame.
+fn seek_mode(fast: bool) -> &'static str {
+    if fast {
+        "absolute+keyframes"
+    } else {
+        "absolute+exact"
+    }
 }
 
 impl Player {
@@ -214,6 +233,9 @@ impl Player {
             reverse: None,
             next_id: 1,
             motion: 0,
+            sent: 0,
+            sent_at: Instant::now(),
+            deferred: None,
             acked: 0,
             seeking: 0,
             restarted: 0,
@@ -236,6 +258,12 @@ impl Player {
     fn command(&mut self, args: &[&str]) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
+        self.command_as(id, args);
+        id
+    }
+
+    /// Sends a command under an id already taken.
+    fn command_as(&mut self, id: u64, args: &[&str]) {
         if debug() {
             eprintln!("[{:?}] #{id} {args:?}", self.id);
         }
@@ -244,12 +272,14 @@ impl Player {
         {
             self.error = Some(e.to_string());
         }
-        id
     }
 
     /// Records a motion command; without mpv it completes at once.
     fn moved(&mut self, id: u64) -> u64 {
         self.motion = id;
+        self.sent = id;
+        self.sent_at = Instant::now();
+        self.deferred = None;
         if self.mpv.is_none() {
             self.acked = id;
             self.restarted = id;
@@ -370,6 +400,7 @@ impl Player {
 
     /// Shows nothing.
     pub fn unload(&mut self) {
+        self.deferred = None;
         if self.loaded.take().is_some() {
             self.command(&["stop"]);
         }
@@ -408,20 +439,53 @@ impl Player {
         } else {
             self.tracking = false;
         }
-        let secs = self.secs(frame);
-        let mode = if fast {
-            "absolute+keyframes"
-        } else {
-            "absolute+exact"
-        };
-        let id = self.command(&["seek", &secs, mode]);
+        // While a seek still decodes, a newer one waits for it and then
+        // goes straight to the newest frame. Each new seek cancelling the
+        // one before showed nothing at all while a step key was held, on
+        // files with keyframes seconds apart.
+        if self.mpv.is_some() && self.speed == 0.0 && self.decoding() {
+            let id = self.next_id;
+            self.next_id += 1;
+            self.deferred = Some((frame, fast, id));
+            self.motion = id;
+            return id;
+        }
+        let id = self.command(&["seek", &self.secs(frame), seek_mode(fast)]);
         self.moved(id)
+    }
+
+    /// Whether the last seek sent is still decoding. One that hasn't
+    /// finished in a second holds nothing up any longer.
+    fn decoding(&self) -> bool {
+        self.restarted < self.sent && self.sent_at.elapsed() < STUCK_SEEK
+    }
+
+    /// Sends the deferred seek once the one before it has finished.
+    fn send_deferred(&mut self) {
+        let Some((frame, fast, id)) = self.deferred else {
+            return;
+        };
+        if self.decoding() {
+            return;
+        }
+        let secs = self.secs(frame);
+        self.command_as(id, &["seek", &secs, seek_mode(fast)]);
+        self.sent = id;
+        self.sent_at = Instant::now();
+        self.deferred = None;
     }
 
     /// Plays at `speed` (negative: stepped reverse).
     pub fn play(&mut self, speed: f64) {
         if self.loaded.is_none() || speed == 0.0 {
             return;
+        }
+        // A deferred seek goes first: playback starts from there.
+        if let Some((frame, fast, id)) = self.deferred.take() {
+            let secs = self.secs(frame);
+            self.command_as(id, &["seek", &secs, seek_mode(fast)]);
+            self.sent = id;
+            self.sent_at = Instant::now();
         }
         self.speed = speed;
         if speed > 0.0 {
@@ -490,7 +554,7 @@ impl Player {
             match event {
                 Event::CommandReply { id, error } => {
                     self.acked = self.acked.max(id);
-                    if error < 0 && id == self.motion {
+                    if error < 0 && id == self.sent {
                         self.error = Some(format!("mpv command failed ({error})"));
                         // Nothing will restart for it; don't keep waiters waiting.
                         self.restarted = self.restarted.max(id);
@@ -508,6 +572,7 @@ impl Player {
                 }
                 Event::EndFile { reason: 4, error } => {
                     self.loading = None;
+                    self.deferred = None;
                     self.error = Some(format!("playback failed ({error})"));
                     self.restarted = self.restarted.max(self.motion);
                     self.shown = self.shown.max(self.motion);
@@ -516,6 +581,7 @@ impl Player {
                 _ => {}
             }
         }
+        self.send_deferred();
         changed
     }
 

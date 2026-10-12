@@ -424,6 +424,33 @@ fn live_session() {
     assert_eq!(h.shown(dir), Some(expected(147)));
     h.ok("player.seek", json!({ "at": "-1s" }));
     assert_eq!(h.shown(dir), Some(expected(117)));
+    step("Quick steps");
+    // Steps quicker than frames decode, as a held arrow key makes them: a
+    // seek waits for the one still decoding instead of cancelling it, and
+    // the last lands exactly. The GUI's overtaken steps aren't errors.
+    let steps: Vec<_> = (0..8)
+        .map(|_| {
+            let handle = h.handle.clone();
+            std::thread::spawn(move || {
+                let e = Envelope::from_json(json!({
+                    "method": "player.step",
+                    "params": { "frames": 1 }
+                }))
+                .unwrap();
+                handle.call(e, Origin::Gui { drag: false }, None, &mut |_| true)
+            })
+        })
+        .collect();
+    for s in steps {
+        s.join()
+            .unwrap()
+            .expect("an overtaken GUI step is no error");
+    }
+    assert_eq!(
+        h.ok("player.state", json!({})).result["timeline"]["position"],
+        125
+    );
+    assert_eq!(h.shown(dir), Some(expected(125)));
 
     step("An edit reloads the preview");
     // An edit reloads the preview: split c1 and delete its first half.

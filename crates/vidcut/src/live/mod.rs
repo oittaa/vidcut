@@ -1030,7 +1030,12 @@ impl Live {
                     // the same frame.
                     let p = &self.players[player.index()];
                     let (frame, exact) = at;
-                    if p.target.0 != frame || (exact && !p.target.1) {
+                    let overtaken = p.target.0 != frame || (exact && !p.target.1);
+                    if overtaken && matches!(w.job.origin, Origin::Gui { .. }) {
+                        // The GUI's steps and seeks overtake each other as a
+                        // key repeats or a drag goes on: not an error there.
+                        Some(Ok(self.state_response()))
+                    } else if overtaken {
                         Some(Err(Error::conflict(format!(
                             "another seek moved the viewer to {}frame {} before frame \
                              {frame} showed",

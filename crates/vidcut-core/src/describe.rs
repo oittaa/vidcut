@@ -124,7 +124,10 @@ pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> Stri
         "player.pause" => "Pause".into(),
         "player.toggle" => "Play or pause".into(),
         "player.seek" => format!("Go to {}", d.time("at")),
-        "player.step" => format!("Step {} frames", params["frames"]),
+        "player.step" => match params["frames"].as_i64() {
+            Some(n) => format!("Step {}", frames(n)),
+            None => format!("Step {} frames", params["frames"]),
+        },
         "player.mute" => match params["mute"].as_bool() {
             Some(true) => "Mute the viewer".into(),
             Some(false) => "Unmute the viewer".into(),
@@ -176,6 +179,15 @@ fn compact(params: &Value) -> String {
 
 fn db(v: &Value) -> String {
     v.as_f64().map_or("?".into(), |d| format!("{d:+.1} dB"))
+}
+
+/// `n` frames, in words: "1 frame", "-2 frames".
+fn frames(n: i64) -> String {
+    if n.abs() == 1 {
+        format!("{n} frame")
+    } else {
+        format!("{n} frames")
+    }
 }
 
 struct Words<'a> {
@@ -389,8 +401,8 @@ impl Words<'_> {
 
     fn by(&self) -> String {
         match self.params["by"].as_i64() {
-            Some(n) if n > 0 => format!("by +{n} frames"),
-            Some(n) => format!("by {n} frames"),
+            Some(n) if n > 0 => format!("by +{}", frames(n)),
+            Some(n) => format!("by {}", frames(n)),
             None => format!("to {}", self.time("to")),
         }
     }
