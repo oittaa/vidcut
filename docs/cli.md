@@ -89,7 +89,7 @@ vidcut history undo                         # works across separate runs
   - `vidcut presets save web --from youtube-1080p --set video.quality=22 [--quick-export]` saves a user preset to `~/.config/vidcut/presets/web.toml`; `--settings JSON|@FILE` gives full settings instead. `vidcut presets delete web` removes it.
 - `vidcut encoders list` shows which GPU encoders work here (cached; `--refresh` re-tests), whether or not `gpu.acceleration` lets vidcut use them.
 - `vidcut preferences get` shows the application preferences (`~/.config/vidcut/preferences.toml`) and what the thumbnail cache holds; `vidcut preferences set thumbnails.cache_limit_mb=256` changes them (`preferences.set` takes `{"thumbnails": {"disk_cache": false}}`; turning the cache off empties it). The cache holds the pool's pictures and the timeline's filmstrip tiles; `thumbnails.timeline_memory_mb` (256) is the memory a running GUI keeps tiles in.
-  - `vidcut preferences set gpu.acceleration=false` (File > Preferences: GPU) turns off all GPU work: exports and proxies take software encoders whatever the settings or preset name (`export plan` shows `cpu`), so nothing decodes on NVDEC either, and the preview decodes in software at once: a running GUI watches the preferences file and switches its players' decoder where they are (`player state` reports what decoded the picture shown, `hwdec`: `nvdec` or `no`). With it on, the preview decodes on NVDEC every stream it can (H.264, HEVC, AV1, VP9). For comparing CPU and GPU pictures, or when a driver misbehaves. On by default.
+  - `vidcut preferences set gpu.acceleration=false` (File > Preferences: GPU) turns off all GPU work: exports and proxies take software encoders whatever the settings or preset name (`export plan` shows `cpu`), so nothing decodes on NVDEC either, and the preview decodes in software at once: a running GUI watches the preferences file and switches its player's decoder where it is (`player state` reports what decoded the picture shown, `hwdec`: `nvdec` or `no`). With it on, the preview decodes on NVDEC every stream it can (H.264, HEVC, AV1, VP9). For comparing CPU and GPU pictures, or when a driver misbehaves. On by default.
 - `vidcut frame render --at 1m --out f.png [--width 640]` renders what the timeline shows at a frame. `--media m1` renders a media frame instead. Use it to look at cuts.
 
 **Automatic tools (spec D29–D32):**
@@ -123,7 +123,7 @@ vidcut history undo                         # works across separate runs
 
 | Command | What |
 |---|---|
-| `vidcut player state` | viewer mode, both playheads, the source clip, selection, what decodes (`hwdec`), late presents and skipped frames while playing |
+| `vidcut player state` | viewer mode, both playheads and whether each one's picture is decoded (`ready`; the one not shown is kept ready, so switching shows it at once), the source clip, selection, what decodes (`hwdec`), late presents and skipped frames while playing |
 | `vidcut player seek 10s [--viewer timeline\|source_clip\|source_tape]` | returns once the frame is on screen (`CONFLICT` if someone moved the viewer first); `+10f`/`-2s` are relative |
 | `vidcut player step [-]N`, `player play [--speed -2]`, `player pause`, `player toggle` | negative speeds play backwards, the sound reversed; other speeds keep its pitch |
 | `vidcut viewer set source_clip\|source_tape\|timeline`, `viewer load m1 [--at 5s]` | what the viewer shows |
@@ -135,7 +135,7 @@ vidcut history undo                         # works across separate runs
 | `vidcut pool set --bin A --sort name --descending true` | the bin the Media Pool shows and its order; Source Tape follows it |
 | `vidcut player mute [true\|false]` | the viewer's monitoring mute (not the export); without a value, toggles |
 | `vidcut player audio-scrubbing [true\|false]` | audio scrubbing (decision D42): steps and paused seeks play their frame's sound; without a value, toggles (Shift+S) |
-| `vidcut mixer preview A1 -12` | a track's level heard now, without changing the project (`track set --volume-db` keeps one); `live: false` when nothing plays the timeline |
+| `vidcut mixer preview A1 -12` | a track's level heard now, without changing the project (`track set --volume-db` keeps one); `live: false` while the viewer shows the source |
 | `vidcut gui show quick_export\|export\|jobs\|log\|mixer\|preferences` | opens that window for the person at the GUI |
 
 - **Looking at the result:** `vidcut player seek 1m && vidcut gui screenshot --out shot.png` shows exactly what `vidcut frame render --at 1m --out f.png` renders. Both are frame-exact.

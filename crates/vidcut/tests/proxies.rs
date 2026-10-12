@@ -2,7 +2,7 @@
 //! core thread keeps answering while one encodes, progress comes as an
 //! export's does, each encode is a job the Jobs window and `jobs.*` show and
 //! cancel, and a cancelled encode leaves no file and records nothing.
-//! Headless, the encode happens before the project is locked. No players
+//! Headless, the encode happens before the project is locked. No player
 //! and no display.
 
 use std::path::{Path, PathBuf};
@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use vidcut::live::{self, Capture, Origin, PlayerId, Presented, WindowChange};
+use vidcut::live::{self, Capture, Origin, Presented, WindowChange};
 use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
 use vidcut_core::model::Settings;
 use vidcut_core::time::Rational;
@@ -20,10 +20,10 @@ use vidcut_core::{Envelope, ErrorCode, Project, Response, Store};
 struct NoRenderer;
 
 impl live::Renderer for NoRenderer {
-    fn present(&self, _: PlayerId, done: Presented) {
+    fn present(&self, done: Presented) {
         done(None);
     }
-    fn capture_viewer(&self, _: PlayerId, done: Capture) {
+    fn capture_viewer(&self, done: Capture) {
         done(Err(vidcut_core::Error::usage("no renderer in tests")));
     }
     fn capture_window(&self, done: Capture) {
@@ -116,7 +116,7 @@ fn proxies_encode_beside_the_session() {
     let (h, session) = live::start(live::Config {
         project: Some(path.clone()),
         create: false,
-        players: None,
+        player: None,
         preview_error: Some("no preview in tests".into()),
         renderer: Arc::new(NoRenderer),
         notify: Arc::new(|| {}),

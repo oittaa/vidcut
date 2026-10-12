@@ -1,6 +1,7 @@
 //! What the player decodes: each frame about once, playing forward and
-//! backward; nothing again for pictures it keeps across an edit; and seeks
-//! that arrive while one decodes merge. One test, so the process-wide
+//! backward; nothing again for pictures it keeps across an edit; nothing
+//! after switching to a prepared plan; and seeks that arrive while one
+//! decodes merge. One test, so the process-wide
 //! decode count is this test's alone.
 
 mod player_support;
@@ -93,6 +94,37 @@ fn frames_decode_about_once_and_edits_keep_them() {
         assert_eq!(shown_at(&player, t), *e, "frame {t}");
     }
     assert_eq!(frames_decoded() - before, 0, "kept pictures decoded again");
+
+    // Switching to the plan played next, after a step back in this one:
+    // its prepared frame shows, and nothing more decodes there. The step
+    // back was in the other plan, so no window behind is wanted in this
+    // one (its frame 60 is lower than 199, which a step back would be).
+    drop(player);
+    let player = new_player();
+    player.seek(200);
+    assert_eq!(shown_at(&player, 200), Some(200));
+    player.step(-1);
+    assert_eq!(shown_at(&player, 199), Some(199));
+    let next = plan(&[clip(&other, 0, 90)], 0);
+    player.prepare(Some((next.clone(), 60)));
+    // Prepared once nothing else is left to decode: the window behind 199.
+    let started = Instant::now();
+    while !player.status().prepared {
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "never prepared"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let expect = rendered(&next, 60);
+    let before = frames_decoded();
+    player.set_plan_at(next.clone(), 60).unwrap();
+    assert!(player.status().ready, "the prepared frame");
+    assert_eq!(shown_at(&player, 60), expect);
+    std::thread::sleep(Duration::from_millis(300));
+    let switched = frames_decoded() - before;
+    eprintln!("switching to a prepared frame: {switched} frames decoded");
+    assert_eq!(switched, 0, "{switched} frames decoded after switching");
 
     // Seeks that arrive while one decodes merge into the last: a fresh
     // player, each seek far from the others.

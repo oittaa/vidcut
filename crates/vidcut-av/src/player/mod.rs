@@ -2,7 +2,7 @@
 //! picture the one export makes, the sound the clock
 //! (docs/decisions/player.md).
 //!
-//! **Threads.** Each player has a decode thread ([`video`]) and an audio
+//! **Threads.** A player has a decode thread ([`video`]) and an audio
 //! thread ([`audio`]); the audio output has its device's callback. The
 //! caller never decodes: [`Player`]'s requests change what is wanted and
 //! return at once, and [`Player::present`] only looks pictures up.
@@ -30,6 +30,12 @@
 //! **Scrubbing.** A frame step, and a seek while paused, play that frame's
 //! sound ([`scrub`]); [`Scrubber`] does it alone, for pictures shown by
 //! something else.
+//!
+//! **The plan played next.** A viewer that shows one thing or another (the
+//! source or the timeline) plays both through one player: the frame it
+//! would show of the other is [`prepare`](Player::prepare)d, decoded while
+//! nothing else is and held whatever the budget, so switching to it
+//! ([`set_plan_at`](Player::set_plan_at)) shows it at once.
 
 mod audio;
 mod clock;
@@ -103,6 +109,9 @@ pub struct Status {
     /// The picture of `position` is decoded: the next
     /// [`present`](Player::present) shows it.
     pub ready: bool,
+    /// The picture of the frame [`prepare`](Player::prepare)d is decoded
+    /// (false while none is): switching to it shows it at once.
+    pub prepared: bool,
     /// The newest frame [`present`](Player::present) showed exactly.
     pub presented: Option<i64>,
     /// The plan's timeline frames, `[first, end)`.
@@ -166,6 +175,8 @@ pub(crate) struct Control {
     pub scrub: Option<(i64, u64)>,
     /// Decode on NVDEC where it can.
     pub hardware: bool,
+    /// The plan played next and the frame of it to keep ready.
+    pub prepared: Option<(Arc<Plan>, i64)>,
     pub closed: bool,
     error: Option<String>,
 }
@@ -218,6 +229,8 @@ pub(crate) struct Snap {
     pub focus: i64,
     /// Decode on NVDEC where it can.
     pub hardware: bool,
+    /// The plan played next and the frame of it to keep ready.
+    pub prepared: Option<(Arc<Plan>, i64)>,
 }
 
 /// The audio thread's view.
@@ -365,6 +378,7 @@ impl Shared {
             version: ctl.version,
             focus,
             hardware: ctl.hardware,
+            prepared: ctl.prepared.clone(),
         })
     }
 
@@ -472,6 +486,7 @@ impl Player {
                 scrubbing: config.audio_scrubbing,
                 scrub: None,
                 hardware: config.hardware,
+                prepared: None,
                 closed: false,
                 error: None,
             }),
@@ -514,25 +529,13 @@ impl Player {
     /// plan), and so do open files and kept pictures where the new plan
     /// shows the same frames. The sample rate and channels must stay.
     pub fn set_plan(&self, plan: RenderPlan) -> Result<()> {
-        if plan.frames <= 0 {
-            return Err(Error::Invalid("nothing to play".into()));
-        }
-        // Refused, or the same plan: nothing changes, nothing is cancelled.
-        let (rate, channels) = self.shared.format;
-        if (plan.sample_rate, plan.channels) != (rate, channels) {
-            return Err(Error::Invalid(format!(
-                "the player plays {rate} Hz in {channels} channels, not {} Hz in {}",
-                plan.sample_rate, plan.channels
-            )));
-        }
+        self.check(&plan)?;
+        // The same plan: nothing changes, nothing is cancelled.
         if self.shared.control().plan.plan == plan {
             return Ok(());
         }
         self.shared.change(true, |ctl, pos, _| {
-            ctl.plan = Arc::new(Plan::new(plan));
-            ctl.plan_gen += 1;
-            ctl.trims.clear();
-            ctl.trims_gen += 1;
+            replace_plan(ctl, plan);
             // Paused, the same frame. Playing, the sound goes on from the
             // same time; at another frame rate, the picture shown stays
             // until the new plan's is decoded.
@@ -543,6 +546,63 @@ impl Player {
             }
         });
         Ok(())
+    }
+
+    /// Plays `plan` from timeline frame `at`, without the frame's sound:
+    /// another thing to show, or an edit seen from elsewhere. Paused, it
+    /// shows `at`; playing, play goes on from there. Until `at`'s picture
+    /// is decoded, the one shown before stays. One change, so nothing is
+    /// decoded for the frame in between. The sample rate and channels must
+    /// stay.
+    pub fn set_plan_at(&self, plan: RenderPlan, at: i64) -> Result<()> {
+        self.check(&plan)?;
+        let same = self.shared.control().plan.plan == plan;
+        self.shared.change(true, |ctl, _, _| {
+            if !same {
+                replace_plan(ctl, plan);
+            }
+            move_to(ctl, at, false);
+        });
+        Ok(())
+    }
+
+    /// Refuses a plan the player can't play: empty, or at another sample
+    /// rate or channel count than the device was opened for. Nothing
+    /// changes then, so nothing is cancelled.
+    fn check(&self, plan: &RenderPlan) -> Result<()> {
+        if plan.frames <= 0 {
+            return Err(Error::Invalid("nothing to play".into()));
+        }
+        let (rate, channels) = self.shared.format;
+        if (plan.sample_rate, plan.channels) != (rate, channels) {
+            return Err(Error::Invalid(format!(
+                "the player plays {rate} Hz in {channels} channels, not {} Hz in {}",
+                plan.sample_rate, plan.channels
+            )));
+        }
+        Ok(())
+    }
+
+    /// Keeps timeline frame `at` of `plan` ready: the plan played next
+    /// ([`set_plan_at`](Self::set_plan_at)), such as what a viewer shows
+    /// when it switches. Its picture decodes while the player is paused
+    /// with nothing else to decode, on a reader of its own (the one the
+    /// player reads with stays where it is), and is held whatever the
+    /// budget until another is prepared. `None` lets it go.
+    pub fn prepare(&self, next: Option<(RenderPlan, i64)>) {
+        let next = next.filter(|(plan, _)| plan.frames > 0).map(|(plan, at)| {
+            let plan = Plan::new(plan);
+            let at = plan.clamp(at);
+            (Arc::new(plan), at)
+        });
+        self.shared
+            .store
+            .hold(next.as_ref().map(|(plan, at)| plan.id(*at)));
+        let mut ctl = self.shared.control();
+        ctl.prepared = next;
+        ctl.version += 1;
+        drop(ctl);
+        self.shared.changed.notify_all();
     }
 
     /// Shows timeline frame `frame` (within the plan). Playing, play goes
@@ -559,25 +619,8 @@ impl Player {
     }
 
     fn seek_with(&self, frame: i64, sound: bool) {
-        self.shared.change(true, |ctl, _, _| {
-            let t = ctl.plan.clamp(frame);
-            ctl.mode = match ctl.mode {
-                Mode::Paused { .. } => {
-                    if sound {
-                        ctl.scrub(t);
-                    }
-                    Mode::Paused { at: t }
-                }
-                Mode::Playing { speed, .. } => {
-                    ctl.epoch += 1;
-                    Mode::Playing {
-                        from: start_sample(&ctl.plan, t, speed),
-                        speed,
-                        epoch: ctl.epoch,
-                    }
-                }
-            };
-        });
+        self.shared
+            .change(true, |ctl, _, _| move_to(ctl, frame, sound));
     }
 
     /// Pauses and moves `frames` frames from where the viewer is (negative
@@ -726,12 +769,13 @@ impl Player {
     }
 
     pub fn status(&self) -> Status {
-        let (id, position, mode, range, error) = {
+        let (id, prepared, position, mode, range, error) = {
             let mut ctl = self.shared.control();
             let position = self.shared.position(&mut ctl, Instant::now());
             let plan = &ctl.plan.plan;
             (
                 ctl.plan.id(position),
+                ctl.prepared.as_ref().map(|(p, t)| p.id(*t)),
                 position,
                 ctl.mode,
                 (plan.range.0, plan.range.0 + plan.frames),
@@ -749,6 +793,7 @@ impl Player {
             playing,
             speed,
             ready: self.shared.store.contains(&id),
+            prepared: prepared.is_some_and(|id| self.shared.store.contains(&id)),
             presented: p.presented,
             range,
             late: p.late,
@@ -797,6 +842,37 @@ impl Player {
         let secs = (next - s).abs() / (f64::from(plan.rate()) * speed.abs());
         Some(Duration::from_secs_f64(secs.clamp(0.0, 1.0)))
     }
+}
+
+/// Plays `plan` instead of the plan played now. Lane gains on top go: the
+/// new plan has its own.
+fn replace_plan(ctl: &mut Control, plan: RenderPlan) {
+    ctl.plan = Arc::new(Plan::new(plan));
+    ctl.plan_gen += 1;
+    ctl.trims.clear();
+    ctl.trims_gen += 1;
+}
+
+/// Moves to timeline frame `frame` (within the plan). Paused, its sound
+/// plays when `sound` and scrubbing; playing, play goes on from there.
+fn move_to(ctl: &mut Control, frame: i64, sound: bool) {
+    let t = ctl.plan.clamp(frame);
+    ctl.mode = match ctl.mode {
+        Mode::Paused { .. } => {
+            if sound {
+                ctl.scrub(t);
+            }
+            Mode::Paused { at: t }
+        }
+        Mode::Playing { speed, .. } => {
+            ctl.epoch += 1;
+            Mode::Playing {
+                from: start_sample(&ctl.plan, t, speed),
+                speed,
+                epoch: ctl.epoch,
+            }
+        }
+    };
 }
 
 /// The sample play at `speed` starts from at timeline frame `t`: its first

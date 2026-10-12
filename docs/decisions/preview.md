@@ -3,7 +3,7 @@
 **Status:** accepted (October 2026). The GUI previews through the player engine ([player.md](player.md)) and draws with eframe on wgpu.
 
 **Evidence** (all rerunnable):
-- [`crates/vidcut/tests/live.rs`](../../crates/vidcut/tests/live.rs): the live session with both engines, a stand-in renderer and recording stand-in devices, no window, GPU or audio device. Seeks frame-exact at every boundary (also with a late renderer), overtaken seeks, seeks while playing and while an edit reloads, pictures against beeps as heard, every frame shown in order, audio scrubbing, backward play, the source viewers, stills and sequences, interlaced, HDR and turned clips, proxies, several tracks and faders, an unreadable file.
+- [`crates/vidcut/tests/live.rs`](../../crates/vidcut/tests/live.rs): the live session with its one engine, a stand-in renderer and a recording stand-in device, no window, GPU or audio device. Seeks frame-exact at every boundary (also with a late renderer), overtaken seeks, seeks while playing and while an edit reloads, pictures against beeps as heard, every frame shown in order, audio scrubbing, backward play, the source viewers, switching between the source and the timeline (each one's frame kept ready, after an edit from the source too), stills and sequences, interlaced, HDR and turned clips, proxies, several tracks and faders, an unreadable file.
 - [`crates/vidcut/tests/gui.rs`](../../crates/vidcut/tests/gui.rs) (`--features vidcut/gui-tests`, needs a display): the real window. Screenshots of the shader's picture against `vidcut frame render` (H.264, a turned clip, 10-bit HEVC on NVDEC), edits, a minimized window, playing, the GPU preference.
 - [`crates/vidcut/tests/picture.rs`](../../crates/vidcut/tests/picture.rs): the shader against the export's conversion on any wgpu adapter (lavapipe too).
 - [`crates/vidcut-av/tests/player_gpu.rs`](../../crates/vidcut-av/tests/player_gpu.rs) (`--features vidcut-av/gpu-tests`): pictures decoded on NVDEC against the CPU's; the engine's own tests in player.md.
@@ -11,8 +11,9 @@
 
 ## 1. What plays
 
-- **Plans.** The timeline viewer plays `render::flatten_lanes(project, 0, end)`, the source viewer `render::tape` (one clip, or the Source Tape): the plans export renders, so every picture is the one `frame render` makes (the engine reads them with the export's readers). Fresh proxies replace their media's pictures where the project plays proxies (§6). A frame of black and silence follows the content, where the playhead stands at the end (after an append, decision D15).
-- **Memory:** each player keeps up to 1 GB of pictures (`vidcut_av::player::DEFAULT_BUDGET`, player.md §3), the two together up to 2 GB.
+- **Plans.** The timeline plays `render::flatten_lanes(project, 0, end)`, the source `render::tape` (one clip, or the Source Tape): the plans export renders, so every picture is the one `frame render` makes (the engine reads them with the export's readers). Fresh proxies replace their media's pictures where the project plays proxies (§6). A frame of black and silence follows the content, where the playhead stands at the end (after an append, decision D15).
+- **One player for both** (`live/player.rs`). One engine plays whichever the viewer shows. The other keeps its plan and playhead in the session, and the engine keeps the picture there ready (`Player::prepare`, player.md §3): decoded while the engine is paused with nothing else to decode, and held whatever the budget. Switching (Q, `viewer.set`) pauses, plays the other plan from its playhead (`set_plan_at`), and shows its picture at once; then the frame left is prepared. An edit function from the source moves the timeline's playhead (decision D15): its new plan and frame are prepared the same way, so Q shows the result at once. `player.state`'s `ready` says whether each one's picture is decoded.
+- **Memory:** the engine keeps up to 1 GB of pictures (`vidcut_av::player::DEFAULT_BUDGET`, player.md §3): what is shown, and the one picture held for what isn't. The two share it: after one played a while, the other's windows going back are gone, and its first step back decodes one again (player.md §7).
 - **Edits** give the engine a new plan (`set_plan`): it keeps its position, open files and kept pictures, and plays on if it plays. Reloads after edits coalesce as before (gui.md §7). Another sample rate or channel count makes a new engine (its device was opened for them).
 - **Nothing to convert.** Index-less containers (MPEG-TS), stills, image sequences at any rate, interlaced sources, turned pictures and HDR play as export reads them; the engine needs no remuxes, image lists, filler media or patches at cuts.
 
@@ -20,10 +21,10 @@
 
 | Thread | Does | Never |
 |---|---|---|
-| **Session** (`live`) | owns both players' engines: loads plans, seeks, steps, plays; asks for presents; waits for frames | decodes, draws |
-| **Engine** (per player: decode, audio, the device's callback, openers; player.md §1) | decodes pictures ahead of the clock, mixes the sound | touches the GPU's queue |
-| **Viewer** (`vidcut-viewer`, `gui/video.rs`) | presents both engines: draws the picture each clock is at, answers presents and viewer screenshots | waits for the UI |
-| **UI** (eframe) | shows the viewer's targets as egui textures, registers them; window screenshots | draws a viewer picture |
+| **Session** (`live`) | owns the engine: loads plans, switches between the source and the timeline, seeks, steps, plays; asks for presents; waits for frames | decodes, draws |
+| **Engine** (decode, audio, the device's callback, openers; player.md §1) | decodes pictures ahead of the clock and the other's frame, mixes the sound | touches the GPU's queue |
+| **Viewer** (`vidcut-viewer`, `gui/video.rs`) | presents the engine: draws the picture its clock is at, answers presents and viewer screenshots | waits for the UI |
+| **UI** (eframe) | shows the viewer's target as an egui texture, registers it; window screenshots | draws a viewer picture |
 
 **Why the viewer has a thread of its own.** On GNOME Wayland with NVIDIA's driver, presenting a hidden window (minimized) blocks the UI thread until the window shows again, with Mailbox and FIFO alike (the only present modes there): measured, a seek took 2.8 s and a viewer screenshot never came. Submissions to the same device from another thread go on meanwhile, so presents, seeks and screenshots don't depend on the UI. Wayland can't show a minimized window again by request, so `gui.quit` ends the process without the window when the window hasn't closed in 5 s.
 
@@ -41,7 +42,7 @@
 - **Copied down.** A frame NVDEC decoded is copied to memory at its own size (NV12 or P010) with its properties, then kept like a CPU picture: the decoder has only a few surfaces, and the engine keeps up to a gigabyte of pictures. A 2160p P010 picture is 24.9 MB; with the copy down and the upload (§4) the whole GUI plays 4K60 on 0.25–0.3 cores (§8). Frames passed over on the way to a seek are decoded and not copied.
 - **Not done: zero-copy.** Importing NVDEC's CUDA frames (or Vulkan Video's images) into wgpu's device without the round trip needs external-memory interop between CUDA or FFmpeg's Vulkan device and wgpu's, which wgpu doesn't expose; kept pictures would then live in video memory. The copy keeps 4K60 smooth (§8), so it waits (own-player.md).
 - **Not done: VAAPI.** The same path with VAAPI frames (AMD, Intel) would follow `open_nvdec_or_cpu`.
-- **Switching.** The session watches the preferences file; a change, from anywhere, switches both engines' decoder at once (`Player::set_hardware`), and they decode their pictures anew, the one shown first. `player.state`'s `hwdec` says what decoded the picture shown: `nvdec` or `no`.
+- **Switching.** The session watches the preferences file; a change, from anywhere, switches the engine's decoder at once (`Player::set_hardware`), and it decodes its pictures anew, the one shown first. `player.state`'s `hwdec` says what decoded the picture shown: `nvdec` or `no`.
 - **Frame-exact:** NVDEC's pictures are the CPU's, barcode for barcode, and within two levels in their pixels (`player_gpu.rs`: H.264, interlaced H.264, HEVC, VP9, AV1, HEVC in MPEG-TS and turned).
 
 ## 4. The picture on screen
@@ -84,10 +85,10 @@ A proxy is a smaller AV1 or H.264 file (8-bit 4:2:0, closed GOPs of 60 frames, e
 
 ## 7. Sound
 
-- **The device.** Each player's engine plays to the system's default output through cpal (ALSA, which PipeWire and PulseAudio serve); its callback is the clock, its latency made up for, so pictures keep with the sound as it is heard (player.md §4). When the device won't open, the engine plays to a silent stand-in and the status bar says why, once: the picture plays all the same.
+- **The device.** The engine plays to the system's default output through cpal (ALSA, which PipeWire and PulseAudio serve); its callback is the clock, its latency made up for, so pictures keep with the sound as it is heard (player.md §4). When the device won't open, the engine plays to a silent stand-in and the status bar says why, once: the picture plays all the same.
 - **Every lane mixed** as export mixes them: clip gains, faders, mute and solo (spec D28), de-click fades at cuts.
-- **Faders while dragged** (`mixer.preview`): a gain on top of the track's lane in the timeline's engine, heard within a tenth of a second; releasing saves the level with `track.set`, whose new plan has it. A track with no sound in the mix (muted, left out by solo, empty) is an error; nothing playing the timeline answers `live: false`.
-- **Monitoring mute** (`player.mute`) silences both engines; the clock runs on. Neither the project nor the export changes.
+- **Faders while dragged** (`mixer.preview`): a gain on top of the track's lane while the viewer plays the timeline, heard within a tenth of a second; releasing saves the level with `track.set`, whose new plan has it. A track with no sound in the mix (muted, left out by solo, empty) is an error; the source shown answers `live: false`.
+- **Monitoring mute** (`player.mute`) silences the engine; the clock runs on. Neither the project nor the export changes.
 - **Audio scrubbing** (decision D42): steps and paused seeks play their frame's sound; `player.audio_scrubbing`, Shift+S or Timeline > Audio Scrubbing turn it off and on (on when the GUI starts). The viewer's own moves (opening at a remembered frame, after an edit) play none.
 - **Backward and other speeds** (J/K/L) play the sound reversed or stretched, keeping its pitch (player.md §4).
 
@@ -110,7 +111,7 @@ The real GUI, a debug build of vidcut's crates (dependencies optimized), the vie
 
 ## 9. Exact frames for the two-up: decoded once either way
 
-The Trim Editor's and Dynamic Trim's two-up show frames of a copy of the project that the players don't play: `vidcut_av::export::renderer::StillRenderer`, the export engine's renderer, draws them at the cell's size (`gui/stills.rs`), a thread per cell. The engine's pictures going back follow its rule.
+The Trim Editor's and Dynamic Trim's two-up show frames of a copy of the project that the player doesn't play: `vidcut_av::export::renderer::StillRenderer`, the export engine's renderer, draws them at the cell's size (`gui/stills.rs`), a thread per cell. The engine's pictures going back follow its rule.
 
 - **The problem it solves.** Stepping back with exact seeks decodes each step from the keyframe before it; on files with keyframes seconds apart that is a few hundred frames again for every step.
 - **Forward:** the file and decoder stay open, and the next frame decodes on from the one before.

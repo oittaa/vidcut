@@ -1,14 +1,23 @@
-//! One viewer's player as the live session drives it: vidcut's own engine
-//! (`vidcut_av::player`, docs/decisions/player.md) playing a render plan,
-//! what is loaded, where the playhead is, and when a requested frame is on
-//! screen (docs/decisions/gui.md §4).
+//! The viewer's player as the live session drives it: vidcut's own engine
+//! (`vidcut_av::player`, docs/decisions/player.md) playing the render plan
+//! of what the viewer shows, the source or the timeline, where each one's
+//! playhead is, and when a requested frame is on screen
+//! (docs/decisions/gui.md §4).
 //!
-//! Every seek, step and load is a motion with a number. A motion is on
-//! screen once the renderer presented the player after it and showed the
-//! frame it asked for exactly: paused, that frame; playing, any frame (the
-//! clock starts at the frame asked for and moves on from there). The
-//! session asks the renderer to present when the engine has the frame's
-//! picture.
+//! **One engine for both.** The one not shown keeps its plan and playhead
+//! here, and the engine keeps the picture there ready (`prepare`): decoded
+//! while nothing else is, held whatever the memory budget. Switching plays
+//! the other plan from its playhead, so its picture shows at once, and
+//! prepares the one left. An edit seen from the source (the timeline's
+//! playhead moving after an edit function, decision D15) prepares the
+//! timeline's new frame the same way.
+//!
+//! Every seek, step, load and switch of what is shown is a motion with a
+//! number. A motion is on screen once the renderer presented the engine
+//! after it and showed the frame it asked for exactly: paused, that frame;
+//! playing, any frame (the clock starts at the frame asked for and moves
+//! on from there). The session asks the renderer to present when the
+//! engine has the frame's picture.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -19,15 +28,33 @@ use vidcut_core::render::{AudioPiece, LaneTrack, RenderPlan, VideoPiece};
 use super::Renderer;
 use super::snapshot::{PlayerId, PlayerSnap};
 
-/// Makes a player's audio output: the system's device in the GUI, a
+/// Makes the engine's audio output: the system's device in the GUI, a
 /// stand-in in tests.
-pub type MakeOutput = Arc<dyn Fn(PlayerId) -> Box<dyn AudioOutput> + Send + Sync>;
+pub type MakeOutput = Arc<dyn Fn() -> Box<dyn AudioOutput> + Send + Sync>;
 
 /// How long a present asked for may go unanswered before it is asked again.
 const PRESENT_AGAIN: Duration = Duration::from_millis(50);
 
+/// The source or the timeline, as the viewer would show it.
+#[derive(Default)]
+struct Content {
+    /// The plan: proxies swapped in, and a frame of black after the
+    /// content, where the playhead stands at its end.
+    plan: Option<RenderPlan>,
+    /// The tracks of the plan's audio lanes (the timeline's), for faders
+    /// moved while it plays.
+    lanes: Vec<LaneTrack>,
+    /// Length of the content in frames (the playhead goes up to it).
+    frames: i64,
+    /// The playhead while the engine plays something else (remembered for
+    /// the next load while nothing is loaded).
+    position: i64,
+    /// What decoded the picture shown last while it was shown.
+    decoder: Option<Decoder>,
+    error: Option<String>,
+}
+
 pub struct Player {
-    pub id: PlayerId,
     /// Makes the engine's audio output; `None`: no preview at all.
     output: Option<MakeOutput>,
     renderer: Arc<dyn Renderer>,
@@ -37,18 +64,17 @@ pub struct Player {
     /// Memory for the engine's pictures.
     budget: usize,
     engine: Option<Arc<engine::Player>>,
-    /// The plan the engine plays: proxies swapped in, and a frame of black
-    /// after the content, where the playhead stands at its end.
-    plan: Option<RenderPlan>,
-    /// The tracks of the plan's audio lanes (the timeline's), for faders
-    /// moved while it plays.
-    lanes: Vec<LaneTrack>,
-    /// Length of the content in frames (the playhead goes up to it).
-    pub frames: i64,
-    /// The playhead while nothing is loaded (remembered for the next load).
-    position: i64,
-    /// The frame the latest seek, step or load asked for. Playback leaves
-    /// it alone, so a waiting seek is overtaken only by another motion.
+    /// Whose plan the engine plays. The renderer shows the engine when
+    /// that is the one shown.
+    plays: Option<PlayerId>,
+    /// The sample rate and channels the engine's device was opened for.
+    format: (u32, u16),
+    /// What the viewer shows.
+    active: PlayerId,
+    contents: [Content; 2],
+    /// The frame the latest seek, step, load or switch asked for. Playback
+    /// leaves it alone, so a waiting seek is overtaken only by another
+    /// motion.
     pub target: i64,
     /// The latest motion, and the newest one on screen.
     pub motion: u64,
@@ -59,30 +85,27 @@ pub struct Player {
     scrubbing: bool,
     /// Decode on the GPU (the GPU acceleration preference).
     gpu: bool,
-    /// The audio device failed to open: the player plays to a stand-in.
+    /// The audio device failed to open: the engine plays to a stand-in.
     pub audio_error: Option<String>,
-    pub error: Option<String>,
 }
 
 impl Player {
     pub fn new(
-        id: PlayerId,
         output: Option<MakeOutput>,
         budget: usize,
         renderer: Arc<dyn Renderer>,
         on_picture: Arc<dyn Fn() + Send + Sync>,
     ) -> Self {
         Self {
-            id,
             output,
             renderer,
             on_picture,
             budget,
             engine: None,
-            plan: None,
-            lanes: Vec::new(),
-            frames: 0,
-            position: 0,
+            plays: None,
+            format: (0, 0),
+            active: PlayerId::Timeline,
+            contents: Default::default(),
             target: 0,
             motion: 0,
             shown: 0,
@@ -91,23 +114,36 @@ impl Player {
             scrubbing: true,
             gpu: crate::preferences::gpu_acceleration(),
             audio_error: None,
-            error: None,
         }
     }
 
-    pub fn is_loaded(&self) -> bool {
-        self.plan.is_some()
+    pub fn is_loaded(&self, id: PlayerId) -> bool {
+        self.contents[id.index()].plan.is_some()
+    }
+
+    /// The engine, while it plays what the viewer shows.
+    fn shown_engine(&self) -> Option<&Arc<engine::Player>> {
+        self.engine
+            .as_ref()
+            .filter(|_| self.plays == Some(self.active))
+    }
+
+    /// The engine playing `id`, while the viewer shows it.
+    fn engine_of(&self, id: PlayerId) -> Option<&Arc<engine::Player>> {
+        self.shown_engine().filter(|_| id == self.active)
     }
 
     fn status(&self) -> Option<engine::Status> {
-        self.engine.as_ref().map(|e| e.status())
+        self.shown_engine().map(|e| e.status())
     }
 
-    /// The playhead: where the engine is (the clock while playing).
-    pub fn position(&self) -> i64 {
-        match self.status() {
-            Some(s) => s.position.clamp(0, self.frames.max(0)),
-            None => self.position,
+    /// `id`'s playhead: where the engine is while it is shown (the clock
+    /// while playing).
+    pub fn position(&self, id: PlayerId) -> i64 {
+        let c = &self.contents[id.index()];
+        match self.engine_of(id) {
+            Some(e) => e.status().position.clamp(0, c.frames.max(0)),
+            None => c.position,
         }
     }
 
@@ -122,69 +158,113 @@ impl Player {
         self.motion
     }
 
-    /// Shows `plan` (its content `plan.frames` long), with `lanes` its audio
-    /// lanes' tracks. `at`: the frame to show (clamped to the content);
-    /// `None` stays where the playhead is, playing on if it plays. Returns
-    /// the motion, or `None` when the picture can't have changed.
+    /// Gives `id` the plan `plan` (its content `plan.frames` long), with
+    /// `lanes` its audio lanes' tracks. `at`: the frame to show (clamped to
+    /// the content); `None` stays where its playhead is, playing on if it
+    /// plays. Returns the motion when the viewer shows `id`, or `None` when
+    /// the picture can't have changed or `id` isn't shown (its frame is
+    /// then prepared).
     pub fn load(
         &mut self,
+        id: PlayerId,
         mut plan: RenderPlan,
         lanes: Vec<LaneTrack>,
         at: Option<i64>,
     ) -> Option<u64> {
         let frames = plan.frames;
+        let i = id.index();
+        if self.output.is_none() {
+            // No preview: nothing loads.
+            self.contents[i].frames = frames;
+            return None;
+        }
         with_end(&mut plan);
-        if self.plan.as_ref() == Some(&plan) {
-            self.frames = frames;
+        if self.contents[i].plan.as_ref() == Some(&plan) {
+            self.contents[i].frames = frames;
             let to = at?.clamp(0, frames);
-            if to == self.position() && to == self.target {
+            if to == self.position(id) && (id != self.active || to == self.target) {
                 return None;
             }
-            return Some(self.seek(to, false));
+            return self.seek(id, to, false);
         }
-        self.frames = frames;
-        self.lanes = lanes;
-        self.error = None;
+        let c = &mut self.contents[i];
+        c.plan = Some(plan);
+        c.frames = frames;
+        c.lanes = lanes;
+        c.error = None;
+        if id != self.active {
+            c.position = at.unwrap_or(c.position).clamp(0, frames);
+            self.prepare_other();
+            return None;
+        }
+        self.play_shown(at)
+    }
+
+    /// The engine plays the plan of what the viewer shows: from `at`, or
+    /// from its playhead (where it is, playing on if it plays, when the
+    /// engine played it already). A new engine when there is none, or its
+    /// device was opened for another sample rate or channel count. Then
+    /// the other's frame is prepared. Returns the motion.
+    fn play_shown(&mut self, at: Option<i64>) -> Option<u64> {
+        let id = self.active;
+        let c = &self.contents[id.index()];
+        let plan = c.plan.clone()?;
+        let (frames, position) = (c.frames, c.position.clamp(0, c.frames));
         let at = at.map(|f| f.clamp(0, frames));
         let format = (plan.sample_rate, plan.channels);
-        let reuse = self
-            .plan
-            .as_ref()
-            .is_some_and(|p| (p.sample_rate, p.channels) == format);
-        match &self.engine {
-            Some(e) if reuse => {
-                if let Err(e) = e.set_plan(plan.clone()) {
-                    self.error = Some(e.to_string());
+        let engine = self.engine.clone().filter(|_| self.format == format);
+        let target = match engine {
+            Some(e) => {
+                let result = match (self.plays == Some(id), at) {
+                    (true, None) => e.set_plan(plan),
+                    (true, Some(f)) => e.set_plan_at(plan, f),
+                    (false, _) => e.set_plan_at(plan, at.unwrap_or(position)),
+                };
+                if let Err(err) = result {
+                    self.contents[id.index()].error = Some(err.to_string());
                     return None;
                 }
-                if let Some(f) = at {
-                    e.seek_quietly(f);
-                    self.target = f;
-                } else {
-                    self.target = self.target.clamp(0, frames);
+                match (self.plays == Some(id), at) {
+                    (true, None) => self.target.clamp(0, frames),
+                    (_, Some(f)) => f,
+                    (false, None) => position,
                 }
             }
-            _ => {
-                let from = at.unwrap_or(self.position).clamp(0, frames);
-                let engine = self.open(plan.clone())?;
+            None => {
+                let from = at.unwrap_or(position);
+                let Some(engine) = self.open(plan.clone()) else {
+                    // Nothing shows: loaded again next time.
+                    self.contents[id.index()].plan = None;
+                    return None;
+                };
                 engine.seek_quietly(from);
                 engine.set_audio_scrubbing(self.scrubbing);
                 engine.set_muted(self.muted);
                 self.engine = Some(engine);
-                self.renderer.attach(self.id, self.engine.clone());
-                self.target = from;
+                self.format = format;
+                from
             }
+        };
+        self.target = target;
+        if self.plays != Some(id) {
+            self.plays = Some(id);
+            self.renderer.attach(self.engine.clone());
         }
-        self.plan = Some(plan);
+        self.prepare_other();
         self.motion += 1;
         Some(self.motion)
     }
 
     /// A new engine for `plan`, paused at its first frame. Its sound goes to
     /// the output made for it, or to a silent stand-in when that won't open
-    /// (no audio device): the picture plays all the same.
+    /// (no audio device): the picture plays all the same. The engine it
+    /// replaces is dropped first, so the device is free again.
     fn open(&mut self, plan: RenderPlan) -> Option<Arc<engine::Player>> {
         let make = self.output.clone()?;
+        if self.engine.take().is_some() {
+            self.plays = None;
+            self.renderer.attach(None);
+        }
         let config = || engine::Config {
             budget: self.budget,
             // Moves the session makes by itself play no sound; on after.
@@ -193,7 +273,7 @@ impl Player {
             hardware: self.gpu,
         };
         self.audio_error = None;
-        match engine::Player::new(plan.clone(), config(), make(self.id)) {
+        match engine::Player::new(plan.clone(), config(), make()) {
             Ok(e) => return Some(Arc::new(e)),
             Err(e) => self.audio_error = Some(e.to_string()),
         }
@@ -201,38 +281,94 @@ impl Player {
         match engine::Player::new(plan, config(), silent) {
             Ok(e) => Some(Arc::new(e)),
             Err(e) => {
-                self.error = Some(e.to_string());
+                self.contents[self.active.index()].error = Some(e.to_string());
                 None
             }
         }
     }
 
-    /// Shows nothing.
-    pub fn unload(&mut self) {
-        if self.engine.take().is_some() {
-            self.renderer.attach(self.id, None);
+    /// The engine keeps the picture at the playhead of what isn't shown
+    /// ready, or none when nothing is loaded there.
+    fn prepare_other(&self) {
+        let Some(engine) = &self.engine else { return };
+        let other = &self.contents[self.active.other().index()];
+        engine.prepare(other.plan.clone().map(|p| (p, other.position)));
+    }
+
+    /// Shows `id` instead of the other: the engine plays its plan from its
+    /// playhead, paused (the picture there was kept ready), and prepares
+    /// the frame of the one left. Returns the motion, or `None` when `id`
+    /// is shown already.
+    pub fn show(&mut self, id: PlayerId) -> Option<u64> {
+        if id == self.active {
+            return None;
         }
-        self.plan = None;
-        self.lanes.clear();
-        self.frames = 0;
-        self.position = 0;
+        let left = self.active;
+        if let Some(e) = self.shown_engine().cloned() {
+            e.pause();
+            let status = e.status();
+            let c = &mut self.contents[left.index()];
+            c.position = status.position.clamp(0, c.frames.max(0));
+            c.decoder = status.decoder;
+        }
+        self.active = id;
+        if self.is_loaded(id) {
+            return self.play_shown(None);
+        }
+        // Nothing to show: black, the frame left prepared.
+        self.plays = None;
+        self.renderer.attach(None);
+        self.prepare_other();
+        self.target = self.contents[id.index()].position;
+        Some(self.instant())
+    }
+
+    /// `id` shows nothing. With nothing loaded either, the engine goes.
+    pub fn unload(&mut self, id: PlayerId) {
+        self.contents[id.index()] = Content::default();
+        if !self.is_loaded(id.other()) {
+            if self.engine.take().is_some() {
+                self.renderer.attach(None);
+            }
+            self.plays = None;
+        } else if id == self.active {
+            // The engine plays what no one shows.
+            if let Some(e) = self.shown_engine() {
+                e.pause();
+            }
+            self.plays = None;
+            self.renderer.attach(None);
+        } else {
+            self.prepare_other();
+            return;
+        }
         self.target = 0;
-        self.error = None;
         self.instant();
     }
 
-    /// Moves the playhead to `frame` (clamped to the content). Paused, the
-    /// frame's sound plays when `sound` and audio scrubbing are on (a drag
-    /// of the playhead is seeks); playing, play goes on from there.
-    /// Returns the motion.
-    pub fn seek(&mut self, frame: i64, sound: bool) -> u64 {
-        let Some(engine) = self.engine.clone() else {
-            // Remembered for the next load (which clamps it).
-            self.position = frame.max(0);
-            self.target = self.position;
-            return self.instant();
+    /// Moves `id`'s playhead to `frame` (clamped to the content). Paused,
+    /// the frame's sound plays when `sound` and audio scrubbing are on (a
+    /// drag of the playhead is seeks); playing, play goes on from there.
+    /// Returns the motion when the viewer shows `id`; otherwise its new
+    /// frame is prepared.
+    pub fn seek(&mut self, id: PlayerId, frame: i64, sound: bool) -> Option<u64> {
+        if id != self.active {
+            let c = &mut self.contents[id.index()];
+            c.position = match c.plan {
+                Some(_) => frame.clamp(0, c.frames.max(0)),
+                // Remembered for the next load (which clamps it).
+                None => frame.max(0),
+            };
+            self.prepare_other();
+            return None;
+        }
+        let Some(engine) = self.shown_engine().cloned() else {
+            let c = &mut self.contents[id.index()];
+            c.position = frame.max(0);
+            self.target = c.position;
+            return Some(self.instant());
         };
-        let frame = frame.clamp(0, self.frames.max(0));
+        let frame = frame.clamp(0, self.contents[id.index()].frames.max(0));
         self.target = frame;
         if sound {
             engine.seek(frame);
@@ -240,15 +376,16 @@ impl Player {
             engine.seek_quietly(frame);
         }
         self.motion += 1;
-        self.motion
+        Some(self.motion)
     }
 
-    /// Pauses and moves `frames` from where the viewer is, playing the
-    /// frame's sound when scrubbing. Returns the motion.
+    /// Pauses what the viewer shows and moves `frames` from where it is,
+    /// playing the frame's sound when scrubbing. Returns the motion.
     pub fn step(&mut self, frames: i64) -> u64 {
-        let Some(engine) = self.engine.clone() else {
-            let to = self.position.saturating_add(frames).max(0);
-            return self.seek(to, false);
+        let Some(engine) = self.shown_engine().cloned() else {
+            let c = &self.contents[self.active.index()];
+            let to = c.position.saturating_add(frames).max(0);
+            return self.seek(self.active, to, false).unwrap_or(self.motion);
         };
         engine.step(frames);
         self.target = engine.status().position;
@@ -256,16 +393,17 @@ impl Player {
         self.motion
     }
 
-    /// Plays at `speed` (negative: backward, the sound reversed).
+    /// Plays what the viewer shows at `speed` (negative: backward, the
+    /// sound reversed).
     pub fn play(&mut self, speed: f64) {
-        if let Some(e) = &self.engine {
+        if let Some(e) = self.shown_engine() {
             e.play(speed);
         }
     }
 
     /// Stops where the viewer is.
     pub fn pause(&mut self) {
-        if let Some(e) = &self.engine {
+        if let Some(e) = self.shown_engine() {
             e.pause();
         }
     }
@@ -304,13 +442,14 @@ impl Player {
         true
     }
 
-    /// Hears `track`'s fader at `volume_db` while it plays, the plan
-    /// unchanged. `None`: nothing plays here; `Some(false)`: the track has
-    /// no sound in the plan.
+    /// Hears `track`'s fader at `volume_db` while the timeline plays, the
+    /// plan unchanged. `None`: the viewer doesn't play the timeline;
+    /// `Some(false)`: the track has no sound in the plan.
     pub fn preview_fader(&self, track: &str, volume_db: f64) -> Option<bool> {
-        let engine = self.engine.as_ref()?;
+        let engine = self.engine_of(PlayerId::Timeline)?;
         let mut found = false;
-        for (lane, t) in self.lanes.iter().enumerate() {
+        let lanes = &self.contents[PlayerId::Timeline.index()].lanes;
+        for (lane, t) in lanes.iter().enumerate() {
             if t.track == track {
                 engine.set_lane_gain(lane, volume_db - t.volume_db);
                 found = true;
@@ -340,7 +479,7 @@ impl Player {
         Some(self.motion)
     }
 
-    /// The renderer presented this player after motion `motion` was asked,
+    /// The renderer presented the engine after motion `motion` was asked,
     /// showing `frame` exactly (`None`: the frame's picture wasn't there).
     pub fn presented(&mut self, motion: u64, frame: Option<i64>) {
         if self.presenting.is_some_and(|(m, _)| m == motion) {
@@ -362,29 +501,47 @@ impl Player {
         (s.failed.is_some() && !s.ready && !s.playing).then(|| s.error.unwrap_or_default())
     }
 
-    /// Since the player was made: presents that showed an older picture
+    /// Why what the viewer shows can't play, if so.
+    pub fn error(&self) -> Option<&String> {
+        self.contents[self.active.index()].error.as_ref()
+    }
+
+    /// Since the engine was made: presents that showed an older picture
     /// because the clock's frame wasn't decoded yet (playing), and frames
     /// the clock passed between two presents without being shown.
     pub fn misses(&self) -> (u64, u64) {
-        self.status().map_or((0, 0), |s| (s.late, s.skipped))
+        self.engine.as_ref().map_or((0, 0), |e| {
+            let s = e.status();
+            (s.late, s.skipped)
+        })
     }
 
     /// While playing: when the clock moves to another frame.
     pub fn next_change(&self, now: Instant) -> Option<Duration> {
-        self.engine.as_ref()?.next_change(now)
+        self.shown_engine()?.next_change(now)
     }
 
-    pub fn snap(&self) -> PlayerSnap {
-        let status = self.status();
+    pub fn snap(&self, id: PlayerId) -> PlayerSnap {
+        let c = &self.contents[id.index()];
+        let status = self.engine_of(id).map(|e| e.status());
+        let ready = match &status {
+            Some(s) => s.ready,
+            // Not shown: its frame is the one prepared.
+            None if id != self.active => {
+                c.plan.is_some() && self.engine.as_ref().is_some_and(|e| e.status().prepared)
+            }
+            None => false,
+        };
         PlayerSnap {
-            loaded: self.is_loaded(),
+            loaded: c.plan.is_some(),
             muted: self.muted,
-            frames: self.frames,
-            position: self.position(),
+            frames: c.frames,
+            position: self.position(id),
+            ready,
             playing: status.as_ref().is_some_and(|s| s.playing),
             speed: status.as_ref().map_or(0.0, |s| s.speed),
-            hwdec: hwdec(status.as_ref().and_then(|s| s.decoder)).into(),
-            error: self.error.clone().or_else(|| status.and_then(|s| s.error)),
+            hwdec: hwdec(status.as_ref().map_or(c.decoder, |s| s.decoder)).into(),
+            error: c.error.clone().or_else(|| status.and_then(|s| s.error)),
         }
     }
 }
@@ -416,7 +573,7 @@ fn with_end(plan: &mut RenderPlan) {
     plan.range.1 += 1;
 }
 
-/// `VIDCUT_DEBUG_PLAYER=1` traces what the players and the viewer do to
+/// `VIDCUT_DEBUG_PLAYER=1` traces what the player and the viewer do to
 /// stderr.
 pub fn debug() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();

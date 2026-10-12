@@ -11,7 +11,8 @@ use vidcut_core::Project;
 use vidcut_core::render::TapeEntry;
 use vidcut_core::request::ViewerMode;
 
-/// The two players behind the single viewer (spec §4.1).
+/// What the single viewer shows (spec §4.1), each with its own playhead:
+/// the source or the timeline. One player plays both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PlayerId {
@@ -27,6 +28,14 @@ impl PlayerId {
         self as usize
     }
 
+    /// The one not shown when this one is.
+    pub fn other(self) -> Self {
+        match self {
+            Self::Source => Self::Timeline,
+            Self::Timeline => Self::Source,
+        }
+    }
+
     pub fn of(mode: ViewerMode) -> Self {
         if mode == ViewerMode::Timeline {
             Self::Timeline
@@ -36,7 +45,7 @@ impl PlayerId {
     }
 }
 
-/// A player's state in frames of its content.
+/// The state of the source or the timeline, in frames of its content.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct PlayerSnap {
     /// Something is loaded (otherwise the viewer shows black).
@@ -47,6 +56,9 @@ pub struct PlayerSnap {
     pub frames: i64,
     /// The playhead frame.
     pub position: i64,
+    /// The picture there is decoded: shown, or kept ready while the other
+    /// is shown, so switching shows it at once.
+    pub ready: bool,
     pub playing: bool,
     /// Shuttle speed (negative: backwards); 0 when stopped.
     pub speed: f64,

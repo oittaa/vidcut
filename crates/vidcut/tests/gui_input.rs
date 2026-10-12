@@ -1,5 +1,5 @@
 //! The GUI under simulated input (egui_kittest, no window or renderer): the
-//! real panels against a live session without players. Each gesture must
+//! real panels against a live session without a player. Each gesture must
 //! change the project with exactly one request, and the command log must
 //! match the undo history.
 
@@ -12,7 +12,7 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use serde_json::{Value, json};
 use vidcut::gui::workspace::Workspace;
-use vidcut::live::{self, Capture, Origin, PlayerId, Presented, WindowChange};
+use vidcut::live::{self, Capture, Origin, Presented, WindowChange};
 use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
 use vidcut_core::model::Settings;
 use vidcut_core::time::Rational;
@@ -21,10 +21,10 @@ use vidcut_core::{Envelope, Project, Response, Store};
 struct NoRenderer;
 
 impl live::Renderer for NoRenderer {
-    fn present(&self, _: PlayerId, done: Presented) {
+    fn present(&self, done: Presented) {
         done(None);
     }
-    fn capture_viewer(&self, _: PlayerId, done: Capture) {
+    fn capture_viewer(&self, done: Capture) {
         done(Err(vidcut_core::Error::usage("no renderer in tests")));
     }
     fn capture_window(&self, done: Capture) {
@@ -173,7 +173,7 @@ fn setup(dir: &Path) -> (live::Handle, std::thread::JoinHandle<()>) {
     let (h, t) = live::start(live::Config {
         project: Some(path),
         create: false,
-        players: None,
+        player: None,
         preview_error: Some("no preview in tests".into()),
         renderer: Arc::new(NoRenderer),
         notify: Arc::new(|| {}),

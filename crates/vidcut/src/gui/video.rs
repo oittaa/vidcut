@@ -1,9 +1,8 @@
-//! The viewers' pictures (docs/decisions/preview.md §4): a thread of their
-//! own presents both players' engines, drawing the picture each one's
-//! clock is at with the GPU shader ([`super::picture`]) into a target the
-//! size of the viewer's picture in physical pixels, and answers the
-//! session's presents and screenshots. egui shows the targets as native
-//! textures.
+//! The viewer's picture (docs/decisions/preview.md §4): a thread of its
+//! own presents the player's engine, drawing the picture its clock is at
+//! with the GPU shader ([`super::picture`]) into a target the size of the
+//! viewer's picture in physical pixels, and answers the session's presents
+//! and screenshots. egui shows the target as a native texture.
 //!
 //! Not on the UI thread: while the window is hidden, presenting the window
 //! may block that thread for as long as it stays hidden (NVIDIA on
@@ -22,17 +21,18 @@ use vidcut_av::player::Player;
 use vidcut_core::Error;
 
 use super::picture::{Drawn, Gpu, Screen};
-use crate::live::{Capture, PlayerId, Presented};
+use crate::live::{Capture, Presented};
 
 type Engine = Arc<Player>;
 
 /// What the session asks of the viewer thread.
 enum Task {
-    Present(PlayerId, Presented),
-    Capture(PlayerId, Capture),
+    Present(Presented),
+    Capture(Capture),
 }
 
-/// A viewer's target as the UI shows it: counted anew with each new target.
+/// The viewer's target as the UI shows it: counted anew with each new
+/// target.
 #[derive(Clone)]
 struct Target {
     generation: u64,
@@ -42,13 +42,12 @@ struct Target {
 #[derive(Default)]
 struct State {
     tasks: Vec<Task>,
-    engines: [Option<Engine>; 2],
-    /// The sizes (physical pixels) the viewer shows each player's picture
-    /// at.
-    wants: [[i32; 2]; 2],
-    targets: [Option<Target>; 2],
-    /// A target holds a picture (not black for want of one).
-    has_frame: [bool; 2],
+    engine: Option<Engine>,
+    /// The size (physical pixels) the viewer shows the picture at.
+    want: [i32; 2],
+    target: Option<Target>,
+    /// The target holds a picture (not black for want of one).
+    has_frame: bool,
     woken: bool,
     stop: bool,
 }
@@ -76,8 +75,8 @@ impl Shared {
 pub struct Viewer {
     shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
-    /// The egui texture of each target, and the target's generation.
-    textures: [Option<(u64, egui::TextureId)>; 2],
+    /// The egui texture of the target, and the target's generation.
+    texture: Option<(u64, egui::TextureId)>,
 }
 
 /// Asks things of the viewer thread from anywhere (the session's side).
@@ -95,7 +94,7 @@ impl Viewer {
     pub fn start(render: &RenderState, repaint: impl Fn() + Send + 'static) -> Self {
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
-                wants: [[640, 360]; 2],
+                want: [640, 360],
                 ..State::default()
             }),
             wake: Condvar::new(),
@@ -111,7 +110,7 @@ impl Viewer {
         Self {
             shared,
             thread,
-            textures: [None, None],
+            texture: None,
         }
     }
 
@@ -123,21 +122,19 @@ impl Viewer {
 }
 
 impl ViewerHandle {
-    /// The engine `player` shows from now on.
-    pub fn attach(&self, player: PlayerId, engine: Option<Engine>) {
-        self.shared.change(|s| s.engines[player.index()] = engine);
+    /// The engine the viewer shows from now on.
+    pub fn attach(&self, engine: Option<Engine>) {
+        self.shared.change(|s| s.engine = engine);
     }
 
-    /// Draw `player`'s picture now and say which frame it showed.
-    pub fn present(&self, player: PlayerId, done: Presented) {
-        self.shared
-            .change(|s| s.tasks.push(Task::Present(player, done)));
+    /// Draw the picture now and say which frame it showed.
+    pub fn present(&self, done: Presented) {
+        self.shared.change(|s| s.tasks.push(Task::Present(done)));
     }
 
-    /// The picture `player`'s viewer shows, as drawn.
-    pub fn capture(&self, player: PlayerId, done: Capture) {
-        self.shared
-            .change(|s| s.tasks.push(Task::Capture(player, done)));
+    /// The picture the viewer shows, as drawn.
+    pub fn capture(&self, done: Capture) {
+        self.shared.change(|s| s.tasks.push(Task::Capture(done)));
     }
 
     /// Looks again (a picture landed, or the session changed something).
@@ -147,58 +144,53 @@ impl ViewerHandle {
 }
 
 impl Viewer {
-    /// The UI's side, each frame: the sizes the viewer shows the pictures
-    /// at, and for each player its picture's egui texture (registered
-    /// anew with each new target) and whether it holds a picture.
+    /// The UI's side, each frame: the size the viewer shows the picture
+    /// at; the picture's egui texture (registered anew with each new
+    /// target) and whether it holds a picture.
     pub fn sync(
         &mut self,
         render: &RenderState,
-        wants: [[i32; 2]; 2],
-    ) -> [(Option<egui::TextureId>, bool); 2] {
-        let (targets, has_frame) = {
+        want: [i32; 2],
+    ) -> (Option<egui::TextureId>, bool) {
+        let (target, has_frame) = {
             let mut s = self.shared.lock();
-            let changed = s.wants != wants;
-            s.wants = wants;
+            let changed = s.want != want;
+            s.want = want;
             if changed {
                 s.woken = true;
                 self.shared.wake.notify_all();
             }
-            (s.targets.clone(), s.has_frame)
+            (s.target.clone(), s.has_frame)
         };
-        let mut out = [(None, false); 2];
-        for id in PlayerId::ALL {
-            let i = id.index();
-            if let Some(t) = &targets[i] {
-                // Drawn one to one: the viewer's picture rectangle is the
-                // target's size in physical pixels.
-                let filter = wgpu::FilterMode::Nearest;
-                match self.textures[i] {
-                    Some((g, _)) if g == t.generation => {}
-                    Some((_, tex)) => {
-                        render
-                            .renderer
-                            .write()
-                            .update_egui_texture_from_wgpu_texture(
-                                &render.device,
-                                &t.view,
-                                filter,
-                                tex,
-                            );
-                        self.textures[i] = Some((t.generation, tex));
-                    }
-                    None => {
-                        let tex = render.renderer.write().register_native_texture(
+        if let Some(t) = &target {
+            // Drawn one to one: the viewer's picture rectangle is the
+            // target's size in physical pixels.
+            let filter = wgpu::FilterMode::Nearest;
+            match self.texture {
+                Some((g, _)) if g == t.generation => {}
+                Some((_, tex)) => {
+                    render
+                        .renderer
+                        .write()
+                        .update_egui_texture_from_wgpu_texture(
                             &render.device,
                             &t.view,
                             filter,
+                            tex,
                         );
-                        self.textures[i] = Some((t.generation, tex));
-                    }
+                    self.texture = Some((t.generation, tex));
+                }
+                None => {
+                    let tex = render.renderer.write().register_native_texture(
+                        &render.device,
+                        &t.view,
+                        filter,
+                    );
+                    self.texture = Some((t.generation, tex));
                 }
             }
-            out[i] = (self.textures[i].map(|(_, t)| t), has_frame[i]);
         }
-        out
+        (self.texture.map(|(_, t)| t), has_frame)
     }
 }
 
@@ -206,7 +198,7 @@ impl Drop for Viewer {
     fn drop(&mut self) {
         self.shared.change(|s| {
             s.stop = true;
-            s.engines = [None, None];
+            s.engine = None;
         });
         if let Some(t) = self.thread.take() {
             let _ = t.join();
@@ -214,15 +206,15 @@ impl Drop for Viewer {
     }
 }
 
-/// The viewer thread: presents both engines whenever woken, and as the
-/// clocks of those playing move.
+/// The viewer thread: presents the engine whenever woken, and as its clock
+/// moves while it plays.
 fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
-    let mut screens = [Screen::new(), Screen::new()];
-    // Counts each player's new targets: the UI registers each anew.
-    let mut generations = [0u64; 2];
+    let mut screen = Screen::new();
+    // Counts new targets: the UI registers each anew.
+    let mut generation = 0u64;
     let mut next: Option<Instant> = None;
     loop {
-        let (tasks, engines, wants) = {
+        let (tasks, engine, want) = {
             let mut s = shared.lock();
             while !s.woken && !s.stop {
                 let wait = next.map_or(IDLE, |n| n.saturating_duration_since(Instant::now()));
@@ -239,59 +231,48 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
                 return;
             }
             s.woken = false;
-            (std::mem::take(&mut s.tasks), s.engines.clone(), s.wants)
+            (std::mem::take(&mut s.tasks), s.engine.clone(), s.want)
         };
         let now = Instant::now();
-        let mut presented = [None; 2];
-        let mut changed = false;
-        let mut targets = [None, None];
-        let mut has_frame = [false; 2];
-        next = None;
-        for id in PlayerId::ALL {
-            let i = id.index();
-            let engine = engines[i].as_deref();
-            let shown = engine.and_then(|e| e.present(now));
-            let [w, h] = wants[i];
-            let drawn = screens[i].draw(
-                gpu,
-                shown.as_ref().map(|s| &s.picture),
-                w.max(2) as u32,
-                h.max(2) as u32,
+        let shown = engine.as_ref().and_then(|e| e.present(now));
+        let [w, h] = want;
+        let drawn = screen.draw(
+            gpu,
+            shown.as_ref().map(|s| &s.picture),
+            w.max(2) as u32,
+            h.max(2) as u32,
+        );
+        let changed = drawn != Drawn::Same;
+        if changed && crate::live::debug() {
+            eprintln!(
+                "[viewer] drew {:?} at {w}x{h}",
+                shown.as_ref().map(|s| (s.frame, s.exact))
             );
-            if drawn != Drawn::Same {
-                changed = true;
-                if crate::live::debug() {
-                    eprintln!(
-                        "[viewer] {id:?} drew {:?} at {w}x{h}",
-                        shown.as_ref().map(|s| (s.frame, s.exact))
-                    );
-                }
-            }
-            if drawn == Drawn::Target {
-                generations[i] += 1;
-            }
-            targets[i] = screens[i].view().map(|view| Target {
-                generation: generations[i],
-                view: view.clone(),
-            });
-            has_frame[i] = shown.is_some();
-            presented[i] = shown.filter(|s| s.exact).map(|s| s.frame);
-            // Playing: look again when the clock moves to the next frame.
-            if let Some(d) = engine.and_then(|e| e.next_change(now)) {
-                let at = now + d.max(Duration::from_millis(1));
-                next = Some(next.map_or(at, |n| n.min(at)));
-            }
         }
+        if drawn == Drawn::Target {
+            generation += 1;
+        }
+        let target = screen.view().map(|view| Target {
+            generation,
+            view: view.clone(),
+        });
+        let has_frame = shown.is_some();
+        let presented = shown.filter(|s| s.exact).map(|s| s.frame);
+        // Playing: look again when the clock moves to the next frame.
+        next = engine
+            .as_ref()
+            .and_then(|e| e.next_change(now))
+            .map(|d| now + d.max(Duration::from_millis(1)));
         {
             let mut s = shared.lock();
-            s.targets = targets;
+            s.target = target;
             s.has_frame = has_frame;
         }
         for task in tasks {
             match task {
-                Task::Present(id, done) => done(presented[id.index()]),
-                Task::Capture(id, done) => {
-                    let image = screens[id.index()].read(gpu);
+                Task::Present(done) => done(presented),
+                Task::Capture(done) => {
+                    let image = screen.read(gpu);
                     done(image.ok_or_else(|| {
                         Error::new(
                             vidcut_core::ErrorCode::Internal,

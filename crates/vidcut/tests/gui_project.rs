@@ -14,17 +14,17 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::{Value, json};
 use vidcut::gui::export::Dialogs;
 use vidcut::gui::workspace::Workspace;
-use vidcut::live::{self, Capture, Origin, PlayerId, Presented, WindowChange};
+use vidcut::live::{self, Capture, Origin, Presented, WindowChange};
 use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
 use vidcut_core::{Envelope, ErrorCode, Response, Result};
 
 struct NoRenderer;
 
 impl live::Renderer for NoRenderer {
-    fn present(&self, _: PlayerId, done: Presented) {
+    fn present(&self, done: Presented) {
         done(None);
     }
-    fn capture_viewer(&self, _: PlayerId, done: Capture) {
+    fn capture_viewer(&self, done: Capture) {
         done(Err(vidcut_core::Error::usage("no renderer in tests")));
     }
     fn capture_window(&self, done: Capture) {
@@ -156,7 +156,7 @@ fn a_new_project_takes_the_format_chosen() {
     let (h, session) = live::start(live::Config {
         project: None,
         create: false,
-        players: None,
+        player: None,
         preview_error: Some("no preview in tests".into()),
         renderer: Arc::new(NoRenderer),
         notify: Arc::new(|| {}),

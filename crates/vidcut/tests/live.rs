@@ -1,8 +1,9 @@
-//! The live session without a window: both players are the engine, a
-//! harness thread stands in for the GUI's renderer (it presents them and
-//! converts their pictures to RGBA with the export's own filters,
-//! `Picture::to_rgba`), their sound goes to stand-in devices that record
-//! it, and requests go through `Handle::call` exactly as IPC clients' do.
+//! The live session without a window: the viewer's player is the engine
+//! (one for the source and the timeline), a harness thread stands in for
+//! the GUI's renderer (it presents it and converts its pictures to RGBA
+//! with the export's own filters, `Picture::to_rgba`), its sound goes to a
+//! stand-in device that records it, and requests go through `Handle::call`
+//! exactly as IPC clients' do.
 //! Checks that what the viewer shows after seeks and edits is frame-exact,
 //! that pictures keep with the sound as it is heard, that edits from other
 //! processes appear, and the clipboard and selection behavior.
@@ -15,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use vidcut::live::{self, Capture, Image, Origin, PlayerId, Presented, WindowChange};
+use vidcut::live::{self, Capture, Image, Origin, Presented, WindowChange};
 use vidcut_av::fixture::{self, Container, FixtureSpec, ImageSpec, VideoCodec};
 use vidcut_av::player::{PacedOutput, Picture, Player, Recording};
 use vidcut_core::model::Settings;
@@ -31,31 +32,33 @@ const LATENCY: Duration = Duration::from_millis(30);
 
 type Engine = Arc<Player>;
 
-/// Each player's sound, as its stand-in device recorded it.
-type Sounds = Arc<Mutex<[Option<Arc<Mutex<Recording>>>; 2]>>;
+/// The player's sound, as its stand-in device recorded it.
+type Sound = Arc<Mutex<Option<Arc<Mutex<Recording>>>>>;
 
 #[derive(Default)]
 struct Port {
-    engines: Mutex<[Option<Engine>; 2]>,
-    presents: Mutex<Vec<(PlayerId, Presented)>>,
-    captures: Mutex<Vec<(PlayerId, Capture)>>,
+    engine: Mutex<Option<Engine>>,
+    /// Engines attached so far (the same one again counts too).
+    attached: AtomicU64,
+    presents: Mutex<Vec<Presented>>,
+    captures: Mutex<Vec<Capture>>,
     /// Milliseconds the render thread looks away once it next finds a new
     /// picture waiting, like a UI thread busy elsewhere.
     stall: AtomicU64,
-    /// Every exact frame the timeline's viewer showed, and when it first
-    /// did.
+    /// Every exact frame the viewer showed, and when it first did.
     shown: Mutex<Vec<(i64, Instant)>>,
 }
 
 impl live::Renderer for Port {
-    fn attach(&self, player: PlayerId, engine: Option<Engine>) {
-        self.engines.lock().unwrap()[player.index()] = engine;
+    fn attach(&self, engine: Option<Engine>) {
+        *self.engine.lock().unwrap() = engine;
+        self.attached.fetch_add(1, Ordering::Relaxed);
     }
-    fn present(&self, player: PlayerId, done: Presented) {
-        self.presents.lock().unwrap().push((player, done));
+    fn present(&self, done: Presented) {
+        self.presents.lock().unwrap().push(done);
     }
-    fn capture_viewer(&self, player: PlayerId, done: Capture) {
-        self.captures.lock().unwrap().push((player, done));
+    fn capture_viewer(&self, done: Capture) {
+        self.captures.lock().unwrap().push(done);
     }
     fn capture_window(&self, done: Capture) {
         done(Err(vidcut_core::Error::usage("no window in tests")));
@@ -64,7 +67,7 @@ impl live::Renderer for Port {
     fn quit(&self) {}
 }
 
-/// What one viewer shows: the picture, as drawn.
+/// What the viewer shows: the picture, as drawn.
 #[derive(Default)]
 struct Screen {
     picture: Option<Arc<Picture>>,
@@ -84,8 +87,8 @@ fn black() -> Image {
 struct Harness {
     handle: live::Handle,
     port: Arc<Port>,
-    /// Each player's sound, as its stand-in device recorded it.
-    sound: Sounds,
+    /// The player's sound, as its stand-in device recorded it.
+    sound: Sound,
     session: Option<std::thread::JoinHandle<()>>,
     stop: Arc<AtomicBool>,
     render: Option<std::thread::JoinHandle<()>>,
@@ -95,17 +98,16 @@ impl Harness {
     fn start(project: &Path) -> Self {
         let port = Arc::new(Port::default());
         let stop = Arc::new(AtomicBool::new(false));
-        // The "render thread": presents both players every 2 ms, as a
-        // display would, draws what changed, and answers presents and
-        // captures.
+        // The "render thread": presents the player every 2 ms, as a display
+        // would, draws what changed, and answers presents and captures.
         let render = {
             let (port, stop) = (port.clone(), stop.clone());
             std::thread::spawn(move || {
-                let mut screens = [Screen::default(), Screen::default()];
+                let mut s = Screen::default();
                 while !stop.load(Ordering::Relaxed) {
-                    let engines = port.engines.lock().unwrap().clone();
-                    let waiting = |i: usize, s: &Screen| {
-                        engines[i]
+                    let engine = port.engine.lock().unwrap().clone();
+                    let waiting = |s: &Screen| {
+                        engine
                             .as_ref()
                             .and_then(|e| e.present(Instant::now()))
                             .is_some_and(|p| {
@@ -114,63 +116,57 @@ impl Harness {
                                     .is_none_or(|q| !Arc::ptr_eq(q, &p.picture))
                             })
                     };
-                    if port.stall.load(Ordering::Relaxed) > 0
-                        && (0..2).any(|i| waiting(i, &screens[i]))
-                    {
+                    if port.stall.load(Ordering::Relaxed) > 0 && waiting(&s) {
                         let ms = port.stall.swap(0, Ordering::Relaxed);
                         std::thread::sleep(Duration::from_millis(ms));
                     }
                     let presents: Vec<_> = port.presents.lock().unwrap().drain(..).collect();
-                    for (i, s) in screens.iter_mut().enumerate() {
-                        let now = Instant::now();
-                        let shown = engines[i].as_ref().and_then(|e| e.present(now));
-                        let picture = shown.as_ref().map(|p| p.picture.clone());
-                        let same = match (&s.picture, &picture) {
-                            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
-                            (None, None) => s.image.is_some(),
-                            _ => false,
-                        };
-                        if !same {
-                            s.image = Some(match &picture {
-                                Some(p) => p.to_rgba(W as u32, H as u32).unwrap(),
-                                None => black(),
-                            });
-                            s.picture = picture;
-                        }
-                        s.exact = shown.filter(|p| p.exact).map(|p| p.frame);
-                        if i == PlayerId::Timeline.index()
-                            && let Some(f) = s.exact
-                        {
-                            let mut log = port.shown.lock().unwrap();
-                            if log.last().is_none_or(|(g, _)| *g != f) {
-                                log.push((f, now));
-                            }
+                    let now = Instant::now();
+                    let shown = engine.as_ref().and_then(|e| e.present(now));
+                    let picture = shown.as_ref().map(|p| p.picture.clone());
+                    let same = match (&s.picture, &picture) {
+                        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                        (None, None) => s.image.is_some(),
+                        _ => false,
+                    };
+                    if !same {
+                        s.image = Some(match &picture {
+                            Some(p) => p.to_rgba(W as u32, H as u32).unwrap(),
+                            None => black(),
+                        });
+                        s.picture = picture;
+                    }
+                    s.exact = shown.filter(|p| p.exact).map(|p| p.frame);
+                    if let Some(f) = s.exact {
+                        let mut log = port.shown.lock().unwrap();
+                        if log.last().is_none_or(|(g, _)| *g != f) {
+                            log.push((f, now));
                         }
                     }
-                    for (id, done) in presents {
-                        done(screens[id.index()].exact);
+                    for done in presents {
+                        done(s.exact);
                     }
                     let captures: Vec<_> = port.captures.lock().unwrap().drain(..).collect();
-                    for (id, done) in captures {
-                        done(Ok(screens[id.index()].image.clone().unwrap_or_else(black)));
+                    for done in captures {
+                        done(Ok(s.image.clone().unwrap_or_else(black)));
                     }
                     std::thread::sleep(Duration::from_millis(2));
                 }
             })
         };
-        let sound: Sounds = Arc::default();
+        let sound: Sound = Arc::default();
         let audio = {
             let sound = sound.clone();
-            Arc::new(move |id: PlayerId| {
+            Arc::new(move || {
                 let (out, rec) = PacedOutput::recording(Duration::from_millis(10), LATENCY);
-                sound.lock().unwrap()[id.index()] = Some(rec);
+                *sound.lock().unwrap() = Some(rec);
                 Box::new(out) as Box<dyn vidcut_av::player::AudioOutput>
             })
         };
         let (handle, session) = live::start(live::Config {
             project: Some(project.to_path_buf()),
             create: false,
-            players: Some(live::Players {
+            player: Some(live::PlayerConfig {
                 audio,
                 budget: vidcut_av::player::DEFAULT_BUDGET,
             }),
@@ -244,11 +240,13 @@ impl Harness {
         panic!("timed out waiting for {what}");
     }
 
-    /// The timeline player's sound so far.
-    fn timeline_sound(&self) -> Arc<Mutex<Recording>> {
-        self.sound.lock().unwrap()[PlayerId::Timeline.index()]
+    /// The player's sound so far.
+    fn sound(&self) -> Arc<Mutex<Recording>> {
+        self.sound
+            .lock()
+            .unwrap()
             .clone()
-            .expect("the timeline plays")
+            .expect("the player plays")
     }
 }
 
@@ -491,7 +489,7 @@ fn live_session() {
     // must show as its beep is heard.
     h.ok("player.audio_scrubbing", json!({ "on": false }));
     h.ok("player.seek", json!({ "at": 0 }));
-    let sound = h.timeline_sound();
+    let sound = h.sound();
     let from = sound.lock().unwrap().samples.len() / 2;
     h.port.shown.lock().unwrap().clear();
     h.ok("player.play", json!({}));
@@ -650,10 +648,43 @@ fn live_session() {
     assert_eq!(h.shown(dir), Some(10), "tape frame 310 = m2 frame 10");
     let sel = h.ok("selection.get", json!({}));
     assert_eq!(sel.result["media"], json!(["m2"]));
-    // Q-style switching keeps each player where it was.
+    // Q-style switching keeps each playhead where it was.
     h.ok("viewer.set", json!({ "mode": "timeline" }));
     h.ok("viewer.set", json!({ "mode": "source_tape" }));
     assert_eq!(h.shown(dir), Some(10));
+
+    step("Switching shows the frame kept ready");
+    // One engine plays the source and the timeline. The frame of the one
+    // not shown is decoded while nothing else is and kept, so switching
+    // shows it at once. An edit function from the source moves the
+    // timeline's playhead (decision D15): its new frame is kept ready too.
+    // The timeline now: m1 50..90, m2 0..30, m1 200..260.
+    let engine = || h.port.engine.lock().unwrap().as_ref().map(Arc::as_ptr);
+    let one = engine();
+    assert!(one.is_some());
+    h.ok("player.seek", json!({ "at": 10, "viewer": "timeline" }));
+    h.ok("viewer.load", json!({ "media": "m1", "at": "120f" }));
+    // Timeline 10..20 becomes m1 120..130; the playhead moves to 20, which
+    // still shows m1 frame 70.
+    h.ok(
+        "edit.overwrite",
+        json!({ "media": "m1", "range": "120f..130f", "at": 10 }),
+    );
+    let took = h.wait_for("the timeline's new frame kept ready", |s| {
+        s.timeline.position == 20 && s.timeline.ready
+    });
+    eprintln!("  the timeline's frame was ready {took:?} after the edit");
+    let started = Instant::now();
+    h.ok("viewer.set", json!({ "mode": "timeline" }));
+    eprintln!("  switched to the timeline in {:?}", started.elapsed());
+    assert_eq!(h.shown(dir), Some(70));
+    h.wait_for("the source's frame kept ready", |s| s.source.ready);
+    let started = Instant::now();
+    h.ok("viewer.set", json!({ "mode": "source_clip" }));
+    eprintln!("  switched to the source in {:?}", started.elapsed());
+    assert_eq!(h.shown(dir), Some(120));
+    assert_eq!(engine(), one, "one engine plays both");
+    h.ok("history.undo", json!({}));
 
     step("Clipboard: copy two clips");
     // Clipboard: copy two clips, paste them at the end of the timeline.

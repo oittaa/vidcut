@@ -1,9 +1,11 @@
 //! The player on real footage, decoding on the CPU, and with
 //! `--features gpu-tests` on NVDEC too: how long a seek takes to its
 //! picture, steps back, and whether 1080p30 and 2160p60 H.264 play in real
-//! time, with the CPU they take. Prints the numbers (`--nocapture`); skips
-//! without the clips (scripts/fetch-test-media.sh).
-//! `VIDCUT_PLAYER_MEDIA=a.mkv,b.mp4` measures those files instead.
+//! time, with the CPU they take; and what one player for a viewer's source
+//! and timeline costs in its one memory budget. Prints the numbers
+//! (`--nocapture`); skips without the clips (scripts/fetch-test-media.sh).
+//! `VIDCUT_PLAYER_MEDIA=a.mkv,b.mp4` measures those files instead, and
+//! `VIDCUT_PLAYER_BUDGET_MB` another budget.
 
 mod player_support;
 
@@ -24,11 +26,16 @@ fn media(name: &str, file: &str) -> Option<PathBuf> {
 }
 
 fn plan(path: &Path, fps: i64, secs: i64) -> RenderPlan {
+    plan_from(path, fps, 0, secs)
+}
+
+/// `secs` of the file from source frame `from` (as far as it goes).
+fn plan_from(path: &Path, fps: i64, from: i64, secs: i64) -> RenderPlan {
     let info = vidcut_av::probe::probe(path).unwrap();
     let origin = info.video.as_ref().unwrap().first_frame_time.unwrap();
     let fps = Rational::new(fps, 1).unwrap();
-    let secs = (secs as f64).min(info.duration.unwrap_or(f64::MAX) - 0.5);
-    let frames = fps.secs_to_frames(secs);
+    let left = info.duration.unwrap_or(f64::MAX) - 0.5 - fps.frames_to_secs(from);
+    let frames = fps.secs_to_frames((secs as f64).min(left));
     let samples = fps.frame_to_sample(frames, 48_000);
     RenderPlan {
         fps,
@@ -41,7 +48,7 @@ fn plan(path: &Path, fps: i64, secs: i64) -> RenderPlan {
             media: "m1".into(),
             path: path.to_path_buf(),
             origin,
-            source_frame: 0,
+            source_frame: from,
             frames,
             image: None,
         }],
@@ -50,7 +57,7 @@ fn plan(path: &Path, fps: i64, secs: i64) -> RenderPlan {
             path: path.to_path_buf(),
             stream: 0,
             origin,
-            source_sample: 0,
+            source_sample: fps.frame_to_sample(from, 48_000),
             samples,
             gain_db: 0.0,
         }]],
@@ -68,8 +75,13 @@ fn median(mut v: Vec<f64>) -> f64 {
     v[v.len() / 2]
 }
 
-#[test]
-fn real_footage_seeks_steps_and_plays() {
+/// A clip measured: its name, its file when it is there, its frame rate.
+type Clip = (String, Option<PathBuf>, i64);
+
+/// The clips measured, with their frame rates: the real 1080p30 and
+/// 2160p60 ones, or `VIDCUT_PLAYER_MEDIA`'s; each with the decoders (true:
+/// NVDEC).
+fn clips() -> Vec<(Clip, bool)> {
     let mut clips = vec![
         (
             "bbb-1080p30".to_string(),
@@ -99,10 +111,23 @@ fn real_footage_seeks_steps_and_plays() {
     } else {
         &[false]
     };
-    for ((name, path, fps), &hardware) in clips
+    clips
         .iter()
-        .flat_map(|c| decoders.iter().map(move |d| (c.clone(), d)))
-    {
+        .flat_map(|c| decoders.iter().map(move |&d| (c.clone(), d)))
+        .collect()
+}
+
+/// The memory budget: `VIDCUT_PLAYER_BUDGET_MB`, or the default.
+fn budget() -> usize {
+    std::env::var("VIDCUT_PLAYER_BUDGET_MB")
+        .ok()
+        .and_then(|mb| mb.parse::<usize>().ok())
+        .map_or(DEFAULT_BUDGET, |mb| mb << 20)
+}
+
+#[test]
+fn real_footage_seeks_steps_and_plays() {
+    for ((name, path, fps), hardware) in clips() {
         let Some(path) = path else {
             eprintln!("skipping {name}: not in the test data (scripts/fetch-test-media.sh)");
             continue;
@@ -112,11 +137,7 @@ fn real_footage_seeks_steps_and_plays() {
         let frames = p.frames;
         // Sound to a stand-in device in real time.
         let out = PacedOutput::new(Duration::from_millis(10), Duration::ZERO);
-        // `VIDCUT_PLAYER_BUDGET_MB` measures another memory budget.
-        let budget = std::env::var("VIDCUT_PLAYER_BUDGET_MB")
-            .ok()
-            .and_then(|mb| mb.parse::<usize>().ok())
-            .map_or(DEFAULT_BUDGET, |mb| mb << 20);
+        let budget = budget();
         let config = Config {
             budget,
             hardware,
@@ -191,6 +212,102 @@ fn real_footage_seeks_steps_and_plays() {
                 forward.shown as f64 >= 0.95 * forward.due as f64,
                 "{name}: {forward}"
             );
+        }
+    }
+}
+
+/// One player for a viewer's source and timeline (preview.md §1), and its
+/// one memory budget. The timeline is stepped back through and played
+/// backward, then the viewer switches to the source and back: right away,
+/// as an engine of the timeline's own would have kept it, and after the
+/// source played 5 s forward and 3 s backward elsewhere in the file. Each
+/// time: how soon each frame shows after switching (the source's a seek
+/// at first, the timeline's prepared), the first step back and those
+/// after it, 3 s backward again, and the memory kept.
+#[test]
+fn one_player_for_the_source_and_the_timeline() {
+    for ((name, path, fps), hardware) in clips() {
+        let Some(path) = path else {
+            eprintln!("skipping {name}: not in the test data (scripts/fetch-test-media.sh)");
+            continue;
+        };
+        let name = format!("{name} ({})", if hardware { "NVDEC" } else { "CPU" });
+        let timeline = plan(&path, fps, 540);
+        let frames = timeline.frames;
+        let source = plan_from(&path, fps, frames * 2 / 3 + fps * 7 / 3, 60);
+        let budget = budget();
+        for source_plays in [false, true] {
+            let config = Config {
+                budget,
+                hardware,
+                audio_scrubbing: false,
+                ..Config::default()
+            };
+            let out = PacedOutput::new(Duration::from_millis(10), Duration::ZERO);
+            let player = Player::new(timeline.clone(), config, Box::new(out)).unwrap();
+            // Editing on the timeline: steps back from the middle of a GOP,
+            // then 3 s backward.
+            let t = frames / 3;
+            player.seek(t);
+            assert!(player.wait_ready(t, Duration::from_secs(20)));
+            for k in 1..=40 {
+                player.step(-1);
+                assert!(player.wait_ready(t - k, Duration::from_secs(20)));
+                player.present(Instant::now());
+            }
+            play(&player, t, -1.0, 3.0);
+            let at = player.status().position;
+            // To the source: a seek, the timeline's frame held.
+            let started = Instant::now();
+            player.prepare(Some((timeline.clone(), at)));
+            let s = source.frames / 2;
+            player.set_plan_at(source.clone(), s).unwrap();
+            assert!(player.wait_ready(s, Duration::from_secs(20)));
+            let to_source = started.elapsed();
+            if source_plays {
+                play(&player, s, 1.0, 5.0);
+                play(&player, s, -1.0, 3.0);
+            }
+            let kept = player.status().kept;
+            // Back to the timeline.
+            let started = Instant::now();
+            player.prepare(Some((source.clone(), player.status().position)));
+            player.set_plan_at(timeline.clone(), at).unwrap();
+            assert!(
+                player.status().ready,
+                "{name}: the timeline's frame was held"
+            );
+            assert!(player.wait_ready(at, Duration::from_secs(20)));
+            let to_timeline = started.elapsed();
+            let mut steps = Vec::new();
+            for k in 1..=40 {
+                let started = Instant::now();
+                player.step(-1);
+                assert!(player.wait_ready(at - k, Duration::from_secs(20)));
+                steps.push(ms(started.elapsed()));
+                // Shown, as a display shows it.
+                player.present(Instant::now());
+            }
+            let backward = play(&player, at - 40, -1.0, 3.0);
+            eprintln!(
+                "{name}, {} MB: {}: switched to the source in {:.0} ms, back in {:.2} ms; \
+                 {} pictures kept ({:.0} MB); then a step back {:.0} ms, the next 39 median \
+                 {:.1} ms, max {:.1} ms; backward {backward}",
+                budget >> 20,
+                if source_plays {
+                    "after the source played 8 s"
+                } else {
+                    "right away"
+                },
+                ms(to_source),
+                ms(to_timeline),
+                kept.0,
+                kept.1 as f64 / 1e6,
+                steps[0],
+                median(steps[1..].to_vec()),
+                steps[1..].iter().cloned().fold(0.0, f64::max),
+            );
+            assert!(player.status().error.is_none(), "{:?}", player.status());
         }
     }
 }
