@@ -106,6 +106,7 @@ impl App {
             renderer: port.clone(),
             notify: Arc::new(move || ctx.request_repaint()),
             socket: Some(socket.clone()),
+            playback: live::device_playback(),
         });
         let ipc = handle.clone();
         let served = crate::ipc::server::start(

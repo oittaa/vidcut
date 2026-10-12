@@ -14,6 +14,7 @@
 //! encoder) reply later, without blocking other requests.
 
 mod jobs;
+mod playback;
 mod player;
 mod project;
 pub mod snapshot;
@@ -27,6 +28,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 pub use jobs::{JobInfo, JobOutput, JobState};
+pub use playback::{Device, Discard, Playback, Recorder, device_playback, discard_playback};
 pub use player::debug;
 use serde_json::{Value, json};
 pub use snapshot::*;
@@ -115,6 +117,9 @@ pub struct Config {
     pub notify: Arc<dyn Fn() + Send + Sync>,
     /// The IPC socket this instance serves, for the instance registry.
     pub socket: Option<PathBuf>,
+    /// Where each player's samples go. The GUI plays them on the default
+    /// device; tests discard or record them.
+    pub playback: playback::PlaybackFactory,
 }
 
 /// Progress and the final answer of one request.
@@ -344,9 +349,10 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     remove_stale_runtime_dirs();
     let edl_dir = ipc::runtime_dir().join(pid.to_string());
     let _ = ipc::private_dir(&edl_dir);
+    let playback = config.playback;
     let players = [
-        Player::new(PlayerId::Source),
-        Player::new(PlayerId::Timeline),
+        Player::new(PlayerId::Source, playback(PlayerId::Source)),
+        Player::new(PlayerId::Timeline, playback(PlayerId::Timeline)),
     ];
     let instance = config.socket.clone().map(|socket| Instance {
         pid,
@@ -1797,6 +1803,8 @@ impl Live {
             }
             Request::PlayerState {} => Step::Now(Ok(self.state_response())),
             Request::MixerPreview { track, volume_db } => {
+                // `volume_db` is where the fader sits. The plan already
+                // includes the saved fader, and the player subtracts that.
                 match self.players[TIMELINE].set_lane_db(&track, volume_db) {
                     Ok(()) => Step::Now(Ok(answer(json!({ "live": true })))),
                     Err(e) => Step::Now(Err(Error::media(e))),
@@ -2433,10 +2441,8 @@ impl Live {
         let mut plan = plan;
         preview::apply_proxies(&mut plan, &p, |path| path.is_file());
         let plan = self.preview_plan(plan, player, position);
-        let names = lanes
-            .map(|ls| ls.iter().map(|l| l.track.clone()).collect())
-            .unwrap_or_default();
-        self.players[player.index()].load_plan(plan, position, names)
+        let lanes = lanes.map(|ls| ls.to_vec()).unwrap_or_default();
+        self.players[player.index()].load_plan(plan, position, lanes)
     }
 
     /// Reloads the timeline soon: at once if the last reload was a while

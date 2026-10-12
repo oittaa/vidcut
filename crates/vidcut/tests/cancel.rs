@@ -48,6 +48,7 @@ fn a_gone_client_cancels_frames_storyboards_and_analysis() {
         renderer: Arc::new(NoRenderer),
         notify: Arc::new(|| {}),
         socket: None,
+        playback: live::discard_playback(),
     });
     let ready = (0..200).any(|_| {
         if h.snapshot().project.is_some() {

@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use vidcut::live::{self, Capture, Origin, PlayerId, Presented, WindowChange};
+use vidcut::live::{self, Capture, Origin, Playback, PlayerId, Presented, WindowChange};
 use vidcut_av::fixture::{self, AudioCodec, Container, FixtureSpec, ImageSpec, Sound, VideoCodec};
 use vidcut_core::model::Settings;
 use vidcut_core::time::Rational;
@@ -51,6 +51,8 @@ struct Harness {
     session: Option<std::thread::JoinHandle<()>>,
     stop: Arc<AtomicBool>,
     render: Option<std::thread::JoinHandle<()>>,
+    /// Samples the timeline player wrote to its sink, in order.
+    heard: Arc<Mutex<Vec<f32>>>,
 }
 
 impl Harness {
@@ -88,6 +90,8 @@ impl Harness {
                 }
             })
         };
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let record = heard.clone();
         let (handle, session) = live::start(live::Config {
             project: Some(project.to_path_buf()),
             create: false,
@@ -95,6 +99,17 @@ impl Harness {
             renderer: port.clone(),
             notify: Arc::new(|| {}),
             socket: None,
+            // The device boundary: the session writes the mix here instead of
+            // opening PulseAudio. Source playback is not what these tests hear.
+            playback: Arc::new(move |id| {
+                if id == PlayerId::Timeline {
+                    Box::new(live::Recorder {
+                        samples: record.clone(),
+                    })
+                } else {
+                    Box::new(live::Discard)
+                }
+            }),
         });
         Self {
             handle,
@@ -102,6 +117,7 @@ impl Harness {
             session: Some(session),
             stop,
             render: Some(render),
+            heard,
         }
     }
 
@@ -158,6 +174,19 @@ impl Harness {
 
     fn monitor(&self) -> Value {
         self.timeline()["monitor"].clone()
+    }
+
+    fn playing(&self) -> bool {
+        self.timeline()["playing"].as_bool().unwrap()
+    }
+
+    fn frames(&self) -> i64 {
+        self.timeline()["frames"].as_i64().unwrap()
+    }
+
+    /// Samples written since the last call.
+    fn take_heard(&self) -> Vec<f32> {
+        std::mem::take(&mut self.heard.lock().unwrap())
     }
 
     /// Waits until `check` holds for the latest snapshot.
@@ -617,24 +646,19 @@ fn live_session() {
         h.ok("player.state", json!({})).result["timeline"]["error"],
         Value::Null
     );
-    // The Mixer's fader while dragged: the running preview's level changes
-    // at once (preview.md §10), the project doesn't. The filter reads
-    // commands as sound passes, so the preview plays.
+    // The Mixer's fader while dragged replaces the saved level in the mix.
+    // The project does not change. A track that is not in the mix is an error.
     let rev = h.ok("project.summary", json!({})).rev;
     h.ok("player.play", json!({}));
     let preview = h.ok(
         "mixer.preview",
         json!({ "track": "A1", "volume_db": -20.0 }),
     );
-    if preview.result["live"] == true {
-        // A track with no fader in the graph: the filter says so.
-        let e = h
-            .call("mixer.preview", json!({ "track": "V7", "volume_db": 0.0 }))
-            .unwrap_err();
-        assert_eq!(e.code, ErrorCode::Media, "{e}");
-    } else {
-        eprintln!("skipping live faders: no ZeroMQ, or an FFmpeg without azmq");
-    }
+    assert_eq!(preview.result["live"], true, "{preview:?}");
+    let e = h
+        .call("mixer.preview", json!({ "track": "V7", "volume_db": 0.0 }))
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Media, "{e}");
     h.ok("player.pause", json!({}));
     assert_eq!(h.ok("project.summary", json!({})).rev, rev);
     // Track 1 ripples: the B-roll and the music follow (decision D21).
@@ -1002,8 +1026,9 @@ fn playback_without_libmpv() {
     beep_at(0);
     beep_at(30);
 
-    // A steady tone, so the fader's next buffer is a level change and not
-    // the silence between beeps. The picture keeps moving; the project does not.
+    // A steady tone. The track fader is already −6 dB in the plan; dragging
+    // it to −12 must be heard as −12, not −18. Mute silences the sink. The
+    // project does not change, and the picture keeps moving.
     let tone = fixture::ensure(
         &FixtureSpec::new(
             VideoCodec::H264,
@@ -1022,53 +1047,220 @@ fn playback_without_libmpv() {
     h.ok("project.open", json!({ "path": tone_path }));
     h.ok("media.add", json!({ "paths": [tone] }));
     h.ok("edit.append", json!({ "media": "m1", "range": "0f..90f" }));
+    h.ok("track.set", json!({ "track": "V1", "volume_db": -6.0 }));
     h.ok("player.seek", json!({ "at": 0, "viewer": "timeline" }));
+    assert!(
+        (track_volume(&h, "V1") + 6.0).abs() < 1e-6,
+        "saved fader {}",
+        track_volume(&h, "V1")
+    );
+    h.take_heard();
     h.ok("player.play", json!({ "speed": 1.0 }));
     let started = Instant::now();
     let mut loud = 0.0;
+    let mut loud_sink = 0.0;
     while started.elapsed() < Duration::from_secs(2) {
         loud = h.monitor()["rms"].as_f64().unwrap();
-        if loud > 0.05 && h.position() > 0 {
+        let heard = h.heard.lock().unwrap();
+        // Half a second, so the rms is the tone and not one short buffer.
+        loud_sink = if heard.len() >= 48_000 {
+            rms(&heard)
+        } else {
+            0.0
+        };
+        drop(heard);
+        // −6 dB under the tone (rms about 0.035), not the unfaded 0.07.
+        if (0.025..0.050).contains(&loud) && h.position() > 0 && (0.025..0.050).contains(&loud_sink)
+        {
             break;
         }
         std::thread::sleep(Duration::from_millis(5));
     }
-    assert!(loud > 0.05, "the tone is not audible ({loud})");
-    let seq = h.monitor()["seq"].as_u64().unwrap();
+    assert!(
+        (0.025..0.050).contains(&loud),
+        "saved −6 dB was not what played ({loud})"
+    );
+    assert!(
+        (0.025..0.050).contains(&loud_sink),
+        "the sink did not get the −6 dB tone ({loud_sink})"
+    );
+
+    // Mute silences the device, not only the meter. Playback continues.
+    // Measure after the call returns: samples written while the request was
+    // in flight are still the old level.
+    h.ok("player.mute", json!({ "mute": true }));
+    let at_mute = h.heard.lock().unwrap().len();
+    let pos_mute = h.position();
+    let started = Instant::now();
+    let mut silenced = false;
+    while started.elapsed() < Duration::from_secs(2) {
+        // A thousand samples is less than one frame, so wait until the
+        // playhead moves as well. The lock is not held across the call.
+        let pos = h.position();
+        let buf = h.heard.lock().unwrap();
+        if pos > pos_mute && buf.len() > at_mute + 1000 {
+            silenced = rms(&buf[at_mute..]) < 1e-4;
+            break;
+        }
+        drop(buf);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(silenced, "mute did not silence the sink");
+    assert!(h.position() > pos_mute, "mute stopped playback");
+    h.ok("player.mute", json!({ "mute": false }));
+    let at_open = h.heard.lock().unwrap().len();
+    let started = Instant::now();
+    let mut restored = false;
+    while started.elapsed() < Duration::from_secs(2) {
+        let buf = h.heard.lock().unwrap();
+        if buf.len() > at_open + 1000 && (0.025..0.050).contains(&rms(&buf[at_open..])) {
+            restored = true;
+            break;
+        }
+        drop(buf);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(restored, "unmute did not restore the sink");
+
     let rev = h.ok("project.summary", json!({})).rev;
     let preview = h.ok(
         "mixer.preview",
-        json!({ "track": "V1", "volume_db": -60.0 }),
+        json!({ "track": "V1", "volume_db": -12.0 }),
     );
     assert_eq!(preview.result["live"], true);
+    // Drop samples from before the fader moved. What arrives now is the
+    // next buffer, at the fader's own level.
+    h.take_heard();
     let started = Instant::now();
     let mut quiet = loud;
+    let mut quiet_sink = 0.0;
     while started.elapsed() < Duration::from_secs(2) {
-        let m = h.monitor();
-        quiet = m["rms"].as_f64().unwrap();
-        if m["seq"].as_u64().unwrap() > seq && quiet < loud / 100.0 {
+        quiet = h.monitor()["rms"].as_f64().unwrap();
+        let heard = h.heard.lock().unwrap();
+        quiet_sink = if heard.len() >= 48_000 {
+            rms(&heard)
+        } else {
+            0.0
+        };
+        drop(heard);
+        // −12 dB is about 0.018. The meter is one buffer, so its band is
+        // wide; the sink ratio over half a second is the precise check.
+        // Stacking −12 on the baked −6 would be about 0.009 (ratio 0.25),
+        // and ignoring the drag would stay near the −6 level.
+        let sink_ratio = if loud_sink > 0.0 {
+            quiet_sink / loud_sink
+        } else {
+            0.0
+        };
+        if (0.012..0.025).contains(&quiet) && (0.45..0.56).contains(&sink_ratio) && h.position() > 0
+        {
             break;
         }
         std::thread::sleep(Duration::from_millis(5));
     }
+    let ratio = quiet / loud;
+    let sink_ratio = quiet_sink / loud_sink;
     let pos = h.position();
     let code = h.shown(dir);
     h.ok("player.pause", json!({}));
     assert!(
-        quiet < loud / 100.0,
-        "the fader did not drop the level ({quiet} from {loud})"
+        (0.012..0.025).contains(&quiet),
+        "the fader did not replace the saved −6 dB ({quiet} from {loud}, ratio {ratio})"
+    );
+    assert!(
+        (0.45..0.56).contains(&sink_ratio),
+        "the sink did not follow the fader ({quiet_sink} from {loud_sink}, ratio {sink_ratio})"
     );
     assert!(pos > 0, "playback stopped for the fader");
     assert_eq!(code, Some(pos as u32), "the picture kept moving");
     assert_eq!(h.ok("project.summary", json!({})).rev, rev);
+    assert!(
+        (track_volume(&h, "V1") + 6.0).abs() < 1e-6,
+        "the preview fader was saved"
+    );
     let missing = h
         .call("mixer.preview", json!({ "track": "V7", "volume_db": 0.0 }))
         .unwrap_err();
     assert_eq!(missing.code, ErrorCode::Media, "{missing}");
 
+    // Forward play pauses itself at the last frame.
+    let end = h.frames();
+    h.ok(
+        "player.seek",
+        json!({ "at": end - 4, "viewer": "timeline" }),
+    );
+    h.ok("player.play", json!({ "speed": 1.0 }));
+    let started = Instant::now();
+    let mut stopped = false;
+    while started.elapsed() < Duration::from_secs(3) {
+        if !h.playing() && h.position() >= end {
+            stopped = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        stopped,
+        "play did not stop at the end (playing {} at {})",
+        h.playing(),
+        h.position()
+    );
+
     assert!(!maps_contain_libmpv(), "libmpv was loaded during playback");
     println!("BARCODE 0 9 black 20 22");
     println!("BEEP frame0=1 frame30=1");
-    println!("FADER drop=1");
+    println!("FADER drop=1 saved=-6 ratio={ratio:.3} sink={sink_ratio:.3}");
+    println!("MUTE zeros=1");
+    println!("END stop=1");
     println!("MAPS libmpv=absent");
+}
+
+fn track_volume(h: &Harness, id: &str) -> f64 {
+    let tl = h.ok("timeline.get", json!({}));
+    tl.result["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == id)
+        .unwrap()["volume_db"]
+        .as_f64()
+        .unwrap()
+}
+
+fn rms(samples: &[f32]) -> f64 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let sum: f64 = samples.iter().map(|s| f64::from(*s) * f64::from(*s)).sum();
+    (sum / samples.len() as f64).sqrt()
+}
+
+/// The default device accepts a buffer. Without PulseAudio the picture still
+/// plays; this test says so and returns.
+#[test]
+fn the_default_playback_device_accepts_samples() {
+    let mut device = live::Device::new("test");
+    device.configure(48_000, 2);
+    match device.wait_ready(Duration::from_secs(2)) {
+        Ok(()) => {
+            device.write(&vec![0.0; 48_000 / 50 * 2]);
+            let started = Instant::now();
+            while device.writes() == 0 && started.elapsed() < Duration::from_secs(2) {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(
+                device.writes() > 0,
+                "the device opened but accepted no samples"
+            );
+            println!("DEVICE open=1 writes={}", device.writes());
+        }
+        Err(e) => {
+            // A missing server or library is this machine. A rejected spec
+            // (invalid argument) is a broken device path and must fail.
+            let unavailable = e.contains("connection refused") || e.contains("libpulse-simple");
+            assert!(unavailable, "playback device rejected the format: {e}");
+            eprintln!("playback device not available, skipped: {e}");
+            println!("DEVICE open=0");
+        }
+    }
 }

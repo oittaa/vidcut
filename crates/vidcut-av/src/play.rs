@@ -24,6 +24,8 @@ use crate::thumbs::Image;
 pub struct Pull {
     pub samples: Vec<f32>,
     pub frame: Option<i64>,
+    /// This pull consumed the plan. The picture stays on the last frame.
+    pub ended: bool,
 }
 
 /// Plays one render plan. Software frames, held by the still renderer so
@@ -124,6 +126,7 @@ impl Player {
             return Ok(Pull {
                 samples: vec![0.0; samples * channels],
                 frame: None,
+                ended: false,
             });
         }
         let span = self.residual + samples as f64 * self.speed;
@@ -141,9 +144,15 @@ impl Player {
         } else {
             None
         };
+        let total = self
+            .plan
+            .fps
+            .frame_to_sample(self.plan.frames.max(0), self.plan.sample_rate);
+        let ended = self.plan.frames > 0 && self.samples >= total;
         Ok(Pull {
             samples: out,
             frame: crossed,
+            ended,
         })
     }
 
@@ -247,6 +256,33 @@ fn fit(src: &[f32], channels: usize, out_n: usize) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pull_past_the_plan_reports_the_end() {
+        use vidcut_core::render::{RenderPlan, VideoPiece};
+
+        let fps = Rational::new(30, 1).unwrap();
+        let plan = RenderPlan {
+            fps,
+            width: 16,
+            height: 16,
+            sample_rate: 48_000,
+            channels: 2,
+            frames: 2,
+            video: vec![VideoPiece::Black { frames: 2 }],
+            audio: Vec::new(),
+            range: (0, 2),
+            name: "end".into(),
+        };
+        let mut player = Player::new(plan).unwrap();
+        player.set_speed(1.0).unwrap();
+        let early = player.pull(100).unwrap();
+        assert!(!early.ended, "a short pull finished the plan");
+        assert_eq!(player.frame(), 0);
+        let rest = player.pull(48_000).unwrap();
+        assert!(rest.ended, "the plan was not finished");
+        assert_eq!(player.frame(), 1, "the picture stays on the last frame");
+    }
 
     #[test]
     fn a_sample_belongs_to_the_frame_that_starts_at_or_before_it() {

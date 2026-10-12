@@ -177,6 +177,7 @@ fn setup(dir: &Path) -> (live::Handle, std::thread::JoinHandle<()>) {
         renderer: Arc::new(NoRenderer),
         notify: Arc::new(|| {}),
         socket: None,
+        playback: live::discard_playback(),
     });
     call(&h, "media.add", json!({ "paths": [media] }));
     // c1 0..60, c2 60..120, c3 120..180.

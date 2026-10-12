@@ -257,6 +257,7 @@ fn an_agent_cuts_silence_over_mcp_live_in_the_gui() {
         renderer: Arc::new(NoRenderer),
         notify: Arc::new(|| {}),
         socket: Some(socket.clone()),
+        playback: live::discard_playback(),
     });
     let ipc = h.clone();
     vidcut::ipc::server::start(

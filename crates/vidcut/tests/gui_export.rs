@@ -139,6 +139,7 @@ fn export_windows() {
         renderer: Arc::new(NoRenderer),
         notify: Arc::new(|| {}),
         socket: None,
+        playback: live::discard_playback(),
     });
     call(&h, "media.add", json!({ "paths": [media] }));
     call(

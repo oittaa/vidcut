@@ -120,6 +120,7 @@ fn proxies_encode_beside_the_session() {
         renderer: Arc::new(NoRenderer),
         notify: Arc::new(|| {}),
         socket: None,
+        playback: live::discard_playback(),
     });
     ok(&h, "media.add", json!({ "paths": [media] }));
     let proxies = dir.join("proxies");

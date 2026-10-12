@@ -89,6 +89,7 @@ fn export_jobs() {
         renderer: Arc::new(NoRenderer),
         notify: Arc::new(|| {}),
         socket: None,
+        playback: live::discard_playback(),
     });
     ok(&h, "media.add", json!({ "paths": [media] }));
     ok(

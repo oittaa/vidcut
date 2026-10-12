@@ -161,6 +161,7 @@ fn tools_send_one_request_each() {
         renderer: Arc::new(NoRenderer),
         notify: Arc::new(|| {}),
         socket: None,
+        playback: live::discard_playback(),
     });
     call(&h, "media.add", json!({ "paths": [beeps, shots] }));
     // c1 = all of m1 (0..300), c2 = m2 (300..450).

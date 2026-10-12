@@ -276,7 +276,7 @@ vidcut undo                                 # works across separate runs
 | `vidcut jobs`, `jobs get\|wait\|cancel J [--timeout S]` | `jobs.*` | export and proxy jobs, the GUI's own included; `wait` fails like the job did |
 | `vidcut pool --bin A --sort name --descending` | `pool.set` | the bin the Media Pool shows and its order; Source Tape follows it |
 | `vidcut mute [on\|off]` | `player.mute` | the viewer's monitoring mute (not the export) |
-| `vidcut fader A1 -12` | `mixer.preview` | a track's level heard on the next buffer, without changing the project (`track set --volume` keeps one); `live: true` when that track is in the mix |
+| `vidcut fader A1 -12` | `mixer.preview` | that track's fader, heard on the next buffer. The saved fader is already in the mix, so this replaces it (`track set --volume` keeps one); `live: true` when that track is in the mix |
 | `vidcut show quick-export\|export\|jobs\|log\|mixer` | `gui.show` | opens that window for the person at the GUI |
 
 - **Looking at the result:** `vidcut seek 1m && vidcut screenshot -o shot.png` shows exactly what `vidcut frame --at 1m -o f.png` renders. Both are frame-exact.
@@ -317,7 +317,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 
 The preview findings and the time-mapping rules are in [docs/decisions/preview.md](docs/decisions/preview.md); the export engine, sampling rule and encoder decisions are in [docs/decisions/export.md](docs/decisions/export.md). Read them before touching preview, seeking, time conversion or export.
 
-- **Playback does not load libmpv.** The session decodes and mixes with `vidcut_av::play`. A seek is on screen once the renderer calls the present callback (`docs/decisions/gui.md` §4). The libmpv spikes still need `LC_NUMERIC=C` (`Mpv::new` calls `setlocale` before `mpv_create`) and may only use render-thread-safe client calls on the UI thread.
+- **Playback does not load libmpv.** The session decodes and mixes with `vidcut_av::play` and writes the mix to PulseAudio. `player.mute` writes silence there. Forward play pauses itself at the last frame. A seek is on screen once the renderer calls the present callback (`docs/decisions/gui.md` §4). The libmpv spikes still need `LC_NUMERIC=C` (`Mpv::new` calls `setlocale` before `mpv_create`) and may only use render-thread-safe client calls on the UI thread.
 - **vsync must stay off** (`GlowConfiguration { vsync: false }`). On GNOME/Wayland with NVIDIA, a vsynced swap blocks forever while the window is hidden.
 - **Start threads with `threads::spawn`, saying what the work is.** `Work::Job` (exports, proxies, measurements, thumbnails, anything decoding media nobody watches frame by frame) runs at nice 19, and the FFmpeg threads it starts inherit that; `Work::Interactive` is for what someone waits on. A unit test fails on any other thread start in `crates/vidcut/src`.
 - **The viewer shows the session player's frame**, uploaded as a texture. `gui.screenshot` of the viewer encodes that frame. The still renderer's tests count decoded frames with `vidcut_av::decode::frames_decoded()`, a process-wide count, so they stay one test in their own binary.

@@ -42,6 +42,7 @@ fn start(project: &Path) -> (live::Handle, std::thread::JoinHandle<()>) {
         renderer: Arc::new(NoRenderer),
         notify: Arc::new(|| {}),
         socket: None,
+        playback: live::discard_playback(),
     })
 }
 

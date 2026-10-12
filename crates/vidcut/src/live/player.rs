@@ -9,9 +9,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use vidcut_av::thumbs::Image;
-use vidcut_core::render::RenderPlan;
+use vidcut_core::render::{LaneTrack, RenderPlan};
 use vidcut_core::time::Rational;
 
+use super::playback::Playback;
 use super::snapshot::{PlayerId, PlayerSnap};
 
 /// Whether `path` is on a network file system (NFS, SMB/CIFS, Ceph, AFS,
@@ -86,8 +87,10 @@ pub struct Player {
     pub id: PlayerId,
     play: Option<vidcut_av::play::Player>,
     plan: Option<RenderPlan>,
-    /// Audio-lane track ids, in lane order.
-    lanes: Vec<String>,
+    /// Audio lanes, in order. Each fader is already inside the plan's gains.
+    lanes: Vec<LaneTrack>,
+    /// Where pull's samples go (the device, or a test recorder).
+    playback: Box<dyn Playback>,
     picture: Option<Arc<Image>>,
     fps: Rational,
     rate: u32,
@@ -116,12 +119,13 @@ pub struct Player {
 }
 
 impl Player {
-    pub fn new(id: PlayerId) -> Self {
+    pub fn new(id: PlayerId, playback: Box<dyn Playback>) -> Self {
         Self {
             id,
             play: None,
             plan: None,
             lanes: Vec::new(),
+            playback,
             picture: None,
             fps: Rational::new(30, 1).expect("valid"),
             rate: 48_000,
@@ -199,11 +203,14 @@ impl Player {
     /// Shows `plan` (its lanes named by `lanes`) with the playhead at
     /// `position`. `position` may be one past the last frame. Returns the
     /// motion id, or `None` when that picture is already showing.
+    ///
+    /// `lanes` are the tracks whose faders are already baked into the piece
+    /// gains. A later [`set_lane_db`](Self::set_lane_db) replaces that fader.
     pub fn load_plan(
         &mut self,
         plan: RenderPlan,
         position: i64,
-        lanes: Vec<String>,
+        lanes: Vec<LaneTrack>,
     ) -> Option<u64> {
         let frames = plan.frames.max(0);
         let position = position.clamp(0, frames);
@@ -217,6 +224,7 @@ impl Player {
         let keep_target = self.plan.is_some() && position == self.target.0;
         self.fps = plan.fps;
         self.rate = plan.sample_rate;
+        self.playback.configure(plan.sample_rate, plan.channels);
         self.frames = frames;
         self.position = position;
         if !keep_target {
@@ -287,9 +295,13 @@ impl Player {
         self.moved()
     }
 
-    /// Plays at `speed` (negative: stepped reverse).
+    /// Plays at `speed` (negative: stepped reverse). At the end already,
+    /// forward play stays paused: there is no frame left to show.
     pub fn play(&mut self, speed: f64) {
         if self.play.is_none() || speed == 0.0 {
+            return;
+        }
+        if speed > 0.0 && self.frames > 0 && self.position >= self.frames {
             return;
         }
         self.speed = speed;
@@ -334,16 +346,23 @@ impl Player {
         self.muted = muted;
     }
 
-    /// Extra gain on the lane of `track`, in dB, on top of the plan. Heard
-    /// on the next buffer.
+    /// Sets the fader of `track` to `db` (its position, not an extra on top
+    /// of the saved one). The plan's piece gains already include the saved
+    /// fader, so the lane trim is the difference. Heard on the next buffer.
     pub fn set_lane_db(&mut self, track: &str, db: f64) -> Result<(), String> {
-        let Some(i) = self.lanes.iter().position(|t| t == track) else {
+        let Some((i, lane)) = self
+            .lanes
+            .iter()
+            .enumerate()
+            .find(|(_, lane)| lane.track == track)
+        else {
             return Err(format!("no audio for track {track}"));
         };
+        let extra = db - lane.volume_db;
         let Some(play) = self.play.as_mut() else {
             return Err("nothing is loaded".into());
         };
-        play.set_lane_db(i, db).map_err(|e| e.to_string())
+        play.set_lane_db(i, extra).map_err(|e| e.to_string())
     }
 
     /// The motion to ask the renderer to present, once.
@@ -389,7 +408,9 @@ impl Player {
             if n > 0 {
                 self.pull_forward(n);
             }
-            return Some(now + Duration::from_millis(20));
+            if self.speed > 0.0 {
+                return Some(now + Duration::from_millis(20));
+            }
         }
         None
     }
@@ -406,18 +427,26 @@ impl Player {
                         .frame
                         .is_some()
                         .then(|| Arc::new(play.picture().clone()));
-                    Ok((frame, picture, pulled.samples))
+                    Ok((frame, picture, pulled.samples, pulled.ended))
                 }
                 Err(e) => Err(e.to_string()),
             }
         };
         match outcome {
-            Ok((frame, picture, samples)) => {
+            Ok((frame, picture, samples, ended)) => {
                 self.position = frame;
                 if let Some(p) = picture {
                     self.picture = Some(p);
                 }
                 self.note_audio(&samples);
+                if self.muted {
+                    self.playback.write(&vec![0.0; samples.len()]);
+                } else {
+                    self.playback.write(&samples);
+                }
+                if ended {
+                    self.stop_at_end(frame);
+                }
             }
             Err(e) => {
                 self.error = Some(e);
@@ -427,6 +456,18 @@ impl Player {
                     let _ = play.set_speed(0.0);
                 }
             }
+        }
+    }
+
+    /// Forward play reached the end and paused itself. The playhead rests on
+    /// the frame just past the last one; the picture stays on the last frame.
+    fn stop_at_end(&mut self, frame: i64) {
+        self.speed = 0.0;
+        self.reverse = None;
+        self.clock = None;
+        self.position = frame.saturating_add(1).clamp(0, self.frames.max(0));
+        if let Some(play) = self.play.as_mut() {
+            let _ = play.set_speed(0.0);
         }
     }
 
@@ -497,6 +538,9 @@ mod tests {
     use vidcut_core::render::{RenderPlan, VideoPiece};
     use vidcut_core::time::Rational;
 
+    use std::sync::{Arc, Mutex};
+
+    use crate::live::playback::{Discard, Recorder};
     use crate::live::snapshot::PlayerId;
 
     use super::*;
@@ -521,7 +565,18 @@ mod tests {
     }
 
     fn player() -> Player {
-        Player::new(PlayerId::Timeline)
+        Player::new(PlayerId::Timeline, Box::new(Discard))
+    }
+
+    fn recording() -> (Player, Arc<Mutex<Vec<f32>>>) {
+        let samples = Arc::new(Mutex::new(Vec::new()));
+        let player = Player::new(
+            PlayerId::Timeline,
+            Box::new(Recorder {
+                samples: samples.clone(),
+            }),
+        );
+        (player, samples)
     }
 
     #[test]
@@ -571,5 +626,56 @@ mod tests {
         assert_eq!(p.target, (10, false));
         p.load_plan(plan("a"), 10, Vec::new()).unwrap();
         assert_eq!(p.target, (10, true));
+    }
+
+    #[test]
+    fn forward_play_stops_after_the_last_frame() {
+        let mut p = player();
+        let mut short = plan("end");
+        short.frames = 30;
+        short.range = (0, 30);
+        short.video = vec![VideoPiece::Black { frames: 30 }];
+        p.load_plan(short, 0, Vec::new()).unwrap();
+        p.play(1.0);
+        let t0 = Instant::now();
+        // A few milliseconds of a one-second plan does not finish it.
+        assert!(p.tick(t0 + Duration::from_millis(20)).is_some());
+        assert!(p.playing(), "stopped before the end");
+        assert!(p.position < 30, "playhead jumped to {}", p.position);
+        let mut now = t0 + Duration::from_millis(20);
+        let mut stopped = false;
+        for _ in 0..5 {
+            now += Duration::from_secs(1);
+            let next = p.tick(now);
+            if !p.playing() {
+                assert!(next.is_none(), "a finished play kept the clock");
+                stopped = true;
+                break;
+            }
+        }
+        assert!(stopped, "forward play never paused at the end");
+        assert_eq!(p.position, 30, "the playhead did not rest at the end");
+        // Playing again at the end stays paused.
+        p.play(1.0);
+        assert!(!p.playing());
+    }
+
+    #[test]
+    fn mute_writes_silence_to_the_sink() {
+        let (mut p, heard) = recording();
+        p.load_plan(plan("a"), 0, Vec::new()).unwrap();
+        p.play(1.0);
+        let t0 = Instant::now();
+        p.tick(t0 + Duration::from_millis(40));
+        let open = heard.lock().unwrap().len();
+        assert!(open > 0, "playback wrote nothing");
+        p.set_muted(true);
+        p.tick(t0 + Duration::from_millis(80));
+        let buf = heard.lock().unwrap();
+        assert!(buf.len() > open, "mute wrote nothing");
+        assert!(
+            buf[open..].iter().all(|s| *s == 0.0),
+            "mute left sound in the sink"
+        );
     }
 }

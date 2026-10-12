@@ -25,7 +25,7 @@ A simple, fully scriptable video cutting tool for Linux, modeled on DaVinci Reso
 
 ## Requirements
 
-Ubuntu 26.04 (or similar) with FFmpeg 8. Playback does not need libmpv.
+Ubuntu 26.04 (or similar) with FFmpeg 8. Playback does not need libmpv. Preview audio plays through PulseAudio (PipeWire provides it).
 
 ```bash
 sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libclang-dev rustup

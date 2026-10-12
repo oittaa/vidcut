@@ -74,6 +74,7 @@ fn gui_command_puts_the_history_warning_on_the_result() {
         renderer: Arc::new(NoRenderer),
         notify: Arc::new(|| {}),
         socket: None,
+        playback: live::discard_playback(),
     });
 
     let first = call(&h, "project.set", json!({ "ripple_on": false }));

@@ -151,6 +151,7 @@ fn numbered_images_are_asked_about() {
         renderer: Arc::new(NoRenderer),
         notify: Arc::new(|| {}),
         socket: None,
+        playback: live::discard_playback(),
     });
     let picked = Arc::new(Mutex::new(Vec::new()));
     let picks = Arc::new(Mutex::new(0));
