@@ -136,7 +136,8 @@ impl HdrMode {
 #[serde(rename_all = "snake_case")]
 pub enum HdrMetadata {
     /// From the sources: the mastering display and content light levels
-    /// (PQ output), and HDR10+ and Dolby Vision when every picture has them.
+    /// (PQ output), HDR10+ when any picture has it (made for the frames
+    /// without), and Dolby Vision when every picture has it.
     #[default]
     Auto,
     /// The mastering display and content light levels only.
@@ -235,8 +236,9 @@ pub struct VideoSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lookahead: Option<u32>,
     /// HDR metadata (decision D46): `auto` writes the mastering display and
-    /// content light levels of the sources into PQ output, and keeps HDR10+
-    /// and Dolby Vision when every picture has them; `static`, `hdr10plus`,
+    /// content light levels of the sources into PQ output, keeps HDR10+
+    /// when any picture has it (made for the frames without), and Dolby
+    /// Vision when every picture has it; `static`, `hdr10plus`,
     /// `dolby_vision` and `all` say which; `none` writes none.
     #[serde(default, skip_serializing_if = "HdrMetadata::is_default")]
     pub hdr_metadata: HdrMetadata,

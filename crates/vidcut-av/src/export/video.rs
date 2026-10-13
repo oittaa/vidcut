@@ -17,6 +17,13 @@ use crate::decode::{Input, VideoReader};
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, filter, format, frame};
 
+/// The sampling rule's time (seconds) for source position `pos` (project
+/// frames from `origin`) at `fps`: the first source frame from then on is
+/// shown.
+pub(crate) fn target(fps: Rational, origin: f64, pos: i64) -> f64 {
+    origin + fps.frames_to_secs(pos) - 0.5 * fps.frames_to_secs(1)
+}
+
 /// How a piece's pictures are read: its file, or its image sequence.
 pub(crate) fn input_of(path: &Path, image: Option<&Image>) -> Input {
     match image {
@@ -229,6 +236,11 @@ struct Source {
     /// `current`'s dynamic HDR metadata, kept apart: the GPU's scaler takes
     /// the frame itself, side data and all.
     dynamic: frame::Video,
+    /// Measures `current` when it has no HDR10+, as it is decoded (before
+    /// the GPU's scaler takes it): for a file not measured ahead.
+    meter: Option<crate::light::Meter>,
+    /// `current`'s light, measured by `meter`.
+    light: Option<crate::light::FrameLight>,
     /// `current`, normalized.
     normalized: Option<frame::Video>,
     /// A still keeps its one picture and is never sought; a sequence knows
@@ -277,6 +289,9 @@ impl Source {
     /// A still's picture is already decoded by [`VideoReader::open_input`].
     /// Seeking would reopen the file and decode it again; a still is never
     /// sought.
+    ///
+    /// `measure`: frames without HDR10+ are measured as they are decoded.
+    #[allow(clippy::too_many_arguments)]
     fn open(
         input: &Input,
         origin: f64,
@@ -285,6 +300,7 @@ impl Source {
         pictures: Pictures,
         gpu: Option<&GpuSide>,
         nvdec: Option<&crate::cuda::CudaDevice>,
+        measure: bool,
     ) -> Result<Source> {
         let video = pictures == Pictures::Video;
         let on_gpu = gpu.filter(|_| video).and_then(|g| gpu_reader(input, g));
@@ -307,6 +323,8 @@ impl Source {
             target,
             current: None,
             dynamic: frame::Video::empty(),
+            meter: measure.then(crate::light::Meter::new),
+            light: None,
             normalized: None,
             pictures,
             on_gpu,
@@ -340,12 +358,13 @@ impl Source {
     }
 
     /// Opens `input` without decoding anything yet: on NVDEC (`nvdec`)
-    /// when it decodes the stream.
+    /// when it decodes the stream. `measure` as for [`open`](Self::open).
     fn bare(
         input: &Input,
         origin: f64,
         pictures: Pictures,
         nvdec: Option<&crate::cuda::CudaDevice>,
+        measure: bool,
     ) -> Result<Source> {
         let reader = match nvdec {
             Some(d) => VideoReader::open_nvdec_or_cpu(input, d)?,
@@ -361,6 +380,8 @@ impl Source {
             target: 0.0,
             current: None,
             dynamic: frame::Video::empty(),
+            meter: measure.then(crate::light::Meter::new),
+            light: None,
             normalized: None,
             pictures,
             on_gpu: false,
@@ -373,6 +394,7 @@ impl Source {
         self.reader.seek((target / self.tick).floor() as i64)?;
         self.target = target;
         self.current = None;
+        self.light = None;
         self.normalized = None;
         Ok(())
     }
@@ -383,7 +405,8 @@ impl Source {
     /// picture lasts its frame (a project rate above the sequence's asks for
     /// a time past it). A sequence that ends before its last picture fails:
     /// a file is missing, and repeating the picture before it would hide the
-    /// hole. Returns whether it moved.
+    /// hole. The frame it moves to is measured by `meter` when it has no
+    /// HDR10+. Returns whether it moved.
     fn advance(&mut self, target: f64) -> Result<bool> {
         self.target = target;
         let mut changed = false;
@@ -402,6 +425,7 @@ impl Source {
                     };
                     crate::hdr::copy_dynamic(&f, &mut self.dynamic, all)?;
                     self.current = Some((f, t));
+                    self.light = None;
                     changed = true;
                 }
                 None => {
@@ -430,6 +454,14 @@ impl Source {
                     )));
                 }
             }
+        }
+        if changed
+            && let Some(meter) = self.meter.as_mut()
+            && !crate::hdr::has_hdr10plus(&self.dynamic)
+        {
+            let (f, _) = self.current.as_ref().expect("have a frame");
+            // A frame that can't be measured gets none.
+            self.light = meter.measure(f).ok();
         }
         Ok(changed)
     }
@@ -720,7 +752,8 @@ impl VideoFrames {
 
     /// Output frames keeping HDR10+ get it made from `light`, the measured
     /// light of their source files by path, where their source frame has
-    /// none; black gets HDR10+ of no light.
+    /// none; black gets HDR10+ of no light. Frames of other files without
+    /// it are measured as they are decoded.
     pub fn with_light(
         mut self,
         light: std::collections::HashMap<
@@ -853,7 +886,13 @@ impl VideoFrames {
         let target = self.target(*origin, *source_frame);
         let mut source = match self.source.take() {
             Some(s) if s.reader.input() == &input => s,
-            _ => Source::bare(&input, *origin, Pictures::Video, self.nvdec.as_ref())?,
+            _ => Source::bare(
+                &input,
+                *origin,
+                Pictures::Video,
+                self.nvdec.as_ref(),
+                self.measures(&input),
+            )?,
         };
         // Interrupted, the file stays open, its position unknown.
         let sought = source.seek(target);
@@ -894,7 +933,15 @@ impl VideoFrames {
 
     /// Seconds of the sampling-rule target for source position `pos`.
     fn target(&self, origin: f64, pos: i64) -> f64 {
-        origin + self.fps.frames_to_secs(pos) - 0.5 * self.fps.frames_to_secs(1)
+        target(self.fps, origin, pos)
+    }
+
+    /// Whether frames of `input` without HDR10+ are measured as they are
+    /// decoded, for HDR10+ made from their light: HDR10+ is kept and the
+    /// file wasn't measured ahead (`with_light`), its first frame having
+    /// HDR10+.
+    fn measures(&self, input: &Input) -> bool {
+        self.dynamic.hdr10plus && !self.light.contains_key(input.path())
     }
 
     /// Readies the current piece's file: the open one if it is the same
@@ -930,6 +977,7 @@ impl VideoFrames {
                     pictures,
                     self.gpu.as_ref().map(|g| &g.side),
                     self.nvdec.as_ref(),
+                    self.measures(input),
                 )?,
             },
         };
@@ -974,6 +1022,7 @@ impl VideoFrames {
         let target = self.target(origin, source_frame);
         let gpu = self.gpu.as_ref().map(|g| g.side.clone());
         let nvdec = self.nvdec.clone();
+        let measure = self.measures(&input);
         let key = (input.clone(), origin.to_bits(), source_frame);
         self.ahead.start(i, key, move || {
             Source::open(
@@ -984,6 +1033,7 @@ impl VideoFrames {
                 pictures,
                 gpu.as_ref(),
                 nvdec.as_ref(),
+                measure,
             )
         });
     }
@@ -993,8 +1043,7 @@ impl VideoFrames {
     fn pass_source_frame(&mut self, k: i64) -> Result<()> {
         let fps = self.fps;
         let src = self.source.as_mut().expect("open");
-        let target =
-            src.origin + fps.frames_to_secs(src.source_frame + k) - 0.5 * fps.frames_to_secs(1);
+        let target = target(fps, src.origin, src.source_frame + k);
         if src.advance(target)? {
             src.normalized = None;
         }
@@ -1006,8 +1055,7 @@ impl VideoFrames {
         let (out_w, out_h, out_fmt) = self.out;
         let fps = self.fps;
         let src = self.source.as_mut().expect("open");
-        let target =
-            src.origin + fps.frames_to_secs(src.source_frame + k) - 0.5 * fps.frames_to_secs(1);
+        let target = target(fps, src.origin, src.source_frame + k);
         let changed = src.advance(target)?;
         if let Some(relayout) = self.decoded.as_mut() {
             if changed || src.normalized.is_none() {
@@ -1060,12 +1108,16 @@ impl VideoFrames {
         if self.dynamic != crate::hdr::Dynamic::default() {
             crate::hdr::copy_dynamic(&src.dynamic, &mut out, self.dynamic)?;
         }
+        // Without HDR10+ of its own, made from the frame's light: measured
+        // ahead with its file, or as it was decoded.
         if self.dynamic.hdr10plus
             && !crate::hdr::has_hdr10plus(&out)
-            && let Some(l) = self
-                .light
-                .get(src.reader.path())
-                .and_then(|a| a.at(src.current.as_ref().expect("have a frame").1))
+            && let Some(l) = src.light.or_else(|| {
+                self.light
+                    .get(src.reader.path())
+                    .and_then(|a| a.at(src.current.as_ref().expect("have a frame").1))
+                    .copied()
+            })
         {
             l.hdr10plus().attach(&mut out)?;
         }

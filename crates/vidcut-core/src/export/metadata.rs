@@ -41,6 +41,8 @@ pub enum Measured {
     /// Measured when the export starts: a plan doesn't measure.
     Pending,
     Known(LightLevel),
+    /// Measuring failed: its frames couldn't be read.
+    Failed,
 }
 
 /// Why light levels aren't known.
@@ -169,6 +171,7 @@ fn light_levels(
             Measured::Known(l) => Ok(l),
             Measured::Pending => Err(Unknown::Pending),
             Measured::No => Err(Unknown::Missing(none)),
+            Measured::Failed => Err(Unknown::Missing("a picture couldn't be measured")),
         };
         let l = match (m.hdr, m.light) {
             _ if measure_all => measured("a picture wasn't measured")?,
@@ -452,7 +455,7 @@ pub fn choose(
                     percent(all - with, all)
                 )
             } else {
-                "HDR10+: kept, every picture has it".into()
+                "HDR10+: kept, every source has it".into()
             });
         }
     }
@@ -661,6 +664,17 @@ mod tests {
         said.measured = Measured::No;
         let c = run(&all, &[(10, said)], false);
         assert_eq!(c.light, None);
+        // Measuring failed: said so, not that the source has none.
+        bare.measured = Measured::Failed;
+        let c = run(&v, &[(10, bare), (10, pq(1000.0, Some((800, 300))))], false);
+        assert_eq!(c.light, None);
+        assert!(
+            c.why
+                .iter()
+                .any(|w| w == "No light levels: a picture couldn't be measured"),
+            "{:?}",
+            c.why
+        );
     }
 
     #[test]
