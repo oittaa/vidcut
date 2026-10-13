@@ -577,8 +577,8 @@ pub struct VideoFrames {
     /// Copies Direct3D 11's frames kept on the GPU out of the decoder's
     /// texture array; `None` too once that failed, when they come down.
     keeper: Option<crate::hw::Keeper>,
-    /// Shrinks VA-API's and Direct3D 11's frames on the GPU before they
-    /// come down to be fitted into the output.
+    /// Shrinks the frames a GPU decoded (NVDEC's, VA-API's, Direct3D 11's)
+    /// on the GPU before they come down to be fitted into the output.
     shrinker: Option<crate::hw::Shrinker>,
     /// Fits frames into the output on the GPU, for an encoder on their
     /// device ([`fit_on_gpu`](Self::fit_on_gpu)).
@@ -673,9 +673,11 @@ impl Relayout {
         };
         let target = if depth > 8 { "p010le" } else { "yuv420p" };
         // A YUV picture keeps its matrix and range, named on both sides:
-        // told nothing, swscale would convert to BT.601.
+        // told nothing, swscale would convert to BT.601. RGB is converted,
+        // with the flags that round its colors right.
         let spec = if rgb {
-            format!("scale=out_color_matrix=bt709:out_range=limited,format={target}")
+            let flags = crate::color::CONVERT;
+            format!("scale=out_color_matrix=bt709:out_range=limited:flags={flags},format={target}")
         } else {
             format!("scale={},format={target}", crate::color::keep(src))
         };
@@ -1185,8 +1187,13 @@ impl VideoFrames {
                         format::Pixel::D3D11 if keep && !self.unkept => {
                             match crate::hw::Keeper::copy(&mut self.keeper, frame) {
                                 Ok(kept) => kept,
-                                // Down to memory, as before they were kept.
-                                Err(_) => {
+                                // Down to memory, as before they were kept:
+                                // a copy that failed or took two seconds
+                                // would again.
+                                Err(e) => {
+                                    eprintln!(
+                                        "vidcut: Direct3D 11 pictures come down to be shown: {e}"
+                                    );
                                     self.unkept = true;
                                     self.keeper = None;
                                     relayout.run(&crate::hw::download(frame)?)?
@@ -1370,8 +1377,68 @@ pub(crate) fn fill_black(f: &mut frame::Video) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Normalizer, fill_black, fit};
+    use super::{Normalizer, Relayout, fill_black, fit};
     use crate::ffmpeg::{self, format::Pixel, frame};
+
+    /// An RGB picture (an image) comes as BT.709 video range with each
+    /// color's codes rounded right: within half a level and a little of the
+    /// exact numbers, and not low on the whole, as swscale's defaults round
+    /// them (export.md §4). White, black, the primaries, a gray and colors
+    /// between.
+    #[test]
+    fn rgb_pictures_get_their_bt709_codes() {
+        let mut colors = vec![
+            [255, 255, 255],
+            [0, 0, 0],
+            [255, 0, 0],
+            [0, 255, 0],
+            [0, 0, 255],
+            [128, 128, 128],
+        ];
+        colors.extend((0..58u32).map(|k| {
+            let v = |m: u32| ((k * m + 17) % 256) as u8;
+            [v(37), v(91), v(53)]
+        }));
+        let (w, h) = (16 * colors.len() as u32, 16);
+        let mut f = frame::Video::new(Pixel::RGB24, w, h);
+        let stride = f.stride(0);
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let c = colors[x / 16];
+                f.data_mut(0)[y * stride + 3 * x..][..3].copy_from_slice(&c);
+            }
+        }
+        let out = Relayout::new().run(&f).unwrap();
+        assert_eq!(out.format(), Pixel::YUV420P);
+        let (kr, kb) = (0.2126, 0.0722);
+        let (mut worst, mut sum) = (0f64, 0f64);
+        for (i, [r, g, b]) in colors.iter().enumerate() {
+            let [r, g, b] = [r, g, b].map(|&v| f64::from(v) / 255.0);
+            let y = kr * r + (1.0 - kr - kb) * g + kb * b;
+            let exact = [
+                16.0 + 219.0 * y,
+                128.0 + 224.0 * (b - y) / (2.0 * (1.0 - kb)),
+                128.0 + 224.0 * (r - y) / (2.0 * (1.0 - kr)),
+            ];
+            // The middle of the color's band, away from its edges.
+            let (x, row) = (16 * i + 8, 8usize);
+            let got = [
+                out.data(0)[row * out.stride(0) + x],
+                out.data(1)[row / 2 * out.stride(1) + x / 2],
+                out.data(2)[row / 2 * out.stride(2) + x / 2],
+            ];
+            for (g, e) in got.into_iter().zip(exact) {
+                let d = f64::from(g) - e;
+                worst = worst.max(d.abs());
+                sum += d;
+            }
+        }
+        let mean = sum / (3 * colors.len()) as f64;
+        assert!(
+            worst <= 0.6 && mean.abs() <= 0.1,
+            "off by {worst:.2}, on average {mean:.2}"
+        );
+    }
 
     /// Bands of `values` (8-bit Y, Cb, Cr) side by side in `pixel` (8-bit
     /// planar, or 10-bit with each sample 4 times as large), tagged with

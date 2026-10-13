@@ -23,9 +23,9 @@ use vidcut_core::model::Hdr;
 /// The GPU and the shader pass the viewer's screen draws with.
 pub struct Gpu {
     /// Takes VA-API's imported surfaces and Direct3D 11's textures over to
-    /// wgpu's queue, made at the first. Before `device`, so it goes first.
+    /// wgpu's queue, made at the first.
     #[cfg(any(target_os = "linux", windows))]
-    acquirer: std::sync::Mutex<Option<super::acquire::Acquirer>>,
+    acquirer: OnceLock<Result<super::acquire::Acquirer, String>>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::RenderPipeline,
@@ -149,7 +149,7 @@ impl Gpu {
         });
         Self {
             #[cfg(any(target_os = "linux", windows))]
-            acquirer: std::sync::Mutex::new(None),
+            acquirer: OnceLock::new(),
             device: device.clone(),
             queue: queue.clone(),
             pipeline,
@@ -216,12 +216,12 @@ impl Gpu {
     }
 
     /// Takes `images` (just imported, not yet used by wgpu) over from the API
-    /// that wrote them, into `layout` for `access` at `stage`
-    /// ([`super::acquire::Acquirer`]).
+    /// that wrote them, into `layout` for `access` at `stage`, in a command
+    /// buffer of its own submitted on wgpu's queue: work submitted after it
+    /// finds them so ([`super::acquire::Acquirer`]).
     ///
     /// # Safety
-    /// The images are this device's, on memory another API wrote; only
-    /// this thread submits to wgpu's queue.
+    /// The images are this device's, on memory another API wrote.
     #[cfg(any(target_os = "linux", windows))]
     unsafe fn acquire(
         &self,
@@ -230,20 +230,45 @@ impl Gpu {
         stage: ash::vk::PipelineStageFlags,
         access: ash::vk::AccessFlags,
     ) -> Result<(), String> {
-        let mut acquirer = self.acquirer.lock().unwrap_or_else(|e| e.into_inner());
-        // SAFETY: wgpu's own device, and images as the caller says.
-        unsafe {
-            if acquirer.is_none() {
-                let hal = self
-                    .device
-                    .as_hal::<wgpu::hal::api::Vulkan>()
-                    .ok_or("not Vulkan")?;
-                *acquirer = Some(super::acquire::Acquirer::new(&hal)?);
-            }
-            acquirer
-                .as_mut()
-                .expect("made above")
-                .acquire(images, layout, stage, access)
+        let acquirer = self
+            .acquirer
+            .get_or_init(|| {
+                // SAFETY: wgpu's own device, only read here.
+                let hal = unsafe { self.device.as_hal::<wgpu::hal::api::Vulkan>() };
+                hal.map(|hal| super::acquire::Acquirer::new(&hal))
+                    .ok_or_else(|| "not Vulkan".to_string())
+            })
+            .as_ref()?;
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("vidcut acquire"),
+            });
+        // SAFETY: an encoder of its own, recorded raw and nothing else; the
+        // barrier goes into its open command buffer, which wgpu ends. The
+        // images are as the caller says.
+        let recorded = unsafe {
+            encoder.as_hal_mut::<wgpu::hal::api::Vulkan, _, _>(|hal| {
+                hal.map(|hal| acquirer.record(hal.raw_handle(), images, layout, stage, access))
+            })
+        };
+        recorded.ok_or("not Vulkan")?;
+        self.queue.submit([encoder.finish()]);
+        Ok(())
+    }
+
+    /// Runs `f`, which makes textures or views, the device's validation
+    /// errors in it an error here rather than wgpu's panic (gotchas.md): a
+    /// picture the device won't import comes down instead. Nothing recorded
+    /// for the GPU goes in it: a command it refused would fail its whole
+    /// submission later.
+    #[cfg(any(target_os = "linux", windows))]
+    fn checked<T>(&self, f: impl FnOnce() -> T) -> Result<T, String> {
+        let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let made = f();
+        match pollster::block_on(scope.pop()) {
+            Some(e) => Err(format!("the display's device refused it: {e}")),
+            None => Ok(made),
         }
     }
 
@@ -652,7 +677,7 @@ impl Screen {
         // Taken over from VA-API with the picture they hold, ready to copy
         // from.
         // SAFETY: the images were just made on wgpu's device, which hasn't
-        // used them; this thread submits all the viewer's work.
+        // used them.
         unsafe {
             let images: Vec<_> = imports.iter().map(|(raw, ..)| raw.raw_handle()).collect();
             gpu.acquire(
@@ -662,25 +687,33 @@ impl Screen {
                 ash::vk::AccessFlags::TRANSFER_READ,
             )?;
         }
-        for (raw, size, format, texture) in imports {
-            // SAFETY: made on this device, as described, and in the layout
-            // copies read from (acquired above).
-            let imported = unsafe {
-                gpu.device.create_texture_from_hal::<Vulkan>(
-                    raw,
-                    &wgpu::TextureDescriptor {
-                        label,
-                        size,
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format,
-                        usage: wgpu::TextureUsages::COPY_SRC,
-                        view_formats: &[],
-                    },
-                    wgpu::TextureUses::COPY_SRC,
-                )
-            };
+        let textures = gpu.checked(|| {
+            imports
+                .into_iter()
+                .map(|(raw, size, format, texture)| {
+                    // SAFETY: made on this device, as described, and in the
+                    // layout copies read from (acquired above).
+                    let imported = unsafe {
+                        gpu.device.create_texture_from_hal::<Vulkan>(
+                            raw,
+                            &wgpu::TextureDescriptor {
+                                label,
+                                size,
+                                mip_level_count: 1,
+                                sample_count: 1,
+                                dimension: wgpu::TextureDimension::D2,
+                                format,
+                                usage: wgpu::TextureUsages::COPY_SRC,
+                                view_formats: &[],
+                            },
+                            wgpu::TextureUses::COPY_SRC,
+                        )
+                    };
+                    (imported, size, texture)
+                })
+                .collect::<Vec<_>>()
+        })?;
+        for (imported, size, texture) in textures {
             // wgpu keeps the texture until the copy is done.
             encoder.copy_texture_to_texture(
                 imported.as_image_copy(),
@@ -786,7 +819,7 @@ impl Screen {
         // Taken over from Direct3D 11 with the picture it holds, ready to
         // sample.
         // SAFETY: the image was just made on wgpu's device, which hasn't
-        // used it; this thread submits all the viewer's work.
+        // used it.
         unsafe {
             gpu.acquire(
                 &[raw.raw_handle()],
@@ -795,37 +828,39 @@ impl Screen {
                 ash::vk::AccessFlags::SHADER_READ,
             )?;
         }
-        // SAFETY: made on this device, as described, and in the layout
-        // shaders sample (acquired above).
-        let imported = unsafe {
-            gpu.device.create_texture_from_hal::<Vulkan>(
-                raw,
-                &wgpu::TextureDescriptor {
+        let (y, uv) = gpu.checked(|| {
+            // SAFETY: made on this device, as described, and in the layout
+            // shaders sample (acquired above).
+            let imported = unsafe {
+                gpu.device.create_texture_from_hal::<Vulkan>(
+                    raw,
+                    &wgpu::TextureDescriptor {
+                        label,
+                        size,
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
+                    },
+                    wgpu::TextureUses::RESOURCE,
+                )
+            };
+            let plane = |format, aspect| {
+                imported.create_view(&wgpu::TextureViewDescriptor {
                     label,
-                    size,
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING,
-                    view_formats: &[],
-                },
-                wgpu::TextureUses::RESOURCE,
+                    format: Some(format),
+                    aspect,
+                    ..Default::default()
+                })
+            };
+            (
+                plane(one, wgpu::TextureAspect::Plane0),
+                plane(two, wgpu::TextureAspect::Plane1),
             )
-        };
-        let plane = |format, aspect| {
-            imported.create_view(&wgpu::TextureViewDescriptor {
-                label,
-                format: Some(format),
-                aspect,
-                ..Default::default()
-            })
-        };
-        self.views = Some((
-            plane(one, wgpu::TextureAspect::Plane0),
-            plane(two, wgpu::TextureAspect::Plane1),
-            (desc.Width, desc.Height),
-        ));
+        })?;
+        self.views = Some((y, uv, (desc.Width, desc.Height)));
         self.imported = Some(picture.clone());
         Ok(())
     }

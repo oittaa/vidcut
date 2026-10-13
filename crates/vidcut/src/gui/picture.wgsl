@@ -61,12 +61,16 @@ fn stored(u: vec2<f32>) -> vec2<f32> {
 fn yuv(u: vec2<f32>) -> vec3<f32> {
     let s = stored(u) * p.upright.zw;
     let y = textureSampleLevel(luma, bilinear, s, 0.0).r;
+    // The same place in the chroma plane, whose samples each cover two of
+    // luma's: where a side is odd, the plane reaches half a sample past
+    // the picture.
+    let c = s * vec2<f32>(textureDimensions(luma)) / vec2<f32>(2u * textureDimensions(chroma_u));
     if p.flags.z == 1u {
-        let uv = textureSampleLevel(chroma_u, bilinear, s, 0.0).rg;
+        let uv = textureSampleLevel(chroma_u, bilinear, c, 0.0).rg;
         return vec3<f32>(y, uv.x, uv.y);
     }
-    let cb = textureSampleLevel(chroma_u, bilinear, s, 0.0).r;
-    let cr = textureSampleLevel(chroma_v, bilinear, s, 0.0).r;
+    let cb = textureSampleLevel(chroma_u, bilinear, c, 0.0).r;
+    let cr = textureSampleLevel(chroma_v, bilinear, c, 0.0).r;
     return vec3<f32>(y, cb, cr);
 }
 

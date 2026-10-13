@@ -478,15 +478,8 @@ fn gpu_decoded_proxies_stay_exact() {
                 .fold((0.0f64, 0.0f64), |(abs, shift), (a, s)| {
                     (abs.max(a), shift.max(s.abs()))
                 });
-            // swscale converts BT.601 to BT.709 a level apart from NV12
-            // (copied down) and from planar YUV (the CPU's decoders).
-            let shift = if *what == "interlaced BT.601" {
-                1.25
-            } else {
-                0.5
-            };
             assert!(
-                worst.0 <= 1.5 && worst.1 <= shift,
+                worst.0 <= 1.5 && worst.1 <= 0.5,
                 "{name}, {what}: on average {:.2} levels from the CPU's, shifted {:.2}",
                 worst.0,
                 worst.1

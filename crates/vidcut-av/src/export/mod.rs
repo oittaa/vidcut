@@ -351,8 +351,8 @@ pub fn run(
 /// [`run`], the pieces decoding as `decoding` says: on a GPU where it
 /// decodes their streams ([`VideoFrames::decode_on`]), the frames that
 /// don't stay there for an encoder on it coming down to be made on the
-/// CPU, shrunk to the size they are shown at; or all on the CPU, NVENC's
-/// too.
+/// CPU, shrunk on the GPU first to the size they are shown at; or all on
+/// the CPU, NVENC's too.
 pub fn run_decoding_on(
     plan: &RenderPlan,
     settings: &ExportSettings,
