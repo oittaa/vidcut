@@ -14,7 +14,7 @@
 **Basic use:**
 
 ```bash
-vidcut project create talk.vidcut           # format from the first video added, or --fps 25 --width 1920 --height 1080
+vidcut project create talk.vidcut           # format from the first video added, or --fps 25 --width 1920 --height 1080; --start-tc 01:00:00:00
 export VIDCUT_PROJECT=talk.vidcut           # or pass -p FILE every time
 vidcut media add cam.mp4 screen.mkv --json  # -> media ids m1, m2
 vidcut edit append m1 --range 10s..2m
@@ -120,9 +120,9 @@ vidcut history undo                         # works across separate runs
 - `vidcut timeline import cut.otio` (or `.otioz`, or an `.otiod` folder) adds the file's media to the pool and the file's tracks after the last clip: video tracks onto V1, V2, … with the audio that belongs to their clips, other audio tracks onto A1, A2, …. `--replace` replaces the timeline instead. An empty timeline takes the file's frame rate, start timecode and track settings.
   - An `.otioz`'s media unpack next to it, into a folder named after it (`cut/media/…`), or into `--unpack DIR`. A dry run unpacks nothing and says what it would.
   - Media that moved: paths relative to the file and a project folder moved with the file are found by themselves; otherwise `--search /mnt/footage` looks for them by file name, subfolders too. Missing media fail the import (exit 7) with the list of files.
-  - What can't be imported (transitions, compound clips, generators, speed changes, clip effects in use such as a zoom, crop or pan, clips overlapping others on their track) is listed in `warnings`.
+  - What can't be imported (compound clips, generators, speed changes, clips overlapping others on their track) is listed in `warnings`. Clip effects such as a zoom, crop, fade or pan stay on their clips, and transitions on their edit points, not shown, and are written back (deviation X9); `timeline get` lists them in `effects` and each track's `transitions`.
 - Raw: `timeline.import` also takes the document inline as `otio` (relative media paths then can't be found but by `search`).
-- `tests/cli.rs` checks the files against OpenTimelineIO's own Python library when one is installed (`pip install opentimelineio`; `VIDCUT_OTIO_PYTHON` names the Python); otherwise that part skips.
+- `tests/cli.rs` checks the files against OpenTimelineIO's own Python library when one is installed (`pip install opentimelineio`; `VIDCUT_OTIO_PYTHON` names the Python, which then must have it); otherwise that part skips. CI installs the version in `tests/otio/requirements.txt`, on Linux and Windows.
 
 **Live control of a running GUI** ([docs/decisions/gui.md](docs/decisions/gui.md)):
 - **Routing:** when a GUI has the project open (`vidcut -p FILE` starts one), every project command runs inside it. You and the human then edit one live session: the GUI updates at once, and `via` in the JSON says `gui:<pid>`.

@@ -19,6 +19,7 @@ pub use tracks::{TrackProps, add_track, remove_track, set_track};
 
 use crate::error::{Error, Result};
 use crate::model::{Clip, ClipAudio, Marker, Project, Track, TrackClip, TrackKind};
+use crate::otio::effects::cut;
 use follow::{Before, Edit};
 
 /// The main (magnetic) track.
@@ -137,8 +138,21 @@ fn split_at(p: &mut Project, ti: usize, t: i64) -> Option<String> {
     if let (Some(la), Some(ra)) = (left.audio.as_mut(), right.audio.as_mut()) {
         la.tail = 0;
         ra.head = 0;
+        cut(&mut la.effects, false, true);
+        cut(&mut ra.effects, true, false);
     }
+    // Carried fades stay at their edges: the fade-in on the left half, the
+    // fade-out on the right (deviation X9).
+    cut(&mut left.effects, false, true);
+    cut(&mut right.effects, true, false);
+    // A carried transition at the clip's end is now at the right half's.
+    let left_id = left.id.clone();
     track.clips.insert(ci + 1, right);
+    for x in &mut track.transitions {
+        if x.from.as_deref() == Some(left_id.as_str()) {
+            x.from = Some(new_id.clone());
+        }
+    }
     Some(new_id)
 }
 
@@ -261,9 +275,11 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
             tail: 0,
             gain_db: 0.0,
             muted: false,
+            effects: None,
         }),
         enabled: true,
         name: None,
+        effects: None,
     })
 }
 

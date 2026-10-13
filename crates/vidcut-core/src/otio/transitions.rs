@@ -1,0 +1,182 @@
+//! Transitions other editors put on edit points (deviation X9): kept while
+//! they fit, shown and played as cuts, written back.
+//!
+//! - A transition sits on a cut between two clips' pictures, or their
+//!   sounds, or between a clip and a gap (a fade from or to black). It
+//!   names the clip on each side; a split of the clip before the cut hands
+//!   it to the part that ends there.
+//! - It fits while those clips still meet at the cut (or the gap is still
+//!   there), the clip after the cut has `before` frames of media before its
+//!   first one and the clip before the cut `after` frames after its last:
+//!   during a transition each clip shows frames past its edge.
+//! - An edit after which one no longer fits drops it, and says so.
+
+use serde_json::Value;
+
+use super::{EDITOR, VIDCUT, gap, rt, schema};
+use crate::model::{Clip, Project, Track, Transition};
+
+/// The name transition `t` goes by: `Cross Dissolve`, `Cross Fade +3 dB`.
+pub fn name(t: &Transition) -> String {
+    otio_name(&t.otio)
+}
+
+/// The name of OTIO transition `o`.
+pub(super) fn otio_name(o: &Value) -> String {
+    [
+        &o["name"],
+        &o["metadata"][EDITOR]["Effects"]["Name"],
+        &o["transition_type"],
+    ]
+    .into_iter()
+    .filter_map(Value::as_str)
+    .find(|n| !n.is_empty())
+    .unwrap_or("transition")
+    .to_string()
+}
+
+/// The span of `c`'s picture (or sound) on the timeline.
+fn span(c: &Clip, sound: bool) -> Option<(i64, i64)> {
+    if sound {
+        c.audio_range()
+    } else {
+        c.video.then(|| (c.start, c.end()))
+    }
+}
+
+/// The cut transition `t` on `track` is on, if it still fits there.
+pub fn place(p: &Project, track: &Track, t: &Transition) -> Option<i64> {
+    let clip = |id: &Option<String>| -> Option<Option<&Clip>> {
+        match id {
+            None => Some(None),
+            Some(id) => track.clips.iter().find(|c| &c.id == id).map(Some),
+        }
+    };
+    let (from, to) = (clip(&t.from)?, clip(&t.to)?);
+    let cut = match (from, to) {
+        (Some(f), Some(g)) => {
+            let at = span(f, t.sound)?.1;
+            (span(g, t.sound)?.0 == at).then_some(at)?
+        }
+        (Some(f), None) => span(f, t.sound)?.1,
+        (None, Some(g)) => span(g, t.sound)?.0,
+        (None, None) => return None,
+    };
+    // A gap side: nothing of the track there.
+    let meets = |end: bool| {
+        track
+            .clips
+            .iter()
+            .any(|c| span(c, t.sound).is_some_and(|(a, b)| if end { b == cut } else { a == cut }))
+    };
+    if (from.is_none() && meets(true)) || (to.is_none() && meets(false)) {
+        return None;
+    }
+    // Media past the edges.
+    if let Some(g) = to
+        && g.source_at(cut) < t.before
+    {
+        return None;
+    }
+    if let Some(f) = from {
+        let m = p.media(&f.media)?;
+        if f.source_at(cut) + t.after > p.media_limit(m) {
+            return None;
+        }
+    }
+    Some(cut)
+}
+
+/// Drops the transitions that no longer fit their edit points; how many.
+pub fn prune(p: &mut Project) -> usize {
+    let mut dropped = 0;
+    for ti in 0..p.tracks.len() {
+        let track = &p.tracks[ti];
+        let fits: Vec<bool> = track
+            .transitions
+            .iter()
+            .map(|t| place(p, track, t).is_some())
+            .collect();
+        let mut keep = fits.into_iter();
+        let before = p.tracks[ti].transitions.len();
+        p.tracks[ti]
+            .transitions
+            .retain(|_| keep.next().unwrap_or(false));
+        dropped += before - p.tracks[ti].transitions.len();
+    }
+    dropped
+}
+
+/// What an edit that dropped `n` transitions says.
+pub fn dropped(n: usize) -> String {
+    format!(
+        "{n} transition(s) from another editor no longer fit their edit points and were dropped"
+    )
+}
+
+/// Transition `t` as written at `rate`.
+fn written(t: &Transition, rate: f64) -> Value {
+    let mut v = t.otio.clone();
+    v["in_offset"] = rt(t.before as f64, rate);
+    v["out_offset"] = rt(t.after as f64, rate);
+    v
+}
+
+/// The transition to write before the item of clip `c`'s picture (or
+/// sound), which starts at `s` in the export, after `items`: one at the
+/// clip's first frame, from the clip or gap just written.
+pub(super) fn head(
+    p: &Project,
+    track: &Track,
+    c: &Clip,
+    sound: bool,
+    s: i64,
+    items: &[Value],
+    rate: f64,
+) -> Option<Value> {
+    let t = track
+        .transitions
+        .iter()
+        .find(|t| t.sound == sound && t.to.as_deref() == Some(c.id.as_str()))?;
+    if place(p, track, t)? != s {
+        return None;
+    }
+    let last = items.last()?;
+    let follows = match &t.from {
+        Some(f) => is_clip_of(last, f),
+        None => schema(last).starts_with("Gap"),
+    };
+    follows.then(|| written(t, rate))
+}
+
+/// The transition to write after the item of clip `c`'s picture (or
+/// sound), which ends at `e` in the export: one into a gap at its end.
+pub(super) fn tail(
+    p: &Project,
+    track: &Track,
+    c: &Clip,
+    sound: bool,
+    e: i64,
+    rate: f64,
+) -> Option<Value> {
+    let t = track
+        .transitions
+        .iter()
+        .find(|t| t.sound == sound && t.from.as_deref() == Some(c.id.as_str()) && t.to.is_none())?;
+    (place(p, track, t)? == e).then(|| written(t, rate))
+}
+
+/// Whether OTIO item `item` is one vidcut wrote for clip `id`.
+fn is_clip_of(item: &Value, id: &str) -> bool {
+    item["metadata"][VIDCUT]["clip"] == id
+}
+
+/// Ends a written track: a transition into a gap needs one after it.
+pub(super) fn close(items: &mut Vec<Value>, rate: f64) {
+    if let Some(last) = items.last()
+        && schema(last).starts_with("Transition")
+    {
+        let after = last["out_offset"]["value"].as_f64().unwrap_or(0.0).max(1.0);
+        items.push(gap(after as i64, rate));
+    }
+}

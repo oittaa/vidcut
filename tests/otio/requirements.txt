@@ -1,0 +1,7 @@
+# OpenTimelineIO's own Python library: tests/cli.rs checks vidcut's OTIO
+# files against it (deviation X9). Dependabot keeps it current. CI installs
+# it into a venv of the Python that .python-version names; locally:
+#   uv venv --python "$(cat tests/otio/.python-version)" tests/otio/.venv
+#   uv pip install --python tests/otio/.venv -r tests/otio/requirements.txt
+# and VIDCUT_OTIO_PYTHON set to that venv's Python.
+opentimelineio==0.18.1
