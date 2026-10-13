@@ -952,16 +952,25 @@ impl Shrinker {
             let scaling = Scaling::new(f, frames, size).ok();
             *shrinker = Some(Self { scaling, input });
         }
-        let scaled = match &mut shrinker.as_mut().expect("made above").scaling {
-            Some(Scaling::Vaapi(graph)) => run_graph(graph, f, "scaling a frame on the GPU")?,
+        let shrinker = shrinker.as_mut().expect("made above");
+        let scaled = match &mut shrinker.scaling {
+            Some(Scaling::Vaapi(graph)) => run_graph(graph, f, "scaling a frame on the GPU"),
             #[cfg(windows)]
-            Some(Scaling::D3d11(scaler)) => scaler.scale(f)?,
+            Some(Scaling::D3d11(scaler)) => scaler.scale(f),
             None => return download(f),
         };
-        let mut small = download(&scaled)?;
-        same_picture(&mut small, f);
-        crate::color::keep_matrix(&mut small, f);
-        Ok(small)
+        match scaled.and_then(|scaled| download(&scaled)) {
+            Ok(mut small) => {
+                same_picture(&mut small, f);
+                crate::color::keep_matrix(&mut small, f);
+                Ok(small)
+            }
+            // The GPU failed it after all: these frames come down whole.
+            Err(_) => {
+                shrinker.scaling = None;
+                download(f)
+            }
+        }
     }
 }
 
@@ -991,10 +1000,7 @@ pub(crate) mod d3d11 {
         DXGI_COLOR_SPACE_TYPE, DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P601,
         DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P709, DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P2020,
         DXGI_COLOR_SPACE_YCBCR_FULL_GHLG_TOPLEFT_P2020,
-        DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P601, DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709,
-        DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P2020,
-        DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020,
-        DXGI_COLOR_SPACE_YCBCR_STUDIO_GHLG_TOPLEFT_P2020, DXGI_FORMAT_NV12, DXGI_FORMAT_P010,
+        DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020, DXGI_FORMAT_NV12, DXGI_FORMAT_P010,
     };
     use ::windows::core::Interface;
 
@@ -1393,6 +1399,13 @@ pub(crate) mod d3d11 {
             source: *mut ffi::AVBufferRef,
             input: (u32, u32),
         ) -> Result<bool> {
+            // Each band's middle, a few samples across in luma and chroma,
+            // must be there to read: smaller, the scaler isn't trusted and
+            // the frames come down whole.
+            let (ow, oh) = (self.size.0 as usize, self.size.1 as usize);
+            if ow < 4 * BANDS.len() || oh < 8 {
+                return Ok(false);
+            }
             // SAFETY: a live frames context.
             let pixel = unsafe {
                 format::Pixel::from((*((*source).data as *const ffi::AVHWFramesContext)).sw_format)
@@ -1456,8 +1469,13 @@ pub(crate) mod d3d11 {
             };
             // A level either way (in 8 bits), in the middle of each band.
             let (scale, near) = if wide { (4, 4) } else { (1, 1) };
-            let (ow, oh) = (self.size.0 as usize, self.size.1 as usize);
-            Ok(BANDS.iter().enumerate().all(|(k, [y, u, v])| {
+            // Below black and above white only where nothing clips them.
+            let checked = if full_range(self.space) {
+                bands
+            } else {
+                bands - OUTSIDE
+            };
+            Ok(BANDS[..checked].iter().enumerate().all(|(k, [y, u, v])| {
                 let middle = (2 * k + 1) * ow / (2 * bands);
                 let luma = (oh / 4..oh * 3 / 4).all(|row| {
                     (middle - 1..middle + 1).all(|x| read(0, x, row).abs_diff(y * scale) <= near)
@@ -1560,8 +1578,10 @@ pub(crate) mod d3d11 {
     }
 
     /// The test picture's bands (8-bit levels, Y, Cb, Cr): grays from black
-    /// to white, then BT.709's red, green and blue.
-    const BANDS: [[u16; 3]; 8] = [
+    /// to white, BT.709's red, green and blue, and levels below black and
+    /// above white with chroma near its ends, which video keeps and a
+    /// scaler mustn't clip.
+    const BANDS: [[u16; 3]; 10] = [
         [16, 128, 128],
         [64, 128, 128],
         [128, 128, 128],
@@ -1570,34 +1590,35 @@ pub(crate) mod d3d11 {
         [63, 102, 240],
         [173, 42, 26],
         [32, 240, 118],
+        [4, 8, 128],
+        [250, 128, 248],
     ];
 
-    /// The color space `f`'s values are read in (untagged, as its size
-    /// implies), for the video processor to keep.
+    /// The last bands, outside video range.
+    const OUTSIDE: usize = 2;
+
+    /// The color space the video processor is told `f`'s values are in, and
+    /// go out in: its matrix (untagged, as its size implies), in full range
+    /// where DXGI has one, as nothing is converted. Told studio range, AMD's
+    /// processor clips levels below black and above white (gotchas.md); PQ
+    /// has studio range alone.
     fn color_space(f: &frame::Video) -> DXGI_COLOR_SPACE_TYPE {
         use crate::color::Matrix;
         use vidcut_core::model::Hdr;
         let colors = crate::color::colors_of(f);
-        let range = |studio, full| if colors.full_range { full } else { studio };
         match (colors.hdr, colors.matrix) {
             (Some(Hdr::Pq), _) => DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020,
-            (Some(Hdr::Hlg), _) => range(
-                DXGI_COLOR_SPACE_YCBCR_STUDIO_GHLG_TOPLEFT_P2020,
-                DXGI_COLOR_SPACE_YCBCR_FULL_GHLG_TOPLEFT_P2020,
-            ),
-            (None, Matrix::Bt2020) => range(
-                DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P2020,
-                DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P2020,
-            ),
-            (None, Matrix::Bt601) => range(
-                DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P601,
-                DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P601,
-            ),
-            (None, Matrix::Bt709) => range(
-                DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709,
-                DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P709,
-            ),
+            (Some(Hdr::Hlg), _) => DXGI_COLOR_SPACE_YCBCR_FULL_GHLG_TOPLEFT_P2020,
+            (None, Matrix::Bt2020) => DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P2020,
+            (None, Matrix::Bt601) => DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P601,
+            (None, Matrix::Bt709) => DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P709,
         }
+    }
+
+    /// Whether `space` is one of the full-range ones [`color_space`] tells,
+    /// which keep every level.
+    fn full_range(space: DXGI_COLOR_SPACE_TYPE) -> bool {
+        space != DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020
     }
 }
 
