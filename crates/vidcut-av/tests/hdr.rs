@@ -46,7 +46,7 @@ fn hdr10_values_are_in_the_stream_the_container_and_the_probe() {
 
         // The bitstream alone: SEI at every keyframe, HDR10+ on every frame,
         // each its own.
-        let frames = hdr::read_frames(&path, false).unwrap();
+        let frames = hdr::read_frames(&path, false, usize::MAX).unwrap();
         assert_eq!(frames.len(), 30);
         for (k, f) in frames.iter().enumerate() {
             assert_eq!(f.metadata.light, want.light, "frame {k} of {container:?}");
@@ -224,7 +224,7 @@ fn pq_exports_keep_hdr10_values_and_each_frames_hdr10plus() {
             "{what}"
         );
         // The bitstream: HEVC's SEI, AV1's metadata OBUs.
-        let alone = hdr::read_frames(&out, false).unwrap();
+        let alone = hdr::read_frames(&out, false, usize::MAX).unwrap();
         assert_eq!(alone.len(), 20, "{what}");
         if in_band {
             for f in &alone {
@@ -233,7 +233,7 @@ fn pq_exports_keep_hdr10_values_and_each_frames_hdr10plus() {
             }
         }
         // Each frame's own HDR10+, from the source frame it shows.
-        let frames = hdr::read_frames(&out, true).unwrap();
+        let frames = hdr::read_frames(&out, true, usize::MAX).unwrap();
         for (i, f) in frames.iter().enumerate() {
             assert_eq!(
                 f.hdr10plus.as_deref(),
@@ -277,7 +277,7 @@ fn mixed_sources_give_the_widest_values_and_sdr_none() {
     );
     // No frame has HDR10+: neither the clip that had it, nor the other.
     assert!(
-        hdr::read_frames(&out, true)
+        hdr::read_frames(&out, true, usize::MAX)
             .unwrap()
             .iter()
             .all(|f| f.hdr10plus.is_none())
@@ -291,7 +291,118 @@ fn mixed_sources_give_the_widest_values_and_sdr_none() {
         &out,
     );
     assert_eq!(stream_values(&out), hdr::Static::default());
-    for f in hdr::read_frames(&out, true).unwrap() {
+    for f in hdr::read_frames(&out, true, usize::MAX).unwrap() {
         assert_eq!(f.metadata, hdr::Metadata::default(), "frame {}", f.pts);
+    }
+}
+
+// ---------------------------------------------------------------- real clips
+
+/// A clip of `tests/media-manifest.toml`, if fetched.
+fn media(name: &str, file: &str) -> Option<PathBuf> {
+    let path = vidcut_av::testdata::root()
+        .join("media")
+        .join(name)
+        .join(file);
+    if !path.exists() {
+        eprintln!("skipping {name}: run scripts/fetch-test-media.sh");
+    }
+    path.exists().then_some(path)
+}
+
+/// `frames` of `path` from its start, into a plan at `fps` and `w`×`h`.
+fn clip_plan(path: &Path, fps: i64, frames: i64, w: u32, h: u32) -> RenderPlan {
+    let mut p = plan(vec![piece(path, 0, frames)]);
+    p.fps = Rational::new(fps, 1).unwrap();
+    (p.width, p.height) = (w, h);
+    p
+}
+
+#[test]
+fn real_clips_keep_their_hdr_metadata() {
+    vidcut_av::init();
+    let dir = tempfile::tempdir().unwrap();
+
+    // HDR10 values (1000 cd/m², MaxCLL 1000, MaxFALL 400) into x265.
+    if let Some(bear) = media("hdr10-bear-hevc", "bear-1280x720-hevc-10bit-hdr10.mp4") {
+        let out = dir.path().join("bear.mkv");
+        let r = render(
+            &clip_plan(&bear, 30, 30, 640, 360),
+            &settings(VCodec::Hevc, OutContainer::Mkv, HdrMode::Auto),
+            &out,
+        );
+        assert_eq!(r.metadata.unwrap().mode, HdrMetadata::Static);
+        let boxes = stream_values(&out);
+        let m = boxes.mastering.unwrap();
+        assert!(
+            close(m.max_nits, 1000.0) && close(m.min_nits, 0.05),
+            "{m:?}"
+        );
+        assert_eq!(
+            boxes.light,
+            Some(LightLevel {
+                max_cll: 1000,
+                max_fall: 400
+            })
+        );
+    }
+
+    // HDR10+ on every frame of 4K AV1, scaled down: each frame keeps its
+    // own. The clip has no static values: BT.2020 at 1000 cd/m² is assumed.
+    if let Some(plus) = media("hdr10plus-croatia-av1", "B_1.mp4") {
+        let out = dir.path().join("plus.webm");
+        let r = render(
+            &clip_plan(&plus, 60, 30, 640, 360),
+            &settings(VCodec::Av1, OutContainer::Webm, HdrMode::Auto),
+            &out,
+        );
+        let m = r.metadata.unwrap();
+        assert_eq!(m.mode, HdrMetadata::Hdr10plus, "{:?}", m.why);
+        assert!(close(m.mastering.unwrap().max_nits, 1000.0));
+        assert_eq!(m.light, None);
+        let source = hdr::read_frames(&plus, true, 30).unwrap();
+        let output = hdr::read_frames(&out, true, 30).unwrap();
+        assert_eq!(output.len(), 30);
+        for (i, (s, o)) in source.iter().zip(&output).enumerate() {
+            assert!(s.hdr10plus.is_some(), "source frame {i}");
+            assert_eq!(o.hdr10plus, s.hdr10plus, "HDR10+ of frame {i}");
+        }
+    }
+
+    // Dolby Vision 8.4: an HLG base layer kept, each frame's RPU with it,
+    // through libx265, into Matroska and MP4.
+    if let Some(dv) = media("dolby-vision-84-hevc", "Test Jellyfin 1080p DV P8.4.mp4") {
+        for container in [OutContainer::Mkv, OutContainer::Mp4] {
+            let out = dir.path().join(format!("dv.{}", container.extension()));
+            let r = render(
+                &clip_plan(&dv, 60, 30, 960, 540),
+                &settings(VCodec::Hevc, container, HdrMode::Auto),
+                &out,
+            );
+            let m = r.metadata.unwrap();
+            assert_eq!(
+                m.mode,
+                HdrMetadata::DolbyVision,
+                "{container:?}: {:?}",
+                m.why
+            );
+            let input = vidcut_av::ffmpeg::format::input(&out).unwrap();
+            let params = input
+                .streams()
+                .best(vidcut_av::ffmpeg::media::Type::Video)
+                .unwrap()
+                .parameters();
+            assert_eq!(
+                hdr::dolby_vision(&params),
+                Some(vidcut_core::model::DolbyVision {
+                    profile: 8,
+                    compatibility: 4
+                }),
+                "{container:?}"
+            );
+            let frames = hdr::read_frames(&out, true, usize::MAX).unwrap();
+            assert_eq!(frames.len(), 30);
+            assert!(frames.iter().all(|f| f.dolby_vision), "{container:?}");
+        }
     }
 }

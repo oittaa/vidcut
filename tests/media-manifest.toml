@@ -41,3 +41,35 @@ url = "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h265/1080/Big_Buck_Bunny_
 license = "Big Buck Bunny CC BY 3.0 (c) Blender Foundation; encode by test-videos.co.uk"
 purpose = "short HEVC 1080p clip: quick HEVC decode and preview tests"
 sha256 = "054fda19ab2c9f24d4524ffc33bfba9620b11e488ab813004dbe952fff26868d"
+
+[[clip]]
+name = "hdr10-bear-hevc"
+file = "bear-1280x720-hevc-10bit-hdr10.mp4"
+url = "https://raw.githubusercontent.com/chromium/chromium/b8b053081e8e43f0206130dc6c70d996343cffa2/media/test/data/bear-1280x720-hevc-10bit-hdr10.mp4"
+license = "BSD-3-Clause, (c) The Chromium Authors, https://chromium.googlesource.com/chromium/src/+/main/LICENSE"
+purpose = "HEVC 10-bit PQ with a mastering display (1000 cd/m²) and MaxCLL/MaxFALL 1000/400 (SDR footage tagged HDR10)"
+sha256 = "49b960ac28ae13153ba8e62e3fceb50408564c21f25fc38936e7c8a06b61f2db"
+
+[[clip]]
+name = "hlg-croatia-av1"
+file = "D_3.mp4"
+url = "https://s3.amazonaws.com/download.opencontent.netflix.com/AV1/DVB-DASH/D_3.mp4"
+license = "CC BY 4.0, Croatia (2019) (c) EBU; AV1 encode from Netflix Open Content, https://s3.amazonaws.com/download.opencontent.netflix.com/AV1/creative-commons-attribution-4-intl-public-license.txt"
+purpose = "AV1 10-bit HLG 1080p50, 60 s, video only (fragmented MP4)"
+sha256 = "eeaceba9d54a228363665879fcfc2ddacf8a8d23ddc269dee2bd856e02132118"
+
+[[clip]]
+name = "hdr10plus-croatia-av1"
+file = "B_1.mp4"
+url = "https://s3.amazonaws.com/download.opencontent.netflix.com/AV1/DVB-DASH/B_1.mp4"
+license = "CC BY 4.0, Croatia (2019) (c) EBU; AV1 encode from Netflix Open Content, https://s3.amazonaws.com/download.opencontent.netflix.com/AV1/creative-commons-attribution-4-intl-public-license.txt"
+purpose = "AV1 10-bit PQ 2160p60 with HDR10+ on every frame and no static values, 60 s, video only"
+sha256 = "cc78e681482f520b5ae7f03ebef663f20ff42e6fb6d7f0331e4f529f4dd4e3e2"
+
+[[clip]]
+name = "dolby-vision-84-hevc"
+file = "Test Jellyfin 1080p DV P8.4.mp4"
+url = "https://repo.jellyfin.org/test-videos/HDR/Dolby%20Vision/Test%20Jellyfin%201080p%20DV%20P8.4.mp4"
+license = "CC BY-SA 4.0, Gnattu (Jellyfin test videos), https://repo.jellyfin.org/test-videos/"
+purpose = "HEVC 10-bit Dolby Vision profile 8.4: an HLG base layer and an RPU on every frame"
+sha256 = "eaf21cc55e31694758c9d5cf2ba9f7b448f8447655907380259d4e42a2ea7276"

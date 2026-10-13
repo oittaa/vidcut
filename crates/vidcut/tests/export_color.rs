@@ -328,7 +328,7 @@ fn hdr_metadata_follows_the_sources() {
         r["result"]["outputs"][0]["metadata"]["mode"], "hdr10plus",
         "{r}"
     );
-    let frames = vidcut_av::hdr::read_frames(&out, false).unwrap();
+    let frames = vidcut_av::hdr::read_frames(&out, false, usize::MAX).unwrap();
     assert_eq!(frames.len(), 30);
     assert!(frames.iter().enumerate().all(|(k, f)| {
         f.hdr10plus.as_deref() == Some(fixture::hdr10plus_t35(k as u32).as_slice())

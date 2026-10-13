@@ -438,6 +438,13 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
         if v.hdr.transfer() == Some(vidcut_core::model::Hdr::Pq) {
             params += ":hdr10-opt=1";
         }
+        // x265 writes Dolby Vision only with a VBV (its HRD): at a target
+        // bitrate, peaks of 1.5 times it; at constant quality, HEVC level
+        // 5.1 High's 160 Mb/s, which it doesn't reach.
+        if dynamic.dolby_vision {
+            let max = v.bitrate.map_or(160_000, |b| b * 3 / 2 / 1000);
+            params += &format!(":vbv-maxrate={max}:vbv-bufsize={}", 2 * max);
+        }
         params
     };
     let speed = |default: &str| opt("preset", v.speed.as_deref().unwrap_or(default));

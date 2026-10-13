@@ -181,18 +181,21 @@ pub fn of_stream(params: &codec::Parameters) -> Static {
     }
 }
 
-/// One decoded frame's HDR metadata, and its HDR10+ as T.35.
+/// One decoded frame's HDR metadata, its HDR10+ as T.35, and whether it has
+/// a Dolby Vision RPU.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameHdr {
     pub pts: i64,
     pub metadata: Metadata,
     pub hdr10plus: Option<Vec<u8>>,
+    pub dolby_vision: bool,
 }
 
-/// Every frame's HDR metadata in a file, in presentation order: with
-/// `container`, as a player sees it; without, from the bitstream alone (the
-/// stream's own values removed before decoding). For tests and checks.
-pub fn read_frames(path: &std::path::Path, container: bool) -> Result<Vec<FrameHdr>> {
+/// The HDR metadata of a file's first `max` frames or so (decoding stops
+/// once that many came out), in presentation order: with `container`, as a
+/// player sees it; without, from the bitstream alone (the stream's own
+/// values removed before decoding). For tests and checks.
+pub fn read_frames(path: &std::path::Path, container: bool, max: usize) -> Result<Vec<FrameHdr>> {
     use crate::error::Context;
     use ffi::AVPacketSideDataType as Pd;
     let mut input = ffmpeg::format::input(path).ctx(|| format!("opening {}", path.display()))?;
@@ -224,6 +227,10 @@ pub fn read_frames(path: &std::path::Path, container: bool) -> Result<Vec<FrameH
                 pts: frame.pts().unwrap_or(i64::MIN),
                 metadata: of_frame(&frame),
                 hdr10plus: hdr10plus_t35(&frame),
+                dolby_vision: unsafe {
+                    !ffi::av_frame_get_side_data(frame.as_ptr(), Sd::AV_FRAME_DATA_DOVI_METADATA)
+                        .is_null()
+                },
             });
         }
     };
@@ -231,11 +238,16 @@ pub fn read_frames(path: &std::path::Path, container: bool) -> Result<Vec<FrameH
         if s.index() == index {
             decoder.send_packet(&packet).ctx(|| "decoding".into())?;
             take(&mut decoder, &mut out);
+            // Some past `max`: reordered frames still to come are earlier.
+            if out.len() >= max.saturating_add(16) {
+                break;
+            }
         }
     }
     decoder.send_eof().ctx(|| "decoding".into())?;
     take(&mut decoder, &mut out);
     out.sort_by_key(|f| f.pts);
+    out.truncate(max);
     Ok(out)
 }
 
