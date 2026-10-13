@@ -124,7 +124,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
     - **Flattened at import** (`timeline.import --flatten`, File > Import Timeline, Decomposing Compound Clips): each compound clip, and those it holds, is decomposed as it lands.
     - **In Resolve** (Studio 21.1.1, scripting API): an import of vidcut's file gives what an import of Resolve's own file gives.
   - **Speed changes** (OTIO time effects: Resolve's constant speeds as `LinearTimeWarp`, `time_scalar` 2.0, 0.5, -1.0 reversed) stay on their clips, which play and edit at their speed (spec D48). The time effect is written back first among the clip's effects; a reversed clip as Resolve writes it (spec D48). A time effect without a speed plays at normal speed, with an import warning.
-    - **Shown:** a badge (`200%`); `speed` (2.0) in `timeline get`. Ripple Delete Silence and Detect Scene Cuts leave them out.
+    - **Shown:** a badge (`200%`); `speed` (2.0) in `timeline get`.
     - **In Resolve** (Studio 21.1.1): an import of vidcut's file rebuilds them as from Resolve's own file.
   - **Accepts what Resolve writes:** `Clip.1` and `Clip.2`, source ranges in media timecode, float rates (snapped to exact rationals such as 24000/1001), Resolve's effect lists.
   - **Left out, with a warning each:** nested tracks, and clips that would overlap others on their track.

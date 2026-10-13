@@ -993,10 +993,9 @@ fn mutate(
             let mut removed = Vec::new();
             for id in &ids {
                 let c = p.clip(id).expect("resolved");
-                // A block plays as a gap: no sound to look at. A clip at
-                // another speed isn't looked at: the analyses map source to
-                // timeline at normal speed.
-                if c.is_block() || c.speed.is_some() {
+                // A block plays as a gap, and a held frame is silent: no
+                // sound to look at.
+                if c.is_block() || c.speed() == 0.0 {
                     continue;
                 }
                 let found = silent_parts(p, env, &Target::Clip(c), &settings)?;
@@ -1025,10 +1024,9 @@ fn mutate(
             let mut created = Vec::new();
             for id in &ids {
                 let c = p.clip(id).expect("resolved");
-                // A block plays as a gap: no pictures to look at. A clip at
-                // another speed isn't looked at: the analyses map source to
-                // timeline at normal speed.
-                if c.is_block() || c.speed.is_some() {
+                // A block plays as a gap: no pictures to look at; a held
+                // frame has no shots.
+                if c.is_block() || c.speed() == 0.0 {
                     continue;
                 }
                 let found = scene_cuts(p, env, &Target::Clip(c), *threshold)?;
@@ -2759,6 +2757,7 @@ impl Target<'_> {
             Target::Media(m) => {
                 let (_, origin) = p.media_origin(&m.id)?;
                 Span {
+                    pace: Default::default(),
                     start: 0,
                     end: p.media_frames(m),
                     source_in: 0,
