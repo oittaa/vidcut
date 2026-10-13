@@ -537,8 +537,10 @@ fn videotoolbox_options(v: &VideoSettings, q: u32, ten: bool) -> Vec<(String, St
     match v.bitrate {
         Some(b) => options.push(opt("b", b)),
         None => {
-            // H.264's and HEVC's 0–51, the lower the better: 20 is 67.
-            let percent = 100 - q.min(51) * 100 / 60;
+            // H.264's and HEVC's 0–51, the lower the better: 20 is 80. On
+            // an M4 this gave H.264 the PSNR x264 gives at the same number
+            // (export.md §5).
+            let percent = 120u32.saturating_sub(2 * q.min(51)).min(100);
             options.push(opt("flags", "+qscale"));
             options.push(opt("global_quality", percent * ffi::FF_QP2LAMBDA as u32));
         }
@@ -1364,10 +1366,10 @@ mod tests {
         };
         let o = quality(20);
         assert!(o.contains(&opt("flags", "+qscale")), "{o:?}");
-        assert!(o.contains(&opt("global_quality", 67 * lambda)), "{o:?}");
+        assert!(o.contains(&opt("global_quality", 80 * lambda)), "{o:?}");
         assert!(o.contains(&opt("profile", "main10")), "{o:?}");
         assert!(quality(0).contains(&opt("global_quality", 100 * lambda)));
-        assert!(quality(51).contains(&opt("global_quality", 15 * lambda)));
+        assert!(quality(51).contains(&opt("global_quality", 18 * lambda)));
         let v = video(
             VideoCodec::H264,
             EncoderChoice::VideoToolbox,
