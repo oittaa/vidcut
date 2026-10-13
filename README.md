@@ -47,7 +47,7 @@ Set `FFMPEG_DIR` to the FFmpeg folder (the one with `bin`, `include` and `lib`) 
 brew install ffmpeg
 ```
 
-vidcut builds there and passes its unit tests on Apple Silicon (CI). The GUI, which draws with Metal and plays sound through Core Audio, hasn't been tried there yet.
+Rust from rustup (below), not Homebrew's `rust`: that one is a single version and ignores the repository's pinned one (`brew uninstall rust` if `which cargo` is under `/opt/homebrew`). vidcut builds there and passes its unit tests on Apple Silicon (CI). The GUI, which draws with Metal and plays sound through Core Audio, hasn't been tried there yet.
 
 Nothing else is needed at run time: vidcut plays video with its own player, on the FFmpeg libraries. The player, proxies and exports decode H.264, HEVC, AV1 and VP9 on the GPU where it can: NVDEC on NVIDIA GPUs, and on AMD and Intel GPUs VA-API on Linux (Mesa's driver, Intel's media driver) and Direct3D 11 on Windows.
 
