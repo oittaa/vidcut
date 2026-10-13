@@ -13,6 +13,14 @@ updates:
           - minor
           - patch
 
+  # rust-toolchain.toml's channel. Raising it takes rust-version in
+  # Cargo.toml with it and fixes for what the new clippy finds, which the
+  # pull request's checks show.
+  - package-ecosystem: rust-toolchain
+    directory: /
+    schedule:
+      interval: weekly
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

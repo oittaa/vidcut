@@ -105,21 +105,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # FFmpeg 9.0 as a shared build with its headers and import libraries:
-      # BtbN's build of the end of a month (those are kept; the daily ones
-      # go), pinned with its checksum so a run builds what the last one
-      # did. Moving to a newer one is a change of these three lines. LLVM,
-      # whose libclang generates the bindings, comes with the runner.
-      - name: Install FFmpeg 9.0
+      # FFmpeg's newest release as a shared build with its headers and
+      # import libraries, as macOS takes Homebrew's newest (Linux builds
+      # against the oldest supported, Ubuntu's): BtbN's rolling `latest`
+      # release has a build of each recent release branch, and its
+      # checksum file names them. No version here to keep up to date; the
+      # step prints the one it took. LLVM, whose libclang generates the
+      # bindings, comes with the runner.
+      - name: Install FFmpeg
         run: |
           set -euo pipefail
-          tag=autobuild-2026-09-30-13-08
-          name=ffmpeg-n9.0.2-17-g2a571b6068-win64-gpl-shared-9.0
-          sha256=3da6c7b60bb9ccd73ec5b5e815ba804a0879eb362ba0e3beebce50174c022696
-          curl -fsSL -o ffmpeg.zip "https://github.com/BtbN/FFmpeg-Builds/releases/download/${tag}/${name}.zip"
-          echo "${sha256}  ffmpeg.zip" | sha256sum -c -
-          unzip -q ffmpeg.zip -d "$RUNNER_TEMP"
-          rm ffmpeg.zip
+          base=https://github.com/BtbN/FFmpeg-Builds/releases/download/latest
+          curl -fsSL -o checksums.sha256 "$base/checksums.sha256"
+          # The newest release branch's: ffmpeg-n9.0-latest-win64-gpl-shared-9.0.zip.
+          zip=$(grep -oE 'ffmpeg-n[0-9]+\.[0-9]+-latest-win64-gpl-shared-[0-9.]+\.zip' checksums.sha256 | sort -V | tail -1)
+          curl -fsSL -o "$zip" "$base/$zip"
+          grep "  ${zip}\$" checksums.sha256 | sha256sum -c -
+          unzip -q "$zip" -d "$RUNNER_TEMP"
+          rm "$zip" checksums.sha256
+          name=${zip%.zip}
           dir=$(cygpath -w "$RUNNER_TEMP/$name")
           {
             echo "FFMPEG_DIR=${dir}"
