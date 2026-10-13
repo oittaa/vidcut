@@ -577,7 +577,15 @@ pub fn ensure_in(dir: &Path, spec: &FixtureSpec) -> Result<PathBuf> {
             let _ = std::fs::remove_file(&tmp);
         }
         result?;
-        std::fs::rename(&tmp, &path)?;
+        match std::fs::rename(&tmp, &path) {
+            Ok(()) => {}
+            // Another test made it meanwhile, and on Windows has it open,
+            // so it can't be replaced.
+            Err(_) if path.exists() => {
+                let _ = std::fs::remove_file(&tmp);
+            }
+            Err(e) => return Err(e.into()),
+        }
     }
     Ok(path)
 }

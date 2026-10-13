@@ -385,9 +385,15 @@ fn export_windows() {
     // subfolders.
     let fixtures = media.parent().unwrap();
     let moved = dir.join("moved.otio");
+    // The folder as JSON writes it: on Windows its backslashes escaped.
+    let quoted = serde_json::to_string(fixtures).unwrap();
+    let separator = if cfg!(windows) { r"\\" } else { "/" };
     let text = std::fs::read_to_string(dir.join("quick-p.otio"))
         .unwrap()
-        .replace(fixtures.to_str().unwrap(), "/nonexistent/footage");
+        .replace(
+            &format!("{}{separator}", &quoted[1..quoted.len() - 1]),
+            "/nonexistent/footage/",
+        );
     std::fs::write(&moved, text).unwrap();
     saved.lock().unwrap().push(moved);
     *folder.lock().unwrap() = fixtures.parent().unwrap().to_path_buf();

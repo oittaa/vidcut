@@ -156,7 +156,20 @@ fn tiles_are_made_kept_on_disk_and_found_again() {
     drop(harness);
 
     // 2. A new window finds them on disk: the clip can't be decoded now.
+    // It moved away; on Windows, where a file the session has open can't
+    // move, this user may no longer read it.
+    #[cfg(unix)]
     std::fs::rename(dir.join("clip.mp4"), dir.join("moved.mp4")).unwrap();
+    #[cfg(windows)]
+    {
+        let user = std::env::var("USERNAME").unwrap();
+        let out = std::process::Command::new("icacls")
+            .arg(dir.join("clip.mp4"))
+            .args(["/deny", &format!("{user}:(RD)")])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+    }
     let mut harness = window(&h);
     assert_eq!(tiles_settle(&mut harness, &cache, kept), kept);
     drop(harness);

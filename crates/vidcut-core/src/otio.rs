@@ -152,8 +152,8 @@ fn media_reference(p: &Project, m: &Media, locations: Locations, rate: f64) -> V
                 .unwrap_or(Path::new("/"))
                 .to_string_lossy()
                 .into_owned();
-            if !dir.ends_with('/') {
-                dir.push('/');
+            if !dir.ends_with(['/', std::path::MAIN_SEPARATOR]) {
+                dir.push(std::path::MAIN_SEPARATOR);
             }
             dir
         });
@@ -732,6 +732,36 @@ fn is_windows_absolute(s: &str) -> bool {
         || (s.len() > 2 && is_drive(&s[..2]) && matches!(s.as_bytes()[2], b'\\' | b'/'))
 }
 
+/// An absolute path on this system: `/…`, or on Windows a Windows one.
+fn is_local_absolute(s: &str) -> bool {
+    if cfg!(windows) {
+        is_windows_absolute(s)
+    } else {
+        s.starts_with('/')
+    }
+}
+
+/// An absolute path on the other kind of system: a Windows path on Linux,
+/// a Unix one on Windows. Its last parts are looked for next to the
+/// timeline file.
+fn is_foreign_absolute(s: &str) -> bool {
+    if cfg!(windows) {
+        s.starts_with('/') && !s.starts_with("//")
+    } else {
+        is_windows_absolute(s)
+    }
+}
+
+/// A path written with `/` (or on Windows either separator) as this system
+/// writes it.
+fn native(s: &str) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(s.replace('/', "\\"))
+    } else {
+        PathBuf::from(s)
+    }
+}
+
 /// The first picture's name for an image sequence named by its range
 /// (`frame_[0001-0120].png` → `frame_0001.png`).
 fn bracketed(name: &str) -> Option<String> {
@@ -796,18 +826,21 @@ fn locate(url: &str, base: Option<&Path>, fps: Rational) -> Option<MediaRef> {
     }
     let mut paths: Vec<PathBuf> = Vec::new();
     for f in &forms {
-        let foreign = is_windows_absolute(f);
-        if !foreign && !f.starts_with('/') {
+        let local = is_local_absolute(f);
+        if !local && !is_foreign_absolute(f) {
             // Relative to the timeline file.
             if let Some(b) = base {
-                paths.push(b.join(f));
-                if f.contains('\\') {
+                paths.push(b.join(native(f)));
+                if !cfg!(windows) && f.contains('\\') {
                     paths.push(b.join(f.replace('\\', "/")));
                 }
             }
             continue;
         }
-        if !foreign {
+        if local {
+            paths.push(native(f));
+        } else if cfg!(windows) {
+            // A Unix path names that folder on the current drive.
             paths.push(PathBuf::from(f));
         }
         // Moved with the timeline file: its last parts next to the file.
@@ -817,7 +850,10 @@ fn locate(url: &str, base: Option<&Path>, fps: Rational) -> Option<MediaRef> {
                 .filter(|s| !s.is_empty() && !is_drive(s))
                 .collect();
             for k in (1..=parts.len().min(3)).rev() {
-                paths.push(b.join(parts[parts.len() - k..].join("/")));
+                let near = parts[parts.len() - k..]
+                    .iter()
+                    .fold(b.to_path_buf(), |p, s| p.join(s));
+                paths.push(near);
             }
         }
     }

@@ -4,7 +4,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 
 **Reading the manual:** it is 183 MB, so extract text with `pdftotext -f 635 -l 790 <manual>.pdf -`. The developer's copy lives in `$VIDCUT_TEST_DATA` (default `~/Downloads/vidcut-tmp`). Don't copy manual text into the repo; write behavior in your own words with page numbers.
 
-**Key names:** the manual uses Mac keys. On Linux, Command → Ctrl and Option → Alt.
+**Key names:** the manual uses Mac keys. On Linux and Windows, Command → Ctrl and Option → Alt.
 
 **Status markers:**
 - **(v1)** planned for the single-track (V1) milestones M1–M5.
@@ -336,7 +336,7 @@ Hover the lower audio part of a clip at an edit until the cursor shows a note, t
 - **User presets** can be added to the Quick Export row.
 - **In vidcut:** the Quick Export row, the Export dialog and jobs are deviation X3. The suggested file name is the project's name. Timeline interchange is deviation X9.
 
-## 11. Keyboard shortcuts (Linux)
+## 11. Keyboard shortcuts (Linux and Windows)
 
 Keys from the Cut chapters, with Edit-page keys filling the gaps (marked †).
 
@@ -403,7 +403,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
 - **D10. Overwrite past the end of Track 1.** With Ripple On, an Overwrite that would start after the end of Track 1 starts at the end instead, so Track 1 stays gapless.
 - **D11. Hover time.** 0.8 s of hovering turns a drop or move onto a clip from "replace" into "overwrite". The manual doesn't give a value.
 - **D12. Clip gain range.** −60 dB to +24 dB, plus mute. The manual gives no range.
-- **D13. Keys.** Shortcuts the Cut chapters don't give come from the Edit page (marked † in §11). Mac → Linux mapping: Command → Ctrl, Option → Alt.
+- **D13. Keys.** Shortcuts the Cut chapters don't give come from the Edit page (marked † in §11). Mac → Linux and Windows mapping: Command → Ctrl, Option → Alt.
 - **D15. Playhead after an edit function.** After Smart Insert, Append, Overwrite, Ripple Overwrite or Paste, the timeline playhead moves to the first frame after the new clip(s), ready for the next edit. The Viewer stays in its mode, so Q reviews the result (p. 696). The manual doesn't say; this is the Edit page's behavior. A clip dragged onto the timeline leaves the playhead where it was: a drop isn't an edit function, and on the Edit page too only the edit functions move it. Edit functions sent by scripts and agents move it as the buttons do.
 - **D16. Mark Out includes the frame under the playhead.** As in Resolve, the Out frame is part of the range. vidcut stores ranges half-open, so pressing O at frame `f` stores `out = f + 1`. The Duration field and `--json` output use the stored values.
 - **D17. Source Tape In/Out** (p. 692). I/O in Source Tape mode marks the whole tape: the open bin's clips end to end, in pool order.

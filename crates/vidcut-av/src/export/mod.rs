@@ -311,7 +311,10 @@ fn gpu_output(
     if enc.kind != EncoderChoice::Nvenc {
         return None;
     }
-    let device = crate::cuda::CudaDevice::open().ok()?;
+    // A stream of its own: its GPU work never waits behind another's.
+    let device = crate::cuda::CudaDevice::open()
+        .and_then(|d| d.with_own_stream())
+        .ok()?;
     let frames = crate::cuda::CudaFrames::new(&device, gpu_pixel(enc), w, h).ok()?;
     Some((device, frames))
 }
@@ -918,6 +921,9 @@ fn encode(
             if !v.metadata.is_empty() {
                 crate::hdr::attach(&mut f, &v.metadata)?;
             }
+            // Pieces decode and convert on streams of their own (`gpu_reader`):
+            // the encoder reads a frame once its stream's work is done.
+            crate::cuda::share::wait_for(&f)?;
             v.encoder
                 .send_frame(&f)
                 .ctx(|| format!("encoding frame {j} with {}", v.name))?;

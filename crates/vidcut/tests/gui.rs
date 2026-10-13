@@ -127,7 +127,11 @@ impl Drop for Gui {
 
 #[test]
 fn gui_acceptance() {
-    if std::env::var_os("WAYLAND_DISPLAY").is_none() && std::env::var_os("DISPLAY").is_none() {
+    let linux = cfg!(target_os = "linux");
+    if linux
+        && std::env::var_os("WAYLAND_DISPLAY").is_none()
+        && std::env::var_os("DISPLAY").is_none()
+    {
         eprintln!("skipping: no display");
         return;
     }

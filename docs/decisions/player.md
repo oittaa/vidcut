@@ -81,7 +81,7 @@ vidcut-av starts them as it starts its other threads (`std::thread::Builder`, na
 ## 6. Outputs
 
 `AudioOutput` starts pulling from the engine's `AudioSource` on a thread of its own and stops when dropped.
-- **`CpalOutput`**: the system's default device through cpal (ALSA on Linux, which PipeWire and PulseAudio serve), `f32` at the plan's rate and channels. The latency is the callback's playback time minus its callback time: 37 ms through PipeWire here. The stream lives on its own thread, as it can't move between threads on every platform. Device errors show in `Status::error`.
+- **`CpalOutput`**: the system's default device through cpal (ALSA on Linux, which PipeWire and PulseAudio serve; WASAPI on Windows), `f32` at the plan's rate and channels. The latency is the callback's playback time minus its callback time: 37 ms through PipeWire here. The stream lives on its own thread, as it can't move between threads on every platform. Device errors show in `Status::error`.
 - **`PacedOutput`**: a stand-in that pulls in real time, each buffer heard a set latency after it is due; it can record what it pulled and when it would be heard.
 - **`ManualOutput`**: pulls when a test says, so the test sets the clock.
 - **cpal** is Apache-2.0 (with the MIT/Apache `alsa` crate and the MIT `alsa-sys`): compatible with MIT distribution. It builds against ALSA's headers, `libasound2-dev`.

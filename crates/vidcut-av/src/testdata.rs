@@ -9,10 +9,9 @@ pub fn root() -> PathBuf {
     if let Some(dir) = std::env::var_os("VIDCUT_TEST_DATA") {
         return PathBuf::from(dir);
     }
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    home.join("Downloads").join("vidcut-tmp")
+    vidcut_core::dirs::home()
+        .join("Downloads")
+        .join("vidcut-tmp")
 }
 
 /// Directory for generated fixtures (created on demand).

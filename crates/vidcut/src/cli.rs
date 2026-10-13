@@ -118,7 +118,7 @@ const GROUPS: &[(&str, &str)] = &[
     ("pool", "The GUI's Media Pool view"),
     (
         "preferences",
-        "Application preferences (~/.config/vidcut/preferences.toml)",
+        "Application preferences (~/.config/vidcut/preferences.toml; on Windows in %APPDATA%\\vidcut)",
     ),
     ("presets", "Export presets: built-in and your own"),
     ("project", "Project files and settings"),
@@ -1104,28 +1104,36 @@ mod tests {
             panic!("probe");
         };
         assert_eq!(path, cwd.join("clip.mp4"));
-        let Request::Probe { path } = request(&["probe", "/srv/clip.mp4"]) else {
+        let elsewhere = if cfg!(windows) {
+            r"D:\srv\clip.mp4"
+        } else {
+            "/srv/clip.mp4"
+        };
+        let Request::Probe { path } = request(&["probe", elsewhere]) else {
             panic!("probe");
         };
-        assert_eq!(path, PathBuf::from("/srv/clip.mp4"));
+        assert_eq!(path, PathBuf::from(elsewhere));
     }
 
     #[test]
     fn a_request_as_a_command_parses_back() {
+        let (project, output) = if cfg!(windows) {
+            (r"D:\p\a b.vidcut", r"D:\tmp\out.mov")
+        } else {
+            ("/p/a b.vidcut", "/tmp/out.mov")
+        };
         let params = json!({
-            "output": "/tmp/out.mov", "preset": "prores-422hq", "range": "1m..2m",
+            "output": output, "preset": "prores-422hq", "range": "1m..2m",
             "set": ["video.quality=14", "video.bitrate=null"], "per_clip": true, "overwrite": true,
         });
-        let line = command_line(
-            std::path::Path::new("/p/a b.vidcut"),
-            "export.start",
-            &params,
-        )
-        .unwrap();
-        assert!(
-            line.starts_with("vidcut -p '/p/a b.vidcut' export start /tmp/out.mov"),
-            "{line}"
+        let line = command_line(std::path::Path::new(project), "export.start", &params).unwrap();
+        let quote = |s| shlex::try_quote(s).unwrap();
+        let want = format!(
+            "vidcut -p {} export start {}",
+            quote(project),
+            quote(output)
         );
+        assert!(line.starts_with(&want), "{line}");
         let args = shlex::split(&line).unwrap();
         let cli = Cli::try_parse_from(&args).unwrap();
         let Some(Action::Run(envelope)) = cli.action().unwrap() else {

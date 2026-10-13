@@ -1,14 +1,16 @@
-//! The GUI side of the socket: one thread accepts connections, one thread per
-//! connection reads requests line by line and answers them in order.
+//! The GUI side of the socket (a pipe on Windows): one thread accepts
+//! connections, one thread per connection reads requests line by line and
+//! answers them in order.
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::{Value, json};
 use vidcut_core::{Envelope, Error, Response, Result};
+
+use super::transport::{Listener, Stream};
 
 /// Answers one request. `project` is the project the client expects to be
 /// open. `progress(Some(params))` sends a notification and returns false once
@@ -50,12 +52,15 @@ pub fn start_limited(path: &Path, handler: Arc<Handler>, limits: Limits) -> std:
     if let Some(dir) = path.parent() {
         super::private_dir(dir)?;
     }
-    let _ = std::fs::remove_file(path);
-    let listener = UnixListener::bind(path)?;
+    let listener = Listener::bind(path)?;
     let open = Arc::new(AtomicUsize::new(0));
     crate::threads::spawn("vidcut-ipc", crate::threads::Work::Interactive, move || {
-        for stream in listener.incoming() {
-            let Ok(mut stream) = stream else { continue };
+        loop {
+            let Ok(mut stream) = listener.accept() else {
+                // Out of handles, say: a moment for some to free.
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                continue;
+            };
             // Only this thread adds connections, so the count can't
             // pass the limit between the check and the increment.
             if open.load(Ordering::SeqCst) >= limits.connections {
@@ -102,7 +107,7 @@ fn failure(id: Value, e: &Error) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "error": super::error_json(e) })
 }
 
-fn serve(stream: UnixStream, handler: &Handler, max_line: u64) {
+fn serve(stream: Stream, handler: &Handler, max_line: u64) {
     let Ok(read_half) = stream.try_clone() else {
         return;
     };
@@ -143,32 +148,14 @@ fn serve(stream: UnixStream, handler: &Handler, max_line: u64) {
     }
 }
 
-/// Whether the peer has closed `stream`, or shut down both ways (a cancelled
-/// client does). A client that only shut down its writing still waits for
-/// the answer: on a Unix socket, `poll` reports `POLLHUP` only once neither
-/// direction is left. Reads nothing, so a later request stays buffered.
-fn peer_gone(stream: &UnixStream) -> bool {
-    use std::os::fd::AsRawFd;
-    // `POLLHUP` and `POLLERR` are reported whatever `events` asks for.
-    let mut pfd = libc::pollfd {
-        fd: stream.as_raw_fd(),
-        events: 0,
-        revents: 0,
-    };
-    // SAFETY: `pfd` describes this socket, and the timeout is zero so this
-    // returns at once.
-    let rc = unsafe { libc::poll(&mut pfd, 1, 0) };
-    rc > 0 && pfd.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0
-}
-
-fn send(writer: &mut UnixStream, v: &Value) -> std::io::Result<()> {
+fn send(writer: &mut Stream, v: &Value) -> std::io::Result<()> {
     let mut line = v.to_string();
     line.push('\n');
     writer.write_all(line.as_bytes())?;
     writer.flush()
 }
 
-fn answer(line: &str, handler: &Handler, writer: &mut UnixStream) -> (Value, Result<Response>) {
+fn answer(line: &str, handler: &Handler, writer: &mut Stream) -> (Value, Result<Response>) {
     let v: Value = match serde_json::from_str(line) {
         Ok(v) => v,
         Err(e) => return (Value::Null, Err(Error::usage(format!("not JSON: {e}")))),
@@ -184,7 +171,7 @@ fn answer(line: &str, handler: &Handler, writer: &mut UnixStream) -> (Value, Res
         Err(e) => return (id, Err(Error::usage(e))),
     };
     let mut progress = |params: Option<Value>| {
-        if peer_gone(writer) {
+        if writer.peer_gone() {
             return false;
         }
         let Some(params) = params else {

@@ -1006,7 +1006,13 @@ fn a_failed_rename_leaves_no_part_file() {
     let vidcut_av::Error::Io(io) = err else {
         panic!("the encode finished and the rename failed: {err}");
     };
-    assert_eq!(io.kind(), std::io::ErrorKind::IsADirectory, "{io}");
+    // Windows says it is denied.
+    let refused = if cfg!(windows) {
+        std::io::ErrorKind::PermissionDenied
+    } else {
+        std::io::ErrorKind::IsADirectory
+    };
+    assert_eq!(io.kind(), refused, "{io}");
     assert!(
         !export::partial_path(&out).exists(),
         "the finished .part is gone"
@@ -1747,14 +1753,29 @@ fn many_segments_keep_memory_flat() {
 }
 
 fn peak_rss_mb() -> i64 {
-    std::fs::read_to_string("/proc/self/status")
-        .ok()
-        .and_then(|s| {
-            s.lines()
-                .find(|l| l.starts_with("VmHWM:"))
-                .map(|l| l.split_whitespace().nth(1).unwrap().parse::<i64>().unwrap() / 1024)
-        })
-        .unwrap_or(0)
+    #[cfg(unix)]
+    {
+        std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|s| {
+                s.lines()
+                    .find(|l| l.starts_with("VmHWM:"))
+                    .map(|l| l.split_whitespace().nth(1).unwrap().parse::<i64>().unwrap() / 1024)
+            })
+            .unwrap_or(0)
+    }
+    #[cfg(windows)]
+    // SAFETY: fills the counters it is given, their size set first.
+    unsafe {
+        use windows_sys::Win32::System::ProcessStatus::{
+            GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+        };
+        use windows_sys::Win32::System::Threading::GetCurrentProcess;
+        let mut c: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
+        c.cb = size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+        GetProcessMemoryInfo(GetCurrentProcess(), &mut c, c.cb);
+        (c.PeakWorkingSetSize >> 20) as i64
+    }
 }
 
 #[cfg(feature = "gpu-tests")]
