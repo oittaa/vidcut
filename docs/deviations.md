@@ -75,7 +75,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 ## X9. OpenTimelineIO interchange
 - **Resolve:** timelines move between applications as EDL, AAF, XML or OTIO files, imported with File > Import Timeline and exported from File > Export (pp. 527–530, 4159–4160).
   - OTIO comes as `.otio` (the timeline) or `.otioz` (a bundle of the timeline and all of its media).
-  - Importing an `.otioz` unpacks its media into the folder the bundle is in and links them.
+  - Importing an `.otioz` unpacks its media into a folder named after the bundle, next to it, and links them (Studio 21.1.1; versions before it unpacked into the folder the bundle is in).
   - An import creates a new timeline, can apply the file's frame rate to the project, and asks for a folder (searched with its subfolders) when media isn't where the file says.
   - None of this is on the Cut page.
 - **vidcut:** OpenTimelineIO only, both ways (`otio.rs`, `bundle.rs`), in the shapes Resolve writes and reads:
@@ -92,12 +92,12 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
     - In `metadata.Resolve_OTIO`: a link group number joins each clip's video and audio, and the audio names the stream and channels it plays.
     - Clip gain is also written as Resolve's clip volume, track lock and solo as Resolve's.
     - Tracks carry the names given to them (a video track's audio track its video track's), else the ones Resolve gives its own by place: `Video 1`, `Audio 2`.
-    - Resolve's files have no place for the In/Out marks or a track's fader, so Resolve gets neither (checked with Studio 21); vidcut's own import reads them back.
+    - Resolve's files have no place for the In/Out marks or a track's fader, so Resolve gets neither (checked with Studio 21); vidcut's own import reads them back. Resolve drops other programs' metadata, so a timeline that went through Resolve comes back without them (checked with Studio 21.1.1).
     - A still is available for one frame, as Resolve writes it. An image sequence is OTIO's `ImageSequenceReference` (folder, name prefix and suffix, first number, zero padding, rate), whose available range is the picture count at that rate: OTIO counts pictures by truncating the range at the reference's rate, so a project-rate length would be a different number of pictures.
   - **Importing:** `vidcut timeline import cut.otio` (or File > Import Timeline) adds the media to the pool.
     - Video tracks become V1, V2, …, each with the audio that belongs to its clips (the clip's link group, if it has one). Other audio tracks become A1, A2, … (vidcut's own files map back exactly).
     - One project holds one timeline (X2), so the import goes after the last clip, or replaces the timeline with `--replace`; the GUI asks which. An empty timeline takes the file's frame rate, start timecode and track settings.
-    - Resolve's channel map picks a clip's audio stream, and its clip volume the gain. Markers on clips and tracks become timeline markers. Track names other than Resolve's defaults (`Video 1`, `Audio 2`) name the tracks; an audio track whose clips become clips' audio has none to keep it.
+    - Resolve's channel map picks a clip's audio stream, and its clip volume the gain. Markers on clips and tracks become timeline markers. Track names other than Resolve's defaults (`Video 1`, `Audio 2`) name the tracks; an audio track whose clips become clips' audio has none to keep it. A marker's note is its `comment`, or `Resolve_OTIO.Note` when that is empty, as Resolve leaves it. A file without a timeline name, as Resolve writes it, names the timeline after the file.
   - **Finding media:**
     - Media are named as `file://` URLs (escaped or not), plain paths, Windows paths, paths relative to the file, or the URL Resolve kept for offline media.
     - A project folder moved with its timeline file is found without asking: the path's last parts are looked for next to the file.
@@ -108,9 +108,9 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
   - **Left out, with a warning each:** transitions (cuts instead), nested stacks (compound clips), generators, speed changes, clip volume keyframes and fades, clip effects in use (named; Resolve's own count when switched on with a setting off its default, Dynamic Zoom whenever it is on, so the untouched stack it writes on every clip says nothing), and clips that would overlap others on their track.
   - Export → import reproduces a timeline frame for frame, through all three formats and through OpenTimelineIO's own Python library (`tests/cli.rs`, `otio/tests.rs`).
 - **Why:**
-  - OTIO is the user's choice: an open standard that Resolve and other editors read and write, so a cut can move to a finishing tool and back, and agents can write timelines in a documented format instead of vidcut's own.
-  - Writing Resolve's own conventions (plain paths, timecode source ranges, link groups) is what lets Resolve link media and keep audio with its video; other OTIO tools read them as plain OTIO.
-  - A bundle's media go into a folder of their own rather than next to the bundle as Resolve does: two bundles unpacked in one folder (Downloads, say) would otherwise mix their `media/` folders, and one bundle's media can be moved or deleted as one folder.
+  - OTIO is the user's choice: an open standard that Resolve and other editors read and write, so a cut can move to a finishing tool and back, and agents can write timelines in a documented format instead of vidcut's own. Resolve's other formats keep less of a cut: its EDL holds one video track and no audio tracks or markers, its FCPXML (1.10) no markers (checked with Studio 21.1.1).
+  - Writing Resolve's own conventions (plain paths, timecode source ranges, link groups) is what lets Resolve link media and keep audio with its video; other OTIO tools read them as plain OTIO. OpenTimelineIO's own bundler wants `file:` URLs and takes a Windows drive letter (`C:\…`) for a URL scheme, so its bundles of vidcut's Windows files need the paths made URLs first (`tests/cli.rs`).
+  - A bundle's media go into a folder of their own, as Studio 21.1.1 now does too, rather than next to the bundle as Resolve did before: two bundles unpacked in one folder (Downloads, say) would otherwise mix their `media/` folders, and one bundle's media can be moved or deleted as one folder.
 
 ## X10. An MCP server for AI agents
 - **Resolve:** scripting is a Python/Lua API for Studio (Workspace > Scripts, outside the Cut page chapters).
