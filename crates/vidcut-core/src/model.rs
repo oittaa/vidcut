@@ -145,6 +145,8 @@ pub fn proxy_size(width: u32, height: u32, longest: u32) -> (u32, u32) {
 pub struct Media {
     /// `m<N>`, never reused.
     pub id: String,
+    /// Absolute. The project file stores it relative to the project's
+    /// folder when the file is in or under it.
     pub path: PathBuf,
     pub name: String,
     /// File size and modification time (Unix ns) when probed; for an image
@@ -172,7 +174,7 @@ pub struct Media {
 /// the source's presentation timestamps (decision D41, deviation X18).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Proxy {
-    /// Absolute path of the proxy file.
+    /// The proxy file, absolute; stored like [`Media::path`].
     pub path: PathBuf,
     /// [`Media::size`] when the proxy was made.
     pub source_size: u64,

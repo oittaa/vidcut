@@ -513,7 +513,7 @@ fn several_tracks_round_trip() {
     ok(
         &mut f,
         "track.set",
-        json!({"track": "V2", "video_enabled": false}),
+        json!({"track": "V2", "video_enabled": false, "name": "B-roll"}),
     );
     let before = f.editor.project().clone();
     let doc = export(&before, "busy", None, Locations::Absolute).unwrap();
@@ -523,7 +523,12 @@ fn several_tracks_round_trip() {
         .iter()
         .map(|t| t["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, ["V1", "V2", "V1 audio", "V2 audio", "A1", "A2"]);
+    // Named tracks keep their names, V2's audio too; the others are named
+    // as editors name theirs, by place in the file.
+    assert_eq!(
+        names,
+        ["Video 1", "B-roll", "Audio 1", "B-roll", "Music", "Audio 4"]
+    );
 
     let mut g = Fixture::new(&[(10.0, true), (4.0, true), (8.0, false)]);
     g.add_music("music.wav", 20.0);
@@ -609,6 +614,35 @@ fn editor_style_tracks_map_onto_ours() {
     );
 }
 
+#[test]
+fn editor_track_names_name_ours() {
+    // Names given in another editor name the tracks; its defaults don't.
+    let mut doc = editor_style();
+    let tracks = doc["tracks"]["children"].as_array_mut().unwrap();
+    tracks[0]["name"] = json!("Interview");
+    tracks[2]["name"] = json!("Sound");
+    let t = import(&doc, None).unwrap();
+    let names: Vec<(&str, Option<&str>)> = t
+        .tracks
+        .iter()
+        .map(|s| (s.id.as_str(), s.name.as_deref()))
+        .collect();
+    assert_eq!(
+        names,
+        [
+            ("V1", Some("Interview")),
+            ("V2", None),
+            ("A1", Some("Sound"))
+        ]
+    );
+    for name in ["Video 12", "Audio 1", "V2", "A1", "", " "] {
+        assert!(default_track_name(name), "{name:?}");
+    }
+    for name in ["Video", "Audio B", "Voice 1", "A-roll", "VO"] {
+        assert!(!default_track_name(name), "{name:?}");
+    }
+}
+
 /// The clip ids and media paths stripped: what an import must reproduce.
 fn shape(p: &Project) -> Vec<(String, crate::model::Clip, PathBuf)> {
     clips(p)
@@ -655,8 +689,8 @@ fn writes_what_editors_read() {
         doc["metadata"]["Resolve_OTIO"]["Resolve OTIO Meta Version"],
         "1.0"
     );
-    let v1 = otio_clips(otio_track(&doc, "V1"));
-    let audio = otio_clips(otio_track(&doc, "V1 audio"));
+    let v1 = otio_clips(otio_track(&doc, "Video 1"));
+    let audio = otio_clips(otio_track(&doc, "Audio 1"));
     let reference = &v1[0]["media_references"]["DEFAULT_MEDIA"];
     assert_eq!(reference["target_url"], "/media/1.mp4", "a plain path");
     assert_eq!(
@@ -689,7 +723,7 @@ fn writes_what_editors_read() {
     assert_eq!(volume["Effect Name"], "Fairlight Clip Volume and Fades");
     assert_eq!(volume["Parameters"][0]["Parameter Value"], -6.0);
     assert_eq!(audio[0]["effects"], json!([]));
-    let sound = &otio_track(&doc, "V1 audio")["metadata"]["Resolve_OTIO"];
+    let sound = &otio_track(&doc, "Audio 1")["metadata"]["Resolve_OTIO"];
     assert_eq!(sound["Audio Type"], "Stereo");
     assert_eq!(sound["Locked"], false);
     // Markers: a frame long, the note in the editor metadata too.
@@ -732,7 +766,7 @@ fn stills_and_sequences_round_trip() {
     let before = f.editor.project().clone();
     assert_eq!(before.clip("c1").unwrap().source_in, 10);
     let doc = export(&before, "pictures", None, Locations::Absolute).unwrap();
-    let v1 = otio_clips(otio_track(&doc, "V1"));
+    let v1 = otio_clips(otio_track(&doc, "Video 1"));
     let still = &v1[0];
     assert_eq!(still["source_range"]["start_time"]["value"], 0.0);
     assert_eq!(
