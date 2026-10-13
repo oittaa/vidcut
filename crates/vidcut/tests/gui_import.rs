@@ -371,6 +371,27 @@ fn numbered_images_are_asked_about() {
     });
     let listed = call(&h, "media.get", json!({ "media": id })).result;
     assert_eq!(listed["missing"], true);
+    // The viewer says so, as Source Clip and on the timeline (where the
+    // clip is red).
+    call(&h, "viewer.load", json!({ "media": id }));
+    until(&mut harness, "offline in the source", |h| {
+        has(h, "Media Offline")
+    });
+    let clip = call(&h, "edit.append", json!({ "media": id })).result["clip"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let start = h.snapshot().project().unwrap().clip(&clip).unwrap().start;
+    call(&h, "viewer.set", json!({ "mode": "timeline" }));
+    call(
+        &h,
+        "player.seek",
+        json!({ "at": start, "viewer": "timeline" }),
+    );
+    harness.step();
+    until(&mut harness, "offline on the timeline", |h| {
+        has(h, "Media Offline")
+    });
     *folder.lock().unwrap() = Some(disk.clone());
     harness.get_by_label("Relink Media (1)").click();
     until(&mut harness, "the result", |h| has(h, "1 relinked"));
@@ -383,7 +404,7 @@ fn numbered_images_are_asked_about() {
     assert_eq!(m["path"], json!(moved));
     assert!(m.get("missing").is_none(), "{m}");
     until(&mut harness, "no missing file", |h| {
-        !has(h, "Relink Media (")
+        !has(h, "Relink Media (") && !has(h, "Media Offline")
     });
     harness.get_by_label("Close").click();
     until(&mut harness, "the window closed", |h| !has(h, "1 relinked"));

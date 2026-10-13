@@ -474,11 +474,12 @@ impl Workspace {
         };
         let thumbs = std::mem::take(&mut self.thumbs);
         let tiles = self.tiles.take();
-        let waveforms = self.snap.waveforms.clone();
+        let (waveforms, missing) = (self.snap.waveforms.clone(), self.snap.missing.clone());
         let assets = Assets {
             thumbs: &thumbs,
             waveforms: &waveforms,
             tiles: tiles.as_ref(),
+            missing: &missing,
         };
         let look = self.look();
         let smart = (end > 0).then(|| ops::nearest_edit(drawn, playhead));
