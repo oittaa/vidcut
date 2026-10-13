@@ -37,6 +37,22 @@ impl Kind {
         }
     }
 
+    /// The kind a [`name`](Self::name) names.
+    pub fn named(name: &str) -> Option<Self> {
+        [Kind::Nvdec, Kind::Vaapi, Kind::D3d11va]
+            .into_iter()
+            .find(|k| k.name() == name)
+    }
+
+    /// What it is called, for people: `NVDEC`, `VA-API`, `Direct3D 11`.
+    pub fn label(self) -> &'static str {
+        match self {
+            Kind::Nvdec => "NVDEC",
+            Kind::Vaapi => "VA-API",
+            Kind::D3d11va => "Direct3D 11",
+        }
+    }
+
     pub(crate) fn device_type(self) -> ffi::AVHWDeviceType {
         use ffi::AVHWDeviceType as T;
         match self {
@@ -199,13 +215,7 @@ impl GpuDecoder {
     /// The decoder `VIDCUT_HWDEC` names: `kind[:on]`, or `none`.
     fn asked(asked: &str) -> Option<Self> {
         let (kind, on) = asked.split_once(':').unwrap_or((asked, ""));
-        let kind = match kind {
-            "nvdec" => Kind::Nvdec,
-            "vaapi" => Kind::Vaapi,
-            "d3d11va" => Kind::D3d11va,
-            _ => return None,
-        };
-        Self::open(kind, on).ok()
+        Self::open(Kind::named(kind)?, on).ok()
     }
 
     /// The decoders of the GPUs other than NVIDIA's (NVDEC decodes there):
@@ -361,7 +371,13 @@ pub(crate) fn sw_format(frame: &frame::Video) -> format::Pixel {
 /// A frame in GPU memory copied down to memory, in its frames' layout (NV12,
 /// P010) at its own size, keeping its properties: colors, aspect,
 /// timestamp.
-pub(crate) fn download(src: &frame::Video) -> Result<frame::Video> {
+pub fn download(src: &frame::Video) -> Result<frame::Video> {
+    // SAFETY: a valid frame.
+    if unsafe { intel_va(src) }
+        && let Some(f) = mapped_down(src)?
+    {
+        return Ok(f);
+    }
     let mut dst = frame::Video::empty();
     // SAFETY: both frames are valid; the destination is allocated by the
     // transfer, in the source frames' software format.
@@ -373,13 +389,103 @@ pub(crate) fn download(src: &frame::Video) -> Result<frame::Video> {
                 source: ffmpeg::Error::from(ret),
             });
         }
-        let ret = ffi::av_frame_copy_props(dst.as_mut_ptr(), src.as_ptr());
-        if ret < 0 {
-            return Err(Error::Ffmpeg {
-                context: "copying a frame's properties".into(),
-                source: ffmpeg::Error::from(ret),
-            });
+    }
+    props(&mut dst, src)?;
+    Ok(dst)
+}
+
+/// `src` copied out of its surface mapped for reading itself
+/// (`vaDeriveImage`), where FFmpeg's copy-down reads a copy the driver makes
+/// of it (`vaGetImage`): on an Intel N150 a 2160p P010 frame took 15 ms of a
+/// core so, 38 ms FFmpeg's way. `None` when it doesn't map.
+fn mapped_down(src: &frame::Video) -> Result<Option<frame::Video>> {
+    let mut map = frame::Video::empty();
+    let flags = ffi::AV_HWFRAME_MAP_READ as i32 | ffi::AV_HWFRAME_MAP_DIRECT as i32;
+    // SAFETY: a fresh frame, mapped in the frames' own layout; unmapped when
+    // it drops.
+    unsafe {
+        (*map.as_mut_ptr()).format = ffi::AVPixelFormat::AV_PIX_FMT_NONE as i32;
+        if ffi::av_hwframe_map(map.as_mut_ptr(), src.as_ptr(), flags) < 0 {
+            return Ok(None);
         }
     }
-    Ok(dst)
+    let mut dst = frame::Video::new(map.format(), src.width(), src.height());
+    // SAFETY: both frames are valid, of one layout, the mapped one no
+    // smaller.
+    if unsafe { ffi::av_frame_copy(dst.as_mut_ptr(), map.as_ptr()) } < 0 {
+        return Ok(None);
+    }
+    props(&mut dst, src)?;
+    Ok(Some(dst))
+}
+
+/// `src`'s properties onto `dst`.
+fn props(dst: &mut frame::Video, src: &frame::Video) -> Result<()> {
+    // SAFETY: both frames are valid.
+    let ret = unsafe { ffi::av_frame_copy_props(dst.as_mut_ptr(), src.as_ptr()) };
+    if ret < 0 {
+        return Err(Error::Ffmpeg {
+            context: "copying a frame's properties".into(),
+            source: ffmpeg::Error::from(ret),
+        });
+    }
+    Ok(())
+}
+
+/// `frame` is a VA-API frame of Intel's driver (iHD), by the vendor string
+/// libva gives its display.
+///
+/// # Safety
+/// `frame` is a valid frame.
+#[cfg(target_os = "linux")]
+unsafe fn intel_va(frame: &frame::Video) -> bool {
+    use std::ffi::{CStr, c_char, c_void};
+    /// `AVVAAPIDeviceContext`.
+    #[repr(C)]
+    struct VaapiDevice {
+        display: *mut c_void,
+        driver_quirks: std::ffi::c_uint,
+    }
+    type Query = unsafe extern "C" fn(*mut c_void) -> *const c_char;
+    // libva's, loaded with FFmpeg: looked up rather than linked, so a
+    // build of FFmpeg without VA-API needs no libva.
+    static QUERY: OnceLock<Option<Query>> = OnceLock::new();
+    let query = QUERY.get_or_init(|| {
+        // SAFETY: a symbol of the process's, which is libva's function or
+        // nothing.
+        unsafe {
+            let f = libc::dlsym(libc::RTLD_DEFAULT, c"vaQueryVendorString".as_ptr());
+            (!f.is_null()).then(|| std::mem::transmute::<*mut c_void, Query>(f))
+        }
+    });
+    let Some(query) = query else {
+        return false;
+    };
+    // SAFETY: a hardware frame's frames context holds its device's, and a
+    // VA-API device's context is an AVVAAPIDeviceContext with its display.
+    unsafe {
+        let frames = (*frame.as_ptr()).hw_frames_ctx;
+        if frames.is_null() {
+            return false;
+        }
+        let device = (*((*frames).data as *const ffi::AVHWFramesContext)).device_ctx;
+        if device.is_null() || (*device).type_ != ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VAAPI {
+            return false;
+        }
+        let va = (*device).hwctx as *const VaapiDevice;
+        if va.is_null() || (*va).display.is_null() {
+            return false;
+        }
+        let vendor = query((*va).display);
+        !vendor.is_null() && CStr::from_ptr(vendor).to_bytes().starts_with(b"Intel iHD")
+    }
+}
+
+/// VA-API is Linux's.
+///
+/// # Safety
+/// None.
+#[cfg(not(target_os = "linux"))]
+unsafe fn intel_va(_: &frame::Video) -> bool {
+    false
 }

@@ -205,10 +205,7 @@ fn decoding(hwdec: &str) -> Option<(String, String)> {
              or the GPU can't decode this file"
                 .into(),
         ),
-        "nvdec" => gpu("NVDEC"),
-        "vaapi" => gpu("VA-API"),
-        "d3d11va" => gpu("Direct3D 11"),
-        other => gpu(other),
+        other => gpu(vidcut_av::hw::Kind::named(other).map_or(other, |k| k.label())),
     })
 }
 
