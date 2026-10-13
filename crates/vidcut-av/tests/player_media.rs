@@ -12,7 +12,7 @@ mod player_support;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use player_support::cpu_seconds;
+use vidcut_av::cpu_seconds;
 use vidcut_av::player::{Budget, Config, DEFAULT_BUDGET, PacedOutput, Player};
 use vidcut_core::render::{AudioPiece, RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
