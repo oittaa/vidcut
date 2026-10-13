@@ -777,16 +777,16 @@ impl Drop for Frames {
 }
 
 /// Fits frames into an output picture on the GPU, for an encoder on their
-/// device: scaled to the size they are shown at, into the output's layout,
-/// and centered on black where their aspect differs, at even offsets as
-/// the CPU pads. VA-API's with `scale_vaapi` and `pad_vaapi`; Direct3D
-/// 11's on the video processor, into the encoder's own frames (AMF takes
-/// those alone).
+/// device: turned upright, scaled to the size they are shown at, into the
+/// output's layout, and centered on black where their aspect differs, at
+/// even offsets as the CPU pads. VA-API's with `transpose_vaapi`,
+/// `scale_vaapi` and `pad_vaapi`; Direct3D 11's on the video processor,
+/// into the encoder's own frames (AMF takes those alone).
 pub(crate) struct Fitter {
     fitting: Fitting,
-    /// The frames context and frame size it was made for, and the size it
-    /// scales to.
-    input: ((usize, u32, u32), (u32, u32)),
+    /// The frames context and frame size it was made for, the size it
+    /// scales to, and the turn.
+    input: ((usize, u32, u32), (u32, u32), u16),
 }
 
 enum Fitting {
@@ -796,20 +796,22 @@ enum Fitting {
 }
 
 impl Fitter {
-    /// `f` scaled to `fitted` and placed in an `out` picture of `layout`
-    /// (NV12, P010), on the GPU, with its timestamp and colors, its pixels
-    /// square; `fitter` made for frames like it first. Direct3D 11's go
-    /// into `into`, the encoder's frames.
+    /// `f` turned clockwise by `rotation` (0, 90, 180 or 270), scaled to
+    /// `fitted` and placed in an `out` picture of `layout` (NV12, P010), on
+    /// the GPU, with its timestamp and colors, its pixels square; `fitter`
+    /// made for frames like it first. Direct3D 11's go into `into`, the
+    /// encoder's frames.
     pub(crate) fn fit(
         fitter: &mut Option<Fitter>,
         f: &frame::Video,
+        rotation: u16,
         fitted: (u32, u32),
         (w, h): (u32, u32),
         layout: format::Pixel,
         into: Option<&Frames>,
     ) -> Result<frame::Video> {
         let (frames, of) = frames_of(f)?;
-        let input = (of, fitted);
+        let input = (of, fitted, rotation);
         if fitter.as_ref().is_none_or(|x| x.input != input) {
             let fitting = match f.format() {
                 format::Pixel::VAAPI => {
@@ -819,7 +821,14 @@ impl Fitter {
                     } else {
                         "nv12"
                     };
-                    let mut spec = format!("scale_vaapi=w={fw}:h={fh}:format={layout}");
+                    // As the CPU's `transpose` and flips turn them.
+                    let turn = match rotation {
+                        90 => "transpose_vaapi=dir=clock,",
+                        180 => "transpose_vaapi=dir=reversal,",
+                        270 => "transpose_vaapi=dir=cclock,",
+                        _ => "",
+                    };
+                    let mut spec = format!("{turn}scale_vaapi=w={fw}:h={fh}:format={layout}");
                     if fitted != (w, h) {
                         let (x, y) = (((w - fw) / 2) & !1, ((h - fh) / 2) & !1);
                         spec.push_str(&format!(",pad_vaapi=w={w}:h={h}:x={x}:y={y}:color=black"));
@@ -834,7 +843,7 @@ impl Fitter {
                     })?;
                     // SAFETY: the encoder's frames, on the decoder's device.
                     Fitting::D3d11(unsafe {
-                        d3d11::Scaler::into(f, frames, into.as_ptr(), fitted)?
+                        d3d11::Scaler::into(f, frames, into.as_ptr(), fitted, rotation)?
                     })
                 }
                 other => return Err(Error::Invalid(format!("no fitting {other:?} frames"))),
@@ -868,14 +877,17 @@ pub(crate) mod d3d11 {
         D3D11_QUERY_DESC, D3D11_QUERY_EVENT, D3D11_RESOURCE_MISC_SHARED,
         D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_TEX2D_VPIV, D3D11_TEX2D_VPOV, D3D11_VIDEO_COLOR,
         D3D11_VIDEO_COLOR_0, D3D11_VIDEO_COLOR_RGBA, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE,
-        D3D11_VIDEO_PROCESSOR_CONTENT_DESC, D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT,
+        D3D11_VIDEO_PROCESSOR_CAPS, D3D11_VIDEO_PROCESSOR_CONTENT_DESC,
+        D3D11_VIDEO_PROCESSOR_FEATURE_CAPS_ROTATION, D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT,
         D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT, D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC,
         D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC_0, D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC,
-        D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0, D3D11_VIDEO_PROCESSOR_STREAM,
-        D3D11_VIDEO_USAGE_PLAYBACK_NORMAL, D3D11_VPIV_DIMENSION_TEXTURE2D,
-        D3D11_VPOV_DIMENSION_TEXTURE2D, ID3D11Device, ID3D11DeviceContext, ID3D11Query,
-        ID3D11Texture2D, ID3D11VideoContext1, ID3D11VideoDevice, ID3D11VideoProcessor,
-        ID3D11VideoProcessorEnumerator,
+        D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0, D3D11_VIDEO_PROCESSOR_ROTATION,
+        D3D11_VIDEO_PROCESSOR_ROTATION_90, D3D11_VIDEO_PROCESSOR_ROTATION_180,
+        D3D11_VIDEO_PROCESSOR_ROTATION_270, D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY,
+        D3D11_VIDEO_PROCESSOR_STREAM, D3D11_VIDEO_USAGE_PLAYBACK_NORMAL,
+        D3D11_VPIV_DIMENSION_TEXTURE2D, D3D11_VPOV_DIMENSION_TEXTURE2D, ID3D11Device,
+        ID3D11DeviceContext, ID3D11Query, ID3D11Texture2D, ID3D11VideoContext1, ID3D11VideoDevice,
+        ID3D11VideoProcessor, ID3D11VideoProcessorEnumerator,
     };
     use ::windows::Win32::Graphics::Dxgi::Common::{
         DXGI_COLOR_SPACE_TYPE, DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P601,
@@ -1177,6 +1189,8 @@ pub(crate) mod d3d11 {
         /// them (x, y, width, height); the rest is black.
         size: (u32, u32),
         place: (u32, u32, u32, u32),
+        /// The clockwise turn it gives them.
+        rotation: D3D11_VIDEO_PROCESSOR_ROTATION,
         /// The color space the processor is told the frames come in and go
         /// out in: their own, so they're only scaled.
         space: DXGI_COLOR_SPACE_TYPE,
@@ -1204,10 +1218,11 @@ pub(crate) mod d3d11 {
             Self::checked(f, source, layout, size)
         }
 
-        /// Scales frames like `f` (of `source`) to `fitted` and places them
-        /// in the middle of `frames`' (an encoder's), at even offsets as
-        /// the CPU pads, on black, in their layout (10 bits into 8 too);
-        /// checked as [`new`](Self::new) checks.
+        /// Turns frames like `f` (of `source`) clockwise by `rotation`,
+        /// scales them to `fitted` and places them in the middle of
+        /// `frames`' (an encoder's), at even offsets as the CPU pads, on
+        /// black, in their layout (10 bits into 8 too); checked as
+        /// [`new`](Self::new) checks.
         ///
         /// # Safety
         /// `frames` is a live D3D11 frames context on `source`'s device.
@@ -1216,6 +1231,7 @@ pub(crate) mod d3d11 {
             source: *mut ffi::AVBufferRef,
             frames: *mut ffi::AVBufferRef,
             fitted: (u32, u32),
+            rotation: u16,
         ) -> Result<Self> {
             // SAFETY: a live frames context, the encoder's.
             let (layout, size) = unsafe {
@@ -1232,7 +1248,25 @@ pub(crate) mod d3d11 {
                 return Err(Error::Invalid("no memory for frames".into()));
             }
             let input = (f.width(), f.height());
-            Self::made(source, input, frames, size, place, color_space(f))
+            let mut scaler = Self::made(source, input, frames, size, place, color_space(f))?;
+            scaler.rotation = match rotation {
+                90 => D3D11_VIDEO_PROCESSOR_ROTATION_90,
+                180 => D3D11_VIDEO_PROCESSOR_ROTATION_180,
+                270 => D3D11_VIDEO_PROCESSOR_ROTATION_270,
+                _ => D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY,
+            };
+            if scaler.rotation != D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY {
+                let mut caps = D3D11_VIDEO_PROCESSOR_CAPS::default();
+                // SAFETY: the processor's enumerator fills the caps.
+                let turns = unsafe { scaler.enumerator.GetVideoProcessorCaps(&mut caps) }.is_ok()
+                    && caps.FeatureCaps & D3D11_VIDEO_PROCESSOR_FEATURE_CAPS_ROTATION.0 as u32 != 0;
+                if !turns {
+                    return Err(Error::Invalid(
+                        "the video processor doesn't turn pictures".into(),
+                    ));
+                }
+            }
+            Ok(scaler)
         }
 
         /// A scaler of frames like `f` into textures of its own of `layout`
@@ -1338,6 +1372,7 @@ pub(crate) mod d3d11 {
                     processor,
                     size,
                     place,
+                    rotation: D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY,
                     space,
                 }),
                 Err(e) => {
@@ -1503,6 +1538,8 @@ pub(crate) mod d3d11 {
                     c.VideoProcessorSetOutputColorSpace1(p, self.space);
                     // None of the driver's own enhancing.
                     c.VideoProcessorSetStreamAutoProcessingMode(p, 0, false);
+                    let turned = self.rotation != D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY;
+                    c.VideoProcessorSetStreamRotation(p, 0, turned, self.rotation);
                     // The picture alone: the decoder's textures are padded.
                     c.VideoProcessorSetStreamSourceRect(
                         p,
