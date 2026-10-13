@@ -406,3 +406,134 @@ fn real_clips_keep_their_hdr_metadata() {
         }
     }
 }
+
+// ---------------------------------------------------------------- GPU
+
+/// The GPU's encoders write the HDR metadata too (`gpu-tests`): NVENC on
+/// frames scaled on the GPU, kept PQ with HDR10+, and with an SDR clip that
+/// libplacebo converts; VAAPI, which reads the values from frames. Each where
+/// this machine has it.
+#[cfg(feature = "gpu-tests")]
+#[test]
+fn gpu_encoders_write_the_hdr_metadata() {
+    vidcut_av::init();
+    let available = export::encode::detect();
+    let plus = hdr10_source(1000, (1000, 400), true);
+    let sdr = fixture::ensure(
+        &FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 30).no_audio(),
+    )
+    .unwrap();
+    let want = HdrMeta {
+        max_nits: 1000,
+        light: Some((1000, 400)),
+        hdr10plus: true,
+    }
+    .values();
+    let dir = tempfile::tempdir().unwrap();
+    let mut tried = 0;
+    for (codec, kind, name, container) in [
+        (
+            VCodec::Hevc,
+            EncoderChoice::Nvenc,
+            "hevc_nvenc",
+            OutContainer::Mp4,
+        ),
+        (
+            VCodec::Av1,
+            EncoderChoice::Nvenc,
+            "av1_nvenc",
+            OutContainer::Mkv,
+        ),
+        (
+            VCodec::Hevc,
+            EncoderChoice::Vaapi,
+            "hevc_vaapi",
+            OutContainer::Mkv,
+        ),
+    ] {
+        if !available
+            .encoders
+            .iter()
+            .any(|e| e.ok && e.encoder == name && e.pixel == "p010le")
+        {
+            eprintln!("skipping {name}: not on this machine");
+            continue;
+        }
+        tried += 1;
+        let mut s = settings(codec, container, HdrMode::Pq);
+        let v = s.video.as_mut().unwrap();
+        (v.encoder, v.speed) = (kind, None);
+
+        // Kept PQ, scaled to 640×360: each frame's own HDR10+.
+        let mut p = plan(vec![piece(&plus, 5, 20)]);
+        (p.width, p.height) = (640, 360);
+        let out = dir.path().join(format!("{name}.{}", container.extension()));
+        let r = export::run(
+            &p,
+            &s,
+            &out,
+            &available,
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
+        assert_eq!(r.video_encoder.as_deref(), Some(name));
+        assert_eq!(r.metadata.unwrap().mode, HdrMetadata::Hdr10plus, "{name}");
+        let boxes = stream_values(&out);
+        assert_eq!(boxes.light, want.light, "{name}: the container");
+        assert!(boxes.mastering.is_some(), "{name}: the container");
+        let alone = hdr::read_frames(&out, false, usize::MAX).unwrap();
+        assert_eq!(alone.len(), 20, "{name}");
+        let in_band = alone.iter().filter(|f| f.metadata.light.is_some()).count();
+        eprintln!("{name}: static values in the bitstream on {in_band} of 20 frames");
+        assert!(in_band > 0, "{name}: no static values in the bitstream");
+        for f in alone.iter().filter(|f| f.metadata.light.is_some()) {
+            assert_eq!(f.metadata.light, want.light, "{name}: frame {}", f.pts);
+            let m = f.metadata.mastering.expect("a mastering display with them");
+            let w = want.mastering.unwrap();
+            assert!(
+                close(m.max_nits, w.max_nits) && close(m.min_nits, w.min_nits),
+                "{name}: {m:?}"
+            );
+            assert!(
+                m.primaries
+                    .iter()
+                    .flatten()
+                    .zip(w.primaries.iter().flatten())
+                    .all(|(a, b)| close(*a, *b)),
+                "{name}: {m:?}"
+            );
+        }
+        for (i, f) in alone.iter().enumerate() {
+            assert_eq!(
+                f.hdr10plus.as_deref(),
+                Some(fixture::hdr10plus_t35(5 + i as u32).as_slice()),
+                "{name}: HDR10+ of frame {i}"
+            );
+        }
+
+        // With an SDR clip (converted into PQ, by libplacebo on NVENC):
+        // the widest values, and no HDR10+.
+        let p = plan(vec![piece(&sdr, 0, 10), piece(&plus, 0, 10)]);
+        let out = dir
+            .path()
+            .join(format!("{name}-mixed.{}", container.extension()));
+        let r = export::run(
+            &p,
+            &s,
+            &out,
+            &available,
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
+        assert_eq!(r.metadata.unwrap().mode, HdrMetadata::Static, "{name}");
+        assert_eq!(stream_values(&out).light, want.light, "{name}: mixed");
+        let frames = hdr::read_frames(&out, true, usize::MAX).unwrap();
+        assert!(
+            frames.iter().all(|f| f.hdr10plus.is_none()),
+            "{name}: mixed"
+        );
+    }
+    assert!(tried > 0, "no GPU encoder of HEVC or AV1 here");
+}

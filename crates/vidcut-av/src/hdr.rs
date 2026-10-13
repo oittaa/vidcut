@@ -456,6 +456,203 @@ pub fn insert_hdr10plus(packet: &mut ffmpeg::Packet, id: codec::Id, t35: &[u8]) 
     Ok(())
 }
 
+/// Puts `s` into an encoded HEVC or AV1 keyframe packet that doesn't carry
+/// it yet: a mastering display colour volume (137) and content light level
+/// (144) SEI, or HDR_MDCV and HDR_CLL metadata OBUs. Encoders that write
+/// none (NVENC built without its SDK 13 headers) then carry them in the
+/// bitstream too; those that do keep theirs.
+pub fn insert_static(packet: &mut ffmpeg::Packet, id: codec::Id, s: &Static) -> Result<()> {
+    if s.is_empty() || !packet.is_key() {
+        return Ok(());
+    }
+    let Some(data) = packet.data() else {
+        return Ok(());
+    };
+    let out = match id {
+        codec::Id::HEVC if !hevc_has_static(data) => hevc_with_static(data, s),
+        codec::Id::AV1 if !av1_has_static(data) => av1_with_static(data, s),
+        _ => return Ok(()),
+    };
+    let Some(out) = out else {
+        return Ok(());
+    };
+    use ffmpeg::packet::{Mut, Ref};
+    let mut new = ffmpeg::Packet::copy(&out);
+    if unsafe { ffi::av_packet_copy_props(new.as_mut_ptr(), packet.as_ptr()) } < 0 {
+        return Err(Error::Invalid("out of memory for HDR metadata".into()));
+    }
+    *packet = new;
+    Ok(())
+}
+
+/// Removes emulation prevention bytes.
+fn unescape(nal: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(nal.len());
+    let mut zeros = 0;
+    for &b in nal {
+        if zeros >= 2 && b == 3 {
+            zeros = 0;
+            continue;
+        }
+        out.push(b);
+        zeros = if b == 0 { zeros + 1 } else { 0 };
+    }
+    out
+}
+
+/// The payload types of an SEI NAL unit's messages (its RBSP after the
+/// two header bytes).
+fn sei_types(rbsp: &[u8]) -> Vec<usize> {
+    let mut types = Vec::new();
+    let mut at = 0;
+    let ff = |at: &mut usize| -> Option<usize> {
+        let mut v = 0;
+        loop {
+            let b = *rbsp.get(*at)?;
+            *at += 1;
+            v += usize::from(b);
+            if b != 255 {
+                return Some(v);
+            }
+        }
+    };
+    // Messages until the trailing bits.
+    while at < rbsp.len() && !(at + 1 == rbsp.len() && rbsp[at] == 0x80) {
+        let (Some(t), Some(size)) = (ff(&mut at), ff(&mut at)) else {
+            break;
+        };
+        types.push(t);
+        at += size;
+    }
+    types
+}
+
+fn hevc_has_static(data: &[u8]) -> bool {
+    let Some((_, units)) = nal_units(data) else {
+        return false;
+    };
+    units.iter().any(|&(_, s, e)| {
+        e > s + 2
+            && (data[s] >> 1) & 0x3F == 39
+            && sei_types(&unescape(&data[s + 2..e]))
+                .iter()
+                .any(|&t| t == 137 || t == 144)
+    })
+}
+
+fn hevc_with_static(data: &[u8], s: &Static) -> Option<Vec<u8>> {
+    let mut rbsp = Vec::new();
+    if let Some(m) = s.mastering {
+        let c = |v: f64| ((v * 50_000.0).round() as u16).to_be_bytes();
+        let l = |v: f64| ((v * 10_000.0).round() as u32).to_be_bytes();
+        let mut payload = Vec::with_capacity(24);
+        // HEVC orders the primaries green, blue, red.
+        for xy in [m.primaries[1], m.primaries[2], m.primaries[0], m.white] {
+            payload.extend_from_slice(&c(xy[0]));
+            payload.extend_from_slice(&c(xy[1]));
+        }
+        payload.extend_from_slice(&l(m.max_nits));
+        payload.extend_from_slice(&l(m.min_nits));
+        ff_coded(137, &mut rbsp);
+        ff_coded(payload.len(), &mut rbsp);
+        rbsp.extend(payload);
+    }
+    if let Some(light) = s.light {
+        let v = |n: u32| (n.min(u32::from(u16::MAX)) as u16).to_be_bytes();
+        ff_coded(144, &mut rbsp);
+        ff_coded(4, &mut rbsp);
+        rbsp.extend_from_slice(&v(light.max_cll));
+        rbsp.extend_from_slice(&v(light.max_fall));
+    }
+    rbsp.push(0x80);
+    let (annex_b, units) = nal_units(data)?;
+    let &(prefix, start, _) = units
+        .iter()
+        .find(|&&(_, s, e)| e > s + 1 && (data[s] >> 1) & 0x3F < 32)?;
+    let mut sei = vec![39 << 1, data[start + 1] & 0x07];
+    sei.extend(escape(&rbsp));
+    let mut out = Vec::with_capacity(data.len() + sei.len() + 4);
+    out.extend_from_slice(&data[..prefix]);
+    if annex_b {
+        out.extend_from_slice(&[0, 0, 0, 1]);
+    } else {
+        out.extend_from_slice(&(sei.len() as u32).to_be_bytes());
+    }
+    out.extend_from_slice(&sei);
+    out.extend_from_slice(&data[prefix..]);
+    Some(out)
+}
+
+/// An AV1 temporal unit's OBUs: (type, start of the OBU, start of its
+/// payload, end).
+fn obus(data: &[u8]) -> Option<Vec<(u8, usize, usize, usize)>> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at < data.len() {
+        let start = at;
+        let header = data[at];
+        at += 1 + usize::from(header & 0x04 != 0);
+        let size = if header & 0x02 != 0 {
+            read_leb128(data, &mut at)?
+        } else {
+            data.len().checked_sub(at)?
+        };
+        let end = at.checked_add(size).filter(|&e| e <= data.len())?;
+        out.push(((header >> 3) & 0x0F, start, at, end));
+        at = end;
+    }
+    Some(out)
+}
+
+fn av1_has_static(data: &[u8]) -> bool {
+    obus(data).is_some_and(|o| {
+        o.iter().any(|&(kind, _, p, e)| {
+            let mut at = p;
+            kind == 5 && matches!(read_leb128(&data[..e], &mut at), Some(1 | 2))
+        })
+    })
+}
+
+fn av1_with_static(data: &[u8], s: &Static) -> Option<Vec<u8>> {
+    let obu = |metadata_type: usize, body: &[u8]| {
+        let mut payload = Vec::new();
+        leb128(metadata_type, &mut payload);
+        payload.extend_from_slice(body);
+        payload.push(0x80);
+        let mut o = vec![(5 << 3) | 0x02];
+        leb128(payload.len(), &mut o);
+        o.extend(payload);
+        o
+    };
+    let mut add = Vec::new();
+    if let Some(light) = s.light {
+        let v = |n: u32| (n.min(u32::from(u16::MAX)) as u16).to_be_bytes();
+        add.extend(obu(1, &[v(light.max_cll), v(light.max_fall)].concat()));
+    }
+    if let Some(m) = s.mastering {
+        // Chromaticity in 0.16 fixed point, red, green, blue; luminance in
+        // 24.8 (max) and 18.14 (min).
+        let c = |v: f64| ((v * 65_536.0).round().min(65_535.0) as u16).to_be_bytes();
+        let mut body = Vec::with_capacity(24);
+        for xy in [m.primaries[0], m.primaries[1], m.primaries[2], m.white] {
+            body.extend_from_slice(&c(xy[0]));
+            body.extend_from_slice(&c(xy[1]));
+        }
+        body.extend_from_slice(&((m.max_nits * 256.0).round() as u32).to_be_bytes());
+        body.extend_from_slice(&((m.min_nits * 16_384.0).round() as u32).to_be_bytes());
+        add.extend(obu(2, &body));
+    }
+    let first = obus(data)?
+        .into_iter()
+        .find(|&(kind, ..)| kind == 3 || kind == 6)?
+        .1;
+    let mut out = Vec::with_capacity(data.len() + add.len());
+    out.extend_from_slice(&data[..first]);
+    out.extend(add);
+    out.extend_from_slice(&data[first..]);
+    Some(out)
+}
+
 /// Inserts emulation prevention bytes: no `00 00 0x` with x ≤ 3 in an RBSP.
 fn escape(rbsp: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(rbsp.len() + rbsp.len() / 64 + 4);
@@ -700,6 +897,37 @@ mod tests {
             .map(|&(_, s, _)| (out[s] >> 1) & 0x3F)
             .collect();
         assert_eq!(types, [32, 39, 19]);
+    }
+
+    #[test]
+    fn static_values_go_into_keyframes_without_them() {
+        let s = Static {
+            mastering: Some(MasteringDisplay {
+                primaries: [[0.68, 0.32], [0.265, 0.69], [0.15, 0.06]],
+                white: [0.3127, 0.329],
+                min_nits: 0.0001,
+                max_nits: 1000.0,
+            }),
+            light: Some(LightLevel {
+                max_cll: 1000,
+                max_fall: 400,
+            }),
+        };
+        let au = [0, 0, 0, 1, 64, 1, 0xAA, 0, 0, 1, 38, 1, 0xBB];
+        assert!(!hevc_has_static(&au));
+        let out = hevc_with_static(&au, &s).unwrap();
+        assert!(hevc_has_static(&out));
+        let (_, units) = nal_units(&out).unwrap();
+        let (_, st, e) = units[1];
+        assert_eq!(sei_types(&unescape(&out[st + 2..e])), [137, 144]);
+        // Green first: 0.265 × 50000 = 13250.
+        assert_eq!(&out[st + 4..st + 6], &13_250u16.to_be_bytes());
+        let tu = [0x12, 0, 0x0A, 2, 0xAA, 0xBB, 0x32, 1, 0xCC];
+        assert!(!av1_has_static(&tu));
+        let out = av1_with_static(&tu, &s).unwrap();
+        assert!(av1_has_static(&out));
+        let kinds: Vec<u8> = obus(&out).unwrap().iter().map(|o| o.0).collect();
+        assert_eq!(kinds, [2, 1, 5, 5, 6]);
     }
 
     #[test]

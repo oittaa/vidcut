@@ -424,6 +424,8 @@ struct VideoOut {
     /// HEVC or AV1 keeping HDR10+, which vidcut puts into the packets:
     /// each frame's by pts.
     hdr10plus: Option<(ffmpeg::codec::Id, std::collections::HashMap<i64, Vec<u8>>)>,
+    /// The codec, for static values put into keyframes that lack them.
+    codec: ffmpeg::codec::Id,
 }
 
 impl VideoOut {
@@ -435,6 +437,7 @@ impl VideoOut {
             {
                 crate::hdr::insert_hdr10plus(&mut p, *id, &t35)?;
             }
+            crate::hdr::insert_static(&mut p, self.codec, &self.metadata)?;
             p.set_stream(0);
             p.set_duration(1);
             p.rescale_ts(self.enc_tb, self.stream_tb);
@@ -663,6 +666,7 @@ fn encode(
                 _pass_files: pass_files,
                 metadata: enc.metadata,
                 hdr10plus,
+                codec: id,
             })
         }
         None => None,
