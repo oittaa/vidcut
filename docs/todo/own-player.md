@@ -4,10 +4,8 @@
 
 The GUI already plays through the engine ([player.md](../decisions/player.md), [preview.md](../decisions/preview.md)). Still open:
 
-- **More decoders into the engine's pictures**, through FFmpeg's hardware contexts:
-  - Linux: VAAPI (AMD, Intel) by the NVDEC path (`VideoReader::open_nvdec_or_cpu`), or Vulkan Video (H.264, HEVC, AV1 on NVIDIA, AMD and Intel).
-  - Windows: Vulkan Video, or D3D11/D3D12.
-  - macOS: VideoToolbox, into Metal textures through IOSurface.
+- **Other GPUs' pictures shown from video memory.** VA-API (Linux) and Direct3D 11 (Windows) decode into the engine's pictures, copied down as they are decoded (preview.md §3). Shown from there, as NVDEC's are: VA-API's surfaces exported as DMA-BUFs into Vulkan, Direct3D 11's textures shared with Vulkan, or Vulkan Video decoding (H.264, HEVC, AV1 on NVIDIA, AMD and Intel), whose frames are Vulkan images already.
+- **macOS:** VideoToolbox, into Metal textures through IOSurface.
 - **Encoding from GPU memory:** NVENC takes CUDA frames, VAAPI its surfaces, VideoToolbox its pixel buffers; scaling stays on the GPU (FFmpeg's CUDA, VAAPI and Vulkan scalers).
 - **Still open in the engine:** choosing the audio device.
 - **Backward play right after a seek** waits once for the first window behind it, a GOP of decoding: with 2160p60 0.27 s on the CPU and 0.47 s for H.264 on NVDEC (its decoder is made anew at every seek, gotchas.md). After that, 20 s backward across keyframes shows 96–100% of the frames at the automatic budget.

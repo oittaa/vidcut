@@ -206,6 +206,8 @@ fn decoding(hwdec: &str) -> Option<(String, String)> {
                 .into(),
         ),
         "nvdec" => gpu("NVDEC"),
+        "vaapi" => gpu("VA-API"),
+        "d3d11va" => gpu("Direct3D 11"),
         other => gpu(other),
     })
 }
@@ -1602,5 +1604,9 @@ mod tests {
         assert_eq!(decoding(""), None);
         assert_eq!(decoding("no").unwrap().0, "decoding on the CPU");
         assert_eq!(decoding("nvdec").unwrap().0, "decoding on the GPU (NVDEC)");
+        assert_eq!(
+            decoding("d3d11va").unwrap().0,
+            "decoding on the GPU (Direct3D 11)"
+        );
     }
 }

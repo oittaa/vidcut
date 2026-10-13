@@ -287,6 +287,8 @@ impl Player {
             audio_scrubbing: false,
             on_picture: Some(self.on_picture.clone()),
             hardware: self.gpu,
+            // The best this computer has (`VIDCUT_HWDEC` picks another).
+            gpu: None,
             gpu_pictures: self.gpu_pictures,
         };
         self.audio_error = None;
@@ -576,12 +578,13 @@ impl Player {
     }
 }
 
-/// `player.state`'s `hwdec`: `nvdec` while the GPU decodes the picture
-/// shown, `no` while the CPU does; empty before any.
+/// `player.state`'s `hwdec`: the GPU's decoder (`nvdec`, `vaapi`, `d3d11va`)
+/// while it decodes the picture shown, `no` while the CPU does; empty
+/// before any.
 fn hwdec(decoder: Option<Decoder>) -> &'static str {
     match decoder {
-        Some(Decoder::Nvdec) => "nvdec",
         Some(Decoder::Cpu) => "no",
+        Some(gpu) => gpu.name(),
         None => "",
     }
 }

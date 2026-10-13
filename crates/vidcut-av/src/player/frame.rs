@@ -91,7 +91,7 @@ impl Picture {
 
     /// The samples' layout; for a GPU surface, that of its frames context.
     pub fn layout(&self) -> Layout {
-        match crate::cuda::sw_format(&self.frame) {
+        match crate::hw::sw_format(&self.frame) {
             format::Pixel::NV12 => Layout::Nv12,
             format::Pixel::P010LE => Layout::P010,
             _ => Layout::Yuv420p,
@@ -132,7 +132,7 @@ impl Picture {
     pub fn copied_down(&self) -> Result<Picture> {
         let frame = match self.memory() {
             Memory::Cpu => crate::export::video::frame_ref(&self.frame)?,
-            _ => crate::cuda::download(&self.frame)?,
+            _ => crate::hw::download(&self.frame)?,
         };
         Ok(Self::new(frame, self.rotation, self.decoder))
     }
@@ -182,7 +182,7 @@ fn bytes_of(frame: &frame::Video) -> usize {
     // SAFETY: a size computation on plain numbers.
     let n = unsafe {
         ffmpeg::ffi::av_image_get_buffer_size(
-            ffmpeg::ffi::AVPixelFormat::from(crate::cuda::sw_format(frame)),
+            ffmpeg::ffi::AVPixelFormat::from(crate::hw::sw_format(frame)),
             w,
             h,
             1,

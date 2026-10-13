@@ -31,26 +31,7 @@ use crate::color::{GpuColor, Tags};
 use crate::decode::VideoReader;
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, ffi, filter, format, frame};
-
-/// A reference to one of FFmpeg's hardware device contexts.
-struct Device(*mut ffi::AVBufferRef);
-
-// SAFETY: a reference to a hardware device context may be used, and
-// dropped, on any thread.
-unsafe impl Send for Device {}
-unsafe impl Sync for Device {}
-
-impl Clone for Device {
-    fn clone(&self) -> Self {
-        Self(unsafe { ffi::av_buffer_ref(self.0) })
-    }
-}
-
-impl Drop for Device {
-    fn drop(&mut self) {
-        unsafe { ffi::av_buffer_unref(&mut self.0) };
-    }
-}
+use crate::hw::Device;
 
 /// A CUDA device: NVDEC, the CUDA filters and NVENC share it.
 #[derive(Clone)]
@@ -272,48 +253,6 @@ impl CudaFrames {
         hw.set_pts(src.pts());
         Ok(hw)
     }
-}
-
-/// The layout of a frame in GPU memory: its frames context's software
-/// format (NV12, P010...); a frame in memory's own.
-pub(crate) fn sw_format(frame: &frame::Video) -> format::Pixel {
-    // SAFETY: a hardware frame holds a reference to its frames context,
-    // whose data is an AVHWFramesContext.
-    unsafe {
-        let ctx = (*frame.as_ptr()).hw_frames_ctx;
-        if ctx.is_null() {
-            frame.format()
-        } else {
-            let frames = (*ctx).data as *const ffi::AVHWFramesContext;
-            format::Pixel::from((*frames).sw_format)
-        }
-    }
-}
-
-/// A frame in GPU memory copied down to memory, in its frames' layout (NV12,
-/// P010) at its own size, keeping its properties: colors, aspect,
-/// timestamp.
-pub(crate) fn download(src: &frame::Video) -> Result<frame::Video> {
-    let mut dst = frame::Video::empty();
-    // SAFETY: both frames are valid; the destination is allocated by the
-    // transfer, in the source frames' software format.
-    unsafe {
-        let ret = ffi::av_hwframe_transfer_data(dst.as_mut_ptr(), src.as_ptr(), 0);
-        if ret < 0 {
-            return Err(Error::Ffmpeg {
-                context: "copying a frame down from the GPU".into(),
-                source: ffmpeg::Error::from(ret),
-            });
-        }
-        let ret = ffi::av_frame_copy_props(dst.as_mut_ptr(), src.as_ptr());
-        if ret < 0 {
-            return Err(Error::Ffmpeg {
-                context: "copying a frame's properties".into(),
-                source: ffmpeg::Error::from(ret),
-            });
-        }
-    }
-    Ok(dst)
 }
 
 /// Where libplacebo keeps the shaders it compiles (`keep_shaders_in`).

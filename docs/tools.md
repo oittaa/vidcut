@@ -23,10 +23,11 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `packets FILE [FROM TO]`: video packets in decode order, with pts, dts and keyframe flags (open-GOP questions).
 - `filmstrip FILE OUTDIR [N]`: pool thumbnails, timed.
 - `tiles FILE [HEIGHT]`: timeline filmstrip tiles, timed at spacings from 0.25 to 30 s.
-- `decode_speed FILE [FRAMES]`: frames a second and seek times decoding on the CPU and on NVDEC.
+- `decode_speed FILE [FRAMES]`: frames a second and seek times decoding on the CPU and on each GPU decoder (NVDEC; VA-API on each render node; Direct3D 11 on each adapter).
 - `passes FILE START_S SECONDS CODEC ENCODER MBPS [key=value…]` (release build): exports a stretch at a bitrate (`qN`: constant quality) with `video.*` settings such as `passes=2 first_pass=full` or `multipass=full lookahead=0`, and prints the bitrate reached, the time and the luma PSNR (spec D45).
 
 **Preview debugging:**
 - `VIDCUT_DEBUG_PLAYER=1` traces to stderr what the player engines decode, the session's presents, what the viewer thread draws, key presses and timeline gestures.
 - `tests/gui.rs` sets it for its GUI. A failed run keeps its temp dir, which the failure names: the screenshots and the GUI's stderr.
+- `VIDCUT_HWDEC` picks the GPU decoder the player uses instead of the best one: `nvdec`, `vaapi` (`vaapi:/dev/dri/renderD129` for a render node), `d3d11va` (`d3d11va:1` for an adapter by its index) or `none`.
 - `WGPU_BACKEND` (`vulkan`, `metal`, `dx12`) and `WGPU_POWER_PREF` (`low`, `high`) pick wgpu's backend and adapter (eframe reads them); `WGPU_VALIDATION=0` turns the validation layers off in debug builds.

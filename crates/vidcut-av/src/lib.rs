@@ -13,6 +13,7 @@ pub mod error;
 pub mod export;
 pub mod fixture;
 pub mod hdr;
+pub mod hw;
 pub mod light;
 pub mod player;
 pub mod probe;

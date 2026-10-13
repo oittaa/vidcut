@@ -250,9 +250,9 @@ struct Source {
     /// first frame), when the export's frames stay on the GPU.
     on_gpu: bool,
     scaler: Option<crate::cuda::CudaPictures>,
-    /// The reader decodes on NVDEC: for an export on the GPU (`on_gpu`), or
-    /// for frames as decoded, copied down from the GPU (`decode_on`).
-    nvdec: bool,
+    /// The GPU the reader decodes on: NVDEC for an export on the GPU
+    /// (`on_gpu`), or any for frames as decoded (`decode_on`).
+    decoder: Option<crate::hw::Kind>,
 }
 
 /// What a source needs to decode on NVDEC for an export whose frames stay
@@ -303,21 +303,21 @@ impl Source {
         target: f64,
         pictures: Pictures,
         gpu: Option<&GpuSide>,
-        nvdec: Option<&crate::cuda::CudaDevice>,
+        decoder: Option<&crate::hw::GpuDecoder>,
         measure: bool,
     ) -> Result<Source> {
         let video = pictures == Pictures::Video;
         let on_gpu = gpu.filter(|_| video).and_then(|g| gpu_reader(input, g));
         let (reader, scaler) = match on_gpu {
             Some((r, s)) => (r, Some(s)),
-            // Frames as decoded: on NVDEC when it decodes the stream.
-            None => match nvdec.filter(|_| video) {
-                Some(d) => (VideoReader::open_nvdec_or_cpu(input, d)?, None),
+            // Frames as decoded: on the GPU when it decodes the stream.
+            None => match decoder.filter(|_| video) {
+                Some(d) => (VideoReader::open_gpu_or_cpu(input, d)?, None),
                 None => (VideoReader::open_input(input)?, None),
             },
         };
         let on_gpu = scaler.is_some();
-        let nvdec = reader.on_nvdec();
+        let decoder = reader.gpu();
         let tb = reader.time_base();
         let mut source = Source {
             reader,
@@ -333,7 +333,7 @@ impl Source {
             pictures,
             on_gpu,
             scaler,
-            nvdec,
+            decoder,
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
@@ -361,20 +361,20 @@ impl Source {
         Ok(())
     }
 
-    /// Opens `input` without decoding anything yet: on NVDEC (`nvdec`)
+    /// Opens `input` without decoding anything yet: on the GPU (`decoder`)
     /// when it decodes the stream. `measure` as for [`open`](Self::open).
     fn bare(
         input: &Input,
         origin: f64,
         pictures: Pictures,
-        nvdec: Option<&crate::cuda::CudaDevice>,
+        decoder: Option<&crate::hw::GpuDecoder>,
         measure: bool,
     ) -> Result<Source> {
-        let reader = match nvdec {
-            Some(d) => VideoReader::open_nvdec_or_cpu(input, d)?,
+        let reader = match decoder {
+            Some(d) => VideoReader::open_gpu_or_cpu(input, d)?,
             None => VideoReader::open_input(input)?,
         };
-        let nvdec = reader.on_nvdec();
+        let decoder = reader.gpu();
         let tb = reader.time_base();
         Ok(Source {
             reader,
@@ -390,7 +390,7 @@ impl Source {
             pictures,
             on_gpu: false,
             scaler: None,
-            nvdec,
+            decoder,
         })
     }
 
@@ -523,15 +523,15 @@ pub struct VideoFrames {
     /// Frames as decoded (`decoded`): each picture's own size and colors,
     /// in a layout a display takes.
     decoded: Option<Relayout>,
-    /// Frames as decoded come from NVDEC where it decodes the stream, and
-    /// are copied down from the GPU (`decode_on`) unless they stay there
+    /// Frames as decoded come from the GPU where it decodes the stream, and
+    /// are copied down from it (`decode_on`) unless they stay there
     /// (`keep_on_gpu`).
-    nvdec: Option<crate::cuda::CudaDevice>,
+    decoder: Option<crate::hw::GpuDecoder>,
     keep_on_gpu: bool,
     /// The clockwise turn that shows the last frame given upright.
     rotation: u16,
-    /// The last frame given was decoded on NVDEC.
-    last_nvdec: bool,
+    /// The GPU that decoded the last frame given.
+    last_decoder: Option<crate::hw::Kind>,
     /// The dynamic HDR metadata each output frame keeps from its source
     /// frame (decision D46). Other HDR metadata of the sources goes.
     dynamic: crate::hdr::Dynamic,
@@ -674,10 +674,10 @@ impl VideoFrames {
             target,
             gpu: None,
             decoded: None,
-            nvdec: None,
+            decoder: None,
             keep_on_gpu: false,
             rotation: 0,
-            last_nvdec: false,
+            last_decoder: None,
             dynamic: Default::default(),
             light: Default::default(),
             last_dolby_vision: frame::Video::empty(),
@@ -695,28 +695,29 @@ impl VideoFrames {
         self
     }
 
-    /// Frames as decoded ([`decoded`](Self::decoded)) decode on NVDEC
-    /// (`device`) where it decodes the stream
-    /// ([`VideoReader::open_nvdec_or_cpu`]), and are copied down to memory at
-    /// their own size: the same frames, with the same timestamps and
-    /// colors. Other streams, stills and image sequences decode on the CPU.
-    pub fn decode_on(mut self, device: crate::cuda::CudaDevice) -> Self {
-        self.nvdec = Some(device);
+    /// Frames as decoded ([`decoded`](Self::decoded)) decode on `gpu` where
+    /// it decodes the stream ([`VideoReader::open_gpu_or_cpu`]), and are
+    /// copied down to memory at their own size: the same frames, with the
+    /// same timestamps and colors. Other streams, stills and image
+    /// sequences decode on the CPU.
+    pub fn decode_on(mut self, gpu: crate::hw::GpuDecoder) -> Self {
+        self.decoder = Some(gpu);
         self
     }
 
     /// Frames NVDEC decoded ([`decode_on`](Self::decode_on)) stay in GPU
     /// memory when a display takes them as they are (NV12, P010): for a
-    /// display that shows them from there. Others are copied down.
+    /// display that shows them from there. Others, and other GPUs', are
+    /// copied down.
     pub fn keep_on_gpu(mut self) -> Self {
         self.keep_on_gpu = true;
         self
     }
 
-    /// The last frame given was decoded on NVDEC (false for black, and for
+    /// The GPU that decoded the last frame given (`None` for black, and for
     /// frames decoded on the CPU).
-    pub fn on_nvdec(&self) -> bool {
-        self.last_nvdec
+    pub fn decoded_on(&self) -> Option<crate::hw::Kind> {
+        self.last_decoder
     }
 
     /// The clockwise turn (0, 90, 180 or 270) that shows the last frame
@@ -811,7 +812,7 @@ impl VideoFrames {
                 VideoPiece::Black { .. } if !picture => Ok(Some(None)),
                 VideoPiece::Black { .. } => {
                     self.rotation = 0;
-                    self.last_nvdec = false;
+                    self.last_decoder = None;
                     let black = frame_ref(self.black()?)?;
                     let mut out = match &self.gpu {
                         Some(g) => g.frames.upload(&black)?,
@@ -849,7 +850,7 @@ impl VideoFrames {
                     let k = if still { 0 } else { k };
                     if picture {
                         self.rotation = self.source.as_ref().map_or(0, |s| s.reader.rotation());
-                        self.last_nvdec = self.source.as_ref().is_some_and(|s| s.nvdec);
+                        self.last_decoder = self.source.as_ref().and_then(|s| s.decoder);
                         self.source_frame(k).map(|f| Some(Some(f)))
                     } else {
                         self.pass_source_frame(k).map(|()| Some(None))
@@ -894,7 +895,7 @@ impl VideoFrames {
                 &input,
                 *origin,
                 Pictures::Video,
-                self.nvdec.as_ref(),
+                self.decoder.as_ref(),
                 self.measures(&input),
             )?,
         };
@@ -980,7 +981,7 @@ impl VideoFrames {
                     target,
                     pictures,
                     self.gpu.as_ref().map(|g| &g.side),
-                    self.nvdec.as_ref(),
+                    self.decoder.as_ref(),
                     self.measures(input),
                 )?,
             },
@@ -1025,7 +1026,7 @@ impl VideoFrames {
         }
         let target = self.target(origin, source_frame);
         let gpu = self.gpu.as_ref().map(|g| g.side.clone());
-        let nvdec = self.nvdec.clone();
+        let decoder = self.decoder.clone();
         let measure = self.measures(&input);
         let key = (input.clone(), origin.to_bits(), source_frame);
         self.ahead.start(i, key, move || {
@@ -1036,7 +1037,7 @@ impl VideoFrames {
                 target,
                 pictures,
                 gpu.as_ref(),
-                nvdec.as_ref(),
+                decoder.as_ref(),
                 measure,
             )
         });
@@ -1064,13 +1065,14 @@ impl VideoFrames {
         if let Some(relayout) = self.decoded.as_mut() {
             if changed || src.normalized.is_none() {
                 let (frame, _) = src.current.as_ref().expect("have a frame");
-                // Frames NVDEC decoded come down to memory at their size,
-                // unless a display takes them from the GPU as they are.
-                src.normalized = Some(if frame.format() == format::Pixel::CUDA {
-                    if self.keep_on_gpu && displayable(crate::cuda::sw_format(frame)) {
+                // Frames the GPU decoded come down to memory at their size,
+                // unless a display takes NVDEC's from the GPU as they are.
+                src.normalized = Some(if crate::hw::on_gpu(frame) {
+                    let cuda = frame.format() == format::Pixel::CUDA;
+                    if self.keep_on_gpu && cuda && displayable(crate::hw::sw_format(frame)) {
                         frame_ref(frame)?
                     } else {
-                        relayout.run(&crate::cuda::download(frame)?)?
+                        relayout.run(&crate::hw::download(frame)?)?
                     }
                 } else {
                     relayout.run(frame)?

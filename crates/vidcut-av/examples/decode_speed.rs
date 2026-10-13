@@ -1,35 +1,38 @@
-//! How fast a file's video decodes on the CPU and on NVDEC: frames a second
-//! decoding on from the start, and the time a seek takes to a frame in the
-//! middle of a GOP.
+//! How fast a file's video decodes on the CPU and on each GPU decoder there
+//! is (NVDEC, VA-API, Direct3D 11): frames a second decoding on from the
+//! start, and the time a seek takes to a frame in the middle of a GOP.
 //!
 //! `cargo run -p vidcut-av --example decode_speed -- FILE [FRAMES]`
 
 use std::time::Instant;
 
-use vidcut_av::cuda::CudaDevice;
 use vidcut_av::decode::{Input, VideoReader};
+use vidcut_av::hw::GpuDecoder;
 
 fn main() {
     let mut args = std::env::args().skip(1);
     let path = std::path::PathBuf::from(args.next().expect("FILE"));
     let frames: usize = args.next().map_or(300, |n| n.parse().expect("FRAMES"));
     let input = Input::File(path.clone());
-    let device = CudaDevice::open().ok();
-    for gpu in [false, true] {
+    let mut decoders: Vec<(String, Option<GpuDecoder>)> = vec![("CPU".into(), None)];
+    for gpu in GpuDecoder::all() {
+        let on = match gpu.on() {
+            "" => String::new(),
+            on => format!(" on {on}"),
+        };
+        decoders.push((format!("{}{on}", gpu.kind().name()), Some(gpu)));
+    }
+    for (name, gpu) in &decoders {
         let open = Instant::now();
-        let mut reader = match (gpu, &device) {
-            (false, _) => VideoReader::open_input(&input).unwrap(),
-            (true, Some(d)) => match VideoReader::open_cuda(&input, d) {
+        let mut reader = match gpu {
+            None => VideoReader::open_input(&input).unwrap(),
+            Some(g) => match VideoReader::open_on(&input, g) {
                 Ok(r) => r,
                 Err(e) => {
-                    println!("NVDEC: {e}");
+                    println!("{name}: {e}");
                     continue;
                 }
             },
-            (true, None) => {
-                println!("NVDEC: no CUDA device");
-                continue;
-            }
         };
         let opened = open.elapsed();
         let start = Instant::now();
@@ -55,7 +58,7 @@ fn main() {
         }
         println!(
             "{}: opened in {:.0} ms; {n} frames in {secs:.2} s ({:.0} fps); seeks {:.0?} ms",
-            if gpu { "NVDEC" } else { "CPU" },
+            name,
             opened.as_secs_f64() * 1e3,
             n as f64 / secs,
             seeks

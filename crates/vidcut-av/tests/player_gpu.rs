@@ -1,11 +1,12 @@
-//! The player decoding on the GPU (NVDEC) every stream it decodes (H.264,
-//! HEVC, AV1, VP9): the same pictures as decoding on the CPU, frame for
-//! frame and within a level or two in their pixels, copied down to memory
-//! in NV12 or P010; streams NVDEC can't decode, stills and black on the
-//! CPU; and switching decoders while it plays. Kept in GPU memory for a
-//! display that shows them from there, they are the same pictures, and a
-//! seek keeps what it decodes on its way for the steps back. Needs an
-//! NVIDIA GPU: `--features vidcut-av/gpu-tests`.
+//! The player decoding on each GPU decoder there is (NVDEC; VA-API on each
+//! render node; Direct3D 11 on each adapter) every stream it decodes
+//! (H.264, HEVC, AV1, VP9): the same pictures as decoding on the CPU, frame
+//! for frame and within a level or two in their pixels, copied down to
+//! memory in NV12 or P010; streams the GPU can't decode, stills and black
+//! on the CPU; and switching decoders while it plays. Kept in GPU memory
+//! for a display that shows them from there, NVDEC's are the same
+//! pictures, and a seek keeps what it decodes on its way for the steps
+//! back. Needs a GPU: `--features vidcut-av/gpu-tests`.
 #![cfg(feature = "gpu-tests")]
 
 mod player_support;
@@ -14,12 +15,24 @@ use std::time::{Duration, Instant};
 
 use player_support::*;
 use vidcut_av::fixture::{Container, FixtureSpec, VideoCodec};
+use vidcut_av::hw::{GpuDecoder, Kind};
 use vidcut_av::player::{Config, Decoder, Layout, ManualOutput, Memory, Picture, Player};
 
 fn player(plan: vidcut_core::render::RenderPlan, hardware: bool) -> Player {
     let config = Config {
         audio_scrubbing: false,
         hardware,
+        ..Config::default()
+    };
+    Player::new(plan, config, Box::new(ManualOutput::new())).unwrap()
+}
+
+/// A player decoding on `gpu`.
+fn player_on(plan: vidcut_core::render::RenderPlan, gpu: GpuDecoder) -> Player {
+    let config = Config {
+        audio_scrubbing: false,
+        hardware: true,
+        gpu: Some(gpu),
         ..Config::default()
     };
     Player::new(plan, config, Box::new(ManualOutput::new())).unwrap()
@@ -48,9 +61,10 @@ fn mean_diff(a: &Picture, b: &Picture) -> f64 {
 }
 
 #[test]
-fn nvdec_pictures_are_the_cpus() {
-    if vidcut_av::cuda::CudaDevice::open().is_err() {
-        eprintln!("skipping: no CUDA device");
+fn gpu_pictures_are_the_cpus() {
+    let decoders = GpuDecoder::all();
+    if decoders.is_empty() {
+        eprintln!("skipping: no GPU decoder");
         return;
     }
     let h264 = src(
@@ -74,7 +88,8 @@ fn nvdec_pictures_are_the_cpus() {
         FixtureSpec::new(VideoCodec::Hevc10, Container::MpegTs, W, H, (30, 1), 60)
             .start_offset_ms(1400),
     );
-    // Interlaced: deinterlaced on the GPU (`bwdif_cuda`) as on the CPU.
+    // Interlaced: deinterlaced as on the CPU, on the GPU for NVDEC's
+    // frames (`bwdif_cuda`), the others' copied down for it.
     let interlaced = src(
         "m6",
         FixtureSpec::new(VideoCodec::H264, Container::Mkv, W, H, (30, 1), 60)
@@ -85,7 +100,7 @@ fn nvdec_pictures_are_the_cpus() {
         "m7",
         FixtureSpec::new(VideoCodec::Hevc10, Container::Mp4, W, H, (30, 1), 30).rotation(90),
     );
-    // ProRes: no NVDEC decoder, so the CPU.
+    // ProRes: no GPU decodes it, so the CPU.
     let prores = src(
         "m8",
         FixtureSpec::new(VideoCodec::ProRes422Hq, Container::Mov, W, H, (30, 1), 30),
@@ -107,7 +122,6 @@ fn nvdec_pictures_are_the_cpus() {
     );
     let frames = p.frames;
     let expect: Vec<Option<u32>> = (0..frames).map(|t| rendered(&p, t)).collect();
-    let gpu = player(p.clone(), true);
     let cpu = player(p.clone(), false);
     // The first frame of each piece, frames inside and the last of each.
     let mut starts = vec![0];
@@ -118,83 +132,97 @@ fn nvdec_pictures_are_the_cpus() {
     for w in starts.windows(2) {
         ts_checked.extend([w[0], (w[0] + w[1]) / 2, w[1] - 1]);
     }
-    for &t in &ts_checked {
-        let g = picture_at(&gpu, t);
-        let c = picture_at(&cpu, t);
-        // Upright, as the export shows it.
-        let upright = |p: &Picture| {
-            let img = p.to_rgba(W, H).unwrap();
-            code_rgba(&img.rgba, W, H)
+    for gpu_decoder in decoders {
+        let kind = gpu_decoder.kind();
+        let name = format!("{} {}", kind.name(), gpu_decoder.on());
+        let gpu = player_on(p.clone(), gpu_decoder);
+        for &t in &ts_checked {
+            let g = picture_at(&gpu, t);
+            let c = picture_at(&cpu, t);
+            // Upright, as the export shows it.
+            let upright = |p: &Picture| {
+                let img = p.to_rgba(W, H).unwrap();
+                code_rgba(&img.rgba, W, H)
+            };
+            assert_eq!(upright(&g), expect[t as usize], "frame {t} on {name}");
+            assert_eq!(
+                upright(&g),
+                upright(&c),
+                "frame {t}: {name} against the CPU"
+            );
+            assert_eq!(g.memory(), Memory::Cpu, "copied down");
+            assert_eq!(g.colors(), c.colors(), "frame {t}'s colors");
+            assert_eq!(g.rotation(), c.rotation());
+            let diff = mean_diff(&g, &c);
+            assert!(diff < 2.0, "frame {t}: {diff:.2} levels from the CPU's");
+        }
+        // Which decoded what: H.264 every GPU, interlaced too; ProRes none;
+        // the rest NVDEC, and the other GPUs where they decode them.
+        let on_gpu = Some(Decoder::Gpu(kind));
+        let decoder = |t: i64| {
+            let _ = picture_at(&gpu, t);
+            gpu.status().decoder
         };
-        assert_eq!(upright(&g), expect[t as usize], "frame {t} on NVDEC");
-        assert_eq!(upright(&g), upright(&c), "frame {t}: NVDEC against the CPU");
-        assert_eq!(g.memory(), Memory::Cpu, "copied down");
-        assert_eq!(g.colors(), c.colors(), "frame {t}'s colors");
-        assert_eq!(g.rotation(), c.rotation());
-        let diff = mean_diff(&g, &c);
-        assert!(diff < 2.0, "frame {t}: {diff:.2} levels from the CPU's");
+        assert_eq!(decoder(5), on_gpu, "{name}: H.264");
+        assert_eq!(picture_at(&gpu, 5).layout(), Layout::Nv12);
+        assert_eq!(decoder(starts[6] + 3), on_gpu, "{name}: interlaced H.264");
+        for (t, what) in [
+            (35, "HEVC 10-bit"),
+            (starts[3] + 3, "VP9"),
+            (starts[4] + 3, "AV1"),
+            (starts[5] + 3, "HEVC in MPEG-TS"),
+            (starts[7] + 3, "HEVC turned"),
+        ] {
+            let d = decoder(t);
+            eprintln!("{name}: {what} decodes on {d:?}");
+            if kind == Kind::Nvdec {
+                assert_eq!(d, on_gpu, "{name}: {what}");
+            } else {
+                assert!(d == on_gpu || d == Some(Decoder::Cpu), "{name}: {what}");
+            }
+        }
+        assert_eq!(picture_at(&gpu, 35).layout(), Layout::P010);
+        assert_eq!(picture_at(&gpu, starts[3] + 3).layout(), Layout::Nv12);
+        assert_eq!(decoder(starts[8] + 3), Some(Decoder::Cpu), "{name}: ProRes");
+
+        // Steps both ways through HEVC, black and VP9 on the GPU.
+        gpu.seek(30);
+        assert_eq!(shown_at(&gpu, 30), expect[30]);
+        for t in 31..85 {
+            gpu.step(1);
+            assert_eq!(shown_at(&gpu, t), expect[t as usize], "{name}: step to {t}");
+        }
+        for t in (30..84).rev() {
+            gpu.step(-1);
+            assert_eq!(shown_at(&gpu, t), expect[t as usize], "{name}: back to {t}");
+        }
+
+        // Switching decoders shows the new one's pictures from the one
+        // shown.
+        gpu.seek(5);
+        assert_eq!(shown_at(&gpu, 5), expect[5]);
+        // A display presenting: what it shows says what decoded it.
+        let shows = |player: &Player| {
+            player.present(Instant::now());
+            player.status().decoder
+        };
+        gpu.set_hardware(false);
+        let started = Instant::now();
+        while shows(&gpu) != Some(Decoder::Cpu) {
+            assert!(started.elapsed() < Duration::from_secs(10), "still {name}");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(shown_at(&gpu, 5), expect[5]);
+        gpu.set_hardware(true);
+        let started = Instant::now();
+        while shows(&gpu) != on_gpu {
+            assert!(started.elapsed() < Duration::from_secs(10), "still the CPU");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(shown_at(&gpu, 5), expect[5]);
+        assert_eq!(gpu.status().error, None);
     }
-    // Which decoded what.
-    let decoder = |t: i64| {
-        let _ = picture_at(&gpu, t);
-        gpu.status().decoder
-    };
-    assert_eq!(decoder(5), Some(Decoder::Nvdec), "H.264");
-    assert_eq!(picture_at(&gpu, 5).layout(), Layout::Nv12);
-    assert_eq!(
-        decoder(starts[6] + 3),
-        Some(Decoder::Nvdec),
-        "interlaced H.264"
-    );
-    assert_eq!(decoder(35), Some(Decoder::Nvdec), "HEVC 10-bit");
-    assert_eq!(picture_at(&gpu, 35).layout(), Layout::P010);
-    assert_eq!(decoder(starts[3] + 3), Some(Decoder::Nvdec), "VP9");
-    assert_eq!(picture_at(&gpu, starts[3] + 3).layout(), Layout::Nv12);
-    assert_eq!(decoder(starts[4] + 3), Some(Decoder::Nvdec), "AV1");
-    assert_eq!(
-        decoder(starts[5] + 3),
-        Some(Decoder::Nvdec),
-        "HEVC in MPEG-TS"
-    );
-    assert_eq!(decoder(starts[7] + 3), Some(Decoder::Nvdec), "HEVC turned");
-    assert_eq!(decoder(starts[8] + 3), Some(Decoder::Cpu), "ProRes");
     assert_eq!(cpu.status().decoder, Some(Decoder::Cpu));
-
-    // Steps both ways through HEVC, black and VP9 on the GPU.
-    gpu.seek(30);
-    assert_eq!(shown_at(&gpu, 30), expect[30]);
-    for t in 31..85 {
-        gpu.step(1);
-        assert_eq!(shown_at(&gpu, t), expect[t as usize], "step to {t}");
-    }
-    for t in (30..84).rev() {
-        gpu.step(-1);
-        assert_eq!(shown_at(&gpu, t), expect[t as usize], "step back to {t}");
-    }
-
-    // Switching decoders shows the new one's pictures from the one shown.
-    gpu.seek(40);
-    assert_eq!(shown_at(&gpu, 40), expect[40]);
-    // A display presenting: what it shows says what decoded it.
-    let shows = |player: &Player| {
-        player.present(Instant::now());
-        player.status().decoder
-    };
-    gpu.set_hardware(false);
-    let started = Instant::now();
-    while shows(&gpu) != Some(Decoder::Cpu) {
-        assert!(started.elapsed() < Duration::from_secs(10), "still NVDEC");
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    assert_eq!(shown_at(&gpu, 40), expect[40]);
-    gpu.set_hardware(true);
-    let started = Instant::now();
-    while shows(&gpu) != Some(Decoder::Nvdec) {
-        assert!(started.elapsed() < Duration::from_secs(10), "still the CPU");
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    assert_eq!(shown_at(&gpu, 40), expect[40]);
-    assert_eq!(gpu.status().error, None);
 }
 
 #[test]

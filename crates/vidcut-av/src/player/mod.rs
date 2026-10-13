@@ -142,9 +142,13 @@ pub struct Config {
     /// Called on the decode thread when the picture of the frame the viewer
     /// is at lands (a display repaints), and when the prepared one does.
     pub on_picture: Option<Arc<dyn Fn() + Send + Sync>>,
-    /// Decode on the GPU (NVDEC) the streams it decodes, the frames copied
-    /// down to memory at their own size ([`set_hardware`](Player::set_hardware)).
+    /// Decode on the GPU the streams it decodes (NVDEC, VA-API, Direct3D
+    /// 11: [`crate::hw::GpuDecoder::best`]), the frames copied down to
+    /// memory at their own size ([`set_hardware`](Player::set_hardware)).
     pub hardware: bool,
+    /// The GPU to decode on when `hardware` is on; `None`: the best there
+    /// is.
+    pub gpu: Option<crate::hw::GpuDecoder>,
     /// Pictures NVDEC decodes stay in GPU memory (NV12, P010), for a
     /// display that shows them from there ([`Memory::Cuda`]); kept ones
     /// take video memory then.
@@ -158,6 +162,7 @@ impl Default for Config {
             audio_scrubbing: true,
             on_picture: None,
             hardware: false,
+            gpu: None,
             gpu_pictures: false,
         }
     }
@@ -207,16 +212,18 @@ pub struct Status {
 pub enum Decoder {
     /// The CPU, FFmpeg's software decoders.
     Cpu,
-    /// The GPU's NVDEC, the frames copied down to memory.
-    Nvdec,
+    /// A GPU ([`crate::hw`]): NVIDIA's NVDEC, whose frames may stay in GPU
+    /// memory, or VA-API or Direct3D 11, whose frames come down to memory.
+    Gpu(crate::hw::Kind),
 }
 
 impl Decoder {
-    /// A short name: `cpu` or `nvdec`.
+    /// A short name: `cpu`, or the GPU decoder's (`nvdec`, `vaapi`,
+    /// `d3d11va`).
     pub fn name(self) -> &'static str {
         match self {
             Self::Cpu => "cpu",
-            Self::Nvdec => "nvdec",
+            Self::Gpu(kind) => kind.name(),
         }
     }
 }
@@ -334,6 +341,8 @@ pub(crate) struct Shared {
     format: (u32, u16),
     /// Pictures NVDEC decodes stay in GPU memory.
     pub(crate) gpu_pictures: bool,
+    /// The GPU to decode on (`Config::gpu`).
+    pub(crate) gpu: Option<crate::hw::GpuDecoder>,
     /// The video memory budget is half the GPU's.
     video_auto: AtomicBool,
     /// The GPU's memory, once the decode thread opened it.
@@ -606,6 +615,7 @@ impl Player {
             device,
             format: (rate, channels),
             gpu_pictures: config.gpu_pictures,
+            gpu: config.gpu.clone(),
             video_auto: AtomicBool::new(config.budget.video.is_none()),
             gpu_memory: std::sync::OnceLock::new(),
         });
