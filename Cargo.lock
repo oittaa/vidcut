@@ -4024,6 +4024,7 @@ dependencies = [
  "vidcut-av",
  "vidcut-core",
  "wgpu",
+ "windows",
  "windows-sys 0.61.2",
  "winit",
  "zip",
@@ -4042,6 +4043,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "vidcut-core",
+ "windows",
  "windows-sys 0.61.2",
 ]
 

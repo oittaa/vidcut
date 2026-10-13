@@ -528,6 +528,11 @@ pub struct VideoFrames {
     /// (`keep_on_gpu`).
     decoder: Option<crate::hw::GpuDecoder>,
     keep_on_gpu: bool,
+    /// Copies Direct3D 11's frames kept on the GPU out of the decoder's
+    /// texture array; `None` too once that failed, when they come down.
+    keeper: Option<crate::hw::Keeper>,
+    /// Keeping Direct3D 11's frames failed: they come down from then on.
+    unkept: bool,
     /// The clockwise turn that shows the last frame given upright.
     rotation: u16,
     /// The GPU that decoded the last frame given.
@@ -676,6 +681,8 @@ impl VideoFrames {
             decoded: None,
             decoder: None,
             keep_on_gpu: false,
+            keeper: None,
+            unkept: false,
             rotation: 0,
             last_decoder: None,
             dynamic: Default::default(),
@@ -705,12 +712,13 @@ impl VideoFrames {
         self
     }
 
-    /// Frames NVDEC or VA-API decoded ([`decode_on`](Self::decode_on)) stay
-    /// in GPU memory when a display takes them as they are (NV12, P010): for
-    /// a display that shows them from there. Kept, they don't run the
-    /// decoder out: FFmpeg copies NVDEC's out of its few surfaces into a
-    /// pool that grows, and VA-API's own pool grows as it needs (libva 1.0
-    /// and later). Others, and other GPUs', are copied down.
+    /// Frames the GPU decoded ([`decode_on`](Self::decode_on)) stay in GPU
+    /// memory when a display takes them as they are (NV12, P010): for a
+    /// display that shows them from there. Kept, they don't run the decoder
+    /// out: FFmpeg copies NVDEC's out of its few surfaces into a pool that
+    /// grows, VA-API's own pool grows as it needs (libva 1.0 and later), and
+    /// Direct3D 11's are copied out of the decoder's texture array on the
+    /// GPU ([`crate::hw::Keeper`]). Others are copied down.
     pub fn keep_on_gpu(mut self) -> Self {
         self.keep_on_gpu = true;
         self
@@ -1068,12 +1076,22 @@ impl VideoFrames {
             if changed || src.normalized.is_none() {
                 let (frame, _) = src.current.as_ref().expect("have a frame");
                 // Frames the GPU decoded come down to memory at their size,
-                // unless a display takes NVDEC's or VA-API's from the GPU as
-                // they are.
+                // unless a display takes them from the GPU as they are.
                 src.normalized = Some(if crate::hw::on_gpu(frame) {
                     let keep = self.keep_on_gpu && displayable(crate::hw::sw_format(frame));
                     match frame.format() {
                         format::Pixel::CUDA | format::Pixel::VAAPI if keep => frame_ref(frame)?,
+                        format::Pixel::D3D11 if keep && !self.unkept => {
+                            match crate::hw::Keeper::copy(&mut self.keeper, frame) {
+                                Ok(kept) => kept,
+                                // Down to memory, as before they were kept.
+                                Err(_) => {
+                                    self.unkept = true;
+                                    self.keeper = None;
+                                    relayout.run(&crate::hw::download(frame)?)?
+                                }
+                            }
+                        }
                         _ => relayout.run(&crate::hw::download(frame)?)?,
                     }
                 } else {

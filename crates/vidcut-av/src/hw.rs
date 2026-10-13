@@ -239,7 +239,7 @@ impl GpuDecoder {
         #[cfg(windows)]
         // SAFETY: a D3D11VA device FFmpeg made.
         let vendor = (kind == Kind::D3d11va)
-            .then(|| unsafe { windows::vendor(&device) })
+            .then(|| unsafe { windows::desc(&device) }.map(|d| d.VendorId))
             .flatten();
         #[cfg(not(windows))]
         let vendor = None;
@@ -307,6 +307,22 @@ impl GpuDecoder {
         self.cuda.as_ref()
     }
 
+    /// The LUID of the adapter a Direct3D 11 decoder is on (Windows), which
+    /// says which GPU it is: a device importing its textures must be on that
+    /// one.
+    pub fn luid(&self) -> Option<[u8; 8]> {
+        #[cfg(windows)]
+        if self.kind == Kind::D3d11va {
+            // SAFETY: a D3D11VA device.
+            let luid = unsafe { windows::desc(&self.device) }?.AdapterLuid;
+            let mut bytes = [0; 8];
+            bytes[..4].copy_from_slice(&luid.LowPart.to_le_bytes());
+            bytes[4..].copy_from_slice(&luid.HighPart.to_le_bytes());
+            return Some(bytes);
+        }
+        None
+    }
+
     pub(crate) fn as_ptr(&self) -> *mut ffi::AVBufferRef {
         self.device.0
     }
@@ -370,16 +386,17 @@ impl GpuDecoder {
 #[cfg(windows)]
 pub(crate) mod windows {
     use std::ffi::c_void;
-    use std::ptr;
 
-    use windows_sys::core::GUID;
+    use ::windows::Win32::Graphics::Direct3D11::ID3D11Device;
+    use ::windows::Win32::Graphics::Dxgi::{DXGI_ADAPTER_DESC, IDXGIDevice};
+    use ::windows::core::Interface;
 
     use super::{Device, Kind, Profile};
     use crate::ffmpeg::ffi;
 
     /// PCI vendor ids.
     pub(crate) const NVIDIA: u32 = 0x10de;
-    pub(crate) const AMD: u32 = 0x1002;
+    pub(crate) const AMD: u32 = super::AMD;
     pub(crate) const INTEL: u32 = 0x8086;
 
     /// Microsoft's: its Basic Render Driver, which draws on the CPU and
@@ -395,7 +412,7 @@ pub(crate) mod windows {
                 break;
             };
             // SAFETY: a D3D11VA device FFmpeg made.
-            match unsafe { vendor(&device) } {
+            match unsafe { desc(&device) }.map(|d| d.VendorId) {
                 Some(MICROSOFT) | None => {}
                 Some(v) => adapters.push((i, v)),
             }
@@ -403,111 +420,56 @@ pub(crate) mod windows {
         adapters
     }
 
-    /// `DXGI_ADAPTER_DESC`.
-    #[repr(C)]
-    struct AdapterDesc {
-        description: [u16; 128],
-        vendor_id: u32,
-        device_id: u32,
-        sub_sys_id: u32,
-        revision: u32,
-        dedicated_video_memory: usize,
-        dedicated_system_memory: usize,
-        shared_system_memory: usize,
-        adapter_luid: (u32, i32),
-    }
-
-    /// `IDXGIDevice`'s interface id.
-    const IID_IDXGI_DEVICE: GUID = GUID::from_u128(0x54ec77fa_1377_44e6_8c32_88fd5f44c84c);
-
     /// Whether a D3D11VA device's video device lists `profile` among its
     /// decoders' (`GetVideoDecoderProfile`).
     ///
     /// # Safety
     /// `device` is a D3D11VA device context.
     pub(super) unsafe fn lists(device: &Device, profile: Profile) -> Option<bool> {
-        // `D3D11_DECODER_PROFILE_*`.
-        let want = GUID::from_u128(match profile {
-            Profile::H264High => 0x1b81be68_a0c7_11d3_b984_00c04f2e73c5,
-            Profile::HevcMain => 0x5b11d51b_2f4c_4452_bcc3_09f2a1160cc0,
-            Profile::HevcMain10 => 0x107af0e0_ef1a_4d19_aba8_67a163073d13,
-            Profile::Vp9Profile0 => 0x463707f8_a1d0_4585_876d_83aa6d60b89e,
-            Profile::Vp9Profile2 => 0xa4c749ef_6ecf_48aa_8448_50a7a1165ff7,
-            Profile::Av1Main => 0xb8be4ccb_cf53_46ba_8d59_d6b8a6da5d2a,
-        });
-        type Count = unsafe extern "system" fn(*mut c_void) -> u32;
-        type Get = unsafe extern "system" fn(*mut c_void, u32, *mut GUID) -> i32;
-        // SAFETY: `ID3D11VideoDevice`'s vtable after IUnknown's three: eight
-        // `Create…` methods, then GetVideoDecoderProfileCount (11th) and
-        // GetVideoDecoderProfile (12th). FFmpeg asks the device for it.
+        use ::windows::Win32::Graphics::Direct3D11::{
+            D3D11_DECODER_PROFILE_AV1_VLD_PROFILE0, D3D11_DECODER_PROFILE_H264_VLD_NOFGT,
+            D3D11_DECODER_PROFILE_HEVC_VLD_MAIN, D3D11_DECODER_PROFILE_HEVC_VLD_MAIN10,
+            D3D11_DECODER_PROFILE_VP9_VLD_10BIT_PROFILE2, D3D11_DECODER_PROFILE_VP9_VLD_PROFILE0,
+            ID3D11VideoDevice,
+        };
+        let want = match profile {
+            Profile::H264High => D3D11_DECODER_PROFILE_H264_VLD_NOFGT,
+            Profile::HevcMain => D3D11_DECODER_PROFILE_HEVC_VLD_MAIN,
+            Profile::HevcMain10 => D3D11_DECODER_PROFILE_HEVC_VLD_MAIN10,
+            Profile::Vp9Profile0 => D3D11_DECODER_PROFILE_VP9_VLD_PROFILE0,
+            Profile::Vp9Profile2 => D3D11_DECODER_PROFILE_VP9_VLD_10BIT_PROFILE2,
+            Profile::Av1Main => D3D11_DECODER_PROFILE_AV1_VLD_PROFILE0,
+        };
+        // SAFETY: a D3D11VA device's context is an AVD3D11VADeviceContext,
+        // whose video device FFmpeg asked its device for and which lives as
+        // long as it.
         unsafe {
             let ctx = (*device.0).data as *const ffi::AVHWDeviceContext;
             let hw = (*ctx).hwctx as *const ffi::AVD3D11VADeviceContext;
-            let video = (*hw).video_device as *mut c_void;
-            if video.is_null() {
-                return None;
-            }
-            let count: Count = std::mem::transmute(method(video, 11));
-            let get: Get = std::mem::transmute(method(video, 12));
-            Some((0..count(video)).any(|i| {
-                let mut g: GUID = std::mem::zeroed();
-                get(video, i, &mut g) >= 0
-                    && (g.data1, g.data2, g.data3, g.data4)
-                        == (want.data1, want.data2, want.data3, want.data4)
-            }))
+            let raw = (*hw).video_device as *mut c_void;
+            let video = ID3D11VideoDevice::from_raw_borrowed(&raw)?;
+            Some(
+                (0..video.GetVideoDecoderProfileCount())
+                    .any(|i| video.GetVideoDecoderProfile(i).is_ok_and(|g| g == want)),
+            )
         }
     }
 
-    /// The `n`th method of a COM object's vtable.
-    ///
-    /// # Safety
-    /// `object` is a live COM object with at least `n + 1` methods.
-    unsafe fn method(object: *mut c_void, n: usize) -> usize {
-        unsafe { *(*(object as *const *const usize)).add(n) }
-    }
-
-    /// The PCI vendor of the adapter a D3D11VA device is on: its Direct3D
-    /// device asked for its DXGI device, that for its adapter, that for
-    /// its description.
+    /// The description of the adapter a D3D11VA device is on: its Direct3D
+    /// device asked for its DXGI device, that for its adapter.
     ///
     /// # Safety
     /// `device` is a D3D11VA device context.
-    pub(super) unsafe fn vendor(device: &Device) -> Option<u32> {
-        type QueryInterface =
-            unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> i32;
-        type Release = unsafe extern "system" fn(*mut c_void) -> u32;
-        type GetAdapter = unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> i32;
-        type GetDesc = unsafe extern "system" fn(*mut c_void, *mut AdapterDesc) -> i32;
-        // SAFETY: the vtables' layouts are the interfaces' as declared:
-        // IUnknown (QueryInterface, AddRef, Release); IDXGIDevice after
-        // IDXGIObject's four (GetAdapter 7th); IDXGIAdapter after them and
-        // EnumOutputs (GetDesc 8th). Every reference got is released.
+    pub(super) unsafe fn desc(device: &Device) -> Option<DXGI_ADAPTER_DESC> {
+        // SAFETY: a D3D11VA device's context is an AVD3D11VADeviceContext,
+        // whose Direct3D device lives as long as it.
         unsafe {
             let ctx = (*device.0).data as *const ffi::AVHWDeviceContext;
             let hw = (*ctx).hwctx as *const ffi::AVD3D11VADeviceContext;
-            let d3d11 = (*hw).device as *mut c_void;
-            if d3d11.is_null() {
-                return None;
-            }
-            let query: QueryInterface = std::mem::transmute(method(d3d11, 0));
-            let mut dxgi = ptr::null_mut();
-            if query(d3d11, &IID_IDXGI_DEVICE, &mut dxgi) < 0 || dxgi.is_null() {
-                return None;
-            }
-            let get_adapter: GetAdapter = std::mem::transmute(method(dxgi, 7));
-            let release: Release = std::mem::transmute(method(dxgi, 2));
-            let mut adapter = ptr::null_mut();
-            let got = get_adapter(dxgi, &mut adapter);
-            release(dxgi);
-            if got < 0 || adapter.is_null() {
-                return None;
-            }
-            let get_desc: GetDesc = std::mem::transmute(method(adapter, 8));
-            let release: Release = std::mem::transmute(method(adapter, 2));
-            let mut desc: AdapterDesc = std::mem::zeroed();
-            let ok = get_desc(adapter, &mut desc) >= 0;
-            release(adapter);
-            ok.then_some(desc.vendor_id)
+            let raw = (*hw).device as *mut c_void;
+            let d3d11 = ID3D11Device::from_raw_borrowed(&raw)?;
+            let dxgi: IDXGIDevice = d3d11.cast().ok()?;
+            dxgi.GetAdapter().ok()?.GetDesc().ok()
         }
     }
 }
@@ -804,6 +766,309 @@ unsafe fn intel_va(frame: &frame::Video) -> Option<usize> {
 #[cfg(not(target_os = "linux"))]
 unsafe fn intel_va(_: &frame::Video) -> Option<usize> {
     None
+}
+
+/// Copies frames kept on the GPU out of a decoder whose few surfaces don't
+/// grow, so kept ones don't run it out: Direct3D 11's, into textures of
+/// their own that another device can open (Windows). FFmpeg copies NVDEC's
+/// itself, and VA-API's pool grows as it needs.
+pub(crate) enum Keeper {
+    #[cfg(windows)]
+    D3d11(d3d11::Keeper),
+}
+
+/// What a keeper is made for: the frames context a frame comes from, its
+/// layout, and the frame's size.
+#[cfg(windows)]
+type KeptLike = (usize, format::Pixel, u32, u32);
+
+/// The frames context a hardware frame comes from, and what a keeper made
+/// for it is made for ([`KeptLike`]).
+#[cfg(windows)]
+fn frames_of(f: &frame::Video) -> Result<(*mut ffi::AVBufferRef, KeptLike)> {
+    // SAFETY: reads the frame's own field, and a live buffer reference.
+    unsafe {
+        let frames = (*f.as_ptr()).hw_frames_ctx;
+        if frames.is_null() {
+            return Err(Error::Invalid("a GPU frame without its frames".into()));
+        }
+        let like = ((*frames).data as usize, sw_format(f), f.width(), f.height());
+        Ok((frames, like))
+    }
+}
+
+impl Keeper {
+    /// `f` (a Direct3D 11 frame) copied, with its timestamp and colors;
+    /// `keeper` made for frames like it first.
+    pub(crate) fn copy(keeper: &mut Option<Keeper>, f: &frame::Video) -> Result<frame::Video> {
+        #[cfg(windows)]
+        if f.format() == format::Pixel::D3D11 {
+            let (frames, like) = frames_of(f)?;
+            if !matches!(keeper, Some(Keeper::D3d11(k)) if k.like == like) {
+                *keeper = Some(Keeper::D3d11(d3d11::Keeper::new(f, frames, like)?));
+            }
+            let Some(Keeper::D3d11(k)) = keeper else {
+                unreachable!("made above")
+            };
+            return k.copy(f);
+        }
+        let _ = keeper;
+        Err(Error::Invalid(format!(
+            "no keeping {:?} frames",
+            f.format()
+        )))
+    }
+}
+
+/// The timestamp and colors of `from` onto `to`, a copy of its picture:
+/// plain fields, for a frame of its own (`av_frame_copy_props` brings the
+/// decoder's private reference along).
+#[cfg(windows)]
+fn same_picture(to: &mut frame::Video, from: &frame::Video) {
+    // SAFETY: both frames are valid; plain fields.
+    unsafe {
+        let (o, i) = (to.as_mut_ptr(), from.as_ptr());
+        (*o).pts = (*i).pts;
+        (*o).color_range = (*i).color_range;
+        (*o).colorspace = (*i).colorspace;
+        (*o).color_primaries = (*i).color_primaries;
+        (*o).color_trc = (*i).color_trc;
+        (*o).chroma_location = (*i).chroma_location;
+        (*o).sample_aspect_ratio = (*i).sample_aspect_ratio;
+    }
+}
+
+/// Direct3D 11's frames kept on the GPU (Windows): each copied out of the
+/// decoder's texture array into a texture of its own, which another device
+/// opens by an NT handle.
+#[cfg(windows)]
+pub(crate) mod d3d11 {
+    use std::ffi::c_void;
+
+    use ::windows::Win32::Graphics::Direct3D11::{
+        D3D11_BIND_SHADER_RESOURCE, D3D11_BOX, D3D11_QUERY_DESC, D3D11_QUERY_EVENT,
+        D3D11_RESOURCE_MISC_SHARED, D3D11_RESOURCE_MISC_SHARED_NTHANDLE, ID3D11Device,
+        ID3D11DeviceContext, ID3D11Query, ID3D11Texture2D,
+    };
+    use ::windows::core::Interface;
+
+    use super::*;
+
+    /// `AVD3D11VADeviceContext`.
+    #[repr(C)]
+    pub(crate) struct DeviceContext {
+        pub(crate) device: *mut c_void,
+        pub(crate) device_context: *mut c_void,
+        video_device: *mut c_void,
+        video_context: *mut c_void,
+        lock: Option<unsafe extern "C" fn(*mut c_void)>,
+        unlock: Option<unsafe extern "C" fn(*mut c_void)>,
+        lock_ctx: *mut c_void,
+    }
+
+    /// `AVD3D11VAFramesContext`.
+    #[repr(C)]
+    struct FramesContext {
+        texture: *mut c_void,
+        bind_flags: u32,
+        misc_flags: u32,
+        texture_infos: *mut c_void,
+    }
+
+    /// The Direct3D 11 device of `frames`, a D3D11 frames context.
+    ///
+    /// # Safety
+    /// `frames` is a live D3D11 frames context.
+    pub(crate) unsafe fn device_of(frames: *mut ffi::AVBufferRef) -> *const DeviceContext {
+        // SAFETY: a D3D11 frames context's device's context is an
+        // AVD3D11VADeviceContext.
+        unsafe {
+            let device = (*((*frames).data as *const ffi::AVHWFramesContext)).device_ctx;
+            (*device).hwctx as *const DeviceContext
+        }
+    }
+
+    pub(crate) struct Keeper {
+        /// Its own frames: single textures, shareable, a pool that grows.
+        frames: *mut ffi::AVBufferRef,
+        /// The decoder's frames it copies out of, held so that another
+        /// context can't come at their address while it is made for them.
+        source: *mut ffi::AVBufferRef,
+        /// Signalled once the copy before it is done.
+        done: ID3D11Query,
+        pub(super) like: super::KeptLike,
+    }
+
+    // SAFETY: the frames contexts are reference-counted and may be used on
+    // any thread; the query is used under the device's lock.
+    unsafe impl Send for Keeper {}
+
+    impl Drop for Keeper {
+        fn drop(&mut self) {
+            // SAFETY: its own references.
+            unsafe {
+                ffi::av_buffer_unref(&mut self.frames);
+                ffi::av_buffer_unref(&mut self.source);
+            }
+        }
+    }
+
+    /// How long a copy may take before the keeper gives up on it: far past
+    /// any copy (a 2160p frame takes well under a millisecond), short of
+    /// holding the decoder for long where the device was lost.
+    const COPY_DEADLINE: std::time::Duration = std::time::Duration::from_secs(2);
+
+    impl Keeper {
+        pub(super) fn new(
+            f: &frame::Video,
+            source: *mut ffi::AVBufferRef,
+            like: super::KeptLike,
+        ) -> Result<Self> {
+            // Textures of 4:2:0 frames have even sides.
+            let (w, h) = (
+                f.width().next_multiple_of(2),
+                f.height().next_multiple_of(2),
+            );
+            // SAFETY: frames made on the source frames' device, set up as
+            // FFmpeg's D3D11 frames are before they start; freed on failure.
+            unsafe {
+                let src = (*source).data as *const ffi::AVHWFramesContext;
+                let mut frames = ffi::av_hwframe_ctx_alloc((*src).device_ref);
+                if frames.is_null() {
+                    return Err(Error::Invalid("no memory for frames".into()));
+                }
+                let fc = (*frames).data as *mut ffi::AVHWFramesContext;
+                (*fc).format = ffi::AVPixelFormat::AV_PIX_FMT_D3D11;
+                (*fc).sw_format = (*src).sw_format;
+                (*fc).width = w as i32;
+                (*fc).height = h as i32;
+                (*fc).initial_pool_size = 0;
+                let hw = (*fc).hwctx as *mut FramesContext;
+                (*hw).bind_flags = D3D11_BIND_SHADER_RESOURCE.0 as u32;
+                (*hw).misc_flags =
+                    (D3D11_RESOURCE_MISC_SHARED.0 | D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0) as u32;
+                let ret = ffi::av_hwframe_ctx_init(frames);
+                if ret < 0 {
+                    ffi::av_buffer_unref(&mut frames);
+                    return Err(Error::Ffmpeg {
+                        context: "making Direct3D 11 frames to keep".into(),
+                        source: ffmpeg::Error::from(ret),
+                    });
+                }
+                let device = ID3D11Device::from_raw_borrowed(&(*device_of(frames)).device);
+                let query = device.and_then(|d| {
+                    let desc = D3D11_QUERY_DESC {
+                        Query: D3D11_QUERY_EVENT,
+                        MiscFlags: 0,
+                    };
+                    let mut query = None;
+                    d.CreateQuery(&desc, Some(&mut query)).ok().and(query)
+                });
+                let Some(done) = query else {
+                    ffi::av_buffer_unref(&mut frames);
+                    return Err(Error::Invalid("no Direct3D 11 query".into()));
+                };
+                let source = ffi::av_buffer_ref(source);
+                if source.is_null() {
+                    ffi::av_buffer_unref(&mut frames);
+                    return Err(Error::Invalid("no memory for frames".into()));
+                }
+                Ok(Self {
+                    frames,
+                    source,
+                    done,
+                    like,
+                })
+            }
+        }
+
+        /// `f` copied into a texture of its own, the copy done when this
+        /// returns: another device reads it next, which can't wait for
+        /// Direct3D 11's work.
+        pub(super) fn copy(&mut self, f: &frame::Video) -> Result<frame::Video> {
+            let mut out = frame::Video::empty();
+            // SAFETY: a frame from its own pool; the device's immediate
+            // context used under FFmpeg's lock for it, as its decoders use
+            // it; the textures are the frames' (array and index).
+            unsafe {
+                let ret = ffi::av_hwframe_get_buffer(self.frames, out.as_mut_ptr(), 0);
+                if ret < 0 {
+                    return Err(Error::Ffmpeg {
+                        context: "getting a Direct3D 11 texture".into(),
+                        source: ffmpeg::Error::from(ret),
+                    });
+                }
+                let dev = &*device_of(self.frames);
+                let context = ID3D11DeviceContext::from_raw_borrowed(&dev.device_context)
+                    .ok_or_else(|| Error::Invalid("no Direct3D 11 context".into()))?;
+                let texture = |frame: &frame::Video| {
+                    let p = (*frame.as_ptr()).data[0] as *mut c_void;
+                    let index = (*frame.as_ptr()).data[1] as usize as u32;
+                    ID3D11Texture2D::from_raw_borrowed(&p).map(|t| (t.clone(), index))
+                };
+                let (Some((dst, di)), Some((src, si))) = (texture(&out), texture(f)) else {
+                    return Err(Error::Invalid(
+                        "a Direct3D 11 frame without a texture".into(),
+                    ));
+                };
+                let region = D3D11_BOX {
+                    left: 0,
+                    top: 0,
+                    front: 0,
+                    right: f.width().next_multiple_of(2),
+                    bottom: f.height().next_multiple_of(2),
+                    back: 1,
+                };
+                let locked = |work: &mut dyn FnMut()| {
+                    if let Some(lock) = dev.lock {
+                        lock(dev.lock_ctx);
+                    }
+                    work();
+                    if let Some(unlock) = dev.unlock {
+                        unlock(dev.lock_ctx);
+                    }
+                };
+                locked(&mut || {
+                    context.CopySubresourceRegion(&dst, di, 0, 0, 0, &src, si, Some(&region));
+                    context.End(&self.done);
+                    context.Flush();
+                });
+                // The event's BOOL turns true once the copy is done; until
+                // then the call says not yet (`S_FALSE`). Failing (a device
+                // lost) or past the deadline, the frame isn't kept.
+                let started = std::time::Instant::now();
+                loop {
+                    let mut done = ::windows::core::BOOL(0);
+                    let mut asked = Ok(());
+                    locked(&mut || {
+                        asked = context.GetData(
+                            &self.done,
+                            Some((&raw mut done).cast()),
+                            size_of::<::windows::core::BOOL>() as u32,
+                            0,
+                        );
+                    });
+                    if let Err(e) = asked {
+                        return Err(Error::Invalid(format!(
+                            "waiting for a Direct3D 11 copy: {e}"
+                        )));
+                    }
+                    if done.as_bool() {
+                        break;
+                    }
+                    if started.elapsed() > COPY_DEADLINE {
+                        return Err(Error::Invalid("a Direct3D 11 copy didn't finish".into()));
+                    }
+                    std::thread::sleep(std::time::Duration::from_micros(100));
+                }
+                same_picture(&mut out, f);
+                // The texture is the frame's size, rounded up to even.
+                (*out.as_mut_ptr()).width = f.width() as i32;
+                (*out.as_mut_ptr()).height = f.height() as i32;
+            }
+            Ok(out)
+        }
+    }
 }
 
 /// A VA-API frame's surface for another device to read: its planes as

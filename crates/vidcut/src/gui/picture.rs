@@ -22,9 +22,9 @@ use vidcut_core::model::Hdr;
 
 /// The GPU and the shader pass the viewer's screen draws with.
 pub struct Gpu {
-    /// Takes VA-API's imported surfaces over to wgpu's queue, made at the
-    /// first. Before `device`, so it goes first.
-    #[cfg(target_os = "linux")]
+    /// Takes VA-API's imported surfaces and Direct3D 11's textures over to
+    /// wgpu's queue, made at the first. Before `device`, so it goes first.
+    #[cfg(any(target_os = "linux", windows))]
     acquirer: std::sync::Mutex<Option<super::acquire::Acquirer>>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -38,6 +38,12 @@ pub struct Gpu {
     shares: bool,
     /// The device imports DMA-BUFs, VA-API's surfaces among them (Linux).
     dma_buf: bool,
+    /// The device imports Direct3D 11's NV12 textures by their shared
+    /// handles (Windows).
+    d3d11: bool,
+    /// The device has P010 textures, for Direct3D 11's 10-bit ones.
+    #[cfg(windows)]
+    p010: bool,
     /// CUDA's device on this GPU, once a picture in CUDA memory came.
     cuda: OnceLock<Result<CudaDevice, String>>,
 }
@@ -49,11 +55,17 @@ const MAX_SHARED: usize = 4;
 const TARGET: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 /// The device features the viewer uses where the adapter has them: 16-bit
-/// textures, and DMA-BUFs for VA-API's pictures (Linux).
+/// textures, DMA-BUFs for VA-API's pictures (Linux), and Direct3D 11's
+/// textures with NV12 and P010 for its pictures (Windows).
 pub fn features(adapter: &wgpu::Adapter) -> wgpu::Features {
     let wanted = wgpu::Features::TEXTURE_FORMAT_16BIT_NORM;
     #[cfg(target_os = "linux")]
     let wanted = wanted | wgpu::Features::VULKAN_EXTERNAL_MEMORY_DMA_BUF;
+    #[cfg(windows)]
+    let wanted = wanted
+        | wgpu::Features::VULKAN_EXTERNAL_MEMORY_WIN32
+        | wgpu::Features::TEXTURE_FORMAT_NV12
+        | wgpu::Features::TEXTURE_FORMAT_P010;
     adapter.features() & wanted
 }
 
@@ -136,7 +148,7 @@ impl Gpu {
             ..Default::default()
         });
         Self {
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", windows))]
             acquirer: std::sync::Mutex::new(None),
             device: device.clone(),
             queue: queue.clone(),
@@ -150,21 +162,28 @@ impl Gpu {
             dma_buf: device
                 .features()
                 .contains(wgpu::Features::VULKAN_EXTERNAL_MEMORY_DMA_BUF),
+            d3d11: device.features().contains(
+                wgpu::Features::VULKAN_EXTERNAL_MEMORY_WIN32 | wgpu::Features::TEXTURE_FORMAT_NV12,
+            ),
+            #[cfg(windows)]
+            p010: device
+                .features()
+                .contains(wgpu::Features::TEXTURE_FORMAT_P010),
             cuda: OnceLock::new(),
         }
     }
 
     /// Whether it may show pictures `kind` decoded from GPU memory, so a
     /// player can keep them there for it: NVDEC's where it shares memory
-    /// with CUDA, VA-API's where it imports DMA-BUFs. Those it can't take
-    /// after all (CUDA on another GPU, a surface it won't import) are copied
-    /// down to be shown.
+    /// with CUDA, VA-API's where it imports DMA-BUFs, Direct3D 11's where it
+    /// imports their textures. Those it can't take after all (on another
+    /// GPU, a surface it won't import) are copied down to be shown.
     pub fn takes_gpu_pictures(&self, kind: vidcut_av::hw::Kind) -> bool {
         use vidcut_av::hw::Kind;
         match kind {
             Kind::Nvdec => self.shares,
             Kind::Vaapi => self.dma_buf,
-            Kind::D3d11va => false,
+            Kind::D3d11va => self.d3d11,
         }
     }
 
@@ -172,6 +191,60 @@ impl Gpu {
     /// VA-API memory from there.
     pub fn imports_dma_bufs(&self) -> bool {
         self.dma_buf
+    }
+
+    /// Whether it imports Direct3D 11's textures to show pictures in
+    /// Direct3D 11 memory from there.
+    pub fn imports_d3d11(&self) -> bool {
+        self.d3d11
+    }
+
+    /// Its adapter's LUID (Windows), which says which GPU it is: the
+    /// Direct3D 11 textures it imports must be on that one.
+    pub fn luid(&self) -> Option<[u8; 8]> {
+        use ash::vk;
+        // SAFETY: reads the physical device's properties.
+        unsafe {
+            let hal = self.device.as_hal::<wgpu::hal::api::Vulkan>()?;
+            let mut id = vk::PhysicalDeviceIDProperties::default();
+            let mut props = vk::PhysicalDeviceProperties2::default().push_next(&mut id);
+            hal.shared_instance()
+                .raw_instance()
+                .get_physical_device_properties2(hal.raw_physical_device(), &mut props);
+            (id.device_luid_valid == vk::TRUE).then_some(id.device_luid)
+        }
+    }
+
+    /// Takes `images` (just imported, not yet used by wgpu) over from the API
+    /// that wrote them, into `layout` for `access` at `stage`
+    /// ([`super::acquire::Acquirer`]).
+    ///
+    /// # Safety
+    /// The images are this device's, on memory another API wrote; only
+    /// this thread submits to wgpu's queue.
+    #[cfg(any(target_os = "linux", windows))]
+    unsafe fn acquire(
+        &self,
+        images: &[ash::vk::Image],
+        layout: ash::vk::ImageLayout,
+        stage: ash::vk::PipelineStageFlags,
+        access: ash::vk::AccessFlags,
+    ) -> Result<(), String> {
+        let mut acquirer = self.acquirer.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: wgpu's own device, and images as the caller says.
+        unsafe {
+            if acquirer.is_none() {
+                let hal = self
+                    .device
+                    .as_hal::<wgpu::hal::api::Vulkan>()
+                    .ok_or("not Vulkan")?;
+                *acquirer = Some(super::acquire::Acquirer::new(&hal)?);
+            }
+            acquirer
+                .as_mut()
+                .expect("made above")
+                .acquire(images, layout, stage, access)
+        }
     }
 
     /// Whether pictures in CUDA memory show from there: it shares memory,
@@ -203,13 +276,30 @@ impl Gpu {
             ..Default::default()
         }))
         .ok()?;
+        Some((Self::on(&adapter)?, adapter.get_info()))
+    }
+
+    /// A device of its own on each Vulkan adapter there is, without a
+    /// window.
+    pub fn headless_all() -> Vec<Self> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::VULKAN,
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
+        pollster::block_on(instance.enumerate_adapters(wgpu::Backends::VULKAN))
+            .iter()
+            .filter_map(Self::on)
+            .collect()
+    }
+
+    fn on(adapter: &wgpu::Adapter) -> Option<Self> {
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("vidcut"),
-            required_features: features(&adapter),
+            required_features: features(adapter),
             ..Default::default()
         }))
         .ok()?;
-        Some((Self::new(&device, &queue), adapter.get_info()))
+        Some(Self::new(&device, &queue))
     }
 
     pub fn device(&self) -> &wgpu::Device {
@@ -249,12 +339,17 @@ pub struct Screen {
     filled: Option<usize>,
     /// Sharing failed: pictures in CUDA memory are copied down from then on.
     unshared: bool,
-    /// The layouts whose import failed: pictures in VA-API memory in them
-    /// are copied down from then on (P010 may fail where NV12 imports).
+    /// The layouts whose import failed: pictures in VA-API or Direct3D 11
+    /// memory in them are copied down from then on (P010 may fail where
+    /// NV12 imports).
     unimported: Vec<Layout>,
-    /// The picture being drawn, imported: held until the copies out of its
-    /// surface are done, so the surface isn't reused under them.
+    /// The picture being drawn, imported: held until the GPU is done with
+    /// its surface, so the surface isn't reused under it.
     imported: Option<Arc<Picture>>,
+    /// The luma and chroma planes of the picture being drawn, imported (a
+    /// Direct3D 11 texture's): drawn from in place of the planes' textures;
+    /// and the texture's size, which is even where the picture's isn't.
+    views: Option<(wgpu::TextureView, wgpu::TextureView, (u32, u32))>,
     /// The last picture in GPU memory was copied on the GPU, not down.
     last_shared: bool,
 }
@@ -324,11 +419,8 @@ impl Screen {
         // Pictures in Vulkan memory have no planes here, and one larger than
         // the device's textures can't go up (wgpu would panic): black.
         let limit = gpu.device.limits().max_texture_dimension_2d;
-        let picture = picture.filter(|p| {
-            matches!(p.memory(), Memory::Cpu | Memory::Cuda | Memory::Vaapi)
-                && p.width() <= limit
-                && p.height() <= limit
-        });
+        let picture = picture
+            .filter(|p| p.memory() != Memory::Vulkan && p.width() <= limit && p.height() <= limit);
         let mut encoder = gpu
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -345,11 +437,23 @@ impl Screen {
                     mapped_at_creation: false,
                 })
             });
+            // How much of an imported texture the picture covers.
+            let cover = self.views.as_ref().map_or((1.0, 1.0), |&(_, _, (w, h))| {
+                (
+                    f64::from(picture.width()) / f64::from(w),
+                    f64::from(picture.height()) / f64::from(h),
+                )
+            });
             gpu.queue
-                .write_buffer(params, 0, &params_of(picture, size, gpu.wide));
+                .write_buffer(params, 0, &params_of(picture, size, gpu.wide, cover));
             let planes = self.planes.as_ref().expect("uploaded");
             let view = |t: &wgpu::Texture| t.create_view(&Default::default());
-            let (y, u, v) = (view(&planes.y), view(&planes.u), view(&planes.v));
+            let (y, u) = self
+                .views
+                .take()
+                .map(|(y, u, _)| (y, u))
+                .unwrap_or_else(|| (view(&planes.y), view(&planes.u)));
+            let v = view(&planes.v);
             gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("vidcut picture"),
                 layout: &gpu.layout,
@@ -423,10 +527,15 @@ impl Screen {
         self.last_shared = false;
         match picture.memory() {
             Memory::Cuda => {}
-            Memory::Vaapi => {
+            memory @ (Memory::Vaapi | Memory::D3d11) => {
                 let layout = picture.layout();
                 if !self.unimported.contains(&layout) {
-                    match self.import_on_gpu(gpu, picture, encoder) {
+                    let imported = if memory == Memory::Vaapi {
+                        self.import_on_gpu(gpu, picture, encoder)
+                    } else {
+                        self.import_d3d11(gpu, picture)
+                    };
+                    match imported {
                         Ok(()) => {
                             self.last_shared = true;
                             return;
@@ -545,13 +654,8 @@ impl Screen {
         // SAFETY: the images were just made on wgpu's device, which hasn't
         // used them; this thread submits all the viewer's work.
         unsafe {
-            let hal = gpu.device.as_hal::<Vulkan>().ok_or("not Vulkan")?;
-            let mut acquirer = gpu.acquirer.lock().unwrap_or_else(|e| e.into_inner());
-            if acquirer.is_none() {
-                *acquirer = Some(super::acquire::Acquirer::new(&hal)?);
-            }
             let images: Vec<_> = imports.iter().map(|(raw, ..)| raw.raw_handle()).collect();
-            acquirer.as_mut().expect("made above").acquire(
+            gpu.acquire(
                 &images,
                 ash::vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
                 ash::vk::PipelineStageFlags::TRANSFER,
@@ -597,6 +701,139 @@ impl Screen {
         _: &mut wgpu::CommandEncoder,
     ) -> Result<(), String> {
         Err("VA-API pictures are Linux's".into())
+    }
+
+    /// Shows a picture in Direct3D 11 memory from there: its texture (one of
+    /// its own, the engine's copy out of the decoder's, done) opened by
+    /// wgpu's Vulkan device through an NT handle, and its planes' views drawn
+    /// from in place of the planes' textures (`views`). The picture is held
+    /// until the drawing is done (`imported`).
+    #[cfg(windows)]
+    fn import_d3d11(&mut self, gpu: &Gpu, picture: &Arc<Picture>) -> Result<(), String> {
+        use ::windows::Win32::Foundation::CloseHandle;
+        use ::windows::Win32::Graphics::Direct3D11::{D3D11_TEXTURE2D_DESC, ID3D11Texture2D};
+        use ::windows::Win32::Graphics::Dxgi::{DXGI_SHARED_RESOURCE_READ, IDXGIResource1};
+        use ::windows::core::Interface;
+        use wgpu::hal::api::Vulkan;
+        if !gpu.d3d11 {
+            return Err("the display's device imports no Direct3D 11 textures".into());
+        }
+        let (format, one, two) = match picture.layout() {
+            Layout::Nv12 => (
+                wgpu::TextureFormat::NV12,
+                wgpu::TextureFormat::R8Unorm,
+                wgpu::TextureFormat::Rg8Unorm,
+            ),
+            Layout::P010 if gpu.wide && gpu.p010 => (
+                wgpu::TextureFormat::P010,
+                wgpu::TextureFormat::R16Unorm,
+                wgpu::TextureFormat::Rg16Unorm,
+            ),
+            Layout::P010 => return Err("no P010 or 16-bit textures for P010".into()),
+            Layout::Yuv420p => return Err("planar pictures aren't Direct3D 11's".into()),
+        };
+        // SAFETY: a Direct3D 11 frame holds its texture and its index in it.
+        let (texture, index) = unsafe {
+            let f = picture.frame().as_ptr();
+            ((*f).data[0] as *mut std::ffi::c_void, (*f).data[1] as usize)
+        };
+        if index != 0 {
+            return Err("a picture in a texture array".into());
+        }
+        // SAFETY: the frame's texture, alive as long as the frame.
+        let texture = unsafe { ID3D11Texture2D::from_raw_borrowed(&texture) }
+            .ok_or("a picture without a texture")?;
+        let mut desc = D3D11_TEXTURE2D_DESC::default();
+        // SAFETY: fills the description it is given.
+        unsafe { texture.GetDesc(&mut desc) };
+        let size = wgpu::Extent3d {
+            width: desc.Width,
+            height: desc.Height,
+            depth_or_array_layers: 1,
+        };
+        let resource: IDXGIResource1 = texture.cast().map_err(|e| e.to_string())?;
+        // SAFETY: a texture made shareable by NT handles (the engine's).
+        let handle =
+            unsafe { resource.CreateSharedHandle(None, DXGI_SHARED_RESOURCE_READ.0, None) }
+                .map_err(|e| format!("sharing a Direct3D 11 texture: {e}"))?;
+        let label = Some("vidcut Direct3D 11 picture");
+        // SAFETY: the handle is the texture's, as described; Vulkan holds
+        // the texture once it is imported, and the handle is closed after.
+        let raw = unsafe {
+            let raw = gpu
+                .device
+                .as_hal::<Vulkan>()
+                .ok_or("not Vulkan")
+                .map(|hal| {
+                    hal.texture_from_d3d11_shared_handle(
+                        ::windows::Win32::Foundation::HANDLE(handle.0),
+                        &wgpu::hal::TextureDescriptor {
+                            label,
+                            size,
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: wgpu::TextureDimension::D2,
+                            format,
+                            usage: wgpu::TextureUses::RESOURCE,
+                            memory_flags: wgpu::hal::MemoryFlags::empty(),
+                            view_formats: Vec::new(),
+                        },
+                    )
+                });
+            let _ = CloseHandle(handle);
+            raw?.map_err(|e| format!("importing a Direct3D 11 texture: {e}"))?
+        };
+        // Taken over from Direct3D 11 with the picture it holds, ready to
+        // sample.
+        // SAFETY: the image was just made on wgpu's device, which hasn't
+        // used it; this thread submits all the viewer's work.
+        unsafe {
+            gpu.acquire(
+                &[raw.raw_handle()],
+                ash::vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                ash::vk::PipelineStageFlags::FRAGMENT_SHADER,
+                ash::vk::AccessFlags::SHADER_READ,
+            )?;
+        }
+        // SAFETY: made on this device, as described, and in the layout
+        // shaders sample (acquired above).
+        let imported = unsafe {
+            gpu.device.create_texture_from_hal::<Vulkan>(
+                raw,
+                &wgpu::TextureDescriptor {
+                    label,
+                    size,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                },
+                wgpu::TextureUses::RESOURCE,
+            )
+        };
+        let plane = |format, aspect| {
+            imported.create_view(&wgpu::TextureViewDescriptor {
+                label,
+                format: Some(format),
+                aspect,
+                ..Default::default()
+            })
+        };
+        self.views = Some((
+            plane(one, wgpu::TextureAspect::Plane0),
+            plane(two, wgpu::TextureAspect::Plane1),
+            (desc.Width, desc.Height),
+        ));
+        self.imported = Some(picture.clone());
+        Ok(())
+    }
+
+    /// Direct3D 11 is Windows's.
+    #[cfg(not(windows))]
+    fn import_d3d11(&mut self, _: &Gpu, _: &Arc<Picture>) -> Result<(), String> {
+        Err("Direct3D 11 pictures are Windows's".into())
     }
 
     /// Copies a picture in CUDA memory into the planes on the GPU: CUDA
@@ -900,7 +1137,10 @@ const PARAMS: usize = 9 * 16;
 
 /// The shader's parameters for `picture` in a `size` target; `wide`: P010
 /// goes up in 16 bits.
-fn params_of(picture: &Picture, size: (u32, u32), wide: bool) -> Vec<u8> {
+/// The shader's parameters for `picture` in a `size` target; `cover`: how
+/// much of its texture's width and height the stored picture covers (1 but
+/// for a texture rounded up to even sides).
+fn params_of(picture: &Picture, size: (u32, u32), wide: bool, cover: (f64, f64)) -> Vec<u8> {
     let colors = shader_colors(picture.colors());
     let (x, y, w, h) = picture.placement(size.0, size.1);
     let turns = u32::from(picture.rotation() / 90) % 4;
@@ -932,7 +1172,7 @@ fn params_of(picture: &Picture, size: (u32, u32), wide: bool) -> Vec<u8> {
     let g = colors.gamut;
     let floats: [[f64; 4]; 8] = [
         [f64::from(x), f64::from(y), f64::from(w), f64::from(h)],
-        [f64::from(upright.0), f64::from(upright.1), 0.0, 0.0],
+        [f64::from(upright.0), f64::from(upright.1), cover.0, cover.1],
         range,
         [colors.kr, colors.kb, kg, colors.linear_scale],
         colors.tone,

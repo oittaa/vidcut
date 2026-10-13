@@ -4,7 +4,7 @@
 
 The GUI already plays through the engine ([player.md](../decisions/player.md), [preview.md](../decisions/preview.md)). Still open:
 
-- **Direct3D 11's pictures shown from video memory** (Windows), as NVDEC's and VA-API's are (preview.md §3): copied out of the decoder's texture array into textures of their own, shared with wgpu's Vulkan device (wgpu-hal imports Direct3D 11 textures by their shared handles) on the same adapter. Or Vulkan Video decoding (H.264, HEVC, AV1 on NVIDIA, AMD and Intel), whose frames are Vulkan images already.
+- **Vulkan Video decoding** (H.264, HEVC, AV1 on NVIDIA, AMD and Intel), whose frames are Vulkan images already: none copied out of the decoder, nothing shared between APIs (preview.md §3 copies and shares).
 - **VA-API's on AMD:** shown from video memory as Intel's are, untested: a surface with compression metadata (AMD's DCC modifiers) needs more than one plane per layer, which the import doesn't take, and such pictures are copied down instead.
 - **macOS:** VideoToolbox, into Metal textures through IOSurface.
 - **Encoding from GPU memory:** NVENC takes CUDA frames, VAAPI its surfaces, AMF and QSV Direct3D 11 textures (QSV VA-API surfaces on Linux), VideoToolbox its pixel buffers; scaling stays on the GPU (FFmpeg's CUDA, VAAPI, Direct3D 11 and Vulkan scalers).

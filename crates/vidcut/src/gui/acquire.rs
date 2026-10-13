@@ -1,5 +1,6 @@
 //! Images another API wrote, taken over by wgpu's queue with what they
-//! hold: VA-API's surfaces imported as DMA-BUFs.
+//! hold: VA-API's surfaces imported as DMA-BUFs (Linux), Direct3D 11's
+//! textures opened by their NT handles (Windows).
 
 use ash::vk;
 
