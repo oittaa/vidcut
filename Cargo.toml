@@ -101,7 +101,9 @@ naga = { version = "30", features = ["wgsl-in"] }
 winit = "0.30"
 # Icons for the timeline's controls (Phosphor). MIT or Apache-2.0.
 egui-phosphor = "0.14"
-notify = { version = "8.2", default-features = false }
+# Watches the project's and the preferences' folders. On macOS through
+# FSEvents (its only backend there; without it notify doesn't build).
+notify = { version = "8.2", default-features = false, features = ["macos_fsevent"] }
 rfd = "0.17"
 # Shell quoting for the commands the GUI shows ("the same export from a shell").
 shlex = "2.0"

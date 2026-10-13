@@ -1,5 +1,5 @@
 # Fast gate only: scripts/check.sh (fmt, clippy -D warnings, unit tests), on
-# Linux and on Windows.
+# Linux, Windows and macOS.
 # scripts/check.sh full (integration, e2e, doc tests) is intentionally not run here.
 name: check
 
@@ -139,6 +139,47 @@ jobs:
             exit 1
           fi
 
+      - name: Cache compiled dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Fast gate
+        run: scripts/check.sh
+
+  macos:
+    name: macOS, fmt, clippy, unit tests
+    # Apple Silicon (arm64), pinned like the others.
+    runs-on: macos-26
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Homebrew's FFmpeg: its newest release, with its headers and
+      # pkg-config files. Not pinned: Homebrew keeps one version of a
+      # formula. libclang, which generates the bindings, comes with Xcode.
+      - name: Install FFmpeg
+        run: |
+          set -euo pipefail
+          brew install ffmpeg
+          pkg-config --exists --print-errors             libavcodec libavformat libavfilter libavutil libswscale libswresample
+          pkg-config --modversion libavcodec libswresample
+          ffmpeg -hide_banner -version | head -1
+
+      - name: Install the pinned Rust toolchain
+        run: |
+          set -euo pipefail
+          rustup show active-toolchain
+          rustc --version
+          channel=$(awk -F'"' '/^channel/ { print $2; exit }' rust-toolchain.toml)
+          got=$(rustc --version | awk '{ print $2 }')
+          if [ "$got" != "$channel" ]; then
+            echo "expected rustc ${channel} from rust-toolchain.toml, got ${got}" >&2
+            exit 1
+          fi
+
+      # As on Linux and Windows: master's run saves the compiled
+      # dependencies, and every later run (pull requests too) starts from
+      # them.
       - name: Cache compiled dependencies
         uses: Swatinem/rust-cache@v2
 

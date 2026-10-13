@@ -328,6 +328,8 @@ impl GpuDecoder {
     /// apart from this.
     pub fn hardware_decodes(&self, codec: ffmpeg::codec::Id, bits: u8) -> Option<bool> {
         use ffmpeg::codec::Id;
+        // Only VA-API's and Direct3D 11's drivers are asked.
+        #[cfg_attr(not(any(target_os = "linux", windows)), allow(unused_variables))]
         let profile = match (codec, bits) {
             (Id::H264, 8) => Profile::H264High,
             (Id::HEVC, 8) => Profile::HevcMain,
