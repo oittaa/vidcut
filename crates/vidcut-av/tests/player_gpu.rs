@@ -232,16 +232,19 @@ fn gpu_pictures_are_the_cpus() {
     assert_eq!(cpu.status().decoder, Some(Decoder::Cpu));
 }
 
-/// The decoders whose pictures stay in GPU memory for a display that shows
-/// them from there: NVDEC's, and VA-API's (copied out of the decoder's
-/// surfaces), with the memory they are kept in.
+/// The GPU decoders there are, with the memory their pictures stay in for a
+/// display that shows them from there: NVDEC's, and VA-API's and Direct3D
+/// 11's (copied out of the decoder's surfaces).
 fn keeping_decoders() -> Vec<(GpuDecoder, Memory)> {
     GpuDecoder::all()
         .into_iter()
-        .filter_map(|d| match d.kind() {
-            Kind::Nvdec => Some((d, Memory::Cuda)),
-            Kind::Vaapi => Some((d, Memory::Vaapi)),
-            Kind::D3d11va => None,
+        .map(|d| {
+            let memory = match d.kind() {
+                Kind::Nvdec => Memory::Cuda,
+                Kind::Vaapi => Memory::Vaapi,
+                Kind::D3d11va => Memory::D3d11,
+            };
+            (d, memory)
         })
         .collect()
 }
@@ -262,7 +265,7 @@ fn keeping(plan: vidcut_core::render::RenderPlan, gpu: GpuDecoder) -> Player {
 fn pictures_kept_in_gpu_memory_are_the_ones_copied_down() {
     let decoders = keeping_decoders();
     if decoders.is_empty() {
-        eprintln!("skipping: no NVDEC or VA-API");
+        eprintln!("skipping: no GPU decoder");
         return;
     }
     let h264 = src(
@@ -302,6 +305,12 @@ fn pictures_kept_in_gpu_memory_are_the_ones_copied_down() {
         let name = format!("{} {}", gpu.kind().name(), gpu.on());
         let kept = keeping(p.clone(), gpu.clone());
         let down = player_on(p.clone(), gpu.clone());
+        // H.264 where the GPU decodes it right (`GpuDecoder::decodes`).
+        let h264 = if gpu.decodes(vidcut_av::ffmpeg::codec::Id::H264) {
+            on_gpu
+        } else {
+            Memory::Cpu
+        };
         // Interlaced: deinterlaced on the GPU for NVDEC's, copied down for
         // `bwdif` for the others'.
         let interlaced = if gpu.kind() == Kind::Nvdec {
@@ -310,7 +319,7 @@ fn pictures_kept_in_gpu_memory_are_the_ones_copied_down() {
             Memory::Cpu
         };
         for (t, memory, bytes) in [
-            (3, on_gpu, nv12),
+            (3, h264, nv12),
             (14, on_gpu, 2 * nv12),
             (25, interlaced, nv12),
             (36, on_gpu, 2 * nv12),
@@ -351,7 +360,7 @@ fn pictures_kept_in_gpu_memory_are_the_ones_copied_down() {
 fn a_seek_in_video_memory_keeps_its_way_for_the_steps_back() {
     let decoders = keeping_decoders();
     if decoders.is_empty() {
-        eprintln!("skipping: no NVDEC or VA-API");
+        eprintln!("skipping: no GPU decoder");
         return;
     }
     // Keyframes 120 frames apart, with B-frames.
@@ -362,6 +371,10 @@ fn a_seek_in_video_memory_keeps_its_way_for_the_steps_back() {
             .bframes(2),
     );
     let p = plan(&[clip(&long, 0, 300)], 0);
+    // Those that decode H.264 (not AMD's Direct3D 11).
+    let decoders = decoders
+        .into_iter()
+        .filter(|(gpu, _)| gpu.decodes(vidcut_av::ffmpeg::codec::Id::H264));
     for (gpu, memory) in decoders {
         let name = format!("{} {}", gpu.kind().name(), gpu.on());
         let player = keeping(p.clone(), gpu);

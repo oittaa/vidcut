@@ -505,10 +505,9 @@ impl Decoder {
                 .get_or_insert_with(|| shared.gpu.clone().or_else(crate::hw::GpuDecoder::best));
             if let Some(gpu) = gpu {
                 frames = frames.decode_on(gpu.clone());
-                // NVDEC's and VA-API's pictures may stay in video memory,
-                // which then has a budget of its own.
-                let kept = matches!(gpu.kind(), crate::hw::Kind::Nvdec | crate::hw::Kind::Vaapi);
-                if kept && self.shared.gpu_pictures {
+                // The GPU's pictures may stay in video memory, which then
+                // has a budget of its own.
+                if self.shared.gpu_pictures {
                     frames = frames.keep_on_gpu();
                 }
                 if let Some(cuda) = gpu.cuda() {
