@@ -68,16 +68,16 @@ On Windows the program is `target\release\vidcut.exe`.
 
 ## Where vidcut keeps its files
 
-The docs name the Linux places; Windows has its own:
+The docs name the Linux places; Windows and macOS have their own:
 
-| Linux | Windows | Holds |
-|---|---|---|
-| `~/.config/vidcut` | `%APPDATA%\vidcut` | preferences, user presets |
-| `~/.cache/vidcut` | `%LOCALAPPDATA%\vidcut\cache` | thumbnails, waveforms, measurements, encoder detection, shaders |
-| `~/.local/state/vidcut` | `%LOCALAPPDATA%\vidcut\state` | undo history, recent projects |
-| `$XDG_RUNTIME_DIR/vidcut` | `%TEMP%\vidcut` | running GUIs (live control) |
+| Linux | Windows | macOS | Holds |
+|---|---|---|---|
+| `~/.config/vidcut` | `%APPDATA%\vidcut` | `~/Library/Application Support/vidcut` | preferences, user presets |
+| `~/.cache/vidcut` | `%LOCALAPPDATA%\vidcut\cache` | `~/Library/Caches/vidcut` | thumbnails, waveforms, measurements, encoder detection, shaders |
+| `~/.local/state/vidcut` | `%LOCALAPPDATA%\vidcut\state` | `~/Library/Application Support/vidcut/state` | undo history, recent projects |
+| `$XDG_RUNTIME_DIR/vidcut` | `%TEMP%\vidcut` | `$TMPDIR/vidcut-UID` | running GUIs (live control) |
 
-The `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME` and `XDG_RUNTIME_DIR` variables move them on either system.
+The `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME` and `XDG_RUNTIME_DIR` variables move them on every system.
 
 ## The GUI
 

@@ -18,8 +18,8 @@ use serde_json::{Value, json};
 use vidcut_core::model::{Project, Track};
 use vidcut_core::ops::{self, Edge, MAIN};
 
-use crate::gui::theme;
 use crate::gui::workspace::{Workspace, dim};
+use crate::gui::{keys, theme};
 use crate::live::PlayerId;
 use geometry::{Hit, NEW_TRACK_STRIP, Rows, Scale, Snap, hit_rows};
 use gesture::{Ctx, Drag, Gesture, Preview};
@@ -825,7 +825,7 @@ impl Workspace {
                 let o = &mut self.timeline.options;
                 if ui
                     .small_button("+")
-                    .on_hover_text("Zoom in (Ctrl+wheel)")
+                    .on_hover_text(keys("Zoom in (Ctrl+wheel)"))
                     .clicked()
                 {
                     o.ppf = (o.ppf * 1.5).min(40.0);
@@ -926,7 +926,7 @@ impl Workspace {
                 ui.close();
             }
         });
-        if icon_toggle(ui, icon::SPLIT, "Split", false, "Split (Ctrl+B)").clicked() {
+        if icon_toggle(ui, icon::SPLIT, "Split", false, &keys("Split (Ctrl+B)")).clicked() {
             self.send(
                 "edit.split",
                 json!({ "at": self.snap.timeline.position, "clips": self.snap.selection.clips }),
@@ -995,7 +995,7 @@ impl Workspace {
         }
         ui.separator();
         let at = self.snap.timeline.position;
-        if ui.button("Split Clips  (Ctrl+B)").clicked() {
+        if ui.button(keys("Split Clips  (Ctrl+B)")).clicked() {
             self.send(
                 "edit.split",
                 json!({ "at": at, "clips": self.snap.selection.clips }),
@@ -1050,7 +1050,7 @@ impl Workspace {
         if ui
             .add_enabled(
                 !self.snap.selection.clips.is_empty(),
-                egui::Button::new("Change Clip Duration…  (Ctrl+D)"),
+                egui::Button::new(keys("Change Clip Duration…  (Ctrl+D)")),
             )
             .clicked()
         {
@@ -1618,8 +1618,18 @@ impl Workspace {
             );
         }
         ui.separator();
-        item(ui, "Copy  (Ctrl+C)", "edit.copy", json!({ "clips": clips }));
-        item(ui, "Cut  (Ctrl+X)", "edit.cut", json!({ "clips": clips }));
+        item(
+            ui,
+            &keys("Copy  (Ctrl+C)"),
+            "edit.copy",
+            json!({ "clips": clips }),
+        );
+        item(
+            ui,
+            &keys("Cut  (Ctrl+X)"),
+            "edit.cut",
+            json!({ "clips": clips }),
+        );
         item(
             ui,
             "Delete  (Delete)",
@@ -1628,12 +1638,12 @@ impl Workspace {
         );
         item(
             ui,
-            "Lift  (Alt+Delete)",
+            &keys("Lift  (Alt+Delete)"),
             "edit.delete",
             json!({ "clips": clips, "lift": true }),
         );
         ui.separator();
-        if ui.button("Change Duration…  (Ctrl+D)").clicked() {
+        if ui.button(keys("Change Duration…  (Ctrl+D)")).clicked() {
             self.timeline.duration_dialog = Some(String::new());
             ui.close();
         }

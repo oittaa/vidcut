@@ -1,15 +1,16 @@
 //! Where vidcut keeps files outside projects ([`vidcut_core::dirs`]: the XDG
-//! base directories, Windows's known folders).
+//! base directories, Windows's known folders, macOS's `~/Library`).
 
 use std::path::PathBuf;
 
-/// `~/.config/vidcut` (`%APPDATA%\vidcut` on Windows): user presets and
-/// preferences.
+/// `~/.config/vidcut` (`%APPDATA%\vidcut` on Windows, `~/Library/Application
+/// Support/vidcut` on macOS): user presets and preferences.
 pub fn config_dir() -> PathBuf {
     vidcut_core::dirs::config()
 }
 
-/// `~/.cache/vidcut` (`%LOCALAPPDATA%\vidcut\cache` on Windows): encoder
+/// `~/.cache/vidcut` (`%LOCALAPPDATA%\vidcut\cache` on Windows,
+/// `~/Library/Caches/vidcut` on macOS): encoder
 /// detection, thumbnails, waveforms, the GPU converter's shaders and
 /// proxies written when no project folder is known.
 pub fn cache_dir() -> PathBuf {
@@ -34,8 +35,9 @@ pub(crate) fn fnv1a(bytes: &[u8]) -> u64 {
     })
 }
 
-/// `~/.local/state/vidcut` (`%LOCALAPPDATA%\vidcut\state` on Windows):
-/// undo history, recent projects.
+/// `~/.local/state/vidcut` (`%LOCALAPPDATA%\vidcut\state` on Windows,
+/// `~/Library/Application Support/vidcut/state` on macOS): undo history,
+/// recent projects.
 pub fn state_dir() -> PathBuf {
     vidcut_core::store::state_dir()
 }
