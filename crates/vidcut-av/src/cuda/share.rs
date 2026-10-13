@@ -7,7 +7,9 @@
 //! `nvcuda.dll` on Windows, which the NVIDIA driver installs and FFmpeg's
 //! CUDA device already uses); the few calls here are declared as its
 //! `cuda.h` has them. Memory comes as a file descriptor on Linux and as a
-//! Win32 handle on Windows.
+//! Win32 handle on Windows. NVDEC's library (`libnvcuvid.so.1`,
+//! `nvcuvid.dll`, which FFmpeg's NVDEC decoding uses) says what NVDEC
+//! decodes.
 
 use std::ffi::c_void;
 use std::sync::OnceLock;
@@ -207,6 +209,87 @@ impl CudaDevice {
                 (cuda.device_total_mem)(&mut bytes, device)
             })?;
             Ok(bytes)
+        })
+    }
+}
+
+/// `CUVIDDECODECAPS` (`cuviddec.h`): asked with a codec, chroma format and
+/// bit depth, NVDEC answers whether it decodes them.
+#[repr(C)]
+#[derive(Default)]
+struct DecodeCaps {
+    /// `cudaVideoCodec`.
+    codec: i32,
+    /// `cudaVideoChromaFormat`.
+    chroma: i32,
+    bit_depth_minus_8: u32,
+    reserved1: [u32; 3],
+    supported: u8,
+    decoders: u8,
+    output_formats: u16,
+    max_width: u32,
+    max_height: u32,
+    max_macroblocks: u32,
+    min_width: u16,
+    min_height: u16,
+    histogram: u8,
+    histogram_bits: u8,
+    histogram_bins: u16,
+    reserved3: [u32; 10],
+}
+
+/// `cudaVideoChromaFormat_420`.
+const CHROMA_420: i32 = 1;
+
+/// NVDEC's call used here, as `nvcuvid.h` declares it.
+struct Nvcuvid {
+    _lib: libloading::Library,
+    decoder_caps: unsafe extern "C" fn(*mut DecodeCaps) -> CuResult,
+}
+
+impl Nvcuvid {
+    fn get() -> Result<&'static Nvcuvid> {
+        static NVCUVID: OnceLock<std::result::Result<Nvcuvid, String>> = OnceLock::new();
+        NVCUVID
+            .get_or_init(|| {
+                // SAFETY: the driver's NVDEC library, its call as declared.
+                unsafe {
+                    #[cfg(unix)]
+                    let lib = libloading::Library::new("libnvcuvid.so.1");
+                    #[cfg(windows)]
+                    let lib = libloading::Library::new("nvcuvid.dll");
+                    lib.and_then(|lib| {
+                        Ok(Self {
+                            decoder_caps: *lib.get(b"cuvidGetDecoderCaps\0")?,
+                            _lib: lib,
+                        })
+                    })
+                }
+                .map_err(|e| format!("NVDEC's library: {e}"))
+            })
+            .as_ref()
+            .map_err(|e| Error::Invalid(e.clone()))
+    }
+}
+
+impl CudaDevice {
+    /// Whether NVDEC on this device's GPU decodes `codec` (`cuviddec.h`'s
+    /// `cudaVideoCodec`: 4 H.264, 8 HEVC, 10 VP9, 11 AV1) in 4:2:0 at
+    /// `bits`.
+    pub(crate) fn nvdec_decodes(&self, codec: i32, bits: u8) -> Result<bool> {
+        let (cuda, nvcuvid) = (Cuda::get()?, Nvcuvid::get()?);
+        let (ctx, _) = unsafe { cuda_context(self.as_ptr()) };
+        in_context(cuda, ctx, || {
+            let mut caps = DecodeCaps {
+                codec,
+                chroma: CHROMA_420,
+                bit_depth_minus_8: u32::from(bits.saturating_sub(8)),
+                ..Default::default()
+            };
+            check("asking NVDEC what it decodes", unsafe {
+                (nvcuvid.decoder_caps)(&mut caps)
+            })?;
+            Ok(caps.supported != 0)
         })
     }
 }

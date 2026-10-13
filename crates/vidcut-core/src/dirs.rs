@@ -88,24 +88,26 @@ fn plain(path: &Path) -> PathBuf {
         // In UTF-16 units, as Windows counts them: a name needn't be valid
         // Unicode.
         let wide: Vec<u16> = path.as_os_str().encode_wide().collect();
-        // Longer paths need the prefix; names it allows that the usual form
-        // doesn't (a trailing dot or space) are left as they are too.
-        let usual = wide.len() < 260
-            && !path.components().any(|c| {
-                let last = c.as_os_str().encode_wide().last();
-                matches!(c, Component::Normal(_)) && matches!(last, Some(0x2e | 0x20))
-            });
         // The path from unit `from` on, after `lead`.
         let rest = |from: usize, lead: &[u16]| {
             PathBuf::from(OsString::from_wide(&[lead, &wide[from..]].concat()))
         };
-        match prefix.kind() {
+        let usual = match prefix.kind() {
             // `\\?\C:\…`
-            Prefix::VerbatimDisk(_) if usual => rest(4, &[]),
+            Prefix::VerbatimDisk(_) => rest(4, &[]),
             // `\\?\UNC\server\…`
-            Prefix::VerbatimUNC(..) if usual => rest(8, &[0x5c, 0x5c]),
-            _ => path.to_path_buf(),
-        }
+            Prefix::VerbatimUNC(..) => rest(8, &[0x5c, 0x5c]),
+            _ => return path.to_path_buf(),
+        };
+        // Longer paths need the prefix (the usual form's limit is 260 units,
+        // its end among them); names it allows that the usual form doesn't
+        // (a trailing dot or space) are left as they are too.
+        let fits = usual.as_os_str().encode_wide().count() < 260
+            && !path.components().any(|c| {
+                let last = c.as_os_str().encode_wide().last();
+                matches!(c, Component::Normal(_)) && matches!(last, Some(0x2e | 0x20))
+            });
+        if fits { usual } else { path.to_path_buf() }
     }
     #[cfg(not(windows))]
     path.to_path_buf()
@@ -156,5 +158,13 @@ mod tests {
         assert_eq!(plain(&wide(r"\\?\C:\", &odd)), wide(r"C:\", &odd));
         let euros = [0x20ac; 200];
         assert_eq!(plain(&wide(r"\\?\C:\", &euros)), wide(r"C:\", &euros));
+        // The usual form's length is what counts: 259 units lose the
+        // prefix, 260 keep it.
+        let (fits, too_long) = ([0x78; 259 - 3], [0x78; 260 - 3]);
+        assert_eq!(plain(&wide(r"\\?\C:\", &fits)), wide(r"C:\", &fits));
+        assert_eq!(
+            plain(&wide(r"\\?\C:\", &too_long)),
+            wide(r"\\?\C:\", &too_long)
+        );
     }
 }

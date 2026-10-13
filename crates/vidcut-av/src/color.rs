@@ -607,7 +607,7 @@ const RESAMPLE: &str = "bicubic";
 /// swscale's flags for a picture whose colors it converts too (YUV to RGB
 /// or back, another matrix or range): left to its defaults, it rounds them
 /// low (export.md §4).
-const CONVERT: &str = "bicubic+accurate_rnd+full_chroma_int";
+pub(crate) const CONVERT: &str = "bicubic+accurate_rnd+full_chroma_int";
 
 /// `scale` options that keep a YUV picture's matrix and range (its tags,
 /// or what is assumed without them) while it is resampled: told nothing,
@@ -865,6 +865,10 @@ mod tests {
         // Every source's primaries lie within BT.2020's: light measured in
         // PQ output rises with each channel (`light::peak`).
         for p in [Primaries::Bt709, Primaries::Smpte170m, Primaries::Bt2020] {
+            // Primaries added later join the list: this has no catch-all.
+            match p {
+                Primaries::Bt709 | Primaries::Smpte170m | Primaries::Bt2020 => {}
+            }
             let m = gamut(p, Primaries::Bt2020);
             assert!(m.iter().flatten().all(|&v| v >= 0.0), "{p:?}: {m:?}");
         }

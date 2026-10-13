@@ -2180,8 +2180,8 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
         );
         // GPU decoding off (`gpu.decoding`): every piece decodes on the CPU,
         // NVDEC's too, and NVENC takes the frames from memory.
-        if bits == 8 {
-            let out = dir.path().join("decoded-on-the-cpu.mp4");
+        {
+            let out = dir.path().join(format!("decoded-on-the-cpu-{bits}.mp4"));
             let report = export::run_decoding_on(
                 &p,
                 &settings,
@@ -2191,14 +2191,19 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
                 &AtomicBool::new(false),
                 &mut |_| {},
             )
-            .unwrap_or_else(|e| panic!("decoded on the CPU: {e}"));
-            assert_eq!(report.video_encoder.as_deref(), Some("h264_nvenc"));
+            .unwrap_or_else(|e| panic!("{bits}-bit, decoded on the CPU: {e}"));
+            let nvenc = if bits == 8 {
+                "h264_nvenc"
+            } else {
+                "hevc_nvenc"
+            };
+            assert_eq!(report.video_encoder.as_deref(), Some(nvenc));
             assert_eq!(
                 (report.gpu_frames, report.gpu_decoded),
                 (0, 0),
-                "decoded on the CPU"
+                "{bits}-bit, decoded on the CPU"
             );
-            assert_eq!(barcodes(&out), want, "decoded on the CPU");
+            assert_eq!(barcodes(&out), want, "{bits}-bit, decoded on the CPU");
         }
     }
 }
@@ -2264,9 +2269,6 @@ fn gpu_decoded_exports_match_the_cpu() {
         v(&vp9, 0, 20),
         v(&a, 50, 20),
     ];
-    // The SD piece's frames: swscale converts BT.601 to BT.709 a level
-    // apart from NV12 (copied down) and from planar YUV (the CPU's).
-    let sd_frames = 120..135;
     let p = plan(fps, 1280, 720, video, vec![]);
     let dir = out_dir("gpu-decoded");
     let mut settings = lossless();
@@ -2320,11 +2322,10 @@ fn gpu_decoded_exports_match_the_cpu() {
                 got.next_frame().unwrap().unwrap(),
                 cpu_frames.next_frame().unwrap().unwrap(),
             );
-            let shift = if sd_frames.contains(&k) { 1.25 } else { 0.5 };
             for plane in 0..3 {
                 let (abs, mean) = difference(&g, &c, plane);
                 assert!(
-                    abs <= 1.5 && mean.abs() <= shift,
+                    abs <= 1.5 && mean.abs() <= 0.5,
                     "{name}: frame {k} plane {plane} is {abs:.2} levels from the CPU's on average, shifted {mean:.2}"
                 );
             }
@@ -2483,11 +2484,10 @@ fn vaapi_exports_keep_frames_on_the_gpu() {
             near(m[0], 16.0) && near(m[1], 128.0) && near(m[2], 128.0),
             "{bits}-bit: the bars are {m:?}"
         );
-        // Levels hold through the GPU's fitting (10 bits into 8 too), within
-        // the encoder's noise, against the CPU's export of the same depth
-        // (in its codes: 10 bits four times 8's). The SD piece, made on the
-        // CPU, comes down as NV12, which swscale converts from BT.601 half a
-        // level apart from planar YUV.
+        // Levels hold through the GPU's fitting (10 bits into 8 too: a
+        // quarter of a level low at most), within the encoder's noise,
+        // against the CPU's export of the same depth (in its codes: 10 bits
+        // four times 8's).
         let (reference, scale) = if bits == 8 {
             (&cpu, 1.0)
         } else {
@@ -2678,7 +2678,8 @@ fn amf_exports_keep_frames_on_the_gpu() {
             near(m[0], 16.0) && near(m[1], 128.0) && near(m[2], 128.0),
             "{bits}-bit: the bars are {m:?}"
         );
-        // Levels hold through the video processor (10 bits into 8 too),
+        // Levels hold through the video processor (10 bits into 8 too: it
+        // drops the low bits, up to half a level low where the CPU rounds),
         // within the encoder's noise, against the CPU's export of the same
         // depth (in its codes: 10 bits four times 8's).
         let (reference, scale) = if bits == 8 {
@@ -2841,8 +2842,7 @@ fn bt601_to_bt709((y, cb, cr): (u8, u8, u8)) -> [f64; 3] {
 /// libplacebo, with the colors the CPU gives them: each stripe of a colored
 /// 4:3 picture and the black beside it, from 8 and 10 bits, to 8 bits
 /// (libplacebo converts, the CUDA filters scale and pad) and 10 (libplacebo
-/// does it all). libplacebo is the more exact (swscale is up to two levels
-/// off).
+/// does it all). The CPU's export is within a level of the exact numbers.
 #[cfg(feature = "gpu-tests")]
 #[test]
 fn nvenc_exports_convert_bt601_on_the_gpu_as_the_cpu_does() {
@@ -2888,7 +2888,7 @@ fn nvenc_exports_convert_bt601_on_the_gpu_as_the_cpu_does() {
         render(&p, &reference, &cpu);
         // The picture is 960 wide in the middle.
         let cpu = stripe_means(&frame(&cpu), (160, 1120));
-        near(&cpu, &exact, 2.0, &format!("{source:?} on the CPU"));
+        near(&cpu, &exact, 1.0, &format!("{source:?} on the CPU"));
         for (codec, bits) in [(VCodec::H264, 8), (VCodec::Hevc, 10)] {
             let settings = ExportSettings {
                 container: OutContainer::Mp4,
@@ -2936,7 +2936,7 @@ fn nvenc_exports_convert_bt601_on_the_gpu_as_the_cpu_does() {
             near(
                 &gpu,
                 &cpu,
-                2.0,
+                1.5,
                 &format!("{source:?} to {bits} bits against the CPU"),
             );
         }

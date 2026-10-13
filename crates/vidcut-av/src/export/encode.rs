@@ -923,8 +923,9 @@ pub(crate) fn open_video(
             Some(up)
         }
         // Frames from memory, encoded on that GPU: QSV on a device of its
-        // own there (a VA-API one beneath it on Linux, which keeps libva's
-        // messages in FFmpeg's log), AMF on Direct3D 11's on that adapter.
+        // own on top of one there (`hw::Device::qsv`: VA-API's on Linux,
+        // which keeps libva's messages in FFmpeg's log, Direct3D 11's on
+        // Windows), AMF on Direct3D 11's on that adapter.
         Some(on) if matches!(enc.kind, EncoderChoice::Qsv | EncoderChoice::Amf) => {
             let device = match enc.kind {
                 EncoderChoice::Qsv => crate::hw::Device::qsv(on)?,
@@ -1206,8 +1207,9 @@ fn amd_and_intel() -> Vec<(String, EncoderChoice)> {
 }
 
 /// What [`detect`] tests, in a number: a cache of its results from
-/// another is out of date.
-pub const DETECTS: u32 = 2;
+/// another is out of date. 3: QSV opened on its GPU (`child_device`); 2's
+/// results came from QSV on the first Intel GPU, or the software runtime.
+pub const DETECTS: u32 = 3;
 
 /// The options among `keys` that encoder `name` doesn't have: FFmpeg drops
 /// those without a word. `None` when this FFmpeg has no `name`.
@@ -1624,5 +1626,62 @@ mod tests {
             ["h264_nvenc", "h264_vaapi", "libx264"].as_slice()
         };
         assert_eq!(names, want);
+    }
+
+    /// A frame going up to a GPU encoder's own frames keeps its colors (AMF
+    /// writes HDR10's metadata only for frames whose transfer is PQ), its
+    /// chroma siting, pixel aspect and timestamp: on a Direct3D 11 device
+    /// (Windows) or VA-API's (Linux), the first that takes P010.
+    #[cfg(feature = "gpu-tests")]
+    #[test]
+    fn frames_going_up_keep_their_colors() {
+        use crate::ffmpeg::ffi::{
+            AVChromaLocation as L, AVColorPrimaries as P, AVColorRange as R, AVColorSpace as S,
+            AVColorTransferCharacteristic as T,
+        };
+        let size = (64, 64);
+        #[cfg(windows)]
+        let upload = crate::hw::GpuDecoder::all()
+            .iter()
+            .filter(|d| d.kind() == crate::hw::Kind::D3d11va)
+            .find_map(|d| Upload::d3d11(d, format::Pixel::P010LE, size.0, size.1).ok());
+        #[cfg(target_os = "linux")]
+        let upload = crate::hw::GpuDecoder::all()
+            .iter()
+            .filter(|d| d.kind() == crate::hw::Kind::Vaapi)
+            .find_map(|d| Upload::vaapi(d.on(), format::Pixel::P010LE, size.0, size.1, None).ok());
+        #[cfg(not(any(windows, target_os = "linux")))]
+        let upload: Option<Upload> = None;
+        let Some(upload) = upload else {
+            eprintln!("skipping: no GPU encoder's frames to upload to here");
+            return;
+        };
+        let mut f = frame::Video::new(format::Pixel::P010LE, size.0, size.1);
+        // SAFETY: plain fields of its own frame.
+        unsafe {
+            let raw = &mut *f.as_mut_ptr();
+            raw.color_primaries = P::AVCOL_PRI_BT2020;
+            raw.colorspace = S::AVCOL_SPC_BT2020_NCL;
+            raw.color_trc = T::AVCOL_TRC_SMPTE2084;
+            raw.color_range = R::AVCOL_RANGE_JPEG;
+            raw.chroma_location = L::AVCHROMA_LOC_TOPLEFT;
+            raw.sample_aspect_ratio = ffi::AVRational { num: 4, den: 3 };
+        }
+        f.set_pts(Some(7));
+        let up = upload.upload(&f).unwrap();
+        // SAFETY: both frames are valid.
+        let fields = |f: &frame::Video| unsafe {
+            let r = &*f.as_ptr();
+            (
+                r.color_primaries,
+                r.colorspace,
+                r.color_trc,
+                r.color_range,
+                r.chroma_location,
+                (r.sample_aspect_ratio.num, r.sample_aspect_ratio.den),
+            )
+        };
+        assert_eq!(fields(&up), fields(&f));
+        assert_eq!(up.pts(), Some(7));
     }
 }

@@ -889,7 +889,7 @@ mod tests {
         });
         put(f, 0, y * rows[0] + x, l);
         let (cx, cy) = (x / 2, y / 2);
-        if f.format() == format::Pixel::YUV420P {
+        if f.planes() == 3 {
             put(f, 1, cy * rows[1] + cx, cb);
             put(f, 2, cy * rows[2] + cx, cr);
         } else {
