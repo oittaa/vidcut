@@ -58,17 +58,21 @@ mod imp {
             self.0.set_read_timeout(timeout)
         }
 
-        /// Whether the peer has closed the connection, or shut it down both
-        /// ways (a cancelled client does). A client that only shut down its
-        /// writing still waits for the answer: on a Unix socket, `poll`
-        /// reports `POLLHUP` only once neither direction is left. Reads
-        /// nothing, so a later request stays buffered.
+        /// Whether the peer has closed the connection, or (Linux) shut it
+        /// down both ways; a cancelled client does both. A client that only
+        /// shut down its writing still waits for the answer: on a Unix
+        /// socket, `poll` reports `POLLHUP` only once neither direction is
+        /// left. Reads nothing, so a later request stays buffered.
         pub fn peer_gone(&self) -> bool {
             use std::os::fd::AsRawFd;
-            // `POLLHUP` and `POLLERR` are reported whatever `events` asks for.
+            // Linux reports `POLLHUP` and `POLLERR` whatever `events` asks
+            // for. macOS reports them only for what is asked: asked for
+            // `POLLOUT`, `POLLHUP` once nothing can be sent, which is once
+            // the peer has closed; asked for `POLLIN`, already when the peer
+            // stops writing.
             let mut pfd = libc::pollfd {
                 fd: self.0.as_raw_fd(),
-                events: 0,
+                events: libc::POLLOUT,
                 revents: 0,
             };
             // SAFETY: `pfd` describes this socket, and the timeout is zero so

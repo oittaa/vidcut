@@ -12,8 +12,8 @@ pub enum Work {
     /// Media work nobody watches frame by frame: exports, proxies,
     /// measurements and analyses, storyboards, thumbnails, waveforms, the
     /// preview's helper files. The lowest priority (Linux's idle class,
-    /// Windows's idle priority); on Linux the threads it starts, FFmpeg's
-    /// decoders and encoders among them, inherit it.
+    /// Windows's idle priority, macOS's utility class); on Linux the threads
+    /// it starts, FFmpeg's decoders and encoders among them, inherit it.
     Job,
     /// Work someone waits on now: the session itself, requests and their
     /// answers, file dialogs, a frame or a plan.
@@ -39,7 +39,11 @@ pub fn spawn<T: Send + 'static>(
 /// Gives the calling thread the lowest CPU priority. On Linux that is the
 /// idle scheduling class, below nice 19, which the threads it starts later
 /// inherit. On Windows it is the idle priority, which threads don't
-/// inherit: the threads FFmpeg starts for a job run at the normal one.
+/// inherit: the threads FFmpeg starts for a job run at the normal one. On
+/// macOS it is the utility QoS class, which threads don't inherit either.
+/// Not the background class below it: that keeps to the efficiency cores
+/// and slows the thread's disk access, so a job wouldn't take the cores and
+/// the disk left idle.
 ///
 /// Not nice 19: NVIDIA's driver, opening NVENC, copies the calling thread's
 /// nice value onto the process id, which is the main thread, and nothing
@@ -60,6 +64,11 @@ fn lowest_priority() {
             GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_IDLE,
         };
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE);
+    }
+    #[cfg(target_os = "macos")]
+    // SAFETY: sets this thread's own class.
+    unsafe {
+        libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_UTILITY, 0);
     }
 }
 
@@ -124,6 +133,35 @@ mod tests {
             .unwrap();
         assert_eq!(interactive, before);
         assert_eq!(priority(), before, "the caller's priority changed");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_job_runs_in_the_utility_class() {
+        /// This thread's QoS class.
+        fn class() -> u32 {
+            let (mut class, mut relative) = (0u32, 0);
+            // SAFETY: reads this thread's own class, written as the u32
+            // `qos_class_t` is.
+            unsafe {
+                libc::pthread_get_qos_class_np(
+                    libc::pthread_self(),
+                    (&mut class as *mut u32).cast(),
+                    &mut relative,
+                );
+            }
+            class
+        }
+        let before = class();
+        let job = spawn("test-job", Work::Job, class).unwrap().join().unwrap();
+        let utility = libc::qos_class_t::QOS_CLASS_UTILITY as u32;
+        assert_eq!(job, utility);
+        let interactive = spawn("test-interactive", Work::Interactive, class)
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_ne!(interactive, utility);
+        assert_eq!(class(), before, "the caller's class changed");
     }
 
     /// Every thread the app starts goes through [`spawn`], which makes each

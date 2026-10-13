@@ -201,6 +201,7 @@ impl Gpu {
 
     /// Its adapter's LUID (Windows), which says which GPU it is: the
     /// Direct3D 11 textures it imports must be on that one.
+    #[cfg(any(target_os = "linux", windows))]
     pub fn luid(&self) -> Option<[u8; 8]> {
         use ash::vk;
         // SAFETY: reads the physical device's properties.
@@ -213,6 +214,12 @@ impl Gpu {
                 .get_physical_device_properties2(hal.raw_physical_device(), &mut props);
             (id.device_luid_valid == vk::TRUE).then_some(id.device_luid)
         }
+    }
+
+    /// Without Vulkan (macOS), none.
+    #[cfg(not(any(target_os = "linux", windows)))]
+    pub fn luid(&self) -> Option<[u8; 8]> {
+        None
     }
 
     /// Takes `images` (just imported, not yet used by wgpu) over from the API

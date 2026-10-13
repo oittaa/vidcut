@@ -16,6 +16,8 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - Caches are Docker volumes: `vidcut-ffmpeg-cargo` (crates), `vidcut-ffmpeg-target-TARGET` and `vidcut-ffmpeg-data-TARGET` (fixtures made with that FFmpeg; the downloaded media are mounted read-only). A target directory takes about 5.5 GB and the images about 3 GB together. On 16 cores a first run of all three targets took 7 minutes, and a repeat run of both default targets takes about a minute. To free the space: `docker volume rm $(docker volume ls -q -f name=vidcut-ffmpeg)` and `docker image rm vidcut-ffmpeg:lts vidcut-ffmpeg:release vidcut-ffmpeg:master`.
 - A newer FFmpeg release: put its version and the sha256 of its tarball, checked against its signature, in `scripts/ffmpeg/release.env` (the steps are there), then run `scripts/ffmpeg-check.sh release`.
 
+**The macOS build, checked from Windows:** `cargo clippy --target aarch64-apple-darwin --workspace --all-targets -- -D warnings` (after `rustup target add aarch64-apple-darwin`) checks everything macOS compiles, without a Mac; nothing is linked or run. FFmpeg's bindings are generated from the Windows build's headers (`FFMPEG_DIR` as usual) and need macOS's C headers, which Zig carries (`winget install zig.zig`): set `BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_darwin="-isystem ZIG/lib/include -isystem ZIG/lib/libc/include/any-macos-any"`, ZIG being Zig's folder (the one with `zig.exe`). Running takes a Mac: CI's `macos` job runs `scripts/check.sh`.
+
 **FFmpeg logging:** quiet by default (fatal only). Set `VIDCUT_AV_LOG=error` (or `warning`, `debug`) to see FFmpeg's messages when debugging media problems.
 
 **Media inspection** (examples in `crates/vidcut-av/examples/`):

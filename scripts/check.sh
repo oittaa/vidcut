@@ -22,6 +22,9 @@ cargo_quiet=(--quiet)
 if [[ -n "${CI:-}" ]]; then
   cargo_quiet=()
 fi
+# Bash 3.2 (macOS's) takes an empty array for an unset variable under set -u,
+# so it is expanded as ${cargo_quiet[@]+"${cargo_quiet[@]}"}: only when it
+# has an element.
 
 # Windows (Git Bash): FFmpeg is the folder FFMPEG_DIR names, and the tests
 # load its DLLs from its bin folder.
@@ -51,17 +54,17 @@ step "rustfmt"
 cargo fmt --all --check
 
 step "clippy (warnings are errors)"
-cargo clippy --workspace --all-targets "${cargo_quiet[@]}" "$@" -- -D warnings
+cargo clippy --workspace --all-targets ${cargo_quiet[@]+"${cargo_quiet[@]}"} "$@" -- -D warnings
 
 case "$mode" in
   fast)
     step "unit tests"
-    cargo test --workspace --lib --bins "${cargo_quiet[@]}" "$@"
+    cargo test --workspace --lib --bins ${cargo_quiet[@]+"${cargo_quiet[@]}"} "$@"
     ;;
   full)
     step "all tests (unit, integration, e2e, doc)"
-    cargo test --workspace --all-targets "${cargo_quiet[@]}" "$@"
-    cargo test --workspace --doc "${cargo_quiet[@]}" "$@"
+    cargo test --workspace --all-targets ${cargo_quiet[@]+"${cargo_quiet[@]}"} "$@"
+    cargo test --workspace --doc ${cargo_quiet[@]+"${cargo_quiet[@]}"} "$@"
     ;;
   *)
     echo "usage: $0 [fast|full] [cargo flags...]" >&2
