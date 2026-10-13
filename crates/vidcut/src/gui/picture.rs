@@ -22,6 +22,10 @@ use vidcut_core::model::Hdr;
 
 /// The GPU and the shader pass the viewer's screen draws with.
 pub struct Gpu {
+    /// Takes VA-API's imported surfaces over to wgpu's queue, made at the
+    /// first. Before `device`, so it goes first.
+    #[cfg(target_os = "linux")]
+    acquirer: std::sync::Mutex<Option<super::acquire::Acquirer>>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::RenderPipeline,
@@ -132,6 +136,8 @@ impl Gpu {
             ..Default::default()
         });
         Self {
+            #[cfg(target_os = "linux")]
+            acquirer: std::sync::Mutex::new(None),
             device: device.clone(),
             queue: queue.clone(),
             pipeline,
@@ -148,13 +154,18 @@ impl Gpu {
         }
     }
 
-    /// Whether it may show pictures in GPU memory from there: a player can
-    /// keep NVDEC's pictures on the GPU for it, where it shares memory with
-    /// CUDA, and VA-API's, where it imports DMA-BUFs. Those it can't take
+    /// Whether it may show pictures `kind` decoded from GPU memory, so a
+    /// player can keep them there for it: NVDEC's where it shares memory
+    /// with CUDA, VA-API's where it imports DMA-BUFs. Those it can't take
     /// after all (CUDA on another GPU, a surface it won't import) are copied
     /// down to be shown.
-    pub fn takes_gpu_pictures(&self) -> bool {
-        self.shares || self.dma_buf
+    pub fn takes_gpu_pictures(&self, kind: vidcut_av::hw::Kind) -> bool {
+        use vidcut_av::hw::Kind;
+        match kind {
+            Kind::Nvdec => self.shares,
+            Kind::Vaapi => self.dma_buf,
+            Kind::D3d11va => false,
+        }
     }
 
     /// Whether it imports VA-API's surfaces (DMA-BUFs) to show pictures in
@@ -180,6 +191,12 @@ impl Gpu {
     /// A device of its own, without a window: the first adapter there is
     /// (a GPU, or a software one such as lavapipe). `None` without one.
     pub fn headless() -> Option<Self> {
+        Self::headless_with_info().map(|(gpu, _)| gpu)
+    }
+
+    /// [`headless`](Self::headless), and what its adapter is (its PCI
+    /// address says which GPU).
+    pub fn headless_with_info() -> Option<(Self, wgpu::AdapterInfo)> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -192,7 +209,7 @@ impl Gpu {
             ..Default::default()
         }))
         .ok()?;
-        Some(Self::new(&device, &queue))
+        Some((Self::new(&device, &queue), adapter.get_info()))
     }
 
     pub fn device(&self) -> &wgpu::Device {
@@ -232,9 +249,9 @@ pub struct Screen {
     filled: Option<usize>,
     /// Sharing failed: pictures in CUDA memory are copied down from then on.
     unshared: bool,
-    /// Importing failed: pictures in VA-API memory are copied down from then
-    /// on.
-    unimported: bool,
+    /// The layouts whose import failed: pictures in VA-API memory in them
+    /// are copied down from then on (P010 may fail where NV12 imports).
+    unimported: Vec<Layout>,
     /// The picture being drawn, imported: held until the copies out of its
     /// surface are done, so the surface isn't reused under them.
     imported: Option<Arc<Picture>>,
@@ -407,15 +424,18 @@ impl Screen {
         match picture.memory() {
             Memory::Cuda => {}
             Memory::Vaapi => {
-                if !self.unimported {
+                let layout = picture.layout();
+                if !self.unimported.contains(&layout) {
                     match self.import_on_gpu(gpu, picture, encoder) {
                         Ok(()) => {
                             self.last_shared = true;
                             return;
                         }
                         Err(e) => {
-                            eprintln!("vidcut: pictures come down from the GPU to be shown: {e}");
-                            self.unimported = true;
+                            eprintln!(
+                                "vidcut: {layout:?} pictures come down from the GPU to be shown: {e}"
+                            );
+                            self.unimported.push(layout);
                         }
                     }
                 }
@@ -480,6 +500,8 @@ impl Screen {
         };
         let (w, h) = (picture.width(), picture.height());
         let ours = self.planes.as_ref().expect("made by upload");
+        let label = Some("vidcut VA-API plane");
+        let mut imports = Vec::new();
         for (plane, (width, height), format, texture) in [
             (y, (w, h), one, &ours.y),
             (uv, (w.div_ceil(2), h.div_ceil(2)), two, &ours.u),
@@ -493,7 +515,6 @@ impl Screen {
                 .fd
                 .try_clone_to_owned()
                 .map_err(|e| format!("a surface's file: {e}"))?;
-            let label = Some("vidcut VA-API plane");
             // SAFETY: the file holds the plane, at its offset and pitch,
             // laid out as its modifier says; Vulkan takes the file over.
             let raw = unsafe {
@@ -517,8 +538,29 @@ impl Screen {
                 )
                 .map_err(|e| format!("importing a VA-API surface: {e}"))?
             };
-            // SAFETY: made on this device, as described; a new image, its
-            // layout undefined, though its memory holds the picture.
+            imports.push((raw, size, format, texture));
+        }
+        // Taken over from VA-API with the picture they hold, ready to copy
+        // from.
+        // SAFETY: the images were just made on wgpu's device, which hasn't
+        // used them; this thread submits all the viewer's work.
+        unsafe {
+            let hal = gpu.device.as_hal::<Vulkan>().ok_or("not Vulkan")?;
+            let mut acquirer = gpu.acquirer.lock().unwrap_or_else(|e| e.into_inner());
+            if acquirer.is_none() {
+                *acquirer = Some(super::acquire::Acquirer::new(&hal)?);
+            }
+            let images: Vec<_> = imports.iter().map(|(raw, ..)| raw.raw_handle()).collect();
+            acquirer.as_mut().expect("made above").acquire(
+                &images,
+                ash::vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                ash::vk::PipelineStageFlags::TRANSFER,
+                ash::vk::AccessFlags::TRANSFER_READ,
+            )?;
+        }
+        for (raw, size, format, texture) in imports {
+            // SAFETY: made on this device, as described, and in the layout
+            // copies read from (acquired above).
             let imported = unsafe {
                 gpu.device.create_texture_from_hal::<Vulkan>(
                     raw,
@@ -532,7 +574,7 @@ impl Screen {
                         usage: wgpu::TextureUsages::COPY_SRC,
                         view_formats: &[],
                     },
-                    wgpu::TextureUses::UNINITIALIZED,
+                    wgpu::TextureUses::COPY_SRC,
                 )
             };
             // wgpu keeps the texture until the copy is done.

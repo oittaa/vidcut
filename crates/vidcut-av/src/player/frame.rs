@@ -16,7 +16,8 @@ pub enum Memory {
     Cpu,
     /// A CUDA surface (NVDEC's frames).
     Cuda,
-    /// A VA-API surface (VA-API's frames, copied out of the decoder's).
+    /// A VA-API surface (the decoder's, whose pool grows as frames are
+    /// kept).
     Vaapi,
     /// A Vulkan image.
     Vulkan,

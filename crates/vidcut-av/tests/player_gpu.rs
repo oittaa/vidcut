@@ -241,8 +241,8 @@ fn gpu_pictures_are_the_cpus() {
 }
 
 /// The decoders whose pictures stay in GPU memory for a display that shows
-/// them from there: NVDEC's, and VA-API's (copied out of the decoder's
-/// surfaces), with the memory they are kept in.
+/// them from there: NVDEC's, and VA-API's (the decoder's surfaces), with
+/// the memory they are kept in.
 fn keeping_decoders() -> Vec<(GpuDecoder, Memory)> {
     GpuDecoder::all()
         .into_iter()

@@ -528,8 +528,6 @@ pub struct VideoFrames {
     /// (`keep_on_gpu`).
     decoder: Option<crate::hw::GpuDecoder>,
     keep_on_gpu: bool,
-    /// Copies VA-API's frames kept on the GPU out of the decoder's surfaces.
-    keeper: Option<crate::hw::Keeper>,
     /// The clockwise turn that shows the last frame given upright.
     rotation: u16,
     /// The GPU that decoded the last frame given.
@@ -678,7 +676,6 @@ impl VideoFrames {
             decoded: None,
             decoder: None,
             keep_on_gpu: false,
-            keeper: None,
             rotation: 0,
             last_decoder: None,
             dynamic: Default::default(),
@@ -710,9 +707,10 @@ impl VideoFrames {
 
     /// Frames NVDEC or VA-API decoded ([`decode_on`](Self::decode_on)) stay
     /// in GPU memory when a display takes them as they are (NV12, P010): for
-    /// a display that shows them from there. VA-API's are copied out of the
-    /// decoder's surfaces on the GPU ([`crate::hw::Keeper`]). Others, and
-    /// other GPUs', are copied down.
+    /// a display that shows them from there. Kept, they don't run the
+    /// decoder out: FFmpeg copies NVDEC's out of its few surfaces into a
+    /// pool that grows, and VA-API's own pool grows as it needs (libva 1.0
+    /// and later). Others, and other GPUs', are copied down.
     pub fn keep_on_gpu(mut self) -> Self {
         self.keep_on_gpu = true;
         self
@@ -1075,10 +1073,7 @@ impl VideoFrames {
                 src.normalized = Some(if crate::hw::on_gpu(frame) {
                     let keep = self.keep_on_gpu && displayable(crate::hw::sw_format(frame));
                     match frame.format() {
-                        format::Pixel::CUDA if keep => frame_ref(frame)?,
-                        format::Pixel::VAAPI if keep => {
-                            crate::hw::Keeper::copy(&mut self.keeper, frame)?
-                        }
+                        format::Pixel::CUDA | format::Pixel::VAAPI if keep => frame_ref(frame)?,
                         _ => relayout.run(&crate::hw::download(frame)?)?,
                     }
                 } else {
