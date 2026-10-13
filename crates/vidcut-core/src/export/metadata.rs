@@ -300,6 +300,15 @@ pub fn choose(
         .collect();
     let total: i64 = shown.iter().map(|(n, _)| n).sum();
     let metas: Vec<PieceMeta> = shown.iter().map(|(_, m)| *m).collect();
+    // Black frames (gaps) show no source: they don't count for the values,
+    // but an encoder writing Dolby Vision needs an RPU on every frame.
+    let black: i64 = video
+        .iter()
+        .map(|p| match p {
+            VideoPiece::Black { frames } => *frames,
+            _ => 0,
+        })
+        .sum();
 
     // The static values, PQ only.
     if out == Hdr::Pq {
@@ -422,6 +431,10 @@ pub fn choose(
                 "{} of the picture has none (or another profile)",
                 percent(total - with, total)
             )),
+            Some(_) if black > 0 => Some(format!(
+                "the black frames ({}, gaps) have none, and every frame needs it",
+                percent(black, total + black)
+            )),
             Some(_) if !matches!(v.codec, VideoCodec::Hevc | VideoCodec::Av1) => {
                 Some("it needs HEVC or AV1".into())
             }
@@ -526,6 +539,27 @@ mod tests {
             },
             dv_writer,
         )
+    }
+
+    #[test]
+    fn black_frames_rule_out_dolby_vision_but_not_hdr10plus() {
+        let v = settings(HdrMode::Pq, HdrMetadata::Auto);
+        let mut dv = pq(1000.0, Some((1000, 400)));
+        dv.dolby_vision = Some(DolbyVision {
+            profile: 8,
+            compatibility: 1,
+        });
+        dv.hdr10plus = true;
+        let video = vec![piece(30, "m0"), VideoPiece::Black { frames: 10 }];
+        let c = choose(&v, &video, |_| dv, true);
+        assert_eq!(c.mode, HdrMetadata::Hdr10plus, "{:?}", c.why);
+        assert!(
+            c.why
+                .iter()
+                .any(|w| w == "No Dolby Vision: the black frames (25%, gaps) have none, and every frame needs it"),
+            "{:?}",
+            c.why
+        );
     }
 
     #[test]

@@ -404,6 +404,25 @@ fn real_clips_keep_their_hdr_metadata() {
             assert_eq!(frames.len(), 30);
             assert!(frames.iter().all(|f| f.dolby_vision), "{container:?}");
         }
+        // A gap's black frames have no RPU: Dolby Vision is left out, and
+        // the export goes on (libx265 stops at a frame without one).
+        let mut p = clip_plan(&dv, 60, 20, 960, 540);
+        p.video.push(VideoPiece::Black { frames: 10 });
+        p.frames += 10;
+        p.range.1 += 10;
+        let out = dir.path().join("dv-gap.mkv");
+        let r = render(
+            &p,
+            &settings(VCodec::Hevc, OutContainer::Mkv, HdrMode::Auto),
+            &out,
+        );
+        assert_eq!(r.metadata.unwrap().mode, HdrMetadata::None);
+        assert!(
+            hdr::read_frames(&out, true, usize::MAX)
+                .unwrap()
+                .iter()
+                .all(|f| !f.dolby_vision)
+        );
     }
 }
 
