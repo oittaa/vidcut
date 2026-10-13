@@ -283,13 +283,34 @@ pub fn timeline(
         "path": params.output, "format": format.name(), "range": [a, b], "frames": b - a,
         "clips": clips,
     });
+    let mut notes = Vec::new();
     if let TimelineFormat::Bundle(_) = format {
         summary["media"] = json!(items.len());
         summary["files"] = json!(items.iter().map(|i| i.files.len()).sum::<usize>());
         summary["bytes"] = json!(items.iter().map(|i| i.bytes).sum::<u64>());
+        // Some editors' import hangs on a bundle holding an image sequence
+        // (deviation X9).
+        let sequences: Vec<&str> = ids
+            .iter()
+            .filter_map(|id| project.media(id))
+            .filter(|m| m.sequence.is_some())
+            .map(|m| m.name.as_str())
+            .collect();
+        if !sequences.is_empty() {
+            notes.push(json!({
+                "code": "bundle_image_sequence",
+                "message": format!(
+                    "some editors' import hangs on a bundle holding an image sequence ({}; \
+                     deviation X9): an .otio with the media in place imports",
+                    sequences.join(", ")
+                ),
+            }));
+        }
     }
     let Some(writing) = write else {
-        return Ok(json!({ "preset": null, "format": format.name(), "outputs": [summary] }));
+        return Ok(json!({
+            "preset": null, "format": format.name(), "outputs": [summary], "notes": notes,
+        }));
     };
     let text =
         serde_json::to_string_pretty(&doc).map_err(|e| Error::internal(e.to_string()))? + "\n";
@@ -310,7 +331,7 @@ pub fn timeline(
             writing.progress,
         )?,
     }
-    Ok(json!({ "outputs": [summary] }))
+    Ok(json!({ "outputs": [summary], "notes": notes }))
 }
 
 fn preset(name: &str) -> Result<Preset> {

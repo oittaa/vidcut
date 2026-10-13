@@ -1565,6 +1565,11 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, closable: bool, send: impl Fn(&str, 
         }
         JobState::Done => {
             ui.label(RichText::new(format!("Done in {}", clock(j.elapsed))).color(theme::OK));
+            // What the export noted: a bundle with an image sequence.
+            let notes = j.result.as_ref().and_then(|r| r["notes"].as_array());
+            for n in notes.into_iter().flatten() {
+                ui.label(dim(n["message"].as_str().unwrap_or_default()));
+            }
             ui.horizontal(|ui| {
                 if let Some(path) = job_paths(j) {
                     ui.label(dim(path.display().to_string()));

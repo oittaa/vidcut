@@ -1287,7 +1287,13 @@ fn stills_and_sequences_edit_and_export() {
     // Through an .otioz bundle (deviation X9): the still, and the sequence's
     // pictures in a folder of their own; back, the same pictures.
     let bundle = sb.dir.path().join("pictures.otioz");
-    sb.ok(&["export", "start", s(&bundle)]);
+    let r = sb.ok(&["export", "start", s(&bundle)]);
+    // Noted: some editors' import hangs on a bundled image sequence.
+    let notes = r["result"]["notes"].as_array().unwrap();
+    assert_eq!(notes.len(), 1, "{r}");
+    assert_eq!(notes[0]["code"], "bundle_image_sequence", "{r}");
+    let plain = sb.ok(&["export", "plan", s(&sb.dir.path().join("pictures.otio"))]);
+    assert_eq!(plain["result"]["notes"], serde_json::json!([]), "{plain}");
     let other = sb.dir.path().join("q.vidcut");
     sb.ok(&["project", "create", s(&other)]);
     let r = sb.ok_in(&other, &["timeline", "import", s(&bundle)]);

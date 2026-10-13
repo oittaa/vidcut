@@ -86,7 +86,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
     - each audio track, and markers
     - in `metadata.vidcut`: the In/Out marks, clip gain/mute and track settings (lock, mute, solo, fader, name)
 
-    A track's video off or audio muted also marks the OTIO track disabled. Unlike media exports it covers the whole timeline unless given a range. An `.otioz` or `.otiod` export (File > Export Timeline with Media) copies the media whole, as Resolve does; it runs as a job.
+    A track's video off or audio muted also marks the OTIO track disabled. Unlike media exports it covers the whole timeline unless given a range. An `.otioz` or `.otiod` export (File > Export Timeline with Media) copies the media whole, as Resolve does; it runs as a job. Studio 21.1.1 hangs importing a bundle that holds an image sequence (a plain `.otio` with one imports), so such an export says so in its `notes` (`bundle_image_sequence`).
   - **What Resolve reads besides:**
     - Paths, timecode source ranges (including drop-frame) and marker notes: spec D40.
     - In `metadata.Resolve_OTIO`: a link group number joins each clip's video and audio, and the audio names the stream and channels it plays.
