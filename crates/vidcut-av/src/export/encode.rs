@@ -183,6 +183,27 @@ pub struct Availability {
 }
 
 impl Availability {
+    /// The encoders on the GPU in use (`gpus::in_use`), the only ones
+    /// exports and proxies take; all of them where no GPU is listed.
+    pub fn in_use(&self) -> Self {
+        match crate::gpus::in_use() {
+            Some(gpu) => self.on(&gpu),
+            None => self.clone(),
+        }
+    }
+
+    /// The encoders `gpu` has: those detection ran on it.
+    pub fn on(&self, gpu: &crate::gpus::Gpu) -> Self {
+        Self {
+            encoders: self
+                .encoders
+                .iter()
+                .filter(|e| gpu.ran(e))
+                .cloned()
+                .collect(),
+        }
+    }
+
     pub(crate) fn find(&self, name: &str, pixel: format::Pixel) -> Option<&EncoderStatus> {
         let pix = pixel_name(pixel);
         self.encoders
@@ -445,6 +466,7 @@ fn nvenc_options(v: &VideoSettings, q: u32, ten: bool, passes: Passes) -> Vec<(S
         opt("tune", "hq"),
         opt("rc", "vbr"),
     ];
+
     if passes == Passes::TwoInside {
         let first = match v.multipass {
             Multipass::Quarter => "qres",
@@ -1034,6 +1056,13 @@ pub(crate) fn open_video(
     for (k, v) in pass_options(enc, pass) {
         dict.set(&k, &v);
     }
+    // NVENC on its GPU's CUDA device, where frames come from memory (on
+    // the GPU, it takes theirs).
+    if enc.kind == EncoderChoice::Nvenc
+        && let Some(cuda) = &enc.device
+    {
+        dict.set("gpu", cuda);
+    }
     // The first run's statistics in memory (libvpx), read once opened.
     if let Pass::Second {
         buffer: Some(stats),
@@ -1222,27 +1251,6 @@ pub fn detect() -> Availability {
                 error: result.err().map(|e| e.to_string()),
             });
         };
-    // NVIDIA's GPUs: not on macOS.
-    let nvenc: &[(&str, &[format::Pixel])] = if cfg!(target_os = "macos") {
-        &[]
-    } else {
-        &[
-            ("h264_nvenc", &[format::Pixel::YUV420P]),
-            (
-                "hevc_nvenc",
-                &[format::Pixel::YUV420P, format::Pixel::P010LE],
-            ),
-            (
-                "av1_nvenc",
-                &[format::Pixel::YUV420P, format::Pixel::P010LE],
-            ),
-        ]
-    };
-    for &(codec, pixels) in nvenc {
-        for &p in pixels {
-            check(codec, EncoderChoice::Nvenc, p, None);
-        }
-    }
     let nv12_p010 = &[format::Pixel::NV12, format::Pixel::P010LE][..];
     if cfg!(target_os = "macos") {
         check(
@@ -1255,68 +1263,61 @@ pub fn detect() -> Availability {
             check("hevc_videotoolbox", EncoderChoice::VideoToolbox, p, None);
         }
     }
-    for (node, _driver) in render_nodes() {
-        for (codec, pixels) in [
-            ("h264_vaapi", &[format::Pixel::NV12][..]),
-            ("hevc_vaapi", nv12_p010),
-            ("av1_vaapi", nv12_p010),
-        ] {
-            for &p in pixels {
-                check(codec, EncoderChoice::Vaapi, p, Some(&node));
+    // Each GPU's own (`gpus::list`): NVENC on NVIDIA's CUDA devices; AMF
+    // on AMD's adapters (Windows: on Linux it takes AMD's closed driver, and
+    // VAAPI serves those GPUs); QSV on Intel's adapters or render nodes;
+    // VAAPI on the other GPUs' render nodes (Linux).
+    use crate::gpus::{AMD, INTEL, NVIDIA};
+    for gpu in crate::gpus::list() {
+        let mut kinds = Vec::new();
+        if let Some(cuda) = gpu.cuda {
+            kinds.push((EncoderChoice::Nvenc, cuda.to_string()));
+        }
+        match (gpu.adapter, gpu.pci_vendor) {
+            (Some(a), AMD) => kinds.push((EncoderChoice::Amf, a.to_string())),
+            (Some(a), INTEL) => kinds.push((EncoderChoice::Qsv, a.to_string())),
+            _ => {}
+        }
+        if let Some(node) = gpu.node.as_ref().filter(|_| gpu.pci_vendor != NVIDIA) {
+            kinds.push((EncoderChoice::Vaapi, node.clone()));
+            if gpu.pci_vendor == INTEL {
+                kinds.push((EncoderChoice::Qsv, node.clone()));
             }
         }
-    }
-    // AMF on each of AMD's GPUs (Windows: on Linux it takes AMD's closed
-    // driver, and VAAPI serves those GPUs), QSV on each of Intel's.
-    for (on, kind) in amd_and_intel() {
-        let codecs = match kind {
-            EncoderChoice::Amf => ["h264_amf", "hevc_amf", "av1_amf"],
-            _ => ["h264_qsv", "hevc_qsv", "av1_qsv"],
-        };
-        for codec in codecs {
-            let pixels = if codec.starts_with("h264") {
-                &nv12_p010[..1]
+        for (kind, on) in kinds {
+            let codecs = match kind {
+                EncoderChoice::Nvenc => ["h264_nvenc", "hevc_nvenc", "av1_nvenc"],
+                EncoderChoice::Amf => ["h264_amf", "hevc_amf", "av1_amf"],
+                EncoderChoice::Qsv => ["h264_qsv", "hevc_qsv", "av1_qsv"],
+                _ => ["h264_vaapi", "hevc_vaapi", "av1_vaapi"],
+            };
+            // NVENC takes frames from memory as YUV 4:2:0, the others as
+            // NV12; H.264 in 8 bits only.
+            let pixels: &[format::Pixel] = if kind == EncoderChoice::Nvenc {
+                &[format::Pixel::YUV420P, format::Pixel::P010LE]
             } else {
                 nv12_p010
             };
-            for &p in pixels {
-                check(codec, kind, p, Some(&on));
+            for codec in codecs {
+                let pixels = if codec.starts_with("h264") {
+                    &pixels[..1]
+                } else {
+                    pixels
+                };
+                for &p in pixels {
+                    check(codec, kind, p, Some(&on));
+                }
             }
         }
     }
     Availability { encoders }
 }
 
-/// AMD's and Intel's GPUs with the encoder each is tested with: on
-/// Windows their adapters' indexes, AMF on AMD's and QSV on Intel's; on
-/// Linux Intel's render nodes, QSV on them.
-fn amd_and_intel() -> Vec<(String, EncoderChoice)> {
-    #[cfg(windows)]
-    {
-        use crate::hw::windows::{AMD, INTEL, adapters};
-        adapters()
-            .into_iter()
-            .filter_map(|(i, vendor)| match vendor {
-                AMD => Some((i.to_string(), EncoderChoice::Amf)),
-                INTEL => Some((i.to_string(), EncoderChoice::Qsv)),
-                _ => None,
-            })
-            .collect()
-    }
-    #[cfg(not(windows))]
-    {
-        render_nodes()
-            .into_iter()
-            .filter(|(_, driver)| matches!(driver.as_str(), "i915" | "xe"))
-            .map(|(node, _)| (node, EncoderChoice::Qsv))
-            .collect()
-    }
-}
-
 /// What [`detect`] tests, in a number: a cache of its results from
-/// another is out of date. 3: QSV opened on its GPU (`child_device`); 2's
+/// another is out of date. 4: each GPU's encoders, NVENC on each NVIDIA
+/// GPU (3's on the first). 3: QSV opened on its GPU (`child_device`); 2's
 /// results came from QSV on the first Intel GPU, or the software runtime.
-pub const DETECTS: u32 = 3;
+pub const DETECTS: u32 = 4;
 
 /// The options among `keys` that encoder `name` doesn't have: FFmpeg drops
 /// those without a word. `None` when this FFmpeg has no `name`.

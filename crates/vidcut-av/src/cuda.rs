@@ -9,6 +9,8 @@
 
 pub mod share;
 
+pub(crate) use share::{Listed, listed};
+
 /// One plane's place in memory a display shares (`share::SharedBuffer`):
 /// where it starts, how far apart its rows are, and how many bytes of how
 /// many rows it has.
@@ -49,38 +51,52 @@ pub struct CudaDevice {
 }
 
 impl CudaDevice {
-    /// The CUDA device on the first GPU that works: one for the whole
-    /// process, shared by every export and proxy, and never closed. Its
-    /// Vulkan device is made one thread at a time: the Vulkan loader
-    /// crashed when two threads made instances at the same time (two
-    /// exports at once).
+    /// The CUDA device on the GPU in use (`gpus::in_use`), when that is
+    /// NVIDIA's.
     pub fn open() -> Result<Self> {
-        static SHARED: OnceLock<std::result::Result<CudaDevice, String>> = OnceLock::new();
-        SHARED
-            .get_or_init(|| {
-                crate::init();
-                let mut device = ptr::null_mut();
-                let ret = unsafe {
-                    ffi::av_hwdevice_ctx_create(
-                        &mut device,
-                        ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA,
-                        ptr::null(),
-                        ptr::null_mut(),
-                        0,
-                    )
-                };
-                if ret < 0 || device.is_null() {
-                    return Err(format!("no CUDA device: {}", ffmpeg::Error::from(ret)));
-                }
-                let cuda = Device(device);
-                Ok(Self {
-                    base: cuda.clone(),
-                    cuda,
-                    vulkan: Arc::default(),
-                })
+        match crate::gpus::in_use().and_then(|g| g.cuda) {
+            Some(index) => Self::on(index),
+            None => Err(Error::Invalid("no NVIDIA GPU is in use".into())),
+        }
+    }
+
+    /// The CUDA device of index `index`, in CUDA's order: one for each in
+    /// the whole process, shared by every export and proxy, and never
+    /// closed. Its Vulkan device is made one thread at a time: the Vulkan
+    /// loader crashed when two threads made instances at the same time (two
+    /// exports at once).
+    pub(crate) fn on(index: i32) -> Result<Self> {
+        static SHARED: Mutex<Vec<(i32, std::result::Result<CudaDevice, String>)>> =
+            Mutex::new(Vec::new());
+        let mut shared = SHARED.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, opened)) = shared.iter().find(|(i, _)| *i == index) {
+            return opened.clone().map_err(Error::Invalid);
+        }
+        crate::init();
+        let mut device = ptr::null_mut();
+        let on = std::ffi::CString::new(index.to_string()).expect("digits");
+        // SAFETY: FFmpeg makes the device on the CUDA device of that index.
+        let ret = unsafe {
+            ffi::av_hwdevice_ctx_create(
+                &mut device,
+                ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA,
+                on.as_ptr(),
+                ptr::null_mut(),
+                0,
+            )
+        };
+        let opened = if ret < 0 || device.is_null() {
+            Err(format!("no CUDA device: {}", ffmpeg::Error::from(ret)))
+        } else {
+            let cuda = Device(device);
+            Ok(Self {
+                base: cuda.clone(),
+                cuda,
+                vulkan: Arc::default(),
             })
-            .clone()
-            .map_err(Error::Invalid)
+        };
+        shared.push((index, opened.clone()));
+        opened.map_err(Error::Invalid)
     }
 
     /// A device of its own on the same context: its work goes on a stream of

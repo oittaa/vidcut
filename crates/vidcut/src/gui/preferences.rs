@@ -194,6 +194,50 @@ impl Workspace {
                             patch = Some(json!({ "gpu": { "decoding": decoding } }));
                         }
                         ui.end_row();
+                        // The GPU that decodes and encodes: none to choose
+                        // where none is listed (macOS).
+                        let gpus = state["gpus"].as_array().cloned().unwrap_or_default();
+                        if !gpus.is_empty() {
+                            let name = |g: &Value| g["name"].as_str().unwrap_or_default().to_string();
+                            let automatic = match state["gpu_automatic"].is_object() {
+                                true => format!("Automatic ({})", name(&state["gpu_automatic"])),
+                                false => "Automatic".to_string(),
+                            };
+                            let chosen = state["preferences"]["gpu"]["device"]
+                                .as_str()
+                                .unwrap_or_default()
+                                .to_string();
+                            // A card moved to another slot is found by its
+                            // model: picking it again saves its new slot.
+                            let found = state["gpu_chosen"]["id"].as_str().map(String::from);
+                            let shown = match &found {
+                                _ if chosen.is_empty() => automatic.clone(),
+                                Some(_) => name(&state["gpu_chosen"]),
+                                None => format!("{chosen} (not here: automatic)"),
+                            };
+                            let current = found.unwrap_or_else(|| chosen.clone());
+                            let mut pick = current.clone();
+                            ui.label("GPU");
+                            ui.add_enabled_ui(!busy && on, |ui| {
+                                egui::ComboBox::from_id_salt("preferences-gpu-device")
+                                    .selected_text(shown)
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(&mut pick, String::new(), &automatic);
+                                        for g in &gpus {
+                                            let id = g["id"].as_str().unwrap_or_default();
+                                            ui.selectable_value(&mut pick, id.to_string(), name(g));
+                                        }
+                                    })
+                                    .response
+                                    .on_hover_text(
+                                        "The graphics card that decodes and encodes, in the                                          viewer, exports and proxies. Automatic: NVIDIA's when                                          there is one, else the first other. A card is known by                                          its model and its slot, so the choice holds on every                                          system this computer starts",
+                                    );
+                            });
+                            if pick != current {
+                                patch = Some(json!({ "gpu": { "device": pick } }));
+                            }
+                            ui.end_row();
+                        }
                     });
                 ui.add_space(8.0);
                 ui.label(RichText::new("Player").strong());

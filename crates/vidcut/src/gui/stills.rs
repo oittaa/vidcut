@@ -147,13 +147,13 @@ impl Stills {
                 format!("vidcut-stills-{n}"),
                 crate::threads::Work::Interactive,
                 move || {
-                    let mut on_gpu = crate::preferences::gpu_decoding();
-                    let mut renderer = cell_renderer(on_gpu);
+                    let mut on_gpu = crate::preferences::decoding_gpu();
+                    let mut renderer = cell_renderer(on_gpu.is_some());
                     loop {
                         let mut job = match rx.recv_timeout(IDLE) {
                             Ok(job) => job,
                             Err(RecvTimeoutError::Timeout) => {
-                                renderer = cell_renderer(on_gpu);
+                                renderer = cell_renderer(on_gpu.is_some());
                                 match rx.recv() {
                                     Ok(job) => job,
                                     Err(_) => return,
@@ -163,10 +163,10 @@ impl Stills {
                         };
                         // The preferences as each frame is asked for: a
                         // change reaches the two-up at once.
-                        let gpu = crate::preferences::gpu_decoding();
+                        let gpu = crate::preferences::decoding_gpu();
                         if gpu != on_gpu {
+                            renderer = cell_renderer(gpu.is_some());
                             on_gpu = gpu;
-                            renderer = cell_renderer(gpu);
                         }
                         let mut skipped = 0;
                         for newer in rx.try_iter() {

@@ -12,6 +12,7 @@ pub mod decode;
 pub mod error;
 pub mod export;
 pub mod fixture;
+pub mod gpus;
 pub mod hdr;
 pub mod hw;
 pub mod light;

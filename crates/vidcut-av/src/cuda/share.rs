@@ -85,6 +85,11 @@ const STREAM_NON_BLOCKING: u32 = 1;
 /// The driver's calls used here.
 struct Cuda {
     _lib: libloading::Library,
+    init: unsafe extern "C" fn(u32) -> CuResult,
+    device_get_count: unsafe extern "C" fn(*mut i32) -> CuResult,
+    device_get: unsafe extern "C" fn(*mut i32, i32) -> CuResult,
+    device_get_name: unsafe extern "C" fn(*mut std::ffi::c_char, i32, i32) -> CuResult,
+    device_get_pci_bus_id: unsafe extern "C" fn(*mut std::ffi::c_char, i32, i32) -> CuResult,
     ctx_push: unsafe extern "C" fn(CuContext) -> CuResult,
     ctx_pop: unsafe extern "C" fn(*mut CuContext) -> CuResult,
     ctx_get_device: unsafe extern "C" fn(*mut i32) -> CuResult,
@@ -124,6 +129,11 @@ impl Cuda {
                 };
             }
             Ok(Self {
+                init: call!("cuInit"),
+                device_get_count: call!("cuDeviceGetCount"),
+                device_get: call!("cuDeviceGet"),
+                device_get_name: call!("cuDeviceGetName"),
+                device_get_pci_bus_id: call!("cuDeviceGetPCIBusId"),
                 ctx_push: call!("cuCtxPushCurrent_v2"),
                 ctx_pop: call!("cuCtxPopCurrent_v2"),
                 ctx_get_device: call!("cuCtxGetDevice"),
@@ -210,6 +220,55 @@ impl CudaDevice {
             })?;
             Ok(bytes)
         })
+    }
+}
+
+/// A CUDA device: its index, which FFmpeg opens it by, its name, and its
+/// PCI slot.
+pub(crate) struct Listed {
+    pub index: i32,
+    pub name: String,
+    pub slot: Option<crate::gpus::Slot>,
+}
+
+/// The CUDA devices, in CUDA's order; none without NVIDIA's driver.
+pub(crate) fn listed() -> Vec<Listed> {
+    let Ok(cuda) = Cuda::get() else {
+        return Vec::new();
+    };
+    let text = |buf: &[std::ffi::c_char]| {
+        // SAFETY: the driver wrote a NUL-terminated string into `buf`,
+        // which holds a NUL at its end anyway.
+        unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }
+            .to_string_lossy()
+            .into_owned()
+    };
+    // SAFETY: the driver's calls as `cuda.h` declares them, each writing
+    // into what it is given, of the length given.
+    unsafe {
+        let mut count = 0;
+        if (cuda.init)(0) != 0 || (cuda.device_get_count)(&mut count) != 0 {
+            return Vec::new();
+        }
+        (0..count)
+            .filter_map(|index| {
+                let mut device = 0;
+                if (cuda.device_get)(&mut device, index) != 0 {
+                    return None;
+                }
+                let mut name = [0 as std::ffi::c_char; 256];
+                (cuda.device_get_name)(name.as_mut_ptr(), 255, device);
+                let mut bus = [0 as std::ffi::c_char; 64];
+                let slot = ((cuda.device_get_pci_bus_id)(bus.as_mut_ptr(), 63, device) == 0)
+                    .then(|| crate::gpus::parse_slot(&text(&bus)))
+                    .flatten();
+                Some(Listed {
+                    index,
+                    name: text(&name),
+                    slot,
+                })
+            })
+            .collect()
     }
 }
 

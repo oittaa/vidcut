@@ -356,6 +356,9 @@ pub struct Prepared {
     pub settings: ExportSettings,
     pub preset: Option<String>,
     pub outputs: Vec<Output>,
+    /// Why the video encoder asked for isn't the one used
+    /// ([`as_preferred`]).
+    pub encoder_changed: Option<String>,
 }
 
 fn sanitize(name: &str) -> String {
@@ -518,6 +521,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
         settings,
         preset: preset_name,
         outputs,
+        encoder_changed: None,
     })
 }
 
@@ -706,11 +710,25 @@ fn measure_spans(todo: &[Span], m: Measuring<'_>) -> Result<()> {
     Ok(())
 }
 
-/// Quiet notes about a prepared export: HDR picture tone-mapped into SDR
-/// when SDR wasn't asked for (decision D44). Each is `{code, message,
-/// set}`, `set` the `--set` overrides that keep the picture HDR, empty
-/// when no encoder `available` allows writes that.
+/// Quiet notes about a prepared export: its video encoder changed for the
+/// GPU in use (`encoder_changed`), and HDR picture tone-mapped into SDR
+/// when SDR wasn't asked for (decision D44, `hdr_tone_mapped`). Each is
+/// `{code, message}`; the HDR one has `set` too, the `--set` overrides
+/// that keep the picture HDR, empty when no encoder `available` allows
+/// writes that.
 pub fn notes(prepared: &Prepared, available: &Availability) -> Vec<Value> {
+    let mut notes: Vec<Value> = prepared
+        .encoder_changed
+        .iter()
+        .map(|why| json!({ "code": "encoder_changed", "message": why }))
+        .collect();
+    notes.extend(hdr_notes(prepared, available));
+    notes
+}
+
+/// The note on HDR pictures tone-mapped to SDR, with the overrides that
+/// keep them HDR.
+fn hdr_notes(prepared: &Prepared, available: &Availability) -> Vec<Value> {
     let noted: Vec<&ColorChoice> = prepared
         .outputs
         .iter()
@@ -822,8 +840,15 @@ pub fn describe(prepared: &Prepared, available: &Availability) -> Value {
     })
 }
 
-/// Encoder availability, from the cache when it matches this system.
+/// The encoders exports and proxies may use: those on the GPU in use
+/// (`Availability::in_use`).
 pub fn availability(refresh: bool) -> Availability {
+    detected(refresh).in_use()
+}
+
+/// The GPU encoders that work here, on every GPU: tested once, then kept
+/// until something they depend on changes.
+pub fn detected(refresh: bool) -> Availability {
     // FFmpeg, the system, the GPUs' drivers and what is tested: a change of
     // any of them tests the encoders again.
     let key = format!(
@@ -849,12 +874,26 @@ pub fn availability(refresh: bool) -> Availability {
     a
 }
 
-/// The settings as the preferences allow: without GPU acceleration every
+/// The export as the preferences allow: without GPU acceleration every
 /// video encoder choice is the CPU's, so a preset naming NVENC still
-/// exports, in software.
-pub fn as_preferred(settings: &mut ExportSettings, gpu: bool) {
-    if !gpu && let Some(v) = settings.video.as_mut() {
+/// exports, in software; with it, a GPU encoder the GPU in use doesn't
+/// have (`gpus::in_use`) is `auto`, the GPU's own then the CPU's, and a
+/// note says so.
+pub fn as_preferred(prepared: &mut Prepared, gpu: bool) {
+    let Some(v) = prepared.settings.video.as_mut() else {
+        return;
+    };
+    if !gpu {
         v.encoder = EncoderChoice::Cpu;
+    } else if let Some(g) = vidcut_av::gpus::in_use()
+        && !g.encodes_with(v.encoder)
+    {
+        prepared.encoder_changed = Some(format!(
+            "{} isn't on the GPU in use ({}): it encodes with its own, or the CPU does",
+            v.encoder.title(),
+            g.name
+        ));
+        v.encoder = EncoderChoice::Auto;
     }
 }
 

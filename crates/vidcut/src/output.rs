@@ -250,7 +250,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                     o["seconds"].as_f64().unwrap_or(0.0)
                 );
                 if let Some(n) = o["gpu_frames"].as_i64().filter(|n| *n > 0) {
-                    println!("  {n} of the frames decoded and scaled on the GPU (NVDEC)");
+                    println!("  {n} of the frames decoded and scaled on the GPU");
                 }
                 print_color(&o["color"]);
                 print_metadata(&o["metadata"]);
@@ -432,6 +432,23 @@ pub fn print(method: &str, r: &Response, json: bool) {
                     c["uses"].as_str().unwrap_or("nothing that works here")
                 );
             }
+            // The GPUs `gpu.device` can name, and the one in use.
+            let chosen = r.result["preferences"]["gpu"]["device"]
+                .as_str()
+                .unwrap_or_default();
+            let found = r.result["gpu_chosen"]["id"].as_str();
+            let in_use = found.or(r.result["gpu_automatic"]["id"].as_str());
+            for g in r.result["gpus"].as_array().into_iter().flatten() {
+                let id = g["id"].as_str().unwrap_or_default();
+                println!(
+                    "gpu.device={id} is {}{}",
+                    g["name"].as_str().unwrap_or_default(),
+                    if Some(id) == in_use { " (in use)" } else { "" }
+                );
+            }
+            if !chosen.is_empty() && found.is_none() {
+                println!("gpu.device={chosen} isn't here: the automatic GPU is in use");
+            }
             let c = &r.result["thumbnail_cache"];
             println!(
                 "thumbnail cache: {} MB in {} files ({})",
@@ -448,9 +465,11 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 .flatten()
                 .map(|e| {
                     let text = |k: &str| e[k].as_str().unwrap_or_default().to_string();
-                    // A render node, or on Windows an adapter's index.
+                    // A render node; on Windows an adapter's index; NVENC's
+                    // CUDA device's.
                     let device = match e["device"].as_str() {
                         None => "-".to_string(),
+                        Some(d) if e["kind"] == "nvenc" => format!("CUDA device {d}"),
                         Some(d) if d.parse::<u32>().is_ok() => format!("adapter {d}"),
                         Some(d) => d.to_string(),
                     };

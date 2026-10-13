@@ -217,8 +217,9 @@ impl HdrMetadata {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum EncoderChoice {
-    /// GPU when available (NVENC; then AMF and QSV on Windows, VAAPI on
-    /// Linux; VideoToolbox on macOS), else CPU.
+    /// The encoder of the GPU in use (the preferences' `gpu.device`):
+    /// NVENC on NVIDIA's, AMF on AMD's and QSV on Intel's (Windows), VAAPI
+    /// (Linux), VideoToolbox (macOS); else the CPU's.
     #[default]
     Auto,
     Cpu,
