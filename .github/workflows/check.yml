@@ -175,6 +175,8 @@ jobs:
           uv pip install --python "$RUNNER_TEMP/otio" opentimelineio==0.18.1
           export VIDCUT_OTIO_PYTHON="$RUNNER_TEMP/otio/Scripts/python.exe"
           "$VIDCUT_OTIO_PYTHON" -c "import opentimelineio as o; print('OpenTimelineIO', o.__version__)"
+          # FFmpeg's DLLs, which scripts/check.sh puts on the path itself.
+          PATH="$(cygpath -u "$FFMPEG_DIR")/bin:$PATH"
           cargo test -p vidcut --test cli -- otio stills_and_sequences
 
   macos:
