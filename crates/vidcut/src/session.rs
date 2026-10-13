@@ -88,20 +88,27 @@ pub fn run_with(
             };
             answer(json!({ "project": path, "settings": settings }))
         }
-        Request::PresetsList {} => answer(json!(
-            export::presets()?
-                .iter()
-                .map(|p| json!({
-                    "name": p.name,
-                    "title": p.title,
-                    "description": p.description,
-                    "quick_export": p.quick_export,
-                    "container": p.settings.container,
-                    "user": export::is_user_preset(&p.name),
-                    "settings": p.settings,
-                }))
-                .collect::<Vec<_>>()
-        )),
+        Request::PresetsList {} => {
+            let (available, gpu) = (
+                export::availability(false),
+                crate::preferences::gpu_acceleration(),
+            );
+            answer(json!(
+                export::presets()?
+                    .iter()
+                    .map(|p| json!({
+                        "unavailable": export::unavailable(&p.settings, &available, gpu),
+                        "name": p.name,
+                        "title": p.title,
+                        "description": p.description,
+                        "quick_export": p.quick_export,
+                        "container": p.settings.container,
+                        "user": export::is_user_preset(&p.name),
+                        "settings": p.settings,
+                    }))
+                    .collect::<Vec<_>>()
+            ))
+        }
         Request::PresetsGet { name } => {
             let p = export::presets()?
                 .into_iter()
@@ -130,7 +137,14 @@ pub fn run_with(
             dry_run: envelope.dry_run,
         })?),
         Request::PresetsDelete { name } => answer(export::delete_preset(name, envelope.dry_run)?),
-        Request::EncodersList { refresh } => answer(json!(export::availability(*refresh))),
+        Request::EncodersList { refresh } => {
+            let available = export::availability(*refresh);
+            let mut answer_json = json!(available);
+            let can = export::encodable(&available, crate::preferences::gpu_acceleration());
+            answer_json["video"] = can["video"].clone();
+            answer_json["audio"] = can["audio"].clone();
+            answer(answer_json)
+        }
         Request::PreferencesGet {} => answer(crate::preferences::get()?),
         Request::PreferencesSet(patch) => answer(crate::preferences::set(patch, envelope.dry_run)?),
         Request::ExportStart(params) if params.background => {

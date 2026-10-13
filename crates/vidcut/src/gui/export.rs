@@ -167,6 +167,9 @@ pub(super) struct PresetInfo {
     #[serde(default)]
     pub user: bool,
     pub settings: ExportSettings,
+    /// Why this machine can't export it (`presets.list`).
+    #[serde(default)]
+    pub unavailable: Option<String>,
 }
 
 // ---------------------------------------------------------------- state
@@ -176,6 +179,10 @@ pub(super) struct PresetInfo {
 pub struct ExportUi {
     presets: Vec<PresetInfo>,
     presets_ask: Option<Ask>,
+    /// What this machine encodes (`encoders.list`): the choices it can't
+    /// take are greyed out, with why.
+    encodable: Value,
+    encodable_ask: Option<Ask>,
     /// Quick Export is open.
     quick: Option<Quick>,
     /// The Export dialog is open.
@@ -604,6 +611,7 @@ impl Workspace {
 
     fn refresh_presets(&mut self, ctx: &egui::Context) {
         self.export.presets_ask = Some(Ask::send(&self.live, ctx, "presets.list", json!({})));
+        self.export.encodable_ask = Some(Ask::send(&self.live, ctx, "encoders.list", json!({})));
     }
 
     /// Where exports go by default: the folder of the last one (this run
@@ -640,6 +648,15 @@ impl Workspace {
             }) {
                 Ok(list) => self.export.presets = list,
                 Err(e) => self.say(format!("presets: {}", e.message)),
+            }
+        }
+        if let Some(ask) = &self.export.encodable_ask
+            && let Some(r) = ask.take()
+        {
+            self.export.encodable_ask = None;
+            match r {
+                Ok(r) => self.export.encodable = r.result,
+                Err(e) => self.say(format!("encoders: {}", e.message)),
             }
         }
         if self.export.dialog_wanted && !self.export.presets.is_empty() {
@@ -688,7 +705,10 @@ impl Workspace {
             .cloned()
             .collect();
         if q.selected.is_none() {
-            q.selected = presets.first().map(|p| p.name.clone());
+            q.selected = presets
+                .iter()
+                .find(|p| p.unavailable.is_none())
+                .map(|p| p.name.clone());
         }
         let range = match self.project().map(|p| (p.marks.clone(), p.end())) {
             Some((m, _)) if m.mark_in.is_some() && m.mark_out.is_some() => {
@@ -731,8 +751,15 @@ impl Workspace {
                             size
                         );
                         let r = ui
-                            .add_sized([150.0, 56.0], egui::Button::selectable(selected, text))
-                            .on_hover_text(&p.description);
+                            .add_enabled_ui(p.unavailable.is_none(), |ui| {
+                                ui.add_sized(
+                                    [150.0, 56.0],
+                                    egui::Button::selectable(selected, text),
+                                )
+                            })
+                            .inner
+                            .on_hover_text(&p.description)
+                            .on_disabled_hover_text(p.unavailable.as_deref().unwrap_or_default());
                         if r.clicked() {
                             q.selected = Some(p.name.clone());
                             q.error = None;
@@ -752,7 +779,13 @@ impl Workspace {
                 }
                 let busy = self.export.starting.is_some();
                 if ui
-                    .add_enabled(!busy && q.selected.is_some(), egui::Button::new("Export…"))
+                    .add_enabled(
+                        !busy
+                            && presets.iter().any(|p| {
+                                Some(&p.name) == q.selected.as_ref() && p.unavailable.is_none()
+                            }),
+                        egui::Button::new("Export…"),
+                    )
                     .clicked()
                 {
                     export = true;
@@ -888,14 +921,19 @@ impl Workspace {
                                 .show_ui(ui, |ui| {
                                     for p in &presets {
                                         let mark = if p.user { " (yours)" } else { "" };
-                                        if ui
-                                            .selectable_label(
-                                                p.name == d.preset,
-                                                format!("{}{mark}", p.title),
-                                            )
+                                        let r = ui
+                                            .add_enabled_ui(p.unavailable.is_none(), |ui| {
+                                                ui.selectable_label(
+                                                    p.name == d.preset,
+                                                    format!("{}{mark}", p.title),
+                                                )
+                                            })
+                                            .inner
                                             .on_hover_text(&p.description)
-                                            .clicked()
-                                        {
+                                            .on_disabled_hover_text(
+                                                p.unavailable.as_deref().unwrap_or_default(),
+                                            );
+                                        if r.clicked() {
                                             d.use_preset(p);
                                         }
                                     }
@@ -921,7 +959,8 @@ impl Workspace {
                         });
                         self.save_preset_form(ui, ctx, &mut d);
                         ui.separator();
-                        settings_form(ui, &mut d, (width, height), (rate, channels));
+                        let can = &self.export.encodable;
+                        settings_form(ui, &mut d, can, (width, height), (rate, channels));
                         ui.separator();
                         // Range.
                         ui.horizontal(|ui| {
@@ -1854,7 +1893,45 @@ fn passes_row(ui: &mut egui::Ui, v: &mut VideoSettings, planned: &Value) {
 }
 
 /// Container, video and audio settings.
-fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u32, u16)) {
+/// Why this machine can't encode `codec` with `encoder` (`encoders.list`).
+fn why_video(can: &Value, codec: VideoCodec, encoder: EncoderChoice) -> Option<String> {
+    can["video"][name(&codec)][name(&encoder)]
+        .as_str()
+        .map(String::from)
+}
+
+/// Why this machine can't encode sound in `codec`.
+fn why_audio(can: &Value, codec: AudioCodec) -> Option<String> {
+    can["audio"][name(&codec)].as_str().map(String::from)
+}
+
+/// A choice in a list, greyed out with `why` where this machine can't take
+/// it.
+fn choice<T: PartialEq>(
+    ui: &mut egui::Ui,
+    current: &mut T,
+    value: T,
+    text: String,
+    why: Option<String>,
+) -> egui::Response {
+    let r = ui
+        .add_enabled_ui(why.is_none(), |ui| {
+            ui.selectable_value(current, value, text)
+        })
+        .inner;
+    match why {
+        Some(why) => r.on_disabled_hover_text(why),
+        None => r,
+    }
+}
+
+fn settings_form(
+    ui: &mut egui::Ui,
+    d: &mut Dialog,
+    can: &Value,
+    size: (u32, u32),
+    audio: (u32, u16),
+) {
     // The encoder the plan says will run: its passes decide which of their
     // settings apply (decision D45).
     let planned = d
@@ -1935,7 +2012,8 @@ fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u3
                         .selected_text(name(&v.codec))
                         .show_ui(ui, |ui| {
                             for c in video_codecs(d.settings.container) {
-                                if ui.selectable_value(&mut v.codec, *c, name(c)).changed() {
+                                let why = why_video(can, *c, v.encoder);
+                                if choice(ui, &mut v.codec, *c, name(c), why).changed() {
                                     v.profile = None;
                                     if matches!(c, VideoCodec::Prores | VideoCodec::Dnxhr) {
                                         // Their profiles set the depth.
@@ -1962,7 +2040,8 @@ fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u3
                                 .into_iter()
                                 .chain(gpus)
                             {
-                                ui.selectable_value(&mut v.encoder, e, name(&e));
+                                let why = why_video(can, v.codec, e);
+                                choice(ui, &mut v.encoder, e, name(&e), why);
                             }
                         });
                 });
@@ -2172,7 +2251,8 @@ fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u3
                         .selected_text(name(&a.codec))
                         .show_ui(ui, |ui| {
                             for c in audio_codecs(d.settings.container) {
-                                if ui.selectable_value(&mut a.codec, *c, name(c)).changed() {
+                                let why = why_audio(can, *c);
+                                if choice(ui, &mut a.codec, *c, name(c), why).changed() {
                                     a.bitrate = lossy(a.codec).then_some(256_000);
                                 }
                             }

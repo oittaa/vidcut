@@ -94,6 +94,27 @@ pub enum VideoCodec {
 }
 
 impl VideoCodec {
+    pub const ALL: [Self; 6] = [
+        Self::H264,
+        Self::Hevc,
+        Self::Av1,
+        Self::Vp9,
+        Self::Prores,
+        Self::Dnxhr,
+    ];
+
+    /// Its name for people: `H.264`, `ProRes`.
+    pub fn title(self) -> &'static str {
+        match self {
+            VideoCodec::H264 => "H.264",
+            VideoCodec::Hevc => "HEVC",
+            VideoCodec::Av1 => "AV1",
+            VideoCodec::Vp9 => "VP9",
+            VideoCodec::Prores => "ProRes",
+            VideoCodec::Dnxhr => "DNxHR",
+        }
+    }
+
     /// The worst constant quality (`video.quality`) its encoders take:
     /// H.264's and HEVC's quantizers end at 51, AV1's and VP9's scales at
     /// 63. A larger one is taken as that.
@@ -114,6 +135,17 @@ pub enum AudioCodec {
     Flac,
     PcmS16,
     PcmS24,
+}
+
+impl AudioCodec {
+    pub const ALL: [Self; 6] = [
+        Self::Aac,
+        Self::Opus,
+        Self::Mp3,
+        Self::Flac,
+        Self::PcmS16,
+        Self::PcmS24,
+    ];
 }
 
 /// The output's dynamic range (`video.hdr`, decision D44).
@@ -201,6 +233,27 @@ pub enum EncoderChoice {
 }
 
 impl EncoderChoice {
+    pub const ALL: [Self; 6] = [
+        Self::Auto,
+        Self::Cpu,
+        Self::Nvenc,
+        Self::Vaapi,
+        Self::Amf,
+        Self::Qsv,
+    ];
+
+    /// Its name for people: `NVENC`, `the CPU`.
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Cpu => "the CPU",
+            Self::Nvenc => "NVENC",
+            Self::Vaapi => "VAAPI",
+            Self::Amf => "AMF",
+            Self::Qsv => "QSV",
+        }
+    }
+
     /// A GPU's encoder, named.
     pub fn gpu(self) -> bool {
         !matches!(self, Self::Auto | Self::Cpu)
@@ -282,6 +335,31 @@ pub struct VideoSettings {
 }
 
 /// The most frames NVENC looks ahead (`video.lookahead`).
+impl VideoSettings {
+    /// `codec` with `encoder`, everything else left to the defaults.
+    pub fn new(codec: VideoCodec, encoder: EncoderChoice) -> Self {
+        Self {
+            codec,
+            encoder,
+            quality: None,
+            bitrate: None,
+            speed: None,
+            profile: None,
+            bit_depth: None,
+            width: None,
+            height: None,
+            hdr: HdrMode::default(),
+            passes: None,
+            first_pass: FirstPass::default(),
+            multipass: Multipass::default(),
+            lookahead: None,
+            hdr_metadata: HdrMetadata::default(),
+            mastering_display: None,
+            max_cll: None,
+        }
+    }
+}
+
 pub const MAX_LOOKAHEAD: u32 = 32;
 
 /// Frames NVENC looks ahead unless `video.lookahead` says otherwise: 0.1 to
