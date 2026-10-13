@@ -192,11 +192,3 @@ jobs:
       - name: Fast gate
         run: scripts/check.sh
 
-      # TEMPORARY (macos-full-tests): the integration tests that failed on a Mac.
-      - name: Integration tests that failed on a Mac
-        run: |
-          status=0
-          cargo test -p vidcut --no-fail-fast --test export_color --test live --test picture || status=1
-          cargo test -p vidcut-av --no-fail-fast --test export --test hdr || status=1
-          VIDCUT_DEBUG_PLAYER=1 cargo test -p vidcut --test gui_import -- --nocapture || status=1
-          exit $status

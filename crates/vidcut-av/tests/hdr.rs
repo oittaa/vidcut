@@ -732,10 +732,11 @@ fn light_is_measured_as_a_pq_export_shows_it() {
         let level = a.level((0..30).map(|k| f64::from(k) / 30.0)).unwrap();
         let f = a.at(0.5).unwrap();
         // The white at the 99th percentile; the encode overshoots a little
-        // at the barcode's edges, which the peak shows.
-        assert!((195.0..=212.0).contains(&f.percentiles[8]), "{what}: {f:?}");
+        // at the barcode's edges, which the peak shows. How much is x265's
+        // build: Homebrew's rings most (HLG: 213 here, a peak of 288).
+        assert!((195.0..=215.0).contains(&f.percentiles[8]), "{what}: {f:?}");
         assert!(f.percentiles[0] < 1.0, "{what}: black, {f:?}");
-        assert!((200..=260).contains(&level.max_cll), "{what}: {level:?}");
+        assert!((200..=300).contains(&level.max_cll), "{what}: {level:?}");
         // Half of the picture is white.
         assert!((90..=115).contains(&level.max_fall), "{what}: {level:?}");
         // Kept: the second time comes from memory.
@@ -765,9 +766,9 @@ fn light_levels_are_measured_where_the_sources_say_none() {
         let r = render(&plan(vec![piece(source, 0, 20)]), s, &out);
         let m = r.metadata.unwrap();
         // The barcode's white, SDR white in PQ output, and a little
-        // overshoot at its edges.
+        // overshoot at its edges (up to 288 with Homebrew's x265).
         let l = m.light.expect("measured");
-        assert!((200..=260).contains(&l.max_cll), "{what}: {l:?}");
+        assert!((200..=300).contains(&l.max_cll), "{what}: {l:?}");
         assert!((90..=115).contains(&l.max_fall), "{what}: {l:?}");
         assert!(
             m.why
