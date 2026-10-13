@@ -30,7 +30,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
   - a live plan (`export.plan`: the encoder that will run, the files and their lengths) before anything is written
   - the same export as a shell command, ready to copy
   - saving the settings as a user preset, optionally added to Quick Export (p. 790)
-  - loudness normalization to a target in LUFS (`audio.loudness`), like the Deliver page's Normalize Audio (p. 4105): the mix is measured (EBU R128), then changed by one gain that keeps true peaks at or below −1 dBTP. The export reports what it measured and the gain
+  - loudness normalization to a target in LUFS (`audio.loudness`; [decisions/agents.md](decisions/agents.md) §5), like the Deliver page's Normalize Audio (p. 4105)
 
   Every export is a job: a Jobs window lists them with progress, ETA and Cancel, including exports started from the CLI. Quitting while exports run asks first.
 - **Why:** vidcut has no Deliver page, and the user requires these export options. The plan and the command make every GUI export reproducible from a script. A short row is quicker to choose from. AV1 makes the smallest files at a given quality, YouTube and other sites take it, and current GPUs encode it in hardware as fast as H.264; H.265 has replaced H.264 for masters.
@@ -88,11 +88,9 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 
     A track's video off or audio muted also marks the OTIO track disabled. Unlike media exports it covers the whole timeline unless given a range. An `.otioz` or `.otiod` export (File > Export Timeline with Media) copies the media whole, as Resolve does; it runs as a job.
   - **What Resolve reads besides:**
-    - Media are named by plain absolute path, not `file://` URLs, which Resolve doesn't read.
-    - Source ranges count from each media file's own start timecode (a camera's `tmcd` track, MXF, a broadcast WAV's time reference), as do the available ranges. Resolve places sources by timecode.
+    - Paths, timecode source ranges (including drop-frame) and marker notes: spec D40.
     - In `metadata.Resolve_OTIO`: a link group number joins each clip's video and audio, and the audio names the stream and channels it plays.
     - Clip gain is also written as Resolve's clip volume, track lock and solo as Resolve's.
-    - Markers are one frame long, with their note where Resolve keeps it.
     - Tracks carry the names given to them (a video track's audio track its video track's), else the ones Resolve gives its own by place: `Video 1`, `Audio 2`.
     - Resolve's files have no place for the In/Out marks or a track's fader, so Resolve gets neither (checked with Studio 21); vidcut's own import reads them back.
     - A still is available for one frame, as Resolve writes it. An image sequence is OTIO's `ImageSequenceReference` (folder, name prefix and suffix, first number, zero padding, rate), whose available range is the picture count at that rate: OTIO counts pictures by truncating the range at the reference's rate, so a project-rate length would be a different number of pictures.
@@ -116,7 +114,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 
 ## X10. An MCP server for AI agents
 - **Resolve:** scripting is a Python/Lua API for Studio (Workspace > Scripts, outside the Cut page chapters).
-- **vidcut:** `vidcut mcp` serves the Model Context Protocol on stdin/stdout. Every request method is a tool with its JSON Schema (`edit.split` is `edit_split`), plus `use_project`. Calls run like CLI commands: inside the GUI that has the project open, so the person at it watches each edit, or headless. Frames, screenshots and storyboards come back as images; exports report progress. Cancelling a call stops a headless export, and one routed into the GUI also stops a frame, a storyboard, an analysis and the loudness measure before a foreground export. A background export job keeps running until `jobs.cancel`. docs/cli.md shows how to connect an agent.
+- **vidcut:** `vidcut mcp` serves the Model Context Protocol on stdin/stdout. Every request method is a tool with its JSON Schema (`edit.split` is `edit_split`), plus `use_project`. Calls run like CLI commands, inside the GUI that has the project open or headless. Frames, screenshots and storyboards come back as images. Cancelling and progress: [decisions/agents.md](decisions/agents.md) §1. [cli.md](cli.md) shows how to connect an agent.
 - **Why:** the user wants vidcut drivable by AI agents. MCP is how agents discover and call tools; generating the tools from the request schema keeps them complete and in step with the CLI.
 
 ## X11. Dynamic Trim and Ripple Delete Silence, simplified
@@ -128,7 +126,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 
 ## X12. Preferences hold only what vidcut needs
 - **Resolve:** the Preferences window has System and User panels with many settings: hardware, media storage, playback, the UI (p. 94). Caches and proxies are set up in the project settings and preferences (pp. 191–218).
-- **vidcut:** File > Preferences (Ctrl+,) holds settings for vidcut as a whole, kept in `~/.config/vidcut/preferences.toml`: GPU acceleration (one switch, everything on the CPU when off), the player's memory for decoded pictures (automatic unless set: the larger of 1 GB and half the computer's memory, half the GPU's), the thumbnail disk cache and its limit, the timeline's picture memory, and the proxy rules, size and codec. `preferences.get` and `preferences.set` read and change them, from the CLI (`vidcut preferences`), IPC and MCP like everything else.
+- **vidcut:** File > Preferences (Ctrl+,) holds settings for vidcut as a whole, kept in `~/.config/vidcut/preferences.toml`: GPU acceleration (one switch, everything on the CPU when off), the player's memory for decoded pictures (automatic unless set: [decisions/player.md](decisions/player.md) §3), the thumbnail disk cache and its limit, the timeline's picture memory, and the proxy rules, size and codec. `preferences.get` and `preferences.set` read and change them, from the CLI (`vidcut preferences`), IPC and MCP like everything else.
 - **Why:** a preference belongs here only once vidcut has a behavior to choose. A plain TOML file can be edited by hand, kept in dotfiles, and changed by agents.
 
 ## X13. Deinterlacing has one quality

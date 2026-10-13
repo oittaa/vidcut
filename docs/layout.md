@@ -2,8 +2,8 @@
 
 | Crate | Purpose | Depends on |
 |---|---|---|
-| `crates/vidcut-core` | Project model, time and timecode math, edit operations (`ops.rs`; tracks in `ops/tracks.rs`, clips following Track 1 in `ops/follow.rs`), Request/Response protocol, Editor (undo/rev), project store, render plans (`render.rs`: top-wins video, mixed audio lanes), the proxies the viewer plays (`preview.rs`), OpenTimelineIO reading and writing (`otio.rs`, tests in `otio/tests.rs`), what the automatic tools decide from measurements (`analysis.rs`), application preferences (`preferences.rs`), media fingerprints for relinking (`fingerprint.rs`), the HDR metadata an export writes (`export/metadata.rs`) | — (pure Rust; fast to build and test) |
-| `crates/vidcut-av` | FFmpeg layer: probe (start timecodes too), exact-seek decode (on NVDEC too, `cuda.rs` for the GPU pipeline, `cuda/share.rs` for memory a display shares, NVDEC's pictures copied into it on the GPU; `VideoReader::open_nvdec_or_cpu` decodes on NVDEC when it can), HDR metadata read, written and put into HEVC and AV1 packets (`hdr.rs`), encode/mux, export engine (with loudness normalization; the next piece's file opens ahead in `export/ahead.rs`), the renderer of two-up pictures that decodes each frame once either way, and the frame reader of timeline tiles (`export/renderer.rs`), thumbnails (and their JPEG cache form), waveforms, still frames, measurements for the automatic tools (`analysis.rs`), the export's color math (`color.rs`, `shader_colors` for the viewer's shader), encoder detection, test-fixture generator, the player engine (`player/`: a decode thread keeping decoded YUV pictures ahead of the clock and windows for going back, on NVDEC when there is one, the frames copied down, the audio mix into a lock-free ring, reversed backward and time-stretched at other speeds keeping the pitch (`player/stretch.rs`, which marks each block for the clock), the device callback as the clock, outputs through cpal, audio scrubbing in `player/scrub.rs` with `Scrubber` for use without a player, a frame of the plan played next prepared and held) | ffmpeg-next, cpal |
+| `crates/vidcut-core` | Project model, time, edit operations, the request protocol, render plans, OTIO, analysis decisions, preferences, fingerprints, HDR metadata choice. Pure Rust. | — |
+| `crates/vidcut-av` | FFmpeg in-process: probe, decode, HDR, export, proxies, thumbnails, measurements, the player engine. [player.md](decisions/player.md), [export.md](decisions/export.md), [preview.md](decisions/preview.md). | ffmpeg-next, cpal |
 | `crates/vidcut` | The `vidcut` binary: Session/host, IPC, CLI (clap), GUI (eframe on wgpu), MCP server | all of the above |
 
 Inside `crates/vidcut`:
@@ -23,9 +23,4 @@ Inside `crates/vidcut`:
 | `export.rs` | presets (built-in and user), outputs, export plans and timeline (`.otio`, bundle) exports as the session runs them |
 | `bundle.rs` | OpenTimelineIO bundles: writing `.otioz` (zip) and `.otiod` (folder) with their media, unpacking `.otioz` for import |
 
-Docs:
-- `docs/cut-page-spec.md`: the behavioral spec.
-- `docs/deviations.md`: intentional differences from Resolve.
-- `docs/roadmap.md`: the use cases vidcut is for, and the order of what comes next.
-- `docs/todo/`: open work, one file per item.
-- `docs/decisions/`: short architecture decision records (preview, export, GUI and live control, agents: MCP and measurements, the player engine).
+The index of the docs is [AGENTS.md](../AGENTS.md).

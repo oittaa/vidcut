@@ -117,6 +117,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
   - `=` then a timecode goes to that absolute time.
   - `+` or `-` then a value jumps relative to the current position.
   - Clicking the timecode field allows typing.
+  - Digits fill a timecode from the right: `100` is 1 second, `10000` is 1 minute. A value with a unit (`5s`, `450f`) is that duration.
 - **Display options** (right-click):
   - source timecode or source frame count (source modes)
   - record timecode or record frame (Timeline mode)
@@ -333,7 +334,7 @@ Hover the lower audio part of a clip at an edit until the cursor shows a note, t
   - Vimeo
   - TikTok: vertical 1080×1920
 - **User presets** can be added to the Quick Export row.
-- **In vidcut:** Quick Export and Export are top-bar buttons only, not File menu items as well. The preset row shows each preset's name and format, and holds H.265 Master, AV1, ProRes 422 HQ, YouTube 1080p and 2160p, and TikTok (deviation X3), the file name defaults to the project's name, and the progress window can be hidden while the export goes on in the Jobs window. The Export dialog, jobs and presets from scripts are deviation X3; OTIO timeline interchange is X9.
+- **In vidcut:** the Quick Export row, the Export dialog and jobs are deviation X3. The suggested file name is the project's name. Timeline interchange is deviation X9.
 
 ## 11. Keyboard shortcuts (Linux)
 
@@ -362,7 +363,9 @@ Shortcuts do nothing while a text field has focus or a question (a modal dialog)
 | F12 | Place On Top (M6) | 890† |
 | Shift+F12 | Append | 890† |
 | Ctrl+\ | Split at playhead | 723 |
+| Ctrl+B | Split at the playhead; same as the row above, without AltGr | 723 |
 | Delete / Backspace | Delete selection (ripples on Track 1) | 725 |
+| Alt+Delete | Lift the selection (leave the gap; D9) | 725 |
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut (ripple) / paste at playhead | 723 |
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all | 719 |
 | Alt+Shift+V | Select clips under the playhead | 719 |
@@ -373,6 +376,8 @@ Shortcuts do nothing while a text field has focus or a question (a modal dialog)
 | N | Snapping on/off | 716 |
 | M / Alt+M | Add-or-edit marker / delete marker at playhead | 718 |
 | W | Dynamic Trim on/off (then J/K/L trim, Space plays around) | 731 |
+| Shift+S | Audio scrubbing on/off | 876 |
+| Ctrl+mouse wheel | Zoom the lower timeline | 644 |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / redo | 651 |
 | Ctrl+I | Import media | 654 |
 | Shift+Ctrl+N | New bin | 655 |
@@ -490,7 +495,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - **Source positions are timecode.** A source range counts from the media file's start timecode (a `tmcd` track, MXF's, a broadcast WAV's time reference), as Resolve writes and reads it; the available range starts there too. Media without one start at 0. Drop-frame timecode counts its skipped numbers out.
   - **Paths are plain.** Resolve reads `target_url` as a path: `file://` URLs and `%20` escapes don't find the file. vidcut writes plain absolute paths, and reads URLs, escaped or not, too. In bundles, paths are relative.
   - **Audio stays with its video** through Resolve's link group number, written on both and read when there.
-  - **What Resolve ignores or keeps elsewhere:** timeline and track names (Resolve names tracks itself), marker notes (in `Resolve_OTIO.Note` as well as `comment`), a one-frame marker duration.
+  - **Marker notes** are written in `Resolve_OTIO.Note` as well as `comment`. Markers are one frame long. Track names are deviation X9 (a set name is written and read back; the place defaults `Video 1` and `Audio 2` are not a name someone gave). A timeline name has no field the import was seen to keep.
   - **Bundles:** `.otioz` as OpenTimelineIO's adapter writes it (what Resolve imports); `.otiod` the same as a folder. Unpacked into a folder named after the bundle, not next to it as Resolve does (deviation X9).
 - **D41. Proxies** (pp. 207–218 are outside the Cut page; deviation X18). The manual's proxy chapters are not what the Cut page specifies, so the playback rules are fixed here.
   - **What gets one:** video and image sequences, generated on demand (`proxy.generate`). Stills and audio-only media do not. Naming a still or an audio-only file is an error; generating with no ids skips them.
