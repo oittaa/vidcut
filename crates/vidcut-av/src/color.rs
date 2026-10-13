@@ -124,6 +124,19 @@ pub fn colors_of(f: &frame::Video) -> Colors {
     }
 }
 
+/// `scaled`, a copy of `f` at another size, tagged with the matrix `f` is
+/// read with: an untagged picture's follows from its size.
+pub(crate) fn keep_matrix(scaled: &mut frame::Video, f: &frame::Video) {
+    use ffi::AVColorSpace as S;
+    let matrix = match Source::of(f).matrix {
+        Matrix::Bt601 => S::AVCOL_SPC_SMPTE170M,
+        Matrix::Bt709 => S::AVCOL_SPC_BT709,
+        Matrix::Bt2020 => S::AVCOL_SPC_BT2020_NCL,
+    };
+    // SAFETY: a plain field of its own frame.
+    unsafe { (*scaled.as_mut_ptr()).colorspace = matrix };
+}
+
 /// How to read `f`'s samples as the light they have in PQ output, as the
 /// export converts them: the YUV matrix and range, the transfer, and the
 /// gamut to BT.2020 in linear light (the identity for HDR).
@@ -730,6 +743,29 @@ mod tests {
             };
         }
         f
+    }
+
+    /// A picture shrunk from an untagged one is read with the matrix the
+    /// untagged one is read with (its size says which), not the one its
+    /// own size would say; a tagged picture's tag goes along.
+    #[test]
+    fn shrunk_pictures_keep_their_sources_matrix() {
+        use ffi::AVColorSpace as S;
+        let shrunk = |w, h, tag| {
+            let mut f = picture(w, h, None);
+            unsafe { (*f.as_mut_ptr()).colorspace = tag };
+            let mut small = picture(320, 180, None);
+            keep_matrix(&mut small, &f);
+            Source::of(&small).matrix
+        };
+        // Untagged: HD is BT.709, SD BT.601, though 320x180 alone is SD.
+        assert_eq!(shrunk(1920, 1080, S::AVCOL_SPC_UNSPECIFIED), Matrix::Bt709);
+        assert_eq!(shrunk(720, 480, S::AVCOL_SPC_UNSPECIFIED), Matrix::Bt601);
+        // Tagged, whatever the size.
+        assert_eq!(shrunk(720, 480, S::AVCOL_SPC_BT709), Matrix::Bt709);
+        assert_eq!(shrunk(3840, 2160, S::AVCOL_SPC_BT2020_NCL), Matrix::Bt2020);
+        // Untouched, the small one alone would be read as SD.
+        assert_eq!(Source::of(&picture(320, 180, None)).matrix, Matrix::Bt601);
     }
 
     #[test]

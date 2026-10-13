@@ -777,14 +777,12 @@ pub(crate) enum Keeper {
     D3d11(d3d11::Keeper),
 }
 
-/// What a keeper is made for: the frames context a frame comes from, its
-/// layout, and the frame's size.
-#[cfg(windows)]
+/// What a keeper or shrinker is made for: the frames context a frame comes
+/// from, its layout, and the frame's size.
 type KeptLike = (usize, format::Pixel, u32, u32);
 
 /// The frames context a hardware frame comes from, and what a keeper made
 /// for it is made for ([`KeptLike`]).
-#[cfg(windows)]
 fn frames_of(f: &frame::Video) -> Result<(*mut ffi::AVBufferRef, KeptLike)> {
     // SAFETY: reads the frame's own field, and a live buffer reference.
     unsafe {
@@ -823,7 +821,6 @@ impl Keeper {
 /// The timestamp and colors of `from` onto `to`, a copy of its picture:
 /// plain fields, for a frame of its own (`av_frame_copy_props` brings the
 /// decoder's private reference along).
-#[cfg(windows)]
 fn same_picture(to: &mut frame::Video, from: &frame::Video) {
     // SAFETY: both frames are valid; plain fields.
     unsafe {
@@ -838,17 +835,172 @@ fn same_picture(to: &mut frame::Video, from: &frame::Video) {
     }
 }
 
-/// Direct3D 11's frames kept on the GPU (Windows): each copied out of the
+/// A filter graph of GPU frames like `f` (format `pixel`, from `frames`)
+/// through `spec`.
+fn gpu_graph(
+    f: &frame::Video,
+    frames: *mut ffi::AVBufferRef,
+    pixel: ffi::AVPixelFormat,
+    spec: &str,
+) -> Result<ffmpeg::filter::Graph> {
+    let mut graph = ffmpeg::filter::Graph::new();
+    let tb = ffi::AVRational { num: 1, den: 1000 };
+    crate::cuda::add_source(
+        &mut graph,
+        c"in",
+        pixel,
+        (f.width(), f.height()),
+        (tb, f.aspect_ratio()),
+        frames,
+        None,
+    )?;
+    let sink = ffmpeg::filter::find("buffersink")
+        .ok_or_else(|| Error::Invalid("no buffersink filter".into()))?;
+    let failed = |context: String| move |source| Error::Ffmpeg { context, source };
+    graph
+        .add(&sink, "out", "")
+        .map_err(failed("creating a GPU filter's sink".into()))?;
+    graph
+        .output("in", 0)
+        .and_then(|p| p.input("out", 0))
+        .and_then(|p| p.parse(spec))
+        .map_err(failed(format!("building {spec}")))?;
+    graph
+        .validate()
+        .map_err(failed(format!("configuring {spec}")))?;
+    Ok(graph)
+}
+
+/// `f` through `graph`'s one filter: the frame it gives.
+fn run_graph(
+    graph: &mut ffmpeg::filter::Graph,
+    f: &frame::Video,
+    doing: &str,
+) -> Result<frame::Video> {
+    // The source takes the frame it is given: another reference.
+    let mut given = frame::Video::empty();
+    // SAFETY: both frames are valid.
+    if unsafe { ffi::av_frame_ref(given.as_mut_ptr(), f.as_ptr()) } < 0 {
+        return Err(Error::Invalid("no memory for a frame".into()));
+    }
+    let failed = |source| Error::Ffmpeg {
+        context: doing.to_string(),
+        source,
+    };
+    graph
+        .get("in")
+        .expect("source")
+        .source()
+        .add(&given)
+        .map_err(failed)?;
+    let mut out = frame::Video::empty();
+    graph
+        .get("out")
+        .expect("sink")
+        .sink()
+        .frame(&mut out)
+        .map_err(failed)?;
+    Ok(out)
+}
+
+/// Scales VA-API's and Direct3D 11's frames down on the GPU, so they come
+/// down to memory small, in the frames' own layout (NV12, P010).
+pub(crate) struct Shrinker {
+    /// `None`: the GPU won't scale these frames, so they come down whole.
+    scaling: Option<Scaling>,
+    /// The frames context, layout and frame size it was made for, and the
+    /// size it scales to.
+    input: (KeptLike, (u32, u32)),
+}
+
+enum Scaling {
+    /// `scale_vaapi`.
+    Vaapi(ffmpeg::filter::Graph),
+    /// The GPU's video processor.
+    #[cfg(windows)]
+    D3d11(d3d11::Scaler),
+}
+
+impl Scaling {
+    fn new(f: &frame::Video, frames: *mut ffi::AVBufferRef, (w, h): (u32, u32)) -> Result<Self> {
+        match f.format() {
+            format::Pixel::VAAPI => {
+                let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VAAPI;
+                let spec = format!("scale_vaapi=w={w}:h={h}");
+                Ok(Self::Vaapi(gpu_graph(f, frames, pixel, &spec)?))
+            }
+            #[cfg(windows)]
+            format::Pixel::D3D11 => Ok(Self::D3d11(d3d11::Scaler::new(f, frames, (w, h))?)),
+            other => Err(Error::Invalid(format!("no scaling {other:?} frames"))),
+        }
+    }
+}
+
+impl Shrinker {
+    /// `f` scaled to `size` (even) on the GPU and copied down, with its
+    /// timestamp and colors; `shrinker` made for frames like it first. A
+    /// GPU that won't scale them (its driver lacks the layout, or changes
+    /// the levels) copies them down whole.
+    pub(crate) fn down(
+        shrinker: &mut Option<Shrinker>,
+        f: &frame::Video,
+        size: (u32, u32),
+    ) -> Result<frame::Video> {
+        let (frames, of) = frames_of(f)?;
+        let input = (of, size);
+        if shrinker.as_ref().is_none_or(|s| s.input != input) {
+            let scaling = Scaling::new(f, frames, size).ok();
+            *shrinker = Some(Self { scaling, input });
+        }
+        let shrinker = shrinker.as_mut().expect("made above");
+        let scaled = match &mut shrinker.scaling {
+            Some(Scaling::Vaapi(graph)) => run_graph(graph, f, "scaling a frame on the GPU"),
+            #[cfg(windows)]
+            Some(Scaling::D3d11(scaler)) => scaler.scale(f),
+            None => return download(f),
+        };
+        match scaled.and_then(|scaled| download(&scaled)) {
+            Ok(mut small) => {
+                same_picture(&mut small, f);
+                crate::color::keep_matrix(&mut small, f);
+                Ok(small)
+            }
+            // The GPU failed it after all: these frames come down whole.
+            Err(_) => {
+                shrinker.scaling = None;
+                download(f)
+            }
+        }
+    }
+}
+
+/// Direct3D 11's frames on the GPU (Windows): kept, each copied out of the
 /// decoder's texture array into a texture of its own, which another device
-/// opens by an NT handle.
+/// opens by an NT handle; and scaled by the GPU's video processor.
 #[cfg(windows)]
 pub(crate) mod d3d11 {
     use std::ffi::c_void;
+    use std::mem::ManuallyDrop;
 
+    use ::windows::Win32::Foundation::RECT;
     use ::windows::Win32::Graphics::Direct3D11::{
-        D3D11_BIND_SHADER_RESOURCE, D3D11_BOX, D3D11_QUERY_DESC, D3D11_QUERY_EVENT,
-        D3D11_RESOURCE_MISC_SHARED, D3D11_RESOURCE_MISC_SHARED_NTHANDLE, ID3D11Device,
-        ID3D11DeviceContext, ID3D11Query, ID3D11Texture2D,
+        D3D11_BIND_DECODER, D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_BOX,
+        D3D11_QUERY_DESC, D3D11_QUERY_EVENT, D3D11_RESOURCE_MISC_SHARED,
+        D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_TEX2D_VPIV, D3D11_TEX2D_VPOV,
+        D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE, D3D11_VIDEO_PROCESSOR_CONTENT_DESC,
+        D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT, D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT,
+        D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC, D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC_0,
+        D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC, D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0,
+        D3D11_VIDEO_PROCESSOR_STREAM, D3D11_VIDEO_USAGE_PLAYBACK_NORMAL,
+        D3D11_VPIV_DIMENSION_TEXTURE2D, D3D11_VPOV_DIMENSION_TEXTURE2D, ID3D11Device,
+        ID3D11DeviceContext, ID3D11Query, ID3D11Texture2D, ID3D11VideoContext1, ID3D11VideoDevice,
+        ID3D11VideoProcessor, ID3D11VideoProcessorEnumerator,
+    };
+    use ::windows::Win32::Graphics::Dxgi::Common::{
+        DXGI_COLOR_SPACE_TYPE, DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P601,
+        DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P709, DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P2020,
+        DXGI_COLOR_SPACE_YCBCR_FULL_GHLG_TOPLEFT_P2020,
+        DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020, DXGI_FORMAT_NV12, DXGI_FORMAT_P010,
     };
     use ::windows::core::Interface;
 
@@ -888,6 +1040,98 @@ pub(crate) mod d3d11 {
         }
     }
 
+    /// `work` on `dev`'s immediate context, under FFmpeg's lock for it, as
+    /// its decoders use it.
+    ///
+    /// # Safety
+    /// `dev` is a live device context.
+    unsafe fn locked<T>(dev: &DeviceContext, work: impl FnOnce() -> T) -> T {
+        // SAFETY: the device's own lock.
+        unsafe {
+            if let Some(lock) = dev.lock {
+                lock(dev.lock_ctx);
+            }
+            let done = work();
+            if let Some(unlock) = dev.unlock {
+                unlock(dev.lock_ctx);
+            }
+            done
+        }
+    }
+
+    /// A D3D11 frame's texture and its index in it (a decoder's are
+    /// arrays).
+    ///
+    /// # Safety
+    /// `frame` is a live D3D11 frame.
+    unsafe fn texture(frame: &frame::Video) -> Result<(ID3D11Texture2D, u32)> {
+        // SAFETY: a D3D11 frame's data are its texture and index.
+        unsafe {
+            let p = (*frame.as_ptr()).data[0] as *mut c_void;
+            let index = (*frame.as_ptr()).data[1] as usize as u32;
+            ID3D11Texture2D::from_raw_borrowed(&p)
+                .map(|t| (t.clone(), index))
+                .ok_or_else(|| Error::Invalid("a Direct3D 11 frame without a texture".into()))
+        }
+    }
+
+    /// Frames on `source`'s device in its layout, at `size`: single
+    /// textures bound and flagged so, in a pool that grows.
+    ///
+    /// # Safety
+    /// `source` is a live D3D11 frames context.
+    unsafe fn own_frames(
+        source: *mut ffi::AVBufferRef,
+        (w, h): (u32, u32),
+        (bind_flags, misc_flags): (i32, i32),
+        what: &str,
+    ) -> Result<*mut ffi::AVBufferRef> {
+        // SAFETY: frames made on the source frames' device, set up as
+        // FFmpeg's D3D11 frames are before they start; freed on failure.
+        unsafe {
+            let src = (*source).data as *const ffi::AVHWFramesContext;
+            let mut frames = ffi::av_hwframe_ctx_alloc((*src).device_ref);
+            if frames.is_null() {
+                return Err(Error::Invalid("no memory for frames".into()));
+            }
+            let fc = (*frames).data as *mut ffi::AVHWFramesContext;
+            (*fc).format = ffi::AVPixelFormat::AV_PIX_FMT_D3D11;
+            (*fc).sw_format = (*src).sw_format;
+            (*fc).width = w as i32;
+            (*fc).height = h as i32;
+            (*fc).initial_pool_size = 0;
+            let hw = (*fc).hwctx as *mut FramesContext;
+            (*hw).bind_flags = bind_flags as u32;
+            (*hw).misc_flags = misc_flags as u32;
+            let ret = ffi::av_hwframe_ctx_init(frames);
+            if ret < 0 {
+                ffi::av_buffer_unref(&mut frames);
+                return Err(Error::Ffmpeg {
+                    context: format!("making Direct3D 11 frames {what}"),
+                    source: ffmpeg::Error::from(ret),
+                });
+            }
+            Ok(frames)
+        }
+    }
+
+    /// A frame of `frames`' pool.
+    ///
+    /// # Safety
+    /// `frames` is a live frames context.
+    unsafe fn pooled(frames: *mut ffi::AVBufferRef) -> Result<frame::Video> {
+        let mut out = frame::Video::empty();
+        // SAFETY: a fresh frame, given a buffer of the pool.
+        let ret = unsafe { ffi::av_hwframe_get_buffer(frames, out.as_mut_ptr(), 0) };
+        if ret < 0 {
+            return Err(Error::Ffmpeg {
+                context: "getting a Direct3D 11 texture".into(),
+                source: ffmpeg::Error::from(ret),
+            });
+        }
+        Ok(out)
+    }
+
     pub(crate) struct Keeper {
         /// Its own frames: single textures, shareable, a pool that grows.
         frames: *mut ffi::AVBufferRef,
@@ -925,36 +1169,18 @@ pub(crate) mod d3d11 {
             like: super::KeptLike,
         ) -> Result<Self> {
             // Textures of 4:2:0 frames have even sides.
-            let (w, h) = (
+            let size = (
                 f.width().next_multiple_of(2),
                 f.height().next_multiple_of(2),
             );
-            // SAFETY: frames made on the source frames' device, set up as
-            // FFmpeg's D3D11 frames are before they start; freed on failure.
+            let flags = (
+                D3D11_BIND_SHADER_RESOURCE.0,
+                D3D11_RESOURCE_MISC_SHARED.0 | D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0,
+            );
+            // SAFETY: the frame's own frames context; the frames made are
+            // freed on failure.
             unsafe {
-                let src = (*source).data as *const ffi::AVHWFramesContext;
-                let mut frames = ffi::av_hwframe_ctx_alloc((*src).device_ref);
-                if frames.is_null() {
-                    return Err(Error::Invalid("no memory for frames".into()));
-                }
-                let fc = (*frames).data as *mut ffi::AVHWFramesContext;
-                (*fc).format = ffi::AVPixelFormat::AV_PIX_FMT_D3D11;
-                (*fc).sw_format = (*src).sw_format;
-                (*fc).width = w as i32;
-                (*fc).height = h as i32;
-                (*fc).initial_pool_size = 0;
-                let hw = (*fc).hwctx as *mut FramesContext;
-                (*hw).bind_flags = D3D11_BIND_SHADER_RESOURCE.0 as u32;
-                (*hw).misc_flags =
-                    (D3D11_RESOURCE_MISC_SHARED.0 | D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0) as u32;
-                let ret = ffi::av_hwframe_ctx_init(frames);
-                if ret < 0 {
-                    ffi::av_buffer_unref(&mut frames);
-                    return Err(Error::Ffmpeg {
-                        context: "making Direct3D 11 frames to keep".into(),
-                        source: ffmpeg::Error::from(ret),
-                    });
-                }
+                let mut frames = own_frames(source, size, flags, "to keep")?;
                 let device = ID3D11Device::from_raw_borrowed(&(*device_of(frames)).device);
                 let query = device.and_then(|d| {
                     let desc = D3D11_QUERY_DESC {
@@ -986,31 +1212,15 @@ pub(crate) mod d3d11 {
         /// returns: another device reads it next, which can't wait for
         /// Direct3D 11's work.
         pub(super) fn copy(&mut self, f: &frame::Video) -> Result<frame::Video> {
-            let mut out = frame::Video::empty();
             // SAFETY: a frame from its own pool; the device's immediate
-            // context used under FFmpeg's lock for it, as its decoders use
-            // it; the textures are the frames' (array and index).
+            // context used under its lock; the textures are the frames'
+            // (array and index).
             unsafe {
-                let ret = ffi::av_hwframe_get_buffer(self.frames, out.as_mut_ptr(), 0);
-                if ret < 0 {
-                    return Err(Error::Ffmpeg {
-                        context: "getting a Direct3D 11 texture".into(),
-                        source: ffmpeg::Error::from(ret),
-                    });
-                }
+                let mut out = pooled(self.frames)?;
                 let dev = &*device_of(self.frames);
                 let context = ID3D11DeviceContext::from_raw_borrowed(&dev.device_context)
                     .ok_or_else(|| Error::Invalid("no Direct3D 11 context".into()))?;
-                let texture = |frame: &frame::Video| {
-                    let p = (*frame.as_ptr()).data[0] as *mut c_void;
-                    let index = (*frame.as_ptr()).data[1] as usize as u32;
-                    ID3D11Texture2D::from_raw_borrowed(&p).map(|t| (t.clone(), index))
-                };
-                let (Some((dst, di)), Some((src, si))) = (texture(&out), texture(f)) else {
-                    return Err(Error::Invalid(
-                        "a Direct3D 11 frame without a texture".into(),
-                    ));
-                };
+                let ((dst, di), (src, si)) = (texture(&out)?, texture(f)?);
                 let region = D3D11_BOX {
                     left: 0,
                     top: 0,
@@ -1019,16 +1229,7 @@ pub(crate) mod d3d11 {
                     bottom: f.height().next_multiple_of(2),
                     back: 1,
                 };
-                let locked = |work: &mut dyn FnMut()| {
-                    if let Some(lock) = dev.lock {
-                        lock(dev.lock_ctx);
-                    }
-                    work();
-                    if let Some(unlock) = dev.unlock {
-                        unlock(dev.lock_ctx);
-                    }
-                };
-                locked(&mut || {
+                locked(dev, || {
                     context.CopySubresourceRegion(&dst, di, 0, 0, 0, &src, si, Some(&region));
                     context.End(&self.done);
                     context.Flush();
@@ -1040,7 +1241,7 @@ pub(crate) mod d3d11 {
                 loop {
                     let mut done = ::windows::core::BOOL(0);
                     let mut asked = Ok(());
-                    locked(&mut || {
+                    locked(dev, || {
                         asked = context.GetData(
                             &self.done,
                             Some((&raw mut done).cast()),
@@ -1065,9 +1266,359 @@ pub(crate) mod d3d11 {
                 // The texture is the frame's size, rounded up to even.
                 (*out.as_mut_ptr()).width = f.width() as i32;
                 (*out.as_mut_ptr()).height = f.height() as i32;
+                Ok(out)
             }
-            Ok(out)
         }
+    }
+
+    /// Scales Direct3D 11's frames on the GPU's video processor, into
+    /// textures of its own in their layout and colors. FFmpeg's
+    /// `scale_d3d11` makes its textures for an encoder as well, which AMD's
+    /// driver refuses, and scales the padding of the decoder's textures in.
+    pub(crate) struct Scaler {
+        /// Its own frames: single textures it draws to, a pool that grows.
+        frames: *mut ffi::AVBufferRef,
+        video: ID3D11VideoDevice,
+        context: ID3D11VideoContext1,
+        enumerator: ID3D11VideoProcessorEnumerator,
+        processor: ID3D11VideoProcessor,
+        size: (u32, u32),
+        /// The color space the processor is told the frames come in and go
+        /// out in: their own, so they're only scaled.
+        space: DXGI_COLOR_SPACE_TYPE,
+    }
+
+    impl Drop for Scaler {
+        fn drop(&mut self) {
+            // SAFETY: its own reference.
+            unsafe { ffi::av_buffer_unref(&mut self.frames) };
+        }
+    }
+
+    impl Scaler {
+        /// Scales frames like `f` (of `source`) to `size` (even), keeping
+        /// their levels and colors; an error where the video processor
+        /// doesn't take their layout, or changes a test picture of grays and
+        /// colors (a driver's own processing).
+        pub(super) fn new(
+            f: &frame::Video,
+            source: *mut ffi::AVBufferRef,
+            size: (u32, u32),
+        ) -> Result<Self> {
+            let input = (f.width(), f.height());
+            let mut scaler = Self::made(source, input, size, color_space(f))?;
+            if !scaler.keeps_levels(source, input)? {
+                return Err(Error::Invalid(
+                    "the video processor changes the levels".into(),
+                ));
+            }
+            Ok(scaler)
+        }
+
+        /// A processor of frames of `source`'s layout at `input` to
+        /// `size`, told they come in and go out in `space`.
+        fn made(
+            source: *mut ffi::AVBufferRef,
+            input: (u32, u32),
+            size: (u32, u32),
+            space: DXGI_COLOR_SPACE_TYPE,
+        ) -> Result<Self> {
+            let failed = |what: &'static str| {
+                move |e: ::windows::core::Error| Error::Invalid(format!("{what}: {e}"))
+            };
+            // SAFETY: the device of a live frames context; the frames made
+            // are freed with the scaler.
+            unsafe {
+                let layout = match format::Pixel::from(
+                    (*((*source).data as *const ffi::AVHWFramesContext)).sw_format,
+                ) {
+                    format::Pixel::NV12 => DXGI_FORMAT_NV12,
+                    format::Pixel::P010LE => DXGI_FORMAT_P010,
+                    other => {
+                        return Err(Error::Invalid(format!(
+                            "no scaling {other:?} on Direct3D 11"
+                        )));
+                    }
+                };
+                let dev = &*device_of(source);
+                let none = || Error::Invalid("no Direct3D 11 device".into());
+                let device = ID3D11Device::from_raw_borrowed(&dev.device).ok_or_else(none)?;
+                let immediate =
+                    ID3D11DeviceContext::from_raw_borrowed(&dev.device_context).ok_or_else(none)?;
+                let video: ID3D11VideoDevice = device
+                    .cast()
+                    .map_err(failed("no Direct3D 11 video device"))?;
+                let context: ID3D11VideoContext1 = immediate
+                    .cast()
+                    .map_err(failed("no Direct3D 11 video context"))?;
+                let desc = D3D11_VIDEO_PROCESSOR_CONTENT_DESC {
+                    InputFrameFormat: D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE,
+                    InputWidth: input.0,
+                    InputHeight: input.1,
+                    OutputWidth: size.0,
+                    OutputHeight: size.1,
+                    Usage: D3D11_VIDEO_USAGE_PLAYBACK_NORMAL,
+                    ..Default::default()
+                };
+                let enumerator = video
+                    .CreateVideoProcessorEnumerator(&desc)
+                    .map_err(failed("no video processor"))?;
+                let both = (D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT.0
+                    | D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT.0)
+                    as u32;
+                let takes = enumerator
+                    .CheckVideoProcessorFormat(layout)
+                    .map_err(failed("no video processor"))?;
+                if takes & both != both {
+                    return Err(Error::Invalid(format!(
+                        "the video processor doesn't scale {layout:?}"
+                    )));
+                }
+                let processor = video
+                    .CreateVideoProcessor(&enumerator, 0)
+                    .map_err(failed("no video processor"))?;
+                let flags = (D3D11_BIND_RENDER_TARGET.0, 0);
+                let frames = own_frames(source, size, flags, "to scale to")?;
+                Ok(Self {
+                    frames,
+                    video,
+                    context,
+                    enumerator,
+                    processor,
+                    size,
+                    space,
+                })
+            }
+        }
+
+        /// Whether a test picture of grays and colors at `input`, in the
+        /// layout of `source`'s frames, comes out of it at the levels it
+        /// went in at.
+        fn keeps_levels(
+            &mut self,
+            source: *mut ffi::AVBufferRef,
+            input: (u32, u32),
+        ) -> Result<bool> {
+            // Each band's middle, a few samples across in luma and chroma,
+            // must be there to read: smaller, the scaler isn't trusted and
+            // the frames come down whole.
+            let (ow, oh) = (self.size.0 as usize, self.size.1 as usize);
+            if ow < 4 * BANDS.len() || oh < 8 {
+                return Ok(false);
+            }
+            // SAFETY: a live frames context.
+            let pixel = unsafe {
+                format::Pixel::from((*((*source).data as *const ffi::AVHWFramesContext)).sw_format)
+            };
+            let wide = pixel == format::Pixel::P010LE;
+            // 10-bit levels in a 16-bit word's top bits.
+            let shift = if wide { 8 } else { 0 };
+            // Textures of 4:2:0 frames have even sides.
+            let size = (input.0.next_multiple_of(2), input.1.next_multiple_of(2));
+            let (w, h) = (size.0 as usize, size.1 as usize);
+            let bands = BANDS.len();
+            let mut picture = frame::Video::new(pixel, size.0, size.1);
+            let mut put = |plane: usize, x: usize, y: usize, value: u16| {
+                let stride = picture.stride(plane);
+                let data = picture.data_mut(plane);
+                let value = value << shift;
+                if wide {
+                    data[y * stride + 2 * x..][..2].copy_from_slice(&value.to_le_bytes());
+                } else {
+                    data[y * stride + x] = value as u8;
+                }
+            };
+            for y in 0..h {
+                for x in 0..w {
+                    put(0, x, y, BANDS[x * bands / w][0]);
+                }
+            }
+            for y in 0..h / 2 {
+                for x in 0..w / 2 {
+                    let [_, u, v] = BANDS[2 * x * bands / w];
+                    put(1, 2 * x, y, u);
+                    put(1, 2 * x + 1, y, v);
+                }
+            }
+            // SAFETY: frames made for the test, their reference let go once
+            // the frame holds its own; a fresh frame uploaded into.
+            let uploaded = unsafe {
+                let flags = (D3D11_BIND_DECODER.0, 0);
+                let mut frames = own_frames(source, size, flags, "to test with")?;
+                let frame = pooled(frames);
+                ffi::av_buffer_unref(&mut frames);
+                let mut frame = frame?;
+                let ret = ffi::av_hwframe_transfer_data(frame.as_mut_ptr(), picture.as_ptr(), 0);
+                if ret < 0 {
+                    return Err(Error::Ffmpeg {
+                        context: "uploading a test picture".into(),
+                        source: ffmpeg::Error::from(ret),
+                    });
+                }
+                frame
+            };
+            let got = download(&self.scale(&uploaded)?)?;
+            let read = |plane: usize, x: usize, y: usize| {
+                let (stride, data) = (got.stride(plane), got.data(plane));
+                if wide {
+                    u16::from_le_bytes([data[y * stride + 2 * x], data[y * stride + 2 * x + 1]])
+                        >> 6
+                } else {
+                    u16::from(data[y * stride + x])
+                }
+            };
+            // A level either way (in 8 bits), in the middle of each band.
+            let (scale, near) = if wide { (4, 4) } else { (1, 1) };
+            // Below black and above white only where nothing clips them.
+            let checked = if full_range(self.space) {
+                bands
+            } else {
+                bands - OUTSIDE
+            };
+            Ok(BANDS[..checked].iter().enumerate().all(|(k, [y, u, v])| {
+                let middle = (2 * k + 1) * ow / (2 * bands);
+                let luma = (oh / 4..oh * 3 / 4).all(|row| {
+                    (middle - 1..middle + 1).all(|x| read(0, x, row).abs_diff(y * scale) <= near)
+                });
+                let chroma = (oh / 8..oh * 3 / 8).all(|row| {
+                    (middle / 2 - 1..middle / 2 + 1).all(|x| {
+                        read(1, 2 * x, row).abs_diff(u * scale) <= near
+                            && read(1, 2 * x + 1, row).abs_diff(v * scale) <= near
+                    })
+                });
+                luma && chroma
+            }))
+        }
+
+        /// `f` scaled into a texture of its own. The work is queued on the
+        /// device's immediate context, before what reads it next there (the
+        /// copy down).
+        pub(super) fn scale(&mut self, f: &frame::Video) -> Result<frame::Video> {
+            let (w, h) = self.size;
+            let whole = |w: u32, h: u32| RECT {
+                left: 0,
+                top: 0,
+                right: w as i32,
+                bottom: h as i32,
+            };
+            let failed = |what: &'static str| {
+                move |e: ::windows::core::Error| Error::Invalid(format!("{what}: {e}"))
+            };
+            // SAFETY: a frame from its own pool; the immediate context used
+            // under its lock; the views are of the frames' textures (array
+            // and index), the input's released after the blit.
+            unsafe {
+                let out = pooled(self.frames)?;
+                let ((src, index), (dst, _)) = (texture(f)?, texture(&out)?);
+                let dev = &*device_of(self.frames);
+                locked(dev, || -> Result<()> {
+                    let desc = D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC {
+                        FourCC: 0,
+                        ViewDimension: D3D11_VPIV_DIMENSION_TEXTURE2D,
+                        Anonymous: D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC_0 {
+                            Texture2D: D3D11_TEX2D_VPIV {
+                                MipSlice: 0,
+                                ArraySlice: index,
+                            },
+                        },
+                    };
+                    let mut input = None;
+                    self.video
+                        .CreateVideoProcessorInputView(
+                            &src,
+                            &self.enumerator,
+                            &desc,
+                            Some(&mut input),
+                        )
+                        .map_err(failed("viewing a decoded frame"))?;
+                    let desc = D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC {
+                        ViewDimension: D3D11_VPOV_DIMENSION_TEXTURE2D,
+                        Anonymous: D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0 {
+                            Texture2D: D3D11_TEX2D_VPOV { MipSlice: 0 },
+                        },
+                    };
+                    let mut output = None;
+                    self.video
+                        .CreateVideoProcessorOutputView(
+                            &dst,
+                            &self.enumerator,
+                            &desc,
+                            Some(&mut output),
+                        )
+                        .map_err(failed("viewing a texture to scale to"))?;
+                    let output = output
+                        .ok_or_else(|| Error::Invalid("no view of a texture to scale to".into()))?;
+                    let (c, p) = (&self.context, &self.processor);
+                    // Their own colors in and out: scaled, not converted.
+                    c.VideoProcessorSetStreamColorSpace1(p, 0, self.space);
+                    c.VideoProcessorSetOutputColorSpace1(p, self.space);
+                    // None of the driver's own enhancing.
+                    c.VideoProcessorSetStreamAutoProcessingMode(p, 0, false);
+                    // The picture alone: the decoder's textures are padded.
+                    c.VideoProcessorSetStreamSourceRect(
+                        p,
+                        0,
+                        true,
+                        Some(&whole(f.width(), f.height())),
+                    );
+                    c.VideoProcessorSetStreamDestRect(p, 0, true, Some(&whole(w, h)));
+                    c.VideoProcessorSetOutputTargetRect(p, true, Some(&whole(w, h)));
+                    let mut stream = D3D11_VIDEO_PROCESSOR_STREAM {
+                        Enable: true.into(),
+                        pInputSurface: ManuallyDrop::new(input),
+                        ..Default::default()
+                    };
+                    let blit = c.VideoProcessorBlt(p, &output, 0, std::slice::from_ref(&stream));
+                    ManuallyDrop::drop(&mut stream.pInputSurface);
+                    blit.map_err(failed("scaling a frame on the GPU"))
+                })?;
+                Ok(out)
+            }
+        }
+    }
+
+    /// The test picture's bands (8-bit levels, Y, Cb, Cr): grays from black
+    /// to white, BT.709's red, green and blue, and levels below black and
+    /// above white with chroma near its ends, which video keeps and a
+    /// scaler mustn't clip.
+    const BANDS: [[u16; 3]; 10] = [
+        [16, 128, 128],
+        [64, 128, 128],
+        [128, 128, 128],
+        [192, 128, 128],
+        [235, 128, 128],
+        [63, 102, 240],
+        [173, 42, 26],
+        [32, 240, 118],
+        [4, 8, 128],
+        [250, 128, 248],
+    ];
+
+    /// The last bands, outside video range.
+    const OUTSIDE: usize = 2;
+
+    /// The color space the video processor is told `f`'s values are in, and
+    /// go out in: its matrix (untagged, as its size implies), in full range
+    /// where DXGI has one, as nothing is converted. Told studio range, AMD's
+    /// processor clips levels below black and above white (gotchas.md); PQ
+    /// has studio range alone.
+    fn color_space(f: &frame::Video) -> DXGI_COLOR_SPACE_TYPE {
+        use crate::color::Matrix;
+        use vidcut_core::model::Hdr;
+        let colors = crate::color::colors_of(f);
+        match (colors.hdr, colors.matrix) {
+            (Some(Hdr::Pq), _) => DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020,
+            (Some(Hdr::Hlg), _) => DXGI_COLOR_SPACE_YCBCR_FULL_GHLG_TOPLEFT_P2020,
+            (None, Matrix::Bt2020) => DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P2020,
+            (None, Matrix::Bt601) => DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P601,
+            (None, Matrix::Bt709) => DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P709,
+        }
+    }
+
+    /// Whether `space` is one of the full-range ones [`color_space`] tells,
+    /// which keep every level.
+    fn full_range(space: DXGI_COLOR_SPACE_TYPE) -> bool {
+        space != DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020
     }
 }
 
