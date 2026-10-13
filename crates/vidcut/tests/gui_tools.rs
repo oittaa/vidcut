@@ -192,6 +192,9 @@ fn tools_send_one_request_each() {
     harness.get_by_label("Remove").click();
     harness.step();
     settle(&h, &mut harness);
+    // The edit runs once a measuring thread has the sound, after requests
+    // answered at once: `settle` doesn't wait for it.
+    until(&mut harness, "the edit", |_| gui_edits(&h).len() > edits0);
     let (m, p) = gui_edits(&h).last().cloned().unwrap();
     assert_eq!(
         (m.as_str(), &p["clips"]),
