@@ -237,13 +237,49 @@ pub fn used_media(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
     used
 }
 
-/// Item `item`'s speed change: its time `effect`, with where the editor
-/// says a reversed clip's media start.
-fn speed_of(item: &Value, effect: Option<Value>) -> Option<Speed> {
-    effect.map(|effect| Speed {
-        effect,
-        media_in: item["metadata"][EDITOR]["Media In"].as_f64(),
-    })
+/// A speed change: its time `effect`.
+fn speed_of(effect: Option<Value>) -> Option<Speed> {
+    effect.map(|effect| Speed { effect })
+}
+
+/// How fast a speed change goes (1 without one).
+fn scalar(speed: Option<&Speed>) -> f64 {
+    speed.and_then(Speed::scalar).unwrap_or(1.0)
+}
+
+/// The first source frame shown by an item whose source range starts at
+/// `start`, `len` frames at `speed`: backward, editors write the bottom of
+/// the range it walks down, and its first frame shows the bottom of its
+/// stretch at the top (decision D48).
+fn first_shown(start: i64, len: i64, speed: f64) -> i64 {
+    if speed < 0.0 {
+        start + ((len - 1) as f64 * -speed + 1e-9).floor() as i64
+    } else {
+        start
+    }
+}
+
+/// The source range start written for clip `c`'s part from timeline frame
+/// `s`, `len` frames long: [`first_shown`]'s inverse.
+fn written_start(c: &Clip, s: i64, len: i64) -> i64 {
+    let first = c.source_at(s);
+    match c.speed() {
+        x if x < 0.0 => (first as f64 + (len - 1) as f64 * x).round() as i64,
+        _ => first,
+    }
+}
+
+/// The editor's `Media In` for clip `c`'s part from timeline frame `s`
+/// walking backward: the room above its top, in seconds of timeline, which
+/// the editor places it by.
+fn media_in(p: &Project, c: &Clip, m: Option<&Media>, s: i64) -> Option<f64> {
+    let x = c.speed();
+    if x >= 0.0 {
+        return None;
+    }
+    let top = c.source_at(s) as f64 - x;
+    let frames = p.media_limit(m?) as f64;
+    Some((frames - top) / -x / p.settings.fps.as_f64())
 }
 
 /// `effects`, after clip `c`'s speed change if it carries one: editors
@@ -370,7 +406,7 @@ pub fn export(
                 if let Some(g) = group {
                     metadata[EDITOR] = json!({ "Link Group ID": g });
                 }
-                if let Some(x) = c.speed.as_ref().and_then(|s| s.media_in) {
+                if let Some(x) = media_in(p, c, m, s) {
                     metadata[EDITOR]["Media In"] = json!(x);
                 }
                 // Carried effects, keyframes moved to where the item
@@ -387,7 +423,7 @@ pub fn export(
                         &label,
                         c,
                         m,
-                        c.source_at(s),
+                        written_start(c, s, e - s),
                         e - s,
                         c.enabled,
                         metadata,
@@ -419,7 +455,7 @@ pub fn export(
                 if let Some(g) = group {
                     editor["Link Group ID"] = json!(g);
                 }
-                if let Some(x) = c.speed.as_ref().and_then(|s| s.media_in) {
+                if let Some(x) = media_in(p, c, m, s) {
                     editor["Media In"] = json!(x);
                 }
                 let whole = c.audio_range().expect("has audio");
@@ -431,7 +467,7 @@ pub fn export(
                     &label,
                     c,
                     m,
-                    c.source_at(s),
+                    written_start(c, s, e - s),
                     e - s,
                     !au.muted,
                     json!({ VIDCUT: meta, EDITOR: editor }),
@@ -1376,7 +1412,8 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 continue;
             }
             let (effects, speed) = effects::read(item);
-            let speed = speed_of(item, speed);
+            let speed = speed_of(speed);
+            let x = scalar(speed.as_ref());
             let reference = media_reference_of(item);
             if stack || schema(reference).starts_with("GeneratorReference") {
                 clip_markers(item, start, len, fps, &mut markers);
@@ -1405,7 +1442,9 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         start,
                         duration: len,
                         // A still's, which its source range doesn't keep.
-                        source_in: meta["source_in"].as_i64().unwrap_or(source_in),
+                        source_in: meta["source_in"]
+                            .as_i64()
+                            .unwrap_or(first_shown(source_in, len, x)),
                         timecoded: timecoded && meta["source_in"].is_null(),
                         video: true,
                         enabled: item["enabled"].as_bool().unwrap_or(true),
@@ -1442,7 +1481,8 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 continue;
             }
             let (effects, speed) = effects::read(item);
-            let speed = speed_of(item, speed);
+            let speed = speed_of(speed);
+            let x = scalar(speed.as_ref());
             // A compound clip's sound: a block on an audio track.
             if stack {
                 clip_markers(item, start, len, fps, &mut markers);
@@ -1465,7 +1505,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 continue;
             }
             let (media, source_in, timecoded) = match clip_source(item, fps, base) {
-                Ok(s) => s,
+                Ok((media, start, timecoded)) => (media, first_shown(start, len, x), timecoded),
                 Err(e) => {
                     warnings.push(format!("{}; left as a gap", e.message));
                     continue;
@@ -1486,7 +1526,10 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                     && c.audio.is_none()
                     && c.media.url == media.url
                     && c.timecoded == timecoded
-                    && c.source_in - c.start == source_in - start
+                    // The same source frame at each time, at its speed.
+                    && (c.source_in as f64 - x * c.start as f64 - (source_in as f64 - x * start as f64))
+                        .abs()
+                        < 1.0
                     && overlaps((c.start, c.end()), span)
                     && match (c.link, link) {
                         (Some(x), Some(y)) => x == y,

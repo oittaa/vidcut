@@ -635,10 +635,6 @@ pub struct Speed {
     /// The OTIO time effect as read: a `LinearTimeWarp` (`time_scalar` 2.0
     /// for twice the speed, -1.0 reversed) or a `FreezeFrame`.
     pub effect: serde_json::Value,
-    /// Where the editor's metadata says a reversed clip's media start
-    /// (`Media In`, seconds), written back with it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub media_in: Option<f64>,
 }
 
 impl Speed {

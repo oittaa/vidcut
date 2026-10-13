@@ -621,12 +621,12 @@ fn waveform(
         return;
     };
     // At its speed (decision D48): a held frame is silent, and backward
-    // the sound starts at the end of the first frame shown.
+    // the sound starts at the top of the first frame's stretch.
     let speed = c.speed();
     if speed == 0.0 {
         return;
     }
-    let first = c.source_in as f64 + if speed < 0.0 { 1.0 } else { 0.0 };
+    let first = c.source_in as f64 - speed.min(0.0);
     let source = |at: f64| first + (at - c.start as f64) * speed;
     let origin = p
         .media(&c.media)
