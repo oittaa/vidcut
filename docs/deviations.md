@@ -92,11 +92,13 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
     - In `metadata.Resolve_OTIO`: a link group number joins each clip's video and audio, and the audio names the stream and channels it plays.
     - Clip gain is also written as Resolve's clip volume, track lock and solo as Resolve's.
     - Markers are one frame long, with their note where Resolve keeps it.
+    - Tracks carry the names given to them (a video track's audio track its video track's), else the ones Resolve gives its own by place: `Video 1`, `Audio 2`.
+    - Resolve's files have no place for the In/Out marks or a track's fader, so Resolve gets neither (checked with Studio 21); vidcut's own import reads them back.
     - A still is available for one frame, as Resolve writes it. An image sequence is OTIO's `ImageSequenceReference` (folder, name prefix and suffix, first number, zero padding, rate), whose available range is the picture count at that rate: OTIO counts pictures by truncating the range at the reference's rate, so a project-rate length would be a different number of pictures.
   - **Importing:** `vidcut timeline import cut.otio` (or File > Import Timeline) adds the media to the pool.
     - Video tracks become V1, V2, …, each with the audio that belongs to its clips (the clip's link group, if it has one). Other audio tracks become A1, A2, … (vidcut's own files map back exactly).
     - One project holds one timeline (X2), so the import goes after the last clip, or replaces the timeline with `--replace`; the GUI asks which. An empty timeline takes the file's frame rate, start timecode and track settings.
-    - Resolve's channel map picks a clip's audio stream, and its clip volume the gain. Markers on clips and tracks become timeline markers.
+    - Resolve's channel map picks a clip's audio stream, and its clip volume the gain. Markers on clips and tracks become timeline markers. Track names other than Resolve's defaults (`Video 1`, `Audio 2`) name the tracks; an audio track whose clips become clips' audio has none to keep it.
   - **Finding media:**
     - Media are named as `file://` URLs (escaped or not), plain paths, Windows paths, paths relative to the file, or the URL Resolve kept for offline media.
     - A project folder moved with its timeline file is found without asking: the path's last parts are looked for next to the file.
