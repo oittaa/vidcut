@@ -25,6 +25,47 @@ pub struct VideoEncoder {
     pub hdr: Option<vidcut_core::model::Hdr>,
     /// How it makes its passes (decision D45).
     pub passes: Passes,
+    /// The static HDR metadata it writes (decision D46).
+    pub metadata: crate::hdr::Static,
+    /// The dynamic HDR metadata kept from the sources' frames.
+    pub dynamic: crate::hdr::Dynamic,
+}
+
+/// The HDR metadata settings that have chosen already ask an encoder to
+/// write (decision D46): none for SDR.
+pub fn hdr_metadata(v: &VideoSettings) -> (crate::hdr::Static, crate::hdr::Dynamic) {
+    use vidcut_core::export::{HdrMetadata, metadata};
+    let Some(transfer) = v.hdr.transfer() else {
+        return Default::default();
+    };
+    if v.hdr_metadata == HdrMetadata::None {
+        return Default::default();
+    }
+    let pq = transfer == vidcut_core::model::Hdr::Pq;
+    let stat = crate::hdr::Static {
+        mastering: v
+            .mastering_display
+            .as_deref()
+            .filter(|_| pq)
+            .and_then(|m| metadata::parse_mastering(m).ok()),
+        light: v
+            .max_cll
+            .as_deref()
+            .filter(|_| pq)
+            .and_then(|l| metadata::parse_light(l).ok()),
+    };
+    let dynamic = crate::hdr::Dynamic {
+        hdr10plus: pq && v.hdr_metadata.hdr10plus(),
+        dolby_vision: v.hdr_metadata.dolby_vision(),
+    };
+    (stat, dynamic)
+}
+
+/// Whether an encoder the settings allow writes Dolby Vision: libx265 and
+/// libsvtav1, the CPU's.
+pub fn writes_dolby_vision(v: &VideoSettings) -> bool {
+    matches!(v.encoder, EncoderChoice::Auto | EncoderChoice::Cpu)
+        && matches!(v.codec, VideoCodec::Hevc | VideoCodec::Av1)
 }
 
 /// How a video encoder makes its passes (decision D45).
@@ -262,6 +303,8 @@ pub fn resolve_video(v: &VideoSettings, available: &Availability) -> Result<Vide
 /// one it moves on to uses its own default.
 pub fn video_encoders(v: &VideoSettings, available: &Availability) -> Vec<Result<VideoEncoder>> {
     let kinds: Vec<EncoderChoice> = match v.encoder {
+        // Dolby Vision is written by the CPU's encoders only.
+        EncoderChoice::Auto if v.hdr_metadata.dolby_vision() => vec![EncoderChoice::Cpu],
         EncoderChoice::Auto => vec![
             EncoderChoice::Nvenc,
             EncoderChoice::Vaapi,
@@ -368,6 +411,7 @@ fn video_encoder(
             }
         }
     }
+    let (metadata, dynamic) = hdr_metadata(v);
     Ok(Some(VideoEncoder {
         name: name.into(),
         kind,
@@ -376,11 +420,26 @@ fn video_encoder(
         options,
         hdr: v.hdr.transfer(),
         passes,
+        metadata,
+        dynamic,
     }))
 }
 
 fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
     use format::Pixel;
+    let (metadata, dynamic) = hdr_metadata(v);
+    // HDR10's SEI at every keyframe, not only in the stream's header, and
+    // x265's QP adjustment for PQ.
+    let x265 = {
+        let mut params = "log-level=error".to_string();
+        if !metadata.is_empty() || dynamic.hdr10plus || dynamic.dolby_vision {
+            params += ":repeat-headers=1";
+        }
+        if v.hdr.transfer() == Some(vidcut_core::model::Hdr::Pq) {
+            params += ":hdr10-opt=1";
+        }
+        params
+    };
     let speed = |default: &str| opt("preset", v.speed.as_deref().unwrap_or(default));
     let quality = |key: &str, default: u32| match v.bitrate {
         Some(b) => opt("b", b),
@@ -411,11 +470,17 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
             } else {
                 Pixel::YUV420P
             },
-            vec![
-                speed("medium"),
-                quality("crf", 20),
-                opt("x265-params", "log-level=error"),
-            ],
+            {
+                let mut o = vec![
+                    speed("medium"),
+                    quality("crf", 20),
+                    opt("x265-params", x265),
+                ];
+                if dynamic.dolby_vision {
+                    o.push(opt("dolbyvision", 1));
+                }
+                o
+            },
         ),
         VideoCodec::Av1 => (
             "libsvtav1",
@@ -424,7 +489,13 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
             } else {
                 Pixel::YUV420P
             },
-            vec![speed("8"), quality("crf", 30)],
+            {
+                let mut o = vec![speed("8"), quality("crf", 30)];
+                if dynamic.dolby_vision {
+                    o.push(opt("dolbyvision", 1));
+                }
+                o
+            },
         ),
         VideoCodec::Vp9 => (
             "libvpx-vp9",
@@ -480,6 +551,8 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
         options,
         hdr: v.hdr.transfer(),
         passes: passes(v, name)?,
+        metadata,
+        dynamic,
     })
 }
 
@@ -617,6 +690,9 @@ pub(crate) fn open_video(
     ctx.set_time_base(fps.invert());
     ctx.set_frame_rate(Some(fps));
     crate::color::tag(unsafe { ctx.as_mut_ptr() }, enc.hdr);
+    if enc.hdr.is_some() && !enc.metadata.is_empty() {
+        unsafe { crate::hdr::set_on_encoder(ctx.as_mut_ptr(), &enc.metadata)? };
+    }
     let mut flags = codec::Flags::empty();
     if global_header {
         flags |= codec::Flags::GLOBAL_HEADER;
@@ -757,6 +833,8 @@ fn try_gpu(
         options: Vec::new(),
         hdr: None,
         passes: Passes::One,
+        metadata: Default::default(),
+        dynamic: Default::default(),
     };
     let (w, h) = (640, 360);
     let (mut encoder, vaapi) =
@@ -880,6 +958,9 @@ mod tests {
             first_pass: FirstPass::Fast,
             multipass: Multipass::Quarter,
             lookahead: None,
+            hdr_metadata: Default::default(),
+            mastering_display: None,
+            max_cll: None,
         }
     }
 

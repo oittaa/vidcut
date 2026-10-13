@@ -18,7 +18,8 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use vidcut_core::export::color::{self, ColorChoice, PictureKind};
-use vidcut_core::export::{EncoderChoice, ExportSettings, HdrMode, validate};
+use vidcut_core::export::metadata::{self, MetadataChoice, PieceMeta};
+use vidcut_core::export::{EncoderChoice, ExportSettings, HdrMetadata, HdrMode, validate};
 use vidcut_core::render::{RenderPlan, VideoPiece};
 
 use crate::error::{Context, Error, Result};
@@ -83,6 +84,53 @@ pub struct Report {
     /// when the export chose them (`video.hdr = auto`, no `bit_depth`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<ColorChoice>,
+    /// The HDR metadata it writes, and why (decision D46), when the export
+    /// chose it (`video.hdr_metadata = auto`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<MetadataChoice>,
+}
+
+/// What a piece's pictures carry, read from its file: its transfer and HDR
+/// metadata. Each file is probed once.
+pub fn probed_metadata() -> impl FnMut(&VideoPiece) -> PieceMeta {
+    let mut known: std::collections::HashMap<PathBuf, PieceMeta> = Default::default();
+    move |piece| {
+        let VideoPiece::Source { path, .. } = piece else {
+            return PieceMeta::default();
+        };
+        *known.entry(path.clone()).or_insert_with(|| {
+            crate::probe::probe(path)
+                .ok()
+                .and_then(|i| i.video)
+                .map_or(PieceMeta::default(), |v| PieceMeta {
+                    hdr: match v.transfer.as_str() {
+                        "smpte2084" => Some(vidcut_core::model::Hdr::Pq),
+                        "arib-std-b67" => Some(vidcut_core::model::Hdr::Hlg),
+                        _ => None,
+                    },
+                    mastering: v.hdr.mastering,
+                    light: v.hdr.light,
+                    hdr10plus: v.hdr.hdr10plus,
+                    dolby_vision: v.hdr.dolby_vision,
+                })
+        })
+    }
+}
+
+/// Chooses the HDR metadata of an export of `plan` with `settings`, whose
+/// dynamic range is chosen already (decision D46); `None` without video.
+pub fn choose_metadata(
+    plan: &RenderPlan,
+    settings: &ExportSettings,
+    meta: impl FnMut(&VideoPiece) -> PieceMeta,
+) -> Option<MetadataChoice> {
+    let v = settings.video.as_ref()?;
+    Some(metadata::choose(
+        v,
+        &plan.video,
+        meta,
+        encode::writes_dolby_vision(v),
+    ))
 }
 
 /// What a piece's pictures are, read from its file: its HDR transfer and
@@ -211,6 +259,17 @@ pub fn run(
         c.apply(settings.video.as_mut().expect("checked"));
         chosen = Some(c);
     }
+    let mut metadata_chosen = None;
+    if settings
+        .video
+        .as_ref()
+        .is_some_and(|v| v.hdr_metadata == HdrMetadata::Auto)
+    {
+        let c =
+            choose_metadata(plan, &settings, probed_metadata()).expect("the settings have video");
+        c.apply(settings.video.as_mut().expect("checked"));
+        metadata_chosen = Some(c);
+    }
     let settings = &settings;
     // Nothing is made once cancelled: a GUI that quit without waiting for
     // a job removes only the partial files of what it heard was started.
@@ -219,7 +278,11 @@ pub fn run(
     }
     let part = partial_path(output);
     let result = encode(plan, settings, &part, output, available, cancel, progress);
-    match result.map(|r| Report { color: chosen, ..r }) {
+    match result.map(|r| Report {
+        color: chosen,
+        metadata: metadata_chosen,
+        ..r
+    }) {
         Ok(report) => match std::fs::rename(&part, output) {
             Ok(()) => Ok(report),
             Err(e) => {
@@ -283,7 +346,8 @@ fn first_run(
     started: Instant,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<Option<String>> {
-    let mut frames = VideoFrames::new(&plan.video, plan.fps, w, h, enc.pixel, enc.hdr);
+    let mut frames =
+        VideoFrames::new(&plan.video, plan.fps, w, h, enc.pixel, enc.hdr).with_dynamic(enc.dynamic);
     let mut p = ffmpeg::Packet::empty();
     for j in 0..plan.frames {
         if cancel.load(Ordering::Relaxed) {
@@ -355,12 +419,22 @@ struct VideoOut {
     /// Kept until the export ends: x264 and x265 read their statistics
     /// as they encode the second pass.
     _pass_files: Option<PassFiles>,
+    /// Static HDR metadata for each frame (VAAPI reads it there).
+    metadata: crate::hdr::Static,
+    /// HEVC or AV1 keeping HDR10+, which vidcut puts into the packets:
+    /// each frame's by pts.
+    hdr10plus: Option<(ffmpeg::codec::Id, std::collections::HashMap<i64, Vec<u8>>)>,
 }
 
 impl VideoOut {
     fn drain(&mut self, octx: &mut format::context::Output) -> Result<()> {
         let mut p = ffmpeg::Packet::empty();
         while self.encoder.receive_packet(&mut p).is_ok() {
+            if let Some((id, waiting)) = self.hdr10plus.as_mut()
+                && let Some(t35) = p.pts().and_then(|pts| waiting.remove(&pts))
+            {
+                crate::hdr::insert_hdr10plus(&mut p, *id, &t35)?;
+            }
             p.set_stream(0);
             p.set_duration(1);
             p.rescale_ts(self.enc_tb, self.stream_tb);
@@ -570,7 +644,14 @@ fn encode(
                         .with_gpu(device, frames)
                 }
                 None => VideoFrames::new(&plan.video, plan.fps, w, h, enc.pixel, enc.hdr),
-            };
+            }
+            .with_dynamic(enc.dynamic);
+            // HDR10+ goes into HEVC and AV1 packets here; libvpx-vp9 takes
+            // it from the frames, and WebM and Matroska carry it.
+            let id = encoder.id();
+            let hdr10plus = (enc.dynamic.hdr10plus
+                && matches!(id, ffmpeg::codec::Id::HEVC | ffmpeg::codec::Id::AV1))
+            .then(|| (id, std::collections::HashMap::new()));
             Some(VideoOut {
                 encoder,
                 vaapi,
@@ -580,6 +661,8 @@ fn encode(
                 name: enc.name.clone(),
                 passes: enc.passes,
                 _pass_files: pass_files,
+                metadata: enc.metadata,
+                hdr10plus,
             })
         }
         None => None,
@@ -666,6 +749,14 @@ fn encode(
     let mut opts = ffmpeg::Dictionary::new();
     if matches!(settings.container.muxer(), "mp4" | "mov" | "ipod") {
         opts.set("movflags", "+faststart");
+        // MP4 and MOV write Dolby Vision's `dvcC`/`dvvC` box only so.
+        if settings
+            .video
+            .as_ref()
+            .is_some_and(|v| v.hdr_metadata.dolby_vision())
+        {
+            opts.set("strict", "unofficial");
+        }
     }
     octx.write_header_with(opts)
         .ctx(|| "writing header".into())?;
@@ -692,10 +783,18 @@ fn encode(
             // encoders take as an order; the encoder chooses its own, as
             // in the ffmpeg command line.
             f.set_kind(ffmpeg::picture::Type::None);
-            let f = match &v.vaapi {
+            if let Some((_, waiting)) = v.hdr10plus.as_mut()
+                && let Some(t35) = crate::hdr::hdr10plus_t35(&f)
+            {
+                waiting.insert(j, t35);
+            }
+            let mut f = match &v.vaapi {
                 Some(hw) => hw.upload(&f)?,
                 None => f,
             };
+            if !v.metadata.is_empty() {
+                crate::hdr::attach(&mut f, &v.metadata)?;
+            }
             v.encoder
                 .send_frame(&f)
                 .ctx(|| format!("encoding frame {j} with {}", v.name))?;
@@ -741,5 +840,6 @@ fn encode(
         seconds: started.elapsed().as_secs_f64(),
         loudness: normalized,
         color: None,
+        metadata: None,
     })
 }

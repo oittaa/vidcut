@@ -1848,6 +1848,9 @@ fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u3
                                 first_pass: Default::default(),
                                 multipass: Default::default(),
                                 lookahead: None,
+                                hdr_metadata: Default::default(),
+                                mastering_display: None,
+                                max_cll: None,
                             }),
                         );
                         fit_codecs(&mut d.settings);
