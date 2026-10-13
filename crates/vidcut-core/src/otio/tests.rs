@@ -1470,3 +1470,210 @@ fn clip_effects_are_carried() {
     let sound = c.audio.unwrap().effects.unwrap();
     assert_eq!(param(&sound.list[0], "faderIn"), json!(50.0));
 }
+
+/// A transition as an editor writes one: `before` and `after` frames of
+/// the cut.
+fn otio_transition(name: &str, kind: &str, before: f64, after: f64) -> Value {
+    let t = |v: f64| json!({"OTIO_SCHEMA": "RationalTime.1", "rate": 25.0, "value": v});
+    json!({"OTIO_SCHEMA": "Transition.1", "name": name, "transition_type": kind,
+        "in_offset": t(before), "out_offset": t(after),
+        "metadata": {"Resolve_OTIO": {"Effects": {"Effect Name": name, "Enabled": true, "Name": name,
+            "Parameters": [], "Type": 9}, "Transition Type": name}}})
+}
+
+/// The transitions written on OTIO track `track`: (name, before, after,
+/// what is before it, what after), sides by clip name or `gap`.
+fn written_transitions(doc: &Value, track: &str) -> Vec<(String, f64, f64, String, String)> {
+    let items = otio_track(doc, track)["children"].as_array().unwrap();
+    let side = |i: Option<&Value>| match i {
+        Some(v) if is_clip(v) => v["name"].as_str().unwrap().to_string(),
+        Some(v) if schema(v).starts_with("Gap") => "gap".to_string(),
+        _ => "nothing".to_string(),
+    };
+    items
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| schema(v).starts_with("Transition"))
+        .map(|(i, v)| {
+            (
+                v["name"].as_str().unwrap().to_string(),
+                v["in_offset"]["value"].as_f64().unwrap(),
+                v["out_offset"]["value"].as_f64().unwrap(),
+                side(i.checked_sub(1).map(|i| &items[i])),
+                side(items.get(i + 1)),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn transitions_are_carried() {
+    // a 0..100 | b 100..200, a gap, c 220..320; each from source frame 50.
+    let mut f = Fixture::new(&[(10.0, true), (10.0, true), (10.0, true)]);
+    f.append("m1", 50, 150);
+    f.append("m2", 50, 150);
+    f.append("m3", 0, 20);
+    f.append("m3", 50, 150);
+    f.ok(req("edit.delete", json!({"clips": "c3", "lift": true})));
+    let mut doc = export(f.editor.project(), "tr", None, Locations::Absolute).unwrap();
+    // As an editor writes them: a dissolve and a sound crossfade between a
+    // and b, a fade from the gap into c and one out of c into a gap.
+    let dissolve = otio_transition("Cross Dissolve", "SMPTE_Dissolve", 6.0, 6.0);
+    let crossfade = otio_transition("Cross Fade +3 dB", "Custom_Transition", 5.0, 5.0);
+    let fade_in = otio_transition("Fade In", "SMPTE_Dissolve", 0.0, 10.0);
+    let fade_out = otio_transition("Fade Out", "SMPTE_Dissolve", 10.0, 0.0);
+    let gap10 = gap(10, 25.0);
+    for (track, at, list) in [
+        ("Video 1", 1, vec![dissolve.clone()]),
+        ("Audio 1", 1, vec![crossfade.clone()]),
+        ("Video 1", 4, vec![fade_in.clone()]),
+        ("Video 1", 6, vec![fade_out.clone(), gap10]),
+    ] {
+        let items = doc["tracks"]["children"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|t| t["name"] == track)
+            .unwrap()["children"]
+            .as_array_mut()
+            .unwrap();
+        for (k, x) in list.into_iter().enumerate() {
+            items.insert(at + k, x);
+        }
+    }
+    let expected = |doc: &Value| {
+        (
+            written_transitions(doc, "Video 1"),
+            written_transitions(doc, "Audio 1"),
+        )
+    };
+    let sides = |n: &str, b: f64, a: f64, from: &str, to: &str| {
+        (n.to_string(), b, a, from.to_string(), to.to_string())
+    };
+    assert_eq!(
+        expected(&doc),
+        (
+            vec![
+                sides("Cross Dissolve", 6.0, 6.0, "1.mp4", "2.mp4"),
+                sides("Fade In", 0.0, 10.0, "gap", "3.mp4"),
+                sides("Fade Out", 10.0, 0.0, "3.mp4", "gap"),
+            ],
+            vec![sides("Cross Fade +3 dB", 5.0, 5.0, "1.mp4", "2.mp4")]
+        ),
+        "the file as made"
+    );
+
+    let mut g = Fixture::new(&[(10.0, true), (10.0, true), (10.0, true)]);
+    let r = g.ok(req("timeline.import", json!({ "otio": doc })));
+    assert_eq!(
+        r.result["warnings"],
+        json!([
+            "transitions kept on their edit points but shown as cuts: Cross Dissolve, \
+             Fade In, Fade Out, Cross Fade +3 dB"
+        ])
+    );
+    let v1 = g.editor.project().track(MAIN).unwrap().clone();
+    let on = |v1: &crate::model::Track| -> Vec<_> {
+        v1.transitions
+            .iter()
+            .map(|x| (x.sound, x.from.clone(), x.to.clone(), x.before, x.after))
+            .collect()
+    };
+    let id = |s: &str| Some(s.to_string());
+    assert_eq!(
+        on(&v1),
+        vec![
+            (false, id("c1"), id("c2"), 6, 6),
+            (false, None, id("c3"), 0, 10),
+            (false, id("c3"), None, 10, 0),
+            (true, id("c1"), id("c2"), 5, 5),
+        ]
+    );
+    assert_eq!(v1.transitions[0].otio, dissolve, "as it came");
+    let r = g.ok(req("timeline.get", json!({})));
+    let listed: Vec<(String, i64)> = r.result["tracks"][0]["transitions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| {
+            (
+                x["name"].as_str().unwrap().to_string(),
+                x["at"].as_i64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            ("Cross Dissolve".to_string(), 100),
+            ("Fade In".into(), 220),
+            ("Fade Out".into(), 320),
+            ("Cross Fade +3 dB".into(), 100)
+        ]
+    );
+    // Written back where they were.
+    let out = export(g.editor.project(), "tr", None, Locations::Absolute).unwrap();
+    assert_eq!(expected(&out), expected(&doc));
+
+    // A split of the clip before a cut hands its transition to the part
+    // that ends there.
+    g.ok(req("edit.split", json!({"at": 50})));
+    let v1 = g.editor.project().track(MAIN).unwrap().clone();
+    assert_eq!(on(&v1)[0], (false, id("c4"), id("c2"), 6, 6));
+    let out = export(g.editor.project(), "tr", None, Locations::Absolute).unwrap();
+    assert_eq!(expected(&out), expected(&doc));
+
+    // A clip with too little media before its first frame for the
+    // transitions into it: dropped, and the edit says so.
+    let r = g.ok(req(
+        "edit.trim",
+        json!({"clip": "c2", "edge": "head", "by": -48}),
+    ));
+    assert_eq!(
+        r.warnings,
+        ["2 transition(s) from another editor no longer fit their edit points and were dropped"]
+    );
+    let out = export(g.editor.project(), "tr", None, Locations::Absolute).unwrap();
+    assert_eq!(
+        expected(&out),
+        (
+            vec![
+                sides("Fade In", 0.0, 10.0, "gap", "3.mp4"),
+                sides("Fade Out", 10.0, 0.0, "3.mp4", "gap"),
+            ],
+            vec![]
+        )
+    );
+    // Undone, they are back.
+    g.ok(req("history.undo", json!({})));
+    assert_eq!(g.editor.project().track(MAIN).unwrap().transitions.len(), 4);
+    // A clip moved up against the one before it: the fade from the gap
+    // goes, the one into the gap after it stays.
+    let r = g.ok(req(
+        "edit.move",
+        json!({"clips": "c3", "to": 200, "mode": "overwrite"}),
+    ));
+    assert_eq!(
+        r.warnings,
+        ["1 transition(s) from another editor no longer fit their edit points and were dropped"],
+        "{:?}",
+        g.editor.project().track(MAIN).unwrap()
+    );
+
+    // An export starting at a cut has nothing before it to fade from.
+    g.ok(req("history.undo", json!({})));
+    let part = export(
+        g.editor.project(),
+        "tr",
+        Some((100, 330)),
+        Locations::Absolute,
+    )
+    .unwrap();
+    assert_eq!(
+        written_transitions(&part, "Video 1"),
+        vec![
+            sides("Fade In", 0.0, 10.0, "gap", "3.mp4"),
+            sides("Fade Out", 10.0, 0.0, "3.mp4", "gap"),
+        ]
+    );
+}

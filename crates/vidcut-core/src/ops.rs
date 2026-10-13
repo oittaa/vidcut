@@ -145,7 +145,14 @@ fn split_at(p: &mut Project, ti: usize, t: i64) -> Option<String> {
     // fade-out on the right (deviation X9).
     cut(&mut left.effects, false, true);
     cut(&mut right.effects, true, false);
+    // A carried transition at the clip's end is now at the right half's.
+    let left_id = left.id.clone();
     track.clips.insert(ci + 1, right);
+    for x in &mut track.transitions {
+        if x.from.as_deref() == Some(left_id.as_str()) {
+            x.from = Some(new_id.clone());
+        }
+    }
     Some(new_id)
 }
 

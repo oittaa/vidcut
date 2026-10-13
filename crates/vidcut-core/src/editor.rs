@@ -11,7 +11,8 @@ use serde_json::{Value, json};
 use crate::analysis::{self, AudioLevels, Loudness, PictureStats, SilenceSettings, Span};
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, ClipAudio, Effects, ImageSequence, Media, MediaInfo, Project, Proxy, VideoInfo,
+    Clip, ClipAudio, Effects, ImageSequence, Media, MediaInfo, Project, Proxy, Transition,
+    VideoInfo,
 };
 use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
@@ -292,6 +293,12 @@ impl Editor {
         let label = label_of(&request, &self.project);
         let mut working = self.project.clone();
         let result = mutate(&mut working, &request, env, playhead, dry_run)?;
+        // Carried transitions the edit took away from their edit points.
+        let mut warnings = Vec::new();
+        let dropped = otio::transitions::prune(&mut working);
+        if dropped > 0 {
+            warnings.push(otio::transitions::dropped(dropped));
+        }
         let problems = validate::violations(&working);
         if !problems.is_empty() {
             return Err(Error::internal(format!(
@@ -308,7 +315,7 @@ impl Editor {
                 result,
                 dry_run: true,
                 via: String::new(),
-                warnings: Vec::new(),
+                warnings,
             });
         }
         // An edit that changes nothing (no shot changes found, a setting set
@@ -341,7 +348,7 @@ impl Editor {
             result,
             dry_run: false,
             via: String::new(),
-            warnings: Vec::new(),
+            warnings,
         })
     }
 
@@ -1719,6 +1726,8 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         .collect();
 
     let mut clips = Vec::new();
+    // The clips made, by key: (id, track).
+    let mut made: HashMap<usize, (String, String)> = HashMap::new();
     for c in &t.clips {
         let m = p.media(&ids[&key(&c.media)]).expect("added").clone();
         let frames = p.media_limit(&m);
@@ -1804,6 +1813,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
             .then(|| c.name.clone());
         let id = p.alloc_clip_id();
         clips.push(id.clone());
+        made.insert(c.key, (id.clone(), c.track.clone()));
         let track = p.track_mut(&c.track).expect("made above");
         track.clips.push(Clip {
             id,
@@ -1818,6 +1828,38 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
             effects,
         });
         track.sort();
+    }
+    // Transitions between clips made, on the track of both; those that don't
+    // fit their edit points here (media too short, a clip moved off it) go.
+    for x in &t.transitions {
+        let side = |k: Option<usize>| match k {
+            None => Some(None),
+            Some(k) => made.get(&k).map(Some),
+        };
+        let (Some(from), Some(to)) = (side(x.from), side(x.to)) else {
+            continue;
+        };
+        let track = match (from, to) {
+            (Some(f), Some(g)) if f.1 != g.1 => continue,
+            (_, Some(g)) => &g.1,
+            (Some(f), None) => &f.1,
+            (None, None) => continue,
+        };
+        p.track_mut(track)
+            .expect("made above")
+            .transitions
+            .push(Transition {
+                sound: x.sound,
+                from: from.map(|f| f.0.clone()),
+                to: to.map(|g| g.0.clone()),
+                before: conv(x.before),
+                after: conv(x.after),
+                otio: x.otio.clone(),
+            });
+    }
+    let dropped = otio::transitions::prune(p);
+    if dropped > 0 {
+        warnings.push(otio::transitions::dropped(dropped));
     }
     let mut markers = Vec::new();
     for k in &t.markers {
@@ -2601,6 +2643,21 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
             }
             if let Some(n) = &t.name {
                 v["name"] = json!(n);
+            }
+            // Carried transitions (deviation X9), at their cuts.
+            let transitions: Vec<Value> = t
+                .transitions
+                .iter()
+                .filter_map(|x| {
+                    let at = otio::transitions::place(p, t, x)?;
+                    (at >= a && at <= b).then(|| {
+                        json!({ "name": otio::transitions::name(x), "at": at, "before": x.before,
+                            "after": x.after, "from": x.from, "to": x.to, "sound": x.sound })
+                    })
+                })
+                .collect();
+            if !transitions.is_empty() {
+                v["transitions"] = json!(transitions);
             }
             v
         })

@@ -471,10 +471,35 @@ pub struct Track {
     /// A name shown in the track header and the mixer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Transitions on its edit points, carried from another editor.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transitions: Vec<Transition>,
 }
 
 fn is_zero(v: &f64) -> bool {
     *v == 0.0
+}
+
+/// A transition another editor put on an edit point, which vidcut keeps
+/// while it fits there, shown as a cut (deviation X9). `otio::transitions`
+/// places and writes them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Transition {
+    /// Between the clips' sounds (an audio edit), not their pictures.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sound: bool,
+    /// The clip before the cut; none for a gap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    /// The clip after the cut; none for a gap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    /// Frames it covers before the cut (OTIO's `in_offset`) and after it
+    /// (`out_offset`).
+    pub before: i64,
+    pub after: i64,
+    /// The OTIO `Transition` as read.
+    pub otio: serde_json::Value,
 }
 
 /// A clip on the timeline.
@@ -780,6 +805,7 @@ impl Track {
             volume_db: 0.0,
             video_enabled: true,
             name: None,
+            transitions: Vec::new(),
         }
     }
 

@@ -9,8 +9,9 @@ use eframe::egui::{
     vec2,
 };
 use vidcut_av::waveform::Waveform;
-use vidcut_core::model::{Clip, Effects, Project, Track};
+use vidcut_core::model::{Clip, Effects, Project, Track, Transition};
 use vidcut_core::ops;
+use vidcut_core::otio::transitions;
 use vidcut_core::time::{Rational, format_timecode};
 
 use super::geometry::{Rows, Scale, TrackRect, clips_in};
@@ -230,6 +231,14 @@ pub fn track(
             fps,
         );
     }
+    for x in &t.transitions {
+        if let Some(at) = transitions::place(p, t, x)
+            && at + x.after >= a
+            && at - x.before <= b
+        {
+            transition(painter, tr, scale, at, x);
+        }
+    }
     if t.locked {
         // Stippled: clips can't be changed.
         let mut x = rect.left() - rect.height();
@@ -408,6 +417,38 @@ fn clip(
             StrokeKind::Inside,
         );
     }
+}
+
+/// A transition carried from another editor on the cut at `at` (deviation
+/// X9), played as a cut: a box over the frames it covers, across the
+/// picture or sound band, with a line rising through it.
+fn transition(painter: &Painter, tr: &TrackRect, scale: &Scale, at: i64, x: &Transition) {
+    let rect = tr.rect;
+    let band = if x.sound {
+        tr.audio_top..=rect.bottom()
+    } else {
+        rect.top()..=tr.audio_top - 1.0
+    };
+    let (x0, x1) = (scale.xf(at - x.before), scale.xf(at + x.after));
+    let r = Rect::from_x_y_ranges(
+        x0.min(scale.xf(at) - 2.0)..=x1.max(scale.xf(at) + 2.0),
+        band,
+    );
+    if r.height() < 4.0 {
+        return;
+    }
+    let painter = painter.with_clip_rect(rect);
+    painter.rect_filled(r, CornerRadius::same(2), Color32::from_white_alpha(70));
+    painter.line_segment(
+        [r.left_bottom(), r.right_top()],
+        Stroke::new(1.0, Color32::from_black_alpha(160)),
+    );
+    painter.rect_stroke(
+        r,
+        CornerRadius::same(2),
+        Stroke::new(1.0, Color32::from_white_alpha(170)),
+        StrokeKind::Inside,
+    );
 }
 
 /// A badge at the bottom right of a clip's picture or sound band naming
