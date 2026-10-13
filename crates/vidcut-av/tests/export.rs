@@ -1760,17 +1760,18 @@ fn many_segments_keep_memory_flat() {
     assert_eq!(barcodes(&out).len(), 800);
 }
 
+/// The process's peak resident memory in MB, as the system counts it: a
+/// reading or a panic, never a stand-in that would pass.
 fn peak_rss_mb() -> i64 {
     #[cfg(unix)]
     {
-        std::fs::read_to_string("/proc/self/status")
-            .ok()
-            .and_then(|s| {
-                s.lines()
-                    .find(|l| l.starts_with("VmHWM:"))
-                    .map(|l| l.split_whitespace().nth(1).unwrap().parse::<i64>().unwrap() / 1024)
-            })
-            .unwrap_or(0)
+        let status = std::fs::read_to_string("/proc/self/status").expect("/proc/self/status");
+        let kb = status
+            .lines()
+            .find(|l| l.starts_with("VmHWM:"))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .expect("VmHWM in /proc/self/status");
+        kb.parse::<i64>().unwrap() / 1024
     }
     #[cfg(windows)]
     // SAFETY: fills the counters it is given, their size set first.
@@ -1781,7 +1782,11 @@ fn peak_rss_mb() -> i64 {
         use windows_sys::Win32::System::Threading::GetCurrentProcess;
         let mut c: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
         c.cb = size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
-        GetProcessMemoryInfo(GetCurrentProcess(), &mut c, c.cb);
+        assert!(
+            GetProcessMemoryInfo(GetCurrentProcess(), &mut c, c.cb) != 0,
+            "no memory counters: {}",
+            std::io::Error::last_os_error()
+        );
         (c.PeakWorkingSetSize >> 20) as i64
     }
 }
@@ -2251,25 +2256,37 @@ fn gpu_decoded_exports_match_the_cpu() {
     for decoder in &decoders {
         let name = format!("{} {}", decoder.kind().name(), decoder.on());
         let out = dir.path().join("gpu.mkv");
+        // On a stream or device of its own, as an export takes it.
+        let own = decoder.own().unwrap_or_else(|e| panic!("{name}: {e}"));
         let report = export::run_decoding_on(
             &p,
             &settings,
             &out,
             &Availability::default(),
-            Some(decoder),
+            Some(&own),
             &AtomicBool::new(false),
             &mut |_| {},
         )
         .unwrap_or_else(|e| panic!("{name}: {e}"));
-        // H.264 on AMD's Direct3D 11, and any codec a GPU lacks, decode on
-        // the CPU; black is no one's.
-        eprintln!(
-            "{name}: {} of 290 frames decoded on the GPU",
-            report.gpu_decoded
-        );
-        assert!(
-            report.gpu_decoded > 0 && report.gpu_decoded <= 290,
-            "{name}"
+        // The frames of each codec (black's 10 are no one's) decode on the
+        // GPU where its driver lists the codec, but H.264 on AMD's Direct3D
+        // 11: 290 frames, or 115 there.
+        use vidcut_av::ffmpeg::codec::Id;
+        let on_gpu: usize = [
+            (Id::H264, 8, 175),
+            (Id::HEVC, 10, 55),
+            (Id::VP9, 8, 40),
+            (Id::AV1, 8, 20),
+        ]
+        .into_iter()
+        .filter(|&(codec, bits, _)| {
+            decoder.decodes(codec) && decoder.hardware_decodes(codec, bits) != Some(false)
+        })
+        .map(|(_, _, frames)| frames)
+        .sum();
+        assert_eq!(
+            report.gpu_decoded as usize, on_gpu,
+            "{name}: frames decoded on the GPU"
         );
         assert_eq!(barcodes(&out), want, "{name}");
         let (mut got, mut cpu_frames) = (
