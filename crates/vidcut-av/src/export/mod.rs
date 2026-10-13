@@ -894,6 +894,13 @@ fn encode(
             if spec.name == "pcm_s24le" || spec.name == "flac" {
                 unsafe { (*ctx.as_mut_ptr()).bits_per_raw_sample = 24 };
             }
+            // FFmpeg's own Opus encoder counts as experimental.
+            if spec.name == "opus" {
+                unsafe {
+                    (*ctx.as_mut_ptr()).strict_std_compliance =
+                        ffmpeg::ffi::FF_COMPLIANCE_EXPERIMENTAL
+                };
+            }
             if global_header {
                 ctx.set_flags(ffmpeg::codec::Flags::GLOBAL_HEADER);
             }

@@ -654,11 +654,7 @@ impl CudaPictures {
             None,
         )?;
         add_sink(&mut graph)?;
-        graph
-            .output("in", 0)
-            .and_then(|p| p.input("out", 0))
-            .and_then(|p| p.parse(&spec))
-            .ctx(|| format!("building {spec}"))?;
+        crate::parts::parse_filters(&mut graph, &spec)?;
         graph.validate().ctx(|| format!("configuring {spec}"))?;
         Ok(Self { graph, placebo })
     }

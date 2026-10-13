@@ -342,11 +342,7 @@ impl Deinterlacer {
         } else {
             "bwdif=mode=send_frame:parity=auto:deint=interlaced"
         };
-        graph
-            .output("in", 0)
-            .and_then(|p| p.input("out", 0))
-            .and_then(|p| p.parse(spec))
-            .ctx(|| format!("building {spec}"))?;
+        crate::parts::parse_filters(&mut graph, spec)?;
         graph.validate().ctx(|| format!("configuring {spec}"))?;
         self.graph = Some(graph);
         self.input = (f.width(), f.height(), f.format());
@@ -653,8 +649,8 @@ impl VideoReader {
                 }
             },
             None => ctx.decoder().video(),
-        }
-        .ctx(|| "opening video decoder".into())?;
+        };
+        let decoder = crate::parts::decoder_opened(decoder, codec_id, "video")?;
         crate::export::audio::discard_others(&input, index);
         Ok(Self {
             source: source.clone(),

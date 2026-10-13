@@ -318,7 +318,7 @@ fn av_error(e: vidcut_av::error::Error) -> Error {
     if vidcut_av::export::is_cancelled(&e) {
         Error::new(vidcut_core::ErrorCode::Cancelled, "cancelled")
     } else {
-        Error::media(e.to_string())
+        crate::export::av_error(&e, vidcut_core::ErrorCode::Media, String::new())
     }
 }
 

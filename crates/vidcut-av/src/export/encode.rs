@@ -197,15 +197,17 @@ fn ten_bit(v: &VideoSettings) -> bool {
     v.bit_depth == Some(10) || v.profile.as_deref() == Some("main10") || v.hdr.transfer().is_some()
 }
 
-/// The CPU encoder of a codec.
-fn cpu_name(codec: VideoCodec) -> &'static str {
+/// A codec's CPU encoders ([`crate::parts`]): the first this FFmpeg has
+/// encodes.
+fn cpu_part(codec: VideoCodec) -> &'static crate::parts::Part {
+    use crate::parts;
     match codec {
-        VideoCodec::H264 => "libx264",
-        VideoCodec::Hevc => "libx265",
-        VideoCodec::Av1 => "libsvtav1",
-        VideoCodec::Vp9 => "libvpx-vp9",
-        VideoCodec::Prores => "prores_ks",
-        VideoCodec::Dnxhr => "dnxhd",
+        VideoCodec::H264 => &parts::H264,
+        VideoCodec::Hevc => &parts::HEVC,
+        VideoCodec::Av1 => &parts::AV1,
+        VideoCodec::Vp9 => &parts::VP9,
+        VideoCodec::Prores => &parts::PRORES,
+        VideoCodec::Dnxhr => &parts::DNXHR,
     }
 }
 
@@ -246,18 +248,12 @@ fn kinds(choice: EncoderChoice) -> Vec<EncoderChoice> {
 pub fn abilities(v: &VideoSettings, available: &Availability) -> Abilities {
     let kinds = kinds(v.encoder);
     let name = |kind: EncoderChoice| match kind {
-        EncoderChoice::Cpu => Some(cpu_name(v.codec)),
+        EncoderChoice::Cpu => crate::parts::first(cpu_part(v.codec)),
         k => gpu_name(v.codec, k),
     };
     let writes = |kind: EncoderChoice, ten: bool| match (kind, name(kind)) {
         (_, None) => false,
-        (EncoderChoice::Cpu, Some(n)) => {
-            if ten {
-                cpu_ten_bit(n)
-            } else {
-                encoder::find_by_name(n).is_some()
-            }
-        }
+        (EncoderChoice::Cpu, Some(n)) => !ten || cpu_ten_bit(n),
         (k, Some(n)) => available.find(n, gpu_pixel(k, ten)).is_some(),
     };
     let first = kinds.iter().copied().find(|&k| writes(k, false));
@@ -565,8 +561,32 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
             v.quality.unwrap_or(default).min(v.codec.worst_quality()),
         ),
     };
-    let (name, pixel, options) = match v.codec {
-        VideoCodec::H264 => {
+    let part = cpu_part(v.codec);
+    let Some(name) = crate::parts::first(part) else {
+        return Err(crate::parts::part_missing(part));
+    };
+    if dynamic.dolby_vision && !matches!(name, "libx265" | "libsvtav1") {
+        return Err(Error::Invalid(format!(
+            "{name} writes no Dolby Vision (libx265 and libsvtav1 do)"
+        )));
+    }
+    let deep = if ten {
+        Pixel::YUV420P10LE
+    } else {
+        Pixel::YUV420P
+    };
+    // The quality on the codec's scale, for the encoders without a
+    // constant rate factor.
+    let q = |default: u32| v.quality.unwrap_or(default).min(v.codec.worst_quality());
+    // A speed asked for in the encoder's own numbers, else `default`.
+    let numbered = |most: u32, default: &str| {
+        v.speed
+            .as_deref()
+            .and_then(|s| s.parse::<u32>().ok())
+            .map_or(default.to_string(), |n| n.min(most).to_string())
+    };
+    let (pixel, options) = match name {
+        "libx264" => {
             // Quality 0 is lossless, which only the High 4:4:4 Predictive profile allows.
             let profile = match (ten, v.quality == Some(0) && v.bitrate.is_none()) {
                 (_, true) => "high444",
@@ -574,69 +594,86 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
                 (false, false) => v.profile.as_deref().unwrap_or("high"),
             };
             (
-                "libx264",
-                if ten {
-                    Pixel::YUV420P10LE
-                } else {
-                    Pixel::YUV420P
-                },
+                deep,
                 vec![speed("medium"), quality("crf", 18), opt("profile", profile)],
             )
         }
-        VideoCodec::Hevc => (
-            "libx265",
-            if ten {
-                Pixel::YUV420P10LE
-            } else {
-                Pixel::YUV420P
-            },
-            {
-                let mut o = vec![
-                    speed("medium"),
-                    quality("crf", 20),
-                    opt("x265-params", x265),
-                ];
-                if dynamic.dolby_vision {
-                    o.push(opt("dolbyvision", 1));
-                }
-                o
-            },
-        ),
-        VideoCodec::Av1 => (
-            "libsvtav1",
-            if ten {
-                Pixel::YUV420P10LE
-            } else {
-                Pixel::YUV420P
-            },
-            {
-                let mut o = vec![speed("8"), quality("crf", 30)];
-                if dynamic.dolby_vision {
-                    o.push(opt("dolbyvision", 1));
-                }
-                o
-            },
-        ),
-        VideoCodec::Vp9 => (
-            "libvpx-vp9",
-            if ten {
-                Pixel::YUV420P10LE
-            } else {
-                Pixel::YUV420P
-            },
-            {
-                let mut o = vec![
-                    quality("crf", 32),
-                    opt("row-mt", 1),
-                    opt("cpu-used", v.speed.as_deref().unwrap_or("4")),
-                ];
-                if v.bitrate.is_none() {
-                    o.push(opt("b", 0));
-                }
-                o
-            },
-        ),
-        VideoCodec::Prores => {
+        // No constant rate factor: one quantizer for every frame, the
+        // quality as x264 counts it.
+        "libopenh264" => {
+            let mut o = vec![opt("profile", "high")];
+            match v.bitrate {
+                Some(b) => o.push(opt("b", b)),
+                None => o.extend([
+                    opt("rc_mode", "quality"),
+                    opt("qmin", q(18)),
+                    opt("qmax", q(18)),
+                ]),
+            }
+            (deep, o)
+        }
+        "libx265" => (deep, {
+            let mut o = vec![
+                speed("medium"),
+                quality("crf", 20),
+                opt("x265-params", x265),
+            ];
+            if dynamic.dolby_vision {
+                o.push(opt("dolbyvision", 1));
+            }
+            o
+        }),
+        // Kvazaar's one quantizer, the quality as x265 counts it, and its
+        // presets, named as x265's.
+        "libkvazaar" => {
+            let preset = v.speed.as_deref().unwrap_or("medium");
+            let params = match v.bitrate {
+                Some(_) => format!("preset={preset}"),
+                None => format!("preset={preset},qp={}", q(20)),
+            };
+            let mut o = vec![opt("kvazaar-params", params)];
+            if let Some(b) = v.bitrate {
+                o.push(opt("b", b));
+            }
+            (deep, o)
+        }
+        "libsvtav1" => (deep, {
+            let mut o = vec![speed("8"), quality("crf", 30)];
+            if dynamic.dolby_vision {
+                o.push(opt("dolbyvision", 1));
+            }
+            o
+        }),
+        // Constant quality on SVT-AV1's scale; `cpu-used` 0–8.
+        "libaom-av1" => {
+            let mut o = vec![opt("cpu-used", numbered(8, "6")), opt("row-mt", 1)];
+            match v.bitrate {
+                Some(b) => o.push(opt("b", b)),
+                None => o.extend([opt("crf", q(30)), opt("b", 0)]),
+            }
+            (deep, o)
+        }
+        // Its quantizer index (0–255) for the quality; `speed` 0–10.
+        "librav1e" => {
+            let mut o = vec![opt("speed", numbered(10, "6"))];
+            match v.bitrate {
+                Some(b) => o.push(opt("b", b)),
+                None => o.push(opt("qp", av1_qindex(q(30)))),
+            }
+            (deep, o)
+        }
+        "libvpx-vp9" => (deep, {
+            let mut o = vec![
+                quality("crf", 32),
+                opt("row-mt", 1),
+                opt("cpu-used", v.speed.as_deref().unwrap_or("4")),
+            ];
+            if v.bitrate.is_none() {
+                o.push(opt("b", 0));
+            }
+            o
+        }),
+        "prores_ks" | "prores_aw" => {
             let (profile, pixel) = match v.profile.as_deref().unwrap_or("hq") {
                 "proxy" => (0, Pixel::YUV422P10LE),
                 "lt" => (1, Pixel::YUV422P10LE),
@@ -644,25 +681,19 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
                 "4444" => (4, Pixel::YUVA444P10LE),
                 _ => (3, Pixel::YUV422P10LE),
             };
-            (
-                "prores_ks",
-                pixel,
-                vec![opt("profile", profile), opt("vendor", "apl0")],
-            )
+            (pixel, vec![opt("profile", profile), opt("vendor", "apl0")])
         }
-        VideoCodec::Dnxhr => {
+        "dnxhd" => {
             let p = v.profile.as_deref().unwrap_or("hq");
             let pixel = match p {
                 "hqx" => Pixel::YUV422P10LE,
                 "444" => Pixel::YUV444P10LE,
                 _ => Pixel::YUV422P,
             };
-            ("dnxhd", pixel, vec![opt("profile", format!("dnxhr_{p}"))])
+            (pixel, vec![opt("profile", format!("dnxhr_{p}"))])
         }
+        n => return Err(Error::Invalid(format!("{n}: no settings for it"))),
     };
-    if encoder::find_by_name(name).is_none() {
-        return Err(Error::Invalid(format!("this FFmpeg has no {name} encoder")));
-    }
     Ok(VideoEncoder {
         name: name.into(),
         kind: EncoderChoice::Cpu,
@@ -682,14 +713,22 @@ pub fn resolve_audio(a: &AudioSettings, rate: u32, channels: u16) -> Result<Audi
     use format::sample::Type::{Packed, Planar};
     let (name, sample, default_kbps) = match a.codec {
         AudioCodec::Aac => ("aac", Sample::F32(Planar), Some(256)),
-        AudioCodec::Opus => ("libopus", Sample::F32(Packed), Some(160)),
+        AudioCodec::Opus => match crate::parts::first(&crate::parts::OPUS) {
+            // FFmpeg's own, without libopus: planar samples.
+            Some("opus") => ("opus", Sample::F32(Planar), Some(160)),
+            Some(_) => ("libopus", Sample::F32(Packed), Some(160)),
+            None => return Err(crate::parts::part_missing(&crate::parts::OPUS)),
+        },
         AudioCodec::Mp3 => ("libmp3lame", Sample::F32(Planar), Some(320)),
         AudioCodec::Flac => ("flac", Sample::I32(Packed), None),
         AudioCodec::PcmS16 => ("pcm_s16le", Sample::I16(Packed), None),
         AudioCodec::PcmS24 => ("pcm_s24le", Sample::I32(Packed), None),
     };
-    if encoder::find_by_name(name).is_none() {
-        return Err(Error::Invalid(format!("this FFmpeg has no {name} encoder")));
+    if !crate::parts::has_encoder(name) {
+        return Err(crate::parts::missing_error(
+            crate::parts::Kind::Encoder,
+            name,
+        ));
     }
     let mut rate = a.sample_rate.unwrap_or(rate);
     if a.codec == AudioCodec::Opus {
@@ -864,6 +903,13 @@ pub(crate) fn open_video(
 ) -> Result<(encoder::Video, Option<Upload>)> {
     let codec = encoder::find_by_name(&enc.name)
         .ok_or_else(|| Error::Invalid(format!("no {} encoder", enc.name)))?;
+    // Kvazaar, the HEVC encoder of FFmpeg builds without x265, takes no
+    // other sizes (FFmpeg says "Function not implemented").
+    if enc.name == "libkvazaar" && !(width.is_multiple_of(8) && height.is_multiple_of(8)) {
+        return Err(Error::Invalid(format!(
+            "libkvazaar, this FFmpeg's HEVC encoder, takes sizes in multiples of 8, not {width}×{height}"
+        )));
+    }
     let mut ctx = codec::context::Context::new_with_codec(codec)
         .encoder()
         .video()

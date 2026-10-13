@@ -55,6 +55,8 @@ vidcut history undo                         # works across separate runs
 - `--json` prints `{"rev", "changes": {"created", "modified", "deleted"}, "result", "via"}`, with `warnings` when the undo history could not be saved (the edit is in the file).
 - Errors print `{"error": {"code", "message"}}` and exit with its code: 1 `INTERNAL`, 2 `USAGE`, 3 `NOT_FOUND`, 4 `INVALID_EDIT`, 5 `CONFLICT`, 6 `NO_INSTANCE`, 7 `MEDIA`, 8 `EXPORT`, 9 `CANCELLED`, 10 `DEPENDENCY`. Success exits 0.
 
+**FFmpeg's parts:** `vidcut doctor` lists the parts vidcut uses that this FFmpeg build lacks (`ffmpeg_missing`: each one's name, kind, library and use). An export that needs one fails with `DEPENDENCY` before writing anything.
+
 **Safe automation:**
 - `--dry-run` reports `changes` without writing anything. `--if-rev N` fails with `CONFLICT` if the project changed after you read revision `N`; every request on the project checks it, live ones too.
 - The project's `edited` (ms since 1970 UTC) is for people; compare `rev`. An export encodes the project as it was when it started.

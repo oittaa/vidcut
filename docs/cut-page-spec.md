@@ -264,7 +264,7 @@ A decision holds until the manual or a test shows Resolve does otherwise.
   - Track names: deviation X9. Resolve writes no timeline name and keeps none on import.
   - `.otioz` as OTIO's adapter writes it, `.otiod` as a folder; a bundle unpacks into a folder named after it.
 - **D41. Proxies** (deviation X18; pp. 207–218).
-  - For videos and image sequences, on demand (Generate Proxy). `proxies.codec` `auto`: AV1 on a hardware encoder, else H.264. Longest side `proxies.size` (960). Files in `proxies/` beside the project.
+  - For videos and image sequences, on demand (Generate Proxy). `proxies.codec` `auto`: AV1 on a hardware encoder, else H.264; without x264 and SVT-AV1, OpenH264, else ProRes Proxy (10-bit 4:2:2). Longest side `proxies.size` (960). Files in `proxies/` beside the project.
   - With `proxies.auto` and `use_proxies` on, the GUI makes them for image sequences, videos over 3840×2160 and files over 150 Mb/s, when imported or when `use_proxies` turns on. Headless runs never do.
   - `use_proxies` (in the project) plays them in the preview only; preview audio, export, frames, analysis and OTIO use the originals. A proxy whose source's size or time changed isn't played; relinking to the same file keeps it.
 - **D42. Audio scrubbing** (p. 876).

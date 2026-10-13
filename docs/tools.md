@@ -23,6 +23,7 @@
 
 **Environment:**
 - `VIDCUT_AV_LOG=error|warning|debug`: FFmpeg's messages (default: fatal only).
+- `VIDCUT_FFMPEG_WITHOUT=zscale,libx264`: treat those FFmpeg parts as missing, as a build without them would.
 - `VIDCUT_DEBUG_PLAYER=1`: trace the player, presents, viewer drawing, keys and gestures to stderr. A failed `tests/gui.rs` run keeps its temp dir with screenshots and the GUI's stderr.
 - `VIDCUT_HWDEC=nvdec|vaapi[:/dev/dri/renderD129]|d3d11va[:1]|none`: the player's GPU decoder.
 - `WGPU_BACKEND=vulkan|metal|dx12`, `WGPU_POWER_PREF=low|high`, `WGPU_VALIDATION=0`: wgpu's backend, adapter and validation layers.

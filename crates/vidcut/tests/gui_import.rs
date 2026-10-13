@@ -160,6 +160,9 @@ fn numbered_images_are_asked_about() {
         notify: Arc::new(|| {}),
         socket: None,
     });
+    // The project is open before the first key: the session opens it on a
+    // thread of its own, and a request waits for it.
+    assert_eq!(media_count(&h), 0);
     let picked = Arc::new(Mutex::new(Vec::new()));
     let picks = Arc::new(Mutex::new(0));
     let folders = Arc::new(Mutex::new(Vec::new()));

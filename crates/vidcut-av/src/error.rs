@@ -14,6 +14,9 @@ pub enum Error {
     },
     #[error("{0}")]
     Invalid(String),
+    /// A part this FFmpeg build lacks ([`crate::parts`]).
+    #[error("{0}")]
+    Missing(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
