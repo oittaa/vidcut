@@ -496,6 +496,8 @@ pub fn doctor() -> Value {
         "system": crate::system::version(),
         "ffmpeg": vidcut_av::library_versions(),
         "audio_output": match vidcut_av::player::output_device() { Ok(d) => json!(d), Err(e) => json!(e.to_string()) },
+        // What `player.audio_device` takes.
+        "audio_outputs": match vidcut_av::player::output_devices() { Ok(d) => json!(d), Err(e) => json!(e.to_string()) },
         "gpus": crate::system::gpus(),
         "display_gpus": display_gpus(),
         "state_dir": state_dir(),

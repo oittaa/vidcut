@@ -8,7 +8,7 @@
 - [`tests/player_decodes.rs`](../../crates/vidcut-av/tests/player_decodes.rs): what is decoded, playing both ways, across an edit, for seeks in a row, and after switching to a prepared plan (nothing).
 - [`tests/player_media.rs`](../../crates/vidcut-av/tests/player_media.rs): numbers on the real 1080p30 and 2160p60 clips, on the CPU and with `--features gpu-tests` on NVDEC too (§7), and what one player for a viewer's source and timeline costs in its one budget; `VIDCUT_PLAYER_MEDIA` measures other files, `VIDCUT_PLAYER_BUDGET_MB` another budget.
 - [`tests/player_gpu.rs`](../../crates/vidcut-av/tests/player_gpu.rs) (`--features vidcut-av/gpu-tests`): pictures decoded on each GPU decoder the machine has are the CPU's (§3), seeks far into a long open GOP show their frames, and the GPU's kept in video memory are the ones copied down, seeks keeping their way there too.
-- [`tests/player_device.rs`](../../crates/vidcut-av/tests/player_device.rs) (`--features vidcut-av/audio-tests`): the system's audio device runs the clock (it plays silence).
+- [`tests/player_device.rs`](../../crates/vidcut-av/tests/player_device.rs) (`--features vidcut-av/audio-tests`): the system's audio device runs the clock (it plays silence); every device listed, chosen by its id, plays as itself, their names told apart, and an id that isn't there plays on the default, saying so.
 
 ## 1. Threads
 
@@ -81,7 +81,7 @@ vidcut-av starts them as it starts its other threads (`std::thread::Builder`, na
 ## 6. Outputs
 
 `AudioOutput` starts pulling from the engine's `AudioSource` on a thread of its own and stops when dropped.
-- **`CpalOutput`**: the system's default device through cpal (ALSA on Linux, which PipeWire and PulseAudio serve; WASAPI on Windows), `f32` at the plan's rate and channels. The latency is the callback's playback time minus its callback time: 37 ms through PipeWire here. The stream lives on its own thread, as it can't move between threads on every platform. Device errors show in `Status::error`.
+- **`CpalOutput`**: an output device through cpal (ALSA on Linux, which PipeWire and PulseAudio serve; WASAPI on Windows): the system's default, or the one the preferences' `player.audio_device` names by cpal's device id (the same across runs; `output_devices` lists them), found by its id exactly as listed (cpal's own lookup misses ALSA's, gotchas.md), and which plays on the default while it isn't connected (`PlaysOn` says which device plays). Names repeat (ALSA's outputs of one card share its name, a mixer's two outputs can be named alike), ids don't: `output_devices` tells them apart by their description's next line ("Front output / input"), else numbers them. A changed choice opens the engine anew on its device, paused where it was; `f32` at the plan's rate and channels. The latency is the callback's playback time minus its callback time: 37 ms through PipeWire here. The stream lives on its own thread, as it can't move between threads on every platform. Device errors show in `Status::error`.
 - **`PacedOutput`**: a stand-in that pulls in real time, each buffer heard a set latency after it is due; it can record what it pulled and when it would be heard.
 - **`ManualOutput`**: pulls when a test says, so the test sets the clock.
 - **cpal** is Apache-2.0 (with the MIT/Apache `alsa` crate and the MIT `alsa-sys`): compatible with MIT distribution. It builds against ALSA's headers, `libasound2-dev`.
@@ -125,4 +125,4 @@ NVDEC's speed against the CPU, and why the GPU is still the default: preview.md 
 ## 8. Not yet
 
 - **Vulkan Video's frames** (own-player.md), which would need no copy at all.
-- **Sound:** choosing the device, resampling for a device that won't open at the plan's rate.
+- **Sound:** resampling for a device that won't open at the plan's rate.

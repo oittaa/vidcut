@@ -72,44 +72,144 @@ pub trait AudioOutput: Send {
     /// Starts pulling from `source`, at its rate and channel count, on the
     /// output's own thread, until the output is dropped.
     fn start(&mut self, source: AudioSource) -> Result<()>;
+
+    /// The device it plays on, once started.
+    fn plays_on(&self) -> PlaysOn {
+        PlaysOn::Default
+    }
 }
 
-/// The system's default output device.
+/// The device an [`AudioOutput`] plays on.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum PlaysOn {
+    /// The system's default, as none was chosen (or not a device at all:
+    /// a stand-in).
+    #[default]
+    Default,
+    /// The device chosen by its [`OutputDevice::id`].
+    Chosen(String),
+    /// The system's default, as the device chosen by this id isn't
+    /// connected.
+    Missing(String),
+}
+
+/// An output device of the system's.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct OutputDevice {
+    /// What [`CpalOutput::on`] opens it by: the same across runs and
+    /// reboots where the system allows (`wasapi:…`, `alsa:…`).
+    pub id: String,
+    /// Its name, told apart from the others' ([`distinct_names`]).
+    pub name: String,
+    /// The system's default.
+    pub default: bool,
+}
+
+/// The system's output devices, its default among them.
+pub fn output_devices() -> Result<Vec<OutputDevice>> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    let host = cpal::default_host();
+    let default = host.default_output_device().and_then(|d| d.id().ok());
+    let devices = host
+        .output_devices()
+        .map_err(|e| Error::Invalid(format!("listing audio devices: {e}")))?;
+    let (mut listed, mut details) = (Vec::new(), Vec::new());
+    for d in devices {
+        let Ok(id) = d.id() else { continue };
+        listed.push(OutputDevice {
+            default: default.as_ref() == Some(&id),
+            id: id.to_string(),
+            name: d.to_string(),
+        });
+        // The description's line after the name.
+        details.push(
+            d.description()
+                .ok()
+                .and_then(|desc| desc.extended().nth(1).map(str::to_string)),
+        );
+    }
+    distinct_names(&mut listed, &details);
+    Ok(listed)
+}
+
+/// Names that repeat made distinct: ALSA's outputs of one card share the
+/// card's name, told apart by their description's next line (`Front
+/// output / input`, `Default Audio Device`); those still alike (a mixer's
+/// two outputs named alike) are numbered.
+fn distinct_names(devices: &mut [OutputDevice], details: &[Option<String>]) {
+    let repeats = |devices: &[OutputDevice], name: &str| {
+        devices.iter().filter(|d| d.name == name).count() > 1
+    };
+    let repeated: Vec<bool> = devices.iter().map(|d| repeats(devices, &d.name)).collect();
+    for ((d, detail), repeated) in devices.iter_mut().zip(details).zip(repeated) {
+        if let Some(detail) = detail.as_deref().filter(|_| repeated) {
+            d.name = format!("{} ({detail})", d.name);
+        }
+    }
+    for i in 0..devices.len() {
+        let name = devices[i].name.clone();
+        if repeats(devices, &name) {
+            for (n, d) in devices.iter_mut().filter(|d| d.name == name).enumerate() {
+                d.name = format!("{name} ({})", n + 1);
+            }
+        }
+    }
+}
+
+/// An output device of the system's: its default, or one chosen by its
+/// [`OutputDevice::id`], which plays on the default while it isn't there.
 #[derive(Default)]
 pub struct CpalOutput {
+    /// The chosen device's id; `None`: the default.
+    device: Option<String>,
+    /// Where it plays, once started.
+    plays_on: PlaysOn,
     stop: Option<mpsc::Sender<()>>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl CpalOutput {
+    /// The system's default device.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The device of `id`, or the default for `None`.
+    pub fn on(device: Option<String>) -> Self {
+        Self {
+            device,
+            plays_on: PlaysOn::Default,
+            stop: None,
+            thread: None,
+        }
     }
 }
 
 impl AudioOutput for CpalOutput {
     fn start(&mut self, source: AudioSource) -> Result<()> {
         let (stop, stopped) = mpsc::channel::<()>();
-        let (ready, opened) = mpsc::channel::<Result<()>>();
+        let (ready, opened) = mpsc::channel::<Result<PlaysOn>>();
+        let device = self.device.clone();
         // The stream lives on a thread of its own: it can't move between
         // threads on every platform.
         let thread = std::thread::Builder::new()
             .name("vidcut-audio-out".into())
             .spawn(move || {
-                let stream = match open_stream(source) {
+                let (stream, plays_on) = match open_stream(source, device.as_deref()) {
                     Ok(s) => s,
                     Err(e) => {
                         let _ = ready.send(Err(e));
                         return;
                     }
                 };
-                let _ = ready.send(Ok(()));
+                let _ = ready.send(Ok(plays_on));
                 let _ = stopped.recv();
                 drop(stream);
             })
             .map_err(Error::Io)?;
         match opened.recv_timeout(Duration::from_secs(5)) {
-            Ok(Ok(())) => {
+            Ok(Ok(plays_on)) => {
+                self.plays_on = plays_on;
                 self.stop = Some(stop);
                 self.thread = Some(thread);
                 Ok(())
@@ -119,6 +219,10 @@ impl AudioOutput for CpalOutput {
                 "the audio device didn't open within 5 s".into(),
             )),
         }
+    }
+
+    fn plays_on(&self) -> PlaysOn {
+        self.plays_on.clone()
     }
 }
 
@@ -140,12 +244,33 @@ pub fn output_device() -> Result<String> {
     Ok(device.to_string())
 }
 
-fn open_stream(source: AudioSource) -> Result<cpal::Stream> {
+/// The output device whose id is `id`, as [`output_devices`] lists it.
+/// Not cpal's own lookup by id: on ALSA it adds a device number to the id
+/// it looks for (`sysdefault:CARD=PCH` becomes `…,DEV=0`), so the ids it
+/// lists aren't found.
+fn output_by_id(host: &cpal::Host, id: &str) -> Option<cpal::Device> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    host.output_devices()
+        .ok()?
+        .find(|d| d.id().is_ok_and(|d| d.to_string() == id))
+}
+
+/// A stream from `source` on `device` (an [`OutputDevice::id`]), or on the
+/// default device for `None` or a device that isn't there; and which it is.
+fn open_stream(source: AudioSource, device: Option<&str>) -> Result<(cpal::Stream, PlaysOn)> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     let host = cpal::default_host();
-    let device = host
-        .default_output_device()
-        .ok_or_else(|| Error::Invalid("no audio output device".into()))?;
+    let default = || {
+        host.default_output_device()
+            .ok_or_else(|| Error::Invalid("no audio output device".into()))
+    };
+    let (device, plays_on) = match device {
+        None => (default()?, PlaysOn::Default),
+        Some(id) => match output_by_id(&host, id) {
+            Some(d) => (d, PlaysOn::Chosen(id.to_string())),
+            None => (default()?, PlaysOn::Missing(id.to_string())),
+        },
+    };
     let config = cpal::StreamConfig {
         channels: source.channels(),
         sample_rate: source.rate(),
@@ -172,7 +297,7 @@ fn open_stream(source: AudioSource) -> Result<cpal::Stream> {
     stream
         .play()
         .map_err(|e| Error::Invalid(format!("the audio device won't start: {e}")))?;
-    Ok(stream)
+    Ok((stream, plays_on))
 }
 
 /// What a [`PacedOutput`] pulled.
@@ -303,5 +428,45 @@ impl AudioOutput for ManualOutput {
     fn start(&mut self, source: AudioSource) -> Result<()> {
         *self.source.lock().unwrap_or_else(|e| e.into_inner()) = Some(source);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeated_device_names_are_told_apart() {
+        let device = |id: &str, name: &str| OutputDevice {
+            id: id.into(),
+            name: name.into(),
+            default: false,
+        };
+        let mut devices = [
+            device("alsa:default", "Default ALSA Output"),
+            device("alsa:sysdefault:CARD=PCH", "HDA Intel PCH, ALC897 Analog"),
+            device("alsa:front:CARD=PCH,DEV=0", "HDA Intel PCH, ALC897 Analog"),
+            device("wasapi:a", "Speakers"),
+            device("wasapi:b", "Speakers"),
+        ];
+        let details = [
+            Some("Playback/recording through the PulseAudio sound server".into()),
+            Some("Default Audio Device".into()),
+            Some("Front output / input".into()),
+            None,
+            None,
+        ];
+        distinct_names(&mut devices, &details);
+        let names: Vec<&str> = devices.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "Default ALSA Output",
+                "HDA Intel PCH, ALC897 Analog (Default Audio Device)",
+                "HDA Intel PCH, ALC897 Analog (Front output / input)",
+                "Speakers (1)",
+                "Speakers (2)",
+            ]
+        );
     }
 }

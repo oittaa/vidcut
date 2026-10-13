@@ -57,7 +57,8 @@ use vidcut_core::render::RenderPlan;
 
 pub use frame::{Layout, Memory, Picture, Shown};
 pub use output::{
-    AudioOutput, AudioSource, CpalOutput, ManualOutput, PacedOutput, Recording, output_device,
+    AudioOutput, AudioSource, CpalOutput, ManualOutput, OutputDevice, PacedOutput, PlaysOn,
+    Recording, output_device, output_devices,
 };
 pub use scrub::Scrubber;
 
@@ -896,6 +897,13 @@ impl Player {
                 })
             }
         }
+    }
+
+    /// The device its sound plays on ([`AudioOutput::plays_on`]).
+    pub fn plays_on(&self) -> PlaysOn {
+        lock(&self.output)
+            .as_ref()
+            .map_or(PlaysOn::Default, |o| o.plays_on())
     }
 
     pub fn status(&self) -> Status {

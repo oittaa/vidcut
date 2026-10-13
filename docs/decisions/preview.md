@@ -132,5 +132,4 @@ The Trim Editor's and Dynamic Trim's two-up show frames of a copy of the project
 ## 10. Still open
 
 - VA-API's and Direct3D 11's pictures shown from video memory, Vulkan Video decoding, VideoToolbox on macOS: own-player.md.
-- Choosing the audio device: the default one plays.
 - The meters show the edit's levels, not the engine's output: todo/meters-tap-player-output.md.
