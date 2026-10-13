@@ -41,13 +41,11 @@ winget install LLVM.LLVM
 
 Set `FFMPEG_DIR` to the FFmpeg folder (the one with `bin`, `include` and `lib`) before building, and put its `bin` folder on `PATH`: vidcut loads FFmpeg's DLLs from there. If the build doesn't find libclang, set `LIBCLANG_PATH` to `C:\Program Files\LLVM\bin`. The GUI draws with Vulkan or Direct3D 12 and plays sound through WASAPI. `scripts/check.sh` runs from Git Bash.
 
-**macOS** (being ported: [docs/todo/macos.md](docs/todo/macos.md)): Xcode's Command Line Tools and Homebrew's FFmpeg:
+**macOS:** with `$(brew --prefix rustup)/bin` on `PATH`:
 
 ```bash
-brew install ffmpeg
+brew install ffmpeg rustup
 ```
-
-Rust from rustup (below), not Homebrew's `rust`: that one is a single version and ignores the repository's pinned one (`brew uninstall rust` if `which cargo` is under `/opt/homebrew`). vidcut builds there and passes its unit tests on Apple Silicon (CI). The GUI, which draws with Metal and plays sound through Core Audio, hasn't been tried there yet.
 
 Nothing else is needed at run time: vidcut plays video with its own player, on the FFmpeg libraries. The player, proxies and exports decode H.264, HEVC, AV1 and VP9 on the GPU where it can: NVDEC on NVIDIA GPUs, and on AMD and Intel GPUs VA-API on Linux (Mesa's driver, Intel's media driver) and Direct3D 11 on Windows.
 
