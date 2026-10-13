@@ -2,7 +2,7 @@
 
 **When:** later.
 
-vidcut builds on macOS (Apple Silicon) and passes its unit tests there: CI's `macos` job (`check.yml`), on Homebrew's FFmpeg. The design keeps macOS open (the FFmpeg libraries are in-process, the GUI draws with wgpu, which builds Metal in, the player's sound goes through cpal on Core Audio, live control is a Unix socket), but the GUI hasn't run there yet. Jobs run in the utility QoS class (gui.md §9).
+vidcut builds on macOS (Apple Silicon) and passes its unit tests there: CI's `macos` job (`check.yml`), on Homebrew's FFmpeg. The design keeps macOS open (the FFmpeg libraries are in-process, the GUI draws with wgpu, which builds Metal in, the player's sound goes through cpal on Core Audio, live control is a Unix socket), but the GUI hasn't run there yet. Jobs run in the utility QoS class, FFmpeg's threads for them in the default one (gui.md §9).
 
 Open:
 
