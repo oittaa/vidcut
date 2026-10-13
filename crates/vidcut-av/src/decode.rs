@@ -478,6 +478,9 @@ pub struct FrameProps {
     /// bottom one (`Some(false)`); `None` when progressive.
     pub top_field_first: Option<bool>,
     pub transfer: ffmpeg::ffi::AVColorTransferCharacteristic,
+    /// Its HDR metadata (the stream's too: decoders put the container's on
+    /// every frame).
+    pub hdr: crate::hdr::Metadata,
 }
 
 impl FrameProps {
@@ -488,6 +491,7 @@ impl FrameProps {
         Self {
             top_field_first: interlaced.then_some(top),
             transfer: f.color_trc,
+            hdr: crate::hdr::of_frame(frame),
         }
     }
 }

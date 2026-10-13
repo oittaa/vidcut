@@ -387,6 +387,10 @@ fn convert(info: &vidcut_av::probe::MediaInfo) -> Result<MediaInfo> {
                     _ => None,
                 },
                 still: v.still,
+                mastering: v.hdr.mastering,
+                light: v.hdr.light,
+                hdr10plus: v.hdr.hdr10plus,
+                dolby_vision: v.hdr.dolby_vision,
             })
         }
         None => None,

@@ -248,6 +248,76 @@ pub struct FixtureSpec {
     /// A start timecode (`HH:MM:SS:FF`, `;` for drop-frame) as a camera
     /// records it: MP4 and MOV get a `tmcd` track.
     pub timecode: Option<String>,
+    /// HDR metadata (with `hdr`), in the bitstream and the container.
+    pub hdr_meta: Option<HdrMeta>,
+}
+
+/// The HDR metadata a fixture carries: the mastering display of
+/// [`mastering`] at `max_nits`, content light levels, and HDR10+ on every
+/// frame ([`hdr10plus_t35`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct HdrMeta {
+    pub max_nits: u32,
+    /// MaxCLL and MaxFALL.
+    pub light: Option<(u32, u32)>,
+    pub hdr10plus: bool,
+}
+
+impl HdrMeta {
+    /// Its static values.
+    pub fn values(&self) -> crate::hdr::Static {
+        crate::hdr::Static {
+            mastering: Some(mastering(self.max_nits)),
+            light: self
+                .light
+                .map(|(max_cll, max_fall)| vidcut_core::model::LightLevel { max_cll, max_fall }),
+        }
+    }
+}
+
+/// A P3 mastering display (D65 white) from 0.0001 to `max_nits` cd/m²: what
+/// HDR10 is mostly mastered on.
+pub fn mastering(max_nits: u32) -> vidcut_core::model::MasteringDisplay {
+    vidcut_core::model::MasteringDisplay {
+        primaries: [[0.68, 0.32], [0.265, 0.69], [0.15, 0.06]],
+        white: [0.3127, 0.329],
+        min_nits: 0.0001,
+        max_nits: f64::from(max_nits),
+    }
+}
+
+/// Frame `k`'s HDR10+ (SMPTE ST 2094-40) as an ITU-T T.35 payload: one
+/// window, MaxSCL and the average MaxRGB counting up with `k`, so each frame's
+/// is its own.
+pub fn hdr10plus_t35(k: u32) -> Vec<u8> {
+    struct Bits(Vec<u8>, u32);
+    impl Bits {
+        fn put(&mut self, value: u32, n: u32) {
+            for i in (0..n).rev() {
+                if self.1.is_multiple_of(8) {
+                    self.0.push(0);
+                }
+                let bit = (value >> i) & 1;
+                *self.0.last_mut().expect("pushed") |= (bit as u8) << (7 - self.1 % 8);
+                self.1 += 1;
+            }
+        }
+    }
+    let mut b = Bits(vec![0xB5, 0x00, 0x3C, 0x00, 0x01, 0x04], 48);
+    b.put(1, 8); // application_version
+    b.put(1, 2); // num_windows
+    b.put(400, 27); // targeted_system_display_maximum_luminance
+    b.put(0, 1); // targeted_system_display_actual_peak_luminance_flag
+    for c in 0..3 {
+        b.put(10_000 + 100 * k + c, 17); // maxscl
+    }
+    b.put(5_000 + 100 * k, 17); // average_maxrgb
+    b.put(0, 4); // num_distribution_maxrgb_percentiles
+    b.put(0, 10); // fraction_bright_pixels
+    b.put(0, 1); // mastering_display_actual_peak_luminance_flag
+    b.put(0, 1); // tone_mapping_flag
+    b.put(0, 1); // color_saturation_mapping_flag
+    b.0
 }
 
 /// 10-bit codes (limited range) of SDR reference white in HDR: 203 nits in
@@ -305,7 +375,14 @@ impl FixtureSpec {
             top_field_first: None,
             hdr: None,
             timecode: None,
+            hdr_meta: None,
         }
+    }
+
+    /// HDR metadata (needs [`hdr`](Self::hdr)).
+    pub fn hdr_meta(mut self, meta: HdrMeta) -> Self {
+        self.hdr_meta = Some(meta);
+        self
     }
 
     /// Records `tc` as the start timecode (`01:00:00:00`).
@@ -428,14 +505,22 @@ impl FixtureSpec {
             Some(vidcut_core::model::Hdr::Pq) => "pq",
             Some(vidcut_core::model::Hdr::Hlg) => "hlg",
         } + &self
-            .timecode
-            .as_ref()
-            .map(|tc| {
-                let digits: String = tc.chars().filter(char::is_ascii_digit).collect();
-                let drop = if tc.contains(';') { "d" } else { "" };
-                format!("tc{digits}{drop}")
+            .hdr_meta
+            .map(|m| {
+                let light = m.light.map_or(String::new(), |(c, f)| format!("l{c}-{f}"));
+                let plus = if m.hdr10plus { "p" } else { "" };
+                format!("m{}{light}{plus}", m.max_nits)
             })
-            .unwrap_or_default();
+            .unwrap_or_default()
+            + &self
+                .timecode
+                .as_ref()
+                .map(|tc| {
+                    let digits: String = tc.chars().filter(char::is_ascii_digit).collect();
+                    let drop = if tc.contains(';') { "d" } else { "" };
+                    format!("tc{digits}{drop}")
+                })
+                .unwrap_or_default();
         format!(
             "{content}{v}_{codec}_{w}x{h}{rot}_{n}-{d}{vfr}_g{g}b{b}_{f}f_{audio}_o{o}.{ext}",
             v = GENERATOR_VERSION,
@@ -800,6 +885,8 @@ struct VideoTrack {
     /// B-frames) don't reliably carry frame durations onto packets; without them
     /// the MP4 muxer gives the last sample duration 0 and its edit list drops it.
     durations: std::collections::HashMap<i64, i64>,
+    /// HDR10+ of each submitted frame by pts, put into its packet.
+    hdr10plus: std::collections::HashMap<i64, Vec<u8>>,
 }
 
 impl VideoTrack {
@@ -845,6 +932,9 @@ impl VideoTrack {
         if spec.hdr.is_some() {
             crate::color::tag(unsafe { enc.as_mut_ptr() }, spec.hdr);
         }
+        if let Some(meta) = spec.hdr_meta {
+            unsafe { crate::hdr::set_on_encoder(enc.as_mut_ptr(), &meta.values())? };
+        }
         let mut opts = ffmpeg::Dictionary::new();
         match spec.video {
             VideoCodec::H264 => {
@@ -861,9 +951,15 @@ impl VideoTrack {
                 opts.set(
                     "x265-params",
                     &format!(
-                        "log-level=error:scenecut=0:open-gop=0:keyint={g}:min-keyint={g}:bframes={b}",
+                        "log-level=error:scenecut=0:open-gop=0:keyint={g}:min-keyint={g}:bframes={b}{r}",
                         g = spec.gop,
-                        b = spec.bframes
+                        b = spec.bframes,
+                        // The HDR SEI at every keyframe, not only in hvcC.
+                        r = if spec.hdr_meta.is_some() {
+                            ":repeat-headers=1"
+                        } else {
+                            ""
+                        },
                     ),
                 );
             }
@@ -924,6 +1020,7 @@ impl VideoTrack {
             luma8: vec![0; (spec.width * spec.height) as usize],
             stored: vec![0; (spec.width * spec.height) as usize],
             durations: std::collections::HashMap::new(),
+            hdr10plus: std::collections::HashMap::new(),
         })
     }
 
@@ -1054,6 +1151,9 @@ impl VideoTrack {
         frame.set_pts(Some(pts));
         unsafe { (*frame.as_mut_ptr()).duration = duration };
         self.durations.insert(pts, duration);
+        if spec.hdr_meta.is_some_and(|m| m.hdr10plus) {
+            self.hdr10plus.insert(pts, hdr10plus_t35(k));
+        }
         self.encoder
             .send_frame(&frame)
             .ctx(|| format!("encoding frame {k}"))?;
@@ -1065,6 +1165,9 @@ impl VideoTrack {
         while self.encoder.receive_packet(&mut packet).is_ok() {
             if let Some(d) = packet.pts().and_then(|pts| self.durations.remove(&pts)) {
                 packet.set_duration(d);
+            }
+            if let Some(t35) = packet.pts().and_then(|pts| self.hdr10plus.remove(&pts)) {
+                crate::hdr::insert_hdr10plus(&mut packet, codec::Id::HEVC, &t35)?;
             }
             packet.set_stream(0);
             packet.rescale_ts(self.enc_tb, self.stream_tb);

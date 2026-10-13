@@ -348,6 +348,47 @@ pub struct VideoInfo {
     /// makes it, and `fps` and `duration` mean nothing.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub still: bool,
+    /// The display the pictures were mastered on, as the file says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mastering: Option<MasteringDisplay>,
+    /// Content light levels, as the file says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub light: Option<LightLevel>,
+    /// HDR10+ dynamic metadata (SMPTE ST 2094-40) on the frames.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hdr10plus: bool,
+    /// Dolby Vision on the frames.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dolby_vision: Option<DolbyVision>,
+}
+
+/// The display HDR pictures were mastered on (SMPTE ST 2086): its color
+/// volume.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MasteringDisplay {
+    /// Red, green and blue primaries as CIE 1931 `[x, y]`.
+    pub primaries: [[f64; 2]; 3],
+    /// White point as CIE 1931 `[x, y]`.
+    pub white: [f64; 2],
+    /// Luminance range, cd/m².
+    pub min_nits: f64,
+    pub max_nits: f64,
+}
+
+/// Content light levels (CTA-861.3), cd/m²: the brightest pixel of all
+/// frames, and the brightest frame on average.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LightLevel {
+    pub max_cll: u32,
+    pub max_fall: u32,
+}
+
+/// Dolby Vision in a stream: its profile (5, 8, 10, …) and the base layer's
+/// signal compatibility (8.1: HDR10, 8.4: HLG).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DolbyVision {
+    pub profile: u8,
+    pub compatibility: u8,
 }
 
 impl VideoInfo {

@@ -12,6 +12,7 @@ pub mod decode;
 pub mod error;
 pub mod export;
 pub mod fixture;
+pub mod hdr;
 pub mod player;
 pub mod probe;
 pub mod progress;

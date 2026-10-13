@@ -72,6 +72,9 @@ pub struct VideoStreamInfo {
     pub transfer: String,
     /// A single picture (an image file), not a video.
     pub still: bool,
+    /// HDR metadata: the first frame's static values and dynamic kinds,
+    /// and the stream's Dolby Vision.
+    pub hdr: crate::hdr::Metadata,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -296,6 +299,10 @@ fn probe_input(source: &Input) -> Result<MediaInfo> {
                     top_field_first,
                     transfer,
                     still,
+                    hdr: crate::hdr::Metadata {
+                        dolby_vision: crate::hdr::dolby_vision(&params),
+                        ..first.map(|f| f.hdr).unwrap_or_default()
+                    },
                 });
             }
             media::Type::Audio => {
