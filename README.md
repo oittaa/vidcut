@@ -18,6 +18,7 @@ A simple, fully scriptable video cutting tool for Linux, modeled on DaVinci Reso
   - Quick Export presets (H.265 Master, AV1, ProRes 422 HQ, YouTube, TikTok), plus your own
   - an Export dialog with codec settings, GPU encoding (NVENC, VAAPI), In–Out range, per-clip export and audio-only export
   - exports run in the background, with progress, ETA and cancel
+  - HDR exports keep their sources' mastering display and light levels, HDR10+ and Dolby Vision
 - **Automatic tools:** Ripple Delete Silence cuts the pauses out of a talk; Detect Scene Cuts splits an edited video back into its shots; the Boring Detector flags clips that run too long or flash by; exports can be normalized to a loudness target (−14 LUFS for YouTube).
 - **Interchange:** import and export timelines as OpenTimelineIO, which DaVinci Resolve and other editors read and write: `.otio` files, and `.otioz` bundles that carry the media along. Files are written the way Resolve writes them, so an edit goes to Resolve and back.
 - **Everything scriptable.** Every action in the GUI is also a CLI command and a JSON-RPC call on the running app, so scripts and AI agents can edit with you. `vidcut mcp` offers it all to AI agents over the Model Context Protocol.

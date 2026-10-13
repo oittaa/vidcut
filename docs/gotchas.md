@@ -14,3 +14,5 @@ Findings not recorded in the decision records (docs/decisions/).
 - **Test cuts against fixtures with B-frames and real media**, not only small fixtures: encodes that decode a keyframe before the frames shown just ahead of it (open GOPs, x264's B-frames) are where readers lose frames at cuts.
 - **Set packet durations explicitly when muxing** from delayed encoders (x264 with B-frames). Otherwise MP4 edit lists drop the last frame.
 - **Clear a decoded frame's picture type before encoding it** (`set_kind(picture::Type::None)`). Encoders take it as an order: the output copies the source's keyframes, and x264 warns about every B-frame it can't make.
+- **Matroska's demuxer exports content light levels only when MaxCLL and MaxFALL are both non-zero**, and FFmpeg's decoders put a container's HDR values on every frame unless the bitstream has its own: read a file's values from its first decoded frame, not from one place (`hdr::of_frame`).
+- **x265 writes Dolby Vision only with a VBV** ("requires VBV settings to enable HRD"), and MP4 writes the Dolby Vision box only with `strict=unofficial` (export.md §4).
