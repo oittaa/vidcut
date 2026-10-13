@@ -62,9 +62,13 @@ pub fn run_with(
             height,
             sample_rate,
             channels,
+            drop_frame,
         } => {
             let mut settings =
                 vidcut_core::model::Settings::with_format(fps.as_deref(), size(*width, *height)?)?;
+            if let Some(d) = drop_frame {
+                settings.set_drop_frame(*d)?;
+            }
             if let Some(r) = sample_rate {
                 settings.sample_rate = *r;
             }
@@ -485,7 +489,11 @@ fn display_gpus() -> Vec<String> {
         .iter()
         .map(|a| {
             let info = a.get_info();
-            format!("{} ({:?}, {})", info.name, info.backend, info.driver)
+            // Metal names no driver.
+            match info.driver.as_str() {
+                "" => format!("{} ({:?})", info.name, info.backend),
+                driver => format!("{} ({:?}, {driver})", info.name, info.backend),
+            }
         })
         .collect()
 }

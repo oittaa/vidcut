@@ -20,7 +20,7 @@
 //! - Editor metadata besides ([`EDITOR`]): a link group joining each clip's
 //!   video and audio, the stream and channels its audio plays, clip gain as
 //!   a clip volume, track lock and solo, marker notes.
-//! - Timeline markers go on the top-level stack, one frame long.
+//! - Timeline markers go on the top-level stack, with their lengths.
 //! - Details OTIO has no field for (clip gain, mute and audio stream, track
 //!   settings, marker colors, the In/Out marks) are kept under
 //!   `metadata.vidcut`.
@@ -44,7 +44,7 @@
 //!   which track each audio track belongs to). The editor metadata's channel
 //!   map picks the stream, its clip volume the gain.
 //! - Markers on the timeline, on tracks and on clips become timeline
-//!   markers.
+//!   markers, keeping their lengths.
 //! - Everything else is left out with a warning: transitions (cuts instead),
 //!   nested compositions and generators (gaps instead), speed changes.
 
@@ -423,8 +423,8 @@ pub fn export(
                 "name": k.name,
                 "comment": k.note,
                 "color": otio_color(&k.color),
-                // Markers are one frame long.
-                "marked_range": range((k.at - a) as f64, 1.0, rate),
+                // Cut at the end of what is exported.
+                "marked_range": range((k.at - a) as f64, k.duration.min(b - k.at) as f64, rate),
                 "metadata": { VIDCUT: { "color": k.color }, EDITOR: { "Note": k.note } },
             })
         })
@@ -575,6 +575,8 @@ fn default_track_name(name: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ImportedMarker {
     pub at: i64,
+    /// Length in frames, at least one.
+    pub duration: i64,
     pub name: String,
     pub note: String,
     pub color: String,
@@ -1115,7 +1117,7 @@ fn timeline_rate(tl: &Value, tracks: &[&Value]) -> Option<f64> {
 }
 
 /// A marker at timeline frame `at`.
-fn marker(k: &Value, at: i64) -> ImportedMarker {
+fn marker(k: &Value, at: i64, fps: Rational) -> ImportedMarker {
     let color = match k["metadata"][VIDCUT]["color"].as_str() {
         Some(c) if crate::ops::MARKER_COLORS.contains(&c) => c.to_string(),
         _ => our_color(k["color"].as_str().unwrap_or("")).to_string(),
@@ -1126,8 +1128,10 @@ fn marker(k: &Value, at: i64) -> ImportedMarker {
         .filter(|c| !c.is_empty())
         .or(k["metadata"][EDITOR]["Note"].as_str())
         .unwrap_or("");
+    let duration = time(&k["marked_range"]["duration"]).map_or(1, |(v, r)| frames(v, r, fps));
     ImportedMarker {
         at,
+        duration: duration.max(1),
         name: k["name"].as_str().unwrap_or("").to_string(),
         note: note.to_string(),
         color,
@@ -1147,7 +1151,7 @@ fn clip_markers(item: &Value, start: i64, len: i64, fps: Rational, out: &mut Vec
             None => frames(t.0, t.1, fps),
         };
         if (0..len).contains(&offset) {
-            out.push(marker(k, start + offset));
+            out.push(marker(k, start + offset, fps));
         }
     }
 }
@@ -1370,7 +1374,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     {
         for k in list.as_array().into_iter().flatten() {
             if let Some((v, r)) = time(&k["marked_range"]["start_time"]) {
-                markers.push(marker(k, frames(v, r, fps)));
+                markers.push(marker(k, frames(v, r, fps), fps));
             }
         }
     }

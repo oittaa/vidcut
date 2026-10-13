@@ -508,6 +508,7 @@ pub fn media_context(p: &Project, media: &Media, playhead: Option<i64>) -> TimeC
     TimeContext {
         fps: p.settings.fps,
         start_tc: 0,
+        drop_frame: p.settings.counts_drop_frame(),
         end: p.media_frames(media),
         mark_in: media.marks.mark_in,
         mark_out: media.marks.mark_out,
@@ -772,6 +773,7 @@ fn mutate(
             let ctx = TimeContext {
                 fps: p.settings.fps,
                 start_tc: 0,
+                drop_frame: p.settings.counts_drop_frame(),
                 end,
                 mark_in: cur_in,
                 mark_out: cur_out,
@@ -976,8 +978,8 @@ fn mutate(
                 post_tail: length(p, post_tail)?.max(0),
                 min: length(p, min)?.max(1),
             };
-            let (fps, stc) = (p.settings.fps, p.settings.start_tc);
-            let tc = move |f: i64| format_timecode(f, fps, stc);
+            let shown = p.settings.clone();
+            let tc = move |f: i64| shown.timecode(f);
             let mut parts = Vec::new();
             let mut removed = Vec::new();
             for id in &ids {
@@ -1002,8 +1004,8 @@ fn mutate(
         }
         Request::EditDetectSceneCuts { clips, threshold } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-            let (fps, stc) = (p.settings.fps, p.settings.start_tc);
-            let tc = move |f: i64| format_timecode(f, fps, stc);
+            let shown = p.settings.clone();
+            let tc = move |f: i64| shown.timecode(f);
             let mut cuts = Vec::new();
             let mut created = Vec::new();
             for id in &ids {
@@ -1103,9 +1105,19 @@ fn mutate(
             name,
             color,
             note,
+            duration,
         } => {
             let at = resolve(p, at, playhead)?;
-            json!({ "marker": ops::add_marker(p, at, name.clone(), color.clone(), note.clone())? })
+            let duration = duration.as_ref().map(|d| length(p, d)).transpose()?;
+            let id = ops::add_marker(
+                p,
+                at,
+                duration.unwrap_or(1),
+                name.clone(),
+                color.clone(),
+                note.clone(),
+            )?;
+            json!({ "marker": id })
         }
         Request::MarkersMove { marker, to } => {
             let to = resolve(p, to, playhead)?;
@@ -1117,8 +1129,17 @@ fn mutate(
             name,
             color,
             note,
+            duration,
         } => {
-            ops::set_marker(p, marker, name.clone(), color.clone(), note.clone())?;
+            let duration = duration.as_ref().map(|d| length(p, d)).transpose()?;
+            ops::set_marker(
+                p,
+                marker,
+                name.clone(),
+                color.clone(),
+                note.clone(),
+                duration,
+            )?;
             Value::Null
         }
         Request::TrackSet {
@@ -1226,8 +1247,11 @@ fn add_media(p: &mut Project, probed: ProbedMedia) -> String {
     if p.settings.auto_format
         && let Some(v) = probed.info.video.as_ref().filter(|v| !v.still)
     {
-        // The first video sets the project format, with no prompt (D37).
-        p.settings.fps = v.fps;
+        // The first video sets the project format, with no prompt (D37),
+        // drop-frame counting too where its timecode counts so (D47).
+        p.settings.set_fps(v.fps);
+        p.settings.drop_frame =
+            v.fps.has_drop_frame() && probed.info.timecode.is_some_and(|t| t.drop_frame);
         adopt_size(p, v);
     }
     let id = p.alloc_media_id();
@@ -1637,7 +1661,17 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         {
             adopt_size(p, &v);
         }
-        p.settings.fps = t.fps;
+        // A file doesn't say whether its timecode counts drop-frame; its
+        // media may (decision D47).
+        let drop = t.clips.iter().any(|c| {
+            p.media(&ids[&key(&c.media)])
+                .and_then(|m| m.info.timecode)
+                .is_some_and(|tc| tc.drop_frame)
+        });
+        p.settings.set_fps(t.fps);
+        if drop && t.fps.has_drop_frame() {
+            p.settings.drop_frame = true;
+        }
         p.settings.start_tc = t.start_tc;
         p.settings.auto_format = false;
     } else if t.fps != p.settings.fps {
@@ -1785,6 +1819,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         markers.push(ops::add_marker(
             p,
             offset + conv(k.at),
+            conv(k.duration).max(1),
             k.name.clone(),
             Some(k.color.clone()),
             k.note.clone(),
@@ -1821,7 +1856,7 @@ fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
                 "the frame rate can only change while the timeline is empty",
             ));
         }
-        p.settings.fps = fps;
+        p.settings.set_fps(fps);
         p.settings.auto_format = false;
     }
     if let Some(w) = set.width {
@@ -1848,6 +1883,10 @@ fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
     }
     if let Some(r) = set.ripple_on {
         p.settings.ripple_on = r;
+    }
+    // Before the start timecode, which then counts so.
+    if let Some(d) = set.drop_frame {
+        p.settings.set_drop_frame(d)?;
     }
     if let Some(tc) = &set.start_tc {
         let c = TimeContext {
@@ -2037,8 +2076,7 @@ pub fn query(
     env: &dyn Env,
     playhead: Option<i64>,
 ) -> Result<Value> {
-    let fps = p.settings.fps;
-    let tc = |f: i64| format_timecode(f, fps, p.settings.start_tc);
+    let tc = |f: i64| p.settings.timecode(f);
     Ok(match request {
         Request::ProjectGet {} => {
             serde_json::to_value(p).map_err(|e| Error::internal(e.to_string()))?
@@ -2171,7 +2209,7 @@ pub fn query(
             let item = |c: &Clip| {
                 json!({
                     "clip": c.id, "start": c.start, "duration": c.duration,
-                    "start_tc": tc(c.start), "duration_tc": format_timecode(c.duration, fps, 0),
+                    "start_tc": tc(c.start), "duration_tc": p.settings.length_timecode(c.duration),
                 })
             };
             json!({
@@ -2321,11 +2359,10 @@ impl Target<'_> {
 
     /// Timecode of position `f`: source timecode for media, record for clips.
     fn tc(&self, p: &Project, f: i64) -> String {
-        let start = match self {
-            Target::Media(_) => 0,
-            Target::Clip(_) => p.settings.start_tc,
-        };
-        format_timecode(f, p.settings.fps, start)
+        match self {
+            Target::Media(_) => p.settings.length_timecode(f),
+            Target::Clip(_) => p.settings.timecode(f),
+        }
     }
 
     fn ranges(&self, p: &Project, ranges: &[(i64, i64)]) -> Vec<Value> {
@@ -2334,7 +2371,7 @@ impl Target<'_> {
             .map(|&(a, b)| {
                 json!({
                     "start": a, "end": b, "start_tc": self.tc(p, a), "end_tc": self.tc(p, b),
-                    "duration_tc": format_timecode(b - a, p.settings.fps, 0),
+                    "duration_tc": p.settings.length_timecode(b - a),
                 })
             })
             .collect()
@@ -2448,7 +2485,7 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env) -> Value {
         "name": m.name,
         "path": m.path,
         "frames": frames,
-        "duration_tc": format_timecode(frames, p.settings.fps, 0),
+        "duration_tc": p.settings.length_timecode(frames),
         "video": m.info.video.as_ref().map(|v| {
             let (width, height) = v.display_size();
             json!({ "width": width, "height": height, "fps": v.fps.to_string(), "codec": v.codec,
@@ -2492,14 +2529,13 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env) -> Value {
             _ => p.settings.fps,
         };
         let frames = tc.frames_at(fps).round() as i64;
-        v["timecode"] = json!(format_timecode(frames, fps, 0));
+        v["timecode"] = json!(format_timecode(frames, fps, 0, tc.drop_frame));
     }
     v
 }
 
 /// A clip as reported by timeline queries.
 pub fn clip_json(p: &Project, c: &Clip, track: &str) -> Value {
-    let (fps, stc) = (p.settings.fps, p.settings.start_tc);
     let mut v = json!({
         "type": "clip",
         "id": c.id,
@@ -2509,11 +2545,11 @@ pub fn clip_json(p: &Project, c: &Clip, track: &str) -> Value {
         "start": c.start,
         "end": c.end(),
         "duration": c.duration,
-        "start_tc": format_timecode(c.start, fps, stc),
-        "end_tc": format_timecode(c.end(), fps, stc),
+        "start_tc": p.settings.timecode(c.start),
+        "end_tc": p.settings.timecode(c.end()),
         "source_in": c.source_in,
         "source_out": c.source_in + c.duration,
-        "source_in_tc": format_timecode(c.source_in, fps, 0),
+        "source_in_tc": p.settings.length_timecode(c.source_in),
         "enabled": c.enabled,
     });
     if let Some(a) = &c.audio {
@@ -2523,7 +2559,7 @@ pub fn clip_json(p: &Project, c: &Clip, track: &str) -> Value {
 }
 
 fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
-    let (fps, stc) = (p.settings.fps, p.settings.start_tc);
+    let fps = p.settings.fps;
     let tracks: Vec<Value> = p
         .tracks
         .iter()
@@ -2534,7 +2570,7 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
                 if c.start > at && c.start > a && at < b {
                     let (gs, ge) = (at.max(a), c.start.min(b));
                     items.push(json!({ "type": "gap", "start": gs, "end": ge, "duration": ge - gs,
-                        "start_tc": format_timecode(gs, fps, stc), "end_tc": format_timecode(ge, fps, stc) }));
+                        "start_tc": p.settings.timecode(gs), "end_tc": p.settings.timecode(ge) }));
                 }
                 if c.end() > a && c.start < b {
                     items.push(clip_json(p, c, &t.id));
@@ -2562,7 +2598,7 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
         "start": a,
         "end": b,
         "duration": p.end(),
-        "duration_tc": format_timecode(p.end(), fps, stc),
+        "duration_tc": p.settings.timecode(p.end()),
         "tracks": tracks,
         "marks": p.marks,
         "markers": p.markers,

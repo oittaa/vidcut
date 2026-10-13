@@ -953,6 +953,7 @@ pub fn frame(
             let ctx = TimeContext {
                 fps,
                 start_tc: 0,
+                drop_frame: p.settings.counts_drop_frame(),
                 end: frames,
                 mark_in: None,
                 mark_out: None,

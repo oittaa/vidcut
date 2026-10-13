@@ -1,4 +1,4 @@
-//! Frame-based time: project frame rates, non-drop-frame timecode, and the
+//! Frame-based time: project frame rates, timecode (drop-frame too), and the
 //! `TimeSpec`/`RangeSpec` syntax shared by the CLI, JSON-RPC and the GUI.
 //!
 //! All timeline positions are integer frames at the project frame rate.
@@ -9,7 +9,8 @@
 //! |---|---|
 //! | `450f` | frames |
 //! | `15s`, `1.5s`, `250ms`, `1m30s`, `1h2m3.5s` | duration, rounded to the nearest frame |
-//! | `00:01:02:03` | timecode `HH:MM:SS:FF` (non-drop-frame), relative to the project start timecode |
+//! | `00:01:02:03` | timecode `HH:MM:SS:FF`, relative to the project start timecode; drop-frame in a project that counts so (decision D47) |
+//! | `00:01:02;03` | drop-frame timecode `HH:MM:SS;FF` (29.97 and 59.94 only) |
 //! | `00:01:02.500` | clock time `HH:MM:SS.mmm` (or `MM:SS.mmm`) |
 //! | `start`, `end`, `in`, `out`, `playhead` | timeline start/end, timeline marks, playhead (live only) |
 //! | `+10f`, `-2s` | relative to a base given by the command (e.g. the playhead) |
@@ -119,6 +120,20 @@ impl Rational {
         (self.num + self.den / 2) / self.den
     }
 
+    /// The frame numbers drop-frame timecode skips at the start of every
+    /// minute but every tenth: 2 at 29.97, 4 at 59.94, none at other rates.
+    pub fn dropped_per_minute(self) -> i64 {
+        match (self.den, self.timecode_base()) {
+            (1001, b @ (30 | 60)) => b / 15,
+            _ => 0,
+        }
+    }
+
+    /// Whether drop-frame timecode is defined at this rate: 29.97 and 59.94.
+    pub fn has_drop_frame(self) -> bool {
+        self.dropped_per_minute() > 0
+    }
+
     /// The standard rate within 0.1% of `rate`, if any (e.g. 29.97002 → 30000/1001).
     pub fn snap_standard(rate: f64) -> Option<Self> {
         STANDARD_RATES
@@ -206,9 +221,10 @@ impl schemars::JsonSchema for Rational {
     }
 }
 
-/// Formats a timeline position as non-drop-frame timecode `HH:MM:SS:FF`,
-/// offset by the project start timecode (in frames).
-pub fn format_timecode(frames: i64, fps: Rational, start_tc: i64) -> String {
+/// Formats a timeline position as timecode `HH:MM:SS:FF`, offset by the
+/// project start timecode (in frames). With `drop` at 29.97 and 59.94 it is
+/// drop-frame, `HH:MM:SS;FF` (decision D47).
+pub fn format_timecode(frames: i64, fps: Rational, start_tc: i64, drop: bool) -> String {
     let base = fps.timecode_base();
     let total = frames + start_tc;
     let (sign, t) = if total < 0 {
@@ -216,15 +232,46 @@ pub fn format_timecode(frames: i64, fps: Rational, start_tc: i64) -> String {
     } else {
         ("", total)
     };
+    let dropped = if drop { fps.dropped_per_minute() } else { 0 };
+    // Drop-frame: the label counts back in the numbers skipped so far.
+    let t = if dropped > 0 {
+        let (per_ten, per_minute) = (base * 600 - dropped * 9, base * 60 - dropped);
+        let (tens, rest) = (t / per_ten, t % per_ten);
+        let minutes = if rest > dropped {
+            (rest - dropped) / per_minute
+        } else {
+            0
+        };
+        t + dropped * (9 * tens + minutes)
+    } else {
+        t
+    };
     let ff = t % base;
     let s = t / base;
     format!(
-        "{sign}{:02}:{:02}:{:02}:{:02}",
+        "{sign}{:02}:{:02}:{:02}{}{:02}",
         s / 3600,
         (s / 60) % 60,
         s % 60,
+        if dropped > 0 { ';' } else { ':' },
         ff
     )
+}
+
+/// The frame count of timecode `h:m:s:f` at `fps`, counted drop-frame with
+/// `drop` at 29.97 and 59.94; `None` for a field out of range or a label
+/// drop-frame skips (`00:01:00;00`).
+pub fn timecode_frames(h: i64, m: i64, s: i64, f: i64, fps: Rational, drop: bool) -> Option<i64> {
+    let base = fps.timecode_base();
+    if h < 0 || !(0..60).contains(&m) || !(0..60).contains(&s) || !(0..base).contains(&f) {
+        return None;
+    }
+    let dropped = if drop { fps.dropped_per_minute() } else { 0 };
+    if s == 0 && f < dropped && m % 10 != 0 {
+        return None;
+    }
+    let minutes = h * 60 + m;
+    Some((minutes * 60 + s) * base + f - dropped * (minutes - minutes / 10))
 }
 
 /// The frame count of a timecode a media file records (`HH:MM:SS:FF`) at
@@ -248,12 +295,9 @@ pub fn parse_media_timecode(s: &str, fps: Rational) -> Option<i64> {
     }
     let nominal = ((h * 60 + m) * 60 + sec) * base + f;
     // Drop-frame is defined for 29.97 and 59.94 only.
-    let dropped_per_minute = match (drop, fps.den(), base) {
-        (true, 1001, 30 | 60) => base / 15,
-        _ => 0,
-    };
+    let dropped = if drop { fps.dropped_per_minute() } else { 0 };
     let minutes = h * 60 + m;
-    Some(nominal - dropped_per_minute * (minutes - minutes / 10))
+    Some(nominal - dropped * (minutes - minutes / 10))
 }
 
 /// Named positions a [`TimeSpec`] can refer to.
@@ -271,8 +315,8 @@ pub enum Keyword {
 pub enum TimeSpec {
     Frames(i64),
     Seconds(f64),
-    /// Non-drop-frame timecode fields (h, m, s, f).
-    Timecode(i64, i64, i64, i64),
+    /// Timecode fields (h, m, s, f), and whether written drop-frame (`;`).
+    Timecode(i64, i64, i64, i64, bool),
     Keyword(Keyword),
     /// `+`/`-` offset relative to a command-specific base.
     Relative(i64, Box<TimeSpec>),
@@ -305,11 +349,10 @@ impl TimeSpec {
 
     fn parse_absolute(t: &str, original: &str) -> Result<Self, TimeError> {
         let err = |why| TimeError::Parse(original.to_string(), why);
-        if t.contains(';') {
-            return Err(err("drop-frame timecode is not supported; use HH:MM:SS:FF"));
-        }
-        if t.contains(':') {
-            let fields: Vec<&str> = t.split(':').collect();
+        if t.contains([':', ';']) {
+            // A `;` marks drop-frame timecode: `01:00:00;00`, `01;00;00;00`.
+            let drop = t.contains(';');
+            let fields: Vec<&str> = t.split([':', ';']).collect();
             let int = |f: &str| {
                 f.parse::<i64>()
                     .map_err(|_| err("timecode fields must be integers"))
@@ -324,7 +367,10 @@ impl TimeSpec {
                 if m >= 60 || sec >= 60 || h < 0 || m < 0 || sec < 0 || fr < 0 {
                     return Err(err("timecode field out of range"));
                 }
-                return Ok(Self::Timecode(h, m, sec, fr));
+                return Ok(Self::Timecode(h, m, sec, fr, drop));
+            }
+            if drop {
+                return Err(err("expected drop-frame timecode HH:MM:SS;FF"));
             }
             // Clock time: [HH:]MM:SS(.fff)
             if fields.len() == 2 || fields.len() == 3 {
@@ -401,7 +447,10 @@ impl fmt::Display for TimeSpec {
         match self {
             Self::Frames(n) => write!(f, "{n}f"),
             Self::Seconds(s) => write!(f, "{s}s"),
-            Self::Timecode(h, m, s, fr) => write!(f, "{h:02}:{m:02}:{s:02}:{fr:02}"),
+            Self::Timecode(h, m, s, fr, drop) => {
+                let sep = if *drop { ';' } else { ':' };
+                write!(f, "{h:02}:{m:02}:{s:02}{sep}{fr:02}")
+            }
             Self::Keyword(k) => f.write_str(match k {
                 Keyword::Start => "start",
                 Keyword::End => "end",
@@ -454,7 +503,7 @@ impl schemars::JsonSchema for TimeSpec {
 
     fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
         schemars::json_schema!({
-            "description": "A time: an integer number of frames, or a string: `450f`, `15s`, `1m30s`, `250ms`, `HH:MM:SS:FF` (non-drop-frame timecode), `HH:MM:SS.mmm`, `start`, `end`, `in`, `out`, `playhead`, or a relative `+10f` / `-2s` where the command allows it.",
+            "description": "A time: an integer number of frames, or a string: `450f`, `15s`, `1m30s`, `250ms`, `HH:MM:SS:FF` (timecode; drop-frame in a project that counts so), `HH:MM:SS;FF` (drop-frame, at 29.97 and 59.94), `HH:MM:SS.mmm`, `start`, `end`, `in`, `out`, `playhead`, or a relative `+10f` / `-2s` where the command allows it.",
             "oneOf": [{"type": "integer"}, {"type": "string"}],
             "examples": [450, "450f", "15s", "1m30s", "00:01:00:00", "end", "+10f"]
         })
@@ -539,6 +588,9 @@ pub struct TimeContext {
     pub fps: Rational,
     /// Project start timecode in frames (timecodes are relative to it).
     pub start_tc: i64,
+    /// Timecodes count drop-frame (the project's setting, decision D47;
+    /// at 29.97 and 59.94 only).
+    pub drop_frame: bool,
     /// End of the timeline (exclusive), for `end`.
     pub end: i64,
     pub mark_in: Option<i64>,
@@ -585,15 +637,17 @@ impl TimeContext {
         Ok(match spec {
             TimeSpec::Frames(n) => *n,
             TimeSpec::Seconds(s) => self.fps.secs_to_frames(*s),
-            TimeSpec::Timecode(h, m, s, f) => {
-                let base = self.fps.timecode_base();
-                if *f >= base {
-                    return Err(TimeError::Parse(
-                        spec.to_string(),
-                        "frame field exceeds the frame rate",
-                    ));
+            TimeSpec::Timecode(h, m, s, f, drop) => {
+                let bad = |why| TimeError::Parse(spec.to_string(), why);
+                if *f >= self.fps.timecode_base() {
+                    return Err(bad("frame field exceeds the frame rate"));
                 }
-                ((h * 60 + m) * 60 + s) * base + f - self.start_tc
+                if *drop && !self.fps.has_drop_frame() {
+                    return Err(bad("drop-frame timecode is for 29.97 and 59.94 fps"));
+                }
+                timecode_frames(*h, *m, *s, *f, self.fps, *drop || self.drop_frame)
+                    .ok_or_else(|| bad("drop-frame timecode skips that label"))?
+                    - self.start_tc
             }
             TimeSpec::Keyword(Keyword::Start) => 0,
             TimeSpec::Keyword(Keyword::End) => self.end,
@@ -629,6 +683,7 @@ mod tests {
         TimeContext {
             fps: fps.parse().unwrap(),
             start_tc: 0,
+            drop_frame: false,
             end: 9000,
             mark_in: Some(100),
             mark_out: None,
@@ -683,8 +738,11 @@ mod tests {
     #[test]
     fn timecode_round_trip() {
         let c = ctx("30000/1001");
-        assert_eq!(format_timecode(0, c.fps, 0), "00:00:00:00");
-        assert_eq!(format_timecode(30 * 3661 + 7, c.fps, 0), "01:01:01:07");
+        assert_eq!(format_timecode(0, c.fps, 0, false), "00:00:00:00");
+        assert_eq!(
+            format_timecode(30 * 3661 + 7, c.fps, 0, false),
+            "01:01:01:07"
+        );
         let tc = TimeSpec::parse("01:01:01:07").unwrap();
         assert_eq!(c.resolve(&tc).unwrap(), 30 * 3661 + 7);
         // With a start timecode, timecodes are record times.
@@ -693,14 +751,61 @@ mod tests {
             start_tc: hour,
             ..c
         };
-        assert_eq!(format_timecode(0, c1.fps, hour), "01:00:00:00");
+        assert_eq!(format_timecode(0, c1.fps, hour, false), "01:00:00:00");
         assert_eq!(
             c1.resolve(&TimeSpec::parse("01:00:10:00").unwrap())
                 .unwrap(),
             300
         );
         assert!(c.resolve(&TimeSpec::parse("00:00:00:30").unwrap()).is_err());
-        assert!(TimeSpec::parse("00:00:01;02").is_err());
+    }
+
+    #[test]
+    fn drop_frame_timecode() {
+        // Decision D47: drop-frame skips 2 numbers a minute (4 at 59.94)
+        // but every tenth, so its labels keep to the clock.
+        let c = ctx("30000/1001");
+        let df = |f| format_timecode(f, c.fps, 0, true);
+        assert_eq!(df(1799), "00:00:59;29");
+        assert_eq!(df(1800), "00:01:00;02");
+        assert_eq!(df(17_982), "00:10:00;00");
+        assert_eq!(df(107_892), "01:00:00;00");
+        let fifty_nine = "60000/1001".parse().unwrap();
+        assert_eq!(format_timecode(3600, fifty_nine, 0, true), "00:01:00;04");
+        // Only at 29.97 and 59.94.
+        let pal = "25".parse().unwrap();
+        assert_eq!(format_timecode(1800, pal, 0, true), "00:01:12:00");
+        // Every label reads back as its frame, at both rates.
+        for fps in ["30000/1001", "60000/1001"] {
+            let c = TimeContext {
+                drop_frame: true,
+                ..ctx(fps)
+            };
+            for f in 0..(c.fps.timecode_base() * 60 * 25) {
+                let label = format_timecode(f, c.fps, 0, true);
+                assert_eq!(
+                    c.resolve(&TimeSpec::parse(&label).unwrap()),
+                    Ok(f),
+                    "{label}"
+                );
+            }
+        }
+        // `;` says drop-frame anywhere; a drop-frame project reads `:` so too.
+        let tc = |s: &str| TimeSpec::parse(s).unwrap();
+        assert_eq!(c.resolve(&tc("01:00:00;00")), Ok(107_892));
+        assert_eq!(c.resolve(&tc("01;00;00;00")), Ok(107_892));
+        assert_eq!(c.resolve(&tc("01:00:00:00")), Ok(108_000));
+        let dfc = TimeContext {
+            drop_frame: true,
+            ..c
+        };
+        assert_eq!(dfc.resolve(&tc("01:00:00:00")), Ok(107_892));
+        // As a length, counted from zero; a skipped label is refused.
+        assert_eq!(c.duration(&tc("00:01:00;02")), Ok(1800));
+        assert!(c.resolve(&tc("00:01:00;00")).is_err());
+        assert!(ctx("25").resolve(&tc("00:00:01;02")).is_err());
+        assert_eq!(tc("00:00:01;02").to_string(), "00:00:01;02");
+        assert!(TimeSpec::parse("00:01;02").is_err());
     }
 
     #[test]

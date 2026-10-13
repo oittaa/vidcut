@@ -118,7 +118,7 @@ const GROUPS: &[(&str, &str)] = &[
     ("pool", "The GUI's Media Pool view"),
     (
         "preferences",
-        "Application preferences (~/.config/vidcut/preferences.toml; on Windows in %APPDATA%\\vidcut)",
+        "Application preferences (~/.config/vidcut/preferences.toml; on Windows in %APPDATA%\\vidcut, on macOS in ~/Library/Application Support/vidcut)",
     ),
     ("presets", "Export presets: built-in and your own"),
     ("project", "Project files and settings"),

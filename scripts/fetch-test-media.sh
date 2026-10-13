@@ -9,16 +9,35 @@ repo="$(cd "$(dirname "$0")/.." && pwd)"
 root="${VIDCUT_TEST_DATA:-$HOME/Downloads/vidcut-tmp}/media"
 mkdir -p "$root"
 
+# sha256sum where there is one; macOS has shasum.
+sha256() {
+  if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1
+}
+
 # name<TAB>file<TAB>url<TAB>sha256, read with Python's tomllib (isolated mode).
+# Before Python 3.11 (macOS's python3 is 3.9) there is no tomllib: the
+# manifest's own few lines are read instead, [[clip]] and key = "text".
 python3 -I -c '
-import sys, tomllib
-for c in tomllib.load(open(sys.argv[1], "rb"))["clip"]:
+import re, sys
+try:
+    import tomllib
+    clips = tomllib.load(open(sys.argv[1], "rb"))["clip"]
+except ModuleNotFoundError:
+    clips = []
+    for line in open(sys.argv[1], encoding="utf-8"):
+        line = line.strip()
+        if line == "[[clip]]":
+            clips.append({})
+        elif clips and re.fullmatch(r"\w+ = \".*\"", line):
+            key, value = line.split(" = ", 1)
+            clips[-1][key] = value[1:-1]
+for c in clips:
     print("\t".join([c["name"], c["file"], c["url"], c.get("sha256", "")]))
 ' "$repo/tests/media-manifest.toml" | while IFS=$'\t' read -r name file url sha; do
   dir="$root/$name"
   target="$dir/$file"
   if [[ -f "$target" ]]; then
-    have="$(sha256sum "$target" | cut -d' ' -f1)"
+    have="$(sha256 "$target")"
     if [[ -z "$sha" || "$have" == "$sha" ]]; then
       echo "ok      $name ($have)"
       continue
@@ -40,7 +59,7 @@ for c in tomllib.load(open(sys.argv[1], "rb"))["clip"]:
   else
     mv "$part" "$target"
   fi
-  have="$(sha256sum "$target" | cut -d' ' -f1)"
+  have="$(sha256 "$target")"
   if [[ -n "$sha" && "$have" != "$sha" ]]; then
     echo "error: $name sha256 $have does not match manifest $sha" >&2
     exit 1

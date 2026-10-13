@@ -81,7 +81,7 @@ fn files(dir: &Path) -> Vec<PathBuf> {
 fn proxies_encode_beside_the_session() {
     let tmp = tempfile::Builder::new()
         .prefix("vidcut-proxies-")
-        .tempdir()
+        .tempdir_in(vidcut_av::testdata::temp_dir())
         .unwrap();
     let dir = tmp.path();
     // SAFETY: the only test in this binary; set before any thread starts.

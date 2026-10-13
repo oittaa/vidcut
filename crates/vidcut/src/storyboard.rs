@@ -7,7 +7,7 @@ use std::path::Path;
 use serde_json::{Value, json};
 use vidcut_core::model::{Project, TrackKind};
 use vidcut_core::render::{self, VideoPiece};
-use vidcut_core::time::{RangeSpec, TimeSpec, format_timecode};
+use vidcut_core::time::{RangeSpec, TimeSpec};
 use vidcut_core::{Error, ErrorCode, Result};
 
 /// The most pictures one storyboard holds.
@@ -130,7 +130,7 @@ pub fn render(
             let dst = ((y + row) * cw + x) * 4;
             canvas[dst..dst + w * 4].copy_from_slice(&rgba[row * w * 4..(row + 1) * w * 4]);
         }
-        let tc = format_timecode(cell.frame, p.settings.fps, p.settings.start_tc);
+        let tc = p.settings.timecode(cell.frame);
         let clip = shown_clip(p, cell.frame);
         let label = match &clip {
             Some((id, track)) if track != "V1" => format!("{tc} {id} {track}"),
