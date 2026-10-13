@@ -96,6 +96,56 @@ impl Device {
     /// FFmpeg's device of `kind` on `on`: a render node, an adapter's
     /// index; the default one when empty.
     fn open(kind: Kind, on: &str) -> Result<Self> {
+        Self::of_type(kind.device_type(), on)
+    }
+
+    /// QSV's device on `on`: a render node (Linux) or an adapter's index
+    /// (Windows), the first Intel GPU when empty. FFmpeg reads QSV's own
+    /// device string as the implementation to load (`1` is the software
+    /// one), so the GPU goes in as the device QSV runs on top of
+    /// (`child_device`): VA-API's on Linux, Direct3D 11's on Windows.
+    pub(crate) fn qsv(on: &str) -> Result<Self> {
+        crate::init();
+        let mut options = ffmpeg::Dictionary::new();
+        options.set(
+            "child_device_type",
+            if cfg!(windows) { "d3d11va" } else { "vaapi" },
+        );
+        if !on.is_empty() {
+            options.set("child_device", on);
+        }
+        let mut device = ptr::null_mut();
+        // SAFETY: the options' dictionary is FFmpeg's to read and is freed
+        // after; FFmpeg makes the device from it.
+        let ret = unsafe {
+            let mut raw = options.disown();
+            let ret = ffi::av_hwdevice_ctx_create(
+                &mut device,
+                ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_QSV,
+                ptr::null(),
+                raw,
+                0,
+            );
+            ffi::av_dict_free(&mut raw);
+            ret
+        };
+        if ret < 0 || device.is_null() {
+            let on = if on.is_empty() {
+                "the first Intel GPU"
+            } else {
+                on
+            };
+            return Err(Error::Ffmpeg {
+                context: format!("opening QSV on {on}"),
+                source: ffmpeg::Error::from(ret),
+            });
+        }
+        Ok(Self(device))
+    }
+
+    /// FFmpeg's device of type `ty` on `on`, as [`open`](Self::open): for
+    /// an encoder, which runs on one too.
+    pub(crate) fn of_type(ty: ffi::AVHWDeviceType, on: &str) -> Result<Self> {
         crate::init();
         let name = std::ffi::CString::new(on)
             .map_err(|_| Error::Invalid(format!("a device name with a NUL: {on:?}")))?;
@@ -104,7 +154,7 @@ impl Device {
         let ret = unsafe {
             ffi::av_hwdevice_ctx_create(
                 &mut device,
-                kind.device_type(),
+                ty,
                 if on.is_empty() {
                     ptr::null()
                 } else {
@@ -120,8 +170,17 @@ impl Device {
             } else {
                 on
             };
+            // SAFETY: FFmpeg's static name of a type, or null.
+            let what = unsafe {
+                let n = ffi::av_hwdevice_get_type_name(ty);
+                if n.is_null() {
+                    "a GPU device".into()
+                } else {
+                    std::ffi::CStr::from_ptr(n).to_string_lossy()
+                }
+            };
             return Err(Error::Ffmpeg {
-                context: format!("opening {} on {on}", kind.name()),
+                context: format!("opening {what} on {on}"),
                 source: ffmpeg::Error::from(ret),
             });
         }
@@ -309,7 +368,7 @@ impl GpuDecoder {
 }
 
 #[cfg(windows)]
-mod windows {
+pub(crate) mod windows {
     use std::ffi::c_void;
     use std::ptr;
 
@@ -318,8 +377,10 @@ mod windows {
     use super::{Device, Kind, Profile};
     use crate::ffmpeg::ffi;
 
-    /// NVIDIA's PCI vendor id.
-    pub(super) const NVIDIA: u32 = 0x10de;
+    /// PCI vendor ids.
+    pub(crate) const NVIDIA: u32 = 0x10de;
+    pub(crate) const AMD: u32 = 0x1002;
+    pub(crate) const INTEL: u32 = 0x8086;
 
     /// Microsoft's: its Basic Render Driver, which draws on the CPU and
     /// decodes nothing.
@@ -327,7 +388,7 @@ mod windows {
 
     /// The adapters with a GPU behind them: their index, what Direct3D 11
     /// is opened on, and their PCI vendor.
-    pub(super) fn adapters() -> Vec<(u32, u32)> {
+    pub(crate) fn adapters() -> Vec<(u32, u32)> {
         let mut adapters = Vec::new();
         for i in 0..8 {
             let Ok(device) = Device::open(Kind::D3d11va, &i.to_string()) else {

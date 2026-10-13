@@ -1640,8 +1640,9 @@ fn normalizing_hot_lanes_keeps_true_peaks_under_the_ceiling() {
 #[test]
 fn auto_moves_on_from_a_gpu_encoder_that_wont_open() {
     // A GPU encoder that tested fine can fail to open when an export starts
-    // (NVENC allows a few sessions at a time). Here the VAAPI render node is
-    // gone: `auto` encodes on the CPU instead.
+    // (NVENC allows a few sessions at a time). Here its GPU is gone (VAAPI's
+    // render node; on Windows, AMF's adapter): `auto` encodes on the CPU
+    // instead.
     let fps = Rational::new(30, 1).unwrap();
     let s = src(FixtureSpec::new(
         VideoCodec::H264,
@@ -1659,18 +1660,23 @@ fn auto_moves_on_from_a_gpu_encoder_that_wont_open() {
     // A speed meant for the GPU encoder: libx264 has no such preset, and
     // takes its own default.
     video.speed = Some("p4".into());
+    let (name, kind, device) = if cfg!(windows) {
+        ("h264_amf", EncoderChoice::Amf, "99")
+    } else {
+        ("h264_vaapi", EncoderChoice::Vaapi, "/dev/dri/renderD999")
+    };
     let available = Availability {
         encoders: vec![EncoderStatus {
-            encoder: "h264_vaapi".into(),
-            kind: EncoderChoice::Vaapi,
-            device: Some("/dev/dri/renderD999".into()),
+            encoder: name.into(),
+            kind,
+            device: Some(device.into()),
             pixel: "nv12".into(),
             ok: true,
             error: None,
         }],
     };
     let first = export::encode::resolve_video(settings.video.as_ref().unwrap(), &available);
-    assert_eq!(first.unwrap().name, "h264_vaapi");
+    assert_eq!(first.unwrap().name, name);
     let dir = out_dir("fallback");
     let out = dir.path().join("out.mkv");
     let report = export::run(
@@ -1685,7 +1691,7 @@ fn auto_moves_on_from_a_gpu_encoder_that_wont_open() {
     assert_eq!(report.video_encoder.as_deref(), Some("libx264"));
     assert_eq!(barcodes(&out), (0..30).map(Some).collect::<Vec<_>>());
     // An encoder asked for by name doesn't give way.
-    settings.video.as_mut().unwrap().encoder = EncoderChoice::Vaapi;
+    settings.video.as_mut().unwrap().encoder = kind;
     let err = export::run(
         &p,
         &settings,
@@ -1694,8 +1700,10 @@ fn auto_moves_on_from_a_gpu_encoder_that_wont_open() {
         &AtomicBool::new(false),
         &mut |_| {},
     )
-    .unwrap_err();
-    assert!(err.to_string().contains("VAAPI"), "{err}");
+    .unwrap_err()
+    .to_string();
+    // Its device, or the encoder where this FFmpeg has none.
+    assert!(err.contains(device) || err.contains(name), "{err}");
 }
 
 #[test]
@@ -1978,6 +1986,19 @@ fn sequences_play_their_pictures_at_their_rate() {
     assert_eq!(barcodes(&out), want);
 }
 
+/// NVENC works here; says so when it doesn't, for the tests that need it.
+#[cfg(feature = "gpu-tests")]
+fn nvenc_here(available: &Availability) -> bool {
+    let here = available
+        .encoders
+        .iter()
+        .any(|e| e.ok && e.encoder == "h264_nvenc");
+    if !here {
+        eprintln!("skipping: no NVENC here");
+    }
+    here
+}
+
 /// With NVENC, video pieces decode on NVDEC and scale there, padded to the
 /// output when their aspect differs (4:3 and 2.4:1 in 16:9), turned and
 /// converted (SD) by libplacebo, deinterlaced by the reader; black is made
@@ -1988,6 +2009,9 @@ fn sequences_play_their_pictures_at_their_rate() {
 #[test]
 fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
     let available = vidcut_av::export::encode::detect();
+    if !nvenc_here(&available) {
+        return;
+    }
     let fps = Rational::new(30, 1).unwrap();
     let hd = |codec, rate: (u32, u32), frames| {
         src(FixtureSpec::new(
@@ -2260,6 +2284,9 @@ fn bt601_to_bt709((y, cb, cr): (u8, u8, u8)) -> [f64; 3] {
 fn nvenc_exports_convert_bt601_on_the_gpu_as_the_cpu_does() {
     use vidcut_av::fixture::Picture;
     let available = vidcut_av::export::encode::detect();
+    if !nvenc_here(&available) {
+        return;
+    }
     let fps = Rational::new(30, 1).unwrap();
     // 8 and 10 bits in: libplacebo reads 10-bit frames as P016.
     for source in [VideoCodec::H264, VideoCodec::Hevc10] {
@@ -2365,6 +2392,9 @@ fn nvenc_exports_convert_hdr_on_the_gpu_as_the_cpu_does() {
     use vidcut_av::fixture::Picture;
     use vidcut_core::model::Hdr;
     let available = vidcut_av::export::encode::detect();
+    if !nvenc_here(&available) {
+        return;
+    }
     let fps = Rational::new(30, 1).unwrap();
     let hdr = |w, h, hdr, rotation| {
         src(

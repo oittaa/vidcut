@@ -102,8 +102,9 @@ impl ProxyEncoder {
                 ("cq", "32".into()),
                 ("b", "0".into()),
             ],
-            // AV1's quantizer index runs 0..255.
-            "av1_vaapi" => vec![("rc_mode", "CQP".into()), ("qp", "128".into())],
+            // AV1's quantizer index (0–255) is its global quality: it has
+            // no `qp`.
+            "av1_vaapi" => vec![("rc_mode", "CQP".into()), ("global_quality", "128".into())],
             _ => Vec::new(),
         }
     }
@@ -619,4 +620,33 @@ fn drain(
             .ctx(|| "writing a proxy packet".into())?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn options_are_the_encoders_own() {
+        // FFmpeg drops an option its encoder doesn't have without a word.
+        crate::init();
+        for (name, codec, kind) in [
+            ("libx264", "h264", EncoderChoice::Cpu),
+            ("libsvtav1", "av1", EncoderChoice::Cpu),
+            ("av1_nvenc", "av1", EncoderChoice::Nvenc),
+            ("av1_vaapi", "av1", EncoderChoice::Vaapi),
+        ] {
+            let enc = ProxyEncoder {
+                name: name.into(),
+                codec,
+                kind,
+                device: None,
+            };
+            let options = enc.options();
+            let keys = options.iter().map(|(k, _)| *k);
+            if let Some(unknown) = crate::export::encode::unknown_options(name, keys) {
+                assert!(unknown.is_empty(), "{name}: {unknown:?}");
+            }
+        }
+    }
 }
