@@ -179,6 +179,26 @@ impl Pace {
     pub fn after(&self, k: i64) -> Self {
         Self::of(self.speed, self.skip + k)
     }
+
+    /// How far into its first frame's source frame (0 to 1) that frame's
+    /// stretch of the source starts: forward its start, backward its
+    /// bottom.
+    pub fn phase(&self) -> f64 {
+        if self.is_normal() || self.speed == 0.0 {
+            return 0.0;
+        }
+        let back = i64::from(self.speed < 0.0);
+        let x = (self.skip + back) as f64 * self.speed;
+        (x - (x + 1e-9).floor()).max(0.0)
+    }
+
+    /// Where its sound is `x` frames into it (between frames too), in source
+    /// frames from its first frame's: forward from where that frame's
+    /// stretch starts, backward from its top.
+    pub fn sound(&self, x: f64) -> f64 {
+        let top = if self.speed < 0.0 { -self.speed } else { 0.0 };
+        self.phase() + top + x * self.speed
+    }
 }
 
 impl VideoPiece {
@@ -354,7 +374,7 @@ fn inside(x: &Clip, c: &Clip) -> Option<Clip> {
         return None;
     }
     let mut y = x.clone();
-    y.source_in = x.source_at(s);
+    y.walk(s - x.start);
     y.start = c.start + s - first;
     y.duration = e - s;
     if let Some(a) = y.audio.as_mut()
@@ -435,7 +455,7 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                         source_frame: c.source_at(x),
                         frames: y - x,
                         image: p.media_image(&c.media),
-                        pace: Pace::of(c.speed(), x - c.start),
+                        pace: c.pace().after(x - c.start),
                     },
                 );
             }
@@ -530,13 +550,10 @@ fn source_audio(p: &Project, c: &Clip, x: i64, samples: i64) -> Result<AudioPiec
     } else if speed == 0.0 {
         return Ok(AudioPiece::Silence { samples });
     } else {
-        // Backward from the top of the first frame's stretch.
-        let top = if speed < 0.0 { -speed } else { 0.0 };
         let per_frame = f64::from(rate) / fps.as_f64();
         let since = fps.frame_to_sample(x, rate) - fps.frame_to_sample(c.start, rate);
         fps.frame_to_sample(c.source_in, rate)
-            + (top * per_frame).round() as i64
-            + (since as f64 * speed).round() as i64
+            + (c.pace().sound(0.0) * per_frame + since as f64 * speed).round() as i64
     };
     Ok(AudioPiece::Source {
         media: c.media.clone(),
@@ -881,6 +898,7 @@ mod tests {
         let speed = |x: f64| {
             Some(crate::model::Speed {
                 effect: json!({"OTIO_SCHEMA": "LinearTimeWarp.1", "time_scalar": x}),
+                skip: 0,
             })
         };
         let track = p

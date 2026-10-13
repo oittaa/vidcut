@@ -1358,3 +1358,77 @@ fn changes_record_when_they_were_made() {
     f.ok(req("project.set", json!({"ripple_on": true})));
     assert_eq!(f.editor.project().edited, Some(undone));
 }
+
+#[test]
+fn clips_at_other_speeds_edit_through_their_speed() {
+    // Decision D48: c2 plays m1 from 100 at half speed, c3 from 199
+    // backward. A split leaves every frame showing what it showed; a roll
+    // carries on the clip's pace; media limits count through the speed.
+    let mut f = fixture();
+    f.append("m1", 0, 100);
+    f.append("m1", 100, 150);
+    f.append("m1", 150, 200);
+    let mut p = f.editor.project().clone();
+    let warp = |x: f64| {
+        Some(crate::model::Speed {
+            effect: json!({"OTIO_SCHEMA": "LinearTimeWarp.1", "time_scalar": x}),
+            skip: 0,
+        })
+    };
+    for c in p.tracks.iter_mut().flat_map(|t| &mut t.clips) {
+        match c.id.as_str() {
+            "c2" => c.speed = warp(0.5),
+            "c3" => {
+                c.speed = warp(-1.0);
+                c.source_in = 199;
+            }
+            _ => {}
+        }
+    }
+    f.editor = crate::editor::Editor::new(p, Default::default());
+    let shows = |f: &Fixture| -> Vec<i64> {
+        let p = f.editor.project();
+        let v1 = &p.tracks.iter().find(|t| t.id == "V1").unwrap().clips;
+        let end = v1.iter().map(|c| c.end()).max().unwrap();
+        (0..end)
+            .map(|t| {
+                let c = v1.iter().find(|c| c.start <= t && t < c.end()).unwrap();
+                c.source_at(t)
+            })
+            .collect()
+    };
+    let before = shows(&f);
+    assert_eq!(before[100..104], [100, 100, 101, 101]);
+
+    f.ok(req("edit.split", json!({"at": 101})));
+    assert_eq!(shows(&f), before);
+    f.ok(req(
+        "edit.roll",
+        json!({"clip": "c1", "edge": "tail", "by": -3}),
+    ));
+    let rolled = shows(&f);
+    assert_eq!(
+        rolled[94..104],
+        [94, 95, 96, 98, 99, 99, 100, 100, 101, 101]
+    );
+
+    let c3 = f.editor.project().clip("c3").unwrap().clone();
+    assert_eq!((c3.room(false, 250), c3.room(true, 250)), (50, 150));
+    let e = f.err(req(
+        "edit.trim",
+        json!({"clip": "c3", "edge": "tail", "by": 151}),
+    ));
+    assert!(
+        e.message.contains("would need source frames -1..200"),
+        "{e}"
+    );
+    f.ok(req(
+        "edit.trim",
+        json!({"clip": "c3", "edge": "tail", "by": 150}),
+    ));
+    let c3 = f.editor.project().clip("c3").unwrap().clone();
+    assert_eq!(
+        (c3.source_at(c3.start), c3.source_at(c3.end() - 1)),
+        (199, 0)
+    );
+}

@@ -55,8 +55,8 @@
 //!   which play as gaps, and nested `Stack`s (compound clips, nested
 //!   timelines) compound clips, which play the clips they hold: their
 //!   references and stacks kept.
-//! - Speed changes (time effects) stay on their clips, which play at them
-//!   (decision D48) and refuse edits that would need speed math.
+//! - Speed changes (time effects) stay on their clips, which play and are
+//!   edited at them (decision D48).
 //! - Everything else is left out with a warning: nested tracks (gaps
 //!   instead).
 
@@ -239,7 +239,7 @@ pub fn used_media(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
 
 /// A speed change: its time `effect`.
 fn speed_of(effect: Option<Value>) -> Option<Speed> {
-    effect.map(|effect| Speed { effect })
+    effect.map(|effect| Speed { effect, skip: 0 })
 }
 
 /// How fast a speed change goes (1 without one).
@@ -248,15 +248,20 @@ fn scalar(speed: Option<&Speed>) -> f64 {
 }
 
 /// The first source frame shown by an item whose source range starts at
-/// `start`, `len` frames at `speed`: backward, editors write the bottom of
-/// the range it walks down, and its first frame shows the bottom of its
-/// stretch at the top (decision D48).
-fn first_shown(start: i64, len: i64, speed: f64) -> i64 {
-    if speed < 0.0 {
-        start + ((len - 1) as f64 * -speed + 1e-9).floor() as i64
-    } else {
-        start
+/// `start`, `len` frames at `speed`, and how far into its pace it starts:
+/// backward, editors write the bottom of the range it walks down, and its
+/// first frame shows the bottom of its stretch at the top (decision D48).
+fn first_shown(start: i64, len: i64, speed: f64) -> (i64, i64) {
+    if speed >= 0.0 {
+        return (start, 0);
     }
+    let bottom = start as f64 + (len - 1) as f64 * -speed;
+    let first = (bottom + 1e-9).floor() as i64;
+    let phase = bottom - first as f64;
+    let skip = (0..1000)
+        .find(|&k| (crate::render::Pace::of(speed, k).phase() - phase).abs() < 1e-6)
+        .unwrap_or(0);
+    (first, skip)
 }
 
 /// The source range start written for clip `c`'s part from timeline frame
@@ -264,7 +269,10 @@ fn first_shown(start: i64, len: i64, speed: f64) -> i64 {
 fn written_start(c: &Clip, s: i64, len: i64) -> i64 {
     let first = c.source_at(s);
     match c.speed() {
-        x if x < 0.0 => (first as f64 + (len - 1) as f64 * x).round() as i64,
+        x if x < 0.0 => {
+            let top = first as f64 + c.pace().after(s - c.start).sound(0.0);
+            (top + len as f64 * x).round() as i64
+        }
         _ => first,
     }
 }
@@ -277,9 +285,19 @@ fn media_in(p: &Project, c: &Clip, m: Option<&Media>, s: i64) -> Option<f64> {
     if x >= 0.0 {
         return None;
     }
-    let top = c.source_at(s) as f64 - x;
+    let top = c.source_at(s) as f64 + c.pace().after(s - c.start).sound(0.0);
     let frames = p.media_limit(m?) as f64;
     Some((frames - top) / -x / p.settings.fps.as_f64())
+}
+
+/// vidcut's own record of where clip `c`'s part from timeline frame `s`
+/// starts in its source and its pace, at another speed: exact where the
+/// source range rounds.
+fn own_pace(meta: &mut Value, c: &Clip, s: i64) {
+    if let Some(speed) = &c.speed {
+        meta["source_in"] = json!(c.source_at(s));
+        meta["skip"] = json!(speed.skip + s - c.start);
+    }
 }
 
 /// `effects`, after clip `c`'s speed change if it carries one: editors
@@ -402,6 +420,7 @@ pub fn export(
                 if m.is_some_and(Media::is_still) {
                     meta["source_in"] = json!(c.source_at(s));
                 }
+                own_pace(&mut meta, c, s);
                 let mut metadata = json!({ VIDCUT: meta });
                 if let Some(g) = group {
                     metadata[EDITOR] = json!({ "Link Group ID": g });
@@ -442,7 +461,8 @@ pub fn export(
                 if let Some(x) = transitions::head(p, t, c, true, s, &audio, rate) {
                     audio.push(x);
                 }
-                let meta = json!({ "clip": c.id, "stream": au.stream, "gain_db": au.gain_db });
+                let mut meta = json!({ "clip": c.id, "stream": au.stream, "gain_db": au.gain_db });
+                own_pace(&mut meta, c, s);
                 let n = m
                     .and_then(|m| m.info.audio.get(au.stream as usize))
                     .map_or(2, |x| x.channels);
@@ -731,6 +751,16 @@ pub struct ImportedClip {
 impl ImportedClip {
     pub fn end(&self) -> i64 {
         self.start + self.duration
+    }
+
+    /// Its content moves on `k` frames of its pace, as [`Clip::walk`].
+    pub fn walk(&mut self, k: i64) {
+        let skip = self.speed.as_ref().map_or(0, |s| s.skip);
+        let speed = self.speed.as_ref().and_then(Speed::scalar).unwrap_or(1.0);
+        self.source_in += crate::render::Pace::of(speed, skip).offset(k);
+        if let Some(s) = self.speed.as_mut() {
+            s.skip += k;
+        }
     }
 
     /// Whether it is a generator or compound clip, without media.
@@ -1412,7 +1442,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 continue;
             }
             let (effects, speed) = effects::read(item);
-            let speed = speed_of(speed);
+            let mut speed = speed_of(speed);
             let x = scalar(speed.as_ref());
             let reference = media_reference_of(item);
             if stack || schema(reference).starts_with("GeneratorReference") {
@@ -1432,6 +1462,10 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             match clip_source(item, fps, base) {
                 Ok((media, source_in, timecoded)) => {
                     let meta = &item["metadata"][VIDCUT];
+                    let (first, skip) = first_shown(source_in, len, x);
+                    if let Some(s) = speed.as_mut() {
+                        s.skip = meta["skip"].as_i64().unwrap_or(skip);
+                    }
                     clip_markers(item, start, len, fps, &mut markers);
                     keys[i] = Some(clips.len());
                     clips.push(ImportedClip {
@@ -1442,9 +1476,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         start,
                         duration: len,
                         // A still's, which its source range doesn't keep.
-                        source_in: meta["source_in"]
-                            .as_i64()
-                            .unwrap_or(first_shown(source_in, len, x)),
+                        source_in: meta["source_in"].as_i64().unwrap_or(first),
                         timecoded: timecoded && meta["source_in"].is_null(),
                         video: true,
                         enabled: item["enabled"].as_bool().unwrap_or(true),
@@ -1481,7 +1513,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 continue;
             }
             let (effects, speed) = effects::read(item);
-            let speed = speed_of(speed);
+            let mut speed = speed_of(speed);
             let x = scalar(speed.as_ref());
             // A compound clip's sound: a block on an audio track.
             if stack {
@@ -1505,7 +1537,18 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 continue;
             }
             let (media, source_in, timecoded) = match clip_source(item, fps, base) {
-                Ok((media, start, timecoded)) => (media, first_shown(start, len, x), timecoded),
+                Ok((media, start, timecoded)) => {
+                    let meta = &item["metadata"][VIDCUT];
+                    let (first, skip) = first_shown(start, len, x);
+                    if let Some(s) = speed.as_mut() {
+                        s.skip = meta["skip"].as_i64().unwrap_or(skip);
+                    }
+                    (
+                        media,
+                        meta["source_in"].as_i64().unwrap_or(first),
+                        timecoded,
+                    )
+                }
                 Err(e) => {
                     warnings.push(format!("{}; left as a gap", e.message));
                     continue;
@@ -1677,8 +1720,13 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             made.join(", ")
         ));
     }
+    // Time effects without a speed play at normal speed.
     let mut speeds: Vec<String> = Vec::new();
-    for speed in clips.iter().filter_map(|c| c.speed.as_ref()) {
+    for speed in clips
+        .iter()
+        .filter_map(|c| c.speed.as_ref())
+        .filter(|s| s.scalar().is_none())
+    {
         let label = speed.label();
         if !speeds.contains(&label) {
             speeds.push(label);
@@ -1686,8 +1734,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     }
     if !speeds.is_empty() {
         warnings.push(format!(
-            "speed changes kept on their clips, which play at them but can't be trimmed, \
-             split, slipped or rolled: {}",
+            "time effects kept on their clips but played at normal speed: {}",
             speeds.join(", ")
         ));
     }
