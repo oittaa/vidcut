@@ -2180,8 +2180,8 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
         );
         // GPU decoding off (`gpu.decoding`): every piece decodes on the CPU,
         // NVDEC's too, and NVENC takes the frames from memory.
-        if bits == 8 {
-            let out = dir.path().join("decoded-on-the-cpu.mp4");
+        {
+            let out = dir.path().join(format!("decoded-on-the-cpu-{bits}.mp4"));
             let report = export::run_decoding_on(
                 &p,
                 &settings,
@@ -2191,14 +2191,19 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
                 &AtomicBool::new(false),
                 &mut |_| {},
             )
-            .unwrap_or_else(|e| panic!("decoded on the CPU: {e}"));
-            assert_eq!(report.video_encoder.as_deref(), Some("h264_nvenc"));
+            .unwrap_or_else(|e| panic!("{bits}-bit, decoded on the CPU: {e}"));
+            let nvenc = if bits == 8 {
+                "h264_nvenc"
+            } else {
+                "hevc_nvenc"
+            };
+            assert_eq!(report.video_encoder.as_deref(), Some(nvenc));
             assert_eq!(
                 (report.gpu_frames, report.gpu_decoded),
                 (0, 0),
-                "decoded on the CPU"
+                "{bits}-bit, decoded on the CPU"
             );
-            assert_eq!(barcodes(&out), want, "decoded on the CPU");
+            assert_eq!(barcodes(&out), want, "{bits}-bit, decoded on the CPU");
         }
     }
 }
