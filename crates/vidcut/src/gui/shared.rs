@@ -1,17 +1,18 @@
 //! Memory the viewer's graphics device shares with CUDA, so pictures NVDEC
 //! decoded show without leaving the GPU (docs/decisions/preview.md §3): a
 //! buffer of wgpu's Vulkan device, exported as a file descriptor
-//! (`VK_KHR_external_memory_fd`) and imported by CUDA
+//! (`VK_KHR_external_memory_fd`), or on Windows a Win32 handle
+//! (`VK_KHR_external_memory_win32`), and imported by CUDA
 //! (`vidcut_av::cuda::share`). CUDA copies a picture's planes into it, and
 //! wgpu copies them on into the picture's textures.
 //!
-//! Linux on Vulkan only, and only when the display's GPU is CUDA's: other
-//! pictures are copied down to memory and uploaded.
+//! Linux and Windows on Vulkan only, and only when the display's GPU is
+//! CUDA's: other pictures are copied down to memory and uploaded.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 use vidcut_av::cuda::share::SharedBuffer;
 use vidcut_av::cuda::{CudaDevice, PlaneCopy};
 use vidcut_av::ffmpeg::frame;
@@ -19,16 +20,13 @@ use vidcut_av::ffmpeg::frame;
 /// Whether `device` can share memory with CUDA: Vulkan, with the extension
 /// for it. Doesn't open CUDA.
 pub fn possible(device: &wgpu::Device) -> bool {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     {
         // SAFETY: only reads what the device enabled.
         let hal = unsafe { device.as_hal::<wgpu::hal::api::Vulkan>() };
-        hal.is_some_and(|hal| {
-            hal.enabled_device_extensions()
-                .contains(&ash::khr::external_memory_fd::NAME)
-        })
+        hal.is_some_and(|hal| hal.enabled_device_extensions().contains(&EXTENSION))
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", windows)))]
     {
         let _ = device;
         false
@@ -38,7 +36,7 @@ pub fn possible(device: &wgpu::Device) -> bool {
 /// CUDA's device (the one NVDEC decodes on), when it is on `device`'s GPU:
 /// the same UUID as Vulkan's physical device.
 pub fn cuda_on(device: &wgpu::Device) -> Result<CudaDevice, String> {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     {
         use ash::vk;
         if !possible(device) {
@@ -64,17 +62,17 @@ pub fn cuda_on(device: &wgpu::Device) -> Result<CudaDevice, String> {
             Err("CUDA's GPU isn't the display's".into())
         }
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", windows)))]
     {
         let _ = device;
-        Err("sharing memory with CUDA needs Linux".into())
+        Err("sharing memory with CUDA needs Linux or Windows".into())
     }
 }
 
 /// A buffer of the display's device that CUDA writes pictures into.
 pub struct Shared {
     /// CUDA's view of it: let go before the memory is.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     cuda: SharedBuffer,
     buffer: wgpu::Buffer,
     size: u64,
@@ -88,7 +86,7 @@ pub struct Shared {
 impl Shared {
     /// A buffer of `size` bytes, shared with `cuda`.
     pub fn new(device: &wgpu::Device, cuda: &CudaDevice, size: u64) -> Result<Self, String> {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", windows))]
         {
             let (cuda, buffer) = make(device, cuda, size)?;
             Ok(Self {
@@ -98,10 +96,10 @@ impl Shared {
                 busy: Arc::default(),
             })
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", windows)))]
         {
             let _ = (device, cuda, size);
-            Err("sharing memory with CUDA needs Linux".into())
+            Err("sharing memory with CUDA needs Linux or Windows".into())
         }
     }
 
@@ -121,16 +119,16 @@ impl Shared {
     /// Copies the planes of `frame` (in CUDA memory) in as `planes` place
     /// them. Only while it is [`free`](Self::free).
     pub fn fill(&mut self, frame: &frame::Video, planes: &[PlaneCopy]) -> Result<(), String> {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", windows))]
         {
             self.cuda
                 .copy_planes(frame, planes)
                 .map_err(|e| e.to_string())
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", windows)))]
         {
             let _ = (frame, planes);
-            Err("sharing memory with CUDA needs Linux".into())
+            Err("sharing memory with CUDA needs Linux or Windows".into())
         }
     }
 
@@ -145,18 +143,19 @@ impl Shared {
 
 /// Makes the Vulkan buffer, with its own exportable memory, and imports it
 /// into CUDA.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 fn make(
     device: &wgpu::Device,
     cuda: &CudaDevice,
     size: u64,
 ) -> Result<(SharedBuffer, wgpu::Buffer), String> {
-    use std::os::fd::FromRawFd;
-
     use ash::vk;
     use wgpu::hal::api::Vulkan;
 
+    #[cfg(target_os = "linux")]
     let handle = vk::ExternalMemoryHandleTypeFlags::OPAQUE_FD;
+    #[cfg(windows)]
+    let handle = vk::ExternalMemoryHandleTypeFlags::OPAQUE_WIN32;
     // SAFETY: Vulkan objects made on wgpu's device, bound and exported as
     // the specification has it; each failure frees what was made. wgpu
     // takes the buffer and its memory over (`from_raw_managed`) once CUDA
@@ -208,19 +207,14 @@ fn make(
             free();
             return Err(format!("binding shared memory: {e}"));
         }
-        let fds = ash::khr::external_memory_fd::Device::new(instance, raw);
-        let fd = match fds.get_memory_fd(
-            &vk::MemoryGetFdInfoKHR::default()
-                .memory(memory)
-                .handle_type(handle),
-        ) {
-            Ok(fd) => std::os::fd::OwnedFd::from_raw_fd(fd),
+        let exported = match export_memory(instance, raw, memory, handle) {
+            Ok(e) => e,
             Err(e) => {
                 free();
                 return Err(format!("exporting shared memory: {e}"));
             }
         };
-        let cuda_buffer = match SharedBuffer::import(cuda, fd, req.size, true) {
+        let cuda_buffer = match SharedBuffer::import(cuda, exported, req.size, true) {
             Ok(b) => b,
             Err(e) => {
                 free();
@@ -245,4 +239,58 @@ fn make(
         )
     };
     Ok((cuda_buffer, buffer))
+}
+
+/// The extension wgpu's device needs to export memory: for file descriptors,
+/// or on Windows for Win32 handles.
+#[cfg(target_os = "linux")]
+const EXTENSION: &std::ffi::CStr = ash::khr::external_memory_fd::NAME;
+#[cfg(windows)]
+const EXTENSION: &std::ffi::CStr = ash::khr::external_memory_win32::NAME;
+
+/// `memory` exported as a file descriptor.
+///
+/// # Safety
+/// `memory` is `raw`'s, allocated exportable as `handle`.
+#[cfg(target_os = "linux")]
+unsafe fn export_memory(
+    instance: &ash::Instance,
+    raw: &ash::Device,
+    memory: ash::vk::DeviceMemory,
+    handle: ash::vk::ExternalMemoryHandleTypeFlags,
+) -> ash::prelude::VkResult<vidcut_av::cuda::share::Exported> {
+    use std::os::fd::FromRawFd;
+    let fds = ash::khr::external_memory_fd::Device::new(instance, raw);
+    let info = ash::vk::MemoryGetFdInfoKHR::default()
+        .memory(memory)
+        .handle_type(handle);
+    // SAFETY: the descriptor Vulkan returns is a new one, ours to close.
+    unsafe {
+        fds.get_memory_fd(&info)
+            .map(|fd| std::os::fd::OwnedFd::from_raw_fd(fd))
+    }
+}
+
+/// `memory` exported as a Win32 handle.
+///
+/// # Safety
+/// `memory` is `raw`'s, allocated exportable as `handle`.
+#[cfg(windows)]
+unsafe fn export_memory(
+    instance: &ash::Instance,
+    raw: &ash::Device,
+    memory: ash::vk::DeviceMemory,
+    handle: ash::vk::ExternalMemoryHandleTypeFlags,
+) -> ash::prelude::VkResult<vidcut_av::cuda::share::Exported> {
+    use std::os::windows::io::FromRawHandle;
+    let handles = ash::khr::external_memory_win32::Device::new(instance, raw);
+    let info = ash::vk::MemoryGetWin32HandleInfoKHR::default()
+        .memory(memory)
+        .handle_type(handle);
+    // SAFETY: the handle Vulkan returns is a new one, ours to close.
+    unsafe {
+        handles
+            .get_memory_win32_handle(&info)
+            .map(|h| std::os::windows::io::OwnedHandle::from_raw_handle(h as _))
+    }
 }

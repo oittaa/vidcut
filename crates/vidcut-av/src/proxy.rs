@@ -102,8 +102,9 @@ impl ProxyEncoder {
                 ("cq", "32".into()),
                 ("b", "0".into()),
             ],
-            // AV1's quantizer index runs 0..255.
-            "av1_vaapi" => vec![("rc_mode", "CQP".into()), ("qp", "128".into())],
+            // AV1's quantizer index (0–255) is its global quality: it has
+            // no `qp`.
+            "av1_vaapi" => vec![("rc_mode", "CQP".into()), ("global_quality", "128".into())],
             _ => Vec::new(),
         }
     }
@@ -153,6 +154,9 @@ pub struct WrittenProxy {
     /// Decoded and scaled on the GPU (NVDEC and CUDA), frames never leaving
     /// it, rather than on the CPU.
     pub on_gpu: bool,
+    /// The GPU that decoded it (frames copied down unless `on_gpu`); `None`:
+    /// the CPU.
+    pub decoder: Option<crate::hw::Kind>,
 }
 
 /// Encodes `input`'s pictures to `dest` at `width`×`height` (even), with the
@@ -162,9 +166,11 @@ pub struct WrittenProxy {
 ///
 /// With NVENC, the frames of a video file are decoded on NVDEC, deinterlaced,
 /// turned, converted and scaled on the GPU, never copied to memory
-/// ([`CudaPictures`](crate::cuda::CudaPictures)). Image sequences, and
-/// streams NVDEC can't decode, are decoded and scaled on the CPU as for
-/// every other encoder.
+/// ([`CudaPictures`](crate::cuda::CudaPictures)). For every other encoder,
+/// and image sequences and streams NVDEC can't decode, the CPU scales: the
+/// frames decode on `decoder` where it decodes the stream, and on the CPU
+/// otherwise. VA-API's and Direct3D 11's are shrunk on the GPU before they
+/// come down; NVDEC's come down whole.
 pub fn write(
     input: &Input,
     width: u32,
@@ -172,6 +178,7 @@ pub fn write(
     dest: &Path,
     total: Option<u64>,
     encoders: &[ProxyEncoder],
+    decoder: Option<&crate::hw::GpuDecoder>,
 ) -> Result<WrittenProxy> {
     crate::init();
     if width < 2 || height < 2 || !width.is_multiple_of(2) || !height.is_multiple_of(2) {
@@ -194,7 +201,7 @@ pub fn write(
         total: total.map_or(0, |t| t as i64),
         started: std::time::Instant::now(),
     };
-    let done = |frames, enc: &ProxyEncoder, on_gpu| -> Result<WrittenProxy> {
+    let done = |frames, enc: &ProxyEncoder, on_gpu, decoder| -> Result<WrittenProxy> {
         std::fs::rename(&tmp, dest)
             .map_err(|e| Error::Invalid(format!("replacing {}: {e}", dest.display())))?;
         Ok(WrittenProxy {
@@ -204,19 +211,23 @@ pub fn write(
             frames,
             encoder: enc.clone(),
             on_gpu,
+            decoder,
         })
     };
     let mut errors = Vec::new();
-    // NVDEC needs a CUDA device; one for the whole proxy.
+    // NVDEC needs a CUDA device; one for the whole proxy, with a stream of
+    // its own (`CudaDevice::with_own_stream`).
     let mut cuda = None;
     for enc in encoders {
         if enc.kind == EncoderChoice::Nvenc && matches!(input, Input::File(_)) {
             if cuda.is_none() {
-                cuda = crate::cuda::CudaDevice::open().ok();
+                cuda = crate::cuda::CudaDevice::open()
+                    .and_then(|d| d.with_own_stream())
+                    .ok();
             }
             if let Some(device) = &cuda {
                 match encode_on_gpu(input, device, enc, (width, height), &tmp, &shown) {
-                    Ok(frames) => return done(frames, enc, true),
+                    Ok(frames) => return done(frames, enc, true, Some(crate::hw::Kind::Nvdec)),
                     Err(Failed::Encoding(e)) => {
                         let _ = std::fs::remove_file(&tmp);
                         return Err(e);
@@ -234,9 +245,12 @@ pub fn write(
             }
         }
         // A fresh reader: a failed attempt may have read frames already.
-        let mut reader = VideoReader::open_input(input)?;
+        let mut reader = match decoder {
+            Some(d) => VideoReader::open_gpu_or_cpu(input, d)?,
+            None => VideoReader::open_input(input)?,
+        };
         match encode_into(&mut reader, enc, (width, height), &tmp, &shown) {
-            Ok(frames) => return done(frames, enc, false),
+            Ok(frames) => return done(frames, enc, false, reader.gpu()),
             Err(Failed::Encoding(e)) => {
                 let _ = std::fs::remove_file(&tmp);
                 return Err(e);
@@ -503,7 +517,8 @@ impl<'a> Writer<'a> {
     }
 }
 
-/// Decodes on the CPU and scales with the export's normalizer.
+/// Scales with the export's normalizer what `reader` decodes, on the CPU or
+/// copied down from the GPU.
 fn encode_into(
     reader: &mut VideoReader,
     enc: &ProxyEncoder,
@@ -515,8 +530,14 @@ fn encode_into(
     let times = (reader.time_base(), reader.frame_rate());
     let mut writer = Writer::new(tmp, enc, (width, height), times, None, shown)?;
     let mut normalizer: Option<Normalizer> = None;
+    let mut shrinker = None;
     let mut encoding = || -> Result<()> {
         while let Some(src) = reader.next_frame()? {
+            let src = if crate::hw::on_gpu(&src) {
+                down(&mut shrinker, &src, rotation, (width, height))?
+            } else {
+                src
+            };
             let picture = scale(
                 &mut normalizer,
                 &src,
@@ -530,6 +551,42 @@ fn encode_into(
     };
     encoding().map_err(Failed::Encoding)?;
     writer.finish(reader.path()).map_err(Failed::Encoding)
+}
+
+/// A frame in GPU memory brought down to be scaled on the CPU: VA-API's and
+/// Direct3D 11's scaled on the GPU first to the size the proxy shows it at
+/// (in the frame's own orientation and layout, its pixels square), so a
+/// fraction comes down; NVDEC's whole (`scale_cuda` aliases shrinking
+/// far). The CPU does the rest as for any frame: turning, colors, HDR.
+fn down(
+    shrinker: &mut Option<crate::hw::Shrinker>,
+    src: &frame::Video,
+    rotation: u16,
+    (out_w, out_h): (u32, u32),
+) -> Result<frame::Video> {
+    let (w, h) = (src.width(), src.height());
+    let sar = src.aspect_ratio();
+    let sar = (sar.numerator(), sar.denominator());
+    // As the normalizer fits it, upright; then in the frame's orientation.
+    let (fw, fh) = if rotation % 180 == 90 {
+        let (sw, sh) = crate::export::video::fit(h, w, (sar.1, sar.0), out_w, out_h);
+        (sh, sw)
+    } else {
+        crate::export::video::fit(w, h, sar, out_w, out_h)
+    };
+    // Textures of 4:2:0 frames have even sides.
+    let size = (fw.next_multiple_of(2), fh.next_multiple_of(2));
+    let shrinks = size.0 < w && size.1 < h;
+    if !shrinks || !matches!(src.format(), format::Pixel::VAAPI | format::Pixel::D3D11) {
+        return crate::hw::download(src);
+    }
+    let mut small = crate::hw::Shrinker::down(shrinker, src, size)?;
+    // Unless it came down whole.
+    if (small.width(), small.height()) == size {
+        // SAFETY: a plain field of its own frame.
+        unsafe { (*small.as_mut_ptr()).sample_aspect_ratio = ffi::AVRational { num: 1, den: 1 } };
+    }
+    Ok(small)
 }
 
 /// Decodes on NVDEC, scales on the GPU and hands NVENC the frames there.
@@ -616,4 +673,33 @@ fn drain(
             .ctx(|| "writing a proxy packet".into())?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn options_are_the_encoders_own() {
+        // FFmpeg drops an option its encoder doesn't have without a word.
+        crate::init();
+        for (name, codec, kind) in [
+            ("libx264", "h264", EncoderChoice::Cpu),
+            ("libsvtav1", "av1", EncoderChoice::Cpu),
+            ("av1_nvenc", "av1", EncoderChoice::Nvenc),
+            ("av1_vaapi", "av1", EncoderChoice::Vaapi),
+        ] {
+            let enc = ProxyEncoder {
+                name: name.into(),
+                codec,
+                kind,
+                device: None,
+            };
+            let options = enc.options();
+            let keys = options.iter().map(|(k, _)| *k);
+            if let Some(unknown) = crate::export::encode::unknown_options(name, keys) {
+                assert!(unknown.is_empty(), "{name}: {unknown:?}");
+            }
+        }
+    }
 }

@@ -62,8 +62,8 @@ pub struct PlayerSnap {
     pub playing: bool,
     /// Shuttle speed (negative: backwards); 0 when stopped.
     pub speed: f64,
-    /// What decodes the picture shown: `nvdec` (the GPU) or `no` (the
-    /// CPU); empty before any.
+    /// What decodes the picture shown: the GPU's decoder (`nvdec`, `vaapi`,
+    /// `d3d11va`) or `no` (the CPU); empty before any.
     pub hwdec: String,
     pub error: Option<String>,
 }

@@ -1,8 +1,6 @@
-//! The CLI side of the socket.
+//! The CLI side of the socket (a pipe on Windows).
 
 use std::io::{BufRead, BufReader, Write};
-use std::net::Shutdown;
-use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{RecvTimeoutError, channel};
@@ -10,6 +8,8 @@ use std::time::Duration;
 
 use serde_json::Value;
 use vidcut_core::{Envelope, Error, ErrorCode, Response, Result};
+
+use super::transport::Stream;
 
 /// Sends one request to the GUI listening on `socket` and waits for the answer.
 /// Progress notifications go to `progress`. `project`, if given, must be the
@@ -32,7 +32,7 @@ pub fn call(
     if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
         return Err(Error::new(ErrorCode::Cancelled, "cancelled"));
     }
-    let mut stream = UnixStream::connect(socket).map_err(|e| {
+    let mut stream = Stream::connect(socket).map_err(|e| {
         Error::no_instance(format!(
             "can't reach the vidcut GUI at {}: {e}",
             socket.display()
@@ -71,7 +71,7 @@ pub fn call(
                     // the flag invisible for up to 20 ms, and a reply in that
                     // window comes back as success.
                     if cancel.load(Ordering::Relaxed) {
-                        let _ = s.shutdown(Shutdown::Both);
+                        let _ = s.shutdown();
                         return;
                     }
                     match waiting.recv_timeout(Duration::from_millis(20)) {
@@ -94,7 +94,7 @@ pub fn call(
 
 /// Reads progress notifications until the answer.
 fn read_answer(
-    mut reader: BufReader<UnixStream>,
+    mut reader: BufReader<Stream>,
     progress: &mut dyn FnMut(&Value),
 ) -> Result<Response> {
     let lost = |e: std::io::Error| Error::no_instance(format!("lost the vidcut GUI: {e}"));

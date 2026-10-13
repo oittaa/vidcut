@@ -1912,12 +1912,20 @@ fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u3
                     egui::ComboBox::from_id_salt("export-encoder")
                         .selected_text(name(&v.encoder))
                         .show_ui(ui, |ui| {
-                            for e in [
-                                EncoderChoice::Auto,
-                                EncoderChoice::Cpu,
-                                EncoderChoice::Nvenc,
-                                EncoderChoice::Vaapi,
-                            ] {
+                            // The GPU encoders this system has.
+                            let gpus = if cfg!(windows) {
+                                [EncoderChoice::Nvenc, EncoderChoice::Amf, EncoderChoice::Qsv]
+                            } else {
+                                [
+                                    EncoderChoice::Nvenc,
+                                    EncoderChoice::Vaapi,
+                                    EncoderChoice::Qsv,
+                                ]
+                            };
+                            for e in [EncoderChoice::Auto, EncoderChoice::Cpu]
+                                .into_iter()
+                                .chain(gpus)
+                            {
                                 ui.selectable_value(&mut v.encoder, e, name(&e));
                             }
                         });
@@ -1940,7 +1948,7 @@ fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u3
                     if by_quality {
                         let mut q = v.quality.unwrap_or(20);
                         if ui
-                            .add(egui::DragValue::new(&mut q).range(0..=63))
+                            .add(egui::DragValue::new(&mut q).range(0..=v.codec.worst_quality()))
                             .on_hover_text("lower is better (CRF / CQ)")
                             .changed()
                         {

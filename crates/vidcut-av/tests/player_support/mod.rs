@@ -262,14 +262,3 @@ pub fn burst_ends(mono: &[f32], threshold: f32, min_gap: usize) -> Vec<usize> {
     ends.reverse();
     ends
 }
-
-/// Seconds of CPU this process has used.
-pub fn cpu_seconds() -> f64 {
-    // SAFETY: getrusage fills the struct it is given.
-    unsafe {
-        let mut r: libc::rusage = std::mem::zeroed();
-        libc::getrusage(libc::RUSAGE_SELF, &mut r);
-        let t = |v: libc::timeval| v.tv_sec as f64 + v.tv_usec as f64 / 1e6;
-        t(r.ru_utime) + t(r.ru_stime)
-    }
-}

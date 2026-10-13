@@ -13,12 +13,14 @@ use crate::ffmpeg::{self, codec, encoder, ffi, format, frame};
 /// A resolved video encoder.
 #[derive(Debug, Clone)]
 pub struct VideoEncoder {
-    /// FFmpeg encoder name, e.g. `libx264`, `hevc_nvenc`, `h264_vaapi`.
+    /// FFmpeg encoder name, e.g. `libx264`, `hevc_nvenc`, `h264_vaapi`,
+    /// `hevc_amf`, `av1_qsv`.
     pub name: String,
     pub kind: EncoderChoice,
     /// Pixel format of the frames handed over (for VAAPI: the upload format).
     pub pixel: format::Pixel,
-    /// VAAPI render node, e.g. `/dev/dri/renderD129`.
+    /// The GPU it encodes on: VAAPI's and QSV's render node on Linux
+    /// (`/dev/dri/renderD129`), AMF's and QSV's adapter index on Windows.
     pub device: Option<String>,
     pub options: Vec<(String, String)>,
     /// HDR output with this transfer; `None`: SDR BT.709.
@@ -133,9 +135,9 @@ fn passes(v: &VideoSettings, name: &str) -> Result<Passes> {
         n if n.ends_with("_nvenc") => Ok(Passes::TwoInside),
         // Unset passes stay one where there's no second.
         _ if v.passes.is_none() => Ok(Passes::One),
-        n if n.ends_with("_vaapi") => Err(Error::Invalid(format!(
-            "{n} makes one pass; two need encoder cpu or nvenc"
-        ))),
+        n if ["_vaapi", "_amf", "_qsv"].iter().any(|s| n.ends_with(s)) => Err(Error::Invalid(
+            format!("{n} makes one pass; two need encoder cpu or nvenc"),
+        )),
         "libsvtav1" => Err(Error::Invalid(
             "libsvtav1 makes one pass in this FFmpeg (its rate control looks ahead on its \
              own); for two, use encoder nvenc or another codec"
@@ -216,21 +218,33 @@ fn cpu_ten_bit(name: &str) -> bool {
         .is_some_and(|mut f| f.any(|p| matches!(p, Pixel::YUV420P10LE | Pixel::YUV422P10LE)))
 }
 
+/// The GPU encoders `auto` tries, best first: NVENC, then the other GPUs'
+/// own, AMF and QSV on Windows, VAAPI on Linux (AMD's and Intel's alike;
+/// QSV there is for asking by name).
+const AUTO_GPU: &[EncoderChoice] = if cfg!(windows) {
+    &[EncoderChoice::Nvenc, EncoderChoice::Amf, EncoderChoice::Qsv]
+} else {
+    &[EncoderChoice::Nvenc, EncoderChoice::Vaapi]
+};
+
+/// The encoders `choice` stands for, in the order they are tried.
+fn kinds(choice: EncoderChoice) -> Vec<EncoderChoice> {
+    match choice {
+        EncoderChoice::Auto => AUTO_GPU
+            .iter()
+            .copied()
+            .chain([EncoderChoice::Cpu])
+            .collect(),
+        k => vec![k],
+    }
+}
+
 /// What the encoders `v` may use can write (decision D44): whether any of
 /// them writes 10 bits, and whether the one an 8-bit export starts with
-/// does. For `auto` that is the first working GPU encoder (NVENC, then
-/// VAAPI) and then the CPU's, as [`video_encoders`] tries them.
+/// does. For `auto` that is the first working GPU encoder ([`AUTO_GPU`])
+/// and then the CPU's, as [`video_encoders`] tries them.
 pub fn abilities(v: &VideoSettings, available: &Availability) -> Abilities {
-    let kinds: &[EncoderChoice] = match v.encoder {
-        EncoderChoice::Auto => &[
-            EncoderChoice::Nvenc,
-            EncoderChoice::Vaapi,
-            EncoderChoice::Cpu,
-        ],
-        EncoderChoice::Cpu => &[EncoderChoice::Cpu],
-        EncoderChoice::Nvenc => &[EncoderChoice::Nvenc],
-        EncoderChoice::Vaapi => &[EncoderChoice::Vaapi],
-    };
+    let kinds = kinds(v.encoder);
     let name = |kind: EncoderChoice| match kind {
         EncoderChoice::Cpu => Some(cpu_name(v.codec)),
         k => gpu_name(v.codec, k),
@@ -262,17 +276,42 @@ fn gpu_name(codec: VideoCodec, kind: EncoderChoice) -> Option<&'static str> {
         (VideoCodec::H264, EncoderChoice::Vaapi) => "h264_vaapi",
         (VideoCodec::Hevc, EncoderChoice::Vaapi) => "hevc_vaapi",
         (VideoCodec::Av1, EncoderChoice::Vaapi) => "av1_vaapi",
+        (VideoCodec::H264, EncoderChoice::Amf) => "h264_amf",
+        (VideoCodec::Hevc, EncoderChoice::Amf) => "hevc_amf",
+        (VideoCodec::Av1, EncoderChoice::Amf) => "av1_amf",
+        (VideoCodec::H264, EncoderChoice::Qsv) => "h264_qsv",
+        (VideoCodec::Hevc, EncoderChoice::Qsv) => "hevc_qsv",
+        (VideoCodec::Av1, EncoderChoice::Qsv) => "av1_qsv",
         _ => return None,
     })
 }
 
-/// The frame format a GPU encoder kind takes for 8- or 10-bit output.
+/// The frame format a GPU encoder kind takes for 8- or 10-bit output:
+/// P010 for 10 bits; for 8, planar for NVENC and NV12 for the others (all
+/// QSV's H.264 takes).
 fn gpu_pixel(kind: EncoderChoice, ten: bool) -> format::Pixel {
     match (kind, ten) {
-        (EncoderChoice::Vaapi, false) => format::Pixel::NV12,
         (_, true) => format::Pixel::P010LE,
-        _ => format::Pixel::YUV420P,
+        (EncoderChoice::Nvenc, false) => format::Pixel::YUV420P,
+        _ => format::Pixel::NV12,
     }
+}
+
+/// AV1's quantizer index (0–255), which VAAPI's and AMF's constant
+/// quantizer take, for a quality on the 0–63 scale of SVT-AV1's CRF and
+/// NVENC's CQ.
+fn av1_qindex(q: u32) -> u32 {
+    (q.min(63) * 255 + 31) / 63
+}
+
+/// QSV's intelligent constant quality (1–51 for every codec) for `q`: AV1's
+/// 0–63 scaled to it.
+fn icq(codec: VideoCodec, q: u32) -> u32 {
+    let q = match codec {
+        VideoCodec::Av1 => (q.min(63) * 51 + 31) / 63,
+        _ => q,
+    };
+    q.clamp(1, 51)
 }
 
 fn opt(k: &str, v: impl ToString) -> (String, String) {
@@ -280,7 +319,7 @@ fn opt(k: &str, v: impl ToString) -> (String, String) {
 }
 
 /// Resolves video settings to the encoder an export starts with: for
-/// `auto`, a working GPU encoder (NVENC, then VAAPI), else the CPU encoder.
+/// `auto`, a working GPU encoder ([`AUTO_GPU`]), else the CPU encoder.
 pub fn resolve_video(v: &VideoSettings, available: &Availability) -> Result<VideoEncoder> {
     let mut errors = Vec::new();
     for candidate in video_encoders(v, available) {
@@ -293,24 +332,20 @@ pub fn resolve_video(v: &VideoSettings, available: &Availability) -> Result<Vide
 }
 
 /// The encoders that may encode `v`, in order: the one asked for, or for
-/// `auto` every working GPU encoder (NVENC, then VAAPI) and then the CPU
+/// `auto` every working GPU encoder ([`AUTO_GPU`]) and then the CPU
 /// encoder; with, in its place, why one can't. An export takes the first
 /// that opens: a GPU encoder can fail to at that moment (NVENC allows a
 /// few sessions at a time, and other exports may hold them).
 ///
 /// An explicit `speed` is for the encoder an export starts with. Encoders
-/// don't share speed names (x264's, NVENC's p1–p7, SVT-AV1's numbers), so
+/// don't share speed names (x264's, NVENC's p1–p7, AMF's `speed` to
+/// `quality`, QSV's `veryfast` to `veryslow`, SVT-AV1's numbers), so
 /// one it moves on to uses its own default.
 pub fn video_encoders(v: &VideoSettings, available: &Availability) -> Vec<Result<VideoEncoder>> {
-    let kinds: Vec<EncoderChoice> = match v.encoder {
+    let kinds = match v.encoder {
         // Dolby Vision is written by the CPU's encoders only.
         EncoderChoice::Auto if v.hdr_metadata.dolby_vision() => vec![EncoderChoice::Cpu],
-        EncoderChoice::Auto => vec![
-            EncoderChoice::Nvenc,
-            EncoderChoice::Vaapi,
-            EncoderChoice::Cpu,
-        ],
-        k => vec![k],
+        k => kinds(k),
     };
     let fallback = VideoSettings {
         speed: None,
@@ -360,57 +395,20 @@ fn video_encoder(
         }
         return Ok(None);
     };
-    let q = v.quality.unwrap_or(match v.codec {
-        VideoCodec::Av1 => 30,
-        _ => 20,
-    });
+    let q = v
+        .quality
+        .unwrap_or(match v.codec {
+            VideoCodec::Av1 => 30,
+            _ => 20,
+        })
+        .min(v.codec.worst_quality());
     let passes = passes(v, name)?;
-    let mut options = Vec::new();
-    if kind == EncoderChoice::Nvenc {
-        options.push(opt("preset", v.speed.as_deref().unwrap_or("p5")));
-        options.push(opt("tune", "hq"));
-        options.push(opt("rc", "vbr"));
-        if passes == Passes::TwoInside {
-            let first = match v.multipass {
-                Multipass::Quarter => "qres",
-                Multipass::Full => "fullres",
-            };
-            options.push(opt("multipass", first));
-        }
-        let lookahead = v
-            .lookahead
-            .unwrap_or(vidcut_core::export::DEFAULT_LOOKAHEAD);
-        if lookahead > 0 {
-            options.push(opt("rc-lookahead", lookahead));
-        }
-        match v.bitrate {
-            Some(b) => {
-                options.push(opt("b", b));
-                options.push(opt("maxrate", b * 3 / 2));
-            }
-            None => {
-                options.push(opt("cq", q));
-                options.push(opt("b", 0));
-            }
-        }
-        if v.codec == VideoCodec::Hevc {
-            options.push(opt("profile", if ten { "main10" } else { "main" }));
-        }
-        if v.codec == VideoCodec::H264 {
-            options.push(opt("profile", v.profile.as_deref().unwrap_or("high")));
-        }
-    } else {
-        match v.bitrate {
-            Some(b) => {
-                options.push(opt("rc_mode", "VBR"));
-                options.push(opt("b", b));
-            }
-            None => {
-                options.push(opt("rc_mode", "CQP"));
-                options.push(opt("qp", q));
-            }
-        }
-    }
+    let options = match kind {
+        EncoderChoice::Nvenc => nvenc_options(v, q, ten, passes),
+        EncoderChoice::Amf => amf_options(v, q, ten),
+        EncoderChoice::Qsv => qsv_options(v, q, ten),
+        _ => vaapi_options(v, q),
+    };
     let (metadata, dynamic) = hdr_metadata(v);
     Ok(Some(VideoEncoder {
         name: name.into(),
@@ -423,6 +421,118 @@ fn video_encoder(
         metadata,
         dynamic,
     }))
+}
+
+/// NVENC's: constant quality in its VBR or a bitrate it may exceed by half
+/// at peaks, looking ahead, and two passes inside one encode when asked.
+fn nvenc_options(v: &VideoSettings, q: u32, ten: bool, passes: Passes) -> Vec<(String, String)> {
+    let mut options = vec![
+        opt("preset", v.speed.as_deref().unwrap_or("p5")),
+        opt("tune", "hq"),
+        opt("rc", "vbr"),
+    ];
+    if passes == Passes::TwoInside {
+        let first = match v.multipass {
+            Multipass::Quarter => "qres",
+            Multipass::Full => "fullres",
+        };
+        options.push(opt("multipass", first));
+    }
+    let lookahead = v
+        .lookahead
+        .unwrap_or(vidcut_core::export::DEFAULT_LOOKAHEAD);
+    if lookahead > 0 {
+        options.push(opt("rc-lookahead", lookahead));
+    }
+    match v.bitrate {
+        Some(b) => {
+            options.push(opt("b", b));
+            options.push(opt("maxrate", b * 3 / 2));
+        }
+        None => {
+            options.push(opt("cq", q));
+            options.push(opt("b", 0));
+        }
+    }
+    match v.codec {
+        VideoCodec::Hevc => options.push(opt("profile", if ten { "main10" } else { "main" })),
+        VideoCodec::H264 => options.push(opt("profile", v.profile.as_deref().unwrap_or("high"))),
+        _ => {}
+    }
+    options
+}
+
+/// VAAPI's: one quantizer for every frame, or a bitrate.
+fn vaapi_options(v: &VideoSettings, q: u32) -> Vec<(String, String)> {
+    match (v.bitrate, v.codec) {
+        (Some(b), _) => vec![opt("rc_mode", "VBR"), opt("b", b)],
+        // AV1's has no `qp`: its quantizer index is the global quality.
+        (None, VideoCodec::Av1) => {
+            vec![opt("rc_mode", "CQP"), opt("global_quality", av1_qindex(q))]
+        }
+        (None, _) => vec![opt("rc_mode", "CQP"), opt("qp", q)],
+    }
+}
+
+/// AMF's (AMD, Windows): one quantizer for every frame as VAAPI's, or a
+/// bitrate it may exceed by half at peaks. (Its quality-led rate control,
+/// `qvbr`, counts the other way and stays under a bitrate.)
+fn amf_options(v: &VideoSettings, q: u32, ten: bool) -> Vec<(String, String)> {
+    // Its presets: `speed`, `balanced`, `quality`, and `high_quality` on
+    // newer GPUs.
+    let mut options = vec![opt("quality", v.speed.as_deref().unwrap_or("quality"))];
+    match v.bitrate {
+        Some(b) => {
+            options.push(opt("rc", "vbr_peak"));
+            options.push(opt("b", b));
+            options.push(opt("maxrate", b * 3 / 2));
+        }
+        None => {
+            let qp = match v.codec {
+                VideoCodec::Av1 => av1_qindex(q),
+                _ => q,
+            };
+            options.push(opt("rc", "cqp"));
+            options.push(opt("qp_i", qp));
+            options.push(opt("qp_p", qp));
+            // AMF's HEVC has no quantizer for B-frames.
+            if v.codec != VideoCodec::Hevc {
+                options.push(opt("qp_b", qp));
+            }
+        }
+    }
+    match v.codec {
+        VideoCodec::Hevc => options.push(opt("profile", if ten { "main10" } else { "main" })),
+        VideoCodec::H264 => {
+            let profile = match v.profile.as_deref() {
+                Some("baseline") => "constrained_baseline",
+                Some(p) => p,
+                None => "high",
+            };
+            options.push(opt("profile", profile));
+        }
+        _ => {}
+    }
+    options
+}
+
+/// QSV's (Intel): its intelligent constant quality, or a bitrate it may
+/// exceed by half at peaks.
+fn qsv_options(v: &VideoSettings, q: u32, ten: bool) -> Vec<(String, String)> {
+    let mut options = vec![opt("preset", v.speed.as_deref().unwrap_or("medium"))];
+    match v.bitrate {
+        Some(b) => {
+            options.push(opt("b", b));
+            options.push(opt("maxrate", b * 3 / 2));
+        }
+        None => options.push(opt("global_quality", icq(v.codec, q))),
+    }
+    match v.codec {
+        VideoCodec::Hevc => options.push(opt("profile", if ten { "main10" } else { "main" })),
+        VideoCodec::H264 => options.push(opt("profile", v.profile.as_deref().unwrap_or("high"))),
+        _ => {}
+    }
+    options
 }
 
 fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
@@ -450,7 +560,10 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
     let speed = |default: &str| opt("preset", v.speed.as_deref().unwrap_or(default));
     let quality = |key: &str, default: u32| match v.bitrate {
         Some(b) => opt("b", b),
-        None => opt(key, v.quality.unwrap_or(default)),
+        None => opt(
+            key,
+            v.quality.unwrap_or(default).min(v.codec.worst_quality()),
+        ),
     };
     let (name, pixel, options) = match v.codec {
         VideoCodec::H264 => {
@@ -730,6 +843,23 @@ pub(crate) fn open_video(
             unsafe { (*ctx.as_mut_ptr()).hw_frames_ctx = frames };
             Some(v)
         }
+        // Frames from memory, encoded on that GPU: QSV on a device of its
+        // own there (a VA-API one beneath it on Linux, which keeps libva's
+        // messages in FFmpeg's log), AMF on Direct3D 11's on that adapter.
+        Some(on) if matches!(enc.kind, EncoderChoice::Qsv | EncoderChoice::Amf) => {
+            let device = match enc.kind {
+                EncoderChoice::Qsv => crate::hw::Device::qsv(on)?,
+                _ => crate::hw::Device::of_type(ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_D3D11VA, on)?,
+            };
+            ctx.set_format(enc.pixel);
+            // SAFETY: the context takes a reference of its own.
+            let device = unsafe { ffi::av_buffer_ref(device.0) };
+            if device.is_null() {
+                return Err(Error::Invalid("no memory for a GPU device".into()));
+            }
+            unsafe { (*ctx.as_mut_ptr()).hw_device_ctx = device };
+            None
+        }
         _ => {
             ctx.set_format(enc.pixel);
             None
@@ -929,18 +1059,102 @@ pub fn detect() -> Availability {
             check(codec, EncoderChoice::Nvenc, p, None);
         }
     }
+    let nv12_p010 = &[format::Pixel::NV12, format::Pixel::P010LE][..];
     for (node, _driver) in render_nodes() {
         for (codec, pixels) in [
             ("h264_vaapi", &[format::Pixel::NV12][..]),
-            ("hevc_vaapi", &[format::Pixel::NV12, format::Pixel::P010LE]),
-            ("av1_vaapi", &[format::Pixel::NV12, format::Pixel::P010LE]),
+            ("hevc_vaapi", nv12_p010),
+            ("av1_vaapi", nv12_p010),
         ] {
             for &p in pixels {
                 check(codec, EncoderChoice::Vaapi, p, Some(&node));
             }
         }
     }
+    // AMF on each of AMD's GPUs (Windows: on Linux it takes AMD's closed
+    // driver, and VAAPI serves those GPUs), QSV on each of Intel's.
+    for (on, kind) in amd_and_intel() {
+        let codecs = match kind {
+            EncoderChoice::Amf => ["h264_amf", "hevc_amf", "av1_amf"],
+            _ => ["h264_qsv", "hevc_qsv", "av1_qsv"],
+        };
+        for codec in codecs {
+            let pixels = if codec.starts_with("h264") {
+                &nv12_p010[..1]
+            } else {
+                nv12_p010
+            };
+            for &p in pixels {
+                check(codec, kind, p, Some(&on));
+            }
+        }
+    }
     Availability { encoders }
+}
+
+/// AMD's and Intel's GPUs with the encoder each is tested with: on
+/// Windows their adapters' indexes, AMF on AMD's and QSV on Intel's; on
+/// Linux Intel's render nodes, QSV on them.
+fn amd_and_intel() -> Vec<(String, EncoderChoice)> {
+    #[cfg(windows)]
+    {
+        use crate::hw::windows::{AMD, INTEL, adapters};
+        adapters()
+            .into_iter()
+            .filter_map(|(i, vendor)| match vendor {
+                AMD => Some((i.to_string(), EncoderChoice::Amf)),
+                INTEL => Some((i.to_string(), EncoderChoice::Qsv)),
+                _ => None,
+            })
+            .collect()
+    }
+    #[cfg(not(windows))]
+    {
+        render_nodes()
+            .into_iter()
+            .filter(|(_, driver)| matches!(driver.as_str(), "i915" | "xe"))
+            .map(|(node, _)| (node, EncoderChoice::Qsv))
+            .collect()
+    }
+}
+
+/// What [`detect`] tests, in a number: a cache of its results from
+/// another is out of date.
+pub const DETECTS: u32 = 2;
+
+/// The options among `keys` that encoder `name` doesn't have: FFmpeg drops
+/// those without a word. `None` when this FFmpeg has no `name`.
+#[cfg(test)]
+pub(crate) fn unknown_options<'a>(
+    name: &str,
+    keys: impl IntoIterator<Item = &'a str>,
+) -> Option<Vec<String>> {
+    let codec = encoder::find_by_name(name)?;
+    // SAFETY: a context made for the codec, which holds its private
+    // options as a child; freed here.
+    unsafe {
+        let mut ctx = ffi::avcodec_alloc_context3(codec.as_ptr());
+        if ctx.is_null() {
+            return None;
+        }
+        let unknown = keys
+            .into_iter()
+            .filter(|k| {
+                let key = std::ffi::CString::new(*k).expect("no NUL");
+                ffi::av_opt_find(
+                    ctx.cast(),
+                    key.as_ptr(),
+                    std::ptr::null(),
+                    0,
+                    ffi::AV_OPT_SEARCH_CHILDREN,
+                )
+                .is_null()
+            })
+            .map(String::from)
+            .collect();
+        ffi::avcodec_free_context(&mut ctx);
+        Some(unknown)
+    }
 }
 
 #[cfg(test)]
@@ -1109,5 +1323,219 @@ mod tests {
             r"log-level=error:pass=2:stats=/tmp/a\:b\=c/stats"
         );
         assert_eq!(pass_options(&x265, Pass::Only), x265.options);
+    }
+
+    /// `name` tested fine with `pixel` on a GPU of its kind.
+    fn working(name: &str, kind: EncoderChoice, pixel: format::Pixel) -> EncoderStatus {
+        EncoderStatus {
+            encoder: name.into(),
+            kind,
+            device: match kind {
+                EncoderChoice::Vaapi => Some("/dev/dri/renderD128".into()),
+                EncoderChoice::Amf | EncoderChoice::Qsv => Some("1".into()),
+                _ => None,
+            },
+            pixel: pixel_name(pixel),
+            ok: true,
+            error: None,
+        }
+    }
+
+    fn only(name: &str, kind: EncoderChoice, pixel: format::Pixel) -> Availability {
+        Availability {
+            encoders: vec![working(name, kind, pixel)],
+        }
+    }
+
+    #[test]
+    fn options_are_the_encoders_own() {
+        // FFmpeg drops an option its encoder doesn't have without a word
+        // (`av1_vaapi` has no `qp`): every one set is the encoder's,
+        // wherever this FFmpeg has the encoder.
+        crate::init();
+        let stats = std::path::Path::new("stats");
+        let mut checked = Vec::new();
+        for codec in [
+            VideoCodec::H264,
+            VideoCodec::Hevc,
+            VideoCodec::Av1,
+            VideoCodec::Vp9,
+            VideoCodec::Prores,
+            VideoCodec::Dnxhr,
+        ] {
+            for kind in [
+                EncoderChoice::Cpu,
+                EncoderChoice::Nvenc,
+                EncoderChoice::Vaapi,
+                EncoderChoice::Amf,
+                EncoderChoice::Qsv,
+            ] {
+                for (bitrate, ten) in [(None, false), (None, true), (Some(4_000_000), false)] {
+                    let mut v = video(codec, kind, bitrate);
+                    if ten {
+                        v.bit_depth = Some(10);
+                    }
+                    let available = match gpu_name(codec, kind) {
+                        Some(name) => only(name, kind, gpu_pixel(kind, ten)),
+                        None => Availability::default(),
+                    };
+                    let Ok(enc) = resolve_video(&v, &available) else {
+                        continue;
+                    };
+                    let mut passes = vec![Pass::Only];
+                    if enc.passes.runs() == 2 {
+                        passes.push(Pass::First { stats });
+                        passes.push(Pass::Second {
+                            stats,
+                            buffer: None,
+                        });
+                    }
+                    for pass in passes {
+                        let options = pass_options(&enc, pass);
+                        let keys = options.iter().map(|(k, _)| k.as_str());
+                        if let Some(unknown) = unknown_options(&enc.name, keys) {
+                            assert!(unknown.is_empty(), "{}: {unknown:?}", enc.name);
+                            checked.push(enc.name.clone());
+                        }
+                    }
+                }
+            }
+        }
+        checked.dedup();
+        eprintln!("checked {checked:?}");
+        assert!(checked.iter().any(|n| n == "libx264"), "{checked:?}");
+    }
+
+    #[test]
+    fn amf_qsv_and_vaapi_take_their_own_options() {
+        crate::init();
+        let has = |e: &VideoEncoder, o: (String, String)| {
+            assert!(
+                e.options.contains(&o),
+                "{o:?} in {}: {:?}",
+                e.name,
+                e.options
+            );
+        };
+        let nv12 = format::Pixel::NV12;
+        // AMF: one quantizer for every frame, its quality preset, and
+        // baseline H.264 as it names it.
+        let mut v = video(VideoCodec::H264, EncoderChoice::Amf, None);
+        v.quality = Some(23);
+        v.profile = Some("baseline".into());
+        let e = resolve_video(&v, &only("h264_amf", EncoderChoice::Amf, nv12)).unwrap();
+        assert_eq!((e.pixel, e.device.as_deref()), (nv12, Some("1")));
+        for (k, val) in [("qp_i", 23), ("qp_p", 23), ("qp_b", 23)] {
+            has(&e, opt(k, val));
+        }
+        has(&e, opt("rc", "cqp"));
+        has(&e, opt("quality", "quality"));
+        has(&e, opt("profile", "constrained_baseline"));
+        // 10-bit HEVC is Main 10, without B-frames' quantizer.
+        let mut v = video(VideoCodec::Hevc, EncoderChoice::Amf, None);
+        v.bit_depth = Some(10);
+        let p010 = format::Pixel::P010LE;
+        let e = resolve_video(&v, &only("hevc_amf", EncoderChoice::Amf, p010)).unwrap();
+        assert_eq!(e.pixel, p010);
+        has(&e, opt("profile", "main10"));
+        assert!(!e.options.iter().any(|(k, _)| k == "qp_b"));
+        // AV1's quality (30 of 63) is a quantizer index there, and in
+        // VAAPI's global quality.
+        let v = video(VideoCodec::Av1, EncoderChoice::Amf, None);
+        let e = resolve_video(&v, &only("av1_amf", EncoderChoice::Amf, nv12)).unwrap();
+        has(&e, opt("qp_p", 121));
+        let v = video(VideoCodec::Av1, EncoderChoice::Vaapi, None);
+        let e = resolve_video(&v, &only("av1_vaapi", EncoderChoice::Vaapi, nv12)).unwrap();
+        has(&e, opt("global_quality", 121));
+        assert!(!e.options.iter().any(|(k, _)| k == "qp"));
+        // A bitrate, with peaks half again as high.
+        let v = video(VideoCodec::H264, EncoderChoice::Amf, Some(8_000_000));
+        let e = resolve_video(&v, &only("h264_amf", EncoderChoice::Amf, nv12)).unwrap();
+        has(&e, opt("rc", "vbr_peak"));
+        has(&e, opt("maxrate", 12_000_000));
+        // QSV: its intelligent constant quality, 1–51 for AV1 too.
+        let v = video(VideoCodec::Hevc, EncoderChoice::Qsv, None);
+        let e = resolve_video(&v, &only("hevc_qsv", EncoderChoice::Qsv, nv12)).unwrap();
+        has(&e, opt("global_quality", 20));
+        has(&e, opt("preset", "medium"));
+        has(&e, opt("profile", "main"));
+        let v = video(VideoCodec::Av1, EncoderChoice::Qsv, None);
+        let e = resolve_video(&v, &only("av1_qsv", EncoderChoice::Qsv, nv12)).unwrap();
+        has(&e, opt("global_quality", 24));
+        // Each makes one pass.
+        for (name, kind) in [
+            ("h264_qsv", EncoderChoice::Qsv),
+            ("h264_amf", EncoderChoice::Amf),
+        ] {
+            let mut v = video(VideoCodec::H264, kind, Some(8_000_000));
+            assert_eq!(
+                resolve_video(&v, &only(name, kind, nv12)).unwrap().passes,
+                Passes::One
+            );
+            v.passes = Some(2);
+            assert!(
+                resolve_video(&v, &only(name, kind, nv12)).is_err(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn qualities_past_a_codecs_scale_are_its_worst() {
+        crate::init();
+        let at = |codec, kind, name: &str, key: &str| {
+            let mut v = video(codec, kind, None);
+            v.quality = Some(63);
+            let available = match kind {
+                EncoderChoice::Cpu => Availability::default(),
+                _ => only(name, kind, gpu_pixel(kind, false)),
+            };
+            let e = resolve_video(&v, &available).unwrap();
+            assert_eq!(e.name, name);
+            e.options
+                .iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| v.clone())
+                .unwrap_or_else(|| panic!("no {key} in {name}: {:?}", e.options))
+        };
+        // H.264's and HEVC's end at 51 on every encoder (FFmpeg won't open
+        // NVENC, AMF, VAAPI or x265 past it).
+        for (codec, kind, name, key) in [
+            (VideoCodec::H264, EncoderChoice::Nvenc, "h264_nvenc", "cq"),
+            (VideoCodec::Hevc, EncoderChoice::Amf, "hevc_amf", "qp_i"),
+            (VideoCodec::H264, EncoderChoice::Vaapi, "h264_vaapi", "qp"),
+            (VideoCodec::Hevc, EncoderChoice::Cpu, "libx265", "crf"),
+        ] {
+            assert_eq!(at(codec, kind, name, key), "51", "{name}");
+        }
+        // AV1's scale goes on to 63.
+        let av1 = at(VideoCodec::Av1, EncoderChoice::Nvenc, "av1_nvenc", "cq");
+        assert_eq!(av1, "63");
+    }
+
+    #[test]
+    fn auto_tries_the_systems_gpu_encoders() {
+        // NVENC first; then AMF and QSV on Windows, VAAPI on Linux.
+        crate::init();
+        let nv12 = format::Pixel::NV12;
+        let all = Availability {
+            encoders: vec![
+                working("h264_vaapi", EncoderChoice::Vaapi, nv12),
+                working("h264_qsv", EncoderChoice::Qsv, nv12),
+                working("h264_amf", EncoderChoice::Amf, nv12),
+                working("h264_nvenc", EncoderChoice::Nvenc, format::Pixel::YUV420P),
+            ],
+        };
+        let v = video(VideoCodec::H264, EncoderChoice::Auto, None);
+        let names: Vec<String> = video_encoders(&v, &all)
+            .into_iter()
+            .map(|e| e.unwrap().name)
+            .collect();
+        let want = if cfg!(windows) {
+            ["h264_nvenc", "h264_amf", "h264_qsv", "libx264"].as_slice()
+        } else {
+            ["h264_nvenc", "h264_vaapi", "libx264"].as_slice()
+        };
+        assert_eq!(names, want);
     }
 }

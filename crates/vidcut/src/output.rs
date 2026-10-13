@@ -443,11 +443,17 @@ pub fn print(method: &str, r: &Response, json: bool) {
         }
         "encoders.list" => {
             for e in r.result["encoders"].as_array().into_iter().flatten() {
+                // A render node, or on Windows an adapter's index.
+                let device = match e["device"].as_str() {
+                    None => "-".to_string(),
+                    Some(d) if d.parse::<u32>().is_ok() => format!("adapter {d}"),
+                    Some(d) => d.to_string(),
+                };
                 println!(
                     "{:<11} {:<8} {:<20} {}",
                     e["encoder"].as_str().unwrap_or_default(),
                     e["pixel"].as_str().unwrap_or_default(),
-                    e["device"].as_str().unwrap_or("-"),
+                    device,
                     if e["ok"] == true {
                         "ok".to_string()
                     } else {

@@ -1,7 +1,9 @@
-//! The GUI: eframe on wgpu (Vulkan on Linux) on the UI thread; the
-//! project, the player and everything else in the live session (crate::live).
-//! See docs/decisions/gui.md.
+//! The GUI: eframe on wgpu (Vulkan on Linux, Vulkan or Direct3D 12 on
+//! Windows) on the UI thread; the project, the player and everything else
+//! in the live session (crate::live). See docs/decisions/gui.md.
 
+#[cfg(any(target_os = "linux", windows))]
+mod acquire;
 mod app;
 pub mod export;
 mod folders;
@@ -80,9 +82,13 @@ pub fn run(project: Option<PathBuf>) -> Result<()> {
         }),
     )
     .map_err(|e| {
+        #[cfg(unix)]
+        let hint = " (is a Wayland or X11 display available?)";
+        #[cfg(not(unix))]
+        let hint = "";
         Error::new(
             ErrorCode::Dependency,
-            format!("can't start the GUI (is a Wayland or X11 display available?): {e}"),
+            format!("can't start the GUI{hint}: {e}"),
         )
     })
 }

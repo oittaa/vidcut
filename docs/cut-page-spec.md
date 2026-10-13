@@ -4,7 +4,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 
 **Reading the manual:** it is 183 MB, so extract text with `pdftotext -f 635 -l 790 <manual>.pdf -`. The developer's copy lives in `$VIDCUT_TEST_DATA` (default `~/Downloads/vidcut-tmp`). Don't copy manual text into the repo; write behavior in your own words with page numbers.
 
-**Key names:** the manual uses Mac keys. On Linux, Command → Ctrl and Option → Alt.
+**Key names:** the manual uses Mac keys. On Linux and Windows, Command → Ctrl and Option → Alt.
 
 **Status markers:**
 - **(v1)** planned for the single-track (V1) milestones M1–M5.
@@ -336,7 +336,7 @@ Hover the lower audio part of a clip at an edit until the cursor shows a note, t
 - **User presets** can be added to the Quick Export row.
 - **In vidcut:** the Quick Export row, the Export dialog and jobs are deviation X3. The suggested file name is the project's name. Timeline interchange is deviation X9.
 
-## 11. Keyboard shortcuts (Linux)
+## 11. Keyboard shortcuts (Linux and Windows)
 
 Keys from the Cut chapters, with Edit-page keys filling the gaps (marked †).
 
@@ -403,7 +403,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
 - **D10. Overwrite past the end of Track 1.** With Ripple On, an Overwrite that would start after the end of Track 1 starts at the end instead, so Track 1 stays gapless.
 - **D11. Hover time.** 0.8 s of hovering turns a drop or move onto a clip from "replace" into "overwrite". The manual doesn't give a value.
 - **D12. Clip gain range.** −60 dB to +24 dB, plus mute. The manual gives no range.
-- **D13. Keys.** Shortcuts the Cut chapters don't give come from the Edit page (marked † in §11). Mac → Linux mapping: Command → Ctrl, Option → Alt.
+- **D13. Keys.** Shortcuts the Cut chapters don't give come from the Edit page (marked † in §11). Mac → Linux and Windows mapping: Command → Ctrl, Option → Alt.
 - **D15. Playhead after an edit function.** After Smart Insert, Append, Overwrite, Ripple Overwrite or Paste, the timeline playhead moves to the first frame after the new clip(s), ready for the next edit. The Viewer stays in its mode, so Q reviews the result (p. 696). The manual doesn't say; this is the Edit page's behavior. A clip dragged onto the timeline leaves the playhead where it was: a drop isn't an edit function, and on the Edit page too only the edit functions move it. Edit functions sent by scripts and agents move it as the buttons do.
 - **D16. Mark Out includes the frame under the playhead.** As in Resolve, the Out frame is part of the range. vidcut stores ranges half-open, so pressing O at frame `f` stores `out = f + 1`. The Duration field and `--json` output use the stored values.
 - **D17. Source Tape In/Out** (p. 692). I/O in Source Tape mode marks the whole tape: the open bin's clips end to end, in pool order.
@@ -523,7 +523,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - **Said, quietly:** the plan and the result report each file's choice, what it came from (frames of PQ, HLG and 10-bit picture) and why. When HDR frames will be tone-mapped and SDR wasn't asked for, the plan carries a note with the overrides that keep them HDR (HEVC when the codec can't). The Export dialog shows it as one dim line under the plan with an Export HDR button that applies them; never a question, and Quick Export and the export go on as they are. With `sdr` set, nothing is said.
 - **D45. Passes** (§10; Resolve's multi-pass option is on the Deliver page, outside the Cut page). Two passes bring an export closer to a target bitrate and spread the bits better; at constant quality they change nothing worth the time.
   - **`video.passes`:** 1 or 2. Unset, 2 with a target bitrate and 1 with constant quality, where the encoder makes two. Two need a bitrate.
-  - **Who makes two:** x264, x265 and VP9 encode the range twice, the first time only to measure; NVENC looks at each frame twice within one encode. VAAPI, ProRes, DNxHR and (in FFmpeg 8.0) SVT-AV1 make one; two asked of them is an error, and `auto` moves on to an encoder that makes them.
+  - **Who makes two:** x264, x265 and VP9 encode the range twice, the first time only to measure; NVENC looks at each frame twice within one encode. VAAPI, AMF, QSV, ProRes, DNxHR and (in FFmpeg 8.0) SVT-AV1 make one; two asked of them is an error, and `auto` moves on to an encoder that makes them.
   - **Settings, with their defaults:** `first_pass` `fast` (quicker settings for the measuring run; `full`), `multipass` `quarter` (NVENC's first look at a quarter of the resolution; `full`), and `lookahead` 32 frames on NVENC whatever the rate control (0 to 32; 0 for none). Measured in export.md §5.
   - **While it runs:** progress says which run it is; cancelling either leaves nothing; the statistics, in a hidden folder beside the output, are removed however it ends. A per-clip export makes both for each file. The Export dialog shows the passes at a bitrate, with the first-pass speed or NVENC's settings for the encoder the plan names.
 - **D46. HDR metadata follows the footage** (§10; deviation X19). The manual's HDR exports carry what the grading setup says (the Mastering Display, Export/Embed HDR10 Metadata, p. 4117); vidcut doesn't grade, so it carries what the sources say.

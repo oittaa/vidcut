@@ -2,7 +2,7 @@
 //! encode. Export plans keep original paths; only [`preview::apply_proxies`]
 //! swaps the picture.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde_json::json;
 
@@ -18,9 +18,9 @@ fn req(method: &str, params: serde_json::Value) -> serde_json::Value {
     json!({ "method": method, "params": params })
 }
 
-fn proxy_path(id: &str) -> String {
+fn proxy_path(id: &str) -> PathBuf {
     // 1920×1080 fitted in 960, the default longest side.
-    format!("/proxies/{id}-960x540.mkv")
+    Path::new("/proxies").join(format!("{id}-960x540.mkv"))
 }
 
 #[test]
@@ -28,11 +28,11 @@ fn generate_records_a_proxy_and_media_get_shows_it() {
     let mut f = Fixture::new(&[(4.0, true)]);
     let r = f.ok(req("proxy.generate", json!({"media": "m1"})));
     assert_eq!(r.result["proxies"][0]["media"], "m1");
-    assert_eq!(r.result["proxies"][0]["path"], proxy_path("m1"));
+    assert_eq!(r.result["proxies"][0]["path"], json!(proxy_path("m1")));
     assert_eq!(r.result["proxies"][0]["width"], 960);
     assert_eq!(r.result["proxies"][0]["height"], 540);
     let g = f.ok(req("media.get", json!({"media": "m1"})));
-    assert_eq!(g.result["proxy"]["path"], proxy_path("m1"));
+    assert_eq!(g.result["proxy"]["path"], json!(proxy_path("m1")));
     assert_eq!(g.result["proxy"]["stale"], false);
     assert_eq!(g.result["proxy"]["codec"], "h264");
 }
@@ -112,7 +112,7 @@ fn preview_swaps_a_fresh_proxy_and_leaves_a_stale_or_missing_one() {
             image,
             ..
         } => {
-            assert_eq!(path, &PathBuf::from(proxy_path("m1")));
+            assert_eq!(path, &proxy_path("m1"));
             assert_eq!(*origin, 0.0);
             assert_eq!(*source_frame, 10);
             assert!(image.is_none());
@@ -127,7 +127,7 @@ fn preview_swaps_a_fresh_proxy_and_leaves_a_stale_or_missing_one() {
             image,
             ..
         } => {
-            assert_eq!(path, &PathBuf::from(proxy_path("m2")));
+            assert_eq!(path, &proxy_path("m2"));
             assert_eq!(*origin, 0.0);
             assert_eq!(*source_frame, 0);
             assert!(image.is_none(), "a sequence plays as the proxy video");
@@ -165,7 +165,7 @@ fn preview_swaps_a_fresh_proxy_and_leaves_a_stale_or_missing_one() {
         )
         .unwrap();
     assert_eq!(g.result["proxy"]["stale"], true);
-    assert_eq!(g.result["proxy"]["path"], proxy_path("m1"));
+    assert_eq!(g.result["proxy"]["path"], json!(proxy_path("m1")));
 }
 
 #[test]
@@ -205,7 +205,7 @@ fn dry_run_reports_the_path_without_saving_it() {
         "params": { "media": "m1" }
     }));
     assert!(r.dry_run);
-    assert_eq!(r.result["proxies"][0]["path"], proxy_path("m1"));
+    assert_eq!(r.result["proxies"][0]["path"], json!(proxy_path("m1")));
     assert_eq!(f.editor.project().rev, rev);
     assert!(f.editor.project().media[0].proxy.is_none());
 }

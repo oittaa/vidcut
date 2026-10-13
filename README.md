@@ -1,6 +1,6 @@
 # vidcut
 
-A simple, fully scriptable video cutting tool for Linux. Behavior follows the Cut page ([docs/cut-page-spec.md](docs/cut-page-spec.md)).
+A simple, fully scriptable video cutting tool for Linux and Windows. Behavior follows the Cut page ([docs/cut-page-spec.md](docs/cut-page-spec.md)).
 
 **Status:** early development. It works, but expect rough edges.
 
@@ -14,7 +14,7 @@ A simple, fully scriptable video cutting tool for Linux. Behavior follows the Cu
   - several tracks: B-roll that follows the main story on Track 1, music on audio tracks
   - a mixer with faders, mute, solo and meters
   - snapping, markers, undo
-- **Export:** Quick Export and an Export dialog (deviation X3), including GPU encoding and background jobs. Dynamic range, bit depth and HDR metadata follow the footage (spec D44, D46). A loudness target is [docs/decisions/agents.md](docs/decisions/agents.md) §5.
+- **Export:** Quick Export and an Export dialog (deviation X3), including GPU encoding (NVIDIA, AMD, Intel) and background jobs. Dynamic range, bit depth and HDR metadata follow the footage (spec D44, D46). A loudness target is [docs/decisions/agents.md](docs/decisions/agents.md) §5.
 - **Automatic tools:** Ripple Delete Silence, Detect Scene Cuts and the Boring Detector (spec D29–D31).
 - **Interchange:** OpenTimelineIO, `.otio` and `.otioz` (deviation X9).
 - **Everything scriptable.** Every action in the GUI is also a CLI command and a JSON-RPC call on the running app, so scripts and AI agents can edit with you. `vidcut mcp` offers it all to AI agents over the Model Context Protocol.
@@ -22,13 +22,26 @@ A simple, fully scriptable video cutting tool for Linux. Behavior follows the Cu
 
 ## Requirements
 
-Ubuntu 26.04 (or similar) with FFmpeg:
+**Linux:** Ubuntu 26.04 (or similar) with FFmpeg:
 
 ```bash
 sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libasound2-dev libclang-dev rustup
 ```
 
-The GUI draws with Vulkan (the driver any desktop has: Mesa's for AMD and Intel, NVIDIA's own) and plays sound through ALSA, which PipeWire and PulseAudio serve. Nothing else is needed at run time: vidcut plays video with its own player, on the FFmpeg libraries. On NVIDIA GPUs the player decodes H.264, HEVC, AV1 and VP9 on the GPU.
+The GUI draws with Vulkan (the driver any desktop has: Mesa's for AMD and Intel, NVIDIA's own) and plays sound through ALSA, which PipeWire and PulseAudio serve.
+
+**Windows 10 or 11:** Visual Studio 2022 or its Build Tools with the C++ workload, LLVM (for libclang), and an FFmpeg build with its headers and import libraries, such as BtbN's shared GPL build:
+
+```bash
+winget install BtbN.FFmpeg.GPL.Shared.9.0
+```
+```bash
+winget install LLVM.LLVM
+```
+
+Set `FFMPEG_DIR` to the FFmpeg folder (the one with `bin`, `include` and `lib`) before building, and put its `bin` folder on `PATH`: vidcut loads FFmpeg's DLLs from there. If the build doesn't find libclang, set `LIBCLANG_PATH` to `C:\Program Files\LLVM\bin`. The GUI draws with Vulkan or Direct3D 12 and plays sound through WASAPI. `scripts/check.sh` runs from Git Bash.
+
+Nothing else is needed at run time: vidcut plays video with its own player, on the FFmpeg libraries. The player decodes H.264, HEVC, AV1 and VP9 on the GPU where it can: NVDEC on NVIDIA GPUs, and on AMD and Intel GPUs VA-API on Linux (Mesa's driver, Intel's media driver) and Direct3D 11 on Windows.
 
 vidcut works with FFmpeg 8.0 (Ubuntu 26.04 LTS) up to the newest release, 9.0; both ends are tested.
 
@@ -43,6 +56,21 @@ cargo build --release
 ./target/release/vidcut --help              # the CLI
 ```
 
+On Windows the program is `target\release\vidcut.exe`.
+
+## Where vidcut keeps its files
+
+The docs name the Linux places; Windows has its own:
+
+| Linux | Windows | Holds |
+|---|---|---|
+| `~/.config/vidcut` | `%APPDATA%\vidcut` | preferences, user presets |
+| `~/.cache/vidcut` | `%LOCALAPPDATA%\vidcut\cache` | thumbnails, waveforms, measurements, encoder detection, shaders |
+| `~/.local/state/vidcut` | `%LOCALAPPDATA%\vidcut\state` | undo history, recent projects |
+| `$XDG_RUNTIME_DIR/vidcut` | `%TEMP%\vidcut` | running GUIs (live control) |
+
+The `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME` and `XDG_RUNTIME_DIR` variables move them on either system.
+
 ## The GUI
 
 Media Pool on the left, with the edit buttons below it; the Viewer on the right; the timeline across the bottom. Editing, tracks, bins and the automatic tools are in the spec.
@@ -51,7 +79,7 @@ The **Command log** (top right) lists what you, scripts and agents did, in words
 
 **Preferences** (File > Preferences, Ctrl+,) live in `~/.config/vidcut/preferences.toml` (deviation X12). `vidcut preferences` reads and changes them.
 
-**Keys:** [spec §11](docs/cut-page-spec.md#11-keyboard-shortcuts-linux).
+**Keys:** [spec §11](docs/cut-page-spec.md#11-keyboard-shortcuts-linux-and-windows).
 
 While a GUI has the project open, `vidcut` commands for that project run inside it ([docs/cli.md](docs/cli.md), Live control).
 

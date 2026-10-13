@@ -822,25 +822,15 @@ pub fn describe(prepared: &Prepared, available: &Availability) -> Value {
 
 /// Encoder availability, from the cache when it matches this system.
 pub fn availability(refresh: bool) -> Availability {
-    let key = {
-        let read = |p: &str| {
-            std::fs::read_to_string(p)
-                .unwrap_or_default()
-                .trim()
-                .to_string()
-        };
-        let nodes: Vec<String> = vidcut_av::export::encode::render_nodes()
-            .into_iter()
-            .map(|(n, d)| format!("{n}={d}"))
-            .collect();
-        format!(
-            "{:?}|nvidia {}|kernel {}|{}",
-            vidcut_av::library_versions(),
-            read("/sys/module/nvidia/version"),
-            read("/proc/sys/kernel/osrelease"),
-            nodes.join(",")
-        )
-    };
+    // FFmpeg, the system, the GPUs' drivers and what is tested: a change of
+    // any of them tests the encoders again.
+    let key = format!(
+        "{:?}|{}|{}|{}",
+        vidcut_av::library_versions(),
+        crate::system::version(),
+        Value::from(crate::system::gpus()),
+        vidcut_av::export::encode::DETECTS
+    );
     let path = cache_dir().join("encoders.json");
     if !refresh
         && let Ok(text) = std::fs::read_to_string(&path)

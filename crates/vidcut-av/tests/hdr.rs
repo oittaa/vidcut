@@ -519,8 +519,8 @@ fn real_clips_keep_their_hdr_metadata() {
 
 /// The GPU's encoders write the HDR metadata too (`gpu-tests`): NVENC on
 /// frames scaled on the GPU, kept PQ with HDR10+, and with an SDR clip that
-/// libplacebo converts; VAAPI, which reads the values from frames. Each where
-/// this machine has it.
+/// libplacebo converts; VAAPI, AMF and QSV, which read the values from
+/// frames. Each where this machine has it.
 #[cfg(feature = "gpu-tests")]
 #[test]
 fn gpu_encoders_write_the_hdr_metadata() {
@@ -557,6 +557,30 @@ fn gpu_encoders_write_the_hdr_metadata() {
             VCodec::Hevc,
             EncoderChoice::Vaapi,
             "hevc_vaapi",
+            OutContainer::Mkv,
+        ),
+        (
+            VCodec::Hevc,
+            EncoderChoice::Amf,
+            "hevc_amf",
+            OutContainer::Mp4,
+        ),
+        (
+            VCodec::Av1,
+            EncoderChoice::Amf,
+            "av1_amf",
+            OutContainer::Mkv,
+        ),
+        (
+            VCodec::Hevc,
+            EncoderChoice::Qsv,
+            "hevc_qsv",
+            OutContainer::Mkv,
+        ),
+        (
+            VCodec::Av1,
+            EncoderChoice::Qsv,
+            "av1_qsv",
             OutContainer::Mkv,
         ),
     ] {

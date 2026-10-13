@@ -383,7 +383,7 @@ fn schema_and_rpc() {
     sb.ok(&[
         "rpc",
         "media.add",
-        &format!("{{\"paths\": [\"{}\"]}}", s(&a)),
+        &serde_json::json!({ "paths": [a] }).to_string(),
     ]);
     sb.ok(&["rpc", "edit.append", "{\"media\": \"m1\"}"]);
     let r = sb.ok(&["rpc", "edit.split", "{\"at\": \"1s\"}"]);
@@ -674,10 +674,14 @@ fn otio_round_trips_frame_exactly() {
     // Moved media: an error naming the files, unless found by name.
     let fixtures = a.parent().unwrap();
     let moved = sb.dir.path().join("moved.otio");
-    // (Media are named by plain path.)
-    let text = std::fs::read_to_string(&cut)
-        .unwrap()
-        .replace(&format!("\"{}/", s(fixtures)), "\"/nonexistent/footage/");
+    // (Media are named by plain path, as JSON writes it: on Windows with
+    // its backslashes escaped.)
+    let quoted = serde_json::to_string(fixtures).unwrap();
+    let separator = if cfg!(windows) { r"\\" } else { "/" };
+    let text = std::fs::read_to_string(&cut).unwrap().replace(
+        &format!("{}{separator}", &quoted[..quoted.len() - 1]),
+        "\"/nonexistent/footage/",
+    );
     std::fs::write(&moved, text).unwrap();
     let third = sb.dir.path().join("r.vidcut");
     sb.ok(&["project", "create", s(&third)]);
@@ -836,10 +840,12 @@ fn otio_bundles_and_timecode() {
     assert_eq!(r["result"]["bundle"]["folder"], s(&away.join("cut")));
     let pool = sb.ok_in(&other, &["media", "list"]);
     assert!(
-        pool["result"].as_array().unwrap().iter().all(|m| m["path"]
-            .as_str()
+        pool["result"]
+            .as_array()
             .unwrap()
-            .starts_with(s(&away.join("cut/media")))),
+            .iter()
+            .all(|m| Path::new(m["path"].as_str().unwrap())
+                .starts_with(away.join("cut").join("media"))),
         "{pool}"
     );
     assert_eq!(
@@ -1283,10 +1289,8 @@ fn stills_and_sequences_edit_and_export() {
     let m = sb.ok_in(&other, &["media", "get", "m2"])["result"].clone();
     assert_eq!(m["sequence"]["count"], 60, "{m}");
     assert!(
-        m["path"]
-            .as_str()
-            .unwrap()
-            .starts_with(s(&sb.dir.path().join("pictures/media/"))),
+        Path::new(m["path"].as_str().unwrap())
+            .starts_with(sb.dir.path().join("pictures").join("media")),
         "{m}"
     );
     let back = sb.dir.path().join("back.mkv");

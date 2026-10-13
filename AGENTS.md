@@ -29,7 +29,9 @@ These are mandatory.
 
 **Enable the hook once per clone:** `git config core.hooksPath .githooks`.
 
-**CI** (`.github/workflows/check.yml`) runs only the fast gate, on pull requests and pushes to master. `.github/workflows/ffmpeg.yml` builds against the newest FFmpeg release and master weekly and on demand.
+**On Windows** the scripts run from Git Bash, with `FFMPEG_DIR` set (README.md, Requirements).
+
+**CI** (`.github/workflows/check.yml`) runs only the fast gate, on Linux and on Windows, on pull requests and pushes to master. `.github/workflows/ffmpeg.yml` builds against the newest FFmpeg release and master weekly and on demand.
 
 ## Docs
 

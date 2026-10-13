@@ -16,8 +16,12 @@ pub enum Memory {
     Cpu,
     /// A CUDA surface (NVDEC's frames).
     Cuda,
-    /// A VAAPI surface.
+    /// A VA-API surface (the decoder's, whose pool grows as frames are
+    /// kept).
     Vaapi,
+    /// A Direct3D 11 texture (Direct3D 11's frames, copied out of the
+    /// decoder's texture array into a texture of its own).
+    D3d11,
     /// A Vulkan image.
     Vulkan,
 }
@@ -43,10 +47,10 @@ pub enum Layout {
 /// it to BT.709 RGB with a shader that reads it as the export does;
 /// `to_rgba` is that conversion on the CPU, the export's own, for a display
 /// without a GPU and for checking one. A picture is in memory
-/// ([`Memory::Cpu`]), or, decoded by NVDEC for a display that shows it from
-/// there, in GPU memory: the same frame with a hardware format and frames
-/// context ([`Memory::Cuda`]), which the engine passes along without
-/// looking at its pixels.
+/// ([`Memory::Cpu`]), or, decoded on the GPU for a display that shows it
+/// from there, in GPU memory: a frame with a hardware format and frames
+/// context ([`Memory::Cuda`], [`Memory::Vaapi`], [`Memory::D3d11`]), which
+/// the engine passes along without looking at its pixels.
 pub struct Picture {
     frame: frame::Video,
     rotation: u16,
@@ -84,6 +88,7 @@ impl Picture {
         match self.frame.format() {
             format::Pixel::CUDA => Memory::Cuda,
             format::Pixel::VAAPI => Memory::Vaapi,
+            format::Pixel::D3D11 => Memory::D3d11,
             format::Pixel::VULKAN => Memory::Vulkan,
             _ => Memory::Cpu,
         }
@@ -91,7 +96,7 @@ impl Picture {
 
     /// The samples' layout; for a GPU surface, that of its frames context.
     pub fn layout(&self) -> Layout {
-        match crate::cuda::sw_format(&self.frame) {
+        match crate::hw::sw_format(&self.frame) {
             format::Pixel::NV12 => Layout::Nv12,
             format::Pixel::P010LE => Layout::P010,
             _ => Layout::Yuv420p,
@@ -132,7 +137,7 @@ impl Picture {
     pub fn copied_down(&self) -> Result<Picture> {
         let frame = match self.memory() {
             Memory::Cpu => crate::export::video::frame_ref(&self.frame)?,
-            _ => crate::cuda::download(&self.frame)?,
+            _ => crate::hw::download(&self.frame)?,
         };
         Ok(Self::new(frame, self.rotation, self.decoder))
     }
@@ -182,7 +187,7 @@ fn bytes_of(frame: &frame::Video) -> usize {
     // SAFETY: a size computation on plain numbers.
     let n = unsafe {
         ffmpeg::ffi::av_image_get_buffer_size(
-            ffmpeg::ffi::AVPixelFormat::from(crate::cuda::sw_format(frame)),
+            ffmpeg::ffi::AVPixelFormat::from(crate::hw::sw_format(frame)),
             w,
             h,
             1,
