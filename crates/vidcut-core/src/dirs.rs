@@ -2,9 +2,10 @@
 //!
 //! The XDG variables (`XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME`)
 //! are honored everywhere, so tests and scripts can move everything.
-//! Without them: the XDG defaults under the home folder, and on Windows the
+//! Without them: the XDG defaults under the home folder; on Windows the
 //! known folders, `%APPDATA%` for settings and `%LOCALAPPDATA%` for caches
-//! and state.
+//! and state; on macOS the folders under `~/Library`, `Application Support`
+//! for settings and state and `Caches` for caches.
 
 use std::path::{Path, PathBuf};
 
@@ -27,41 +28,56 @@ fn known(var: &str, default: &str) -> PathBuf {
     xdg(var).unwrap_or_else(|| home().join("AppData").join(default))
 }
 
-/// Settings: `~/.config/vidcut` (`%APPDATA%\vidcut` on Windows): user
-/// presets and preferences.
+/// vidcut's folder in one of macOS's under `~/Library` (`Application
+/// Support`, `Caches`).
+#[cfg(target_os = "macos")]
+fn library(folder: &str) -> PathBuf {
+    home().join("Library").join(folder).join("vidcut")
+}
+
+/// Settings: `~/.config/vidcut` (`%APPDATA%\vidcut` on Windows,
+/// `~/Library/Application Support/vidcut` on macOS): user presets and
+/// preferences.
 pub fn config() -> PathBuf {
     if let Some(dir) = xdg("XDG_CONFIG_HOME") {
         return dir.join("vidcut");
     }
     #[cfg(windows)]
     let dir = known("APPDATA", "Roaming").join("vidcut");
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    let dir = library("Application Support");
+    #[cfg(not(any(windows, target_os = "macos")))]
     let dir = home().join(".config").join("vidcut");
     dir
 }
 
 /// What can be made again: `~/.cache/vidcut` (`%LOCALAPPDATA%\vidcut\cache`
-/// on Windows).
+/// on Windows, `~/Library/Caches/vidcut` on macOS).
 pub fn cache() -> PathBuf {
     if let Some(dir) = xdg("XDG_CACHE_HOME") {
         return dir.join("vidcut");
     }
     #[cfg(windows)]
     let dir = known("LOCALAPPDATA", "Local").join("vidcut").join("cache");
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    let dir = library("Caches");
+    #[cfg(not(any(windows, target_os = "macos")))]
     let dir = home().join(".cache").join("vidcut");
     dir
 }
 
 /// What outlives a run but isn't a setting: `~/.local/state/vidcut`
-/// (`%LOCALAPPDATA%\vidcut\state` on Windows): undo histories.
+/// (`%LOCALAPPDATA%\vidcut\state` on Windows, `~/Library/Application
+/// Support/vidcut/state` on macOS): undo histories.
 pub fn state() -> PathBuf {
     if let Some(dir) = xdg("XDG_STATE_HOME") {
         return dir.join("vidcut");
     }
     #[cfg(windows)]
     let dir = known("LOCALAPPDATA", "Local").join("vidcut").join("state");
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    let dir = library("Application Support").join("state");
+    #[cfg(not(any(windows, target_os = "macos")))]
     let dir = home().join(".local").join("state").join("vidcut");
     dir
 }
