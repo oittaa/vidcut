@@ -73,6 +73,7 @@ struct Cuda {
     ctx_pop: unsafe extern "C" fn(*mut CuContext) -> CuResult,
     ctx_get_device: unsafe extern "C" fn(*mut i32) -> CuResult,
     device_get_uuid: unsafe extern "C" fn(*mut [u8; 16], i32) -> CuResult,
+    device_total_mem: unsafe extern "C" fn(*mut usize, i32) -> CuResult,
     import: unsafe extern "C" fn(*mut CuExternalMemory, *const HandleDesc) -> CuResult,
     mapped_buffer:
         unsafe extern "C" fn(*mut CuDevicePtr, CuExternalMemory, *const BufferDesc) -> CuResult,
@@ -106,6 +107,7 @@ impl Cuda {
                 ctx_pop: call!("cuCtxPopCurrent_v2"),
                 ctx_get_device: call!("cuCtxGetDevice"),
                 device_get_uuid: call!("cuDeviceGetUuid_v2"),
+                device_total_mem: call!("cuDeviceTotalMem_v2"),
                 import: call!("cuImportExternalMemory"),
                 mapped_buffer: call!("cuExternalMemoryGetMappedBuffer"),
                 destroy: call!("cuDestroyExternalMemory"),
@@ -167,6 +169,23 @@ impl CudaDevice {
                 (cuda.device_get_uuid)(&mut uuid, device)
             })?;
             Ok(uuid)
+        })
+    }
+
+    /// The GPU's memory in bytes.
+    pub fn memory(&self) -> Result<usize> {
+        let cuda = Cuda::get()?;
+        let (ctx, _) = unsafe { cuda_context(self.as_ptr()) };
+        in_context(cuda, ctx, || {
+            let mut device = 0;
+            check("finding the device", unsafe {
+                (cuda.ctx_get_device)(&mut device)
+            })?;
+            let mut bytes = 0;
+            check("reading the device's memory", unsafe {
+                (cuda.device_total_mem)(&mut bytes, device)
+            })?;
+            Ok(bytes)
         })
     }
 }

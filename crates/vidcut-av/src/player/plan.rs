@@ -15,6 +15,17 @@ pub(crate) struct Id {
     pos: i64,
 }
 
+#[cfg(test)]
+impl Id {
+    /// Position `pos` of `source`, for tests.
+    pub(crate) fn of(source: &str, pos: i64) -> Self {
+        Self {
+            source: source.into(),
+            pos,
+        }
+    }
+}
+
 /// A plan, indexed.
 pub(crate) struct Plan {
     pub(crate) plan: RenderPlan,

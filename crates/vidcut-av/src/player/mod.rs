@@ -67,14 +67,66 @@ use plan::Plan;
 use ring::Ring;
 use store::Store;
 
-/// Memory for kept pictures unless the caller sets it.
-pub const DEFAULT_BUDGET: usize = 1 << 30;
+/// Memory for kept pictures: in memory, and in video memory (pictures NVDEC
+/// decoded for a display that shows them from there).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Budget {
+    pub memory: usize,
+    /// `None`: half the memory of the GPU that decodes them (1 GB until it
+    /// is known).
+    pub video: Option<usize>,
+}
+
+/// 1 GB of each, for players that don't ask for more (tests, tools).
+pub const DEFAULT_BUDGET: Budget = Budget::both(GB);
+
+const GB: usize = 1 << 30;
+
+impl Budget {
+    /// `bytes` of each.
+    pub const fn both(bytes: usize) -> Self {
+        Self {
+            memory: bytes,
+            video: Some(bytes),
+        }
+    }
+
+    /// What a viewer keeps unless told otherwise: memory is there to be
+    /// used, and the more pictures stay around the playhead the less it
+    /// waits. The larger of 1 GB and half the computer's memory, and half
+    /// the GPU's.
+    pub fn automatic() -> Self {
+        Self {
+            memory: system_memory().map_or(GB, |m| (m / 2).max(GB)),
+            video: None,
+        }
+    }
+}
+
+/// The computer's memory in bytes, where it can be read.
+pub fn system_memory() -> Option<usize> {
+    #[cfg(unix)]
+    {
+        // SAFETY: sysconf reads system constants.
+        let (pages, size) = unsafe {
+            (
+                libc::sysconf(libc::_SC_PHYS_PAGES),
+                libc::sysconf(libc::_SC_PAGESIZE),
+            )
+        };
+        (pages > 0 && size > 0).then(|| (pages as usize).saturating_mul(size as usize))
+    }
+    #[cfg(not(unix))]
+    {
+        None
+    }
+}
 
 /// How a player works.
 #[derive(Clone)]
 pub struct Config {
     /// Memory for kept pictures.
-    pub budget: usize,
+    pub budget: Budget,
     /// Frame steps, and seeks while paused, play the frame's sound (spec
     /// §4.5, decision D42). On unless set otherwise.
     pub audio_scrubbing: bool,
@@ -212,6 +264,9 @@ pub(crate) enum Busy {
     Focus,
     /// Pictures ahead of it.
     Ahead,
+    /// A window behind it, timeline frames `[from, to]` of the plan of
+    /// change `plan_gen`: a step back into it waits for it to land there.
+    Window { from: i64, to: i64, plan_gen: u64 },
 }
 
 #[derive(Default)]
@@ -270,6 +325,10 @@ pub(crate) struct Shared {
     format: (u32, u16),
     /// Pictures NVDEC decodes stay in GPU memory.
     pub(crate) gpu_pictures: bool,
+    /// The video memory budget is half the GPU's.
+    video_auto: AtomicBool,
+    /// The GPU's memory, once the decode thread opened it.
+    gpu_memory: std::sync::OnceLock<usize>,
 }
 
 /// A paused seek that has decoded this long holds a newer one up no more.
@@ -356,6 +415,9 @@ impl Shared {
             };
             let cancel = match *lock(&self.busy) {
                 Some((Busy::Ahead, _)) => true,
+                Some((Busy::Window { from, to, plan_gen }, _)) => {
+                    playing || plan_gen != ctl.plan_gen || !(from..=to).contains(&target)
+                }
                 Some((Busy::Focus, since)) => playing || since.elapsed() >= PATIENCE,
                 None => false,
             };
@@ -451,6 +513,27 @@ impl Shared {
         }
     }
 
+    /// The decode thread decodes on `device`: an automatic video memory
+    /// budget is half its memory from now on.
+    pub(crate) fn gpu_found(&self, device: &crate::cuda::CudaDevice) {
+        #[cfg(unix)]
+        if self.gpu_memory.get().is_none()
+            && let Ok(bytes) = device.memory()
+        {
+            let _ = self.gpu_memory.set(bytes);
+            self.apply_video_budget();
+        }
+        #[cfg(not(unix))]
+        let _ = device;
+    }
+
+    fn apply_video_budget(&self) {
+        if self.video_auto.load(std::sync::atomic::Ordering::Relaxed) {
+            let bytes = self.gpu_memory.get().map_or(GB, |m| m / 2);
+            self.store.set_budget(store::Kind::Video, bytes);
+        }
+    }
+
     /// The prepared picture landed: `Status::prepared` changed.
     pub(crate) fn prepared(&self) {
         if let Some(f) = &self.on_picture {
@@ -505,7 +588,7 @@ impl Player {
                 error: None,
             }),
             changed: Condvar::new(),
-            store: Store::new(config.budget),
+            store: Store::new(config.budget.memory, config.budget.video.unwrap_or(GB)),
             ring,
             heard,
             markers: Markers::default(),
@@ -517,6 +600,8 @@ impl Player {
             device,
             format: (rate, channels),
             gpu_pictures: config.gpu_pictures,
+            video_auto: AtomicBool::new(config.budget.video.is_none()),
+            gpu_memory: std::sync::OnceLock::new(),
         });
         output.start(source)?;
         let mut player = Self {
@@ -722,6 +807,20 @@ impl Player {
             return;
         }
         self.shared.change(true, |ctl, _, _| ctl.hardware = on);
+    }
+
+    /// Keeps pictures within `budget` from now on: over it, those kept or
+    /// looked at least recently go at once.
+    pub fn set_budget(&self, budget: Budget) {
+        let store = &self.shared.store;
+        store.set_budget(store::Kind::Memory, budget.memory);
+        self.shared
+            .video_auto
+            .store(budget.video.is_none(), std::sync::atomic::Ordering::Relaxed);
+        match budget.video {
+            Some(bytes) => store.set_budget(store::Kind::Video, bytes),
+            None => self.shared.apply_video_budget(),
+        }
     }
 
     /// Silences the sound (the viewer's monitoring mute); the clock runs on.

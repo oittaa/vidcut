@@ -1,7 +1,8 @@
 //! What the player decodes: each frame about once, playing forward and
-//! backward; nothing again for pictures it keeps across an edit; nothing
-//! after switching to a prepared plan; and seeks that arrive while one
-//! decodes merge. One test, so the process-wide
+//! backward; nothing again for pictures it keeps across an edit; two
+//! seconds behind a paused playhead while nothing else is wanted, so steps
+//! back after a seek find their pictures, also after switching to a
+//! prepared plan; and seeks that arrive while one decodes merge. One test, so the process-wide
 //! decode count is this test's alone.
 
 mod player_support;
@@ -95,19 +96,57 @@ fn frames_decode_about_once_and_edits_keep_them() {
     }
     assert_eq!(frames_decoded() - before, 0, "kept pictures decoded again");
 
-    // Switching to the plan played next, after a step back in this one:
-    // its prepared frame shows, and nothing more decodes there. The step
-    // back was in the other plan, so no window behind is wanted in this
-    // one (its frame 60 is lower than 199, which a step back would be).
+    // Two seconds behind the playhead come while nothing else is wanted,
+    // after a seek too, nearest first: each step back finds its picture
+    // there at once. Pictures in memory come half a second at a time, each
+    // chunk decoded from the keyframe on (a seek keeps what it decodes on
+    // its way only in video memory, tests/player_gpu.rs).
+    let behind = |player: &Player, from: i64, to: i64| {
+        for t in (from..to).rev() {
+            assert!(
+                player.wait_ready(t, Duration::from_secs(10)),
+                "frame {t} behind"
+            );
+        }
+    };
+    let step_back = |player: &Player, from: i64, to: i64| {
+        for t in (to..from).rev() {
+            player.step(-1);
+            assert!(player.status().ready, "step back to {t}: kept behind");
+            assert_eq!(shown_at(player, t), rendered(&p, t), "step back to {t}");
+        }
+    };
+    // Frame 200 is 80 past its keyframe (120).
     drop(player);
     let player = new_player();
     player.seek(200);
     assert_eq!(shown_at(&player, 200), Some(200));
-    player.step(-1);
-    assert_eq!(shown_at(&player, 199), Some(199));
+    let before = frames_decoded();
+    behind(&player, 140, 200);
+    eprintln!(
+        "two seconds behind a seek, half a second at a time: {} frames decoded",
+        frames_decoded() - before
+    );
+    step_back(&player, 200, 160);
+    // Just past a keyframe: the chunks behind reach back over it (frame
+    // 120's sampling time is just before its keyframe's).
+    drop(player);
+    let player = new_player();
+    player.seek(125);
+    assert_eq!(shown_at(&player, 125), Some(125));
+    behind(&player, 65, 125);
+    step_back(&player, 125, 85);
+
+    // Switching to the plan played next: its prepared frame shows at once,
+    // and the two seconds behind it come while nothing else is wanted
+    // (frames 0..60 of `other`, keyframes 30 apart), so the steps back
+    // after it wait for nothing either.
+    drop(player);
+    let player = new_player();
+    player.seek(200);
+    assert_eq!(shown_at(&player, 200), Some(200));
     let next = plan(&[clip(&other, 0, 90)], 0);
     player.prepare(Some((next.clone(), 60)));
-    // Prepared once nothing else is left to decode: the window behind 199.
     let started = Instant::now();
     while !player.status().prepared {
         assert!(
@@ -117,14 +156,19 @@ fn frames_decode_about_once_and_edits_keep_them() {
         std::thread::sleep(Duration::from_millis(1));
     }
     let expect = rendered(&next, 60);
-    let before = frames_decoded();
     player.set_plan_at(next.clone(), 60).unwrap();
     assert!(player.status().ready, "the prepared frame");
     assert_eq!(shown_at(&player, 60), expect);
-    std::thread::sleep(Duration::from_millis(300));
-    let switched = frames_decoded() - before;
-    eprintln!("switching to a prepared frame: {switched} frames decoded");
-    assert_eq!(switched, 0, "{switched} frames decoded after switching");
+    for t in (1..60).rev() {
+        assert!(
+            player.wait_ready(t, Duration::from_secs(10)),
+            "frame {t} behind"
+        );
+    }
+    for t in (30..60).rev() {
+        player.step(-1);
+        assert!(player.status().ready, "step back to {t}");
+    }
 
     // Seeks that arrive while one decodes merge into the last: a fresh
     // player, each seek far from the others.

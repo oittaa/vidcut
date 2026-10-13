@@ -15,8 +15,23 @@ use crate::model::{Media, PROXY_LONGEST};
 #[serde(default, deny_unknown_fields)]
 pub struct Preferences {
     pub gpu: Gpu,
+    pub player: Player,
     pub thumbnails: Thumbnails,
     pub proxies: Proxies,
+}
+
+/// The viewer's player: memory for the decoded pictures it keeps around
+/// the playhead. More memory, fewer waits: stepping and playing back
+/// through files with keyframes far apart decode less again.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct Player {
+    /// Memory for pictures in MB. `0` (the default): the larger of 1 GB and
+    /// half the computer's memory.
+    pub memory_mb: u64,
+    /// Video memory for pictures the GPU decoded and keeps there, in MB.
+    /// `0` (the default): half the GPU's.
+    pub video_memory_mb: u64,
 }
 
 /// The graphics card's share of the work.
@@ -137,6 +152,8 @@ pub struct PreferencesPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gpu: Option<GpuPatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player: Option<PlayerPatch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thumbnails: Option<ThumbnailsPatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxies: Option<ProxiesPatch>,
@@ -147,6 +164,17 @@ pub struct PreferencesPatch {
 pub struct GpuPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acceleration: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PlayerPatch {
+    /// `0` (automatic) or at least 64.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_mb: Option<u64>,
+    /// `0` (automatic) or at least 64.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video_memory_mb: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -218,6 +246,10 @@ impl Preferences {
         if let Some(g) = &patch.gpu {
             p.gpu.acceleration = g.acceleration.unwrap_or(p.gpu.acceleration);
         }
+        if let Some(x) = &patch.player {
+            p.player.memory_mb = x.memory_mb.unwrap_or(p.player.memory_mb);
+            p.player.video_memory_mb = x.video_memory_mb.unwrap_or(p.player.video_memory_mb);
+        }
         if let Some(t) = &patch.thumbnails {
             if let Some(v) = t.disk_cache {
                 p.thumbnails.disk_cache = v;
@@ -244,6 +276,16 @@ impl Preferences {
 
     /// Fails with `USAGE` for values out of range.
     pub fn check(&self) -> Result<()> {
+        for (key, mb) in [
+            ("player.memory_mb", self.player.memory_mb),
+            ("player.video_memory_mb", self.player.video_memory_mb),
+        ] {
+            if (1..64).contains(&mb) {
+                return Err(Error::usage(format!(
+                    "{key} must be 0 (automatic) or at least 64"
+                )));
+            }
+        }
         if self.thumbnails.cache_limit_mb == 0 {
             return Err(Error::usage("thumbnails.cache_limit_mb must be at least 1"));
         }
@@ -284,6 +326,24 @@ mod tests {
         // A file without the key keeps it on.
         let read: Preferences = serde_json::from_value(serde_json::json!({})).unwrap();
         assert!(read.gpu.acceleration);
+    }
+
+    #[test]
+    fn the_player_takes_automatic_memory_unless_set() {
+        let p = Preferences::default();
+        assert_eq!((p.player.memory_mb, p.player.video_memory_mb), (0, 0));
+        let set = p
+            .patched(&PreferencesPatch::from_pairs(&["player.memory_mb=4096".into()]).unwrap())
+            .unwrap();
+        assert_eq!(
+            (set.player.memory_mb, set.player.video_memory_mb),
+            (4096, 0)
+        );
+        // 0 is automatic; otherwise at least 64 MB.
+        for bad in ["player.memory_mb=8", "player.video_memory_mb=63"] {
+            let patch = PreferencesPatch::from_pairs(&[bad.into()]).unwrap();
+            assert_eq!(p.patched(&patch).unwrap_err().code, crate::ErrorCode::Usage);
+        }
     }
 
     #[test]

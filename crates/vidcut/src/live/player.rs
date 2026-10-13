@@ -66,7 +66,7 @@ pub struct Player {
     /// at lands (or fails).
     on_picture: Arc<dyn Fn() + Send + Sync>,
     /// Memory for the engine's pictures.
-    budget: usize,
+    budget: engine::Budget,
     /// The renderer shows pictures NVDEC decoded from GPU memory: they stay
     /// there.
     gpu_pictures: bool,
@@ -99,7 +99,7 @@ pub struct Player {
 impl Player {
     pub fn new(
         output: Option<MakeOutput>,
-        budget: usize,
+        budget: engine::Budget,
         gpu_pictures: bool,
         renderer: Arc<dyn Renderer>,
         on_picture: Arc<dyn Fn() + Send + Sync>,
@@ -443,6 +443,15 @@ impl Player {
         self.scrubbing = on;
         if let Some(e) = &self.engine {
             e.set_audio_scrubbing(on);
+        }
+    }
+
+    /// Keeps pictures within `budget` from now on (the preferences'
+    /// `player.memory_mb` and `video_memory_mb`).
+    pub fn set_budget(&mut self, budget: engine::Budget) {
+        self.budget = budget;
+        if let Some(e) = &self.engine {
+            e.set_budget(budget);
         }
     }
 

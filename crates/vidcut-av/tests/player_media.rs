@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use player_support::cpu_seconds;
-use vidcut_av::player::{Config, DEFAULT_BUDGET, PacedOutput, Player};
+use vidcut_av::player::{Budget, Config, DEFAULT_BUDGET, PacedOutput, Player};
 use vidcut_core::render::{AudioPiece, RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
 
@@ -122,7 +122,7 @@ fn budget() -> usize {
     std::env::var("VIDCUT_PLAYER_BUDGET_MB")
         .ok()
         .and_then(|mb| mb.parse::<usize>().ok())
-        .map_or(DEFAULT_BUDGET, |mb| mb << 20)
+        .map_or(DEFAULT_BUDGET.memory, |mb| mb << 20)
 }
 
 #[test]
@@ -139,7 +139,7 @@ fn real_footage_seeks_steps_and_plays() {
         let out = PacedOutput::new(Duration::from_millis(10), Duration::ZERO);
         let budget = budget();
         let config = Config {
-            budget,
+            budget: Budget::both(budget),
             hardware,
             ..Config::default()
         };
@@ -238,7 +238,7 @@ fn one_player_for_the_source_and_the_timeline() {
         let budget = budget();
         for source_plays in [false, true] {
             let config = Config {
-                budget,
+                budget: Budget::both(budget),
                 hardware,
                 audio_scrubbing: false,
                 ..Config::default()

@@ -707,6 +707,16 @@ impl VideoReader {
         self.pending.as_ref().and_then(|f| f.pts())
     }
 
+    /// After a [`seek`](Self::seek): the frames from the keyframe it
+    /// landed on come next, not only those from its target, so a reader
+    /// that looked for a keyframe decodes on from it instead of seeking
+    /// again.
+    pub fn from_keyframe(&mut self) {
+        if let Some(pts) = self.pending_pts() {
+            self.min_pts = Some(pts);
+        }
+    }
+
     /// Returns the next frame in presentation order, or `None` at end of stream.
     /// The frame's pts is its best-effort timestamp.
     pub fn next_frame(&mut self) -> Result<Option<frame::Video>> {

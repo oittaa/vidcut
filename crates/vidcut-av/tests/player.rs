@@ -558,7 +558,7 @@ fn the_plan_played_next_shows_its_prepared_frame_at_once() {
     // Room for a few pictures (10-bit ones are 173 kB here): those not
     // held go as others come.
     let config = Config {
-        budget: 1 << 20,
+        budget: vidcut_av::player::Budget::both(1 << 20),
         audio_scrubbing: false,
         ..Config::default()
     };

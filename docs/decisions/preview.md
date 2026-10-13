@@ -13,7 +13,7 @@
 
 - **Plans.** The timeline plays `render::flatten_lanes(project, 0, end)`, the source `render::tape` (one clip, or the Source Tape): the plans export renders, so every picture is the one `frame render` makes (the engine reads them with the export's readers). Fresh proxies replace their media's pictures where the project plays proxies (§6). A frame of black and silence follows the content, where the playhead stands at the end (after an append, decision D15).
 - **One player for both** (`live/player.rs`). One engine plays whichever the viewer shows. The other keeps its plan and playhead in the session, and the engine keeps the picture there ready (`Player::prepare`, player.md §3): decoded while the engine is paused with nothing else to decode, and held whatever the budget. Switching (Q, `viewer.set`) pauses, plays the other plan from its playhead (`set_plan_at`), and shows its picture at once; then the frame left is prepared. An edit function from the source moves the timeline's playhead (decision D15): its new plan and frame are prepared the same way, so Q shows the result at once. `player.state`'s `ready` says whether each one's picture is decoded, and the GUI's snapshot changes when the one kept ready lands.
-- **Memory:** the engine keeps up to 1 GB of pictures (`vidcut_av::player::DEFAULT_BUDGET`, player.md §3): what is shown, and the one picture held for what isn't. The two share it: after one played a while, the other's windows going back are gone, and its first step back decodes one again (player.md §7).
+- **Memory:** the more pictures are kept, the less the viewer waits, so it uses what the computer has (`Budget::automatic`, player.md §3): pictures in memory up to the larger of 1 GB and half the computer's memory, pictures NVDEC decoded up to half the GPU's memory. The preferences' `player.memory_mb` and `player.video_memory_mb` (File > Preferences: Player; `0`, the default, is automatic) set other limits, which a running GUI takes at once. The source and the timeline share the budgets: after one played a while, the other's pictures going back may be gone, and its first step back decodes a window again (player.md §7).
 - **Edits** give the engine a new plan (`set_plan`): it keeps its position, open files and kept pictures, and plays on if it plays. Reloads after edits coalesce as before (gui.md §7). Another sample rate or channel count makes a new engine (its device was opened for them).
 - **Nothing to convert.** Index-less containers (MPEG-TS), stills, image sequences at any rate, interlaced sources, turned pictures and HDR play as export reads them; the engine needs no remuxes, image lists, filler media or patches at cuts.
 
@@ -108,7 +108,16 @@ The real GUI, a debug build of vidcut's crates (dependencies optimized), the vie
 
 - **NVDEC's 2160p pictures shown from video memory** (§3), 10 s of each played in the GUI's window: 0.043–0.054 cores. Copied down and uploaded in the same runs: 0.15–0.23 cores. Single runs moved by up to 0.2 cores while other work used the machine. The 1080p rows are with pictures copied down.
 
-- **Steps back** from the middle of a GOP: the first 150–500 ms (a window decodes from the keyframe; 1.0–1.2 s for H.264 on NVDEC), then 17–35 ms each (the CLI's own round trip).
+- **Steps back** after a seek to the middle of a GOP, `vidcut player step -1` until the frame shows, 17–25 ms of it the CLI's own round trip (3 seeks each, 20 steps after each):
+
+| Stream | Decoded on | First step back, right after the seek / after 1.5 s | The next 19 |
+|---|---|---|---|
+| 1080p30 H.264 | NVDEC / CPU | 19–22 / 22–25 ms; 44–99 / 23–25 ms | median 17–20 ms, max 21–30 ms |
+| 2160p60 H.264 | NVDEC / CPU | 19–25 / 24–25 ms; 104–384 / 21–23 ms | median 17–27 ms, max 21–44 ms |
+| 2160p60 10-bit HEVC | NVDEC / CPU | 18–24 / 23–24 ms; 393–881 / 27–33 ms | median 17–33 ms, max 21–42 ms |
+| 2160p60 10-bit AV1 | NVDEC / CPU | 18–23 / 23–24 ms; 520–1,051 / 27–32 ms | median 17–30 ms, max 22–38 ms |
+
+  Seeks take as long as before the pictures behind were kept (preview.md's table above; 4K H.264 on NVDEC 0.5–1.2 s). NVDEC's pictures in video memory: a seek keeps what it decodes on its way, so the steps back after it find their pictures, right after it too. Decoded on the CPU, a step right after the seek waits for the half second behind (player.md §3), as long as the seek takes; given a moment, they are there as well. With the 1 GB this used to keep, the first step back took 0.5 s (1080p on NVDEC) to 2.0 s (4K H.264 on NVDEC), 0.08–1.0 s on the CPU, after a pause too, and 4K HEVC and AV1 waited again 0.4–1.0 s a window later.
 - **Picture against sound** (`tests/live.rs`, a stand-in device heard 30 ms after it pulls): the picture changed 0.4–1.4 ms after each beep was heard; every frame of 150 showed, in order. The engine's own measurements are in player.md §7.
 - **Minimized** (GNOME Wayland, NVIDIA): a seek 25 ms, a viewer screenshot 23 ms.
 - **Seeks after an edit of 120 cuts** wait for nothing: 6 ms to the first.
