@@ -33,7 +33,7 @@ These are mandatory.
 
 ## Docs
 
-- [README.md](README.md): features, requirements, build, GUI keys, CLI basics.
+- [README.md](README.md): features, requirements, build, CLI basics. Keys: [docs/cut-page-spec.md](docs/cut-page-spec.md) §11.
 - [docs/cli.md](docs/cli.md): every command, JSON output and exit codes, live control of a running GUI.
 - [docs/cut-page-spec.md](docs/cut-page-spec.md): the behavioral spec; [docs/deviations.md](docs/deviations.md): where vidcut differs.
 - [docs/decisions/](docs/decisions/): architecture records (preview, export, GUI, agents, player).

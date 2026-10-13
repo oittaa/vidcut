@@ -67,7 +67,7 @@ vidcut-av starts them as it starts its other threads (`std::thread::Builder`, na
 - **Other speeds**, both ways, go through the engine's own time stretch (`Stretch`, WSOLA), which keeps the pitch and says where its output came from:
   - The mix is cut into fragments of 21 ms that overlap by half in the output, Hann-shaped and added. Fragment *k* would start *k* hops × speed into the input; it moves by up to 5 ms to where its first half best matches what would have followed the fragment before, so the overlap adds alike sound.
   - Each output block (a hop, 10.4 ms) runs from the middle of one fragment to the middle of the next, and both input positions are known: every block is marked as it is queued, so the clock follows what is heard. A block blends two fragments a hop × |speed − 1| apart in the input, so a sound may be heard up to half that from where its block's mark puts it: 2.6 ms of play at 2×, 3.9 ms at 4×.
-  - FFmpeg's `atempo` was tried first and dropped: it moves its fragments by up to 21 ms where nothing outside can see, and its output drifted from the input by 10–20 ms over a few seconds, so its sound couldn't be clocked.
+  - FFmpeg's `atempo` can't be the clock: it moves its fragments by up to 21 ms where nothing outside can see, and its output drifts from the input by 10–20 ms over a few seconds.
   - At 4× and above a sound much shorter than a fragment may blend away (a 10 ms beep lasts 2.5 ms at 4×); tones, speech and music keep their pitch (a 1 kHz tone stays within 2 Hz from 0.5× to 8×, both ways).
 
 ## 5. Audio scrubbing (spec §4.5, decision D42)
@@ -116,11 +116,11 @@ On the dev machine (16 threads), decoding on the CPU; YUV pictures at the clips'
 | The same at 2 GB | first step back 34 / 171 ms; 3 s backward 90 of 91 / 179 of 181 shown |
 | The same on NVDEC, 1 GB (1080p30 / 2160p60) | switching to the prepared frame 0.03–0.05 ms, to one not decoded yet 560–567 / 893 ms; after the source played 8 s, the first step back 429 / 1,209 ms (with nothing played between, 0 ms) |
 
-Against the earlier RGBA pictures at a 1920×1080 viewer (8.3 MB each): playing forward no longer scales on the CPU (4K 1.2 cores down to 0.4, 1080p 0.2 to 0.1), 1080p keeps 2.7 times as many pictures, and 4K keeps two thirds as many (12.4 MB for the source size). Backward 4K in a 4 s GOP decodes most windows from the keyframe again, so the budget decides it: 14 pictures a window (512 MB) take 7.1 cores and drop frames, 20 (the RGBA pictures at 512 MB) took 6.1, 28 (1 GB, the default for that reason) take 4.3 and drop none. A smaller budget suits smaller sources.
+Backward 4K in a 4 s GOP decodes most windows from the keyframe again, so the budget decides it: 14 pictures a window (512 MB) take 7.1 cores and drop frames; 28 (1 GB, the default) take 4.3 and drop none. A smaller budget suits smaller sources.
 
 One budget for a viewer's source and timeline costs one window at 1 GB: 8 s of 4K play goes through 480 pictures (6 GB), so the windows of the one not shown go, and its first step back after a switch decodes one again. The prepared picture stays, and a switch needs no more. 2 GB kept no more of the timeline than 1 GB once the source had played. On NVDEC that window takes as long as a first step back there: 1.2 s for 4K H.264. The automatic budget (half the memory: 29 GB on this machine, 8 GB of video memory) keeps far more than 8 s of 4K. Steps back measured in the GUI are in preview.md §8.
 
-NVDEC's engine decodes 4K H.264 at 253 frames a second against the CPU's 1,014 on this machine, 99% busy (more frames in flight through FFmpeg's frame threads add nothing; two decodes at once share it), so seeks into long GOPs and backward play (windows decoded again) take three to four times as long on NVDEC, and playing forward half the CPU. The GPU decodes all the same when there is one: it leaves the CPU free, and with fewer cores it is the faster. For 10-bit HEVC and AV1 NVDEC is the faster: seeks in half the time, forward play on a tenth of a core; backward 4K is short of real time either way (a window of 14 P010 pictures at 1 GB). The GUI's numbers are in preview.md §8.
+NVDEC's speed against the CPU, and why the GPU is still the default: preview.md §3. The GUI's numbers are in preview.md §8.
 
 ## 8. Not yet
 
