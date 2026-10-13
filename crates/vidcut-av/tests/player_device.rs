@@ -8,7 +8,7 @@ mod player_support;
 use std::time::{Duration, Instant};
 
 use player_support::*;
-use vidcut_av::player::{Config, CpalOutput, Player};
+use vidcut_av::player::{Config, CpalOutput, Player, PlaysOn};
 
 #[test]
 fn the_device_runs_the_clock() {
@@ -57,10 +57,11 @@ fn the_device_runs_the_clock() {
     );
 }
 
-/// A device chosen by its id runs the clock, the default one listed among
-/// the system's devices; one that isn't there plays on the default.
+/// Every device listed opens as itself, chosen by its id, and runs the
+/// clock; their names are told apart. An id that isn't there plays on the
+/// default, saying so.
 #[test]
-fn a_chosen_device_runs_the_clock() {
+fn each_listed_device_plays_as_itself() {
     let devices = match vidcut_av::player::output_devices() {
         Ok(d) if !d.is_empty() => d,
         other => {
@@ -68,12 +69,16 @@ fn a_chosen_device_runs_the_clock() {
             return;
         }
     };
-    let default = devices.iter().find(|d| d.default).map(|d| d.id.clone());
-    for chosen in [default, Some("wasapi:{gone}".to_string())] {
+    let names: std::collections::HashSet<&str> = devices.iter().map(|d| d.name.as_str()).collect();
+    assert_eq!(names.len(), devices.len(), "names repeat: {devices:#?}");
+    let runs_the_clock = |chosen: Option<String>, want: PlaysOn| {
         let p = plan(&[gap(60)], 0);
-        let output = Box::new(CpalOutput::on(chosen.clone()));
-        let player =
-            Player::new(p, Config::default(), output).unwrap_or_else(|e| panic!("{chosen:?}: {e}"));
+        let player = Player::new(
+            p,
+            Config::default(),
+            Box::new(CpalOutput::on(chosen.clone())),
+        )?;
+        assert_eq!(player.plays_on(), want, "{chosen:?}");
         assert!(player.wait_ready(0, Duration::from_secs(5)), "{chosen:?}");
         let start = Instant::now();
         player.play(1.0);
@@ -86,5 +91,28 @@ fn a_chosen_device_runs_the_clock() {
             player.present(Instant::now());
         }
         assert!(player.status().error.is_none(), "{chosen:?}");
+        Ok::<_, vidcut_av::Error>(())
+    };
+    let mut opened = 0;
+    for d in &devices {
+        // A device may refuse the plan's rate and channels (a surround
+        // output, an S/PDIF one); one that opens is the one chosen.
+        match runs_the_clock(Some(d.id.clone()), PlaysOn::Chosen(d.id.clone())) {
+            Ok(()) => {
+                eprintln!("{} ({}) plays", d.name, d.id);
+                opened += 1;
+            }
+            Err(e) => eprintln!("{} ({}) won't open: {e}", d.name, d.id),
+        }
     }
+    eprintln!("{opened} of {} devices opened", devices.len());
+    assert!(opened > 0, "none opened: {devices:#?}");
+    // Where the default opens.
+    let gone = "wasapi:{gone}".to_string();
+    let default = CpalOutput::new();
+    if let Err(e) = Player::new(plan(&[gap(1)], 0), Config::default(), Box::new(default)) {
+        eprintln!("the default device won't open: {e}");
+        return;
+    }
+    runs_the_clock(Some(gone.clone()), PlaysOn::Missing(gone)).unwrap();
 }

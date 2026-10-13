@@ -22,7 +22,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use vidcut_av::player::{self as engine, AudioOutput, Decoder, PacedOutput};
+use vidcut_av::player::{self as engine, AudioOutput, Decoder, PacedOutput, PlaysOn};
 use vidcut_core::render::{AudioPiece, LaneTrack, RenderPlan, VideoPiece};
 
 use super::Renderer;
@@ -92,10 +92,13 @@ pub struct Player {
     scrubbing: bool,
     /// Decode on the GPU (the GPU acceleration preference).
     gpu: bool,
-    /// The audio device the engine's output opened on (the preference;
-    /// `None`: the system's default).
+    /// The audio device the preferences name, its output made for it
+    /// (`None`: the system's default).
     audio_device: Option<String>,
-    /// The audio device failed to open: the engine plays to a stand-in.
+    /// The device the engine's sound plays on.
+    plays_on: PlaysOn,
+    /// Why the sound doesn't play on the device chosen: none opened (the
+    /// engine plays to a stand-in), or the chosen one isn't connected.
     pub audio_error: Option<String>,
 }
 
@@ -126,6 +129,7 @@ impl Player {
             scrubbing: true,
             gpu: crate::preferences::gpu_decoding(),
             audio_device: crate::preferences::audio_device(),
+            plays_on: PlaysOn::Default,
             audio_error: None,
         }
     }
@@ -297,9 +301,18 @@ impl Player {
         };
         self.audio_error = None;
         match engine::Player::new(plan.clone(), config(), make()) {
-            Ok(e) => return Some(Arc::new(e)),
+            Ok(e) => {
+                self.plays_on = e.plays_on();
+                if let PlaysOn::Missing(id) = &self.plays_on {
+                    self.audio_error = Some(format!(
+                        "the audio device {id} isn't connected: the system's default plays"
+                    ));
+                }
+                return Some(Arc::new(e));
+            }
             Err(e) => self.audio_error = Some(e.to_string()),
         }
+        self.plays_on = PlaysOn::Default;
         let silent = Box::new(PacedOutput::new(Duration::from_millis(10), Duration::ZERO));
         match engine::Player::new(plan, config(), silent) {
             Ok(e) => Some(Arc::new(e)),
@@ -475,9 +488,25 @@ impl Player {
         true
     }
 
-    /// The audio device it plays on: an id, `None` for the system's default.
+    /// The audio device its sound plays on: the chosen one's id, `None`
+    /// for the system's default (also while the chosen one isn't
+    /// connected, or with no device at all: [`audio_error`](Self::audio_error)
+    /// says why).
     pub fn audio_device(&self) -> Option<&str> {
-        self.audio_device.as_deref()
+        match &self.plays_on {
+            PlaysOn::Chosen(id) => Some(id),
+            _ => None,
+        }
+    }
+
+    /// What to tell about the sound: that there is none, or that the
+    /// chosen device isn't connected.
+    pub fn audio_notice(&self) -> Option<String> {
+        let e = self.audio_error.as_ref()?;
+        Some(match self.plays_on {
+            PlaysOn::Missing(_) => e.clone(),
+            _ => format!("no sound: {e}"),
+        })
     }
 
     /// Plays on `device` (an audio device's id; `None`: the system's
