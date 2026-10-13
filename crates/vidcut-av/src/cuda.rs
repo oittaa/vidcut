@@ -311,8 +311,9 @@ struct Placebo {
 }
 
 /// One converter at work at a time in the process: made, fed, read or
-/// torn down. Two at work at once lost the Vulkan device now and then as
-/// they started (the three parallel `nvenc_exports` tests, one run in 76).
+/// torn down. Without this, the Vulkan device was sometimes lost when
+/// converters started at the same time (1 in 76 runs of the parallel
+/// `nvenc_exports` tests). The cause isn't known.
 fn converting() -> std::sync::MutexGuard<'static, ()> {
     static CONVERTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
     CONVERTING.lock().unwrap_or_else(|e| e.into_inner())
@@ -328,19 +329,17 @@ impl Drop for Placebo {
 /// How long the GPU may take with a frame before it counts as stuck.
 const HANDOFF: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// Waits, [`HANDOFF`] at most, until the GPU has done what `f` (a Vulkan
-/// frame) was last given: its copy from CUDA, or libplacebo's picture.
+/// Waits, [`HANDOFF`] at most, until the GPU is done with `f` (a Vulkan
+/// frame): its copy from CUDA, or libplacebo's work on it.
 ///
-/// libplacebo without its commit 2ba21c07 gives a frame back (signals its
-/// semaphore one step on) without waiting for its own read of the frame
-/// when that read runs on another queue, as its compute passes do. Its
-/// signal can then come before the copy's: the read starts on it and sees
-/// the frame's old picture, and the copy's later signal sets the semaphore
-/// back a step, so freeing the frame waits forever. And the frame, given
-/// back, can be copied into again while libplacebo still reads it. So a
-/// frame goes to libplacebo only once its copy is done, and is copied into
-/// again only once libplacebo's picture of it is done.
-/// docs/todo/libplacebo-handback-workaround.md says when this can go.
+/// A workaround for a libplacebo bug (fixed upstream in commit 2ba21c07,
+/// not released yet): libplacebo marks an input frame done before it has
+/// read it. If that comes before the CUDA copy into the frame finishes,
+/// libplacebo reads the old picture, and the frame's semaphore ends up one
+/// step behind, so freeing the frame waits forever. So the frame goes to
+/// libplacebo only after its copy is done, and the next copy waits for
+/// libplacebo's output. docs/todo/libplacebo-handback-workaround.md says
+/// when to remove this.
 fn wait_done(f: &frame::Video, what: &str) -> Result<()> {
     // SAFETY: a Vulkan frame: its frames context's device, its AVVkFrame in
     // data[0].
@@ -1060,8 +1059,8 @@ impl Placebo {
                 self.pts.pop_front();
                 pts = t;
             }
-            // libplacebo is done reading the frame this picture is of
-            // before the next copy (`wait_done`).
+            // libplacebo has read the input frame once its output is
+            // done, so the next copy can't overwrite it (`wait_done`).
             wait_done(&out, "converting on the GPU")?;
             let mut c = self.output.copy(&out, "copying back from Vulkan")?;
             unsafe {

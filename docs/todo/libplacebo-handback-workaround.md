@@ -1,7 +1,5 @@
-# Drop the cover for libplacebo's early hand-backs
+# Remove the libplacebo workaround
 
-**When:** every FFmpeg build vidcut supports (AGENTS.md) has libplacebo with its commit 2ba21c07, "vulkan/gpu_tex: order the hold signal after reads on other queues"; no libplacebo release has it yet. FFmpeg builds that link libplacebo statically (BtbN's) carry the libplacebo of their build date.
+**When:** every FFmpeg build vidcut supports comes with a libplacebo that has commit 2ba21c07 ("vulkan/gpu_tex: order the hold signal after reads on other queues"). No libplacebo release has it yet.
 
-libplacebo without it gives a frame back before reading it (gotchas.md). `cuda::wait_done` covers for it: in `cuda::Placebo::push` a frame goes to libplacebo only once its copy from CUDA is done, and in `pull` the next copy waits until libplacebo's picture is done. Each is the CPU waiting for the GPU once a frame.
-
-Then remove `wait_done`'s two calls, `wait_done` and the gotcha, and run the loop of the [Linux check](nvidia-linux-converter-check.md) (on Windows too): three NVENC exports at once must neither hang nor show the frame before.
+**What:** the workaround for libplacebo marking frames done too early (gotchas.md). Remove `cuda::wait_done` and its two calls in `cuda::Placebo::push` and `pull`, and the gotcha. Then run the loop in [the Linux check](nvidia-linux-converter-check.md), on Windows too: three NVENC exports at once must not hang or show the previous frame.

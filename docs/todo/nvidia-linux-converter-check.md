@@ -2,7 +2,7 @@
 
 **When:** next time on a Linux desktop with an NVIDIA GPU. High priority.
 
-NVENC exports convert turned, BT.601, HDR and 10-bit placed pieces with libplacebo on a Vulkan device derived from CUDA (export.md §5). On Windows (RTX 4080 SUPER) three exports at once hung at a converter's teardown or showed the frame before: libplacebo gives frames back before reading them (gotchas.md), and `cuda::wait_done` covers for it. None of the Linux machines here runs this path: the N150 is Intel, WSL has no NVIDIA Vulkan driver, and CI has no GPU. So whether the cover holds on Linux is unchecked.
+NVENC exports convert turned, BT.601, HDR and 10-bit placed pieces with libplacebo on a Vulkan device derived from CUDA (export.md §5). On Windows (RTX 4080 SUPER), three exports at once used to hang or show the previous frame because of a libplacebo bug (gotchas.md). vidcut now works around it. Nobody has checked the workaround on Linux with an NVIDIA GPU: the N150 is Intel, WSL has no NVIDIA Vulkan driver, and CI has no GPU.
 
 On the desktop:
 
