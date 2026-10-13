@@ -10,7 +10,7 @@
 //! (`d3d11va:1` for an adapter by its index), or `none`.
 
 use std::ptr;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::cuda::CudaDevice;
 use crate::error::{Error, Result};
@@ -146,6 +146,17 @@ pub struct GpuDecoder {
 /// AMD's PCI vendor id.
 const AMD: u32 = 0x1002;
 
+/// The decoding profiles [`GpuDecoder::hardware_decodes`] asks a driver for.
+#[derive(Clone, Copy)]
+enum Profile {
+    H264High,
+    HevcMain,
+    HevcMain10,
+    Vp9Profile0,
+    Vp9Profile2,
+    Av1Main,
+}
+
 impl GpuDecoder {
     /// NVDEC, on `cuda`.
     pub fn nvdec(cuda: CudaDevice) -> Self {
@@ -195,6 +206,36 @@ impl GpuDecoder {
         !(self.kind == Kind::D3d11va
             && self.vendor == Some(AMD)
             && codec == ffmpeg::codec::Id::H264)
+    }
+
+    /// Whether its hardware decodes `codec` in `bits` (8 or 10), as its
+    /// driver lists the profiles it decodes (VA-API's; Direct3D 11's video
+    /// device's): H.264 High, HEVC Main or Main 10, VP9 profile 0 or 2, AV1
+    /// Main. `None` where the driver isn't asked (NVDEC) or doesn't say.
+    /// What [`decodes`](Self::decodes) knows of streams decoded wrong is
+    /// apart from this.
+    pub fn hardware_decodes(&self, codec: ffmpeg::codec::Id, bits: u8) -> Option<bool> {
+        use ffmpeg::codec::Id;
+        let profile = match (codec, bits) {
+            (Id::H264, 8) => Profile::H264High,
+            (Id::HEVC, 8) => Profile::HevcMain,
+            (Id::HEVC, 10) => Profile::HevcMain10,
+            (Id::VP9, 8) => Profile::Vp9Profile0,
+            (Id::VP9, 10) => Profile::Vp9Profile2,
+            (Id::AV1, 8 | 10) => Profile::Av1Main,
+            _ => return None,
+        };
+        match self.kind {
+            Kind::Nvdec => None,
+            // SAFETY: a VA-API device FFmpeg made.
+            #[cfg(target_os = "linux")]
+            Kind::Vaapi => unsafe { va_lists(&self.device, profile) },
+            // SAFETY: a D3D11VA device FFmpeg made.
+            #[cfg(windows)]
+            Kind::D3d11va => unsafe { windows::lists(&self.device, profile) },
+            #[allow(unreachable_patterns)]
+            _ => None,
+        }
     }
 
     /// The render node or adapter it is on; empty for the default one.
@@ -274,7 +315,7 @@ mod windows {
 
     use windows_sys::core::GUID;
 
-    use super::{Device, Kind};
+    use super::{Device, Kind, Profile};
     use crate::ffmpeg::ffi;
 
     /// NVIDIA's PCI vendor id.
@@ -317,6 +358,44 @@ mod windows {
 
     /// `IDXGIDevice`'s interface id.
     const IID_IDXGI_DEVICE: GUID = GUID::from_u128(0x54ec77fa_1377_44e6_8c32_88fd5f44c84c);
+
+    /// Whether a D3D11VA device's video device lists `profile` among its
+    /// decoders' (`GetVideoDecoderProfile`).
+    ///
+    /// # Safety
+    /// `device` is a D3D11VA device context.
+    pub(super) unsafe fn lists(device: &Device, profile: Profile) -> Option<bool> {
+        // `D3D11_DECODER_PROFILE_*`.
+        let want = GUID::from_u128(match profile {
+            Profile::H264High => 0x1b81be68_a0c7_11d3_b984_00c04f2e73c5,
+            Profile::HevcMain => 0x5b11d51b_2f4c_4452_bcc3_09f2a1160cc0,
+            Profile::HevcMain10 => 0x107af0e0_ef1a_4d19_aba8_67a163073d13,
+            Profile::Vp9Profile0 => 0x463707f8_a1d0_4585_876d_83aa6d60b89e,
+            Profile::Vp9Profile2 => 0xa4c749ef_6ecf_48aa_8448_50a7a1165ff7,
+            Profile::Av1Main => 0xb8be4ccb_cf53_46ba_8d59_d6b8a6da5d2a,
+        });
+        type Count = unsafe extern "system" fn(*mut c_void) -> u32;
+        type Get = unsafe extern "system" fn(*mut c_void, u32, *mut GUID) -> i32;
+        // SAFETY: `ID3D11VideoDevice`'s vtable after IUnknown's three: eight
+        // `Create…` methods, then GetVideoDecoderProfileCount (11th) and
+        // GetVideoDecoderProfile (12th). FFmpeg asks the device for it.
+        unsafe {
+            let ctx = (*device.0).data as *const ffi::AVHWDeviceContext;
+            let hw = (*ctx).hwctx as *const ffi::AVD3D11VADeviceContext;
+            let video = (*hw).video_device as *mut c_void;
+            if video.is_null() {
+                return None;
+            }
+            let count: Count = std::mem::transmute(method(video, 11));
+            let get: Get = std::mem::transmute(method(video, 12));
+            Some((0..count(video)).any(|i| {
+                let mut g: GUID = std::mem::zeroed();
+                get(video, i, &mut g) >= 0
+                    && (g.data1, g.data2, g.data3, g.data4)
+                        == (want.data1, want.data2, want.data3, want.data4)
+            }))
+        }
+    }
 
     /// The `n`th method of a COM object's vtable.
     ///
@@ -373,7 +452,7 @@ mod windows {
 }
 
 /// Whether `frame` is in GPU memory: a hardware frame of any kind.
-pub(crate) fn on_gpu(frame: &frame::Video) -> bool {
+pub fn on_gpu(frame: &frame::Video) -> bool {
     // SAFETY: reads the frame's own field.
     unsafe { !(*frame.as_ptr()).hw_frames_ctx.is_null() }
 }
@@ -399,11 +478,27 @@ pub(crate) fn sw_format(frame: &frame::Video) -> format::Pixel {
 /// timestamp.
 pub fn download(src: &frame::Video) -> Result<frame::Video> {
     // SAFETY: a valid frame.
-    if unsafe { intel_va(src) }
-        && let Some(f) = mapped_down(src)?
-    {
-        return Ok(f);
+    let Some(display) = (unsafe { intel_va(src) }) else {
+        return fetched(src);
+    };
+    if Ways::maps(display) {
+        let started = std::time::Instant::now();
+        match mapped_down(src)? {
+            Some(f) => {
+                Ways::took(display, Way::Mapped, started.elapsed(), &f);
+                return Ok(f);
+            }
+            None => Ways::unmapped(display),
+        }
     }
+    let started = std::time::Instant::now();
+    let f = fetched(src)?;
+    Ways::took(display, Way::Fetched, started.elapsed(), &f);
+    Ok(f)
+}
+
+/// `src` copied down FFmpeg's way.
+fn fetched(src: &frame::Video) -> Result<frame::Video> {
     let mut dst = frame::Video::empty();
     // SAFETY: both frames are valid; the destination is allocated by the
     // transfer, in the source frames' software format.
@@ -420,10 +515,91 @@ pub fn download(src: &frame::Video) -> Result<frame::Video> {
     Ok(dst)
 }
 
+/// The ways Intel's VA-API frames come down.
+#[derive(Clone, Copy)]
+enum Way {
+    /// The surface mapped itself (`mapped_down`).
+    Mapped,
+    /// FFmpeg's copy of it (`fetched`).
+    Fetched,
+}
+
+/// Which way Intel's frames come down faster on a VA-API display, timed on
+/// its first frames, each way in turn. Mapped, an N150's take half the time
+/// (gotchas.md); FFmpeg finds Gen7–Gen9's mapped memory uncached, so slow
+/// to read, and a card of its own reads its memory across the bus.
+#[derive(Clone, Copy)]
+struct Ways {
+    /// The display it is for.
+    display: usize,
+    /// Each way's quickest time a megabyte, in seconds, and its frames
+    /// timed (mapping that failed counts as never quicker).
+    mapped: (f64, u32),
+    fetched: (f64, u32),
+}
+
+/// The frames timed each way before one is kept.
+const WAY_TRIALS: u32 = 4;
+
+/// The displays' [`Ways`].
+static WAYS: Mutex<Vec<Ways>> = Mutex::new(Vec::new());
+
+impl Ways {
+    /// Whether the next frame on `display` is mapped: in turn while they
+    /// are timed, then the quicker way.
+    fn maps(display: usize) -> bool {
+        let ways = WAYS.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(w) = ways.iter().find(|w| w.display == display) else {
+            return true;
+        };
+        if w.mapped.1 < WAY_TRIALS || w.fetched.1 < WAY_TRIALS {
+            w.mapped.1 <= w.fetched.1
+        } else {
+            w.mapped.0 <= w.fetched.0
+        }
+    }
+
+    /// `display`'s, made at the first frame.
+    fn of(ways: &mut Vec<Ways>, display: usize) -> &mut Ways {
+        let i = match ways.iter().position(|w| w.display == display) {
+            Some(i) => i,
+            None => {
+                ways.push(Ways {
+                    display,
+                    mapped: (f64::INFINITY, 0),
+                    fetched: (f64::INFINITY, 0),
+                });
+                ways.len() - 1
+            }
+        };
+        &mut ways[i]
+    }
+
+    /// A frame `f` came down `way` on `display` in `took`.
+    fn took(display: usize, way: Way, took: std::time::Duration, f: &frame::Video) {
+        let mb = (0..f.planes()).map(|p| f.data(p).len()).sum::<usize>() as f64 / 1e6;
+        let per_mb = took.as_secs_f64() / mb.max(1e-6);
+        let mut ways = WAYS.lock().unwrap_or_else(|e| e.into_inner());
+        let w = Self::of(&mut ways, display);
+        let slot = match way {
+            Way::Mapped => &mut w.mapped,
+            Way::Fetched => &mut w.fetched,
+        };
+        *slot = (slot.0.min(per_mb), slot.1.saturating_add(1));
+    }
+
+    /// A frame on `display` wouldn't map: its frames come down FFmpeg's
+    /// way from now on.
+    fn unmapped(display: usize) {
+        let mut ways = WAYS.lock().unwrap_or_else(|e| e.into_inner());
+        Self::of(&mut ways, display).mapped = (f64::INFINITY, WAY_TRIALS);
+    }
+}
+
 /// `src` copied out of its surface mapped for reading itself
 /// (`vaDeriveImage`), where FFmpeg's copy-down reads a copy the driver makes
-/// of it (`vaGetImage`): on an Intel N150 a 2160p P010 frame took 15 ms of a
-/// core so, 38 ms FFmpeg's way. `None` when it doesn't map.
+/// of it (`vaGetImage`): on an Intel N150 in half the time (gotchas.md).
+/// `None` when it doesn't map.
 fn mapped_down(src: &frame::Video) -> Result<Option<frame::Video>> {
     let mut map = frame::Video::empty();
     let flags = ffi::AV_HWFRAME_MAP_READ as i32 | ffi::AV_HWFRAME_MAP_DIRECT as i32;
@@ -458,13 +634,67 @@ fn props(dst: &mut frame::Video, src: &frame::Video) -> Result<()> {
     Ok(())
 }
 
-/// `frame` is a VA-API frame of Intel's driver (iHD), by the vendor string
-/// libva gives its display.
+/// Whether a VA-API device's driver lists `profile` with the entry point
+/// for decoding (`VAEntrypointVLD`); `None` without libva to ask.
+///
+/// # Safety
+/// `device` is a VA-API device context.
+#[cfg(target_os = "linux")]
+unsafe fn va_lists(device: &Device, profile: Profile) -> Option<bool> {
+    use std::ffi::{c_int, c_void};
+    /// `AVVAAPIDeviceContext`.
+    #[repr(C)]
+    struct VaapiDevice {
+        display: *mut c_void,
+        driver_quirks: std::ffi::c_uint,
+    }
+    type Max = unsafe extern "C" fn(*mut c_void) -> c_int;
+    type Entrypoints = unsafe extern "C" fn(*mut c_void, c_int, *mut c_int, *mut c_int) -> c_int;
+    // va.h's `VAProfile` and `VAEntrypointVLD`.
+    let va_profile = match profile {
+        Profile::H264High => 7,
+        Profile::HevcMain => 17,
+        Profile::HevcMain10 => 18,
+        Profile::Vp9Profile0 => 19,
+        Profile::Vp9Profile2 => 21,
+        Profile::Av1Main => 32,
+    };
+    const VLD: c_int = 1;
+    // SAFETY: libva's functions as va.h declares them, looked up in the
+    // process (loaded with FFmpeg); the device's context is an
+    // AVVAAPIDeviceContext with its display; the list holds as many entry
+    // points as libva says there can be.
+    unsafe {
+        let max = libc::dlsym(libc::RTLD_DEFAULT, c"vaMaxNumEntrypoints".as_ptr());
+        let query = libc::dlsym(libc::RTLD_DEFAULT, c"vaQueryConfigEntrypoints".as_ptr());
+        if max.is_null() || query.is_null() {
+            return None;
+        }
+        let max = std::mem::transmute::<*mut c_void, Max>(max);
+        let query = std::mem::transmute::<*mut c_void, Entrypoints>(query);
+        let ctx = (*device.0).data as *const ffi::AVHWDeviceContext;
+        let display = (*((*ctx).hwctx as *const VaapiDevice)).display;
+        if display.is_null() {
+            return None;
+        }
+        let mut entrypoints = vec![0; usize::try_from(max(display)).ok()?.max(1)];
+        let mut n: c_int = 0;
+        // A profile the driver lacks: an error, not an empty list.
+        if query(display, va_profile, entrypoints.as_mut_ptr(), &mut n) != 0 {
+            return Some(false);
+        }
+        let n = usize::try_from(n).unwrap_or(0).min(entrypoints.len());
+        Some(entrypoints[..n].contains(&VLD))
+    }
+}
+
+/// The display of `frame` when it is a VA-API frame of Intel's driver
+/// (iHD), by the vendor string libva gives the display.
 ///
 /// # Safety
 /// `frame` is a valid frame.
 #[cfg(target_os = "linux")]
-unsafe fn intel_va(frame: &frame::Video) -> bool {
+unsafe fn intel_va(frame: &frame::Video) -> Option<usize> {
     use std::ffi::{CStr, c_char, c_void};
     /// `AVVAAPIDeviceContext`.
     #[repr(C)]
@@ -484,26 +714,25 @@ unsafe fn intel_va(frame: &frame::Video) -> bool {
             (!f.is_null()).then(|| std::mem::transmute::<*mut c_void, Query>(f))
         }
     });
-    let Some(query) = query else {
-        return false;
-    };
+    let query = (*query)?;
     // SAFETY: a hardware frame's frames context holds its device's, and a
     // VA-API device's context is an AVVAAPIDeviceContext with its display.
     unsafe {
         let frames = (*frame.as_ptr()).hw_frames_ctx;
         if frames.is_null() {
-            return false;
+            return None;
         }
         let device = (*((*frames).data as *const ffi::AVHWFramesContext)).device_ctx;
         if device.is_null() || (*device).type_ != ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VAAPI {
-            return false;
+            return None;
         }
         let va = (*device).hwctx as *const VaapiDevice;
         if va.is_null() || (*va).display.is_null() {
-            return false;
+            return None;
         }
         let vendor = query((*va).display);
-        !vendor.is_null() && CStr::from_ptr(vendor).to_bytes().starts_with(b"Intel iHD")
+        (!vendor.is_null() && CStr::from_ptr(vendor).to_bytes().starts_with(b"Intel iHD"))
+            .then_some((*va).display as usize)
     }
 }
 
@@ -512,6 +741,6 @@ unsafe fn intel_va(frame: &frame::Video) -> bool {
 /// # Safety
 /// None.
 #[cfg(not(target_os = "linux"))]
-unsafe fn intel_va(_: &frame::Video) -> bool {
-    false
+unsafe fn intel_va(_: &frame::Video) -> Option<usize> {
+    None
 }

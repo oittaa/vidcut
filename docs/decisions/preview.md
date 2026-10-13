@@ -44,7 +44,7 @@
 
 | GPU | 1080p30 H.264 (fixture) | 2160p60 10-bit HEVC |
 |---|---|---|
-| Direct3D 11, the Ryzen 7 9800X3D's Radeon iGPU | 944, copied down 801 | 163 / 131, copied down 83 / 82 on 0.3 cores (CPU: 829 / 255) |
+| Direct3D 11, the Ryzen 7 9800X3D's Radeon iGPU | on the CPU there (gotchas.md) | 163 / 131, copied down 83 / 82 on 0.3 cores (CPU: 829 / 255) |
 | VA-API, Intel N150 (4 cores, Linux) | 881, copied down 352 | 277 / 204, copied down 56 / 31 on 0.8 cores (CPU: 154 / 41 on 3.8 cores) |
 
   Copying 2160p down is what limits them: 25 MB a frame. These GPUs leave the CPU free more than they decode 4K faster, and a 4K60 file plays on the Radeon, not always on the N150. Intel's surfaces copy down at twice FFmpeg's speed mapped themselves (`hw::download`, gotchas.md). Showing their pictures from video memory as NVDEC's is own-player.md's.
@@ -52,7 +52,7 @@
 - **Shown from there** (`gui/shared.rs`, `vidcut_av::cuda::share`): wgpu's Vulkan device makes a buffer whose memory it exports (`VK_KHR_external_memory_fd`; on Windows as a Win32 handle, `VK_KHR_external_memory_win32`), CUDA imports it, and to show a picture CUDA copies its planes into the buffer and wgpu copies them on into the plane textures (§4): two copies on the GPU, nothing through memory or the CPU. The whole GUI then plays 4K60 on 0.04–0.05 cores (§8). A few such buffers take turns, each free again once the queue has done the copy out of it (`Queue::on_submitted_work_done`); waiting for the GPU instead (`Device::poll`) holds wgpu's device, and the UI thread's frames stalled behind it.
 - **Copied down** where the viewer can't do that: VA-API's and Direct3D 11's frames always, as they are decoded (each surface goes back to the decoder at once); NVDEC's with another backend than Vulkan, CUDA on another GPU than the display's, a player without a viewer (tests). The frame comes to memory at its own size with its properties and is uploaded (§4). Interlaced frames from the other GPUs come down before `bwdif` (NVDEC's go through `bwdif_cuda`).
 - **Switching.** The session watches the preferences file; a change, from anywhere, switches the engine's decoder at once (`Player::set_hardware`), and it decodes its pictures anew, the one shown first. `player.state`'s `hwdec` says what decoded the picture shown: `nvdec`, `vaapi`, `d3d11va` or `no`.
-- **Frame-exact:** every GPU decoder's pictures are the CPU's, barcode for barcode, and within two levels in their pixels (`player_gpu.rs`, on each decoder the machine has: H.264, interlaced H.264, HEVC, VP9, AV1, HEVC in MPEG-TS and turned). NVDEC (RTX 4080 SUPER), Direct3D 11 on the Radeon iGPU and VA-API on the Intel N150 decode all of them.
+- **Frame-exact:** every GPU decoder's pictures are the CPU's, barcode for barcode, and within two levels in their pixels (`player_gpu.rs`, on each decoder the machine has: H.264, interlaced H.264, HEVC, VP9, AV1, HEVC in MPEG-TS and turned). NVDEC (RTX 4080 SUPER), Direct3D 11 on the Radeon iGPU and VA-API on the Intel N150 decode all of them, but H.264 on the Radeon, which the CPU decodes there (gotchas.md); the test holds every codec whose profile the driver lists to the GPU (`GpuDecoder::hardware_decodes`).
 
 ## 4. The picture on screen
 
