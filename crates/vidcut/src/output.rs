@@ -442,24 +442,31 @@ pub fn print(method: &str, r: &Response, json: bool) {
             println!("({})", r.result["path"].as_str().unwrap_or_default());
         }
         "encoders.list" => {
-            for e in r.result["encoders"].as_array().into_iter().flatten() {
-                // A render node, or on Windows an adapter's index.
-                let device = match e["device"].as_str() {
-                    None => "-".to_string(),
-                    Some(d) if d.parse::<u32>().is_ok() => format!("adapter {d}"),
-                    Some(d) => d.to_string(),
-                };
-                println!(
-                    "{:<11} {:<8} {:<20} {}",
-                    e["encoder"].as_str().unwrap_or_default(),
-                    e["pixel"].as_str().unwrap_or_default(),
-                    device,
-                    if e["ok"] == true {
+            let rows: Vec<[String; 4]> = r.result["encoders"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|e| {
+                    let text = |k: &str| e[k].as_str().unwrap_or_default().to_string();
+                    // A render node, or on Windows an adapter's index.
+                    let device = match e["device"].as_str() {
+                        None => "-".to_string(),
+                        Some(d) if d.parse::<u32>().is_ok() => format!("adapter {d}"),
+                        Some(d) => d.to_string(),
+                    };
+                    let ok = if e["ok"] == true {
                         "ok".to_string()
                     } else {
-                        format!("no ({})", e["error"].as_str().unwrap_or_default())
-                    }
-                );
+                        format!("no ({})", text("error"))
+                    };
+                    [text("encoder"), text("pixel"), device, ok]
+                })
+                .collect();
+            // Each column as wide as its longest.
+            let width = |c: usize| rows.iter().map(|r| r[c].len()).max().unwrap_or(0);
+            let (w0, w1, w2) = (width(0), width(1), width(2));
+            for [encoder, pixel, device, ok] in &rows {
+                println!("{encoder:<w0$}  {pixel:<w1$}  {device:<w2$}  {ok}");
             }
         }
         "proxy.generate" => {

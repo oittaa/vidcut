@@ -1222,17 +1222,23 @@ pub fn detect() -> Availability {
                 error: result.err().map(|e| e.to_string()),
             });
         };
-    for (codec, pixels) in [
-        ("h264_nvenc", &[format::Pixel::YUV420P][..]),
-        (
-            "hevc_nvenc",
-            &[format::Pixel::YUV420P, format::Pixel::P010LE],
-        ),
-        (
-            "av1_nvenc",
-            &[format::Pixel::YUV420P, format::Pixel::P010LE],
-        ),
-    ] {
+    // NVIDIA's GPUs: not on macOS.
+    let nvenc: &[(&str, &[format::Pixel])] = if cfg!(target_os = "macos") {
+        &[]
+    } else {
+        &[
+            ("h264_nvenc", &[format::Pixel::YUV420P]),
+            (
+                "hevc_nvenc",
+                &[format::Pixel::YUV420P, format::Pixel::P010LE],
+            ),
+            (
+                "av1_nvenc",
+                &[format::Pixel::YUV420P, format::Pixel::P010LE],
+            ),
+        ]
+    };
+    for &(codec, pixels) in nvenc {
         for &p in pixels {
             check(codec, EncoderChoice::Nvenc, p, None);
         }
