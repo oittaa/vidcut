@@ -407,7 +407,7 @@ type Block = Vec<(i64, Image)>;
 fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Context) {
     static TRIMMED: Mutex<Option<Instant>> = Mutex::new(None);
     // Decoded on the GPU as the viewer decodes.
-    let mut reader = match crate::preferences::gpu_acceleration()
+    let mut reader = match crate::preferences::gpu_decoding()
         .then(crate::preferences::gpu_decoder)
         .flatten()
     {

@@ -378,13 +378,13 @@ pub fn export_media(
         }),
     )?;
     // Decoded on the GPU as the viewer decodes.
-    let decoder = crate::preferences::gpu_acceleration()
+    let decoder = crate::preferences::gpu_decoding()
         .then(crate::preferences::gpu_decoder)
         .flatten();
     let reports = export::run(
         &prepared,
         &available,
-        decoder.as_ref(),
+        crate::preferences::decoding(decoder.as_ref()),
         hooks.cancel,
         &mut |i, path, pr| (hooks.progress)(i, count, path, pr),
     )?;

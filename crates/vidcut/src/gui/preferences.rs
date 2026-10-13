@@ -159,6 +159,24 @@ impl Workspace {
                             patch = Some(json!({ "gpu": { "acceleration": on } }));
                         }
                         ui.end_row();
+                        let mut decoding = state["preferences"]["gpu"]["decoding"] != false;
+                        ui.label("Decoding");
+                        if ui
+                            .add_enabled(
+                                !busy && on,
+                                egui::Checkbox::new(&mut decoding, "Decode on the GPU too"),
+                            )
+                            .on_hover_text(
+                                "Decode H.264, HEVC, AV1 and VP9 on the graphics card, in the \
+                                 viewer, exports, proxies and the timeline's pictures. Turn off \
+                                 where a small GPU decodes more slowly than the CPU: the GPU \
+                                 still scales and encodes",
+                            )
+                            .changed()
+                        {
+                            patch = Some(json!({ "gpu": { "decoding": decoding } }));
+                        }
+                        ui.end_row();
                     });
                 ui.add_space(8.0);
                 ui.label(RichText::new("Player").strong());

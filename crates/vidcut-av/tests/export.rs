@@ -2173,6 +2173,27 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
             near(m[0], 16.0) && near(m[1], 128.0) && near(m[2], 128.0),
             "{bits}-bit: black is {m:?}"
         );
+        // GPU decoding off (`gpu.decoding`): every piece decodes on the CPU,
+        // NVDEC's too, and NVENC takes the frames from memory.
+        if bits == 8 {
+            let out = dir.path().join("decoded-on-the-cpu.mp4");
+            let report = export::run_decoding_on(
+                &p,
+                &settings,
+                &out,
+                &available,
+                vidcut_av::hw::Decoding::Cpu,
+                &AtomicBool::new(false),
+                &mut |_| {},
+            )
+            .unwrap_or_else(|e| panic!("decoded on the CPU: {e}"));
+            assert_eq!(
+                (report.gpu_frames, report.gpu_decoded),
+                (0, 0),
+                "decoded on the CPU"
+            );
+            assert_eq!(barcodes(&out), want, "decoded on the CPU");
+        }
     }
 }
 
@@ -2256,7 +2277,7 @@ fn gpu_decoded_exports_match_the_cpu() {
             &settings,
             &out,
             &Availability::default(),
-            Some(decoder),
+            vidcut_av::hw::Decoding::Gpu(decoder),
             &AtomicBool::new(false),
             &mut |_| {},
         )
@@ -2398,7 +2419,7 @@ fn vaapi_exports_keep_frames_on_the_gpu() {
             &settings,
             &out,
             &available,
-            Some(&decoder),
+            vidcut_av::hw::Decoding::Gpu(&decoder),
             &AtomicBool::new(false),
             &mut |_| {},
         )
@@ -2564,7 +2585,7 @@ fn amf_exports_keep_frames_on_the_gpu() {
             &settings,
             &out,
             &available,
-            Some(&decoder),
+            vidcut_av::hw::Decoding::Gpu(&decoder),
             &AtomicBool::new(false),
             &mut |_| {},
         )

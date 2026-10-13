@@ -256,7 +256,7 @@ impl Stills {
 /// `gpu.acceleration` is on.
 fn cell_renderer() -> StillRenderer {
     let renderer = StillRenderer::with_budget(BUDGET);
-    match crate::preferences::gpu_acceleration()
+    match crate::preferences::gpu_decoding()
         .then(crate::preferences::gpu_decoder)
         .flatten()
     {

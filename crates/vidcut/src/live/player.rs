@@ -121,7 +121,7 @@ impl Player {
             presenting: None,
             muted: false,
             scrubbing: true,
-            gpu: crate::preferences::gpu_acceleration(),
+            gpu: crate::preferences::gpu_decoding(),
             audio_error: None,
         }
     }
@@ -457,8 +457,9 @@ impl Player {
         }
     }
 
-    /// Decodes as the GPU acceleration preference `gpu` says; whether that
-    /// changed. The engine decodes its pictures anew, the one shown first.
+    /// Decodes on the GPU or not as the preferences say (`gpu`: GPU
+    /// acceleration and decoding on); whether that changed. The engine
+    /// decodes its pictures anew, the one shown first.
     pub fn follow_gpu(&mut self, gpu: bool) -> bool {
         if self.gpu == gpu {
             return false;

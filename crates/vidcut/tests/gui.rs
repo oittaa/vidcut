@@ -8,7 +8,8 @@
 //! - a CLI edit is applied by the GUI and shows in its window in < 100 ms;
 //! - live control keeps working while the window is minimized;
 //! - playing keeps with the clock;
-//! - GPU acceleration switches the viewer's decoder at once.
+//! - GPU acceleration, and GPU decoding alone, switch the viewer's decoder
+//!   at once.
 //!
 //! The session must be unlocked: the window screenshots need the window
 //! shown (a hidden window doesn't paint on every system); the viewer's work
@@ -333,6 +334,13 @@ fn gui_acceptance() {
     gui.check_frame(181);
     wait_for(&gui, &|h| h == before);
     gui.check_frame(182);
+    // Decoding alone off: the CPU decodes, the GPU on for the rest.
+    gui.cli(&["preferences", "set", "gpu.decoding=false"]);
+    wait_for(&gui, &|h| h == "no");
+    gui.check_frame(183);
+    gui.cli(&["preferences", "set", "gpu.decoding=true"]);
+    wait_for(&gui, &|h| h == before);
+    gui.check_frame(184);
 
     // Quit cleanly: the instance unregisters.
     gui.cli(&["gui", "quit"]);
