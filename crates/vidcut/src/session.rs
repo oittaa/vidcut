@@ -481,27 +481,12 @@ fn display_gpus() -> Vec<String> {
 
 /// Dependencies and environment, for humans and agents debugging setups.
 pub fn doctor() -> Value {
-    let gpus: Vec<Value> = std::fs::read_dir("/sys/class/drm")
-        .map(|dir| {
-            let mut nodes: Vec<Value> = dir
-                .flatten()
-                .filter(|e| e.file_name().to_string_lossy().starts_with("renderD"))
-                .map(|e| {
-                    let driver = std::fs::read_link(e.path().join("device/driver"))
-                        .ok()
-                        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));
-                    json!({ "node": format!("/dev/dri/{}", e.file_name().to_string_lossy()), "driver": driver })
-                })
-                .collect();
-            nodes.sort_by_key(|v| v["node"].as_str().unwrap_or_default().to_string());
-            nodes
-        })
-        .unwrap_or_default();
     json!({
         "vidcut": env!("CARGO_PKG_VERSION"),
+        "system": crate::system::version(),
         "ffmpeg": vidcut_av::library_versions(),
         "audio_output": match vidcut_av::player::output_device() { Ok(d) => json!(d), Err(e) => json!(e.to_string()) },
-        "gpus": gpus,
+        "gpus": crate::system::gpus(),
         "display_gpus": display_gpus(),
         "state_dir": state_dir(),
         "test_data": vidcut_av::testdata::root(),

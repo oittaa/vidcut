@@ -21,4 +21,4 @@ These guide what gets built and what gets tested.
 
 ## What comes next
 
-Moving an edit in either direction, and between computers, should take no fixing by hand. Open work is in [docs/todo/](todo/), one file per item, each saying when it is wanted. Roughly: the interchange first (use case 1), then the smaller items, then macOS and Windows.
+Moving an edit in either direction, and between computers, should take no fixing by hand. Open work is in [docs/todo/](todo/), one file per item, each saying when it is wanted. Roughly: the interchange first (use case 1), then the smaller items, then macOS.

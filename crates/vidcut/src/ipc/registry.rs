@@ -1,6 +1,7 @@
 //! Running GUIs announce themselves with `<pid>.json` (and listen on
-//! `<pid>.sock`) in `$XDG_RUNTIME_DIR/vidcut/instances/`. Entries of processes
-//! that are gone are removed when listed.
+//! `<pid>.sock`, on Windows a pipe named after it) in
+//! `$XDG_RUNTIME_DIR/vidcut/instances/`. Entries of processes that are gone
+//! are removed when listed.
 
 use std::path::{Path, PathBuf};
 
@@ -20,8 +21,20 @@ pub fn dir() -> PathBuf {
     super::runtime_dir().join("instances")
 }
 
+/// Where this process's GUI listens: `<pid>.sock` in [`dir`]. On Windows
+/// the name also holds a number picked at random, as the pipe named after
+/// it is in a namespace every user sees: nobody can take it first.
 pub fn socket_path(pid: u32) -> PathBuf {
-    dir().join(format!("{pid}.sock"))
+    #[cfg(windows)]
+    let name = {
+        use std::hash::{BuildHasher, RandomState};
+        static SALT: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+        let salt = SALT.get_or_init(|| RandomState::new().hash_one(std::process::id()));
+        format!("{pid}-{salt:016x}.sock")
+    };
+    #[cfg(not(windows))]
+    let name = format!("{pid}.sock");
+    dir().join(name)
 }
 
 fn entry_path(pid: u32) -> PathBuf {
@@ -46,6 +59,7 @@ pub fn unregister(pid: u32) {
 }
 
 /// Whether a process with this pid exists.
+#[cfg(unix)]
 fn alive(pid: u32) -> bool {
     let Ok(pid) = libc::pid_t::try_from(pid) else {
         return false;
@@ -53,6 +67,29 @@ fn alive(pid: u32) -> bool {
     // SAFETY: signal 0 only checks for existence and permission.
     let r = unsafe { libc::kill(pid, 0) };
     r == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+/// Whether a process with this pid is running.
+#[cfg(windows)]
+fn alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, ERROR_ACCESS_DENIED, GetLastError, STILL_ACTIVE,
+    };
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    // SAFETY: opens the process only to read its exit code, and closes it.
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            // Another user's process is there, but not ours to open.
+            return GetLastError() == ERROR_ACCESS_DENIED;
+        }
+        let mut code = 0u32;
+        let read = GetExitCodeProcess(process, &mut code);
+        CloseHandle(process);
+        read != 0 && code == STILL_ACTIVE as u32
+    }
 }
 
 fn read(path: &Path) -> Option<Instance> {
@@ -71,7 +108,7 @@ pub fn list() -> Vec<Instance> {
             continue;
         }
         match read(&path) {
-            Some(i) if alive(i.pid) && i.socket.exists() => out.push(i),
+            Some(i) if alive(i.pid) && super::transport::exists(&i.socket) => out.push(i),
             Some(i) if !alive(i.pid) => unregister(i.pid),
             _ => {}
         }

@@ -1,6 +1,6 @@
 # Our own player: what is left
 
-**When:** next. It opens the way for [macOS and Windows](macos-windows.md).
+**When:** next. It opens the way for [macOS](macos.md).
 
 The GUI already plays through the engine ([player.md](../decisions/player.md), [preview.md](../decisions/preview.md)). Still open:
 

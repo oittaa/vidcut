@@ -5,6 +5,7 @@
 
 pub mod analysis;
 pub mod describe;
+pub mod dirs;
 pub mod editor;
 pub mod error;
 pub mod export;

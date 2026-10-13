@@ -116,7 +116,16 @@ pub fn system_memory() -> Option<usize> {
         };
         (pages > 0 && size > 0).then(|| (pages as usize).saturating_mul(size as usize))
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+        // SAFETY: fills the struct it is given, its length set first.
+        let mut status: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
+        status.dwLength = size_of::<MEMORYSTATUSEX>() as u32;
+        (unsafe { GlobalMemoryStatusEx(&mut status) } != 0)
+            .then(|| usize::try_from(status.ullTotalPhys).unwrap_or(usize::MAX))
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         None
     }
@@ -516,15 +525,12 @@ impl Shared {
     /// The decode thread decodes on `device`: an automatic video memory
     /// budget is half its memory from now on.
     pub(crate) fn gpu_found(&self, device: &crate::cuda::CudaDevice) {
-        #[cfg(unix)]
         if self.gpu_memory.get().is_none()
             && let Ok(bytes) = device.memory()
         {
             let _ = self.gpu_memory.set(bytes);
             self.apply_video_budget();
         }
-        #[cfg(not(unix))]
-        let _ = device;
     }
 
     fn apply_video_budget(&self) {

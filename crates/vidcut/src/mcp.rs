@@ -514,15 +514,20 @@ mod tests {
         absolute_paths(&mut frame);
         assert!(matches!(frame, Request::FrameRender { ref out, .. } if *out == cwd.join("f.png")));
         // In a batch too.
+        let elsewhere = if cfg!(windows) {
+            r"D:\x\b.mp4"
+        } else {
+            "/x/b.mp4"
+        };
         let mut batch = Request::from_parts(
             "apply",
             Some(json!({"commands": [
-                {"method": "media.add", "params": {"paths": ["a.mp4", "/x/b.mp4"]}},
+                {"method": "media.add", "params": {"paths": ["a.mp4", elsewhere]}},
             ]})),
         )
         .unwrap();
         absolute_paths(&mut batch);
         let paths: Vec<PathBuf> = batch.paths_mut().into_iter().map(|p| p.clone()).collect();
-        assert_eq!(paths, [cwd.join("a.mp4"), PathBuf::from("/x/b.mp4")]);
+        assert_eq!(paths, [cwd.join("a.mp4"), PathBuf::from(elsewhere)]);
     }
 }

@@ -150,9 +150,15 @@ impl LocalTime {
 /// `ms` (since 1970 UTC) in the computer's time zone.
 fn local_time(ms: u64) -> Option<LocalTime> {
     let secs = libc::time_t::try_from(ms / 1000).ok()?;
-    // SAFETY: localtime_r writes only the `tm` it is given.
+    // SAFETY: localtime_r (localtime_s on Windows) writes only the `tm` it
+    // is given.
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    #[cfg(unix)]
     if unsafe { libc::localtime_r(&secs, &mut tm) }.is_null() {
+        return None;
+    }
+    #[cfg(windows)]
+    if unsafe { libc::localtime_s(&mut tm, &secs) } != 0 {
         return None;
     }
     Some(LocalTime {

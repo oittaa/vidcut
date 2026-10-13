@@ -42,7 +42,10 @@ fn run(cli: &Cli) -> Result<()> {
         },
     };
     match action {
-        Action::Gui { project } => vidcut::gui::run(project),
+        Action::Gui { project } => {
+            leave_own_console();
+            vidcut::gui::run(project)
+        }
         Action::Mcp => vidcut::mcp::serve(
             cli.project.clone(),
             RouteOptions {
@@ -185,6 +188,22 @@ impl ProgressBar {
         );
         if frames == total {
             eprintln!();
+        }
+    }
+}
+
+/// On Windows, a program for the console gets a console window of its own
+/// when started from the desktop: the GUI closes it, unless a terminal it
+/// was started from shares it.
+fn leave_own_console() {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Console::{FreeConsole, GetConsoleProcessList};
+        let mut processes = [0u32; 2];
+        // SAFETY: fills at most the two ids it is given room for.
+        if unsafe { GetConsoleProcessList(processes.as_mut_ptr(), 2) } == 1 {
+            // SAFETY: detaches this process from its console.
+            unsafe { FreeConsole() };
         }
     }
 }

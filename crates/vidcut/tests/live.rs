@@ -311,6 +311,34 @@ fn fixture_file(frames: u32) -> PathBuf {
     .unwrap()
 }
 
+/// Makes `path` unreadable for this user, or readable again: its
+/// permissions, or on Windows an entry denying this user its data (on both,
+/// handles open already keep reading).
+fn set_readable(path: &Path, readable: bool) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = if readable { 0o644 } else { 0o000 };
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+    #[cfg(windows)]
+    {
+        let user = match std::env::var("USERDOMAIN") {
+            Ok(domain) => format!("{domain}\\{}", std::env::var("USERNAME").unwrap()),
+            Err(_) => std::env::var("USERNAME").unwrap(),
+        };
+        let mut icacls = std::process::Command::new("icacls");
+        icacls.arg(path);
+        if readable {
+            icacls.args(["/remove:d", &user]);
+        } else {
+            icacls.args(["/deny", &format!("{user}:(RD)")]);
+        }
+        let out = icacls.output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+    }
+}
+
 /// Milliseconds from `a` to `b`, negative when `b` is earlier.
 fn ms_between(a: Instant, b: Instant) -> f64 {
     if b >= a {
@@ -1079,8 +1107,7 @@ fn live_session() {
     std::fs::copy(fixture_file(300), &gone).unwrap();
     let added = h.ok("media.add", json!({ "paths": [gone] }));
     let media = added.changes.created[0].clone();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&gone, std::fs::Permissions::from_mode(0o000)).unwrap();
+    set_readable(&gone, false);
     let started = Instant::now();
     let e = h
         .call("viewer.load", json!({ "media": media }))
@@ -1089,7 +1116,7 @@ fn live_session() {
     assert!(started.elapsed() < Duration::from_secs(5), "{e}");
     let state = h.ok("player.state", json!({})).result;
     assert!(state["source"]["error"].is_string(), "{state}");
-    std::fs::set_permissions(&gone, std::fs::Permissions::from_mode(0o644)).unwrap();
+    set_readable(&gone, true);
 
     step("Switching back: the frame decoded meanwhile, the fader held");
     // A new project: a new engine, nothing decoded yet.

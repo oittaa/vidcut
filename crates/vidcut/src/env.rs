@@ -96,8 +96,7 @@ pub fn input_of(m: &Media) -> vidcut_av::decode::Input {
 
 impl Env for AvEnv {
     fn probe(&self, path: &Path) -> Result<ProbedMedia> {
-        let canonical = path
-            .canonicalize()
+        let canonical = vidcut_core::dirs::canonical(path)
             .map_err(|e| Error::media(format!("{}: {e}", path.display())))?;
         let meta = std::fs::metadata(&canonical)
             .map_err(|e| Error::media(format!("{}: {e}", path.display())))?;
@@ -126,8 +125,7 @@ impl Env for AvEnv {
     }
 
     fn probe_sequence(&self, path: &Path, rate: Rational) -> Result<ProbedMedia> {
-        let canonical = path
-            .canonicalize()
+        let canonical = vidcut_core::dirs::canonical(path)
             .map_err(|e| Error::media(format!("{}: {e}", path.display())))?;
         let sequence = vidcut_core::sequence::find(&canonical)?;
         let dir = canonical.parent().unwrap_or(Path::new("/"));
@@ -473,23 +471,28 @@ pub fn fill_timecodes(p: &mut vidcut_core::Project, ids: &[String]) {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
     use super::frame_rate;
     use vidcut_core::Env;
 
     #[test]
     fn only_regular_files_are_media() {
-        // A pipe would block the probe until something writes to it.
         let tmp = tempfile::Builder::new()
             .prefix("vidcut-env-")
             .tempdir()
             .unwrap();
         let dir = tmp.path();
-        let fifo = dir.join("pipe.mp4");
-        let c = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
-        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
-        for path in [std::path::Path::new("/dev/null"), Path::new("/tmp"), &fifo] {
+        // A folder; on Unix a device and a pipe too, which would block the
+        // probe until something writes to it.
+        #[cfg(unix)]
+        let paths = {
+            let fifo = dir.join("pipe.mp4");
+            let c = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+            assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+            vec![dir.to_path_buf(), "/dev/null".into(), fifo]
+        };
+        #[cfg(not(unix))]
+        let paths = vec![dir.to_path_buf()];
+        for path in &paths {
             let e = super::AvEnv::new().probe(path).unwrap_err();
             assert!(e.message.contains("not a regular file"), "{path:?}: {e}");
         }

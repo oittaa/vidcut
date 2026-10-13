@@ -3,17 +3,25 @@
 //! planes are copied into it on the GPU, from where the display copies them
 //! into its textures. Nothing goes through memory or the CPU.
 //!
-//! CUDA's driver library is loaded when first needed (`libcuda.so.1`, which
-//! the NVIDIA driver installs and FFmpeg's CUDA device already uses); the
-//! few calls here are declared as its `cuda.h` has them.
+//! CUDA's driver library is loaded when first needed (`libcuda.so.1`, or
+//! `nvcuda.dll` on Windows, which the NVIDIA driver installs and FFmpeg's
+//! CUDA device already uses); the few calls here are declared as its
+//! `cuda.h` has them. Memory comes as a file descriptor on Linux and as a
+//! Win32 handle on Windows.
 
 use std::ffi::c_void;
-use std::os::fd::{IntoRawFd, OwnedFd};
 use std::sync::OnceLock;
 
 use super::{CudaDevice, PlaneCopy};
 use crate::error::{Error, Result};
 use crate::ffmpeg::{ffi, format, frame};
+
+/// Memory a Vulkan device exported, in the form this system passes it
+/// (`VK_KHR_external_memory_fd`, `VK_KHR_external_memory_win32`).
+#[cfg(unix)]
+pub type Exported = std::os::fd::OwnedFd;
+#[cfg(windows)]
+pub type Exported = std::os::windows::io::OwnedHandle;
 
 type CuResult = i32;
 type CuDevicePtr = u64;
@@ -62,9 +70,15 @@ struct Memcpy2d {
     height: usize,
 }
 
-const HANDLE_TYPE_OPAQUE_FD: u32 = 1;
+/// `CU_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD`, `_OPAQUE_WIN32`.
+#[cfg(unix)]
+const HANDLE_TYPE: u32 = 1;
+#[cfg(windows)]
+const HANDLE_TYPE: u32 = 2;
 const DEDICATED: u32 = 1;
 const MEMORY_TYPE_DEVICE: u32 = 2;
+/// `CU_STREAM_NON_BLOCKING`: no implicit waits for the default stream.
+const STREAM_NON_BLOCKING: u32 = 1;
 
 /// The driver's calls used here.
 struct Cuda {
@@ -81,6 +95,8 @@ struct Cuda {
     free: unsafe extern "C" fn(CuDevicePtr) -> CuResult,
     copy_2d: unsafe extern "C" fn(*const Memcpy2d, CuStream) -> CuResult,
     synchronize: unsafe extern "C" fn(CuStream) -> CuResult,
+    stream_create: unsafe extern "C" fn(*mut CuStream, u32) -> CuResult,
+    stream_destroy: unsafe extern "C" fn(CuStream) -> CuResult,
 }
 
 impl Cuda {
@@ -96,7 +112,10 @@ impl Cuda {
     /// them.
     unsafe fn load() -> std::result::Result<Self, libloading::Error> {
         unsafe {
+            #[cfg(unix)]
             let lib = libloading::Library::new("libcuda.so.1")?;
+            #[cfg(windows)]
+            let lib = libloading::Library::new("nvcuda.dll")?;
             macro_rules! call {
                 ($name:literal) => {
                     *lib.get(concat!($name, "\0").as_bytes())?
@@ -114,6 +133,8 @@ impl Cuda {
                 free: call!("cuMemFree_v2"),
                 copy_2d: call!("cuMemcpy2DAsync_v2"),
                 synchronize: call!("cuStreamSynchronize"),
+                stream_create: call!("cuStreamCreate"),
+                stream_destroy: call!("cuStreamDestroy_v2"),
                 _lib: lib,
             })
         }
@@ -190,6 +211,93 @@ impl CudaDevice {
     }
 }
 
+/// Waits until the work queued on the stream of `frame`'s device is done,
+/// for a frame in CUDA memory.
+pub(crate) fn wait_for(frame: &frame::Video) -> Result<()> {
+    if frame.format() != format::Pixel::CUDA {
+        return Ok(());
+    }
+    let cuda = Cuda::get()?;
+    // SAFETY: a CUDA frame's frames context is on a CUDA device.
+    let (ctx, stream) = unsafe {
+        let frames = (*frame.as_ptr()).hw_frames_ctx;
+        if frames.is_null() {
+            return Ok(());
+        }
+        cuda_context((*((*frames).data as *const ffi::AVHWFramesContext)).device_ref)
+    };
+    in_context(cuda, ctx, || {
+        check("waiting for the GPU", unsafe { (cuda.synchronize)(stream) })
+    })
+}
+
+/// A stream of a CUDA device's context, destroyed when dropped.
+pub(crate) struct Stream {
+    cuda: &'static Cuda,
+    ctx: CuContext,
+    raw: CuStream,
+}
+
+impl Stream {
+    /// A new stream on `device`'s context, which doesn't wait for the
+    /// context's default stream.
+    pub(crate) fn new(device: &CudaDevice) -> Result<Self> {
+        let cuda = Cuda::get()?;
+        let (ctx, _) = unsafe { cuda_context(device.as_ptr()) };
+        let raw = in_context(cuda, ctx, || {
+            let mut raw = std::ptr::null_mut();
+            check("making a stream", unsafe {
+                (cuda.stream_create)(&mut raw, STREAM_NON_BLOCKING)
+            })?;
+            Ok(raw)
+        })?;
+        Ok(Self { cuda, ctx, raw })
+    }
+
+    pub(crate) fn as_raw(&self) -> CuStream {
+        self.raw
+    }
+
+    /// Lets go of it, for [`destroy_stream`] to destroy.
+    pub(crate) fn into_raw(self) -> *mut c_void {
+        let raw = self.raw;
+        std::mem::forget(self);
+        raw
+    }
+}
+
+impl Drop for Stream {
+    fn drop(&mut self) {
+        let _ = in_context(self.cuda, self.ctx, || {
+            check("destroying a stream", unsafe {
+                (self.cuda.stream_destroy)(self.raw)
+            })
+        });
+    }
+}
+
+/// Destroys the stream a device of `CudaDevice::with_own_stream` keeps in
+/// its `user_opaque`: FFmpeg calls it as the device goes.
+///
+/// # Safety
+/// `device` is such a device, its context still there.
+pub(crate) unsafe extern "C" fn destroy_stream(device: *mut ffi::AVHWDeviceContext) {
+    let Ok(cuda) = Cuda::get() else { return };
+    // SAFETY: the device's CUDA context, and the stream made with it.
+    let (ctx, stream) = unsafe {
+        let hw = (*device).hwctx as *const ffi::AVCUDADeviceContext;
+        (
+            (*hw).cuda_ctx as CuContext,
+            (*device).user_opaque as CuStream,
+        )
+    };
+    let _ = in_context(cuda, ctx, || {
+        check("destroying a stream", unsafe {
+            (cuda.stream_destroy)(stream)
+        })
+    });
+}
+
 /// Memory a display's Vulkan device exported, as CUDA sees it: pictures
 /// NVDEC decoded are copied into it on the GPU.
 pub struct SharedBuffer {
@@ -209,39 +317,54 @@ unsafe impl Send for SharedBuffer {}
 
 impl SharedBuffer {
     /// Imports `size` bytes of memory a Vulkan device exported as an opaque
-    /// file descriptor (`VK_KHR_external_memory_fd`), into `device`'s
-    /// context. CUDA owns the descriptor from then on.
+    /// file descriptor (`VK_KHR_external_memory_fd`), or on Windows an
+    /// opaque Win32 handle (`VK_KHR_external_memory_win32`), into
+    /// `device`'s context. CUDA owns a descriptor from then on; a Win32
+    /// handle stays the caller's, and is closed here once CUDA holds the
+    /// memory.
     ///
     /// # Safety
-    /// `fd` must be memory of at least `size` bytes, exported by a Vulkan
-    /// device on `device`'s GPU (see [`CudaDevice::uuid`]), from a dedicated
-    /// allocation when `dedicated`. The memory must stay allocated while
-    /// this lives.
+    /// `exported` must be memory of at least `size` bytes, exported by a
+    /// Vulkan device on `device`'s GPU (see [`CudaDevice::uuid`]), from a
+    /// dedicated allocation when `dedicated`. The memory must stay allocated
+    /// while this lives.
     pub unsafe fn import(
         device: &CudaDevice,
-        fd: OwnedFd,
+        exported: Exported,
         size: u64,
         dedicated: bool,
     ) -> Result<Self> {
         let cuda = Cuda::get()?;
         let (ctx, stream) = unsafe { cuda_context(device.as_ptr()) };
         in_context(cuda, ctx, || {
-            let raw = fd.into_raw_fd();
+            #[cfg(unix)]
+            let handle = {
+                use std::os::fd::AsRawFd;
+                [u64::from(exported.as_raw_fd() as u32), 0]
+            };
+            #[cfg(windows)]
+            let handle = {
+                use std::os::windows::io::AsRawHandle;
+                [exported.as_raw_handle() as u64, 0]
+            };
             let desc = HandleDesc {
-                kind: HANDLE_TYPE_OPAQUE_FD,
-                handle: [u64::from(raw as u32), 0],
+                kind: HANDLE_TYPE,
+                handle,
                 size,
                 flags: if dedicated { DEDICATED } else { 0 },
                 reserved: [0; 16],
             };
             let mut memory = std::ptr::null_mut();
-            if let Err(e) = check("importing shared memory", unsafe {
+            // Not taken, the descriptor is still ours to close: dropped.
+            check("importing shared memory", unsafe {
                 (cuda.import)(&mut memory, &desc)
-            }) {
-                // Not taken: still ours to close.
-                drop(unsafe { <OwnedFd as std::os::fd::FromRawFd>::from_raw_fd(raw) });
-                return Err(e);
-            }
+            })?;
+            // Taken: a descriptor is CUDA's now. A Win32 handle isn't, and
+            // CUDA keeps a reference of its own.
+            #[cfg(unix)]
+            std::mem::forget(exported);
+            #[cfg(windows)]
+            drop(exported);
             let buffer = BufferDesc {
                 offset: 0,
                 size,

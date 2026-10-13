@@ -270,9 +270,13 @@ pub(crate) struct GpuSide {
 /// BT.709, and HDR). The reader deinterlaces interlaced frames on the GPU
 /// in decode order, before the sampling rule picks them, as on the CPU.
 fn gpu_reader(input: &Input, gpu: &GpuSide) -> Option<(VideoReader, crate::cuda::CudaPictures)> {
-    let reader = VideoReader::open_cuda(input, &gpu.device).ok()?;
+    // A stream of its own: the next piece opens, and makes its first
+    // picture, on another thread while this one encodes. Frames go to the
+    // encoder once their stream's work is done (`share::wait_for`).
+    let device = gpu.device.with_own_stream().ok()?;
+    let reader = VideoReader::open_cuda(input, &device).ok()?;
     let scaler =
-        crate::cuda::CudaPictures::new(&gpu.device, &reader, gpu.out, gpu.format, gpu.target, true)
+        crate::cuda::CudaPictures::new(&device, &reader, gpu.out, gpu.format, gpu.target, true)
             .ok()?;
     Some((reader, scaler))
 }

@@ -207,12 +207,15 @@ pub fn write(
         })
     };
     let mut errors = Vec::new();
-    // NVDEC needs a CUDA device; one for the whole proxy.
+    // NVDEC needs a CUDA device; one for the whole proxy, with a stream of
+    // its own (`CudaDevice::with_own_stream`).
     let mut cuda = None;
     for enc in encoders {
         if enc.kind == EncoderChoice::Nvenc && matches!(input, Input::File(_)) {
             if cuda.is_none() {
-                cuda = crate::cuda::CudaDevice::open().ok();
+                cuda = crate::cuda::CudaDevice::open()
+                    .and_then(|d| d.with_own_stream())
+                    .ok();
             }
             if let Some(device) = &cuda {
                 match encode_on_gpu(input, device, enc, (width, height), &tmp, &shown) {
