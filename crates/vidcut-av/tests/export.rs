@@ -2512,6 +2512,17 @@ fn amf_exports_keep_frames_on_the_gpu() {
         ))
     };
     let a = at(VideoCodec::H264, (1280, 720), 60);
+    // 24 frames a second in a 30 fps plan: a frame shown twice now and
+    // then, sent to the encoder again (VP9: AMD's Direct3D 11 leaves H.264
+    // to the CPU).
+    let slow = src(FixtureSpec::new(
+        VideoCodec::Vp9,
+        Container::Mkv,
+        1280,
+        720,
+        (24, 1),
+        40,
+    ));
     let b = at(VideoCodec::Hevc10, (1280, 720), 30);
     let big = at(VideoCodec::Hevc10, (1920, 1080), 20);
     let e = at(VideoCodec::Av1, (1280, 720), 20);
@@ -2527,6 +2538,7 @@ fn amf_exports_keep_frames_on_the_gpu() {
     // Each piece, and whether it stays on the GPU where the GPU decodes it.
     let pieces = [
         (v(&a, 0, 30), true),
+        (v(&slow, 0, 30), true),
         (VideoPiece::Black { frames: 10 }, false),
         (v(&b, 0, 30), true),
         (v(&big, 0, 20), true),
@@ -2571,6 +2583,11 @@ fn amf_exports_keep_frames_on_the_gpu() {
     let cpu = dir.path().join("cpu.mkv");
     render(&p, &reference, &cpu);
     let want = barcodes(&cpu);
+    // And at 10 bits, for the 10-bit export's levels.
+    let mut reference10 = reference.clone();
+    reference10.video.as_mut().unwrap().bit_depth = Some(10);
+    let cpu10 = dir.path().join("cpu10.mkv");
+    render(&p, &reference10, &cpu10);
     for (codec, bits) in [(VCodec::H264, 8), (VCodec::Hevc, 10)] {
         let mut settings = reference.clone();
         let v = settings.video.as_mut().unwrap();
@@ -2597,38 +2614,42 @@ fn amf_exports_keep_frames_on_the_gpu() {
         );
         assert_eq!(barcodes(&out), want, "{bits}-bit");
         // The pillarboxed and letterboxed pictures start where the CPU's
-        // do, on video-range black: 4:3 (frames 130 to 139) and 2.4:1
-        // (140 to 149).
-        for k in [135, 145] {
+        // do, on video-range black: 4:3 (frames 160 to 169) and 2.4:1
+        // (170 to 179).
+        for k in [165, 175] {
             assert_eq!(
                 picture_starts(&frame_at(&out, k)),
                 picture_starts(&frame_at(&cpu, k)),
                 "{bits}-bit: frame {k}"
             );
         }
-        let m = region_means(&frame_at(&out, 135), (0, 100));
+        let m = region_means(&frame_at(&out, 165), (0, 100));
         let near = |v: f64, want: f64| (v - want).abs() <= 1.0;
         assert!(
             near(m[0], 16.0) && near(m[1], 128.0) && near(m[2], 128.0),
             "{bits}-bit: the bars are {m:?}"
         );
         // Levels hold through the video processor (10 bits into 8 too),
-        // within the encoder's noise.
-        if bits == 8 {
-            let (mut got, mut cpu_frames) = (
-                VideoReader::open(&out).unwrap(),
-                VideoReader::open(&cpu).unwrap(),
-            );
-            for k in 0..want.len() {
-                let g = got.next_frame().unwrap().unwrap();
-                let c = cpu_frames.next_frame().unwrap().unwrap();
-                for plane in 0..3 {
-                    let (abs, mean) = difference(&g, &c, plane);
-                    assert!(
-                        abs <= 1.5 && mean.abs() <= 0.75,
-                        "frame {k} plane {plane} is {abs:.2} levels from the CPU's, shifted {mean:.2}"
-                    );
-                }
+        // within the encoder's noise, against the CPU's export of the same
+        // depth (in its codes: 10 bits four times 8's).
+        let (reference, scale) = if bits == 8 {
+            (&cpu, 1.0)
+        } else {
+            (&cpu10, 4.0)
+        };
+        let (mut got, mut cpu_frames) = (
+            VideoReader::open(&out).unwrap(),
+            VideoReader::open(reference).unwrap(),
+        );
+        for k in 0..want.len() {
+            let g = got.next_frame().unwrap().unwrap();
+            let c = cpu_frames.next_frame().unwrap().unwrap();
+            for plane in 0..3 {
+                let (abs, mean) = difference(&g, &c, plane);
+                assert!(
+                    abs <= 1.5 * scale && mean.abs() <= 0.75 * scale,
+                    "{bits}-bit: frame {k} plane {plane} is {abs:.2} codes from the CPU's, shifted {mean:.2}"
+                );
             }
         }
     }

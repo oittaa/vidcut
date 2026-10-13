@@ -807,7 +807,10 @@ impl Upload {
         }
     }
 
-    /// Copies a frame in memory into one of these (keeping its pts).
+    /// Copies a frame in memory into one of these, keeping its timestamp
+    /// and colors, as an encoder given the frame in memory would see them
+    /// (AMF reads HDR10's metadata only off frames whose transfer is PQ;
+    /// `hdr::insert_static` puts it in the file regardless).
     pub(crate) fn upload(&self, src: &frame::Video) -> Result<frame::Video> {
         let mut hw = frame::Video::empty();
         unsafe {
@@ -827,6 +830,16 @@ impl Upload {
             }
         }
         hw.set_pts(src.pts());
+        // SAFETY: both frames are valid; plain fields.
+        unsafe {
+            let (o, i) = (hw.as_mut_ptr(), src.as_ptr());
+            (*o).color_range = (*i).color_range;
+            (*o).colorspace = (*i).colorspace;
+            (*o).color_primaries = (*i).color_primaries;
+            (*o).color_trc = (*i).color_trc;
+            (*o).chroma_location = (*i).chroma_location;
+            (*o).sample_aspect_ratio = (*i).sample_aspect_ratio;
+        }
         Ok(hw)
     }
 }
