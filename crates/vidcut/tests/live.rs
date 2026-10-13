@@ -1090,5 +1090,61 @@ fn live_session() {
     assert!(state["source"]["error"].is_string(), "{state}");
     std::fs::set_permissions(&gone, std::fs::Permissions::from_mode(0o644)).unwrap();
 
+    step("Switching back: the frame decoded meanwhile, the fader held");
+    // A new project: a new engine, nothing decoded yet.
+    h.ok(
+        "project.open",
+        json!({ "path": dir.join("switch.vidcut"), "create": true }),
+    );
+    h.ok("media.add", json!({ "paths": [fixture_file(300)] }));
+    h.ok("edit.append", json!({ "media": "m1", "range": "0f..90f" }));
+    h.ok("player.audio_scrubbing", json!({ "on": false }));
+    h.ok("player.seek", json!({ "at": 10, "viewer": "timeline" }));
+    h.ok("viewer.load", json!({ "media": "m1", "at": "200f" }));
+    // Nothing else to publish a snapshot meanwhile: the pool's pictures
+    // and sound are done.
+    h.wait_for("the pool's thumbnails and waveform", |s| {
+        s.thumbs.contains_key("m1") && s.waveforms.contains_key("m1")
+    });
+    // An edit function from the source moves the timeline's playhead to
+    // frame 50, never decoded: it decodes while the source shows, and the
+    // snapshot says when it is ready.
+    h.ok(
+        "edit.overwrite",
+        json!({ "media": "m1", "range": "250f..260f", "at": 40 }),
+    );
+    let took = h.wait_for("the timeline's frame decoded while hidden", |s| {
+        s.timeline.position == 50 && s.timeline.ready
+    });
+    eprintln!("  the timeline's frame was decoded {took:?} after the edit");
+    h.ok("viewer.set", json!({ "mode": "timeline" }));
+    assert_eq!(h.shown(dir), Some(50));
+    // A fader held while the viewer goes to the source and back (Q twice)
+    // is heard as held: the beeps at frames 0 and 30 come 40 dB down.
+    let sound = h.sound();
+    let peak_of_play = || {
+        h.ok("player.seek", json!({ "at": 0, "viewer": "timeline" }));
+        let from = sound.lock().unwrap().samples.len();
+        h.ok("player.play", json!({}));
+        std::thread::sleep(Duration::from_millis(1300));
+        h.ok("player.pause", json!({}));
+        let rec = sound.lock().unwrap();
+        rec.samples[from..].iter().fold(0f32, |m, s| m.max(s.abs()))
+    };
+    // Track 1's clips carry their sound: its fader is V1's.
+    let preview = h.ok(
+        "mixer.preview",
+        json!({ "track": "V1", "volume_db": -40.0 }),
+    );
+    assert_eq!(preview.result["live"], true);
+    h.ok("viewer.set", json!({ "mode": "source_clip" }));
+    h.ok("viewer.set", json!({ "mode": "timeline" }));
+    let held = peak_of_play();
+    h.ok("mixer.preview", json!({ "track": "V1", "volume_db": 0.0 }));
+    let saved = peak_of_play();
+    eprintln!("  beeps peak at {held:.4} held at -40 dB, {saved:.4} at 0 dB");
+    assert!(saved > 0.1, "the beeps play: {saved}");
+    assert!(held < saved * 0.05, "held {held}, saved {saved}");
+
     drop(h);
 }

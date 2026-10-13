@@ -277,13 +277,13 @@ fn gui_acceptance() {
     gui.cli(&["gui", "window", "--minimized", "false"]);
     std::thread::sleep(Duration::from_millis(300));
     gui.cli(&["player", "seek", "0f", "--viewer", "timeline"]);
-    let state = |gui: &Gui| gui.cli(&["player", "state"]).0["result"]["timeline"].clone();
+    let state = |gui: &Gui| gui.cli(&["player", "state"]).0["result"].clone();
     let before = state(&gui);
     gui.cli(&["player", "play"]);
     std::thread::sleep(Duration::from_secs(2));
     let (paused, _) = gui.cli(&["player", "pause"]);
-    let after = &paused["result"]["timeline"];
-    let played = after["position"].as_i64().unwrap();
+    let after = &paused["result"];
+    let played = after["timeline"]["position"].as_i64().unwrap();
     let late = after["late"].as_u64().unwrap() - before["late"].as_u64().unwrap();
     eprintln!("played {played} frames in 2 s, {late} late presents");
     assert!((50..=70).contains(&played), "played {played} frames in 2 s");

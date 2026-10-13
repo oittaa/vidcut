@@ -79,7 +79,7 @@ pub struct Config {
     /// §4.5, decision D42). On unless set otherwise.
     pub audio_scrubbing: bool,
     /// Called on the decode thread when the picture of the frame the viewer
-    /// is at lands: a display repaints.
+    /// is at lands (a display repaints), and when the prepared one does.
     pub on_picture: Option<Arc<dyn Fn() + Send + Sync>>,
     /// Decode on the GPU (NVDEC) the streams it decodes, the frames copied
     /// down to memory at their own size ([`set_hardware`](Player::set_hardware)).
@@ -439,6 +439,13 @@ impl Shared {
     /// The picture of the frame the viewer is at landed.
     pub(crate) fn landed(&self) {
         lock(&self.failed).take();
+        if let Some(f) = &self.on_picture {
+            f();
+        }
+    }
+
+    /// The prepared picture landed: `Status::prepared` changed.
+    pub(crate) fn prepared(&self) {
         if let Some(f) = &self.on_picture {
             f();
         }

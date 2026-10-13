@@ -780,9 +780,10 @@ impl Live {
                 reply,
             } => self.request(envelope, origin, project, reply),
             Msg::Picture => {
-                // Waits look again in `tick`; a present may be due.
+                // Waits look again in `tick`; a present may be due. The
+                // snapshot changes when the picture kept ready landed.
                 self.present_due();
-                changed = false;
+                changed = self.ready_changed();
             }
             Msg::Presented { motion, frame } => {
                 self.player.presented(motion, frame);
@@ -1020,6 +1021,18 @@ impl Live {
             }
         }
         next
+    }
+
+    /// Whether the published snapshot's `ready` is out of date: the
+    /// picture there landed.
+    fn ready_changed(&self) -> bool {
+        let snap = self
+            .shared
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        snap.source.ready != self.player.snap(SOURCE).ready
+            || snap.timeline.ready != self.player.snap(TIMELINE).ready
     }
 
     fn publish(&mut self) {
@@ -2597,15 +2610,13 @@ impl Live {
     }
 
     fn state_json(&self) -> Value {
+        let (late, skipped) = self.player.misses();
         let p = self.project.as_ref().map(|o| o.project());
         let fps = p.map_or(Rational::new(30, 1).expect("valid"), |p| p.settings.fps);
         let tc = |f: i64, stc: i64| format_timecode(f, fps, stc);
-        let (late, skipped) = self.player.misses();
         let player = |id: PlayerId, stc: i64| {
             let snap = self.player.snap(id);
             json!({
-                "late": late,
-                "skipped": skipped,
                 "loaded": snap.loaded,
                 "frames": snap.frames,
                 "position": snap.position,
@@ -2642,6 +2653,9 @@ impl Live {
             "source_media": self.source_media,
             "source": source,
             "timeline": player(TIMELINE, p.map_or(0, |p| p.settings.start_tc)),
+            // The viewer's: whichever it played.
+            "late": late,
+            "skipped": skipped,
             "selection": self.selection,
             "pool": self.pool,
             "muted": self.player.muted(),
