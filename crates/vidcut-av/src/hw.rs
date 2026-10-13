@@ -99,6 +99,50 @@ impl Device {
         Self::of_type(kind.device_type(), on)
     }
 
+    /// QSV's device on `on`: a render node (Linux) or an adapter's index
+    /// (Windows), the first Intel GPU when empty. FFmpeg reads QSV's own
+    /// device string as the implementation to load (`1` is the software
+    /// one), so the GPU goes in as the device QSV runs on top of
+    /// (`child_device`): VA-API's on Linux, Direct3D 11's on Windows.
+    pub(crate) fn qsv(on: &str) -> Result<Self> {
+        crate::init();
+        let mut options = ffmpeg::Dictionary::new();
+        options.set(
+            "child_device_type",
+            if cfg!(windows) { "d3d11va" } else { "vaapi" },
+        );
+        if !on.is_empty() {
+            options.set("child_device", on);
+        }
+        let mut device = ptr::null_mut();
+        // SAFETY: the options' dictionary is FFmpeg's to read and is freed
+        // after; FFmpeg makes the device from it.
+        let ret = unsafe {
+            let mut raw = options.disown();
+            let ret = ffi::av_hwdevice_ctx_create(
+                &mut device,
+                ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_QSV,
+                ptr::null(),
+                raw,
+                0,
+            );
+            ffi::av_dict_free(&mut raw);
+            ret
+        };
+        if ret < 0 || device.is_null() {
+            let on = if on.is_empty() {
+                "the first Intel GPU"
+            } else {
+                on
+            };
+            return Err(Error::Ffmpeg {
+                context: format!("opening QSV on {on}"),
+                source: ffmpeg::Error::from(ret),
+            });
+        }
+        Ok(Self(device))
+    }
+
     /// FFmpeg's device of type `ty` on `on`, as [`open`](Self::open): for
     /// an encoder, which runs on one too.
     pub(crate) fn of_type(ty: ffi::AVHWDeviceType, on: &str) -> Result<Self> {
