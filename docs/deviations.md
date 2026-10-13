@@ -85,6 +85,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
     - the audio of each video track's clips, as an audio track (J/L cuts become audio clips offset from the video edits)
     - each audio track, and markers
     - in `metadata.vidcut`: the In/Out marks, clip gain/mute and track settings (lock, mute, solo, fader, name)
+    - the clip effects and transitions carried from another editor's file (below)
 
     A track's video off or audio muted also marks the OTIO track disabled. Unlike media exports it covers the whole timeline unless given a range. An `.otioz` or `.otiod` export (File > Export Timeline with Media) copies the media whole, as Resolve does; it runs as a job.
   - **What Resolve reads besides:**
@@ -104,12 +105,23 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
     - Other media that moved are found by name with `--search FOLDER` (subfolders too), and the GUI asks for that folder.
     - Only local regular files count as media: a device or a pipe counts as missing, and a clip whose `file://` URL names another host is left out with a warning.
   - **Bundles:** an `.otioz` import unpacks the media into a folder named after the bundle, next to it (`cut.otioz` → `cut/media/…`), or where `--unpack` says. Files already there are kept if they are the bundle's (by CRC-32); other files in the way are an error. A dry run unpacks nothing.
+  - **Clip effects** (Transform, Cropping, Composite, Video Faders, the clip volume's fades, Pan, …; another program's named ones too) stay on the clip's picture or sound: kept as data, not shown or played, and written back unchanged on export. Editing them stays out of scope (spec §1).
+    - **Which:** the ones in use: Resolve's when switched on with a setting off its default, Dynamic Zoom whenever it is on. The untouched stack Resolve writes on every clip and switched-off effects are left out.
+    - **Shown:** a badge on the clip (`fx Transform, Cropping`), their names in `timeline get` (`effects`), the effects themselves in `project get`, and one import warning naming them.
+    - **Through edits:** keyframe times count from the clip's first source frame, so they stay on their source frames through trims, slips and splits. A split leaves the fade-in on the first part and the fade-out on the last, as does an export that cuts a clip. The clip volume's level is the clip gain, written into it. An import at another frame rate converts keyframe times and fade lengths.
+    - **In Resolve** (Studio 21.1.1): an import of vidcut's file rebuilds them from the ones in use.
+  - **Transitions** (a dissolve as OTIO's `SMPTE_Dissolve`, Resolve's audio crossfades and others as `Custom_Transition`) stay on their edit points, between two clips' pictures or sounds, or between a clip and a gap (a fade from or to black). Shown and played as cuts; written back while they fit.
+    - **Fitting:** the clips on each side still meet at the cut (or the gap is still there), the clip after it has the transition's frames before the cut (`in_offset`) as media before its first frame, and the clip before it those after the cut (`out_offset`) after its last. A split of the clip before a cut hands the transition to the part that ends there.
+    - **Dropped** when an edit leaves one that no longer fits (a clip moved, deleted, or trimmed to the end of its media), and the edit's `warnings` say how many; an undo brings them back. An import drops those that don't fit the project's media, an export those at its edges.
+    - **Shown:** a box over the frames each covers, across the picture or sound band; in `timeline get`, each track's `transitions` with name and cut; one import warning naming them.
+    - **In Resolve** (Studio 21.1.1): an import of vidcut's file rebuilds them.
   - **Accepts what Resolve writes:** `Clip.1` and `Clip.2`, source ranges in media timecode, float rates (snapped to exact rationals such as 24000/1001), Resolve's effect lists.
-  - **Left out, with a warning each:** transitions (cuts instead), nested stacks (compound clips), generators, speed changes, clip volume keyframes and fades, clip effects in use (named; Resolve's own count when switched on with a setting off its default, Dynamic Zoom whenever it is on, so the untouched stack it writes on every clip says nothing), and clips that would overlap others on their track.
+  - **Left out, with a warning each:** nested stacks (compound clips), generators, speed changes, and clips that would overlap others on their track.
   - Export → import reproduces a timeline frame for frame, through all three formats and through OpenTimelineIO's own Python library (`tests/cli.rs`, `otio/tests.rs`).
 - **Why:**
   - OTIO is the user's choice: an open standard that Resolve and other editors read and write, so a cut can move to a finishing tool and back, and agents can write timelines in a documented format instead of vidcut's own. Resolve's other formats keep less of a cut: its EDL holds one video track and no audio tracks or markers, its FCPXML (1.10) no markers (checked with Studio 21.1.1).
   - Writing Resolve's own conventions (plain paths, timecode source ranges, link groups) is what lets Resolve link media and keep audio with its video; other OTIO tools read them as plain OTIO. OpenTimelineIO's own bundler wants `file:` URLs and takes a Windows drive letter (`C:\…`) for a URL scheme, so its bundles of vidcut's Windows files need the paths made URLs first (`tests/cli.rs`).
+  - Clip effects and transitions are carried rather than left out so that a cut finished in Resolve can come back to vidcut for a recut and go back again without losing them: vidcut needn't understand an effect to keep it. Only the effects in use, because Resolve fills in the rest itself. A transition is dropped rather than moved when an edit takes its cut away, because a dissolve between two other shots is a different edit.
   - A bundle's media go into a folder of their own, as Studio 21.1.1 now does too, rather than next to the bundle as Resolve did before: two bundles unpacked in one folder (Downloads, say) would otherwise mix their `media/` folders, and one bundle's media can be moved or deleted as one folder.
 
 ## X10. An MCP server for AI agents

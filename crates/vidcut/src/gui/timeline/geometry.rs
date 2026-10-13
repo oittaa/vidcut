@@ -547,9 +547,11 @@ mod tests {
                 tail,
                 gain_db: 0.0,
                 muted: false,
+                effects: None,
             }),
             enabled: true,
             name: None,
+            effects: None,
         }
     }
 

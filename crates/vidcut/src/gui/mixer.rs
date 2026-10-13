@@ -680,9 +680,11 @@ mod tests {
                 tail: 0,
                 gain_db,
                 muted,
+                effects: None,
             }),
             enabled: true,
             name: None,
+            effects: None,
         }
     }
 
