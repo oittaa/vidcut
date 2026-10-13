@@ -2,6 +2,8 @@
 //! Windows) on the UI thread; the project, the player and everything else
 //! in the live session (crate::live). See docs/decisions/gui.md.
 
+#[cfg(target_os = "linux")]
+mod acquire;
 mod app;
 pub mod export;
 mod folders;
