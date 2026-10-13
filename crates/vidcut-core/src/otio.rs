@@ -52,8 +52,9 @@
 //!   ([`effects`]), not shown or played, and are written back. So do
 //!   transitions, on their edit points ([`transitions`]): shown as cuts.
 //! - Generators and titles (`GeneratorReference`s) become generator clips,
-//!   and nested `Stack`s (compound clips, nested timelines) compound clips:
-//!   blocks that play as gaps, their references and stacks kept.
+//!   which play as gaps, and nested `Stack`s (compound clips, nested
+//!   timelines) compound clips, which play the clips they hold: their
+//!   references and stacks kept.
 //! - Speed changes (time effects) stay on their clips, which play at them
 //!   (decision D48) and refuse edits that would need speed math.
 //! - Everything else is left out with a warning: nested tracks (gaps
@@ -80,7 +81,7 @@ const VIDCUT: &str = "vidcut";
 const EDITOR: &str = "Resolve_OTIO";
 /// The import warning naming the compound clips it kept.
 pub const COMPOUNDS_KEPT: &str =
-    "compound clips and nested timelines kept as blocks but played as gaps";
+    "compound clips and nested timelines kept as blocks, playing their clips";
 
 fn rt(value: f64, rate: f64) -> Value {
     json!({ "OTIO_SCHEMA": "RationalTime.1", "rate": rate, "value": value })
@@ -582,7 +583,11 @@ fn compound_of(item: &Value, fps: Rational) -> Compound {
     {
         m.remove("Link Group ID");
     }
-    Compound { stack, frames }
+    Compound {
+        stack,
+        frames,
+        tracks: Vec::new(),
+    }
 }
 
 /// Compound clip `c`'s OTIO item: its stack, showing `frames` from

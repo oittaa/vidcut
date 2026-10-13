@@ -678,6 +678,12 @@ pub struct Compound {
     pub stack: serde_json::Value,
     /// Its length in project frames: the clip's source range stays within.
     pub frames: i64,
+    /// The clips it holds as vidcut plays them, on tracks of their own,
+    /// frames from its first: its stack's video tracks for a picture block,
+    /// audio tracks for a sound block. None when their media weren't found:
+    /// it plays as a gap.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tracks: Vec<Track>,
 }
 
 /// Clip effects another editor applied, which vidcut keeps without showing

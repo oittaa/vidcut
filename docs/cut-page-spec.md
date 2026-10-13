@@ -542,3 +542,4 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
 - **D48. Clips at another speed** (§1; deviation X9). A clip's constant speed from an OTIO file plays wherever its pictures and sound go: the viewer, exports, frame renders, storyboards and analyses.
   - **Pictures:** frame `k` of the clip shows source frame `in + ⌊k × speed⌋` by the sampling rule (export.md §2): every other frame at 200%, each twice at 50%, backward from its first frame at −100%, its first frame held at 0 (a freeze). No frame blending or optical flow.
   - **Sound:** the sound of the frames shown, stretched keeping its pitch; backward reversed, from the end of the first frame shown. A freeze is silent.
+  - **Compound clips:** the clips one holds play at their own speeds; the compound clip's own speed change doesn't play.

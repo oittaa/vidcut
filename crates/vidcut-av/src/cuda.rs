@@ -308,18 +308,12 @@ struct Placebo {
     pts: VecDeque<(i64, Option<i64>)>,
     /// The sample aspect of the upright pictures.
     sar: ffi::AVRational,
-    /// The input pool's frames (their `AVVkFrame`s), for the teardown.
-    inputs: Vec<usize>,
 }
 
-/// How long a converter's frames may take to be done with once libplacebo
-/// is gone: its own work it waits for, so they are done at once.
-const SETTLE: std::time::Duration = std::time::Duration::from_secs(2);
-
 /// One converter at work at a time in the process: made, fed, read or
-/// torn down. Each step finishes its GPU work before it returns, so two
-/// exports' converters never have work on the GPU at once: with both at
-/// work, the Vulkan device was now and then lost as they started.
+/// torn down. Without this, the Vulkan device was sometimes lost when
+/// converters started at the same time (1 in 76 runs of the parallel
+/// `nvenc_exports` tests). The cause isn't known.
 fn converting() -> std::sync::MutexGuard<'static, ()> {
     static CONVERTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
     CONVERTING.lock().unwrap_or_else(|e| e.into_inner())
@@ -328,63 +322,24 @@ fn converting() -> std::sync::MutexGuard<'static, ()> {
 impl Drop for Placebo {
     fn drop(&mut self) {
         let _one = converting();
-        // libplacebo first: it waits for its own work.
         drop(std::mem::replace(&mut self.graph, filter::Graph::new()));
-        // Freeing a frame waits for the GPU's last signal on it, without
-        // end. Frames the GPU isn't done with soon (work that will never
-        // finish) are left allocated rather than waited on forever.
-        if let Err(e) = self.settled() {
-            eprintln!("vidcut: GPU frames left unfreed: {e}");
-            // SAFETY: a null reference, which unref ignores.
-            std::mem::forget(std::mem::replace(
-                &mut self.input,
-                HwFrames(ptr::null_mut()),
-            ));
-            std::mem::forget(self.background.take());
-            std::mem::forget(self.filler.take());
-        }
     }
 }
 
-impl Placebo {
-    /// Waits, [`SETTLE`] at most, until the GPU has given its last signal
-    /// on each of the converter's frames.
-    fn settled(&self) -> Result<()> {
-        let mut frames: Vec<*const ffi::AVVkFrame> = self
-            .inputs
-            .iter()
-            .map(|&f| f as *const ffi::AVVkFrame)
-            .collect();
-        for blacks in [&self.background, &self.filler].into_iter().flatten() {
-            // SAFETY: a frame of a Vulkan pool holds its AVVkFrame in data[0].
-            frames.extend(
-                blacks
-                    .made
-                    .iter()
-                    .map(|f| unsafe { (*f.as_ptr()).data[0] } as *const ffi::AVVkFrame),
-            );
-        }
-        // SAFETY: the input pool's device; the pools hold their frames until
-        // they are freed.
-        unsafe {
-            let fc = (*self.input.0).data as *const ffi::AVHWFramesContext;
-            let dev = &*((*(*fc).device_ctx).hwctx as *const ffi::AVVulkanDeviceContext);
-            wait_signalled(dev, &frames, SETTLE)
-        }
-    }
-}
-
-/// How long a hand-off between CUDA, the GPU's copies and libplacebo may
-/// take before it counts as stuck.
+/// How long the GPU may take with a frame before it counts as stuck.
 const HANDOFF: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// Waits, [`HANDOFF`] at most, until the GPU has done what `f` (a Vulkan
-/// frame) was last given: its copy from CUDA, libplacebo's picture, or its
-/// copy back. Each hand-off between CUDA, FFmpeg's copies and libplacebo
-/// done before the next starts: left to wait on each other on the GPU, now
-/// and then a picture was read before its copy was done (the frame before
-/// it showed), a signal never came (freeing the frame then waited forever),
-/// or the device was lost.
+/// Waits, [`HANDOFF`] at most, until the GPU is done with `f` (a Vulkan
+/// frame): its copy from CUDA, or libplacebo's work on it.
+///
+/// A workaround for a libplacebo bug (fixed upstream in commit 2ba21c07,
+/// not released yet): libplacebo marks an input frame done before it has
+/// read it. If that comes before the CUDA copy into the frame finishes,
+/// libplacebo reads the old picture, and the frame's semaphore ends up one
+/// step behind, so freeing the frame waits forever. So the frame goes to
+/// libplacebo only after its copy is done, and the next copy waits for
+/// libplacebo's output. docs/todo/libplacebo-handback-workaround.md says
+/// when to remove this.
 fn wait_done(f: &frame::Video, what: &str) -> Result<()> {
     // SAFETY: a Vulkan frame: its frames context's device, its AVVkFrame in
     // data[0].
@@ -1025,7 +980,6 @@ impl Placebo {
                 num: out_sar.0,
                 den: out_sar.1,
             },
-            inputs: Vec::new(),
         })
     }
 
@@ -1045,11 +999,6 @@ impl Placebo {
         };
         let mut v = self.input.copy(f, "copying to Vulkan")?;
         wait_done(&v, "copying to Vulkan")?;
-        // SAFETY: a frame of a Vulkan pool holds its AVVkFrame in data[0].
-        let vkf = unsafe { (*v.as_ptr()).data[0] } as usize;
-        if !self.inputs.contains(&vkf) {
-            self.inputs.push(vkf);
-        }
         unsafe {
             ffi::av_frame_copy_props(v.as_mut_ptr(), f.as_ptr());
             // No side data: the CPU converts by the tags alone. libplacebo
@@ -1110,9 +1059,10 @@ impl Placebo {
                 self.pts.pop_front();
                 pts = t;
             }
+            // libplacebo has read the input frame once its output is
+            // done, so the next copy can't overwrite it (`wait_done`).
             wait_done(&out, "converting on the GPU")?;
             let mut c = self.output.copy(&out, "copying back from Vulkan")?;
-            wait_done(&out, "copying back from Vulkan")?;
             unsafe {
                 ffi::av_frame_copy_props(c.as_mut_ptr(), out.as_ptr());
                 (*c.as_mut_ptr()).sample_aspect_ratio = self.sar;
@@ -1160,7 +1110,6 @@ impl Blacks {
             Some(i) => i,
             None => {
                 let mut f = self.pool.copy(&self.black, "copying to Vulkan")?;
-                wait_done(&f, "copying to Vulkan")?;
                 tag(&mut f, self.tags);
                 self.made.push(f);
                 self.made.len() - 1
