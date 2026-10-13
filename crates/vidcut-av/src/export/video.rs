@@ -226,6 +226,9 @@ struct Source {
     target: f64,
     /// Current source frame (decoded) and its timestamp in seconds.
     current: Option<(frame::Video, f64)>,
+    /// `current`'s dynamic HDR metadata, kept apart: the GPU's scaler takes
+    /// the frame itself, side data and all.
+    dynamic: frame::Video,
     /// `current`, normalized.
     normalized: Option<frame::Video>,
     /// A still keeps its one picture and is never sought; a sequence knows
@@ -303,6 +306,7 @@ impl Source {
             source_frame,
             target,
             current: None,
+            dynamic: frame::Video::empty(),
             normalized: None,
             pictures,
             on_gpu,
@@ -356,6 +360,7 @@ impl Source {
             source_frame: 0,
             target: 0.0,
             current: None,
+            dynamic: frame::Video::empty(),
             normalized: None,
             pictures,
             on_gpu: false,
@@ -390,6 +395,12 @@ impl Source {
             match self.reader.next_frame()? {
                 Some(f) => {
                     let t = f.pts().unwrap_or(0) as f64 * self.tick;
+                    self.dynamic = frame::Video::empty();
+                    let all = crate::hdr::Dynamic {
+                        hdr10plus: true,
+                        dolby_vision: true,
+                    };
+                    crate::hdr::copy_dynamic(&f, &mut self.dynamic, all)?;
                     self.current = Some((f, t));
                     changed = true;
                 }
@@ -997,8 +1008,7 @@ impl VideoFrames {
         // is kept, from the frame this one shows.
         crate::hdr::strip(&mut out);
         if self.dynamic != crate::hdr::Dynamic::default() {
-            let (frame, _) = src.current.as_ref().expect("have a frame");
-            crate::hdr::copy_dynamic(frame, &mut out, self.dynamic)?;
+            crate::hdr::copy_dynamic(&src.dynamic, &mut out, self.dynamic)?;
         }
         Ok(out)
     }
