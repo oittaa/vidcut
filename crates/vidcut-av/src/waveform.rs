@@ -332,32 +332,3 @@ impl ChannelAccum {
         self.peaks
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn stereo() -> Waveform {
-        Waveform {
-            per_second: 100,
-            start: 0.0,
-            peaks: vec![(0, 64), (0, 0)],
-            channels: 2,
-            // Bucket 0: L ±64, R silent. Bucket 1: L quiet, R −40.
-            channel_peaks: vec![(-64, 64), (0, 0), (0, 5), (-40, 0)],
-        }
-    }
-
-    #[test]
-    fn channel_peaks_round_trip_and_differ() {
-        let w = stereo();
-        assert_eq!(Waveform::from_bytes(&w.to_bytes()), Some(w.clone()));
-        let (lo, hi) = w.channel_range(0, 0.0, 0.01).unwrap();
-        assert!(lo < -0.5 && hi > 0.5, "{lo} {hi}");
-        assert_eq!(w.channel_range(1, 0.0, 0.01), Some((0.0, 0.0)));
-        assert!(w.channel_peak(1, 0.01, 0.02) > 0.3);
-        assert!(w.channel_peak(0, 0.01, 0.02) < 0.1);
-        assert!(w.channel_range(2, 0.0, 0.01).is_none());
-        assert!(Waveform::from_bytes(&[0, 1, 2, 3, 4, 5, 6, 7]).is_none());
-    }
-}

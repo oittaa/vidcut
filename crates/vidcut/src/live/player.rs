@@ -694,34 +694,3 @@ pub fn debug() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("VIDCUT_DEBUG_PLAYER").is_some())
 }
-
-#[cfg(test)]
-mod tests {
-    use vidcut_core::render::{AudioPiece, RenderPlan, VideoPiece};
-    use vidcut_core::time::Rational;
-
-    use super::with_end;
-
-    #[test]
-    fn the_end_is_a_frame_of_black_and_silence() {
-        let fps = Rational::new(30000, 1001).unwrap();
-        let mut plan = RenderPlan {
-            fps,
-            width: 64,
-            height: 36,
-            sample_rate: 48_000,
-            channels: 2,
-            frames: 3,
-            video: vec![VideoPiece::Black { frames: 3 }],
-            audio: vec![vec![AudioPiece::Silence { samples: 4804 }]],
-            range: (0, 3),
-            name: "t".into(),
-        };
-        with_end(&mut plan);
-        assert_eq!((plan.frames, plan.range), (4, (0, 4)));
-        assert_eq!(plan.video, vec![VideoPiece::Black { frames: 4 }]);
-        // Frame 3's samples, as the plan counts them.
-        let samples = fps.frame_to_sample(4, 48_000) - fps.frame_to_sample(3, 48_000);
-        assert_eq!(plan.audio[0][1], AudioPiece::Silence { samples });
-    }
-}

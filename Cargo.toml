@@ -21,8 +21,6 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 schemars = "1"
 toml = "1.1"
 ctrlc = "3"
-proptest = "1"
-insta = { version = "1", features = ["json"] }
 # Test outputs in temp dirs that remove themselves, also when a test fails.
 tempfile = "3"
 # Drives the egui GUI with simulated input in tests (no renderer).

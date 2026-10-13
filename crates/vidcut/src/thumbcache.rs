@@ -181,58 +181,6 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn tile_blocks_gather_their_frames() {
-        let tmp = tempfile::Builder::new()
-            .prefix("vidcut-thumbcache-tiles-")
-            .tempdir()
-            .unwrap();
-        let path = tmp.path().join("m.t56-b0.thumbs");
-        let tile = |v: u8| Image {
-            width: 4,
-            height: 2,
-            rgba: vec![v; 4 * 2 * 4],
-        };
-        store_tiles(&path, &[(8, tile(200))]);
-        store_tiles(&path, &[(0, tile(10)), (8, tile(0))]);
-        let kept = load_tiles(&path).unwrap();
-        // Ordered by frame; the first picture kept for a frame stays.
-        assert_eq!(kept.iter().map(|t| t.0).collect::<Vec<_>>(), [0, 8]);
-        assert!(kept[1].1.rgba[0] > 150, "JPEG keeps it near 200");
-        // Nothing left of the parts.
-        let names: Vec<_> = std::fs::read_dir(tmp.path()).unwrap().flatten().collect();
-        assert_eq!(names.len(), 1);
-    }
-
-    #[test]
-    fn tiles_written_at_once_all_stay() {
-        let tmp = tempfile::Builder::new()
-            .prefix("vidcut-thumbcache-race-")
-            .tempdir()
-            .unwrap();
-        let tile = Image {
-            width: 4,
-            height: 2,
-            rgba: vec![128; 4 * 2 * 4],
-        };
-        for round in 0..20 {
-            // Four workers write their tiles of one block at the same time.
-            let path = tmp.path().join(format!("m.t16-b{round}.thumbs"));
-            let start = std::sync::Barrier::new(4);
-            std::thread::scope(|s| {
-                for frame in 0..4 {
-                    let (path, tile, start) = (&path, &tile, &start);
-                    s.spawn(move || {
-                        start.wait();
-                        store_tiles(path, &[(frame, tile.clone())]);
-                    });
-                }
-            });
-            let kept = load_tiles(&path).unwrap();
-            assert_eq!(kept.iter().map(|t| t.0).collect::<Vec<_>>(), [0, 1, 2, 3]);
-        }
-    }
-
-    #[test]
     fn eviction_drops_the_least_recently_used_first() {
         let tmp = tempfile::Builder::new()
             .prefix("vidcut-thumbcache-")

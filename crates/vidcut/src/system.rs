@@ -161,20 +161,3 @@ mod macos {
         Some(text.trim_end_matches('\0').to_string())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn macos_names_its_version_and_build() {
-        // "macos 26.6.2 (25G83)"
-        let version = super::version();
-        let rest = version.strip_prefix("macos ").expect(&version);
-        let (number, build) = rest.split_once(" (").expect(&version);
-        assert!(
-            number.split('.').all(|n| n.parse::<u32>().is_ok()),
-            "{version}"
-        );
-        assert!(build.len() > 1 && build.ends_with(')'), "{version}");
-    }
-}

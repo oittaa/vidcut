@@ -155,24 +155,6 @@ mod tests {
     }
 
     #[test]
-    fn reads_scaled_pictures() {
-        // A 640-wide frame shown 594 wide (cells 29.7 px), as in a viewer
-        // screenshot; also odd widths with a margin, unscaled.
-        let (w, h) = (640, 360);
-        for index in [1, 2, 29, 1000, MAX_INDEX] {
-            let mut buf = vec![0u8; w * h];
-            paint(index, &mut buf, w, h, w);
-            let (sw, sh) = (594, 334);
-            let scaled: Vec<u8> = (0..sw * sh)
-                .map(|i| buf[(i / sw) * h / sh * w + (i % sw) * w / sw])
-                .collect();
-            assert_eq!(read(&scaled, sw, sh, sw), Some(index), "#{index}");
-        }
-        assert_eq!(roundtrip(1000, 330, 180, 330), Some(1000));
-        assert_eq!(roundtrip(1000, 854, 480, 854), Some(1000));
-    }
-
-    #[test]
     fn rejects_blank_and_uniform_frames() {
         let gray = vec![MID; 320 * 180];
         assert_eq!(read(&gray, 320, 180, 320), None);

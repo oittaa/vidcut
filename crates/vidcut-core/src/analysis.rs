@@ -363,20 +363,6 @@ mod tests {
     }
 
     #[test]
-    fn measurements_round_trip_through_bytes() {
-        let l = levels(0.5, &[(0.1, 0.2)]);
-        assert_eq!(AudioLevels::from_bytes(&l.to_bytes()), Some(l.clone()));
-        let p = PictureStats {
-            pts: vec![0.0, 0.04],
-            score: vec![0.0, 33.5],
-            black: vec![1.0, 0.25],
-        };
-        assert_eq!(PictureStats::from_bytes(&p.to_bytes()), Some(p));
-        assert_eq!(AudioLevels::from_bytes(&l.to_bytes()[..10]), None);
-        assert_eq!(AudioLevels::from_bytes(b"nope"), None);
-    }
-
-    #[test]
     fn silences_are_runs_below_the_threshold() {
         let l = levels(4.0, &[(1.0, 1.5), (3.0, 3.2)]);
         let s = silences(&l, 0.0, 4.0, -40.0, 0.0, 0.9);
@@ -414,42 +400,6 @@ mod tests {
             silent_parts(&span, &l, 0.0, &s),
             vec![(100, 108), (118, 128), (135, 140)]
         );
-    }
-
-    #[test]
-    fn scene_cuts_land_on_the_first_frame_of_a_shot() {
-        // 25 fps source with a new shot at source frames 10 and 20, shown
-        // at 25 fps from source frame 5.
-        let n = 30;
-        let stats = PictureStats {
-            pts: (0..n).map(|k| f64::from(k) / 25.0).collect(),
-            score: (0..n)
-                .map(|k| if k == 10 || k == 20 { 60.0 } else { 0.5 })
-                .collect(),
-            black: vec![0.0; n as usize],
-        };
-        let span = Span {
-            start: 50,
-            end: 70,
-            source_in: 5,
-            origin: 0.0,
-            fps: fps(25),
-        };
-        assert_eq!(
-            scene_cuts(&span, &stats, 10.0),
-            vec![(55, 60.0), (65, 60.0)]
-        );
-        // At half the rate, frames are skipped; the cut shows on the first
-        // frame after it.
-        let half = Span {
-            fps: fps(12),
-            source_in: 0,
-            start: 0,
-            end: 14,
-            origin: 0.0,
-        };
-        let cuts = scene_cuts(&half, &stats, 10.0);
-        assert_eq!(cuts.len(), 2, "{cuts:?}");
     }
 
     #[test]

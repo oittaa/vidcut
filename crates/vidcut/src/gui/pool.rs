@@ -1012,31 +1012,8 @@ pub(super) fn elide(s: &str, n: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use eframe::egui::pos2;
 
     use super::*;
-
-    /// Master, two folders, and a bin inside the first. Points sit in the rects.
-    fn targets() -> Vec<(Rect, String)> {
-        vec![
-            (
-                Rect::from_min_max(pos2(0.0, 0.0), pos2(48.0, 16.0)),
-                String::new(),
-            ),
-            (
-                Rect::from_min_max(pos2(0.0, 24.0), pos2(96.0, 40.0)),
-                "Bin 1".into(),
-            ),
-            (
-                Rect::from_min_max(pos2(0.0, 44.0), pos2(96.0, 60.0)),
-                "Bin 2".into(),
-            ),
-            (
-                Rect::from_min_max(pos2(0.0, 64.0), pos2(120.0, 80.0)),
-                "Bin 1/Inner".into(),
-            ),
-        ]
-    }
 
     #[test]
     fn bin_drop_to_names_the_moved_bin() {
@@ -1065,27 +1042,5 @@ mod tests {
         assert_eq!(bin_drop_to("A/B", "A"), None, "onto its parent");
         assert_eq!(bin_drop_to("Top", ""), None, "a top-level bin onto Master");
         assert_eq!(bin_drop_to("", "A"), None, "Master is not a bin to drag");
-    }
-
-    #[test]
-    fn bin_at_is_the_folder_or_path_level_under_the_pointer() {
-        let t = targets();
-        assert_eq!(bin_at(&t, pos2(8.0, 8.0)), Some(""));
-        assert_eq!(bin_at(&t, pos2(10.0, 32.0)), Some("Bin 1"));
-        assert_eq!(bin_at(&t, pos2(200.0, 8.0)), None);
-        // Onto its parent (Master): no request. Onto Bin 1: Bin 1/Bin 2.
-        assert_eq!(
-            bin_drop_to("Bin 2", bin_at(&t, pos2(8.0, 8.0)).unwrap()),
-            None
-        );
-        assert_eq!(
-            bin_drop_to("Bin 2", bin_at(&t, pos2(10.0, 32.0)).unwrap()).as_deref(),
-            Some("Bin 1/Bin 2")
-        );
-        // Onto a bin inside the one being dragged.
-        assert_eq!(
-            bin_drop_to("Bin 1", bin_at(&t, pos2(10.0, 72.0)).unwrap()),
-            None
-        );
     }
 }

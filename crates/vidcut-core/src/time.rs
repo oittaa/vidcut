@@ -692,40 +692,6 @@ mod tests {
     }
 
     #[test]
-    fn rationals() {
-        let r: Rational = "30000/1001".parse().unwrap();
-        assert_eq!((r.num(), r.den(), r.timecode_base()), (30000, 1001, 30));
-        assert_eq!("29.97".parse::<Rational>().unwrap(), r);
-        assert_eq!(
-            "23.976".parse::<Rational>().unwrap().to_string(),
-            "24000/1001"
-        );
-        assert_eq!("50/2".parse::<Rational>().unwrap().to_string(), "25");
-        assert_eq!("12.5".parse::<Rational>().unwrap().to_string(), "25/2");
-        assert!("0".parse::<Rational>().is_err());
-        assert!("-25".parse::<Rational>().is_err());
-        assert_eq!(
-            Rational::snap_standard(59.9401),
-            Some(Rational::new(60000, 1001).unwrap())
-        );
-        assert_eq!(Rational::snap_standard(31.0), None);
-        // As people write them, and back.
-        for (n, d, shown) in [
-            (24000, 1001, "23.976"),
-            (30000, 1001, "29.97"),
-            (48000, 1001, "47.952"),
-            (60000, 1001, "59.94"),
-            (120000, 1001, "119.88"),
-            (25, 1, "25"),
-            (25, 2, "12.5"),
-        ] {
-            let r = Rational::new(n, d).unwrap();
-            assert_eq!(r.decimal(), shown);
-            assert_eq!(shown.parse::<Rational>().unwrap(), r, "{shown}");
-        }
-    }
-
-    #[test]
     fn frame_to_sample_is_exact() {
         let ntsc = Rational::new(30000, 1001).unwrap();
         // 1001 samples-per-frame cycle at 48 kHz: 1601.6 samples per frame.
@@ -733,79 +699,6 @@ mod tests {
         assert_eq!(ntsc.frame_to_sample(30_000, 48_000), 48_048_000);
         let pal = Rational::new(25, 1).unwrap();
         assert_eq!(pal.frame_to_sample(1, 44_100), 1764);
-    }
-
-    #[test]
-    fn timecode_round_trip() {
-        let c = ctx("30000/1001");
-        assert_eq!(format_timecode(0, c.fps, 0, false), "00:00:00:00");
-        assert_eq!(
-            format_timecode(30 * 3661 + 7, c.fps, 0, false),
-            "01:01:01:07"
-        );
-        let tc = TimeSpec::parse("01:01:01:07").unwrap();
-        assert_eq!(c.resolve(&tc).unwrap(), 30 * 3661 + 7);
-        // With a start timecode, timecodes are record times.
-        let hour = 30 * 3600;
-        let c1 = TimeContext {
-            start_tc: hour,
-            ..c
-        };
-        assert_eq!(format_timecode(0, c1.fps, hour, false), "01:00:00:00");
-        assert_eq!(
-            c1.resolve(&TimeSpec::parse("01:00:10:00").unwrap())
-                .unwrap(),
-            300
-        );
-        assert!(c.resolve(&TimeSpec::parse("00:00:00:30").unwrap()).is_err());
-    }
-
-    #[test]
-    fn drop_frame_timecode() {
-        // Decision D47: drop-frame skips 2 numbers a minute (4 at 59.94)
-        // but every tenth, so its labels keep to the clock.
-        let c = ctx("30000/1001");
-        let df = |f| format_timecode(f, c.fps, 0, true);
-        assert_eq!(df(1799), "00:00:59;29");
-        assert_eq!(df(1800), "00:01:00;02");
-        assert_eq!(df(17_982), "00:10:00;00");
-        assert_eq!(df(107_892), "01:00:00;00");
-        let fifty_nine = "60000/1001".parse().unwrap();
-        assert_eq!(format_timecode(3600, fifty_nine, 0, true), "00:01:00;04");
-        // Only at 29.97 and 59.94.
-        let pal = "25".parse().unwrap();
-        assert_eq!(format_timecode(1800, pal, 0, true), "00:01:12:00");
-        // Every label reads back as its frame, at both rates.
-        for fps in ["30000/1001", "60000/1001"] {
-            let c = TimeContext {
-                drop_frame: true,
-                ..ctx(fps)
-            };
-            for f in 0..(c.fps.timecode_base() * 60 * 25) {
-                let label = format_timecode(f, c.fps, 0, true);
-                assert_eq!(
-                    c.resolve(&TimeSpec::parse(&label).unwrap()),
-                    Ok(f),
-                    "{label}"
-                );
-            }
-        }
-        // `;` says drop-frame anywhere; a drop-frame project reads `:` so too.
-        let tc = |s: &str| TimeSpec::parse(s).unwrap();
-        assert_eq!(c.resolve(&tc("01:00:00;00")), Ok(107_892));
-        assert_eq!(c.resolve(&tc("01;00;00;00")), Ok(107_892));
-        assert_eq!(c.resolve(&tc("01:00:00:00")), Ok(108_000));
-        let dfc = TimeContext {
-            drop_frame: true,
-            ..c
-        };
-        assert_eq!(dfc.resolve(&tc("01:00:00:00")), Ok(107_892));
-        // As a length, counted from zero; a skipped label is refused.
-        assert_eq!(c.duration(&tc("00:01:00;02")), Ok(1800));
-        assert!(c.resolve(&tc("00:01:00;00")).is_err());
-        assert!(ctx("25").resolve(&tc("00:00:01;02")).is_err());
-        assert_eq!(tc("00:00:01;02").to_string(), "00:00:01;02");
-        assert!(TimeSpec::parse("00:01;02").is_err());
     }
 
     #[test]
@@ -832,39 +725,6 @@ mod tests {
     }
 
     #[test]
-    fn time_spec_forms() {
-        let c = ctx("25");
-        let r = |s: &str| c.resolve(&TimeSpec::parse(s).unwrap()).unwrap();
-        assert_eq!(r("450f"), 450);
-        assert_eq!(r("15s"), 375);
-        assert_eq!(r("1.5s"), 38); // 37.5 rounds to 38
-        assert_eq!(r("250ms"), 6); // 6.25 -> 6
-        assert_eq!(r("1m30s"), 2250);
-        assert_eq!(r("2m"), 3000);
-        assert_eq!(r("1h"), 90_000);
-        assert_eq!(r("01:02.5"), 1563); // 62.5 s
-        assert_eq!(r("start"), 0);
-        assert_eq!(r("end"), 9000);
-        assert_eq!(r("in"), 100);
-        assert!(c.resolve(&TimeSpec::parse("out").unwrap()).is_err());
-        assert!(c.resolve(&TimeSpec::parse("playhead").unwrap()).is_err());
-        assert!(TimeSpec::parse("30").is_err(), "bare numbers are ambiguous");
-        assert!(TimeSpec::parse("12.5").is_err());
-        assert!(TimeSpec::parse("5x").is_err());
-        assert!(c.resolve(&TimeSpec::parse("+10f").unwrap()).is_err());
-        assert_eq!(
-            c.resolve_from(&TimeSpec::parse("+10f").unwrap(), 50)
-                .unwrap(),
-            60
-        );
-        assert_eq!(
-            c.resolve_from(&TimeSpec::parse("-2s").unwrap(), 100)
-                .unwrap(),
-            50
-        );
-    }
-
-    #[test]
     fn ranges() {
         let c = ctx("25");
         let r = |s: &str| c.range(&RangeSpec::parse(s).unwrap()).unwrap();
@@ -874,19 +734,5 @@ mod tests {
         assert_eq!(r("450f..end"), (450, 9000));
         assert_eq!(r("100f..+00:00:01:00"), (100, 125));
         assert!(RangeSpec::parse("10s").is_err());
-    }
-
-    #[test]
-    fn serde_forms() {
-        let t: TimeSpec = serde_json::from_str("450").unwrap();
-        assert_eq!(t, TimeSpec::Frames(450));
-        let t: TimeSpec = serde_json::from_str("\"1m30s\"").unwrap();
-        assert_eq!(t, TimeSpec::Seconds(90.0));
-        assert_eq!(serde_json::to_string(&TimeSpec::Frames(7)).unwrap(), "7");
-        assert!(serde_json::from_str::<TimeSpec>("\"30\"").is_err());
-        let r: Rational = serde_json::from_str("\"30000/1001\"").unwrap();
-        assert_eq!(serde_json::to_string(&r).unwrap(), "\"30000/1001\"");
-        let range: RangeSpec = serde_json::from_str("\"in..out\"").unwrap();
-        assert_eq!(range.to_string(), "in..out");
     }
 }

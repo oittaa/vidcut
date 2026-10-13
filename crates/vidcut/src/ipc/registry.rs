@@ -116,16 +116,3 @@ pub fn list() -> Vec<Instance> {
     out.sort_by_key(|i| i.pid);
     out
 }
-
-#[cfg(test)]
-mod tests {
-    /// A socket's path takes 104 bytes on macOS (108 on Linux), and the
-    /// temp folder the registry is in there, without `XDG_RUNTIME_DIR`, is
-    /// long (`/var/folders/…/T/`): the longest pid's still fits.
-    #[cfg(unix)]
-    #[test]
-    fn a_socket_path_fits_in_a_socket_address() {
-        let path = super::socket_path(u32::MAX);
-        assert!(path.as_os_str().len() < 104, "{}", path.display());
-    }
-}

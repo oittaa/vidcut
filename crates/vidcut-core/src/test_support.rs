@@ -67,13 +67,6 @@ pub fn still_info(width: u32, height: u32) -> MediaInfo {
     info
 }
 
-/// Media facts for a fake audio-only file (music, narration).
-pub fn audio_info(secs: f64) -> MediaInfo {
-    let mut info = media_info(secs, Rational::new(25, 1).unwrap(), true);
-    info.video = None;
-    info
-}
-
 /// An Env whose files are fake media keyed by path, with made-up
 /// measurements: sound and pictures as tests describe them.
 #[derive(Default)]
@@ -144,19 +137,6 @@ pub fn pictures(secs: f64, fps: f64, shots: &[f64], black: &[(f64, f64)]) -> Pic
 impl FakeEnv {
     pub fn with(mut self, path: &str, info: MediaInfo) -> Self {
         self.files.insert(PathBuf::from(path), info);
-        self
-    }
-
-    /// An image sequence of 1920×1080 pictures, `count` files from `first`,
-    /// named by `pattern` in `dir`.
-    pub fn with_sequence(mut self, dir: &str, pattern: &str, first: u64, count: u64) -> Self {
-        let s = ImageSequence {
-            pattern: pattern.into(),
-            first,
-            count,
-        };
-        self.sequences
-            .insert(s.file(Path::new(dir), 0), (s, 1920, 1080));
         self
     }
 }
@@ -366,16 +346,6 @@ impl Fixture {
             .collect()
     }
 
-    /// Adds an audio-only file `secs` long to the pool; returns its media id.
-    pub fn add_music(&mut self, name: &str, secs: f64) -> String {
-        let path = format!("/media/{name}");
-        self.env
-            .files
-            .insert(PathBuf::from(&path), audio_info(secs));
-        let r = self.ok(json!({"method": "media.add", "params": {"paths": [path]}}));
-        r.result["media"][0].as_str().unwrap().to_string()
-    }
-
     /// A track's clips as `(id, start, duration, source_in)`.
     pub fn track(&self, id: &str) -> Vec<(String, i64, i64, i64)> {
         self.editor
@@ -388,16 +358,6 @@ impl Fixture {
                     .collect()
             })
             .unwrap_or_default()
-    }
-
-    /// Track ids, bottom video track first.
-    pub fn track_ids(&self) -> Vec<String> {
-        self.editor
-            .project()
-            .tracks
-            .iter()
-            .map(|t| t.id.clone())
-            .collect()
     }
 
     /// Shorthand: append `media` frames `a..b`.
