@@ -282,6 +282,9 @@ struct Source {
     normalized: Option<frame::Video>,
     /// `normalized` was fitted on the GPU ([`VideoFrames::fit_on_gpu`]).
     fitted: bool,
+    /// Fitting this file's frames on the GPU failed: they are made on the
+    /// CPU.
+    fit_failed: bool,
     /// A still keeps its one picture and is never sought; a sequence knows
     /// how many pictures it has.
     pictures: Pictures,
@@ -370,6 +373,7 @@ impl Source {
             light: None,
             normalized: None,
             fitted: false,
+            fit_failed: false,
             pictures,
             on_gpu,
             scaler,
@@ -428,6 +432,7 @@ impl Source {
             light: None,
             normalized: None,
             fitted: false,
+            fit_failed: false,
             pictures,
             on_gpu: false,
             scaler: None,
@@ -575,10 +580,9 @@ pub struct VideoFrames {
     /// Shrinks VA-API's and Direct3D 11's frames on the GPU before they
     /// come down to be fitted into the output.
     shrinker: Option<crate::hw::Shrinker>,
-    /// Fits VA-API's frames into the output on the GPU, for an encoder on
-    /// their device ([`fit_on_gpu`](Self::fit_on_gpu)), and the frames given
-    /// so far that it made.
-    fit: Option<(Option<crate::hw::Fitter>, i64)>,
+    /// Fits frames into the output on the GPU, for an encoder on their
+    /// device ([`fit_on_gpu`](Self::fit_on_gpu)).
+    fit: Option<GpuFit>,
     /// Keeping Direct3D 11's frames failed: they come down from then on.
     unkept: bool,
     /// The clockwise turn that shows the last frame given upright.
@@ -597,6 +601,15 @@ pub struct VideoFrames {
     /// The Dolby Vision of the last source frame given: black after it
     /// takes it.
     last_dolby_vision: frame::Video,
+}
+
+/// Frames fitted into the output on the GPU ([`VideoFrames::fit_on_gpu`]).
+struct GpuFit {
+    fitter: Option<crate::hw::Fitter>,
+    /// The encoder's frames, which Direct3D 11's are drawn into.
+    into: Option<crate::hw::Frames>,
+    /// Frames given so far that it made.
+    made: i64,
 }
 
 /// The layouts a display takes: 8-bit 4:2:0 (planar, or NV12 as hardware
@@ -773,7 +786,22 @@ impl VideoFrames {
     /// when they need nothing else: not turned, and in the output's colors
     /// (`color::kept`). The rest are made on the CPU.
     pub fn fit_on_gpu(mut self) -> Self {
-        self.fit = Some((None, 0));
+        self.fit = Some(GpuFit {
+            fitter: None,
+            into: None,
+            made: 0,
+        });
+        self
+    }
+
+    /// [`fit_on_gpu`](Self::fit_on_gpu), Direct3D 11's frames too, drawn
+    /// into `frames`, the encoder's.
+    pub(crate) fn fit_on_gpu_into(mut self, frames: crate::hw::Frames) -> Self {
+        self.fit = Some(GpuFit {
+            fitter: None,
+            into: Some(frames),
+            made: 0,
+        });
         self
     }
 
@@ -848,7 +876,7 @@ impl VideoFrames {
     /// Frames decoded and scaled on the GPU so far, on their way to the
     /// encoder there.
     pub fn gpu_frames(&self) -> i64 {
-        self.gpu.as_ref().map_or(0, |g| g.made) + self.fit.as_ref().map_or(0, |f| f.1)
+        self.gpu.as_ref().map_or(0, |g| g.made) + self.fit.as_ref().map_or(0, |f| f.made)
     }
 
     /// Frames given so far whose source frame a GPU decoded, whether it
@@ -1176,21 +1204,44 @@ impl VideoFrames {
         } else if changed || src.normalized.is_none() {
             let (frame, _) = src.current.as_ref().expect("have a frame");
             let rotation = src.reader.rotation();
-            // VA-API's frames that need nothing but fitting stay on the GPU,
-            // for an encoder on their device.
-            let on_gpu = self.fit.as_mut().filter(|_| {
-                frame.format() == format::Pixel::VAAPI
+            // Frames that need nothing but fitting stay on the GPU, for an
+            // encoder on their device. AMD's video processor won't draw 8-bit
+            // frames of a decoder into 10-bit ones: those come down.
+            let on_gpu = self.fit.as_mut().filter(|fit| {
+                let fits = match frame.format() {
+                    format::Pixel::VAAPI => true,
+                    format::Pixel::D3D11 => {
+                        fit.into.is_some()
+                            && !(crate::hw::sw_format(frame) == format::Pixel::NV12
+                                && out_fmt == format::Pixel::P010LE)
+                    }
+                    _ => false,
+                };
+                fits && !src.fit_failed
                     && rotation == 0
                     && crate::color::kept(crate::color::Source::of(frame), self.target)
             });
-            src.fitted = on_gpu.is_some();
-            src.normalized = Some(match on_gpu {
-                Some((fitter, _)) => {
-                    let sar = frame.aspect_ratio();
-                    let sar = (sar.numerator(), sar.denominator());
-                    let fitted = fit(frame.width(), frame.height(), sar, out_w, out_h);
-                    crate::hw::Fitter::fit(fitter, frame, fitted, (out_w, out_h), out_fmt)?
-                }
+            let tried = on_gpu.is_some();
+            // A GPU that won't fit them (a driver's limits) leaves the
+            // file's frames to the CPU.
+            let fitted = on_gpu.and_then(|gpu_fit| {
+                let sar = frame.aspect_ratio();
+                let sar = (sar.numerator(), sar.denominator());
+                let fitted = fit(frame.width(), frame.height(), sar, out_w, out_h);
+                crate::hw::Fitter::fit(
+                    &mut gpu_fit.fitter,
+                    frame,
+                    fitted,
+                    (out_w, out_h),
+                    out_fmt,
+                    gpu_fit.into.as_ref(),
+                )
+                .ok()
+            });
+            src.fit_failed |= tried && fitted.is_none();
+            src.fitted = fitted.is_some();
+            src.normalized = Some(match fitted {
+                Some(picture) => picture,
                 None => {
                     // Frames the GPU decoded come down to memory first.
                     let came_down;
@@ -1219,9 +1270,9 @@ impl VideoFrames {
             });
         }
         if src.fitted
-            && let Some((_, made)) = self.fit.as_mut()
+            && let Some(fit) = self.fit.as_mut()
         {
-            *made += 1;
+            fit.made += 1;
         }
         let picture = frame_ref(src.normalized.as_ref().expect("normalized"))?;
         let mut out = match &mut self.gpu {

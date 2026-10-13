@@ -20,7 +20,7 @@ use vidcut_core::preferences::ProxyCodec;
 
 use crate::decode::{Input, VideoReader};
 use crate::error::{Context, Error, Result};
-use crate::export::encode::{Availability, Vaapi};
+use crate::export::encode::{Availability, Upload};
 use crate::export::video::Normalizer;
 use crate::ffmpeg::{self, codec, encoder, ffi, format, frame};
 
@@ -324,7 +324,7 @@ fn open(
     rate: Option<ffmpeg::Rational>,
     global: bool,
     gpu_frames: Option<*mut ffi::AVBufferRef>,
-) -> Result<(encoder::Video, ffmpeg::Codec, Option<Vaapi>)> {
+) -> Result<(encoder::Video, ffmpeg::Codec, Option<Upload>)> {
     let codec = encoder::find_by_name(&enc.name)
         .ok_or_else(|| Error::Invalid(format!("this FFmpeg has no {} encoder", enc.name)))?;
     let mut ctx = codec::context::Context::new_with_codec(codec)
@@ -363,7 +363,7 @@ fn open(
             None
         }
         (Some(node), EncoderChoice::Vaapi, _) => {
-            let v = Vaapi::new(node, enc.pixel(), width, height, None)?;
+            let v = Upload::vaapi(node, enc.pixel(), width, height, None)?;
             ctx.set_format(format::Pixel::VAAPI);
             hw_frames(&mut ctx, v.frames)?;
             Some(v)
@@ -388,7 +388,7 @@ fn open(
 struct Writer<'a> {
     octx: format::context::Output,
     encoder: encoder::Video,
-    vaapi: Option<Vaapi>,
+    vaapi: Option<Upload>,
     src_tb: ffmpeg::Rational,
     enc_tb: ffmpeg::Rational,
     durations: HashMap<i64, i64>,

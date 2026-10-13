@@ -779,3 +779,63 @@ fn light_levels_are_measured_where_the_sources_say_none() {
         assert_eq!(stream_values(&out).light, Some(l), "{what}");
     }
 }
+
+/// With AMF on a Direct3D 11 decoder's adapter, frames made on the CPU go
+/// up into the encoder's own frames, their colors with them: AMF writes
+/// HDR10's metadata only with frames whose transfer is PQ. An SDR source
+/// into PQ output, every frame made on the CPU, gets its mastering display
+/// in the bitstream. Windows, with AMF: `gpu-tests`.
+#[cfg(all(windows, feature = "gpu-tests"))]
+#[test]
+fn amf_frames_made_on_the_cpu_keep_hdr10s_metadata() {
+    use vidcut_av::hw::{GpuDecoder, Kind};
+    vidcut_av::init();
+    let available = export::encode::detect();
+    let adapter = available
+        .encoders
+        .iter()
+        .find(|e| e.ok && e.encoder == "hevc_amf" && e.pixel == "p010le")
+        .and_then(|e| e.device.clone());
+    let Some(decoder) = adapter.and_then(|adapter| {
+        GpuDecoder::all()
+            .into_iter()
+            .find(|d| d.kind() == Kind::D3d11va && d.on() == adapter)
+    }) else {
+        eprintln!("skipping: no 10-bit AMF HEVC on a Direct3D 11 decoder's adapter here");
+        return;
+    };
+    let source = fixture::ensure(&FixtureSpec::new(
+        VideoCodec::Hevc10,
+        Container::Mkv,
+        640,
+        360,
+        (30, 1),
+        30,
+    ))
+    .unwrap();
+    let p = plan(vec![piece(&source, 0, 20)]);
+    let mut s = settings(VCodec::Hevc, OutContainer::Mkv, HdrMode::Pq);
+    let v = s.video.as_mut().unwrap();
+    v.encoder = EncoderChoice::Amf;
+    v.speed = None;
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("amf.mkv");
+    let r = export::run_decoding_on(
+        &p,
+        &s,
+        &out,
+        &available,
+        Some(&decoder),
+        &AtomicBool::new(false),
+        &mut |_| {},
+    )
+    .unwrap();
+    assert_eq!(r.gpu_frames, 0, "SDR into PQ is made on the CPU");
+    let frames = hdr::read_frames(&out, false, usize::MAX).unwrap();
+    assert_eq!(frames.len(), 20);
+    assert!(
+        frames[0].metadata.mastering.is_some(),
+        "the first frame's mastering display: {:?}",
+        frames[0].metadata
+    );
+}
