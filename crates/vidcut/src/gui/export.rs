@@ -454,52 +454,6 @@ fn clock(secs: f64) -> String {
     }
 }
 
-/// Shows `path` in the file manager: a folder opened, a file selected in
-/// its folder (Finder, Explorer). On Linux the file's folder is opened:
-/// xdg-open selects nothing.
-fn show_in_folder(path: &Path) {
-    use std::process::Command;
-    let file = !path.is_dir();
-    #[cfg(target_os = "macos")]
-    let mut command = {
-        let mut c = Command::new("open");
-        if file {
-            c.arg("-R");
-        }
-        c.arg(path);
-        c
-    };
-    #[cfg(windows)]
-    let mut command = {
-        use std::os::windows::process::CommandExt;
-        let mut c = Command::new("explorer");
-        if file {
-            // Explorer reads `/select,` and the path as one argument, the
-            // path quoted in it.
-            c.raw_arg(format!("/select,\"{}\"", path.display()));
-        } else {
-            c.arg(path);
-        }
-        c
-    };
-    #[cfg(not(any(target_os = "macos", windows)))]
-    let mut command = {
-        let mut c = Command::new("xdg-open");
-        c.arg(if file {
-            path.parent().unwrap_or(path)
-        } else {
-            path
-        });
-        c
-    };
-    // Waited for on a thread of its own, so it doesn't stay a zombie.
-    let _ = crate::threads::spawn(
-        "vidcut-show-in-folder",
-        crate::threads::Work::Interactive,
-        move || command.status(),
-    );
-}
-
 fn job_paths(j: &JobInfo) -> Option<&Path> {
     if j.params["per_clip"] == true {
         j.params["output"].as_str().map(Path::new)
@@ -1652,7 +1606,7 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, closable: bool, send: impl Fn(&str, 
                 if let Some(path) = job_paths(j) {
                     ui.label(dim(path.display().to_string()));
                     if ui.small_button("Show in Folder").clicked() {
-                        show_in_folder(path);
+                        super::file_manager::show(path);
                     }
                 }
             });
