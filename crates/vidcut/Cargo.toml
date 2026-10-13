@@ -40,10 +40,6 @@ egui_kittest.workspace = true
 naga.workspace = true
 tempfile.workspace = true
 
-[target.'cfg(windows)'.dev-dependencies]
-# Which processes have a file open (Restart Manager).
-windows-sys = { workspace = true, features = ["Win32_System_RestartManager"] }
-
 [lints]
 workspace = true
 

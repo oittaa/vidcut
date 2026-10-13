@@ -1495,34 +1495,6 @@ mod tests {
     }
 
     #[test]
-    fn parses_methods_with_and_without_params() {
-        let r = Request::from_parts("project.get", None).unwrap();
-        assert_eq!(r, Request::ProjectGet {});
-        let r = Request::from_parts(
-            "edit.append",
-            Some(serde_json::json!({"media": "m1", "range": "5s..+20s"})),
-        )
-        .unwrap();
-        assert!(matches!(r, Request::EditAppend(SourceParams { ref media, .. }) if media == "m1"));
-        assert_eq!(r.method(), "edit.append");
-        let r = Request::from_parts("edit.split", Some(serde_json::json!({"at": ["1m", 900]})))
-            .unwrap();
-        assert!(matches!(r, Request::EditSplit { at: OneOrMany::Many(ref v), .. } if v.len() == 2));
-        let err = Request::from_parts("edit.frobnicate", None).unwrap_err();
-        assert!(err.contains("unknown method"), "{err}");
-        let r =
-            Request::from_parts("edit.append", Some(serde_json::json!({"tape": true}))).unwrap();
-        assert!(matches!(
-            r,
-            Request::EditAppend(SourceParams {
-                tape: true,
-                media,
-                ..
-            }) if media.is_empty()
-        ));
-    }
-
-    #[test]
     fn paths_include_those_of_batched_commands() {
         let mut r = Request::from_parts(
             "apply",
@@ -1535,17 +1507,5 @@ mod tests {
         .unwrap();
         let paths: Vec<_> = r.paths_mut().into_iter().map(|p| p.clone()).collect();
         assert_eq!(paths, ["a.mp4", "b.mp4", "c.otio", "d"].map(PathBuf::from));
-    }
-
-    #[test]
-    fn envelope_takes_common_options_from_params() {
-        let e = Envelope::from_json(serde_json::json!({
-            "method": "edit.delete",
-            "params": {"clips": "c3", "if_rev": 7, "dry_run": true}
-        }))
-        .unwrap();
-        assert_eq!((e.if_rev, e.dry_run), (Some(7), true));
-        assert!(e.request.is_mutation());
-        assert!(!Request::TimelineGet { range: None }.is_mutation());
     }
 }

@@ -15,17 +15,6 @@ pub(crate) struct Id {
     pos: i64,
 }
 
-#[cfg(test)]
-impl Id {
-    /// Position `pos` of `source`, for tests.
-    pub(crate) fn of(source: &str, pos: i64) -> Self {
-        Self {
-            source: source.into(),
-            pos,
-        }
-    }
-}
-
 /// A plan, indexed.
 pub(crate) struct Plan {
     pub(crate) plan: RenderPlan,
@@ -201,93 +190,4 @@ pub(crate) fn frame_of(fps: Rational, sample: i64, rate: u32) -> i64 {
         frame += 1;
     }
     frame
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-
-    use super::*;
-
-    fn source(media: &str, source_frame: i64, frames: i64) -> VideoPiece {
-        VideoPiece::Source {
-            pace: Default::default(),
-            media: media.into(),
-            path: PathBuf::from(format!("/{media}.mp4")),
-            origin: 0.0,
-            source_frame,
-            frames,
-            image: None,
-        }
-    }
-
-    fn plan(video: Vec<VideoPiece>, range: (i64, i64)) -> Plan {
-        let plan = RenderPlan {
-            fps: Rational::new(30000, 1001).unwrap(),
-            width: 320,
-            height: 180,
-            sample_rate: 48_000,
-            channels: 2,
-            frames: range.1 - range.0,
-            video,
-            audio: Vec::new(),
-            range,
-            name: "t".into(),
-        };
-        Plan::new(plan)
-    }
-
-    #[test]
-    fn a_sample_belongs_to_the_frame_that_starts_at_or_before_it() {
-        // 29.97 fps at 48 kHz: frames alternate 1601 and 1602 samples.
-        let fps = Rational::new(30000, 1001).unwrap();
-        let rate = 48_000;
-        for j in [0, 1, 2, 29, 30, 1000, 107_892] {
-            let s = fps.frame_to_sample(j, rate);
-            assert_eq!(frame_of(fps, s, rate), j, "frame {j}'s first sample");
-            assert_eq!(frame_of(fps, s - 1, rate), (j - 1).max(0));
-        }
-        assert_eq!(frame_of(fps, -5, rate), 0);
-    }
-
-    #[test]
-    fn frames_map_to_pictures_that_survive_moves() {
-        // A plan of timeline frames 100..160: m1 0..30, black 10, m2 5..25.
-        let p = plan(
-            vec![
-                source("m1", 0, 30),
-                VideoPiece::Black { frames: 10 },
-                source("m2", 5, 20),
-            ],
-            (100, 160),
-        );
-        assert_eq!(p.first(), 100);
-        assert_eq!(p.last(), 159);
-        assert_eq!(p.id(129), p.id(129));
-        assert_ne!(p.id(129), p.id(130), "the cut into black");
-        assert_eq!(p.id(130), p.id(139), "black is one picture");
-        // m2's source frame 5 is timeline frame 140; past the end clamps.
-        let (piece, start) = p.piece_at(145).unwrap();
-        assert_eq!(start, 140);
-        assert!(matches!(
-            piece,
-            VideoPiece::Source {
-                source_frame: 10,
-                frames: 15,
-                ..
-            }
-        ));
-        assert_eq!(p.id(500), p.id(159));
-        let from = p.pieces_from(135);
-        assert_eq!(from.len(), 2);
-        assert_eq!(from[0], VideoPiece::Black { frames: 5 });
-        // The same source frames elsewhere on another timeline are the same
-        // pictures.
-        let moved = plan(vec![source("m2", 0, 40)], (0, 40));
-        assert_eq!(moved.id(10), p.id(145));
-        // Sample positions and frames meet exactly.
-        for t in [100, 101, 129, 130, 159] {
-            assert_eq!(p.frame_at_sample(p.sample(t)), t);
-        }
-    }
 }

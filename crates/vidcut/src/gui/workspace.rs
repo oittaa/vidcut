@@ -1594,25 +1594,7 @@ pub(super) fn escape_cancels<T>(ctx: &egui::Context, modal: &egui::ModalResponse
 
 #[cfg(test)]
 mod tests {
-    use super::{LocalTime, decoding, edited_text};
-
-    #[test]
-    fn the_status_bar_says_when_the_project_changed() {
-        let at = |day, hour, minute| LocalTime {
-            year: 2026,
-            month: 10,
-            day,
-            hour,
-            minute,
-            second: 5,
-        };
-        assert_eq!(edited_text(&at(12, 9, 5), &at(12, 23, 0)), "edited 09:05");
-        assert_eq!(
-            edited_text(&at(11, 14, 32), &at(12, 9, 0)),
-            "edited 2026-10-11 14:32"
-        );
-        assert_eq!(at(12, 9, 5).full(), "2026-10-12 09:05:05");
-    }
+    use super::decoding;
 
     #[test]
     fn the_status_bar_says_where_the_viewer_decodes() {

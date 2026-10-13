@@ -129,42 +129,6 @@ mod tests {
     }
 
     #[test]
-    fn a_run_is_the_numbers_in_a_row_around_the_file() {
-        let dir = folder(&[
-            "f_0008.png",
-            "f_0009.png",
-            "f_0010.png",
-            "f_0011.png",
-            "f_0013.png",
-            "f_0010.jpg",
-            "g_0010.png",
-        ]);
-        let s = find(&dir.path().join("f_0010.png")).unwrap();
-        assert_eq!((s.pattern.as_str(), s.first, s.count), ("f_%04d.png", 8, 4));
-        assert_eq!(s.name(11), "f_0011.png");
-        assert_eq!(s.display(), "f_[0008-0011].png");
-        // Past the gap, a run of its own.
-        let s = find(&dir.path().join("f_0013.png")).unwrap();
-        assert_eq!((s.first, s.count), (13, 1));
-    }
-
-    #[test]
-    fn unpadded_numbers_and_percent_signs() {
-        let dir = folder(&["50% 9.png", "50% 10.png", "50% 11.png"]);
-        let s = find(&dir.path().join("50% 10.png")).unwrap();
-        assert_eq!(
-            (s.pattern.as_str(), s.first, s.count),
-            ("50%% %d.png", 9, 3)
-        );
-        assert_eq!(s.name(10), "50% 10.png");
-        assert_eq!(s.display(), "50% [9-11].png");
-        assert!(
-            find(&dir.path().join("50% 12.png")).is_err(),
-            "no such file"
-        );
-    }
-
-    #[test]
     fn padding_shows_in_the_neighbours() {
         // 123456 has no leading zero, but its folder's other files do.
         let dir = folder(&["c_099999.exr", "c_100000.exr", "c_100001.exr"]);

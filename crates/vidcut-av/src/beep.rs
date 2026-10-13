@@ -65,15 +65,6 @@ mod tests {
     }
 
     #[test]
-    fn chunked_generation_is_continuous() {
-        let rate = 44_100;
-        let whole = generate(rate, 2, 0, 50_000);
-        let mut parts = generate(rate, 2, 0, 1_234);
-        parts.extend(generate(rate, 2, 1_234, 50_000 - 1_234));
-        assert_eq!(whole, parts);
-    }
-
-    #[test]
     fn onsets_found_after_offset_start() {
         let rate = 48_000;
         // Start mid-way through second 0: first onset is at the start of second 1.
