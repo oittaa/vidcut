@@ -14,9 +14,12 @@ struct Sandbox {
 
 impl Sandbox {
     fn new(name: &str) -> Self {
+        // In the temp folder as vidcut names the files it adds: Windows
+        // runners' `TEMP` is a short name (`C:\Users\RUNNER~1\…`).
+        let temp = vidcut_core::dirs::canonical(&std::env::temp_dir()).unwrap();
         let dir = tempfile::Builder::new()
             .prefix(&format!("vidcut-cli-{name}-"))
-            .tempdir()
+            .tempdir_in(temp)
             .unwrap();
         Self { dir }
     }
