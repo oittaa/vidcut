@@ -3,10 +3,12 @@
 //!
 //! **Writing** ([`export`]):
 //! - Each video track becomes an OTIO video track of clips and gaps.
-//! - The audio of each track's clips becomes an audio track (`V1 audio`, …),
-//!   and each audio track (`A1`, …) one more. Each audio clip covers its
-//!   clip's audio range, so J/L cuts show up as audio edits offset from the
-//!   video edits, which is what other editors expect.
+//! - The audio of each track's clips becomes an audio track, and each audio
+//!   track one more. Each audio clip covers its clip's audio range, so J/L
+//!   cuts show up as audio edits offset from the video edits, which is what
+//!   other editors expect.
+//! - Tracks carry the names given to them (a track's audio its track's),
+//!   else the ones editors give their own by place: `Video 1`, `Audio 2`.
 //! - Media are named by plain absolute path, as editors write them (not
 //!   every editor reads `file://` URLs), or in a
 //!   bundle by a path relative to it. Image sequences are
@@ -33,6 +35,8 @@
 //!   editor had offline (`MissingReference` with a `Media Url`). Each
 //!   gives the places to look ([`MediaRef::paths`]), including where a
 //!   project folder moved with the timeline file would have put it.
+//! - Track names other than editors' defaults (`Video 1`, `Audio 2`) name
+//!   the tracks, unless vidcut's metadata says otherwise.
 //! - Video tracks become V1, V2, … An audio clip that lines up with a video
 //!   clip of the same media (on any video track, in the same link group if
 //!   it has one) becomes that clip's audio, J/L offsets included.
@@ -393,15 +397,20 @@ pub fn export(
             sound["Audio Type"] = json!(kind);
         }
         let sound = json!({ VIDCUT: meta, EDITOR: sound });
+        // The track's name, else the one editors give their own tracks by
+        // place: `Video 1`, `Audio 2`. A track's audio takes its name too.
+        let named = |kind: &str, n: usize| t.name.clone().unwrap_or(format!("{kind} {n}"));
         if t.kind == TrackKind::Video {
             let picture = json!({ VIDCUT: meta, EDITOR: { "Locked": t.locked } });
-            video_tracks.push(track(&t.id, "Video", video, t.video_enabled, picture));
+            let name = named("Video", video_tracks.len() + 1);
+            video_tracks.push(track(&name, "Video", video, t.video_enabled, picture));
             if !audio.is_empty() {
-                let name = format!("{} audio", t.id);
+                let name = named("Audio", audio_tracks.len() + 1);
                 audio_tracks.push(track(&name, "Audio", audio, !t.muted, sound));
             }
         } else {
-            audio_tracks.push(track(&t.id, "Audio", audio, !t.muted, sound));
+            let name = named("Audio", audio_tracks.len() + 1);
+            audio_tracks.push(track(&name, "Audio", audio, !t.muted, sound));
         }
     }
     let markers: Vec<Value> = p
@@ -523,7 +532,7 @@ pub struct ImportedTrack {
 
 impl ImportedTrack {
     /// From vidcut's metadata, else the editor metadata, else the OTIO track's
-    /// `enabled`.
+    /// `enabled` and `name` (unless an editor's default name).
     fn of(otio: &Value, id: &str, audio: bool) -> Self {
         let meta = &otio["metadata"][VIDCUT];
         let editor = &otio["metadata"][EDITOR];
@@ -541,9 +550,26 @@ impl ImportedTrack {
                 .unwrap_or(false),
             volume_db: meta["volume_db"].as_f64().unwrap_or(0.0),
             video_enabled: meta["video_enabled"].as_bool().unwrap_or(audio || enabled),
-            name: meta["name"].as_str().map(String::from),
+            name: match meta.get("name") {
+                Some(name) => name.as_str().map(String::from),
+                None => otio["name"]
+                    .as_str()
+                    .filter(|n| !default_track_name(n))
+                    .map(String::from),
+            },
         }
     }
+}
+
+/// A name editors give a track by place, not one somebody gave it: `Video 1`,
+/// `Audio 2`, `V1`, `A2`, or none.
+fn default_track_name(name: &str) -> bool {
+    let name = name.trim();
+    let numbered = |prefix: &str| {
+        name.strip_prefix(prefix)
+            .is_some_and(|n| !n.is_empty() && n.trim_start().bytes().all(|b| b.is_ascii_digit()))
+    };
+    name.is_empty() || ["Video", "Audio", "V", "A"].into_iter().any(numbered)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

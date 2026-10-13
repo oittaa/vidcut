@@ -105,7 +105,7 @@ vidcut history undo                         # works across separate runs
 - Measuring decodes a file once; the results are cached (`~/.cache/vidcut/analysis/`), so trying other settings is quick.
 
 **Timeline interchange (OpenTimelineIO, deviation X9):** files are written as DaVinci Resolve writes them, so they go to Resolve and back.
-- `vidcut export start cut.otio` writes the whole timeline (or `--range`) for other editors: each video track, its clips' audio (J/L cuts included) as an audio track, each audio track, markers, and vidcut extras (marks, clip gain, track settings) in `metadata.vidcut`.
+- `vidcut export start cut.otio` writes the whole timeline (or `--range`) for other editors: each video track, its clips' audio (J/L cuts included) as an audio track, each audio track, markers, and vidcut extras (marks, clip gain, track settings) in `metadata.vidcut`. Tracks carry their names (`track set A1 --name Music`), else `Video 1`, `Audio 2`, … by place.
   - Media are plain absolute paths; source ranges count from each file's own start timecode (`vidcut media get` reports `timecode`); a clip's video and audio share a Resolve link group (`metadata.Resolve_OTIO`).
   - Image sequences go as `ImageSequenceReference`s whose available range counts the pictures at the sequence rate, and come back as sequences; a still is available for one frame, as Resolve writes it.
   - `cut.otioz` bundles the media too (a zip file; Resolve imports these), `cut.otiod` in a folder. Bundles copy whole media files, so in a GUI they run as jobs.
