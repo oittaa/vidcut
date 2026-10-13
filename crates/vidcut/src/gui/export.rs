@@ -1527,6 +1527,10 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, closable: bool, send: impl Fn(&str, 
     match j.state {
         JobState::Running => {
             let text = match j.eta {
+                _ if j.measuring => format!(
+                    "measuring light for the HDR metadata · {:.0}%",
+                    j.progress * 100.0
+                ),
                 Some(eta) => format!(
                     "{:.0}% · {} elapsed · about {} left",
                     j.progress * 100.0,

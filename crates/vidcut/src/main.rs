@@ -20,6 +20,7 @@ fn main() -> ExitCode {
     }
     let cli = Cli::parse();
     vidcut_av::cuda::keep_shaders_in(vidcut::paths::cache_dir().join("shaders"));
+    vidcut_av::light::cache_in(vidcut::paths::cache_dir().join("analysis"));
     match run(&cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -104,20 +105,7 @@ fn execute(cli: &Cli, envelope: Envelope) -> Result<Response> {
         &options,
         envelope,
         &CANCEL,
-        &mut |v: &Value| {
-            bar.show(
-                v["output"].as_u64().unwrap_or(0) as usize,
-                v["outputs"].as_u64().unwrap_or(1) as usize,
-                Path::new(v["path"].as_str().unwrap_or_default()),
-                v["frames"].as_i64().unwrap_or(0),
-                v["total"].as_i64().unwrap_or(0),
-                (
-                    v["pass"].as_u64().unwrap_or(1) as u8,
-                    v["passes"].as_u64().unwrap_or(1) as u8,
-                ),
-                v["elapsed"].as_f64().unwrap_or(0.0),
-            )
-        },
+        &mut |v: &Value| bar.show(v),
     )
     .map_err(|e| {
         if live && e.code == vidcut_core::ErrorCode::NoInstance && !cli.json {
@@ -146,20 +134,34 @@ impl ProgressBar {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn show(
-        &mut self,
-        i: usize,
-        n: usize,
-        path: &Path,
-        frames: i64,
-        total: i64,
-        (pass, passes): (u8, u8),
-        elapsed: f64,
-    ) {
+    /// Shows a progress event.
+    fn show(&mut self, v: &Value) {
+        let i = v["output"].as_u64().unwrap_or(0) as usize;
+        let n = v["outputs"].as_u64().unwrap_or(1) as usize;
+        let path = Path::new(v["path"].as_str().unwrap_or_default());
+        let frames = v["frames"].as_i64().unwrap_or(0);
+        let total = v["total"].as_i64().unwrap_or(0);
+        let pass = v["pass"].as_u64().unwrap_or(1) as u8;
+        let passes = v["passes"].as_u64().unwrap_or(1) as u8;
+        let elapsed = v["elapsed"].as_f64().unwrap_or(0.0);
         if !self.show || (frames < total && self.last.elapsed().as_millis() < 200) {
             return;
         }
         self.last = Instant::now();
+        let file = path
+            .file_name()
+            .map(|f| f.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if v["measuring"].as_bool() == Some(true) {
+            eprint!(
+                "\r{file}: measuring light for the HDR metadata, {:3}%   ",
+                frames * 100 / total.max(1)
+            );
+            if frames == total {
+                eprintln!();
+            }
+            return;
+        }
         // Over both runs of a two-pass export (decision D45).
         let passes = i64::from(passes.max(1));
         let done = i64::from(pass.max(1) - 1) * total + frames;
@@ -171,10 +173,6 @@ impl ProgressBar {
         } else {
             String::new()
         };
-        let file = path
-            .file_name()
-            .map(|f| f.to_string_lossy().into_owned())
-            .unwrap_or_default();
         let which = if n > 1 {
             format!("[{}/{n}] ", i + 1)
         } else {

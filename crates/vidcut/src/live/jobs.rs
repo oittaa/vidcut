@@ -52,6 +52,9 @@ pub struct JobInfo {
     /// second pass of a two-pass export.
     pub pass: u8,
     pub passes: u8,
+    /// Measuring the light the HDR metadata needs, before encoding
+    /// (decision D46): `progress` is the share measured.
+    pub measuring: bool,
     /// 0..1 over all files.
     pub progress: f64,
     /// Seconds since the job started.
@@ -99,6 +102,7 @@ impl JobInfo {
             total: 0,
             pass: 1,
             passes: 1,
+            measuring: false,
             progress: 0.0,
             elapsed: 0.0,
             eta: None,
@@ -134,14 +138,22 @@ impl JobInfo {
     }
 
     /// Output `output` has `frames` of `total` frames done in run `pass`
-    /// of `passes`.
+    /// of `passes`; or, `measuring`, that share of the light measured.
     pub(crate) fn progressed(
         &mut self,
         output: usize,
         frames: i64,
         total: i64,
         (pass, passes): (u8, u8),
+        measuring: bool,
     ) {
+        self.measuring = measuring;
+        if measuring {
+            self.elapsed = self.clock.elapsed().as_secs_f64();
+            self.progress = frames as f64 / total.max(1) as f64;
+            self.eta = None;
+            return;
+        }
         let before: i64 = self.outputs.iter().take(output).map(|o| o.frames).sum();
         if self.outputs.is_empty() {
             self.total = total;
@@ -154,6 +166,7 @@ impl JobInfo {
             elapsed: Default::default(),
             pass,
             passes,
+            measuring,
         }
         .done();
         self.frames = (before + done).min(self.total);

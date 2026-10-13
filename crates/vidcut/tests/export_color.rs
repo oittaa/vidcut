@@ -335,3 +335,49 @@ fn hdr_metadata_follows_the_sources() {
             && f.metadata.light.is_some_and(|l| l.max_cll == 1000)
     }));
 }
+
+#[test]
+fn light_levels_are_measured_when_the_export_starts() {
+    // Decision D46: HLG in PQ output has no light levels of its own. The
+    // plan says they are measured when the export starts; the export
+    // writes them, and the next plan has them.
+    let sb = Sandbox::new("measured");
+    let hlg = fixture(
+        FixtureSpec::new(VideoCodec::Hevc10, Container::Mkv, 320, 180, (30, 1), 30)
+            .hdr(Hdr::Hlg)
+            .no_audio(),
+    );
+    let project = sb.path("p.vidcut");
+    sb.ok(&["project", "create", project.to_str().unwrap()]);
+    sb.ok(&["media", "add", &hlg]);
+    sb.ok(&["edit", "append", "m1"]);
+    let args = ["--preset", "h265-master", "--set", "video.hdr=pq"];
+    let plan = sb.plan("pq.mkv", &args);
+    let m = &plan["outputs"][0]["metadata"];
+    assert!(m["light"].is_null(), "{m}");
+    assert!(
+        m["why"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w == "MaxCLL and MaxFALL: measured when the export starts"),
+        "{m}"
+    );
+
+    let out = sb.path("pq.mkv");
+    let mut start = vec!["export", "start", out.to_str().unwrap(), "--encoder", "cpu"];
+    start.extend_from_slice(&args);
+    start.extend_from_slice(&["--set", "video.speed=ultrafast"]);
+    let r = sb.ok(&start);
+    let light = r["result"]["outputs"][0]["metadata"]["light"].clone();
+    // SDR white, 203 cd/m² in PQ, and a little overshoot.
+    let cll = light["max_cll"].as_u64().unwrap_or(0);
+    assert!((200..=260).contains(&cll), "{r}");
+    let frames = vidcut_av::hdr::read_frames(&out, false, 1).unwrap();
+    assert_eq!(
+        frames[0].metadata.light.map(|l| u64::from(l.max_cll)),
+        Some(cll)
+    );
+    let plan = sb.plan("again.mkv", &args);
+    assert_eq!(plan["outputs"][0]["metadata"]["light"], light, "{plan}");
+}

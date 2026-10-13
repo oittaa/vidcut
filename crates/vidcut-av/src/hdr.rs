@@ -48,6 +48,8 @@ unsafe extern "C" {
     fn av_mastering_display_metadata_alloc_size(size: *mut usize) -> *mut AvMastering;
     fn av_content_light_metadata_alloc(size: *mut usize) -> *mut AvLight;
     fn av_dynamic_hdr_plus_to_t35(s: *const c_void, data: *mut *mut u8, size: *mut usize) -> c_int;
+    fn av_dynamic_hdr_plus_create_side_data(frame: *mut ffi::AVFrame) -> *mut c_void;
+    fn av_dynamic_hdr_plus_from_t35(s: *mut c_void, data: *const u8, size: usize) -> c_int;
 }
 
 /// What a frame (and its stream) says of its HDR.
@@ -430,6 +432,86 @@ pub fn hdr10plus_t35(f: &frame::Video) -> Option<Vec<u8>> {
         out.extend_from_slice(std::slice::from_raw_parts(data, size));
         ffi::av_free(data.cast());
         Some(out)
+    }
+}
+
+/// One frame's HDR10+ (SMPTE ST 2094-40) with one window and no tone
+/// mapping curve: its light in cd/m². What frames without it are given
+/// (decision D46).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Hdr10Plus {
+    /// The display it was graded for, cd/m²; 0 for none.
+    pub targeted_max_luminance: u32,
+    /// Each channel's brightest, red, green, blue.
+    pub maxscl: [f64; 3],
+    /// The brightest channel of each pixel, averaged.
+    pub average_maxrgb: f64,
+    /// That brightest channel at percentages of the pixels.
+    pub percentiles: Vec<(u8, f64)>,
+}
+
+impl Hdr10Plus {
+    /// As an ITU-T T.35 payload, header included ([`hdr10plus_t35`]).
+    pub fn t35(&self) -> Vec<u8> {
+        struct Bits(Vec<u8>, u32);
+        impl Bits {
+            fn put(&mut self, value: u32, n: u32) {
+                for i in (0..n).rev() {
+                    if self.1.is_multiple_of(8) {
+                        self.0.push(0);
+                    }
+                    let bit = (value >> i) & 1;
+                    *self.0.last_mut().expect("pushed") |= (bit as u8) << (7 - self.1 % 8);
+                    self.1 += 1;
+                }
+            }
+        }
+        // Light in 1/100000 of 10000 cd/m², 17 bits.
+        let light = |nits: f64| ((nits * 10.0).round() as u32).min((1 << 17) - 1);
+        let mut b = Bits(HDR10PLUS_T35.to_vec(), 48);
+        b.put(1, 8); // application_version
+        b.put(1, 2); // num_windows
+        b.put(self.targeted_max_luminance, 27);
+        b.put(0, 1); // targeted_system_display_actual_peak_luminance_flag
+        for c in self.maxscl {
+            b.put(light(c), 17);
+        }
+        b.put(light(self.average_maxrgb), 17);
+        let percentiles = &self.percentiles[..self.percentiles.len().min(15)];
+        b.put(percentiles.len() as u32, 4);
+        for &(percentage, nits) in percentiles {
+            b.put(u32::from(percentage.min(100)), 7);
+            b.put(light(nits), 17);
+        }
+        b.put(0, 10); // fraction_bright_pixels
+        b.put(0, 1); // mastering_display_actual_peak_luminance_flag
+        b.put(0, 1); // tone_mapping_flag
+        b.put(0, 1); // color_saturation_mapping_flag
+        b.0
+    }
+
+    /// Puts it on `f`, in place of any it had.
+    pub fn attach(&self, f: &mut frame::Video) -> Result<()> {
+        let t35 = self.t35();
+        let payload = &t35[HDR10PLUS_T35.len()..];
+        unsafe {
+            ffi::av_frame_remove_side_data(f.as_mut_ptr(), Sd::AV_FRAME_DATA_DYNAMIC_HDR_PLUS);
+            let sd = av_dynamic_hdr_plus_create_side_data(f.as_mut_ptr());
+            if sd.is_null() {
+                return Err(Error::Invalid("out of memory for HDR metadata".into()));
+            }
+            if av_dynamic_hdr_plus_from_t35(sd, payload.as_ptr(), payload.len()) < 0 {
+                return Err(Error::Invalid("HDR10+ that FFmpeg doesn't read".into()));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Whether `f` has HDR10+.
+pub fn has_hdr10plus(f: &frame::Video) -> bool {
+    unsafe {
+        !ffi::av_frame_get_side_data(f.as_ptr(), Sd::AV_FRAME_DATA_DYNAMIC_HDR_PLUS).is_null()
     }
 }
 

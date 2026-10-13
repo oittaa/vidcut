@@ -18,9 +18,13 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use vidcut_core::export::color::{self, ColorChoice, PictureKind};
-use vidcut_core::export::metadata::{self, MetadataChoice, PieceMeta};
-use vidcut_core::export::{EncoderChoice, ExportSettings, HdrMetadata, HdrMode, validate};
+use vidcut_core::export::metadata::{self, Measured, MetadataChoice, PieceMeta};
+use vidcut_core::export::{
+    EncoderChoice, ExportSettings, HdrMetadata, HdrMode, VideoSettings, validate,
+};
+use vidcut_core::model::Hdr;
 use vidcut_core::render::{RenderPlan, VideoPiece};
+use vidcut_core::time::Rational;
 
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, encoder, ffi, format, frame};
@@ -40,6 +44,9 @@ pub struct Progress {
     /// two passes by encoding twice reports both (decision D45).
     pub pass: u8,
     pub passes: u8,
+    /// Measuring the light the HDR metadata needs, before encoding
+    /// (decision D46): `frames` of `total` is the share measured.
+    pub measuring: bool,
 }
 
 impl Progress {
@@ -51,6 +58,17 @@ impl Progress {
             elapsed,
             pass: 1,
             passes: 1,
+            measuring: false,
+        }
+    }
+
+    /// `share` of the light measured, in thousandths.
+    pub fn measuring(share: f64, elapsed: Duration) -> Self {
+        Self {
+            frames: (share.clamp(0.0, 1.0) * 1000.0) as i64,
+            total: 1000,
+            measuring: true,
+            ..Self::single(0, 0, elapsed)
         }
     }
 
@@ -91,8 +109,71 @@ pub struct Report {
 }
 
 /// What a piece's pictures carry, read from its file: its transfer and HDR
+/// metadata (each file probed once), and its light measured where output
+/// with `v` needs it ([`measured_light`]).
+pub fn probed_metadata<'a>(
+    fps: Rational,
+    v: &'a VideoSettings,
+    cancel: Option<&'a AtomicBool>,
+) -> impl FnMut(&VideoPiece) -> PieceMeta + 'a {
+    let mut probe = probed_files();
+    move |piece| {
+        let mut m = probe(piece);
+        m.measured = measured_light(piece, fps, v, &m, true, cancel);
+        m
+    }
+}
+
+/// Whether the light levels of output with `v` (its dynamic range chosen)
+/// need the light of a piece carrying `m` measured (decision D46): those of
+/// PQ output from the sources, for pieces that say none (PQ without them,
+/// HLG), or for all with `video.max_cll = measure`.
+pub fn needs_light(v: &VideoSettings, m: &PieceMeta) -> bool {
+    if v.hdr.transfer() != Some(Hdr::Pq) || v.hdr_metadata == HdrMetadata::None {
+        return false;
+    }
+    match v.max_cll.as_deref() {
+        Some(metadata::MEASURE) => true,
+        Some(_) => false,
+        None => match m.hdr {
+            Some(Hdr::Pq) => m.light.is_none(),
+            Some(Hdr::Hlg) => true,
+            None => false,
+        },
+    }
+}
+
+/// A piece's light levels where [`needs_light`]: measured now with
+/// `measure_now`, else as measured before, or pending.
+pub fn measured_light(
+    piece: &VideoPiece,
+    fps: Rational,
+    v: &VideoSettings,
+    m: &PieceMeta,
+    measure_now: bool,
+    cancel: Option<&AtomicBool>,
+) -> Measured {
+    if !needs_light(v, m) {
+        return Measured::No;
+    }
+    match crate::light::piece_level(piece, fps, measure_now, cancel, &mut |_| {}) {
+        Ok(Some(l)) => Measured::Known(l),
+        Ok(None) if !measure_now => Measured::Pending,
+        // What can't be read is left out; a cancelled export stops after.
+        _ => Measured::No,
+    }
+}
+
+/// Whether output with `v` (its HDR metadata chosen) makes HDR10+ for the
+/// frames of a piece carrying `m`, from their measured light (decision
+/// D46).
+pub fn makes_hdr10plus(v: &VideoSettings, m: &PieceMeta) -> bool {
+    v.hdr.transfer() == Some(Hdr::Pq) && v.hdr_metadata.hdr10plus() && !m.hdr10plus
+}
+
+/// What a piece's pictures carry, read from its file: its transfer and HDR
 /// metadata. Each file is probed once.
-pub fn probed_metadata() -> impl FnMut(&VideoPiece) -> PieceMeta {
+pub fn probed_files() -> impl FnMut(&VideoPiece) -> PieceMeta {
     let mut known: std::collections::HashMap<PathBuf, PieceMeta> = Default::default();
     move |piece| {
         let VideoPiece::Source { path, .. } = piece else {
@@ -112,6 +193,7 @@ pub fn probed_metadata() -> impl FnMut(&VideoPiece) -> PieceMeta {
                     light: v.hdr.light,
                     hdr10plus: v.hdr.hdr10plus,
                     dolby_vision: v.hdr.dolby_vision,
+                    measured: Measured::No,
                 })
         })
     }
@@ -265,8 +347,9 @@ pub fn run(
         .as_ref()
         .is_some_and(|v| v.hdr_metadata == HdrMetadata::Auto)
     {
-        let c =
-            choose_metadata(plan, &settings, probed_metadata()).expect("the settings have video");
+        let v = settings.video.clone().expect("checked");
+        let c = choose_metadata(plan, &settings, probed_metadata(plan.fps, &v, Some(cancel)))
+            .expect("the settings have video");
         c.apply(settings.video.as_mut().expect("checked"));
         metadata_chosen = Some(c);
     }
@@ -332,6 +415,39 @@ impl Drop for PassFiles {
     }
 }
 
+/// The measured light of the files whose frames get HDR10+ made (decision
+/// D46), by path: what the plan shows of each, measured now unless it was
+/// before.
+fn made_hdr10plus_light(
+    plan: &RenderPlan,
+    enc: &encode::VideoEncoder,
+    cancel: &AtomicBool,
+) -> Result<std::collections::HashMap<PathBuf, std::sync::Arc<crate::light::LightAnalysis>>> {
+    let mut out = std::collections::HashMap::new();
+    if !enc.dynamic.hdr10plus {
+        return Ok(out);
+    }
+    let mut probe = probed_files();
+    for piece in &plan.video {
+        let Some(span) = crate::light::Span::of(piece, plan.fps) else {
+            continue;
+        };
+        if probe(piece).hdr10plus {
+            continue;
+        }
+        match crate::light::analysis(&span, true, Some(cancel), &mut |_| {}) {
+            // The latest holds what the ones before did.
+            Ok(Some(a)) => {
+                out.insert(span.input.path().to_path_buf(), a);
+            }
+            Err(e) if is_cancelled(&e) => return Err(e),
+            // Frames of a file that can't be measured get none.
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
 /// The first of two runs (decision D45): every frame of the range through
 /// the encoder opened for it, its packets dropped, so it writes its
 /// statistics. Returns the ones it hands back in memory (libvpx); x264 and
@@ -368,6 +484,7 @@ fn first_run(
             elapsed: started.elapsed(),
             pass: 1,
             passes: 2,
+            measuring: false,
         });
     }
     encoder
@@ -621,6 +738,7 @@ fn encode(
                     why.join("; ")
                 )));
             };
+            let light = made_hdr10plus_light(plan, &enc, cancel)?;
             // Two runs: the first measures, then the encoder opens again
             // for the second with what it wrote.
             let (encoder, vaapi) = match &pass_files {
@@ -648,7 +766,8 @@ fn encode(
                 }
                 None => VideoFrames::new(&plan.video, plan.fps, w, h, enc.pixel, enc.hdr),
             }
-            .with_dynamic(enc.dynamic);
+            .with_dynamic(enc.dynamic)
+            .with_light(light);
             // HDR10+ goes into HEVC and AV1 packets here; libvpx-vp9 takes
             // it from the frames, and WebM and Matroska carry it.
             let id = encoder.id();
@@ -817,6 +936,7 @@ fn encode(
             elapsed: started.elapsed(),
             pass: runs,
             passes: runs,
+            measuring: false,
         });
     }
     if let Some(a) = audio.as_mut() {
