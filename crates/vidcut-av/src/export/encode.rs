@@ -361,7 +361,10 @@ pub fn video_encoders(v: &VideoSettings, available: &Availability) -> Vec<Result
         }
     }
     if found.is_empty() {
-        found.push(Err(Error::Invalid(format!("no encoder for {:?}", v.codec))));
+        found.push(Err(Error::Invalid(format!(
+            "no encoder for {}",
+            v.codec.title()
+        ))));
     }
     found
 }
@@ -379,13 +382,18 @@ fn video_encoder(
         return cpu_video(v, ten).map(Some);
     }
     let Some(name) = gpu_name(v.codec, kind) else {
+        if asked {
+            let (kind, codec) = (kind.title(), v.codec.title());
+            return Err(Error::Invalid(format!("{kind} doesn't support {codec}")));
+        }
         return Ok(None);
     };
     let pixel = gpu_pixel(kind, ten);
     let Some(status) = available.find(name, pixel) else {
         if asked {
             return Err(Error::Invalid(format!(
-                "{name} ({}) is not available on this machine; see `vidcut encoders list`",
+                "{} isn't available on this machine ({name}, {})",
+                kind.title(),
                 pixel_name(pixel)
             )));
         }
@@ -907,7 +915,7 @@ pub(crate) fn open_video(
     // other sizes (FFmpeg says "Function not implemented").
     if enc.name == "libkvazaar" && !(width.is_multiple_of(8) && height.is_multiple_of(8)) {
         return Err(Error::Invalid(format!(
-            "libkvazaar, this FFmpeg's HEVC encoder, takes sizes in multiples of 8, not {width}×{height}"
+            "this FFmpeg's HEVC encoder, Kvazaar, only takes sizes in multiples of 8, not {width}×{height}"
         )));
     }
     let mut ctx = codec::context::Context::new_with_codec(codec)

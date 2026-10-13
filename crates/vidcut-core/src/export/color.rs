@@ -145,14 +145,7 @@ pub fn carries_hdr(codec: VideoCodec) -> bool {
 }
 
 fn codec_name(codec: VideoCodec) -> &'static str {
-    match codec {
-        VideoCodec::H264 => "H.264",
-        VideoCodec::Hevc => "HEVC",
-        VideoCodec::Av1 => "AV1",
-        VideoCodec::Vp9 => "VP9",
-        VideoCodec::Prores => "ProRes",
-        VideoCodec::Dnxhr => "DNxHR",
-    }
+    codec.title()
 }
 
 fn transfer_name(h: Hdr) -> &'static str {

@@ -197,29 +197,24 @@ pub fn stand_ins() -> Vec<(Part, &'static str)> {
         .collect()
 }
 
-/// The error for `part`, which this FFmpeg lacks.
+/// The error for `part`, which this FFmpeg lacks, in words: what it
+/// can't do, and what it was built without.
 pub fn part_missing(part: &Part) -> Error {
-    let k = part.kind.name();
-    let named = |n: &Name| match n.library {
-        Some(library) => format!("{} from {library}", n.name),
-        None => n.name.to_string(),
+    let without = |n: &Name| match n.library {
+        Some(library) => format!("{library} ({})", n.name),
+        None => format!("its {} {}", n.name, part.kind.name()),
     };
-    Error::Missing(match part.names {
-        [n] => match n.library {
-            Some(library) => format!(
-                "this FFmpeg has no {} {k} ({}; it comes with {library})",
-                n.name, part.used_for
-            ),
-            None => format!("this FFmpeg has no {} {k} ({})", n.name, part.used_for),
-        },
-        names => {
-            let all: Vec<String> = names.iter().map(named).collect();
-            format!(
-                "this FFmpeg has no {k} for {} ({})",
-                part.used_for,
-                all.join(" or ")
-            )
-        }
+    let all: Vec<String> = part.names.iter().map(without).collect();
+    let all = all.join(" or ");
+    Error::Missing(match part.kind {
+        Kind::Encoder => format!(
+            "this FFmpeg can't encode {}: it was built without {all}",
+            part.used_for
+        ),
+        Kind::Filter => format!(
+            "this FFmpeg can't do {}: it was built without {all}",
+            part.used_for
+        ),
     })
 }
 
@@ -303,16 +298,20 @@ mod tests {
         let e = missing_error(Kind::Filter, "zscale").to_string();
         assert_eq!(
             e,
-            "this FFmpeg has no zscale filter (faster HDR conversion; it comes with zimg)"
+            "this FFmpeg can't do faster HDR conversion: it was built without zimg (zscale)"
         );
         let e = missing_error(Kind::Encoder, "png").to_string();
-        assert_eq!(e, "this FFmpeg has no png encoder (stills and storyboards)");
+        assert_eq!(
+            e,
+            "this FFmpeg can't encode stills and storyboards: it was built without its png encoder"
+        );
         let e = missing_error(Kind::Filter, "nosuch").to_string();
         assert_eq!(e, "this FFmpeg has no nosuch filter");
         // A part with alternatives names them all.
         assert_eq!(
             part_missing(&H264).to_string(),
-            "this FFmpeg has no encoder for H.264 on the CPU (libx264 from x264 or libopenh264 from OpenH264)"
+            "this FFmpeg can't encode H.264 on the CPU: it was built without x264 (libx264) \
+             or OpenH264 (libopenh264)"
         );
     }
 

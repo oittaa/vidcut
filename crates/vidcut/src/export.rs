@@ -858,6 +858,78 @@ pub fn as_preferred(settings: &mut ExportSettings, gpu: bool) {
     }
 }
 
+/// Why this machine can't export `settings` (`None`: it can), the GPU's
+/// use as `gpu` says: no encoder for its picture or its sound.
+pub fn unavailable(
+    settings: &ExportSettings,
+    available: &Availability,
+    gpu: bool,
+) -> Option<String> {
+    let video = settings
+        .video
+        .as_ref()
+        .and_then(|v| video_unavailable(v, available, gpu));
+    let audio = settings.audio.as_ref().and_then(|a| {
+        vidcut_av::export::encode::resolve_audio(a, 48_000, 2)
+            .err()
+            .map(|e| e.to_string())
+    });
+    video.or(audio)
+}
+
+fn video_unavailable(
+    v: &vidcut_core::export::VideoSettings,
+    available: &Availability,
+    gpu: bool,
+) -> Option<String> {
+    let mut v = v.clone();
+    if !gpu {
+        v.encoder = EncoderChoice::Cpu;
+    }
+    vidcut_av::export::encode::resolve_video(&v, available)
+        .err()
+        .map(|e| e.to_string())
+}
+
+/// What this machine encodes, the GPU's use as `gpu` says: for each video
+/// codec and encoder choice, and each audio codec, why not (`null`: it
+/// does), by their names in the settings.
+pub fn encodable(available: &Availability, gpu: bool) -> Value {
+    use vidcut_core::export::{AudioCodec, AudioSettings, VideoCodec, VideoSettings};
+    let key = |v: Value| v.as_str().unwrap_or_default().to_string();
+    let video: serde_json::Map<String, Value> = VideoCodec::ALL
+        .iter()
+        .map(|&codec| {
+            let by_encoder: serde_json::Map<String, Value> = EncoderChoice::ALL
+                .iter()
+                .map(|&encoder| {
+                    let v = VideoSettings::new(codec, encoder);
+                    (
+                        key(json!(encoder)),
+                        json!(video_unavailable(&v, available, gpu)),
+                    )
+                })
+                .collect();
+            (key(json!(codec)), Value::Object(by_encoder))
+        })
+        .collect();
+    let audio: serde_json::Map<String, Value> = AudioCodec::ALL
+        .iter()
+        .map(|&codec| {
+            let a = AudioSettings {
+                codec,
+                bitrate: None,
+                sample_rate: None,
+                channels: None,
+                loudness: None,
+            };
+            let why = vidcut_av::export::encode::resolve_audio(&a, 48_000, 2).err();
+            (key(json!(codec)), json!(why.map(|e| e.to_string())))
+        })
+        .collect();
+    json!({ "video": video, "audio": audio })
+}
+
 /// Whether the settings may pick a GPU encoder (so availability matters).
 pub fn needs_gpu_info(settings: &ExportSettings) -> bool {
     settings

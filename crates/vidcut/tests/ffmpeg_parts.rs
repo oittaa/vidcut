@@ -145,8 +145,8 @@ fn an_export_without_its_encoder_fails_before_writing() {
     assert_eq!(
         message,
         format!(
-            "{}: this FFmpeg has no encoder for H.264 on the CPU \
-             (libx264 from x264 or libopenh264 from OpenH264)",
+            "{}: this FFmpeg can't encode H.264 on the CPU: \
+             it was built without x264 (libx264) or OpenH264 (libopenh264)",
             out.display()
         )
     );
@@ -232,4 +232,39 @@ fn hdr_into_sdr_without_zscale_converts_on_the_cpu() {
     assert_eq!(code, Some(0), "{v}");
     assert_eq!(v["result"]["outputs"][0]["color"]["tone_mapped"], 30, "{v}");
     assert!(out.is_file());
+}
+
+/// `encoders list` says why each codec and encoder can't encode here, and
+/// `presets list` why each preset can't export (`null`: it can).
+#[test]
+fn the_lists_say_what_cant_be_encoded_and_why() {
+    let sb = Sandbox::new("lists");
+    let without = "libvpx-vp9,libmp3lame";
+    let (code, v) = sb.run(without, &["encoders", "list"]);
+    assert_eq!(code, Some(0), "{v}");
+    let can = &v["result"];
+    let vp9 = "this FFmpeg can't encode VP9: it was built without libvpx (libvpx-vp9)";
+    let mp3 = "this FFmpeg can't encode MP3 sound: it was built without LAME (libmp3lame)";
+    assert_eq!(can["video"]["vp9"]["cpu"], vp9, "{can}");
+    assert_eq!(
+        can["video"]["prores"]["nvenc"],
+        "NVENC doesn't support ProRes"
+    );
+    assert!(can["video"]["prores"]["cpu"].is_null());
+    assert_eq!(can["audio"]["mp3"], mp3);
+    assert!(can["audio"]["aac"].is_null());
+    let (code, v) = sb.run(without, &["presets", "list"]);
+    assert_eq!(code, Some(0), "{v}");
+    let why = |name: &str| {
+        v["result"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == name)
+            .expect(name)["unavailable"]
+            .clone()
+    };
+    assert_eq!(why("vp9-webm"), vp9);
+    assert_eq!(why("audio-mp3"), mp3);
+    assert!(why("prores-422hq").is_null());
 }
