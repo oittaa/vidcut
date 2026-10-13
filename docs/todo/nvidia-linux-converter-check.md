@@ -2,12 +2,7 @@
 
 **When:** next time on a Linux desktop with an NVIDIA GPU. High priority.
 
-NVENC exports convert turned, BT.601, HDR and 10-bit placed pieces with libplacebo on a Vulkan device derived from CUDA (export.md §5). On Windows (RTX 4080 SUPER) three exports at once sometimes went wrong:
-- the export hung at a converter's teardown;
-- the frame before showed;
-- the Vulkan device was lost.
-
-Waiting for each hand-off on the CPU, one converter at a time (gotchas.md, oittaa/vidcut#96), made the hang about five times rarer, from one run in 15 to one in 76; the root cause is still being looked for. None of the Linux machines here runs this path: the N150 is Intel, WSL has no NVIDIA Vulkan driver, and CI has no GPU. So whether Linux shows it is unknown.
+NVENC exports convert turned, BT.601, HDR and 10-bit placed pieces with libplacebo on a Vulkan device derived from CUDA (export.md §5). On Windows (RTX 4080 SUPER) three exports at once hung at a converter's teardown or showed the frame before: libplacebo gives frames back before reading them (gotchas.md), and `cuda::wait_done` covers for it. None of the Linux machines here runs this path: the N150 is Intel, WSL has no NVIDIA Vulkan driver, and CI has no GPU. So whether the cover holds on Linux is unchecked.
 
 On the desktop:
 
@@ -22,7 +17,6 @@ for i in $(seq 1 60); do timeout 180 cargo test -p vidcut-av --features gpu-test
   ```
 
 - In the logs, look for:
-  - `vidcut: GPU frames left unfreed`: the teardown's safety net caught a frame never signalled;
   - a barcode assertion (`frame N: Some(a)` against `Some(b)`): a wrong picture;
   - `VK_ERROR_DEVICE_LOST` or `VkResult -4`: run with `VIDCUT_AV_LOG=error` to see it.
 - Note the driver and FFmpeg versions (`nvidia-smi`, `vidcut doctor`).
