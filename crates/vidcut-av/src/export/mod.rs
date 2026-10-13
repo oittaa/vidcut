@@ -91,8 +91,9 @@ pub struct Report {
     /// Passes the video encoder made over each frame (decision D45).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub passes: Option<u8>,
-    /// Video frames decoded and scaled on the GPU (NVDEC, CUDA) on their way
-    /// to NVENC; the rest were made on the CPU.
+    /// Video frames decoded and scaled on the GPU on their way to its
+    /// encoder (NVENC, VAAPI, AMF), never in memory; the rest were made on
+    /// the CPU.
     pub gpu_frames: i64,
     /// Video frames whose source frame a GPU decoded (NVDEC, VA-API,
     /// Direct3D 11): those of `gpu_frames`, and those that came down to be

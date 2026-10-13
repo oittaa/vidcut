@@ -5,12 +5,13 @@
 //! display that shows them from there, every other kind comes down to
 //! memory as it is decoded, its surface going back to the decoder at once.
 //!
-//! `VIDCUT_HWDEC` picks one for tests and debugging: `nvdec`, `vaapi`
-//! (`vaapi:/dev/dri/renderD129` for a render node), `d3d11va`
-//! (`d3d11va:1` for an adapter by its index), or `none`.
+//! `VIDCUT_HWDEC` picks one for tests and debugging: `nvdec` (`nvdec:1`
+//! for a CUDA device by its index), `vaapi` (`vaapi:/dev/dri/renderD129`
+//! for a render node), `d3d11va` (`d3d11va:1` for an adapter by its
+//! index), or `none`.
 
 use std::ptr;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use crate::cuda::CudaDevice;
 use crate::error::{Error, Result};
@@ -204,9 +205,6 @@ pub struct GpuDecoder {
     left: Vec<ffmpeg::codec::Id>,
 }
 
-/// AMD's PCI vendor id.
-const AMD: u32 = 0x1002;
-
 /// Where a job's pieces decode: an export's or a proxy's.
 #[derive(Clone, Copy)]
 pub enum Decoding<'a> {
@@ -259,11 +257,10 @@ impl GpuDecoder {
     }
 
     /// `kind` on `on` (a render node for VA-API, an adapter's index for
-    /// Direct3D 11; the default one when empty). NVDEC is on the process's
-    /// CUDA device.
+    /// Direct3D 11, a CUDA device's for NVDEC; the first one when empty).
     pub fn open(kind: Kind, on: &str) -> Result<Self> {
         if kind == Kind::Nvdec {
-            return CudaDevice::open().map(Self::nvdec);
+            return CudaDevice::on(on.parse().unwrap_or(0)).map(Self::nvdec);
         }
         let device = Device::open(kind, on)?;
         #[cfg(windows)]
@@ -309,7 +306,7 @@ impl GpuDecoder {
     /// decodes H.264 there.
     pub fn decodes(&self, codec: ffmpeg::codec::Id) -> bool {
         !(self.kind == Kind::D3d11va
-            && self.vendor == Some(AMD)
+            && self.vendor == Some(crate::gpus::AMD)
             && codec == ffmpeg::codec::Id::H264)
             && !self.left.contains(&codec)
     }
@@ -392,59 +389,56 @@ impl GpuDecoder {
         self.device.0
     }
 
-    /// The best this computer has, opened once for the process: NVDEC on
-    /// an NVIDIA GPU, else VA-API on the first render node that isn't
-    /// NVIDIA's (Linux) or Direct3D 11 on the first adapter that isn't
-    /// (Windows); `VIDCUT_HWDEC` says otherwise. `None` without any.
+    /// The decoder on the GPU in use (`gpus::in_use`: the one the
+    /// preferences chose, else the best this computer has), opened once for
+    /// each; `VIDCUT_HWDEC` says otherwise. `None` without any.
     pub fn best() -> Option<Self> {
-        static BEST: OnceLock<Option<GpuDecoder>> = OnceLock::new();
-        BEST.get_or_init(|| match std::env::var("VIDCUT_HWDEC") {
+        static BEST: Mutex<Option<(String, Option<GpuDecoder>)>> = Mutex::new(None);
+        let gpu = crate::gpus::in_use();
+        let id = gpu.as_ref().map_or(String::new(), |g| g.id.clone());
+        let mut best = BEST.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((was, decoder)) = best.as_ref()
+            && *was == id
+        {
+            return decoder.clone();
+        }
+        let decoder = match std::env::var("VIDCUT_HWDEC") {
             Ok(asked) => Self::asked(&asked),
-            Err(_) => CudaDevice::open()
-                .ok()
-                .map(Self::nvdec)
-                .or_else(|| Self::others().into_iter().next()),
-        })
-        .clone()
+            Err(_) => gpu.and_then(|g| Self::on_gpu(&g).ok()),
+        };
+        *best = Some((id, decoder.clone()));
+        decoder
     }
 
-    /// Every decoder this computer has: NVDEC, and the other GPUs'.
+    /// Every decoder this computer has: one on each GPU (`gpus::list`).
     pub fn all() -> Vec<Self> {
-        let mut all: Vec<Self> = CudaDevice::open()
-            .ok()
-            .map(Self::nvdec)
-            .into_iter()
-            .collect();
-        all.extend(Self::others());
-        all
+        crate::gpus::list()
+            .iter()
+            .filter_map(|g| Self::on_gpu(g).ok())
+            .collect()
+    }
+
+    /// The decoder on `gpu`: NVDEC on NVIDIA's CUDA device, Direct3D 11 on
+    /// its adapter (Windows), VA-API on its render node (Linux).
+    fn on_gpu(gpu: &crate::gpus::Gpu) -> Result<Self> {
+        if let Some(index) = gpu.cuda {
+            return CudaDevice::on(index).map(Self::nvdec);
+        }
+        #[cfg(windows)]
+        if let Some(adapter) = gpu.adapter {
+            return Self::open(Kind::D3d11va, &adapter.to_string());
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(node) = &gpu.node {
+            return Self::open(Kind::Vaapi, node);
+        }
+        Err(Error::Invalid(format!("{} decodes nothing here", gpu.name)))
     }
 
     /// The decoder `VIDCUT_HWDEC` names: `kind[:on]`, or `none`.
     fn asked(asked: &str) -> Option<Self> {
         let (kind, on) = asked.split_once(':').unwrap_or((asked, ""));
         Self::open(Kind::named(kind)?, on).ok()
-    }
-
-    /// The decoders of the GPUs other than NVIDIA's (NVDEC decodes there):
-    /// VA-API on each render node (Linux), Direct3D 11 on each adapter
-    /// (Windows).
-    fn others() -> Vec<Self> {
-        #[cfg(windows)]
-        {
-            windows::adapters()
-                .into_iter()
-                .filter(|&(_, vendor)| vendor != windows::NVIDIA)
-                .filter_map(|(i, _)| Self::open(Kind::D3d11va, &i.to_string()).ok())
-                .collect()
-        }
-        #[cfg(not(windows))]
-        {
-            crate::export::encode::render_nodes()
-                .into_iter()
-                .filter(|(_, driver)| driver != "nvidia")
-                .filter_map(|(node, _)| Self::open(Kind::Vaapi, &node).ok())
-                .collect()
-        }
     }
 }
 
@@ -456,34 +450,8 @@ pub(crate) mod windows {
     use ::windows::Win32::Graphics::Dxgi::{DXGI_ADAPTER_DESC, IDXGIDevice};
     use ::windows::core::Interface;
 
-    use super::{Device, Kind, Profile};
+    use super::{Device, Profile};
     use crate::ffmpeg::ffi;
-
-    /// PCI vendor ids.
-    pub(crate) const NVIDIA: u32 = 0x10de;
-    pub(crate) const AMD: u32 = super::AMD;
-    pub(crate) const INTEL: u32 = 0x8086;
-
-    /// Microsoft's: its Basic Render Driver, which draws on the CPU and
-    /// decodes nothing.
-    const MICROSOFT: u32 = 0x1414;
-
-    /// The adapters with a GPU behind them: their index, what Direct3D 11
-    /// is opened on, and their PCI vendor.
-    pub(crate) fn adapters() -> Vec<(u32, u32)> {
-        let mut adapters = Vec::new();
-        for i in 0..8 {
-            let Ok(device) = Device::open(Kind::D3d11va, &i.to_string()) else {
-                break;
-            };
-            // SAFETY: a D3D11VA device FFmpeg made.
-            match unsafe { desc(&device) }.map(|d| d.VendorId) {
-                Some(MICROSOFT) | None => {}
-                Some(v) => adapters.push((i, v)),
-            }
-        }
-        adapters
-    }
 
     /// Whether a D3D11VA device's video device lists `profile` among its
     /// decoders' (`GetVideoDecoderProfile`).
@@ -793,7 +761,7 @@ unsafe fn intel_va(frame: &frame::Video) -> Option<usize> {
     type Query = unsafe extern "C" fn(*mut c_void) -> *const c_char;
     // libva's, loaded with FFmpeg: looked up rather than linked, so a
     // build of FFmpeg without VA-API needs no libva.
-    static QUERY: OnceLock<Option<Query>> = OnceLock::new();
+    static QUERY: std::sync::OnceLock<Option<Query>> = std::sync::OnceLock::new();
     let query = QUERY.get_or_init(|| {
         // SAFETY: a symbol of the process's, which is libva's function or
         // nothing.

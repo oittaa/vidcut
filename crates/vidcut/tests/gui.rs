@@ -341,6 +341,29 @@ fn gui_acceptance() {
     gui.cli(&["preferences", "set", "gpu.decoding=true"]);
     wait_for(&gui, &|h| h == before);
     gui.check_frame(184);
+    // Each GPU chosen from anywhere: the player opens on its decoder where
+    // it stood, still frame-exact; cleared, the automatic one again.
+    let (prefs, _) = gui.cli(&["preferences", "get"]);
+    let gpus = prefs["result"]["gpus"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    for (i, g) in gpus.iter().enumerate() {
+        let kind = match g["vendor"].as_str() {
+            Some("NVIDIA") => "nvdec",
+            _ if cfg!(windows) => "d3d11va",
+            _ => "vaapi",
+        };
+        let id = g["id"].as_str().unwrap_or_default();
+        gui.cli(&["preferences", "set", &format!("gpu.device={id}")]);
+        wait_for(&gui, &|h| h == kind);
+        gui.check_frame(188 + i as i64);
+    }
+    if !gpus.is_empty() {
+        gui.cli(&["preferences", "set", "gpu.device="]);
+        wait_for(&gui, &|h| h == before);
+        gui.check_frame(184);
+    }
 
     // An audio device chosen from anywhere: the player opens on it where it
     // stood, still frame-exact; one that isn't connected plays on the

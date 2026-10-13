@@ -14,7 +14,14 @@ pub fn path() -> PathBuf {
 }
 
 /// The preferences; defaults for what the file leaves out, or without one.
+/// The GPU they name (`gpu.device`) decodes and encodes from then on.
 pub fn load() -> Result<Preferences> {
+    let p = read()?;
+    vidcut_av::gpus::choose(&p.gpu.device);
+    Ok(p)
+}
+
+fn read() -> Result<Preferences> {
     let path = path();
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
@@ -67,6 +74,13 @@ pub fn decoding(decoder: Option<&vidcut_av::hw::GpuDecoder>) -> vidcut_av::hw::D
     }
 }
 
+/// The GPU that decodes, by its id, while `gpu.decoding` is on (empty
+/// where no GPU is listed); `None` while the CPU decodes. Workers that keep
+/// a decoder make another when this changes.
+pub fn decoding_gpu() -> Option<String> {
+    gpu_decoding().then(|| vidcut_av::gpus::in_use().map(|g| g.id).unwrap_or_default())
+}
+
 /// The GPU decoder the timeline's pictures (tiles, the two-up) decode on
 /// while `on_gpu`: the viewer's, on a stream or device of their own
 /// (`GpuDecoder::own`), so they don't wait in line with playback; `None`
@@ -78,14 +92,13 @@ pub fn timeline_decoder(on_gpu: bool) -> Option<vidcut_av::hw::GpuDecoder> {
         .and_then(|d| d.own().ok())
 }
 
-/// The GPU decoder the viewer takes (`GpuDecoder::best`), opened once.
-/// Exports, proxies, the timeline's tiles and the two-up decode on the same
-/// GPU, on a stream or device of their own (`GpuDecoder::own`). `None`
-/// without one; callers check [`gpu_decoding`].
+/// The GPU decoder the viewer takes (`GpuDecoder::best`: on the GPU in
+/// use). Exports, proxies, the timeline's tiles and the two-up decode on
+/// the same GPU, on a stream or device of their own (`GpuDecoder::own`).
+/// `None` without one; callers check [`gpu_decoding`].
 pub fn gpu_decoder() -> Option<vidcut_av::hw::GpuDecoder> {
-    static BEST: std::sync::OnceLock<Option<vidcut_av::hw::GpuDecoder>> =
-        std::sync::OnceLock::new();
-    BEST.get_or_init(vidcut_av::hw::GpuDecoder::best).clone()
+    let _ = load();
+    vidcut_av::hw::GpuDecoder::best()
 }
 
 /// The viewer's memory for pictures: `player.memory_mb` and
@@ -130,6 +143,7 @@ pub fn set(patch: &PreferencesPatch, dry_run: bool) -> Result<Value> {
         .and_then(|()| std::fs::write(&part, text))
         .and_then(|()| std::fs::rename(&part, &path))
         .map_err(|e| Error::internal(format!("{}: {e}", path.display())))?;
+    vidcut_av::gpus::choose(&p.gpu.device);
     if p.thumbnails.disk_cache {
         thumbcache::evict(
             &thumbcache::dir(),
@@ -166,6 +180,11 @@ fn describe(p: &Preferences) -> Value {
             "mb": (bytes as f64 / f64::from(1 << 20) * 10.0).round() / 10.0,
         },
         "proxy_codecs": codecs,
+        // The GPUs `gpu.device` can name; the one it names, as found here;
+        // and the one that works when none is chosen or found.
+        "gpus": vidcut_av::gpus::list(),
+        "gpu_chosen": vidcut_av::gpus::find(vidcut_av::gpus::list(), &p.gpu.device),
+        "gpu_automatic": vidcut_av::gpus::automatic(),
         // What `player.memory_mb` 0 means here.
         "player_memory_auto_mb": vidcut_av::player::Budget::automatic().memory >> 20,
     })
