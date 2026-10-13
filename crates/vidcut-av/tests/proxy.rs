@@ -24,6 +24,46 @@ fn frames(input: &Input) -> Vec<(Option<u32>, f64)> {
     out
 }
 
+/// Each frame's planes, rows packed.
+#[cfg(feature = "gpu-tests")]
+fn pictures(input: &Input) -> Vec<Vec<Vec<u8>>> {
+    let mut reader = VideoReader::open_input(input).unwrap();
+    let mut out = Vec::new();
+    while let Some(frame) = reader.next_frame().unwrap() {
+        let planes = (0..frame.planes())
+            .map(|p| {
+                let (w, h, stride) = (
+                    frame.plane_width(p) as usize,
+                    frame.plane_height(p) as usize,
+                    frame.stride(p),
+                );
+                let data = frame.data(p);
+                (0..h)
+                    .flat_map(|y| &data[y * stride..y * stride + w])
+                    .copied()
+                    .collect()
+            })
+            .collect();
+        out.push(planes);
+    }
+    out
+}
+
+/// How far `a`'s values are from `b`'s, plane by plane: on average, and the
+/// average difference (a shift of levels).
+#[cfg(feature = "gpu-tests")]
+fn distance(a: &[Vec<u8>], b: &[Vec<u8>]) -> Vec<(f64, f64)> {
+    a.iter()
+        .zip(b)
+        .map(|(a, b)| {
+            let n = a.len() as f64;
+            let diffs = a.iter().zip(b).map(|(&x, &y)| f64::from(x) - f64::from(y));
+            let (abs, sum) = diffs.fold((0.0, 0.0), |(abs, sum), d| (abs + d.abs(), sum + d));
+            (abs / n, sum / n)
+        })
+        .collect()
+}
+
 fn skip(e: impl std::fmt::Display) -> bool {
     eprintln!("skipping: {e}");
     true
@@ -62,6 +102,7 @@ fn matches_source(enc: &ProxyEncoder) {
             &dest,
             None,
             std::slice::from_ref(enc),
+            None,
         )
         .unwrap_or_else(|e| panic!("{} with {}: {e}", path.display(), enc.name));
         assert_eq!(written.encoder, *enc);
@@ -108,6 +149,7 @@ fn keyframes_and_order(enc: &ProxyEncoder) {
         &dest,
         None,
         std::slice::from_ref(enc),
+        None,
     )
     .unwrap();
     let mut input = ffmpeg::format::input(&dest).unwrap();
@@ -202,6 +244,7 @@ fn a_sequence_proxy_uses_the_sequence_timestamps() {
             &dest,
             None,
             std::slice::from_ref(&enc),
+            None,
         ) {
             Ok(w) => w,
             Err(e) => {
@@ -307,9 +350,16 @@ fn nvenc_proxies_decode_on_the_gpu_and_stay_exact() {
         let source = fixture::ensure(&spec).unwrap();
         let dest = tmp.path().join(format!("gpu-{n}.mkv"));
         let turned = spec.rotation != 0 || spec.hdr.is_some();
-        let written =
-            vidcut_av::proxy::write(&Input::File(source.clone()), 640, 360, &dest, None, &nvenc)
-                .unwrap_or_else(|e| panic!("{what}: {e}"));
+        let written = vidcut_av::proxy::write(
+            &Input::File(source.clone()),
+            640,
+            360,
+            &dest,
+            None,
+            &nvenc,
+            None,
+        )
+        .unwrap_or_else(|e| panic!("{what}: {e}"));
         assert_eq!(written.on_gpu, gpu, "{what}: on the GPU");
         assert_eq!(written.encoder.name, "av1_nvenc", "{what}");
         let src = frames(&Input::File(source));
@@ -324,6 +374,134 @@ fn nvenc_proxies_decode_on_the_gpu_and_stay_exact() {
                 (got_t - want_t).abs() <= 1.5e-3,
                 "{what}: frame {k} at {got_t}, source at {want_t}"
             );
+        }
+    }
+}
+
+/// Decoded on each GPU decoder there is and copied down for the CPU to
+/// scale (x264 here), each proxy frame is still the source frame with its
+/// timestamp; streams the GPU can't decode go to the CPU.
+#[cfg(feature = "gpu-tests")]
+#[test]
+fn gpu_decoded_proxies_stay_exact() {
+    use vidcut_core::model::Hdr;
+    let decoders = vidcut_av::hw::GpuDecoder::all();
+    if decoders.is_empty() {
+        eprintln!("skipping: no GPU decoder here");
+        return;
+    }
+    let x264 = encoders(ProxyCodec::H264, &Availability::default());
+    let hd = |codec, container| FixtureSpec::new(codec, container, 1280, 720, (30, 1), 45);
+    let sd = FixtureSpec::new(VideoCodec::H264, Container::Mp4, 640, 360, (30, 1), 45);
+    let cases = [
+        ("H.264", hd(VideoCodec::H264, Container::Mp4), true),
+        ("HEVC 10-bit", hd(VideoCodec::Hevc10, Container::Mkv), true),
+        ("VP9", hd(VideoCodec::Vp9, Container::Mkv), true),
+        ("AV1 10-bit", hd(VideoCodec::Av1, Container::Mp4), true),
+        (
+            "MPEG-TS starting at 1.4 s",
+            hd(VideoCodec::H264, Container::MpegTs).start_offset_ms(1400),
+            true,
+        ),
+        (
+            "interlaced",
+            hd(VideoCodec::H264, Container::Mp4).interlaced(true),
+            true,
+        ),
+        ("interlaced BT.601", sd.interlaced(true), true),
+        (
+            "turned 10-bit",
+            hd(VideoCodec::Hevc10, Container::Mp4).rotation(90),
+            true,
+        ),
+        (
+            "PQ",
+            hd(VideoCodec::Hevc10, Container::Mkv).hdr(Hdr::Pq),
+            true,
+        ),
+        (
+            "turned HLG",
+            hd(VideoCodec::Hevc10, Container::Mp4)
+                .hdr(Hdr::Hlg)
+                .rotation(90),
+            true,
+        ),
+        ("ProRes", hd(VideoCodec::ProRes422Hq, Container::Mov), false),
+    ];
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-proxy-decoded-")
+        .tempdir()
+        .unwrap();
+    let write = |source: &std::path::Path, dest: &std::path::Path, decoder| {
+        vidcut_av::proxy::write(
+            &Input::File(source.to_path_buf()),
+            640,
+            360,
+            dest,
+            None,
+            &x264,
+            decoder,
+        )
+    };
+    // Made on the CPU, to compare the pictures with.
+    let on_cpu: Vec<_> = cases
+        .iter()
+        .enumerate()
+        .map(|(n, (what, spec, _))| {
+            let dest = tmp.path().join(format!("cpu-{n}.mkv"));
+            write(&fixture::ensure(spec).unwrap(), &dest, None)
+                .unwrap_or_else(|e| panic!("CPU, {what}: {e}"));
+            pictures(&Input::File(dest))
+        })
+        .collect();
+    for decoder in &decoders {
+        let name = format!("{} {}", decoder.kind().name(), decoder.on());
+        for (n, (what, spec, gpu)) in cases.iter().enumerate() {
+            let source = fixture::ensure(spec).unwrap();
+            let dest = tmp.path().join(format!("decoded-{n}.mkv"));
+            let turned = spec.rotation != 0 || spec.hdr.is_some();
+            let written = write(&source, &dest, Some(decoder))
+                .unwrap_or_else(|e| panic!("{name}, {what}: {e}"));
+            // Scaled on another GPU (or not), the pictures are the CPU's but
+            // for the scalers' own rounding: on average within a level and
+            // a half, no level shifted (a matrix taken wrong shifts white).
+            let worst = pictures(&Input::File(dest.clone()))
+                .iter()
+                .zip(&on_cpu[n])
+                .flat_map(|(a, b)| distance(a, b))
+                .fold((0.0f64, 0.0f64), |(abs, shift), (a, s)| {
+                    (abs.max(a), shift.max(s.abs()))
+                });
+            // swscale converts BT.601 to BT.709 a level apart from NV12
+            // (copied down) and from planar YUV (the CPU's decoders).
+            let shift = if *what == "interlaced BT.601" {
+                1.25
+            } else {
+                0.5
+            };
+            assert!(
+                worst.0 <= 1.5 && worst.1 <= shift,
+                "{name}, {what}: on average {:.2} levels from the CPU's, shifted {:.2}",
+                worst.0,
+                worst.1
+            );
+            let want = gpu.then_some(decoder.kind());
+            // A GPU may lack a codec (AV1, VP9 on older ones): the CPU then.
+            if written.decoder != want {
+                assert!(*gpu && written.decoder.is_none(), "{name}, {what}");
+                eprintln!("{name}: {what} decoded on the CPU");
+            }
+            let src = frames(&Input::File(source));
+            let got = frames(&Input::File(dest));
+            assert_eq!(got.len(), src.len(), "{name}, {what}: frames");
+            for (k, ((want_code, want_t), (got_code, got_t))) in src.iter().zip(&got).enumerate() {
+                let want_code = if turned { Some(k as u32) } else { *want_code };
+                assert_eq!(*got_code, want_code, "{name}, {what}: frame {k}");
+                assert!(
+                    (got_t - want_t).abs() <= 1.5e-3,
+                    "{name}, {what}: frame {k} at {got_t}, source at {want_t}"
+                );
+            }
         }
     }
 }

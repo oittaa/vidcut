@@ -124,6 +124,19 @@ pub fn colors_of(f: &frame::Video) -> Colors {
     }
 }
 
+/// `scaled`, a copy of `f` at another size, tagged with the matrix `f` is
+/// read with: an untagged picture's follows from its size.
+pub(crate) fn keep_matrix(scaled: &mut frame::Video, f: &frame::Video) {
+    use ffi::AVColorSpace as S;
+    let matrix = match Source::of(f).matrix {
+        Matrix::Bt601 => S::AVCOL_SPC_SMPTE170M,
+        Matrix::Bt709 => S::AVCOL_SPC_BT709,
+        Matrix::Bt2020 => S::AVCOL_SPC_BT2020_NCL,
+    };
+    // SAFETY: a plain field of its own frame.
+    unsafe { (*scaled.as_mut_ptr()).colorspace = matrix };
+}
+
 /// How to read `f`'s samples as the light they have in PQ output, as the
 /// export converts them: the YUV matrix and range, the transfer, and the
 /// gamut to BT.2020 in linear light (the identity for HDR).

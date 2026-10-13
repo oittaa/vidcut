@@ -244,11 +244,27 @@ impl Env for AvEnv {
             std::fs::create_dir_all(dir)
                 .map_err(|e| Error::media(format!("{}: {e}", dir.display())))?;
             let total = Some((v.duration * v.fps.as_f64()).round().max(0.0) as u64);
-            let written = vidcut_av::proxy::write(&input_of(media), w, h, &path, total, &encoders)
-                .map_err(av_error)?;
+            // Decoded on the GPU as the viewer decodes (preview.md §6).
+            let decoder = prefs
+                .gpu
+                .acceleration
+                .then(vidcut_av::hw::GpuDecoder::best)
+                .flatten();
+            let written = vidcut_av::proxy::write(
+                &input_of(media),
+                w,
+                h,
+                &path,
+                total,
+                &encoders,
+                decoder.as_ref(),
+            )
+            .map_err(av_error)?;
             made_with = Some(format!(
                 "decoded on the {}, {}",
-                if written.on_gpu { "GPU (NVDEC)" } else { "CPU" },
+                written
+                    .decoder
+                    .map_or("CPU".into(), |k| format!("GPU ({})", k.label())),
                 written.encoder.label()
             ));
             // A hardware encoder that wouldn't open gave way to another codec.
