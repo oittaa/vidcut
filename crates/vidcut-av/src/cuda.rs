@@ -7,6 +7,20 @@
 //! (decision D41) and exports use it: the CPU only reads the file and writes
 //! the result.
 
+#[cfg(unix)]
+pub mod share;
+
+/// One plane's place in memory a display shares (`share::SharedBuffer`):
+/// where it starts, how far apart its rows are, and how many bytes of how
+/// many rows it has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlaneCopy {
+    pub offset: u64,
+    pub pitch: u64,
+    pub row_bytes: u64,
+    pub rows: u64,
+}
+
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::ptr;
@@ -206,6 +220,22 @@ impl CudaFrames {
         let mut hw = self.0.copy(src, "uploading to the GPU")?;
         hw.set_pts(src.pts());
         Ok(hw)
+    }
+}
+
+/// The layout of a frame in GPU memory: its frames context's software
+/// format (NV12, P010...); a frame in memory's own.
+pub(crate) fn sw_format(frame: &frame::Video) -> format::Pixel {
+    // SAFETY: a hardware frame holds a reference to its frames context,
+    // whose data is an AVHWFramesContext.
+    unsafe {
+        let ctx = (*frame.as_ptr()).hw_frames_ctx;
+        if ctx.is_null() {
+            frame.format()
+        } else {
+            let frames = (*ctx).data as *const ffi::AVHWFramesContext;
+            format::Pixel::from((*frames).sw_format)
+        }
     }
 }
 

@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use crate::color::{Colors, colors_of};
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::export::video::{Normalizer, fit};
 use crate::ffmpeg::{self, format, frame};
 use crate::thumbs::Image;
@@ -42,10 +42,11 @@ pub enum Layout {
 /// A display fits it into the viewer (`placement`), turns it, and converts
 /// it to BT.709 RGB with a shader that reads it as the export does;
 /// `to_rgba` is that conversion on the CPU, the export's own, for a display
-/// without a GPU and for checking one. Pictures are in memory today
-/// ([`Memory::Cpu`]); a picture in GPU memory is the same frame with a
-/// hardware format and frames context (CUDA, VAAPI, Vulkan), which the
-/// engine passes along without looking at its pixels.
+/// without a GPU and for checking one. A picture is in memory
+/// ([`Memory::Cpu`]), or, decoded by NVDEC for a display that shows it from
+/// there, in GPU memory: the same frame with a hardware format and frames
+/// context ([`Memory::Cuda`]), which the engine passes along without
+/// looking at its pixels.
 pub struct Picture {
     frame: frame::Video,
     rotation: u16,
@@ -90,21 +91,7 @@ impl Picture {
 
     /// The samples' layout; for a GPU surface, that of its frames context.
     pub fn layout(&self) -> Layout {
-        let pixel = match self.memory() {
-            Memory::Cpu => self.frame.format(),
-            // SAFETY: a hardware frame holds a reference to its frames
-            // context, whose data is an AVHWFramesContext.
-            _ => unsafe {
-                let ctx = (*self.frame.as_ptr()).hw_frames_ctx;
-                if ctx.is_null() {
-                    format::Pixel::NV12
-                } else {
-                    let frames = (*ctx).data as *const ffmpeg::ffi::AVHWFramesContext;
-                    format::Pixel::from((*frames).sw_format)
-                }
-            },
-        };
-        match pixel {
+        match crate::cuda::sw_format(&self.frame) {
             format::Pixel::NV12 => Layout::Nv12,
             format::Pixel::P010LE => Layout::P010,
             _ => Layout::Yuv420p,
@@ -140,6 +127,16 @@ impl Picture {
         &self.frame
     }
 
+    /// The picture with its planes in memory: copied down from GPU memory,
+    /// or itself (by reference) when it is in memory already.
+    pub fn copied_down(&self) -> Result<Picture> {
+        let frame = match self.memory() {
+            Memory::Cpu => crate::export::video::frame_ref(&self.frame)?,
+            _ => crate::cuda::download(&self.frame)?,
+        };
+        Ok(Self::new(frame, self.rotation, self.decoder))
+    }
+
     /// The memory it takes.
     pub fn bytes(&self) -> usize {
         self.bytes
@@ -148,11 +145,11 @@ impl Picture {
     /// The picture as export renders it at `width`×`height`: turned
     /// upright, fitted, padded black and converted to BT.709 RGB by the
     /// export's own filters; packed RGBA rows. What `frame render` gives,
-    /// and what a display's shader must match. Pictures in GPU memory have
-    /// no rows here.
+    /// and what a display's shader must match. Pictures in GPU memory are
+    /// copied down first.
     pub fn to_rgba(&self, width: u32, height: u32) -> Result<Image> {
         if self.memory() != Memory::Cpu {
-            return Err(Error::Invalid("the picture is in GPU memory".into()));
+            return self.copied_down()?.to_rgba(width, height);
         }
         let mut normalizer = Normalizer::new(
             &self.frame,
@@ -178,13 +175,14 @@ impl Picture {
     }
 }
 
-/// The bytes a frame's pixels take (an estimate for hardware frames).
+/// The bytes a frame's pixels take, in memory or in GPU memory (its
+/// frames' layout).
 fn bytes_of(frame: &frame::Video) -> usize {
     let (w, h) = (frame.width() as i32, frame.height() as i32);
     // SAFETY: a size computation on plain numbers.
     let n = unsafe {
         ffmpeg::ffi::av_image_get_buffer_size(
-            ffmpeg::ffi::AVPixelFormat::from(frame.format()),
+            ffmpeg::ffi::AVPixelFormat::from(crate::cuda::sw_format(frame)),
             w,
             h,
             1,

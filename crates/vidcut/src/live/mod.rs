@@ -134,6 +134,9 @@ pub struct PlayerConfig {
     pub audio: MakeOutput,
     /// Memory for its pictures: what is shown, and the frame of what isn't.
     pub budget: usize,
+    /// The renderer shows pictures in CUDA memory from there: those NVDEC
+    /// decodes stay on the GPU (and kept ones in video memory).
+    pub gpu_pictures: bool,
 }
 
 /// Progress and the final answer of one request.
@@ -358,15 +361,16 @@ impl Handle {
 pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     let (tx, rx) = channel();
     let pid = std::process::id();
-    let (audio, budget) = match config.player {
-        Some(p) => (Some(p.audio), p.budget),
-        None => (None, 0),
+    let (audio, budget, gpu_pictures) = match config.player {
+        Some(p) => (Some(p.audio), p.budget, p.gpu_pictures),
+        None => (None, 0, false),
     };
     let player = {
         let (tx, notify) = (tx.clone(), config.notify.clone());
         Player::new(
             audio,
             budget,
+            gpu_pictures,
             config.renderer.clone(),
             Arc::new(move || {
                 let _ = tx.send(Msg::Picture);

@@ -84,6 +84,10 @@ pub struct Config {
     /// Decode on the GPU (NVDEC) the streams it decodes, the frames copied
     /// down to memory at their own size ([`set_hardware`](Player::set_hardware)).
     pub hardware: bool,
+    /// Pictures NVDEC decodes stay in GPU memory (NV12, P010), for a
+    /// display that shows them from there ([`Memory::Cuda`]); kept ones
+    /// take video memory then.
+    pub gpu_pictures: bool,
 }
 
 impl Default for Config {
@@ -93,6 +97,7 @@ impl Default for Config {
             audio_scrubbing: true,
             on_picture: None,
             hardware: false,
+            gpu_pictures: false,
         }
     }
 }
@@ -263,6 +268,8 @@ pub(crate) struct Shared {
     device: Arc<Mutex<Option<String>>>,
     /// The sample rate and channels the device was opened for.
     format: (u32, u16),
+    /// Pictures NVDEC decodes stay in GPU memory.
+    pub(crate) gpu_pictures: bool,
 }
 
 /// A paused seek that has decoded this long holds a newer one up no more.
@@ -502,6 +509,7 @@ impl Player {
             presenter: Mutex::new(Presenter::default()),
             device,
             format: (rate, channels),
+            gpu_pictures: config.gpu_pictures,
         });
         output.start(source)?;
         let mut player = Self {

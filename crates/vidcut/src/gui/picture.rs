@@ -1,5 +1,6 @@
 //! The viewer's picture on the GPU (docs/decisions/preview.md §4): a
-//! player's decoded YUV picture uploaded as textures at its own size, and
+//! player's decoded YUV picture uploaded as textures at its own size (from
+//! memory, or copied on the GPU from NVDEC's frames, [`super::shared`]), and
 //! drawn by one shader pass (`picture.wgsl`) into a target the viewer's
 //! size: fitted as export fits it (`Picture::placement`), turned upright,
 //! scaled in YUV and converted to BT.709 RGB with the export's math
@@ -10,9 +11,10 @@
 //! Nothing here needs a window: the GUI draws with eframe's device, tests
 //! with a device of their own ([`Gpu::headless`]).
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use vidcut_av::color::shader_colors;
+use vidcut_av::cuda::{CudaDevice, PlaneCopy};
 use vidcut_av::player::{Layout, Memory, Picture};
 use vidcut_av::thumbs::Image;
 use vidcut_core::model::Hdr;
@@ -27,7 +29,14 @@ pub struct Gpu {
     /// 16-bit textures (P010 as it is); without them P010 goes up as 8
     /// bits.
     wide: bool,
+    /// The device can share memory with CUDA ([`super::shared`]).
+    shares: bool,
+    /// CUDA's device on this GPU, once a picture in CUDA memory came.
+    cuda: OnceLock<Result<CudaDevice, String>>,
 }
+
+/// Shared buffers a screen keeps at most ([`Screen::copy_on_gpu`]).
+const MAX_SHARED: usize = 4;
 
 /// The format targets are drawn in, which egui shows as it is.
 const TARGET: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -124,7 +133,23 @@ impl Gpu {
             wide: device
                 .features()
                 .contains(wgpu::Features::TEXTURE_FORMAT_16BIT_NORM),
+            shares: super::shared::possible(device),
+            cuda: OnceLock::new(),
         }
+    }
+
+    /// Whether it may show pictures in CUDA memory from there: a player
+    /// can keep NVDEC's pictures on the GPU for it. Those it can't share
+    /// after all (CUDA on another GPU) are copied down to be shown.
+    pub fn takes_gpu_pictures(&self) -> bool {
+        self.shares
+    }
+
+    fn cuda(&self) -> Result<&CudaDevice, String> {
+        self.cuda
+            .get_or_init(|| super::shared::cuda_on(&self.device))
+            .as_ref()
+            .map_err(Clone::clone)
     }
 
     /// A device of its own, without a window: the first adapter there is
@@ -175,6 +200,15 @@ pub struct Screen {
     params: Option<wgpu::Buffer>,
     /// The picture in the target (`None` inside: black).
     drawn: Option<Option<Arc<Picture>>>,
+    /// Memory CUDA copies pictures into, for the planes: a few, so one is
+    /// free while copies out of the others are in flight.
+    shared: Vec<super::shared::Shared>,
+    /// The one the picture being drawn went through.
+    filled: Option<usize>,
+    /// Sharing failed: pictures in CUDA memory are copied down from then on.
+    unshared: bool,
+    /// The last picture in CUDA memory was copied on the GPU, not down.
+    last_shared: bool,
 }
 
 /// What [`Screen::draw`] changed.
@@ -208,6 +242,12 @@ impl Screen {
         self.drawn = None;
     }
 
+    /// The last picture in CUDA memory went into the planes on the GPU,
+    /// not copied down.
+    pub fn shared(&self) -> bool {
+        self.last_shared
+    }
+
     /// Draws `picture` (`None`: black) into a `width`×`height` target, as
     /// the viewer shows it.
     pub fn draw(
@@ -233,18 +273,23 @@ impl Screen {
                 return Drawn::Same;
             }
         }
-        // Pictures in GPU memory have no planes here, and one larger than
-        // the device's textures can't go up (wgpu would panic): black.
+        // Pictures in VAAPI or Vulkan memory have no planes here, and one
+        // larger than the device's textures can't go up (wgpu would panic):
+        // black.
         let limit = gpu.device.limits().max_texture_dimension_2d;
-        let picture = picture
-            .filter(|p| p.memory() == Memory::Cpu && p.width() <= limit && p.height() <= limit);
+        let picture = picture.filter(|p| {
+            matches!(p.memory(), Memory::Cpu | Memory::Cuda)
+                && p.width() <= limit
+                && p.height() <= limit
+        });
         let mut encoder = gpu
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("vidcut picture"),
             });
+        self.filled = None;
         let bind = picture.map(|picture| {
-            self.upload(gpu, picture);
+            self.upload(gpu, picture, &mut encoder);
             let params = self.params.get_or_insert_with(|| {
                 gpu.device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("vidcut picture"),
@@ -310,13 +355,129 @@ impl Screen {
             }
         }
         gpu.queue.submit([encoder.finish()]);
+        if let Some(i) = self.filled.take() {
+            self.shared[i].used(&gpu.queue);
+        }
         self.drawn = Some(picture.cloned());
         drawn
     }
 
-    /// Uploads `picture`'s planes, making textures for its size and layout
-    /// when they changed.
-    fn upload(&mut self, gpu: &Gpu, picture: &Picture) {
+    /// Puts `picture`'s planes into its textures, making them for its size
+    /// and layout when they changed: from memory, or for a picture in CUDA
+    /// memory, copied on the GPU by `encoder` (`filled` says through which
+    /// shared buffer). A picture in CUDA memory that can't be shared is
+    /// copied down.
+    fn upload(&mut self, gpu: &Gpu, picture: &Picture, encoder: &mut wgpu::CommandEncoder) {
+        self.make_planes(gpu, picture);
+        if picture.memory() != Memory::Cuda {
+            return self.write_planes(gpu, picture);
+        }
+        self.last_shared = false;
+        if !self.unshared {
+            match self.copy_on_gpu(gpu, picture, encoder) {
+                Ok(true) => {
+                    self.last_shared = true;
+                    return;
+                }
+                // Every shared buffer in flight: this one comes down.
+                Ok(false) => {}
+                Err(e) => {
+                    eprintln!("vidcut: pictures come down from the GPU to be shown: {e}");
+                    self.unshared = true;
+                    self.shared.clear();
+                }
+            }
+        }
+        match picture.copied_down() {
+            Ok(down) => self.write_planes(gpu, &down),
+            Err(e) => eprintln!("vidcut: a picture didn't come down from the GPU: {e}"),
+        }
+    }
+
+    /// Copies a picture in CUDA memory into the planes on the GPU: CUDA
+    /// into a free shared buffer, then `encoder` into the textures. False
+    /// when none is free (copies out of all are in flight).
+    fn copy_on_gpu(
+        &mut self,
+        gpu: &Gpu,
+        picture: &Picture,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<bool, String> {
+        let cuda = gpu.cuda()?;
+        let layout = picture.layout();
+        let bytes = match layout {
+            Layout::Nv12 => 1,
+            Layout::P010 if gpu.wide => 2,
+            Layout::P010 => return Err("no 16-bit textures for P010".into()),
+            Layout::Yuv420p => return Err("planar pictures aren't NVDEC's".into()),
+        };
+        let (w, h) = (u64::from(picture.width()), u64::from(picture.height()));
+        let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+        // Rows and planes where a copy into a texture may start.
+        let align = |n: u64| n.div_ceil(256) * 256;
+        let y = PlaneCopy {
+            offset: 0,
+            pitch: align(w * bytes),
+            row_bytes: w * bytes,
+            rows: h,
+        };
+        let uv = PlaneCopy {
+            offset: align(y.pitch * h),
+            pitch: align(cw * 2 * bytes),
+            row_bytes: cw * 2 * bytes,
+            rows: ch,
+        };
+        let need = uv.offset + uv.pitch * ch;
+        // Too small for these pictures: let go (wgpu keeps what a copy in
+        // flight reads until it is done).
+        self.shared.retain(|s| s.size() >= need);
+        let free = |shared: &[super::shared::Shared]| shared.iter().position(|s| s.free());
+        let i = match free(&self.shared) {
+            Some(i) => i,
+            // All in flight: another (a display refreshing at most a few
+            // pictures ahead never needs many).
+            None if self.shared.len() < MAX_SHARED => {
+                let made = super::shared::Shared::new(&gpu.device, cuda, need)?;
+                self.shared.push(made);
+                self.shared.len() - 1
+            }
+            None => {
+                // Work done but not noticed yet: notice it, without waiting.
+                let _ = gpu.device.poll(wgpu::PollType::Poll);
+                match free(&self.shared) {
+                    Some(i) => i,
+                    None => return Ok(false),
+                }
+            }
+        };
+        let shared = &mut self.shared[i];
+        shared.fill(picture.frame(), &[y, uv])?;
+        self.filled = Some(i);
+        let planes = self.planes.as_ref().expect("made by upload");
+        for (texture, p, width) in [(&planes.y, y, w), (&planes.u, uv, cw)] {
+            encoder.copy_buffer_to_texture(
+                wgpu::TexelCopyBufferInfo {
+                    buffer: shared.buffer(),
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: p.offset,
+                        bytes_per_row: Some(p.pitch as u32),
+                        rows_per_image: Some(p.rows as u32),
+                    },
+                },
+                texture.as_image_copy(),
+                wgpu::Extent3d {
+                    width: width as u32,
+                    height: p.rows as u32,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+        Ok(true)
+    }
+
+    /// Makes the planes' textures for `picture`'s size and layout, when
+    /// they changed.
+    fn make_planes(&mut self, gpu: &Gpu, picture: &Picture) {
         let (w, h) = (picture.width(), picture.height());
         let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
         let layout = picture.layout();
@@ -362,7 +523,15 @@ impl Screen {
                 },
             });
         }
-        let planes = self.planes.as_ref().expect("made above");
+    }
+
+    /// Uploads `picture`'s planes from memory into the planes made for it.
+    fn write_planes(&self, gpu: &Gpu, picture: &Picture) {
+        let (w, h) = (picture.width(), picture.height());
+        let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+        let layout = picture.layout();
+        let wide = gpu.wide && layout == Layout::P010;
+        let planes = self.planes.as_ref().expect("made for it");
         let frame = picture.frame();
         let put = |texture: &wgpu::Texture, plane: usize, size: (u32, u32), bytes: u32| {
             let stride = frame.stride(plane);

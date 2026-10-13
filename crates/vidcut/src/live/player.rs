@@ -63,6 +63,9 @@ pub struct Player {
     on_picture: Arc<dyn Fn() + Send + Sync>,
     /// Memory for the engine's pictures.
     budget: usize,
+    /// The renderer shows pictures NVDEC decoded from GPU memory: they stay
+    /// there.
+    gpu_pictures: bool,
     engine: Option<Arc<engine::Player>>,
     /// Whose plan the engine plays. The renderer shows the engine when
     /// that is the one shown.
@@ -93,6 +96,7 @@ impl Player {
     pub fn new(
         output: Option<MakeOutput>,
         budget: usize,
+        gpu_pictures: bool,
         renderer: Arc<dyn Renderer>,
         on_picture: Arc<dyn Fn() + Send + Sync>,
     ) -> Self {
@@ -101,6 +105,7 @@ impl Player {
             renderer,
             on_picture,
             budget,
+            gpu_pictures,
             engine: None,
             plays: None,
             format: (0, 0),
@@ -271,6 +276,7 @@ impl Player {
             audio_scrubbing: false,
             on_picture: Some(self.on_picture.clone()),
             hardware: self.gpu,
+            gpu_pictures: self.gpu_pictures,
         };
         self.audio_error = None;
         match engine::Player::new(plan.clone(), config(), make()) {
