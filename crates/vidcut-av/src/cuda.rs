@@ -308,6 +308,169 @@ struct Placebo {
     pts: VecDeque<(i64, Option<i64>)>,
     /// The sample aspect of the upright pictures.
     sar: ffi::AVRational,
+    /// The input pool's frames (their `AVVkFrame`s), for the teardown.
+    inputs: Vec<usize>,
+}
+
+/// How long a converter's frames may take to be done with once libplacebo
+/// is gone: its own work it waits for, so they are done at once.
+const SETTLE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// One converter at work at a time in the process: made, fed, read or
+/// torn down. Each step finishes its GPU work before it returns, so two
+/// exports' converters never have work on the GPU at once: with both at
+/// work, the Vulkan device was now and then lost as they started.
+fn converting() -> std::sync::MutexGuard<'static, ()> {
+    static CONVERTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    CONVERTING.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+impl Drop for Placebo {
+    fn drop(&mut self) {
+        let _one = converting();
+        // libplacebo first: it waits for its own work.
+        drop(std::mem::replace(&mut self.graph, filter::Graph::new()));
+        // Freeing a frame waits for the GPU's last signal on it, without
+        // end. Frames the GPU isn't done with soon (work that will never
+        // finish) are left allocated rather than waited on forever.
+        if let Err(e) = self.settled() {
+            eprintln!("vidcut: GPU frames left unfreed: {e}");
+            // SAFETY: a null reference, which unref ignores.
+            std::mem::forget(std::mem::replace(
+                &mut self.input,
+                HwFrames(ptr::null_mut()),
+            ));
+            std::mem::forget(self.background.take());
+            std::mem::forget(self.filler.take());
+        }
+    }
+}
+
+impl Placebo {
+    /// Waits, [`SETTLE`] at most, until the GPU has given its last signal
+    /// on each of the converter's frames.
+    fn settled(&self) -> Result<()> {
+        let mut frames: Vec<*const ffi::AVVkFrame> = self
+            .inputs
+            .iter()
+            .map(|&f| f as *const ffi::AVVkFrame)
+            .collect();
+        for blacks in [&self.background, &self.filler].into_iter().flatten() {
+            // SAFETY: a frame of a Vulkan pool holds its AVVkFrame in data[0].
+            frames.extend(
+                blacks
+                    .made
+                    .iter()
+                    .map(|f| unsafe { (*f.as_ptr()).data[0] } as *const ffi::AVVkFrame),
+            );
+        }
+        // SAFETY: the input pool's device; the pools hold their frames until
+        // they are freed.
+        unsafe {
+            let fc = (*self.input.0).data as *const ffi::AVHWFramesContext;
+            let dev = &*((*(*fc).device_ctx).hwctx as *const ffi::AVVulkanDeviceContext);
+            wait_signalled(dev, &frames, SETTLE)
+        }
+    }
+}
+
+/// How long a hand-off between CUDA, the GPU's copies and libplacebo may
+/// take before it counts as stuck.
+const HANDOFF: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Waits, [`HANDOFF`] at most, until the GPU has done what `f` (a Vulkan
+/// frame) was last given: its copy from CUDA, libplacebo's picture, or its
+/// copy back. Each hand-off between CUDA, FFmpeg's copies and libplacebo
+/// done before the next starts: left to wait on each other on the GPU, now
+/// and then a picture was read before its copy was done (the frame before
+/// it showed), a signal never came (freeing the frame then waited forever),
+/// or the device was lost.
+fn wait_done(f: &frame::Video, what: &str) -> Result<()> {
+    // SAFETY: a Vulkan frame: its frames context's device, its AVVkFrame in
+    // data[0].
+    unsafe {
+        let fc = (*(*f.as_ptr()).hw_frames_ctx).data as *const ffi::AVHWFramesContext;
+        let dev = &*((*(*fc).device_ctx).hwctx as *const ffi::AVVulkanDeviceContext);
+        wait_signalled(
+            dev,
+            &[(*f.as_ptr()).data[0] as *const ffi::AVVkFrame],
+            HANDOFF,
+        )
+    }
+    .map_err(|e| Error::Invalid(format!("{what}: {e}")))
+}
+
+/// Waits, `timeout` at most, until `dev`'s GPU has given its last signal on
+/// each of `frames`, as their semaphores' values say.
+///
+/// # Safety
+/// The frames are `dev`'s, alive.
+unsafe fn wait_signalled(
+    dev: &ffi::AVVulkanDeviceContext,
+    frames: &[*const ffi::AVVkFrame],
+    timeout: std::time::Duration,
+) -> Result<()> {
+    let (mut sems, mut values) = (Vec::new(), Vec::new());
+    for &f in frames {
+        // SAFETY: as the caller says.
+        let f = unsafe { &*f };
+        for (&sem, &value) in f.sem.iter().zip(&f.sem_value).take_while(|(s, _)| **s != 0) {
+            sems.push(sem);
+            values.push(value);
+        }
+    }
+    if sems.is_empty() {
+        return Ok(());
+    }
+    // SAFETY: the device's calls as vulkan.h declares them, looked up
+    // through its loader.
+    unsafe {
+        let none = |what: &str| Error::Invalid(format!("no {what}"));
+        let instance_proc = dev.get_proc_addr.ok_or_else(|| none("Vulkan loader"))?;
+        let device_proc = instance_proc(dev.inst, c"vkGetDeviceProcAddr".as_ptr())
+            .ok_or_else(|| none("vkGetDeviceProcAddr"))?;
+        let device_proc: GetDeviceProcAddr = std::mem::transmute(device_proc);
+        let wait = device_proc(dev.act_dev, c"vkWaitSemaphores".as_ptr())
+            .ok_or_else(|| none("vkWaitSemaphores"))?;
+        let wait: WaitSemaphores = std::mem::transmute(wait);
+        let info = SemaphoreWaitInfo {
+            s_type: SEMAPHORE_WAIT_INFO,
+            next: ptr::null(),
+            flags: 0,
+            count: sems.len() as u32,
+            semaphores: sems.as_ptr(),
+            values: values.as_ptr(),
+        };
+        match wait(dev.act_dev, &info, timeout.as_nanos() as u64) {
+            0 => Ok(()),
+            result => Err(Error::Invalid(format!(
+                "the GPU didn't finish in {} s (VkResult {result})",
+                timeout.as_secs()
+            ))),
+        }
+    }
+}
+
+/// `vkGetDeviceProcAddr`.
+type GetDeviceProcAddr =
+    unsafe extern "system" fn(ffi::VkDevice, *const std::ffi::c_char) -> ffi::PFN_vkVoidFunction;
+
+/// `vkWaitSemaphores`.
+type WaitSemaphores =
+    unsafe extern "system" fn(ffi::VkDevice, *const SemaphoreWaitInfo, u64) -> i32;
+
+/// `VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO`.
+const SEMAPHORE_WAIT_INFO: i32 = 1_000_207_004;
+
+/// `VkSemaphoreWaitInfo`.
+#[repr(C)]
+struct SemaphoreWaitInfo {
+    s_type: i32,
+    next: *const std::ffi::c_void,
+    flags: u32,
+    count: u32,
+    semaphores: *const ffi::VkSemaphore,
+    values: *const u64,
 }
 
 /// What libplacebo makes of a picture.
@@ -719,6 +882,7 @@ impl Placebo {
         at_once: bool,
     ) -> Result<Self> {
         use ffi::AVPixelFormat::{AV_PIX_FMT_CUDA as CUDA, AV_PIX_FMT_VULKAN as VULKAN};
+        let _one = converting();
         let vulkan = device.vulkan()?;
         let sw = unsafe { (*((*decoded).data as *mut ffi::AVHWFramesContext)).sw_format };
         let turned = rotation % 180 == 90;
@@ -861,11 +1025,13 @@ impl Placebo {
                 num: out_sar.0,
                 den: out_sar.1,
             },
+            inputs: Vec::new(),
         })
     }
 
     /// Feeds `f` (a CUDA frame), or the end of the stream (`None`).
     fn push(&mut self, f: Option<&frame::Video>) -> Result<()> {
+        let _one = converting();
         let Some(f) = f else {
             for name in ["bg", "in"] {
                 if let Some(mut source) = self.graph.get(name) {
@@ -878,6 +1044,12 @@ impl Placebo {
             return Ok(());
         };
         let mut v = self.input.copy(f, "copying to Vulkan")?;
+        wait_done(&v, "copying to Vulkan")?;
+        // SAFETY: a frame of a Vulkan pool holds its AVVkFrame in data[0].
+        let vkf = unsafe { (*v.as_ptr()).data[0] } as usize;
+        if !self.inputs.contains(&vkf) {
+            self.inputs.push(vkf);
+        }
         unsafe {
             ffi::av_frame_copy_props(v.as_mut_ptr(), f.as_ptr());
             // No side data: the CPU converts by the tags alone. libplacebo
@@ -922,6 +1094,7 @@ impl Placebo {
     /// The next converted frame, if one is ready, with its properties and
     /// timestamp, in a CUDA frame.
     fn pull(&mut self) -> Result<Option<frame::Video>> {
+        let _one = converting();
         while let Some((out, tb)) = take(&mut self.graph, "converting on the GPU")? {
             let k = out
                 .pts()
@@ -937,7 +1110,9 @@ impl Placebo {
                 self.pts.pop_front();
                 pts = t;
             }
+            wait_done(&out, "converting on the GPU")?;
             let mut c = self.output.copy(&out, "copying back from Vulkan")?;
+            wait_done(&out, "copying back from Vulkan")?;
             unsafe {
                 ffi::av_frame_copy_props(c.as_mut_ptr(), out.as_ptr());
                 (*c.as_mut_ptr()).sample_aspect_ratio = self.sar;
@@ -985,6 +1160,7 @@ impl Blacks {
             Some(i) => i,
             None => {
                 let mut f = self.pool.copy(&self.black, "copying to Vulkan")?;
+                wait_done(&f, "copying to Vulkan")?;
                 tag(&mut f, self.tags);
                 self.made.push(f);
                 self.made.len() - 1
