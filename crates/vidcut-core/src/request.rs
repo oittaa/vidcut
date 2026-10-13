@@ -489,6 +489,21 @@ pub enum Request {
         #[serde(default)]
         ripple: Option<bool>,
     },
+    /// Change Clip Speed (R; decision D48): each clip plays at `speed`
+    /// (2.0 twice as fast, 0.5 half, -1.0 backward, 0 a freeze frame). With
+    /// ripple (Ripple On unless overridden) it keeps its source and its
+    /// length changes, later clips following; without, it keeps its length.
+    /// A freeze holds the frame at `at` (the playhead) when it is over the
+    /// clip, else its first.
+    #[serde(rename = "edit.change_speed")]
+    EditChangeSpeed {
+        clips: OneOrMany<ClipRef>,
+        speed: f64,
+        #[serde(default)]
+        ripple: Option<bool>,
+        #[serde(default)]
+        at: Option<TimeSpec>,
+    },
     /// Copy clips (Ctrl+C): returns them with their tracks as `clips`,
     /// ready for `edit.paste`. The GUI also keeps them on its clipboard.
     #[serde(rename = "edit.copy")]

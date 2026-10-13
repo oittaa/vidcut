@@ -89,6 +89,15 @@ pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> Stri
             d.clips("clips"),
             d.time("duration")
         ),
+        "edit.change_speed" => format!(
+            "Change the speed of {} to {}",
+            d.clips("clips"),
+            match d.params["speed"].as_f64() {
+                Some(0.0) => "a freeze frame".to_string(),
+                Some(x) => format!("{}%", (x * 100.0).round()),
+                None => "?".to_string(),
+            }
+        ),
         "edit.copy" => format!("Copy {}", d.clips("clips")),
         "edit.cut" => format!("Cut {}", d.clips("clips")),
         "edit.paste" => format!("Paste at {}", d.time("at")),

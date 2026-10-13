@@ -16,14 +16,14 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 
 **In scope:**
 - media pool, viewer, dual timeline
-- editing and trimming
+- editing and trimming, constant speed changes (D48)
 - clip/track audio levels and waveforms
 - Quick Export, plus our Export dialog
 
 **Out of scope (out):**
 - effects, transitions, titles, generators, keyframes
 - color, Fusion, Smart Reframe, Close Up
-- setting speed changes (a clip with one from an OTIO file plays and edits at it, D48), Sync Bin, Multi Source, Source Overwrite, Live Overwrite
+- Sync Bin, Multi Source, Source Overwrite, Live Overwrite
 - Replay, voiceover, subtitles
 - AI tools: scene detection, transcription, voice/dialogue tools
 - Mixer FX, Paste Attributes, proxies, guides
@@ -285,6 +285,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - ±1-frame buttons
   - vidcut v1 shows the outgoing clip's last frame beside the incoming clip's first frame with the ±1 buttons; the draggable filmstrips are (later).
 - **Trim Start/End to Playhead** (Edit Actions, p. 729): moves a clip's head or tail to the playhead.
+- **Change Clip Speed** (R†, D48): a speed in percent, reversed, or a freeze frame, for every selected clip.
 - **Change Clip Duration** (Ctrl+D, p. 693):
   - enter frames or a timecode, or pick 1/5/15 seconds
   - End extends to the end of the media
@@ -374,6 +375,7 @@ Shortcuts do nothing while a text field has focus or a question (a modal dialog)
 | , / . (Shift: 1 s) | Trim the selected edit one frame left / right | 870† |
 | D | Disable / enable clip video | 724 |
 | Ctrl+D | Change clip duration | 693 |
+| R | Change clip speed (D48) | † |
 | N | Snapping on/off | 716 |
 | M / Alt+M | Add-or-edit marker / delete marker at playhead | 718 |
 | W | Dynamic Trim on/off (then J/K/L trim, Space plays around) | 731 |
@@ -539,9 +541,10 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - **Shown** with `;` before the frames wherever timecode is: the viewer, the ruler, storyboards, the `*_tc` of query results, lengths and source positions too. A media file's own timecode shows as it counts.
   - **Typed:** `;` says drop-frame anywhere (`01:00:00;00`, `01;00;00;00`); in a drop-frame project `:` counts so too. A label drop-frame skips (`00:01:00;00`) is refused.
   - **Set by itself:** the first video of a project whose format it sets (D37), and an OTIO import into an empty timeline, turn it on when the media's own timecode counts drop-frame (written with `;`). OTIO doesn't say whether a timeline counts so: only frame numbers travel.
-- **D48. Clips at another speed** (§1; deviation X9). A clip's constant speed from an OTIO file plays wherever its pictures and sound go (the viewer, exports, frame renders, storyboards and analyses), and edits go through it.
+- **D48. Clips at another speed** (§1, §8.6; deviation X9). A clip's constant speed, set with Change Clip Speed or from an OTIO file, plays wherever its pictures and sound go (the viewer, exports, frame renders, storyboards and analyses), and edits go through it.
+  - **Setting** (`edit.change_speed`; R, Edit Actions and the clip's menu), as Resolve 21.1.1's Change Clip Speed does: without ripple the clip keeps its length, forward from where it started or, turned around, from the frame it ended on; with ripple it keeps its source, its length the source over the speed (99 frames at 50% become 198), later clips following. A freeze holds the frame under the playhead. Either way it ends where its media does. Speeds from 1% to 10000% either way, or 0.
   - **Pictures:** each frame of the clip shows the source frame its stretch of the source starts in, by the sampling rule (export.md §2): every other frame at 200%, each twice at 50%, its first frame held at 0 (a freeze). Backward, a stretch starts at its bottom, as Resolve shows it: at −200% from a top at 150, frames 148, 146, …. No frame blending or optical flow.
   - **Sound:** the sound of the frames shown, stretched keeping its pitch; backward reversed, from the top of the first frame's stretch. A freeze is silent.
   - **Editing:** trims, rolls, slides, splits and J/L rolls count timeline frames through the speed, and so do media limits. A clip keeps where in its pace it starts, so an edit leaves every frame showing what it showed: a 50% clip split at its 25th frame starts its second part half a source frame in. A slip moves the content by frames of the clip (two source frames at 200%).
-  - **Interchange:** a reversed clip's OTIO source range starts at the bottom of what it shows, with Resolve's `Media In`, the room above its top in seconds of timeline, which Resolve places it by (deviation X9). Read from Resolve, a reversed clip at a fraction of normal speed pairs its frames as Resolve shows them; vidcut's own file keeps each clip's pace (`metadata.vidcut`).
+  - **Interchange:** a reversed clip's OTIO source range starts at the bottom of what it shows, with Resolve's `Media In`, the room above its top in seconds of timeline, which Resolve places it by (deviation X9). Read from Resolve, a reversed clip at a fraction of normal speed pairs its frames as Resolve shows them; vidcut's own file keeps each clip's pace (`metadata.vidcut`). A speed set in vidcut is written as OTIO's `LinearTimeWarp`, a freeze as `FreezeFrame`.
   - **Compound clips:** the clips one holds play at their own speeds; the compound clip's own speed change doesn't play.

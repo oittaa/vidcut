@@ -15,10 +15,11 @@ mod tracks;
 
 use std::collections::BTreeMap;
 
+use serde_json::json;
 pub use tracks::{TrackProps, add_track, remove_track, set_track};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, ClipAudio, Marker, Project, Track, TrackClip, TrackKind};
+use crate::model::{Clip, ClipAudio, Marker, Project, Speed, Track, TrackClip, TrackKind};
 use crate::otio::effects::cut;
 use follow::{Before, Edit};
 
@@ -1411,6 +1412,121 @@ pub fn change_duration(
         }
     }
     Ok(())
+}
+
+/// Change Clip Speed (decision D48): each clip plays at `speed`. Going
+/// forward it starts where what it showed starts; backward, at the frame it
+/// ended on; a freeze holds the frame at `at` over the clip, else its first.
+/// With ripple (Ripple On unless overridden) it keeps its source, its length
+/// the source over the speed, later clips following; without, it keeps its
+/// length. Either way it ends where its media does.
+pub fn change_speed(
+    p: &mut Project,
+    ids: &[String],
+    speed: f64,
+    ripple: Option<bool>,
+    at: Option<i64>,
+) -> Result<()> {
+    if !speed.is_finite() || (speed != 0.0 && !(0.01..=100.0).contains(&speed.abs())) {
+        return Err(Error::invalid(format!(
+            "speed {speed} isn't 0 (a freeze frame) or 1% to 10000% either way"
+        )));
+    }
+    let ripple = ripple.unwrap_or(p.settings.ripple_on);
+    // Later clips first, so rippling doesn't move the ones still to change.
+    let mut targets = Vec::new();
+    for id in ids {
+        let c = p
+            .clip(id)
+            .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
+        if c.is_block() {
+            return Err(Error::invalid(format!(
+                "{id} is a block from another editor: it has no speed to change"
+            )));
+        }
+        targets.push((c.start, id.clone()));
+    }
+    targets.sort();
+    for (_, id) in targets.into_iter().rev() {
+        let c = p.clip(&id).expect("found").clone();
+        let old = c.speed();
+        let mut n = c.clone();
+        // What it showed: its first and last frames, and the source between.
+        let (first, last) = (c.source_at(c.start), c.source_at(c.end() - 1));
+        let span = if old == 0.0 {
+            c.duration as f64
+        } else {
+            c.duration as f64 * old.abs()
+        };
+        n.source_in = if speed == 0.0 {
+            at.filter(|&t| c.start <= t && t < c.end())
+                .map_or(first, |t| c.source_at(t))
+        } else if (speed < 0.0) != (old < 0.0) {
+            // Turning around: from the frame it ended on.
+            last
+        } else {
+            first
+        };
+        n.speed = (speed != 1.0).then(|| Speed {
+            effect: time_effect(c.speed.as_ref(), speed),
+            skip: 0,
+        });
+        let want = if ripple && speed != 0.0 && old != 0.0 {
+            ((span / speed.abs()) + 1e-6).floor().max(1.0) as i64
+        } else {
+            c.duration
+        };
+        // As much of it as its media holds.
+        let fits = |d: i64| {
+            let mut x = n.clone();
+            x.duration = d;
+            check_source(p, &x).is_ok()
+        };
+        if !fits(1) {
+            return Err(Error::invalid(format!(
+                "{id} has no media to play at {}%",
+                (speed * 100.0).round()
+            )));
+        }
+        let (mut lo, mut hi) = (1, want + 1);
+        while hi - lo > 1 {
+            let mid = lo + (hi - lo) / 2;
+            if fits(mid) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let (ti, ci) = locate(p, &id)?;
+        p.tracks[ti].clips[ci] = n;
+        if lo != c.duration {
+            trim(p, &id, Edge::Tail, lo - c.duration, Some(ripple))?;
+        }
+    }
+    Ok(())
+}
+
+/// The OTIO time effect of a clip at `speed`: its own with the new speed,
+/// else a new `LinearTimeWarp`; a `FreezeFrame` held.
+fn time_effect(old: Option<&Speed>, speed: f64) -> serde_json::Value {
+    let schema = if speed == 0.0 {
+        "FreezeFrame.1"
+    } else {
+        "LinearTimeWarp.1"
+    };
+    match old.map(|s| s.effect.clone()) {
+        Some(mut e) if e["OTIO_SCHEMA"] == schema => {
+            e["time_scalar"] = json!(speed);
+            e
+        }
+        _ => json!({
+            "OTIO_SCHEMA": schema,
+            "name": "",
+            "effect_name": "",
+            "time_scalar": speed,
+            "metadata": {},
+        }),
+    }
 }
 
 /// Clip properties settable through `clip.set`.

@@ -1432,3 +1432,73 @@ fn clips_at_other_speeds_edit_through_their_speed() {
         (199, 0)
     );
 }
+
+#[test]
+fn change_clip_speed_follows_the_editor() {
+    // Decision D48, against what Resolve does with a clip of m1 10..109
+    // (99 frames) and one after it.
+    let clip = |f: &Fixture, id: &str| f.editor.project().clip(id).unwrap().clone();
+    let frames = |c: &crate::model::Clip| (c.source_at(c.start), c.source_at(c.end() - 1));
+    let setup = || {
+        let mut f = fixture();
+        f.append("m1", 10, 109);
+        f.append("m2", 0, 50);
+        f
+    };
+    let speed = |f: &mut Fixture, x: f64, ripple: bool| {
+        f.ok(req(
+            "edit.change_speed",
+            json!({"clips": "c1", "speed": x, "ripple": ripple}),
+        ));
+    };
+
+    // Without ripple it keeps its length: 50% shows 10..59, 200% 10..206,
+    // -100% from the frame it ended on back to its first.
+    for (x, shown) in [(0.5, (10, 59)), (2.0, (10, 206)), (-1.0, (108, 10))] {
+        let mut f = setup();
+        speed(&mut f, x, false);
+        let c = clip(&f, "c1");
+        assert_eq!((c.duration, frames(&c)), (99, shown), "{x}");
+        assert_eq!(clip(&f, "c2").start, 99);
+    }
+    // With ripple it keeps its source: 198 frames at 50%, 300 at 33%, 49 at
+    // 200%; the clip after it follows.
+    for (x, len) in [(0.5, 198), (0.33, 300), (2.0, 49)] {
+        let mut f = setup();
+        speed(&mut f, x, true);
+        let c = clip(&f, "c1");
+        assert_eq!((c.duration, c.source_in), (len, 10), "{x}");
+        assert_eq!(clip(&f, "c2").start, len, "{x}");
+    }
+    // Backward at -200% from 148 it runs out of media at frame 0: 75 frames.
+    let mut f = fixture();
+    f.append("m1", 50, 149);
+    speed(&mut f, -2.0, false);
+    let c = clip(&f, "c1");
+    assert_eq!((c.duration, frames(&c)), (75, (148, 0)));
+    // A freeze holds the frame under the playhead; back to 100% it plays on
+    // from there.
+    let mut f = setup();
+    f.ok(req(
+        "edit.change_speed",
+        json!({"clips": "c1", "speed": 0.0, "at": 20}),
+    ));
+    let c = clip(&f, "c1");
+    assert_eq!(
+        (c.duration, frames(&c), c.speed.unwrap().label()),
+        (99, (30, 30), "freeze".into())
+    );
+    speed(&mut f, 1.0, false);
+    let c = clip(&f, "c1");
+    assert_eq!((frames(&c), c.speed), ((30, 128), None));
+    // Undone in one step; nonsense refused.
+    f.ok(req("history.undo", json!({})));
+    assert_eq!(clip(&f, "c1").speed().to_string(), "0");
+    for bad in [1000.0, 0.001, -500.0] {
+        let e = f.err(req(
+            "edit.change_speed",
+            json!({"clips": "c1", "speed": bad}),
+        ));
+        assert!(e.message.contains("isn't 0"), "{bad}: {e}");
+    }
+}

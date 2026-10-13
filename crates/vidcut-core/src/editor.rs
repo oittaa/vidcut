@@ -1072,6 +1072,20 @@ fn mutate(
             }
             Value::Null
         }
+        Request::EditChangeSpeed {
+            clips,
+            speed,
+            ripple,
+            at,
+        } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let at = match at {
+                Some(t) => Some(resolve(p, t, playhead)?),
+                None => playhead,
+            };
+            ops::change_speed(p, &ids, *speed, *ripple, at)?;
+            Value::Null
+        }
         Request::ClipSet {
             clips,
             enabled,

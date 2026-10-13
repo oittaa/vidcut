@@ -201,6 +201,8 @@ pub struct TimelineView {
     pub marker_dialog: Option<MarkerDialog>,
     /// Change Clip Duration (Ctrl+D), the typed value.
     pub duration_dialog: Option<String>,
+    /// Change Clip Speed (R), while open.
+    pub speed_dialog: Option<SpeedDialog>,
     /// Ripple Delete Silence's dialog, while open.
     pub silence: Option<tools::SilenceDialog>,
     /// Analyze Timeline Edits (the Boring Detector's settings): seconds and
@@ -233,6 +235,7 @@ impl Default for TimelineView {
             scrub_sent: None,
             marker_dialog: None,
             duration_dialog: None,
+            speed_dialog: None,
             enlarged: None,
             silence: None,
             boring_dialog: None,
@@ -243,6 +246,16 @@ impl Default for TimelineView {
             sent_trim: None,
         }
     }
+}
+
+/// Change Clip Speed's fields (decision D48).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpeedDialog {
+    /// How fast, in percent of normal speed.
+    pub percent: f64,
+    pub reverse: bool,
+    pub freeze: bool,
+    pub ripple: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -779,6 +792,7 @@ impl Workspace {
         }
         self.marker_window(ui.ctx());
         self.duration_window(ui.ctx());
+        self.speed_window(ui.ctx());
         self.silence_window(ui.ctx());
         self.boring_window(ui.ctx());
         self.dynamic_tick(ui.ctx());
@@ -1055,6 +1069,16 @@ impl Workspace {
             .clicked()
         {
             self.timeline.duration_dialog = Some(String::new());
+            ui.close();
+        }
+        if ui
+            .add_enabled(
+                !self.snap.selection.clips.is_empty(),
+                egui::Button::new(keys("Change Clip Speed…  (R)")),
+            )
+            .clicked()
+        {
+            self.open_speed_dialog();
             ui.close();
         }
     }
@@ -1657,6 +1681,10 @@ impl Workspace {
             self.timeline.duration_dialog = Some(String::new());
             ui.close();
         }
+        if !c.is_block() && ui.button(keys("Change Speed…  (R)")).clicked() {
+            self.open_speed_dialog();
+            ui.close();
+        }
         if c.audio.is_some() {
             ui.menu_button("Audio Operations", |ui| {
                 if ui.button("Ripple Delete Silence…").clicked() {
@@ -1859,6 +1887,9 @@ impl Workspace {
         if pressed(Key::D) && input.modifiers.command && !self.snap.selection.clips.is_empty() {
             self.timeline.duration_dialog = Some(String::new());
         }
+        if pressed(Key::R) && !input.modifiers.command && !self.snap.selection.clips.is_empty() {
+            self.open_speed_dialog();
+        }
         if pressed(Key::W) && !input.modifiers.command {
             self.toggle_dynamic();
         }
@@ -2052,6 +2083,89 @@ impl Workspace {
             });
         if open && !done {
             self.timeline.duration_dialog = Some(text);
+        }
+    }
+
+    /// Opens Change Clip Speed with the first selected clip's speed.
+    fn open_speed_dialog(&mut self) {
+        let Some(p) = self.project() else {
+            return;
+        };
+        let speed: f64 = self
+            .snap
+            .selection
+            .clips
+            .first()
+            .and_then(|id| p.clip(id))
+            .map_or(1.0, |c| c.speed());
+        let ripple = p.settings.ripple_on;
+        self.timeline.speed_dialog = Some(SpeedDialog {
+            percent: if speed == 0.0 {
+                100.0
+            } else {
+                speed.abs() * 100.0
+            },
+            reverse: speed < 0.0,
+            freeze: speed == 0.0,
+            ripple,
+        });
+    }
+
+    /// Change Clip Speed (R; decision D48).
+    fn speed_window(&mut self, ctx: &egui::Context) {
+        let Some(mut d) = self.timeline.speed_dialog.take() else {
+            return;
+        };
+        let clips = self.snap.selection.clips.clone();
+        let mut open = !clips.is_empty();
+        let mut done = false;
+        egui::Window::new("Change Clip Speed")
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.label(format!("{} clip(s)", clips.len()));
+                ui.add_enabled_ui(!d.freeze, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Speed");
+                        ui.add(
+                            egui::DragValue::new(&mut d.percent)
+                                .range(1.0..=10000.0)
+                                .speed(1.0)
+                                .suffix(" %"),
+                        );
+                    });
+                    ui.checkbox(&mut d.reverse, "Reverse Speed");
+                });
+                ui.checkbox(&mut d.freeze, "Freeze Frame")
+                    .on_hover_text("Holds the frame under the playhead");
+                ui.checkbox(&mut d.ripple, "Ripple Timeline").on_hover_text(
+                    "Keeps the clip's source and changes its length; off, keeps its length",
+                );
+                ui.horizontal(|ui| {
+                    let change =
+                        ui.button("Change").clicked() || ui.input(|i| i.key_pressed(Key::Enter));
+                    if change {
+                        let speed = if d.freeze {
+                            0.0
+                        } else if d.reverse {
+                            -d.percent / 100.0
+                        } else {
+                            d.percent / 100.0
+                        };
+                        self.send(
+                            "edit.change_speed",
+                            json!({ "clips": clips, "speed": speed, "ripple": d.ripple }),
+                        );
+                        done = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        done = true;
+                    }
+                });
+            });
+        if open && !done {
+            self.timeline.speed_dialog = Some(d);
         }
     }
 
