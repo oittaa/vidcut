@@ -15,6 +15,8 @@ pub const ACCENT: Color32 = Color32::from_rgb(232, 150, 52);
 pub const PLAYHEAD: Color32 = Color32::from_rgb(231, 72, 58);
 pub const CLIP: Color32 = Color32::from_rgb(58, 96, 150);
 pub const CLIP_DISABLED: Color32 = Color32::from_rgb(52, 58, 68);
+/// A clip whose file is missing, and the viewer's Media Offline frame.
+pub const OFFLINE: Color32 = Color32::from_rgb(150, 46, 42);
 pub const AUDIO: Color32 = Color32::from_rgb(52, 120, 84);
 pub const MARKED: Color32 = Color32::from_rgba_premultiplied(70, 70, 76, 70);
 pub const ERROR: Color32 = Color32::from_rgb(235, 98, 88);

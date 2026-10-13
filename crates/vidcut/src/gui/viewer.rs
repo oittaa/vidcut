@@ -2,11 +2,14 @@
 //! bar with In/Out handles, the transport and the timecode and duration
 //! fields.
 
+use std::collections::HashSet;
+
 use eframe::egui::{
-    self, Align2, Color32, CornerRadius, FontId, Key, Pos2, Rect, RichText, Sense, Stroke, pos2,
-    vec2,
+    self, Align, Align2, Color32, CornerRadius, FontId, Key, Pos2, Rect, RichText, Sense, Stroke,
+    pos2, vec2,
 };
 use serde_json::json;
+use vidcut_core::model::{Media, Project, TrackKind};
 use vidcut_core::request::ViewerMode;
 use vidcut_core::time::{TimeContext, TimeSpec};
 
@@ -54,6 +57,33 @@ impl MarkHandles {
             Self::Clip { xb, .. } | Self::Tape { xb, .. } => *xb,
         }
     }
+}
+
+/// The media the viewer shows at `position` if its file is missing: the
+/// source's, or the picture on top at the timeline's playhead.
+fn offline_media<'a>(
+    p: &'a Project,
+    missing: &HashSet<String>,
+    mode: ViewerMode,
+    position: i64,
+    source: Option<&str>,
+) -> Option<&'a Media> {
+    let media = match mode {
+        ViewerMode::Timeline => p
+            .tracks
+            .iter()
+            .rev()
+            .filter(|t| t.kind == TrackKind::Video && t.video_enabled)
+            .find_map(|t| {
+                t.clip_at(position)
+                    .map(|i| &t.clips[i])
+                    .filter(|c| c.enabled && c.video)
+            })?
+            .media
+            .as_str(),
+        ViewerMode::SourceClip | ViewerMode::SourceTape => source?,
+    };
+    p.media(media).filter(|_| missing.contains(media))
 }
 
 impl Workspace {
@@ -204,7 +234,23 @@ impl Workspace {
                 }
             }
         }
-        if let Some(e) = &player.error {
+        let offline = self.project().and_then(|p| {
+            let source = self.snap.source_at().map(|(m, _)| m);
+            offline_media(p, &self.snap.missing, mode, player.position, source)
+                .map(|m| m.name.clone())
+        });
+        if let Some(name) = offline {
+            painter.rect_filled(picture, CornerRadius::ZERO, theme::OFFLINE);
+            let text = RichText::new(format!("Media Offline\n{name}"))
+                .size(18.0)
+                .color(Color32::WHITE);
+            ui.put(
+                Rect::from_center_size(picture.center(), vec2(picture.width(), 60.0)),
+                egui::Label::new(text)
+                    .halign(Align::Center)
+                    .selectable(false),
+            );
+        } else if let Some(e) = &player.error {
             painter.text(
                 picture.left_top() + vec2(8.0, 8.0),
                 Align2::LEFT_TOP,
