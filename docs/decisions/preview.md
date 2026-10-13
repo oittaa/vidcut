@@ -6,8 +6,8 @@
 - [`crates/vidcut/tests/live.rs`](../../crates/vidcut/tests/live.rs): the live session with its one engine, a stand-in renderer and a recording stand-in device, no window, GPU or audio device. Seeks frame-exact at every boundary (also with a late renderer), overtaken seeks, seeks while playing and while an edit reloads, pictures against beeps as heard, every frame shown in order, audio scrubbing, backward play, the source viewers, switching between the source and the timeline (each one's frame kept ready, after an edit from the source too), stills and sequences, interlaced, HDR and turned clips, proxies, several tracks and faders, an unreadable file.
 - [`crates/vidcut/tests/gui.rs`](../../crates/vidcut/tests/gui.rs) (`--features vidcut/gui-tests`, needs a display): the real window. Screenshots of the shader's picture against `vidcut frame render` (H.264, a turned clip, 10-bit HEVC on NVDEC), edits, a minimized window, playing, the GPU preference.
 - [`crates/vidcut/tests/picture.rs`](../../crates/vidcut/tests/picture.rs): the shader against the export's conversion on any wgpu adapter (lavapipe too); NVDEC's pictures shown from video memory as they show copied down, to the byte (NV12, P010, deinterlaced, odd sizes), where the adapter is CUDA's GPU (not in WSL, whose only Vulkan device is lavapipe).
-- [`crates/vidcut-av/tests/player_gpu.rs`](../../crates/vidcut-av/tests/player_gpu.rs) (`--features vidcut-av/gpu-tests`): pictures decoded on NVDEC against the CPU's; the engine's own tests in player.md.
-- `cargo run -p vidcut-av --example decode_speed -- FILE`: raw decoding speed on the CPU and on NVDEC.
+- [`crates/vidcut-av/tests/player_gpu.rs`](../../crates/vidcut-av/tests/player_gpu.rs) (`--features vidcut-av/gpu-tests`): pictures decoded on each GPU decoder the machine has against the CPU's; the engine's own tests in player.md.
+- `cargo run -p vidcut-av --example decode_speed -- FILE`: raw decoding speed on the CPU and on each GPU decoder.
 
 ## 1. What plays
 
@@ -30,7 +30,7 @@
 
 ## 3. Decoding: on the GPU when there is one
 
-- **NVDEC decodes every stream it can**, while GPU acceleration is on (the preferences' `gpu.acceleration`, the default): H.264, HEVC, AV1 and VP9 (`VideoReader::open_nvdec_or_cpu`). Streams NVDEC doesn't decode (ProRes, VP8, a profile the GPU lacks) decode on the CPU, as do stills and image sequences. Measured with `decode_speed` on this machine (16 threads, RTX 4080 SUPER):
+- **The GPU decodes every stream it can**, while GPU acceleration is on (the preferences' `gpu.acceleration`, the default): H.264, HEVC, AV1 and VP9 where the GPU has them (`VideoReader::open_gpu_or_cpu`). The decoder is the best the computer has (`vidcut_av::hw::GpuDecoder::best`): NVDEC on an NVIDIA GPU; else VA-API on Linux (Mesa's driver for AMD, Intel's own) on the first render node that isn't NVIDIA's, or Direct3D 11's video decoding on Windows on the first adapter that isn't. FFmpeg's own decoders do it through its hardware contexts, so every one gives the same frames. Streams the GPU doesn't decode (ProRes, VP8, a profile the GPU lacks) decode on the CPU, as do stills and image sequences, and H.264 where AMD's Direct3D 11 decoder would (`GpuDecoder::decodes`, gotchas.md). Measured with `decode_speed` on this machine (16 threads, RTX 4080 SUPER):
 
 | Stream | CPU | NVDEC |
 |---|---|---|
@@ -39,11 +39,20 @@
 | 1080p30 H.264 (bbb) | 2,439 frames/s; 24–89 ms | 913 frames/s; 54–329 ms |
 
   NVDEC's engine is the limit for H.264: decoding 4K it is 99% busy (`nvidia-smi dmon`), FFmpeg's frame threads on it add nothing, and two decodes at once share its 257 frames a second. So a CPU with many cores decodes H.264 several times faster: on this machine H.264 seeks and backward windows take three to four times as long on NVDEC (§8), while playing forward takes half the CPU. HEVC, AV1 and VP9 are costly in software, and NVDEC is faster at everything. The GPU is the default all the same: it leaves the CPU to the rest of the work, and on a CPU with fewer cores it is the faster for H.264 too. Long GOPs, keyframes seconds apart as cameras, phones and the web make them (a frame late in one decodes after every frame from its keyframe), are what proxies are for (§6): a 960×400 AV1 proxy decodes at 5,921 frames a second on NVDEC, and a seek into its 60-frame GOPs takes 0–7 ms. `gpu.acceleration` off decodes everything on the CPU.
+
+  Other GPUs, frames a second decoding and copied down to memory as the player takes them, with the CPU's (`decode_speed`). The 2160p 10-bit HEVC is the barcode fixture and, after the slash, a clip of noise (FFmpeg's `testsrc2` with `noise`), as hard to decode as it gets:
+
+| GPU | 1080p30 H.264 (fixture) | 2160p60 10-bit HEVC |
+|---|---|---|
+| Direct3D 11, the Ryzen 7 9800X3D's Radeon iGPU | on the CPU there (gotchas.md) | 163 / 131, copied down 83 / 82 on 0.3 cores (CPU: 829 / 255) |
+| VA-API, Intel N150 (4 cores, Linux) | 881, copied down 352 | 277 / 204, copied down 56 / 31 on 0.8 cores (CPU: 154 / 41 on 3.8 cores) |
+
+  Copying 2160p down is what limits them: 25 MB a frame. These GPUs leave the CPU free more than they decode 4K faster, and a 4K60 file plays on the Radeon, not always on the N150. Intel's surfaces copy down at twice FFmpeg's speed mapped themselves (`hw::download`, gotchas.md). Showing their pictures from video memory as NVDEC's is own-player.md's.
 - **In video memory.** A frame NVDEC decoded stays on the GPU, NV12 or P010, and so do the pictures the engine keeps: up to a gigabyte of video memory (`Config::gpu_pictures`). FFmpeg copies each frame out of NVDEC's few surfaces into one of its own, so kept frames don't run the decoder out. A 2160p P010 picture is 24.9 MB. Frames passed over on the way to a seek are decoded and not kept.
 - **Shown from there** (`gui/shared.rs`, `vidcut_av::cuda::share`): wgpu's Vulkan device makes a buffer whose memory it exports (`VK_KHR_external_memory_fd`; on Windows as a Win32 handle, `VK_KHR_external_memory_win32`), CUDA imports it, and to show a picture CUDA copies its planes into the buffer and wgpu copies them on into the plane textures (§4): two copies on the GPU, nothing through memory or the CPU. The whole GUI then plays 4K60 on 0.04–0.05 cores (§8). A few such buffers take turns, each free again once the queue has done the copy out of it (`Queue::on_submitted_work_done`); waiting for the GPU instead (`Device::poll`) holds wgpu's device, and the UI thread's frames stalled behind it.
-- **Copied down** where the viewer can't do that: another backend than Vulkan, CUDA on another GPU than the display's, a player without a viewer (tests). The frame comes to memory at its own size with its properties and is uploaded (§4).
-- **Switching.** The session watches the preferences file; a change, from anywhere, switches the engine's decoder at once (`Player::set_hardware`), and it decodes its pictures anew, the one shown first. `player.state`'s `hwdec` says what decoded the picture shown: `nvdec` or `no`.
-- **Frame-exact:** NVDEC's pictures are the CPU's, barcode for barcode, and within two levels in their pixels (`player_gpu.rs`: H.264, interlaced H.264, HEVC, VP9, AV1, HEVC in MPEG-TS and turned).
+- **Copied down** where the viewer can't do that: VA-API's and Direct3D 11's frames always, as they are decoded (each surface goes back to the decoder at once); NVDEC's with another backend than Vulkan, CUDA on another GPU than the display's, a player without a viewer (tests). The frame comes to memory at its own size with its properties and is uploaded (§4). Interlaced frames from the other GPUs come down before `bwdif` (NVDEC's go through `bwdif_cuda`).
+- **Switching.** The session watches the preferences file; a change, from anywhere, switches the engine's decoder at once (`Player::set_hardware`), and it decodes its pictures anew, the one shown first. `player.state`'s `hwdec` says what decoded the picture shown: `nvdec`, `vaapi`, `d3d11va` or `no`.
+- **Frame-exact:** every GPU decoder's pictures are the CPU's, barcode for barcode, and within two levels in their pixels (`player_gpu.rs`, on each decoder the machine has: H.264, interlaced H.264, HEVC, VP9, AV1, HEVC in MPEG-TS and turned). NVDEC (RTX 4080 SUPER), Direct3D 11 on the Radeon iGPU and VA-API on the Intel N150 decode all of them, but H.264 on the Radeon, which the CPU decodes there (gotchas.md); the test holds every codec whose profile the driver lists to the GPU (`GpuDecoder::hardware_decodes`).
 
 ## 4. The picture on screen
 
@@ -119,6 +128,6 @@ The Trim Editor's and Dynamic Trim's two-up show frames of a copy of the project
 
 ## 10. Still open
 
-- Zero-copy GPU frames, VAAPI and Vulkan Video decoding, Metal and D3D frames on other systems: own-player.md.
+- VA-API's and Direct3D 11's pictures shown from video memory, Vulkan Video decoding, VideoToolbox on macOS: own-player.md.
 - Choosing the audio device: the default one plays.
 - The meters show the edit's levels, not the engine's output: todo/meters-tap-player-output.md.

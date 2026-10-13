@@ -13,6 +13,7 @@ pub mod error;
 pub mod export;
 pub mod fixture;
 pub mod hdr;
+pub mod hw;
 pub mod light;
 pub mod player;
 pub mod probe;
@@ -84,6 +85,33 @@ pub fn library_versions() -> std::collections::BTreeMap<&'static str, String> {
     ]
     .into_iter()
     .collect()
+}
+
+/// Seconds of CPU this process has used, for measurements: how much of the
+/// computer a way of decoding or encoding takes.
+pub fn cpu_seconds() -> f64 {
+    #[cfg(unix)]
+    // SAFETY: getrusage fills the struct it is given.
+    unsafe {
+        let mut r: libc::rusage = std::mem::zeroed();
+        libc::getrusage(libc::RUSAGE_SELF, &mut r);
+        let t = |v: libc::timeval| v.tv_sec as f64 + v.tv_usec as f64 / 1e6;
+        t(r.ru_utime) + t(r.ru_stime)
+    }
+    #[cfg(windows)]
+    // SAFETY: fills the four times it is given, for this process.
+    unsafe {
+        use windows_sys::Win32::Foundation::FILETIME;
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
+        let mut times: [FILETIME; 4] = std::mem::zeroed();
+        let [created, exited, kernel, user] = &mut times;
+        GetProcessTimes(GetCurrentProcess(), created, exited, kernel, user);
+        // Hundreds of nanoseconds.
+        let t = |f: &FILETIME| {
+            (u64::from(f.dwHighDateTime) << 32 | u64::from(f.dwLowDateTime)) as f64 / 1e7
+        };
+        t(&times[2]) + t(&times[3])
+    }
 }
 
 #[cfg(test)]

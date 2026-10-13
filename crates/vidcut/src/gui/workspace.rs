@@ -205,8 +205,7 @@ fn decoding(hwdec: &str) -> Option<(String, String)> {
              or the GPU can't decode this file"
                 .into(),
         ),
-        "nvdec" => gpu("NVDEC"),
-        other => gpu(other),
+        other => gpu(vidcut_av::hw::Kind::named(other).map_or(other, |k| k.label())),
     })
 }
 
@@ -1602,5 +1601,9 @@ mod tests {
         assert_eq!(decoding(""), None);
         assert_eq!(decoding("no").unwrap().0, "decoding on the CPU");
         assert_eq!(decoding("nvdec").unwrap().0, "decoding on the GPU (NVDEC)");
+        assert_eq!(
+            decoding("d3d11va").unwrap().0,
+            "decoding on the GPU (Direct3D 11)"
+        );
     }
 }

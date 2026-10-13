@@ -559,8 +559,8 @@ impl Meter {
     /// `f` stays as it is: a layout to convert goes through a filter, which
     /// takes the frame it is given, so it gets another reference.
     pub(crate) fn measure(&mut self, f: &frame::Video) -> Result<FrameLight> {
-        let f = if f.format() == format::Pixel::CUDA {
-            crate::cuda::download(f)?
+        let f = if crate::hw::on_gpu(f) {
+            crate::hw::download(f)?
         } else {
             crate::export::video::frame_ref(f)?
         };

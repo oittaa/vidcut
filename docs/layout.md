@@ -3,7 +3,7 @@
 | Crate | Purpose | Depends on |
 |---|---|---|
 | `crates/vidcut-core` | Project model, time, edit operations, the request protocol, render plans, OTIO, analysis decisions, preferences, fingerprints, HDR metadata choice, where files live on each system (`dirs.rs`). Pure Rust. | — |
-| `crates/vidcut-av` | FFmpeg in-process: probe, decode, HDR, export, proxies, thumbnails, measurements, the player engine. [player.md](decisions/player.md), [export.md](decisions/export.md), [preview.md](decisions/preview.md). | ffmpeg-next, cpal |
+| `crates/vidcut-av` | FFmpeg in-process: probe, decode (on the CPU, or the GPU's decoders: `hw.rs`), HDR, export, proxies, thumbnails, measurements, the player engine. [player.md](decisions/player.md), [export.md](decisions/export.md), [preview.md](decisions/preview.md). | ffmpeg-next, cpal |
 | `crates/vidcut` | The `vidcut` binary: Session/host, IPC, CLI (clap), GUI (eframe on wgpu), MCP server | all of the above |
 
 Inside `crates/vidcut`:
