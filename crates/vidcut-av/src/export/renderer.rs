@@ -136,7 +136,7 @@ impl StillRenderer {
             Some(img) => img,
             None if self.back && video => {
                 let (.., frames) = self.frames.as_mut().expect("set above");
-                let start = window(frames, piece, pos, floor, fps, min, max)?;
+                let start = window(frames, piece, pos, floor, fps, min, max, false)?;
                 let n = pos - start + 1;
                 let mut shown = None;
                 for (j, img) in (start..).zip(self.render(&at(piece, start, n), n)?) {
@@ -310,6 +310,7 @@ impl Prefetch {
             self.fps,
             self.min,
             self.max,
+            false,
         )?;
         self.shared.lock().prefetching = Some((self.key.clone(), start, self.end));
         let n = self.end - start + 1;
@@ -416,7 +417,10 @@ pub(crate) fn window_sizes(budget: usize, width: u32, height: u32, fps: Rational
 /// The first frame of the window to render together for `pos`, going back:
 /// from a keyframe, so nothing in it decodes twice, reaching back over more
 /// keyframes to hold `min` frames, holding at most `max`, and starting no
-/// earlier than `floor`.
+/// earlier than `floor`. With `whole_gops` it reaches back over another
+/// keyframe only to hold that GOP whole: started between two keyframes, the
+/// frames before it decode for nothing.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn window(
     frames: &mut VideoFrames,
     piece: &VideoPiece,
@@ -425,13 +429,14 @@ pub(crate) fn window(
     fps: Rational,
     min: i64,
     max: i64,
+    whole_gops: bool,
 ) -> Result<i64> {
     let VideoPiece::Source { origin, .. } = piece else {
         return Ok(pos);
     };
     let rate = fps.as_f64();
     let (mut probe, mut start) = (pos, pos);
-    for _ in 0..64 {
+    for i in 0..64 {
         let Some(key) = frames.keyframe_time(&at(piece, probe, 1))? else {
             start = pos - min + 1;
             break;
@@ -440,7 +445,11 @@ pub(crate) fn window(
         // is past the keyframe's (a microsecond more against float noise),
         // so seeking for it starts from that keyframe, not the one before.
         let first = ((key - origin) * rate + 0.5 + 1e-6).ceil() as i64;
-        start = first.clamp(0, probe);
+        let first = first.clamp(0, probe);
+        if whole_gops && i > 0 && pos - first.max(floor) + 1 > max {
+            break;
+        }
+        start = first;
         if pos - start + 1 >= min || start <= floor {
             break;
         }

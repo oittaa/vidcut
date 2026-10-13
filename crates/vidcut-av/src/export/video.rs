@@ -443,10 +443,21 @@ impl Source {
         if self.pictures == Pictures::Still {
             return Ok(());
         }
-        let ahead = self
-            .current
-            .as_ref()
-            .is_some_and(|(_, t)| target >= self.target && target - t <= DECODE_AHEAD);
+        let ahead = match &self.current {
+            Some((_, t)) => target >= self.target && target - t <= DECODE_AHEAD,
+            // Just sought (a keyframe looked for, `VideoFrames::keyframe_time`):
+            // the frame it landed on comes next, and decoding on from it
+            // reaches any target not before it. Up to the target sought,
+            // no keyframe lies between: a seek would land on the same one.
+            None => self
+                .reader
+                .pending_pts()
+                .map(|p| p as f64 * self.tick)
+                .is_some_and(|t| {
+                    t <= target + 1e-6
+                        && (target <= self.target + 1e-6 || target - t <= DECODE_AHEAD)
+                }),
+        };
         if !ahead {
             self.seek(target)?;
         }
@@ -789,7 +800,8 @@ impl VideoFrames {
 
     /// The time (seconds) of the keyframe decoding starts from for the
     /// first frame of `piece`, a video file's: a seek and one decoded frame.
-    /// `None` for black, stills and image sequences.
+    /// The reader stays there: frames read from the keyframe on decode on
+    /// without seeking again. `None` for black, stills and image sequences.
     pub fn keyframe_time(&mut self, piece: &VideoPiece) -> Result<Option<f64>> {
         let VideoPiece::Source {
             path,
@@ -809,6 +821,8 @@ impl VideoFrames {
         };
         // Interrupted, the file stays open, its position unknown.
         let sought = source.seek(target);
+        // The window that starts there decodes on from it.
+        source.reader.from_keyframe();
         let at = source.reader.pending_pts().map(|p| p as f64 * source.tick);
         self.source = Some(source);
         sought?;

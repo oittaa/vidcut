@@ -21,6 +21,9 @@ pub(super) struct PreferencesUi {
     /// bitrate, and the proxy size.
     limit: String,
     memory: String,
+    /// The player's memory and video memory (MB, 0: automatic).
+    player_memory: String,
+    video_memory: String,
     larger_w: String,
     larger_h: String,
     mbps: String,
@@ -97,6 +100,8 @@ impl Workspace {
                     let n = |v: &Value| v.as_u64().unwrap_or(0).to_string();
                     ui_state.limit = n(&p["thumbnails"]["cache_limit_mb"]);
                     ui_state.memory = n(&p["thumbnails"]["timeline_memory_mb"]);
+                    ui_state.player_memory = n(&p["player"]["memory_mb"]);
+                    ui_state.video_memory = n(&p["player"]["video_memory_mb"]);
                     // The timeline's pictures follow at once.
                     if let (Some(tiles), Ok(t)) = (
                         &mut self.tiles,
@@ -154,6 +159,54 @@ impl Workspace {
                             patch = Some(json!({ "gpu": { "acceleration": on } }));
                         }
                         ui.end_row();
+                    });
+                ui.add_space(8.0);
+                ui.label(RichText::new("Player").strong());
+                egui::Grid::new("preferences-player")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        let player = &state["preferences"]["player"];
+                        let auto_mb = state["player_memory_auto_mb"].as_u64().unwrap_or(1024);
+                        for (key, name, saved, text, tip) in [
+                            (
+                                "memory_mb",
+                                "Memory",
+                                player["memory_mb"].as_u64().unwrap_or(0),
+                                &mut ui_state.player_memory,
+                                format!(
+                                    "Decoded pictures kept around the playhead, so steps and \
+                                     playing back wait less. 0: automatic, the larger of 1 GB \
+                                     and half the computer's memory ({auto_mb} MB here)"
+                                ),
+                            ),
+                            (
+                                "video_memory_mb",
+                                "Video memory",
+                                player["video_memory_mb"].as_u64().unwrap_or(0),
+                                &mut ui_state.video_memory,
+                                "Pictures the GPU decoded, kept on the GPU. 0: automatic, \
+                                 half the GPU's memory"
+                                    .to_string(),
+                            ),
+                        ] {
+                            let label = ui.label(name);
+                            ui.horizontal(|ui| {
+                                let field = NumberField {
+                                    label: label.id,
+                                    saved,
+                                    range: 0..=100_000_000,
+                                    enabled: !busy,
+                                    tip: &tip,
+                                    refusal: "The player's memory is 0 (automatic) or at least \
+                                              64 MB",
+                                };
+                                if let Some(mb) = field.show(ui, text, &mut ui_state.error) {
+                                    patch = Some(json!({ "player": { key: mb } }));
+                                }
+                                ui.label("MB (0: automatic)");
+                            });
+                            ui.end_row();
+                        }
                     });
                 ui.add_space(8.0);
                 ui.label(RichText::new("Thumbnails").strong());

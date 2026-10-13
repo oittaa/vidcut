@@ -16,7 +16,6 @@
   - macOS: VideoToolbox, into Metal textures through IOSurface.
 - **Encoding from GPU memory:** NVENC takes CUDA frames, VAAPI its surfaces, VideoToolbox its pixel buffers; scaling stays on the GPU (FFmpeg's CUDA, VAAPI and Vulkan scalers).
 - **Still open in the engine:** choosing the audio device.
-- **Backward 4K play in long GOPs** is short of real time: 3 s backward of 2160p60 HEVC shows 84 of 181 frames on NVDEC and 23 on the CPU.
-- **The first step back** from the middle of a GOP takes 150–500 ms (a window decodes from the keyframe); the steps after it take 17–35 ms.
+- **Backward play right after a seek** waits once for the first window behind it, a GOP of decoding: with 2160p60 0.27 s on the CPU and 0.47 s for H.264 on NVDEC (its decoder is made anew at every seek, gotchas.md). After that, 20 s backward across keyframes shows 96–100% of the frames at the automatic budget.
 - **CPU path stays** for what GPUs don't decode: VP8, ProRes outside Apple, PNG and other image sequences.
 - **Frame-exact:** every decoding path passes the barcode fixtures, as the software decoder does.

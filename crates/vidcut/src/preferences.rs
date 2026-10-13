@@ -39,6 +39,20 @@ pub fn gpu_acceleration() -> bool {
     load().map_or(true, |p| p.gpu.acceleration)
 }
 
+/// The viewer's memory for pictures: `player.memory_mb` and
+/// `player.video_memory_mb`, `0` the automatic sizes (`Budget::automatic`).
+pub fn player_budget() -> vidcut_av::player::Budget {
+    let p = load().map(|p| p.player).unwrap_or_default();
+    let mb = |n: u64| usize::try_from(n.saturating_mul(1 << 20)).unwrap_or(usize::MAX);
+    vidcut_av::player::Budget {
+        memory: match p.memory_mb {
+            0 => vidcut_av::player::Budget::automatic().memory,
+            n => mb(n),
+        },
+        video: (p.video_memory_mb != 0).then(|| mb(p.video_memory_mb)),
+    }
+}
+
 /// `preferences.get`: the preferences, where they are kept, and what the
 /// thumbnail cache holds.
 pub fn get() -> Result<Value> {
@@ -103,5 +117,7 @@ fn describe(p: &Preferences) -> Value {
             "mb": (bytes as f64 / f64::from(1 << 20) * 10.0).round() / 10.0,
         },
         "proxy_codecs": codecs,
+        // What `player.memory_mb` 0 means here.
+        "player_memory_auto_mb": vidcut_av::player::Budget::automatic().memory >> 20,
     })
 }

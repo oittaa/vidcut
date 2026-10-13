@@ -134,7 +134,7 @@ pub struct PlayerConfig {
     /// stand-in when it won't open), a stand-in in tests.
     pub audio: MakeOutput,
     /// Memory for its pictures: what is shown, and the frame of what isn't.
-    pub budget: usize,
+    pub budget: vidcut_av::player::Budget,
     /// The renderer shows pictures in CUDA memory from there: those NVDEC
     /// decodes stay on the GPU (and kept ones in video memory).
     pub gpu_pictures: bool,
@@ -366,7 +366,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     let pid = std::process::id();
     let (audio, budget, gpu_pictures) = match config.player {
         Some(p) => (Some(p.audio), p.budget, p.gpu_pictures),
-        None => (None, 0, false),
+        None => (None, vidcut_av::player::Budget::both(0), false),
     };
     let player = {
         let (tx, notify) = (tx.clone(), config.notify.clone());
@@ -829,6 +829,7 @@ impl Live {
             Msg::PreferencesChanged => {
                 let gpu = crate::preferences::gpu_acceleration();
                 changed = self.player.follow_gpu(gpu);
+                self.player.set_budget(crate::preferences::player_budget());
             }
             Msg::FileChanged => {
                 let refreshed = match self.project.as_mut().map(OpenProject::reload) {

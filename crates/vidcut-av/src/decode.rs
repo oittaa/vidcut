@@ -252,6 +252,8 @@ pub struct VideoReader {
     min_pts: Option<i64>,
     /// One frame of look-ahead, filled while verifying a seek.
     pending: Option<frame::Video>,
+    /// A packet read by a seek and not yet sent to the decoder.
+    packet: Option<ffmpeg::Packet>,
     /// Pts of the first decodable frame (`o` in the time map).
     first_pts: Option<i64>,
     /// Clockwise rotation that shows the pictures upright.
@@ -638,6 +640,7 @@ impl VideoReader {
             draining: false,
             min_pts: None,
             pending: None,
+            packet: None,
             first_pts: None,
             rotation,
             first_props: None,
@@ -709,6 +712,16 @@ impl VideoReader {
     /// [`seek`](Self::seek), the keyframe decoding started from.
     pub fn pending_pts(&self) -> Option<i64> {
         self.pending.as_ref().and_then(|f| f.pts())
+    }
+
+    /// After a [`seek`](Self::seek): the frames from the keyframe it
+    /// landed on come next, not only those from its target, so a reader
+    /// that looked for a keyframe decodes on from it instead of seeking
+    /// again.
+    pub fn from_keyframe(&mut self) {
+        if let Some(pts) = self.pending_pts() {
+            self.min_pts = Some(pts);
+        }
     }
 
     /// Returns the next frame in presentation order, or `None` at end of stream.
@@ -786,6 +799,25 @@ impl VideoReader {
                         0,
                     )
                 } < 0;
+            self.packet = None;
+            if !at_start {
+                // A demuxer that seeks by decode times (MP4) lands on a
+                // keyframe shown after the target when the target lies
+                // just before it: seen in its first packet, the seek goes
+                // on to before that keyframe without decoding (on NVDEC
+                // each decoder flush of H.264 makes the decoder anew).
+                let packet = self.first_packet()?;
+                if let Some(p) = &packet
+                    && p.is_key()
+                    && p.pts().is_some_and(|pts| pts > target)
+                    && let Some(dts) = p.dts()
+                    && dts <= ts
+                {
+                    back = back.max(target - dts + 1);
+                    continue;
+                }
+                self.packet = packet;
+            }
             if at_start {
                 self.rewind()?;
             } else {
@@ -809,6 +841,25 @@ impl VideoReader {
             self.pending = frame;
             self.min_pts = Some(target);
             return Ok(());
+        }
+    }
+
+    /// The stream's next packet, read and not sent; `None` at the end.
+    fn first_packet(&mut self) -> Result<Option<ffmpeg::Packet>> {
+        loop {
+            crate::cancel::stop()?;
+            let mut packet = ffmpeg::Packet::empty();
+            match packet.read(&mut self.input) {
+                Ok(()) if packet.stream() == self.stream => return Ok(Some(packet)),
+                Ok(()) => continue,
+                Err(ffmpeg::Error::Eof) => return Ok(None),
+                Err(e) => {
+                    return Err(Error::Ffmpeg {
+                        context: "reading packet".into(),
+                        source: e,
+                    });
+                }
+            }
         }
     }
 
@@ -852,6 +903,10 @@ impl VideoReader {
             }
             if self.draining {
                 return Ok(None);
+            }
+            if let Some(packet) = self.packet.take() {
+                send_packet(&mut self.decoder, &packet)?;
+                continue;
             }
             loop {
                 crate::cancel::stop()?;

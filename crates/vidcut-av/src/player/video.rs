@@ -5,12 +5,15 @@
 //! another file opening ahead on its helper thread. Going back there is
 //! nothing to decode on from, so a window renders at once, from a keyframe
 //! up to the frame wanted, and is kept (as the two-up's renderer does,
-//! preview.md §9); playing backwards, the window before renders while this
-//! one is shown.
+//! preview.md §9). Playing backwards, two windows wait behind the one
+//! shown where they fit: once one is left, the one before it decodes.
 //!
-//! Paused with nothing else to decode, it decodes the frame prepared of the
-//! plan played next, on a reader of its own made for that picture, so the
-//! reader it plays with stays where it stands.
+//! Paused, frames stay around the playhead. A seek keeps what it decodes
+//! on its way, from the keyframe before; with nothing else to decode, it
+//! decodes the frame prepared of the plan played next (on a reader of its
+//! own made for that picture, so the reader it plays with stays where it
+//! stands), and a window behind the playhead, so the first steps back wait
+//! for nothing.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -20,6 +23,7 @@ use vidcut_core::time::Rational;
 
 use super::frame::Picture;
 use super::plan::Plan;
+use super::store::Kind;
 use super::{Busy, Decoder as Decoding, Mode, Shared, Snap, trace};
 use crate::error::{Error, Result};
 use crate::export::is_cancelled;
@@ -40,6 +44,24 @@ const DECODE_ON_SECS: f64 = 1.0;
 /// Seconds a window back holds at least, where keyframes are close.
 const WINDOW_SECS: f64 = 2.0;
 
+/// Windows decoded behind the one shown, playing backwards.
+const WINDOWS_BEHIND: usize = 2;
+
+/// Pictures a window behind leaves room for in the budget: the one held
+/// for the plan played next, and one to spare.
+const SPARE: i64 = 2;
+
+/// How far back a decode starts, and what of it is kept.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Reach {
+    /// From the frame (or on from where the reader stands): those from the
+    /// viewer's on are kept.
+    Forward,
+    /// From a keyframe, reaching back over more to hold `min` frames, at
+    /// most `max`: all kept.
+    Window { min: i64, max: i64 },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Direction {
     Paused,
@@ -56,9 +78,10 @@ struct Decoder {
     hardware: bool,
     /// The GPU, once opened (`None` inside: it can't be).
     cuda: Option<Option<crate::cuda::CudaDevice>>,
-    /// What the latest picture took: windows and the pictures ahead are
-    /// counted in it.
+    /// What the latest picture took, and where: windows and the pictures
+    /// ahead are counted in it, against that kind's budget.
     picture_bytes: usize,
+    picture_kind: Kind,
     /// The timeline frame the reader gives next, when it is known.
     next: Option<i64>,
     plan: Arc<Plan>,
@@ -78,6 +101,13 @@ struct Decoder {
     /// The prepared frame failed to decode after this change: not tried
     /// again until something changes.
     prepared_failed: Option<u64>,
+    /// Playing backwards: the windows decoded (first and last frame), and
+    /// the lowest frame of those kept below the playhead, last looked.
+    back_windows: Vec<(i64, i64)>,
+    back_low: Option<i64>,
+    /// The window found to decode next playing backwards, by its last
+    /// frame, while it waits for room.
+    next_window: Option<(i64, i64)>,
 }
 
 pub(crate) fn run(shared: Arc<Shared>) {
@@ -90,6 +120,7 @@ pub(crate) fn run(shared: Arc<Shared>) {
         hardware: first.hardware,
         cuda: None,
         picture_bytes: (p.width as usize * p.height as usize * 3).div_ceil(2),
+        picture_kind: Kind::Memory,
         next: None,
         plan: first.plan.clone(),
         plan_gen: None,
@@ -99,6 +130,9 @@ pub(crate) fn run(shared: Arc<Shared>) {
         seek_cost: Duration::ZERO,
         caught_up: None,
         prepared_failed: None,
+        back_windows: Vec::new(),
+        back_low: None,
+        next_window: None,
     };
     while let Some(snap) = shared.snap() {
         if d.plan_gen != Some(snap.plan_gen) {
@@ -112,6 +146,7 @@ pub(crate) fn run(shared: Arc<Shared>) {
             // shows): no window behind until it steps back here.
             d.last_focus = None;
             d.back = false;
+            d.forget_windows();
         }
         if d.hardware != snap.hardware {
             // Another decoder: its pictures, from the one shown on.
@@ -134,6 +169,9 @@ pub(crate) fn run(shared: Arc<Shared>) {
             }
             Direction::Forward(_) => d.back = false,
             Direction::Back => d.back = true,
+        }
+        if dir != Direction::Back {
+            d.forget_windows();
         }
         d.last_focus = Some(snap.focus);
         let result = d.work(&snap, dir);
@@ -164,6 +202,13 @@ pub(crate) fn run(shared: Arc<Shared>) {
 }
 
 impl Decoder {
+    /// Not playing backwards (or another plan): its windows say nothing.
+    fn forget_windows(&mut self) {
+        self.back_windows.clear();
+        self.back_low = None;
+        self.next_window = None;
+    }
+
     /// The reader stands anywhere: interrupted, or after an error.
     fn lost_position(&mut self) {
         if let Some((_, f)) = self.frames.as_mut() {
@@ -203,7 +248,38 @@ impl Decoder {
                 }
                 _ => focus,
             };
-            self.decode(snap, target, self.back)?;
+            let reach = match dir {
+                // Playing back with nothing kept here: from this frame's
+                // own keyframe, so it shows after one GOP's decoding, not
+                // two; the windows before come while it is shown.
+                Direction::Back => Reach::Window {
+                    min: 1,
+                    max: self.windows(2).1,
+                },
+                // A step back past what is kept: a chunk behind, the rest
+                // comes when nothing else is wanted.
+                _ if self.back => Reach::Window {
+                    min: 1,
+                    max: self.chunk(),
+                },
+                // A seek: the frames from its keyframe are decoded anyway,
+                // and kept they are the first steps back. In video memory
+                // all of them (NVDEC's, for a display that shows them from
+                // there: kept, they cost nothing more); in memory the last
+                // half second (`chunk`), as each kept there takes new
+                // memory, and a 10-bit one a conversion, slowing the seek
+                // down. The rest behind comes when nothing else is wanted.
+                // It reaches back no further than the seek's keyframe.
+                Direction::Paused => Reach::Window {
+                    min: 1,
+                    max: self.chunk(),
+                },
+                _ => Reach::Forward,
+            };
+            let first = self.decode(snap, target, reach)?;
+            if dir == Direction::Back {
+                self.back_windows.push((first, target));
+            }
             if !reads_on {
                 let took = started.elapsed();
                 self.seek_cost = (self.seek_cost * 3 + took) / 4;
@@ -219,43 +295,119 @@ impl Decoder {
         let wanted = match dir {
             Direction::Forward(speed) => {
                 let ahead = ((AHEAD_SECS * fps * speed).ceil() as i64).max(2);
-                let ahead = ahead.min(self.pictures_in(store.budget() / 4).max(2));
+                let budget = store.budget(self.picture_kind);
+                let ahead = ahead.min(self.pictures_in(budget / 4).max(2));
                 (anchor + 1..=plan.clamp(anchor + ahead))
                     .find(|&t| missing(t))
-                    .map(|t| (t, false))
+                    .map(|t| (t, Reach::Forward))
             }
-            Direction::Back => {
-                // A window behind the one being shown, so going back
-                // doesn't wait at keyframes: a third of the budget each.
-                let (_, max) = self.windows(3);
-                (plan.clamp(focus - max)..focus)
-                    .rev()
-                    .find(|&t| missing(t))
-                    .map(|t| (t, true))
-            }
-            Direction::Paused => {
-                let next = (focus + 1..=plan.clamp(focus + PAUSED_AHEAD))
-                    .find(|&t| missing(t))
-                    .filter(|&t| self.next == Some(t));
-                let behind = || {
-                    let (min, _) = self.windows(2);
-                    (plan.clamp(focus - min)..focus).rev().find(|&t| missing(t))
-                };
-                match next {
-                    Some(t) => Some((t, false)),
-                    None if self.back => behind().map(|t| (t, true)),
-                    None => None,
-                }
-            }
+            Direction::Back => return self.window_behind(snap),
+            Direction::Paused => (focus + 1..=plan.clamp(focus + PAUSED_AHEAD))
+                .find(|&t| missing(t))
+                .filter(|&t| self.next == Some(t))
+                .map(|t| (t, Reach::Forward)),
         };
-        match wanted {
-            Some((t, back)) => {
-                self.decode(snap, t, back)?;
+        if let Some((t, reach)) = wanted {
+            self.decode(snap, t, reach)?;
+            return Ok(true);
+        }
+        if dir != Direction::Paused {
+            return Ok(false);
+        }
+        // Paused, whichever way it last went: at least two seconds behind
+        // the playhead (half the budget at most), so the first steps back
+        // wait for nothing. Nearest first: each window from the keyframe
+        // of the latest frame missing up to it, a GOP at a time, so the
+        // frames right behind come soonest. Stepping back, that first;
+        // otherwise the frame the other plan shows (a switch) first.
+        let (min, max) = self.windows(2);
+        let behind = (plan.clamp(focus - min)..focus).rev().find(|&t| missing(t));
+        if !self.back && self.prepare(snap)? {
+            return Ok(true);
+        }
+        match behind {
+            Some(t) => {
+                self.decode_behind(snap, t, self.chunk().min(max))?;
                 Ok(true)
             }
-            None if dir == Direction::Paused => self.prepare(snap),
+            None if self.back => self.prepare(snap),
             None => Ok(false),
         }
+    }
+
+    /// Playing backwards: decodes the next window behind those kept below
+    /// the playhead, while fewer than two wait behind the one shown;
+    /// whether it did. The first behind is the nearest, from its own
+    /// keyframe, as the playhead may be close; the second holds at least
+    /// two seconds where keyframes are close, and decodes once it fits
+    /// in the budget beside the frames still to be shown. Those count as
+    /// looked at first, so the frames shown go before them.
+    fn window_behind(&mut self, snap: &Snap) -> Result<bool> {
+        let plan = self.plan.clone();
+        let shared = self.shared.clone();
+        let store = &shared.store;
+        let focus = snap.focus;
+        let (min, max) = self.windows(2);
+        // The frames kept below the playhead, from where they ended last.
+        let from = self
+            .back_low
+            .filter(|&l| l <= focus && store.contains(&plan.id(l)))
+            .unwrap_or(focus);
+        let reach = plan.clamp(from - 3 * max);
+        let run = store.kept_run((reach..from).rev().map(|t| plan.id(t)));
+        let low = from - run as i64;
+        self.back_low = Some(low);
+        self.back_windows.retain(|&(first, _)| first <= focus);
+        let behind = self
+            .back_windows
+            .iter()
+            .filter(|&&(first, last)| last < focus && first >= low)
+            .count();
+        let next = low - 1;
+        if behind >= WINDOWS_BEHIND || next < 0 || next < reach {
+            return Ok(false);
+        }
+        let room = self.pictures_in(store.budget(self.picture_kind)) - (focus - low + 1) - SPARE;
+        let first = if behind == 0 {
+            if room < 1 {
+                return Ok(false);
+            }
+            self.window_start(next, 1, max.min(room))?
+        } else {
+            let first = match self.next_window {
+                Some((last, first)) if last == next => first,
+                _ => self.window_start(next, min, max)?,
+            };
+            if next - first + 1 > room {
+                self.next_window = Some((next, first));
+                return Ok(false);
+            }
+            first
+        };
+        self.next_window = None;
+        trace!("window {first}..={next} behind, {behind} waiting there");
+        store.touch((low..=focus).map(|t| plan.id(t)));
+        self.decode_from(snap, Some(first), next, true)?;
+        self.back_windows.push((first, next));
+        Ok(true)
+    }
+
+    /// Decodes a window behind the playhead up to `t`: from `t`'s
+    /// keyframe, at most `max` frames. The viewer stepping back into it
+    /// waits for it (`Busy::Window`) rather than start it again.
+    fn decode_behind(&mut self, snap: &Snap, t: i64, max: i64) -> Result<()> {
+        self.reader();
+        let from = if self.reads_on(t) {
+            None
+        } else {
+            Some(self.window_start(t, 1, max)?)
+        };
+        self.shared.set_busy(Some(Busy::Window {
+            from: from.or(self.next).unwrap_or(t),
+            to: t,
+            plan_gen: snap.plan_gen,
+        }));
+        self.decode_from(snap, from, t, true)
     }
 
     /// Decodes the prepared frame of the plan played next, when it isn't
@@ -303,11 +455,24 @@ impl Decoder {
     /// them share the budget: at least two seconds where keyframes are
     /// close, at most what fits.
     fn windows(&self, parts: usize) -> (i64, i64) {
-        let max = self
-            .pictures_in(self.shared.store.budget() / parts.max(1))
-            .max(1);
+        let budget = self.shared.store.budget(self.picture_kind);
+        let max = self.pictures_in(budget / parts.max(1)).max(1);
         let min = ((self.plan.fps().as_f64() * WINDOW_SECS).round() as i64).clamp(1, max);
         (min, max)
+    }
+
+    /// Frames a window behind a paused playhead keeps at once. Kept in
+    /// video memory a frame costs nothing more, and the window goes from
+    /// its keyframe up. Kept in memory, each takes new memory (and a 10-bit
+    /// one a conversion): half a second at a time, nearest first, so a step
+    /// back right after a seek waits for half a second's frames, not the
+    /// whole GOP's.
+    fn chunk(&self) -> i64 {
+        let (_, max) = self.windows(2);
+        match self.picture_kind {
+            Kind::Video => max,
+            Kind::Memory => ((self.plan.fps().as_f64() * 0.5).ceil() as i64).clamp(8, max.max(8)),
+        }
     }
 
     /// Pictures like the latest that fit in `bytes`.
@@ -342,18 +507,36 @@ impl Decoder {
                 if self.shared.gpu_pictures {
                     frames = frames.keep_on_gpu();
                 }
+                self.shared.gpu_found(device);
             }
         }
         frames
     }
 
     /// Decodes timeline frame `t`, and on the way what is worth keeping:
-    /// going `back`, a window from a keyframe up to `t`.
-    fn decode(&mut self, snap: &Snap, t: i64, back: bool) -> Result<()> {
-        let plan = self.plan.clone();
+    /// for a window, everything from its keyframe up to `t`. The first
+    /// frame decoded.
+    fn decode(&mut self, snap: &Snap, t: i64, reach: Reach) -> Result<i64> {
         self.reader();
-        if !self.reads_on(t) {
-            let from = if back { self.window_start(t)? } else { t };
+        let from = if self.reads_on(t) {
+            None
+        } else {
+            Some(match reach {
+                Reach::Window { min, max } => self.window_start(t, min, max)?,
+                Reach::Forward => t,
+            })
+        };
+        let first = from.or(self.next).unwrap_or(t);
+        self.decode_from(snap, from, t, matches!(reach, Reach::Window { .. }))?;
+        Ok(first)
+    }
+
+    /// Decodes up to timeline frame `t`: from `from` (`None`: on from where
+    /// the reader stands), keeping all on the way when `back`, otherwise
+    /// those from the viewer's on.
+    fn decode_from(&mut self, snap: &Snap, from: Option<i64>, t: i64, back: bool) -> Result<()> {
+        let plan = self.plan.clone();
+        if let Some(from) = from {
             self.reader().read_pieces(&plan.pieces_from(from));
             self.next = Some(from);
         }
@@ -361,7 +544,7 @@ impl Decoder {
         trace!(
             "decode {r}..={t} (viewer at {}{})",
             snap.focus,
-            if back { ", going back" } else { "" }
+            if back { ", keeping a window" } else { "" }
         );
         for i in r..=t {
             // Frames before the one wanted: kept going back (they are the
@@ -377,6 +560,7 @@ impl Decoder {
                 let picture = picture(frames, &plan, i, frame);
                 self.next = Some(i + 1);
                 self.picture_bytes = picture.bytes();
+                self.picture_kind = Kind::of(&picture);
                 self.shared.store.put(plan.id(i), Arc::new(picture));
                 if i == snap.focus {
                     self.shared.landed();
@@ -389,12 +573,13 @@ impl Decoder {
         Ok(())
     }
 
-    /// The first frame of the window to decode going back to `t`: from a
-    /// keyframe, so nothing in it decodes twice, holding at least the
-    /// shortest window where keyframes are close and at most the longest,
-    /// never before `t`'s piece. A picture at a time for black, stills
-    /// and image sequences: they stand alone.
-    fn window_start(&mut self, t: i64) -> Result<i64> {
+    /// The first frame of the window to decode up to `t`: from a keyframe,
+    /// so nothing in it decodes twice, holding at least `min` frames where
+    /// keyframes are close and at most `max` (reaching back over another
+    /// keyframe only to hold that GOP whole), never before `t`'s piece. A
+    /// picture at a time for black, stills and image sequences: they stand
+    /// alone.
+    fn window_start(&mut self, t: i64, min: i64, max: i64) -> Result<i64> {
         let plan = self.plan.clone();
         let Some((piece, piece_start)) = plan.piece_at(t) else {
             return Ok(t);
@@ -408,7 +593,6 @@ impl Decoder {
             return Ok(t);
         };
         let floor = pos - (t - piece_start);
-        let (min, max) = self.windows(3);
         let frames = self.reader();
         let start = window(
             frames,
@@ -418,6 +602,7 @@ impl Decoder {
             plan.fps(),
             min,
             max,
+            true,
         )?;
         // The reader was moved to find the keyframe.
         self.next = None;

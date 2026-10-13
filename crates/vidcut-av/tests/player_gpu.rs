@@ -3,8 +3,9 @@
 //! frame and within a level or two in their pixels, copied down to memory
 //! in NV12 or P010; streams NVDEC can't decode, stills and black on the
 //! CPU; and switching decoders while it plays. Kept in GPU memory for a
-//! display that shows them from there, they are the same pictures. Needs
-//! an NVIDIA GPU: `--features vidcut-av/gpu-tests`.
+//! display that shows them from there, they are the same pictures, and a
+//! seek keeps what it decodes on its way for the steps back. Needs an
+//! NVIDIA GPU: `--features vidcut-av/gpu-tests`.
 #![cfg(feature = "gpu-tests")]
 
 mod player_support;
@@ -269,4 +270,48 @@ fn pictures_kept_in_gpu_memory_are_the_ones_copied_down() {
         assert_eq!(code_rgba(&img.rgba, W, H), rendered(&p, t), "frame {t}");
     }
     assert_eq!(kept.status().error, None);
+}
+
+#[test]
+fn a_seek_in_video_memory_keeps_its_way_for_the_steps_back() {
+    if vidcut_av::cuda::CudaDevice::open().is_err() {
+        eprintln!("skipping: no CUDA device");
+        return;
+    }
+    // Keyframes 120 frames apart, with B-frames.
+    let long = src(
+        "m1",
+        FixtureSpec::new(VideoCodec::H264, Container::Mp4, W, H, (30, 1), 300)
+            .gop(120)
+            .bframes(2),
+    );
+    let p = plan(&[clip(&long, 0, 300)], 0);
+    let player = Player::new(
+        p,
+        Config {
+            audio_scrubbing: false,
+            hardware: true,
+            gpu_pictures: true,
+            ..Config::default()
+        },
+        Box::new(ManualOutput::new()),
+    )
+    .unwrap();
+    // In video memory: read once copied down.
+    let barcode = |p: &Picture| code(&p.copied_down().unwrap());
+    // The first picture says where pictures go: video memory.
+    assert_eq!(picture_at(&player, 10).memory(), Memory::Cuda);
+    // Frame 200 is 80 past its keyframe (120): the frames decoded on the
+    // way are kept, so steps back right after the seek show at once.
+    assert_eq!(barcode(&picture_at(&player, 200)), Some(200));
+    for t in (150..200).rev() {
+        player.step(-1);
+        assert!(
+            player.status().ready,
+            "step back to {t}: kept from the seek"
+        );
+        let shown = player.present(Instant::now()).unwrap();
+        assert_eq!((shown.frame, shown.exact), (t, true));
+        assert_eq!(barcode(&shown.picture), Some(t as u32));
+    }
 }
