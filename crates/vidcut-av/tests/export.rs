@@ -2192,6 +2192,7 @@ fn nvenc_exports_decode_on_the_gpu_and_match_the_cpu() {
                 &mut |_| {},
             )
             .unwrap_or_else(|e| panic!("decoded on the CPU: {e}"));
+            assert_eq!(report.video_encoder.as_deref(), Some("h264_nvenc"));
             assert_eq!(
                 (report.gpu_frames, report.gpu_decoded),
                 (0, 0),

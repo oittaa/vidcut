@@ -167,10 +167,11 @@ impl Workspace {
                                 egui::Checkbox::new(&mut decoding, "Decode on the GPU too"),
                             )
                             .on_hover_text(
-                                "Decode H.264, HEVC, AV1 and VP9 on the graphics card, in the \
-                                 viewer, exports, proxies and the timeline's pictures. Turn off \
-                                 where a small GPU decodes more slowly than the CPU: the GPU \
-                                 still scales and encodes",
+                                "Decode H.264, HEVC, AV1 and VP9 on the graphics card in the \
+                                 viewer, exports and proxies, and all but H.264 in the \
+                                 timeline's pictures. Turn off where a small GPU decodes more \
+                                 slowly than the CPU: the CPU decodes and scales, and the GPU \
+                                 only encodes",
                             )
                             .changed()
                         {
