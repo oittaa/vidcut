@@ -27,7 +27,7 @@ These are mandatory.
 
 | When | Command | Runs |
 |---|---|---|
-| Before **every commit** (enforced by `.githooks/pre-commit`) | `scripts/check.sh` | no binary files in git, `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, unit tests (`--lib --bins`) |
+| Before **every commit** that changes more than `.md` files (enforced by `.githooks/pre-commit`) | `scripts/check.sh` | no binary files in git, `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, unit tests (`--lib --bins`) |
 | After a **bigger change** | `scripts/check.sh full` | the above plus all integration/e2e tests and doc tests |
 
 **Enable the hook once per clone:** `git config core.hooksPath .githooks`.
