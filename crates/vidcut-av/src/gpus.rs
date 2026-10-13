@@ -324,15 +324,17 @@ fn pci_names() -> std::collections::HashMap<(u32, u32), String> {
     names
 }
 
+/// CUDA's GPUs alone, which no Mac has.
 #[cfg(not(any(windows, target_os = "linux")))]
 fn listed() -> Vec<Gpu> {
-    Vec::new()
+    let mut gpus = Vec::new();
+    with_cuda(&mut gpus, &crate::cuda::listed());
+    gpus
 }
 
 /// Gives NVIDIA's GPUs their CUDA devices, by their slots, and CUDA's
 /// names for them. Without slots, the one NVIDIA GPU is the one CUDA
 /// device.
-#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 fn with_cuda(gpus: &mut Vec<Gpu>, cuda: &[crate::cuda::Listed]) {
     let nvidia = gpus.iter().filter(|g| g.pci_vendor == NVIDIA).count();
     for g in gpus.iter_mut().filter(|g| g.pci_vendor == NVIDIA) {
@@ -366,7 +368,6 @@ fn with_cuda(gpus: &mut Vec<Gpu>, cuda: &[crate::cuda::Listed]) {
 }
 
 /// The PCI device id of the card in `slot`, as Linux's sysfs has it.
-#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 fn pci_device((bus, device, function): Slot) -> Option<u32> {
     if !cfg!(target_os = "linux") {
         return None;
