@@ -282,6 +282,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         effects: None,
         generator: None,
         compound: None,
+        speed: None,
     })
 }
 

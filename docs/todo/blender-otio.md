@@ -7,4 +7,4 @@ Blender 5.2 has neither (nor EDL); `bpy` from PyPI is the same Blender as a modu
 Then try both ways, watching:
 - Paths: vidcut writes plain ones (spec D40), which OpenTimelineIO's own tools misread on Windows (deviation X9).
 - J/L cuts as audio clips offset from the video: Blender splits mixed channels, and doesn't know Resolve's link groups.
-- Image sequences, the start timecode, and its transitions and speed effects (the carrying items).
+- Image sequences, the start timecode, and its transitions and speed effects (carried, deviation X9).

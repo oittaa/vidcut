@@ -1,6 +1,6 @@
 # Speed changes
 
-**When:** later. Until then they are [carried and locked](otio-speed-carry.md). Out of scope today (spec §1), so this needs a deviation.
+**When:** later. Until then they are carried and locked (deviation X9). Out of scope today (spec §1), so this needs a deviation.
 
 Playing and exporting clips at a constant speed (2, ½, −1 for reverse, 0 for a freeze), and setting it (Resolve's Cut page has Change Clip Speed):
 

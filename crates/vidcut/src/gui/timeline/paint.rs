@@ -9,7 +9,7 @@ use eframe::egui::{
     vec2,
 };
 use vidcut_av::waveform::Waveform;
-use vidcut_core::model::{Clip, Effects, Project, Track, Transition};
+use vidcut_core::model::{Clip, Effects, Project, Speed, Track, Transition};
 use vidcut_core::ops;
 use vidcut_core::otio::transitions;
 use vidcut_core::time::Rational;
@@ -359,6 +359,12 @@ fn clip(
         {
             effects_badge(&ap, audio, e);
         }
+        if look.status
+            && !c.video
+            && let Some(speed) = &c.speed
+        {
+            speed_badge(&ap, audio, speed);
+        }
     }
     if look.names && width > 30.0 {
         let name = c
@@ -402,6 +408,12 @@ fn clip(
         && let Some(e) = &c.effects
     {
         effects_badge(&painter, video, e);
+    }
+    if look.status
+        && has_picture
+        && let Some(speed) = &c.speed
+    {
+        speed_badge(&painter, video, speed);
     }
     if look.status && width > 40.0 {
         let status = if offline {
@@ -479,11 +491,28 @@ fn effects_badge(painter: &Painter, band: Rect, effects: &Effects) {
     } else {
         "fx".to_string()
     };
+    tag(painter, text, |size| {
+        pos2(right - size.x - 4.0, band.bottom() - size.y - 2.0)
+    });
+}
+
+/// A badge at the top right of a clip's picture or sound band with the
+/// speed change it carries from another editor, played at normal speed
+/// (deviation X9): `200%`.
+fn speed_badge(painter: &Painter, band: Rect, speed: &Speed) {
+    let right = band.right().min(painter.clip_rect().right());
+    if right - band.left().max(painter.clip_rect().left()) < 40.0 || band.height() < 13.0 {
+        return;
+    }
+    tag(painter, speed.label(), |size| {
+        pos2(right - size.x - 4.0, band.top() + 2.0)
+    });
+}
+
+/// `text` small on a dark tag, where `at` puts it for its size.
+fn tag(painter: &Painter, text: String, at: impl FnOnce(egui::Vec2) -> Pos2) {
     let galley = painter.layout_no_wrap(text, FontId::proportional(9.0), theme::ACCENT);
-    let pos = pos2(
-        right - galley.size().x - 4.0,
-        band.bottom() - galley.size().y - 2.0,
-    );
+    let pos = at(galley.size());
     painter.rect_filled(
         Rect::from_min_size(pos - vec2(2.0, 0.0), galley.size() + vec2(4.0, 1.0)),
         CornerRadius::same(2),
