@@ -119,7 +119,7 @@ fn media_count(h: &live::Handle) -> usize {
 fn numbered_images_are_asked_about() {
     let tmp = tempfile::Builder::new()
         .prefix("vidcut-gui-import-")
-        .tempdir()
+        .tempdir_in(vidcut_av::testdata::temp_dir())
         .unwrap();
     let dir = tmp.path();
     // SAFETY: the only test in this binary; set before any thread starts.

@@ -5,7 +5,7 @@
 use serde_json::{Value, json};
 
 /// The system's version: the kernel's release on Linux, the build on
-/// Windows (with its update revision).
+/// Windows (with its update revision), the version and build on macOS.
 pub fn version() -> String {
     #[cfg(windows)]
     {
@@ -14,7 +14,13 @@ pub fn version() -> String {
         let revision = windows::number(key, "UBR").unwrap_or(0);
         format!("windows {build}.{revision}")
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        let version = macos::sysctl(c"kern.osproductversion").unwrap_or_default();
+        let build = macos::sysctl(c"kern.osversion").unwrap_or_default();
+        format!("macos {version} ({build})")
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     std::fs::read_to_string("/proc/sys/kernel/osrelease")
         .unwrap_or_default()
         .trim()
@@ -23,7 +29,8 @@ pub fn version() -> String {
 
 /// The GPUs: on Linux the render nodes and their kernel drivers, with
 /// NVIDIA's driver version when its module is loaded; on Windows the
-/// display adapters and their drivers' versions.
+/// display adapters and their drivers' versions; on macOS Metal's devices,
+/// whose drivers come with the system (its version).
 pub fn gpus() -> Vec<Value> {
     #[cfg(windows)]
     {
@@ -32,7 +39,15 @@ pub fn gpus() -> Vec<Value> {
             .map(|(name, driver)| json!({ "name": name, "driver": driver }))
             .collect()
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        pollster::block_on(instance.enumerate_adapters(wgpu::Backends::METAL))
+            .iter()
+            .map(|a| json!({ "name": a.get_info().name }))
+            .collect()
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let nvidia = std::fs::read_to_string("/sys/module/nvidia/version")
             .ok()
@@ -117,5 +132,49 @@ mod windows {
                 Some((name, text(&key, "DriverVersion").unwrap_or_default()))
             })
             .collect()
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod macos {
+    use std::ffi::CStr;
+
+    /// A text value of the kernel's, by its name (`kern.osversion`).
+    pub fn sysctl(name: &CStr) -> Option<String> {
+        let mut buf = [0u8; 256];
+        let mut len = buf.len();
+        // SAFETY: a NUL-terminated name; the value is written into `buf`,
+        // `len` bytes at most, and `len` says how many.
+        let status = unsafe {
+            libc::sysctlbyname(
+                name.as_ptr(),
+                buf.as_mut_ptr().cast(),
+                &mut len,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if status != 0 {
+            return None;
+        }
+        let text = String::from_utf8_lossy(&buf[..len.min(buf.len())]);
+        Some(text.trim_end_matches('\0').to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_names_its_version_and_build() {
+        // "macos 26.6.2 (25G83)"
+        let version = super::version();
+        let rest = version.strip_prefix("macos ").expect(&version);
+        let (number, build) = rest.split_once(" (").expect(&version);
+        assert!(
+            number.split('.').all(|n| n.parse::<u32>().is_ok()),
+            "{version}"
+        );
+        assert!(build.len() > 1 && build.ends_with(')'), "{version}");
     }
 }

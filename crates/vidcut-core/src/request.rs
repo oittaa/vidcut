@@ -51,6 +51,9 @@ pub enum Request {
         sample_rate: Option<u32>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         channels: Option<u16>,
+        /// Count record timecode drop-frame (29.97 and 59.94; decision D47).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        drop_frame: Option<bool>,
     },
 
     // ---------------------------------------------------------------- media pool
@@ -635,8 +638,9 @@ pub enum Request {
     #[serde(rename = "presets.get")]
     PresetsGet { name: String },
     /// Save a user preset (`~/.config/vidcut/presets/NAME.toml`, on Windows
-    /// in `%APPDATA%\vidcut`): `settings`, or preset `from` with `set`
-    /// overrides. `quick_export` puts it in Quick Export.
+    /// in `%APPDATA%\vidcut`, on macOS in `~/Library/Application
+    /// Support/vidcut`): `settings`, or preset `from` with `set` overrides.
+    /// `quick_export` puts it in Quick Export.
     #[serde(rename = "presets.save")]
     PresetsSave {
         /// File-name safe: letters, digits, `-`, `_` and `.`.
@@ -669,7 +673,8 @@ pub enum Request {
         refresh: bool,
     },
     /// Application preferences (`~/.config/vidcut/preferences.toml`, on
-    /// Windows in `%APPDATA%\vidcut`) and what the thumbnail cache holds.
+    /// Windows in `%APPDATA%\vidcut`, on macOS in `~/Library/Application
+    /// Support/vidcut`) and what the thumbnail cache holds.
     #[serde(rename = "preferences.get")]
     PreferencesGet {},
     /// Change application preferences; what is left out stays. Turning the
@@ -717,6 +722,10 @@ pub enum Request {
         /// With `create`, the new project's frame height; give the width too.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         height: Option<u32>,
+        /// With `create`, count record timecode drop-frame (29.97 and 59.94;
+        /// decision D47).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        drop_frame: Option<bool>,
     },
     /// Show the viewer in a mode: `source_clip`, `source_tape` or `timeline`.
     #[serde(rename = "viewer.set")]
@@ -1081,7 +1090,11 @@ pub struct ProjectSet {
     pub channels: Option<u16>,
     #[serde(default)]
     pub ripple_on: Option<bool>,
-    /// Record timecode of the first frame, e.g. `01:00:00:00`.
+    /// Count record timecode drop-frame: at 29.97 and 59.94 (decision D47).
+    #[serde(default)]
+    pub drop_frame: Option<bool>,
+    /// Record timecode of the first frame, e.g. `01:00:00:00` (`01:00:00;00`
+    /// drop-frame).
     #[serde(default)]
     pub start_tc: Option<TimeSpec>,
     // Decision D38.

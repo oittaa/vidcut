@@ -1,6 +1,6 @@
 # Choosing the start timecode
 
-**When:** after [drop-frame timecode](drop-frame-timecode.md).
+**When:** next.
 
 The start timecode (deviation X7: `00:00:00:00`) can be changed only with `project set --start-tc`. Offer it where a project is made and set:
 

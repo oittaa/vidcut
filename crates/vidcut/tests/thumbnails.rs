@@ -198,7 +198,9 @@ fn thumbnails_come_back_from_the_disk_cache_until_it_is_turned_off() {
     // A menu ignores input in the frame it opens in.
     harness.step();
     harness.step();
-    harness.get_by_label("Preferences… Ctrl+,").click();
+    harness
+        .get_by_label(&format!("Preferences… {}", vidcut::gui::keys("Ctrl+,")))
+        .click();
     let started = Instant::now();
     while harness.query_by_label("Keep thumbnails on disk").is_none() {
         assert!(started.elapsed() < Duration::from_secs(30), "no window");

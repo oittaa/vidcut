@@ -12,7 +12,7 @@ use vidcut_av::waveform::Waveform;
 use vidcut_core::model::{Clip, Effects, Project, Track, Transition};
 use vidcut_core::ops;
 use vidcut_core::otio::transitions;
-use vidcut_core::time::{Rational, format_timecode};
+use vidcut_core::time::Rational;
 
 use super::geometry::{Rows, Scale, TrackRect, clips_in};
 use super::gesture::{Preview, Target};
@@ -122,7 +122,7 @@ pub fn ruler(
             painter.text(
                 pos2(x + 3.0, rect.top() + 1.0),
                 Align2::LEFT_TOP,
-                format_timecode(frame, fps, p.settings.start_tc),
+                p.settings.timecode(frame),
                 FontId::monospace(if compact { 9.0 } else { 10.0 }),
                 theme::TEXT_DIM,
             );

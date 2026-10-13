@@ -41,13 +41,11 @@ winget install LLVM.LLVM
 
 Set `FFMPEG_DIR` to the FFmpeg folder (the one with `bin`, `include` and `lib`) before building, and put its `bin` folder on `PATH`: vidcut loads FFmpeg's DLLs from there. If the build doesn't find libclang, set `LIBCLANG_PATH` to `C:\Program Files\LLVM\bin`. The GUI draws with Vulkan or Direct3D 12 and plays sound through WASAPI. `scripts/check.sh` runs from Git Bash.
 
-**macOS** (being ported: [docs/todo/macos.md](docs/todo/macos.md)): Xcode's Command Line Tools and Homebrew's FFmpeg:
+**macOS:** with `$(brew --prefix rustup)/bin` on `PATH`:
 
 ```bash
-brew install ffmpeg
+brew install ffmpeg rustup
 ```
-
-vidcut builds there and passes its unit tests on Apple Silicon (CI). The GUI, which draws with Metal and plays sound through Core Audio, hasn't been tried there yet.
 
 Nothing else is needed at run time: vidcut plays video with its own player, on the FFmpeg libraries. The player, proxies and exports decode H.264, HEVC, AV1 and VP9 on the GPU where it can: NVDEC on NVIDIA GPUs, and on AMD and Intel GPUs VA-API on Linux (Mesa's driver, Intel's media driver) and Direct3D 11 on Windows.
 
@@ -68,16 +66,16 @@ On Windows the program is `target\release\vidcut.exe`.
 
 ## Where vidcut keeps its files
 
-The docs name the Linux places; Windows has its own:
+The docs name the Linux places; Windows and macOS have their own:
 
-| Linux | Windows | Holds |
-|---|---|---|
-| `~/.config/vidcut` | `%APPDATA%\vidcut` | preferences, user presets |
-| `~/.cache/vidcut` | `%LOCALAPPDATA%\vidcut\cache` | thumbnails, waveforms, measurements, encoder detection, shaders |
-| `~/.local/state/vidcut` | `%LOCALAPPDATA%\vidcut\state` | undo history, recent projects |
-| `$XDG_RUNTIME_DIR/vidcut` | `%TEMP%\vidcut` | running GUIs (live control) |
+| Linux | Windows | macOS | Holds |
+|---|---|---|---|
+| `~/.config/vidcut` | `%APPDATA%\vidcut` | `~/Library/Application Support/vidcut` | preferences, user presets |
+| `~/.cache/vidcut` | `%LOCALAPPDATA%\vidcut\cache` | `~/Library/Caches/vidcut` | thumbnails, waveforms, measurements, encoder detection, shaders |
+| `~/.local/state/vidcut` | `%LOCALAPPDATA%\vidcut\state` | `~/Library/Application Support/vidcut/state` | undo history, recent projects |
+| `$XDG_RUNTIME_DIR/vidcut` | `%TEMP%\vidcut` | `$TMPDIR/vidcut-UID` | running GUIs (live control) |
 
-The `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME` and `XDG_RUNTIME_DIR` variables move them on either system.
+The `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME` and `XDG_RUNTIME_DIR` variables move them on every system.
 
 ## The GUI
 
