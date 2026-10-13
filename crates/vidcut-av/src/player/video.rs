@@ -233,15 +233,16 @@ impl Decoder {
                     max: self.chunk(),
                 },
                 // A seek: the frames from its keyframe are decoded anyway,
-                // and kept they are the first steps back. Only those that
-                // stay in video memory as they are (NVDEC's, for a display
-                // that shows them from there): kept in memory, each would
-                // take new memory, and 10-bit ones a conversion, slowing
-                // the seek down; the window behind comes for them when
-                // nothing else is wanted. It reaches back no further.
-                Direction::Paused if self.picture_kind == Kind::Video => Reach::Window {
+                // and kept they are the first steps back. In video memory
+                // all of them (NVDEC's, for a display that shows them from
+                // there: kept, they cost nothing more); in memory the last
+                // half second (`chunk`), as each kept there takes new
+                // memory, and a 10-bit one a conversion, slowing the seek
+                // down. The rest behind comes when nothing else is wanted.
+                // It reaches back no further than the seek's keyframe.
+                Direction::Paused => Reach::Window {
                     min: 1,
-                    max: self.windows(2).1,
+                    max: self.chunk(),
                 },
                 _ => Reach::Forward,
             };

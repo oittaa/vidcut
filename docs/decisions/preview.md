@@ -112,12 +112,12 @@ The real GUI, a debug build of vidcut's crates (dependencies optimized), the vie
 
 | Stream | Decoded on | First step back, right after the seek / after 1.5 s | The next 19 |
 |---|---|---|---|
-| 1080p30 H.264 | NVDEC / CPU | 19–22 / 22–25 ms; 44–99 / 23–25 ms | median 17–20 ms, max 21–30 ms |
-| 2160p60 H.264 | NVDEC / CPU | 19–25 / 24–25 ms; 104–384 / 21–23 ms | median 17–27 ms, max 21–44 ms |
-| 2160p60 10-bit HEVC | NVDEC / CPU | 18–24 / 23–24 ms; 393–881 / 27–33 ms | median 17–33 ms, max 21–42 ms |
-| 2160p60 10-bit AV1 | NVDEC / CPU | 18–23 / 23–24 ms; 520–1,051 / 27–32 ms | median 17–30 ms, max 22–38 ms |
+| 1080p30 H.264 | NVDEC / CPU | 19–22 / 22–25 ms; 21–28 / 24–25 ms | median 17–18 ms, max 21–30 ms |
+| 2160p60 H.264 | NVDEC / CPU | 19–25 / 24–25 ms; 22–27 / 22–24 ms | median 17–31 ms, max 21–47 ms |
+| 2160p60 10-bit HEVC | NVDEC / CPU | 18–24 / 23–24 ms; 25–30 / 30–42 ms | median 17–31 ms, max 21–43 ms |
+| 2160p60 10-bit AV1 | NVDEC / CPU | 18–23 / 23–24 ms; 27–30 / 29–35 ms | median 17–30 ms, max 22–40 ms |
 
-  Seeks take as long as before the pictures behind were kept (preview.md's table above; 4K H.264 on NVDEC 0.5–1.2 s). NVDEC's pictures in video memory: a seek keeps what it decodes on its way, so the steps back after it find their pictures, right after it too. Decoded on the CPU, a step right after the seek waits for the half second behind (player.md §3), as long as the seek takes; given a moment, they are there as well. With the 1 GB this used to keep, the first step back took 0.5 s (1080p on NVDEC) to 2.0 s (4K H.264 on NVDEC), 0.08–1.0 s on the CPU, after a pause too, and 4K HEVC and AV1 waited again 0.4–1.0 s a window later.
+  A seek keeps what it decodes on its way (on the CPU, its last half second; player.md §3), so the steps back after it find their pictures, right after it too. On NVDEC seeks take as long as without (4K H.264 0.5–1.2 s); on the CPU 5–110 ms longer (1080p 56–99 ms, 4K H.264 0.11–0.30 s, 4K 10-bit HEVC 0.38–0.78 s, AV1 0.51–1.0 s). With the 1 GB this used to keep, the first step back took 0.5 s (1080p on NVDEC) to 2.0 s (4K H.264 on NVDEC), 0.08–1.0 s on the CPU, after a pause too, and 4K HEVC and AV1 waited again 0.4–1.0 s a window later.
 - **Picture against sound** (`tests/live.rs`, a stand-in device heard 30 ms after it pulls): the picture changed 0.4–1.4 ms after each beep was heard; every frame of 150 showed, in order. The engine's own measurements are in player.md §7.
 - **Minimized** (GNOME Wayland, NVIDIA): a seek 25 ms, a viewer screenshot 23 ms.
 - **Seeks after an edit of 120 cuts** wait for nothing: 6 ms to the first.

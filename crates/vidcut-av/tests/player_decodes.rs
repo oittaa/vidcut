@@ -99,8 +99,8 @@ fn frames_decode_about_once_and_edits_keep_them() {
     // Two seconds behind the playhead come while nothing else is wanted,
     // after a seek too, nearest first: each step back finds its picture
     // there at once. Pictures in memory come half a second at a time, each
-    // chunk decoded from the keyframe on (a seek keeps what it decodes on
-    // its way only in video memory, tests/player_gpu.rs).
+    // chunk decoded from the keyframe on (in video memory a seek keeps all
+    // it decodes on its way, tests/player_gpu.rs).
     let behind = |player: &Player, from: i64, to: i64| {
         for t in (from..to).rev() {
             assert!(
@@ -116,9 +116,20 @@ fn frames_decode_about_once_and_edits_keep_them() {
             assert_eq!(shown_at(player, t), rendered(&p, t), "step back to {t}");
         }
     };
-    // Frame 200 is 80 past its keyframe (120).
+    // Frame 200 is 80 past its keyframe (120). The seek keeps the last
+    // half second it decodes on its way (frames 186..=200): the steps back
+    // right after it find their pictures without waiting.
     drop(player);
     let player = new_player();
+    player.seek(200);
+    assert_eq!(shown_at(&player, 200), Some(200));
+    for t in (186..200).rev() {
+        player.step(-1);
+        assert!(
+            player.status().ready,
+            "step back to {t}: kept from the seek"
+        );
+    }
     player.seek(200);
     assert_eq!(shown_at(&player, 200), Some(200));
     let before = frames_decoded();

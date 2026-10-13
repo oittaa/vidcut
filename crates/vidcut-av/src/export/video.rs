@@ -436,12 +436,16 @@ impl Source {
             Some((_, t)) => target >= self.target && target - t <= DECODE_AHEAD,
             // Just sought (a keyframe looked for, `VideoFrames::keyframe_time`):
             // the frame it landed on comes next, and decoding on from it
-            // reaches any target not before it.
+            // reaches any target not before it. Up to the target sought,
+            // no keyframe lies between: a seek would land on the same one.
             None => self
                 .reader
                 .pending_pts()
                 .map(|p| p as f64 * self.tick)
-                .is_some_and(|t| t <= target + 1e-6 && target - t <= DECODE_AHEAD),
+                .is_some_and(|t| {
+                    t <= target + 1e-6
+                        && (target <= self.target + 1e-6 || target - t <= DECODE_AHEAD)
+                }),
         };
         if !ahead {
             self.seek(target)?;
