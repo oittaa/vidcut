@@ -74,16 +74,60 @@ pub trait AudioOutput: Send {
     fn start(&mut self, source: AudioSource) -> Result<()>;
 }
 
-/// The system's default output device.
+/// An output device of the system's.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct OutputDevice {
+    /// What [`CpalOutput::on`] opens it by: the same across runs and
+    /// reboots where the system allows (`wasapi:…`, `alsa:…`).
+    pub id: String,
+    pub name: String,
+    /// The system's default.
+    pub default: bool,
+}
+
+/// The system's output devices, its default among them.
+pub fn output_devices() -> Result<Vec<OutputDevice>> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    let host = cpal::default_host();
+    let default = host.default_output_device().and_then(|d| d.id().ok());
+    let devices = host
+        .output_devices()
+        .map_err(|e| Error::Invalid(format!("listing audio devices: {e}")))?;
+    Ok(devices
+        .filter_map(|d| {
+            let id = d.id().ok()?;
+            Some(OutputDevice {
+                default: default.as_ref() == Some(&id),
+                id: id.to_string(),
+                name: d.to_string(),
+            })
+        })
+        .collect())
+}
+
+/// An output device of the system's: its default, or one chosen by its
+/// [`OutputDevice::id`], which plays on the default while it isn't there.
 #[derive(Default)]
 pub struct CpalOutput {
+    /// The chosen device's id; `None`: the default.
+    device: Option<String>,
     stop: Option<mpsc::Sender<()>>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl CpalOutput {
+    /// The system's default device.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The device of `id`, or the default for `None`.
+    pub fn on(device: Option<String>) -> Self {
+        Self {
+            device,
+            stop: None,
+            thread: None,
+        }
     }
 }
 
@@ -91,12 +135,13 @@ impl AudioOutput for CpalOutput {
     fn start(&mut self, source: AudioSource) -> Result<()> {
         let (stop, stopped) = mpsc::channel::<()>();
         let (ready, opened) = mpsc::channel::<Result<()>>();
+        let device = self.device.clone();
         // The stream lives on a thread of its own: it can't move between
         // threads on every platform.
         let thread = std::thread::Builder::new()
             .name("vidcut-audio-out".into())
             .spawn(move || {
-                let stream = match open_stream(source) {
+                let stream = match open_stream(source, device.as_deref()) {
                     Ok(s) => s,
                     Err(e) => {
                         let _ = ready.send(Err(e));
@@ -140,11 +185,16 @@ pub fn output_device() -> Result<String> {
     Ok(device.to_string())
 }
 
-fn open_stream(source: AudioSource) -> Result<cpal::Stream> {
+/// A stream from `source` on `device` (an [`OutputDevice::id`]), or on the
+/// default device for `None` or a device that isn't there.
+fn open_stream(source: AudioSource, device: Option<&str>) -> Result<cpal::Stream> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     let host = cpal::default_host();
-    let device = host
-        .default_output_device()
+    let chosen = device
+        .and_then(|id| id.parse::<cpal::DeviceId>().ok())
+        .and_then(|id| host.device_by_id(&id));
+    let device = chosen
+        .or_else(|| host.default_output_device())
         .ok_or_else(|| Error::Invalid("no audio output device".into()))?;
     let config = cpal::StreamConfig {
         channels: source.channels(),

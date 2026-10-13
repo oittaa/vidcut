@@ -39,6 +39,15 @@ pub fn gpu_acceleration() -> bool {
     load().map_or(true, |p| p.gpu.acceleration)
 }
 
+/// The audio device the player plays on (`player.audio_device`): `None`
+/// for the system's default.
+pub fn audio_device() -> Option<String> {
+    load()
+        .ok()
+        .map(|p| p.player.audio_device)
+        .filter(|d| !d.is_empty())
+}
+
 /// Whether the GPU decodes too (`gpu.decoding`, while `gpu.acceleration`
 /// is on): in the viewer, exports, proxies, the timeline's tiles and the
 /// two-up.

@@ -57,7 +57,8 @@ use vidcut_core::render::RenderPlan;
 
 pub use frame::{Layout, Memory, Picture, Shown};
 pub use output::{
-    AudioOutput, AudioSource, CpalOutput, ManualOutput, PacedOutput, Recording, output_device,
+    AudioOutput, AudioSource, CpalOutput, ManualOutput, OutputDevice, PacedOutput, Recording,
+    output_device, output_devices,
 };
 pub use scrub::Scrubber;
 

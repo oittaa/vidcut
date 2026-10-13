@@ -28,6 +28,11 @@ pub(super) struct PreferencesUi {
     larger_h: String,
     mbps: String,
     size: String,
+    /// The system's audio devices, listed on a thread as the window opens
+    /// (it can take a while), or why they couldn't be.
+    audio_outputs: Option<Result<Vec<vidcut_av::player::OutputDevice>, String>>,
+    listing:
+        Option<std::sync::mpsc::Receiver<Result<Vec<vidcut_av::player::OutputDevice>, String>>>,
 }
 
 /// A number typed into a field: digits only, sent on Enter or when the
@@ -85,6 +90,17 @@ impl Workspace {
     pub(super) fn open_preferences(&mut self, ctx: &egui::Context) {
         self.preferences.open = true;
         self.preferences.ask = Some(Ask::send(&self.live, ctx, "preferences.get", json!({})));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let repaint = ctx.clone();
+        let _ = crate::threads::spawn(
+            "vidcut-audio-devices",
+            crate::threads::Work::Interactive,
+            move || {
+                let _ = tx.send(vidcut_av::player::output_devices().map_err(|e| e.to_string()));
+                repaint.request_repaint();
+            },
+        );
+        self.preferences.listing = Some(rx);
     }
 
     pub(super) fn preferences_window(&mut self, ctx: &egui::Context) {
@@ -225,6 +241,65 @@ impl Workspace {
                             });
                             ui.end_row();
                         }
+                        if let Some(listed) =
+                            ui_state.listing.as_ref().and_then(|r| r.try_recv().ok())
+                        {
+                            ui_state.audio_outputs = Some(listed);
+                            ui_state.listing = None;
+                        }
+                        let chosen = player["audio_device"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_string();
+                        ui.label("Sound");
+                        match &ui_state.audio_outputs {
+                            None => {
+                                ui.spinner();
+                            }
+                            Some(Err(e)) => {
+                                ui.label(RichText::new(e).color(theme::ERROR));
+                            }
+                            Some(Ok(devices)) => {
+                                let default = devices
+                                    .iter()
+                                    .find(|d| d.default)
+                                    .map_or(String::new(), |d| format!(" ({})", d.name));
+                                let shown = match devices.iter().find(|d| d.id == chosen) {
+                                    _ if chosen.is_empty() => format!("System default{default}"),
+                                    Some(d) => d.name.clone(),
+                                    None => format!("{chosen} (not connected: the default plays)"),
+                                };
+                                let mut pick = chosen.clone();
+                                ui.add_enabled_ui(!busy, |ui| {
+                                    egui::ComboBox::from_id_salt("preferences-audio-device")
+                                        .selected_text(shown)
+                                        .show_ui(ui, |ui| {
+                                            ui.selectable_value(
+                                                &mut pick,
+                                                String::new(),
+                                                format!("System default{default}"),
+                                            );
+                                            for d in devices {
+                                                ui.selectable_value(
+                                                    &mut pick,
+                                                    d.id.clone(),
+                                                    &d.name,
+                                                );
+                                            }
+                                        })
+                                        .response
+                                        .on_hover_text(
+                                            "The device the player plays sound on. The system's \
+                                             default follows the system; a chosen device that \
+                                             isn't connected plays on the default",
+                                        );
+                                });
+                                if pick != chosen {
+                                    patch = Some(json!({ "player": { "audio_device": pick } }));
+                                }
+                            }
+                        }
+                        ui.end_row();
                     });
                 ui.add_space(8.0);
                 ui.label(RichText::new("Thumbnails").strong());

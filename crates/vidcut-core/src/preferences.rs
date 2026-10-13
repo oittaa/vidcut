@@ -21,8 +21,9 @@ pub struct Preferences {
 }
 
 /// The viewer's player: memory for the decoded pictures it keeps around
-/// the playhead. More memory, fewer waits: stepping and playing back
-/// through files with keyframes far apart decode less again.
+/// the playhead (more memory, fewer waits: stepping and playing back
+/// through files with keyframes far apart decode less again), and where
+/// its sound plays.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Player {
@@ -32,6 +33,11 @@ pub struct Player {
     /// Video memory for pictures the GPU decoded and keeps there, in MB.
     /// `0` (the default): half the GPU's.
     pub video_memory_mb: u64,
+    /// The audio device the player plays on, by its id (`vidcut doctor`
+    /// lists them as `audio_outputs`). Empty (the default): the system's
+    /// default device, which it plays on also while the chosen one isn't
+    /// there.
+    pub audio_device: String,
 }
 
 /// The graphics card's share of the work.
@@ -185,6 +191,9 @@ pub struct PlayerPatch {
     /// `0` (automatic) or at least 64.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub video_memory_mb: Option<u64>,
+    /// A device's id, or empty for the system's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_device: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -260,6 +269,9 @@ impl Preferences {
         if let Some(x) = &patch.player {
             p.player.memory_mb = x.memory_mb.unwrap_or(p.player.memory_mb);
             p.player.video_memory_mb = x.video_memory_mb.unwrap_or(p.player.video_memory_mb);
+            if let Some(d) = &x.audio_device {
+                p.player.audio_device = d.clone();
+            }
         }
         if let Some(t) = &patch.thumbnails {
             if let Some(v) = t.disk_cache {
@@ -337,6 +349,25 @@ mod tests {
         // A file without the key keeps it on.
         let read: Preferences = serde_json::from_value(serde_json::json!({})).unwrap();
         assert!(read.gpu.acceleration);
+    }
+
+    #[test]
+    fn the_player_plays_on_the_default_device_unless_set() {
+        let p = Preferences::default();
+        assert_eq!(p.player.audio_device, "");
+        let set = p
+            .patched(
+                &PreferencesPatch::from_pairs(&[
+                    "player.audio_device=wasapi:{0.0.0.00000000}".into()
+                ])
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(set.player.audio_device, "wasapi:{0.0.0.00000000}");
+        let back = set
+            .patched(&PreferencesPatch::from_pairs(&["player.audio_device=".into()]).unwrap())
+            .unwrap();
+        assert_eq!(back.player.audio_device, "");
     }
 
     #[test]

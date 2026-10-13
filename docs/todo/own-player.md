@@ -8,7 +8,6 @@ The GUI already plays through the engine ([player.md](../decisions/player.md), [
 - **VA-API's on AMD:** shown from video memory as Intel's are, untested: a surface with compression metadata (AMD's DCC modifiers) needs more than one plane per layer, which the import doesn't take, and such pictures are copied down instead.
 - **macOS:** VideoToolbox, into Metal textures through IOSurface.
 - **Encoding from GPU memory:** NVENC takes CUDA frames, VAAPI its surfaces, AMF and QSV Direct3D 11 textures (QSV VA-API surfaces on Linux), VideoToolbox its pixel buffers; scaling stays on the GPU (FFmpeg's CUDA, VAAPI, Direct3D 11 and Vulkan scalers).
-- **Still open in the engine:** choosing the audio device.
 - **Backward play right after a seek** waits once for the first window behind it, a GOP of decoding: with 2160p60 0.27 s on the CPU and 0.47 s for H.264 on NVDEC (its decoder is made anew at every seek, gotchas.md). After that, 20 s backward across keyframes shows 96–100% of the frames at the automatic budget.
 - **CPU path stays** for what GPUs don't decode: VP8, ProRes outside Apple, PNG and other image sequences.
 - **Frame-exact:** every decoding path passes the barcode fixtures, as the software decoder does.

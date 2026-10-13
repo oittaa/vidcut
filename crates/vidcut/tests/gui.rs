@@ -342,6 +342,41 @@ fn gui_acceptance() {
     wait_for(&gui, &|h| h == before);
     gui.check_frame(184);
 
+    // An audio device chosen from anywhere: the player opens on it where it
+    // stood, still frame-exact; cleared, on the system's default again.
+    let default = vidcut_av::player::output_devices()
+        .ok()
+        .and_then(|d| d.into_iter().find(|d| d.default));
+    if let Some(d) = default {
+        let device = |gui: &Gui| {
+            let (st, _) = gui.cli(&["player", "state"]);
+            st["result"]["audio_device"].clone()
+        };
+        let wait_device = |gui: &Gui, want: serde_json::Value| {
+            let started = Instant::now();
+            while device(gui) != want {
+                assert!(
+                    started.elapsed() < Duration::from_secs(10),
+                    "the player stays on {:?}",
+                    device(gui)
+                );
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        };
+        gui.cli(&[
+            "preferences",
+            "set",
+            &format!("player.audio_device={}", d.id),
+        ]);
+        wait_device(&gui, serde_json::json!(d.id));
+        gui.check_frame(185);
+        gui.cli(&["preferences", "set", "player.audio_device="]);
+        wait_device(&gui, serde_json::Value::Null);
+        gui.check_frame(186);
+        let (st, _) = gui.cli(&["player", "state"]);
+        assert!(st["result"]["audio_error"].is_null(), "{st}");
+    }
+
     // Quit cleanly: the instance unregisters.
     gui.cli(&["gui", "quit"]);
     let started = Instant::now();

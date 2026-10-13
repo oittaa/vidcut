@@ -92,6 +92,9 @@ pub struct Player {
     scrubbing: bool,
     /// Decode on the GPU (the GPU acceleration preference).
     gpu: bool,
+    /// The audio device the engine's output opened on (the preference;
+    /// `None`: the system's default).
+    audio_device: Option<String>,
     /// The audio device failed to open: the engine plays to a stand-in.
     pub audio_error: Option<String>,
 }
@@ -122,6 +125,7 @@ impl Player {
             muted: false,
             scrubbing: true,
             gpu: crate::preferences::gpu_decoding(),
+            audio_device: crate::preferences::audio_device(),
             audio_error: None,
         }
     }
@@ -467,6 +471,33 @@ impl Player {
         self.gpu = gpu;
         if let Some(e) = &self.engine {
             e.set_hardware(gpu);
+        }
+        true
+    }
+
+    /// The audio device it plays on: an id, `None` for the system's default.
+    pub fn audio_device(&self) -> Option<&str> {
+        self.audio_device.as_deref()
+    }
+
+    /// Plays on `device` (an audio device's id; `None`: the system's
+    /// default) as the preferences say; whether that changed. The engine
+    /// opens anew, paused where it was, its output made for the new device.
+    pub fn follow_audio(&mut self, device: Option<String>) -> bool {
+        if self.audio_device == device {
+            return false;
+        }
+        self.audio_device = device;
+        if let Some(e) = self.engine.take() {
+            if let Some(id) = self.plays {
+                let c = &mut self.contents[id.index()];
+                c.position = e.status().position.clamp(0, c.frames.max(0));
+            }
+            // The device is free once the renderer lets the engine go too.
+            self.plays = None;
+            self.renderer.attach(None);
+            drop(e);
+            self.play_shown(None);
         }
         true
     }

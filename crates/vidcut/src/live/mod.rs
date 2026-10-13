@@ -831,6 +831,7 @@ impl Live {
             Msg::PreferencesChanged => {
                 let gpu = crate::preferences::gpu_decoding();
                 changed = self.player.follow_gpu(gpu);
+                changed |= self.player.follow_audio(crate::preferences::audio_device());
                 self.player.set_budget(crate::preferences::player_budget());
             }
             Msg::FileChanged => {
@@ -2687,6 +2688,10 @@ impl Live {
             "selection": self.selection,
             "pool": self.pool,
             "muted": self.player.muted(),
+            // The audio device's id (`player.audio_device`), null for the
+            // system's default, and why it didn't open.
+            "audio_device": self.player.audio_device(),
+            "audio_error": self.player.audio_error,
             "audio_scrubbing": self.audio_scrubbing,
             "clipboard": self.clipboard.len(),
             "preview": self.preview_error.as_deref().map_or(json!(true), |e| json!(e)),
