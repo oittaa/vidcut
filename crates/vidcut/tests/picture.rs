@@ -381,8 +381,8 @@ fn pictures_in_gpu_memory_draw_as_copied_down() {
         eprintln!("skipping: no GPU adapter");
         return;
     };
-    if vidcut_av::cuda::CudaDevice::open().is_err() || !gpu.takes_gpu_pictures() {
-        eprintln!("skipping: the adapter shares no memory with CUDA");
+    if !gpu.shares_with_cuda() {
+        eprintln!("skipping: the adapter shares no memory with CUDA, or isn't CUDA's GPU");
         return;
     }
     let p = plan(vec![

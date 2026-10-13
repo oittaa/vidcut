@@ -159,8 +159,10 @@ pub fn measured_light(
     match crate::light::piece_level(piece, fps, measure_now, cancel, &mut |_| {}) {
         Ok(Some(l)) => Measured::Known(l),
         Ok(None) if !measure_now => Measured::Pending,
-        // What can't be read is left out; a cancelled export stops after.
-        _ => Measured::No,
+        // A cancelled export stops after.
+        Err(e) if is_cancelled(&e) => Measured::No,
+        // What can't be read (or has no frames) is left out, and said.
+        Ok(None) | Err(_) => Measured::Failed,
     }
 }
 

@@ -2084,8 +2084,9 @@ fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u3
                                 .response
                                 .on_hover_text(
                                     "auto: the sources' mastering display and light levels \
-                                     (PQ), and HDR10+ and Dolby Vision when every picture has \
-                                     them. Dolby Vision is written by the CPU's encoders.",
+                                     (PQ), HDR10+ when any picture has it (made for the frames \
+                                     without), and Dolby Vision when every picture has it. \
+                                     Dolby Vision is written by the CPU's encoders.",
                                 );
                         }
                     } else if v.hdr.transfer().is_some() {

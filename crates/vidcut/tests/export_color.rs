@@ -272,6 +272,7 @@ fn hdr_metadata_follows_the_sources() {
                 max_nits: 1000,
                 light: Some((1000, 400)),
                 hdr10plus: true,
+                hdr10plus_frames: None,
             })
             .no_audio(),
     );

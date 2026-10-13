@@ -594,19 +594,25 @@ pub fn choose_colors(
     available: &Availability,
     measure: Option<Measuring<'_>>,
 ) -> Result<()> {
-    let todo = choose_once(prepared, p, available);
+    let todo = choose_once(prepared, p, available, false);
     if let Some(m) = measure
         && !todo.is_empty()
     {
         measure_spans(&todo, m)?;
-        choose_once(prepared, p, available);
+        choose_once(prepared, p, available, true);
     }
     Ok(())
 }
 
 /// [`choose_colors`] with the light measured before; returns what the
-/// metadata needs measured and isn't.
-fn choose_once(prepared: &mut Prepared, p: &Project, available: &Availability) -> Vec<Span> {
+/// metadata needs measured and isn't. `measured`: what it needed was just
+/// measured, so light levels still unknown couldn't be.
+fn choose_once(
+    prepared: &mut Prepared,
+    p: &Project,
+    available: &Availability,
+    measured: bool,
+) -> Vec<Span> {
     let ids: Vec<String> = prepared
         .outputs
         .iter()
@@ -634,7 +640,11 @@ fn choose_once(prepared: &mut Prepared, p: &Project, available: &Availability) -
             if let Some(v) = &colored {
                 m.measured = engine::measured_light(piece, fps, v, &m, false, None);
                 if m.measured == Measured::Pending {
-                    todo.extend(Span::of(piece, fps));
+                    if measured {
+                        m.measured = Measured::Failed;
+                    } else {
+                        todo.extend(Span::of(piece, fps));
+                    }
                 }
             }
             m
@@ -682,7 +692,7 @@ fn measure_spans(todo: &[Span], m: Measuring<'_>) -> Result<()> {
         let measured = vidcut_av::light::analysis(s, true, Some(m.cancel), &mut |share| {
             (m.progress)((done + share * w) / total)
         });
-        // What can't be read is left out of the metadata.
+        // What can't be read is left out of the metadata, and said.
         if let Err(e) = measured
             && engine::is_cancelled(&e)
         {
