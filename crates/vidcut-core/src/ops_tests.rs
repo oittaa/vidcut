@@ -733,6 +733,55 @@ fn first_video_sets_the_project_format() {
 }
 
 #[test]
+fn drop_frame_timecode_is_a_project_setting() {
+    // Decision D47: at 29.97 and 59.94 record timecode may count
+    // drop-frame; the first video, whose own timecode does, sets it.
+    let ntsc = crate::time::Rational::new(30000, 1001).unwrap();
+    let mut cam = crate::test_support::media_info(120.0, ntsc, true);
+    cam.timecode = Some(crate::model::StartTimecode {
+        count: 107_892,
+        rate: ntsc,
+        drop_frame: true,
+    });
+    let mut f = Fixture::new(&[]);
+    f.env = std::mem::take(&mut f.env).with("/media/cam.mov", cam.clone());
+    let mut settings = f.editor.project().settings.clone();
+    settings.auto_format = true;
+    f.editor = crate::Editor::new(crate::Project::new(settings), Default::default());
+    f.ok(req("media.add", json!({"paths": ["/media/cam.mov"]})));
+    assert!(f.editor.project().settings.counts_drop_frame());
+    f.append("m1", 0, 1800);
+    let clip = |f: &mut Fixture, key: &str| {
+        f.ok(req("timeline.get", json!({}))).result["tracks"][0]["items"][0][key].clone()
+    };
+    assert_eq!(clip(&mut f, "end_tc"), "00:01:00;02");
+    // A drop-frame start: an hour of the clock is 107892 frames.
+    f.ok(req("project.set", json!({"start_tc": "01:00:00;00"})));
+    assert_eq!(f.editor.project().settings.start_tc, 107_892);
+    assert_eq!(clip(&mut f, "start_tc"), "01:00:00;00");
+    // An import into an empty project takes it from its media: the file
+    // doesn't say.
+    let doc = crate::otio::export(
+        f.editor.project(),
+        "cam",
+        None,
+        crate::otio::Locations::Absolute,
+    )
+    .unwrap();
+    let mut g = Fixture::new(&[]);
+    g.env = std::mem::take(&mut g.env).with("/media/cam.mov", cam);
+    g.ok(req("timeline.import", json!({"otio": doc})));
+    let s = &g.editor.project().settings;
+    assert!(s.counts_drop_frame() && s.start_tc == 107_892);
+    // Off, the same frames show non-drop.
+    f.ok(req("project.set", json!({"drop_frame": false})));
+    assert_eq!(clip(&mut f, "start_tc"), "00:59:56:12");
+    // Not at 25.
+    let e = Fixture::new(&[]).err(req("project.set", json!({"drop_frame": true})));
+    assert_eq!(e.code, ErrorCode::InvalidEdit, "{e}");
+}
+
+#[test]
 fn a_portrait_phone_clip_makes_a_portrait_project() {
     // Phones store portrait video sideways with a rotation: the project takes
     // the picture as shown.

@@ -713,6 +713,7 @@ fn writes_what_editors_read() {
     p.media[0].info.timecode = Some(crate::model::StartTimecode {
         count: 900_000, // 10:00:00:00
         rate: Rational::new(25, 1).unwrap(),
+        drop_frame: false,
     });
     let doc = export(&p, "busy", None, Locations::Absolute).unwrap();
     assert_eq!(
@@ -1104,6 +1105,7 @@ fn source_timecode_without_available_ranges() {
     cam.timecode = Some(crate::model::StartTimecode {
         count: 900_000,
         rate: fps,
+        drop_frame: false,
     });
     let mut f = Fixture::new(&[]);
     f.env = FakeEnv::default()

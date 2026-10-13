@@ -5,7 +5,6 @@
 use serde_json::Value;
 
 use crate::model::Project;
-use crate::time::format_timecode;
 
 /// `method` with `params` (a request's JSON) in words. `project`, as it was
 /// before the request, names media and turns frames into timecodes.
@@ -238,7 +237,7 @@ impl Words<'_> {
     fn time(&self, key: &str) -> String {
         let one = |v: &Value| match v {
             Value::Number(n) => match (n.as_i64(), self.project) {
-                (Some(f), Some(p)) => format_timecode(f, p.settings.fps, p.settings.start_tc),
+                (Some(f), Some(p)) => p.settings.timecode(f),
                 (Some(f), None) => format!("{f}f"),
                 _ => n.to_string(),
             },

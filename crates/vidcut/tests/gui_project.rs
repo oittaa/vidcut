@@ -182,6 +182,8 @@ fn a_new_project_takes_the_format_chosen() {
     choose(&mut harness, "Resolution", "HD 1280 × 720");
     type_rate(&mut harness, "12.5");
     assert!(harness.query_by_label_contains("a rate above 0").is_none());
+    // Drop-frame timecode is for 29.97 and 59.94 (decision D47).
+    assert!(harness.query_by_label("Drop-frame").is_none());
     harness.get_by_label("Create…").click();
     until(&mut harness, "the new project", || settings(&h).is_some());
     let s = settings(&h).unwrap();
@@ -199,18 +201,26 @@ fn a_new_project_takes_the_format_chosen() {
         )
     );
 
-    // 2. Project Settings: another size and rate, one project.set.
+    // 2. Project Settings: another size and rate, drop-frame at it, one
+    // project.set.
     menu_item(&mut harness, "File", "Project Settings…");
     choose(&mut harness, "Resolution", "Vertical 1080 × 1920");
     type_rate(&mut harness, "30000/1001");
+    harness.get_by_label("Drop-frame").click();
+    harness.step();
     harness.get_by_label("Apply").click();
     until(&mut harness, "the new settings", || {
         settings(&h).is_some_and(|s| s["width"] == 1080)
     });
     let s = settings(&h).unwrap();
     assert_eq!(
-        (&s["fps"], &s["width"], &s["height"]),
-        (&json!("30000/1001"), &json!(1080), &json!(1920))
+        (&s["fps"], &s["width"], &s["height"], &s["drop_frame"]),
+        (
+            &json!("30000/1001"),
+            &json!(1080),
+            &json!(1920),
+            &json!(true)
+        )
     );
     let requests = gui_requests(&h);
     let (method, params) = requests.last().unwrap();
@@ -220,13 +230,15 @@ fn a_new_project_takes_the_format_chosen() {
             method.as_str(),
             &params["width"],
             &params["height"],
-            &params["fps"]
+            &params["fps"],
+            &params["drop_frame"]
         ),
         (
             "project.set",
             &json!(1080),
             &json!(1920),
-            &json!("30000/1001")
+            &json!("30000/1001"),
+            &json!(true)
         )
     );
     // It closes in the frame after the click.
