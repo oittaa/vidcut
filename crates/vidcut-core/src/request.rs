@@ -570,10 +570,14 @@ pub enum Request {
         color: Option<String>,
         #[serde(default)]
         note: String,
+        /// Its length (`25f`, `1s`); one frame by default. The timeline
+        /// shows it as a point; OTIO files keep it (spec D40).
+        #[serde(default)]
+        duration: Option<TimeSpec>,
     },
     #[serde(rename = "markers.move")]
     MarkersMove { marker: String, to: TimeSpec },
-    /// Change a marker's name, color or note (M on a marker).
+    /// Change a marker's name, color, note or length (M on a marker).
     #[serde(rename = "markers.set")]
     MarkersSet {
         marker: String,
@@ -583,6 +587,9 @@ pub enum Request {
         color: Option<String>,
         #[serde(default)]
         note: Option<String>,
+        /// Its length (`25f`, `1s`).
+        #[serde(default)]
+        duration: Option<TimeSpec>,
     },
     #[serde(rename = "markers.remove")]
     MarkersRemove { marker: String },

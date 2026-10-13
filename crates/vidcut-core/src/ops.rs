@@ -1486,10 +1486,18 @@ fn check_color(color: &str) -> Result<()> {
     }
 }
 
-/// Adds a marker (M); returns its id.
+fn check_duration(frames: i64) -> Result<()> {
+    if frames < 1 {
+        return Err(Error::invalid("a marker lasts at least one frame"));
+    }
+    Ok(())
+}
+
+/// Adds a marker (M) `duration` frames long; returns its id.
 pub fn add_marker(
     p: &mut Project,
     at: i64,
+    duration: i64,
     name: String,
     color: Option<String>,
     note: String,
@@ -1497,6 +1505,7 @@ pub fn add_marker(
     if at < 0 {
         return Err(Error::invalid("marker before 0"));
     }
+    check_duration(duration)?;
     if let Some(c) = &color {
         check_color(c)?;
     }
@@ -1504,6 +1513,7 @@ pub fn add_marker(
     p.markers.push(Marker {
         id: id.clone(),
         at,
+        duration,
         name,
         color: color.unwrap_or_else(|| "blue".into()),
         note,
@@ -1526,22 +1536,29 @@ pub fn move_marker(p: &mut Project, id: &str, to: i64) -> Result<()> {
     Ok(())
 }
 
-/// Changes a marker's name, color or note.
+/// Changes a marker's name, color, note or length.
 pub fn set_marker(
     p: &mut Project,
     id: &str,
     name: Option<String>,
     color: Option<String>,
     note: Option<String>,
+    duration: Option<i64>,
 ) -> Result<()> {
     if let Some(c) = &color {
         check_color(c)?;
+    }
+    if let Some(d) = duration {
+        check_duration(d)?;
     }
     let k = p
         .markers
         .iter_mut()
         .find(|k| k.id == id)
         .ok_or_else(|| Error::not_found(format!("no marker {id}")))?;
+    if let Some(d) = duration {
+        k.duration = d;
+    }
     if let Some(n) = name {
         k.name = n;
     }
