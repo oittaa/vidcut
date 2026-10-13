@@ -1681,7 +1681,7 @@ impl Workspace {
             self.timeline.duration_dialog = Some(String::new());
             ui.close();
         }
-        if !c.is_block() && ui.button(keys("Change Speed…  (R)")).clicked() {
+        if !c.is_generator() && ui.button(keys("Change Speed…  (R)")).clicked() {
             self.open_speed_dialog();
             ui.close();
         }

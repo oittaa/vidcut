@@ -354,6 +354,8 @@ fn expanded(p: &Project) -> Option<Project> {
                     v.video_enabled &= t.video_enabled;
                     v.transitions.clear();
                     v.clips = n.clips.iter().filter_map(|x| inside(x, c)).collect();
+                    // Backward, its last clip comes first.
+                    v.clips.sort_by_key(|y| y.start);
                     inner.push(v);
                 }
             }
@@ -366,8 +368,20 @@ fn expanded(p: &Project) -> Option<Project> {
 }
 
 /// Clip `x` of compound clip `c`, trimmed to the part `c` shows and placed
-/// where it shows it.
+/// where it shows it; at `c`'s speed (decision D48), through its pace.
 fn inside(x: &Clip, c: &Clip) -> Option<Clip> {
+    if c.speed() != 1.0 {
+        let (k0, k1) = shown_between(c, x.start, x.end())?;
+        let mut y = x.clone();
+        y.walk(c.source_at(c.start + k0) - x.start);
+        (y.start, y.duration) = (c.start + k0, k1 - k0);
+        y.speed = paced(c, x.speed.as_ref(), k0);
+        if let Some(a) = y.audio.as_mut() {
+            a.head = 0;
+            a.tail = 0;
+        }
+        return Some(y);
+    }
     let (first, last) = (c.source_in, c.source_in + c.duration);
     let (s, e) = (x.start.max(first), x.end().min(last));
     if e <= s {
@@ -384,6 +398,34 @@ fn inside(x: &Clip, c: &Clip) -> Option<Clip> {
         a.tail = 0;
     }
     Some(y)
+}
+
+/// The frames of compound clip `c` (from its first) that show its
+/// timeline's frames `[a, b)`, at its speed: none when it shows none of them.
+pub(crate) fn shown_between(c: &Clip, a: i64, b: i64) -> Option<(i64, i64)> {
+    let shows = |k: i64| (a..b).contains(&c.source_at(c.start + k));
+    let k0 = (0..c.duration).find(|&k| shows(k))?;
+    let k1 = (k0..c.duration).find(|&k| !shows(k)).unwrap_or(c.duration);
+    Some((k0, k1))
+}
+
+/// The speed of a clip held by compound clip `c` at `own` speed, shown from
+/// `c`'s frame `k`: the two speeds together. One at normal speed walks
+/// `c`'s pace exactly.
+pub(crate) fn paced(
+    c: &Clip,
+    own: Option<&crate::model::Speed>,
+    k: i64,
+) -> Option<crate::model::Speed> {
+    let speed = c.speed() * own.and_then(crate::model::Speed::scalar).unwrap_or(1.0);
+    (speed != 1.0).then(|| crate::model::Speed {
+        effect: crate::ops::time_effect(own.or(c.speed.as_ref()), speed),
+        skip: if own.is_none() {
+            c.pace().after(k).skip
+        } else {
+            0
+        },
+    })
 }
 
 /// Plans the timeline range `[a, b)`.

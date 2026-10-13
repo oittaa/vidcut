@@ -5,13 +5,14 @@
 //! The media layer measures, through [`Env`](crate::editor::Env); everything
 //! here is arithmetic on those measurements, so it is tested without media.
 //! Positions are project frames: a clip's frame `t` shows source frame
-//! `source_in + (t - start)`, whose audio starts at raw time
-//! `origin + source_frame / fps`.
+//! `source_in + (t - start)` (at another speed, through its pace: decision
+//! D48), whose audio starts at raw time `origin + source_frame / fps`.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::model::{Clip, Project, TrackKind};
+use crate::render::Pace;
 use crate::time::Rational;
 
 /// Peak levels of one audio stream: the largest absolute sample of any
@@ -130,9 +131,9 @@ fn linear(db: f64) -> f64 {
 }
 
 /// What a stretch of picture or sound is measured over: frames `[start,
-/// end)` on the timeline showing source frames from `source_in`, of media
-/// whose source frame 0 is at raw time `origin`. A clip, or a whole media
-/// item (start 0).
+/// end)` on the timeline showing source frames from `source_in` at `pace`,
+/// of media whose source frame 0 is at raw time `origin`. A clip, or a
+/// whole media item (start 0).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Span {
     pub start: i64,
@@ -140,6 +141,7 @@ pub struct Span {
     pub source_in: i64,
     pub origin: f64,
     pub fps: Rational,
+    pub pace: Pace,
 }
 
 impl Span {
@@ -150,17 +152,32 @@ impl Span {
             source_in: c.source_in,
             origin,
             fps,
+            pace: c.pace(),
         }
     }
 
-    /// Raw time where frame `t`'s audio starts.
-    fn time(&self, t: i64) -> f64 {
-        self.origin + (self.source_in + t - self.start) as f64 / self.fps.as_f64()
+    /// Raw time of source position `pos` (frames, between frames too).
+    fn at(&self, pos: f64) -> f64 {
+        self.origin + pos / self.fps.as_f64()
     }
 
-    /// Frame position (fractional) of raw time `x`.
+    /// Raw time where the audio is at frame position `t` (between frames
+    /// too): its frame's start at normal speed; at another, through its
+    /// pace, backward from the top of the first frame's stretch.
+    fn time(&self, t: f64) -> f64 {
+        self.at(self.source_in as f64 + self.pace.sound(t - self.start as f64))
+    }
+
+    /// Frame position (fractional) of raw time `x`: [`time`](Self::time)'s
+    /// inverse. Not for a held frame.
     fn frame(&self, x: f64) -> f64 {
-        self.start as f64 + (x - self.origin) * self.fps.as_f64() - self.source_in as f64
+        let pos = (x - self.origin) * self.fps.as_f64() - self.source_in as f64;
+        self.start as f64 + (pos - self.pace.sound(0.0)) / self.pace.speed
+    }
+
+    /// Raw time of the source frame frame `t` shows.
+    fn shown_time(&self, t: i64) -> f64 {
+        self.at((self.source_in + self.pace.offset(t - self.start)) as f64)
     }
 }
 
@@ -229,18 +246,26 @@ pub fn silent_parts(
     gain_db: f64,
     s: &SilenceSettings,
 ) -> Vec<(i64, i64)> {
+    // A held frame is silent: nothing to find.
+    if span.pace.speed == 0.0 {
+        return Vec::new();
+    }
     let f = span.fps.as_f64();
+    let (from, to) = (span.time(span.start as f64), span.time(span.end as f64));
+    // At another speed the timeline covers more or less of the source, and
+    // backward it runs down it.
     let quiet = silences(
         levels,
-        span.time(span.start),
-        span.time(span.end),
+        from.min(to),
+        from.max(to),
         s.threshold_db,
         gain_db,
-        s.min as f64 / f,
+        s.min as f64 * span.pace.speed.abs() / f,
     );
     let mut parts = Vec::new();
     for (a, b) in quiet {
         let (fa, fb) = (span.frame(a), span.frame(b));
+        let (fa, fb) = (fa.min(fb), fa.max(fb));
         let x0 = if fa <= span.start as f64 + 1e-6 {
             span.start as f64
         } else {
@@ -257,27 +282,34 @@ pub fn silent_parts(
             parts.push((p0, p1));
         }
     }
+    // Backward, the source's last silence is the timeline's first.
+    parts.sort_unstable();
     parts
 }
 
 /// The source frame shown at frame `t` of `span`: the first one at or after
 /// the frame's time less half a frame (the sampling rule, export.md §2).
 fn shown(span: &Span, stats: &PictureStats, t: i64) -> usize {
-    let target = span.time(t) - 0.5 / span.fps.as_f64() - 1e-9;
+    let target = span.shown_time(t) - 0.5 / span.fps.as_f64() - 1e-9;
     stats.pts.partition_point(|&p| p < target)
 }
 
 /// Frames of `span` where a new shot starts, with their scores: the first
 /// frame showing a source frame that scores at least `threshold` against the
 /// one before it (Detect Scene Cuts). Frames skipped between two
-/// shown ones count too. The span's own first frame never counts.
+/// shown ones count too, and walking the source backward, the change it
+/// crosses the other way. The span's own first frame never counts.
 pub fn scene_cuts(span: &Span, stats: &PictureStats, threshold: f64) -> Vec<(i64, f32)> {
     let mut cuts = Vec::new();
     let mut prev = shown(span, stats, span.start);
     for t in span.start + 1..span.end {
         let k = shown(span, stats, t).min(stats.score.len());
-        if k > prev {
-            let score = stats.score[prev + 1..k.min(stats.score.len() - 1) + 1]
+        let (lo, hi) = (
+            prev.min(k),
+            prev.max(k).min(stats.score.len().saturating_sub(1)),
+        );
+        if hi > lo {
+            let score = stats.score[lo + 1..hi + 1]
                 .iter()
                 .fold(0f32, |m, &s| m.max(s));
             if f64::from(score) >= threshold {
@@ -382,6 +414,7 @@ mod tests {
         // Speech at 1.0–1.5 s and 3.0–3.2 s of a 4 s clip at 10 fps.
         let l = levels(4.0, &[(1.0, 1.5), (3.0, 3.2)]);
         let span = Span {
+            pace: Default::default(),
             start: 100,
             end: 140,
             source_in: 0,
@@ -419,6 +452,7 @@ mod tests {
                 .collect(),
         };
         let span = Span {
+            pace: Default::default(),
             start: 0,
             end: 40,
             source_in: 0,
