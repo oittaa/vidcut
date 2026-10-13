@@ -782,6 +782,34 @@ fn drop_frame_timecode_is_a_project_setting() {
 }
 
 #[test]
+fn the_start_timecode_keeps_its_label() {
+    // Deviation X7: a start set as 01:00:00:00 stays so when the rate or
+    // drop-frame counting changes, another frame count each time.
+    let mut f = Fixture::new(&[]);
+    let start = |f: &Fixture| {
+        let s = &f.editor.project().settings;
+        (s.start_tc, s.timecode(0))
+    };
+    f.ok(req("project.set", json!({"start_tc": "01:00:00:00"})));
+    assert_eq!(start(&f), (90_000, "01:00:00:00".to_string()));
+    f.ok(req("project.set", json!({"fps": "30000/1001"})));
+    assert_eq!(start(&f), (108_000, "01:00:00:00".to_string()));
+    f.ok(req("project.set", json!({"drop_frame": true})));
+    assert_eq!(start(&f), (107_892, "01:00:00;00".to_string()));
+    // A label the new rate hasn't keeps its time: 29 frames at 29.97 are
+    // 24 at 25.
+    f.ok(req(
+        "project.set",
+        json!({"drop_frame": false, "start_tc": "00:00:00:29"}),
+    ));
+    f.ok(req("project.set", json!({"fps": "25"})));
+    assert_eq!(start(&f), (24, "00:00:00:24".to_string()));
+    // A timecode, not before zero.
+    let e = f.err(req("project.set", json!({"start_tc": "-1s"})));
+    assert_eq!(e.code, ErrorCode::Usage, "{e}");
+}
+
+#[test]
 fn a_portrait_phone_clip_makes_a_portrait_project() {
     // Phones store portrait video sideways with a rotation: the project takes
     // the picture as shown.

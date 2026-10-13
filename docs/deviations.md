@@ -62,8 +62,8 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 
 ## X7. Timelines start at 00:00:00:00
 - **Resolve:** new timelines start at record timecode 01:00:00:00 (p. 678).
-- **vidcut:** the start timecode defaults to 00:00:00:00, and `project.set --start-tc 01:00:00:00` changes it. Timecodes typed into commands are record timecodes, so they follow the setting.
-- **Why:** with a zero start, timecode, seconds and frame numbers all count from the same point. Scripts and agents mix all three, and a hidden one-hour offset would make `00:01:00:00` and `60s` mean different frames.
+- **vidcut:** the start timecode defaults to 00:00:00:00. New Project and File > Project Settings offer 00:00:00:00, 01:00:00:00 and 10:00:00:00, or any other typed; `project.create`, `project.open`'s create and `project.set` take `start_tc` (`--start-tc 01:00:00:00`, drop-frame `01:00:00;00`). It keeps its label when the frame rate or drop-frame counting changes (decision D47), another frame count each time. Timecodes typed into commands are record timecodes, so they follow the setting.
+- **Why:** with a zero start, timecode, seconds and frame numbers all count from the same point. Scripts and agents mix all three, and a hidden one-hour offset would make `00:01:00:00` and `60s` mean different frames. The hours offered are where editors and broadcasters start: an hour (programmes, with bars, tone and a countdown before), ten hours (UK broadcast). A start is meant as its label, so a new rate keeps it.
 
 ## X8. The source viewer counts project frames
 - **Resolve:** Source Clip and Source Tape show a clip at its own frame rate, with its own source timecode (p. 680, 688).
