@@ -588,7 +588,7 @@ impl Workspace {
                 }
                 if ui
                     .add_enabled(open, egui::Button::new("New Bin"))
-                    .on_hover_text("Shift+Ctrl+N: a bin in the bin the pool shows")
+                    .on_hover_text(super::keys("Shift+Ctrl+N: a bin in the bin the pool shows"))
                     .clicked()
                 {
                     self.new_bin();
@@ -616,7 +616,7 @@ impl Workspace {
                 }
                 ui.separator();
                 if ui
-                    .add(egui::Button::new("Preferences…").shortcut_text("Ctrl+,"))
+                    .add(egui::Button::new("Preferences…").shortcut_text(super::keys("Ctrl+,")))
                     .clicked()
                 {
                     self.open_preferences(ui.ctx());
@@ -668,7 +668,11 @@ impl Workspace {
             ui.separator();
             // The project's name is in the window title.
             if self.snap.project.is_some() {
-                if ui.button("Import").on_hover_text("Ctrl+I").clicked() {
+                if ui
+                    .button("Import")
+                    .on_hover_text(super::keys("Ctrl+I"))
+                    .clicked()
+                {
                     self.import_media();
                 }
                 if ui

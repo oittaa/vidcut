@@ -2,7 +2,7 @@
 
 **MCP** ([docs/decisions/agents.md](decisions/agents.md), deviation X10): `vidcut mcp [-p FILE]` serves the Model Context Protocol on stdin/stdout. Every command is a tool (`edit.split` is `edit_split`, with its JSON Schema), plus `use_project` to pick or create the project. Calls run like the CLI's: inside the GUI that has the project open, or headless. `frame_render`, `gui_screenshot` and `storyboard_render` return images. Cancelling and progress: agents.md §1. To add it to Claude Code: `claude mcp add vidcut -- vidcut mcp -p /abs/talk.vidcut`; other clients take `{"command": "vidcut", "args": ["mcp", "-p", "/abs/talk.vidcut"]}`.
 
-**Folders:** `~/.config/vidcut`, `~/.cache/vidcut` and `~/.local/state/vidcut` below are where vidcut keeps files on Linux; README.md's table says where on Windows (`%APPDATA%`, `%LOCALAPPDATA%`).
+**Folders:** `~/.config/vidcut`, `~/.cache/vidcut` and `~/.local/state/vidcut` below are where vidcut keeps files on Linux; README.md's table says where on Windows (`%APPDATA%`, `%LOCALAPPDATA%`) and macOS (`~/Library`).
 
 **Commands are the protocol's methods** (`crates/vidcut/src/cli.rs` generates the CLI from the request schema):
 - Method `group.verb` is the command `vidcut group verb`: dots become spaces, underscores hyphens (`edit.place_on_top` is `vidcut edit place-on-top`; MCP calls it `edit_place_on_top`).

@@ -81,7 +81,7 @@ pub fn timeline_decoder(on_gpu: bool) -> Option<vidcut_av::hw::GpuDecoder> {
 /// The GPU decoder the viewer takes (`GpuDecoder::best`), opened once.
 /// Exports, proxies, the timeline's tiles and the two-up decode on the same
 /// GPU, on a stream or device of their own (`GpuDecoder::own`). `None`
-/// without one; callers check `gpu.acceleration`.
+/// without one; callers check [`gpu_decoding`].
 pub fn gpu_decoder() -> Option<vidcut_av::hw::GpuDecoder> {
     static BEST: std::sync::OnceLock<Option<vidcut_av::hw::GpuDecoder>> =
         std::sync::OnceLock::new();

@@ -11,7 +11,8 @@ Import vidcut's `.otio` and `.otioz` files into the current free and Studio vers
 
 **Studio 21.1.1 (2026-10-13, through its scripting API):**
 - `.otio`: as in 21, plus the muted clip and the disabled clip, marker notes, and the start timecode (`01:00:00:00` and drop-frame both land on the right frame).
-- `.otioz`: the media unpack into a folder named after the bundle, and link; a bundle with an image sequence hangs Resolve ([todo](otioz-image-sequences.md)).
+- `.otioz`: the media unpack into a folder named after the bundle, and link, image sequences too (two in one bundle, 120 and 30 pictures). One import hung once, with a blank dialog on screen; twelve more of bundles with sequences didn't, that same bundle among them, nor did a half-written one (refused at once).
+- `.otiod`: the import takes its `content.otio`, not the folder, and finds the media.
 - Back to vidcut: everything structural survives the round trip; In/Out, track faders and track settings don't, as Resolve drops vidcut's metadata (deviation X9).
 - Resolve's own timelines (transitions, speed, effects, generators, compound clips): see the carrying items (`otio-carry-*`, `otio-compound-clips`, `otio-speed-carry`).
 - EDL and FCPXML keep less than OTIO: the EDL one video track, no markers or audio tracks; the FCPXML (1.10) no markers.

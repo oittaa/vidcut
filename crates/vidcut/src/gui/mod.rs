@@ -82,13 +82,41 @@ pub fn run(project: Option<PathBuf>) -> Result<()> {
         }),
     )
     .map_err(|e| {
-        #[cfg(unix)]
+        #[cfg(all(unix, not(target_os = "macos")))]
         let hint = " (is a Wayland or X11 display available?)";
-        #[cfg(not(unix))]
+        #[cfg(any(windows, target_os = "macos"))]
         let hint = "";
         Error::new(
             ErrorCode::Dependency,
             format!("can't start the GUI{hint}: {e}"),
         )
     })
+}
+
+/// Shortcuts as this system names its keys: what Linux and Windows call
+/// Ctrl and Alt are Cmd and Option on macOS (the spec's key names). The
+/// keys themselves are egui's `command` and `alt` everywhere.
+pub fn keys(text: &str) -> String {
+    keys_on(text, cfg!(target_os = "macos"))
+}
+
+fn keys_on(text: &str, mac: bool) -> String {
+    if mac {
+        text.replace("Ctrl+", "Cmd+").replace("Alt+", "Option+")
+    } else {
+        text.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn macos_names_ctrl_and_alt_cmd_and_option() {
+        let text = "Lift (Alt+Delete), Shift+Ctrl+N";
+        assert_eq!(super::keys_on(text, false), text);
+        assert_eq!(
+            super::keys_on(text, true),
+            "Lift (Option+Delete), Shift+Cmd+N"
+        );
+    }
 }

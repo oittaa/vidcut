@@ -730,7 +730,11 @@ impl Workspace {
             if ui.button("Mark Out").on_hover_text("O").clicked() {
                 self.mark(false);
             }
-            if ui.button("Clear").on_hover_text("Alt+X").clicked() {
+            if ui
+                .button("Clear")
+                .on_hover_text(super::keys("Alt+X"))
+                .clicked()
+            {
                 self.clear_marks();
             }
             if player.speed != 0.0 && player.speed != 1.0 {

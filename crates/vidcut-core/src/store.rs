@@ -25,7 +25,7 @@ use crate::model::{FORMAT_VERSION, Project};
 /// How long to wait for another process to release the project lock.
 const LOCK_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// `$XDG_STATE_HOME/vidcut`, or `~/.local/state/vidcut`
+/// `$XDG_STATE_HOME/vidcut`, or `~/.local/state/vidcut` and the like
 /// ([`crate::dirs::state`]).
 pub fn state_dir() -> PathBuf {
     crate::dirs::state()

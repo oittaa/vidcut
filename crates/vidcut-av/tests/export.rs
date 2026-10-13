@@ -2389,8 +2389,13 @@ fn vaapi_exports_keep_frames_on_the_gpu() {
     let turned = |codec, rotation| {
         src(FixtureSpec::new(codec, Container::Mp4, 1280, 720, (30, 1), 10).rotation(rotation))
     };
+    // A quarter turn shows a portrait picture (stored landscape, as phones
+    // store it): bars beside it after the turn.
+    let portrait = src(
+        FixtureSpec::new(VideoCodec::H264, Container::Mp4, 720, 1280, (30, 1), 10).rotation(90),
+    );
     let (r90, r180, r270) = (
-        turned(VideoCodec::H264, 90),
+        portrait,
         turned(VideoCodec::H264, 180),
         turned(VideoCodec::Hevc10, 270),
     );
@@ -2478,12 +2483,16 @@ fn vaapi_exports_keep_frames_on_the_gpu() {
                 "{bits}-bit: frame {k}"
             );
         }
-        let m = region_means(&frame_at(&out, 165), (0, 100));
+        // The bars beside the 4:3 and the portrait pictures are video-range
+        // black: there are bars.
         let near = |v: f64, want: f64| (v - want).abs() <= 1.0;
-        assert!(
-            near(m[0], 16.0) && near(m[1], 128.0) && near(m[2], 128.0),
-            "{bits}-bit: the bars are {m:?}"
-        );
+        for k in [165, 195] {
+            let m = region_means(&frame_at(&out, k), (0, 100));
+            assert!(
+                near(m[0], 16.0) && near(m[1], 128.0) && near(m[2], 128.0),
+                "{bits}-bit: frame {k}'s bars are {m:?}"
+            );
+        }
         // Levels hold through the GPU's fitting (10 bits into 8 too: a
         // quarter of a level low at most), within the encoder's noise,
         // against the CPU's export of the same depth (in its codes: 10 bits
@@ -2570,8 +2579,12 @@ fn amf_exports_keep_frames_on_the_gpu() {
     let turned = |codec, rotation| {
         src(FixtureSpec::new(codec, Container::Mp4, 1280, 720, (30, 1), 10).rotation(rotation))
     };
+    // A quarter turn shows a portrait picture (stored landscape, as phones
+    // store it): bars beside it after the turn.
+    let portrait =
+        src(FixtureSpec::new(VideoCodec::Vp9, Container::Mp4, 720, 1280, (30, 1), 10).rotation(90));
     let (r90, r180, r270) = (
-        turned(VideoCodec::Vp9, 90),
+        portrait,
         turned(VideoCodec::Vp9, 180),
         turned(VideoCodec::Hevc10, 270),
     );
@@ -2672,12 +2685,16 @@ fn amf_exports_keep_frames_on_the_gpu() {
                 "{bits}-bit: frame {k}"
             );
         }
-        let m = region_means(&frame_at(&out, 165), (0, 100));
+        // The bars beside the 4:3 and the portrait pictures are video-range
+        // black: there are bars.
         let near = |v: f64, want: f64| (v - want).abs() <= 1.0;
-        assert!(
-            near(m[0], 16.0) && near(m[1], 128.0) && near(m[2], 128.0),
-            "{bits}-bit: the bars are {m:?}"
-        );
+        for k in [165, 195] {
+            let m = region_means(&frame_at(&out, k), (0, 100));
+            assert!(
+                near(m[0], 16.0) && near(m[1], 128.0) && near(m[2], 128.0),
+                "{bits}-bit: frame {k}'s bars are {m:?}"
+            );
+        }
         // Levels hold through the video processor (10 bits into 8 too: it
         // drops the low bits, up to half a level low where the CPU rounds),
         // within the encoder's noise, against the CPU's export of the same

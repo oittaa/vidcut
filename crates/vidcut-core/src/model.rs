@@ -668,9 +668,21 @@ pub struct Marker {
     /// `k<N>`, never reused.
     pub id: String,
     pub at: i64,
+    /// Length in frames: one, unless set or imported (spec D40). The
+    /// timeline shows a marker as a point either way.
+    #[serde(default = "one_frame", skip_serializing_if = "is_one_frame")]
+    pub duration: i64,
     pub name: String,
     pub color: String,
     pub note: String,
+}
+
+fn one_frame() -> i64 {
+    1
+}
+
+fn is_one_frame(frames: &i64) -> bool {
+    *frames == 1
 }
 
 /// Counters for new ids.

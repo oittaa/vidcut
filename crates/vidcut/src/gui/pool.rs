@@ -243,9 +243,9 @@ impl Workspace {
                                  a clip and choose Move to Bin",
                             ));
                         } else {
-                            ui.label(dim(
+                            ui.label(dim(super::keys(
                                 "No media yet. Import with Ctrl+I, or `vidcut media add FILE…`",
-                            ));
+                            )));
                             if ui.button("Import Media…").clicked() {
                                 self.import_media();
                             }

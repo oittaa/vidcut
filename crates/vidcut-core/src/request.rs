@@ -574,10 +574,14 @@ pub enum Request {
         color: Option<String>,
         #[serde(default)]
         note: String,
+        /// Its length (`25f`, `1s`); one frame by default. The timeline
+        /// shows it as a point; OTIO files keep it (spec D40).
+        #[serde(default)]
+        duration: Option<TimeSpec>,
     },
     #[serde(rename = "markers.move")]
     MarkersMove { marker: String, to: TimeSpec },
-    /// Change a marker's name, color or note (M on a marker).
+    /// Change a marker's name, color, note or length (M on a marker).
     #[serde(rename = "markers.set")]
     MarkersSet {
         marker: String,
@@ -587,6 +591,9 @@ pub enum Request {
         color: Option<String>,
         #[serde(default)]
         note: Option<String>,
+        /// Its length (`25f`, `1s`).
+        #[serde(default)]
+        duration: Option<TimeSpec>,
     },
     #[serde(rename = "markers.remove")]
     MarkersRemove { marker: String },
@@ -635,8 +642,9 @@ pub enum Request {
     #[serde(rename = "presets.get")]
     PresetsGet { name: String },
     /// Save a user preset (`~/.config/vidcut/presets/NAME.toml`, on Windows
-    /// in `%APPDATA%\vidcut`): `settings`, or preset `from` with `set`
-    /// overrides. `quick_export` puts it in Quick Export.
+    /// in `%APPDATA%\vidcut`, on macOS in `~/Library/Application
+    /// Support/vidcut`): `settings`, or preset `from` with `set` overrides.
+    /// `quick_export` puts it in Quick Export.
     #[serde(rename = "presets.save")]
     PresetsSave {
         /// File-name safe: letters, digits, `-`, `_` and `.`.
@@ -669,7 +677,8 @@ pub enum Request {
         refresh: bool,
     },
     /// Application preferences (`~/.config/vidcut/preferences.toml`, on
-    /// Windows in `%APPDATA%\vidcut`) and what the thumbnail cache holds.
+    /// Windows in `%APPDATA%\vidcut`, on macOS in `~/Library/Application
+    /// Support/vidcut`) and what the thumbnail cache holds.
     #[serde(rename = "preferences.get")]
     PreferencesGet {},
     /// Change application preferences; what is left out stays. Turning the

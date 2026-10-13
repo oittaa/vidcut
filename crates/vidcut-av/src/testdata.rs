@@ -20,3 +20,11 @@ pub fn fixtures_dir() -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }
+
+/// The system's temp folder with its links resolved, as vidcut names the
+/// paths it keeps: macOS's is under `/var`, a link to `/private/var`. Tests
+/// that compare paths vidcut keeps with their own make their folders here.
+pub fn temp_dir() -> PathBuf {
+    let temp = std::env::temp_dir();
+    vidcut_core::dirs::canonical(&temp).unwrap_or(temp)
+}
