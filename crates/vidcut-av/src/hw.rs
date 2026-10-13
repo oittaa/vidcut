@@ -200,6 +200,8 @@ pub struct GpuDecoder {
     cuda: Option<CudaDevice>,
     /// Its GPU's PCI vendor, where known (Direct3D 11's adapter's).
     vendor: Option<u32>,
+    /// Codecs left to the CPU ([`without`](Self::without)).
+    left: Vec<ffmpeg::codec::Id>,
 }
 
 /// AMD's PCI vendor id.
@@ -225,6 +227,7 @@ impl GpuDecoder {
             on: String::new(),
             cuda: Some(cuda),
             vendor: None,
+            left: Vec::new(),
         }
     }
 
@@ -249,6 +252,7 @@ impl GpuDecoder {
             on: on.to_string(),
             cuda: None,
             vendor,
+            left: Vec::new(),
         })
     }
 
@@ -270,15 +274,23 @@ impl GpuDecoder {
         self.kind
     }
 
-    /// Whether it decodes `codec` right, as far as known. AMD's Direct3D 11
-    /// decoder loses its way in H.264 sought into an open GOP (a keyframe
-    /// that isn't IDR): some frames on, it shows one picture over and over,
-    /// where NVIDIA's and VA-API on Intel decode on. The CPU decodes H.264
-    /// there.
+    /// Whether it decodes `codec`, unless left to the CPU
+    /// ([`without`](Self::without)) or not decoded right, as far as known.
+    /// AMD's Direct3D 11 decoder loses its way in H.264 sought into an open
+    /// GOP (a keyframe that isn't IDR): some frames on, it shows one picture
+    /// over and over, where NVIDIA's and VA-API on Intel decode on. The CPU
+    /// decodes H.264 there.
     pub fn decodes(&self, codec: ffmpeg::codec::Id) -> bool {
         !(self.kind == Kind::D3d11va
             && self.vendor == Some(AMD)
             && codec == ffmpeg::codec::Id::H264)
+            && !self.left.contains(&codec)
+    }
+
+    /// The same decoder, leaving `codec` to the CPU.
+    pub fn without(mut self, codec: ffmpeg::codec::Id) -> Self {
+        self.left.push(codec);
+        self
     }
 
     /// Whether its hardware decodes `codec` in `bits` (8 or 10), as its

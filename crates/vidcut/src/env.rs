@@ -249,7 +249,7 @@ impl Env for AvEnv {
             let decoder = prefs
                 .gpu
                 .acceleration
-                .then(vidcut_av::hw::GpuDecoder::best)
+                .then(crate::preferences::gpu_decoder)
                 .flatten()
                 .and_then(|d| d.own().ok());
             let written = vidcut_av::proxy::write(

@@ -380,7 +380,7 @@ pub fn export_media(
     // Decoded on the GPU the viewer decodes on, on a stream or device of
     // its own; on the CPU where that won't open.
     let decoder = crate::preferences::gpu_acceleration()
-        .then(vidcut_av::hw::GpuDecoder::best)
+        .then(crate::preferences::gpu_decoder)
         .flatten()
         .and_then(|d| d.own().ok());
     let reports = export::run(
