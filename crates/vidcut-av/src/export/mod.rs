@@ -94,6 +94,10 @@ pub struct Report {
     /// Video frames decoded and scaled on the GPU (NVDEC, CUDA) on their way
     /// to NVENC; the rest were made on the CPU.
     pub gpu_frames: i64,
+    /// Video frames whose source frame a GPU decoded (NVDEC, VA-API,
+    /// Direct3D 11): those of `gpu_frames`, and those that came down to be
+    /// made on the CPU ([`run_decoding_on`]).
+    pub gpu_decoded: i64,
     pub seconds: f64,
     /// What loudness normalization did (`audio.loudness`).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -333,6 +337,23 @@ pub fn run(
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<Report> {
+    run_decoding_on(plan, settings, output, available, None, cancel, progress)
+}
+
+/// [`run`], the pieces decoding on `decoder` where it decodes their
+/// streams, and NVENC's on NVDEC in any case
+/// ([`VideoFrames::decode_on`]): frames that don't stay on the GPU for
+/// NVENC come down to be made on the CPU, shrunk there to the size they
+/// are shown at.
+pub fn run_decoding_on(
+    plan: &RenderPlan,
+    settings: &ExportSettings,
+    output: &Path,
+    available: &Availability,
+    decoder: Option<&crate::hw::GpuDecoder>,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(Progress),
+) -> Result<Report> {
     crate::init();
     validate(settings).map_err(|e| Error::Invalid(e.message))?;
     // Settings left to the export choose from the files (decision D44).
@@ -365,7 +386,9 @@ pub fn run(
         return Err(Error::Invalid(CANCELLED.into()));
     }
     let part = partial_path(output);
-    let result = encode(plan, settings, &part, output, available, cancel, progress);
+    let result = encode(
+        plan, settings, &part, output, available, decoder, cancel, progress,
+    );
     match result.map(|r| Report {
         color: chosen,
         metadata: metadata_chosen,
@@ -463,12 +486,16 @@ fn first_run(
     enc: &encode::VideoEncoder,
     mut encoder: encoder::Video,
     (w, h): (u32, u32),
+    decoder: Option<&crate::hw::GpuDecoder>,
     cancel: &AtomicBool,
     started: Instant,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<Option<String>> {
     let mut frames =
         VideoFrames::new(&plan.video, plan.fps, w, h, enc.pixel, enc.hdr).with_dynamic(enc.dynamic);
+    if let Some(d) = decoder {
+        frames = frames.decode_on(d.clone());
+    }
     let mut p = ffmpeg::Packet::empty();
     for j in 0..plan.frames {
         if cancel.load(Ordering::Relaxed) {
@@ -662,6 +689,7 @@ fn encode(
     part: &Path,
     output: &Path,
     available: &Availability,
+    decoder: Option<&crate::hw::GpuDecoder>,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<Report> {
@@ -748,7 +776,16 @@ fn encode(
             // for the second with what it wrote.
             let (encoder, vaapi) = match &pass_files {
                 Some(files) if enc.passes.runs() == 2 => {
-                    let buffer = first_run(plan, &enc, encoder, (w, h), cancel, started, progress)?;
+                    let buffer = first_run(
+                        plan,
+                        &enc,
+                        encoder,
+                        (w, h),
+                        decoder,
+                        cancel,
+                        started,
+                        progress,
+                    )?;
                     let stats = files.stats();
                     let second = encode::Pass::Second {
                         stats: &stats,
@@ -764,7 +801,7 @@ fn encode(
             ost.set_parameters(&encoder);
             ost.set_time_base(fps.invert());
             ost.set_avg_frame_rate(fps);
-            let frames = match gpu {
+            let mut frames = match gpu {
                 Some((device, frames)) => {
                     VideoFrames::new(&plan.video, plan.fps, w, h, gpu_pixel(&enc), enc.hdr)
                         .with_gpu(device, frames)
@@ -773,6 +810,9 @@ fn encode(
             }
             .with_dynamic(enc.dynamic)
             .with_light(light);
+            if let Some(d) = decoder {
+                frames = frames.decode_on(d.clone());
+            }
             // HDR10+ goes into HEVC and AV1 packets here; libvpx-vp9 takes
             // it from the frames, and WebM and Matroska carry it.
             let id = encoder.id();
@@ -966,6 +1006,7 @@ fn encode(
         frames: plan.frames,
         samples: if audio.is_some() { plan.samples() } else { 0 },
         gpu_frames: video.as_ref().map_or(0, |v| v.frames.gpu_frames()),
+        gpu_decoded: video.as_ref().map_or(0, |v| v.frames.gpu_decoded()),
         passes: video.as_ref().map(|v| v.passes.count()),
         video_encoder: video.map(|v| v.name),
         audio_encoder: audio.map(|a| a.spec.name),

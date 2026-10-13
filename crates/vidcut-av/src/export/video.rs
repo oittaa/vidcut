@@ -116,6 +116,42 @@ pub(crate) fn fit(w: u32, h: u32, sar: (i32, i32), out_w: u32, out_h: u32) -> (u
     }
 }
 
+/// A frame in GPU memory brought down for the CPU to normalize into an
+/// `out_w`×`out_h` picture: scaled on the GPU first to the size it is shown
+/// at there (in the frame's own orientation and layout, its pixels square)
+/// when that is smaller, so a fraction comes down. The CPU does the rest as
+/// for any frame: turning, colors, HDR.
+pub(crate) fn down(
+    shrinker: &mut Option<crate::hw::Shrinker>,
+    src: &frame::Video,
+    rotation: u16,
+    (out_w, out_h): (u32, u32),
+) -> Result<frame::Video> {
+    let (w, h) = (src.width(), src.height());
+    let sar = src.aspect_ratio();
+    let sar = (sar.numerator(), sar.denominator());
+    // As the normalizer fits it, upright; then in the frame's orientation.
+    let size = if rotation % 180 == 90 {
+        let (sw, sh) = fit(h, w, (sar.1, sar.0), out_w, out_h);
+        (sh, sw)
+    } else {
+        fit(w, h, sar, out_w, out_h)
+    };
+    let shrinks = size.0 < w && size.1 < h;
+    if !shrinks {
+        return crate::hw::download(src);
+    }
+    let mut small = crate::hw::Shrinker::down(shrinker, src, size)?;
+    // Unless it came down whole.
+    if (small.width(), small.height()) == size {
+        // SAFETY: a plain field of its own frame.
+        unsafe {
+            (*small.as_mut_ptr()).sample_aspect_ratio = ffmpeg::ffi::AVRational { num: 1, den: 1 }
+        };
+    }
+    Ok(small)
+}
+
 impl Normalizer {
     /// `target`: the output's dynamic range (`None`: SDR BT.709).
     pub(crate) fn new(
@@ -531,12 +567,17 @@ pub struct VideoFrames {
     /// Copies Direct3D 11's frames kept on the GPU out of the decoder's
     /// texture array; `None` too once that failed, when they come down.
     keeper: Option<crate::hw::Keeper>,
+    /// Shrinks VA-API's and Direct3D 11's frames on the GPU before they
+    /// come down to be fitted into the output.
+    shrinker: Option<crate::hw::Shrinker>,
     /// Keeping Direct3D 11's frames failed: they come down from then on.
     unkept: bool,
     /// The clockwise turn that shows the last frame given upright.
     rotation: u16,
     /// The GPU that decoded the last frame given.
     last_decoder: Option<crate::hw::Kind>,
+    /// Frames given so far whose source frame a GPU decoded.
+    gpu_decoded: i64,
     /// The dynamic HDR metadata each output frame keeps from its source
     /// frame (decision D46). Other HDR metadata of the sources goes.
     dynamic: crate::hdr::Dynamic,
@@ -682,9 +723,11 @@ impl VideoFrames {
             decoder: None,
             keep_on_gpu: false,
             keeper: None,
+            shrinker: None,
             unkept: false,
             rotation: 0,
             last_decoder: None,
+            gpu_decoded: 0,
             dynamic: Default::default(),
             light: Default::default(),
             last_dolby_vision: frame::Video::empty(),
@@ -702,11 +745,14 @@ impl VideoFrames {
         self
     }
 
-    /// Frames as decoded ([`decoded`](Self::decoded)) decode on `gpu` where
-    /// it decodes the stream ([`VideoReader::open_gpu_or_cpu`]), and are
-    /// copied down to memory at their own size: the same frames, with the
-    /// same timestamps and colors. Other streams, stills and image
-    /// sequences decode on the CPU.
+    /// Frames decode on `gpu` where it decodes the stream
+    /// ([`VideoReader::open_gpu_or_cpu`]): the same frames, with the same
+    /// timestamps and colors. Frames as decoded ([`decoded`](Self::decoded))
+    /// are copied down to memory at their own size; frames fitted into the
+    /// output come down shrunk on the GPU to the size they are shown at,
+    /// where it is smaller ([`down`]). Other streams, stills and image
+    /// sequences decode on the CPU, and pieces NVDEC takes for NVENC
+    /// ([`with_gpu`](Self::with_gpu)) stay with it.
     pub fn decode_on(mut self, gpu: crate::hw::GpuDecoder) -> Self {
         self.decoder = Some(gpu);
         self
@@ -785,6 +831,12 @@ impl VideoFrames {
         self.gpu.as_ref().map_or(0, |g| g.made)
     }
 
+    /// Frames given so far whose source frame a GPU decoded, whether it
+    /// stayed there or came down.
+    pub fn gpu_decoded(&self) -> i64 {
+        self.gpu_decoded
+    }
+
     /// The rate frames are sampled at.
     pub fn fps(&self) -> Rational {
         self.fps
@@ -861,6 +913,7 @@ impl VideoFrames {
                     if picture {
                         self.rotation = self.source.as_ref().map_or(0, |s| s.reader.rotation());
                         self.last_decoder = self.source.as_ref().and_then(|s| s.decoder);
+                        self.gpu_decoded += i64::from(self.last_decoder.is_some());
                         self.source_frame(k).map(|f| Some(Some(f)))
                     } else {
                         self.pass_source_frame(k).map(|()| Some(None))
@@ -1103,6 +1156,14 @@ impl VideoFrames {
         } else if changed || src.normalized.is_none() {
             let (frame, _) = src.current.as_ref().expect("have a frame");
             let rotation = src.reader.rotation();
+            // Frames the GPU decoded come down to memory first.
+            let came_down;
+            let frame = if crate::hw::on_gpu(frame) {
+                came_down = down(&mut self.shrinker, frame, rotation, (out_w, out_h))?;
+                &came_down
+            } else {
+                frame
+            };
             let rebuild = self
                 .normalizer
                 .as_ref()

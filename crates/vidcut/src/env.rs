@@ -244,12 +244,14 @@ impl Env for AvEnv {
             std::fs::create_dir_all(dir)
                 .map_err(|e| Error::media(format!("{}: {e}", dir.display())))?;
             let total = Some((v.duration * v.fps.as_f64()).round().max(0.0) as u64);
-            // Decoded on the GPU as the viewer decodes (preview.md §6).
+            // Decoded on the GPU the viewer decodes on (preview.md §6), on a
+            // stream or device of its own.
             let decoder = prefs
                 .gpu
                 .acceleration
                 .then(vidcut_av::hw::GpuDecoder::best)
-                .flatten();
+                .flatten()
+                .and_then(|d| d.own().ok());
             let written = vidcut_av::proxy::write(
                 &input_of(media),
                 w,

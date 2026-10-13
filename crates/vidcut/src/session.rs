@@ -377,9 +377,19 @@ pub fn export_media(
             },
         }),
     )?;
-    let reports = export::run(&prepared, &available, hooks.cancel, &mut |i, path, pr| {
-        (hooks.progress)(i, count, path, pr)
-    })?;
+    // Decoded on the GPU the viewer decodes on, on a stream or device of
+    // its own; on the CPU where that won't open.
+    let decoder = crate::preferences::gpu_acceleration()
+        .then(vidcut_av::hw::GpuDecoder::best)
+        .flatten()
+        .and_then(|d| d.own().ok());
+    let reports = export::run(
+        &prepared,
+        &available,
+        decoder.as_ref(),
+        hooks.cancel,
+        &mut |i, path, pr| (hooks.progress)(i, count, path, pr),
+    )?;
     let mut r =
         answer(json!({ "outputs": reports, "notes": export::notes(&prepared, &available) }));
     r.rev = p.rev;
