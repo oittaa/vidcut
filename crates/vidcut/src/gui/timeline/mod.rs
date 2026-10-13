@@ -1642,6 +1642,16 @@ impl Workspace {
             "edit.delete",
             json!({ "clips": clips, "lift": true }),
         );
+        // A compound clip from another editor (deviation X9).
+        if c.compound.is_some() {
+            ui.separator();
+            item(
+                ui,
+                "Decompose in Place",
+                "edit.decompose",
+                json!({ "clips": [c.id] }),
+            );
+        }
         ui.separator();
         if ui.button(keys("Change Duration…  (Ctrl+D)")).clicked() {
             self.timeline.duration_dialog = Some(String::new());

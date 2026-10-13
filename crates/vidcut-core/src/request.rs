@@ -292,6 +292,10 @@ pub enum Request {
         /// named after the bundle, next to it). A dry run doesn't unpack.
         #[serde(default)]
         unpack: Option<PathBuf>,
+        /// Decompose the compound clips it holds, and those they hold, into
+        /// their clips (`edit.decompose`).
+        #[serde(default)]
+        flatten: bool,
     },
 
     // ---------------------------------------------------------------- edit functions (spec §7)
@@ -419,6 +423,14 @@ pub enum Request {
     /// Slip a clip's content.
     #[serde(rename = "edit.slip")]
     EditSlip { clip: ClipRef, by: TimeSpec },
+    /// Decompose in Place: a compound clip from another editor (deviation
+    /// X9) becomes the clips it holds, at their times, trimmed to the part
+    /// it shows. A picture block brings its pictures: its first track in
+    /// the block's place, each other on the next video track above that is
+    /// free there. A sound block brings its sound the same way on audio
+    /// tracks.
+    #[serde(rename = "edit.decompose")]
+    EditDecompose { clips: OneOrMany<ClipRef> },
     /// Slide a clip (Dynamic Trim's Slide mode): it keeps its media and moves,
     /// the clip before it getting longer and the one after it shorter (or the
     /// reverse).
