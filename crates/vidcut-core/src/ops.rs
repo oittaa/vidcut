@@ -129,9 +129,7 @@ fn split_at(p: &mut Project, ti: usize, t: i64) -> Option<String> {
     let offset = t - left.start;
     let mut right = left.clone();
     right.id = new_id.clone();
-    right.start = t;
-    right.duration = left.duration - offset;
-    right.source_in = left.source_in + offset;
+    right.move_head(offset);
     left.duration = offset;
     // The split point becomes a plain edit: audio continues seamlessly from the
     // left half into the right half.
@@ -401,11 +399,8 @@ pub fn edit_has_handles(p: &Project, e: i64) -> bool {
         return true;
     };
     !t.clips.iter().filter(|c| !c.is_generator()).any(|c| {
-        let at_end = c.end() == e
-            && p.source_frames(c)
-                .is_some_and(|frames| c.source_in + c.duration >= frames);
-        let at_start = c.start == e && c.source_in <= 0;
-        at_end || at_start
+        let room = |tail| p.source_frames(c).is_some_and(|f| c.room(tail, f) == 0);
+        (c.end() == e && room(true)) || (c.start == e && room(false))
     })
 }
 
@@ -820,9 +815,7 @@ pub fn slide(p: &mut Project, id: &str, by: i64) -> Result<()> {
     let (mut before_c, mut moved, mut after_c) = (t.clips[l].clone(), c, t.clips[r].clone());
     before_c.duration += by;
     moved.start += by;
-    after_c.start += by;
-    after_c.source_in += by;
-    after_c.duration -= by;
+    after_c.move_head(by);
     check_source(p, &before_c)?;
     check_source(p, &after_c)?;
     let before = (ti == main_index(p)).then(|| Before::of(p));
@@ -1194,14 +1187,14 @@ fn check_source(p: &Project, c: &Clip) -> Result<()> {
     if c.is_generator() {
         return Ok(());
     }
+    // At its speed (decision D48), the frames it shows and the source its
+    // sound plays.
+    let (lo, hi) = c.shown();
     if let Some(k) = &c.compound {
-        if c.source_in < 0 || c.source_in + c.duration > k.frames {
+        if lo < 0 || hi > k.frames {
             return Err(Error::invalid(format!(
-                "{} would need frames {}..{} of its compound, which has 0..{}",
-                c.id,
-                c.source_in,
-                c.source_in + c.duration,
-                k.frames
+                "{} would need frames {lo}..{hi} of its compound, which has 0..{}",
+                c.id, k.frames
             )));
         }
         return Ok(());
@@ -1210,18 +1203,17 @@ fn check_source(p: &Project, c: &Clip) -> Result<()> {
         .media(&c.media)
         .ok_or_else(|| Error::not_found(format!("no media {}", c.media)))?;
     let frames = p.media_limit(m);
-    if c.source_in < 0 || c.source_in + c.duration > frames {
+    if lo < 0 || hi > frames {
         return Err(Error::invalid(format!(
-            "{} would need source frames {}..{}, but {} has 0..{frames}",
-            c.id,
-            c.source_in,
-            c.source_in + c.duration,
-            m.id
+            "{} would need source frames {lo}..{hi}, but {} has 0..{frames}",
+            c.id, m.id
         )));
     }
-    if let Some(a) = &c.audio {
-        let (s, e) = (c.source_in + a.head, c.source_in + c.duration + a.tail);
-        if s < 0 || e > frames || e - s < 1 {
+    if let Some((a, b)) = c.audio_range() {
+        let span = c.sound_span();
+        let outside = span.is_some_and(|(s, e)| s < -1e-6 || e > frames as f64 + 1e-6);
+        if outside || b - a < 1 {
+            let (s, e) = span.map_or((lo, hi), |(s, e)| (s.floor() as i64, e.ceil() as i64));
             return Err(Error::invalid(format!(
                 "{}'s audio would need source frames {s}..{e}, but {} has 0..{frames}",
                 c.id, m.id
@@ -1248,10 +1240,9 @@ pub fn trim(p: &mut Project, id: &str, edge: Edge, delta: i64, ripple: Option<bo
     match edge {
         Edge::Tail => new.duration += delta,
         Edge::Head => {
-            new.source_in += delta;
-            new.duration -= delta;
-            if !ripple {
-                new.start += delta;
+            new.move_head(delta);
+            if ripple {
+                new.start -= delta;
             }
         }
     }
@@ -1313,9 +1304,7 @@ pub fn roll(p: &mut Project, id: &str, edge: Edge, delta: i64) -> Result<()> {
     let mut out = p.tracks[ti].clips[a].clone();
     let mut inc = p.tracks[ti].clips[b].clone();
     out.duration += delta;
-    inc.start += delta;
-    inc.source_in += delta;
-    inc.duration -= delta;
+    inc.move_head(delta);
     check_source(p, &out)?;
     check_source(p, &inc)?;
     p.tracks[ti].clips[a] = out;
@@ -1323,12 +1312,13 @@ pub fn roll(p: &mut Project, id: &str, edge: Edge, delta: i64) -> Result<()> {
     Ok(())
 }
 
-/// Slip a clip's content by `delta` source frames; position and
+/// Slip a clip's content by `delta` frames (source frames at normal
+/// speed, frames of its pace at another, decision D48); position and
 /// length stay.
 pub fn slip(p: &mut Project, id: &str, delta: i64) -> Result<()> {
     let (ti, ci) = locate(p, id)?;
     let mut c = p.tracks[ti].clips[ci].clone();
-    c.source_in += delta;
+    c.walk(delta);
     check_source(p, &c)?;
     p.tracks[ti].clips[ci] = c;
     Ok(())
@@ -1472,14 +1462,14 @@ pub fn extend_to_media_end(p: &mut Project, ids: &[String], ripple: Option<bool>
         let c = p
             .clip(id)
             .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
-        // A generator has no end.
-        if c.is_generator() {
+        // A generator, or a held frame, has no end.
+        if c.is_generator() || c.speed() == 0.0 {
             continue;
         }
         let frames = p
             .source_frames(c)
             .ok_or_else(|| Error::not_found(format!("no media {}", c.media)))?;
-        let room = frames - c.source_in - c.duration;
+        let room = c.room(true, frames);
         targets.push((c.start, id.clone(), room));
     }
     targets.sort();
@@ -1828,10 +1818,8 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
     for TrackClip { track, clip: c } in clips {
         // A block from another editor has no media (deviation X9).
         let has_video = if c.is_block() {
-            let outside = c
-                .compound
-                .as_ref()
-                .is_some_and(|k| c.source_in < 0 || c.source_in + c.duration > k.frames);
+            let (lo, hi) = c.shown();
+            let outside = c.compound.as_ref().is_some_and(|k| lo < 0 || hi > k.frames);
             if c.duration <= 0 || !c.media.is_empty() || c.audio.is_some() || outside {
                 return Err(Error::invalid(format!(
                     "pasted clip {} is a block with media, audio or frames it hasn't",
@@ -1844,7 +1832,8 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
                 .media(&c.media)
                 .ok_or_else(|| Error::not_found(format!("no media {} in this project", c.media)))?;
             let frames = p.media_limit(media);
-            if c.duration <= 0 || c.source_in < 0 || c.source_in + c.duration > frames {
+            let (lo, hi) = c.shown();
+            if c.duration <= 0 || lo < 0 || hi > frames {
                 return Err(Error::invalid(format!(
                     "pasted clip {} is outside {} (0..{frames} frames)",
                     c.id, c.media

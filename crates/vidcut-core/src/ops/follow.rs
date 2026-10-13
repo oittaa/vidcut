@@ -74,14 +74,16 @@ struct Mapper<'a> {
 }
 
 impl Mapper<'_> {
-    /// The clip now showing source frame `s` of old Track 1 clip `c`.
-    fn successor(&self, c: &Clip, s: i64) -> Option<&Clip> {
+    /// The clip now showing content `u` of old Track 1 clip `c`
+    /// ([`Clip::content_at`]).
+    fn successor(&self, c: &Clip, u: i64) -> Option<&Clip> {
         let shows = |n: &Clip| {
             n.media == c.media
                 && n.generator == c.generator
                 && n.compound == c.compound
-                && n.source_in <= s
-                && s < n.source_in + n.duration
+                && c.in_step(n)
+                && n.content_at(n.start) <= u
+                && u < n.content_at(n.end())
         };
         if let Some(n) = self.all.get(c.id.as_str())
             && shows(n)
@@ -90,8 +92,8 @@ impl Mapper<'_> {
         }
         self.parts.iter().copied().find(|n| {
             shows(n)
-                && n.source_in >= c.source_in
-                && n.source_in + n.duration <= c.source_in + c.duration
+                && n.content_at(n.start) >= c.content_at(c.start)
+                && n.content_at(n.end()) <= c.content_at(c.end())
         })
     }
 
@@ -132,12 +134,12 @@ impl Mapper<'_> {
                         .map_or(x, |(q, now)| now.end() + (x - q.end())),
                 );
             }
-            let s = c.source_at(x);
-            if let Some(n) = self.successor(c, s) {
-                return Some(n.start + (s - n.source_in));
+            let u = c.content_at(x);
+            if let Some(n) = self.successor(c, u) {
+                return Some(n.start + (u - n.content_at(n.start)));
             }
             if let Some(n) = self.all.get(c.id.as_str()) {
-                if s < n.source_in {
+                if u < n.content_at(n.start) {
                     return Some(n.start);
                 }
                 if self.edit.trimmed == Some(c.id.as_str()) {

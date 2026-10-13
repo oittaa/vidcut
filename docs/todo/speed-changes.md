@@ -1,9 +1,8 @@
 # Speed changes
 
-**When:** next. Clips at a speed play (spec D48); edits that would need speed math are refused (deviation X9).
+**When:** next. Clips at a speed play and edit (spec D48).
 
-- **Editing:** every edit at a clip's edge converts timeline frames to media frames through its speed: trim, roll, ripple, slip, slide, split, J/L rolls. Splitting a clip at 200% at its 25th frame splits its media at frame 50. Media limits count through it too.
-- **Phase:** a clip keeps how far into its pace it starts, so a split or head trim of a 50% clip shows the same frames, and a reversed −50% clip from Resolve pairs its frames as Resolve does (148, 147, 147, 146).
-- **Setting:** Change Clip Speed (Resolve's Cut page has it) in the GUI, CLI, IPC and MCP, and speed changes into scope (spec §1).
-- **Interchange:** OTIO's `LinearTimeWarp` both ways as the clip's own speed, replacing the carrying.
-- **Compound clips:** one with a speed change plays the clips it holds at it (`render::expanded`), backward in reverse order.
+- **Setting:** Change Clip Speed (Resolve's Cut page has it) in the GUI, CLI, IPC and MCP, and speed changes into scope (spec §1). Resolve keeps a clip's length without ripple and its source with ripple (99 frames at 50% become 198).
+- **Interchange:** OTIO's `LinearTimeWarp` written for speeds set in vidcut.
+- **Analyses:** Ripple Delete Silence and Detect Scene Cuts look at clips at another speed, their source mapped to the timeline through it (`analysis::Span`).
+- **Compound clips:** one with a speed change plays the clips it holds at it (`render::expanded`), backward in reverse order, and decomposes.

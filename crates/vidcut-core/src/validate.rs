@@ -65,15 +65,13 @@ pub fn violations(p: &Project) -> Vec<String> {
                 {
                     v.push(format!("{}: a block with media, audio or no place", c.id));
                 }
+                let (lo, hi) = c.shown();
                 if let Some(k) = &c.compound
-                    && (c.source_in < 0 || c.source_in + c.duration > k.frames)
+                    && (lo < 0 || hi > k.frames)
                 {
                     v.push(format!(
-                        "{}: source {}..{} outside its compound (0..{})",
-                        c.id,
-                        c.source_in,
-                        c.source_in + c.duration,
-                        k.frames
+                        "{}: source {lo}..{hi} outside its compound (0..{})",
+                        c.id, k.frames
                     ));
                 }
                 continue;
@@ -85,13 +83,12 @@ pub fn violations(p: &Project) -> Vec<String> {
                     if c.video && m.info.video.is_none() {
                         v.push(format!("{}: video clip of audio-only media {}", c.id, m.id));
                     }
-                    if c.video && (c.source_in < 0 || c.source_in + c.duration > frames) {
+                    // At its speed (decision D48).
+                    let (lo, hi) = c.shown();
+                    if c.video && (lo < 0 || hi > frames) {
                         v.push(format!(
-                            "{}: source {}..{} outside media {} (0..{frames})",
-                            c.id,
-                            c.source_in,
-                            c.source_in + c.duration,
-                            m.id
+                            "{}: source {lo}..{hi} outside media {} (0..{frames})",
+                            c.id, m.id
                         ));
                     }
                     if let Some(a) = &c.audio {
@@ -107,11 +104,15 @@ pub fn violations(p: &Project) -> Vec<String> {
                                 c.id, a.stream, m.id
                             ));
                         }
-                        let (s, e) = (c.source_in + a.head, c.source_in + c.duration + a.tail);
-                        if s < 0 || e > frames || e - s < 1 {
+                        let (s, e) = c.sound_span().unwrap_or((0.0, 1.0));
+                        if s < -1e-6 || e > frames as f64 + 1e-6 || c.duration + a.tail - a.head < 1
+                        {
                             v.push(format!(
-                                "{}: audio source {s}..{e} outside media {} (0..{frames})",
-                                c.id, m.id
+                                "{}: audio source {}..{} outside media {} (0..{frames})",
+                                c.id,
+                                s.floor(),
+                                e.ceil(),
+                                m.id
                             ));
                         }
                         let (as_, ae) = c.audio_range().expect("has audio");

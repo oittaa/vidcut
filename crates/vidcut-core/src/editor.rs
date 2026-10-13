@@ -231,26 +231,6 @@ pub struct History {
     pub redo: Vec<Entry>,
 }
 
-/// A clip with a speed change from another editor that `after` changed
-/// other than by moving it (its length, source or audio offsets), or split
-/// (deviation X9): that would need speed math.
-fn speed_reshaped(before: &Project, after: &Project) -> Option<String> {
-    let shape = |c: &Clip| {
-        (
-            c.duration,
-            c.source_in,
-            c.audio.as_ref().map(|a| (a.head, a.tail)),
-        )
-    };
-    before
-        .tracks
-        .iter()
-        .flat_map(|t| &t.clips)
-        .filter(|c| c.speed.is_some())
-        .find(|c| after.clip(&c.id).is_some_and(|n| shape(n) != shape(c)))
-        .map(|c| c.id.clone())
-}
-
 /// Maximum undo steps kept.
 pub const HISTORY_CAP: usize = 100;
 
@@ -313,12 +293,6 @@ impl Editor {
         let label = label_of(&request, &self.project);
         let mut working = self.project.clone();
         let result = mutate(&mut working, &request, env, playhead, dry_run)?;
-        if let Some(id) = speed_reshaped(&self.project, &working) {
-            return Err(Error::invalid(format!(
-                "{id} has a speed change from another editor (deviation X9): trims, splits, \
-                 slips and rolls of it would need speed math; move or delete it"
-            )));
-        }
         // Carried transitions the edit took away from their edit points.
         let mut warnings = Vec::new();
         let dropped = otio::transitions::prune(&mut working);
@@ -1019,8 +993,9 @@ fn mutate(
             let mut removed = Vec::new();
             for id in &ids {
                 let c = p.clip(id).expect("resolved");
-                // A block plays as a gap: no sound to look at. A speed
-                // change from another editor can't be cut.
+                // A block plays as a gap: no sound to look at. A clip at
+                // another speed isn't looked at: the analyses map source to
+                // timeline at normal speed.
                 if c.is_block() || c.speed.is_some() {
                     continue;
                 }
@@ -1050,8 +1025,9 @@ fn mutate(
             let mut created = Vec::new();
             for id in &ids {
                 let c = p.clip(id).expect("resolved");
-                // A block plays as a gap: no pictures to look at. A speed
-                // change from another editor can't be cut.
+                // A block plays as a gap: no pictures to look at. A clip at
+                // another speed isn't looked at: the analyses map source to
+                // timeline at normal speed.
                 if c.is_block() || c.speed.is_some() {
                     continue;
                 }
@@ -2019,8 +1995,8 @@ fn decompose(
         .ok_or_else(|| Error::invalid(format!("{id} isn't a compound clip")))?;
     if block.speed.is_some() {
         return Err(Error::invalid(format!(
-            "{id} has a speed change from another editor (deviation X9): decomposing it would \
-             need speed math"
+            "{id} has a speed change, so it can't be decomposed: its clips would have to play \
+             at that speed"
         )));
     }
     let mut t = nested(&k, block.video)?;
@@ -2030,7 +2006,7 @@ fn decompose(
     let b = rescale(block.source_in + block.duration, to, t.fps);
     t.clips.retain_mut(|c| {
         let (s, e) = (c.start.max(a), c.end().min(b));
-        c.source_in += s - c.start;
+        c.walk(s - c.start);
         (c.start, c.duration) = (s - a, e - s);
         e > s
     });
@@ -2239,8 +2215,8 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         for id in pending {
             if p.clip(&id).is_some_and(|c| c.speed.is_some()) {
                 warnings.push(format!(
-                    "{id} has a speed change: kept as a compound clip, as decomposing it would \
-                     need speed math"
+                    "{id} has a speed change: kept as a compound clip, as its clips would have \
+                     to play at that speed"
                 ));
                 continue;
             }
@@ -2983,7 +2959,8 @@ pub fn clip_json(p: &Project, c: &Clip, track: &str) -> Value {
         "start_tc": p.settings.timecode(c.start),
         "end_tc": p.settings.timecode(c.end()),
         "source_in": c.source_in,
-        "source_out": c.source_in + c.duration,
+        // Where it would show next (decision D48).
+        "source_out": c.source_at(c.end()),
         "source_in_tc": p.settings.length_timecode(c.source_in),
         "enabled": c.enabled,
     });

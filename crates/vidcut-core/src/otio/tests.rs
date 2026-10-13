@@ -1,7 +1,7 @@
 //! OTIO interchange tests (deviation X9).
 
 use super::*;
-use crate::model::{AudioInfo, MediaInfo};
+use crate::model::{AudioInfo, MediaInfo, Speed};
 use crate::ops::MAIN;
 use crate::test_support::{FakeEnv, Fixture, media_info};
 
@@ -1035,7 +1035,8 @@ fn reads_editor_exports() {
         ]
     );
     let w = t.warnings.join("\n");
-    assert!(w.contains("speed changes"), "{w}");
+    // A speed change plays and is edited at its speed: nothing to warn of.
+    assert!(!w.contains("speed"), "{w}");
 
     // Through the editor: found by name, named after the file.
     let fps = Rational::new(24, 1).unwrap();
@@ -2106,7 +2107,7 @@ fn reversed_clips_read_and_write_as_editors_do() {
 }
 
 #[test]
-fn speed_changes_are_carried_and_locked() {
+fn speed_changes_are_carried_and_edited() {
     // As an editor writes them: a 0..100 | b 100..150 at twice its speed,
     // the time effect on its picture and sound | c 150..200.
     let mut f = Fixture::new(&[(10.0, true), (10.0, true)]);
@@ -2130,12 +2131,10 @@ fn speed_changes_are_carried_and_locked() {
 
     let mut g = Fixture::new(&[(10.0, true), (10.0, true)]);
     let r = g.ok(req("timeline.import", json!({ "otio": doc })));
-    assert_eq!(
-        r.result["warnings"],
-        json!([
-            "speed changes kept on their clips, which play at them but can't be trimmed, \
-             split, slipped or rolled: 200%"
-        ])
+    assert!(
+        r.result["warnings"].as_array().is_none_or(|w| w.is_empty()),
+        "{}",
+        r.result["warnings"]
     );
     let b = g.editor.project().clip("c2").unwrap().clone();
     let speed = b.speed.clone().unwrap();
@@ -2163,47 +2162,31 @@ fn speed_changes_are_carried_and_locked() {
     let first = otio_clips(otio_track(&part, "Video 1"))[0].clone();
     assert_eq!(first["source_range"]["start_time"]["value"], 20.0);
 
-    // What would need speed math is refused; nothing changes.
-    let before = g.editor.project().clone();
-    for (method, params) in [
-        (
-            "edit.trim",
-            json!({"clip": "c2", "edge": "tail", "by": -10}),
-        ),
-        ("edit.split", json!({"at": 120})),
-        ("edit.slip", json!({"clip": "c2", "by": 5})),
-        ("edit.roll", json!({"clip": "c1", "edge": "tail", "by": 5})),
-        (
-            "edit.audio_roll",
-            json!({"clip": "c2", "edge": "tail", "by": 5}),
-        ),
-        (
-            "edit.insert",
-            json!({"media": "m1", "range": "0f..10f", "at": 120}),
-        ),
-    ] {
-        let e = g.err(req(method, params));
-        assert!(e.message.contains("c2 has a speed change"), "{method}: {e}");
-    }
-    assert_eq!(g.editor.project(), &before);
-    // What only moves it works.
-    g.ok(req(
-        "edit.trim",
-        json!({"clip": "c1", "edge": "head", "by": 10}),
-    ));
-    assert_eq!(g.editor.project().clip("c2").unwrap().start, 90);
-    g.ok(req(
-        "edit.move",
-        json!({"clips": "c2", "to": 300, "mode": "overwrite"}),
-    ));
-    let moved = g.editor.project().clip("c2").unwrap().clone();
+    // Edits go through its speed (decision D48): split 20 frames in, its
+    // second part starts at source 40 and shows what it showed; slipped a
+    // frame it shows 2 later; trimmed past its media's end it is refused.
+    let shown: Vec<i64> = (120..150).map(|t| b.source_at(t)).collect();
+    g.ok(req("edit.split", json!({"at": 120})));
+    let p = g.editor.project();
+    let second = p
+        .tracks
+        .iter()
+        .flat_map(|t| &t.clips)
+        .find(|c| c.start == 120 && c.video)
+        .unwrap()
+        .clone();
+    assert_eq!(second.source_in, 40);
     assert_eq!(
-        (moved.start, moved.duration, moved.source_in),
-        (140, 50, b.source_in),
-        "to Track 1's end, with Ripple on"
+        (120..150).map(|t| second.source_at(t)).collect::<Vec<_>>(),
+        shown
     );
-    g.ok(req("edit.delete", json!({"clips": "c2"})));
-    assert!(g.editor.project().clip("c2").is_none());
+    g.ok(req("edit.slip", json!({"clip": second.id, "by": 1})));
+    assert_eq!(g.editor.project().clip(&second.id).unwrap().source_in, 42);
+    let e = g.err(req(
+        "edit.trim",
+        json!({"clip": second.id, "edge": "tail", "by": 100}),
+    ));
+    assert!(e.message.contains("would need source frames"), "{e}");
 }
 
 #[test]
@@ -2387,4 +2370,70 @@ fn compound_clips_play_what_they_hold() {
         pictures(&crate::render::flatten(h.editor.project(), 0, 100).unwrap()),
         [(Some(0), 100)]
     );
+}
+
+#[test]
+fn a_clip_keeps_its_pace_through_an_export() {
+    // Decision D48: a clip at half speed split at an odd frame, its second
+    // part half a source frame into its pace; vidcut's own file brings it
+    // back showing the same frames, and Resolve's reversed one at -50%
+    // pairs its frames as Resolve shows them.
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.append("m1", 100, 150);
+    let mut p = f.editor.project().clone();
+    p.tracks
+        .iter_mut()
+        .flat_map(|t| &mut t.clips)
+        .for_each(|c| {
+            c.speed = Some(Speed {
+                effect: json!({"OTIO_SCHEMA": "LinearTimeWarp.1", "name": "", "effect_name": "",
+                    "time_scalar": 0.5}),
+                skip: 0,
+            })
+        });
+    f.editor = crate::editor::Editor::new(p, Default::default());
+    f.ok(req("edit.split", json!({"at": 1})));
+    let shows = |f: &Fixture| -> Vec<i64> {
+        let p = f.editor.project();
+        let v1 = &p.tracks.iter().find(|t| t.id == "V1").unwrap().clips;
+        (0..50)
+            .map(|t| {
+                v1.iter()
+                    .find(|c| c.start <= t && t < c.end())
+                    .unwrap()
+                    .source_at(t)
+            })
+            .collect()
+    };
+    let before = shows(&f);
+    assert_eq!(before[..5], [100, 100, 101, 101, 102]);
+    let doc = export(f.editor.project(), "pace", None, Locations::Absolute).unwrap();
+    let mut g = Fixture::new(&[(10.0, true)]);
+    g.ok(req("timeline.import", json!({ "otio": doc })));
+    assert_eq!(shows(&g), before);
+
+    // As Resolve writes a clip reversed at -50%: its range 99..148.5.
+    let mut doc = export(f.editor.project(), "pace", None, Locations::Absolute).unwrap();
+    for track in ["Video 1", "Audio 1"] {
+        let items = doc["tracks"]["children"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|t| t["name"] == track)
+            .unwrap()["children"]
+            .as_array_mut()
+            .unwrap();
+        items.truncate(1);
+        let item = &mut items[0];
+        item["effects"] = json!([{"OTIO_SCHEMA": "LinearTimeWarp.1", "name": "",
+            "effect_name": "", "time_scalar": -0.5}]);
+        item["metadata"]["vidcut"] = json!({});
+        item["source_range"]["start_time"]["value"] = json!(99.0);
+        item["source_range"]["duration"]["value"] = json!(99.0);
+    }
+    let mut h = Fixture::new(&[(10.0, true)]);
+    h.ok(req("timeline.import", json!({ "otio": doc })));
+    let c = h.editor.project().clip("c1").unwrap().clone();
+    let first: Vec<i64> = (0..4).map(|t| c.source_at(t)).collect();
+    assert_eq!((first, c.source_at(98)), (vec![148, 147, 147, 146], 99));
 }

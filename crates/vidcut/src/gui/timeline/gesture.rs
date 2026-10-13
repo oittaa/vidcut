@@ -300,11 +300,11 @@ impl Drag {
         let row = Some(t.id.clone());
         let (target, snapped) = ctx.snapped(from + moved(ctx, self.press, pos));
         let mut delta = target - from;
-        // Media limits.
+        // Media limits, at its speed (decision D48).
         let frames = ctx.media_frames(c);
         let (lo, hi) = match edge {
-            Edge::Head => (-c.source_in, c.duration - 1),
-            Edge::Tail => (1 - c.duration, frames - c.source_in - c.duration),
+            Edge::Head => (-c.room(false, frames), c.duration - 1),
+            Edge::Tail => (1 - c.duration, c.room(true, frames)),
         };
         delta = delta.clamp(lo, hi);
         if edge == Edge::Head && !ripple {
@@ -678,8 +678,8 @@ fn roll_preview(ctx: &Ctx, target: i64, outgoing: &str, from: i64) -> Preview {
         return Preview::default();
     };
     let (target, snapped) = ctx.snapped(target);
-    let lo = (1 - a.duration).max(-b.source_in);
-    let hi = (b.duration - 1).min(ctx.media_frames(a) - a.source_in - a.duration);
+    let lo = (1 - a.duration).max(-b.room(false, ctx.media_frames(b)));
+    let hi = (b.duration - 1).min(a.room(true, ctx.media_frames(a)));
     let delta = (target - from).clamp(lo.min(0), hi.max(0));
     Preview {
         request: (delta != 0)
@@ -705,10 +705,8 @@ fn slip_preview(ctx: &Ctx, pos: Pos2, press: Pos2, clips: &[String]) -> Preview 
     for id in clips {
         if let Some(c) = ctx.clip(id) {
             let frames = ctx.media_frames(c);
-            by = by.clamp(
-                -c.source_in,
-                (frames - c.source_in - c.duration).max(-c.source_in),
-            );
+            let lo = -c.room(false, frames);
+            by = by.clamp(lo, c.room(true, frames).max(lo));
         }
     }
     let req = match clips {

@@ -623,8 +623,7 @@ pub struct Clip {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compound: Option<Compound>,
     /// A speed change another editor made, carried (deviation X9): the clip
-    /// plays at it (decision D48), and edits that would need speed math
-    /// (trims, splits, slips, rolls) refuse it.
+    /// plays and edits at it (decision D48).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed: Option<Speed>,
 }
@@ -635,6 +634,14 @@ pub struct Speed {
     /// The OTIO time effect as read: a `LinearTimeWarp` (`time_scalar` 2.0
     /// for twice the speed, -1.0 reversed) or a `FreezeFrame`.
     pub effect: serde_json::Value,
+    /// Frames of its pace before its first frame (decision D48): the parts
+    /// a split or trim leaves show the frames they showed.
+    #[serde(default, skip_serializing_if = "is_zero_frames")]
+    pub skip: i64,
+}
+
+fn is_zero_frames(n: &i64) -> bool {
+    *n == 0
 }
 
 impl Speed {
@@ -748,10 +755,114 @@ impl Clip {
             .map(|a| (self.start + a.head, self.end() + a.tail))
     }
 
+    /// How it walks its source (decision D48): its speed, from where in its
+    /// pace it starts.
+    pub fn pace(&self) -> crate::render::Pace {
+        crate::render::Pace::of(self.speed(), self.speed.as_ref().map_or(0, |s| s.skip))
+    }
+
     /// Source frame shown at timeline frame `t`: at its speed (decision
-    /// D48), the frame at or before where it is.
+    /// D48), the one its stretch of the source starts in.
     pub fn source_at(&self, t: i64) -> i64 {
-        self.source_in + crate::render::Pace::of(self.speed(), 0).offset(t - self.start)
+        self.source_in + self.pace().offset(t - self.start)
+    }
+
+    /// Where its sound is in its source at timeline frame `t` (frames,
+    /// between frames too), at its speed (decision D48).
+    pub fn sound_at(&self, t: f64) -> f64 {
+        self.source_in as f64 + self.pace().sound(t - self.start as f64)
+    }
+
+    /// Its content moves on `k` frames of its pace (back when negative):
+    /// each frame shows what the one `k` later showed. A slip; with its
+    /// start and length (`move_head`), a head trim, a split's second part,
+    /// a roll's or slide's incoming clip.
+    pub fn walk(&mut self, k: i64) {
+        self.source_in += self.pace().offset(k);
+        if let Some(s) = self.speed.as_mut() {
+            s.skip += k;
+        }
+    }
+
+    /// Its head moves `k` frames later (earlier when negative), every frame
+    /// after it showing what it showed.
+    pub fn move_head(&mut self, k: i64) {
+        self.start += k;
+        self.duration -= k;
+        self.walk(k);
+    }
+
+    /// The source frames its picture shows: the lowest, and one past the
+    /// highest.
+    pub fn shown(&self) -> (i64, i64) {
+        let (a, b) = (self.source_at(self.start), self.source_at(self.end() - 1));
+        (a.min(b), a.max(b) + 1)
+    }
+
+    /// The source its sound plays (frames, low and high): none without
+    /// sound, or held.
+    pub fn sound_span(&self) -> Option<(f64, f64)> {
+        let (a, b) = self.audio_range()?;
+        if self.speed() == 0.0 {
+            return None;
+        }
+        let (x, y) = (self.sound_at(a as f64), self.sound_at(b as f64));
+        Some((x.min(y), x.max(y)))
+    }
+
+    /// Frames its head can move earlier, or its tail later (`tail`), with
+    /// its picture inside source frames `0..frames`; unbounded held.
+    pub fn room(&self, tail: bool, frames: i64) -> i64 {
+        let speed = self.speed();
+        if speed == 0.0 {
+            return i64::MAX / 4;
+        }
+        let at = |n: i64| {
+            let t = if tail {
+                self.end() - 1 + n
+            } else {
+                self.start - n
+            };
+            (0..frames).contains(&self.source_at(t))
+        };
+        // The last that fits, found between two that bracket it.
+        let far = ((frames as f64 + 2.0) / speed.abs()).min((i64::MAX / 4) as f64);
+        let (mut lo, mut hi) = (0, far as i64 + 2);
+        if !at(lo) {
+            return 0;
+        }
+        while hi - lo > 1 {
+            let mid = lo + (hi - lo) / 2;
+            if at(mid) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        lo
+    }
+
+    /// Where timeline frame `t` falls in its content: source frames at
+    /// normal speed, else frames of its pace (decision D48), which the
+    /// parts a split or trim leaves agree on.
+    pub fn content_at(&self, t: i64) -> i64 {
+        match &self.speed {
+            None => self.source_in + t - self.start,
+            Some(s) => s.skip + t - self.start,
+        }
+    }
+
+    /// Whether `other` walks the same source as it does, the same way, and
+    /// in step: a part of it after splits and trims.
+    pub fn in_step(&self, other: &Clip) -> bool {
+        match (&self.speed, &other.speed) {
+            (None, None) => true,
+            (Some(a), Some(b)) => {
+                a.effect == b.effect
+                    && other.source_in == self.source_in + self.pace().offset(b.skip - a.skip)
+            }
+            _ => false,
+        }
     }
 
     /// Source frames per timeline frame: its speed change's (2.0 twice as
