@@ -348,8 +348,24 @@ fn ms_between(a: Instant, b: Instant) -> f64 {
     }
 }
 
+/// Plays as the app it stands in for does in front: Windows favors the
+/// window in front, while a test runs in the background, level with every
+/// build and test beside it. Above them, playback keeps real time on a busy
+/// machine. Other systems don't let a user raise a process.
+fn above_normal_priority() {
+    #[cfg(windows)]
+    // SAFETY: sets this process's own priority class.
+    unsafe {
+        use windows_sys::Win32::System::Threading::{
+            ABOVE_NORMAL_PRIORITY_CLASS, GetCurrentProcess, SetPriorityClass,
+        };
+        SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
+    }
+}
+
 #[test]
 fn live_session() {
+    above_normal_priority();
     let tmp = tempfile::Builder::new()
         .prefix("vidcut-live-")
         .tempdir()
