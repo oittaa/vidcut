@@ -16,7 +16,7 @@ impl Sandbox {
     fn new(name: &str) -> Self {
         let dir = tempfile::Builder::new()
             .prefix(&format!("vidcut-cli-{name}-"))
-            .tempdir()
+            .tempdir_in(vidcut_av::testdata::temp_dir())
             .unwrap();
         Self { dir }
     }

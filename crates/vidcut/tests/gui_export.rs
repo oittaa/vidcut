@@ -128,7 +128,7 @@ fn last_gui_export(h: &live::Handle) -> Value {
 fn export_windows() {
     let tmp = tempfile::Builder::new()
         .prefix("vidcut-gui-export-")
-        .tempdir()
+        .tempdir_in(vidcut_av::testdata::temp_dir())
         .unwrap();
     let dir = tmp.path();
     // SAFETY: the only test in this binary; set before any thread starts.
