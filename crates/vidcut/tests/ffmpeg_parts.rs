@@ -115,7 +115,11 @@ fn doctor_names_what_the_build_lacks() {
         .expect("zscale");
     assert_eq!(
         (&z["kind"], &z["names"][0]["library"], &z["used_for"]),
-        (&"filter".into(), &"zimg".into(), &"HDR conversion".into())
+        (
+            &"filter".into(),
+            &"zimg".into(),
+            &"faster HDR conversion".into()
+        )
     );
     // H.264 has another encoder where this FFmpeg has one.
     if vidcut_av::parts::has_encoder("libopenh264") {
@@ -215,7 +219,7 @@ fn proxies_fall_back_to_prores() {
 }
 
 #[test]
-fn hdr_into_sdr_without_zscale_fails_before_writing_and_sdr_still_exports() {
+fn hdr_into_sdr_without_zscale_converts_on_the_cpu() {
     let pq = fixture::ensure(
         &FixtureSpec::new(VideoCodec::Hevc10, Container::Mkv, 320, 180, (30, 1), 30).hdr(Hdr::Pq),
     )
@@ -225,20 +229,7 @@ fn hdr_into_sdr_without_zscale_fails_before_writing_and_sdr_still_exports() {
     // H.264 can't carry HDR: the picture is tone-mapped into SDR.
     let out = sb.path("out.mp4");
     let (code, v) = sb.export("zscale", &out);
-    let message = dependency(code, &v);
-    assert!(
-        message.contains("30 frames change between HDR and SDR")
-            && message.contains("no zscale filter")
-            && message.contains("zimg"),
-        "{message}"
-    );
-    assert!(!out.exists());
-
-    // SDR into SDR needs no zscale.
-    let sb = Sandbox::new("sdr");
-    sb.project(&sdr());
-    let out = sb.path("out.mp4");
-    let (code, v) = sb.export("zscale", &out);
     assert_eq!(code, Some(0), "{v}");
+    assert_eq!(v["result"]["outputs"][0]["color"]["tone_mapped"], 30, "{v}");
     assert!(out.is_file());
 }

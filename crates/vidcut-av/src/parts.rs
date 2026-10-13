@@ -102,7 +102,7 @@ pub const DNXHR: Part = encoder(&[own("dnxhd")], "DNxHR");
 pub const AAC: Part = encoder(&[own("aac")], "AAC sound");
 pub const OPUS: Part = encoder(&[lib("libopus", "libopus"), own("opus")], "Opus sound");
 pub const MP3: Part = encoder(&[lib("libmp3lame", "LAME")], "MP3 sound");
-pub const ZSCALE: Part = filter(&[lib("zscale", "zimg")], "HDR conversion");
+pub const ZSCALE: Part = filter(&[lib("zscale", "zimg")], "faster HDR conversion");
 
 /// The parts vidcut uses.
 pub const PARTS: &[Part] = &[
@@ -303,7 +303,7 @@ mod tests {
         let e = missing_error(Kind::Filter, "zscale").to_string();
         assert_eq!(
             e,
-            "this FFmpeg has no zscale filter (HDR conversion; it comes with zimg)"
+            "this FFmpeg has no zscale filter (faster HDR conversion; it comes with zimg)"
         );
         let e = missing_error(Kind::Encoder, "png").to_string();
         assert_eq!(e, "this FFmpeg has no png encoder (stills and storyboards)");

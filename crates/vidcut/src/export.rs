@@ -873,7 +873,7 @@ pub fn run(
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(usize, &Path, Progress),
 ) -> Result<Vec<Report>> {
-    check(prepared, available, vidcut_av::parts::has_filter)?;
+    check(prepared, available)?;
     let mut reports = Vec::new();
     for (i, o) in prepared.outputs.iter().enumerate() {
         if let Some(dir) = o.path.parent().filter(|d| !d.as_os_str().is_empty()) {
@@ -906,26 +906,12 @@ pub fn run(
 }
 
 /// What the outputs need of this FFmpeg, before any file is written: an
-/// encoder for the picture, and where it changes transfer (HDR and SDR,
-/// PQ and HLG) the `zscale` filter, as `has_filter` says.
-fn check(
-    prepared: &Prepared,
-    available: &Availability,
-    has_filter: impl Fn(&str) -> bool,
-) -> Result<()> {
+/// encoder for the picture.
+fn check(prepared: &Prepared, available: &Availability) -> Result<()> {
     for o in &prepared.outputs {
-        let at = format!("{}: ", o.path.display());
         if let Some(v) = &o.settings.video {
             vidcut_av::export::encode::resolve_video(v, available)
-                .map_err(|e| av_error(&e, ErrorCode::Export, at.clone()))?;
-        }
-        if let Some(c) = &o.color
-            && c.converted() > 0
-            && !has_filter("zscale")
-        {
-            let e = vidcut_av::parts::missing_error(vidcut_av::parts::Kind::Filter, "zscale");
-            let what = format!("{at}{} frames change between HDR and SDR: ", c.converted());
-            return Err(av_error(&e, ErrorCode::Export, what));
+                .map_err(|e| av_error(&e, ErrorCode::Export, format!("{}: ", o.path.display())))?;
         }
     }
     Ok(())

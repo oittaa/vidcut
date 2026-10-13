@@ -78,6 +78,8 @@ pub(crate) fn frame_ref(src: &frame::Video) -> Result<frame::Video> {
 /// size, and converts them to the output's colors and pixel format.
 pub(crate) struct Normalizer {
     graph: filter::Graph,
+    /// Without `zscale`: its math on the CPU ([`crate::color::split`]).
+    cpu: Option<CpuStage>,
     /// Input parameters the graph was built for, and the rotation.
     input: (
         u32,
@@ -87,6 +89,16 @@ pub(crate) struct Normalizer {
         u16,
         crate::color::Source,
     ),
+}
+
+/// `zscale`'s part of a [`Normalizer`] without it: the colors converted on
+/// the CPU, written as planar YUV there (`write`) or not, and the graph from
+/// there into the output's format (`back`).
+struct CpuStage {
+    colors: crate::color::CpuColors,
+    write: Option<format::Pixel>,
+    target: Option<Hdr>,
+    back: Option<filter::Graph>,
 }
 
 /// The filters that turn a picture stored with clockwise `rotation` upright.
@@ -162,6 +174,20 @@ impl Normalizer {
         out_fmt: format::Pixel,
         target: Option<Hdr>,
     ) -> Result<Self> {
+        let zscale = crate::parts::has_filter("zscale");
+        Self::with(src, rotation, (out_w, out_h), out_fmt, target, zscale)
+    }
+
+    /// [`Normalizer::new`], converting colors with `zscale` or, without
+    /// it, on the CPU.
+    fn with(
+        src: &frame::Video,
+        rotation: u16,
+        (out_w, out_h): (u32, u32),
+        out_fmt: format::Pixel,
+        target: Option<Hdr>,
+        zscale: bool,
+    ) -> Result<Self> {
         let (w, h, fmt) = (src.width(), src.height(), src.format());
         let sar = src.aspect_ratio();
         let sar = (sar.numerator(), sar.denominator());
@@ -199,23 +225,53 @@ impl Normalizer {
             )
             .ctx(|| "creating video sink".into())?;
         let color = crate::color::Source::of(src);
-        let conv = crate::color::conversion(color, out_fmt, target);
+        // Without zimg the CPU does `zscale`'s part, between two graphs.
+        let (conv, cpu) = if crate::color::needs_zscale(color, target) && !zscale {
+            let split = crate::color::split(color, out_fmt, target);
+            (split.before, Some((split.cpu, split.write, split.back)))
+        } else {
+            (crate::color::conversion(color, out_fmt, target), None)
+        };
+        let last = match cpu {
+            Some(_) => String::new(),
+            None => format!(",format={}", fmt_name(out_fmt)),
+        };
         let spec = format!(
-            "{}scale={sw}:{sh}:flags={}{},pad={out_w}:{out_h}:{}:{}:color=black,setsar=1{},format={}",
+            "{}scale={sw}:{sh}:flags={}{},pad={out_w}:{out_h}:{}:{}:color=black,setsar=1{}{last}",
             upright(rotation),
             conv.flags,
             conv.scale,
             (out_w - sw) / 2,
             (out_h - sh) / 2,
             conv.after,
-            fmt_name(out_fmt)
         );
         crate::parts::parse_filters(&mut graph, &spec)?;
         graph
             .validate()
             .ctx(|| format!("configuring filter {spec}"))?;
+        let cpu = match cpu {
+            Some((colors, write, back)) => {
+                let from = write.unwrap_or(format::Pixel::GBRPF32LE);
+                let args = format!(
+                    "video_size={out_w}x{out_h}:pix_fmt={}:time_base=1/1000000:pixel_aspect=1/1",
+                    ffmpeg::ffi::AVPixelFormat::from(from) as i32
+                );
+                let back = match back {
+                    Some(spec) => Some(simple_graph(&args, &spec)?),
+                    None => None,
+                };
+                Some(CpuStage {
+                    colors,
+                    write,
+                    target,
+                    back,
+                })
+            }
+            None => None,
+        };
         Ok(Self {
             graph,
+            cpu,
             input: (w, h, fmt, sar, rotation, color),
         })
     }
@@ -249,8 +305,54 @@ impl Normalizer {
             .sink()
             .frame(&mut out)
             .ctx(|| "filtering frame".into())?;
-        Ok(out)
+        let Some(cpu) = self.cpu.as_mut() else {
+            return Ok(out);
+        };
+        // SAFETY: the graph's frame, made the caller's own to write.
+        if unsafe { ffmpeg::ffi::av_frame_make_writable(out.as_mut_ptr()) } < 0 {
+            return Err(Error::Invalid("no memory for a frame".into()));
+        }
+        cpu.colors.run(&mut out);
+        if let Some(pixel) = cpu.write {
+            let mut yuv = frame::Video::new(pixel, out.width(), out.height());
+            crate::color::write_yuv(&out, &mut yuv, cpu.target);
+            yuv.set_pts(out.pts());
+            out = yuv;
+        }
+        let Some(back) = cpu.back.as_mut() else {
+            return Ok(out);
+        };
+        back.get("in")
+            .expect("source")
+            .source()
+            .add(&out)
+            .ctx(|| "filtering frame".into())?;
+        let mut written = frame::Video::empty();
+        back.get("out")
+            .expect("sink")
+            .sink()
+            .frame(&mut written)
+            .ctx(|| "filtering frame".into())?;
+        Ok(written)
     }
+}
+
+/// A graph of `spec` between a source of `args` and a sink.
+fn simple_graph(args: &str, spec: &str) -> Result<filter::Graph> {
+    let find =
+        |name: &str| filter::find(name).ok_or_else(|| Error::Invalid(format!("no {name} filter")));
+    let mut graph = filter::Graph::new();
+    graph
+        .add(&find("buffer")?, "in", args)
+        .ctx(|| "creating video source".into())?;
+    graph
+        .add(&find("buffersink")?, "out", "")
+        .ctx(|| "creating video sink".into())?;
+    crate::parts::parse_filters(&mut graph, spec)?;
+    graph
+        .validate()
+        .ctx(|| format!("configuring filter {spec}"))?;
+    Ok(graph)
 }
 
 /// An open source file, read for one piece or several in a row.
@@ -1566,6 +1668,101 @@ mod tests {
                         (f64::from(got[c]) - want[c]).abs() <= near,
                         "{tag:?} {v:?} ({pixel:?}, full {full}, {size:?}) into {out:?}: \
                          {got:?}, the math says {want:.1?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Without `zscale`, the CPU's conversion (`color::split`) makes the
+    /// pictures zimg does, within a level (two for HLG's colors): HDR into
+    /// SDR (YUV and RGB), between PQ and HLG (light above HLG's white
+    /// kept), and SDR into HDR.
+    #[test]
+    fn the_cpus_conversion_matches_zscales() {
+        crate::init();
+        use ffmpeg::ffi::AVColorPrimaries as P;
+        use ffmpeg::ffi::AVColorSpace as S;
+        use ffmpeg::ffi::AVColorTransferCharacteristic as T;
+        use vidcut_core::model::Hdr;
+        if !crate::parts::has_filter("zscale") {
+            eprintln!("skipped: this FFmpeg has no zscale to compare with");
+            return;
+        }
+        // Black, grays, about SDR white in PQ, highlights, colors.
+        let values = [
+            [16, 128, 128],
+            [90, 128, 128],
+            [143, 128, 128],
+            [190, 128, 128],
+            [235, 128, 128],
+            [120, 90, 170],
+            [110, 170, 100],
+            [160, 140, 110],
+        ];
+        let hdr = |trc| {
+            let mut f = bands(
+                (640, 360),
+                &values,
+                S::AVCOL_SPC_BT2020_NCL,
+                false,
+                Pixel::YUV420P10LE,
+            );
+            // SAFETY: plain fields of its own frame.
+            unsafe {
+                (*f.as_mut_ptr()).color_trc = trc;
+                (*f.as_mut_ptr()).color_primaries = P::AVCOL_PRI_BT2020;
+            }
+            f
+        };
+        let sdr = bands(
+            (640, 360),
+            &values,
+            S::AVCOL_SPC_BT709,
+            false,
+            Pixel::YUV420P,
+        );
+        let (pq, hlg) = (hdr(T::AVCOL_TRC_SMPTE2084), hdr(T::AVCOL_TRC_ARIB_STD_B67));
+        let (planar, ten, rgb) = (Pixel::YUV420P, Pixel::YUV420P10LE, Pixel::RGB24);
+        for (what, f, out, target) in [
+            ("PQ into SDR", &pq, planar, None),
+            ("PQ into SDR RGB", &pq, rgb, None),
+            ("HLG into SDR", &hlg, planar, None),
+            ("PQ into HLG", &pq, ten, Some(Hdr::Hlg)),
+            ("HLG into PQ", &hlg, ten, Some(Hdr::Pq)),
+            ("SDR into PQ", &sdr, ten, Some(Hdr::Pq)),
+        ] {
+            let made = |zscale| {
+                Normalizer::with(f, 0, (640, 360), out, target, zscale)
+                    .and_then(|mut n| n.run(f))
+                    .unwrap()
+            };
+            let (zimg, cpu) = (made(true), made(false));
+            // Levels on the output's scale, 8 bits: a 10-bit level is a
+            // quarter.
+            let sample = |g: &frame::Video, plane: usize, x: usize, y: usize| match out {
+                Pixel::RGB24 => f64::from(g.data(0)[y * g.stride(0) + 3 * x + plane]),
+                Pixel::YUV420P10LE => {
+                    let (x, y) = if plane == 0 { (x, y) } else { (x / 2, y / 2) };
+                    let at = y * g.stride(plane) + 2 * x;
+                    let d = g.data(plane);
+                    f64::from(u16::from_le_bytes([d[at], d[at + 1]])) / 4.0
+                }
+                _ => {
+                    let (x, y) = if plane == 0 { (x, y) } else { (x / 2, y / 2) };
+                    f64::from(g.data(plane)[y * g.stride(plane) + x])
+                }
+            };
+            // HLG's saturated colors within two: zimg's HLG differs a little.
+            let near = if what.starts_with("HLG") { 2.0 } else { 1.0 };
+            for k in 0..values.len() {
+                let x = (2 * k + 1) * 640 / (2 * values.len());
+                for plane in 0..3 {
+                    let (a, b) = (sample(&zimg, plane, x, 180), sample(&cpu, plane, x, 180));
+                    assert!(
+                        (a - b).abs() <= near,
+                        "{what}, band {k} {:?}, plane {plane}: zimg {a}, the CPU {b}",
+                        values[k]
                     );
                 }
             }
