@@ -31,7 +31,7 @@ These are mandatory.
 
 **On Windows** the scripts run from Git Bash, with `FFMPEG_DIR` set (README.md, Requirements).
 
-**CI** (`.github/workflows/check.yml`) runs only the fast gate, on Linux, Windows and macOS, on pull requests and pushes to master. `.github/workflows/ffmpeg.yml` builds against the newest FFmpeg release and master weekly and on demand.
+**CI** (`.github/workflows/check.yml`) runs only the fast gate, on Linux, Windows and macOS, on pull requests and pushes to master; on Linux and Windows also the OTIO tests of `tests/cli.rs` with OpenTimelineIO's library installed. `.github/workflows/ffmpeg.yml` builds against the newest FFmpeg release and master weekly and on demand.
 
 ## Docs
 

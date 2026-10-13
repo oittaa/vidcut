@@ -120,7 +120,7 @@ vidcut history undo                         # works across separate runs
   - Media that moved: paths relative to the file and a project folder moved with the file are found by themselves; otherwise `--search /mnt/footage` looks for them by file name, subfolders too. Missing media fail the import (exit 7) with the list of files.
   - What can't be imported (transitions, compound clips, generators, speed changes, clip effects in use such as a zoom, crop or pan, clips overlapping others on their track) is listed in `warnings`.
 - Raw: `timeline.import` also takes the document inline as `otio` (relative media paths then can't be found but by `search`).
-- `tests/cli.rs` checks the files against OpenTimelineIO's own Python library when one is installed (`pip install opentimelineio`; `VIDCUT_OTIO_PYTHON` names the Python); otherwise that part skips.
+- `tests/cli.rs` checks the files against OpenTimelineIO's own Python library when one is installed (`pip install opentimelineio`; `VIDCUT_OTIO_PYTHON` names the Python, which then must have it); otherwise that part skips. CI installs the version in `tests/otio/requirements.txt`, on Linux and Windows.
 
 **Live control of a running GUI** ([docs/decisions/gui.md](docs/decisions/gui.md)):
 - **Routing:** when a GUI has the project open (`vidcut -p FILE` starts one), every project command runs inside it. You and the human then edit one live session: the GUI updates at once, and `via` in the JSON says `gui:<pid>`.
