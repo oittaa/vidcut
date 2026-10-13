@@ -507,6 +507,10 @@ pub fn doctor() -> Value {
         // What this FFmpeg build lacks of the parts vidcut uses, and what
         // each is for.
         "ffmpeg_missing": vidcut_av::parts::missing(),
+        // The parts it does with another than the usual name.
+        "ffmpeg_stand_ins": vidcut_av::parts::stand_ins().iter().map(|(p, name)| json!({
+            "used_for": p.used_for, "name": name, "instead_of": p.names[0].name,
+        })).collect::<Vec<_>>(),
         "audio_output": match vidcut_av::player::output_device() { Ok(d) => json!(d), Err(e) => json!(e.to_string()) },
         // What `player.audio_device` takes.
         "audio_outputs": match vidcut_av::player::output_devices() { Ok(d) => json!(d), Err(e) => json!(e.to_string()) },
