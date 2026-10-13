@@ -19,7 +19,7 @@ Early development: it works, but expect rough edges.
 - **Media:** stills, image sequences, proxies; GPU decoding (NVDEC; VA-API on Linux, Direct3D 11 on Windows).
 - **Interchange:** OpenTimelineIO (`.otio`, `.otioz`, `.otiod`).
 - **Everything scriptable:** every GUI action is also a CLI command and a JSON-RPC call on the running app. `vidcut mcp` offers them to AI agents over the Model Context Protocol.
-- **Not included:** effects, transitions, titles, color grading.
+- **Not included:** effects, transitions, titles, color grading. Clip effects and transitions in another editor's OTIO file are kept and written back.
 
 ## Requirements
 
@@ -47,10 +47,10 @@ winget install LLVM.LLVM
 - If the build doesn't find libclang, set `LIBCLANG_PATH` to `C:\Program Files\LLVM\bin`.
 - `scripts/check.sh` runs from Git Bash.
 
-**macOS** (Apple Silicon; open work: [docs/todo/macos.md](docs/todo/macos.md)): Xcode's Command Line Tools and
+**macOS** (Apple Silicon), with `$(brew --prefix rustup)/bin` on `PATH` and `$(brew --prefix ffmpeg-full)/lib/pkgconfig` on `PKG_CONFIG_PATH`:
 
 ```bash
-brew install ffmpeg
+brew install ffmpeg-full rustup
 ```
 
 ## Build and run

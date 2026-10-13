@@ -1,6 +1,8 @@
 # Fast gate only: scripts/check.sh (fmt, clippy -D warnings, unit tests), on
 # Linux, Windows and macOS.
-# scripts/check.sh full (integration, e2e, doc tests) is intentionally not run here.
+# scripts/check.sh full (integration, e2e, doc tests) is intentionally not run here,
+# but for one cross-check on Linux and Windows: vidcut's OTIO files against
+# OpenTimelineIO's own library, which those tests skip without.
 name: check
 
 on:
@@ -94,6 +96,22 @@ jobs:
         # shows each crate as it compiles.
         run: scripts/check.sh
 
+      # vidcut's OTIO files against OpenTimelineIO's own Python library
+      # (deviation X9): tests/cli.rs skips that part without one. The
+      # library and the Python are in tests/otio, where Dependabot sees the
+      # library.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: OTIO against OpenTimelineIO's library
+        run: |
+          set -euo pipefail
+          uv venv --python "$(tr -d '[:space:]' < tests/otio/.python-version)" "$RUNNER_TEMP/otio"
+          uv pip install --python "$RUNNER_TEMP/otio" -r tests/otio/requirements.txt
+          export VIDCUT_OTIO_PYTHON="$RUNNER_TEMP/otio/bin/python"
+          "$VIDCUT_OTIO_PYTHON" -c "import opentimelineio as o; print('OpenTimelineIO', o.__version__)"
+          cargo test -p vidcut --test cli -- otio stills_and_sequences
+
   windows:
     name: Windows, fmt, clippy, unit tests
     runs-on: windows-2025
@@ -105,21 +123,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # FFmpeg 9.0 as a shared build with its headers and import libraries:
-      # BtbN's build of the end of a month (those are kept; the daily ones
-      # go), pinned with its checksum so a run builds what the last one
-      # did. Moving to a newer one is a change of these three lines. LLVM,
-      # whose libclang generates the bindings, comes with the runner.
-      - name: Install FFmpeg 9.0
+      # FFmpeg's newest release as a shared build with its headers and
+      # import libraries, as macOS takes Homebrew's newest (Linux builds
+      # against the oldest supported, Ubuntu's): BtbN's rolling `latest`
+      # release has a build of each recent release branch, and its
+      # checksum file names them. No version here to keep up to date; the
+      # step prints the one it took. LLVM, whose libclang generates the
+      # bindings, comes with the runner.
+      - name: Install FFmpeg
         run: |
           set -euo pipefail
-          tag=autobuild-2026-09-30-13-08
-          name=ffmpeg-n9.0.2-17-g2a571b6068-win64-gpl-shared-9.0
-          sha256=3da6c7b60bb9ccd73ec5b5e815ba804a0879eb362ba0e3beebce50174c022696
-          curl -fsSL -o ffmpeg.zip "https://github.com/BtbN/FFmpeg-Builds/releases/download/${tag}/${name}.zip"
-          echo "${sha256}  ffmpeg.zip" | sha256sum -c -
-          unzip -q ffmpeg.zip -d "$RUNNER_TEMP"
-          rm ffmpeg.zip
+          base=https://github.com/BtbN/FFmpeg-Builds/releases/download/latest
+          curl -fsSL -o checksums.sha256 "$base/checksums.sha256"
+          # The newest release branch's: ffmpeg-n9.0-latest-win64-gpl-shared-9.0.zip.
+          zip=$(grep -oE 'ffmpeg-n[0-9]+\.[0-9]+-latest-win64-gpl-shared-[0-9.]+\.zip' checksums.sha256 | sort -V | tail -1)
+          curl -fsSL -o "$zip" "$base/$zip"
+          grep "  ${zip}\$" checksums.sha256 | sha256sum -c -
+          unzip -q "$zip" -d "$RUNNER_TEMP"
+          rm "$zip" checksums.sha256
+          name=${zip%.zip}
           dir=$(cygpath -w "$RUNNER_TEMP/$name")
           {
             echo "FFMPEG_DIR=${dir}"
@@ -145,6 +167,24 @@ jobs:
       - name: Fast gate
         run: scripts/check.sh
 
+      # vidcut's OTIO files against OpenTimelineIO's own Python library
+      # (deviation X9): tests/cli.rs skips that part without one. The
+      # library and the Python are in tests/otio, where Dependabot sees the
+      # library.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: OTIO against OpenTimelineIO's library
+        run: |
+          set -euo pipefail
+          uv venv --python "$(tr -d '[:space:]' < tests/otio/.python-version)" "$RUNNER_TEMP/otio"
+          uv pip install --python "$RUNNER_TEMP/otio" -r tests/otio/requirements.txt
+          export VIDCUT_OTIO_PYTHON="$RUNNER_TEMP/otio/Scripts/python.exe"
+          "$VIDCUT_OTIO_PYTHON" -c "import opentimelineio as o; print('OpenTimelineIO', o.__version__)"
+          # FFmpeg's DLLs, which scripts/check.sh puts on the path itself.
+          PATH="$(cygpath -u "$FFMPEG_DIR")/bin:$PATH"
+          cargo test -p vidcut --test cli -- otio stills_and_sequences
+
   macos:
     name: macOS, fmt, clippy, unit tests
     # Apple Silicon (arm64), pinned like the others.
@@ -154,16 +194,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # Homebrew's FFmpeg: its newest release, with its headers and
-      # pkg-config files. Not pinned: Homebrew keeps one version of a
-      # formula. libclang, which generates the bindings, comes with Xcode.
+      # Homebrew's ffmpeg-full: the newest release with zimg (zscale, which
+      # HDR needs), its headers and pkg-config files. Keg-only. Not pinned:
+      # Homebrew keeps one version of a formula. libclang, which generates
+      # the bindings, comes with Xcode.
       - name: Install FFmpeg
         run: |
           set -euo pipefail
-          brew install ffmpeg
-          pkg-config --exists --print-errors             libavcodec libavformat libavfilter libavutil libswscale libswresample
+          brew install ffmpeg-full
+          prefix=$(brew --prefix ffmpeg-full)
+          export PKG_CONFIG_PATH="${prefix}/lib/pkgconfig"
+          echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
+          pkg-config --exists --print-errors \
+            libavcodec libavformat libavfilter libavutil libswscale libswresample
           pkg-config --modversion libavcodec libswresample
-          ffmpeg -hide_banner -version | head -1
+          "${prefix}/bin/ffmpeg" -hide_banner -version | head -1
+          "${prefix}/bin/ffmpeg" -hide_banner -filters | grep -w zscale
 
       - name: Install the pinned Rust toolchain
         run: |
@@ -185,3 +231,4 @@ jobs:
 
       - name: Fast gate
         run: scripts/check.sh
+

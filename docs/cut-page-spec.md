@@ -118,6 +118,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 - **Display options** (right-click):
   - source timecode or source frame count (source modes)
   - record timecode or record frame (Timeline mode)
+  - drop-frame at 29.97 and 59.94, in a drop-frame project (D47)
   - Timer 1/2 and KeyKode (later)
 
 ### 4.4 In/Out (pp. 691–693, 700)
@@ -508,7 +509,7 @@ A decision holds until the manual or a test shows that Resolve does otherwise; t
   - **Source positions are timecode.** A source range counts from the media file's start timecode (a `tmcd` track, MXF's, a broadcast WAV's time reference), as Resolve writes and reads it; the available range starts there too. Media without one start at 0. Drop-frame timecode is converted with its skipped numbers left out.
   - **Paths are plain.** Resolve reads `target_url` as a path: `file://` URLs and `%20` escapes don't find the file. vidcut writes plain absolute paths (relative ones in bundles), and reads URLs too, escaped or not.
   - **Audio stays with its video** through Resolve's link group number, written on both and read when present.
-  - **Markers:** notes are written in `Resolve_OTIO.Note` as well as `comment`. Markers are one frame long ([todo](todo/otio-marker-durations.md)).
+  - **Markers:** notes are written in `Resolve_OTIO.Note` as well as `comment`. A marker keeps its length (one frame unless given one; `markers.add` and `markers.set` take `duration`), carried as OTIO's marked range. The timeline draws it as a point.
   - **Names:** track names are deviation X9 (a name that was set is written and read back; the place defaults `Video 1` and `Audio 2` don't count as names). Resolve's export writes no timeline name, and its import doesn't keep one.
   - **Bundles:** `.otioz` as OpenTimelineIO's adapter writes it (what Resolve imports); `.otiod` is the same as a folder. A bundle unpacks into a folder named after it, as Resolve's import does (deviation X9).
 - **D41. Proxies** (deviation X18). The manual's proxy chapters (pp. 207–218) are outside the Cut page, so the playback rules are set here.
@@ -576,3 +577,8 @@ A decision holds until the manual or a test shows that Resolve does otherwise; t
     - `static`, `hdr10plus`, `dolby_vision`, `all` and `none` choose what is written. `hdr10plus` makes HDR10+ for every frame when no picture has its own.
   - **Where:** in the bitstream (HEVC SEI at every keyframe, AV1 metadata OBUs; HDR10+ on every frame) and in the container (MP4/MOV `mdcv`/`clli`, Matroska/WebM colour metadata, Dolby Vision's configuration; VP9's HDR10+ as WebM BlockAdditions).
   - **Reporting:** the plan and the result give each file's metadata and why (what was left out, and for what). The Export dialog shows it in one dim line, and offers the setting next to the dynamic range.
+- **D47. Drop-frame timecode** (§4.3; Resolve's project settings offer it at these rates). At 29.97 and 59.94 fps a project can count record timecode drop-frame: frame numbers 00 and 01 (00–03 at 59.94) are skipped at the start of every minute except every tenth. So `01:00:00;00` is an hour of clock time, frame 107892; non-drop `01:00:00:00` is frame 108000.
+  - **Setting:** `project.set drop_frame` (`--drop-frame true`), and `project.create` and `project.open`'s create. New Project and File > Project Settings show it at those rates. It is refused at other rates, and changing to a rate without it turns it off.
+  - **Shown** with `;` before the frames wherever timecode appears: the viewer, the ruler, storyboards, query results' `*_tc` fields, lengths and source positions. A media file's own timecode shows as that file counts it.
+  - **Typed:** `;` means drop-frame anywhere (`01:00:00;00`, `01;00;00;00`); in a drop-frame project `:` counts drop-frame too. A label that drop-frame skips (`00:01:00;00`) is refused.
+  - **Set automatically:** the first video of a project whose format it sets (D37), and an OTIO import into an empty timeline, turn it on when the media's own timecode is drop-frame (written with `;`). OTIO doesn't say whether a timeline is drop-frame; only frame numbers travel.

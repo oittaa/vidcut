@@ -51,6 +51,13 @@ pub enum Request {
         sample_rate: Option<u32>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         channels: Option<u16>,
+        /// Count record timecode drop-frame (29.97 and 59.94; decision D47).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        drop_frame: Option<bool>,
+        /// Record timecode of the first frame: `00:00:00:00` (the default),
+        /// `01:00:00:00`, `10:00:00:00` or any other (deviation X7).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        start_tc: Option<TimeSpec>,
     },
 
     // ---------------------------------------------------------------- media pool
@@ -567,10 +574,14 @@ pub enum Request {
         color: Option<String>,
         #[serde(default)]
         note: String,
+        /// Its length (`25f`, `1s`); one frame by default. The timeline
+        /// shows it as a point; OTIO files keep it (spec D40).
+        #[serde(default)]
+        duration: Option<TimeSpec>,
     },
     #[serde(rename = "markers.move")]
     MarkersMove { marker: String, to: TimeSpec },
-    /// Change a marker's name, color or note (M on a marker).
+    /// Change a marker's name, color, note or length (M on a marker).
     #[serde(rename = "markers.set")]
     MarkersSet {
         marker: String,
@@ -580,6 +591,9 @@ pub enum Request {
         color: Option<String>,
         #[serde(default)]
         note: Option<String>,
+        /// Its length (`25f`, `1s`).
+        #[serde(default)]
+        duration: Option<TimeSpec>,
     },
     #[serde(rename = "markers.remove")]
     MarkersRemove { marker: String },
@@ -712,6 +726,14 @@ pub enum Request {
         /// With `create`, the new project's frame height; give the width too.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         height: Option<u32>,
+        /// With `create`, count record timecode drop-frame (29.97 and 59.94;
+        /// decision D47).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        drop_frame: Option<bool>,
+        /// With `create`, the record timecode of the first frame
+        /// (deviation X7).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        start_tc: Option<TimeSpec>,
     },
     /// Show the viewer in a mode: `source_clip`, `source_tape` or `timeline`.
     #[serde(rename = "viewer.set")]
@@ -1076,7 +1098,11 @@ pub struct ProjectSet {
     pub channels: Option<u16>,
     #[serde(default)]
     pub ripple_on: Option<bool>,
-    /// Record timecode of the first frame, e.g. `01:00:00:00`.
+    /// Count record timecode drop-frame: at 29.97 and 59.94 (decision D47).
+    #[serde(default)]
+    pub drop_frame: Option<bool>,
+    /// Record timecode of the first frame, e.g. `01:00:00:00` (`01:00:00;00`
+    /// drop-frame).
     #[serde(default)]
     pub start_tc: Option<TimeSpec>,
     // Decision D38.

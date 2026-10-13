@@ -1763,7 +1763,15 @@ fn many_segments_keep_memory_flat() {
 /// The process's peak resident memory in MB, as the system counts it: a
 /// reading or a panic, never a stand-in that would pass.
 fn peak_rss_mb() -> i64 {
-    #[cfg(unix)]
+    #[cfg(target_os = "macos")]
+    // SAFETY: getrusage fills the struct it is given.
+    unsafe {
+        let mut r: libc::rusage = std::mem::zeroed();
+        assert_eq!(libc::getrusage(libc::RUSAGE_SELF, &mut r), 0, "getrusage");
+        // In bytes (Linux counts kilobytes).
+        r.ru_maxrss >> 20
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
     {
         let status = std::fs::read_to_string("/proc/self/status").expect("/proc/self/status");
         let kb = status

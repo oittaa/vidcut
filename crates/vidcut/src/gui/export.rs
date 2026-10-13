@@ -444,14 +444,50 @@ fn clock(secs: f64) -> String {
     }
 }
 
-/// Opens the folder holding `path` in the file manager.
+/// Shows `path` in the file manager: a folder opened, a file selected in
+/// its folder (Finder, Explorer). On Linux the file's folder is opened:
+/// xdg-open selects nothing.
 fn show_in_folder(path: &Path) {
-    let dir = if path.is_dir() {
-        path
-    } else {
-        path.parent().unwrap_or(path)
+    use std::process::Command;
+    let file = !path.is_dir();
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut c = Command::new("open");
+        if file {
+            c.arg("-R");
+        }
+        c.arg(path);
+        c
     };
-    let _ = std::process::Command::new("xdg-open").arg(dir).spawn();
+    #[cfg(windows)]
+    let mut command = {
+        use std::os::windows::process::CommandExt;
+        let mut c = Command::new("explorer");
+        if file {
+            // Explorer reads `/select,` and the path as one argument, the
+            // path quoted in it.
+            c.raw_arg(format!("/select,\"{}\"", path.display()));
+        } else {
+            c.arg(path);
+        }
+        c
+    };
+    #[cfg(not(any(target_os = "macos", windows)))]
+    let mut command = {
+        let mut c = Command::new("xdg-open");
+        c.arg(if file {
+            path.parent().unwrap_or(path)
+        } else {
+            path
+        });
+        c
+    };
+    // Waited for on a thread of its own, so it doesn't stay a zombie.
+    let _ = crate::threads::spawn(
+        "vidcut-show-in-folder",
+        crate::threads::Work::Interactive,
+        move || command.status(),
+    );
 }
 
 fn job_paths(j: &JobInfo) -> Option<&Path> {

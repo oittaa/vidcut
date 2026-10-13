@@ -67,8 +67,11 @@ Additions that don't change Cut-page behavior, such as extra scripting commands,
 
 ## X7. Timelines start at 00:00:00:00
 - **Resolve:** new timelines start at record timecode 01:00:00:00 (p. 678).
-- **vidcut:** the start timecode defaults to 00:00:00:00; `project.set --start-tc 01:00:00:00` changes it. Timecodes typed into commands are record timecodes, so they follow the setting.
-- **Why:** with a zero start, timecode, seconds and frame numbers all count from the same point. Scripts and agents mix all three, and a hidden one-hour offset would make `00:01:00:00` and `60s` different frames.
+- **vidcut:** the start timecode defaults to 00:00:00:00.
+  - New Project and File > Project Settings offer 00:00:00:00, 01:00:00:00, 10:00:00:00 or any other. `project.create`, `project.open`'s create and `project.set` take `start_tc` (`--start-tc 01:00:00:00`; drop-frame `01:00:00;00`).
+  - The start keeps its label when the frame rate or drop-frame counting changes (decision D47), so its frame number changes.
+  - Timecodes typed into commands are record timecodes, so they follow the setting.
+- **Why:** with a zero start, timecode, seconds and frame numbers all count from the same point. Scripts and agents mix all three, and a hidden one-hour offset would make `00:01:00:00` and `60s` different frames. The hours offered are where editors and broadcasters start: one hour for programmes (bars, tone and a countdown come before it), ten hours for UK broadcast. A start means its label, so a new rate keeps the label.
 
 ## X8. The source viewer counts project frames
 - **Resolve:** Source Clip and Source Tape show a clip at its own frame rate, with its own source timecode (pp. 680, 688).
@@ -88,6 +91,7 @@ Additions that don't change Cut-page behavior, such as extra scripting commands,
     - each video track, and its clips' audio as an audio track (J/L cuts become audio clips offset from the video edits)
     - each audio track, and the markers
     - in `metadata.vidcut`: the In/Out marks, clip gain and mute, and track settings (lock, mute, solo, fader, name)
+    - the clip effects and transitions carried from another editor's file (below)
 
     A track with its video off or its audio muted is also marked disabled. Unlike a media export, it covers the whole timeline unless given a range. An `.otioz` or `.otiod` export (File > Export Timeline with Media) copies the media whole, as Resolve does, and runs as a job.
   - **For Resolve,** besides that:
@@ -102,21 +106,32 @@ Additions that don't change Cut-page behavior, such as extra scripting commands,
     - Video tracks become V1, V2, …, each with the audio that belongs to its clips (by link group when there is one). Other audio tracks become A1, A2, …. vidcut's own files map back exactly.
     - A project holds one timeline (X2), so the import goes after the last clip, or replaces the timeline (`--replace`); the GUI asks which. An empty timeline takes the file's frame rate, start timecode and track settings.
     - Resolve's channel map picks a clip's audio stream, and its clip volume sets the gain.
-    - Markers on clips and tracks become timeline markers. A marker's note is its `comment`, or `Resolve_OTIO.Note` when `comment` is empty, as Resolve leaves it.
+    - Markers on clips and tracks become timeline markers, keeping their lengths. A marker's note is its `comment`, or `Resolve_OTIO.Note` when `comment` is empty, as Resolve leaves it.
     - Track names other than Resolve's defaults name the tracks. An audio track whose clips become other clips' audio leaves no track to keep its name.
     - A file without a timeline name, as Resolve writes it, names the timeline after the file.
     - Accepted as Resolve writes them: `Clip.1` and `Clip.2`, source ranges in media timecode, float rates (snapped to exact rationals such as 24000/1001), Resolve's effect lists.
-    - **Left out, with a warning each:** transitions (cuts instead), nested stacks (compound clips), generators, speed changes, clip volume keyframes and fades, clips that would overlap others on their track, and clip effects in use, by name. A Resolve effect counts as in use when it is on with a setting off its default; Dynamic Zoom whenever it is on. So the untouched effect stack Resolve writes on every clip raises no warning. Carrying these: the `otio-carry-*`, `otio-compound-clips` and `otio-speed-carry` items in [todo/](todo/).
+    - **Left out, with a warning each:** nested stacks (compound clips), generators, speed changes, and clips that would overlap others on their track. Carrying these: the `otio-carry-generators`, `otio-compound-clips` and `otio-speed-carry` items in [todo/](todo/).
   - **Finding media:**
     - Media can be named as `file://` URLs (escaped or not), plain paths, Windows paths, paths relative to the file, or the URL Resolve keeps for offline media.
     - A project folder moved together with its timeline file is found without asking: the path's last parts are looked for next to the file.
     - Other media that moved are found by name with `--search FOLDER` (subfolders too); the GUI asks for that folder.
     - Only local regular files count as media: a device or a pipe counts as missing, and a clip whose `file://` URL names another host is left out with a warning.
   - **Bundles:** an `.otioz` import unpacks the media into a folder named after the bundle, next to it (`cut.otioz` → `cut/media/…`), or where `--unpack` says. Files already there are kept if they are the bundle's (by CRC-32); other files in the way are an error. A dry run unpacks nothing.
+  - **Clip effects** (Transform, Cropping, Composite, Video Faders, the clip volume's fades, Pan, …; another program's named ones too) stay on the clip's picture or sound. They are kept as data, not applied when playing or exporting, and written back unchanged in OTIO. Editing them stays out of scope (spec §1).
+    - **Which:** the ones in use. A Resolve effect is in use when it is on with a setting off its default; Dynamic Zoom whenever it is on. The untouched stack Resolve writes on every clip, and effects switched off, are left out.
+    - **Shown:** a badge on the clip (`fx Transform, Cropping`), their names in `timeline get` (`effects`), the effects themselves in `project get`, and one import warning naming them.
+    - **Through edits:** keyframe times count from the clip's first source frame, so they stay on their source frames through trims, slips and splits. A split leaves the fade-in on the first part and the fade-out on the last, as does an export that cuts a clip. The clip volume's level is the clip gain, written into it. An import at another frame rate converts keyframe times and fade lengths.
+    - Resolve rebuilds the ones in use when it imports vidcut's file.
+  - **Transitions** (a dissolve as OTIO's `SMPTE_Dissolve`; Resolve's audio crossfades and others as `Custom_Transition`) stay on their edit points: between two clips' pictures or sounds, or between a clip and a gap (a fade from or to black). They show and play as cuts, and are written back while they fit.
+    - **Fitting:** the clips on each side still meet at the cut (or the gap is still there); the clip after the cut has the transition's frames before the cut (`in_offset`) as media before its first frame; and the clip before it has those after the cut (`out_offset`) after its last. Splitting the clip before a cut hands the transition to the part that ends there.
+    - **Dropped** when an edit leaves one that no longer fits (a clip moved, deleted, or trimmed to the end of its media); the edit's `warnings` say how many, and undo brings them back. An import drops those that don't fit the project's media; an export drops those at its edges.
+    - **Shown:** a box over the frames each covers, across the picture or sound band; in `timeline get`, each track's `transitions` with name and cut; one import warning naming them.
+    - Resolve rebuilds them when it imports vidcut's file.
   - **Round trip:** export then import gives back the timeline frame for frame, in all three formats and through OpenTimelineIO's own Python library (`tests/cli.rs`, `otio/tests.rs`). OpenTimelineIO's bundler wants `file:` URLs and reads a Windows drive letter (`C:\…`) as a URL scheme, so bundling vidcut's Windows files with it needs the paths made URLs first (`tests/cli.rs` does).
 - **Why:**
   - OTIO is the user's choice: an open standard that Resolve and other editors read and write, so a cut can go to a finishing tool and back, and agents can write timelines in a documented format instead of vidcut's own. Resolve's other formats keep less of a cut: its EDL holds one video track and no audio tracks or markers, and its FCPXML (1.10) no markers.
   - Writing Resolve's conventions (plain paths, timecode source ranges, link groups) lets Resolve link the media and keep audio with its video. Other OTIO tools read them as plain OTIO.
+  - Clip effects and transitions are carried rather than left out, so a cut finished in Resolve can come back to vidcut for a recut and go back again without losing them: vidcut needn't understand an effect to keep it. Only the effects in use are kept, because Resolve fills in the rest itself. A transition is dropped rather than moved when an edit takes its cut away, because a dissolve between two other shots is a different edit.
   - Each bundle unpacks into its own folder, so two bundles unpacked in one folder (Downloads, say) don't mix their `media/` folders, and one bundle's media can be moved or deleted as one folder.
 
 ## X10. An MCP server for AI agents

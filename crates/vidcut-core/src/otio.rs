@@ -20,7 +20,10 @@
 //! - Editor metadata besides ([`EDITOR`]): a link group joining each clip's
 //!   video and audio, the stream and channels its audio plays, clip gain as
 //!   a clip volume, track lock and solo, marker notes.
-//! - Timeline markers go on the top-level stack, one frame long.
+//! - The clip effects a clip carries from another editor's file, as they
+//!   came ([`effects`]), and the transitions on its edit points that still
+//!   fit there ([`transitions`]).
+//! - Timeline markers go on the top-level stack, with their lengths.
 //! - Details OTIO has no field for (clip gain, mute and audio stream, track
 //!   settings, marker colors, the In/Out marks) are kept under
 //!   `metadata.vidcut`.
@@ -44,9 +47,12 @@
 //!   which track each audio track belongs to). The editor metadata's channel
 //!   map picks the stream, its clip volume the gain.
 //! - Markers on the timeline, on tracks and on clips become timeline
-//!   markers.
-//! - Everything else is left out with a warning: transitions (cuts instead),
-//!   nested compositions and generators (gaps instead), speed changes.
+//!   markers, keeping their lengths.
+//! - Clip effects in use stay on their clips' pictures and sounds
+//!   ([`effects`]), not shown or played, and are written back. So do
+//!   transitions, on their edit points ([`transitions`]): shown as cuts.
+//! - Everything else is left out with a warning: nested compositions and
+//!   generators (gaps instead), speed changes.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -57,8 +63,10 @@ use crate::error::{Error, Result};
 use crate::model::{Marks, Media, Project, TrackKind};
 use crate::time::Rational;
 
+pub mod effects;
 #[cfg(test)]
 mod tests;
+pub mod transitions;
 
 /// Where vidcut keeps its own details in OTIO metadata.
 const VIDCUT: &str = "vidcut";
@@ -195,24 +203,6 @@ fn media_reference(p: &Project, m: &Media, locations: Locations, rate: f64) -> V
     })
 }
 
-/// A clip volume effect at `db`, in the editor metadata.
-fn editor_volume(db: f64) -> Value {
-    json!({
-        "OTIO_SCHEMA": "Effect.1",
-        "name": "",
-        "effect_name": "Resolve Effect",
-        "metadata": { EDITOR: {
-            "Effect Name": "Fairlight Clip Volume and Fades",
-            "Enabled": true,
-            "Name": "Volume",
-            "Type": 62,
-            "Parameters": [
-                { "Parameter ID": "volume", "Parameter Value": db, "Variant Type": "Double" }
-            ],
-        } },
-    })
-}
-
 /// The timeline range `[a, b)` of the clip's audio an export of `[a, b)`
 /// writes, if any.
 fn audio_part(c: &crate::model::Clip, a: i64, b: i64) -> Option<(i64, i64)> {
@@ -321,6 +311,9 @@ pub fn export(
                 if s > tv {
                     video.push(gap(s - tv, rate));
                 }
+                if let Some(x) = transitions::head(p, t, c, false, s, &video, rate) {
+                    video.push(x);
+                }
                 let mut meta = json!({ "clip": c.id, "media": c.media });
                 if let Some(au) = &c.audio {
                     meta["stream"] = json!(au.stream);
@@ -334,6 +327,11 @@ pub fn export(
                 if let Some(g) = group {
                     metadata[EDITOR] = json!({ "Link Group ID": g });
                 }
+                // Carried effects, keyframes moved to where the item
+                // starts, fades cut where the export does.
+                let effects = c.effects.as_ref().map_or_else(Vec::new, |x| {
+                    x.written(c.source_at(s), s > c.start, e < c.end())
+                });
                 video.push(item(
                     &label,
                     m,
@@ -341,13 +339,19 @@ pub fn export(
                     e - s,
                     c.enabled,
                     metadata,
-                    vec![],
+                    effects,
                 ));
+                if let Some(x) = transitions::tail(p, t, c, false, e, rate) {
+                    video.push(x);
+                }
                 tv = e;
             }
             if let (Some(au), Some((s, e))) = (&c.audio, sounds) {
                 if s > ta {
                     audio.push(gap(s - ta, rate));
+                }
+                if let Some(x) = transitions::head(p, t, c, true, s, &audio, rate) {
+                    audio.push(x);
                 }
                 let meta = json!({ "clip": c.id, "stream": au.stream, "gain_db": au.gain_db });
                 let n = m
@@ -364,11 +368,8 @@ pub fn export(
                 if let Some(g) = group {
                     editor["Link Group ID"] = json!(g);
                 }
-                let effects = if au.gain_db == 0.0 {
-                    vec![]
-                } else {
-                    vec![editor_volume(au.gain_db)]
-                };
+                let whole = c.audio_range().expect("has audio");
+                let effects = effects::sound(au, c.source_at(s), s > whole.0, e < whole.1);
                 audio.push(item(
                     &label,
                     m,
@@ -378,9 +379,14 @@ pub fn export(
                     json!({ VIDCUT: meta, EDITOR: editor }),
                     effects,
                 ));
+                if let Some(x) = transitions::tail(p, t, c, true, e, rate) {
+                    audio.push(x);
+                }
                 ta = e;
             }
         }
+        transitions::close(&mut video, rate);
+        transitions::close(&mut audio, rate);
         let meta = json!({
             "track": t.id, "locked": t.locked, "muted": t.muted, "solo": t.solo,
             "volume_db": t.volume_db, "video_enabled": t.video_enabled, "name": t.name,
@@ -423,8 +429,8 @@ pub fn export(
                 "name": k.name,
                 "comment": k.note,
                 "color": otio_color(&k.color),
-                // Markers are one frame long.
-                "marked_range": range((k.at - a) as f64, 1.0, rate),
+                // Cut at the end of what is exported.
+                "marked_range": range((k.at - a) as f64, k.duration.min(b - k.at) as f64, rate),
                 "metadata": { VIDCUT: { "color": k.color }, EDITOR: { "Note": k.note } },
             })
         })
@@ -484,6 +490,8 @@ pub struct MediaRef {
 /// A clip read from an OTIO file. Frames are at [`Imported::fps`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportedClip {
+    /// Which clip it is, for [`ImportedTransition`]s.
+    pub key: usize,
     /// The track it goes on: `V<n>` or `A<n>`.
     pub track: String,
     pub media: MediaRef,
@@ -506,6 +514,10 @@ pub struct ImportedClip {
     pub muted: bool,
     /// The link group joining a clip's video and audio.
     pub link: Option<i64>,
+    /// The clip effects in use on its picture and on its sound
+    /// ([`effects`]), as the file has them.
+    pub effects: Vec<Value>,
+    pub audio_effects: Vec<Value>,
 }
 
 impl ImportedClip {
@@ -516,6 +528,20 @@ impl ImportedClip {
     fn audio_range(&self) -> Option<(i64, i64)> {
         self.audio.map(|(h, t)| (self.start + h, self.end() + t))
     }
+}
+
+/// A transition read from an OTIO file, between the clips with these
+/// [`ImportedClip::key`]s (none: a gap). Frames are at [`Imported::fps`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportedTransition {
+    /// Between sounds, not pictures.
+    pub sound: bool,
+    pub from: Option<usize>,
+    pub to: Option<usize>,
+    pub before: i64,
+    pub after: i64,
+    /// As the file has it.
+    pub otio: Value,
 }
 
 /// A track's settings read from an OTIO file.
@@ -575,6 +601,8 @@ fn default_track_name(name: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ImportedMarker {
     pub at: i64,
+    /// Length in frames, at least one.
+    pub duration: i64,
     pub name: String,
     pub note: String,
     pub color: String,
@@ -589,6 +617,7 @@ pub struct Imported {
     pub start_tc: i64,
     /// Sorted by start; on each track, not overlapping.
     pub clips: Vec<ImportedClip>,
+    pub transitions: Vec<ImportedTransition>,
     /// Settings of the tracks the clips go on.
     pub tracks: Vec<ImportedTrack>,
     pub markers: Vec<ImportedMarker>,
@@ -953,121 +982,32 @@ fn editor_stream(item: &Value) -> Option<u32> {
     u32::try_from(track).ok()
 }
 
-/// The clip volume in dB, noting what of it is left out.
-fn editor_gain(item: &Value, warnings: &mut Vec<String>) -> Option<f64> {
-    for e in item["effects"].as_array().into_iter().flatten() {
-        let r = &e["metadata"][EDITOR];
-        if r["Effect Name"] != "Fairlight Clip Volume and Fades" || r["Enabled"] == false {
-            continue;
-        }
-        let mut gain = None;
-        for p in r["Parameters"].as_array().into_iter().flatten() {
-            let value = p["Parameter Value"].as_f64();
-            match p["Parameter ID"].as_str() {
-                Some("volume") => {
-                    gain = value;
-                    if p["Key Frames"].as_object().is_some_and(|k| !k.is_empty()) {
-                        warn(
-                            warnings,
-                            "clip volume keyframes were left out (the clips keep their base level)",
-                        );
-                    }
-                }
-                Some("faderIn" | "faderOut") if value.is_some_and(|v| v > 0.0) => {
-                    warn(warnings, "audio fades were left out")
-                }
-                _ => {}
-            }
-        }
-        // Editors write -16.999998 for -17.
-        return gain.map(|g| (g * 100.0).round() / 100.0);
-    }
-    None
+/// A transition on a track, between the items with these indexes in
+/// [`walk`]'s list.
+struct Between<'a> {
+    item: &'a Value,
+    prev: Option<usize>,
+    next: usize,
 }
 
-/// Notes the effects of `item` that are left out: speed changes, and clip
-/// effects in use. The editor writes its whole stack of clip effects on
-/// every clip (Transform, Cropping, Pan, …), untouched ones included:
-/// those are nothing to note. The clip volume is read (`editor_gain`).
-fn note_effects(item: &Value, warnings: &mut Vec<String>) {
-    for e in item["effects"].as_array().into_iter().flatten() {
-        let s = schema(e);
-        if s.starts_with("LinearTimeWarp")
-            || s.starts_with("FreezeFrame")
-            || s.starts_with("TimeEffect")
-        {
-            warn(
-                warnings,
-                "speed changes were left out (those clips play at normal speed)",
-            );
-        } else if let Some(name) = effect_in_use(e) {
-            warn(warnings, &format!("the {name} clip effect was left out"));
-        }
-    }
-}
-
-/// The name of clip effect `e` if it changes the clip: one of the editor's
-/// switched on with a setting off its default (Dynamic Zoom moves the
-/// picture whenever it is on), or another program's, which says nothing
-/// of its defaults.
-fn effect_in_use(e: &Value) -> Option<String> {
-    let r = &e["metadata"][EDITOR];
-    let Some(name) = r["Effect Name"].as_str() else {
-        return e["effect_name"]
-            .as_str()
-            .or_else(|| e["name"].as_str())
-            .filter(|n| !n.is_empty())
-            .map(String::from);
-    };
-    if r["Enabled"] == false || name == "Fairlight Clip Volume and Fades" {
-        return None;
-    }
-    let off = |v: &Value, default: &Value| !same_value(v, default);
-    let changed = name == "Dynamic Zoom"
-        || r["Parameters"].as_array().into_iter().flatten().any(|p| {
-            let default = &p["Default Parameter Value"];
-            off(&p["Parameter Value"], default)
-                || p["Key Frames"]
-                    .as_object()
-                    .into_iter()
-                    .flatten()
-                    .any(|(_, k)| off(&k["Value"], default))
-        });
-    let shown = r["Name"].as_str().filter(|n| !n.is_empty()).unwrap_or(name);
-    changed.then(|| shown.to_string())
-}
-
-/// Whether two parameter values are the same, numbers to a millionth
-/// (editors write -16.999998 for -17).
-fn same_value(a: &Value, b: &Value) -> bool {
-    match (a, b) {
-        (Value::Number(x), Value::Number(y)) => {
-            let (x, y) = (
-                x.as_f64().unwrap_or(f64::NAN),
-                y.as_f64().unwrap_or(f64::NAN),
-            );
-            (x - y).abs() <= 1e-6 * x.abs().max(y.abs()).max(1.0)
-        }
-        (Value::Array(x), Value::Array(y)) => {
-            x.len() == y.len() && x.iter().zip(y).all(|(x, y)| same_value(x, y))
-        }
-        _ => a == b,
-    }
-}
-
-/// A track's items that take time, as `(start, length, item)`. Transitions
-/// overlap their neighbors instead, so they are left out.
+/// A track's items that take time, as `(start, length, item)`, and the
+/// transitions between them (which overlap their neighbors instead).
 fn walk<'a>(
     track: &'a Value,
     fps: Rational,
     warnings: &mut Vec<String>,
-) -> Vec<(i64, i64, &'a Value)> {
+) -> (Vec<(i64, i64, &'a Value)>, Vec<Between<'a>>) {
     let mut out = Vec::new();
+    let mut between = Vec::new();
     let mut t = 0;
     for item in track["children"].as_array().into_iter().flatten() {
         let s = schema(item);
         if s.starts_with("Transition") {
-            warn(warnings, "transitions were left out (cuts instead)");
+            between.push(Between {
+                item,
+                prev: out.len().checked_sub(1),
+                next: out.len(),
+            });
             continue;
         }
         if s.starts_with("Stack") || s.starts_with("Track") {
@@ -1082,7 +1022,34 @@ fn walk<'a>(
         out.push((t, len, item));
         t += len;
     }
-    out
+    (out, between)
+}
+
+/// The transitions `between` items of a track, which became the clips with
+/// `keys` (by item), as read.
+fn transitions_of(
+    between: Vec<Between>,
+    keys: &[Option<usize>],
+    sound: bool,
+    fps: Rational,
+    out: &mut Vec<ImportedTransition>,
+) {
+    for b in between {
+        let key = |i: Option<usize>| i.and_then(|i| keys.get(i).copied().flatten());
+        let (from, to) = (key(b.prev), key(Some(b.next)));
+        if from.is_none() && to.is_none() {
+            continue;
+        }
+        let offset = |k: &str| time(&b.item[k]).map_or(0, |(v, r)| frames(v, r, fps));
+        out.push(ImportedTransition {
+            sound,
+            from,
+            to,
+            before: offset("in_offset"),
+            after: offset("out_offset"),
+            otio: b.item.clone(),
+        });
+    }
 }
 
 fn warn(warnings: &mut Vec<String>, w: &str) {
@@ -1115,7 +1082,7 @@ fn timeline_rate(tl: &Value, tracks: &[&Value]) -> Option<f64> {
 }
 
 /// A marker at timeline frame `at`.
-fn marker(k: &Value, at: i64) -> ImportedMarker {
+fn marker(k: &Value, at: i64, fps: Rational) -> ImportedMarker {
     let color = match k["metadata"][VIDCUT]["color"].as_str() {
         Some(c) if crate::ops::MARKER_COLORS.contains(&c) => c.to_string(),
         _ => our_color(k["color"].as_str().unwrap_or("")).to_string(),
@@ -1126,8 +1093,10 @@ fn marker(k: &Value, at: i64) -> ImportedMarker {
         .filter(|c| !c.is_empty())
         .or(k["metadata"][EDITOR]["Note"].as_str())
         .unwrap_or("");
+    let duration = time(&k["marked_range"]["duration"]).map_or(1, |(v, r)| frames(v, r, fps));
     ImportedMarker {
         at,
+        duration: duration.max(1),
         name: k["name"].as_str().unwrap_or("").to_string(),
         note: note.to_string(),
         color,
@@ -1147,7 +1116,7 @@ fn clip_markers(item: &Value, start: i64, len: i64, fps: Rational, out: &mut Vec
             None => frames(t.0, t.1, fps),
         };
         if (0..len).contains(&offset) {
-            out.push(marker(k, start + offset));
+            out.push(marker(k, start + offset, fps));
         }
     }
 }
@@ -1186,20 +1155,25 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
 
     // Video tracks become V1, V2…
     let mut clips: Vec<ImportedClip> = Vec::new();
+    let mut found = Vec::new();
     let mut settings: Vec<ImportedTrack> = Vec::new();
     for (k, v) in video_tracks.iter().enumerate() {
         let id = format!("V{}", k + 1);
         settings.push(ImportedTrack::of(v, &id, false));
-        for (start, len, item) in walk(v, fps, &mut warnings) {
+        let (items, between) = walk(v, fps, &mut warnings);
+        let mut keys = vec![None; items.len()];
+        for (i, (start, len, item)) in items.into_iter().enumerate() {
             if !is_clip(item) || len <= 0 {
                 continue;
             }
-            note_effects(item, &mut warnings);
+            let effects = effects::read(item, &mut warnings);
             match clip_source(item, fps, base) {
                 Ok((media, source_in, timecoded)) => {
                     let meta = &item["metadata"][VIDCUT];
                     clip_markers(item, start, len, fps, &mut markers);
+                    keys[i] = Some(clips.len());
                     clips.push(ImportedClip {
+                        key: clips.len(),
                         track: id.clone(),
                         media,
                         name: item["name"].as_str().unwrap_or("").to_string(),
@@ -1215,11 +1189,14 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         gain_db: meta["gain_db"].as_f64().unwrap_or(0.0),
                         muted: meta["muted"].as_bool().unwrap_or(false),
                         link: link_group(item),
+                        effects,
+                        audio_effects: Vec::new(),
                     });
                 }
                 Err(e) => warnings.push(format!("{}; left as a gap", e.message)),
             }
         }
+        transitions_of(between, &keys, false, fps, &mut found);
     }
     // An audio clip lining up with a video clip of the same media (on the
     // track vidcut named, else on any; in its link group if both
@@ -1229,11 +1206,13 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     for a in &audio_tracks {
         let hint = a["metadata"][VIDCUT]["track"].as_str().map(String::from);
         let mut own: Option<String> = None;
-        for (start, len, item) in walk(a, fps, &mut warnings) {
+        let (items, between) = walk(a, fps, &mut warnings);
+        let mut keys = vec![None; items.len()];
+        for (i, (start, len, item)) in items.into_iter().enumerate() {
             if !is_clip(item) || len <= 0 {
                 continue;
             }
-            note_effects(item, &mut warnings);
+            let effects = effects::read(item, &mut warnings);
             let (media, source_in, timecoded) = match clip_source(item, fps, base) {
                 Ok(s) => s,
                 Err(e) => {
@@ -1246,9 +1225,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             let meta = &item["metadata"][VIDCUT];
             let muted = item["enabled"].as_bool() == Some(false);
             let link = link_group(item);
-            let gain = meta["gain_db"]
-                .as_f64()
-                .or_else(|| editor_gain(item, &mut warnings));
+            let gain = meta["gain_db"].as_f64().or_else(|| effects::gain(item));
             let stream = meta["stream"]
                 .as_u64()
                 .map(|s| s as u32)
@@ -1279,6 +1256,8 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 if let Some(s) = stream {
                     c.stream = s;
                 }
+                c.audio_effects = effects;
+                keys[i] = Some(c.key);
                 continue;
             }
             let track = match &hint {
@@ -1290,7 +1269,9 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                     })
                     .clone(),
             };
+            keys[i] = Some(clips.len());
             clips.push(ImportedClip {
+                key: clips.len(),
                 track,
                 media,
                 name: item["name"].as_str().unwrap_or("").to_string(),
@@ -1305,8 +1286,11 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 gain_db: gain.unwrap_or(0.0),
                 muted,
                 link,
+                effects: Vec::new(),
+                audio_effects: effects,
             });
         }
+        transitions_of(between, &keys, true, fps, &mut found);
         match (&hint, own) {
             (Some(h), _) if h.starts_with('A') => settings.push(ImportedTrack::of(a, h, true)),
             (None, Some(id)) => settings.push(ImportedTrack::of(a, &id, true)),
@@ -1347,6 +1331,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         {
             dropped += 1;
             c.audio = None;
+            c.audio_effects.clear();
         }
         kept.push(c);
     }
@@ -1363,6 +1348,43 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         ));
     }
     settings.retain(|t| t.id.starts_with('V') || clips.iter().any(|c| c.track == t.id));
+    let mut kept: Vec<String> = Vec::new();
+    for e in clips
+        .iter()
+        .flat_map(|c| c.effects.iter().chain(&c.audio_effects))
+    {
+        let name = effects::name(e);
+        if !kept.contains(&name) {
+            kept.push(name);
+        }
+    }
+    if !kept.is_empty() {
+        warnings.push(format!(
+            "clip effects kept on their clips but not shown or played: {}",
+            kept.join(", ")
+        ));
+    }
+    // Transitions with a clip still on a side.
+    let have: std::collections::HashSet<usize> = clips.iter().map(|c| c.key).collect();
+    found.retain(|t| {
+        [t.from, t.to]
+            .into_iter()
+            .flatten()
+            .any(|k| have.contains(&k))
+    });
+    let mut names: Vec<String> = Vec::new();
+    for t in &found {
+        let name = transitions::otio_name(&t.otio);
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    if !names.is_empty() {
+        warnings.push(format!(
+            "transitions kept on their edit points but shown as cuts: {}",
+            names.join(", ")
+        ));
+    }
 
     // Markers of the timeline and of its tracks (tracks start with it).
     for list in
@@ -1370,7 +1392,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     {
         for k in list.as_array().into_iter().flatten() {
             if let Some((v, r)) = time(&k["marked_range"]["start_time"]) {
-                markers.push(marker(k, frames(v, r, fps)));
+                markers.push(marker(k, frames(v, r, fps), fps));
             }
         }
     }
@@ -1385,6 +1407,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         fps,
         start_tc,
         clips,
+        transitions: found,
         tracks: settings,
         markers,
         marks,

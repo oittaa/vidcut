@@ -371,9 +371,10 @@ fn light_levels_are_measured_when_the_export_starts() {
     start.extend_from_slice(&["--set", "video.speed=ultrafast"]);
     let r = sb.ok(&start);
     let light = r["result"]["outputs"][0]["metadata"]["light"].clone();
-    // SDR white, 203 cd/m² in PQ, and a little overshoot.
+    // SDR white, 203 cd/m² in PQ, and a little overshoot (up to 288 with
+    // Homebrew's x265).
     let cll = light["max_cll"].as_u64().unwrap_or(0);
-    assert!((200..=260).contains(&cll), "{r}");
+    assert!((200..=300).contains(&cll), "{r}");
     let frames = vidcut_av::hdr::read_frames(&out, false, 1).unwrap();
     assert_eq!(
         frames[0].metadata.light.map(|l| u64::from(l.max_cll)),

@@ -16,7 +16,7 @@ impl Sandbox {
     fn new(name: &str) -> Self {
         let dir = tempfile::Builder::new()
             .prefix(&format!("vidcut-cli-{name}-"))
-            .tempdir()
+            .tempdir_in(vidcut_av::testdata::temp_dir())
             .unwrap();
         Self { dir }
     }
@@ -706,13 +706,19 @@ fn otio_round_trips_frame_exactly() {
 }
 
 /// A Python with OpenTimelineIO (`VIDCUT_OTIO_PYTHON`, else `python3`), to
-/// check files against the reference implementation.
+/// check files against the reference implementation. One named must work:
+/// CI names one, and a skip there would hide a broken setup.
 fn otio_python() -> Option<String> {
-    let python = std::env::var("VIDCUT_OTIO_PYTHON").unwrap_or_else(|_| "python3".into());
+    let named = std::env::var("VIDCUT_OTIO_PYTHON").ok();
+    let python = named.clone().unwrap_or_else(|| "python3".into());
     let ok = Command::new(&python)
         .args(["-c", "import opentimelineio"])
         .output()
         .is_ok_and(|o| o.status.success());
+    assert!(
+        ok || named.is_none(),
+        "VIDCUT_OTIO_PYTHON={python} can't import opentimelineio"
+    );
     ok.then_some(python)
 }
 

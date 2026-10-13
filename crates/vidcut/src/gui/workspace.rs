@@ -352,13 +352,18 @@ impl Workspace {
 
     /// Record timecode of a timeline frame.
     pub(super) fn tc(&self, frame: i64) -> String {
-        let start = self.project().map_or(0, |p| p.settings.start_tc);
-        format_timecode(frame, self.fps(), start)
+        match self.project() {
+            Some(p) => p.settings.timecode(frame),
+            None => format_timecode(frame, self.fps(), 0, false),
+        }
     }
 
     /// Source timecode (counting from the media's first frame).
     pub(super) fn src_tc(&self, frame: i64) -> String {
-        format_timecode(frame, self.fps(), 0)
+        match self.project() {
+            Some(p) => p.settings.length_timecode(frame),
+            None => format_timecode(frame, self.fps(), 0, false),
+        }
     }
 
     pub(super) fn media_frames(&self, media: &str) -> i64 {

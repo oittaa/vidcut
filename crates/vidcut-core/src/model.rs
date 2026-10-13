@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::time::{Rational, TimeContext};
+use crate::time::{Rational, TimeContext, TimeSpec, format_timecode};
 
 /// Version of the project file format.
 pub const FORMAT_VERSION: u32 = 1;
@@ -63,6 +63,10 @@ pub struct Settings {
     pub ripple_on: bool,
     /// Record timecode of timeline frame 0, in frames (deviation X7: 0, not 01:00:00:00).
     pub start_tc: i64,
+    /// Record timecode counts drop-frame (decision D47): at 29.97 and 59.94,
+    /// and nothing at other rates.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub drop_frame: bool,
     /// Format not chosen yet: the first video media added sets fps and size.
     pub auto_format: bool,
     /// How long a still lasts when edited without a range or marks, and
@@ -84,6 +88,7 @@ impl Default for Settings {
             channels: 2,
             ripple_on: true,
             start_tc: 0,
+            drop_frame: false,
             auto_format: true,
             still_secs: 5.0,
             use_proxies: false,
@@ -111,6 +116,81 @@ impl Settings {
             s.auto_format = false;
         }
         Ok(s)
+    }
+
+    /// Counts record timecode drop-frame, or not (decision D47): only at
+    /// 29.97 and 59.94. The start keeps its label.
+    pub fn set_drop_frame(&mut self, on: bool) -> crate::error::Result<()> {
+        if on && !self.fps.has_drop_frame() {
+            return Err(crate::error::Error::invalid(format!(
+                "drop-frame timecode is for 29.97 and 59.94 fps, not {}",
+                self.fps.decimal()
+            )));
+        }
+        self.relabel(|s| s.drop_frame = on);
+        Ok(())
+    }
+
+    /// Changes the frame rate; drop-frame counting stays only where the
+    /// new rate has it. The start keeps its label.
+    pub fn set_fps(&mut self, fps: Rational) {
+        self.relabel(|s| {
+            s.fps = fps;
+            s.drop_frame &= fps.has_drop_frame();
+        });
+    }
+
+    /// Makes `change` keeping the start timecode's label (deviation X7):
+    /// `01:00:00:00` stays so, another frame count at another rate. A label
+    /// the new rate hasn't (frame 29 at 25 fps) keeps its time instead.
+    fn relabel(&mut self, change: impl FnOnce(&mut Self)) {
+        let (label, secs) = (self.timecode(0), self.fps.frames_to_secs(self.start_tc));
+        change(self);
+        self.start_tc = TimeSpec::parse(&label)
+            .ok()
+            .and_then(|t| self.start_context().resolve(&t).ok())
+            .unwrap_or_else(|| self.fps.secs_to_frames(secs));
+    }
+
+    /// How a start timecode is read: as the project counts timecode.
+    fn start_context(&self) -> TimeContext {
+        TimeContext {
+            fps: self.fps,
+            start_tc: 0,
+            drop_frame: self.counts_drop_frame(),
+            end: 0,
+            mark_in: None,
+            mark_out: None,
+            playhead: None,
+        }
+    }
+
+    /// Sets the record timecode of the first frame: `01:00:00:00`, or
+    /// drop-frame `01:00:00;00` (deviation X7, decision D47).
+    pub fn set_start_tc(&mut self, tc: &TimeSpec) -> crate::error::Result<()> {
+        let frames = self.start_context().resolve(tc)?;
+        if frames < 0 {
+            return Err(crate::error::Error::invalid(
+                "a start timecode is 00:00:00:00 or later",
+            ));
+        }
+        self.start_tc = frames;
+        Ok(())
+    }
+
+    /// Whether timecodes count drop-frame: set, at a rate that has it.
+    pub fn counts_drop_frame(&self) -> bool {
+        self.drop_frame && self.fps.has_drop_frame()
+    }
+
+    /// Timeline frame `frame` as record timecode (drop-frame when counted so).
+    pub fn timecode(&self, frame: i64) -> String {
+        format_timecode(frame, self.fps, self.start_tc, self.counts_drop_frame())
+    }
+
+    /// A length, or a source position, as timecode counted from zero.
+    pub fn length_timecode(&self, frames: i64) -> String {
+        format_timecode(frames, self.fps, 0, self.counts_drop_frame())
     }
 }
 
@@ -307,6 +387,9 @@ pub struct StartTimecode {
     pub count: i64,
     /// The video's frame rate, or the sample rate.
     pub rate: Rational,
+    /// The file counts its timecode drop-frame (`01:00:00;00`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub drop_frame: bool,
 }
 
 impl StartTimecode {
@@ -471,10 +554,35 @@ pub struct Track {
     /// A name shown in the track header and the mixer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Transitions on its edit points, carried from another editor.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transitions: Vec<Transition>,
 }
 
 fn is_zero(v: &f64) -> bool {
     *v == 0.0
+}
+
+/// A transition another editor put on an edit point, which vidcut keeps
+/// while it fits there, shown as a cut (deviation X9). `otio::transitions`
+/// places and writes them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Transition {
+    /// Between the clips' sounds (an audio edit), not their pictures.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sound: bool,
+    /// The clip before the cut; none for a gap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    /// The clip after the cut; none for a gap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    /// Frames it covers before the cut (OTIO's `in_offset`) and after it
+    /// (`out_offset`).
+    pub before: i64,
+    pub after: i64,
+    /// The OTIO `Transition` as read.
+    pub otio: serde_json::Value,
 }
 
 /// A clip on the timeline.
@@ -500,6 +608,23 @@ pub struct Clip {
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Effects on its picture, carried from another editor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effects: Option<Effects>,
+}
+
+/// Clip effects another editor applied, which vidcut keeps without showing
+/// or playing them (deviation X9): the OTIO effects of a clip's picture or
+/// of its sound. `otio::effects` reads, cuts and writes them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Effects {
+    /// The source frame their keyframe times count from: the first of the
+    /// picture or sound when they were read. Keyframes stay on their source
+    /// frames through trims, slips and splits.
+    pub from: i64,
+    /// OTIO `Effect`s as read, keyframe times and fade lengths in project
+    /// frames.
+    pub list: Vec<serde_json::Value>,
 }
 
 /// A clip with the track it is on: what `edit.copy` returns and `edit.paste`
@@ -523,6 +648,10 @@ pub struct ClipAudio {
     pub tail: i64,
     pub gain_db: f64,
     pub muted: bool,
+    /// Effects on its sound, carried from another editor. The clip volume
+    /// is `gain_db`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effects: Option<Effects>,
 }
 
 impl Clip {
@@ -585,9 +714,21 @@ pub struct Marker {
     /// `k<N>`, never reused.
     pub id: String,
     pub at: i64,
+    /// Length in frames: one, unless set or imported (spec D40). The
+    /// timeline shows a marker as a point either way.
+    #[serde(default = "one_frame", skip_serializing_if = "is_one_frame")]
+    pub duration: i64,
     pub name: String,
     pub color: String,
     pub note: String,
+}
+
+fn one_frame() -> i64 {
+    1
+}
+
+fn is_one_frame(frames: &i64) -> bool {
+    *frames == 1
 }
 
 /// Counters for new ids.
@@ -708,6 +849,7 @@ impl Project {
         TimeContext {
             fps: self.settings.fps,
             start_tc: self.settings.start_tc,
+            drop_frame: self.settings.counts_drop_frame(),
             end: self.end(),
             mark_in: self.marks.mark_in,
             mark_out: self.marks.mark_out,
@@ -747,6 +889,7 @@ impl Track {
             volume_db: 0.0,
             video_enabled: true,
             name: None,
+            transitions: Vec::new(),
         }
     }
 

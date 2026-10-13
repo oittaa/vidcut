@@ -182,12 +182,29 @@ fn a_new_project_takes_the_format_chosen() {
     choose(&mut harness, "Resolution", "HD 1280 × 720");
     type_rate(&mut harness, "12.5");
     assert!(harness.query_by_label_contains("a rate above 0").is_none());
+    // Drop-frame timecode is for 29.97 and 59.94 (decision D47).
+    assert!(harness.query_by_label("Drop-frame").is_none());
+    // An hour's start, offered (deviation X7).
+    choose(&mut harness, "Start timecode", "01:00:00:00");
     harness.get_by_label("Create…").click();
     until(&mut harness, "the new project", || settings(&h).is_some());
     let s = settings(&h).unwrap();
+    // 12.5 fps counts 13 frames a second: an hour of timecode is 46800.
     assert_eq!(
-        (&s["fps"], &s["width"], &s["height"], &s["auto_format"]),
-        (&json!("25/2"), &json!(1280), &json!(720), &json!(false))
+        (
+            &s["fps"],
+            &s["width"],
+            &s["height"],
+            &s["auto_format"],
+            &s["start_tc"]
+        ),
+        (
+            &json!("25/2"),
+            &json!(1280),
+            &json!(720),
+            &json!(false),
+            &json!(46_800)
+        )
     );
     let requests = gui_requests(&h);
     assert_eq!(requests.len(), 1, "{requests:#?}");
@@ -195,22 +212,39 @@ fn a_new_project_takes_the_format_chosen() {
         requests[0],
         (
             "project.open".to_string(),
-            json!({ "path": path, "create": true, "fps": "12.5", "width": 1280, "height": 720 })
+            json!({ "path": path, "create": true, "fps": "12.5", "width": 1280, "height": 720,
+                    "start_tc": "01:00:00:00" })
         )
     );
 
-    // 2. Project Settings: another size and rate, one project.set.
+    // 2. Project Settings: another size and rate, drop-frame at it, one
+    // project.set.
     menu_item(&mut harness, "File", "Project Settings…");
     choose(&mut harness, "Resolution", "Vertical 1080 × 1920");
     type_rate(&mut harness, "30000/1001");
+    harness.get_by_label("Drop-frame").click();
+    harness.step();
     harness.get_by_label("Apply").click();
     until(&mut harness, "the new settings", || {
         settings(&h).is_some_and(|s| s["width"] == 1080)
     });
     let s = settings(&h).unwrap();
+    // The start keeps its label: 01:00:00;00 now, frame 107892.
     assert_eq!(
-        (&s["fps"], &s["width"], &s["height"]),
-        (&json!("30000/1001"), &json!(1080), &json!(1920))
+        (
+            &s["fps"],
+            &s["width"],
+            &s["height"],
+            &s["drop_frame"],
+            &s["start_tc"]
+        ),
+        (
+            &json!("30000/1001"),
+            &json!(1080),
+            &json!(1920),
+            &json!(true),
+            &json!(107_892)
+        )
     );
     let requests = gui_requests(&h);
     let (method, params) = requests.last().unwrap();
@@ -220,13 +254,15 @@ fn a_new_project_takes_the_format_chosen() {
             method.as_str(),
             &params["width"],
             &params["height"],
-            &params["fps"]
+            &params["fps"],
+            &params["drop_frame"]
         ),
         (
             "project.set",
             &json!(1080),
             &json!(1920),
-            &json!("30000/1001")
+            &json!("30000/1001"),
+            &json!(true)
         )
     );
     // It closes in the frame after the click.

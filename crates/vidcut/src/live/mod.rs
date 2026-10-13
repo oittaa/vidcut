@@ -471,7 +471,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     let create = config.create;
     let thread = crate::threads::spawn("vidcut-session", Work::Interactive, move || {
         if let Some(path) = project
-            && let Err(e) = new_settings(&path, create, None, None, None)
+            && let Err(e) = new_settings(&path, create, None, (None, None), None, None)
                 .and_then(|settings| live.open_project(&path, settings))
         {
             live.notice(
@@ -1717,10 +1717,19 @@ impl Live {
                 fps,
                 width,
                 height,
+                drop_frame,
+                start_tc,
             } => Step::Now(
-                new_settings(&path, create, fps.as_deref(), width, height)
-                    .and_then(|settings| self.open_project(&path, settings))
-                    .map(|()| self.state_response()),
+                new_settings(
+                    &path,
+                    create,
+                    fps.as_deref(),
+                    (width, height),
+                    drop_frame,
+                    start_tc.as_ref(),
+                )
+                .and_then(|settings| self.open_project(&path, settings))
+                .map(|()| self.state_response()),
             ),
             Request::ViewerSet { mode } => {
                 let motion = self.set_viewer(mode);
@@ -2488,6 +2497,7 @@ impl Live {
                 TimeContext {
                     fps: p.settings.fps,
                     start_tc: 0,
+                    drop_frame: p.settings.counts_drop_frame(),
                     end: self.tape.last().map_or(0, |e| e.start + e.frames),
                     mark_in: marks.0,
                     mark_out: marks.1,
@@ -2642,7 +2652,8 @@ impl Live {
         let (late, skipped) = self.player.misses();
         let p = self.project.as_ref().map(|o| o.project());
         let fps = p.map_or(Rational::new(30, 1).expect("valid"), |p| p.settings.fps);
-        let tc = |f: i64, stc: i64| format_timecode(f, fps, stc);
+        let drop = p.is_some_and(|p| p.settings.counts_drop_frame());
+        let tc = |f: i64, stc: i64| format_timecode(f, fps, stc, drop);
         let player = |id: PlayerId, stc: i64| {
             let snap = self.player.snap(id);
             json!({
@@ -2773,11 +2784,12 @@ fn new_settings(
     path: &Path,
     create: bool,
     fps: Option<&str>,
-    width: Option<u32>,
-    height: Option<u32>,
+    (width, height): (Option<u32>, Option<u32>),
+    drop_frame: Option<bool>,
+    start_tc: Option<&TimeSpec>,
 ) -> Result<Option<Settings>> {
     let size = crate::session::size(width, height)?;
-    let format = fps.is_some() || size.is_some();
+    let format = fps.is_some() || size.is_some() || drop_frame.is_some() || start_tc.is_some();
     if format && !create {
         return Err(Error::usage("a frame rate or size needs create"));
     }
@@ -2793,7 +2805,14 @@ fn new_settings(
         }
         return Ok(None);
     }
-    Settings::with_format(fps, size).map(Some)
+    let mut settings = Settings::with_format(fps, size)?;
+    if let Some(d) = drop_frame {
+        settings.set_drop_frame(d)?;
+    }
+    if let Some(tc) = start_tc {
+        settings.set_start_tc(tc)?;
+    }
+    Ok(Some(settings))
 }
 
 fn no_project() -> Error {
