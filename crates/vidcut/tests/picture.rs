@@ -3,14 +3,16 @@
 //! turned every way, pillarboxed, SD and HD colors, full range, PQ and HLG)
 //! drawn on the GPU shows the barcode `frame render` shows, and its pixels
 //! are within a level or so of `Picture::to_rgba`, the export's own
-//! filters. Runs on any adapter, lavapipe too; skips without one.
+//! filters. Pictures NVDEC decoded show from GPU memory as they do copied
+//! down. Runs on any adapter, lavapipe too; skips without one, and the
+//! NVDEC checks without CUDA.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use vidcut::gui::picture::{Drawn, Gpu, Screen};
 use vidcut_av::fixture::{self, Container, FixtureSpec, ImageSpec, Picture as Content, VideoCodec};
-use vidcut_av::player::{Config, ManualOutput, Picture, Player};
+use vidcut_av::player::{Config, Layout, ManualOutput, Memory, Picture, Player};
 use vidcut_core::model::Hdr;
 use vidcut_core::render::{Image, RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
@@ -365,5 +367,87 @@ fn nv12_pictures_draw_as_the_export_renders_them() {
         let (mean, _) = diff(&ours.rgba, &theirs.rgba);
         assert!(mean < 1.5, "frame {t}: {mean:.2}");
         assert_eq!(barcode(&ours.rgba, W, H), Some(2 + t as u32), "frame {t}");
+    }
+}
+
+/// Pictures NVDEC decoded, kept in GPU memory and shown from there (memory
+/// the device shares with CUDA, `gui::shared`): the same pixels as the
+/// same picture copied down and uploaded, NV12 and P010, deinterlaced on
+/// the GPU, at a size whose rows and chroma aren't round. Needs CUDA on the
+/// adapter's GPU.
+#[test]
+fn pictures_in_gpu_memory_draw_as_copied_down() {
+    let Some(gpu) = Gpu::headless() else {
+        eprintln!("skipping: no GPU adapter");
+        return;
+    };
+    if vidcut_av::cuda::CudaDevice::open().is_err() || !gpu.takes_gpu_pictures() {
+        eprintln!("skipping: the adapter shares no memory with CUDA");
+        return;
+    }
+    let p = plan(vec![
+        piece(
+            FixtureSpec::new(VideoCodec::H264, Container::Mp4, W, H, (30, 1), 30),
+            0,
+            20,
+        ),
+        piece(
+            FixtureSpec::new(VideoCodec::Hevc10, Container::Mkv, W, H, (30, 1), 30),
+            0,
+            20,
+        ),
+        piece(
+            FixtureSpec::new(VideoCodec::H264, Container::Mkv, W, H, (30, 1), 30)
+                .interlaced(true)
+                .no_audio(),
+            0,
+            20,
+        ),
+        piece(
+            FixtureSpec::new(VideoCodec::H264, Container::Mp4, 330, 186, (30, 1), 30),
+            0,
+            20,
+        ),
+    ]);
+    let player = Player::new(
+        p.clone(),
+        Config {
+            audio_scrubbing: false,
+            hardware: true,
+            gpu_pictures: true,
+            ..Config::default()
+        },
+        Box::new(ManualOutput::new()),
+    )
+    .unwrap();
+    let (mut shown, mut copied) = (Screen::new(), Screen::new());
+    for (t, layout) in [
+        (0, Layout::Nv12),
+        (19, Layout::Nv12),
+        (20, Layout::P010),
+        (33, Layout::P010),
+        (40, Layout::Nv12),
+        (51, Layout::Nv12),
+        (60, Layout::Nv12),
+        (79, Layout::Nv12),
+    ] {
+        let picture = picture_at(&player, t);
+        assert_eq!(picture.memory(), Memory::Cuda, "frame {t}");
+        assert_eq!(picture.layout(), layout, "frame {t}");
+        shown.draw(&gpu, Some(&picture), W, H);
+        assert!(shown.shared(), "frame {t} was copied down to be shown");
+        let ours = shown.read(&gpu).unwrap();
+        let down = Arc::new(picture.copied_down().unwrap());
+        assert_eq!(down.memory(), Memory::Cpu);
+        copied.draw(&gpu, Some(&down), W, H);
+        let theirs = copied.read(&gpu).unwrap();
+        let (mean, max) = diff(&ours.rgba, &theirs.rgba);
+        assert_eq!((mean, max), (0.0, 0), "frame {t}");
+        let rendered = vidcut_av::export::still::rgba(&piece_at(&p, t), p.fps, W, H).unwrap();
+        assert_eq!(
+            barcode(&ours.rgba, W, H),
+            barcode(&rendered.rgba, W, H),
+            "frame {t}"
+        );
     }
 }

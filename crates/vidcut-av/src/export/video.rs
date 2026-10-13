@@ -466,8 +466,10 @@ pub struct VideoFrames {
     /// in a layout a display takes.
     decoded: Option<Relayout>,
     /// Frames as decoded come from NVDEC where it decodes the stream, and
-    /// are copied down from the GPU (`decode_on`).
+    /// are copied down from the GPU (`decode_on`) unless they stay there
+    /// (`keep_on_gpu`).
     nvdec: Option<crate::cuda::CudaDevice>,
+    keep_on_gpu: bool,
     /// The clockwise turn that shows the last frame given upright.
     rotation: u16,
     /// The last frame given was decoded on NVDEC.
@@ -605,6 +607,7 @@ impl VideoFrames {
             gpu: None,
             decoded: None,
             nvdec: None,
+            keep_on_gpu: false,
             rotation: 0,
             last_nvdec: false,
         }
@@ -628,6 +631,14 @@ impl VideoFrames {
     /// colors. Other streams, stills and image sequences decode on the CPU.
     pub fn decode_on(mut self, device: crate::cuda::CudaDevice) -> Self {
         self.nvdec = Some(device);
+        self
+    }
+
+    /// Frames NVDEC decoded ([`decode_on`](Self::decode_on)) stay in GPU
+    /// memory when a display takes them as they are (NV12, P010): for a
+    /// display that shows them from there. Others are copied down.
+    pub fn keep_on_gpu(mut self) -> Self {
+        self.keep_on_gpu = true;
         self
     }
 
@@ -929,10 +940,14 @@ impl VideoFrames {
         if let Some(relayout) = self.decoded.as_mut() {
             if changed || src.normalized.is_none() {
                 let (frame, _) = src.current.as_ref().expect("have a frame");
-                // Frames NVDEC decoded come down to memory at their size:
-                // the decoder's frames are few, and pictures are kept.
+                // Frames NVDEC decoded come down to memory at their size,
+                // unless a display takes them from the GPU as they are.
                 src.normalized = Some(if frame.format() == format::Pixel::CUDA {
-                    relayout.run(&crate::cuda::download(frame)?)?
+                    if self.keep_on_gpu && displayable(crate::cuda::sw_format(frame)) {
+                        frame_ref(frame)?
+                    } else {
+                        relayout.run(&crate::cuda::download(frame)?)?
+                    }
                 } else {
                     relayout.run(frame)?
                 });

@@ -2,8 +2,9 @@
 //! HEVC, AV1, VP9): the same pictures as decoding on the CPU, frame for
 //! frame and within a level or two in their pixels, copied down to memory
 //! in NV12 or P010; streams NVDEC can't decode, stills and black on the
-//! CPU; and switching decoders while it plays. Needs an NVIDIA GPU:
-//! `--features vidcut-av/gpu-tests`.
+//! CPU; and switching decoders while it plays. Kept in GPU memory for a
+//! display that shows them from there, they are the same pictures. Needs
+//! an NVIDIA GPU: `--features vidcut-av/gpu-tests`.
 #![cfg(feature = "gpu-tests")]
 
 mod player_support;
@@ -193,4 +194,79 @@ fn nvdec_pictures_are_the_cpus() {
     }
     assert_eq!(shown_at(&gpu, 40), expect[40]);
     assert_eq!(gpu.status().error, None);
+}
+
+#[test]
+fn pictures_kept_in_gpu_memory_are_the_ones_copied_down() {
+    if vidcut_av::cuda::CudaDevice::open().is_err() {
+        eprintln!("skipping: no CUDA device");
+        return;
+    }
+    let h264 = src(
+        "m1",
+        FixtureSpec::new(VideoCodec::H264, Container::Mp4, W, H, (30, 1), 30),
+    );
+    let hevc = src(
+        "m2",
+        FixtureSpec::new(VideoCodec::Hevc10, Container::Mkv, W, H, (30, 1), 30),
+    );
+    let interlaced = src(
+        "m6",
+        FixtureSpec::new(VideoCodec::H264, Container::Mkv, W, H, (30, 1), 60)
+            .interlaced(true)
+            .no_audio(),
+    );
+    let turned = src(
+        "m7",
+        FixtureSpec::new(VideoCodec::Hevc10, Container::Mp4, W, H, (30, 1), 30).rotation(90),
+    );
+    let prores = src(
+        "m8",
+        FixtureSpec::new(VideoCodec::ProRes422Hq, Container::Mov, W, H, (30, 1), 30),
+    );
+    let p = plan(
+        &[
+            clip(&h264, 0, 10),
+            clip(&hevc, 10, 10),
+            clip(&interlaced, 10, 10),
+            clip(&turned, 0, 10),
+            clip(&prores, 0, 10),
+        ],
+        0,
+    );
+    let kept = Player::new(
+        p.clone(),
+        Config {
+            audio_scrubbing: false,
+            hardware: true,
+            gpu_pictures: true,
+            ..Config::default()
+        },
+        Box::new(ManualOutput::new()),
+    )
+    .unwrap();
+    let down = player(p.clone(), true);
+    let nv12 = (W * H * 3 / 2) as usize;
+    for (t, memory, layout, bytes) in [
+        (3, Memory::Cuda, Layout::Nv12, nv12),
+        (14, Memory::Cuda, Layout::P010, 2 * nv12),
+        (25, Memory::Cuda, Layout::Nv12, nv12),
+        (36, Memory::Cuda, Layout::P010, 2 * nv12),
+        (47, Memory::Cpu, Layout::P010, 2 * nv12),
+    ] {
+        let k = picture_at(&kept, t);
+        let d = picture_at(&down, t);
+        assert_eq!((k.memory(), k.layout()), (memory, layout), "frame {t}");
+        // The budget counts what the picture takes where it is.
+        assert_eq!(k.bytes(), bytes, "frame {t}");
+        assert_eq!((k.colors(), k.rotation()), (d.colors(), d.rotation()));
+        assert_eq!(
+            mean_diff(&k, &d),
+            0.0,
+            "frame {t}: kept against copied down"
+        );
+        let img = k.to_rgba(W, H).unwrap();
+        assert_eq!(code_rgba(&img.rgba, W, H), rendered(&p, t), "frame {t}");
+    }
+    assert_eq!(kept.status().error, None);
 }

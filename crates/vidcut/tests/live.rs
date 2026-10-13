@@ -169,6 +169,7 @@ impl Harness {
             player: Some(live::PlayerConfig {
                 audio,
                 budget: vidcut_av::player::DEFAULT_BUDGET,
+                gpu_pictures: false,
             }),
             preview_error: None,
             renderer: port.clone(),

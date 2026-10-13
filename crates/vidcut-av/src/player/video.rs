@@ -336,6 +336,9 @@ impl Decoder {
                 .get_or_insert_with(|| crate::cuda::CudaDevice::open().ok());
             if let Some(device) = cuda {
                 frames = frames.decode_on(device.clone());
+                if self.shared.gpu_pictures {
+                    frames = frames.keep_on_gpu();
+                }
             }
         }
         frames

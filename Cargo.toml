@@ -31,6 +31,12 @@ clap = { version = "4.6", features = ["env", "string"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 libc = "0.2"
+# Vulkan calls on wgpu's own device (the version wgpu-hal uses): memory the
+# viewer shares with CUDA. MIT or Apache-2.0.
+ash = { version = "0.38", default-features = false, features = ["std"] }
+# Loads CUDA's driver library for the calls FFmpeg doesn't make (memory a
+# display shares). ISC.
+libloading = "0.8"
 # Links the system FFmpeg 8.0 via pkg-config; bindings are generated with bindgen.
 # The crate's version numbers follow FFmpeg's, but it detects the installed
 # FFmpeg and compiles only what that version has, so 9.x builds against 8.0.

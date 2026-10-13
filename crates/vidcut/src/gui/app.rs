@@ -149,6 +149,7 @@ impl App {
             player: Some(live::PlayerConfig {
                 audio: Arc::new(audio_device),
                 budget: vidcut_av::player::DEFAULT_BUDGET,
+                gpu_pictures: viewer.takes_gpu_pictures(),
             }),
             preview_error: None,
             renderer: port.clone(),

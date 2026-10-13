@@ -74,6 +74,8 @@ impl Shared {
 /// The viewer thread, and what the UI shows of it.
 pub struct Viewer {
     shared: Arc<Shared>,
+    /// It shows pictures in CUDA memory from there.
+    gpu_pictures: bool,
     thread: Option<JoinHandle<()>>,
     /// The egui texture of the target, and the target's generation.
     texture: Option<(u64, egui::TextureId)>,
@@ -100,6 +102,7 @@ impl Viewer {
             wake: Condvar::new(),
         });
         let gpu = Gpu::new(&render.device, &render.queue);
+        let gpu_pictures = gpu.takes_gpu_pictures();
         let s = shared.clone();
         let thread = crate::threads::spawn(
             "vidcut-viewer",
@@ -109,9 +112,16 @@ impl Viewer {
         .ok();
         Self {
             shared,
+            gpu_pictures,
             thread,
             texture: None,
         }
+    }
+
+    /// Whether it shows pictures NVDEC decoded from GPU memory, so a
+    /// player may keep them there.
+    pub fn takes_gpu_pictures(&self) -> bool {
+        self.gpu_pictures
     }
 
     pub fn handle(&self) -> ViewerHandle {
