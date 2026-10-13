@@ -32,80 +32,112 @@ impl Kind {
     }
 }
 
-/// A part of FFmpeg vidcut uses.
+/// One of a part's encoders or filters: its name in FFmpeg and the
+/// library it comes with (`None`: FFmpeg's own).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Name {
+    pub name: &'static str,
+    pub library: Option<&'static str>,
+}
+
+/// A part of FFmpeg vidcut uses, by what it does: any of its names does
+/// it, the first best.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Part {
     pub kind: Kind,
-    pub name: &'static str,
-    /// The library it comes with; `None` for FFmpeg's own.
-    pub library: Option<&'static str>,
+    pub names: &'static [Name],
     /// What vidcut does with it.
     pub used_for: &'static str,
 }
 
-const fn lib(
-    kind: Kind,
-    name: &'static str,
-    library: &'static str,
-    used_for: &'static str,
-) -> Part {
-    Part {
-        kind,
+const fn lib(name: &'static str, library: &'static str) -> Name {
+    Name {
         name,
         library: Some(library),
-        used_for,
     }
 }
 
-const fn own(kind: Kind, name: &'static str, used_for: &'static str) -> Part {
-    Part {
-        kind,
+const fn own(name: &'static str) -> Name {
+    Name {
         name,
         library: None,
+    }
+}
+
+const fn encoder(names: &'static [Name], used_for: &'static str) -> Part {
+    Part {
+        kind: Kind::Encoder,
+        names,
         used_for,
     }
 }
 
-/// The parts from other libraries.
-pub const OPTIONAL: &[Part] = &[
-    lib(Kind::Encoder, "libx264", "x264", "H.264 on the CPU"),
-    lib(Kind::Encoder, "libx265", "x265", "HEVC on the CPU"),
-    lib(Kind::Encoder, "libsvtav1", "SVT-AV1", "AV1 on the CPU"),
-    lib(Kind::Encoder, "libvpx-vp9", "libvpx", "VP9"),
-    lib(Kind::Encoder, "libopus", "libopus", "Opus sound"),
-    lib(Kind::Encoder, "libmp3lame", "LAME", "MP3 sound"),
-    lib(Kind::Filter, "zscale", "zimg", "HDR conversion"),
-    lib(
-        Kind::Filter,
-        "libplacebo",
-        "libplacebo",
+const fn filter(names: &'static [Name], used_for: &'static str) -> Part {
+    Part {
+        kind: Kind::Filter,
+        names,
+        used_for,
+    }
+}
+
+pub const H264: Part = encoder(
+    &[lib("libx264", "x264"), lib("libopenh264", "OpenH264")],
+    "H.264 on the CPU",
+);
+pub const HEVC: Part = encoder(
+    &[lib("libx265", "x265"), lib("libkvazaar", "Kvazaar")],
+    "HEVC on the CPU",
+);
+pub const AV1: Part = encoder(
+    &[
+        lib("libsvtav1", "SVT-AV1"),
+        lib("libaom-av1", "libaom"),
+        lib("librav1e", "rav1e"),
+    ],
+    "AV1 on the CPU",
+);
+pub const VP9: Part = encoder(&[lib("libvpx-vp9", "libvpx")], "VP9");
+pub const PRORES: Part = encoder(&[own("prores_ks"), own("prores_aw")], "ProRes");
+pub const DNXHR: Part = encoder(&[own("dnxhd")], "DNxHR");
+pub const AAC: Part = encoder(&[own("aac")], "AAC sound");
+pub const OPUS: Part = encoder(&[lib("libopus", "libopus"), own("opus")], "Opus sound");
+pub const MP3: Part = encoder(&[lib("libmp3lame", "LAME")], "MP3 sound");
+pub const ZSCALE: Part = filter(&[lib("zscale", "zimg")], "HDR conversion");
+
+/// The parts vidcut uses.
+pub const PARTS: &[Part] = &[
+    H264,
+    HEVC,
+    AV1,
+    VP9,
+    PRORES,
+    DNXHR,
+    AAC,
+    OPUS,
+    MP3,
+    encoder(&[own("flac")], "FLAC sound"),
+    encoder(&[own("pcm_s16le")], "PCM sound"),
+    encoder(&[own("pcm_s24le")], "PCM sound"),
+    encoder(&[own("png")], "stills and storyboards"),
+    ZSCALE,
+    filter(
+        &[lib("libplacebo", "libplacebo")],
         "NVDEC's pictures converted on the GPU",
     ),
-];
-
-/// FFmpeg's own parts vidcut uses.
-pub const OWN: &[Part] = &[
-    own(Kind::Encoder, "aac", "AAC sound"),
-    own(Kind::Encoder, "flac", "FLAC sound"),
-    own(Kind::Encoder, "pcm_s16le", "PCM sound"),
-    own(Kind::Encoder, "pcm_s24le", "PCM sound"),
-    own(Kind::Encoder, "prores_ks", "ProRes"),
-    own(Kind::Encoder, "dnxhd", "DNxHR"),
-    own(Kind::Encoder, "png", "stills and storyboards"),
-    own(Kind::Filter, "buffer", "every picture conversion"),
-    own(Kind::Filter, "buffersink", "every picture conversion"),
-    own(Kind::Filter, "abuffer", "loudness"),
-    own(Kind::Filter, "abuffersink", "loudness"),
-    own(Kind::Filter, "scale", "every picture conversion"),
-    own(Kind::Filter, "pad", "every picture conversion"),
-    own(Kind::Filter, "setsar", "every picture conversion"),
-    own(Kind::Filter, "format", "every picture conversion"),
-    own(Kind::Filter, "transpose", "turning pictures upright"),
-    own(Kind::Filter, "hflip", "turning pictures upright"),
-    own(Kind::Filter, "vflip", "turning pictures upright"),
-    own(Kind::Filter, "tonemap", "HDR into SDR"),
-    own(Kind::Filter, "bwdif", "deinterlacing"),
-    own(Kind::Filter, "ebur128", "loudness"),
+    filter(&[own("buffer")], "every picture conversion"),
+    filter(&[own("buffersink")], "every picture conversion"),
+    filter(&[own("abuffer")], "loudness"),
+    filter(&[own("abuffersink")], "loudness"),
+    filter(&[own("scale")], "every picture conversion"),
+    filter(&[own("pad")], "every picture conversion"),
+    filter(&[own("setsar")], "every picture conversion"),
+    filter(&[own("format")], "every picture conversion"),
+    filter(&[own("transpose")], "turning pictures upright"),
+    filter(&[own("hflip")], "turning pictures upright"),
+    filter(&[own("vflip")], "turning pictures upright"),
+    filter(&[own("tonemap")], "HDR into SDR"),
+    filter(&[own("bwdif")], "deinterlacing"),
+    filter(&[own("ebur128")], "loudness"),
 ];
 
 /// The names `VIDCUT_FFMPEG_WITHOUT` makes count as missing.
@@ -132,38 +164,75 @@ pub fn has_filter(name: &str) -> bool {
     !without().contains(name) && ffmpeg::filter::find(name).is_some()
 }
 
-fn has(part: &Part) -> bool {
-    match part.kind {
-        Kind::Encoder => has_encoder(part.name),
-        Kind::Filter => has_filter(part.name),
+fn has(kind: Kind, name: &str) -> bool {
+    match kind {
+        Kind::Encoder => has_encoder(name),
+        Kind::Filter => has_filter(name),
     }
 }
 
-/// The parts this FFmpeg lacks, FFmpeg's own first.
+/// The first of `part`'s names this FFmpeg has.
+pub fn first(part: &Part) -> Option<&'static str> {
+    part.names
+        .iter()
+        .map(|n| n.name)
+        .find(|n| has(part.kind, n))
+}
+
+/// The parts this FFmpeg lacks.
 pub fn missing() -> Vec<Part> {
-    OWN.iter()
-        .chain(OPTIONAL)
-        .filter(|p| !has(p))
+    PARTS
+        .iter()
+        .filter(|p| first(p).is_none())
         .copied()
         .collect()
 }
 
-/// The error for a `kind` named `name` this FFmpeg lacks.
-pub fn missing_error(kind: Kind, name: &str) -> Error {
-    let k = kind.name();
-    let part = OWN
+/// The parts this FFmpeg does with other than their first name, and the
+/// name it does each with.
+pub fn stand_ins() -> Vec<(Part, &'static str)> {
+    PARTS
         .iter()
-        .chain(OPTIONAL)
-        .find(|p| p.kind == kind && p.name == name);
-    Error::Missing(match part {
-        Some(Part {
-            library: Some(library),
-            used_for,
-            ..
-        }) => format!("this FFmpeg has no {name} {k} ({used_for}; it comes with {library})"),
-        Some(Part { used_for, .. }) => format!("this FFmpeg has no {name} {k} ({used_for})"),
-        None => format!("this FFmpeg has no {name} {k}"),
+        .filter_map(|p| first(p).filter(|n| *n != p.names[0].name).map(|n| (*p, n)))
+        .collect()
+}
+
+/// The error for `part`, which this FFmpeg lacks.
+pub fn part_missing(part: &Part) -> Error {
+    let k = part.kind.name();
+    let named = |n: &Name| match n.library {
+        Some(library) => format!("{} from {library}", n.name),
+        None => n.name.to_string(),
+    };
+    Error::Missing(match part.names {
+        [n] => match n.library {
+            Some(library) => format!(
+                "this FFmpeg has no {} {k} ({}; it comes with {library})",
+                n.name, part.used_for
+            ),
+            None => format!("this FFmpeg has no {} {k} ({})", n.name, part.used_for),
+        },
+        names => {
+            let all: Vec<String> = names.iter().map(named).collect();
+            format!(
+                "this FFmpeg has no {k} for {} ({})",
+                part.used_for,
+                all.join(" or ")
+            )
+        }
     })
+}
+
+/// The error for a `kind` named `name` this FFmpeg lacks: its part's, when
+/// it is a part's only name.
+pub fn missing_error(kind: Kind, name: &str) -> Error {
+    match PARTS
+        .iter()
+        .find(|p| p.kind == kind && p.names.len() == 1 && p.names[0].name == name)
+    {
+        Some(part) => part_missing(part),
+        None => Error::Missing(format!("this FFmpeg has no {name} {}", kind.name())),
+    }
 }
 
 /// A decoder for a stream of `id` opened, or why not: none for its codec
@@ -240,6 +309,11 @@ mod tests {
         assert_eq!(e, "this FFmpeg has no png encoder (stills and storyboards)");
         let e = missing_error(Kind::Filter, "nosuch").to_string();
         assert_eq!(e, "this FFmpeg has no nosuch filter");
+        // A part with alternatives names them all.
+        assert_eq!(
+            part_missing(&H264).to_string(),
+            "this FFmpeg has no encoder for H.264 on the CPU (libx264 from x264 or libopenh264 from OpenH264)"
+        );
     }
 
     #[test]
@@ -258,12 +332,16 @@ mod tests {
         assert_eq!(e.to_string(), "this FFmpeg has no vidcut_nosuch filter");
     }
 
-    /// FFmpeg's own parts are in the builds the tests run on: the list
-    /// names real parts.
+    /// The parts that are FFmpeg's own are in the builds the tests run on:
+    /// the list names real ones.
     #[test]
     fn ffmpegs_own_parts_are_here() {
         crate::init();
-        let lacking: Vec<&str> = OWN.iter().filter(|p| !has(p)).map(|p| p.name).collect();
+        let lacking: Vec<&str> = PARTS
+            .iter()
+            .filter(|p| p.names.iter().all(|n| n.library.is_none()) && first(p).is_none())
+            .map(|p| p.names[0].name)
+            .collect();
         assert!(lacking.is_empty(), "{lacking:?}");
     }
 }

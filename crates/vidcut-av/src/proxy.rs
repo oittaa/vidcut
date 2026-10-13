@@ -30,9 +30,11 @@ const KEYFRAMES: u32 = 60;
 /// An encoder proxies can be made with.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProxyEncoder {
-    /// FFmpeg's encoder: `av1_nvenc`, `av1_vaapi`, `libsvtav1` or `libx264`.
+    /// FFmpeg's encoder: `av1_nvenc`, `av1_vaapi`, `libsvtav1`, `libx264`,
+    /// or where this FFmpeg has neither of those two `libopenh264` or
+    /// `prores_ks`.
     pub name: String,
-    /// `av1` or `h264`.
+    /// `av1`, `h264` or `prores`.
     pub codec: &'static str,
     /// Hardware (NVENC, VAAPI) or software (CPU).
     pub kind: EncoderChoice,
@@ -54,6 +56,7 @@ impl ProxyEncoder {
     pub fn label(&self) -> String {
         let codec = match self.codec {
             "av1" => "AV1",
+            "prores" => "ProRes Proxy",
             _ => "H.264",
         };
         let what = match (self.kind, self.name.as_str()) {
@@ -64,14 +67,17 @@ impl ProxyEncoder {
             ),
             (_, "libsvtav1") => "software (SVT-AV1)".to_string(),
             (_, "libx264") => "software (x264)".to_string(),
+            (_, "libopenh264") => "software (OpenH264)".to_string(),
+            (_, "prores_ks") => "software (FFmpeg's)".to_string(),
             (_, other) => format!("software ({other})"),
         };
         format!("{codec}, {what}")
     }
 
     fn pixel(&self) -> format::Pixel {
-        match self.kind {
-            EncoderChoice::Vaapi => format::Pixel::NV12,
+        match (self.kind, self.codec) {
+            (EncoderChoice::Vaapi, _) => format::Pixel::NV12,
+            (_, "prores") => format::Pixel::YUV422P10LE,
             _ => format::Pixel::YUV420P,
         }
     }
@@ -102,6 +108,15 @@ impl ProxyEncoder {
                 ("cq", "32".into()),
                 ("b", "0".into()),
             ],
+            // One quantizer for every frame, near x264's CRF 20.
+            "libopenh264" => vec![
+                ("profile", "high".into()),
+                ("rc_mode", "quality".into()),
+                ("qmin", "22".into()),
+                ("qmax", "22".into()),
+            ],
+            // ProRes Proxy: every frame a keyframe.
+            "prores_ks" => vec![("profile", "0".into()), ("vendor", "apl0".into())],
             // AV1's quantizer index (0–255) is its global quality: it has
             // no `qp`.
             "av1_vaapi" => vec![("rc_mode", "CQP".into()), ("global_quality", "128".into())],
@@ -112,8 +127,9 @@ impl ProxyEncoder {
 
 /// The encoders `choice` makes proxies with here, best first: hardware AV1
 /// (NVENC, then VAAPI) when this machine has a working one, then x264 for
-/// automatic, SVT-AV1 for AV1; x264 for H.264. A proxy takes the first that
-/// opens: NVENC allows a few sessions at a time.
+/// automatic and H.264, SVT-AV1 for AV1; without those, OpenH264, else
+/// ProRes Proxy. A proxy takes the first that opens: NVENC allows a few
+/// sessions at a time.
 pub fn encoders(choice: ProxyCodec, available: &Availability) -> Vec<ProxyEncoder> {
     let mut out = Vec::new();
     if choice != ProxyCodec::H264 {
@@ -131,12 +147,23 @@ pub fn encoders(choice: ProxyCodec, available: &Availability) -> Vec<ProxyEncode
             }
         }
     }
-    let software = match choice {
-        ProxyCodec::Av1 => ProxyEncoder::software("libsvtav1", "av1"),
-        ProxyCodec::Auto | ProxyCodec::H264 => ProxyEncoder::software("libx264", "h264"),
+    // The first software encoder this FFmpeg has. ProRes is FFmpeg's own,
+    // in every build.
+    let software: &[(&str, &'static str)] = match choice {
+        ProxyCodec::Av1 => &[
+            ("libsvtav1", "av1"),
+            ("libx264", "h264"),
+            ("libopenh264", "h264"),
+            ("prores_ks", "prores"),
+        ],
+        ProxyCodec::Auto | ProxyCodec::H264 => &[
+            ("libx264", "h264"),
+            ("libopenh264", "h264"),
+            ("prores_ks", "prores"),
+        ],
     };
-    if crate::parts::has_encoder(&software.name) {
-        out.push(software);
+    if let Some((name, codec)) = software.iter().find(|(n, _)| crate::parts::has_encoder(n)) {
+        out.push(ProxyEncoder::software(name, codec));
     }
     out
 }

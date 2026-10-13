@@ -113,6 +113,8 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
 - User presets are TOML files in `~/.config/vidcut/presets/`.
 - `--set key=value` overrides any field.
 
+**CPU encoders:** each codec's first that this FFmpeg has (`vidcut_av::parts`): H.264 x264, OpenH264; HEVC x265, Kvazaar (sizes in multiples of 8 only); AV1 SVT-AV1, libaom, rav1e; ProRes `prores_ks`, `prores_aw`; Opus libopus, FFmpeg's own. The quality stays on the codec's scale: OpenH264 and Kvazaar take it as one quantizer for every frame, rav1e as a quantizer index. `doctor` names the stand-ins in use (`ffmpeg_stand_ins`).
+
 **`auto` encoder:**
 - Picks NVENC if a test encode works; then the other GPUs' own: AMF (AMD) and QSV (Intel) on Windows, VAAPI (AMD and Intel alike) on Linux; then the CPU encoder (`encode::AUTO_GPU`). On Linux QSV is there by name: it needs Intel's VPL GPU runtime (`libmfx-gen1.2` on Ubuntu), and VAAPI serves the same GPUs without it. AMF on Linux needs AMD's closed driver, so vidcut leaves it out there.
 - An export takes the first of these that opens (`encode::video_encoders`). A GPU encoder that tested fine can still fail to open when an export starts: NVENC allows a few sessions at a time, and other exports may hold them. The report names the encoder used; the plan (`--dry-run`) names the first choice.
