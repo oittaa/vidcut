@@ -742,6 +742,55 @@ impl Shrinker {
     }
 }
 
+/// Fits VA-API's frames into an output picture on the GPU, for an encoder
+/// on their device: scaled to the size they are shown at, into the
+/// output's layout (`scale_vaapi`), and centered on black where their
+/// aspect differs (`pad_vaapi`), at even offsets as the CPU pads.
+pub(crate) struct Fitter {
+    graph: ffmpeg::filter::Graph,
+    /// The frames context and frame size it was made for, and the size it
+    /// scales to.
+    input: ((usize, u32, u32), (u32, u32)),
+}
+
+impl Fitter {
+    /// `f` scaled to `fitted` and placed in an `out` picture of `layout`
+    /// (NV12, P010), on the GPU, with its timestamp and colors, its pixels
+    /// square; `fitter` made for frames like it first.
+    pub(crate) fn fit(
+        fitter: &mut Option<Fitter>,
+        f: &frame::Video,
+        fitted: (u32, u32),
+        (w, h): (u32, u32),
+        layout: format::Pixel,
+    ) -> Result<frame::Video> {
+        let (frames, of) = frames_of(f)?;
+        let input = (of, fitted);
+        if fitter.as_ref().is_none_or(|x| x.input != input) {
+            let (fw, fh) = fitted;
+            let layout = if layout == format::Pixel::P010LE {
+                "p010"
+            } else {
+                "nv12"
+            };
+            let mut spec = format!("scale_vaapi=w={fw}:h={fh}:format={layout}");
+            if fitted != (w, h) {
+                let (x, y) = (((w - fw) / 2) & !1, ((h - fh) / 2) & !1);
+                spec.push_str(&format!(",pad_vaapi=w={w}:h={h}:x={x}:y={y}:color=black"));
+            }
+            let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VAAPI;
+            let graph = gpu_graph(f, frames, pixel, &spec)?;
+            *fitter = Some(Self { graph, input });
+        }
+        let graph = &mut fitter.as_mut().expect("made above").graph;
+        let mut out = run_graph(graph, f, "fitting a frame on the GPU")?;
+        same_picture(&mut out, f);
+        // SAFETY: a plain field of its own frame.
+        unsafe { (*out.as_mut_ptr()).sample_aspect_ratio = ffi::AVRational { num: 1, den: 1 } };
+        Ok(out)
+    }
+}
+
 /// Direct3D 11's frames on the GPU (Windows): kept, each copied out of the
 /// decoder's texture array into a texture of its own, which another device
 /// opens by an NT handle; and scaled by the GPU's video processor.

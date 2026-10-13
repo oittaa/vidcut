@@ -2293,6 +2293,151 @@ fn gpu_decoded_exports_match_the_cpu() {
     }
 }
 
+/// With VAAPI on a VA-API decoder's render node, video pieces that need
+/// nothing but fitting stay on the GPU from the decoder to the encoder:
+/// scaled there into the output's layout (10-bit sources into 8-bit
+/// output too) and padded on black where their aspect differs. Turned, SD
+/// (BT.601) and interlaced pieces, and black, are made on the CPU. Every
+/// frame is the one the CPU export shows.
+#[cfg(feature = "gpu-tests")]
+#[test]
+fn vaapi_exports_keep_frames_on_the_gpu() {
+    use vidcut_av::hw::{GpuDecoder, Kind};
+    let available = vidcut_av::export::encode::detect();
+    let node = available
+        .encoders
+        .iter()
+        .find(|e| e.ok && e.encoder == "h264_vaapi")
+        .and_then(|e| e.device.clone());
+    let Some(decoder) = node.and_then(|node| {
+        GpuDecoder::all()
+            .into_iter()
+            .find(|d| d.kind() == Kind::Vaapi && d.on() == node)
+    }) else {
+        eprintln!("skipping: no VAAPI encoder on a VA-API decoder's node here");
+        return;
+    };
+    let fps = Rational::new(30, 1).unwrap();
+    let at = |codec, (w, h), frames| {
+        src(FixtureSpec::new(
+            codec,
+            Container::Mkv,
+            w,
+            h,
+            (30, 1),
+            frames,
+        ))
+    };
+    let a = at(VideoCodec::H264, (1280, 720), 60);
+    let b = at(VideoCodec::Hevc10, (1280, 720), 30);
+    let big = at(VideoCodec::Hevc10, (1920, 1080), 20);
+    let e = at(VideoCodec::Av1, (1280, 720), 20);
+    let vp9 = at(VideoCodec::Vp9, (1280, 720), 20);
+    let four_three = at(VideoCodec::H264, (1440, 1080), 10);
+    let scope = at(VideoCodec::H264, (1920, 800), 10);
+    let sd = at(VideoCodec::H264, (320, 180), 10);
+    let r90 = src(
+        FixtureSpec::new(VideoCodec::H264, Container::Mp4, 1280, 720, (30, 1), 10).rotation(90),
+    );
+    let inter = src(
+        FixtureSpec::new(VideoCodec::H264, Container::Mkv, 1280, 720, (25, 1), 20).interlaced(true),
+    );
+    // Each piece, and whether it stays on the GPU where the GPU decodes it.
+    let pieces = [
+        (v(&a, 0, 30), true),
+        (VideoPiece::Black { frames: 10 }, false),
+        (v(&b, 0, 30), true),
+        (v(&big, 0, 20), true),
+        (v(&e, 0, 20), true),
+        (v(&vp9, 0, 20), true),
+        (v(&four_three, 0, 10), true),
+        (v(&scope, 0, 10), true),
+        (v(&sd, 0, 10), false),
+        (v(&r90, 0, 10), false),
+        (v(&inter, 0, 15), false),
+        (v(&a, 40, 15), true),
+    ];
+    let decodes = |piece: &VideoPiece| match piece {
+        VideoPiece::Source { path, .. } => {
+            VideoReader::open_gpu_or_cpu(&vidcut_av::decode::Input::File(path.clone()), &decoder)
+                .is_ok_and(|r| r.gpu().is_some())
+        }
+        VideoPiece::Black { .. } => false,
+    };
+    let on_gpu: i64 = pieces
+        .iter()
+        .filter(|(p, fits)| *fits && decodes(p))
+        .map(|(p, _)| p.frames())
+        .sum();
+    let video: Vec<_> = pieces.into_iter().map(|(p, _)| p).collect();
+    let p = plan(fps, 1280, 720, video, vec![]);
+    let dir = out_dir("vaapi-frames");
+    let mut reference = lossless();
+    reference.audio = None;
+    let cpu = dir.path().join("cpu.mkv");
+    render(&p, &reference, &cpu);
+    let want = barcodes(&cpu);
+    for (codec, bits) in [(VCodec::H264, 8), (VCodec::Hevc, 10)] {
+        let mut settings = reference.clone();
+        let v = settings.video.as_mut().unwrap();
+        v.codec = codec;
+        v.encoder = EncoderChoice::Vaapi;
+        v.quality = Some(16);
+        v.speed = None;
+        v.bit_depth = Some(bits);
+        let out = dir.path().join(format!("vaapi-{bits}.mkv"));
+        let report = export::run_decoding_on(
+            &p,
+            &settings,
+            &out,
+            &available,
+            Some(&decoder),
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap_or_else(|e| panic!("{bits}-bit: {e}"));
+        assert_eq!(report.gpu_frames, on_gpu, "{bits}-bit: frames on the GPU");
+        assert_eq!(barcodes(&out), want, "{bits}-bit");
+        // The pillarboxed and letterboxed pictures start where the CPU's
+        // do, on video-range black.
+        // 4:3 (frames 130 to 139) and 2.4:1 (140 to 149).
+        for k in [135, 145] {
+            assert_eq!(
+                picture_starts(&frame_at(&out, k)),
+                picture_starts(&frame_at(&cpu, k)),
+                "{bits}-bit: frame {k}"
+            );
+        }
+        let m = region_means(&frame_at(&out, 135), (0, 100));
+        let near = |v: f64, want: f64| (v - want).abs() <= 1.0;
+        assert!(
+            near(m[0], 16.0) && near(m[1], 128.0) && near(m[2], 128.0),
+            "{bits}-bit: the bars are {m:?}"
+        );
+        // Levels hold through the GPU's fitting (10 bits into 8 too), within
+        // the encoder's noise. The SD piece, made on the CPU, comes down as
+        // NV12, which swscale converts from BT.601 half a level apart from
+        // planar YUV.
+        if bits == 8 {
+            let (mut got, mut cpu_frames) = (
+                VideoReader::open(&out).unwrap(),
+                VideoReader::open(&cpu).unwrap(),
+            );
+            for k in 0..want.len() {
+                let g = got.next_frame().unwrap().unwrap();
+                let c = cpu_frames.next_frame().unwrap().unwrap();
+                for plane in 0..3 {
+                    let (abs, mean) = difference(&g, &c, plane);
+                    assert!(
+                        abs <= 1.5 && mean.abs() <= 0.75,
+                        "frame {k} plane {plane} is {abs:.2} levels from the CPU's, shifted {mean:.2}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// How far plane `plane` of `a` is from `b`'s, on average, and the average
 /// of the differences (a shift of levels). 8-bit pictures of one size.
 #[cfg(feature = "gpu-tests")]

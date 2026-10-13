@@ -364,7 +364,7 @@ fn open(
             None
         }
         (Some(node), EncoderChoice::Vaapi, _) => {
-            let v = Vaapi::new(node, enc.pixel(), width, height)?;
+            let v = Vaapi::new(node, enc.pixel(), width, height, None)?;
             ctx.set_format(format::Pixel::VAAPI);
             hw_frames(&mut ctx, v.frames)?;
             Some(v)

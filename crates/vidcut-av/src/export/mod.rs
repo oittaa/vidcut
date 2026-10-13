@@ -741,21 +741,30 @@ fn encode(
                         fps,
                         global_header,
                         Some(frames.as_ptr()),
+                        None,
                         pass,
                     )
                 {
-                    opened = Some((enc, o, Some((device, frames))));
+                    opened = Some((enc, o, Some((device, frames)), false));
                     break;
                 }
-                match encode::open_video(&enc, w, h, fps, global_header, None, pass) {
+                // VAAPI on the decoder's own device, where the decoder is
+                // VA-API on its render node: frames fitted on the GPU go to
+                // it as they are.
+                let shared = decoder.filter(|d| {
+                    enc.kind == EncoderChoice::Vaapi
+                        && d.kind() == crate::hw::Kind::Vaapi
+                        && enc.device.as_deref() == Some(d.on())
+                });
+                match encode::open_video(&enc, w, h, fps, global_header, None, shared, pass) {
                     Ok(o) => {
-                        opened = Some((enc, o, None));
+                        opened = Some((enc, o, None, shared.is_some()));
                         break;
                     }
                     Err(e) => failed.push((Some(enc.name.clone()), e)),
                 }
             }
-            let Some((enc, (encoder, vaapi), gpu)) = opened else {
+            let Some((enc, (encoder, vaapi), gpu, fit_on_gpu)) = opened else {
                 if failed.len() == 1 {
                     return Err(failed.remove(0).1);
                 }
@@ -791,7 +800,7 @@ fn encode(
                         stats: &stats,
                         buffer: buffer.as_deref(),
                     };
-                    encode::open_video(&enc, w, h, fps, global_header, None, second)?
+                    encode::open_video(&enc, w, h, fps, global_header, None, None, second)?
                 }
                 _ => (encoder, vaapi),
             };
@@ -812,6 +821,9 @@ fn encode(
             .with_light(light);
             if let Some(d) = decoder {
                 frames = frames.decode_on(d.clone());
+            }
+            if fit_on_gpu {
+                frames = frames.fit_on_gpu();
             }
             // HDR10+ goes into HEVC and AV1 packets here; libvpx-vp9 takes
             // it from the frames, and WebM and Matroska carry it.
@@ -956,9 +968,10 @@ fn encode(
             {
                 waiting.insert(j, t35);
             }
+            // Frames fitted on the GPU are on the encoder's device already.
             let mut f = match &v.vaapi {
-                Some(hw) => hw.upload(&f)?,
-                None => f,
+                Some(hw) if !crate::hw::on_gpu(&f) => hw.upload(&f)?,
+                _ => f,
             };
             if !v.metadata.is_empty() {
                 crate::hdr::attach(&mut f, &v.metadata)?;

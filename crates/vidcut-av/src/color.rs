@@ -124,6 +124,19 @@ pub fn colors_of(f: &frame::Video) -> Colors {
     }
 }
 
+/// Whether `src` goes into output of `target`'s dynamic range (`None`:
+/// SDR BT.709) as it is: video-range YUV in the output's matrix and
+/// transfer, which a scaler only resamples.
+pub(crate) fn kept(src: Source, target: Option<Hdr>) -> bool {
+    !src.rgb
+        && !src.full_range
+        && match (src.hdr, target) {
+            (None, None) => src.matrix == Matrix::Bt709,
+            (Some(s), Some(t)) => s == t && src.matrix == Matrix::Bt2020,
+            _ => false,
+        }
+}
+
 /// `scaled`, a copy of `f` at another size, tagged with the matrix `f` is
 /// read with: an untagged picture's follows from its size.
 pub(crate) fn keep_matrix(scaled: &mut frame::Video, f: &frame::Video) {

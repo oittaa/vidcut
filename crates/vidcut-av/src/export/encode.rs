@@ -714,18 +714,36 @@ impl Drop for Vaapi {
 }
 
 impl Vaapi {
-    pub(crate) fn new(node: &str, sw: format::Pixel, width: u32, height: u32) -> Result<Self> {
+    /// Frames on `node`, or on `shared`, a device already open there (a
+    /// decoder's, whose frames then go to the encoder as they are).
+    pub(crate) fn new(
+        node: &str,
+        sw: format::Pixel,
+        width: u32,
+        height: u32,
+        shared: Option<&crate::hw::GpuDecoder>,
+    ) -> Result<Self> {
         let path =
             std::ffi::CString::new(node).map_err(|_| Error::Invalid("bad device path".into()))?;
         unsafe {
             let mut device = std::ptr::null_mut();
-            let ret = ffi::av_hwdevice_ctx_create(
-                &mut device,
-                ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VAAPI,
-                path.as_ptr(),
-                std::ptr::null_mut(),
-                0,
-            );
+            let ret = match shared {
+                Some(d) => {
+                    device = ffi::av_buffer_ref(d.as_ptr());
+                    if device.is_null() {
+                        ffi::AVERROR(ffi::ENOMEM)
+                    } else {
+                        0
+                    }
+                }
+                None => ffi::av_hwdevice_ctx_create(
+                    &mut device,
+                    ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VAAPI,
+                    path.as_ptr(),
+                    std::ptr::null_mut(),
+                    0,
+                ),
+            };
             if ret < 0 {
                 return Err(Error::Ffmpeg {
                     context: format!("opening VAAPI device {node}"),
@@ -783,7 +801,10 @@ impl Vaapi {
 /// Opens a video encoder for `enc` at `width`×`height` and `fps`.
 /// Returns the opened encoder and, for VAAPI, the upload context.
 /// With `gpu_frames` (NVENC), the encoder takes frames in GPU memory of
-/// that frames context.
+/// that frames context. VAAPI opens on `shared`'s device when given (a
+/// VA-API decoder on its render node), so that decoder's frames can go to
+/// it without leaving the GPU.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn open_video(
     enc: &VideoEncoder,
     width: u32,
@@ -791,6 +812,7 @@ pub(crate) fn open_video(
     fps: ffmpeg::Rational,
     global_header: bool,
     gpu_frames: Option<*mut ffi::AVBufferRef>,
+    shared: Option<&crate::hw::GpuDecoder>,
     pass: Pass<'_>,
 ) -> Result<(encoder::Video, Option<Vaapi>)> {
     let codec = encoder::find_by_name(&enc.name)
@@ -828,7 +850,7 @@ pub(crate) fn open_video(
             None
         }
         Some(node) if enc.kind == EncoderChoice::Vaapi => {
-            let v = Vaapi::new(node, enc.pixel, width, height)?;
+            let v = Vaapi::new(node, enc.pixel, width, height, shared)?;
             ctx.set_format(format::Pixel::VAAPI);
             let frames = unsafe { ffi::av_buffer_ref(v.frames) };
             if frames.is_null() {
@@ -965,8 +987,16 @@ fn try_gpu(
         dynamic: Default::default(),
     };
     let (w, h) = (640, 360);
-    let (mut encoder, vaapi) =
-        open_video(&enc, w, h, ffmpeg::Rational(30, 1), false, None, Pass::Only)?;
+    let (mut encoder, vaapi) = open_video(
+        &enc,
+        w,
+        h,
+        ffmpeg::Rational(30, 1),
+        false,
+        None,
+        None,
+        Pass::Only,
+    )?;
     let mut sw = frame::Video::new(pixel, w, h);
     crate::export::video::fill_black(&mut sw)?;
     let mut packets = 0;
