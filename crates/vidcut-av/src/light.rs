@@ -78,27 +78,21 @@ impl LightAnalysis {
             .any(|&(a, b)| a <= from + EPS && b >= to - EPS)
     }
 
-    /// MaxCLL and MaxFALL of the frames from `from` to before `to`
-    /// (seconds); with none there, of the frame shown then (the next, or
-    /// the last); `None` without frames.
-    pub fn level(&self, from: f64, to: f64) -> Option<LightLevel> {
+    /// MaxCLL and MaxFALL of the frames shown at `sampled`, times (seconds)
+    /// in order within what is measured: at each, the first frame from then
+    /// on, or the last (the sampling rule, `export::video`). Frames between
+    /// them, which a lower output rate skips, don't count. `None` without
+    /// frames.
+    pub fn level(&self, sampled: impl IntoIterator<Item = f64>) -> Option<LightLevel> {
+        let last = self.frames.len().checked_sub(1)?;
         let mut out: Option<(f32, f32)> = None;
-        for (_, l) in self
-            .frames
-            .iter()
-            .filter(|(t, _)| *t >= from - EPS && *t < to - EPS)
-        {
+        let mut i = 0;
+        for t in sampled {
+            i += self.frames[i..].partition_point(|(f, _)| *f < t - EPS);
+            let l = &self.frames[i.min(last)].1;
             let (m, a) = out.get_or_insert((0.0, 0.0));
             *m = m.max(l.max);
             *a = a.max(l.average);
-        }
-        if out.is_none() {
-            out = self
-                .frames
-                .iter()
-                .find(|(t, _)| *t >= from - EPS)
-                .or(self.frames.last())
-                .map(|(_, l)| (l.max, l.average));
         }
         out.map(|(m, a)| {
             let max_cll = (m.ceil() as u32).max(1);
@@ -167,13 +161,33 @@ impl Span {
                 to: f64::INFINITY,
             });
         }
-        let half = 0.5 * fps.frames_to_secs(1);
+        let target = |pos| crate::export::video::target(fps, *origin, pos);
         Some(Self {
             input,
-            from: origin + fps.frames_to_secs(*source_frame) - half,
-            to: origin + fps.frames_to_secs(source_frame + frames) - half,
+            from: target(*source_frame),
+            to: target(source_frame + frames),
         })
     }
+}
+
+/// When the frames `piece` shows at `fps` are sampled, in order (the
+/// sampling rule, `export::video`): each shows the first source frame from
+/// then on, or the last. A still shows its one picture; black, none.
+pub fn sampled(piece: &VideoPiece, fps: Rational) -> impl Iterator<Item = f64> + use<> {
+    let (origin, first, n) = match piece {
+        VideoPiece::Source {
+            image: Some(Image::Still),
+            ..
+        } => (f64::NEG_INFINITY, 0, 1),
+        VideoPiece::Source {
+            origin,
+            source_frame,
+            frames,
+            ..
+        } => (*origin, *source_frame, *frames),
+        VideoPiece::Black { .. } => (0.0, 0, 0),
+    };
+    (0..n).map(move |k| crate::export::video::target(fps, origin, first + k))
 }
 
 /// A transfer's light per normalized code, cd/m² (SDR: relative to its
@@ -530,7 +544,28 @@ pub fn piece_level(
     let Some(span) = Span::of(piece, fps) else {
         return Ok(None);
     };
-    Ok(analysis(&span, measure_now, cancel, progress)?.and_then(|a| a.level(span.from, span.to)))
+    Ok(analysis(&span, measure_now, cancel, progress)?.and_then(|a| a.level(sampled(piece, fps))))
+}
+
+/// Measures single frames as they are decoded, on the CPU or copied down
+/// from the GPU: for HDR10+ made for frames of a file not measured ahead.
+pub(crate) struct Meter(crate::export::video::Relayout);
+
+impl Meter {
+    pub(crate) fn new() -> Self {
+        Self(crate::export::video::Relayout::new())
+    }
+
+    /// `f` stays as it is: a layout to convert goes through a filter, which
+    /// takes the frame it is given, so it gets another reference.
+    pub(crate) fn measure(&mut self, f: &frame::Video) -> Result<FrameLight> {
+        let f = if f.format() == format::Pixel::CUDA {
+            crate::cuda::download(f)?
+        } else {
+            crate::export::video::frame_ref(f)?
+        };
+        measure_with(&f, &mut self.0)
+    }
 }
 
 #[cfg(test)]
@@ -572,24 +607,73 @@ mod tests {
         assert_eq!(a.spans, vec![(0.0, 1.0)]);
         assert!(a.covers(0.2, 1.0) && !a.covers(0.2, 1.5));
         assert_eq!(
-            a.level(0.0, 1.0),
+            a.level([0.0, 0.5]),
             Some(LightLevel {
                 max_cll: 901,
                 max_fall: 80
             })
         );
+        // The frame between two sampled is skipped.
         assert_eq!(
-            a.level(1.0, 2.0),
+            a.level([0.0, 1.0]),
             Some(LightLevel {
                 max_cll: 300,
                 max_fall: 300
             })
         );
-        // No frame there: the one shown then.
-        assert_eq!(a.level(2.0, 3.0).map(|l| l.max_cll), Some(300));
-        assert_eq!(a.level(0.2, 0.3).map(|l| l.max_cll), Some(901));
-        assert_eq!(LightAnalysis::default().level(0.0, 1.0), None);
+        // Between frames, the next is shown; past the last, the last.
+        assert_eq!(a.level([0.2, 0.3]).map(|l| l.max_cll), Some(901));
+        assert_eq!(a.level([2.0, 3.0]).map(|l| l.max_cll), Some(300));
+        assert_eq!(a.level(std::iter::empty()), None);
+        assert_eq!(LightAnalysis::default().level([0.0]), None);
         assert_eq!(a.at(0.7).map(|f| f.max), Some(900.5));
         assert_eq!(from_bytes(&to_bytes(&a)), Some(a));
+    }
+
+    #[test]
+    fn levels_count_the_frames_an_export_shows() {
+        let fps = Rational::new(30, 1).unwrap();
+        let piece = |frames, image| VideoPiece::Source {
+            media: "m".into(),
+            path: "clip.mov".into(),
+            origin: 0.0,
+            source_frame: 0,
+            frames,
+            image,
+        };
+        let measured = |rate: f64, maxes: &[f32]| {
+            let mut a = LightAnalysis::default();
+            let frames = maxes
+                .iter()
+                .enumerate()
+                .map(|(j, &max)| {
+                    let l = FrameLight {
+                        max,
+                        average: max / 2.0,
+                        ..FrameLight::default()
+                    };
+                    (j as f64 / rate, l)
+                })
+                .collect();
+            a.add(f64::NEG_INFINITY, f64::INFINITY, frames);
+            a
+        };
+        // 60 fps at 30: frames 0, 1 and 3 are shown, 2 and 4 skipped.
+        let a = measured(60.0, &[100.0, 110.0, 900.0, 120.0, 950.0]);
+        let level = a.level(sampled(&piece(3, None), fps)).unwrap();
+        assert_eq!((level.max_cll, level.max_fall), (120, 60));
+        // 24 fps at 30: the last frame shown, 2/24 s, is where the next
+        // piece's span starts (5/60 s).
+        let a = measured(24.0, &[100.0, 200.0, 900.0, 300.0]);
+        let level = a.level(sampled(&piece(3, None), fps)).unwrap();
+        assert_eq!(level.max_cll, 900);
+        let to = Span::of(&piece(3, None), fps).unwrap().to;
+        assert!((to - 5.0 / 60.0).abs() < EPS, "{to}");
+        // A still is its one picture, whatever the piece's length.
+        let a = measured(1.0, &[500.0]);
+        let still = piece(90, Some(Image::Still));
+        assert_eq!(sampled(&still, fps).count(), 1);
+        assert_eq!(a.level(sampled(&still, fps)).unwrap().max_cll, 500);
+        assert_eq!(sampled(&VideoPiece::Black { frames: 9 }, fps).count(), 0);
     }
 }
