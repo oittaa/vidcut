@@ -42,11 +42,20 @@ pub struct Gpu {
     /// proxies. Off, all of it runs on the CPU, even when an export names a
     /// GPU encoder.
     pub acceleration: bool,
+    /// While `acceleration` is on, decode H.264, HEVC, AV1 and VP9 on the
+    /// GPU in the viewer, exports and proxies, and all but H.264 in the
+    /// timeline's pictures. Off, the CPU decodes and scales them and the
+    /// GPU only encodes, which is faster where the GPU is small and the CPU
+    /// large.
+    pub decoding: bool,
 }
 
 impl Default for Gpu {
     fn default() -> Self {
-        Self { acceleration: true }
+        Self {
+            acceleration: true,
+            decoding: true,
+        }
     }
 }
 
@@ -164,6 +173,8 @@ pub struct PreferencesPatch {
 pub struct GpuPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acceleration: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decoding: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -245,6 +256,7 @@ impl Preferences {
         let mut p = self.clone();
         if let Some(g) = &patch.gpu {
             p.gpu.acceleration = g.acceleration.unwrap_or(p.gpu.acceleration);
+            p.gpu.decoding = g.decoding.unwrap_or(p.gpu.decoding);
         }
         if let Some(x) = &patch.player {
             p.player.memory_mb = x.memory_mb.unwrap_or(p.player.memory_mb);
@@ -326,6 +338,21 @@ mod tests {
         // A file without the key keeps it on.
         let read: Preferences = serde_json::from_value(serde_json::json!({})).unwrap();
         assert!(read.gpu.acceleration);
+    }
+
+    #[test]
+    fn gpu_decoding_goes_off_on_its_own() {
+        let p = Preferences::default();
+        assert!(p.gpu.decoding);
+        let off = p
+            .patched(&PreferencesPatch::from_pairs(&["gpu.decoding=false".into()]).unwrap())
+            .unwrap();
+        assert!(!off.gpu.decoding);
+        assert!(off.gpu.acceleration);
+        // A file from before it keeps decoding on.
+        let read: Preferences =
+            serde_json::from_value(serde_json::json!({ "gpu": { "acceleration": true } })).unwrap();
+        assert!(read.gpu.decoding);
     }
 
     #[test]

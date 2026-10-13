@@ -207,6 +207,33 @@ pub struct GpuDecoder {
 /// AMD's PCI vendor id.
 const AMD: u32 = 0x1002;
 
+/// Where a job's pieces decode: an export's or a proxy's.
+#[derive(Clone, Copy)]
+pub enum Decoding<'a> {
+    /// NVENC's on NVDEC, so their frames stay on the GPU; the rest on the
+    /// CPU.
+    Nvdec,
+    /// On this GPU where it decodes their streams; NVENC's on NVDEC.
+    Gpu(&'a GpuDecoder),
+    /// All on the CPU, NVENC's too.
+    Cpu,
+}
+
+impl<'a> Decoding<'a> {
+    /// The GPU decoder for pieces that aren't NVENC's, when there is one.
+    pub fn decoder(self) -> Option<&'a GpuDecoder> {
+        match self {
+            Self::Gpu(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    /// Whether NVENC's pieces decode on NVDEC.
+    pub fn nvdec(self) -> bool {
+        !matches!(self, Self::Cpu)
+    }
+}
+
 /// The decoding profiles [`GpuDecoder::hardware_decodes`] asks a driver for.
 #[derive(Clone, Copy)]
 enum Profile {

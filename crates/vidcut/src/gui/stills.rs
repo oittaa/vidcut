@@ -147,7 +147,7 @@ impl Stills {
                 format!("vidcut-stills-{n}"),
                 crate::threads::Work::Interactive,
                 move || {
-                    let mut on_gpu = crate::preferences::gpu_acceleration();
+                    let mut on_gpu = crate::preferences::gpu_decoding();
                     let mut renderer = cell_renderer(on_gpu);
                     loop {
                         let mut job = match rx.recv_timeout(IDLE) {
@@ -163,7 +163,7 @@ impl Stills {
                         };
                         // The preferences as each frame is asked for: a
                         // change reaches the two-up at once.
-                        let gpu = crate::preferences::gpu_acceleration();
+                        let gpu = crate::preferences::gpu_decoding();
                         if gpu != on_gpu {
                             on_gpu = gpu;
                             renderer = cell_renderer(gpu);
@@ -261,7 +261,7 @@ impl Stills {
 }
 
 /// A renderer for a cell, decoding on the GPU the viewer decodes on while
-/// `on_gpu` (`gpu.acceleration`).
+/// `on_gpu` (`gpu.decoding`).
 fn cell_renderer(on_gpu: bool) -> StillRenderer {
     let renderer = StillRenderer::with_budget(BUDGET);
     match crate::preferences::timeline_decoder(on_gpu) {

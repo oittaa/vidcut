@@ -201,8 +201,8 @@ fn decoding(hwdec: &str) -> Option<(String, String)> {
         "" => return None,
         "no" => (
             "decoding on the CPU".into(),
-            "The viewer decodes in software: GPU acceleration is off in File > Preferences, \
-             or the GPU can't decode this file"
+            "The viewer decodes in software: GPU acceleration or decoding is off in File > \
+             Preferences, or the GPU can't decode this file"
                 .into(),
         ),
         other => gpu(vidcut_av::hw::Kind::named(other).map_or(other, |k| k.label())),

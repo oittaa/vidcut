@@ -825,7 +825,7 @@ fn amf_frames_made_on_the_cpu_keep_hdr10s_metadata() {
         &s,
         &out,
         &available,
-        Some(&decoder),
+        vidcut_av::hw::Decoding::Gpu(&decoder),
         &AtomicBool::new(false),
         &mut |_| {},
     )

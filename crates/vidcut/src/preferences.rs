@@ -39,6 +39,25 @@ pub fn gpu_acceleration() -> bool {
     load().map_or(true, |p| p.gpu.acceleration)
 }
 
+/// Whether the GPU decodes too (`gpu.decoding`, while `gpu.acceleration`
+/// is on): in the viewer, exports, proxies, the timeline's tiles and the
+/// two-up.
+pub fn gpu_decoding() -> bool {
+    load().map_or(true, |p| p.gpu.acceleration && p.gpu.decoding)
+}
+
+/// Where exports and proxies decode, as the preferences say: all on the
+/// CPU while `gpu.decoding` is off; otherwise on `decoder`, the GPU the
+/// viewer takes ([`gpu_decoder`]), and NVENC's pieces on NVDEC (also
+/// without one).
+pub fn decoding(decoder: Option<&vidcut_av::hw::GpuDecoder>) -> vidcut_av::hw::Decoding<'_> {
+    match decoder {
+        _ if !gpu_decoding() => vidcut_av::hw::Decoding::Cpu,
+        Some(d) => vidcut_av::hw::Decoding::Gpu(d),
+        None => vidcut_av::hw::Decoding::Nvdec,
+    }
+}
+
 /// The GPU decoder the timeline's pictures (tiles, the two-up) decode on
 /// while `on_gpu`: the viewer's, on a stream or device of their own
 /// (`GpuDecoder::own`), so they don't wait in line with playback; `None`

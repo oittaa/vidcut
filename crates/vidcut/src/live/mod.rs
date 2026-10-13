@@ -829,7 +829,7 @@ impl Live {
                 self.finish(job, result);
             }
             Msg::PreferencesChanged => {
-                let gpu = crate::preferences::gpu_acceleration();
+                let gpu = crate::preferences::gpu_decoding();
                 changed = self.player.follow_gpu(gpu);
                 self.player.set_budget(crate::preferences::player_budget());
             }
