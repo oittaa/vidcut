@@ -162,7 +162,11 @@ fn tiles_are_made_kept_on_disk_and_found_again() {
     std::fs::rename(dir.join("clip.mp4"), dir.join("moved.mp4")).unwrap();
     #[cfg(windows)]
     {
-        let user = std::env::var("USERNAME").unwrap();
+        // As `DOMAIN\user`, which names the account on a domain too.
+        let user = match std::env::var("USERDOMAIN") {
+            Ok(domain) => format!("{domain}\\{}", std::env::var("USERNAME").unwrap()),
+            Err(_) => std::env::var("USERNAME").unwrap(),
+        };
         let out = std::process::Command::new("icacls")
             .arg(dir.join("clip.mp4"))
             .args(["/deny", &format!("{user}:(RD)")])

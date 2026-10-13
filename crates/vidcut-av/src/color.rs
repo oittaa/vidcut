@@ -758,6 +758,67 @@ mod tests {
         f
     }
 
+    /// What a scaler may take into the output as it is: video-range YUV in
+    /// the output's matrix and transfer, SDR and HDR alike.
+    #[test]
+    fn only_the_outputs_own_colors_are_kept() {
+        use Matrix::*;
+        let src = |hdr, matrix, full_range, rgb| Source {
+            hdr,
+            matrix,
+            full_range,
+            rgb,
+        };
+        // SDR into SDR: BT.709 in video range alone.
+        assert!(kept(src(None, Bt709, false, false), None));
+        assert!(!kept(src(None, Bt601, false, false), None));
+        assert!(!kept(src(None, Bt2020, false, false), None));
+        assert!(!kept(src(None, Bt709, true, false), None));
+        assert!(!kept(src(None, Bt709, false, true), None));
+        for hdr in [Hdr::Pq, Hdr::Hlg] {
+            // Into the same HDR, in BT.2020's matrix and video range.
+            assert!(kept(src(Some(hdr), Bt2020, false, false), Some(hdr)));
+            assert!(!kept(src(Some(hdr), Bt709, false, false), Some(hdr)));
+            assert!(!kept(src(Some(hdr), Bt2020, true, false), Some(hdr)));
+            // Into SDR, and SDR into it: converted.
+            assert!(!kept(src(Some(hdr), Bt2020, false, false), None));
+            assert!(!kept(src(None, Bt2020, false, false), Some(hdr)));
+            assert!(!kept(src(None, Bt709, false, false), Some(hdr)));
+        }
+        // One HDR into the other: converted.
+        assert!(!kept(
+            src(Some(Hdr::Pq), Bt2020, false, false),
+            Some(Hdr::Hlg)
+        ));
+        assert!(!kept(
+            src(Some(Hdr::Hlg), Bt2020, false, false),
+            Some(Hdr::Pq)
+        ));
+    }
+
+    /// A picture shrunk from an untagged one is read with the matrix the
+    /// untagged one is read with (its size says which), not the one its
+    /// own size would say; a tagged picture's tag goes along.
+    #[test]
+    fn shrunk_pictures_keep_their_sources_matrix() {
+        use ffi::AVColorSpace as S;
+        let shrunk = |w, h, tag| {
+            let mut f = picture(w, h, None);
+            unsafe { (*f.as_mut_ptr()).colorspace = tag };
+            let mut small = picture(320, 180, None);
+            keep_matrix(&mut small, &f);
+            Source::of(&small).matrix
+        };
+        // Untagged: HD is BT.709, SD BT.601, though 320x180 alone is SD.
+        assert_eq!(shrunk(1920, 1080, S::AVCOL_SPC_UNSPECIFIED), Matrix::Bt709);
+        assert_eq!(shrunk(720, 480, S::AVCOL_SPC_UNSPECIFIED), Matrix::Bt601);
+        // Tagged, whatever the size.
+        assert_eq!(shrunk(720, 480, S::AVCOL_SPC_BT709), Matrix::Bt709);
+        assert_eq!(shrunk(3840, 2160, S::AVCOL_SPC_BT2020_NCL), Matrix::Bt2020);
+        // Untouched, the small one alone would be read as SD.
+        assert_eq!(Source::of(&picture(320, 180, None)).matrix, Matrix::Bt601);
+    }
+
     #[test]
     fn the_gamut_matrix_is_bt2020_to_bt709s() {
         let m = gamut(Primaries::Bt2020, Primaries::Bt709);

@@ -79,21 +79,31 @@ pub fn canonical(path: &Path) -> std::io::Result<PathBuf> {
 fn plain(path: &Path) -> PathBuf {
     #[cfg(windows)]
     {
+        use std::ffi::OsString;
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
         use std::path::{Component, Prefix};
         let Some(Component::Prefix(prefix)) = path.components().next() else {
             return path.to_path_buf();
         };
-        let text = path.as_os_str().to_string_lossy();
+        // In UTF-16 units, as Windows counts them: a name needn't be valid
+        // Unicode.
+        let wide: Vec<u16> = path.as_os_str().encode_wide().collect();
         // Longer paths need the prefix; names it allows that the usual form
         // doesn't (a trailing dot or space) are left as they are too.
-        let usual = text.len() < 260
+        let usual = wide.len() < 260
             && !path.components().any(|c| {
-                let s = c.as_os_str().to_string_lossy();
-                matches!(c, Component::Normal(_)) && (s.ends_with('.') || s.ends_with(' '))
+                let last = c.as_os_str().encode_wide().last();
+                matches!(c, Component::Normal(_)) && matches!(last, Some(0x2e | 0x20))
             });
+        // The path from unit `from` on, after `lead`.
+        let rest = |from: usize, lead: &[u16]| {
+            PathBuf::from(OsString::from_wide(&[lead, &wide[from..]].concat()))
+        };
         match prefix.kind() {
-            Prefix::VerbatimDisk(_) if usual => PathBuf::from(&text[4..]),
-            Prefix::VerbatimUNC(..) if usual => PathBuf::from(format!(r"\\{}", &text[8..])),
+            // `\\?\C:\…`
+            Prefix::VerbatimDisk(_) if usual => rest(4, &[]),
+            // `\\?\UNC\server\…`
+            Prefix::VerbatimUNC(..) if usual => rest(8, &[0x5c, 0x5c]),
             _ => path.to_path_buf(),
         }
     }
@@ -132,5 +142,19 @@ mod tests {
         assert_eq!(plain(Path::new(r"\\?\C:\a.")), Path::new(r"\\?\C:\a."));
         let long = format!(r"\\?\C:\{}", "x".repeat(300));
         assert_eq!(plain(Path::new(&long)), Path::new(&long));
+        // A name that isn't valid Unicode (a lone surrogate) stays itself,
+        // and length counts UTF-16 units: 200 of these are 600 bytes in
+        // UTF-8.
+        use std::ffi::OsString;
+        use std::os::windows::ffi::OsStringExt;
+        let wide = |s: &str, name: &[u16]| {
+            let mut w: Vec<u16> = s.encode_utf16().collect();
+            w.extend_from_slice(name);
+            PathBuf::from(OsString::from_wide(&w))
+        };
+        let odd = [0xd800, 0x61];
+        assert_eq!(plain(&wide(r"\\?\C:\", &odd)), wide(r"C:\", &odd));
+        let euros = [0x20ac; 200];
+        assert_eq!(plain(&wide(r"\\?\C:\", &euros)), wide(r"C:\", &euros));
     }
 }

@@ -169,8 +169,7 @@ pub struct WrittenProxy {
 /// ([`CudaPictures`](crate::cuda::CudaPictures)). For every other encoder,
 /// and image sequences and streams NVDEC can't decode, the CPU scales: the
 /// frames decode on `decoder` where it decodes the stream, and on the CPU
-/// otherwise. VA-API's and Direct3D 11's are shrunk on the GPU before they
-/// come down; NVDEC's come down whole.
+/// otherwise, shrunk on the GPU before they come down (`hw::Shrinker`).
 pub fn write(
     input: &Input,
     width: u32,

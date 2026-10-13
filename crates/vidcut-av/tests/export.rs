@@ -1760,17 +1760,18 @@ fn many_segments_keep_memory_flat() {
     assert_eq!(barcodes(&out).len(), 800);
 }
 
+/// The process's peak resident memory in MB, as the system counts it: a
+/// reading or a panic, never a stand-in that would pass.
 fn peak_rss_mb() -> i64 {
     #[cfg(unix)]
     {
-        std::fs::read_to_string("/proc/self/status")
-            .ok()
-            .and_then(|s| {
-                s.lines()
-                    .find(|l| l.starts_with("VmHWM:"))
-                    .map(|l| l.split_whitespace().nth(1).unwrap().parse::<i64>().unwrap() / 1024)
-            })
-            .unwrap_or(0)
+        let status = std::fs::read_to_string("/proc/self/status").expect("/proc/self/status");
+        let kb = status
+            .lines()
+            .find(|l| l.starts_with("VmHWM:"))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .expect("VmHWM in /proc/self/status");
+        kb.parse::<i64>().unwrap() / 1024
     }
     #[cfg(windows)]
     // SAFETY: fills the counters it is given, their size set first.
@@ -1781,7 +1782,11 @@ fn peak_rss_mb() -> i64 {
         use windows_sys::Win32::System::Threading::GetCurrentProcess;
         let mut c: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
         c.cb = size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
-        GetProcessMemoryInfo(GetCurrentProcess(), &mut c, c.cb);
+        assert!(
+            GetProcessMemoryInfo(GetCurrentProcess(), &mut c, c.cb) != 0,
+            "no memory counters: {}",
+            std::io::Error::last_os_error()
+        );
         (c.PeakWorkingSetSize >> 20) as i64
     }
 }
@@ -2251,25 +2256,37 @@ fn gpu_decoded_exports_match_the_cpu() {
     for decoder in &decoders {
         let name = format!("{} {}", decoder.kind().name(), decoder.on());
         let out = dir.path().join("gpu.mkv");
+        // On a stream or device of its own, as an export takes it.
+        let own = decoder.own().unwrap_or_else(|e| panic!("{name}: {e}"));
         let report = export::run_decoding_on(
             &p,
             &settings,
             &out,
             &Availability::default(),
-            Some(decoder),
+            Some(&own),
             &AtomicBool::new(false),
             &mut |_| {},
         )
         .unwrap_or_else(|e| panic!("{name}: {e}"));
-        // H.264 on AMD's Direct3D 11, and any codec a GPU lacks, decode on
-        // the CPU; black is no one's.
-        eprintln!(
-            "{name}: {} of 290 frames decoded on the GPU",
-            report.gpu_decoded
-        );
-        assert!(
-            report.gpu_decoded > 0 && report.gpu_decoded <= 290,
-            "{name}"
+        // The frames of each codec (black's 10 are no one's) decode on the
+        // GPU where its driver lists the codec, but H.264 on AMD's Direct3D
+        // 11: 290 frames, or 115 there.
+        use vidcut_av::ffmpeg::codec::Id;
+        let on_gpu: usize = [
+            (Id::H264, 8, 175),
+            (Id::HEVC, 10, 55),
+            (Id::VP9, 8, 40),
+            (Id::AV1, 8, 20),
+        ]
+        .into_iter()
+        .filter(|&(codec, bits, _)| {
+            decoder.decodes(codec) && decoder.hardware_decodes(codec, bits) != Some(false)
+        })
+        .map(|(_, _, frames)| frames)
+        .sum();
+        assert_eq!(
+            report.gpu_decoded as usize, on_gpu,
+            "{name}: frames decoded on the GPU"
         );
         assert_eq!(barcodes(&out), want, "{name}");
         let (mut got, mut cpu_frames) = (
@@ -2329,6 +2346,16 @@ fn vaapi_exports_keep_frames_on_the_gpu() {
         ))
     };
     let a = at(VideoCodec::H264, (1280, 720), 60);
+    // 24 frames a second in a 30 fps plan: a frame shown twice now and
+    // then, sent to the encoder again.
+    let slow = src(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mkv,
+        1280,
+        720,
+        (24, 1),
+        40,
+    ));
     let b = at(VideoCodec::Hevc10, (1280, 720), 30);
     let big = at(VideoCodec::Hevc10, (1920, 1080), 20);
     let e = at(VideoCodec::Av1, (1280, 720), 20);
@@ -2345,6 +2372,7 @@ fn vaapi_exports_keep_frames_on_the_gpu() {
     // Each piece, and whether it stays on the GPU where the GPU decodes it.
     let pieces = [
         (v(&a, 0, 30), true),
+        (v(&slow, 0, 30), true),
         (VideoPiece::Black { frames: 10 }, false),
         (v(&b, 0, 30), true),
         (v(&big, 0, 20), true),
@@ -2377,6 +2405,11 @@ fn vaapi_exports_keep_frames_on_the_gpu() {
     let cpu = dir.path().join("cpu.mkv");
     render(&p, &reference, &cpu);
     let want = barcodes(&cpu);
+    // And at 10 bits, for the 10-bit export's levels.
+    let mut reference10 = reference.clone();
+    reference10.video.as_mut().unwrap().bit_depth = Some(10);
+    let cpu10 = dir.path().join("cpu10.mkv");
+    render(&p, &reference10, &cpu10);
     for (codec, bits) in [(VCodec::H264, 8), (VCodec::Hevc, 10)] {
         let mut settings = reference.clone();
         let v = settings.video.as_mut().unwrap();
@@ -2400,39 +2433,43 @@ fn vaapi_exports_keep_frames_on_the_gpu() {
         assert_eq!(barcodes(&out), want, "{bits}-bit");
         // The pillarboxed and letterboxed pictures start where the CPU's
         // do, on video-range black.
-        // 4:3 (frames 130 to 139) and 2.4:1 (140 to 149).
-        for k in [135, 145] {
+        // 4:3 (frames 160 to 169) and 2.4:1 (170 to 179).
+        for k in [165, 175] {
             assert_eq!(
                 picture_starts(&frame_at(&out, k)),
                 picture_starts(&frame_at(&cpu, k)),
                 "{bits}-bit: frame {k}"
             );
         }
-        let m = region_means(&frame_at(&out, 135), (0, 100));
+        let m = region_means(&frame_at(&out, 165), (0, 100));
         let near = |v: f64, want: f64| (v - want).abs() <= 1.0;
         assert!(
             near(m[0], 16.0) && near(m[1], 128.0) && near(m[2], 128.0),
             "{bits}-bit: the bars are {m:?}"
         );
         // Levels hold through the GPU's fitting (10 bits into 8 too), within
-        // the encoder's noise. The SD piece, made on the CPU, comes down as
-        // NV12, which swscale converts from BT.601 half a level apart from
-        // planar YUV.
-        if bits == 8 {
-            let (mut got, mut cpu_frames) = (
-                VideoReader::open(&out).unwrap(),
-                VideoReader::open(&cpu).unwrap(),
-            );
-            for k in 0..want.len() {
-                let g = got.next_frame().unwrap().unwrap();
-                let c = cpu_frames.next_frame().unwrap().unwrap();
-                for plane in 0..3 {
-                    let (abs, mean) = difference(&g, &c, plane);
-                    assert!(
-                        abs <= 1.5 && mean.abs() <= 0.75,
-                        "frame {k} plane {plane} is {abs:.2} levels from the CPU's, shifted {mean:.2}"
-                    );
-                }
+        // the encoder's noise, against the CPU's export of the same depth
+        // (in its codes: 10 bits four times 8's). The SD piece, made on the
+        // CPU, comes down as NV12, which swscale converts from BT.601 half a
+        // level apart from planar YUV.
+        let (reference, scale) = if bits == 8 {
+            (&cpu, 1.0)
+        } else {
+            (&cpu10, 4.0)
+        };
+        let (mut got, mut cpu_frames) = (
+            VideoReader::open(&out).unwrap(),
+            VideoReader::open(reference).unwrap(),
+        );
+        for k in 0..want.len() {
+            let g = got.next_frame().unwrap().unwrap();
+            let c = cpu_frames.next_frame().unwrap().unwrap();
+            for plane in 0..3 {
+                let (abs, mean) = difference(&g, &c, plane);
+                assert!(
+                    abs <= 1.5 * scale && mean.abs() <= 0.75 * scale,
+                    "{bits}-bit: frame {k} plane {plane} is {abs:.2} codes from the CPU's, shifted {mean:.2}"
+                );
             }
         }
     }
@@ -2611,10 +2648,25 @@ fn difference(
     );
     let (sa, sb) = (a.stride(plane), b.stride(plane));
     let (da, db) = (a.data(plane), b.data(plane));
+    // In 10-bit codes for 10-bit frames.
+    let wide = |f: &vidcut_av::ffmpeg::frame::Video| {
+        f.format() == vidcut_av::ffmpeg::format::Pixel::YUV420P10LE
+    };
+    assert_eq!(wide(a), wide(b), "frames of one depth");
+    let sample = |d: &[u8], stride: usize, x: usize, y: usize| {
+        if wide(a) {
+            f64::from(u16::from_le_bytes([
+                d[y * stride + 2 * x],
+                d[y * stride + 2 * x + 1],
+            ]))
+        } else {
+            f64::from(d[y * stride + x])
+        }
+    };
     let (mut abs, mut sum) = (0.0, 0.0);
     for y in 0..h {
         for x in 0..w {
-            let d = f64::from(da[y * sa + x]) - f64::from(db[y * sb + x]);
+            let d = sample(da, sa, x, y) - sample(db, sb, x, y);
             abs += d.abs();
             sum += d;
         }

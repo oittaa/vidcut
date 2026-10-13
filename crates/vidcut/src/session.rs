@@ -377,10 +377,12 @@ pub fn export_media(
             },
         }),
     )?;
-    // Decoded on the GPU as the viewer decodes.
+    // Decoded on the GPU the viewer decodes on, on a stream or device of
+    // its own; on the CPU where that won't open.
     let decoder = crate::preferences::gpu_acceleration()
         .then(crate::preferences::gpu_decoder)
-        .flatten();
+        .flatten()
+        .and_then(|d| d.own().ok());
     let reports = export::run(
         &prepared,
         &available,
