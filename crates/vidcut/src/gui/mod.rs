@@ -6,6 +6,7 @@
 mod acquire;
 mod app;
 pub mod export;
+mod file_manager;
 mod folders;
 mod import;
 mod mixer;
