@@ -279,6 +279,8 @@ struct Source {
     light: Option<crate::light::FrameLight>,
     /// `current`, normalized.
     normalized: Option<frame::Video>,
+    /// `normalized` was fitted on the GPU ([`VideoFrames::fit_on_gpu`]).
+    fitted: bool,
     /// A still keeps its one picture and is never sought; a sequence knows
     /// how many pictures it has.
     pictures: Pictures,
@@ -366,6 +368,7 @@ impl Source {
             meter: measure.then(crate::light::Meter::new),
             light: None,
             normalized: None,
+            fitted: false,
             pictures,
             on_gpu,
             scaler,
@@ -423,6 +426,7 @@ impl Source {
             meter: measure.then(crate::light::Meter::new),
             light: None,
             normalized: None,
+            fitted: false,
             pictures,
             on_gpu: false,
             scaler: None,
@@ -570,6 +574,10 @@ pub struct VideoFrames {
     /// Shrinks VA-API's and Direct3D 11's frames on the GPU before they
     /// come down to be fitted into the output.
     shrinker: Option<crate::hw::Shrinker>,
+    /// Fits VA-API's frames into the output on the GPU, for an encoder on
+    /// their device ([`fit_on_gpu`](Self::fit_on_gpu)), and the frames given
+    /// so far that it made.
+    fit: Option<(Option<crate::hw::Fitter>, i64)>,
     /// Keeping Direct3D 11's frames failed: they come down from then on.
     unkept: bool,
     /// The clockwise turn that shows the last frame given upright.
@@ -724,6 +732,7 @@ impl VideoFrames {
             keep_on_gpu: false,
             keeper: None,
             shrinker: None,
+            fit: None,
             unkept: false,
             rotation: 0,
             last_decoder: None,
@@ -755,6 +764,15 @@ impl VideoFrames {
     /// ([`with_gpu`](Self::with_gpu)) stay with it.
     pub fn decode_on(mut self, gpu: crate::hw::GpuDecoder) -> Self {
         self.decoder = Some(gpu);
+        self
+    }
+
+    /// VA-API's frames ([`decode_on`](Self::decode_on)) are fitted into the
+    /// output on the GPU and given there, for an encoder on their device,
+    /// when they need nothing else: not turned, and in the output's colors
+    /// (`color::kept`). The rest are made on the CPU.
+    pub fn fit_on_gpu(mut self) -> Self {
+        self.fit = Some((None, 0));
         self
     }
 
@@ -826,9 +844,10 @@ impl VideoFrames {
         self
     }
 
-    /// Frames decoded and scaled on the GPU so far.
+    /// Frames decoded and scaled on the GPU so far, on their way to the
+    /// encoder there.
     pub fn gpu_frames(&self) -> i64 {
-        self.gpu.as_ref().map_or(0, |g| g.made)
+        self.gpu.as_ref().map_or(0, |g| g.made) + self.fit.as_ref().map_or(0, |f| f.1)
     }
 
     /// Frames given so far whose source frame a GPU decoded, whether it
@@ -1156,29 +1175,52 @@ impl VideoFrames {
         } else if changed || src.normalized.is_none() {
             let (frame, _) = src.current.as_ref().expect("have a frame");
             let rotation = src.reader.rotation();
-            // Frames the GPU decoded come down to memory first.
-            let came_down;
-            let frame = if crate::hw::on_gpu(frame) {
-                came_down = down(&mut self.shrinker, frame, rotation, (out_w, out_h))?;
-                &came_down
-            } else {
-                frame
-            };
-            let rebuild = self
-                .normalizer
-                .as_ref()
-                .is_none_or(|n| !n.matches(frame, rotation));
-            if rebuild {
-                self.normalizer = Some(Normalizer::new(
-                    frame,
-                    rotation,
-                    out_w,
-                    out_h,
-                    out_fmt,
-                    self.target,
-                )?);
-            }
-            src.normalized = Some(self.normalizer.as_mut().expect("built").run(frame)?);
+            // VA-API's frames that need nothing but fitting stay on the GPU,
+            // for an encoder on their device.
+            let on_gpu = self.fit.as_mut().filter(|_| {
+                frame.format() == format::Pixel::VAAPI
+                    && rotation == 0
+                    && crate::color::kept(crate::color::Source::of(frame), self.target)
+            });
+            src.fitted = on_gpu.is_some();
+            src.normalized = Some(match on_gpu {
+                Some((fitter, _)) => {
+                    let sar = frame.aspect_ratio();
+                    let sar = (sar.numerator(), sar.denominator());
+                    let fitted = fit(frame.width(), frame.height(), sar, out_w, out_h);
+                    crate::hw::Fitter::fit(fitter, frame, fitted, (out_w, out_h), out_fmt)?
+                }
+                None => {
+                    // Frames the GPU decoded come down to memory first.
+                    let came_down;
+                    let frame = if crate::hw::on_gpu(frame) {
+                        came_down = down(&mut self.shrinker, frame, rotation, (out_w, out_h))?;
+                        &came_down
+                    } else {
+                        frame
+                    };
+                    let rebuild = self
+                        .normalizer
+                        .as_ref()
+                        .is_none_or(|n| !n.matches(frame, rotation));
+                    if rebuild {
+                        self.normalizer = Some(Normalizer::new(
+                            frame,
+                            rotation,
+                            out_w,
+                            out_h,
+                            out_fmt,
+                            self.target,
+                        )?);
+                    }
+                    self.normalizer.as_mut().expect("built").run(frame)?
+                }
+            });
+        }
+        if src.fitted
+            && let Some((_, made)) = self.fit.as_mut()
+        {
+            *made += 1;
         }
         let picture = frame_ref(src.normalized.as_ref().expect("normalized"))?;
         let mut out = match &mut self.gpu {

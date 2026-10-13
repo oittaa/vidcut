@@ -124,6 +124,19 @@ pub fn colors_of(f: &frame::Video) -> Colors {
     }
 }
 
+/// Whether `src` goes into output of `target`'s dynamic range (`None`:
+/// SDR BT.709) as it is: video-range YUV in the output's matrix and
+/// transfer, which a scaler only resamples.
+pub(crate) fn kept(src: Source, target: Option<Hdr>) -> bool {
+    !src.rgb
+        && !src.full_range
+        && match (src.hdr, target) {
+            (None, None) => src.matrix == Matrix::Bt709,
+            (Some(s), Some(t)) => s == t && src.matrix == Matrix::Bt2020,
+            _ => false,
+        }
+}
+
 /// `scaled`, a copy of `f` at another size, tagged with the matrix `f` is
 /// read with: an untagged picture's follows from its size.
 pub(crate) fn keep_matrix(scaled: &mut frame::Video, f: &frame::Video) {
@@ -743,6 +756,44 @@ mod tests {
             };
         }
         f
+    }
+
+    /// What a scaler may take into the output as it is: video-range YUV in
+    /// the output's matrix and transfer, SDR and HDR alike.
+    #[test]
+    fn only_the_outputs_own_colors_are_kept() {
+        use Matrix::*;
+        let src = |hdr, matrix, full_range, rgb| Source {
+            hdr,
+            matrix,
+            full_range,
+            rgb,
+        };
+        // SDR into SDR: BT.709 in video range alone.
+        assert!(kept(src(None, Bt709, false, false), None));
+        assert!(!kept(src(None, Bt601, false, false), None));
+        assert!(!kept(src(None, Bt2020, false, false), None));
+        assert!(!kept(src(None, Bt709, true, false), None));
+        assert!(!kept(src(None, Bt709, false, true), None));
+        for hdr in [Hdr::Pq, Hdr::Hlg] {
+            // Into the same HDR, in BT.2020's matrix and video range.
+            assert!(kept(src(Some(hdr), Bt2020, false, false), Some(hdr)));
+            assert!(!kept(src(Some(hdr), Bt709, false, false), Some(hdr)));
+            assert!(!kept(src(Some(hdr), Bt2020, true, false), Some(hdr)));
+            // Into SDR, and SDR into it: converted.
+            assert!(!kept(src(Some(hdr), Bt2020, false, false), None));
+            assert!(!kept(src(None, Bt2020, false, false), Some(hdr)));
+            assert!(!kept(src(None, Bt709, false, false), Some(hdr)));
+        }
+        // One HDR into the other: converted.
+        assert!(!kept(
+            src(Some(Hdr::Pq), Bt2020, false, false),
+            Some(Hdr::Hlg)
+        ));
+        assert!(!kept(
+            src(Some(Hdr::Hlg), Bt2020, false, false),
+            Some(Hdr::Pq)
+        ));
     }
 
     /// A picture shrunk from an untagged one is read with the matrix the
