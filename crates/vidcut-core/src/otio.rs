@@ -732,10 +732,11 @@ fn is_windows_absolute(s: &str) -> bool {
         || (s.len() > 2 && is_drive(&s[..2]) && matches!(s.as_bytes()[2], b'\\' | b'/'))
 }
 
-/// An absolute path on this system: `/…`, or on Windows a Windows one.
+/// An absolute path on this system: `/…`, or on Windows a Windows one (a
+/// server's written `//server/…` too).
 fn is_local_absolute(s: &str) -> bool {
     if cfg!(windows) {
-        is_windows_absolute(s)
+        is_windows_absolute(s) || s.starts_with("//")
     } else {
         s.starts_with('/')
     }
