@@ -280,6 +280,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         enabled: true,
         name: None,
         effects: None,
+        generator: None,
     })
 }
 
@@ -397,7 +398,7 @@ pub fn edit_has_handles(p: &Project, e: i64) -> bool {
     let Some(t) = p.track(MAIN) else {
         return true;
     };
-    !t.clips.iter().any(|c| {
+    !t.clips.iter().filter(|c| !c.is_generator()).any(|c| {
         let at_end = c.end() == e
             && p.media(&c.media)
                 .is_some_and(|m| c.source_in + c.duration >= p.media_limit(m));
@@ -1171,18 +1172,22 @@ pub fn move_replace(p: &mut Project, id: &str, onto: &str) -> Result<()> {
     Ok(())
 }
 
-/// Checks a clip's video and audio stay within its media.
+/// Checks a clip's video and audio stay within its media. A generator has
+/// none, and any length.
 fn check_source(p: &Project, c: &Clip) -> Result<()> {
-    let m = p
-        .media(&c.media)
-        .ok_or_else(|| Error::not_found(format!("no media {}", c.media)))?;
-    let frames = p.media_limit(m);
     if c.duration < 1 {
         return Err(Error::invalid(format!(
             "{} would be shorter than one frame",
             c.id
         )));
     }
+    if c.is_generator() {
+        return Ok(());
+    }
+    let m = p
+        .media(&c.media)
+        .ok_or_else(|| Error::not_found(format!("no media {}", c.media)))?;
+    let frames = p.media_limit(m);
     if c.source_in < 0 || c.source_in + c.duration > frames {
         return Err(Error::invalid(format!(
             "{} would need source frames {}..{}, but {} has 0..{frames}",
@@ -1445,6 +1450,10 @@ pub fn extend_to_media_end(p: &mut Project, ids: &[String], ripple: Option<bool>
         let c = p
             .clip(id)
             .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
+        // A generator has no end.
+        if c.is_generator() {
+            continue;
+        }
         let media = p
             .media(&c.media)
             .ok_or_else(|| Error::not_found(format!("no media {}", c.media)))?;
@@ -1795,25 +1804,36 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
     let first = clips[0].clip.start;
     let mut ids = Vec::new();
     for TrackClip { track, clip: c } in clips {
-        let media = p
-            .media(&c.media)
-            .ok_or_else(|| Error::not_found(format!("no media {} in this project", c.media)))?;
-        let frames = p.media_limit(media);
-        if c.duration <= 0 || c.source_in < 0 || c.source_in + c.duration > frames {
-            return Err(Error::invalid(format!(
-                "pasted clip {} is outside {} (0..{frames} frames)",
-                c.id, c.media
-            )));
-        }
-        if c.audio.as_ref().is_some_and(|a| {
-            a.stream as usize >= media.info.audio.len() || !(-60.0..=24.0).contains(&a.gain_db)
-        }) {
-            return Err(Error::invalid(format!(
-                "pasted clip {} has invalid audio settings",
-                c.id
-            )));
-        }
-        let has_video = media.info.video.is_some();
+        // A generator from another editor has no media (deviation X9).
+        let has_video = if c.is_generator() {
+            if c.duration <= 0 || !c.media.is_empty() || c.audio.is_some() {
+                return Err(Error::invalid(format!(
+                    "pasted clip {} is a generator with media or audio",
+                    c.id
+                )));
+            }
+            true
+        } else {
+            let media = p
+                .media(&c.media)
+                .ok_or_else(|| Error::not_found(format!("no media {} in this project", c.media)))?;
+            let frames = p.media_limit(media);
+            if c.duration <= 0 || c.source_in < 0 || c.source_in + c.duration > frames {
+                return Err(Error::invalid(format!(
+                    "pasted clip {} is outside {} (0..{frames} frames)",
+                    c.id, c.media
+                )));
+            }
+            if c.audio.as_ref().is_some_and(|a| {
+                a.stream as usize >= media.info.audio.len() || !(-60.0..=24.0).contains(&a.gain_db)
+            }) {
+                return Err(Error::invalid(format!(
+                    "pasted clip {} has invalid audio settings",
+                    c.id
+                )));
+            }
+            media.info.video.is_some()
+        };
         // A track that's gone: the paste makes tracks up to it.
         let ti = ensure_track(p, &track)?;
         unlocked(p, ti)?;

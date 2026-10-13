@@ -231,7 +231,10 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
 
     // Video: at every frame the highest video track with a visible clip
     // there shows; clips above cover the ones below.
-    let visible = |t: &crate::model::Track, c: &Clip| t.video_enabled && c.enabled && c.video;
+    // A generator from another editor plays as a gap (deviation X9).
+    let visible = |t: &crate::model::Track, c: &Clip| {
+        t.video_enabled && c.enabled && c.video && !c.is_generator()
+    };
     let tracks: Vec<_> = p
         .tracks
         .iter()

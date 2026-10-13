@@ -476,7 +476,9 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
             .tracks
             .iter()
             .flat_map(|t| t.clips.iter())
-            .filter(|c| c.start < b && c.end() > a)
+            // A generator from another editor plays as a gap: no file of
+            // its own (deviation X9).
+            .filter(|c| c.start < b && c.end() > a && !c.is_generator())
             .map(|c| (c.start, c.id.clone(), c.media.clone()))
             .collect();
         let mut clips = clips;

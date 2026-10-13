@@ -611,6 +611,18 @@ pub struct Clip {
     /// Effects on its picture, carried from another editor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effects: Option<Effects>,
+    /// A generator or title another editor made, carried (deviation X9):
+    /// a block that plays as a gap. It has no media (`media` is empty) and
+    /// no audio, and any length.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generator: Option<Generator>,
+}
+
+/// A generator or title from another editor's file (deviation X9).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Generator {
+    /// The OTIO media reference as read: a `GeneratorReference`.
+    pub reference: serde_json::Value,
 }
 
 /// Clip effects another editor applied, which vidcut keeps without showing
@@ -655,6 +667,12 @@ pub struct ClipAudio {
 }
 
 impl Clip {
+    /// Whether it is a generator or title from another editor, without
+    /// media.
+    pub fn is_generator(&self) -> bool {
+        self.generator.is_some()
+    }
+
     /// First frame after the clip.
     pub fn end(&self) -> i64 {
         self.start + self.duration

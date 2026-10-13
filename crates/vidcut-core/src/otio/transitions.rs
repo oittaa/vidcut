@@ -72,13 +72,13 @@ pub fn place(p: &Project, track: &Track, t: &Transition) -> Option<i64> {
     if (from.is_none() && meets(true)) || (to.is_none() && meets(false)) {
         return None;
     }
-    // Media past the edges.
-    if let Some(g) = to
+    // Media past the edges (a generator has any).
+    if let Some(g) = to.filter(|g| !g.is_generator())
         && g.source_at(cut) < t.before
     {
         return None;
     }
-    if let Some(f) = from {
+    if let Some(f) = from.filter(|f| !f.is_generator()) {
         let m = p.media(&f.media)?;
         if f.source_at(cut) + t.after > p.media_limit(m) {
             return None;

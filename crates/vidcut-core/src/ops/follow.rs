@@ -76,8 +76,12 @@ struct Mapper<'a> {
 impl Mapper<'_> {
     /// The clip now showing source frame `s` of old Track 1 clip `c`.
     fn successor(&self, c: &Clip, s: i64) -> Option<&Clip> {
-        let shows =
-            |n: &Clip| n.media == c.media && n.source_in <= s && s < n.source_in + n.duration;
+        let shows = |n: &Clip| {
+            n.media == c.media
+                && n.generator == c.generator
+                && n.source_in <= s
+                && s < n.source_in + n.duration
+        };
         if let Some(n) = self.all.get(c.id.as_str())
             && shows(n)
         {

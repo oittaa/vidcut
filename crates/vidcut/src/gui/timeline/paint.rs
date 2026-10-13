@@ -284,10 +284,12 @@ fn clip(
     let offline = assets.missing.contains(&c.media);
     let fill = if offline {
         theme::OFFLINE
-    } else if enabled {
-        theme::CLIP
-    } else {
+    } else if !enabled {
         theme::CLIP_DISABLED
+    } else if c.is_generator() {
+        theme::GENERATOR
+    } else {
+        theme::CLIP
     };
     // Audio-only clips (and audio tracks) have no picture band.
     let has_picture = c.video && video.height() > 2.0;
@@ -356,6 +358,7 @@ fn clip(
             .name
             .clone()
             .or_else(|| p.media(&c.media).map(|m| m.name.clone()))
+            .or_else(|| c.generator.as_ref().map(vidcut_core::otio::generator_kind))
             .unwrap_or_default();
         // Pinned to the visible part of the clip.
         let left = x0.max(painter.clip_rect().left());

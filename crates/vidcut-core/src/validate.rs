@@ -53,6 +53,13 @@ pub fn violations(p: &Project) -> Vec<String> {
                 v.push(format!("{} overlaps the previous clip on {}", c.id, t.id));
             }
             prev_end = Some(c.end());
+            // A generator (deviation X9): no media, no audio.
+            if c.is_generator() {
+                if !c.media.is_empty() || c.audio.is_some() || !c.video {
+                    v.push(format!("{}: a generator with media or audio", c.id));
+                }
+                continue;
+            }
             match p.media(&c.media) {
                 None => v.push(format!("{}: unknown media {}", c.id, c.media)),
                 Some(m) => {
