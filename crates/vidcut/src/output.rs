@@ -253,6 +253,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                     println!("  {n} of the frames decoded and scaled on the GPU (NVDEC)");
                 }
                 print_color(&o["color"]);
+                print_metadata(&o["metadata"]);
             }
             print_notes(&r.result["notes"]);
         }
@@ -306,6 +307,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                     o["audio_lanes"]
                 );
                 print_color(&o["color"]);
+                print_metadata(&o["metadata"]);
             }
             print_notes(&r.result["notes"]);
         }
@@ -890,6 +892,15 @@ fn print_color(c: &Value) {
     if !why.is_empty() {
         println!("    {}", why.join("; "));
     }
+}
+
+/// An output's HDR metadata and why (decision D46), indented; nothing when
+/// it writes none.
+fn print_metadata(m: &Value) {
+    if !m.is_object() || m["mode"].as_str() == Some("none") {
+        return;
+    }
+    println!("    HDR metadata: {}", crate::export::metadata_words(m));
 }
 
 /// An export's notes, with the overrides each suggests.

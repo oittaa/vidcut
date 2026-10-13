@@ -11,6 +11,7 @@ use serde_json::Value;
 use crate::error::{Error, Result};
 
 pub mod color;
+pub mod metadata;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -130,6 +131,43 @@ impl HdrMode {
     }
 }
 
+/// HDR metadata an export writes (`video.hdr_metadata`, decision D46).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HdrMetadata {
+    /// From the sources: the mastering display and content light levels
+    /// (PQ output), and HDR10+ and Dolby Vision when every picture has them.
+    #[default]
+    Auto,
+    /// The mastering display and content light levels only.
+    Static,
+    /// Those, and HDR10+ kept from the sources' frames.
+    Hdr10plus,
+    /// Those, and Dolby Vision kept from the sources' frames (libx265 and
+    /// libsvtav1 write it).
+    DolbyVision,
+    /// Those, HDR10+ and Dolby Vision.
+    All,
+    /// None.
+    None,
+}
+
+impl HdrMetadata {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// HDR10+ is kept.
+    pub fn hdr10plus(self) -> bool {
+        matches!(self, Self::Hdr10plus | Self::All)
+    }
+
+    /// Dolby Vision is kept.
+    pub fn dolby_vision(self) -> bool {
+        matches!(self, Self::DolbyVision | Self::All)
+    }
+}
+
 /// Which encoder implementation to use.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -196,6 +234,20 @@ pub struct VideoSettings {
     /// Unset: 32 (decision D45).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lookahead: Option<u32>,
+    /// HDR metadata (decision D46): `auto` writes the mastering display and
+    /// content light levels of the sources into PQ output, and keeps HDR10+
+    /// and Dolby Vision when every picture has them; `static`, `hdr10plus`,
+    /// `dolby_vision` and `all` say which; `none` writes none.
+    #[serde(default, skip_serializing_if = "HdrMetadata::is_default")]
+    pub hdr_metadata: HdrMetadata,
+    /// The mastering display PQ output says it was made on, as x265 writes
+    /// it: `G(x,y)B(x,y)R(x,y)WP(x,y)L(max,min)`, chromaticity in 1/50000,
+    /// luminance in 1/10000 cd/m². Unset: from the sources.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mastering_display: Option<String>,
+    /// MaxCLL and MaxFALL in cd/m² (`1000,400`). Unset: from the sources.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_cll: Option<String>,
 }
 
 /// The most frames NVENC looks ahead (`video.lookahead`).
@@ -304,6 +356,9 @@ fn video(codec: VideoCodec, quality: Option<u32>) -> VideoSettings {
         first_pass: FirstPass::Fast,
         multipass: Multipass::Quarter,
         lookahead: None,
+        hdr_metadata: Default::default(),
+        mastering_display: None,
+        max_cll: None,
     }
 }
 
@@ -645,6 +700,15 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
             }
             Some(2) => {}
             Some(n) => return Err(Error::usage(format!("passes {n}: 1 or 2"))),
+        }
+        if let Some(m) = &v.mastering_display {
+            metadata::parse_mastering(m)?;
+        }
+        if let Some(l) = &v.max_cll {
+            metadata::parse_light(l)?;
+        }
+        if v.hdr_metadata.dolby_vision() && !matches!(v.codec, V::Hevc | V::Av1) {
+            return Err(Error::usage("Dolby Vision needs HEVC or AV1"));
         }
         if v.lookahead.is_some_and(|n| n > MAX_LOOKAHEAD) {
             return Err(Error::usage(format!(

@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use vidcut_av::export::encode::Availability;
 use vidcut_av::export::{self as engine, Progress, Report};
 use vidcut_core::export::color::{self, ColorChoice, PictureKind, PictureShare};
+use vidcut_core::export::metadata::PieceMeta;
 use vidcut_core::export::{
     Container, EncoderChoice, ExportSettings, Preset, apply_overrides, builtin_presets, validate,
 };
@@ -344,6 +345,8 @@ pub struct Output {
     pub settings: ExportSettings,
     /// What was chosen, and why (decision D44).
     pub color: Option<ColorChoice>,
+    /// The HDR metadata it writes, and why (decision D46).
+    pub metadata: Option<vidcut_core::export::metadata::MetadataChoice>,
 }
 
 /// A checked export: settings and the files to write.
@@ -485,6 +488,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
                 plan,
                 settings: settings.clone(),
                 color: None,
+                metadata: None,
             });
         }
         if outputs.is_empty() {
@@ -496,6 +500,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
             path: params.output.clone(),
             settings: settings.clone(),
             color: None,
+            metadata: None,
         });
     }
     for o in &outputs {
@@ -527,16 +532,75 @@ fn picture_kind(p: &Project, piece: &render::VideoPiece) -> PictureKind {
         })
 }
 
+/// What a media item's pictures carry: its transfer and HDR metadata, as
+/// probed when it was added (or filled in, [`fill_hdr_metadata`]).
+fn piece_meta(p: &Project, piece: &render::VideoPiece) -> PieceMeta {
+    let render::VideoPiece::Source { media, .. } = piece else {
+        return PieceMeta::default();
+    };
+    p.media(media)
+        .and_then(|m| m.info.video.as_ref())
+        .map_or(PieceMeta::default(), |v| PieceMeta {
+            hdr: v.hdr,
+            mastering: v.mastering,
+            light: v.light,
+            hdr10plus: v.hdr10plus,
+            dolby_vision: v.dolby_vision,
+        })
+}
+
+/// Probes again the HDR media among `ids` that were probed before vidcut
+/// kept their metadata: those with none of it.
+pub fn fill_hdr_metadata(p: &mut Project, ids: &[String]) {
+    for m in &mut p.media {
+        let Some(v) = m.info.video.as_mut() else {
+            continue;
+        };
+        let bare = v.hdr.is_some()
+            && v.mastering.is_none()
+            && v.light.is_none()
+            && !v.hdr10plus
+            && v.dolby_vision.is_none();
+        if !bare || !ids.contains(&m.id) || m.sequence.is_some() {
+            continue;
+        }
+        if let Some(probed) = vidcut_av::probe::probe(&m.path).ok().and_then(|i| i.video) {
+            v.mastering = probed.hdr.mastering;
+            v.light = probed.hdr.light;
+            v.hdr10plus = probed.hdr.hdr10plus;
+            v.dolby_vision = probed.hdr.dolby_vision;
+        }
+    }
+}
+
 /// Chooses each output's dynamic range and bit depth from the pictures it
 /// shows, where the settings leave them to the export (decision D44): with
 /// the encoders the export may use (`settings` as the preferences allow).
+/// Then its HDR metadata (decision D46).
 pub fn choose_colors(prepared: &mut Prepared, p: &Project, available: &Availability) {
+    let ids: Vec<String> = prepared
+        .outputs
+        .iter()
+        .flat_map(|o| &o.plan.video)
+        .filter_map(|piece| match piece {
+            render::VideoPiece::Source { media, .. } => Some(media.clone()),
+            _ => None,
+        })
+        .collect();
+    let mut filled = p.clone();
+    fill_hdr_metadata(&mut filled, &ids);
     for o in &mut prepared.outputs {
         o.settings = prepared.settings.clone();
         o.color = vidcut_av::export::choose_color(&o.plan, &o.settings, available, |piece| {
             picture_kind(p, piece)
         });
         if let (Some(c), Some(v)) = (&o.color, o.settings.video.as_mut()) {
+            c.apply(v);
+        }
+        o.metadata = vidcut_av::export::choose_metadata(&o.plan, &o.settings, |piece| {
+            piece_meta(&filled, piece)
+        });
+        if let (Some(c), Some(v)) = (&o.metadata, o.settings.video.as_mut()) {
             c.apply(v);
         }
     }
@@ -591,6 +655,41 @@ pub fn notes(prepared: &Prepared, available: &Availability) -> Vec<Value> {
     vec![json!({ "code": "hdr_tone_mapped", "message": message, "set": set })]
 }
 
+/// A metadata choice in words: `HDR10: P3 D65, 0.0001–1000 cd/m², MaxCLL
+/// 1000, MaxFALL 400; HDR10+`.
+pub fn metadata_words(m: &Value) -> String {
+    let mut parts = Vec::new();
+    if let Ok(d) =
+        serde_json::from_value::<vidcut_core::model::MasteringDisplay>(m["mastering"].clone())
+    {
+        parts.push(vidcut_core::export::metadata::describe_mastering(&d));
+    }
+    if m["light"].is_object() {
+        parts.push(format!(
+            "MaxCLL {}, MaxFALL {}",
+            m["light"]["max_cll"], m["light"]["max_fall"]
+        ));
+    }
+    let mut words = if parts.is_empty() {
+        String::new()
+    } else {
+        format!("HDR10: {}", parts.join(", "))
+    };
+    let mode = m["mode"].as_str().unwrap_or_default();
+    for (kept, name) in [
+        (matches!(mode, "hdr10plus" | "all"), "HDR10+"),
+        (matches!(mode, "dolby_vision" | "all"), "Dolby Vision"),
+    ] {
+        if kept {
+            if !words.is_empty() {
+                words += "; ";
+            }
+            words += name;
+        }
+    }
+    words
+}
+
 /// A summary of a prepared export (the `export.plan` result).
 pub fn describe(prepared: &Prepared, available: &Availability) -> Value {
     // The encoder of the first file; with `auto` color, files may differ
@@ -617,6 +716,7 @@ pub fn describe(prepared: &Prepared, available: &Availability) -> Value {
             "video_pieces": o.plan.video.len(),
             "audio_lanes": o.plan.audio.len(),
             "color": o.color,
+            "metadata": o.metadata,
             "plan": o.plan,
         })).collect::<Vec<_>>(),
     })
@@ -706,6 +806,7 @@ pub fn run(
         })?;
         reports.push(Report {
             color: report.color.or_else(|| o.color.clone()),
+            metadata: report.metadata.or_else(|| o.metadata.clone()),
             ..report
         });
     }

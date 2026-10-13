@@ -1628,6 +1628,9 @@ fn plan_view(ui: &mut egui::Ui, d: &Dialog) -> Option<Vec<String>> {
             if let Some(line) = color_line(&outputs) {
                 ui.label(line.0).on_hover_text(line.1);
             }
+            if let Some(line) = metadata_line(&outputs) {
+                ui.label(dim(line.0)).on_hover_text(line.1);
+            }
             let frames: i64 = outputs.iter().filter_map(|o| o["frames"].as_i64()).sum();
             ui.label(format!("{} file(s), {frames} frames", outputs.len()));
             for o in outputs.iter().take(4) {
@@ -1698,6 +1701,25 @@ fn color_line(outputs: &[Value]) -> Option<(String, String)> {
         }
     }
     (!kinds.is_empty()).then(|| (kinds.join(" / "), why.join("\n")))
+}
+
+/// The HDR metadata the outputs write, in a few words, with the reasons to
+/// hover (decision D46); `None` when they write none.
+fn metadata_line(outputs: &[Value]) -> Option<(String, String)> {
+    let m = outputs
+        .iter()
+        .map(|o| &o["metadata"])
+        .find(|m| m.is_object() && m["mode"].as_str() != Some("none"))?;
+    Some((
+        crate::export::metadata_words(m),
+        m["why"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    ))
 }
 
 /// Applies a note's overrides to the dialog's settings: HDR, on a codec
@@ -1848,6 +1870,9 @@ fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u3
                                 first_pass: Default::default(),
                                 multipass: Default::default(),
                                 lookahead: None,
+                                hdr_metadata: Default::default(),
+                                mastering_display: None,
+                                max_cll: None,
                             }),
                         );
                         fit_codecs(&mut d.settings);
@@ -2018,6 +2043,34 @@ fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u3
                             );
                         if v.hdr.transfer().is_some() && v.bit_depth == Some(8) {
                             v.bit_depth = None;
+                        }
+                        // HDR metadata (decision D46), when the output may be HDR.
+                        if v.hdr != HdrMode::Sdr {
+                            use vidcut_core::export::HdrMetadata as M;
+                            let label = |m: M| match m {
+                                M::Auto => "auto",
+                                M::Static => "HDR10 only",
+                                M::Hdr10plus => "HDR10 + HDR10+",
+                                M::DolbyVision => "HDR10 + Dolby Vision",
+                                M::All => "HDR10 + HDR10+ + DV",
+                                M::None => "none",
+                            };
+                            ui.label(dim("metadata"));
+                            egui::ComboBox::from_id_salt("export-hdr-metadata")
+                                .selected_text(label(v.hdr_metadata))
+                                .show_ui(ui, |ui| {
+                                    for m in
+                                        [M::Auto, M::Static, M::Hdr10plus, M::DolbyVision, M::None]
+                                    {
+                                        ui.selectable_value(&mut v.hdr_metadata, m, label(m));
+                                    }
+                                })
+                                .response
+                                .on_hover_text(
+                                    "auto: the sources' mastering display and light levels \
+                                     (PQ), and HDR10+ and Dolby Vision when every picture has \
+                                     them. Dolby Vision is written by the CPU's encoders.",
+                                );
                         }
                     } else if v.hdr.transfer().is_some() {
                         v.hdr = HdrMode::Auto;

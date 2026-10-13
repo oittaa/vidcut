@@ -1,0 +1,9 @@
+# More HDR metadata
+
+**When:** later. What decision D46 (export.md §4, HDR metadata) leaves out.
+
+- **GPU encoders, tested.** NVENC writes the static values only when FFmpeg was built with NVENC SDK 13 headers (the container gets them either way), and VAAPI reads them from frames. HDR10+ goes into their packets as into the CPU's. A `gpu-tests` export through NVENC (with and without libplacebo) and VAAPI should read them back as `tests/hdr.rs` does.
+- **Measured light levels.** MaxCLL and MaxFALL come from the sources, or are left out when a PQ source has none. A pass over the output's pictures (as Resolve's Light Level report measures, p. 282) would give the real ones, also for timelines that mix sources.
+- **Dynamic metadata for mixed timelines.** HDR10+ and Dolby Vision are kept only when every picture has them. Frames without (SDR clips, PQ clips without them, titles) would need some made for them: HDR10+'s statistics, Dolby Vision's level 1, measured from the pictures.
+- **Dolby Vision through NVENC and VAAPI.** FFmpeg makes the RPU only in libx265, libsvtav1 and libaom; for the GPU's encoders vidcut would put each frame's RPU (`AV_FRAME_DATA_DOVI_RPU_BUFFER`) into the packets, as it does HDR10+. Profiles 5 and 7 (no HDR10 base layer, or an enhancement layer) aren't kept.
+- **Bindings.** ffmpeg-sys-next doesn't bind `libavutil/mastering_display_metadata.h`; `vidcut-av/src/hdr.rs` mirrors its structs. Binding it there would remove the mirror.

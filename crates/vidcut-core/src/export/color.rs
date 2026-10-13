@@ -398,6 +398,9 @@ mod tests {
             first_pass: Default::default(),
             multipass: Default::default(),
             lookahead: None,
+            hdr_metadata: Default::default(),
+            mastering_display: None,
+            max_cll: None,
         }
     }
 

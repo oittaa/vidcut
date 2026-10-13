@@ -822,6 +822,10 @@ mod tests {
                     fields: None,
                     hdr: None,
                     still: false,
+                    mastering: None,
+                    light: None,
+                    hdr10plus: false,
+                    dolby_vision: None,
                 }),
                 audio: vec![AudioInfo {
                     index: 0,

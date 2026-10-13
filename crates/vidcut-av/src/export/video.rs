@@ -474,6 +474,9 @@ pub struct VideoFrames {
     rotation: u16,
     /// The last frame given was decoded on NVDEC.
     last_nvdec: bool,
+    /// The dynamic HDR metadata each output frame keeps from its source
+    /// frame (decision D46). Other HDR metadata of the sources goes.
+    dynamic: crate::hdr::Dynamic,
 }
 
 /// The layouts a display takes: 8-bit 4:2:0 (planar, or NV12 as hardware
@@ -610,6 +613,7 @@ impl VideoFrames {
             keep_on_gpu: false,
             rotation: 0,
             last_nvdec: false,
+            dynamic: Default::default(),
         }
     }
 
@@ -673,6 +677,13 @@ impl VideoFrames {
             frames,
             made: 0,
         });
+        self
+    }
+
+    /// Output frames keep `dynamic` HDR metadata from the frames they are
+    /// made from.
+    pub fn with_dynamic(mut self, dynamic: crate::hdr::Dynamic) -> Self {
+        self.dynamic = dynamic;
         self
     }
 
@@ -974,14 +985,22 @@ impl VideoFrames {
             src.normalized = Some(self.normalizer.as_mut().expect("built").run(frame)?);
         }
         let picture = frame_ref(src.normalized.as_ref().expect("normalized"))?;
-        match &mut self.gpu {
+        let mut out = match &mut self.gpu {
             Some(g) if src.on_gpu => {
                 g.made += 1;
-                Ok(picture)
+                picture
             }
-            Some(g) => g.frames.upload(&picture),
-            None => Ok(picture),
+            Some(g) => g.frames.upload(&picture)?,
+            None => picture,
+        };
+        // The output's HDR metadata is its own: of the source's, only what
+        // is kept, from the frame this one shows.
+        crate::hdr::strip(&mut out);
+        if self.dynamic != crate::hdr::Dynamic::default() {
+            let (frame, _) = src.current.as_ref().expect("have a frame");
+            crate::hdr::copy_dynamic(frame, &mut out, self.dynamic)?;
         }
+        Ok(out)
     }
 }
 
