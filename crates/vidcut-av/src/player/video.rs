@@ -74,10 +74,10 @@ struct Decoder {
     /// The reader, for the rate, the size (of black) and the decoding it
     /// was made for.
     frames: Option<((Rational, u32, u32, bool), VideoFrames)>,
-    /// Decode on NVDEC where it can, as last asked.
+    /// Decode on the GPU where it can, as last asked.
     hardware: bool,
-    /// The GPU, once opened (`None` inside: it can't be).
-    cuda: Option<Option<crate::cuda::CudaDevice>>,
+    /// The GPU's decoder, once opened (`None` inside: there is none).
+    gpu: Option<Option<crate::hw::GpuDecoder>>,
     /// What the latest picture took, and where: windows and the pictures
     /// ahead are counted in it, against that kind's budget.
     picture_bytes: usize,
@@ -118,7 +118,7 @@ pub(crate) fn run(shared: Arc<Shared>) {
         shared: shared.clone(),
         frames: None,
         hardware: first.hardware,
-        cuda: None,
+        gpu: None,
         picture_bytes: (p.width as usize * p.height as usize * 3).div_ceil(2),
         picture_kind: Kind::Memory,
         next: None,
@@ -499,15 +499,20 @@ impl Decoder {
         let mut frames =
             VideoFrames::new(&[], p.fps, p.width, p.height, format::Pixel::YUV420P, None).decoded();
         if self.hardware {
-            let cuda = self
-                .cuda
-                .get_or_insert_with(|| crate::cuda::CudaDevice::open().ok());
-            if let Some(device) = cuda {
-                frames = frames.decode_on(device.clone());
+            let shared = &self.shared;
+            let gpu = self
+                .gpu
+                .get_or_insert_with(|| shared.gpu.clone().or_else(crate::hw::GpuDecoder::best));
+            if let Some(gpu) = gpu {
+                frames = frames.decode_on(gpu.clone());
+                // The GPU's pictures may stay in video memory, which then
+                // has a budget of its own.
                 if self.shared.gpu_pictures {
                     frames = frames.keep_on_gpu();
                 }
-                self.shared.gpu_found(device);
+                if let Some(cuda) = gpu.cuda() {
+                    self.shared.gpu_found(cuda);
+                }
             }
         }
         frames
@@ -617,12 +622,8 @@ fn picture(
     t: i64,
     frame: crate::ffmpeg::frame::Video,
 ) -> Picture {
-    let decoder = plan.shows_a_file(t).then(|| {
-        if frames.on_nvdec() {
-            Decoding::Nvdec
-        } else {
-            Decoding::Cpu
-        }
-    });
+    let decoder = plan
+        .shows_a_file(t)
+        .then(|| frames.decoded_on().map_or(Decoding::Cpu, Decoding::Gpu));
     Picture::new(frame, frames.rotation(), decoder)
 }

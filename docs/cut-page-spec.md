@@ -4,7 +4,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 
 **Reading the manual:** it is 183 MB, so extract text with `pdftotext -f 635 -l 790 <manual>.pdf -`. The developer's copy lives in `$VIDCUT_TEST_DATA` (default `~/Downloads/vidcut-tmp`). Don't copy manual text into the repo; write behavior in your own words with page numbers.
 
-**Key names:** the manual uses Mac keys. On Linux, Command → Ctrl and Option → Alt.
+**Key names:** the manual uses Mac keys. On Linux and Windows, Command → Ctrl and Option → Alt.
 
 **Status markers:**
 - **(v1)** planned for the single-track (V1) milestones M1–M5.
@@ -117,6 +117,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
   - `=` then a timecode goes to that absolute time.
   - `+` or `-` then a value jumps relative to the current position.
   - Clicking the timecode field allows typing.
+  - Digits fill a timecode from the right: `100` is 1 second, `10000` is 1 minute. A value with a unit (`5s`, `450f`) is that duration.
 - **Display options** (right-click):
   - source timecode or source frame count (source modes)
   - record timecode or record frame (Timeline mode)
@@ -333,9 +334,9 @@ Hover the lower audio part of a clip at an edit until the cursor shows a note, t
   - Vimeo
   - TikTok: vertical 1080×1920
 - **User presets** can be added to the Quick Export row.
-- **In vidcut:** Quick Export and Export are top-bar buttons only, not File menu items as well. The preset row shows each preset's name and format, and holds H.265 Master, AV1, ProRes 422 HQ, YouTube 1080p and 2160p, and TikTok (deviation X3), the file name defaults to the project's name, and the progress window can be hidden while the export goes on in the Jobs window. The Export dialog, jobs and presets from scripts are deviation X3; OTIO timeline interchange is X9.
+- **In vidcut:** the Quick Export row, the Export dialog and jobs are deviation X3. The suggested file name is the project's name. Timeline interchange is deviation X9.
 
-## 11. Keyboard shortcuts (Linux)
+## 11. Keyboard shortcuts (Linux and Windows)
 
 Keys from the Cut chapters, with Edit-page keys filling the gaps (marked †).
 
@@ -362,7 +363,9 @@ Shortcuts do nothing while a text field has focus or a question (a modal dialog)
 | F12 | Place On Top (M6) | 890† |
 | Shift+F12 | Append | 890† |
 | Ctrl+\ | Split at playhead | 723 |
+| Ctrl+B | Split at the playhead; same as the row above, without AltGr | 723 |
 | Delete / Backspace | Delete selection (ripples on Track 1) | 725 |
+| Alt+Delete | Lift the selection (leave the gap; D9) | 725 |
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut (ripple) / paste at playhead | 723 |
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all | 719 |
 | Alt+Shift+V | Select clips under the playhead | 719 |
@@ -373,6 +376,8 @@ Shortcuts do nothing while a text field has focus or a question (a modal dialog)
 | N | Snapping on/off | 716 |
 | M / Alt+M | Add-or-edit marker / delete marker at playhead | 718 |
 | W | Dynamic Trim on/off (then J/K/L trim, Space plays around) | 731 |
+| Shift+S | Audio scrubbing on/off | 876 |
+| Ctrl+mouse wheel | Zoom the lower timeline | 644 |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / redo | 651 |
 | Ctrl+I | Import media | 654 |
 | Shift+Ctrl+N | New bin | 655 |
@@ -398,7 +403,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
 - **D10. Overwrite past the end of Track 1.** With Ripple On, an Overwrite that would start after the end of Track 1 starts at the end instead, so Track 1 stays gapless.
 - **D11. Hover time.** 0.8 s of hovering turns a drop or move onto a clip from "replace" into "overwrite". The manual doesn't give a value.
 - **D12. Clip gain range.** −60 dB to +24 dB, plus mute. The manual gives no range.
-- **D13. Keys.** Shortcuts the Cut chapters don't give come from the Edit page (marked † in §11). Mac → Linux mapping: Command → Ctrl, Option → Alt.
+- **D13. Keys.** Shortcuts the Cut chapters don't give come from the Edit page (marked † in §11). Mac → Linux and Windows mapping: Command → Ctrl, Option → Alt.
 - **D15. Playhead after an edit function.** After Smart Insert, Append, Overwrite, Ripple Overwrite or Paste, the timeline playhead moves to the first frame after the new clip(s), ready for the next edit. The Viewer stays in its mode, so Q reviews the result (p. 696). The manual doesn't say; this is the Edit page's behavior. A clip dragged onto the timeline leaves the playhead where it was: a drop isn't an edit function, and on the Edit page too only the edit functions move it. Edit functions sent by scripts and agents move it as the buttons do.
 - **D16. Mark Out includes the frame under the playhead.** As in Resolve, the Out frame is part of the range. vidcut stores ranges half-open, so pressing O at frame `f` stores `out = f + 1`. The Duration field and `--json` output use the stored values.
 - **D17. Source Tape In/Out** (p. 692). I/O in Source Tape mode marks the whole tape: the open bin's clips end to end, in pool order.
@@ -490,7 +495,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - **Source positions are timecode.** A source range counts from the media file's start timecode (a `tmcd` track, MXF's, a broadcast WAV's time reference), as Resolve writes and reads it; the available range starts there too. Media without one start at 0. Drop-frame timecode counts its skipped numbers out.
   - **Paths are plain.** Resolve reads `target_url` as a path: `file://` URLs and `%20` escapes don't find the file. vidcut writes plain absolute paths, and reads URLs, escaped or not, too. In bundles, paths are relative.
   - **Audio stays with its video** through Resolve's link group number, written on both and read when there.
-  - **What Resolve ignores or keeps elsewhere:** timeline and track names (Resolve names tracks itself), marker notes (in `Resolve_OTIO.Note` as well as `comment`), a one-frame marker duration.
+  - **Marker notes** are written in `Resolve_OTIO.Note` as well as `comment`. Markers are one frame long. Track names are deviation X9 (a set name is written and read back; the place defaults `Video 1` and `Audio 2` are not a name someone gave). A timeline name has no field the import was seen to keep.
   - **Bundles:** `.otioz` as OpenTimelineIO's adapter writes it (what Resolve imports); `.otiod` the same as a folder. Unpacked into a folder named after the bundle, not next to it as Resolve does (deviation X9).
 - **D41. Proxies** (pp. 207–218 are outside the Cut page; deviation X18). The manual's proxy chapters are not what the Cut page specifies, so the playback rules are fixed here.
   - **What gets one:** video and image sequences, generated on demand (`proxy.generate`). Stills and audio-only media do not. Naming a still or an audio-only file is an error; generating with no ids skips them.
@@ -518,7 +523,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - **Said, quietly:** the plan and the result report each file's choice, what it came from (frames of PQ, HLG and 10-bit picture) and why. When HDR frames will be tone-mapped and SDR wasn't asked for, the plan carries a note with the overrides that keep them HDR (HEVC when the codec can't). The Export dialog shows it as one dim line under the plan with an Export HDR button that applies them; never a question, and Quick Export and the export go on as they are. With `sdr` set, nothing is said.
 - **D45. Passes** (§10; Resolve's multi-pass option is on the Deliver page, outside the Cut page). Two passes bring an export closer to a target bitrate and spread the bits better; at constant quality they change nothing worth the time.
   - **`video.passes`:** 1 or 2. Unset, 2 with a target bitrate and 1 with constant quality, where the encoder makes two. Two need a bitrate.
-  - **Who makes two:** x264, x265 and VP9 encode the range twice, the first time only to measure; NVENC looks at each frame twice within one encode. VAAPI, ProRes, DNxHR and (in FFmpeg 8.0) SVT-AV1 make one; two asked of them is an error, and `auto` moves on to an encoder that makes them.
+  - **Who makes two:** x264, x265 and VP9 encode the range twice, the first time only to measure; NVENC looks at each frame twice within one encode. VAAPI, AMF, QSV, ProRes, DNxHR and (in FFmpeg 8.0) SVT-AV1 make one; two asked of them is an error, and `auto` moves on to an encoder that makes them.
   - **Settings, with their defaults:** `first_pass` `fast` (quicker settings for the measuring run; `full`), `multipass` `quarter` (NVENC's first look at a quarter of the resolution; `full`), and `lookahead` 32 frames on NVENC whatever the rate control (0 to 32; 0 for none). Measured in export.md §5.
   - **While it runs:** progress says which run it is; cancelling either leaves nothing; the statistics, in a hidden folder beside the output, are removed however it ends. A per-clip export makes both for each file. The Export dialog shows the passes at a bitrate, with the first-pass speed or NVENC's settings for the encoder the plan names.
 - **D46. HDR metadata follows the footage** (§10; deviation X19). The manual's HDR exports carry what the grading setup says (the Mastering Display, Export/Embed HDR10 Metadata, p. 4117); vidcut doesn't grade, so it carries what the sources say.

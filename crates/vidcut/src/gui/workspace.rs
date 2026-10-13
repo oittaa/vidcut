@@ -150,9 +150,15 @@ impl LocalTime {
 /// `ms` (since 1970 UTC) in the computer's time zone.
 fn local_time(ms: u64) -> Option<LocalTime> {
     let secs = libc::time_t::try_from(ms / 1000).ok()?;
-    // SAFETY: localtime_r writes only the `tm` it is given.
+    // SAFETY: localtime_r (localtime_s on Windows) writes only the `tm` it
+    // is given.
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    #[cfg(unix)]
     if unsafe { libc::localtime_r(&secs, &mut tm) }.is_null() {
+        return None;
+    }
+    #[cfg(windows)]
+    if unsafe { libc::localtime_s(&mut tm, &secs) } != 0 {
         return None;
     }
     Some(LocalTime {
@@ -199,8 +205,7 @@ fn decoding(hwdec: &str) -> Option<(String, String)> {
              or the GPU can't decode this file"
                 .into(),
         ),
-        "nvdec" => gpu("NVDEC"),
-        other => gpu(other),
+        other => gpu(vidcut_av::hw::Kind::named(other).map_or(other, |k| k.label())),
     })
 }
 
@@ -1596,5 +1601,9 @@ mod tests {
         assert_eq!(decoding(""), None);
         assert_eq!(decoding("no").unwrap().0, "decoding on the CPU");
         assert_eq!(decoding("nvdec").unwrap().0, "decoding on the GPU (NVDEC)");
+        assert_eq!(
+            decoding("d3d11va").unwrap().0,
+            "decoding on the GPU (Direct3D 11)"
+        );
     }
 }

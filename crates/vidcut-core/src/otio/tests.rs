@@ -375,42 +375,51 @@ fn files_without_audio_tracks_bring_media_audio() {
 #[test]
 fn media_urls_and_paths() {
     let fps = Rational::new(25, 1).unwrap();
-    let paths = |url: &str, base: Option<&str>| -> Vec<String> {
-        locate(url, base.map(Path::new), fps)
-            .unwrap()
-            .paths
-            .iter()
-            .map(|p| p.to_string_lossy().into_owned())
-            .collect()
+    // Paths compare by their parts: on Windows `/` and `\` alike.
+    let paths = |url: &str, base: Option<&str>| -> Vec<PathBuf> {
+        locate(url, base.map(Path::new), fps).unwrap().paths
     };
+    let these = |p: &[&str]| -> Vec<PathBuf> { p.iter().map(PathBuf::from).collect() };
     // Percent-encoded file URLs; OTIO's Python library doesn't encode them.
     assert_eq!(
         paths(
             "file:///home/me/My%20Clips/take%20%231%20%28%C3%A4%29.mp4",
             None
         ),
-        [
+        these(&[
             "/home/me/My Clips/take #1 (ä).mp4",
             "/home/me/My%20Clips/take%20%231%20%28%C3%A4%29.mp4"
-        ]
+        ])
     );
-    assert_eq!(paths("file:///a b/c #1.mov", None), ["/a b/c #1.mov"]);
-    assert_eq!(paths("file://localhost/a/b.mov", None), ["/a/b.mov"]);
+    assert_eq!(
+        paths("file:///a b/c #1.mov", None),
+        these(&["/a b/c #1.mov"])
+    );
+    assert_eq!(
+        paths("file://localhost/a/b.mov", None),
+        these(&["/a/b.mov"])
+    );
     // Plain paths: as they are first.
-    assert_eq!(paths("/plain/50%.mov", None), ["/plain/50%.mov"]);
-    assert_eq!(paths("/a/b%20c.mov", None), ["/a/b%20c.mov", "/a/b c.mov"]);
+    assert_eq!(paths("/plain/50%.mov", None), these(&["/plain/50%.mov"]));
+    assert_eq!(
+        paths("/a/b%20c.mov", None),
+        these(&["/a/b%20c.mov", "/a/b c.mov"])
+    );
     assert!(locate("file://server/share/a.mov", None, fps).is_none());
     assert!(locate("https://example.com/a.mp4", None, fps).is_none());
     assert!(locate("", None, fps).is_none());
     // Relative to the timeline file (bundles write these).
     assert_eq!(
         paths("media/A001.mov", Some("/bundles/cut")),
-        ["/bundles/cut/media/A001.mov"]
+        these(&["/bundles/cut/media/A001.mov"])
     );
-    assert_eq!(
-        paths("media\\A001.mov", Some("/b")),
-        ["/b/media\\A001.mov", "/b/media/A001.mov"]
-    );
+    // A backslash separates on Windows; elsewhere it may be in a name.
+    let backslash: &[&str] = if cfg!(windows) {
+        &["/b/media/A001.mov"]
+    } else {
+        &[r"/b/media\A001.mov", "/b/media/A001.mov"]
+    };
+    assert_eq!(paths(r"media\A001.mov", Some("/b")), these(backslash));
     assert!(
         paths("media/A001.mov", None).is_empty(),
         "no folder to count from"
@@ -419,37 +428,58 @@ fn media_urls_and_paths() {
     // next to the file.
     assert_eq!(
         paths("/Volumes/Proj/Media/A001.mov", Some("/home/me/Proj")),
-        [
+        these(&[
             "/Volumes/Proj/Media/A001.mov",
             "/home/me/Proj/Proj/Media/A001.mov",
             "/home/me/Proj/Media/A001.mov",
             "/home/me/Proj/A001.mov"
-        ]
+        ])
     );
-    // Windows paths, as editors on Windows write them: only near the file
-    // here, and by name.
+    // Windows paths, as editors on Windows write them: there, the path
+    // first; elsewhere only near the file, and by name.
     let w = locate(
-        "E:\\subMedia\\Mel\\Mel q7-camera2.mp4",
+        r"E:\subMedia\Mel\Mel q7-camera2.mp4",
         Some(Path::new("/x")),
         fps,
     )
     .unwrap();
     assert_eq!(w.file_name, "Mel q7-camera2.mp4");
-    assert_eq!(w.shown, "E:\\subMedia\\Mel\\Mel q7-camera2.mp4");
-    assert_eq!(
-        w.paths,
-        [
-            "/x/subMedia/Mel/Mel q7-camera2.mp4",
-            "/x/Mel/Mel q7-camera2.mp4",
-            "/x/Mel q7-camera2.mp4"
-        ]
-        .map(PathBuf::from)
-    );
+    assert_eq!(w.shown, r"E:\subMedia\Mel\Mel q7-camera2.mp4");
+    let near = [
+        "/x/subMedia/Mel/Mel q7-camera2.mp4",
+        "/x/Mel/Mel q7-camera2.mp4",
+        "/x/Mel q7-camera2.mp4",
+    ];
+    let mut want = these(&near);
+    if cfg!(windows) {
+        want.insert(0, PathBuf::from(r"E:\subMedia\Mel\Mel q7-camera2.mp4"));
+    }
+    assert_eq!(w.paths, want);
     let w = locate("file:///C:/Users/me/a%20b.mov", None, fps).unwrap();
-    assert_eq!((w.file_name.as_str(), w.paths.len()), ("a b.mov", 0));
+    assert_eq!(w.file_name, "a b.mov");
+    let here: &[&str] = if cfg!(windows) {
+        &[r"C:\Users\me\a b.mov", r"C:\Users\me\a%20b.mov"]
+    } else {
+        &[]
+    };
+    assert_eq!(w.paths, these(here));
+    // A server's file, with no timeline folder: on Windows the server with
+    // either slash; elsewhere `//` is the root's, and `\\` only a name.
+    let server: &[&str] = if cfg!(windows) {
+        &[r"\\server\share\a.mov"]
+    } else {
+        &["//server/share/a.mov"]
+    };
+    assert_eq!(paths("//server/share/a.mov", None), these(server));
+    let server: &[&str] = if cfg!(windows) {
+        &[r"\\server\share\a.mov"]
+    } else {
+        &[]
+    };
+    assert_eq!(paths(r"\\server\share\a.mov", None), these(server));
     // An image sequence named by its range.
     let s = locate("/renders/frame_[0001-0120].png", None, fps).unwrap();
-    assert_eq!(s.paths, [PathBuf::from("/renders/frame_0001.png")]);
+    assert_eq!(s.paths, these(&["/renders/frame_0001.png"]));
     assert_eq!(
         (s.file_name.as_str(), s.sequence),
         ("frame_0001.png", Some(fps))
@@ -781,7 +811,11 @@ fn stills_and_sequences_round_trip() {
             &seq["name_prefix"],
             &seq["name_suffix"]
         ),
-        (&json!("/renders/"), &json!("frame_"), &json!(".png"))
+        (
+            &json!(format!("/renders{}", std::path::MAIN_SEPARATOR)),
+            &json!("frame_"),
+            &json!(".png")
+        )
     );
     assert_eq!(
         (
@@ -903,10 +937,13 @@ fn reads_editor_exports() {
         "the channel map's stream, the clip volume"
     );
     assert_eq!(v1[0].media.file_name, "A001.mov");
-    assert!(
-        v1[0].media.paths.is_empty(),
-        "a Windows path: found by name only"
-    );
+    // A Windows path: there, the path; elsewhere found by name only.
+    let here = if cfg!(windows) {
+        vec![PathBuf::from(r"E:\Shoot\Day 1\A001.mov")]
+    } else {
+        vec![]
+    };
+    assert_eq!(v1[0].media.paths, here);
     // The offline media's URL.
     assert_eq!(
         v1[1].media.paths,

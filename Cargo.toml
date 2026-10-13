@@ -31,6 +31,32 @@ clap = { version = "4.6", features = ["env", "string"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 libc = "0.2"
+# Windows's own calls where the standard library has none: named pipes for
+# live control, thread priorities, memory size, the GPU drivers' versions.
+# MIT or Apache-2.0.
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+] }
+# COM calls: Direct3D 11 textures the decoder and the viewer share. MIT or
+# Apache-2.0.
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Security",
+] }
 # Vulkan calls on wgpu's own device (the version wgpu-hal uses): memory the
 # viewer shares with CUDA. MIT or Apache-2.0.
 ash = { version = "0.38", default-features = false, features = ["std"] }

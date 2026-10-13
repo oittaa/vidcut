@@ -135,8 +135,8 @@ pub struct PlayerConfig {
     pub audio: MakeOutput,
     /// Memory for its pictures: what is shown, and the frame of what isn't.
     pub budget: vidcut_av::player::Budget,
-    /// The renderer shows pictures in CUDA memory from there: those NVDEC
-    /// decodes stay on the GPU (and kept ones in video memory).
+    /// The renderer shows pictures in GPU memory from there: those NVDEC or
+    /// VA-API decodes stay on the GPU (and kept ones in video memory).
     pub gpu_pictures: bool,
 }
 
@@ -1139,7 +1139,7 @@ impl Live {
         };
         if let Some(expected) = expected {
             let open = self.project.as_ref().map(|p| p.store.path());
-            let want = expected.canonicalize().unwrap_or(expected.clone());
+            let want = vidcut_core::dirs::canonical(&expected).unwrap_or(expected.clone());
             if open != Some(want.as_path()) {
                 return self.finish(
                     job,
@@ -2150,7 +2150,7 @@ impl Live {
 
     fn remember_recent(&self, path: &Path) {
         let file = paths::state_dir().join("recent.json");
-        let canonical = path.canonicalize().unwrap_or(path.to_path_buf());
+        let canonical = vidcut_core::dirs::canonical(path).unwrap_or(path.to_path_buf());
         let mut recent: Vec<PathBuf> = std::fs::read_to_string(&file)
             .ok()
             .and_then(|t| serde_json::from_str(&t).ok())

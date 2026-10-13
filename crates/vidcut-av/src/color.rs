@@ -124,6 +124,32 @@ pub fn colors_of(f: &frame::Video) -> Colors {
     }
 }
 
+/// Whether `src` goes into output of `target`'s dynamic range (`None`:
+/// SDR BT.709) as it is: video-range YUV in the output's matrix and
+/// transfer, which a scaler only resamples.
+pub(crate) fn kept(src: Source, target: Option<Hdr>) -> bool {
+    !src.rgb
+        && !src.full_range
+        && match (src.hdr, target) {
+            (None, None) => src.matrix == Matrix::Bt709,
+            (Some(s), Some(t)) => s == t && src.matrix == Matrix::Bt2020,
+            _ => false,
+        }
+}
+
+/// `scaled`, a copy of `f` at another size, tagged with the matrix `f` is
+/// read with: an untagged picture's follows from its size.
+pub(crate) fn keep_matrix(scaled: &mut frame::Video, f: &frame::Video) {
+    use ffi::AVColorSpace as S;
+    let matrix = match Source::of(f).matrix {
+        Matrix::Bt601 => S::AVCOL_SPC_SMPTE170M,
+        Matrix::Bt709 => S::AVCOL_SPC_BT709,
+        Matrix::Bt2020 => S::AVCOL_SPC_BT2020_NCL,
+    };
+    // SAFETY: a plain field of its own frame.
+    unsafe { (*scaled.as_mut_ptr()).colorspace = matrix };
+}
+
 /// How to read `f`'s samples as the light they have in PQ output, as the
 /// export converts them: the YUV matrix and range, the transfer, and the
 /// gamut to BT.2020 in linear light (the identity for HDR).
@@ -566,13 +592,22 @@ fn transfer(hdr: Option<Hdr>) -> &'static str {
     }
 }
 
-/// How a normalizer brings a source to its output: options for the `scale`
-/// filter, and filters to run after padding (which happens in the source's
-/// format), before the final `format`.
+/// How a normalizer brings a source to its output: flags and options for
+/// the `scale` filter, and filters to run after padding (which happens in
+/// the source's format), before the final `format`.
 pub(crate) struct Conversion {
+    pub flags: &'static str,
     pub scale: String,
     pub after: String,
 }
+
+/// swscale's flags for a picture it only resamples.
+const RESAMPLE: &str = "bicubic";
+
+/// swscale's flags for a picture whose colors it converts too (YUV to RGB
+/// or back, another matrix or range): left to its defaults, it rounds them
+/// low (export.md §4).
+const CONVERT: &str = "bicubic+accurate_rnd+full_chroma_int";
 
 /// `scale` options that keep a YUV picture's matrix and range (its tags,
 /// or what is assumed without them) while it is resampled: told nothing,
@@ -602,6 +637,7 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
     };
     let in_range = if src.full_range { "full" } else { "limited" };
     let none = || Conversion {
+        flags: RESAMPLE,
         scale: String::new(),
         after: String::new(),
     };
@@ -620,10 +656,12 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
         // SDR to SDR: swscale converts the matrix and range as it scales.
         (None, None) if src.rgb && rgb_out => none(),
         (None, None) if src.rgb => Conversion {
+            flags: CONVERT,
             scale: ":out_color_matrix=bt709:out_range=limited".into(),
             after: String::new(),
         },
         (None, None) if rgb_out => Conversion {
+            flags: CONVERT,
             scale: format!(
                 ":in_color_matrix={in_matrix}:in_range={in_range},format={}",
                 name(out)
@@ -631,6 +669,11 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
             after: String::new(),
         },
         (None, None) => Conversion {
+            flags: if src.matrix == Matrix::Bt709 && !src.full_range {
+                RESAMPLE
+            } else {
+                CONVERT
+            },
             scale: format!(
                 ":in_color_matrix={in_matrix}:in_range={in_range}:out_color_matrix=bt709:out_range=limited"
             ),
@@ -638,6 +681,7 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
         },
         // The same HDR transfer: nothing to convert.
         (Some(s), Some(t)) if s == t && !src.rgb && src.matrix == Matrix::Bt2020 => Conversion {
+            flags: RESAMPLE,
             scale: keep,
             after: String::new(),
         },
@@ -650,6 +694,7 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
                 format!("zscale=t=709:m=709:r=limited{}", zscale_writes(out))
             };
             Conversion {
+                flags: RESAMPLE,
                 scale: keep,
                 after: format!(
                     ",zscale={},format=gbrpf32le,zscale=p=709,\
@@ -661,6 +706,7 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
         }
         // Into HDR: linear light with SDR white at the reference white.
         (_, Some(t)) => Conversion {
+            flags: RESAMPLE,
             scale: keep,
             after: format!(
                 ",zscale={},format=gbrpf32le,\
@@ -734,6 +780,67 @@ mod tests {
             };
         }
         f
+    }
+
+    /// What a scaler may take into the output as it is: video-range YUV in
+    /// the output's matrix and transfer, SDR and HDR alike.
+    #[test]
+    fn only_the_outputs_own_colors_are_kept() {
+        use Matrix::*;
+        let src = |hdr, matrix, full_range, rgb| Source {
+            hdr,
+            matrix,
+            full_range,
+            rgb,
+        };
+        // SDR into SDR: BT.709 in video range alone.
+        assert!(kept(src(None, Bt709, false, false), None));
+        assert!(!kept(src(None, Bt601, false, false), None));
+        assert!(!kept(src(None, Bt2020, false, false), None));
+        assert!(!kept(src(None, Bt709, true, false), None));
+        assert!(!kept(src(None, Bt709, false, true), None));
+        for hdr in [Hdr::Pq, Hdr::Hlg] {
+            // Into the same HDR, in BT.2020's matrix and video range.
+            assert!(kept(src(Some(hdr), Bt2020, false, false), Some(hdr)));
+            assert!(!kept(src(Some(hdr), Bt709, false, false), Some(hdr)));
+            assert!(!kept(src(Some(hdr), Bt2020, true, false), Some(hdr)));
+            // Into SDR, and SDR into it: converted.
+            assert!(!kept(src(Some(hdr), Bt2020, false, false), None));
+            assert!(!kept(src(None, Bt2020, false, false), Some(hdr)));
+            assert!(!kept(src(None, Bt709, false, false), Some(hdr)));
+        }
+        // One HDR into the other: converted.
+        assert!(!kept(
+            src(Some(Hdr::Pq), Bt2020, false, false),
+            Some(Hdr::Hlg)
+        ));
+        assert!(!kept(
+            src(Some(Hdr::Hlg), Bt2020, false, false),
+            Some(Hdr::Pq)
+        ));
+    }
+
+    /// A picture shrunk from an untagged one is read with the matrix the
+    /// untagged one is read with (its size says which), not the one its
+    /// own size would say; a tagged picture's tag goes along.
+    #[test]
+    fn shrunk_pictures_keep_their_sources_matrix() {
+        use ffi::AVColorSpace as S;
+        let shrunk = |w, h, tag| {
+            let mut f = picture(w, h, None);
+            unsafe { (*f.as_mut_ptr()).colorspace = tag };
+            let mut small = picture(320, 180, None);
+            keep_matrix(&mut small, &f);
+            Source::of(&small).matrix
+        };
+        // Untagged: HD is BT.709, SD BT.601, though 320x180 alone is SD.
+        assert_eq!(shrunk(1920, 1080, S::AVCOL_SPC_UNSPECIFIED), Matrix::Bt709);
+        assert_eq!(shrunk(720, 480, S::AVCOL_SPC_UNSPECIFIED), Matrix::Bt601);
+        // Tagged, whatever the size.
+        assert_eq!(shrunk(720, 480, S::AVCOL_SPC_BT709), Matrix::Bt709);
+        assert_eq!(shrunk(3840, 2160, S::AVCOL_SPC_BT2020_NCL), Matrix::Bt2020);
+        // Untouched, the small one alone would be read as SD.
+        assert_eq!(Source::of(&picture(320, 180, None)).matrix, Matrix::Bt601);
     }
 
     #[test]

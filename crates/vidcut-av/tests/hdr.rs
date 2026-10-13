@@ -17,6 +17,7 @@ fn hdr10_values_are_in_the_stream_the_container_and_the_probe() {
         max_nits: 1000,
         light: Some((1000, 400)),
         hdr10plus: true,
+        hdr10plus_frames: None,
     };
     for container in [Container::Mp4, Container::Mkv] {
         let spec = FixtureSpec::new(VideoCodec::Hevc10, container, 320, 180, (30, 1), 30)
@@ -185,6 +186,7 @@ fn hdr10_source(max_nits: u32, light: (u32, u32), hdr10plus: bool) -> PathBuf {
                 max_nits,
                 light: Some(light),
                 hdr10plus,
+                hdr10plus_frames: None,
             })
             .no_audio(),
     )
@@ -199,6 +201,7 @@ fn pq_exports_keep_hdr10_values_and_each_frames_hdr10plus() {
         max_nits: 1000,
         light: Some((1000, 400)),
         hdr10plus: true,
+        hdr10plus_frames: None,
     }
     .values();
     let p = plan(vec![piece(&source, 5, 20)]);
@@ -313,6 +316,56 @@ fn mixed_sources_give_the_widest_values_and_sdr_none() {
     assert_eq!(stream_values(&out), hdr::Static::default());
     for f in hdr::read_frames(&out, true, usize::MAX).unwrap() {
         assert_eq!(f.metadata, hdr::Metadata::default(), "frame {}", f.pts);
+    }
+}
+
+#[test]
+fn hdr10plus_that_stops_partway_through_a_file_is_made_for_the_rest() {
+    // The probe sees HDR10+ on the first frame, so the file isn't measured
+    // ahead: the frames without it are measured as they are decoded. AV1:
+    // FFmpeg's HEVC decoder puts the last HDR10+ on every frame after it.
+    vidcut_av::init();
+    let partway = fixture::ensure(
+        &FixtureSpec::new(VideoCodec::Av1, Container::Mkv, 320, 180, (30, 1), 30)
+            .hdr(Hdr::Pq)
+            .hdr_meta(HdrMeta {
+                max_nits: 1000,
+                light: Some((1000, 400)),
+                hdr10plus: true,
+                hdr10plus_frames: Some(5),
+            })
+            .no_audio(),
+    )
+    .unwrap();
+    let p = plan(vec![piece(&partway, 2, 10)]);
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("partway.mkv");
+    let r = render(
+        &p,
+        &settings(VCodec::Hevc, OutContainer::Mkv, HdrMode::Pq),
+        &out,
+    );
+    let m = r.metadata.unwrap();
+    assert_eq!(m.mode, HdrMetadata::Hdr10plus, "{:?}", m.why);
+    let VideoPiece::Source { origin, .. } = &p.video[0] else {
+        unreachable!()
+    };
+    let span = Span::of(&p.video[0], p.fps).unwrap();
+    let measured = light::analysis(&span, true, None, &mut |_| {})
+        .unwrap()
+        .unwrap();
+    let frames = hdr::read_frames(&out, true, usize::MAX).unwrap();
+    assert_eq!(frames.len(), 10);
+    for (i, f) in frames.iter().enumerate() {
+        let k = 2 + i as u32;
+        let want = if k < 5 {
+            fixture::hdr10plus_t35(k)
+        } else {
+            // Frame `k`, its time rounded to Matroska's milliseconds.
+            let t = origin + (f64::from(k) + 0.5) / 30.0;
+            measured.at(t).unwrap().hdr10plus().t35()
+        };
+        assert_eq!(f.hdr10plus.as_deref(), Some(want.as_slice()), "frame {i}");
     }
 }
 
@@ -466,8 +519,8 @@ fn real_clips_keep_their_hdr_metadata() {
 
 /// The GPU's encoders write the HDR metadata too (`gpu-tests`): NVENC on
 /// frames scaled on the GPU, kept PQ with HDR10+, and with an SDR clip that
-/// libplacebo converts; VAAPI, which reads the values from frames. Each where
-/// this machine has it.
+/// libplacebo converts; VAAPI, AMF and QSV, which read the values from
+/// frames. Each where this machine has it.
 #[cfg(feature = "gpu-tests")]
 #[test]
 fn gpu_encoders_write_the_hdr_metadata() {
@@ -482,6 +535,7 @@ fn gpu_encoders_write_the_hdr_metadata() {
         max_nits: 1000,
         light: Some((1000, 400)),
         hdr10plus: true,
+        hdr10plus_frames: None,
     }
     .values();
     let dir = tempfile::tempdir().unwrap();
@@ -503,6 +557,30 @@ fn gpu_encoders_write_the_hdr_metadata() {
             VCodec::Hevc,
             EncoderChoice::Vaapi,
             "hevc_vaapi",
+            OutContainer::Mkv,
+        ),
+        (
+            VCodec::Hevc,
+            EncoderChoice::Amf,
+            "hevc_amf",
+            OutContainer::Mp4,
+        ),
+        (
+            VCodec::Av1,
+            EncoderChoice::Amf,
+            "av1_amf",
+            OutContainer::Mkv,
+        ),
+        (
+            VCodec::Hevc,
+            EncoderChoice::Qsv,
+            "hevc_qsv",
+            OutContainer::Mkv,
+        ),
+        (
+            VCodec::Av1,
+            EncoderChoice::Qsv,
+            "av1_qsv",
             OutContainer::Mkv,
         ),
     ] {
@@ -651,7 +729,7 @@ fn light_is_measured_as_a_pq_export_shows_it() {
             .unwrap()
             .unwrap();
         assert_eq!(a.frames.len(), 33, "{what}");
-        let level = a.level(0.0, 1.0).unwrap();
+        let level = a.level((0..30).map(|k| f64::from(k) / 30.0)).unwrap();
         let f = a.at(0.5).unwrap();
         // The white at the 99th percentile; the encode overshoots a little
         // at the barcode's edges, which the peak shows.
@@ -744,7 +822,67 @@ fn a_highlight_of_two_pixels_is_the_peak() {
                 "{what} at {t}: {f:?}"
             );
         }
-        let level = a.level(0.0, 0.1).unwrap();
+        let level = a.level((0..3).map(|k| f64::from(k) / 30.0)).unwrap();
         assert!(peak.contains(&(level.max_cll as f32)), "{what}: {level:?}");
     }
+}
+
+/// With AMF on a Direct3D 11 decoder's adapter, frames made on the CPU go
+/// up into the encoder's own frames, their colors with them: AMF writes
+/// HDR10's metadata only with frames whose transfer is PQ. An SDR source
+/// into PQ output, every frame made on the CPU, gets its mastering display
+/// in the bitstream. Windows, with AMF: `gpu-tests`.
+#[cfg(all(windows, feature = "gpu-tests"))]
+#[test]
+fn amf_frames_made_on_the_cpu_keep_hdr10s_metadata() {
+    use vidcut_av::hw::{GpuDecoder, Kind};
+    vidcut_av::init();
+    let available = export::encode::detect();
+    let adapter = available
+        .encoders
+        .iter()
+        .find(|e| e.ok && e.encoder == "hevc_amf" && e.pixel == "p010le")
+        .and_then(|e| e.device.clone());
+    let Some(decoder) = adapter.and_then(|adapter| {
+        GpuDecoder::all()
+            .into_iter()
+            .find(|d| d.kind() == Kind::D3d11va && d.on() == adapter)
+    }) else {
+        eprintln!("skipping: no 10-bit AMF HEVC on a Direct3D 11 decoder's adapter here");
+        return;
+    };
+    let source = fixture::ensure(&FixtureSpec::new(
+        VideoCodec::Hevc10,
+        Container::Mkv,
+        640,
+        360,
+        (30, 1),
+        30,
+    ))
+    .unwrap();
+    let p = plan(vec![piece(&source, 0, 20)]);
+    let mut s = settings(VCodec::Hevc, OutContainer::Mkv, HdrMode::Pq);
+    let v = s.video.as_mut().unwrap();
+    v.encoder = EncoderChoice::Amf;
+    v.speed = None;
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("amf.mkv");
+    let r = export::run_decoding_on(
+        &p,
+        &s,
+        &out,
+        &available,
+        Some(&decoder),
+        &AtomicBool::new(false),
+        &mut |_| {},
+    )
+    .unwrap();
+    assert_eq!(r.gpu_frames, 0, "SDR into PQ is made on the CPU");
+    let frames = hdr::read_frames(&out, false, usize::MAX).unwrap();
+    assert_eq!(frames.len(), 20);
+    assert!(
+        frames[0].metadata.mastering.is_some(),
+        "the first frame's mastering display: {:?}",
+        frames[0].metadata
+    );
 }

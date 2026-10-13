@@ -1,6 +1,6 @@
 # GUI and live control: decisions from M3
 
-**Status:** accepted (M3, October 2026); §8 added in M4, §9 in M5, §10 in M7; §1, §4, §5 and §7 revised when the viewers moved to vidcut's own player on wgpu ([preview.md](preview.md)).
+**Status:** accepted (October 2026). The viewer plays through the player engine on wgpu ([preview.md](preview.md)).
 
 **Evidence** (all rerunnable):
 - [`crates/vidcut/tests/live.rs`](../../crates/vidcut/tests/live.rs): the live session with its one player engine, a stand-in renderer and a stand-in audio device, no window. Covers frame-exact seeks at every boundary (also with a late renderer), pictures against the sound, the source viewers and switching between them and the timeline (the frame kept ready, a fader held), the clipboard, edits from other processes, and errors.
@@ -76,8 +76,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 
 ## 5. Rendering and screenshots
 
-**Rendering** (preview.md §4).
-- The viewer thread draws the player's picture with the shader into a target the viewer's size, and the UI shows the target. Not the UI thread: on GNOME Wayland with NVIDIA, presenting a hidden window blocks that thread until the window shows again, and Wayland can't show it by request. Seeks, screenshots and edits keep working meanwhile (`tests/gui.rs`); what needs the UI (window screenshots, opening windows) waits. `gui.quit` ends the process without the window when it hasn't closed in 5 s.
+**Rendering** (preview.md §4). The viewer thread draws the player's picture; the UI shows the target. A hidden window doesn't block seeks, viewer screenshots or edits (preview.md §2); window screenshots and opening windows wait on the UI.
 
 **`gui.screenshot` targets:**
 - **`viewer`** (the default) reads the player's target back: the picture exactly as the viewer shows it, at the viewer's size. It works while the window is hidden.
@@ -91,6 +90,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 
 **Registry.** A running GUI writes `$XDG_RUNTIME_DIR/vidcut/instances/<pid>.json` with its pid, socket, open project and version. It serves JSON-RPC 2.0 on `<pid>.sock`, with one JSON object per line (format in `ipc/mod.rs`).
 - **Access.** The directory is mode 0700, so only the user can connect.
+- **Windows** (`ipc::transport`): a named pipe stands in for the socket, named after the socket's path, and `%TEMP%\vidcut` for the runtime directory. Its access list grants the user alone, nobody else may even read it (the default lets everyone read); the address holds a random number, as pipe names are seen by every user, so none can take it first; and a client lets the GUI identify it, not act as it. Reads and writes are overlapped calls that a shutdown stops: a Unix socket on Windows doesn't end a read already waiting when another thread shuts it down, and that is how a cancelled client stops waiting. A pipe can't be shut down one way only, so a client that stops writing has left.
 - **Limits** (`ipc::server::Limits`), so a runaway client can't take the session's memory or threads: a request line up to 64 MiB (a longer one gets an error and the connection closes) and 64 connections at once (more are turned away with an error). A waiting request such as `jobs.wait` keeps its connection, as intended.
 - **Clean-up.** Stale entries are removed when they're found.
 
@@ -108,13 +108,11 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 
 ## 7. Previews
 
-**One player.**
-- **The source** (Source Clip and Source Tape) and **the timeline** (the program) each keep their own playhead.
-- One engine plays whichever the viewer shows. Switching pauses it and plays the other from its playhead; the frame of the one not shown is kept ready, so it shows at once (preview.md §1).
+**One player.** Source Clip, Source Tape and the timeline each keep a playhead. One engine plays whichever the viewer shows (preview.md §1).
 
-**Source Tape span marks (D17).** In Source Tape mode, I and O set `tape.marks.set` with the pool's media ids in tape order and tape-frame `in`/`out` (half-open, D16). A span on one clip is stored on the project as both tape marks and that clip's source marks; the scroll bar still shows the clip's handles offset onto the tape. A span across clips is stored only in `tape_marks` on the project (with the order snapshot); the bar draws one shaded range in tape frames and edit gestures send `{"tape": true}` so the core turns the span into one source range per touched clip in a single request. Alt+X sends `tape.marks.clear` with the clip under the playhead when the span is one clip. Crossing spans clear only the tape marks.
+**Source Tape span marks** (spec D17). The scroll bar shows a one-clip span as that clip's handles offset onto the tape, and a span across clips as one shaded range. Alt+X sends `tape.marks.clear` with the clip under the playhead when the span is one clip.
 
-**What it loads.** The engine (`vidcut_av::player`) plays a render plan the export would render: `render::tape` for sources and `render::flatten_lanes` for the timeline, fresh proxies swapped in (preview.md §1). Source time therefore maps to frames exactly as the timeline's does: the source viewer counts project frames (deviation X8).
+**What it loads.** The engine plays the export's plans, proxies included (preview.md §1). The source viewer counts project frames (deviation X8).
 
 **Reloads.** Timeline reloads are coalesced: one at once, then at most one per 100 ms while edits keep coming. Every live request (state, screenshots, playback, viewer changes) applies a pending reload first, so it sees the timeline as edited; a seek or step loads straight at its target. A reload gives the engine the new plan: its position, open files and kept pictures stay, and it plays on if it plays. While the source is shown, the timeline's new frame is prepared instead.
 
@@ -125,12 +123,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 - **Separate stills:** every file a still. Offered first for numbered JPEGs, which are usually photos.
 - The import stays one request: `media.add`, or an `apply` of two when sequences come with other files.
 
-**Pool thumbnails.**
-- **Frames:** 24 per clip at 192×108, spread evenly.
-- **Accuracy:** each is within half the spacing of its time, so keyframes are good enough for long clips; short clips are decoded forward.
-- **Speed:** ~0.1–3 s per clip on workers.
-
-**Shuttle.** J/K/L play at their speeds, backward too, with the sound reversed or stretched at its pitch (player.md §4).
+**Shuttle.** J/K/L: player.md §4.
 
 ## 8. The timeline (M4)
 
@@ -175,10 +168,10 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 
 **Jobs.** Every media export and proxy encode in a running GUI is a job (`live/jobs.rs`), whoever started it:
 - **A thread per job** prepares the export from a copy of the project (§2), reports its files and their lengths (`JobPlanned`), then encodes, sending progress about ten times a second. The session keeps each job's state for `jobs.*` and the snapshot.
-- **Foreground** (an IPC client without `background`): progress notifications carry the job id, the reply comes when the job ends, and a closed connection cancels it, as in M3. That same closed connection cancels a `frame.render`, a storyboard, an analysis and the loudness measure before the export, which send no progress of their own. A background job is cancelled only by `jobs.cancel`.
+- **Foreground** (an IPC client without `background`): progress notifications carry the job id, the reply comes when the job ends, and a closed connection cancels it. That same closed connection cancels a `frame.render`, a storyboard, an analysis and the loudness measure before the export, which send no progress of their own. A background job is cancelled only by `jobs.cancel`.
 - **Background** (`background: true`, and every GUI export): the reply comes once the files are planned, so mistakes (an unknown preset, an existing file) still fail the request itself. The job goes on without the client.
 - **`jobs.wait`** is a wait-list entry like a seek's (§2), without the 10 s limit unless given a `timeout`; it fails the way the job failed. `jobs.cancel` sets the job's cancel flag, and the engine removes partial files.
-- **Low priority:** every thread the app starts goes through `threads::spawn` and says what its work is. A job (`Work::Job`) drops to the lowest CPU priority as it starts, Linux's idle scheduling class, and the FFmpeg threads it starts inherit it. Not nice 19: NVIDIA's driver, opening NVENC, copies the calling thread's nice value onto the main thread, and nothing unprivileged raises it again; the idle class leaves nice values alone. The GUI, playback and other programs come first, and the job still takes every core they leave idle. So do the other requests that decode whole files: the measuring before Detect Scene Cuts and Ripple Delete Silence, `analyze.*` and storyboards. Frames and plans keep their priority: someone waits for them, and they're quick. Headless runs keep their priority: a terminal waits for them.
+- **Low priority:** every thread the app starts goes through `threads::spawn` and says what its work is. A job (`Work::Job`) drops to the lowest CPU priority as it starts, Linux's idle scheduling class, and the FFmpeg threads it starts inherit it. On Windows the job's thread takes the idle priority, and FFmpeg's threads keep the normal one: Windows threads don't inherit priorities. Not nice 19: NVIDIA's driver, opening NVENC, copies the calling thread's nice value onto the main thread, and nothing unprivileged raises it again; the idle class leaves nice values alone. The GUI, playback and other programs come first, and the job still takes every core they leave idle. So do the other requests that decode whole files: the measuring before Detect Scene Cuts and Ripple Delete Silence, `analyze.*` and storyboards. Frames and plans keep their priority: someone waits for them, and they're quick. Headless runs keep their priority: a terminal waits for them.
 - **Kept:** running jobs and the 50 most recent finished ones.
 - **Closing:** quitting the window while jobs run asks first (`gui.quit` doesn't). The session cancels running jobs on shutdown and waits up to 3 s for them to clean up.
   - A job still running after that is stuck in a decoder or an encoder. The session removes its partial files itself, and the process ends without it.
@@ -211,7 +204,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 
 ## 11. Pool thumbnails and preferences
 
-- **Filmstrips are kept on disk** (`thumbcache.rs`): 24 pictures of a media file, fitted in 192×108, as one JPEG strip in `~/.cache/vidcut/thumbs` (about 6 KB a picture, where the RGBA in memory takes 83 KB). The file name holds the media file's path hash, size and modification time, and the strip's layout, so a changed file or another layout never reads a stale strip.
+- **Filmstrips are kept on disk** (`thumbcache.rs`): 24 pictures of a media file, fitted in 192×108 and spread evenly, as one JPEG strip in `~/.cache/vidcut/thumbs` (about 6 KB a picture, where the RGBA in memory takes 83 KB). Each is within half the spacing of its time, so keyframes are enough for long clips; short clips are decoded forward. About 0.1–3 s a clip on workers. The file name holds the media file's path hash, size and modification time, and the strip's layout, so a changed file or another layout never reads a stale strip.
 - **Eviction:** a strip's modification time is its last use. After each new strip, the least recently used go until the rest fit `thumbnails.cache_limit_mb` (512 MB by default, about 3,000 media files).
 - **Why:** decoding 24 pictures takes from a tenth of a second to seconds per clip, much more from a network share, and it ran again for every clip each time a project opened. The project still keeps no pictures (deviation X1).
 - **Preferences** (`preferences.toml`, deviation X12) are read whenever a thumbnail job, an export or a proxy runs, so a change from the CLI applies to a running GUI at once. GPU acceleration also reaches the player at once: the session watches the preferences file, and when the preference changed, whoever changed it (the Preferences window, a CLI run, the file by hand), the engine switches its decoder and decodes its pictures anew, the one shown first (preview.md §3). The player's memory (`player.memory_mb`, `player.video_memory_mb`) reaches it the same way: over a smaller limit, the pictures kept least recently go at once. `preferences.set` empties the cache when it is turned off and trims it when the limit drops.
@@ -221,7 +214,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 - **Why not the pool's pictures:** 24 per file is one every 30 s of a 12-minute film. A 5 s clip showed one picture over and over, often from another shot.
 - **Keys:** a tile asks for its media, source frame and height in pixels (rounded up to a multiple of 16). The first tile shows the clip's first frame; the others the first multiple of a step at or after their left edge, where the step is the largest power of two frames no wider than a tile. Zooming in or out by two keeps half of the frames.
 - **Memory:** pictures are textures, kept up to `thumbnails.timeline_memory_mb` (256 MB by default, about 12,000 tiles 56 px tall). Above it, those shown least recently go, down to nine tenths; never one shown in the last frame.
-- **Making them:** four worker threads at the lowest CPU priority take the tiles painting asked for, in its order, and replace their queue with each frame's asks, so tiles scrolled away aren't made. A worker goes on along a file while the next tile is asked for within 4 s ahead (decoding on beats a seek), and a fresh pick avoids what another worker is near. Frames come from `vidcut_av::export::renderer::FrameReader`, the export's sampling at the tile's size, from a fresh proxy when there is one.
+- **Making them:** four worker threads at the lowest CPU priority take the tiles painting asked for, in its order, and replace their queue with each frame's asks, so tiles scrolled away aren't made. A worker goes on along a file while the next tile is asked for within 4 s ahead (decoding on beats a seek), and a fresh pick avoids what another worker is near. Frames come from `vidcut_av::export::renderer::FrameReader`, the export's sampling at the tile's size, from a fresh proxy when there is one. While `gpu.acceleration` is on (read as each tile is decoded, so a change reaches them at once), HEVC, AV1 and VP9 decode on the GPU the viewer decodes on, on a stream or device of their own, and shrink there to the tile's size (interlaced frames of VA-API and Direct3D 11 come down whole, for the CPU to deinterlace); H.264 stays on the CPU, which decodes it cheaply, where a seek makes NVDEC's H.264 decoder anew (gotchas.md). A far-apart tile of 4K60 10-bit HEVC (the noise clip, preview.md §3) took 72–420 ms on the N150's VA-API against 0.35–2.2 s on its CPU, and 199–278 ms on NVDEC against 248–493 on the 9800X3D's CPU; the 9800X3D's small Radeon took longer than its CPU (492–675 ms).
 - **Disk:** tiles go to the thumbnail cache in blocks of 64 source frames per file (`<media>.t<height>-b<block>.thumbs`), under the same limit and switch as the pool's pictures. A JPEG tile takes 2–4 KB and decodes in 0.03 ms; decoding a far-apart tile takes 40 ms on 1080p H.264 and 105–170 ms on 4K60 H.264 (20–37 ms on their AV1 proxies), so a reopened project fills its tiles from disk.
 - **Until a tile's picture comes:** the nearest kept picture of the same media within two steps, else the pool's picture nearest in time.
 - **Tests:** `tests/gui_tiles.rs` checks that the visible tiles are made and kept on disk, then that a new window finds them there after the media moved away. `vidcut-av/tests/frames.rs` checks the frames by barcode; the grid and the eviction are unit tests.

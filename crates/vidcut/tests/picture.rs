@@ -3,9 +3,9 @@
 //! turned every way, pillarboxed, SD and HD colors, full range, PQ and HLG)
 //! drawn on the GPU shows the barcode `frame render` shows, and its pixels
 //! are within a level or so of `Picture::to_rgba`, the export's own
-//! filters. Pictures NVDEC decoded show from GPU memory as they do copied
-//! down. Runs on any adapter, lavapipe too; skips without one, and the
-//! NVDEC checks without CUDA.
+//! filters. Pictures NVDEC, VA-API and Direct3D 11 decoded show from GPU
+//! memory as they do copied down. Runs on any adapter, lavapipe too; skips
+//! without one, and each GPU's checks without that GPU.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -268,11 +268,11 @@ fn the_shader_draws_what_the_export_renders() {
         );
         assert_eq!(barcode(&ours.rgba, w, h), want, "frame {t}'s barcode");
         // The colors: within rounding of the export's where the picture is
-        // flat (swscale's conversion runs up to two or three levels low). At edges
+        // flat (lavapipe: SDR exact, PQ and HLG a level at most). At edges
         // the filters differ: at its own size the export repeats each
         // chroma sample, the shader interpolates between them.
         assert!(
-            flat < 1.5 && flat_max <= 3,
+            flat < 1.0 && flat_max <= 2,
             "frame {t}: {flat:.2}, {flat_max}"
         );
         assert!(mean < 2.0, "frame {t}: {mean:.2} levels apart on average");
@@ -381,8 +381,8 @@ fn pictures_in_gpu_memory_draw_as_copied_down() {
         eprintln!("skipping: no GPU adapter");
         return;
     };
-    if vidcut_av::cuda::CudaDevice::open().is_err() || !gpu.takes_gpu_pictures() {
-        eprintln!("skipping: the adapter shares no memory with CUDA");
+    if !gpu.shares_with_cuda() {
+        eprintln!("skipping: the adapter shares no memory with CUDA, or isn't CUDA's GPU");
         return;
     }
     let p = plan(vec![
@@ -449,5 +449,200 @@ fn pictures_in_gpu_memory_draw_as_copied_down() {
             barcode(&rendered.rgba, W, H),
             "frame {t}"
         );
+    }
+}
+
+/// Pictures VA-API decoded, kept in GPU memory (the decoder's surfaces)
+/// and shown from there (imported as DMA-BUFs, taken over from VA-API):
+/// the same pixels as the same picture copied down and uploaded, NV12 and
+/// P010, at a size whose rows and chroma aren't round; interlaced ones come
+/// down for the CPU's deinterlacer. Needs VA-API, and an adapter that
+/// imports DMA-BUFs.
+#[cfg(target_os = "linux")]
+#[test]
+fn vaapi_pictures_draw_as_copied_down() {
+    use vidcut_av::hw::{GpuDecoder, Kind};
+    let Some((gpu, adapter)) = Gpu::headless_with_info() else {
+        eprintln!("skipping: no GPU adapter");
+        return;
+    };
+    if !gpu.imports_dma_bufs() {
+        eprintln!("skipping: the adapter imports no DMA-BUFs");
+        return;
+    }
+    // VA-API on the adapter's GPU, by its render node's PCI address, where
+    // the adapter says its own.
+    let pci = |node: &str| {
+        let name = std::path::Path::new(node).file_name()?.to_owned();
+        let device = std::path::Path::new("/sys/class/drm")
+            .join(name)
+            .join("device");
+        let address = std::fs::read_link(device).ok()?;
+        Some(address.file_name()?.to_string_lossy().to_lowercase())
+    };
+    let ours = adapter.device_pci_bus_id.to_lowercase();
+    let Some(vaapi) = GpuDecoder::all().into_iter().find(|d| {
+        d.kind() == Kind::Vaapi && (ours.is_empty() || pci(d.on()).as_deref() == Some(&*ours))
+    }) else {
+        eprintln!(
+            "skipping: no VA-API on the adapter's GPU ({})",
+            adapter.name
+        );
+        return;
+    };
+    let p = plan(vec![
+        piece(
+            FixtureSpec::new(VideoCodec::H264, Container::Mp4, W, H, (30, 1), 30),
+            0,
+            20,
+        ),
+        piece(
+            FixtureSpec::new(VideoCodec::Hevc10, Container::Mkv, W, H, (30, 1), 30),
+            0,
+            20,
+        ),
+        piece(
+            FixtureSpec::new(VideoCodec::H264, Container::Mkv, W, H, (30, 1), 30)
+                .interlaced(true)
+                .no_audio(),
+            0,
+            20,
+        ),
+        piece(
+            FixtureSpec::new(VideoCodec::H264, Container::Mp4, 330, 186, (30, 1), 30),
+            0,
+            20,
+        ),
+    ]);
+    let player = Player::new(
+        p.clone(),
+        Config {
+            audio_scrubbing: false,
+            hardware: true,
+            gpu: Some(vaapi),
+            gpu_pictures: true,
+            ..Config::default()
+        },
+        Box::new(ManualOutput::new()),
+    )
+    .unwrap();
+    let (mut shown, mut copied) = (Screen::new(), Screen::new());
+    for (t, memory) in [
+        (0, Memory::Vaapi),
+        (19, Memory::Vaapi),
+        (20, Memory::Vaapi),
+        (33, Memory::Vaapi),
+        (45, Memory::Cpu),
+        (60, Memory::Vaapi),
+        (79, Memory::Vaapi),
+    ] {
+        let picture = picture_at(&player, t);
+        assert_eq!(picture.memory(), memory, "frame {t}");
+        shown.draw(&gpu, Some(&picture), W, H);
+        if memory == Memory::Vaapi {
+            assert!(shown.shared(), "frame {t} was copied down to be shown");
+        }
+        let ours = shown.read(&gpu).unwrap();
+        let down = Arc::new(picture.copied_down().unwrap());
+        copied.draw(&gpu, Some(&down), W, H);
+        let theirs = copied.read(&gpu).unwrap();
+        let (mean, max) = diff(&ours.rgba, &theirs.rgba);
+        assert_eq!((mean, max), (0.0, 0), "frame {t}");
+        let rendered = vidcut_av::export::still::rgba(&piece_at(&p, t), p.fps, W, H).unwrap();
+        assert_eq!(
+            barcode(&ours.rgba, W, H),
+            barcode(&rendered.rgba, W, H),
+            "frame {t}"
+        );
+    }
+}
+
+/// Pictures Direct3D 11 decoded, kept in GPU memory (copied out of the
+/// decoder's texture array into textures of their own) and shown from there
+/// (each texture imported by wgpu's Vulkan device on the same adapter, its
+/// planes drawn from views of it): the same pixels as the same picture copied
+/// down and uploaded, NV12 and P010, at a size whose rows and chroma aren't
+/// round. Needs Direct3D 11 decoding, and a Vulkan adapter on the same GPU
+/// that imports its textures (Windows).
+#[cfg(windows)]
+#[test]
+fn d3d11_pictures_draw_as_copied_down() {
+    use vidcut_av::hw::{GpuDecoder, Kind};
+    let pairs: Vec<(GpuDecoder, Gpu)> = GpuDecoder::all()
+        .into_iter()
+        .filter(|d| d.kind() == Kind::D3d11va)
+        .filter_map(|d| {
+            let luid = d.luid()?;
+            let gpu = Gpu::headless_all()
+                .into_iter()
+                .find(|g| g.imports_d3d11() && g.luid() == Some(luid))?;
+            Some((d, gpu))
+        })
+        .collect();
+    if pairs.is_empty() {
+        eprintln!("skipping: no Direct3D 11 decoder on an adapter wgpu imports from");
+        return;
+    }
+    let p = plan(vec![
+        piece(
+            FixtureSpec::new(VideoCodec::Vp9, Container::Webm, W, H, (30, 1), 30),
+            0,
+            20,
+        ),
+        piece(
+            FixtureSpec::new(VideoCodec::Hevc10, Container::Mkv, W, H, (30, 1), 30),
+            0,
+            20,
+        ),
+        piece(
+            FixtureSpec::new(VideoCodec::Vp9, Container::Webm, 330, 186, (30, 1), 30),
+            0,
+            20,
+        ),
+    ]);
+    for (decoder, gpu) in pairs {
+        let name = format!("d3d11va {}", decoder.on());
+        let player = Player::new(
+            p.clone(),
+            Config {
+                audio_scrubbing: false,
+                hardware: true,
+                gpu: Some(decoder),
+                gpu_pictures: true,
+                ..Config::default()
+            },
+            Box::new(ManualOutput::new()),
+        )
+        .unwrap();
+        let (mut shown, mut copied) = (Screen::new(), Screen::new());
+        for (t, layout) in [
+            (0, Layout::Nv12),
+            (19, Layout::Nv12),
+            (20, Layout::P010),
+            (39, Layout::P010),
+            (40, Layout::Nv12),
+            (59, Layout::Nv12),
+        ] {
+            let picture = picture_at(&player, t);
+            assert_eq!(picture.memory(), Memory::D3d11, "{name}: frame {t}");
+            assert_eq!(picture.layout(), layout, "{name}: frame {t}");
+            shown.draw(&gpu, Some(&picture), W, H);
+            assert!(
+                shown.shared(),
+                "{name}: frame {t} was copied down to be shown"
+            );
+            let ours = shown.read(&gpu).unwrap();
+            let down = Arc::new(picture.copied_down().unwrap());
+            copied.draw(&gpu, Some(&down), W, H);
+            let theirs = copied.read(&gpu).unwrap();
+            let (mean, max) = diff(&ours.rgba, &theirs.rgba);
+            assert_eq!((mean, max), (0.0, 0), "{name}: frame {t}");
+            let rendered = vidcut_av::export::still::rgba(&piece_at(&p, t), p.fps, W, H).unwrap();
+            assert_eq!(
+                barcode(&ours.rgba, W, H),
+                barcode(&rendered.rgba, W, H),
+                "{name}: frame {t}"
+            );
+        }
     }
 }

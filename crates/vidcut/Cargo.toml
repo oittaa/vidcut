@@ -31,6 +31,10 @@ shlex.workspace = true
 zip.workspace = true
 crc32fast.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+windows.workspace = true
+
 [dev-dependencies]
 egui_kittest.workspace = true
 naga.workspace = true

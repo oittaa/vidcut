@@ -7,7 +7,6 @@
 //! (decision D41) and exports use it: the CPU only reads the file and writes
 //! the result.
 
-#[cfg(unix)]
 pub mod share;
 
 /// One plane's place in memory a display shares (`share::SharedBuffer`):
@@ -32,34 +31,19 @@ use crate::color::{GpuColor, Tags};
 use crate::decode::VideoReader;
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, ffi, filter, format, frame};
-
-/// A reference to one of FFmpeg's hardware device contexts.
-struct Device(*mut ffi::AVBufferRef);
-
-// SAFETY: a reference to a hardware device context may be used, and
-// dropped, on any thread.
-unsafe impl Send for Device {}
-unsafe impl Sync for Device {}
-
-impl Clone for Device {
-    fn clone(&self) -> Self {
-        Self(unsafe { ffi::av_buffer_ref(self.0) })
-    }
-}
-
-impl Drop for Device {
-    fn drop(&mut self) {
-        unsafe { ffi::av_buffer_unref(&mut self.0) };
-    }
-}
+use crate::hw::Device;
 
 /// A CUDA device: NVDEC, the CUDA filters and NVENC share it.
 #[derive(Clone)]
 pub struct CudaDevice {
     cuda: Device,
-    /// The Vulkan device on the same GPU, for libplacebo: made the first
-    /// time it is needed (that takes a quarter of a second), then shared
-    /// by every clone.
+    /// The process's one device ([`CudaDevice::open`]): this one, or the
+    /// one whose context this one shares with a stream of its own
+    /// ([`CudaDevice::with_own_stream`]).
+    base: Device,
+    /// The Vulkan device on the same GPU, for libplacebo: made from the
+    /// base the first time it is needed (that takes a quarter of a
+    /// second), then shared by every clone.
     vulkan: Arc<OnceLock<std::result::Result<Device, String>>>,
 }
 
@@ -86,13 +70,56 @@ impl CudaDevice {
                 if ret < 0 || device.is_null() {
                     return Err(format!("no CUDA device: {}", ffmpeg::Error::from(ret)));
                 }
+                let cuda = Device(device);
                 Ok(Self {
-                    cuda: Device(device),
+                    base: cuda.clone(),
+                    cuda,
                     vulkan: Arc::default(),
                 })
             })
             .clone()
             .map_err(Error::Invalid)
+    }
+
+    /// A device of its own on the same context: its work goes on a stream of
+    /// its own, so it never waits behind another user's. On the context's
+    /// default stream every user's work runs in one line, and a wait there
+    /// for Vulkan (libplacebo's pictures) holds up everyone's decoding and
+    /// encoding; two users each waiting for Vulkan work queued behind the
+    /// other's would never go on. Frames made on it are done once its
+    /// stream is (`share::wait_for`).
+    pub fn with_own_stream(&self) -> Result<Self> {
+        let stream = share::Stream::new(self)?;
+        // SAFETY: a CUDA device context FFmpeg allocates, given this
+        // device's context (which the base keeps) and the new stream, which
+        // its `free` destroys once FFmpeg is done with it.
+        unsafe {
+            let mut device = ffi::av_hwdevice_ctx_alloc(ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA);
+            if device.is_null() {
+                return Err(Error::Invalid("no memory for a CUDA device".into()));
+            }
+            let hw = (*device).data as *mut ffi::AVHWDeviceContext;
+            let cuda = (*hw).hwctx as *mut ffi::AVCUDADeviceContext;
+            let own = (*((*self.as_ptr()).data as *const ffi::AVHWDeviceContext)).hwctx
+                as *const ffi::AVCUDADeviceContext;
+            (*cuda).cuda_ctx = (*own).cuda_ctx;
+            (*cuda).stream = stream.as_raw().cast();
+            (*hw).user_opaque = stream.into_raw();
+            (*hw).free = Some(share::destroy_stream);
+            let ret = ffi::av_hwdevice_ctx_init(device);
+            if ret < 0 {
+                ffi::av_buffer_unref(&mut device);
+                return Err(Error::Ffmpeg {
+                    context: "setting up a CUDA stream".into(),
+                    source: ffmpeg::Error::from(ret),
+                });
+            }
+            Ok(Self {
+                cuda: Device(device),
+                base: self.base.clone(),
+                vulkan: self.vulkan.clone(),
+            })
+        }
     }
 
     pub(crate) fn as_ptr(&self) -> *mut ffi::AVBufferRef {
@@ -107,7 +134,7 @@ impl CudaDevice {
                     ffi::av_hwdevice_ctx_create_derived(
                         &mut vulkan,
                         ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VULKAN,
-                        self.as_ptr(),
+                        self.base.0,
                         0,
                     )
                 };
@@ -161,6 +188,11 @@ impl HwFrames {
             }
             Ok(Self(frames))
         }
+    }
+
+    /// Another reference to the same frames.
+    fn share(&self) -> Self {
+        Self(unsafe { ffi::av_buffer_ref(self.0) })
     }
 
     /// A frame of this pool holding the picture of `src` (in memory, or in
@@ -223,48 +255,6 @@ impl CudaFrames {
     }
 }
 
-/// The layout of a frame in GPU memory: its frames context's software
-/// format (NV12, P010...); a frame in memory's own.
-pub(crate) fn sw_format(frame: &frame::Video) -> format::Pixel {
-    // SAFETY: a hardware frame holds a reference to its frames context,
-    // whose data is an AVHWFramesContext.
-    unsafe {
-        let ctx = (*frame.as_ptr()).hw_frames_ctx;
-        if ctx.is_null() {
-            frame.format()
-        } else {
-            let frames = (*ctx).data as *const ffi::AVHWFramesContext;
-            format::Pixel::from((*frames).sw_format)
-        }
-    }
-}
-
-/// A frame in GPU memory copied down to memory, in its frames' layout (NV12,
-/// P010) at its own size, keeping its properties: colors, aspect,
-/// timestamp.
-pub(crate) fn download(src: &frame::Video) -> Result<frame::Video> {
-    let mut dst = frame::Video::empty();
-    // SAFETY: both frames are valid; the destination is allocated by the
-    // transfer, in the source frames' software format.
-    unsafe {
-        let ret = ffi::av_hwframe_transfer_data(dst.as_mut_ptr(), src.as_ptr(), 0);
-        if ret < 0 {
-            return Err(Error::Ffmpeg {
-                context: "copying a frame down from the GPU".into(),
-                source: ffmpeg::Error::from(ret),
-            });
-        }
-        let ret = ffi::av_frame_copy_props(dst.as_mut_ptr(), src.as_ptr());
-        if ret < 0 {
-            return Err(Error::Ffmpeg {
-                context: "copying a frame's properties".into(),
-                source: ffmpeg::Error::from(ret),
-            });
-        }
-    }
-    Ok(dst)
-}
-
 /// Where libplacebo keeps the shaders it compiles (`keep_shaders_in`).
 static SHADERS: OnceLock<PathBuf> = OnceLock::new();
 
@@ -304,12 +294,12 @@ struct Placebo {
     output: HwFrames,
     /// Black, under each picture placed on a bigger frame
     /// (`Layout::Placed`).
-    background: Option<frame::Video>,
+    background: Option<Blacks>,
     /// Pushed after each frame when its picture is wanted at once.
     /// libplacebo gives out a frame's picture only once it has the frame
     /// after it; the filler's own pictures are dropped. Without it, a
     /// picture comes a frame late and the GPU renders half as many.
-    filler: Option<frame::Video>,
+    filler: Option<Blacks>,
     /// What libplacebo reads the source as (`GpuColor::input`).
     tags: Tags,
     /// Frames are timed by count, two apart with the filler between, as
@@ -345,24 +335,12 @@ enum Layout {
 const COUNTED: ffi::AVRational = ffi::AVRational { num: 1, den: 1 };
 
 /// The filters from `w`×`h` frames to `width`×`height` NV12 pictures.
-/// `scale_cuda` samples a fixed few pixels around each output pixel, which
-/// aliases when it shrinks a lot (4K to 960 wide): halvings first, each a
-/// bilinear sample between four pixels, so their average, then one bicubic
-/// step to the size.
 fn filters(
     (w, h): (u32, u32),
     (fit_w, fit_h): (u32, u32),
     (width, height, out): (u32, u32, &str),
 ) -> String {
-    let mut steps = Vec::new();
-    let (mut w, mut h) = (w, h);
-    while w >= 2 * fit_w && h >= 2 * fit_h && w >= 4 && h >= 4 {
-        (w, h) = ((w / 2) & !1, (h / 2) & !1);
-        steps.push(format!("scale_cuda=w={w}:h={h}:interp_algo=bilinear"));
-    }
-    steps.push(format!(
-        "scale_cuda=w={fit_w}:h={fit_h}:format={out}:interp_algo=bicubic"
-    ));
+    let mut steps = scaling((w, h), (fit_w, fit_h), &format!(":format={out}"));
     // Centered on black, as the CPU's normalizer pads.
     if (fit_w, fit_h) != (width, height) {
         let (x, y) = centered((fit_w, fit_h), (width, height));
@@ -371,6 +349,28 @@ fn filters(
         ));
     }
     steps.join(",")
+}
+
+/// `scale_cuda` steps from `w`×`h` frames to `fit_w`×`fit_h` (with
+/// `options` for the last). `scale_cuda` samples a fixed few pixels around
+/// each output pixel, which aliases when it shrinks a lot (4K to 960 wide):
+/// halvings first, each a bilinear sample between four pixels, so their
+/// average, then one bicubic step to the size.
+pub(crate) fn scaling(
+    (w, h): (u32, u32),
+    (fit_w, fit_h): (u32, u32),
+    options: &str,
+) -> Vec<String> {
+    let mut steps = Vec::new();
+    let (mut w, mut h) = (w, h);
+    while w >= 2 * fit_w && h >= 2 * fit_h && w >= 4 && h >= 4 {
+        (w, h) = ((w / 2) & !1, (h / 2) & !1);
+        steps.push(format!("scale_cuda=w={w}:h={h}:interp_algo=bilinear"));
+    }
+    steps.push(format!(
+        "scale_cuda=w={fit_w}:h={fit_h}{options}:interp_algo=bicubic"
+    ));
+    steps
 }
 
 /// Where a `fit_w`×`fit_h` picture goes in a `width`×`height` frame:
@@ -774,11 +774,7 @@ impl Placebo {
                 let timing = (COUNTED, ffmpeg::Rational(1, 1));
                 let tags = Some((black_tags.matrix, black_tags.range));
                 add_source(&mut graph, c"bg", VULKAN, (w, h), timing, frames.0, tags)?;
-                let mut black = frame::Video::new(format, w, h);
-                crate::export::video::fill_black(&mut black)?;
-                let mut background = frames.copy(&black, "copying to Vulkan")?;
-                tag(&mut background, black_tags);
-                Some(background)
+                Some(Blacks::new(frames, format, (w, h), black_tags)?)
             }
             _ => None,
         };
@@ -846,11 +842,13 @@ impl Placebo {
         graph.validate().ctx(|| "configuring libplacebo".into())?;
         let filler = if at_once {
             // Any picture will do: a black one.
-            let mut black = frame::Video::new(as_read(sw).into(), width, height);
-            crate::export::video::fill_black(&mut black)?;
-            let mut filler = input.copy(&black, "copying to Vulkan")?;
-            tag(&mut filler, color.input);
-            Some(filler)
+            let size = (width, height);
+            Some(Blacks::new(
+                input.share(),
+                as_read(sw).into(),
+                size,
+                color.input,
+            )?)
         } else {
             None
         };
@@ -899,8 +897,8 @@ impl Placebo {
         self.count += 1;
         self.pts.push_back((n, f.pts()));
         self.feed(n, v)?;
-        if let Some(filler) = &self.filler {
-            let next = frame_ref(filler);
+        if let Some(filler) = self.filler.as_mut() {
+            let next = filler.next()?;
             self.feed(n + 1, next)?;
         }
         Ok(())
@@ -908,8 +906,8 @@ impl Placebo {
 
     /// `picture` at count `n`, over the black frame when there is one.
     fn feed(&mut self, n: i64, mut picture: frame::Video) -> Result<()> {
-        if let Some(background) = &self.background {
-            let mut black = frame_ref(background);
+        if let Some(background) = self.background.as_mut() {
+            let mut black = background.next()?;
             black.set_pts(Some(n));
             let mut source = self.graph.get("bg").expect("background");
             source
@@ -952,6 +950,51 @@ impl Placebo {
             return Ok(Some(c));
         }
         Ok(None)
+    }
+}
+
+/// Black pictures fed to libplacebo, each at most once at a time. It takes
+/// a Vulkan frame at the semaphore value the frame says and gives it back at
+/// the next one, so a frame it holds twice at once ends up a step ahead of
+/// anything the GPU signals, and freeing it waits for that forever (an
+/// export hung so on Windows). A frame goes in again once libplacebo let go
+/// of it, its only reference left here; more are made while all are out.
+struct Blacks {
+    pool: HwFrames,
+    black: frame::Video,
+    tags: Tags,
+    made: Vec<frame::Video>,
+}
+
+impl Blacks {
+    /// Black `size` frames of `format` from `pool`, tagged `tags`.
+    fn new(pool: HwFrames, format: format::Pixel, (w, h): (u32, u32), tags: Tags) -> Result<Self> {
+        let mut black = frame::Video::new(format, w, h);
+        crate::export::video::fill_black(&mut black)?;
+        Ok(Self {
+            pool,
+            black,
+            tags,
+            made: Vec::new(),
+        })
+    }
+
+    /// A reference to a black frame libplacebo doesn't hold.
+    fn next(&mut self) -> Result<frame::Video> {
+        let free = self.made.iter().position(|f| {
+            // SAFETY: a frame of a pool holds its picture in `buf[0]`.
+            unsafe { ffi::av_buffer_get_ref_count((*f.as_ptr()).buf[0]) == 1 }
+        });
+        let i = match free {
+            Some(i) => i,
+            None => {
+                let mut f = self.pool.copy(&self.black, "copying to Vulkan")?;
+                tag(&mut f, self.tags);
+                self.made.push(f);
+                self.made.len() - 1
+            }
+        };
+        Ok(frame_ref(&self.made[i]))
     }
 }
 

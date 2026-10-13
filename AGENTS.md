@@ -29,11 +29,13 @@ These are mandatory.
 
 **Enable the hook once per clone:** `git config core.hooksPath .githooks`.
 
-**CI** (`.github/workflows/check.yml`) runs only the fast gate, on pull requests and pushes to master. `.github/workflows/ffmpeg.yml` builds against the newest FFmpeg release and master weekly and on demand.
+**On Windows** the scripts run from Git Bash, with `FFMPEG_DIR` set (README.md, Requirements).
+
+**CI** (`.github/workflows/check.yml`) runs only the fast gate, on Linux and on Windows, on pull requests and pushes to master. `.github/workflows/ffmpeg.yml` builds against the newest FFmpeg release and master weekly and on demand.
 
 ## Docs
 
-- [README.md](README.md): features, requirements, build, GUI keys, CLI basics.
+- [README.md](README.md): features, requirements, build, CLI basics. Keys: [docs/cut-page-spec.md](docs/cut-page-spec.md) §11.
 - [docs/cli.md](docs/cli.md): every command, JSON output and exit codes, live control of a running GUI.
 - [docs/cut-page-spec.md](docs/cut-page-spec.md): the behavioral spec; [docs/deviations.md](docs/deviations.md): where vidcut differs.
 - [docs/decisions/](docs/decisions/): architecture records (preview, export, GUI, agents, player).

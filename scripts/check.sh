@@ -23,6 +23,18 @@ if [[ -n "${CI:-}" ]]; then
   cargo_quiet=()
 fi
 
+# Windows (Git Bash): FFmpeg is the folder FFMPEG_DIR names, and the tests
+# load its DLLs from its bin folder.
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*)
+    if [[ -z "${FFMPEG_DIR:-}" ]]; then
+      echo "set FFMPEG_DIR to an FFmpeg build with include, lib and bin folders (README.md)" >&2
+      exit 2
+    fi
+    PATH="$(cygpath -u "$FFMPEG_DIR")/bin:$PATH"
+    ;;
+esac
+
 step "no binary files"
 # Media and test data live in $VIDCUT_TEST_DATA, never in git (AGENTS.md).
 # Git's own test decides what is binary: `--numstat` shows "-" for it. The

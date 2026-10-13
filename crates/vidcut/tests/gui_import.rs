@@ -365,7 +365,17 @@ fn numbered_images_are_asked_about() {
     let id = added.result["media"][0].as_str().unwrap().to_string();
     let disk = dir.join("disk");
     std::fs::create_dir_all(&disk).unwrap();
-    std::fs::rename(&footage, disk.join("footage")).unwrap();
+    // The pool's workers read a file just added for a while, and on Windows
+    // a folder holding a file that is open can't move: until they let go.
+    let started = std::time::Instant::now();
+    while let Err(e) = std::fs::rename(&footage, disk.join("footage")) {
+        let busy = cfg!(windows) && e.kind() == std::io::ErrorKind::PermissionDenied;
+        assert!(
+            busy && started.elapsed() < std::time::Duration::from_secs(20),
+            "moving the footage: {e}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
     until(&mut harness, "the missing file", |h| {
         has(h, "Relink Media (1)")
     });
@@ -396,11 +406,8 @@ fn numbered_images_are_asked_about() {
     harness.get_by_label("Relink Media (1)").click();
     until(&mut harness, "the result", |h| has(h, "1 relinked"));
     let m = call(&h, "media.get", json!({ "media": id })).result;
-    let moved = disk
-        .join("footage")
-        .join("moved.mp4")
-        .canonicalize()
-        .unwrap();
+    let moved = disk.join("footage").join("moved.mp4");
+    let moved = vidcut_core::dirs::canonical(&moved).unwrap();
     assert_eq!(m["path"], json!(moved));
     assert!(m.get("missing").is_none(), "{m}");
     until(&mut harness, "no missing file", |h| {

@@ -251,7 +251,7 @@ pub struct FixtureSpec {
     /// which the barcode reader doesn't sample, a white block moves 40 px
     /// each field, as a camera would see it. Not deinterlaced, it combs.
     pub top_field_first: Option<bool>,
-    /// HDR (10-bit HEVC tagged BT.2100 with this transfer): the barcode's
+    /// HDR (10-bit HEVC or AV1 tagged BT.2100 with this transfer): the barcode's
     /// white is SDR reference white (203 nits in PQ, 75% in HLG), which an
     /// SDR player that doesn't convert shows gray.
     pub hdr: Option<vidcut_core::model::Hdr>,
@@ -264,13 +264,15 @@ pub struct FixtureSpec {
 
 /// The HDR metadata a fixture carries: the mastering display of
 /// [`mastering`] at `max_nits`, content light levels, and HDR10+ on every
-/// frame ([`hdr10plus_t35`]).
+/// frame ([`hdr10plus_t35`], an HEVC SEI or AV1 metadata OBU), or on the
+/// first `hdr10plus_frames`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct HdrMeta {
     pub max_nits: u32,
     /// MaxCLL and MaxFALL.
     pub light: Option<(u32, u32)>,
     pub hdr10plus: bool,
+    pub hdr10plus_frames: Option<u32>,
 }
 
 impl HdrMeta {
@@ -499,7 +501,11 @@ impl FixtureSpec {
             .hdr_meta
             .map(|m| {
                 let light = m.light.map_or(String::new(), |(c, f)| format!("l{c}-{f}"));
-                let plus = if m.hdr10plus { "p" } else { "" };
+                let plus = match (m.hdr10plus, m.hdr10plus_frames) {
+                    (false, _) => String::new(),
+                    (true, None) => "p".into(),
+                    (true, Some(n)) => format!("p{n}"),
+                };
                 format!("m{}{light}{plus}", m.max_nits)
             })
             .unwrap_or_default()
@@ -588,7 +594,15 @@ pub fn ensure_in(dir: &Path, spec: &FixtureSpec) -> Result<PathBuf> {
             let _ = std::fs::remove_file(&tmp);
         }
         result?;
-        std::fs::rename(&tmp, &path)?;
+        match std::fs::rename(&tmp, &path) {
+            Ok(()) => {}
+            // Another test made it meanwhile, and on Windows has it open,
+            // so it can't be replaced.
+            Err(_) if path.exists() => {
+                let _ = std::fs::remove_file(&tmp);
+            }
+            Err(e) => return Err(e.into()),
+        }
     }
     Ok(path)
 }
@@ -805,8 +819,8 @@ pub fn generate(spec: &FixtureSpec, path: &Path) -> Result<()> {
     if spec.top_field_first.is_some() && spec.video != VideoCodec::H264 {
         return Err(Error::Invalid("interlaced fixtures are H.264".into()));
     }
-    if spec.hdr.is_some() && spec.video != VideoCodec::Hevc10 {
-        return Err(Error::Invalid("HDR fixtures are 10-bit HEVC".into()));
+    if spec.hdr.is_some() && !matches!(spec.video, VideoCodec::Hevc10 | VideoCodec::Av1) {
+        return Err(Error::Invalid("HDR fixtures are 10-bit HEVC or AV1".into()));
     }
     let mut octx = format::output_as(path, spec.container.muxer())
         .ctx(|| format!("creating {}", path.display()))?;
@@ -1148,7 +1162,10 @@ impl VideoTrack {
         frame.set_pts(Some(pts));
         unsafe { (*frame.as_mut_ptr()).duration = duration };
         self.durations.insert(pts, duration);
-        if spec.hdr_meta.is_some_and(|m| m.hdr10plus) {
+        if spec
+            .hdr_meta
+            .is_some_and(|m| m.hdr10plus && m.hdr10plus_frames.is_none_or(|n| k < n))
+        {
             self.hdr10plus.insert(pts, hdr10plus_t35(k));
         }
         self.encoder
@@ -1159,12 +1176,13 @@ impl VideoTrack {
 
     fn drain(&mut self, octx: &mut format::context::Output) -> Result<()> {
         let mut packet = ffmpeg::Packet::empty();
+        let id = self.encoder.id();
         while self.encoder.receive_packet(&mut packet).is_ok() {
             if let Some(d) = packet.pts().and_then(|pts| self.durations.remove(&pts)) {
                 packet.set_duration(d);
             }
             if let Some(t35) = packet.pts().and_then(|pts| self.hdr10plus.remove(&pts)) {
-                crate::hdr::insert_hdr10plus(&mut packet, codec::Id::HEVC, &t35)?;
+                crate::hdr::insert_hdr10plus(&mut packet, id, &t35)?;
             }
             packet.set_stream(0);
             packet.rescale_ts(self.enc_tb, self.stream_tb);

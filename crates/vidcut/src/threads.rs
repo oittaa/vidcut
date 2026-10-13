@@ -11,9 +11,9 @@ use std::thread::JoinHandle;
 pub enum Work {
     /// Media work nobody watches frame by frame: exports, proxies,
     /// measurements and analyses, storyboards, thumbnails, waveforms, the
-    /// preview's helper files. The lowest priority (Linux's idle class);
-    /// the threads it starts, FFmpeg's decoders and encoders among them,
-    /// inherit it.
+    /// preview's helper files. The lowest priority (Linux's idle class,
+    /// Windows's idle priority); on Linux the threads it starts, FFmpeg's
+    /// decoders and encoders among them, inherit it.
     Job,
     /// Work someone waits on now: the session itself, requests and their
     /// answers, file dialogs, a frame or a plan.
@@ -36,8 +36,10 @@ pub fn spawn<T: Send + 'static>(
         })
 }
 
-/// Gives the calling thread the lowest CPU priority: the idle scheduling
-/// class, below nice 19. Threads it starts later inherit it. Linux only.
+/// Gives the calling thread the lowest CPU priority. On Linux that is the
+/// idle scheduling class, below nice 19, which the threads it starts later
+/// inherit. On Windows it is the idle priority, which threads don't
+/// inherit: the threads FFmpeg starts for a job run at the normal one.
 ///
 /// Not nice 19: NVIDIA's driver, opening NVENC, copies the calling thread's
 /// nice value onto the process id, which is the main thread, and nothing
@@ -50,6 +52,14 @@ fn lowest_priority() {
     unsafe {
         let param = libc::sched_param { sched_priority: 0 };
         libc::sched_setscheduler(libc::gettid(), libc::SCHED_IDLE, &param);
+    }
+    #[cfg(windows)]
+    // SAFETY: sets this thread's own priority.
+    unsafe {
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_IDLE,
+        };
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE);
     }
 }
 
@@ -86,6 +96,28 @@ mod tests {
         // opening NVENC) leaves the GUI's priority alone.
         let idle = (libc::SCHED_IDLE, before.1);
         assert_eq!(job, (idle, idle));
+        let interactive = spawn("test-interactive", Work::Interactive, priority)
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(interactive, before);
+        assert_eq!(priority(), before, "the caller's priority changed");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_job_runs_at_idle_priority() {
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentThread, GetThreadPriority, THREAD_PRIORITY_IDLE,
+        };
+        // SAFETY: reads this thread's own priority.
+        let priority = || unsafe { GetThreadPriority(GetCurrentThread()) };
+        let before = priority();
+        let job = spawn("test-job", Work::Job, priority)
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(job, THREAD_PRIORITY_IDLE);
         let interactive = spawn("test-interactive", Work::Interactive, priority)
             .unwrap()
             .join()

@@ -25,19 +25,10 @@ use crate::model::{FORMAT_VERSION, Project};
 /// How long to wait for another process to release the project lock.
 const LOCK_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// `$XDG_STATE_HOME`, or `~/.local/state`.
+/// `$XDG_STATE_HOME/vidcut`, or `~/.local/state/vidcut`
+/// ([`crate::dirs::state`]).
 pub fn state_dir() -> PathBuf {
-    std::env::var_os("XDG_STATE_HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home().join(".local").join("state"))
-        .join("vidcut")
-}
-
-fn home() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
+    crate::dirs::state()
 }
 
 /// FNV-1a: a stable 64-bit hash for sidecar names (not security relevant).
@@ -86,7 +77,7 @@ impl Store {
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
         std::fs::create_dir_all(parent).map_err(|e| io(path, e))?;
-        let dir = parent.canonicalize().map_err(|e| io(path, e))?;
+        let dir = crate::dirs::canonical(parent).map_err(|e| io(path, e))?;
         write_atomic(path, &to_json(project, &dir)?).map_err(|e| io(path, e))?;
         let store = Self::open(path)?;
         // A fresh project starts with fresh history.
@@ -96,7 +87,7 @@ impl Store {
 
     /// Opens an existing project file.
     pub fn open(path: &Path) -> Result<Self> {
-        let path = path.canonicalize().map_err(|e| {
+        let path = crate::dirs::canonical(path).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 Error::not_found(format!("no project file {}", path.display()))
             } else {
@@ -260,7 +251,7 @@ fn to_json(project: &Project, dir: &Path) -> Result<String> {
     let mut project = project.clone();
     for path in files(&mut project) {
         if let Ok(relative) = path.strip_prefix(dir) {
-            *path = relative.to_path_buf();
+            *path = portable(relative);
         }
     }
     let mut s =
@@ -269,14 +260,50 @@ fn to_json(project: &Project, dir: &Path) -> Result<String> {
     Ok(s)
 }
 
+/// A relative path as the file keeps it: its parts joined by `/` on every
+/// system, so a project folder moves between Linux and Windows.
+fn portable(relative: &Path) -> PathBuf {
+    #[cfg(windows)]
+    let path = PathBuf::from(relative.to_string_lossy().replace('\\', "/"));
+    #[cfg(not(windows))]
+    let path = relative.to_path_buf();
+    path
+}
+
+/// A relative path the file keeps, as this system writes it.
+fn native(relative: &Path) -> PathBuf {
+    #[cfg(windows)]
+    let path = PathBuf::from(relative.to_string_lossy().replace('/', "\\"));
+    #[cfg(not(windows))]
+    let path = relative.to_path_buf();
+    path
+}
+
+/// Whether a path the file keeps is absolute on some system: `/…`, or a
+/// Windows drive's (`C:\…`, `C:/…`) or server's (`\\server\…`). One written
+/// on the other kind of system names nothing here, so it is kept as it was
+/// written rather than joined onto the project's folder: it shows as it
+/// was, and goes back into the file unchanged.
+fn absolute_anywhere(path: &Path) -> bool {
+    let Some(s) = path.to_str() else {
+        return path.is_absolute();
+    };
+    let b = s.as_bytes();
+    s.starts_with(['/', '\\'])
+        || (b.len() > 2
+            && b[0].is_ascii_alphabetic()
+            && b[1] == b':'
+            && matches!(b[2], b'\\' | b'/'))
+}
+
 /// The project in the file's `text`, its relative paths made absolute from
 /// `dir`.
 fn parse(path: &Path, dir: &Path, text: &str) -> Result<Project> {
     let mut project: Project = serde_json::from_str(text)
         .map_err(|e| Error::invalid(format!("{} is not a vidcut project: {e}", path.display())))?;
     for file in files(&mut project) {
-        if file.is_relative() {
-            *file = dir.join(&*file);
+        if !absolute_anywhere(file) {
+            *file = dir.join(native(file));
         }
     }
     if project.vidcut > FORMAT_VERSION {
@@ -461,21 +488,27 @@ mod tests {
             .prefix("vidcut-store-")
             .tempdir()
             .unwrap();
-        let dir = tmp.path().canonicalize().unwrap();
+        let dir = crate::dirs::canonical(tmp.path()).unwrap();
         isolated_state();
         let film = dir.join("film");
         let inside = film.join("footage").join("a.mp4");
+        // Absolute somewhere else on this system.
+        let elsewhere = if cfg!(windows) {
+            r"D:\elsewhere\b.mp4"
+        } else {
+            "/elsewhere/b.mp4"
+        };
         let info =
             crate::test_support::media_info(4.0, crate::time::Rational::new(25, 1).unwrap(), true);
         let env = FakeEnv::default()
             .with(inside.to_str().unwrap(), info.clone())
-            .with("/elsewhere/b.mp4", info);
+            .with(elsewhere, info);
         let path = film.join("p.vidcut");
         let store = Store::create(&path, &Project::new(Settings::default())).unwrap();
         apply(
             &store,
             &env,
-            json!({"method": "media.add", "params": {"paths": [inside, "/elsewhere/b.mp4"]}}),
+            json!({"method": "media.add", "params": {"paths": [inside, elsewhere]}}),
         )
         .unwrap();
         let file = |path: &Path| -> serde_json::Value {
@@ -497,11 +530,8 @@ mod tests {
         // absolute.
         let text = file(&path);
         assert_eq!(text["media"][0]["path"], "footage/a.mp4");
-        assert_eq!(text["media"][1]["path"], "/elsewhere/b.mp4");
-        assert_eq!(
-            paths(&path),
-            [inside.clone(), PathBuf::from("/elsewhere/b.mp4")]
-        );
+        assert_eq!(text["media"][1]["path"], elsewhere);
+        assert_eq!(paths(&path), [inside.clone(), PathBuf::from(elsewhere)]);
 
         // Proxies beside the project too.
         let mut text = text;
@@ -531,10 +561,56 @@ mod tests {
             .project()
             .clone();
         assert_eq!(project.media[0].path, moved.join("footage").join("a.mp4"));
-        assert_eq!(project.media[1].path, PathBuf::from("/elsewhere/b.mp4"));
+        assert_eq!(project.media[1].path, PathBuf::from(elsewhere));
         assert_eq!(
             project.media[0].proxy.as_ref().unwrap().path,
             moved.join("proxies").join("a.mov")
         );
+    }
+
+    #[test]
+    fn paths_absolute_on_the_other_system_stay_as_written() {
+        let tmp = tempfile::Builder::new()
+            .prefix("vidcut-store-")
+            .tempdir()
+            .unwrap();
+        let dir = crate::dirs::canonical(tmp.path()).unwrap();
+        isolated_state();
+        let a = dir.join("a.mp4");
+        let info =
+            crate::test_support::media_info(4.0, crate::time::Rational::new(25, 1).unwrap(), true);
+        let env = FakeEnv::default().with(a.to_str().unwrap(), info);
+        let path = dir.join("p.vidcut");
+        let store = Store::create(&path, &Project::new(Settings::default())).unwrap();
+        apply(
+            &store,
+            &env,
+            json!({"method": "media.add", "params": {"paths": [a]}}),
+        )
+        .unwrap();
+        let file = |path: &Path| -> serde_json::Value {
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+        };
+        // A project made on Windows (a drive, a server) or on Linux.
+        for written in [
+            r"D:\elsewhere\c.mp4",
+            r"\\server\share\d.mp4",
+            "/elsewhere/e.mp4",
+        ] {
+            let mut text = file(&path);
+            text["media"][0]["path"] = json!(written);
+            std::fs::write(&path, text.to_string()).unwrap();
+            let store = Store::open(&path).unwrap();
+            let project = store.load().unwrap().project().clone();
+            assert_eq!(project.media[0].path, PathBuf::from(written));
+            // Saved again, still as written.
+            apply(
+                &store,
+                &env,
+                json!({"method": "marks.set", "params": {"in": 1, "out": 2}}),
+            )
+            .unwrap();
+            assert_eq!(file(&path)["media"][0]["path"], written);
+        }
     }
 }

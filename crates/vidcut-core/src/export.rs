@@ -93,6 +93,18 @@ pub enum VideoCodec {
     Dnxhr,
 }
 
+impl VideoCodec {
+    /// The worst constant quality (`video.quality`) its encoders take:
+    /// H.264's and HEVC's quantizers end at 51, AV1's and VP9's scales at
+    /// 63. A larger one is taken as that.
+    pub fn worst_quality(self) -> u32 {
+        match self {
+            VideoCodec::H264 | VideoCodec::Hevc => 51,
+            _ => 63,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AudioCodec {
@@ -136,7 +148,8 @@ impl HdrMode {
 #[serde(rename_all = "snake_case")]
 pub enum HdrMetadata {
     /// From the sources: the mastering display and content light levels
-    /// (PQ output), and HDR10+ and Dolby Vision when every picture has them.
+    /// (PQ output), HDR10+ when any picture has it (made for the frames
+    /// without), and Dolby Vision when every picture has it.
     #[default]
     Auto,
     /// The mastering display and content light levels only.
@@ -172,12 +185,26 @@ impl HdrMetadata {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum EncoderChoice {
-    /// GPU when available (NVENC, then VAAPI), else CPU.
+    /// GPU when available (NVENC; then AMF and QSV on Windows, VAAPI on
+    /// Linux), else CPU.
     #[default]
     Auto,
     Cpu,
+    /// NVIDIA's.
     Nvenc,
+    /// VA-API (Linux): AMD's and Intel's GPUs.
     Vaapi,
+    /// AMD's AMF (Windows).
+    Amf,
+    /// Intel's Quick Sync Video, through oneVPL.
+    Qsv,
+}
+
+impl EncoderChoice {
+    /// A GPU's encoder, named.
+    pub fn gpu(self) -> bool {
+        !matches!(self, Self::Auto | Self::Cpu)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -187,7 +214,8 @@ pub struct VideoSettings {
     #[serde(default)]
     pub encoder: EncoderChoice,
     /// Constant-quality level (CRF/CQ/QP style: lower is better), unless
-    /// `bitrate` is set.
+    /// `bitrate` is set: up to 51 for H.264 and HEVC, 63 for AV1 and VP9
+    /// (more is taken as that).
     #[serde(default)]
     pub quality: Option<u32>,
     /// Target bitrate in bits per second.
@@ -235,8 +263,9 @@ pub struct VideoSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lookahead: Option<u32>,
     /// HDR metadata (decision D46): `auto` writes the mastering display and
-    /// content light levels of the sources into PQ output, and keeps HDR10+
-    /// and Dolby Vision when every picture has them; `static`, `hdr10plus`,
+    /// content light levels of the sources into PQ output, keeps HDR10+
+    /// when any picture has it (made for the frames without), and Dolby
+    /// Vision when every picture has it; `static`, `hdr10plus`,
     /// `dolby_vision` and `all` say which; `none` writes none.
     #[serde(default, skip_serializing_if = "HdrMetadata::is_default")]
     pub hdr_metadata: HdrMetadata,
@@ -627,8 +656,7 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
                 s.container.extension()
             )));
         }
-        let gpu = matches!(v.encoder, EncoderChoice::Nvenc | EncoderChoice::Vaapi);
-        if gpu && matches!(v.codec, V::Prores | V::Dnxhr | V::Vp9) {
+        if v.encoder.gpu() && matches!(v.codec, V::Prores | V::Dnxhr | V::Vp9) {
             return Err(Error::usage(format!(
                 "{:?} has no GPU encoder; use encoder cpu or auto",
                 v.codec

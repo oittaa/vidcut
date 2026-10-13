@@ -19,12 +19,6 @@ These guide what gets built and what gets tested.
 - Running well without a GPU on a modest CPU. Meeting recordings are variable-frame-rate H.264: test with real ones.
 - Automatic cuts that are quick to tune: silence removal for speech, scene cuts for footage.
 
-## To do: interchange with Resolve
+## What comes next
 
-Moving an edit between vidcut and Resolve, in either direction and between computers, should take no fixing by hand.
-
-What is still open is in [docs/todo/](todo/), one file per item.
-
-## Order
-
-Open work is in [docs/todo/](todo/), one file per item, each saying when it is wanted. Roughly: the interchange with Resolve first, then the smaller items, then macOS and Windows.
+Moving an edit in either direction, and between computers, should take no fixing by hand. Open work is in [docs/todo/](todo/), one file per item, each saying when it is wanted. Roughly: the interchange first (use case 1), then the smaller items, then macOS.

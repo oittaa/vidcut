@@ -406,7 +406,14 @@ type Block = Vec<(i64, Image)>;
 /// One worker: takes jobs until told to stop.
 fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Context) {
     static TRIMMED: Mutex<Option<Instant>> = Mutex::new(None);
-    let mut reader = FrameReader::default();
+    // Decoded on the GPU the viewer decodes on while the preferences say
+    // so, read as a tile is decoded: a change reaches the tiles at once.
+    let reader_for = |on_gpu: bool| match crate::preferences::timeline_decoder(on_gpu) {
+        Some(gpu) => FrameReader::decoding_on(gpu),
+        None => FrameReader::default(),
+    };
+    let mut on_gpu = crate::preferences::gpu_acceleration();
+    let mut reader = reader_for(on_gpu);
     // Blocks read or written lately (a missing file is an empty block),
     // and tiles made but not yet on disk.
     let mut blocks: Vec<(PathBuf, Block)> = Vec::new();
@@ -434,6 +441,11 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Co
             }
         };
         let picture = from_disk(&job, &mut blocks, &unwritten).or_else(|| {
+            let gpu = crate::preferences::gpu_acceleration();
+            if gpu != on_gpu {
+                on_gpu = gpu;
+                reader = reader_for(gpu);
+            }
             let made = job
                 .pieces
                 .iter()

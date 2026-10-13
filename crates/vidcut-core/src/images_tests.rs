@@ -204,7 +204,7 @@ fn stills_and_sequences_travel_through_otio() {
             &seq["rate"],
         ),
         (
-            &json!("/renders/"),
+            &json!(format!("/renders{}", std::path::MAIN_SEPARATOR)),
             &json!("frame_"),
             &json!(".png"),
             &json!(100),

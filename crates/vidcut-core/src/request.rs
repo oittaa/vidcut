@@ -627,9 +627,9 @@ pub enum Request {
     PresetsList {},
     #[serde(rename = "presets.get")]
     PresetsGet { name: String },
-    /// Save a user preset (`~/.config/vidcut/presets/NAME.toml`): `settings`,
-    /// or preset `from` with `set` overrides. `quick_export` puts it in Quick
-    /// Export.
+    /// Save a user preset (`~/.config/vidcut/presets/NAME.toml`, on Windows
+    /// in `%APPDATA%\vidcut`): `settings`, or preset `from` with `set`
+    /// overrides. `quick_export` puts it in Quick Export.
     #[serde(rename = "presets.save")]
     PresetsSave {
         /// File-name safe: letters, digits, `-`, `_` and `.`.
@@ -661,8 +661,8 @@ pub enum Request {
         #[serde(default)]
         refresh: bool,
     },
-    /// Application preferences (`~/.config/vidcut/preferences.toml`) and what
-    /// the thumbnail cache holds.
+    /// Application preferences (`~/.config/vidcut/preferences.toml`, on
+    /// Windows in `%APPDATA%\vidcut`) and what the thumbnail cache holds.
     #[serde(rename = "preferences.get")]
     PreferencesGet {},
     /// Change application preferences; what is left out stays. Turning the

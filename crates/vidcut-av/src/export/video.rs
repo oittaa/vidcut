@@ -17,6 +17,13 @@ use crate::decode::{Input, VideoReader};
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, filter, format, frame};
 
+/// The sampling rule's time (seconds) for source position `pos` (project
+/// frames from `origin`) at `fps`: the first source frame from then on is
+/// shown.
+pub(crate) fn target(fps: Rational, origin: f64, pos: i64) -> f64 {
+    origin + fps.frames_to_secs(pos) - 0.5 * fps.frames_to_secs(1)
+}
+
 /// How a piece's pictures are read: its file, or its image sequence.
 pub(crate) fn input_of(path: &Path, image: Option<&Image>) -> Input {
     match image {
@@ -109,6 +116,42 @@ pub(crate) fn fit(w: u32, h: u32, sar: (i32, i32), out_w: u32, out_h: u32) -> (u
     }
 }
 
+/// A frame in GPU memory brought down for the CPU to normalize into an
+/// `out_w`×`out_h` picture: scaled on the GPU first to the size it is shown
+/// at there (in the frame's own orientation and layout, its pixels square)
+/// when that is smaller, so a fraction comes down. The CPU does the rest as
+/// for any frame: turning, colors, HDR.
+pub(crate) fn down(
+    shrinker: &mut Option<crate::hw::Shrinker>,
+    src: &frame::Video,
+    rotation: u16,
+    (out_w, out_h): (u32, u32),
+) -> Result<frame::Video> {
+    let (w, h) = (src.width(), src.height());
+    let sar = src.aspect_ratio();
+    let sar = (sar.numerator(), sar.denominator());
+    // As the normalizer fits it, upright; then in the frame's orientation.
+    let size = if rotation % 180 == 90 {
+        let (sw, sh) = fit(h, w, (sar.1, sar.0), out_w, out_h);
+        (sh, sw)
+    } else {
+        fit(w, h, sar, out_w, out_h)
+    };
+    let shrinks = size.0 < w && size.1 < h;
+    if !shrinks {
+        return crate::hw::download(src);
+    }
+    let mut small = crate::hw::Shrinker::down(shrinker, src, size)?;
+    // Unless it came down whole.
+    if (small.width(), small.height()) == size {
+        // SAFETY: a plain field of its own frame.
+        unsafe {
+            (*small.as_mut_ptr()).sample_aspect_ratio = ffmpeg::ffi::AVRational { num: 1, den: 1 }
+        };
+    }
+    Ok(small)
+}
+
 impl Normalizer {
     /// `target`: the output's dynamic range (`None`: SDR BT.709).
     pub(crate) fn new(
@@ -158,8 +201,9 @@ impl Normalizer {
         let color = crate::color::Source::of(src);
         let conv = crate::color::conversion(color, out_fmt, target);
         let spec = format!(
-            "{}scale={sw}:{sh}:flags=bicubic{},pad={out_w}:{out_h}:{}:{}:color=black,setsar=1{},format={}",
+            "{}scale={sw}:{sh}:flags={}{},pad={out_w}:{out_h}:{}:{}:color=black,setsar=1{},format={}",
             upright(rotation),
+            conv.flags,
             conv.scale,
             (out_w - sw) / 2,
             (out_h - sh) / 2,
@@ -229,8 +273,18 @@ struct Source {
     /// `current`'s dynamic HDR metadata, kept apart: the GPU's scaler takes
     /// the frame itself, side data and all.
     dynamic: frame::Video,
+    /// Measures `current` when it has no HDR10+, as it is decoded (before
+    /// the GPU's scaler takes it): for a file not measured ahead.
+    meter: Option<crate::light::Meter>,
+    /// `current`'s light, measured by `meter`.
+    light: Option<crate::light::FrameLight>,
     /// `current`, normalized.
     normalized: Option<frame::Video>,
+    /// `normalized` was fitted on the GPU ([`VideoFrames::fit_on_gpu`]).
+    fitted: bool,
+    /// Fitting this file's frames on the GPU failed: they are made on the
+    /// CPU.
+    fit_failed: bool,
     /// A still keeps its one picture and is never sought; a sequence knows
     /// how many pictures it has.
     pictures: Pictures,
@@ -238,9 +292,9 @@ struct Source {
     /// first frame), when the export's frames stay on the GPU.
     on_gpu: bool,
     scaler: Option<crate::cuda::CudaPictures>,
-    /// The reader decodes on NVDEC: for an export on the GPU (`on_gpu`), or
-    /// for frames as decoded, copied down from the GPU (`decode_on`).
-    nvdec: bool,
+    /// The GPU the reader decodes on: NVDEC for an export on the GPU
+    /// (`on_gpu`), or any for frames as decoded (`decode_on`).
+    decoder: Option<crate::hw::Kind>,
 }
 
 /// What a source needs to decode on NVDEC for an export whose frames stay
@@ -258,9 +312,13 @@ pub(crate) struct GpuSide {
 /// BT.709, and HDR). The reader deinterlaces interlaced frames on the GPU
 /// in decode order, before the sampling rule picks them, as on the CPU.
 fn gpu_reader(input: &Input, gpu: &GpuSide) -> Option<(VideoReader, crate::cuda::CudaPictures)> {
-    let reader = VideoReader::open_cuda(input, &gpu.device).ok()?;
+    // A stream of its own: the next piece opens, and makes its first
+    // picture, on another thread while this one encodes. Frames go to the
+    // encoder once their stream's work is done (`share::wait_for`).
+    let device = gpu.device.with_own_stream().ok()?;
+    let reader = VideoReader::open_cuda(input, &device).ok()?;
     let scaler =
-        crate::cuda::CudaPictures::new(&gpu.device, &reader, gpu.out, gpu.format, gpu.target, true)
+        crate::cuda::CudaPictures::new(&device, &reader, gpu.out, gpu.format, gpu.target, true)
             .ok()?;
     Some((reader, scaler))
 }
@@ -277,6 +335,9 @@ impl Source {
     /// A still's picture is already decoded by [`VideoReader::open_input`].
     /// Seeking would reopen the file and decode it again; a still is never
     /// sought.
+    ///
+    /// `measure`: frames without HDR10+ are measured as they are decoded.
+    #[allow(clippy::too_many_arguments)]
     fn open(
         input: &Input,
         origin: f64,
@@ -284,20 +345,21 @@ impl Source {
         target: f64,
         pictures: Pictures,
         gpu: Option<&GpuSide>,
-        nvdec: Option<&crate::cuda::CudaDevice>,
+        decoder: Option<&crate::hw::GpuDecoder>,
+        measure: bool,
     ) -> Result<Source> {
         let video = pictures == Pictures::Video;
         let on_gpu = gpu.filter(|_| video).and_then(|g| gpu_reader(input, g));
         let (reader, scaler) = match on_gpu {
             Some((r, s)) => (r, Some(s)),
-            // Frames as decoded: on NVDEC when it decodes the stream.
-            None => match nvdec.filter(|_| video) {
-                Some(d) => (VideoReader::open_nvdec_or_cpu(input, d)?, None),
+            // Frames as decoded: on the GPU when it decodes the stream.
+            None => match decoder.filter(|_| video) {
+                Some(d) => (VideoReader::open_gpu_or_cpu(input, d)?, None),
                 None => (VideoReader::open_input(input)?, None),
             },
         };
         let on_gpu = scaler.is_some();
-        let nvdec = reader.on_nvdec();
+        let decoder = reader.gpu();
         let tb = reader.time_base();
         let mut source = Source {
             reader,
@@ -307,11 +369,15 @@ impl Source {
             target,
             current: None,
             dynamic: frame::Video::empty(),
+            meter: measure.then(crate::light::Meter::new),
+            light: None,
             normalized: None,
+            fitted: false,
+            fit_failed: false,
             pictures,
             on_gpu,
             scaler,
-            nvdec,
+            decoder,
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
@@ -339,19 +405,20 @@ impl Source {
         Ok(())
     }
 
-    /// Opens `input` without decoding anything yet: on NVDEC (`nvdec`)
-    /// when it decodes the stream.
+    /// Opens `input` without decoding anything yet: on the GPU (`decoder`)
+    /// when it decodes the stream. `measure` as for [`open`](Self::open).
     fn bare(
         input: &Input,
         origin: f64,
         pictures: Pictures,
-        nvdec: Option<&crate::cuda::CudaDevice>,
+        decoder: Option<&crate::hw::GpuDecoder>,
+        measure: bool,
     ) -> Result<Source> {
-        let reader = match nvdec {
-            Some(d) => VideoReader::open_nvdec_or_cpu(input, d)?,
+        let reader = match decoder {
+            Some(d) => VideoReader::open_gpu_or_cpu(input, d)?,
             None => VideoReader::open_input(input)?,
         };
-        let nvdec = reader.on_nvdec();
+        let decoder = reader.gpu();
         let tb = reader.time_base();
         Ok(Source {
             reader,
@@ -361,11 +428,15 @@ impl Source {
             target: 0.0,
             current: None,
             dynamic: frame::Video::empty(),
+            meter: measure.then(crate::light::Meter::new),
+            light: None,
             normalized: None,
+            fitted: false,
+            fit_failed: false,
             pictures,
             on_gpu: false,
             scaler: None,
-            nvdec,
+            decoder,
         })
     }
 
@@ -373,6 +444,7 @@ impl Source {
         self.reader.seek((target / self.tick).floor() as i64)?;
         self.target = target;
         self.current = None;
+        self.light = None;
         self.normalized = None;
         Ok(())
     }
@@ -383,7 +455,8 @@ impl Source {
     /// picture lasts its frame (a project rate above the sequence's asks for
     /// a time past it). A sequence that ends before its last picture fails:
     /// a file is missing, and repeating the picture before it would hide the
-    /// hole. Returns whether it moved.
+    /// hole. The frame it moves to is measured by `meter` when it has no
+    /// HDR10+. Returns whether it moved.
     fn advance(&mut self, target: f64) -> Result<bool> {
         self.target = target;
         let mut changed = false;
@@ -402,6 +475,7 @@ impl Source {
                     };
                     crate::hdr::copy_dynamic(&f, &mut self.dynamic, all)?;
                     self.current = Some((f, t));
+                    self.light = None;
                     changed = true;
                 }
                 None => {
@@ -430,6 +504,14 @@ impl Source {
                     )));
                 }
             }
+        }
+        if changed
+            && let Some(meter) = self.meter.as_mut()
+            && !crate::hdr::has_hdr10plus(&self.dynamic)
+        {
+            let (f, _) = self.current.as_ref().expect("have a frame");
+            // A frame that can't be measured gets none.
+            self.light = meter.measure(f).ok();
         }
         Ok(changed)
     }
@@ -487,15 +569,28 @@ pub struct VideoFrames {
     /// Frames as decoded (`decoded`): each picture's own size and colors,
     /// in a layout a display takes.
     decoded: Option<Relayout>,
-    /// Frames as decoded come from NVDEC where it decodes the stream, and
-    /// are copied down from the GPU (`decode_on`) unless they stay there
+    /// Frames as decoded come from the GPU where it decodes the stream, and
+    /// are copied down from it (`decode_on`) unless they stay there
     /// (`keep_on_gpu`).
-    nvdec: Option<crate::cuda::CudaDevice>,
+    decoder: Option<crate::hw::GpuDecoder>,
     keep_on_gpu: bool,
+    /// Copies Direct3D 11's frames kept on the GPU out of the decoder's
+    /// texture array; `None` too once that failed, when they come down.
+    keeper: Option<crate::hw::Keeper>,
+    /// Shrinks VA-API's and Direct3D 11's frames on the GPU before they
+    /// come down to be fitted into the output.
+    shrinker: Option<crate::hw::Shrinker>,
+    /// Fits frames into the output on the GPU, for an encoder on their
+    /// device ([`fit_on_gpu`](Self::fit_on_gpu)).
+    fit: Option<GpuFit>,
+    /// Keeping Direct3D 11's frames failed: they come down from then on.
+    unkept: bool,
     /// The clockwise turn that shows the last frame given upright.
     rotation: u16,
-    /// The last frame given was decoded on NVDEC.
-    last_nvdec: bool,
+    /// The GPU that decoded the last frame given.
+    last_decoder: Option<crate::hw::Kind>,
+    /// Frames given so far whose source frame a GPU decoded.
+    gpu_decoded: i64,
     /// The dynamic HDR metadata each output frame keeps from its source
     /// frame (decision D46). Other HDR metadata of the sources goes.
     dynamic: crate::hdr::Dynamic,
@@ -506,6 +601,15 @@ pub struct VideoFrames {
     /// The Dolby Vision of the last source frame given: black after it
     /// takes it.
     last_dolby_vision: frame::Video,
+}
+
+/// Frames fitted into the output on the GPU ([`VideoFrames::fit_on_gpu`]).
+struct GpuFit {
+    fitter: Option<crate::hw::Fitter>,
+    /// The encoder's frames, which Direct3D 11's are drawn into.
+    into: Option<crate::hw::Frames>,
+    /// Frames given so far that it made.
+    made: i64,
 }
 
 /// The layouts a display takes: 8-bit 4:2:0 (planar, or NV12 as hardware
@@ -638,10 +742,15 @@ impl VideoFrames {
             target,
             gpu: None,
             decoded: None,
-            nvdec: None,
+            decoder: None,
             keep_on_gpu: false,
+            keeper: None,
+            shrinker: None,
+            fit: None,
+            unkept: false,
             rotation: 0,
-            last_nvdec: false,
+            last_decoder: None,
+            gpu_decoded: 0,
             dynamic: Default::default(),
             light: Default::default(),
             last_dolby_vision: frame::Video::empty(),
@@ -659,28 +768,59 @@ impl VideoFrames {
         self
     }
 
-    /// Frames as decoded ([`decoded`](Self::decoded)) decode on NVDEC
-    /// (`device`) where it decodes the stream
-    /// ([`VideoReader::open_nvdec_or_cpu`]), and are copied down to memory at
-    /// their own size: the same frames, with the same timestamps and
-    /// colors. Other streams, stills and image sequences decode on the CPU.
-    pub fn decode_on(mut self, device: crate::cuda::CudaDevice) -> Self {
-        self.nvdec = Some(device);
+    /// Frames decode on `gpu` where it decodes the stream
+    /// ([`VideoReader::open_gpu_or_cpu`]): the same frames, with the same
+    /// timestamps and colors. Frames as decoded ([`decoded`](Self::decoded))
+    /// are copied down to memory at their own size; frames fitted into the
+    /// output come down shrunk on the GPU to the size they are shown at,
+    /// where it is smaller ([`down`]). Other streams, stills and image
+    /// sequences decode on the CPU, and pieces NVDEC takes for NVENC
+    /// ([`with_gpu`](Self::with_gpu)) stay with it.
+    pub fn decode_on(mut self, gpu: crate::hw::GpuDecoder) -> Self {
+        self.decoder = Some(gpu);
         self
     }
 
-    /// Frames NVDEC decoded ([`decode_on`](Self::decode_on)) stay in GPU
+    /// VA-API's frames ([`decode_on`](Self::decode_on)) are turned upright
+    /// and fitted into the output on the GPU and given there, for an encoder
+    /// on their device, when they need nothing else: in the output's colors
+    /// (`color::kept`). The rest are made on the CPU.
+    pub fn fit_on_gpu(mut self) -> Self {
+        self.fit = Some(GpuFit {
+            fitter: None,
+            into: None,
+            made: 0,
+        });
+        self
+    }
+
+    /// [`fit_on_gpu`](Self::fit_on_gpu), Direct3D 11's frames too, drawn
+    /// into `frames`, the encoder's.
+    pub(crate) fn fit_on_gpu_into(mut self, frames: crate::hw::Frames) -> Self {
+        self.fit = Some(GpuFit {
+            fitter: None,
+            into: Some(frames),
+            made: 0,
+        });
+        self
+    }
+
+    /// Frames the GPU decoded ([`decode_on`](Self::decode_on)) stay in GPU
     /// memory when a display takes them as they are (NV12, P010): for a
-    /// display that shows them from there. Others are copied down.
+    /// display that shows them from there. Kept, they don't run the decoder
+    /// out: FFmpeg copies NVDEC's out of its few surfaces into a pool that
+    /// grows, VA-API's own pool grows as it needs (libva 1.0 and later), and
+    /// Direct3D 11's are copied out of the decoder's texture array on the
+    /// GPU ([`crate::hw::Keeper`]). Others are copied down.
     pub fn keep_on_gpu(mut self) -> Self {
         self.keep_on_gpu = true;
         self
     }
 
-    /// The last frame given was decoded on NVDEC (false for black, and for
+    /// The GPU that decoded the last frame given (`None` for black, and for
     /// frames decoded on the CPU).
-    pub fn on_nvdec(&self) -> bool {
-        self.last_nvdec
+    pub fn decoded_on(&self) -> Option<crate::hw::Kind> {
+        self.last_decoder
     }
 
     /// The clockwise turn (0, 90, 180 or 270) that shows the last frame
@@ -720,7 +860,8 @@ impl VideoFrames {
 
     /// Output frames keeping HDR10+ get it made from `light`, the measured
     /// light of their source files by path, where their source frame has
-    /// none; black gets HDR10+ of no light.
+    /// none; black gets HDR10+ of no light. Frames of other files without
+    /// it are measured as they are decoded.
     pub fn with_light(
         mut self,
         light: std::collections::HashMap<
@@ -732,9 +873,16 @@ impl VideoFrames {
         self
     }
 
-    /// Frames decoded and scaled on the GPU so far.
+    /// Frames decoded and scaled on the GPU so far, on their way to the
+    /// encoder there.
     pub fn gpu_frames(&self) -> i64 {
-        self.gpu.as_ref().map_or(0, |g| g.made)
+        self.gpu.as_ref().map_or(0, |g| g.made) + self.fit.as_ref().map_or(0, |f| f.made)
+    }
+
+    /// Frames given so far whose source frame a GPU decoded, whether it
+    /// stayed there or came down.
+    pub fn gpu_decoded(&self) -> i64 {
+        self.gpu_decoded
     }
 
     /// The rate frames are sampled at.
@@ -774,7 +922,7 @@ impl VideoFrames {
                 VideoPiece::Black { .. } if !picture => Ok(Some(None)),
                 VideoPiece::Black { .. } => {
                     self.rotation = 0;
-                    self.last_nvdec = false;
+                    self.last_decoder = None;
                     let black = frame_ref(self.black()?)?;
                     let mut out = match &self.gpu {
                         Some(g) => g.frames.upload(&black)?,
@@ -812,7 +960,8 @@ impl VideoFrames {
                     let k = if still { 0 } else { k };
                     if picture {
                         self.rotation = self.source.as_ref().map_or(0, |s| s.reader.rotation());
-                        self.last_nvdec = self.source.as_ref().is_some_and(|s| s.nvdec);
+                        self.last_decoder = self.source.as_ref().and_then(|s| s.decoder);
+                        self.gpu_decoded += i64::from(self.last_decoder.is_some());
                         self.source_frame(k).map(|f| Some(Some(f)))
                     } else {
                         self.pass_source_frame(k).map(|()| Some(None))
@@ -853,7 +1002,13 @@ impl VideoFrames {
         let target = self.target(*origin, *source_frame);
         let mut source = match self.source.take() {
             Some(s) if s.reader.input() == &input => s,
-            _ => Source::bare(&input, *origin, Pictures::Video, self.nvdec.as_ref())?,
+            _ => Source::bare(
+                &input,
+                *origin,
+                Pictures::Video,
+                self.decoder.as_ref(),
+                self.measures(&input),
+            )?,
         };
         // Interrupted, the file stays open, its position unknown.
         let sought = source.seek(target);
@@ -894,7 +1049,15 @@ impl VideoFrames {
 
     /// Seconds of the sampling-rule target for source position `pos`.
     fn target(&self, origin: f64, pos: i64) -> f64 {
-        origin + self.fps.frames_to_secs(pos) - 0.5 * self.fps.frames_to_secs(1)
+        target(self.fps, origin, pos)
+    }
+
+    /// Whether frames of `input` without HDR10+ are measured as they are
+    /// decoded, for HDR10+ made from their light: HDR10+ is kept and the
+    /// file wasn't measured ahead (`with_light`), its first frame having
+    /// HDR10+.
+    fn measures(&self, input: &Input) -> bool {
+        self.dynamic.hdr10plus && !self.light.contains_key(input.path())
     }
 
     /// Readies the current piece's file: the open one if it is the same
@@ -929,7 +1092,8 @@ impl VideoFrames {
                     target,
                     pictures,
                     self.gpu.as_ref().map(|g| &g.side),
-                    self.nvdec.as_ref(),
+                    self.decoder.as_ref(),
+                    self.measures(input),
                 )?,
             },
         };
@@ -973,7 +1137,8 @@ impl VideoFrames {
         }
         let target = self.target(origin, source_frame);
         let gpu = self.gpu.as_ref().map(|g| g.side.clone());
-        let nvdec = self.nvdec.clone();
+        let decoder = self.decoder.clone();
+        let measure = self.measures(&input);
         let key = (input.clone(), origin.to_bits(), source_frame);
         self.ahead.start(i, key, move || {
             Source::open(
@@ -983,7 +1148,8 @@ impl VideoFrames {
                 target,
                 pictures,
                 gpu.as_ref(),
-                nvdec.as_ref(),
+                decoder.as_ref(),
+                measure,
             )
         });
     }
@@ -993,8 +1159,7 @@ impl VideoFrames {
     fn pass_source_frame(&mut self, k: i64) -> Result<()> {
         let fps = self.fps;
         let src = self.source.as_mut().expect("open");
-        let target =
-            src.origin + fps.frames_to_secs(src.source_frame + k) - 0.5 * fps.frames_to_secs(1);
+        let target = target(fps, src.origin, src.source_frame + k);
         if src.advance(target)? {
             src.normalized = None;
         }
@@ -1006,19 +1171,29 @@ impl VideoFrames {
         let (out_w, out_h, out_fmt) = self.out;
         let fps = self.fps;
         let src = self.source.as_mut().expect("open");
-        let target =
-            src.origin + fps.frames_to_secs(src.source_frame + k) - 0.5 * fps.frames_to_secs(1);
+        let target = target(fps, src.origin, src.source_frame + k);
         let changed = src.advance(target)?;
         if let Some(relayout) = self.decoded.as_mut() {
             if changed || src.normalized.is_none() {
                 let (frame, _) = src.current.as_ref().expect("have a frame");
-                // Frames NVDEC decoded come down to memory at their size,
+                // Frames the GPU decoded come down to memory at their size,
                 // unless a display takes them from the GPU as they are.
-                src.normalized = Some(if frame.format() == format::Pixel::CUDA {
-                    if self.keep_on_gpu && displayable(crate::cuda::sw_format(frame)) {
-                        frame_ref(frame)?
-                    } else {
-                        relayout.run(&crate::cuda::download(frame)?)?
+                src.normalized = Some(if crate::hw::on_gpu(frame) {
+                    let keep = self.keep_on_gpu && displayable(crate::hw::sw_format(frame));
+                    match frame.format() {
+                        format::Pixel::CUDA | format::Pixel::VAAPI if keep => frame_ref(frame)?,
+                        format::Pixel::D3D11 if keep && !self.unkept => {
+                            match crate::hw::Keeper::copy(&mut self.keeper, frame) {
+                                Ok(kept) => kept,
+                                // Down to memory, as before they were kept.
+                                Err(_) => {
+                                    self.unkept = true;
+                                    self.keeper = None;
+                                    relayout.run(&crate::hw::download(frame)?)?
+                                }
+                            }
+                        }
+                        _ => relayout.run(&crate::hw::download(frame)?)?,
                     }
                 } else {
                     relayout.run(frame)?
@@ -1029,21 +1204,83 @@ impl VideoFrames {
         } else if changed || src.normalized.is_none() {
             let (frame, _) = src.current.as_ref().expect("have a frame");
             let rotation = src.reader.rotation();
-            let rebuild = self
-                .normalizer
-                .as_ref()
-                .is_none_or(|n| !n.matches(frame, rotation));
-            if rebuild {
-                self.normalizer = Some(Normalizer::new(
+            // Frames that need nothing but turning and fitting stay on the
+            // GPU, for an encoder on their device. AMD's video processor
+            // won't draw 8-bit frames of a decoder into 10-bit ones: those
+            // come down.
+            let on_gpu = self.fit.as_mut().filter(|fit| {
+                let fits = match frame.format() {
+                    format::Pixel::VAAPI => true,
+                    format::Pixel::D3D11 => {
+                        fit.into.is_some()
+                            && !(crate::hw::sw_format(frame) == format::Pixel::NV12
+                                && out_fmt == format::Pixel::P010LE)
+                    }
+                    _ => false,
+                };
+                fits && !src.fit_failed
+                    && crate::color::kept(crate::color::Source::of(frame), self.target)
+            });
+            let tried = on_gpu.is_some();
+            // A GPU that won't fit them (a driver's limits) leaves the
+            // file's frames to the CPU.
+            let fitted = on_gpu.and_then(|gpu_fit| {
+                let sar = frame.aspect_ratio();
+                let sar = (sar.numerator(), sar.denominator());
+                // Fitted as shown: a quarter turn swaps the sides and the
+                // pixel aspect.
+                let (w, h) = (frame.width(), frame.height());
+                let fitted = if rotation % 180 == 90 {
+                    fit(h, w, (sar.1, sar.0), out_w, out_h)
+                } else {
+                    fit(w, h, sar, out_w, out_h)
+                };
+                crate::hw::Fitter::fit(
+                    &mut gpu_fit.fitter,
                     frame,
                     rotation,
-                    out_w,
-                    out_h,
+                    fitted,
+                    (out_w, out_h),
                     out_fmt,
-                    self.target,
-                )?);
-            }
-            src.normalized = Some(self.normalizer.as_mut().expect("built").run(frame)?);
+                    gpu_fit.into.as_ref(),
+                )
+                .ok()
+            });
+            src.fit_failed |= tried && fitted.is_none();
+            src.fitted = fitted.is_some();
+            src.normalized = Some(match fitted {
+                Some(picture) => picture,
+                None => {
+                    // Frames the GPU decoded come down to memory first.
+                    let came_down;
+                    let frame = if crate::hw::on_gpu(frame) {
+                        came_down = down(&mut self.shrinker, frame, rotation, (out_w, out_h))?;
+                        &came_down
+                    } else {
+                        frame
+                    };
+                    let rebuild = self
+                        .normalizer
+                        .as_ref()
+                        .is_none_or(|n| !n.matches(frame, rotation));
+                    if rebuild {
+                        self.normalizer = Some(Normalizer::new(
+                            frame,
+                            rotation,
+                            out_w,
+                            out_h,
+                            out_fmt,
+                            self.target,
+                        )?);
+                    }
+                    self.normalizer.as_mut().expect("built").run(frame)?
+                }
+            });
+        }
+        if src.fitted
+            && let Some(fit) = self.fit.as_mut()
+        {
+            fit.made += 1;
         }
         let picture = frame_ref(src.normalized.as_ref().expect("normalized"))?;
         let mut out = match &mut self.gpu {
@@ -1060,12 +1297,16 @@ impl VideoFrames {
         if self.dynamic != crate::hdr::Dynamic::default() {
             crate::hdr::copy_dynamic(&src.dynamic, &mut out, self.dynamic)?;
         }
+        // Without HDR10+ of its own, made from the frame's light: measured
+        // ahead with its file, or as it was decoded.
         if self.dynamic.hdr10plus
             && !crate::hdr::has_hdr10plus(&out)
-            && let Some(l) = self
-                .light
-                .get(src.reader.path())
-                .and_then(|a| a.at(src.current.as_ref().expect("have a frame").1))
+            && let Some(l) = src.light.or_else(|| {
+                self.light
+                    .get(src.reader.path())
+                    .and_then(|a| a.at(src.current.as_ref().expect("have a frame").1))
+                    .copied()
+            })
         {
             l.hdr10plus().attach(&mut out)?;
         }
@@ -1129,8 +1370,148 @@ pub(crate) fn fill_black(f: &mut frame::Video) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{fill_black, fit};
-    use crate::ffmpeg::{format::Pixel, frame};
+    use super::{Normalizer, fill_black, fit};
+    use crate::ffmpeg::{self, format::Pixel, frame};
+
+    /// Bands of `values` (8-bit Y, Cb, Cr) side by side in `pixel` (8-bit
+    /// planar, or 10-bit with each sample 4 times as large), tagged with
+    /// `matrix`, and full range when `full`.
+    fn bands(
+        (w, h): (u32, u32),
+        values: &[[u8; 3]],
+        matrix: ffmpeg::ffi::AVColorSpace,
+        full: bool,
+        pixel: Pixel,
+    ) -> frame::Video {
+        let mut f = frame::Video::new(pixel, w, h);
+        let wide = pixel == Pixel::YUV420P10LE;
+        let planes = [(w, h), (w / 2, h / 2), (w / 2, h / 2)];
+        for (p, (pw, ph)) in planes.into_iter().enumerate() {
+            let stride = f.stride(p);
+            for y in 0..ph as usize {
+                for x in 0..pw as usize {
+                    let v = values[x * values.len() / pw as usize][p];
+                    if wide {
+                        let at = y * stride + 2 * x;
+                        f.data_mut(p)[at..at + 2]
+                            .copy_from_slice(&(u16::from(v) << 2).to_le_bytes());
+                    } else {
+                        f.data_mut(p)[y * stride + x] = v;
+                    }
+                }
+            }
+        }
+        use ffmpeg::ffi::AVColorRange as R;
+        // SAFETY: plain fields of its own frame.
+        unsafe {
+            (*f.as_mut_ptr()).colorspace = matrix;
+            (*f.as_mut_ptr()).color_range = if full {
+                R::AVCOL_RANGE_JPEG
+            } else {
+                R::AVCOL_RANGE_MPEG
+            };
+        }
+        f
+    }
+
+    /// 8-bit Y, Cb, Cr, video range or `full`, in the matrix of `(kr, kb)`
+    /// as RGB, 0 to 1.
+    fn rgb(yuv: [u8; 3], (kr, kb): (f64, f64), full: bool) -> [f64; 3] {
+        let (black, luma, chroma) = if full {
+            (0.0, 255.0, 255.0)
+        } else {
+            (16.0, 219.0, 224.0)
+        };
+        let y = (f64::from(yuv[0]) - black) / luma;
+        let cb = (f64::from(yuv[1]) - 128.0) / chroma;
+        let cr = (f64::from(yuv[2]) - 128.0) / chroma;
+        let r = y + 2.0 * (1.0 - kr) * cr;
+        let b = y + 2.0 * (1.0 - kb) * cb;
+        [r, (y - kr * r - kb * b) / (1.0 - kr - kb), b]
+    }
+
+    /// RGB (0 to 1) as video-range Y, Cb, Cr in the matrix of `(kr, kb)`.
+    fn yuv([r, g, b]: [f64; 3], (kr, kb): (f64, f64)) -> [f64; 3] {
+        let y = kr * r + (1.0 - kr - kb) * g + kb * b;
+        [
+            16.0 + 219.0 * y,
+            128.0 + 224.0 * (b - y) / (2.0 * (1.0 - kb)),
+            128.0 + 224.0 * (r - y) / (2.0 * (1.0 - kr)),
+        ]
+    }
+
+    /// Converting colors, the normalizer rounds them as the math does: grays
+    /// come out at the nearest level, from BT.601 to BT.709, from full range
+    /// to video range, from 10 bits to 8 and into RGB, scaled or at their
+    /// own size (swscale's defaults took BT.601's white to 233 and to 253),
+    /// and colors within a level.
+    #[test]
+    fn conversions_keep_levels() {
+        crate::init();
+        use ffmpeg::ffi::AVColorSpace as S;
+        const BT601: (f64, f64) = (0.299, 0.114);
+        const BT709: (f64, f64) = (0.2126, 0.0722);
+        let (sd, hd) = (S::AVCOL_SPC_SMPTE170M, S::AVCOL_SPC_BT709);
+        // Black, gray and white; BT.601's 75% red, green and blue.
+        let values = [
+            [16, 128, 128],
+            [126, 128, 128],
+            [235, 128, 128],
+            [65, 100, 212],
+            [112, 72, 58],
+            [35, 212, 114],
+        ];
+        let (big, small) = ((1280, 720), (640, 360));
+        let (planar, ten) = (Pixel::YUV420P, Pixel::YUV420P10LE);
+        // The source's matrix, its tag, its range, layout and size, and the
+        // output's layout (640x360).
+        for (matrix, tag, full, pixel, size, out) in [
+            (BT601, sd, false, planar, big, Pixel::YUV420P),
+            (BT601, sd, false, planar, big, Pixel::RGB24),
+            (BT709, hd, false, planar, big, Pixel::RGB24),
+            // At its own size, which swscale converts without scaling.
+            (BT601, sd, false, planar, small, Pixel::YUV420P),
+            (BT601, sd, false, planar, small, Pixel::RGB24),
+            // Full range into video range.
+            (BT709, hd, true, planar, big, Pixel::YUV420P),
+            (BT709, hd, true, planar, small, Pixel::YUV420P),
+            (BT601, sd, true, planar, big, Pixel::RGB24),
+            // 10 bits into 8.
+            (BT601, sd, false, ten, big, Pixel::YUV420P),
+            (BT709, hd, false, ten, big, Pixel::RGB24),
+        ] {
+            let f = bands(size, &values, tag, full, pixel);
+            let got = Normalizer::new(&f, 0, 640, 360, out, None)
+                .and_then(|mut n| n.run(&f))
+                .unwrap();
+            for (k, v) in values.iter().enumerate() {
+                // The middle of band k.
+                let x = (2 * k + 1) * 640 / (2 * values.len());
+                let (want, got) = if out == Pixel::RGB24 {
+                    let p = &got.data(0)[180 * got.stride(0) + 3 * x..][..3];
+                    (
+                        rgb(*v, matrix, full).map(|c| (c * 255.0).clamp(0.0, 255.0)),
+                        [p[0], p[1], p[2]],
+                    )
+                } else {
+                    let at = |p: usize, x: usize, y: usize| got.data(p)[y * got.stride(p) + x];
+                    (
+                        yuv(rgb(*v, matrix, full), BT709),
+                        [at(0, x, 180), at(1, x / 2, 90), at(2, x / 2, 90)],
+                    )
+                };
+                // Grays at the nearest level, colors within one.
+                let near = if k < 3 { 0.5 } else { 1.0 };
+                for c in 0..3 {
+                    assert!(
+                        (f64::from(got[c]) - want[c]).abs() <= near,
+                        "{tag:?} {v:?} ({pixel:?}, full {full}, {size:?}) into {out:?}: \
+                         {got:?}, the math says {want:.1?}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn black_is_video_range_black_in_every_layout() {

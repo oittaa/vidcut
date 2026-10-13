@@ -1,4 +1,5 @@
-//! Live control of a running GUI: JSON-RPC 2.0 over a Unix socket.
+//! Live control of a running GUI: JSON-RPC 2.0 over a Unix socket (a named
+//! pipe on Windows, [`transport`]).
 //!
 //! Each running GUI registers itself in [`registry`] and serves [`server`] on
 //! `$XDG_RUNTIME_DIR/vidcut/instances/<pid>.sock`. The CLI's [`route`] sends a
@@ -22,6 +23,7 @@
 pub mod client;
 pub mod registry;
 pub mod server;
+pub mod transport;
 
 use std::path::{Path, PathBuf};
 
@@ -75,7 +77,7 @@ pub fn run(
             },
         ),
         Route::Instance(instance) => {
-            let project = project.and_then(|p| p.canonicalize().ok());
+            let project = project.and_then(|p| vidcut_core::dirs::canonical(p).ok());
             client::call(
                 &instance.socket,
                 &envelope,
@@ -106,7 +108,7 @@ pub fn route(project: Option<&Path>, options: &RouteOptions, request: &Request) 
     let live = request.is_live();
     let instances = registry::list();
     if let Some(project) = project {
-        let want = project.canonicalize().ok();
+        let want = vidcut_core::dirs::canonical(project).ok();
         if let Some(i) = instances
             .iter()
             .find(|i| i.project.is_some() && i.project.as_deref() == want.as_deref())
@@ -210,22 +212,33 @@ pub fn error_from_json(v: &Value) -> Error {
     Error::new(code, message)
 }
 
-/// `$XDG_RUNTIME_DIR/vidcut`, or a private directory under the temp dir.
+/// `$XDG_RUNTIME_DIR/vidcut`, or a private directory under the temp dir
+/// (on Windows the user's own temporary folder).
 pub fn runtime_dir() -> PathBuf {
     match std::env::var_os("XDG_RUNTIME_DIR").filter(|v| !v.is_empty()) {
         Some(dir) => PathBuf::from(dir).join("vidcut"),
+        #[cfg(unix)]
         None => std::env::temp_dir().join(format!("vidcut-{}", unsafe { libc::getuid() })),
+        #[cfg(not(unix))]
+        None => std::env::temp_dir().join("vidcut"),
     }
 }
 
-/// Creates `dir` (and parents) readable only by this user.
+/// Creates `dir` (and parents) readable only by this user. On Windows the
+/// folders it is made in (the user's profile, its temporary folder) are the
+/// user's own already, and a new folder inherits that.
 pub fn private_dir(dir: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(dir)?;
-    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)?;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+    }
+    #[cfg(not(unix))]
+    std::fs::create_dir_all(dir)
 }
 
 #[cfg(test)]
@@ -307,8 +320,8 @@ mod tests {
     #[test]
     fn the_server_limits_lines_and_connections() {
         use std::io::{BufRead, BufReader, Write};
-        use std::os::unix::net::UnixStream;
         use std::sync::Arc;
+        use transport::Stream;
         let tmp = tempfile::Builder::new()
             .prefix("vidcut-ipc-limits-")
             .tempdir()
@@ -334,7 +347,7 @@ mod tests {
         server::start_limited(&socket, handler, limits).unwrap();
         // Sends a line on a new connection and reads one line back.
         let ask = |line: &[u8]| {
-            let mut s = UnixStream::connect(&socket).unwrap();
+            let mut s = Stream::connect(&socket).unwrap();
             // A server at its limit turns the connection away without
             // reading it and may close first: the write then fails, and the
             // refusal is still there to read.
@@ -418,8 +431,8 @@ mod tests {
         // written when the GUI closes, so the write fails: the refusal is
         // the answer all the same, not a lost GUI.
         use std::io::{BufRead, BufReader, Write};
-        use std::os::unix::net::UnixStream;
         use std::sync::Arc;
+        use transport::Stream;
         let tmp = tempfile::Builder::new()
             .prefix("vidcut-ipc-refused-")
             .tempdir()
@@ -444,7 +457,7 @@ mod tests {
         };
         server::start_limited(&socket, handler, limits).unwrap();
         // Hold the one place: served, and still open.
-        let mut held = UnixStream::connect(&socket).unwrap();
+        let mut held = Stream::connect(&socket).unwrap();
         held.write_all(b"{\"method\": \"project.get\"}\n").unwrap();
         let mut reply = String::new();
         BufReader::new(held.try_clone().unwrap())
@@ -520,11 +533,11 @@ mod tests {
     #[test]
     fn a_closed_connection_fails_a_progress_probe() {
         use std::io::Write;
-        use std::net::Shutdown;
-        use std::os::unix::net::UnixStream;
         use std::sync::Arc;
         use std::sync::atomic::{AtomicU64, Ordering};
         use std::time::{Duration, Instant};
+
+        use transport::Stream;
 
         let tmp = tempfile::Builder::new()
             .prefix("vidcut-ipc-probe-")
@@ -554,7 +567,7 @@ mod tests {
         .unwrap();
         let mut stream = None;
         for _ in 0..50 {
-            if let Ok(s) = UnixStream::connect(&socket) {
+            if let Ok(s) = Stream::connect(&socket) {
                 stream = Some(s);
                 break;
             }
@@ -577,7 +590,10 @@ mod tests {
             u64::MAX,
             "stopped while the client was still connected"
         );
-        stream.shutdown(Shutdown::Both).unwrap();
+        // Shut down both ways (a socket), and closed (a pipe on Windows is
+        // gone once its last handle is).
+        stream.shutdown().unwrap();
+        drop(stream);
         let mut ms = u64::MAX;
         for _ in 0..100 {
             ms = stopped.load(Ordering::Relaxed);
@@ -589,13 +605,15 @@ mod tests {
         assert!(ms < 1000, "still running after the client left: {ms} ms");
     }
 
+    /// A pipe (Windows) can't be shut down one way only.
+    #[cfg(unix)]
     #[test]
     fn a_client_that_only_stops_writing_still_gets_its_answer() {
         // `printf '...' | socat - UNIX:...` shuts down its writing once the
         // request is sent, and reads on. That is not a client that left.
         use std::io::{BufRead, BufReader, Write};
         use std::net::Shutdown;
-        use std::os::unix::net::UnixStream;
+        use std::os::unix::net::UnixStream as Stream;
         use std::sync::Arc;
         use std::time::Duration;
         let tmp = tempfile::Builder::new()
@@ -628,7 +646,7 @@ mod tests {
             ),
         )
         .unwrap();
-        let mut stream = UnixStream::connect(&socket).unwrap();
+        let mut stream = Stream::connect(&socket).unwrap();
         stream.write_all(b"{\"method\":\"project.get\"}\n").unwrap();
         stream.shutdown(Shutdown::Write).unwrap();
         let mut reply = String::new();
