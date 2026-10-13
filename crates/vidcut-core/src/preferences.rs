@@ -54,6 +54,12 @@ pub struct Gpu {
     /// GPU only encodes, which is faster where the GPU is small and the CPU
     /// large.
     pub decoding: bool,
+    /// The GPU that decodes and encodes, by its id (`preferences.get` lists
+    /// them as `gpus`): its PCI vendor and device ids and its slot, the
+    /// same on every system the computer starts. Empty (the default): NVIDIA's
+    /// when there is one, else the first other; also while the chosen one
+    /// isn't there.
+    pub device: String,
 }
 
 impl Default for Gpu {
@@ -61,6 +67,7 @@ impl Default for Gpu {
         Self {
             acceleration: true,
             decoding: true,
+            device: String::new(),
         }
     }
 }
@@ -181,6 +188,9 @@ pub struct GpuPatch {
     pub acceleration: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decoding: Option<bool>,
+    /// A GPU's id, or empty for the automatic one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -266,6 +276,9 @@ impl Preferences {
         if let Some(g) = &patch.gpu {
             p.gpu.acceleration = g.acceleration.unwrap_or(p.gpu.acceleration);
             p.gpu.decoding = g.decoding.unwrap_or(p.gpu.decoding);
+            if let Some(d) = &g.device {
+                p.gpu.device = d.clone();
+            }
         }
         if let Some(x) = &patch.player {
             p.player.memory_mb = x.memory_mb.unwrap_or(p.player.memory_mb);
@@ -369,6 +382,23 @@ mod tests {
             .patched(&PreferencesPatch::from_pairs(&["player.audio_device=".into()]).unwrap())
             .unwrap();
         assert_eq!(back.player.audio_device, "");
+    }
+
+    #[test]
+    fn the_gpu_is_automatic_unless_chosen() {
+        let p = Preferences::default();
+        assert_eq!(p.gpu.device, "");
+        let set = p
+            .patched(
+                &PreferencesPatch::from_pairs(&["gpu.device=10de:2702@01:00.0".into()]).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(set.gpu.device, "10de:2702@01:00.0");
+        assert!(set.gpu.acceleration && set.gpu.decoding);
+        let back = set
+            .patched(&PreferencesPatch::from_pairs(&["gpu.device=".into()]).unwrap())
+            .unwrap();
+        assert_eq!(back.gpu.device, "");
     }
 
     #[test]

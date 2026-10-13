@@ -55,6 +55,7 @@ windows = { version = "0.62", features = [
     "Win32_Graphics_Direct3D11",
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
+    "Wdk_Graphics_Direct3D",
     "Win32_Security",
 ] }
 # Vulkan calls on wgpu's own device (the version wgpu-hal uses): memory the

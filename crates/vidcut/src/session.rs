@@ -138,9 +138,9 @@ pub fn run_with(
         })?),
         Request::PresetsDelete { name } => answer(export::delete_preset(name, envelope.dry_run)?),
         Request::EncodersList { refresh } => {
-            let available = export::availability(*refresh);
-            let mut answer_json = json!(available);
-            let can = export::encodable(&available, crate::preferences::gpu_acceleration());
+            let detected = export::detected(*refresh);
+            let mut answer_json = json!(detected);
+            let can = export::encodable(&detected.in_use(), crate::preferences::gpu_acceleration());
             answer_json["video"] = can["video"].clone();
             answer_json["audio"] = can["audio"].clone();
             answer(answer_json)
@@ -253,10 +253,7 @@ pub fn render(
         }
         Request::ExportPlan(params) => {
             let mut prepared = export::prepare(project, params, None)?;
-            export::as_preferred(
-                &mut prepared.settings,
-                crate::preferences::gpu_acceleration(),
-            );
+            export::as_preferred(&mut prepared, crate::preferences::gpu_acceleration());
             let available = if export::needs_gpu_info(&prepared.settings) {
                 export::availability(false)
             } else {
@@ -363,10 +360,7 @@ pub fn export_media(
         return Ok(r);
     }
     let mut prepared = export::prepare(p, params, None)?;
-    export::as_preferred(
-        &mut prepared.settings,
-        crate::preferences::gpu_acceleration(),
-    );
+    export::as_preferred(&mut prepared, crate::preferences::gpu_acceleration());
     let available = if export::needs_gpu_info(&prepared.settings) {
         export::availability(false)
     } else {

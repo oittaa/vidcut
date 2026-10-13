@@ -832,6 +832,7 @@ impl Live {
             Msg::PreferencesChanged => {
                 let gpu = crate::preferences::gpu_decoding();
                 changed = self.player.follow_gpu(gpu);
+                changed |= self.player.follow_gpu_in_use();
                 changed |= self.player.follow_audio(crate::preferences::audio_device());
                 self.player.set_budget(crate::preferences::player_budget());
             }

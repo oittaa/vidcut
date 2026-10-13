@@ -412,8 +412,8 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Co
         Some(gpu) => FrameReader::decoding_on(gpu),
         None => FrameReader::default(),
     };
-    let mut on_gpu = crate::preferences::gpu_decoding();
-    let mut reader = reader_for(on_gpu);
+    let mut on_gpu = crate::preferences::decoding_gpu();
+    let mut reader = reader_for(on_gpu.is_some());
     // Blocks read or written lately (a missing file is an empty block),
     // and tiles made but not yet on disk.
     let mut blocks: Vec<(PathBuf, Block)> = Vec::new();
@@ -441,10 +441,10 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Co
             }
         };
         let picture = from_disk(&job, &mut blocks, &unwritten).or_else(|| {
-            let gpu = crate::preferences::gpu_decoding();
+            let gpu = crate::preferences::decoding_gpu();
             if gpu != on_gpu {
+                reader = reader_for(gpu.is_some());
                 on_gpu = gpu;
-                reader = reader_for(gpu);
             }
             let made = job
                 .pieces

@@ -95,6 +95,8 @@ pub struct Player {
     /// The audio device the preferences name, its output made for it
     /// (`None`: the system's default).
     audio_device: Option<String>,
+    /// The GPU in use when the engine opened, by its id.
+    gpu_in_use: Option<String>,
     /// The device the engine's sound plays on.
     plays_on: PlaysOn,
     /// Why the sound doesn't play on the device chosen: none opened (the
@@ -129,6 +131,7 @@ impl Player {
             scrubbing: true,
             gpu: crate::preferences::gpu_decoding(),
             audio_device: crate::preferences::audio_device(),
+            gpu_in_use: vidcut_av::gpus::in_use().map(|g| g.id),
             plays_on: PlaysOn::Default,
             audio_error: None,
         }
@@ -517,6 +520,25 @@ impl Player {
             return false;
         }
         self.audio_device = device;
+        self.reopen();
+        true
+    }
+
+    /// Decodes on the GPU in use (`gpus::in_use`, as the preferences
+    /// choose it); whether that changed. The engine opens anew, paused
+    /// where it was, its decoders on the new GPU.
+    pub fn follow_gpu_in_use(&mut self) -> bool {
+        let gpu = vidcut_av::gpus::in_use().map(|g| g.id);
+        if self.gpu_in_use == gpu {
+            return false;
+        }
+        self.gpu_in_use = gpu;
+        self.reopen();
+        true
+    }
+
+    /// Lets the engine go, to open anew where it was paused.
+    fn reopen(&mut self) {
         if let Some(e) = self.engine.take() {
             if let Some(id) = self.plays {
                 let c = &mut self.contents[id.index()];
@@ -528,7 +550,6 @@ impl Player {
             drop(e);
             self.play_shown(None);
         }
-        true
     }
 
     /// Hears `track`'s fader at `volume_db` while the timeline plays, the
