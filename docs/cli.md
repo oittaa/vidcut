@@ -14,7 +14,7 @@
 **Basic use:**
 
 ```bash
-vidcut project create talk.vidcut           # format from the first video added, or --fps 25 --width 1920 --height 1080
+vidcut project create talk.vidcut           # format from the first video added, or --fps 25 --width 1920 --height 1080; --start-tc 01:00:00:00
 export VIDCUT_PROJECT=talk.vidcut           # or pass -p FILE every time
 vidcut media add cam.mp4 screen.mkv --json  # -> media ids m1, m2
 vidcut edit append m1 --range 10s..2m

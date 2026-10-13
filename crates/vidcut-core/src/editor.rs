@@ -1250,8 +1250,10 @@ fn add_media(p: &mut Project, probed: ProbedMedia) -> String {
         // The first video sets the project format, with no prompt (D37),
         // drop-frame counting too where its timecode counts so (D47).
         p.settings.set_fps(v.fps);
-        p.settings.drop_frame =
-            v.fps.has_drop_frame() && probed.info.timecode.is_some_and(|t| t.drop_frame);
+        let drop = v.fps.has_drop_frame() && probed.info.timecode.is_some_and(|t| t.drop_frame);
+        p.settings
+            .set_drop_frame(drop)
+            .expect("the rate has drop-frame");
         adopt_size(p, v);
     }
     let id = p.alloc_media_id();
@@ -1889,11 +1891,7 @@ fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
         p.settings.set_drop_frame(d)?;
     }
     if let Some(tc) = &set.start_tc {
-        let c = TimeContext {
-            start_tc: 0,
-            ..p.time_context(None)
-        };
-        p.settings.start_tc = c.resolve(tc)?;
+        p.settings.set_start_tc(tc)?;
     }
     if let Some(d) = &set.still_duration {
         let c = TimeContext {

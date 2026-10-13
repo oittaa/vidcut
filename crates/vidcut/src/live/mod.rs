@@ -471,7 +471,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     let create = config.create;
     let thread = crate::threads::spawn("vidcut-session", Work::Interactive, move || {
         if let Some(path) = project
-            && let Err(e) = new_settings(&path, create, None, None, None, None)
+            && let Err(e) = new_settings(&path, create, None, (None, None), None, None)
                 .and_then(|settings| live.open_project(&path, settings))
         {
             live.notice(
@@ -1718,10 +1718,18 @@ impl Live {
                 width,
                 height,
                 drop_frame,
+                start_tc,
             } => Step::Now(
-                new_settings(&path, create, fps.as_deref(), width, height, drop_frame)
-                    .and_then(|settings| self.open_project(&path, settings))
-                    .map(|()| self.state_response()),
+                new_settings(
+                    &path,
+                    create,
+                    fps.as_deref(),
+                    (width, height),
+                    drop_frame,
+                    start_tc.as_ref(),
+                )
+                .and_then(|settings| self.open_project(&path, settings))
+                .map(|()| self.state_response()),
             ),
             Request::ViewerSet { mode } => {
                 let motion = self.set_viewer(mode);
@@ -2776,12 +2784,12 @@ fn new_settings(
     path: &Path,
     create: bool,
     fps: Option<&str>,
-    width: Option<u32>,
-    height: Option<u32>,
+    (width, height): (Option<u32>, Option<u32>),
     drop_frame: Option<bool>,
+    start_tc: Option<&TimeSpec>,
 ) -> Result<Option<Settings>> {
     let size = crate::session::size(width, height)?;
-    let format = fps.is_some() || size.is_some() || drop_frame.is_some();
+    let format = fps.is_some() || size.is_some() || drop_frame.is_some() || start_tc.is_some();
     if format && !create {
         return Err(Error::usage("a frame rate or size needs create"));
     }
@@ -2800,6 +2808,9 @@ fn new_settings(
     let mut settings = Settings::with_format(fps, size)?;
     if let Some(d) = drop_frame {
         settings.set_drop_frame(d)?;
+    }
+    if let Some(tc) = start_tc {
+        settings.set_start_tc(tc)?;
     }
     Ok(Some(settings))
 }

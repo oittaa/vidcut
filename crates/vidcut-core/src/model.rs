@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::time::{Rational, TimeContext, format_timecode};
+use crate::time::{Rational, TimeContext, TimeSpec, format_timecode};
 
 /// Version of the project file format.
 pub const FORMAT_VERSION: u32 = 1;
@@ -119,7 +119,7 @@ impl Settings {
     }
 
     /// Counts record timecode drop-frame, or not (decision D47): only at
-    /// 29.97 and 59.94.
+    /// 29.97 and 59.94. The start keeps its label.
     pub fn set_drop_frame(&mut self, on: bool) -> crate::error::Result<()> {
         if on && !self.fps.has_drop_frame() {
             return Err(crate::error::Error::invalid(format!(
@@ -127,15 +127,55 @@ impl Settings {
                 self.fps.decimal()
             )));
         }
-        self.drop_frame = on;
+        self.relabel(|s| s.drop_frame = on);
         Ok(())
     }
 
     /// Changes the frame rate; drop-frame counting stays only where the
-    /// new rate has it.
+    /// new rate has it. The start keeps its label.
     pub fn set_fps(&mut self, fps: Rational) {
-        self.fps = fps;
-        self.drop_frame &= fps.has_drop_frame();
+        self.relabel(|s| {
+            s.fps = fps;
+            s.drop_frame &= fps.has_drop_frame();
+        });
+    }
+
+    /// Makes `change` keeping the start timecode's label (deviation X7):
+    /// `01:00:00:00` stays so, another frame count at another rate. A label
+    /// the new rate hasn't (frame 29 at 25 fps) keeps its time instead.
+    fn relabel(&mut self, change: impl FnOnce(&mut Self)) {
+        let (label, secs) = (self.timecode(0), self.fps.frames_to_secs(self.start_tc));
+        change(self);
+        self.start_tc = TimeSpec::parse(&label)
+            .ok()
+            .and_then(|t| self.start_context().resolve(&t).ok())
+            .unwrap_or_else(|| self.fps.secs_to_frames(secs));
+    }
+
+    /// How a start timecode is read: as the project counts timecode.
+    fn start_context(&self) -> TimeContext {
+        TimeContext {
+            fps: self.fps,
+            start_tc: 0,
+            drop_frame: self.counts_drop_frame(),
+            end: 0,
+            mark_in: None,
+            mark_out: None,
+            playhead: None,
+        }
+    }
+
+    /// Sets the record timecode of the first frame: `01:00:00:00`, or
+    /// drop-frame `01:00:00;00` (deviation X7, decision D47).
+    pub fn set_start_tc(&mut self, tc: &TimeSpec) -> crate::error::Result<()> {
+        let frames = self.start_context().resolve(tc)?;
+        if frames < 0 {
+            return Err(crate::error::Error::invalid(
+                "a start timecode is 00:00:00:00 or later",
+            ));
+        }
+        self.start_tc = frames;
+        Ok(())
     }
 
     /// Whether timecodes count drop-frame: set, at a rate that has it.
