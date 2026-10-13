@@ -554,6 +554,7 @@ mod tests {
             effects: None,
             generator: None,
             compound: None,
+            speed: None,
         }
     }
 

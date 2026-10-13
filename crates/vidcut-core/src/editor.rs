@@ -231,6 +231,26 @@ pub struct History {
     pub redo: Vec<Entry>,
 }
 
+/// A clip with a speed change from another editor that `after` changed
+/// other than by moving it (its length, source or audio offsets), or split
+/// (deviation X9): that would need speed math.
+fn speed_reshaped(before: &Project, after: &Project) -> Option<String> {
+    let shape = |c: &Clip| {
+        (
+            c.duration,
+            c.source_in,
+            c.audio.as_ref().map(|a| (a.head, a.tail)),
+        )
+    };
+    before
+        .tracks
+        .iter()
+        .flat_map(|t| &t.clips)
+        .filter(|c| c.speed.is_some())
+        .find(|c| after.clip(&c.id).is_some_and(|n| shape(n) != shape(c)))
+        .map(|c| c.id.clone())
+}
+
 /// Maximum undo steps kept.
 pub const HISTORY_CAP: usize = 100;
 
@@ -293,6 +313,12 @@ impl Editor {
         let label = label_of(&request, &self.project);
         let mut working = self.project.clone();
         let result = mutate(&mut working, &request, env, playhead, dry_run)?;
+        if let Some(id) = speed_reshaped(&self.project, &working) {
+            return Err(Error::invalid(format!(
+                "{id} has a speed change from another editor (deviation X9): trims, splits, \
+                 slips and rolls of it would need speed math; move or delete it"
+            )));
+        }
         // Carried transitions the edit took away from their edit points.
         let mut warnings = Vec::new();
         let dropped = otio::transitions::prune(&mut working);
@@ -993,8 +1019,9 @@ fn mutate(
             let mut removed = Vec::new();
             for id in &ids {
                 let c = p.clip(id).expect("resolved");
-                // A block plays as a gap: no sound to look at.
-                if c.is_block() {
+                // A block plays as a gap: no sound to look at. A speed
+                // change from another editor can't be cut.
+                if c.is_block() || c.speed.is_some() {
                     continue;
                 }
                 let found = silent_parts(p, env, &Target::Clip(c), &settings)?;
@@ -1023,8 +1050,9 @@ fn mutate(
             let mut created = Vec::new();
             for id in &ids {
                 let c = p.clip(id).expect("resolved");
-                // A block plays as a gap: no pictures to look at.
-                if c.is_block() {
+                // A block plays as a gap: no pictures to look at. A speed
+                // change from another editor can't be cut.
+                if c.is_block() || c.speed.is_some() {
                     continue;
                 }
                 let found = scene_cuts(p, env, &Target::Clip(c), *threshold)?;
@@ -1787,6 +1815,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
                     reference: reference.clone(),
                 }),
                 compound,
+                speed: c.speed.clone(),
             });
             track.sort();
             continue;
@@ -1890,6 +1919,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
             effects,
             generator: None,
             compound: None,
+            speed: c.speed.clone(),
         });
         track.sort();
     }
@@ -2674,6 +2704,12 @@ pub fn clip_json(p: &Project, c: &Clip, track: &str) -> Value {
     }
     if let Some(k) = &c.compound {
         v["compound"] = json!(otio::compound_kind(k));
+    }
+    // A speed change: how fast (2.0, -1.0 reversed), else what it is.
+    if let Some(speed) = &c.speed {
+        v["speed"] = speed
+            .scalar()
+            .map_or_else(|| json!(speed.label()), |x| json!(x));
     }
     // Carried clip effects by name (deviation X9); `project.get` has them
     // whole.

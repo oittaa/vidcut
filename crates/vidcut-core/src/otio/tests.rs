@@ -2050,3 +2050,99 @@ fn compound_clips_are_carried() {
     let e = g.err(req("analyze.silence", json!({"clips": [id]})));
     assert!(e.message.contains("is a block from another editor"), "{e}");
 }
+
+#[test]
+fn speed_changes_are_carried_and_locked() {
+    // As an editor writes them: a 0..100 | b 100..150 at twice its speed,
+    // the time effect on its picture and sound | c 150..200.
+    let mut f = Fixture::new(&[(10.0, true), (10.0, true)]);
+    f.append("m1", 50, 150);
+    f.append("m2", 0, 50);
+    f.append("m1", 0, 50);
+    let mut doc = export(f.editor.project(), "spd", None, Locations::Absolute).unwrap();
+    let warp = json!({"OTIO_SCHEMA": "LinearTimeWarp.1", "name": "", "effect_name": "",
+        "time_scalar": 2.0, "metadata": {"Resolve_OTIO": {"Retime Mode": "NONE"}}});
+    for track in ["Video 1", "Audio 1"] {
+        let items = doc["tracks"]["children"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|t| t["name"] == track)
+            .unwrap()["children"]
+            .as_array_mut()
+            .unwrap();
+        items[1]["effects"] = json!([warp]);
+        items[1]["metadata"]["Resolve_OTIO"]["Media In"] = json!(0.4);
+    }
+
+    let mut g = Fixture::new(&[(10.0, true), (10.0, true)]);
+    let r = g.ok(req("timeline.import", json!({ "otio": doc })));
+    assert_eq!(
+        r.result["warnings"],
+        json!(["speed changes kept on their clips but played at normal speed: 200%"])
+    );
+    let b = g.editor.project().clip("c2").unwrap().clone();
+    let speed = b.speed.clone().unwrap();
+    assert_eq!((speed.effect, speed.media_in), (warp.clone(), Some(0.4)));
+    let r = g.ok(req("timeline.get", json!({})));
+    assert_eq!(r.result["tracks"][0]["items"][1]["speed"], 2.0);
+    // Written back first among its effects, with its Media In.
+    let out = export(g.editor.project(), "spd", None, Locations::Absolute).unwrap();
+    for track in ["Video 1", "Audio 1"] {
+        let item = otio_clips(otio_track(&out, track))[1].clone();
+        assert_eq!(item["effects"][0], warp, "{track}");
+        assert_eq!(item["metadata"]["Resolve_OTIO"]["Media In"], 0.4, "{track}");
+    }
+    // An export from inside it starts its source at its speed.
+    let part = export(
+        g.editor.project(),
+        "spd",
+        Some((110, 200)),
+        Locations::Absolute,
+    )
+    .unwrap();
+    let first = otio_clips(otio_track(&part, "Video 1"))[0].clone();
+    assert_eq!(first["source_range"]["start_time"]["value"], 20.0);
+
+    // What would need speed math is refused; nothing changes.
+    let before = g.editor.project().clone();
+    for (method, params) in [
+        (
+            "edit.trim",
+            json!({"clip": "c2", "edge": "tail", "by": -10}),
+        ),
+        ("edit.split", json!({"at": 120})),
+        ("edit.slip", json!({"clip": "c2", "by": 5})),
+        ("edit.roll", json!({"clip": "c1", "edge": "tail", "by": 5})),
+        (
+            "edit.audio_roll",
+            json!({"clip": "c2", "edge": "tail", "by": 5}),
+        ),
+        (
+            "edit.insert",
+            json!({"media": "m1", "range": "0f..10f", "at": 120}),
+        ),
+    ] {
+        let e = g.err(req(method, params));
+        assert!(e.message.contains("c2 has a speed change"), "{method}: {e}");
+    }
+    assert_eq!(g.editor.project(), &before);
+    // What only moves it works.
+    g.ok(req(
+        "edit.trim",
+        json!({"clip": "c1", "edge": "head", "by": 10}),
+    ));
+    assert_eq!(g.editor.project().clip("c2").unwrap().start, 90);
+    g.ok(req(
+        "edit.move",
+        json!({"clips": "c2", "to": 300, "mode": "overwrite"}),
+    ));
+    let moved = g.editor.project().clip("c2").unwrap().clone();
+    assert_eq!(
+        (moved.start, moved.duration, moved.source_in),
+        (140, 50, b.source_in),
+        "to Track 1's end, with Ripple on"
+    );
+    g.ok(req("edit.delete", json!({"clips": "c2"})));
+    assert!(g.editor.project().clip("c2").is_none());
+}

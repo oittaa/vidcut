@@ -4,7 +4,7 @@
 //! - The editor writes its whole stack of clip effects on every clip
 //!   (Transform, Cropping, Pan, …), untouched ones included. An import
 //!   keeps the ones in use as [`Effects`] on the clip's picture or sound,
-//!   as they came; speed changes are left out.
+//!   as they came, and a speed change apart.
 //! - Keyframe times count from the item's first source frame, so an item
 //!   written from another first frame (a trimmed head, a split, a slip)
 //!   has its keyframes moved by the difference: they stay on their frames.
@@ -15,7 +15,7 @@
 
 use serde_json::{Value, json};
 
-use super::{EDITOR, schema, warn};
+use super::{EDITOR, schema};
 use crate::model::{ClipAudio, Effects};
 
 /// The editor's clip volume (and audio fades), whose level vidcut reads as
@@ -62,25 +62,22 @@ pub(super) fn gain(item: &Value) -> Option<f64> {
         .map(|g| (g * 100.0).round() / 100.0)
 }
 
-/// The effects of `item` to keep: those in use. Speed changes are left out
-/// and noted.
-pub(super) fn read(item: &Value, warnings: &mut Vec<String>) -> Vec<Value> {
-    let mut kept = Vec::new();
+/// The effects of `item` to keep: those in use; and its speed change, a
+/// time effect, if it has one.
+pub(super) fn read(item: &Value) -> (Vec<Value>, Option<Value>) {
+    let (mut kept, mut speed) = (Vec::new(), None);
     for e in item["effects"].as_array().into_iter().flatten() {
         let s = schema(e);
         if s.starts_with("LinearTimeWarp")
             || s.starts_with("FreezeFrame")
             || s.starts_with("TimeEffect")
         {
-            warn(
-                warnings,
-                "speed changes were left out (those clips play at normal speed)",
-            );
+            speed.get_or_insert_with(|| e.clone());
         } else if in_use(e) {
             kept.push(e.clone());
         }
     }
-    kept
+    (kept, speed)
 }
 
 /// The name effect `e` goes by: `Transform`, `Pan`, `Gaussian Blur` (empty

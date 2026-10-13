@@ -622,6 +622,44 @@ pub struct Clip {
     /// (`video` false).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compound: Option<Compound>,
+    /// A speed change another editor made, carried (deviation X9): the clip
+    /// plays at normal speed, and edits that would need speed math (trims,
+    /// splits, slips, rolls) refuse it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed: Option<Speed>,
+}
+
+/// A speed change from another editor's file (deviation X9).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Speed {
+    /// The OTIO time effect as read: a `LinearTimeWarp` (`time_scalar` 2.0
+    /// for twice the speed, -1.0 reversed) or a `FreezeFrame`.
+    pub effect: serde_json::Value,
+    /// Where the editor's metadata says a reversed clip's media start
+    /// (`Media In`, seconds), written back with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_in: Option<f64>,
+}
+
+impl Speed {
+    /// How fast: 2.0 twice, -1.0 reversed, 0 frozen; none for a time effect
+    /// without a scalar.
+    pub fn scalar(&self) -> Option<f64> {
+        self.effect["time_scalar"].as_f64()
+    }
+
+    /// As shown: `200%`, `-100%`, `freeze`, or the effect's name.
+    pub fn label(&self) -> String {
+        match self.scalar() {
+            Some(0.0) => "freeze".to_string(),
+            Some(x) => format!("{}%", (x * 100.0).round()),
+            None => self.effect["OTIO_SCHEMA"]
+                .as_str()
+                .and_then(|s| s.split('.').next())
+                .unwrap_or("speed")
+                .to_string(),
+        }
+    }
 }
 
 /// A generator or title from another editor's file (deviation X9).

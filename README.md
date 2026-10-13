@@ -18,7 +18,7 @@ A simple, fully scriptable video cutting tool for Linux and Windows. Behavior fo
 - **Automatic tools:** Ripple Delete Silence, Detect Scene Cuts and the Boring Detector (spec D29–D31).
 - **Interchange:** OpenTimelineIO, `.otio` and `.otioz` (deviation X9).
 - **Everything scriptable.** Every action in the GUI is also a CLI command and a JSON-RPC call on the running app, so scripts and AI agents can edit with you. `vidcut mcp` offers it all to AI agents over the Model Context Protocol.
-- **Deliberately not included:** effects, transitions, titles or color grading. Clip effects, transitions, generators, titles and compound clips from another editor's OTIO file are kept and written back (deviation X9).
+- **Deliberately not included:** effects, transitions, titles or color grading. Clip effects, transitions, generators, titles, compound clips and speed changes from another editor's OTIO file are kept and written back (deviation X9).
 
 ## Requirements
 

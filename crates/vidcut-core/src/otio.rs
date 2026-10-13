@@ -54,8 +54,10 @@
 //! - Generators and titles (`GeneratorReference`s) become generator clips,
 //!   and nested `Stack`s (compound clips, nested timelines) compound clips:
 //!   blocks that play as gaps, their references and stacks kept.
+//! - Speed changes (time effects) stay on their clips, which play at
+//!   normal speed and refuse edits that would need speed math.
 //! - Everything else is left out with a warning: nested tracks (gaps
-//!   instead), speed changes.
+//!   instead).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -63,7 +65,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, Compound, Marks, Media, Project, TrackKind};
+use crate::model::{Clip, Compound, Marks, Media, Project, Speed, TrackKind};
 use crate::time::Rational;
 
 pub mod effects;
@@ -231,6 +233,33 @@ pub fn used_media(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
     used
 }
 
+/// Item `item`'s speed change: its time `effect`, with where the editor
+/// says a reversed clip's media start.
+fn speed_of(item: &Value, effect: Option<Value>) -> Option<Speed> {
+    effect.map(|effect| Speed {
+        effect,
+        media_in: item["metadata"][EDITOR]["Media In"].as_f64(),
+    })
+}
+
+/// Clip `c`'s source frame at timeline frame `t`: at its speed, when it
+/// carries one from another editor.
+fn source_at(c: &Clip, t: i64) -> i64 {
+    match c.speed.as_ref().and_then(Speed::scalar) {
+        Some(x) => c.source_in + ((t - c.start) as f64 * x).round() as i64,
+        None => c.source_at(t),
+    }
+}
+
+/// `effects`, after clip `c`'s speed change if it carries one: editors
+/// write the time effect first.
+fn with_speed(c: &Clip, mut effects: Vec<Value>) -> Vec<Value> {
+    if let Some(speed) = &c.speed {
+        effects.insert(0, speed.effect.clone());
+    }
+    effects
+}
+
 /// The timeline range `[a, b)` of `p` (default: all of it) as an OTIO
 /// timeline named `name`, its media where `locations` says.
 pub fn export(
@@ -340,24 +369,30 @@ pub fn export(
                     meta["muted"] = json!(au.muted);
                 }
                 if m.is_some_and(Media::is_still) {
-                    meta["source_in"] = json!(c.source_at(s));
+                    meta["source_in"] = json!(source_at(c, s));
                 }
                 let mut metadata = json!({ VIDCUT: meta });
                 if let Some(g) = group {
                     metadata[EDITOR] = json!({ "Link Group ID": g });
                 }
+                if let Some(x) = c.speed.as_ref().and_then(|s| s.media_in) {
+                    metadata[EDITOR]["Media In"] = json!(x);
+                }
                 // Carried effects, keyframes moved to where the item
                 // starts, fades cut where the export does.
-                let effects = c.effects.as_ref().map_or_else(Vec::new, |x| {
-                    x.written(c.source_at(s), s > c.start, e < c.end())
-                });
+                let effects = with_speed(
+                    c,
+                    c.effects.as_ref().map_or_else(Vec::new, |x| {
+                        x.written(source_at(c, s), s > c.start, e < c.end())
+                    }),
+                );
                 video.push(match &c.compound {
-                    Some(k) => compound_item(c, k, &label, c.source_at(s), e - s, effects, rate),
+                    Some(k) => compound_item(c, k, &label, source_at(c, s), e - s, effects, rate),
                     None => item(
                         &label,
                         c,
                         m,
-                        c.source_at(s),
+                        source_at(c, s),
                         e - s,
                         c.enabled,
                         metadata,
@@ -389,13 +424,19 @@ pub fn export(
                 if let Some(g) = group {
                     editor["Link Group ID"] = json!(g);
                 }
+                if let Some(x) = c.speed.as_ref().and_then(|s| s.media_in) {
+                    editor["Media In"] = json!(x);
+                }
                 let whole = c.audio_range().expect("has audio");
-                let effects = effects::sound(au, c.source_at(s), s > whole.0, e < whole.1);
+                let effects = with_speed(
+                    c,
+                    effects::sound(au, source_at(c, s), s > whole.0, e < whole.1),
+                );
                 audio.push(item(
                     &label,
                     c,
                     m,
-                    c.source_at(s),
+                    source_at(c, s),
                     e - s,
                     !au.muted,
                     json!({ VIDCUT: meta, EDITOR: editor }),
@@ -413,14 +454,17 @@ pub fn export(
                     if s > ta {
                         audio.push(gap(s - ta, rate));
                     }
-                    let effects = c.effects.as_ref().map_or_else(Vec::new, |x| {
-                        x.written(c.source_at(s), s > c.start, e < c.end())
-                    });
+                    let effects = with_speed(
+                        c,
+                        c.effects.as_ref().map_or_else(Vec::new, |x| {
+                            x.written(source_at(c, s), s > c.start, e < c.end())
+                        }),
+                    );
                     audio.push(compound_item(
                         c,
                         k,
                         &label,
-                        c.source_at(s),
+                        source_at(c, s),
                         e - s,
                         effects,
                         rate,
@@ -645,6 +689,8 @@ pub struct ImportedClip {
     /// A compound clip or nested timeline: its `Stack`, frames at
     /// [`Imported::fps`]. It has no media; on an audio track, no picture.
     pub compound: Option<Compound>,
+    /// Its speed change: a time effect, as the file has it.
+    pub speed: Option<Speed>,
 }
 
 impl ImportedClip {
@@ -687,6 +733,7 @@ impl ImportedClip {
             audio_effects: Vec::new(),
             generator: None,
             compound: None,
+            speed: None,
         }
     }
 
@@ -1329,13 +1376,15 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             if !(is_clip(item) || stack) || len <= 0 {
                 continue;
             }
-            let effects = effects::read(item, &mut warnings);
+            let (effects, speed) = effects::read(item);
+            let speed = speed_of(item, speed);
             let reference = media_reference_of(item);
             if stack || schema(reference).starts_with("GeneratorReference") {
                 clip_markers(item, start, len, fps, &mut markers);
                 keys[i] = Some(clips.len());
                 let mut c = ImportedClip::block(clips.len(), &id, item, (start, len), fps);
                 c.effects = effects;
+                c.speed = speed;
                 if stack {
                     c.compound = Some(compound_of(item, fps));
                 } else {
@@ -1370,6 +1419,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         audio_effects: Vec::new(),
                         generator: None,
                         compound: None,
+                        speed,
                     });
                 }
                 Err(e) => warnings.push(format!("{}; left as a gap", e.message)),
@@ -1392,7 +1442,8 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             if !(is_clip(item) || stack) || len <= 0 {
                 continue;
             }
-            let effects = effects::read(item, &mut warnings);
+            let (effects, speed) = effects::read(item);
+            let speed = speed_of(item, speed);
             // A compound clip's sound: a block on an audio track.
             if stack {
                 clip_markers(item, start, len, fps, &mut markers);
@@ -1409,6 +1460,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 let mut c = ImportedClip::block(clips.len(), &track, item, (start, len), fps);
                 c.video = false;
                 c.effects = effects;
+                c.speed = speed;
                 c.compound = Some(compound_of(item, fps));
                 clips.push(c);
                 continue;
@@ -1457,6 +1509,10 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                     c.stream = s;
                 }
                 c.audio_effects = effects;
+                // The picture's, which editors write on both.
+                if c.speed.is_none() {
+                    c.speed = speed;
+                }
                 keys[i] = Some(c.key);
                 continue;
             }
@@ -1490,6 +1546,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 audio_effects: effects,
                 generator: None,
                 compound: None,
+                speed,
             });
         }
         transitions_of(between, &keys, true, fps, &mut found);
@@ -1576,6 +1633,19 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         warnings.push(format!(
             "generators and titles kept as blocks but played as gaps: {}",
             made.join(", ")
+        ));
+    }
+    let mut speeds: Vec<String> = Vec::new();
+    for speed in clips.iter().filter_map(|c| c.speed.as_ref()) {
+        let label = speed.label();
+        if !speeds.contains(&label) {
+            speeds.push(label);
+        }
+    }
+    if !speeds.is_empty() {
+        warnings.push(format!(
+            "speed changes kept on their clips but played at normal speed: {}",
+            speeds.join(", ")
         ));
     }
     let mut nested: Vec<&str> = Vec::new();
