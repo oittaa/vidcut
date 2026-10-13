@@ -147,12 +147,12 @@ impl Stills {
                 format!("vidcut-stills-{n}"),
                 crate::threads::Work::Interactive,
                 move || {
-                    let mut renderer = StillRenderer::with_budget(BUDGET);
+                    let mut renderer = cell_renderer();
                     loop {
                         let mut job = match rx.recv_timeout(IDLE) {
                             Ok(job) => job,
                             Err(RecvTimeoutError::Timeout) => {
-                                renderer = StillRenderer::with_budget(BUDGET);
+                                renderer = cell_renderer();
                                 match rx.recv() {
                                     Ok(job) => job,
                                     Err(_) => return,
@@ -249,5 +249,18 @@ impl Stills {
             .shown
             .as_ref()
             .map(|t| Shown::Previous(t.id()))
+    }
+}
+
+/// A renderer for a cell, decoding on the GPU as the viewer does while
+/// `gpu.acceleration` is on.
+fn cell_renderer() -> StillRenderer {
+    let renderer = StillRenderer::with_budget(BUDGET);
+    match crate::preferences::gpu_acceleration()
+        .then(crate::preferences::gpu_decoder)
+        .flatten()
+    {
+        Some(gpu) => renderer.decoding_on(gpu),
+        None => renderer,
     }
 }

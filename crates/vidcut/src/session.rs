@@ -379,7 +379,7 @@ pub fn export_media(
     )?;
     // Decoded on the GPU as the viewer decodes.
     let decoder = crate::preferences::gpu_acceleration()
-        .then(vidcut_av::hw::GpuDecoder::best)
+        .then(crate::preferences::gpu_decoder)
         .flatten();
     let reports = export::run(
         &prepared,

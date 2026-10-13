@@ -39,6 +39,15 @@ pub fn gpu_acceleration() -> bool {
     load().map_or(true, |p| p.gpu.acceleration)
 }
 
+/// The GPU decoder the viewer takes (`GpuDecoder::best`), opened once for
+/// what decodes as it does: exports, proxies, the timeline's tiles and the
+/// two-up. `None` without one; callers check `gpu.acceleration`.
+pub fn gpu_decoder() -> Option<vidcut_av::hw::GpuDecoder> {
+    static BEST: std::sync::OnceLock<Option<vidcut_av::hw::GpuDecoder>> =
+        std::sync::OnceLock::new();
+    BEST.get_or_init(vidcut_av::hw::GpuDecoder::best).clone()
+}
+
 /// The viewer's memory for pictures: `player.memory_mb` and
 /// `player.video_memory_mb`, `0` the automatic sizes (`Budget::automatic`).
 pub fn player_budget() -> vidcut_av::player::Budget {

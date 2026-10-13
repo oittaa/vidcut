@@ -406,7 +406,14 @@ type Block = Vec<(i64, Image)>;
 /// One worker: takes jobs until told to stop.
 fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Context) {
     static TRIMMED: Mutex<Option<Instant>> = Mutex::new(None);
-    let mut reader = FrameReader::default();
+    // Decoded on the GPU as the viewer decodes.
+    let mut reader = match crate::preferences::gpu_acceleration()
+        .then(crate::preferences::gpu_decoder)
+        .flatten()
+    {
+        Some(gpu) => FrameReader::decoding_on(gpu),
+        None => FrameReader::default(),
+    };
     // Blocks read or written lately (a missing file is an empty block),
     // and tiles made but not yet on disk.
     let mut blocks: Vec<(PathBuf, Block)> = Vec::new();

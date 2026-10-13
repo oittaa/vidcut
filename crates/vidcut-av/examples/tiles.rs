@@ -1,7 +1,8 @@
 //! Times timeline filmstrip tiles: frames of FILE at a fixed spacing, read
-//! in order as the timeline asks for them.
+//! in order as the timeline asks for them; `gpu` decodes on the GPU the
+//! viewer decodes on (`VIDCUT_HWDEC` picks another).
 //!
-//! `cargo run --release -p vidcut-av --example tiles -- FILE [HEIGHT]`
+//! `cargo run --release -p vidcut-av --example tiles -- FILE [HEIGHT] [gpu]`
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -14,6 +15,11 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let path = PathBuf::from(args.next().expect("FILE"));
     let height: u32 = args.next().map_or(112, |h| h.parse().expect("HEIGHT"));
+    let gpu = match args.next().as_deref() {
+        Some("gpu") => Some(vidcut_av::hw::GpuDecoder::best().expect("a GPU decoder")),
+        Some(other) => panic!("not gpu: {other}"),
+        None => None,
+    };
     let info = vidcut_av::probe::probe(&path).expect("probe");
     let video = info.video.expect("a video stream");
     let duration = video.duration_secs.unwrap_or(0.0);
@@ -22,15 +28,22 @@ fn main() {
     let width = (f64::from(height) * 16.0 / 9.0).round() as u32;
     let frames = (duration * 30.0) as i64;
     println!(
-        "{} ({:.0} s), tiles {width}x{height}",
+        "{} ({:.0} s), tiles {width}x{height}, decoding on {}",
         path.display(),
-        duration
+        duration,
+        gpu.as_ref().map_or("the CPU".to_string(), |d| format!(
+            "{} {}",
+            d.kind().name(),
+            d.on()
+        ))
     );
     for spacing in [0.25, 1.0, 2.0, 4.0, 8.0, 30.0] {
         let step = (spacing * 30.0) as i64;
         // Twenty tiles from a third of the way in.
         let from = frames / 3;
-        let mut reader = FrameReader::default();
+        let mut reader = gpu
+            .clone()
+            .map_or_else(FrameReader::default, FrameReader::decoding_on);
         let started = Instant::now();
         let mut first = None;
         let mut n = 0;

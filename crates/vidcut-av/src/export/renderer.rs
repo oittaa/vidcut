@@ -44,6 +44,8 @@ pub struct StillRenderer {
     /// Whether the position moved back with the last request.
     back: bool,
     prefetch: Option<Prefetch>,
+    /// Where files decode, when on a GPU ([`decoding_on`](Self::decoding_on)).
+    decoder: Option<crate::hw::GpuDecoder>,
 }
 
 /// Kept pictures, shared with prefetches.
@@ -89,7 +91,16 @@ impl StillRenderer {
             last: None,
             back: false,
             prefetch: None,
+            decoder: None,
         }
+    }
+
+    /// Files decode on `gpu` where it decodes their streams, but H.264
+    /// (`frames`), the frames shrunk there before they come down
+    /// ([`VideoFrames::decode_on`]).
+    pub fn decoding_on(mut self, gpu: crate::hw::GpuDecoder) -> Self {
+        self.decoder = Some(gpu);
+        self
     }
 
     /// Renders `piece`'s first frame at `width`×`height`. `floor` is the
@@ -110,7 +121,7 @@ impl StillRenderer {
         let same =
             matches!(&self.frames, Some((f, w, h, _)) if (*f, *w, *h) == (fps, width, height));
         if !same {
-            let frames = VideoFrames::new(&[], fps, width, height, format::Pixel::RGBA, None);
+            let frames = frames(fps, (width, height), self.decoder.as_ref());
             self.frames = Some((fps, width, height, frames));
         }
         let VideoPiece::Source {
@@ -208,6 +219,7 @@ impl StillRenderer {
             min,
             max,
             shared: self.shared.clone(),
+            decoder: self.decoder.clone(),
         });
     }
 
@@ -235,9 +247,21 @@ impl StillRenderer {
 #[derive(Default)]
 pub struct FrameReader {
     frames: Option<(Rational, u32, u32, VideoFrames)>,
+    /// Where files decode, when on a GPU ([`decoding_on`](Self::decoding_on)).
+    decoder: Option<crate::hw::GpuDecoder>,
 }
 
 impl FrameReader {
+    /// Files decode on `gpu` where it decodes their streams, but H.264
+    /// (`frames`), the frames shrunk there before they come down
+    /// ([`VideoFrames::decode_on`]).
+    pub fn decoding_on(gpu: crate::hw::GpuDecoder) -> Self {
+        Self {
+            frames: None,
+            decoder: Some(gpu),
+        }
+    }
+
     /// `piece`'s first frame as export samples it, at `width`×`height`
     /// (packed RGBA, the picture fit inside, padded black).
     pub fn rgba(
@@ -252,7 +276,7 @@ impl FrameReader {
         let same =
             matches!(&self.frames, Some((f, w, h, _)) if (*f, *w, *h) == (fps, width, height));
         if !same {
-            let frames = VideoFrames::new(&[], fps, width, height, format::Pixel::RGBA, None);
+            let frames = frames(fps, (width, height), self.decoder.as_ref());
             self.frames = Some((fps, width, height, frames));
         }
         let (.., frames) = self.frames.as_mut().expect("set above");
@@ -261,6 +285,22 @@ impl FrameReader {
             .next_frame()?
             .ok_or_else(|| Error::Invalid("no frame to render".into()))?;
         Ok(image(&frame, width, height))
+    }
+}
+
+/// Frames as RGBA pictures of `width`×`height` at `fps`, decoding on
+/// `decoder` where it decodes a stream: HEVC, AV1 and VP9. H.264, which the
+/// CPU decodes cheaply, stays on the CPU: frames read in jumps seek at every
+/// one, and a seek makes NVDEC's H.264 decoder anew (gotchas.md).
+fn frames(
+    fps: Rational,
+    (width, height): (u32, u32),
+    decoder: Option<&crate::hw::GpuDecoder>,
+) -> VideoFrames {
+    let frames = VideoFrames::new(&[], fps, width, height, format::Pixel::RGBA, None);
+    match decoder {
+        Some(d) => frames.decode_on(d.clone().without(crate::ffmpeg::codec::Id::H264)),
+        None => frames,
     }
 }
 
@@ -287,6 +327,7 @@ pub struct Prefetch {
     min: i64,
     max: i64,
     shared: Arc<Shared>,
+    decoder: Option<crate::hw::GpuDecoder>,
 }
 
 impl Prefetch {
@@ -294,14 +335,7 @@ impl Prefetch {
     /// for meanwhile, rather than rendering it again.
     pub fn run(self) -> Result<()> {
         crate::init();
-        let mut frames = VideoFrames::new(
-            &[],
-            self.fps,
-            self.width,
-            self.height,
-            format::Pixel::RGBA,
-            None,
-        );
+        let mut frames = frames(self.fps, (self.width, self.height), self.decoder.as_ref());
         let start = window(
             &mut frames,
             &self.piece,
