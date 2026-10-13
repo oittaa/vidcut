@@ -781,9 +781,9 @@ impl VideoFrames {
         self
     }
 
-    /// VA-API's frames ([`decode_on`](Self::decode_on)) are fitted into the
-    /// output on the GPU and given there, for an encoder on their device,
-    /// when they need nothing else: not turned, and in the output's colors
+    /// VA-API's frames ([`decode_on`](Self::decode_on)) are turned upright
+    /// and fitted into the output on the GPU and given there, for an encoder
+    /// on their device, when they need nothing else: in the output's colors
     /// (`color::kept`). The rest are made on the CPU.
     pub fn fit_on_gpu(mut self) -> Self {
         self.fit = Some(GpuFit {
@@ -1204,9 +1204,10 @@ impl VideoFrames {
         } else if changed || src.normalized.is_none() {
             let (frame, _) = src.current.as_ref().expect("have a frame");
             let rotation = src.reader.rotation();
-            // Frames that need nothing but fitting stay on the GPU, for an
-            // encoder on their device. AMD's video processor won't draw 8-bit
-            // frames of a decoder into 10-bit ones: those come down.
+            // Frames that need nothing but turning and fitting stay on the
+            // GPU, for an encoder on their device. AMD's video processor
+            // won't draw 8-bit frames of a decoder into 10-bit ones: those
+            // come down.
             let on_gpu = self.fit.as_mut().filter(|fit| {
                 let fits = match frame.format() {
                     format::Pixel::VAAPI => true,
@@ -1218,7 +1219,6 @@ impl VideoFrames {
                     _ => false,
                 };
                 fits && !src.fit_failed
-                    && rotation == 0
                     && crate::color::kept(crate::color::Source::of(frame), self.target)
             });
             let tried = on_gpu.is_some();
@@ -1227,10 +1227,18 @@ impl VideoFrames {
             let fitted = on_gpu.and_then(|gpu_fit| {
                 let sar = frame.aspect_ratio();
                 let sar = (sar.numerator(), sar.denominator());
-                let fitted = fit(frame.width(), frame.height(), sar, out_w, out_h);
+                // Fitted as shown: a quarter turn swaps the sides and the
+                // pixel aspect.
+                let (w, h) = (frame.width(), frame.height());
+                let fitted = if rotation % 180 == 90 {
+                    fit(h, w, (sar.1, sar.0), out_w, out_h)
+                } else {
+                    fit(w, h, sar, out_w, out_h)
+                };
                 crate::hw::Fitter::fit(
                     &mut gpu_fit.fitter,
                     frame,
+                    rotation,
                     fitted,
                     (out_w, out_h),
                     out_fmt,
