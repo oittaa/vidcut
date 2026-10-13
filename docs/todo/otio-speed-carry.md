@@ -6,4 +6,4 @@ Resolve writes a constant speed as OTIO's standard `LinearTimeWarp` (`time_scala
 
 - Keep the speed on the clip and write it back. The clip shows it (`200%`) and plays at normal speed, as now.
 - Lock what needs speed math: trim, split, slip, slide and J/L rolls refuse the clip (cutting 10 frames off a clip at 200% removes 20 frames of its media). Moving and deleting work.
-- Speed ramps (Resolve 21's retime curves) weren't tried; however Resolve writes them, they are carried and locked the same way.
+- Speed ramps (Resolve 21's retime curves): however Resolve writes them, they are carried and locked the same way.

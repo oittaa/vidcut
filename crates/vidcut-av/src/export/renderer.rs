@@ -1,6 +1,6 @@
 //! Pictures that follow a moving position, such as a paused viewer being
 //! stepped or a trim's two-up, each frame decoded once
-//! (docs/decisions/preview.md §9).
+//! (docs/decisions/preview.md §8).
 //!
 //! Forward, the file and its decoder stay open and the next frame decodes
 //! on from the one before, as every player does. Back, there is nothing to

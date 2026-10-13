@@ -1,221 +1,255 @@
-# Export: decisions from M2
+# Export
 
-**Status:** accepted (M2, October 2026).
-
-**Evidence:**
-- [`crates/vidcut-av/tests/export.rs`](../../crates/vidcut-av/tests/export.rs): frame and sample exactness, A/V offset, rate conversion, all presets, cancellation, memory, and GPU encoders behind `--features vidcut-av/gpu-tests`.
-- [`crates/vidcut/tests/cli.rs`](../../crates/vidcut/tests/cli.rs): export through the CLI.
+Tests: [`crates/vidcut-av/tests/export.rs`](../../crates/vidcut-av/tests/export.rs) and `hdr.rs` (GPU encoders with `--features vidcut-av/gpu-tests`), [`crates/vidcut/tests/cli.rs`](../../crates/vidcut/tests/cli.rs).
 
 ## 1. In-process and streaming
 
-**Where it runs:**
-- Export runs in-process on the FFmpeg libraries (`vidcut-av::export`). There are no ffmpeg CLI subprocesses (a user decision).
-- The work is planned by `vidcut_core::render::flatten`, a pure function, then encoded by the engine.
+- Export runs in-process on the FFmpeg libraries (`vidcut-av::export`), with no ffmpeg subprocesses.
+- `vidcut_core::render::flatten`, a pure function, plans the work. The engine encodes the plan.
 
 **Plan:**
 - Video is a list of pieces: source ranges or black.
 - Audio is one or more lanes of pieces: source ranges or silence.
-- Every boundary is computed with exact integer math. Audio boundaries use `Rational::frame_to_sample` (i128, rounded), so lengths never drift. For example, 29.97 fps at 48 kHz alternates 1601 and 1602 samples per frame.
+- Boundaries use exact integer math. Audio boundaries use `Rational::frame_to_sample` (i128, rounded), so lengths never drift: at 29.97 fps and 48 kHz, frames alternate between 1601 and 1602 samples.
 
 **Engine:**
-- For each output frame, it pulls the next video frame from the current piece's decoder, then exactly the audio samples that frame spans from each lane, and encodes them.
-- Memory stays flat with the segment count (one filter graph for every input was about 155 MB each): each reader (video, and each audio lane) has its current file open, plus the next one while it opens. The test with 400 segments verifies this, in a process of its own.
-- A two-pass export (§5, Passes) runs the video through the encoder twice: the first time to measure, muxing nothing, then as above.
+- For each output frame, it takes the next video frame from the current piece's decoder, then exactly the audio samples that frame spans from each lane, and encodes them.
+- Memory stays flat however many segments there are. Each reader (video, and each audio lane) has only its current file open, plus the next one while that opens. A 400-segment test checks this in a process of its own.
+- A two-pass export (§5, Passes) runs the video through the encoder twice: once to measure, muxing nothing, then as above.
 
 **Starting a piece** (`export/video.rs`, `export/audio.rs`, `export/ahead.rs`):
-- **Same file as the piece before:** the reader reads on. A piece that starts at most 1 s past where the decoder is decodes on to its first frame (or skips samples); anything else seeks the open file. A frame repeated across the cut needs neither.
-- **Another file:** opening it, seeking and decoding up to its first frame (up to a whole GOP, and round trips on a network share) happen on a helper thread while the piece before encodes. The piece then takes the opened source; a failure there is the same error the piece would have hit.
-- **One opener thread per reader for the whole export**, not one per piece. glibc gives every new thread its own malloc arena, and decoder memory freed across many arenas stays resident. Per-piece threads raised the 400-segment test's peak from about 50 MB to 230 MB; one thread keeps it at about 100 MB (the second decoder).
+- **Same file as the previous piece:** the reader reads on. If the piece starts at most 1 s past the decoder's position, it decodes forward to the first frame (audio skips samples). Otherwise it seeks in the open file. A frame repeated across the cut needs neither.
+- **Another file:** a helper thread opens it, seeks, and decodes up to its first frame while the previous piece encodes. The piece then takes the opened source. If opening failed, the piece fails with that error.
+- Each reader has one opener thread for the whole export, not one per piece: glibc gives every new thread its own malloc arena, and decoder memory freed across many arenas stays resident.
 
-**Output:** goes to a hidden `.<name>.part` file, renamed into place on success. Errors and cancellation delete it.
+**Output:** written to a hidden `.<name>.part` file and renamed into place on success. Errors and cancellation delete it.
 
-**Damaged sources:** a packet the decoder rejects as invalid data is skipped, as players and the `ffmpeg` tool skip it, and the export goes on.
-- Video shows the next frame in its place (the sampling rule, §2). Frames that refer to it show what the decoder makes of them, up to the next keyframe.
-- Audio has silence there (§3).
-- Any other decoder error still fails the export. A hundred damaged frames in a row are still skipped; the 101st fails. Audio levels, scene measurements and waveforms decode by the same rule (`decode::decode_stream`).
+**Damaged sources:** a packet the decoder rejects as invalid data is skipped, as players skip it, and the export goes on.
+- Video shows the next frame in its place (the sampling rule, §2). Frames that refer to it show whatever the decoder makes of them, up to the next keyframe.
+- Audio is silent there (§3).
+- Any other decoder error fails the export. So do more than 100 damaged frames in a row (`decode::DAMAGED_IN_A_ROW`).
+- Audio levels, scene measurements and waveforms decode by the same rule (`decode::decode_stream`).
 
 ## 2. Sampling rule (preview and export)
 
 Output frame `k` of a source piece shows the **first source frame whose timestamp is at least `origin + (source_frame + k)/fps − ½ frame`**.
 
-**What it gives:**
-- Sources at the project rate: frame-exact, as verified by barcodes across H.264, HEVC 10-bit, VP9, ProRes, MPEG-TS and VFR fixtures.
-- Other rates: nearest-frame sampling with ties going to the later frame.
-- Example: a 25 fps clip on a 30 fps timeline shows source frames `0 1 2 3 3 4 5 6 7 8 8 9…`, 5 source frames per 6 output frames.
+- Sources at the project rate are frame-exact.
+- At other rates it picks the nearest frame, and ties go to the later frame. A 25 fps clip on a 30 fps timeline shows source frames `0 1 2 3 3 4 5 6 7 8 8 9…`.
+- The preview (the player engine, [preview.md](preview.md)) reads with the same readers, so it shows the export's frames at every rate.
 
-**Stills and image sequences (M9):**
-- A still's one picture is decoded once and shows for every frame of its pieces. It is never sought: an image file has nothing past its picture.
-- A sequence is read by FFmpeg's `image2` demuxer (`decode::Input::Sequence`): picture `k` has timestamp `k` in a time base of one frame at the sequence's rate, so the rule above picks pictures as from a video file, frame for frame at the project's rate and nearest-frame otherwise. The run is the contiguous files from its first number: image2's `start_number_range` is 1, so a missing first file fails the open instead of starting a few numbers later. The last picture lasts its own frame, as a video's does: at a project rate above the sequence's, the last output frame or two sample a time just past it. A run that ends before the sequence's count (a missing file) fails the export instead of repeating the picture before the hole.
-
-**Preview vs export:**
-- The preview (the player engine, [preview.md](preview.md)) reads with these same readers, so it shows the export's frames at every rate.
+**Stills and image sequences:**
+- A still's picture is decoded once and shown on every frame of its pieces. It is never sought: an image file has nothing past its picture.
+- A sequence is read by FFmpeg's `image2` demuxer (`decode::Input::Sequence`). Picture `k` has timestamp `k` in a time base of one frame at the sequence's rate, so the rule above picks pictures as it picks a video file's frames.
+- The run is the contiguous files from the first number. image2's `start_number_range` is 1, so a missing first file fails the open instead of starting at a later number.
+- A run that ends before the sequence's count (a missing file) fails the export instead of repeating the picture before the hole.
+- The last picture lasts one frame at the sequence's rate, like a video's last frame. At a project rate above the sequence's, the last output frame or two sample a time just past it.
 
 ## 3. Audio
 
 **Reading:**
-- Each source piece is read sample-exactly: seek before the start, decode, find the first frame's timestamp, and drop samples up to the start time.
-- Decoders get the packet time base (`pkt_timebase`). Without it, FFmpeg can't shift timestamps past skipped priming samples, and audio was found to start 6.5 ms late (Opus pre-skip, AAC priming).
-- **Gaps follow the timestamps.** A frame that starts more than 2 ms after the one before it ended follows a gap: a packet the file lacks, or one the decoder rejected.
-  - The gap becomes silence, so what follows stays in sync with the picture. Counting samples instead put everything after a lost AAC packet 21 ms early.
-  - The silence is made a second at a time as it is read, so a jump in the timestamps costs no memory.
-  - Audio that starts after a piece's start (a stream that begins after the picture, or a lost first packet) is silent until it does. Starting it at once put it early by that much.
-  - A frame stamped past the file's end has a broken timestamp: it plays in order, with no gap. Otherwise one bad timestamp would silence the rest of the piece.
-  - That end is the container's start plus its duration. The duration is a length. When the start is missing, the length is added to the audio stream's start, not counted from zero; with no start at all, the end counts as unknown (below). Timestamps on an offset clock would otherwise look past the end, a real gap would be dropped, and later audio would shift early.
-  - When the duration is missing or not positive, a jump of more than a second plays in order too. A shorter one is still silence. Filling the whole jump would silence the rest of the piece, a second at a time, for as long as the timestamp says.
-  - Smaller differences are timestamp rounding (Matroska keeps milliseconds).
-  - Audio levels and waveforms count gaps the same way, so silence found in a measurement is where the export has it.
+- Each source piece is read sample-exactly: seek before the start, decode, find the first frame's timestamp, and drop the samples before the start time.
+- Decoders get the packet time base (`pkt_timebase`). FFmpeg needs it to shift timestamps past skipped priming samples (Opus pre-skip, AAC priming).
+
+**Gaps follow the timestamps** (`decode::audio_gap`):
+- A frame that starts more than 2 ms after the previous one ended follows a gap: a packet the file lacks, or one the decoder rejected. Smaller differences are timestamp rounding (Matroska keeps milliseconds).
+- A gap becomes silence, so later audio stays in sync with the picture. The silence is made a second at a time as it is read, so a big jump in the timestamps costs no memory.
+- Audio that starts after the piece starts (a stream that begins after the picture, or a lost first packet) is silent until it begins.
+- A frame stamped past the file's end has a broken timestamp. It plays in order, with no gap, so one bad timestamp doesn't silence the rest of the piece.
+- The file's end (`decode::file_end`) is the container's start plus its duration. Without a container start, the duration is added to the audio stream's start, so timestamps on an offset clock don't look past the end. With no start at all, or no positive duration, the end is unknown.
+- When the end is unknown, a jump of more than 1 s plays in order too. A shorter one is still silence.
+- Audio levels and waveforms count gaps the same way, so silence a measurement finds is where the export has it.
 
 **Conversion and mixing:**
-- libswresample converts to interleaved `f32` at the export rate and layout: mono is upmixed, 5.1 is downmixed. vidcut sizes the output buffers itself; ffmpeg-next's wrapper can truncate when upsampling.
-- **Loudness normalization** (`audio.loudness`): [agents.md](agents.md) §5.
+- libswresample converts to interleaved `f32` at the export's rate and layout: mono is upmixed, 5.1 downmixed. vidcut sizes the output buffers itself, because ffmpeg-next's wrapper can truncate when upsampling.
 - Lanes are summed in Rust, with clip gain applied.
-- **De-click:** 3 ms linear fades at every cut inside a lane (on by default; `declick=false` turns them off). Silence-removal cuts would click without them.
-
-**Verified:** beeps land within 1 ms of where they should across codec boundaries, and output sample counts are exact.
+- **De-click:** 3 ms linear fades at every cut inside a lane, so silence-removal cuts don't click. On by default; `declick=false` turns them off.
+- **Loudness normalization** (`audio.loudness`): [agents.md](agents.md) §5.
 
 ## 4. Video normalization
 
-- Each source frame goes through a libavfilter graph: `scale` (fit inside the output keeping the display aspect, honoring the sample aspect ratio), `pad` (black, centered), `setsar=1`, `format=<encoder pixel format>`.
-- The fit is computed in Rust (`export::video::fit`, unit-tested).
-- **Rotation** (spec D33): a stream's display matrix (phones store portrait video sideways with one) turns the picture upright first: `transpose=clock` or `cclock`, or `hflip,vflip` for 180°. The fit then uses the shown aspect. Thumbnails turn their pictures the same way.
-- **Interlaced sources** (spec D34): `VideoReader` deinterlaces streams flagged interlaced, in decode order and before the sampling rule picks frames, so `bwdif` sees each frame's real neighbors.
-  - It runs `bwdif=mode=send_frame:deint=interlaced`: one frame per frame, with the first field kept, and progressive frames passing through. Frames NVDEC decodes go through `bwdif_cuda` with the same options, on the GPU, the same way (§5).
-  - A seek starts it over, and frames decoded on the way to the target feed it. `bwdif` halves its output time base, so timestamps are rescaled back to the stream's.
-  - Thumbnails aren't deinterlaced: at pool size, combing barely shows.
-- **Color** (`color.rs`, spec D35). Every picture is converted to the output's colors, from its tags or else what players assume (untagged: BT.709 when 1280 wide or over 576 lines, BT.601 otherwise, as players commonly guess and the viewer reads them; HDR untagged in BT.2020):
-  - **SDR into SDR:** `scale` converts the YUV matrix and range to BT.709 limited as it scales. SD sources become BT.709, and full-range sources limited. Converting colors (another matrix or range, YUV to RGB or back), swscale rounds them right only with `accurate_rnd+full_chroma_int`: by default BT.601's white (235) came out 233 in BT.709 and 253 in RGB (FFmpeg 8.0 and 9.0), and the thumbnail cache's JPEG gave white back 2 levels green. Those flags cost an SD picture scaled to 1080 lines 0.3–0.6 ms more on a 9800X3D; only conversions take them.
-  - **HDR into SDR:** `zscale` takes the picture to linear light, with the reference white (203 nits) at 1.0, then to BT.709 primaries. `tonemap=mobius` (transition 0.8, peak 1000 nits) maps it, and `zscale` gives BT.709's transfer.
-    - Everything up to 0.8 of the reference white stays as it was, so SDR-graded material in an HDR file looks as it did, and highlights roll off above it. PQ's 203 nits and HLG's 75% both come out at about 95% white.
-    - `tonemap=hable` maps that white to about 40% gray, so the curve is mobius.
-  - **Into HDR** (PQ or HLG): the same linear light, SDR white at 203 nits (BT.2408), then BT.2020 and the transfer. An SDR source's white lands at PQ code 573 of 1023, exactly 203 nits.
-  - **Output tags:** encoders tag what they write: BT.709, or BT.2020 with PQ or HLG.
-  - **Which output** (spec D44) is decided in `vidcut_core::export::color` before encoding. The session takes each media's transfer and pixel format from the project (`pixel_depth` asks FFmpeg's pixel format descriptor); the engine, given `auto` directly, probes the files. What the encoders can write comes from the encoder cache and the CPU encoders' pixel formats (`encode::abilities`): SDR takes 10 bits only from the encoder an 8-bit export starts with, so `auto` with an 8-bit-only GPU doesn't move a 10-bit SDR export to a slower CPU encoder, while HDR takes any 10-bit encoder. The plan's and the result's `outputs[].color` say what was chosen and why; `notes` carries the tone-mapping note (code `hdr_tone_mapped`) with the `set` overrides that keep the picture HDR.
-  - **zimg detail:** `zscale` needs explicit output primaries when it converts to linear. Untagged frames otherwise give it no path.
-  - **swscale only scales what `zscale` converts:** `scale` is told the source's matrix and range for both sides. Told nothing, it converted the matrix to BT.601 (the graph's source carries no colorspace), and `zscale` then read BT.601 numbers as BT.2020: saturated HDR colors came out up to 70 levels off, and HDR kept as HDR was rewritten in BT.601 under a BT.2020 tag. `zscale` writes the YUV itself, for NVENC's NV12 and P010 in their planar layouts, which swscale only interleaves: left to choose, it wrote RGB, and swscale's conversion to YUV came out over half a level brighter than zimg's.
-  - **Cost at 4K60 with NVENC:** about 31 frames a second converting on the CPU, against 50 for plain SDR. On the GPU (§5) it converts at NVENC's pace: 71 frames a second into 2160p H.264.
-  - **Real footage:** a 4K60 SDR clip exported as PQ and tone-mapped back differs from the original by about 6 of 255 on average.
-- **HDR metadata** (spec D46, `video.hdr_metadata`, `mastering_display`, `max_cll`; `vidcut_av::hdr`, `vidcut_core::export::metadata`). Chosen per file after the dynamic range, from what the project knows of each piece (the probe reads it from the first decoded frame, where FFmpeg puts the container's values unless the bitstream has its own) or, given `auto` directly, from the files.
-  - **Static values** go to the encoder before it opens (`AVCodecContext.decoded_side_data`): libx265 and libsvtav1 write them into the bitstream (x265 with `repeat-headers=1`, at every keyframe rather than only in `hvcC`; SVT-AV1 on every keyframe), NVENC when FFmpeg was built with its SDK 13 headers, and FFmpeg's `ff_encode_preinit` copies them into the stream's parameters, from which MP4/MOV (`mdcv`/`clli`) and Matroska/WebM write them, whichever encoder ran. Every frame carries them too, for VAAPI, which reads them only there. A keyframe packet still without them gets them from vidcut (`hdr::insert_static`: the mastering display and light level SEI, or AV1's HDR_MDCV and HDR_CLL metadata OBUs), as from NVENC in Ubuntu's FFmpeg 8.0, built without SDK 13. x265 also gets `hdr10-opt=1` for PQ.
-  - **Measured light** (`vidcut_av::light`): the frames a piece shows, decoded on the CPU, read as the export converts them (PQ's EOTF; HLG's inverse OETF with 1.2 system gamma on a 1000 cd/m² display; SDR as BT.1886 with white at 203 cd/m², in BT.2020). Each frame gives each channel's peak, of every pixel, so a highlight of one counts; and, from a grid of at most half a million pixels (every pixel of smaller frames), the average of each pixel's brightest channel and that channel's percentiles from a histogram of 0.1 cd/m² bins up to 100 and 1 cd/m² above. A file's measurements are kept with the time spans they cover, under its path, size and time, in memory and in `~/.cache/vidcut/analysis`; a piece measures only the span it shows that isn't there. A piece's MaxCLL and MaxFALL are of the frames the sampling rule (§2) picks there (`light::sampled`, with `export::video::target`): at another rate than the source's, frames it skips don't count, and the last frame shown may lie past the span's end (measuring a span keeps the frame after it). The session measures what an export needs before choosing its metadata (`export::choose_colors` with `Measuring`), reporting progress with `measuring` set; a plan measures nothing. The engine, run directly, measures what is missing without progress. A piece that can't be measured is left out and said (`No light levels: a picture couldn't be measured`).
-    - **The peak, exactly and cheaply:** in a 2×2 block, whose chroma is one, each channel's code is the luma's plus what the chroma adds, and its light rises with it (the transfers rise; SDR's gamut into BT.2020 has no negative coefficient), so the block's brightest luma gives its brightest channels. A block row whose brightest luma with its chroma's extremes can't pass the peak found is skipped, and in the rest, blocks whose luma can't. HDR keeps each channel's highest code and looks its light up once.
-    - **Cost at 4K** (one thread of a Ryzen 7 9800X3D, made-up pictures): 3.7 to 5.5 ms a frame, less than reading the grid alone took before (5 to 8 ms). One made to defeat the skipping, bright gray blocks between dark saturated ones in every row, takes 6.5 ms in HDR and 19 ms in SDR, and SDR noise in saturated colors without white 22 ms (7.7 before): a block whose one channel is high can't be skipped there.
-  - **Each output frame** loses its source's HDR metadata (the CPU's `scale` passes it on, and VAAPI and libvpx would write it) and gets back only the dynamic kinds the file keeps, from the frame it shows (`VideoFrames::with_dynamic`): after scaling, libplacebo or the upload, which drop or change it. The decoded frame's are kept apart as it is decoded: the GPU's scaler takes the frame itself (`av_buffersrc_add_frame` moves it), side data and all.
-  - **HDR10+:** FFmpeg's HEVC and AV1 encoders don't write it (8.0 and 9.0; 9.0's libaom does), so vidcut puts it into their packets (`hdr::insert_hdr10plus`): FFmpeg's `av_dynamic_hdr_plus_to_t35` after the T.35 header Matroska also writes, in a prefix SEI before the first slice (escaped, at the slice's temporal id) or a metadata OBU before the first frame OBU. libvpx-vp9 takes it from the frames, and WebM/Matroska store it as BlockAdditions. Frames without it get it made from their measured light (`hdr::Hdr10Plus`, put on the frame with `av_dynamic_hdr_plus_from_t35`): one window, no target display, each channel's peak, the average and the percentiles at 1, 5, 10, 25, 50, 75, 90, 95 and 99%, no curve. Files whose first frame has none are measured ahead; in the others, a frame without it is measured as it is decoded (`light::Meter`, before the GPU's scaler takes it; NVDEC's frames copied down), so HDR10+ that stops partway through a file goes on where the decoder gives the frames after it none, as libdav1d does for AV1. FFmpeg's HEVC decoder repeats the last HDR10+ on them instead (gotchas), and they keep that one. Black frames get zeros.
-  - **Dolby Vision:** libx265 and libsvtav1 make an RPU from each frame's `AV_FRAME_DATA_DOVI_METADATA` when `dolbyvision=1` (profile 8 for HEVC with the base layer's compatibility from its tags, 10 for AV1); a frame without one is an error, so every picture must have it, and a black frame takes the RPU of the last frame shown (`VideoFrames` keeps it). x265 needs a VBV for it: peaks of 1.5 times a target bitrate, or 160 Mb/s at constant quality. MP4 writes `dvcC` only with `strict=unofficial`.
-  - **Structs:** ffmpeg-sys-next doesn't bind `mastering_display_metadata.h`, so `hdr.rs` mirrors the two structs' fields and takes FFmpeg's allocators' sizes (they may grow). HDR10+ and Dolby Vision stay FFmpeg's opaque buffers, copied by reference.
-  - **Tests** (`vidcut-av/tests/hdr.rs`): fixtures with HDR10 values and HDR10+ on every frame (`FixtureSpec::hdr_meta`, written as an export writes them) read back from the container, the bitstream alone and the probe; exports through x265 (MP4, MKV), SVT-AV1 (MP4, WebM) and VP9 (WebM) keep the values and each frame's HDR10+; mixed sources give the widest values, the frames without HDR10+ get it made, black frames zeros, and in an AV1 file whose HDR10+ stops partway (`HdrMeta::hdr10plus_frames`), the frames after it; SDR none. Light is measured where a PQ export shows it (SDR white at 203 cd/m² in PQ, HLG and SDR files), only over the span asked for; HLG into PQ and `max_cll=measure` write the measured levels. The manifest's real clips: HDR10 values through x265, 4K AV1 with HDR10+ scaled down, Dolby Vision 8.4 into Matroska and MP4, a gap after the clip taking its RPU, one before it leaving Dolby Vision out; the AV1 clip has no light levels, so they are measured. With `gpu-tests`, hevc_nvenc, av1_nvenc and hevc_vaapi (where the machine has them) write the static values into the bitstream at every keyframe and the container, keep each frame's HDR10+ scaled on the GPU, and with an SDR clip that libplacebo converts, the widest values and HDR10+ made for the SDR frames.
+- Each source frame goes through a libavfilter graph: `scale` (fit inside the output, keeping the display aspect and honoring the sample aspect ratio), `pad` (black, centered), `setsar=1`, `format=<encoder pixel format>`.
+- The fit is computed in Rust (`export::video::fit`).
+
+**Rotation** (spec D33): the stream's display matrix turns the picture upright first, with `transpose=clock` or `cclock`, or `hflip,vflip` for 180°. The fit then uses the upright aspect. Thumbnails turn their pictures the same way.
+
+**Interlaced sources** (spec D34):
+- `VideoReader` deinterlaces streams flagged interlaced with `bwdif=mode=send_frame:deint=interlaced`: one frame out per frame in, the first field kept, progressive frames passed through. NVDEC's frames go through `bwdif_cuda` with the same options (§5).
+- It runs in decode order, before the sampling rule picks frames, so `bwdif` sees each frame's real neighbors.
+- A seek restarts it, and the frames decoded on the way to the target feed it. `bwdif` halves its output time base, so timestamps are rescaled back to the stream's.
+- Thumbnails aren't deinterlaced: at pool size, combing barely shows.
+
+**Color** (`color.rs`, spec D35): every picture is converted to the output's colors. A picture's colors come from its tags. Untagged pictures get what players assume: BT.709 when 1280 wide or over 576 lines, BT.601 otherwise, and BT.2020 for HDR.
+- **SDR into SDR:** `scale` converts the matrix and range to BT.709 limited range as it scales.
+  - When swscale converts colors (another matrix or range, YUV to RGB or back), it gets `accurate_rnd+full_chroma_int` (`color::CONVERT`): with its default flags it rounds colors low, enough to move white by a level or two. The flags cost time, so pictures it only resamples go without them.
+- **HDR into SDR:** `zscale` converts to linear light with the reference white (203 nits) at 1.0, then to BT.709 primaries. `tonemap=mobius` (transition 0.8, peak 1000 nits) maps the result, and `zscale` applies BT.709's transfer.
+  - Everything up to 0.8 of the reference white stays as it was, so SDR-graded material in an HDR file looks as it did. Highlights roll off above it. PQ's 203 nits and HLG's 75% both come out at about 95% white.
+  - The curve is mobius because `tonemap=hable` maps the reference white to a dark gray.
+- **Into HDR** (PQ or HLG): the same linear light, with SDR white at 203 nits (BT.2408), then BT.2020 and the output's transfer. SDR white lands at PQ code 573 of 1023.
+- **Output tags:** encoders tag what they write: BT.709, or BT.2020 with PQ or HLG.
+- **zimg:** `zscale` needs explicit output primaries when it converts to linear light. For untagged frames it otherwise finds no path.
+- **swscale only scales what `zscale` converts:** `scale` is told the source's matrix and range for both input and output, so it leaves them alone. Told nothing, it would convert to BT.601, because the graph's source carries no colorspace. `zscale` writes the YUV itself, in planar form even for NVENC's NV12 and P010, which swscale then only interleaves: swscale's own RGB-to-YUV conversion comes out brighter than zimg's.
+
+**Which output** (spec D44) is decided in `vidcut_core::export::color` before encoding:
+- The session takes each media's transfer and pixel format from the project (`pixel_depth` reads FFmpeg's pixel format descriptor). The engine, given `auto` directly, probes the files.
+- What the encoders can write comes from the encoder cache and the CPU encoders' pixel formats (`encode::abilities`).
+- What the plan and result report: [cli.md](../cli.md).
+
+**HDR metadata** (spec D46; `vidcut_av::hdr`, `vidcut_core::export::metadata`) is chosen per file, after the dynamic range. The sources' values come from the project, or from the files when the engine is given `auto` directly. The probe reads them from the first decoded frame, where FFmpeg puts the container's values unless the bitstream has its own.
+
+*Static values:*
+- They go to the encoder before it opens (`AVCodecContext.decoded_side_data`).
+- libx265 writes them into the bitstream at every keyframe (`repeat-headers=1`), not only in `hvcC`. libsvtav1 writes them on every keyframe. NVENC writes them when FFmpeg was built with SDK 13 headers.
+- FFmpeg's `ff_encode_preinit` copies them into the stream's parameters, so MP4/MOV (`mdcv`/`clli`) and Matroska/WebM write them whatever the encoder.
+- Every frame carries them too, for VAAPI, which reads them only there.
+- A keyframe packet still without them gets them from vidcut (`hdr::insert_static`): the mastering display and light level SEI, or AV1's HDR_MDCV and HDR_CLL metadata OBUs. This covers NVENC in FFmpeg builds without SDK 13, such as Ubuntu's FFmpeg 8.0.
+- x265 also gets `hdr10-opt=1` for PQ.
+
+*Measured light* (`vidcut_av::light`):
+- Light is measured on the frames a piece shows, decoded on the CPU and read as the export converts them: PQ's EOTF; HLG's inverse OETF with 1.2 system gamma on a 1000 cd/m² display; SDR as BT.1886 with white at 203 cd/m², in BT.2020.
+- Each frame gives each channel's peak over every pixel, so a one-pixel highlight counts.
+- From a grid of at most half a million pixels (every pixel of smaller frames), each frame also gives the average of each pixel's brightest channel, and that channel's percentiles from a histogram with 0.1 cd/m² bins up to 100 cd/m² and 1 cd/m² bins above.
+- A piece's MaxCLL and MaxFALL count only the frames the sampling rule (§2) picks (`light::sampled`, with `export::video::target`). At another rate, skipped frames don't count, and the last frame shown may lie past the span's end (measuring a span keeps the frame after it).
+- Results are kept per file with the time spans they cover, keyed by path, size and time, in memory and in `~/.cache/vidcut/analysis`. A piece measures only the part of its span that isn't there yet.
+- The session measures what an export needs before choosing its metadata (`export::choose_colors` with `Measuring`) and reports progress with `measuring` set. A plan measures nothing. The engine, run directly, measures what is missing without progress.
+- A piece that can't be measured is left out, and the result says so (`No light levels: a picture couldn't be measured`).
+- **Finding the peak cheaply:** the four pixels of a 2×2 block share one chroma sample, so each channel's code is the luma plus what the chroma adds, and its light rises with it (the transfers rise, and SDR's gamut into BT.2020 has no negative coefficient). So the block's brightest luma gives its brightest channels. A block row is skipped when its brightest luma, with its chroma's extremes, can't beat the peak found so far. In the other rows, each block whose luma can't beat it is skipped. HDR keeps each channel's highest code and looks up its light once.
+
+*Dynamic metadata on each output frame:*
+- An output frame drops its source's HDR metadata (the CPU's `scale` passes it on, and VAAPI and libvpx would write it).
+- It gets back only the dynamic kinds the file keeps, from the frame it shows (`VideoFrames::with_dynamic`), after scaling, libplacebo or the upload, which drop or change them.
+- The decoded frame's side data is set aside as it is decoded, because the GPU's scaler takes the frame itself (`av_buffersrc_add_frame` moves it).
+
+*HDR10+:*
+- FFmpeg's HEVC and AV1 encoders don't write it (libaom does in FFmpeg 9.0), so vidcut puts it into their packets (`hdr::insert_hdr10plus`): `av_dynamic_hdr_plus_to_t35` after the T.35 header Matroska also writes, in a prefix SEI before the first slice (escaped, at the slice's temporal id) or in a metadata OBU before the first frame OBU.
+- libvpx-vp9 takes it from the frames, and WebM/Matroska store it as BlockAdditions.
+- Frames without it get it made from their measured light (`hdr::Hdr10Plus`, attached with `av_dynamic_hdr_plus_from_t35`): one window, no target display, each channel's peak, the average, the percentiles at 1, 5, 10, 25, 50, 75, 90, 95 and 99%, and no curve.
+- Files whose first frame has none are measured ahead. In other files, a frame without it is measured as it is decoded (`light::Meter`, before the GPU's scaler takes it; NVDEC's frames are copied down). So when HDR10+ stops partway through a file, the frames after it get HDR10+ made, where the decoder gives them none, as libdav1d does for AV1. FFmpeg's HEVC decoder repeats the last HDR10+ on them instead ([gotchas.md](../gotchas.md)), and they keep that.
+- Black frames get zeros.
+
+*Dolby Vision:*
+- libx265 and libsvtav1 make an RPU from each frame's `AV_FRAME_DATA_DOVI_METADATA` when `dolbyvision=1`: profile 8 for HEVC (the base layer's compatibility from its tags), 10 for AV1.
+- A frame without one is an error, so every picture must have it. A black frame takes the RPU of the last frame shown (`VideoFrames` keeps it).
+- x265 needs a VBV for it: peaks of 1.5 times a target bitrate, or 160 Mb/s at constant quality.
+- MP4 writes `dvcC` only with `strict=unofficial`.
+
+*FFmpeg structs:* ffmpeg-sys-next doesn't bind `mastering_display_metadata.h`, so `hdr.rs` mirrors the two structs' fields and takes their sizes from FFmpeg's allocators (they may grow). HDR10+ and Dolby Vision stay FFmpeg's opaque buffers, copied by reference.
 
 ## 5. Encoders
 
 **Settings and presets:**
-- Settings are pure data in `vidcut_core::export`: container, video (codec, encoder, quality or bitrate, speed, profile, bit depth, size, dynamic range) and audio (codec, bitrate, rate, channels). The dynamic range and an unset depth are chosen per file (§4, spec D44); presets leave them to it, except TikTok's, which asks for SDR.
-- Built-in presets follow Resolve's Quick Export models: H.264/H.265 Master, ProRes 422 HQ, YouTube 720p/1080p/2160p, Vimeo, TikTok. There are also AV1, VP9, DNxHR HQ and five audio-only presets. The Quick Export row shows H.265 Master, AV1, ProRes 422 HQ, YouTube 1080p and 2160p, and TikTok (deviation X3).
-- User presets are TOML files in `~/.config/vidcut/presets/`.
-- `--set key=value` overrides any field.
+- Settings are plain data in `vidcut_core::export`: container, video (codec, encoder, quality or bitrate, speed, profile, bit depth, size, dynamic range) and audio (codec, bitrate, rate, channels).
+- The dynamic range and an unset bit depth are chosen per file (§4, spec D44). Presets leave them to that, except TikTok's, which asks for SDR.
+- Built-in presets follow Resolve's Quick Export models (spec §10): H.264/H.265 Master, ProRes 422 HQ, YouTube 720p/1080p/2160p, Vimeo, TikTok. There are also AV1, VP9, DNxHR HQ and five audio-only presets. The Quick Export row shows H.265 Master, AV1, ProRes 422 HQ, YouTube 1080p and 2160p, and TikTok (deviation X3).
+- User presets are TOML files in `~/.config/vidcut/presets/`. `--set key=value` overrides any field.
 
-**`auto` encoder:**
-- Picks NVENC if a test encode works; then the other GPUs' own: AMF (AMD) and QSV (Intel) on Windows, VAAPI (AMD and Intel alike) on Linux; then the CPU encoder (`encode::AUTO_GPU`). On Linux QSV is there by name: it needs Intel's VPL GPU runtime (`libmfx-gen1.2` on Ubuntu), and VAAPI serves the same GPUs without it. AMF on Linux needs AMD's closed driver, so vidcut leaves it out there.
-- An export takes the first of these that opens (`encode::video_encoders`). A GPU encoder that tested fine can still fail to open when an export starts: NVENC allows a few sessions at a time, and other exports may hold them. The report names the encoder used; the plan (`--dry-run`) names the first choice.
-- An encoder asked for by name (`nvenc`, `vaapi`, `amf`, `qsv`, `cpu`) fails the export if it won't open.
-- An explicit `video.speed` goes to the encoder an export starts with. Encoders don't share speed names (x264's, NVENC's p1–p7, AMF's `speed` to `quality`, QSV's `veryfast` to `veryslow`, SVT-AV1's numbers), so one it moves on to uses its own default.
-- If none opens, the error says why each didn't.
-- Detection test-encodes every GPU encoder × pixel format × GPU, about 1 s: VAAPI on each render node; QSV on each of Intel's (its render nodes on Linux, its adapters on Windows, as the device QSV runs on top of: `child_device`, as FFmpeg reads QSV's own device string as the implementation to load); AMF on each of AMD's adapters. It is cached in `~/.cache/vidcut/encoders.json`, keyed by FFmpeg versions, the system, the GPUs with their drivers, and what detection tests (`encode::DETECTS`).
+**Choosing the encoder:**
+- `auto` tries NVENC, then the other GPUs' own encoders, then the CPU's (`encode::AUTO_GPU`). The other GPUs' encoders are AMF (AMD) and QSV (Intel) on Windows, and VAAPI (AMD and Intel) on Linux.
+- On Linux, QSV is used only when asked for by name: it needs Intel's VPL GPU runtime (`libmfx-gen1.2` on Ubuntu), and VAAPI serves the same GPUs without it. vidcut doesn't use AMF on Linux, where it needs AMD's closed driver.
+- An export takes the first of these that opens (`encode::video_encoders`). A GPU encoder that passed detection can still fail to open: NVENC allows only a few sessions at a time, and other exports may hold them. The report names the encoder used; the plan (`--dry-run`) names the first choice.
+- An encoder asked for by name (`nvenc`, `vaapi`, `amf`, `qsv`, `cpu`) fails the export if it won't open. If none opens, the error says why each didn't.
+- An explicit `video.speed` goes only to the encoder the export starts with. Encoders don't share speed names (x264's presets, NVENC's p1–p7, AMF's `speed` to `quality`, QSV's `veryfast` to `veryslow`, SVT-AV1's numbers), so an encoder the export falls back to uses its own default.
+- **Detection** test-encodes every GPU encoder × pixel format × GPU: VAAPI on each render node; QSV on each Intel GPU (its render nodes on Linux, its adapters on Windows, passed as `child_device` because FFmpeg reads QSV's own device string as the implementation to load); AMF on each AMD adapter. The result is cached in `~/.cache/vidcut/encoders.json`, keyed by the FFmpeg versions, the system, the GPUs and their drivers, and what detection tests (`encode::DETECTS`).
 
-**AMD's and Intel's encoders** take frames from memory, NV12 or P010, each on a device on its GPU: QSV on a device of its own there (a VA-API one beneath it on Linux), AMF on a Direct3D 11 device on its adapter; where a decoder on the same GPU decodes the pieces, VAAPI and AMF take its frames on its device instead (§5). What each makes of the settings:
-- **AMF:** one quantizer for every frame (`rc=cqp`, as VAAPI's; its quality-led `qvbr` counts the other way and stays under a bitrate), or a bitrate with peaks half again as high (`vbr_peak`); preset `quality`; H.264 High (baseline is its `constrained_baseline`), HEVC Main or Main 10. H.264 from the Radeon iGPU below says only its matrix (BT.709) in the bitstream, primaries and transfer unspecified, though FFmpeg hands AMF all three: players take such HD as BT.709.
-- **QSV:** its intelligent constant quality (`global_quality`, 1–51 for every codec), or a bitrate with peaks half again as high; preset `medium`; profiles as AMF's.
-- **AV1's quality** is on the 0–63 scale of SVT-AV1's CRF and NVENC's CQ: VAAPI and AMF take it as a quantizer index (0–255, VAAPI's in `global_quality`: its AV1 has no `qp`), QSV scaled to its 1–51.
-- **HDR:** the static values come from each frame (`hdr::attach`), and HEVC's carry them at every keyframe and in the container; HDR10+ goes into their packets as into the others' (§4).
-- FFmpeg drops an option an encoder doesn't have without a word: `options_are_the_encoders_own` checks every option vidcut sets on every encoder this FFmpeg has.
+**AMD's and Intel's encoders** take NV12 or P010 frames from memory, each on a device on its GPU: QSV on its own device (over a VA-API device on Linux), AMF on a Direct3D 11 device on its adapter. Where a decoder on the same GPU decodes the pieces, VAAPI and AMF take that decoder's frames on its device instead (below).
+- **AMF:** a constant quantizer (`rc=cqp`, as VAAPI uses; AMF's quality-led `qvbr` counts the other way and stays under a bitrate), or a bitrate with peaks 1.5 times as high (`vbr_peak`). Preset `quality`. H.264 High (baseline is its `constrained_baseline`), HEVC Main or Main 10.
+- AMF's H.264 can leave the primaries and transfer unspecified in the bitstream and write only the matrix (BT.709), though FFmpeg gives it all three. Players take such HD as BT.709.
+- **QSV:** its intelligent constant quality (`global_quality`, 1–51 for every codec), or a bitrate with peaks 1.5 times as high. Preset `medium`. Profiles as AMF's.
+- **AV1 quality** is on the 0–63 scale of SVT-AV1's CRF and NVENC's CQ. VAAPI and AMF take it as a quantizer index (0–255; VAAPI's in `global_quality`, since its AV1 has no `qp`). QSV scales it to 1–51.
+- **HDR:** the static values come from each frame (`hdr::attach`), and their HEVC carries them at every keyframe and in the container. HDR10+ goes into their packets as for the other encoders (§4).
+- FFmpeg silently drops an option an encoder doesn't have. The test `options_are_the_encoders_own` checks every option vidcut sets on every encoder this FFmpeg has.
 
-**On the dev machines:**
-- NVENC (RTX 4080 SUPER): H.264, HEVC and AV1, in 8 and 10 bit.
-- AMF (Windows, the Ryzen 7 9800X3D's Radeon iGPU): H.264, and HEVC in 8 and 10 bit; no AV1.
-- VAAPI: H.264 and HEVC on `renderD129` (AMD). Not on `renderD128` (the NVIDIA node), and no VAAPI AV1.
-- VAAPI and QSV on an Intel N150 (Linux): H.264, and HEVC in 8 and 10 bit; no AV1.
-- Every working configuration exports frame-exactly (`gpu-tests`): NVENC's and AMF's on Windows, VAAPI's and QSV's on the N150. hevc_amf, hevc_qsv and hevc_vaapi write HDR10's values on every frame of the HDR test (`hdr.rs`).
+**GPU switches:** all GPU work, the GPU encoders included, needs the preferences' `gpu.acceleration` on (the default). When it is off, `export.plan` and `export.start` set every video encoder choice to the CPU (`export::as_preferred`): a preset naming NVENC still exports, in software, and proxies use x264 or SVT-AV1.
 
-**Frames on the GPU (NVENC):** all of it, and the GPU encoders themselves, only while the preferences' `gpu.acceleration` is on (the default). Off, `export.plan` and `export.start` set every video encoder choice to the CPU (`export::as_preferred`), so a preset naming NVENC still exports, in software, and proxies take x264 or SVT-AV1.
-- NVENC is opened on frames in GPU memory (`cuda::CudaFrames`, NV12, or P010 for 10-bit output). Each source piece that the GPU shows as the CPU would decodes on NVDEC and scales with `scale_cuda` (`VideoFrames::with_gpu`); frames are picked by the sampling rule as on the CPU, so other rates repeat or skip GPU frames the same way. `VideoReader::open_cuda` uses a decoder that can use NVDEC, FFmpeg's own: FFmpeg would pick libdav1d for AV1, which decodes on the CPU only. `scale_cuda` samples a fixed few pixels per output pixel, so a big shrink aliases. It halves with bilinear steps first, each the average of four pixels, then scales with bicubic: a 4K-to-960 picture that skipped the halving came out sharper than the CPU's and 33% larger; halved first, 7% larger.
-- **Streams:** each export, and each piece of one (the next opens ahead on another thread), works on a CUDA stream of its own (`CudaDevice::with_own_stream`), and the encoder takes a frame once its stream's work is done. On the context's default stream everyone's work runs in one line: a wait there for Vulkan holds up every other user's decoding and encoding, and two waiting for Vulkan work queued behind the other's never go on.
-- **A piece qualifies** when it is a video file NVDEC decodes. Interlaced ones are deinterlaced by the reader with `bwdif_cuda`, in decode order and before the sampling rule picks frames, as the CPU reader runs `bwdif` (§4): a deinterlacer behind the picking would see gaps at other rates and after seeks. bwdif_cuda's pictures differ from bwdif's by its rounding only, the frames being the same. A picture of another aspect is fitted and centered on black with `pad_cuda`, as the CPU pads, at even offsets as FFmpeg's `pad` rounds them for 4:2:0 (an odd one put the GPU's pictures a row lower); FFmpeg's `pad_cuda` takes no 10-bit frames, so in 10-bit output libplacebo places it (below). The source builds its GPU filters when it opens, and makes its first picture there too (on the thread that opens the next piece ahead), and takes the CPU if they won't build. Other pieces, stills and sequences decode and normalize on the CPU (§4), and black frames are made there; they are uploaded to the encoder's frames. Software encoders and QSV take frames from the CPU; VAAPI and AMF take their decoder's on the GPU where they can (below).
-- **Turned pictures** (spec D33: phone video), **other matrices** (BT.601: SD, and VP8, which always signals BT.601; BT.2020 SDR) **and full range** go through libplacebo on Vulkan first (`cuda::CudaPictures`), at the source's size, turned upright with its `rotate` (clockwise, as the display matrix says): the CUDA filters neither turn pictures nor change their colors. In 10-bit output a picture of another aspect is also scaled and placed by libplacebo, in one pass with the rest: it can't clear a border (it clears with a copy FFmpeg's Vulkan frames don't allow), so it has two inputs, a black frame of the output's size under the picture, and nothing is left to clear. The Vulkan device is derived from the CUDA device once (a quarter of a second), and both are one for the whole process, shared by every export and proxy and never closed (`CudaDevice::open`): the Vulkan loader crashed when two exports made Vulkan instances at the same time; each frame is copied CUDA → Vulkan, converted, and copied back, never leaving the GPU (Vulkan → CUDA mapping isn't supported, copies are). The input is tagged with the matrix and range the CPU reads (`color::gpu_color`, untagged SD as BT.601) and with the output's primaries and transfer, so only the matrix and range change, as swscale converts. On colored stripes libplacebo is within the encoder's rounding of the exact BT.601 → BT.709 numbers, and swscale, with its accurate flags (§4), within a level.
-- **HDR** (HDR sources into SDR, and anything into PQ or HLG) goes through libplacebo too, with the CPU's math (§4) in a user shader (`color::gpu_color`): PQ's EOTF or HLG's inverse OETF and 1.2 gamma channel by channel (zimg's approximate path, which `zscale` takes), linear light with the reference white at 1.0, the gamut matrix, the mobius curve on the brightest channel, negative channels black, and the output's transfer. libplacebo is told the picture is already in the output's primaries and transfer, so it only reads the matrix, scales, places and writes. The shader hooks the scaled picture, as the CPU scales before converting; libplacebo scales and places every HDR picture (the CUDA filters would scale converted pictures). HDR kept in the same transfer passes through the CUDA filters, as the CPU leaves it.
-  - **libplacebo's own conversion can't give the CPU's curve:** measured on 640 patches (a gray ramp and 512 colors, PQ into SDR), its `mobius` with knee 0.8, peak detection and contrast recovery off and the 1000-nit peak put mid-grays up to 10 levels lower, as it lifts black for an SDR display's 1000:1 contrast (BT.1886 with a black level, which no option sets); HLG grays up to 6 levels off; and colors outside BT.709 up to 118 levels off, as it maps the curve on intensity (IPT) rather than the brightest channel and clips nothing, leaving them outside the video range.
-  - **Half floats:** libplacebo keeps a picture between passes in half floats, and the GPU stores them rounded toward zero: up to almost half a 10-bit code low on PQ. The shader takes the middle of the step a value it reads came from, and moves what it writes half a step up. Without that, the GPU's pictures are half a level darker than the CPU's.
-  - **Agreement**, on the patches through NVENC against the CPU's lossless export: PQ into SDR grays within a level (on average 0.05 low in 8 bits, 0.2 in 10, where NVENC drops P016's low bits rather than rounding), colors within 1.2 levels but one: a cyan outside BT.709 at 1500 nits, whose clipped channel lands near zero, differs by 6 levels in Cr, the half floats' rounding magnified by the gamut matrix. HLG into SDR within 1.2, SDR into PQ and HLG and PQ into HLG within 0.7, PQ kept as PQ exact. On the 4K footage below, a frame's luma differs by 0.24 on average with the CPU's (2 or more in 0.13% of pixels), the same frame through both by FFmpeg's tools.
-- **libplacebo's quirks:** FFmpeg's filter allocated without its Vulkan device converts on the CPU in front of it, so it is made by hand with the device set before it starts. It gives out a frame's picture only once it has the next frame; an export wants each picture at once, so a filler frame follows each frame and its pictures are dropped (proxies skip it: half the rendering). Each black frame it is given, filler or the background under a placed picture, is one it doesn't hold already (`cuda::Blacks`, refilled as frames come back): it takes a Vulkan frame at the semaphore value the frame says and gives it back at the next, so the same frame held twice ends a step ahead of anything the GPU signals, and FFmpeg, freeing it, waits for that forever (exports hung so on Windows, a third of the time). Its frame queue takes a frame within a millisecond of the render time as that time's frame, so the timestamps it sees are counts a second apart. A Vulkan device derived from CUDA keeps each plane of a frame in its own image, and libplacebo misses P010's 6-bit shift in such planes: it reads them 64 times too bright and writes blended pictures a 64th as bright. It gets 10-bit frames as P016, laid out the same with all 16 bits used, so they copy as they are; NVENC reads the top 10 bits. Its blue-noise dither lifts black by most of a 10-bit level, so it rounds instead. A frame's side data is dropped before it goes in: the filter copies the frame's properties to its picture and libplacebo turns both by their display matrices, so the turns cancel, and it would tone-map by HDR metadata and read ICC profiles, which the CPU ignores. The output's HDR metadata is attached after (§4). Compiled shaders are kept in `~/.cache/vidcut/shaders` (`cuda::keep_shaders_in`): a new converter starts in 20 ms instead of 0.1 s.
-- **Black frames** (gaps, black pieces) in P010 keep their 10 bits high: written low, they are a green-tinted black below black.
-- **Measured** on the GPU path (CPU-seconds are the process's; PSNR is against the CPU's export): 60 s of VP8 (BT.601) 1920×800, 1438 of 1438 frames on the GPU, 3.7 CPU-seconds, wall 5 s. 60 s of 1080p30 H.264 turned a quarter: 7.1 s, 3.6 CPU-seconds, PSNR 48 dB. 30 s of 4K60 H.264 turned, to 2160×3840: 25 s, 3.3 CPU-seconds. Into 1080p 10-bit HEVC with black bars: 60 s of 1280×534 H.264, 4.3 s, 3.0 CPU-seconds, PSNR 55 dB; the VP8, 5.3 s, 4.2 CPU-seconds. 60 s of 4K60 10-bit AV1 to 1080p H.264: 16.4 s, 3.3 CPU-seconds; to 2160p: 51.9 s, 3.9 CPU-seconds, NVENC's default preset (p5) setting the pace. 1080p H.264 sources are NVENC-bound, 3.2 CPU-seconds. HDR, 30 s of the 4K60 clip made PQ and HLG with SDR white at 1000 nits (most of the picture above the knee): PQ into 1080p H.264 7.1 s, 2.0 CPU-seconds, PSNR 48.5 dB; into 2160p 25.3 s, 3.4 CPU-seconds, 51.0 dB; HLG into 1080p 7.1 s, 2.1 CPU-seconds, 48.5 dB. Into HDR, 10-bit HEVC at 2160p: the SDR clip into PQ 19.6 s, 2.5 CPU-seconds, 56.5 dB; PQ into HLG 17.8 s, 2.6 CPU-seconds, 55.6 dB. 60 s of 1080i (made from the 4K60 clip, top field first) into 1080p H.264: 6.7 s, 0.8 CPU-seconds, PSNR 51.5 dB (the median frame 52.4, 3 of 1800 under 45).
-- **Tests:** `tests/export.rs` (`gpu-tests`) exports a plan of 720p H.264, 10-bit HEVC, 10-bit AV1, 60 and 24 fps sources, a seek back, black, an SD (BT.601) piece, pieces stored turned 90°, 180° and 270° (one in 10 bits), and 4:3 and 2.4:1 pieces that need black bars through NVENC in 8 and 10 bits: every frame's barcode is the CPU export's, every piece's frames but black were made on the GPU, and black is video-range black. Interlaced pieces among them (25 fps into 30, a seek back, and SD, which libplacebo converts after deinterlacing) pick the CPU's frames and don't comb. Colored 4:3 SD pictures (`Picture::Colors`) in 8 and 10 bits check the BT.601 conversion into both depths: each stripe within 1.5 levels of the exact numbers and of the CPU's (the CPU's within a level of them), and the black beside it. HDR: PQ, HLG stored turned, 4:3 PQ, colored PQ, SDR and colored SD pieces into 8 and 10-bit SDR, PQ and HLG: every frame but black made on the GPU, every barcode the CPU export's, the barcode cells' black and white and the stripes within two levels of the CPU's. Without the GPU, `hdr_colors_keep_their_matrix` checks PQ stripes into SDR against the math and kept as PQ against the source, and NV12 and P010 frames against the planar ones.
+GPU tests (`gpu-tests`) compare every frame with the CPU's export: `gpu_decoded_exports_match_the_cpu`, `vaapi_exports_keep_frames_on_the_gpu`, `amf_exports_keep_frames_on_the_gpu` and the NVENC tests in `tests/export.rs`.
+
+**Frames on the GPU (NVENC):**
+- NVENC opens on frames in GPU memory (`cuda::CudaFrames`: NV12, or P010 for 10-bit output).
+- **A piece qualifies** when it is a video file NVDEC decodes. It decodes on NVDEC and scales with `scale_cuda` (`VideoFrames::with_gpu`). The sampling rule picks its frames as on the CPU, so other rates repeat or skip GPU frames the same way.
+- `VideoReader::open_cuda` uses FFmpeg's own decoder, which can use NVDEC. For AV1, FFmpeg would otherwise pick libdav1d, which decodes on the CPU only.
+- **Halving:** `scale_cuda` samples only a few pixels per output pixel, so a big shrink would alias. It first halves in bilinear steps (each output pixel the average of four), then scales with bicubic.
+- **Interlaced** pieces are deinterlaced by the reader with `bwdif_cuda`, in decode order and before the sampling rule picks frames, as the CPU reader runs `bwdif` (§4). A deinterlacer after the picking would see gaps at other rates and after seeks.
+- **Another aspect:** the picture is fitted and centered on black with `pad_cuda`, at even offsets, as FFmpeg's `pad` rounds them for 4:2:0. `pad_cuda` takes no 10-bit frames, so in 10-bit output libplacebo places the picture (below).
+- The source builds its GPU filters and makes its first picture when it opens (on the thread that opens the next piece ahead). If the filters won't build, the piece uses the CPU.
+- Other pieces, stills and sequences decode and normalize on the CPU (§4), and black frames are made there. They are uploaded into the encoder's frames.
+- Software encoders and QSV take frames from the CPU. VAAPI and AMF take their decoder's frames on the GPU where they can (below).
+- **CUDA streams:** each export, and each piece in it (the next piece opens ahead on another thread), works on its own CUDA stream (`CudaDevice::with_own_stream`). The encoder takes a frame once its stream's work is done. On the context's default stream, all work runs in one line: a wait for Vulkan there holds up everyone's decoding and encoding, and two users each waiting for Vulkan work queued behind the other's deadlock.
+- **Black frames** (gaps, black pieces) in P010 keep their 10 bits in the high bits. Written low, they are a green-tinted black below black.
 - The report counts the frames made on the GPU (`gpu_frames`).
 
-**Decoded on the GPU, made on the CPU** (`export::run_decoding_on`): while `gpu.acceleration` and `gpu.decoding` are on, an export's pieces decode on the GPU the viewer decodes on (`GpuDecoder::best`: NVDEC, VA-API or Direct3D 11), on a CUDA stream or device of their own (`GpuDecoder::own`, so its work doesn't wait in line with playback's, nor playback's with it), where it decodes their streams, whatever the encoder; pieces NVENC takes stay on the GPU as above. The frames come down to be made on the CPU, shrunk on the GPU first to the size they are shown at when that is smaller (`hw::Shrinker`: `scale_cuda` in the halving steps above, `scale_vaapi`, or the video processor, preview.md §6), and AMD's and Intel's encoders take them back up, but where they stay on the GPU throughout (VAAPI, below). The report counts them (`gpu_decoded`).
-- **Measured** exporting 4K60 10-bit HEVC, the noise clip and the barcode fixture (preview.md §3), into 1080p H.264:
+**libplacebo on Vulkan** (`cuda::CudaPictures`): the CUDA filters can't turn pictures or change their colors, so these pictures go through libplacebo first, at the source's size:
+- **Turned pictures** (spec D33, phone video): turned upright with libplacebo's `rotate` (clockwise, as the display matrix says).
+- **Other matrices** (BT.601: SD, and VP8, which always signals BT.601; BT.2020 SDR) **and full range:** the input is tagged with the matrix and range the CPU reads (`color::gpu_color`; untagged SD as BT.601) and with the output's primaries and transfer, so only the matrix and range change, as when swscale converts them.
+- **10-bit output with another aspect:** libplacebo also scales and places the picture, in the same pass. It can't clear a border (it clears with a copy that FFmpeg's Vulkan frames don't allow), so it gets two inputs: a black frame of the output's size, and the picture over it.
+- **HDR** (HDR into SDR, and anything into PQ or HLG) uses the CPU's math (§4) in a libplacebo user shader (`color::gpu_color`): PQ's EOTF, or HLG's inverse OETF and 1.2 gamma, per channel (zimg's approximate path, which `zscale` takes); linear light with the reference white at 1.0; the gamut matrix; the mobius curve on the brightest channel; negative channels to black; then the output's transfer.
+  - libplacebo is told the picture is already in the output's primaries and transfer, so it only reads the matrix, scales, places and writes.
+  - The shader hooks the scaled picture, as the CPU scales before converting. libplacebo scales and places every HDR picture, since the CUDA filters would scale converted pictures.
+  - HDR kept in the same transfer passes through the CUDA filters, as the CPU leaves it alone.
+  - libplacebo's own tone mapping can't give the CPU's curve: it lifts black for an SDR display's contrast (BT.1886 with a black level, which no option sets), and it maps on intensity (IPT) rather than the brightest channel, leaving colors outside BT.709 out of range. Hence the user shader.
+  - **Half floats:** libplacebo keeps a picture between passes in half floats, which the GPU stores rounded toward zero. The shader reads each value as the middle of its step and moves what it writes half a step up. Without that, the GPU's pictures come out darker than the CPU's.
+- **Devices:** the Vulkan device is derived from the CUDA device once. Both are shared by every export and proxy for the whole process and never closed (`CudaDevice::open`), because the Vulkan loader crashes when two exports create Vulkan instances at the same time. Each frame is copied CUDA → Vulkan, converted, and copied back, never leaving the GPU (Vulkan → CUDA mapping isn't supported; copies are).
 
-| | decoded on the CPU | decoded on the GPU |
-|---|---|---|
-| N150, x264 | 11–44 fps on 3.8–3.9 cores | 15–61 on 3.1–3.8 |
-| N150, VAAPI (frames on the GPU throughout, below) | 32–87 on 3.5–3.8 | 103–135 on 0.4 |
-| N150, QSV | 33–84 on 3.7–3.8 | 65–70 on 1.4–1.5 |
-| 9800X3D, x264 (NVDEC) | 85–261 on 12–14 | 117–297 on 6–12 |
-| 9800X3D, AMF (its Radeon; frames on the GPU throughout, below) | 129–137 on 2.2–6.8 | 65–75 on 0.0 |
+**libplacebo's quirks:**
+- FFmpeg's filter, made without its Vulkan device, converts on the CPU in front of it. vidcut makes it by hand, with the device set before it starts.
+- It gives out a frame's picture only once it has the next frame. An export needs each picture at once, so a filler frame follows each frame, and the filler's pictures are dropped. Proxies skip the filler, which halves the rendering.
+- **Never give it the same Vulkan frame twice at once** (`cuda::Blacks`). libplacebo takes a frame at the semaphore value the frame says and gives it back at the next value. A frame held twice ends a step ahead of anything the GPU signals, and FFmpeg, freeing it, waits forever. So each black frame it gets (a filler, or the background under a placed picture) is one it doesn't already hold, and the pool refills as frames come back.
+- Its frame queue takes a frame within a millisecond of the render time as that time's frame, so the timestamps it sees are counts a second apart.
+- A Vulkan device derived from CUDA keeps each plane of a frame in its own image, and libplacebo misses P010's 6-bit shift in such planes. So it gets 10-bit frames as P016, which has the same layout with all 16 bits used: they copy unchanged, and NVENC reads the top 10 bits.
+- Its blue-noise dither lifts black by most of a 10-bit level, so it rounds instead.
+- A frame's side data is dropped before the frame goes in. The filter copies the frame's properties to its picture and libplacebo turns both by their display matrices, so the turns would cancel. It would also tone-map by HDR metadata and read ICC profiles, which the CPU ignores. The output's HDR metadata is attached afterwards (§4).
+- Compiled shaders are kept in `~/.cache/vidcut/shaders` (`cuda::keep_shaders_in`), so a new converter starts faster.
 
-- **A GPU that encodes too** decodes, scales and encodes in turn, and frames that come down to the CPU go back up (not those that stay on it, below). On the noise clip, hard to decode, the N150's GPU still doubles the CPU's pace with QSV. On the barcode fixture, which the CPU decodes fast, QSV is slower (70 fps against 84, on 1.5 cores against 3.7; VAAPI was too, 59 against 81, until its frames stayed on the GPU), and so is the 9800X3D's Radeon with AMF, two compute units at half the pace of its 16-thread CPU decoding. There decoding on the CPU while the GPU encodes is faster: `gpu.decoding` off decodes every piece on the CPU, NVENC's too (`hw::Decoding::Cpu`), which scales them, and the GPU only encodes.
-- **Tests:** `gpu_decoded_exports_match_the_cpu` (`tests/export.rs`, `gpu-tests`) exports a plan of cuts, files, a seek back, black, other rates and codecs (8- and 10-bit, AV1, VP9), interlaced, SD, 4:3 and 2.4:1 pieces, turned pieces and 1080p pieces shrunk on the GPU into 720p, decoded on every GPU decoder there is: every frame's barcode is the CPU export's, its pictures within a level and a half on average, none shifted by more than half a level.
+**Decoded on the GPU, made on the CPU** (`export::run_decoding_on`):
+- While `gpu.acceleration` and `gpu.decoding` are on, an export's pieces decode on the GPU the viewer decodes on (`GpuDecoder::best`: NVDEC, VA-API or Direct3D 11), where it decodes their streams, whatever the encoder.
+- They decode on a CUDA stream or device of their own (`GpuDecoder::own`), so their work and playback's don't wait in line behind each other.
+- Pieces NVENC takes stay on the GPU, as above. Other frames come down to be made on the CPU. When they are shown smaller than they are, they are first shrunk on the GPU (`hw::Shrinker`: `scale_cuda` in the halving steps above, `scale_vaapi`, or the Direct3D 11 video processor, [preview.md](preview.md) §6).
+- AMD's and Intel's encoders take them back up, except where frames stay on the GPU throughout (VAAPI and AMF, below).
+- The report counts these frames (`gpu_decoded`).
+- **`gpu.decoding` off** decodes every piece on the CPU, NVENC's too (`hw::Decoding::Cpu`), and the GPU only encodes. A GPU that also encodes has to decode, scale and encode in turn, so on a small GPU the CPU can be faster at decoding (choosing by itself: [todo](../todo/gpu-decoding.md)).
 
-**Frames on the GPU (VAAPI):** where the export's VAAPI encoder is on the render node of its VA-API decoder, it opens on that decoder's device (`encode::open_video`'s `shared`), and a piece's frames that need nothing but turning and fitting stay on the GPU from the decoder to the encoder (`VideoFrames::fit_on_gpu`, `hw::Fitter`). `transpose_vaapi` turns them upright as the CPU's `transpose` and flips do (spec D33: phone video), `scale_vaapi` scales them into the output's layout (10-bit sources into 8-bit output too), and `pad_vaapi` centers them on black, at even offsets as the CPU pads. Pieces in other colors than the output's (`color::kept`: BT.601, full range, HDR into SDR), interlaced ones (which come down for `bwdif`) and black are made on the CPU and go up as before; `gpu_frames` counts the frames that stayed.
-- **Agreement:** against the CPU's lossless export, every piece the GPU fitted measured within 0.4 levels on average, 10-bit sources in 8-bit output shifted by at most 0.23. `vaapi_exports_keep_frames_on_the_gpu` (`gpu-tests`) holds every frame to a level and a half on average and 0.75 of shift, in 8 bits and (against a 10-bit lossless export) in 10, with the plan's SD, interlaced and black pieces made on the CPU, pieces turned 90°, 180° and 270° (one 10-bit) on the GPU (and the bars beside a portrait one), the bars and black where the CPU's are, pieces at the output's own size (whose surfaces `scale_vaapi` passes to the encoder as decoded) and 24 fps pieces, one turned, whose repeated frames go to the encoder twice.
-- **Measured** on the N150 with h264_vaapi, exporting 4K60 10-bit HEVC (the noise clip and the barcode fixture): into 1080p, 103–135 fps on 0.4 cores, against 32–87 on 3.5–3.7 decoding on the CPU and 52–59 on 1.0 coming down and back up; into 2160p, 41–67 fps on 0.3 cores against 27–51 on 2.8–3.6. With its frames on the GPU throughout, VAAPI is faster on the easy fixture too, unlike QSV and AMF (above).
+**Frames on the GPU (VAAPI):**
+- Where the VAAPI encoder is on the render node of the VA-API decoder, it opens on that decoder's device (`encode::open_video`'s `shared`).
+- A piece whose frames need only turning and fitting stays on the GPU from decoder to encoder (`VideoFrames::fit_on_gpu`, `hw::Fitter`):
+  - `transpose_vaapi` turns them upright as the CPU's `transpose` and flips do (spec D33).
+  - `scale_vaapi` scales them into the output's layout (10-bit sources into 8-bit output too).
+  - `pad_vaapi` centers them on black, at even offsets as the CPU pads.
+- Pieces in other colors than the output's (`color::kept`: BT.601, full range, HDR into SDR), interlaced ones (which come down for `bwdif`) and black are made on the CPU and uploaded. `gpu_frames` counts the frames that stayed on the GPU.
 
-**Frames on the GPU (AMF):** AMF takes Direct3D 11 textures only of the frames context it was opened with, so where its adapter is the Direct3D 11 decoder's, it opens on frames made on that decoder's device (`encode::Upload::d3d11`), and the video processor draws the pieces' frames into them (`hw::d3d11::Scaler::into`): turned upright (its stream rotation, where it has it), scaled into the output's layout (10 bits into 8 too) and placed on a black background where their aspect differs. The same pieces as VAAPI's stay on the GPU, but 8-bit ones into 10-bit output: AMD's video processor refuses to draw a decoder's NV12 into P010 (`E_INVALIDARG`), though it draws a single texture's (the self-check's). A fit that fails leaves the file's frames to the CPU rather than failing the export.
-- **Background:** AMD's driver reads a background color given as YCbCr as RGB: video-range black (16, 128, 128 over 255) came out as luma 105. It is given as RGB: 16 of 255 where the frames are told full range (gotchas.md), which is video-range black there, and 0 for PQ's studio range.
-- **Agreement:** against the CPU's lossless export, within a tenth of a level on average in 8-bit output and a fifth in 10-bit, but 10-bit sources into 8-bit output, up to half a level low: the video processor drops the low bits where the CPU rounds (`amf_exports_keep_frames_on_the_gpu`, `gpu-tests`, Windows, which holds every frame to a level and a half on average and three quarters of shift).
-- **Measured** on the 9800X3D's Radeon with h264_amf, the same clips: into 1080p, 65–75 fps on no CPU to speak of, against 56–61 coming down and back up and 130–137 decoding on the CPU (2.2–6.5 cores); into 2160p, 27–30 against 34–37. Its two compute units decode, scale and encode in turn.
+**Frames on the GPU (AMF):**
+- AMF takes Direct3D 11 textures only from the frames context it was opened with. Where its adapter is the Direct3D 11 decoder's, it opens on frames made on that decoder's device (`encode::Upload::d3d11`).
+- The video processor draws the pieces' frames into them (`hw::d3d11::Scaler::into`): turned upright (with its stream rotation, where it has one), scaled into the output's layout (10 bits into 8 too), and placed on a black background where the aspect differs.
+- The same pieces as with VAAPI stay on the GPU, except 8-bit ones into 10-bit output: AMD's video processor refuses to draw a decoder's NV12 into P010 (`E_INVALIDARG`), though it draws a single texture's (the self-check's).
+- A fit that fails leaves that file's frames to the CPU rather than failing the export.
+- **Background:** AMD's driver reads a background color given as YCbCr as RGB, so it is given as RGB: 16 of 255 where the frames are told full range ([gotchas.md](../gotchas.md)), which is video-range black there, and 0 for PQ's studio range.
+- 10-bit sources into 8-bit output come out slightly low: the video processor drops the low bits where the CPU rounds.
 
-**Passes** (spec D45, `video.passes`, `first_pass`, `multipass`, `lookahead`):
-- **What makes two:** x264, x265 and VP9 encode the range twice (`Passes::TwoRuns`): the first run feeds every frame to an encoder opened with `AV_CODEC_FLAG_PASS1`, drops its packets and writes nothing but statistics; the second opens the encoder again with `PASS2` and the statistics, and encodes as in one pass, with the audio. NVENC looks at each frame twice inside one encode (`multipass`, `Passes::TwoInside`). VAAPI, AMF, QSV, ProRes and DNxHR make one. SVT-AV1 makes one in FFmpeg 8.0: its wrapper ignores the pass flags, and `svtav1-params` can't hand the statistics back ([todo](../todo/svt-av1-two-passes.md)).
-- **Unset `passes`:** 2 with a target bitrate, 1 with constant quality, where the encoder makes two; one elsewhere. Two asked for where an encoder can't: an error for that encoder, so `auto` moves on to one that can (VAAPI, AMF or QSV to the CPU). Two need a bitrate (validation): at constant quality a second pass changes nothing worth the time.
-- **Statistics:** x264 writes a file it names with the `stats` option (and its MB-tree file); x265 takes `pass` and `stats` in `x265-params`, its path escaped (FFmpeg 8.0's wrapper ignores the flags), and writes a `.cutree` file beside it; both finish their files when the encoder closes, so the first run's encoder is freed before the second opens. libvpx hands its statistics back in `stats_out` (base64, at the flush); vidcut copies them into an `av_malloc`'d `stats_in` for the second, frees both itself (FFmpeg doesn't), and keeps them in memory. The files live in a hidden `.<name>.passes` folder beside the output, on the output's disk: x264's and x265's per-block statistics grow to tens of kilobytes a frame at 4K, too much for a RAM-backed `/tmp` on a long export. The folder is removed when the export ends, however it ends.
-- **First pass (`first_pass`):** `fast` (the default) is x264's `fastfirstpass`, x265 without `slow-firstpass`, and VP9 at speed 4 or faster in the first run. `full` gives the first run the second's settings.
-- **NVENC:** `multipass` `quarter` (the default, `qres`) or `full` (`fullres`) for the first look; `lookahead` (`rc-lookahead`) 32 frames unless set, 0 for none, in both rate controls.
-- **Progress** reports the run (`pass`, `passes`), each counting its frames; the CLI's bar, a job's `progress` and `eta` cover both, and the Jobs window says "pass 1 of 2". Cancelling in either run stops it, and the `.part` file and the statistics go. A per-clip export makes both runs for each file. Pieces NVDEC decodes stay on the GPU in NVENC's single run; the CPU encoders' two runs decode as one does (on the GPU where it decodes them, made on the CPU).
-- **Loudness normalization** measures the mix before the second run, as it does before a one-pass export; its measure decodes only audio, a small part of the time, so it isn't folded into the first run.
-- **Measured** with `examples/passes.rs` (60 s stretches; bitrate from the file size; luma PSNR against the source frames as the export reads them): Tears of Steel 720p from 2:00 at 2 Mb/s, and Big Buck Bunny 1080p30 from 1:00 at 3 Mb/s. Times on the 16-thread dev machine.
-
-| | 1 pass | 2, fast first | 2, full first |
-|---|---|---|---|
-| x264, ToS | +1.0%, 46.13 dB, 3.7 s | +0.5%, 46.14 dB, 4.7 s | +0.4%, 46.09 dB, 7.1 s |
-| x264, BBB | −3.6%, 49.19 dB (worst frame 36.7), 8.0 s | −0.4%, 49.44 dB (39.4), 10.1 s | +1.1%, 49.50 dB (39.7), 13.9 s |
-| x265, ToS | +2.5%, 47.20 dB, 16.7 s | +0.3%, 47.14 dB, 29.6 s | +0.3%, 47.14 dB, 32.8 s |
-| x265, BBB | −2.6%, 50.01 dB (37.8), 33.0 s | −1.0%, 50.31 dB (42.1), 59.1 s | −0.1%, 50.32 dB (42.6), 60.6 s |
-| VP9, ToS | +2.9%, 45.99 dB, 67.5 s | +0.1%, 46.67 dB, 118.5 s | the same (speed 4 already) |
-| VP9, BBB | +28.3%, 49.34 dB (35.7), 150.6 s | −1.0%, 49.22 dB (36.2) on 28% fewer bits, 240.9 s | |
-
-  Two passes land within about 1% of the target where one is off by up to 4% (x264, x265) and 28% (VP9), and lift the worst frames by up to 4.3 dB; they cost 25–35% more time with x264, 60–80% with x265 and VP9. The fast first pass saves a quarter to a third of x264's time (3–10% of x265's) for at most 0.06 dB. On a 15 s fixture of barcodes around noise at 800 kb/s, one pass overshoots by 87% (x264), 109% (x265) and 494% (VP9), two by 1.2%, 6.9% and 7.1% (`tests/export.rs`).
-- **NVENC**, the same stretches (decoding on NVDEC sets the pace of H.264 and HEVC, so multipass costs them nothing):
-
-| | one pass | quarter | full | one, lookahead 32 | quarter, lookahead 32 |
-|---|---|---|---|---|---|
-| H.264, BBB 3 Mb/s | +5.3%, 48.57 dB | +1.6%, 48.32 dB | +1.4%, 48.37 dB | +4.8%, 49.46 dB | +1.9%, 49.48 dB |
-| HEVC, BBB 3 Mb/s | +5.4%, 48.52 dB | +2.8%, 48.46 dB | +3.1%, 48.44 dB, +10% time | +6.1%, 49.29 dB | +4.1%, 49.37 dB |
-| AV1, BBB 3 Mb/s | +4.5%, 48.98 dB, 4.6 s | +4.0%, 48.90 dB, 4.8 s | +3.5%, 48.85 dB, 5.8 s | +3.8%, 49.81 dB | +3.3%, 49.63 dB |
-| H.264, ToS 0.8 Mb/s | +5.1%, 43.71 dB | +5.1%, 43.71 dB | +5.1%, 43.71 dB | +4.6%, 43.82 dB | +4.5%, 43.83 dB |
-| HEVC, ToS 0.8 Mb/s | +7.4%, 44.51 dB | +7.3%, 44.52 dB | +7.5%, 44.52 dB | +5.9%, 44.55 dB | +5.9%, 44.57 dB |
-
-  Multipass brings the bitrate closer on the animation and changes little on the film; full resolution adds time for nothing more, so `quarter`. Looking 32 frames ahead adds 0.1 to 0.9 dB, costing time only in AV1 on the smaller picture (1.3 s to 1.6 s); at constant quality (H.264 and HEVC at 23, AV1 at 32) it also adds 0.7 to 0.8 dB on BBB with 2.5–4% smaller files, and 0.1 to 0.2 dB with 1% larger ones on ToS. So it is on by default, whatever the rate control. NVENC overshoots by 4–8% either way, its VBR allowed up to 1.5 times the target.
+**Passes** (spec D45, which lists the settings and defaults; `video.passes`, `first_pass`, `multipass`, `lookahead`):
+- **Two runs** (`Passes::TwoRuns`; x264, x265 and VP9): the first run feeds every frame to an encoder opened with `AV_CODEC_FLAG_PASS1`, drops its packets and writes only statistics. The second run opens the encoder again with `PASS2` and the statistics, and encodes as in one pass, with the audio.
+- **Two inside one encode** (`Passes::TwoInside`): NVENC looks at each frame twice (`multipass`).
+- VAAPI, AMF, QSV, ProRes and DNxHR make one pass. So does SVT-AV1 in FFmpeg 8.0: its wrapper ignores the pass flags, and `svtav1-params` can't hand the statistics back ([todo](../todo/svt-av1-two-passes.md)).
+- Two passes asked of an encoder that can't make them is an error for that encoder, so `auto` moves on to one that can (from VAAPI, AMF or QSV to the CPU).
+- **Statistics:**
+  - x264 writes a file named by its `stats` option, plus its MB-tree file. x265 takes `pass` and `stats` in `x265-params`, with the path escaped (FFmpeg 8.0's wrapper ignores the flags), and writes a `.cutree` file beside it. Both finish their files when the encoder closes, so the first run's encoder is freed before the second opens.
+  - libvpx returns its statistics in `stats_out` (base64, at the flush). vidcut keeps them in memory, copies them into an `av_malloc`'d `stats_in` for the second run, and frees both itself (FFmpeg doesn't).
+  - The files live in a hidden `.<name>.passes` folder beside the output, on the output's disk: x264's and x265's per-block statistics grow to tens of kilobytes a frame at 4K, too much for a RAM-backed `/tmp`. The folder is removed when the export ends, however it ends.
+- **`first_pass`:** `fast` (the default) is x264's `fastfirstpass`, x265 without `slow-firstpass`, and VP9 at speed 4 or faster in the first run. `full` gives the first run the second's settings.
+- **NVENC:** `multipass` is `quarter` (`qres`, the default) or `full` (`fullres`); `full` costs time without a better result. `lookahead` (`rc-lookahead`) is 32 frames unless set, 0 for none, in both rate controls; it lifts quality for little time.
+- **Progress** reports the run (`pass`, `passes`), each run counting its frames. The CLI's bar and a job's `progress` and `eta` cover both runs.
+- Pieces NVDEC decodes stay on the GPU in NVENC's single run. The CPU encoders' two runs decode as a one-pass export does.
+- **Loudness normalization** measures the mix before the second run, as before a one-pass export. Its measuring decodes only audio, so it isn't folded into the first run.
+- `crates/vidcut-av/examples/passes.rs` compares pass settings by bitrate and PSNR.
 
 **Details:**
-- Quality 0 with libx264 means lossless, which requires the High 4:4:4 Predictive profile.
-- SVT-AV1's info logging is silenced through `SVT_LOG=2`, set by the binary at startup.
+- Quality 0 with libx264 means lossless, which needs the High 4:4:4 Predictive profile.
+- SVT-AV1's info logging is silenced with `SVT_LOG=2`, which the binary sets at startup.
 
 ## 6. Quick Export semantics
 
-- With no range given, export covers the timeline In–Out when both marks are set, otherwise the whole timeline (p. 789).
+- With no range given, an export covers the timeline's In–Out when both marks are set, otherwise the whole timeline (spec §10).
 - With no preset given, the output extension picks one: `h264-master` settings for video containers (container from the extension), and the matching `audio-*` preset for audio extensions.
-- **Per-clip export** writes one file per clip in the range, without neighbors' J/L audio, using a name template (`{index:03}-{name}`).
+- **Per-clip export** writes one file per clip in the range, without the neighbors' J/L audio, named by a template (`{index:03}-{name}`).
 - Existing files are kept unless `overwrite` is set.
 
 ## 7. Logging
 
-FFmpeg's own logging defaults to fatal only. Decoders recovering after a seek log harmless errors, and real failures surface as vidcut errors with context. `VIDCUT_AV_LOG` ([tools.md](../tools.md)) shows more.
+FFmpeg's own logging defaults to fatal only: decoders recovering after a seek log harmless errors, and real failures surface as vidcut errors with context. `VIDCUT_AV_LOG` ([tools.md](../tools.md)) shows more.

@@ -2,4 +2,4 @@
 
 **When:** after the features settle.
 
-The panels and windows were built one feature at a time, and it shows: sizes, spacing and alignment differ from window to window. Go through them together for a consistent look. Add concrete problems here as they turn up.
+Sizes, spacing and alignment differ from window to window. Go through all panels and windows together for a consistent look. Add concrete problems here as they turn up.

@@ -2,35 +2,39 @@
 
 A simple, fully scriptable video cutting tool for Linux and Windows. Behavior follows the Cut page ([docs/cut-page-spec.md](docs/cut-page-spec.md)).
 
-**Status:** early development. It works, but expect rough edges.
+Early development: it works, but expect rough edges.
 
 ## What it does
 
 - **Cut-page editing:**
-  - a media pool with bins, and a source/timeline viewer (Source Clip, Source Tape, Timeline)
+  - a media pool with bins, and a viewer for source clips, the Source Tape and the timeline
   - a dual timeline: an overview of the whole program plus a detail view
   - Smart Insert, Append, Ripple Overwrite, Overwrite, Place On Top
   - split, ripple delete, trimming (resize, roll, slip, J/L cuts)
   - several tracks: B-roll that follows the main story on Track 1, music on audio tracks
   - a mixer with faders, mute, solo and meters
   - snapping, markers, undo
-- **Export:** Quick Export and an Export dialog (deviation X3), including GPU encoding (NVIDIA, AMD, Intel) and background jobs. Dynamic range, bit depth and HDR metadata follow the footage (spec D44, D46). A loudness target is [docs/decisions/agents.md](docs/decisions/agents.md) §5.
-- **Automatic tools:** Ripple Delete Silence, Detect Scene Cuts and the Boring Detector (spec D29–D31).
-- **Interchange:** OpenTimelineIO, `.otio` and `.otioz` (deviation X9).
-- **Everything scriptable.** Every action in the GUI is also a CLI command and a JSON-RPC call on the running app, so scripts and AI agents can edit with you. `vidcut mcp` offers it all to AI agents over the Model Context Protocol.
-- **Deliberately not included:** effects, transitions, titles or color grading.
+- **Export:** Quick Export and an Export dialog, background jobs, GPU encoding (NVIDIA, AMD, Intel), loudness normalization. Dynamic range, bit depth and HDR metadata follow the footage.
+- **Automatic tools:** Ripple Delete Silence, Detect Scene Cuts, the Boring Detector.
+- **Media:** stills, image sequences, proxies; GPU decoding (NVDEC; VA-API on Linux, Direct3D 11 on Windows).
+- **Interchange:** OpenTimelineIO (`.otio`, `.otioz`, `.otiod`).
+- **Everything scriptable:** every GUI action is also a CLI command and a JSON-RPC call on the running app. `vidcut mcp` offers them to AI agents over the Model Context Protocol.
+- **Not included:** effects, transitions, titles, color grading.
 
 ## Requirements
 
-**Linux:** Ubuntu 26.04 (or similar) with FFmpeg:
+- FFmpeg 8.0 to 9.0, with its development files.
+- Rust from [rustup](https://rustup.rs). `rust-toolchain.toml` pins the version; rustup fetches it on the first build.
+
+**Linux** (Ubuntu 26.04 or similar):
 
 ```bash
 sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libasound2-dev libclang-dev rustup
 ```
 
-The GUI draws with Vulkan (the driver any desktop has: Mesa's for AMD and Intel, NVIDIA's own) and plays sound through ALSA, which PipeWire and PulseAudio serve.
+The GUI needs a Vulkan driver. Sound goes through ALSA (PipeWire and PulseAudio provide it).
 
-**Windows 10 or 11:** Visual Studio 2022 or its Build Tools with the C++ workload, LLVM (for libclang), and an FFmpeg build with its headers and import libraries, such as BtbN's shared GPL build:
+**Windows 10 or 11:** Visual Studio 2022 or its Build Tools with the C++ workload, plus:
 
 ```bash
 winget install BtbN.FFmpeg.GPL.Shared.9.0
@@ -39,21 +43,15 @@ winget install BtbN.FFmpeg.GPL.Shared.9.0
 winget install LLVM.LLVM
 ```
 
-Set `FFMPEG_DIR` to the FFmpeg folder (the one with `bin`, `include` and `lib`) before building, and put its `bin` folder on `PATH`: vidcut loads FFmpeg's DLLs from there. If the build doesn't find libclang, set `LIBCLANG_PATH` to `C:\Program Files\LLVM\bin`. The GUI draws with Vulkan or Direct3D 12 and plays sound through WASAPI. `scripts/check.sh` runs from Git Bash.
+- Set `FFMPEG_DIR` to the FFmpeg folder (the one with `bin`, `include` and `lib`) and put its `bin` on `PATH`.
+- If the build doesn't find libclang, set `LIBCLANG_PATH` to `C:\Program Files\LLVM\bin`.
+- `scripts/check.sh` runs from Git Bash.
 
-**macOS** (being ported: [docs/todo/macos.md](docs/todo/macos.md)): Xcode's Command Line Tools and Homebrew's FFmpeg:
+**macOS** (Apple Silicon; open work: [docs/todo/macos.md](docs/todo/macos.md)): Xcode's Command Line Tools and
 
 ```bash
 brew install ffmpeg
 ```
-
-vidcut builds there and passes its unit tests on Apple Silicon (CI). The GUI, which draws with Metal and plays sound through Core Audio, hasn't been tried there yet.
-
-Nothing else is needed at run time: vidcut plays video with its own player, on the FFmpeg libraries. The player, proxies and exports decode H.264, HEVC, AV1 and VP9 on the GPU where it can: NVDEC on NVIDIA GPUs, and on AMD and Intel GPUs VA-API on Linux (Mesa's driver, Intel's media driver) and Direct3D 11 on Windows.
-
-vidcut works with FFmpeg 8.0 (Ubuntu 26.04 LTS) up to the newest release, 9.0; both ends are tested.
-
-Rust comes from [rustup](https://rustup.rs). The repository pins its Rust version in `rust-toolchain.toml`, and rustup downloads that toolchain the first time you build.
 
 ## Build and run
 
@@ -68,7 +66,7 @@ On Windows the program is `target\release\vidcut.exe`.
 
 ## Where vidcut keeps its files
 
-The docs name the Linux places; Windows and macOS have their own:
+The docs name the Linux paths.
 
 | Linux | Windows | macOS | Holds |
 |---|---|---|---|
@@ -77,19 +75,15 @@ The docs name the Linux places; Windows and macOS have their own:
 | `~/.local/state/vidcut` | `%LOCALAPPDATA%\vidcut\state` | `~/Library/Application Support/vidcut/state` | undo history, recent projects |
 | `$XDG_RUNTIME_DIR/vidcut` | `%TEMP%\vidcut` | `$TMPDIR/vidcut-UID` | running GUIs (live control) |
 
-The `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME` and `XDG_RUNTIME_DIR` variables move them on every system.
+`XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME` and `XDG_RUNTIME_DIR` override them on every system.
 
 ## The GUI
 
-Media Pool on the left, with the edit buttons below it; the Viewer on the right; the timeline across the bottom. Editing, tracks, bins and the automatic tools are in the spec.
+Media Pool on the left with the edit buttons below it, the Viewer on the right, the timeline across the bottom. How editing works: [the spec](docs/cut-page-spec.md). Keys: [spec §11](docs/cut-page-spec.md#11-keyboard-shortcuts-linux-and-windows).
 
-The **Command log** (top right) lists what you, scripts and agents did, in words. Hover an entry for the request; click it to copy a shell command (deviation X5).
-
-**Preferences** (File > Preferences, Ctrl+,) live in `~/.config/vidcut/preferences.toml` (deviation X12). `vidcut preferences` reads and changes them.
-
-**Keys:** [spec §11](docs/cut-page-spec.md#11-keyboard-shortcuts-linux-and-windows).
-
-While a GUI has the project open, `vidcut` commands for that project run inside it ([docs/cli.md](docs/cli.md), Live control).
+- **Command log** (top right): what you, scripts and agents did, in words. Hover an entry for the request; click it to copy it as a shell command.
+- **Preferences** (File > Preferences, Ctrl+,): `~/.config/vidcut/preferences.toml`, also `vidcut preferences`.
+- **Live control:** while a GUI has a project open, `vidcut` commands for that project run inside it ([docs/cli.md](docs/cli.md)).
 
 ## Try the CLI
 
@@ -100,26 +94,35 @@ vidcut -p talk.vidcut edit append m1 --range 10s..2m
 vidcut -p talk.vidcut export start talk.mp4 --preset youtube-1080p
 ```
 
-Every command, flag and exit code is in [docs/cli.md](docs/cli.md). `vidcut schema` prints the protocol. `--json` is machine-readable output; `--headless` edits the file directly even while a GUI has it open.
+- `--json`: machine-readable output.
+- `--headless`: edit the file directly even while a GUI has it open.
+- `vidcut schema`: the protocol as JSON Schema.
+- Every command, flag and exit code: [docs/cli.md](docs/cli.md).
 
 ## Moving a project
 
-Media kept in the project's folder is stored relative to it, and missing files relink by name and fingerprint (deviation X1). Timelines move as OpenTimelineIO (deviation X9). The commands are in [docs/cli.md](docs/cli.md).
+Media in the project's folder are stored relative to it. Missing files relink by name and fingerprint (`vidcut media relink`). Timelines move as OpenTimelineIO. Commands: [docs/cli.md](docs/cli.md).
 
 ## Use with AI agents
 
-`vidcut mcp` serves every command over the Model Context Protocol (deviation X10, [docs/decisions/agents.md](docs/decisions/agents.md)). With Claude Code: `claude mcp add vidcut -- vidcut mcp -p /path/to/talk.vidcut`. Connecting, and getting frames back as images, is in [docs/cli.md](docs/cli.md).
+`vidcut mcp` serves every command over the Model Context Protocol. With Claude Code:
+
+```bash
+claude mcp add vidcut -- vidcut mcp -p /path/to/talk.vidcut
+```
+
+Other clients, and frames as images: [docs/cli.md](docs/cli.md).
 
 ## What's next
 
-The use cases vidcut is for, and what comes next, are in [docs/roadmap.md](docs/roadmap.md). Open items are in [docs/todo/](docs/todo/), one file each.
+What vidcut is for and what comes next: [docs/roadmap.md](docs/roadmap.md). Open work: [docs/todo/](docs/todo/), one file per item.
 
 ## Contributing
 
-Read [AGENTS.md](AGENTS.md) first; it's written for AI agents but applies to humans too. Behavior follows [docs/cut-page-spec.md](docs/cut-page-spec.md), and intentional differences are recorded in [docs/deviations.md](docs/deviations.md).
+Read [AGENTS.md](AGENTS.md) first; it's written for AI agents but applies to humans too.
 
 ## License
 
-vidcut's source code is released under the [MIT License](LICENSE).
+MIT ([LICENSE](LICENSE)).
 
-vidcut links the FFmpeg libraries, which are LGPL or GPL depending on how they were built; Ubuntu's builds are GPL. Binaries you distribute together with them must therefore comply with their licenses. vidcut's own source stays MIT.
+vidcut links the FFmpeg libraries, which are LGPL or GPL depending on the build (Ubuntu's are GPL). If you distribute binaries with them, comply with their licenses.

@@ -5,7 +5,7 @@
 //! another file opening ahead on its helper thread. Going back there is
 //! nothing to decode on from, so a window renders at once, from a keyframe
 //! up to the frame wanted, and is kept (as the two-up's renderer does,
-//! preview.md §9). Playing backwards, two windows wait behind the one
+//! preview.md §8). Playing backwards, two windows wait behind the one
 //! shown where they fit: once one is left, the one before it decodes.
 //!
 //! Paused, frames stay around the playhead. A seek keeps what it decodes

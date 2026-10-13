@@ -40,7 +40,7 @@ pub fn run(project: Option<PathBuf>) -> Result<()> {
             // at the next refresh, no frames queued. Presenting a hidden
             // window can still block the UI thread (NVIDIA on Wayland), so
             // the viewer presents on a thread of its own
-            // (docs/decisions/preview.md §4).
+            // (docs/decisions/preview.md §2, §4).
             surface: eframe::SurfaceConfig {
                 present_mode: wgpu::PresentMode::AutoNoVsync,
                 desired_maximum_frame_latency: Some(1),

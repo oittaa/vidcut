@@ -37,7 +37,7 @@ vidcut history undo                         # works across separate runs
 - Edit functions take `--track V2` (the target track) and `--audio-only`/`--video-only`. Naming the next new track (V3 when V2 is the last) creates it. Media without video go to A1 by default.
 - `vidcut edit place-on-top m4 --range 5s..+3s` puts B-roll on the first track above everything at the playhead (or `--at`, or the timeline marks); the result names the clip and the track. `vidcut edit move c7 --to 2m --track V2` moves clips between tracks.
 - Track 1 ripples. Clips on other tracks follow the Track 1 picture under their first frame (spec D21); other tracks ripple only where Track 1 is empty (D22). Only Track 1 pushes clips: inserts elsewhere overwrite (D23).
-- Export, `frame render` and the preview show the highest visible clip and mix every audible track with its fader. Mute and solo apply to the export too (p. 650).
+- Export, `frame render` and the preview show the highest visible clip and mix every audible track with its fader. Mute and solo apply to the export too.
 
 **Stills and image sequences (spec D38, D39):**
 - `vidcut media add photo.jpg` adds a still. Edited without `--range` it lasts the project's still duration (5 s; `vidcut project set --still-duration 3s`); a range or trim makes it up to 17 h 40 min long.
@@ -122,7 +122,7 @@ vidcut history undo                         # works across separate runs
 - Raw: `timeline.import` also takes the document inline as `otio` (relative media paths then can't be found but by `search`).
 - `tests/cli.rs` checks the files against OpenTimelineIO's own Python library when one is installed (`pip install opentimelineio`; `VIDCUT_OTIO_PYTHON` names the Python); otherwise that part skips.
 
-**Live control of a running GUI** ([docs/decisions/gui.md](docs/decisions/gui.md)):
+**Live control of a running GUI** ([decisions/gui.md](decisions/gui.md)):
 - **Routing:** when a GUI has the project open (`vidcut -p FILE` starts one), every project command runs inside it. You and the human then edit one live session: the GUI updates at once, and `via` in the JSON says `gui:<pid>`.
   - `--headless` forces a separate run; `--instance PID|SOCKET` (or `VIDCUT_SOCKET`) picks a GUI.
   - `vidcut instances` lists running GUIs.

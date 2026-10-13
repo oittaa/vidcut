@@ -1,5 +1,5 @@
 //! Timeline tiles and the two-up decoded on each GPU decoder there is
-//! (docs/decisions/preview.md §9): every picture is the one the CPU gives.
+//! (docs/decisions/preview.md §8): every picture is the one the CPU gives.
 
 #![cfg(feature = "gpu-tests")]
 
@@ -121,7 +121,7 @@ fn gpu_decoded_tiles_and_two_up_are_the_cpus() {
         for decoder in &decoders {
             let name = format!("{} {}, {what}", decoder.kind().name(), decoder.on());
             // On the GPU where it lists the codec, but H.264, which the
-            // CPU decodes faster for the timeline (preview.md §9).
+            // CPU decodes faster for the timeline (preview.md §8).
             let on_gpu = (*codec != Id::H264
                 && decoder.decodes(*codec)
                 && decoder.hardware_decodes(*codec, *bits) != Some(false))

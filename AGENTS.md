@@ -17,6 +17,9 @@ vidcut is a video cutting tool modeled on DaVinci Resolve's Cut page, in Rust: t
 5. **No ffmpeg/ffprobe subprocesses.** Use `vidcut-av`, the FFmpeg libraries, for exports and the preview alike.
 6. **License:** MIT.
 7. **FFmpeg:** 8.0 (the latest Ubuntu LTS) up to the newest release. No code for FFmpeg before 8.0.
+8. **Docs aren't history; git is.** A `.md` file says only what is true now and what someone needs to use or work on the code, as briefly as possible.
+   - No status, dates, test-run results, benchmark numbers, "was tried"/"before, it did" stories or explanations of past mistakes. Those go in commit messages and pull request descriptions.
+   - A setup step is a command, not a paragraph. Open work goes in `docs/todo/`, nowhere else.
 
 ## Quality gates
 

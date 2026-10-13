@@ -1,5 +1,5 @@
 //! The frame renderer behind the paused viewer and the two-up
-//! (docs/decisions/preview.md §9): every picture exact, and each frame
+//! (docs/decisions/preview.md §8): every picture exact, and each frame
 //! decoded about once going back as well as forward. One test, so the
 //! process-wide decode count is this test's alone.
 
