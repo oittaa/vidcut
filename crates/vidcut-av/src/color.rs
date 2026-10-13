@@ -731,6 +731,411 @@ fn zscale_writes(out: format::Pixel) -> &'static str {
     }
 }
 
+/// Whether [`conversion`] takes `zscale` from `src` into `target`'s
+/// dynamic range: a change of transfer or primaries.
+pub(crate) fn needs_zscale(src: Source, target: Option<Hdr>) -> bool {
+    match (src.hdr, target) {
+        (None, None) => false,
+        (Some(s), Some(t)) => !(s == t && !src.rgb && src.matrix == Matrix::Bt2020),
+        _ => true,
+    }
+}
+
+/// [`conversion`] for an FFmpeg without `zscale` (zimg), slower: swscale
+/// scales, pads and reads the picture as float RGB in its own transfer and
+/// primaries (`before`, the `scale` and `after` of a [`Conversion`]); the
+/// CPU does `zscale`'s math on it ([`CpuColors`]) and writes planar YUV as
+/// zimg does ([`write_yuv`]); swscale repacks that, or writes the float RGB
+/// as RGB or as YUV the CPU doesn't write (`back`, a graph of its own).
+pub(crate) struct Split {
+    pub before: Conversion,
+    pub cpu: CpuColors,
+    /// The planar YUV the CPU writes; `None`: `back` takes the float RGB.
+    pub write: Option<format::Pixel>,
+    /// The filters from there into the output's format; `None`: `write` is
+    /// it.
+    pub back: Option<String>,
+}
+
+pub(crate) fn split(src: Source, out: format::Pixel, target: Option<Hdr>) -> Split {
+    let in_matrix = match src.matrix {
+        Matrix::Bt601 => "bt601",
+        Matrix::Bt709 => "bt709",
+        Matrix::Bt2020 => "bt2020",
+    };
+    let in_range = if src.full_range { "full" } else { "limited" };
+    // Scaled and padded in its own colors, as for `zscale`, then read as RGB.
+    let (scale, to_rgb) = if src.rgb {
+        (String::new(), String::new())
+    } else {
+        (
+            format!(
+                ":in_color_matrix={in_matrix}:in_range={in_range}\
+                 :out_color_matrix={in_matrix}:out_range={in_range}"
+            ),
+            format!(",scale=flags={CONVERT}:in_color_matrix={in_matrix}:in_range={in_range}"),
+        )
+    };
+    let (write, back) = if is_rgb(out) {
+        (None, Some(format!("format=gbrp16le,format={}", name(out))))
+    } else if let Some(planar) = planar_yuv(out) {
+        (
+            Some(planar),
+            (planar != out).then(|| format!("format={}", name(out))),
+        )
+    } else {
+        // swscale clips the RGB it reads at white, which zimg keeps above.
+        let matrix = if target.is_some() { "bt2020" } else { "bt709" };
+        let yuv = format!(
+            "scale=flags={CONVERT}:out_color_matrix={matrix}:out_range=limited,format={}",
+            name(out)
+        );
+        (None, Some(yuv))
+    };
+    Split {
+        before: Conversion {
+            flags: RESAMPLE,
+            scale,
+            after: format!("{to_rgb},format=gbrpf32le"),
+        },
+        cpu: CpuColors::new(src, target),
+        write,
+        back,
+    }
+}
+
+/// The planar YUV [`write_yuv`] writes for `out`: itself, or for NV12 and
+/// P010 the planar layout they interleave. `None` for others (alpha, big
+/// endian, other subsampling).
+fn planar_yuv(out: format::Pixel) -> Option<format::Pixel> {
+    use format::Pixel as P;
+    match out {
+        P::NV12 => return Some(P::YUV420P),
+        P::P010LE => return Some(P::YUV420P10LE),
+        _ => {}
+    }
+    let d = out.descriptor()?;
+    // SAFETY: FFmpeg's static descriptor of the format.
+    let d = unsafe { &*d.as_ptr() };
+    let flag = |f: std::ffi::c_int| d.flags & f as u64 != 0;
+    let fits = flag(ffi::AV_PIX_FMT_FLAG_PLANAR)
+        && !flag(ffi::AV_PIX_FMT_FLAG_RGB)
+        && !flag(ffi::AV_PIX_FMT_FLAG_BE)
+        && !flag(ffi::AV_PIX_FMT_FLAG_ALPHA)
+        && d.nb_components == 3
+        && (8..=16).contains(&d.comp[0].depth)
+        && d.log2_chroma_w <= 1
+        && d.log2_chroma_h <= 1;
+    fits.then_some(out)
+}
+
+/// Writes `rgb`, planar float RGB (`gbrpf32le`) in an output's transfer and
+/// primaries, into `out`'s planar YUV ([`planar_yuv`]) as zimg writes it:
+/// `target`'s matrix (BT.709 for SDR, BT.2020 for HDR), video range, each
+/// subsampled block's chroma from its average, codes rounded and clipped
+/// only to the format's (light above white stays above it).
+pub(crate) fn write_yuv(rgb: &frame::Video, out: &mut frame::Video, target: Option<Hdr>) {
+    let (kr, kb) = if target.is_some() {
+        (0.2627f32, 0.0593f32)
+    } else {
+        (0.2126, 0.0722)
+    };
+    let kg = 1.0 - kr - kb;
+    let desc = out.format().descriptor().expect("a known format");
+    // SAFETY: FFmpeg's static descriptor of the format.
+    let (sx, sy, depth) = unsafe {
+        let d = &*desc.as_ptr();
+        (
+            u32::from(d.log2_chroma_w),
+            u32::from(d.log2_chroma_h),
+            d.comp[0].depth,
+        )
+    };
+    let (w, h) = (out.width() as usize, out.height() as usize);
+    let (cw, ch) = (w.div_ceil(1 << sx), h.div_ceil(1 << sy));
+    let unit = (1u32 << (depth - 8)) as f32;
+    let max = ((1u32 << depth) - 1) as f32;
+    let code = |base: f32, span: f32, v: f32| (unit * (base + span * v)).round().clamp(0.0, max);
+    // The float planes: G, B, R.
+    let read = |plane: usize, x: usize, y: usize| {
+        let at = y * rgb.stride(plane) + 4 * x;
+        let d = rgb.data(plane);
+        f32::from_le_bytes([d[at], d[at + 1], d[at + 2], d[at + 3]])
+    };
+    let pixel = |x: usize, y: usize| [read(2, x, y), read(0, x, y), read(1, x, y)];
+    let luma = |[r, g, b]: [f32; 3]| kr * r + kg * g + kb * b;
+    let strides = [out.stride(0), out.stride(1), out.stride(2)];
+    let wide = depth > 8;
+    let put = |row: &mut [u8], x: usize, v: f32| {
+        if wide {
+            row[2 * x..2 * x + 2].copy_from_slice(&(v as u16).to_le_bytes());
+        } else {
+            row[x] = v as u8;
+        }
+    };
+    // SAFETY: the three planes are apart in memory; each slice covers its
+    // plane's rows, `stride` bytes apart.
+    let [y_plane, u_plane, v_plane] = unsafe {
+        let raw = out.as_mut_ptr();
+        [(0, h), (1, ch), (2, ch)]
+            .map(|(p, rows)| std::slice::from_raw_parts_mut((*raw).data[p], strides[p] * rows))
+    };
+    let threads = std::thread::available_parallelism()
+        .map_or(1, |n| n.get())
+        .min(ch);
+    // Chroma rows per thread, and the luma rows they cover.
+    let rows = ch.div_ceil(threads);
+    std::thread::scope(|scope| {
+        let chunks = y_plane
+            .chunks_mut(strides[0] * (rows << sy))
+            .zip(u_plane.chunks_mut(strides[1] * rows))
+            .zip(v_plane.chunks_mut(strides[2] * rows))
+            .enumerate();
+        for (i, ((ys, us), vs)) in chunks {
+            scope.spawn(move || {
+                let first = i * rows;
+                for (dy, row) in ys.chunks_mut(strides[0]).enumerate() {
+                    let y = (first << sy) + dy;
+                    for x in 0..w {
+                        put(row, x, code(16.0, 219.0, luma(pixel(x, y))));
+                    }
+                }
+                let lines = us.chunks_mut(strides[1]).zip(vs.chunks_mut(strides[2]));
+                for (dy, (u_row, v_row)) in lines.enumerate() {
+                    let cy = first + dy;
+                    for cx in 0..cw {
+                        let mut sum = [0f32; 3];
+                        let mut n = 0.0;
+                        for y in (cy << sy)..((cy + 1) << sy).min(h) {
+                            for x in (cx << sx)..((cx + 1) << sx).min(w) {
+                                let p = pixel(x, y);
+                                (0..3).for_each(|k| sum[k] += p[k]);
+                                n += 1.0;
+                            }
+                        }
+                        let [r, g, b] = sum.map(|s| s / n);
+                        let l = luma([r, g, b]);
+                        put(u_row, cx, code(128.0, 224.0, (b - l) / (2.0 * (1.0 - kb))));
+                        put(v_row, cx, code(128.0, 224.0, (r - l) / (2.0 * (1.0 - kr))));
+                    }
+                }
+            });
+        }
+    });
+}
+
+/// `zscale`'s math, as the GPU's shader does it ([`shader`]), on the CPU:
+/// float RGB in a source's transfer and primaries to linear light (the
+/// reference white at 1.0), the output's primaries, the tone curve on the
+/// brightest channel (HDR into SDR), the output's transfer.
+#[derive(Debug, Clone)]
+pub(crate) struct CpuColors {
+    /// The source's transfer to linear light, and linear light to the
+    /// output's.
+    from: Curve,
+    to: Curve,
+    gamut: Option<[[f32; 3]; 3]>,
+    /// The knee, then `scale`, `a` and `b` of the curve above it.
+    tone: Option<[f32; 4]>,
+}
+
+impl CpuColors {
+    pub(crate) fn new(src: Source, target: Option<Hdr>) -> Self {
+        let from = Primaries::of(src);
+        let to = if target.is_some() {
+            Primaries::Bt2020
+        } else {
+            Primaries::Bt709
+        };
+        let (scale, a, b) = mobius();
+        // Light up to the output's brightest: PQ's 10,000 nits, HLG's
+        // 1,000-nit display; SDR's white, which the tone curve keeps it to.
+        let top = match target {
+            Some(Hdr::Pq) => 10000.0 / REFERENCE_WHITE as f32,
+            Some(Hdr::Hlg) => 1000.0 / REFERENCE_WHITE as f32,
+            None => 1.0,
+        };
+        Self {
+            from: Curve::new(to_linear, src.hdr, 1.0, false),
+            to: Curve::new(from_linear, target, top, true),
+            gamut: (from != to).then(|| gamut(from, to).map(|row| row.map(|v| v as f32))),
+            tone: (src.hdr.is_some() && target.is_none()).then_some([
+                KNEE as f32,
+                scale as f32,
+                a as f32,
+                b as f32,
+            ]),
+        }
+    }
+
+    /// One pixel's RGB.
+    fn pixel(&self, rgb: [f32; 3]) -> [f32; 3] {
+        let mut c = rgb.map(|v| self.from.at(v));
+        if let Some(m) = self.gamut {
+            c = m.map(|row| row[0] * c[0] + row[1] * c[1] + row[2] * c[2]);
+        }
+        if let Some([knee, scale, a, b]) = self.tone {
+            let sig = c[0].max(c[1]).max(c[2]).max(1e-6);
+            let mapped = if sig <= knee {
+                sig
+            } else {
+                scale * (sig + a) / (sig + b)
+            };
+            c = c.map(|v| v * mapped / sig);
+        }
+        c.map(|v| self.to.at(v))
+    }
+
+    /// Converts `f`, planar float RGB (`gbrpf32le`), in place, its rows
+    /// shared among the CPU's cores.
+    pub(crate) fn run(&self, f: &mut frame::Video) {
+        assert_eq!(f.format(), format::Pixel::GBRPF32LE);
+        let (width, height) = (f.width() as usize, f.height() as usize);
+        if width == 0 || height == 0 {
+            return;
+        }
+        let strides = [f.stride(0), f.stride(1), f.stride(2)];
+        let threads = std::thread::available_parallelism()
+            .map_or(1, |n| n.get())
+            .min(height);
+        let rows = height.div_ceil(threads);
+        // SAFETY: the three planes are apart in memory; each slice covers
+        // its plane's rows, `stride` bytes apart.
+        let planes = unsafe {
+            let raw = f.as_mut_ptr();
+            [0, 1, 2].map(|p| std::slice::from_raw_parts_mut((*raw).data[p], strides[p] * height))
+        };
+        let [g, b, r] = planes;
+        std::thread::scope(|scope| {
+            let chunks = g
+                .chunks_mut(strides[0] * rows)
+                .zip(b.chunks_mut(strides[1] * rows))
+                .zip(r.chunks_mut(strides[2] * rows));
+            for ((g, b), r) in chunks {
+                scope.spawn(move || {
+                    let lines = g
+                        .chunks_mut(strides[0])
+                        .zip(b.chunks_mut(strides[1]))
+                        .zip(r.chunks_mut(strides[2]));
+                    for ((g, b), r) in lines {
+                        let samples = g[..4 * width]
+                            .as_chunks_mut::<4>()
+                            .0
+                            .iter_mut()
+                            .zip(b[..4 * width].as_chunks_mut::<4>().0)
+                            .zip(r[..4 * width].as_chunks_mut::<4>().0);
+                        for ((g, b), r) in samples {
+                            let rgb = [*r, *g, *b].map(f32::from_le_bytes);
+                            let [rv, gv, bv] = self.pixel(rgb).map(f32::to_le_bytes);
+                            (*r, *g, *b) = (rv, gv, bv);
+                        }
+                    }
+                });
+            }
+        });
+    }
+}
+
+/// A transfer function `f` for `hdr`, as a table of its values from 0 to
+/// `top` in [`Curve::STEPS`] steps, interpolated: of the input, or of its
+/// fourth root (`root`) where `f` is steep near black. Computed outside it.
+#[derive(Clone)]
+struct Curve {
+    f: fn(Option<Hdr>, f32) -> f32,
+    hdr: Option<Hdr>,
+    top: f32,
+    root: bool,
+    values: Vec<f32>,
+}
+
+impl std::fmt::Debug for Curve {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(out, "Curve({:?} to {})", self.hdr, self.top)
+    }
+}
+
+impl Curve {
+    const STEPS: usize = 4096;
+
+    fn new(f: fn(Option<Hdr>, f32) -> f32, hdr: Option<Hdr>, top: f32, root: bool) -> Self {
+        let values = (0..=Self::STEPS)
+            .map(|i| {
+                let u = i as f32 / Self::STEPS as f32;
+                f(hdr, top * if root { u * u * u * u } else { u })
+            })
+            .collect();
+        Self {
+            f,
+            hdr,
+            top,
+            root,
+            values,
+        }
+    }
+
+    fn at(&self, x: f32) -> f32 {
+        // Below 0, above the top and NaN: computed.
+        if !(x >= 0.0 && x < self.top) {
+            return (self.f)(self.hdr, x);
+        }
+        let u = x / self.top;
+        let u = if self.root { u.sqrt().sqrt() } else { u };
+        let pos = u * Self::STEPS as f32;
+        let i = (pos as usize).min(Self::STEPS - 1);
+        let t = pos - i as f32;
+        self.values[i] + t * (self.values[i + 1] - self.values[i])
+    }
+}
+
+/// `v` in `hdr`'s transfer to linear light, the reference white at 1.0
+/// ([`glsl_to_linear`]).
+fn to_linear(hdr: Option<Hdr>, v: f32) -> f32 {
+    let v = v.max(0.0);
+    match hdr {
+        Some(Hdr::Pq) => {
+            let p = v.powf(1.0 / 78.843_75);
+            let num = (p - 0.835_937_5).max(0.0);
+            let den = (18.851_563 - 18.6875 * p).max(f32::MIN_POSITIVE);
+            (num / den).powf(1.0 / 0.159_301_76) * (10000.0 / REFERENCE_WHITE as f32)
+        }
+        Some(Hdr::Hlg) => {
+            let l = if v <= 0.5 {
+                v * v / 3.0
+            } else {
+                (((v - 0.559_910_7) / 0.178_832_77).exp() + 0.284_668_92) / 12.0
+            };
+            l.powf(1.2) * (1000.0 / REFERENCE_WHITE as f32)
+        }
+        None => v.powf(2.4),
+    }
+}
+
+/// Linear light `v` (the reference white at 1.0) to `hdr`'s transfer
+/// ([`glsl_from_linear`]).
+fn from_linear(hdr: Option<Hdr>, v: f32) -> f32 {
+    match hdr {
+        Some(Hdr::Pq) => {
+            let l = v * (REFERENCE_WHITE as f32 / 10000.0);
+            if l <= 0.0 {
+                return 0.0;
+            }
+            let p = l.powf(0.159_301_76);
+            ((0.835_937_5 + 18.851_563 * p) / (1.0 + 18.6875 * p)).powf(78.843_75)
+        }
+        Some(Hdr::Hlg) => {
+            let l = (v * (REFERENCE_WHITE as f32 / 1000.0))
+                .max(0.0)
+                .powf(1.0 / 1.2);
+            if l <= 1.0 / 12.0 {
+                (3.0 * l).sqrt()
+            } else {
+                0.178_832_77 * (12.0 * l - 0.284_668_92).max(1e-30).ln() + 0.559_910_7
+            }
+        }
+        None => v.max(0.0).powf(1.0 / 2.4),
+    }
+}
+
 fn name(p: format::Pixel) -> String {
     p.descriptor()
         .map(|d| d.name().to_string())
