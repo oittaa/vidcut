@@ -1628,6 +1628,9 @@ fn plan_view(ui: &mut egui::Ui, d: &Dialog) -> Option<Vec<String>> {
             if let Some(line) = color_line(&outputs) {
                 ui.label(line.0).on_hover_text(line.1);
             }
+            if let Some(line) = metadata_line(&outputs) {
+                ui.label(dim(line.0)).on_hover_text(line.1);
+            }
             let frames: i64 = outputs.iter().filter_map(|o| o["frames"].as_i64()).sum();
             ui.label(format!("{} file(s), {frames} frames", outputs.len()));
             for o in outputs.iter().take(4) {
@@ -1698,6 +1701,25 @@ fn color_line(outputs: &[Value]) -> Option<(String, String)> {
         }
     }
     (!kinds.is_empty()).then(|| (kinds.join(" / "), why.join("\n")))
+}
+
+/// The HDR metadata the outputs write, in a few words, with the reasons to
+/// hover (decision D46); `None` when they write none.
+fn metadata_line(outputs: &[Value]) -> Option<(String, String)> {
+    let m = outputs
+        .iter()
+        .map(|o| &o["metadata"])
+        .find(|m| m.is_object() && m["mode"].as_str() != Some("none"))?;
+    Some((
+        crate::export::metadata_words(m),
+        m["why"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    ))
 }
 
 /// Applies a note's overrides to the dialog's settings: HDR, on a codec

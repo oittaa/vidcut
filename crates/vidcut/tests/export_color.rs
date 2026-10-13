@@ -257,3 +257,81 @@ fn presets_show_their_dynamic_range() {
     assert_eq!(hdr("h265-master"), "auto");
     assert_eq!(hdr("tiktok"), "sdr");
 }
+
+#[test]
+fn hdr_metadata_follows_the_sources() {
+    // Decision D46, through the binary: the plan says what an export writes,
+    // the export writes it, and media probed before vidcut kept the values
+    // are probed again.
+    use vidcut_av::fixture::HdrMeta;
+    let sb = Sandbox::new("metadata");
+    let plus = fixture(
+        FixtureSpec::new(VideoCodec::Hevc10, Container::Mkv, 320, 180, (30, 1), 30)
+            .hdr(Hdr::Pq)
+            .hdr_meta(HdrMeta {
+                max_nits: 1000,
+                light: Some((1000, 400)),
+                hdr10plus: true,
+            })
+            .no_audio(),
+    );
+    let project = sb.path("p.vidcut");
+    sb.ok(&["project", "create", project.to_str().unwrap()]);
+    sb.ok(&["media", "add", &plus]);
+    sb.ok(&["edit", "append", "m1"]);
+    let media = sb.ok(&["media", "get", "m1"])["result"].clone();
+    assert_eq!(media["info"]["video"]["hdr10plus"], true);
+    assert_eq!(
+        media["info"]["video"]["light"],
+        json!({"max_cll": 1000, "max_fall": 400})
+    );
+
+    // As a project from before: the values gone from the file.
+    let mut file: Value =
+        serde_json::from_str(&std::fs::read_to_string(&project).unwrap()).unwrap();
+    let v = &mut file["media"][0]["info"]["video"];
+    for k in ["mastering", "light", "hdr10plus"] {
+        v.as_object_mut().unwrap().remove(k);
+    }
+    std::fs::write(&project, file.to_string()).unwrap();
+    assert!(sb.ok(&["media", "get", "m1"])["result"]["info"]["video"]["light"].is_null());
+
+    let plan = sb.plan("master.mkv", &["--preset", "h265-master"]);
+    let m = &plan["outputs"][0]["metadata"];
+    assert_eq!(m["mode"], "hdr10plus", "{m}");
+    assert_eq!(m["light"], json!({"max_cll": 1000, "max_fall": 400}));
+    // The settings the encoder runs with, and none asked for.
+    let plan = sb.plan(
+        "plain.mkv",
+        &[
+            "--preset",
+            "h265-master",
+            "--set",
+            "video.hdr_metadata=none",
+        ],
+    );
+    assert_eq!(plan["outputs"][0]["metadata"]["mode"], "none");
+
+    let out = sb.path("master.mkv");
+    let r = sb.ok(&[
+        "export",
+        "start",
+        out.to_str().unwrap(),
+        "--preset",
+        "h265-master",
+        "--encoder",
+        "cpu",
+        "--set",
+        "video.speed=ultrafast",
+    ]);
+    assert_eq!(
+        r["result"]["outputs"][0]["metadata"]["mode"], "hdr10plus",
+        "{r}"
+    );
+    let frames = vidcut_av::hdr::read_frames(&out, false).unwrap();
+    assert_eq!(frames.len(), 30);
+    assert!(frames.iter().enumerate().all(|(k, f)| {
+        f.hdr10plus.as_deref() == Some(fixture::hdr10plus_t35(k as u32).as_slice())
+            && f.metadata.light.is_some_and(|l| l.max_cll == 1000)
+    }));
+}
