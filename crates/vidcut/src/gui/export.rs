@@ -1704,22 +1704,29 @@ fn color_line(outputs: &[Value]) -> Option<(String, String)> {
 }
 
 /// The HDR metadata the outputs write, in a few words, with the reasons to
-/// hover (decision D46); `None` when they write none.
+/// hover (decision D46): one line however many files, each kind once;
+/// `None` when they write none.
 fn metadata_line(outputs: &[Value]) -> Option<(String, String)> {
-    let m = outputs
+    let mut kinds: Vec<String> = Vec::new();
+    let mut why = Vec::new();
+    for m in outputs
         .iter()
         .map(|o| &o["metadata"])
-        .find(|m| m.is_object() && m["mode"].as_str() != Some("none"))?;
-    Some((
-        crate::export::metadata_words(m),
-        m["why"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|w| w.as_str())
-            .collect::<Vec<_>>()
-            .join("\n"),
-    ))
+        .filter(|m| m.is_object() && m["mode"].as_str() != Some("none"))
+    {
+        let words = crate::export::metadata_words(m);
+        if !kinds.contains(&words) {
+            kinds.push(words);
+            why.extend(
+                m["why"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|w| w.as_str().map(String::from)),
+            );
+        }
+    }
+    (!kinds.is_empty()).then(|| (kinds.join(" / "), why.join("\n")))
 }
 
 /// Applies a note's overrides to the dialog's settings: HDR, on a codec
@@ -2059,9 +2066,14 @@ fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u3
                             egui::ComboBox::from_id_salt("export-hdr-metadata")
                                 .selected_text(label(v.hdr_metadata))
                                 .show_ui(ui, |ui| {
-                                    for m in
-                                        [M::Auto, M::Static, M::Hdr10plus, M::DolbyVision, M::None]
-                                    {
+                                    for m in [
+                                        M::Auto,
+                                        M::Static,
+                                        M::Hdr10plus,
+                                        M::DolbyVision,
+                                        M::All,
+                                        M::None,
+                                    ] {
                                         ui.selectable_value(&mut v.hdr_metadata, m, label(m));
                                     }
                                 })
@@ -2191,4 +2203,35 @@ fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u3
                 ui.end_row();
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::metadata_line;
+
+    #[test]
+    fn the_metadata_line_names_each_kind_once() {
+        let file = |mode: &str, cll: u32| {
+            json!({ "metadata": {
+                "mode": mode,
+                "light": { "max_cll": cll, "max_fall": 400 },
+                "why": [format!("MaxCLL {cll}")],
+            }})
+        };
+        let outputs = [
+            file("static", 1000),
+            file("static", 1000),
+            file("hdr10plus", 2000),
+            json!({ "metadata": { "mode": "none", "why": [] } }),
+        ];
+        let (words, why) = metadata_line(&outputs).unwrap();
+        assert_eq!(
+            words,
+            "HDR10: MaxCLL 1000, MaxFALL 400 / HDR10: MaxCLL 2000, MaxFALL 400; HDR10+"
+        );
+        assert_eq!(why, "MaxCLL 1000\nMaxCLL 2000");
+        assert!(metadata_line(&outputs[3..]).is_none());
+    }
 }
