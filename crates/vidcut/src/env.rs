@@ -244,9 +244,13 @@ impl Env for AvEnv {
             std::fs::create_dir_all(dir)
                 .map_err(|e| Error::media(format!("{}: {e}", dir.display())))?;
             let total = Some((v.duration * v.fps.as_f64()).round().max(0.0) as u64);
-            // Decoded on the GPU as the viewer decodes (preview.md §6).
+            // Decoded on the GPU the viewer decodes on (preview.md §6), on a
+            // stream or device of its own.
             let gpu = prefs.gpu.acceleration && prefs.gpu.decoding;
-            let decoder = gpu.then(crate::preferences::gpu_decoder).flatten();
+            let decoder = gpu
+                .then(crate::preferences::gpu_decoder)
+                .flatten()
+                .and_then(|d| d.own().ok());
             let decoding = match &decoder {
                 Some(d) => vidcut_av::hw::Decoding::Gpu(d),
                 None if gpu => vidcut_av::hw::Decoding::Nvdec,

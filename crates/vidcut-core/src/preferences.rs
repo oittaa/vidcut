@@ -49,9 +49,10 @@ pub struct Gpu {
     /// GPU encoder.
     pub acceleration: bool,
     /// While `acceleration` is on, decode H.264, HEVC, AV1 and VP9 on the
-    /// GPU: in the viewer, exports, proxies and the timeline's pictures.
-    /// Off, the CPU decodes them and the GPU still scales and encodes,
-    /// which is faster where the GPU is small and the CPU large.
+    /// GPU in the viewer, exports and proxies, and all but H.264 in the
+    /// timeline's pictures. Off, the CPU decodes and scales them and the
+    /// GPU only encodes, which is faster where the GPU is small and the CPU
+    /// large.
     pub decoding: bool,
 }
 

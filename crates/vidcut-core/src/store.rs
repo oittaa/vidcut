@@ -279,13 +279,30 @@ fn native(relative: &Path) -> PathBuf {
     path
 }
 
+/// Whether a path the file keeps is absolute on some system: `/…`, or a
+/// Windows drive's (`C:\…`, `C:/…`) or server's (`\\server\…`). One written
+/// on the other kind of system names nothing here, so it is kept as it was
+/// written rather than joined onto the project's folder: it shows as it
+/// was, and goes back into the file unchanged.
+fn absolute_anywhere(path: &Path) -> bool {
+    let Some(s) = path.to_str() else {
+        return path.is_absolute();
+    };
+    let b = s.as_bytes();
+    s.starts_with(['/', '\\'])
+        || (b.len() > 2
+            && b[0].is_ascii_alphabetic()
+            && b[1] == b':'
+            && matches!(b[2], b'\\' | b'/'))
+}
+
 /// The project in the file's `text`, its relative paths made absolute from
 /// `dir`.
 fn parse(path: &Path, dir: &Path, text: &str) -> Result<Project> {
     let mut project: Project = serde_json::from_str(text)
         .map_err(|e| Error::invalid(format!("{} is not a vidcut project: {e}", path.display())))?;
     for file in files(&mut project) {
-        if file.is_relative() {
+        if !absolute_anywhere(file) {
             *file = dir.join(native(file));
         }
     }
@@ -549,5 +566,51 @@ mod tests {
             project.media[0].proxy.as_ref().unwrap().path,
             moved.join("proxies").join("a.mov")
         );
+    }
+
+    #[test]
+    fn paths_absolute_on_the_other_system_stay_as_written() {
+        let tmp = tempfile::Builder::new()
+            .prefix("vidcut-store-")
+            .tempdir()
+            .unwrap();
+        let dir = crate::dirs::canonical(tmp.path()).unwrap();
+        isolated_state();
+        let a = dir.join("a.mp4");
+        let info =
+            crate::test_support::media_info(4.0, crate::time::Rational::new(25, 1).unwrap(), true);
+        let env = FakeEnv::default().with(a.to_str().unwrap(), info);
+        let path = dir.join("p.vidcut");
+        let store = Store::create(&path, &Project::new(Settings::default())).unwrap();
+        apply(
+            &store,
+            &env,
+            json!({"method": "media.add", "params": {"paths": [a]}}),
+        )
+        .unwrap();
+        let file = |path: &Path| -> serde_json::Value {
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+        };
+        // A project made on Windows (a drive, a server) or on Linux.
+        for written in [
+            r"D:\elsewhere\c.mp4",
+            r"\\server\share\d.mp4",
+            "/elsewhere/e.mp4",
+        ] {
+            let mut text = file(&path);
+            text["media"][0]["path"] = json!(written);
+            std::fs::write(&path, text.to_string()).unwrap();
+            let store = Store::open(&path).unwrap();
+            let project = store.load().unwrap().project().clone();
+            assert_eq!(project.media[0].path, PathBuf::from(written));
+            // Saved again, still as written.
+            apply(
+                &store,
+                &env,
+                json!({"method": "marks.set", "params": {"in": 1, "out": 2}}),
+            )
+            .unwrap();
+            assert_eq!(file(&path)["media"][0]["path"], written);
+        }
     }
 }

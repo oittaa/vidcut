@@ -53,9 +53,11 @@ fn pictures(input: &Input) -> Vec<Vec<Vec<u8>>> {
 /// average difference (a shift of levels).
 #[cfg(feature = "gpu-tests")]
 fn distance(a: &[Vec<u8>], b: &[Vec<u8>]) -> Vec<(f64, f64)> {
+    assert_eq!(a.len(), b.len(), "as many planes");
     a.iter()
         .zip(b)
         .map(|(a, b)| {
+            assert_eq!(a.len(), b.len(), "planes of one size");
             let n = a.len() as f64;
             let diffs = a.iter().zip(b).map(|(&x, &y)| f64::from(x) - f64::from(y));
             let (abs, sum) = diffs.fold((0.0, 0.0), |(abs, sum), d| (abs + d.abs(), sum + d));
