@@ -866,8 +866,9 @@ pub(crate) fn open_video(
             Some(v)
         }
         // Frames from memory, encoded on that GPU: QSV on a device of its
-        // own there (a VA-API one beneath it on Linux, which keeps libva's
-        // messages in FFmpeg's log), AMF on Direct3D 11's on that adapter.
+        // own on top of one there (`hw::Device::qsv`: VA-API's on Linux,
+        // which keeps libva's messages in FFmpeg's log, Direct3D 11's on
+        // Windows), AMF on Direct3D 11's on that adapter.
         Some(on) if matches!(enc.kind, EncoderChoice::Qsv | EncoderChoice::Amf) => {
             let device = match enc.kind {
                 EncoderChoice::Qsv => crate::hw::Device::qsv(on)?,
@@ -1149,8 +1150,9 @@ fn amd_and_intel() -> Vec<(String, EncoderChoice)> {
 }
 
 /// What [`detect`] tests, in a number: a cache of its results from
-/// another is out of date.
-pub const DETECTS: u32 = 2;
+/// another is out of date. 3: QSV opened on its GPU (`child_device`); 2's
+/// results came from QSV on the first Intel GPU, or the software runtime.
+pub const DETECTS: u32 = 3;
 
 /// The options among `keys` that encoder `name` doesn't have: FFmpeg drops
 /// those without a word. `None` when this FFmpeg has no `name`.
