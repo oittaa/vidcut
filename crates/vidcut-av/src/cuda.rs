@@ -23,7 +23,7 @@ pub struct PlaneCopy {
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::ptr;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use vidcut_core::model::Hdr;
 
@@ -43,15 +43,17 @@ pub struct CudaDevice {
     base: Device,
     /// The Vulkan device on the same GPU, for libplacebo: made from the
     /// base the first time it is needed (that takes a quarter of a
-    /// second), then shared by every clone.
-    vulkan: Arc<OnceLock<std::result::Result<Device, String>>>,
+    /// second), then shared by every clone, until a converter on it fails
+    /// ([`CudaDevice::forget_vulkan`]).
+    vulkan: Arc<Mutex<Option<std::result::Result<Device, String>>>>,
 }
 
 impl CudaDevice {
     /// The CUDA device on the first GPU that works: one for the whole
     /// process, shared by every export and proxy, and never closed. Its
-    /// Vulkan device is made once too: the Vulkan loader crashed when two
-    /// threads made instances at the same time (two exports at once).
+    /// Vulkan device is made one thread at a time: the Vulkan loader
+    /// crashed when two threads made instances at the same time (two
+    /// exports at once).
     pub fn open() -> Result<Self> {
         static SHARED: OnceLock<std::result::Result<CudaDevice, String>> = OnceLock::new();
         SHARED
@@ -126,29 +128,44 @@ impl CudaDevice {
         self.cuda.0
     }
 
-    fn vulkan(&self) -> Result<&Device> {
-        self.vulkan
-            .get_or_init(|| {
-                let mut vulkan = ptr::null_mut();
-                let ret = unsafe {
-                    ffi::av_hwdevice_ctx_create_derived(
-                        &mut vulkan,
-                        ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VULKAN,
-                        self.base.0,
-                        0,
-                    )
-                };
-                if ret < 0 || vulkan.is_null() {
-                    Err(format!(
-                        "no Vulkan device on the CUDA device's GPU: {}",
-                        ffmpeg::Error::from(ret)
-                    ))
-                } else {
-                    Ok(Device(vulkan))
-                }
-            })
-            .as_ref()
-            .map_err(|e| Error::Invalid(e.clone()))
+    /// The Vulkan device, made if there is none.
+    fn vulkan(&self) -> Result<Device> {
+        let mut slot = self.vulkan.lock().unwrap_or_else(|e| e.into_inner());
+        slot.get_or_insert_with(|| {
+            let mut vulkan = ptr::null_mut();
+            let ret = unsafe {
+                ffi::av_hwdevice_ctx_create_derived(
+                    &mut vulkan,
+                    ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VULKAN,
+                    self.base.0,
+                    0,
+                )
+            };
+            if ret < 0 || vulkan.is_null() {
+                Err(format!(
+                    "no Vulkan device on the CUDA device's GPU: {}",
+                    ffmpeg::Error::from(ret)
+                ))
+            } else {
+                Ok(Device(vulkan))
+            }
+        })
+        .clone()
+        .map_err(Error::Invalid)
+    }
+
+    /// Drops `used`, the Vulkan device a converter failed on, if it is
+    /// still the one handed out, so the next converter makes another: a
+    /// device the GPU lost stays lost, and every converter on it would fail.
+    fn forget_vulkan(&self, used: &Device) {
+        let mut slot = self.vulkan.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: references to device contexts, the same device when they
+        // point to the same data.
+        if let Some(Ok(d)) = slot.as_ref()
+            && unsafe { (*d.0).data == (*used.0).data }
+        {
+            *slot = None;
+        }
     }
 }
 
@@ -308,6 +325,10 @@ struct Placebo {
     pts: VecDeque<(i64, Option<i64>)>,
     /// The sample aspect of the upright pictures.
     sar: ffi::AVRational,
+    /// The device the converter was made on, and its Vulkan device, dropped
+    /// there when the converter fails ([`Placebo::checked`]).
+    device: CudaDevice,
+    vulkan: Device,
 }
 
 /// One converter at work at a time in the process: made, fed, read or
@@ -398,13 +419,26 @@ unsafe fn wait_signalled(
         };
         match wait(dev.act_dev, &info, timeout.as_nanos() as u64) {
             0 => Ok(()),
-            result => Err(Error::Invalid(format!(
-                "the GPU didn't finish in {} s (VkResult {result})",
-                timeout.as_secs()
-            ))),
+            result => Err(Error::Invalid(waiting_failed(result, timeout))),
         }
     }
 }
+
+/// What a wait of `timeout` at most for the GPU says when it ended in
+/// `result` (a `VkResult`).
+fn waiting_failed(result: i32, timeout: std::time::Duration) -> String {
+    match result {
+        VK_TIMEOUT => format!("the GPU didn't finish in {} s", timeout.as_secs()),
+        VK_ERROR_DEVICE_LOST => "the GPU stopped working (its Vulkan device was lost)".into(),
+        _ => format!("waiting for the GPU failed (Vulkan error {result})"),
+    }
+}
+
+/// `VK_TIMEOUT`.
+const VK_TIMEOUT: i32 = 2;
+
+/// `VK_ERROR_DEVICE_LOST`.
+const VK_ERROR_DEVICE_LOST: i32 = -4;
 
 /// `vkGetDeviceProcAddr`.
 type GetDeviceProcAddr =
@@ -980,12 +1014,29 @@ impl Placebo {
                 num: out_sar.0,
                 den: out_sar.1,
             },
+            device: device.clone(),
+            vulkan,
         })
+    }
+
+    /// `r`, the Vulkan device dropped first if it is an error: the export
+    /// fails all the same, and the next converter makes another device
+    /// ([`CudaDevice::forget_vulkan`]).
+    fn checked<T>(&self, r: Result<T>) -> Result<T> {
+        if r.is_err() {
+            self.device.forget_vulkan(&self.vulkan);
+        }
+        r
     }
 
     /// Feeds `f` (a CUDA frame), or the end of the stream (`None`).
     fn push(&mut self, f: Option<&frame::Video>) -> Result<()> {
         let _one = converting();
+        let fed = self.feed_frame(f);
+        self.checked(fed)
+    }
+
+    fn feed_frame(&mut self, f: Option<&frame::Video>) -> Result<()> {
         let Some(f) = f else {
             for name in ["bg", "in"] {
                 if let Some(mut source) = self.graph.get(name) {
@@ -1044,6 +1095,11 @@ impl Placebo {
     /// timestamp, in a CUDA frame.
     fn pull(&mut self) -> Result<Option<frame::Video>> {
         let _one = converting();
+        let pulled = self.converted();
+        self.checked(pulled)
+    }
+
+    fn converted(&mut self) -> Result<Option<frame::Video>> {
         while let Some((out, tb)) = take(&mut self.graph, "converting on the GPU")? {
             let k = out
                 .pts()
@@ -1153,10 +1209,49 @@ fn tag(f: &mut frame::Video, tags: Tags) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Layout, filters, placebo_options};
+    use super::{Layout, filters, placebo_options, waiting_failed};
     use crate::color::{GpuColor, gpu_color};
     use crate::ffmpeg::{ffi, format::Pixel, frame};
     use vidcut_core::model::Hdr;
+
+    /// A wait for the GPU that failed says why in words: the GPU too slow,
+    /// or its Vulkan device lost.
+    #[test]
+    fn a_failed_wait_says_why() {
+        let five = std::time::Duration::from_secs(5);
+        assert_eq!(waiting_failed(2, five), "the GPU didn't finish in 5 s");
+        assert_eq!(
+            waiting_failed(-4, five),
+            "the GPU stopped working (its Vulkan device was lost)"
+        );
+        assert_eq!(
+            waiting_failed(-2, five),
+            "waiting for the GPU failed (Vulkan error -2)"
+        );
+    }
+
+    /// After a converter fails, the next gets a new Vulkan device; a
+    /// converter failing on a device already replaced leaves the new one.
+    #[cfg(feature = "gpu-tests")]
+    #[test]
+    fn a_failed_converter_leaves_the_next_a_new_vulkan_device() {
+        let Ok(cuda) = super::CudaDevice::open() else {
+            eprintln!("skipping: no CUDA device here");
+            return;
+        };
+        let Ok(first) = cuda.vulkan() else {
+            eprintln!("skipping: no Vulkan device on the CUDA device's GPU");
+            return;
+        };
+        // SAFETY: references to live device contexts.
+        let same = |a: &super::Device, b: &super::Device| unsafe { (*a.0).data == (*b.0).data };
+        assert!(same(&first, &cuda.vulkan().expect("made")));
+        cuda.forget_vulkan(&first);
+        let second = cuda.vulkan().expect("made anew");
+        assert!(!same(&first, &second));
+        cuda.forget_vulkan(&first);
+        assert!(same(&second, &cuda.vulkan().expect("kept")));
+    }
 
     /// How the GPU converts a 1080p 10-bit picture of `hdr`'s transfer
     /// (`None`: SDR, BT.709) for an output of `target`'s.
