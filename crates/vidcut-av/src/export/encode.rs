@@ -1482,7 +1482,7 @@ mod tests {
         assert_eq!(passes(&one, &none).unwrap(), Passes::One);
         // NVENC looks twice inside one encode, at a quarter of the size
         // unless told; VAAPI makes one.
-        let mut nvenc = video(VideoCodec::H264, EncoderChoice::Auto, Some(4_000_000));
+        let mut nvenc = video(VideoCodec::H264, EncoderChoice::Nvenc, Some(4_000_000));
         let e = resolve_video(&nvenc, &nvenc_here()).unwrap();
         assert_eq!(
             (e.name.as_str(), e.passes),
@@ -1760,11 +1760,13 @@ mod tests {
 
     #[test]
     fn auto_tries_the_systems_gpu_encoders() {
-        // NVENC first; then AMF and QSV on Windows, VAAPI on Linux.
+        // NVENC first; then AMF and QSV on Windows, VAAPI on Linux;
+        // VideoToolbox on macOS.
         crate::init();
         let nv12 = format::Pixel::NV12;
         let all = Availability {
             encoders: vec![
+                working("h264_videotoolbox", EncoderChoice::VideoToolbox, nv12),
                 working("h264_vaapi", EncoderChoice::Vaapi, nv12),
                 working("h264_qsv", EncoderChoice::Qsv, nv12),
                 working("h264_amf", EncoderChoice::Amf, nv12),
@@ -1778,6 +1780,8 @@ mod tests {
             .collect();
         let want = if cfg!(windows) {
             ["h264_nvenc", "h264_amf", "h264_qsv", "libx264"].as_slice()
+        } else if cfg!(target_os = "macos") {
+            ["h264_videotoolbox", "libx264"].as_slice()
         } else {
             ["h264_nvenc", "h264_vaapi", "libx264"].as_slice()
         };
