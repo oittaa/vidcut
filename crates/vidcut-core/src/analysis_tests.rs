@@ -238,3 +238,44 @@ fn a_slide_moves_a_clip_between_its_neighbors() {
     let e = f.err(req("edit.slide", json!({"clip": "c2", "by": -70})));
     assert_eq!(e.code, ErrorCode::InvalidEdit);
 }
+
+#[test]
+fn clips_at_other_speeds_are_cut_through_their_speed() {
+    // Decision D48: all of m1 twice as fast in 125 frames. Its speech at
+    // 1.0–1.5 s, 3.0–3.2 s and 6.0–7.0 s plays at frames 12.5–18.75,
+    // 37.5–40 and 75–87.5; its shots change at frames 25 and 63 (source 2 s
+    // and 5 s).
+    let speedy = || {
+        let mut f = fixture();
+        f.append("m1", 0, 125);
+        f.ok(req(
+            "edit.change_speed",
+            json!({"clips": "c1", "speed": 2.0, "ripple": false}),
+        ));
+        f
+    };
+    let mut f = speedy();
+    let r = f.ok(req(
+        "edit.ripple_delete_silence",
+        json!({"clips": "c1", "pre_head": "5f", "post_tail": "5f", "min": "0.7s", "dry_run": true}),
+    ));
+    let parts: Vec<(i64, i64)> = r.result["removed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| (p["start"].as_i64().unwrap(), p["end"].as_i64().unwrap()))
+        .collect();
+    assert_eq!(parts, vec![(24, 32), (45, 70), (93, 125)]);
+
+    let mut f = speedy();
+    let r = f.ok(req("edit.detect_scene_cuts", json!({"clips": "c1"})));
+    let frames: Vec<i64> = r.result["cuts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["frame"].as_i64().unwrap())
+        .collect();
+    assert_eq!(frames, vec![25, 63]);
+    let starts: Vec<(i64, i64)> = f.v1().iter().map(|c| (c.1, c.3)).collect();
+    assert_eq!(starts, vec![(0, 0), (25, 50), (63, 126)]);
+}

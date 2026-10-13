@@ -993,10 +993,9 @@ fn mutate(
             let mut removed = Vec::new();
             for id in &ids {
                 let c = p.clip(id).expect("resolved");
-                // A block plays as a gap: no sound to look at. A clip at
-                // another speed isn't looked at: the analyses map source to
-                // timeline at normal speed.
-                if c.is_block() || c.speed.is_some() {
+                // A block plays as a gap, and a held frame is silent: no
+                // sound to look at.
+                if c.is_block() || c.speed() == 0.0 {
                     continue;
                 }
                 let found = silent_parts(p, env, &Target::Clip(c), &settings)?;
@@ -1025,10 +1024,9 @@ fn mutate(
             let mut created = Vec::new();
             for id in &ids {
                 let c = p.clip(id).expect("resolved");
-                // A block plays as a gap: no pictures to look at. A clip at
-                // another speed isn't looked at: the analyses map source to
-                // timeline at normal speed.
-                if c.is_block() || c.speed.is_some() {
+                // A block plays as a gap: no pictures to look at; a held
+                // frame has no shots.
+                if c.is_block() || c.speed() == 0.0 {
                     continue;
                 }
                 let found = scene_cuts(p, env, &Target::Clip(c), *threshold)?;
@@ -2007,27 +2005,53 @@ fn decompose(
         .compound
         .clone()
         .ok_or_else(|| Error::invalid(format!("{id} isn't a compound clip")))?;
-    if block.speed.is_some() {
-        return Err(Error::invalid(format!(
-            "{id} has a speed change, so it can't be decomposed: its clips would have to play \
-             at that speed"
-        )));
-    }
     let mut t = nested(&k, block.video)?;
     // What the block shows, in the stack's frames.
     let to = p.settings.fps;
-    let a = rescale(block.source_in, to, t.fps);
-    let b = rescale(block.source_in + block.duration, to, t.fps);
-    t.clips.retain_mut(|c| {
-        let (s, e) = (c.start.max(a), c.end().min(b));
-        c.walk(s - c.start);
-        (c.start, c.duration) = (s - a, e - s);
-        e > s
-    });
-    t.markers.retain_mut(|m| {
-        m.at -= a;
-        (0..b - a).contains(&m.at)
-    });
+    if block.speed() != 1.0 {
+        // At its speed (decision D48): each clip where the block shows it,
+        // through its pace, at both speeds together.
+        if t.fps != to {
+            return Err(Error::invalid(format!(
+                "{id} has a speed change and its clips another frame rate: it can't be \
+                 decomposed"
+            )));
+        }
+        t.clips.retain_mut(|c| {
+            let Some((k0, k1)) = crate::render::shown_between(&block, c.start, c.end()) else {
+                return false;
+            };
+            c.walk(block.source_at(block.start + k0) - c.start);
+            (c.start, c.duration) = (k0, k1 - k0);
+            c.speed = crate::render::paced(&block, c.speed.as_ref(), k0);
+            if let Some(a) = c.audio.as_mut() {
+                *a = (0, 0);
+            }
+            true
+        });
+        t.markers.retain_mut(
+            |m| match crate::render::shown_between(&block, m.at, m.at + 1) {
+                Some((k, _)) => {
+                    m.at = k;
+                    true
+                }
+                None => false,
+            },
+        );
+    } else {
+        let a = rescale(block.source_in, to, t.fps);
+        let b = rescale(block.source_in + block.duration, to, t.fps);
+        t.clips.retain_mut(|c| {
+            let (s, e) = (c.start.max(a), c.end().min(b));
+            c.walk(s - c.start);
+            (c.start, c.duration) = (s - a, e - s);
+            e > s
+        });
+        t.markers.retain_mut(|m| {
+            m.at -= a;
+            (0..b - a).contains(&m.at)
+        });
+    }
     let (ids, _) = find_media(p, &t, env, dirs, false)?;
     for w in &t.warnings {
         if !warnings.contains(w) {
@@ -2227,14 +2251,16 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     while flatten && !pending.is_empty() {
         let mut next = Vec::new();
         for id in pending {
-            if p.clip(&id).is_some_and(|c| c.speed.is_some()) {
-                warnings.push(format!(
-                    "{id} has a speed change: kept as a compound clip, as its clips would have \
-                     to play at that speed"
-                ));
-                continue;
-            }
-            let made = decompose(p, &id, env, (&dirs, true), &mut warnings)?;
+            let made = match decompose(p, &id, env, (&dirs, true), &mut warnings) {
+                Ok(made) => made,
+                // A speed change over clips at another frame rate stays a
+                // block (decision D48).
+                Err(e) if p.clip(&id).is_some_and(|c| c.speed.is_some()) => {
+                    warnings.push(format!("{id} kept as a compound clip: {}", e.message));
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
             clips.retain(|c| c != &id);
             next.extend(made.iter().filter(|m| compound(p, m)).cloned());
             clips.extend(made);
@@ -2759,6 +2785,7 @@ impl Target<'_> {
             Target::Media(m) => {
                 let (_, origin) = p.media_origin(&m.id)?;
                 Span {
+                    pace: Default::default(),
                     start: 0,
                     end: p.media_frames(m),
                     source_in: 0,

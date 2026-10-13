@@ -1439,9 +1439,11 @@ pub fn change_speed(
         let c = p
             .clip(id)
             .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
-        if c.is_block() {
+        // A compound clip plays what it holds at its speed; a generator has
+        // nothing to play faster.
+        if c.is_generator() {
             return Err(Error::invalid(format!(
-                "{id} is a block from another editor: it has no speed to change"
+                "{id} is a generator from another editor: it has no speed to change"
             )));
         }
         targets.push((c.start, id.clone()));
@@ -1508,7 +1510,7 @@ pub fn change_speed(
 
 /// The OTIO time effect of a clip at `speed`: its own with the new speed,
 /// else a new `LinearTimeWarp`; a `FreezeFrame` held.
-fn time_effect(old: Option<&Speed>, speed: f64) -> serde_json::Value {
+pub(crate) fn time_effect(old: Option<&Speed>, speed: f64) -> serde_json::Value {
     let schema = if speed == 0.0 {
         "FreezeFrame.1"
     } else {
