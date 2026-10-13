@@ -20,6 +20,7 @@ pub mod player;
 pub mod probe;
 pub mod progress;
 pub mod proxy;
+pub(crate) mod stretch;
 pub mod testdata;
 pub mod thumbs;
 pub mod waveform;

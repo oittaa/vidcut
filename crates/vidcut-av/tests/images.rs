@@ -54,6 +54,7 @@ fn sequence(pattern: &Path, first: u64, count: u64) -> Image {
 
 fn pictures(path: &Path, image: Image, source_frame: i64, frames: i64) -> VideoPiece {
     VideoPiece::Source {
+        pace: Default::default(),
         media: "m".into(),
         path: path.to_path_buf(),
         origin: 0.0,

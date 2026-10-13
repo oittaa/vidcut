@@ -97,6 +97,7 @@ fn plan(path: &Path, secs: i64, gain_db: f64) -> RenderPlan {
         frames: secs * 30,
         video: vec![],
         audio: vec![vec![AudioPiece::Source {
+            speed: 1.0,
             media: "m1".into(),
             path: path.to_path_buf(),
             stream: 0,

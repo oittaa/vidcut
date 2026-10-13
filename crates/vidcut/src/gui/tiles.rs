@@ -381,14 +381,20 @@ pub fn tile_step(frames_per_tile: f64) -> i64 {
 }
 
 /// The source frame a tile shows: the clip's first one for its first tile,
-/// else the first multiple of `step` at or after the tile's left edge,
-/// `offset` frames into the clip from `source_in`.
-pub fn tile_frame(source_in: i64, offset: f64, step: i64, first: bool) -> i64 {
-    if first {
+/// else the first multiple of `step` at or after (backward: at or before)
+/// the one at the tile's left edge, `offset` frames into the clip from
+/// `source_in` at `speed` (decision D48).
+pub fn tile_frame(source_in: i64, offset: f64, step: i64, first: bool, speed: f64) -> i64 {
+    if first || speed == 0.0 {
         return source_in;
     }
-    let left = source_in as f64 + offset;
-    (left / step as f64).ceil() as i64 * step
+    let left = (source_in as f64 + offset * speed) / step as f64;
+    let n = if speed < 0.0 {
+        left.floor()
+    } else {
+        left.ceil()
+    };
+    n as i64 * step
 }
 
 /// A tile picture's height for a band `px` pixels tall: a multiple of 16,
@@ -589,17 +595,22 @@ mod tests {
     #[test]
     fn a_tile_shows_a_grid_frame_inside_it() {
         // The first tile: the clip's first frame, whatever the grid.
-        assert_eq!(tile_frame(100, 0.0, 64, true), 100);
+        assert_eq!(tile_frame(100, 0.0, 64, true, 1.0), 100);
         // Tiles 80 frames wide (step 64) from frame 100: lefts at 180,
         // 260 and 340 show 192, 320 and 384.
         for (offset, want) in [(80.0, 192), (160.0, 320), (240.0, 384)] {
-            let f = tile_frame(100, offset, 64, false);
+            let f = tile_frame(100, offset, 64, false, 1.0);
             assert_eq!(f, want);
             assert!(f >= 100 + offset as i64 && f < 100 + offset as i64 + 80);
         }
         // Zoomed out twice as far (step 128), the frame there is one the
         // closer view showed too: kept already.
-        assert_eq!(tile_frame(100, 160.0, 128, false), 384);
+        assert_eq!(tile_frame(100, 160.0, 128, false, 1.0), 384);
+        // At twice the speed 80 frames in show 260 on; backward from 500,
+        // 420 back.
+        assert_eq!(tile_frame(100, 80.0, 64, false, 2.0), 320);
+        assert_eq!(tile_frame(500, 80.0, 64, false, -1.0), 384);
+        assert_eq!(tile_frame(500, 80.0, 64, false, 0.0), 500);
     }
 
     #[test]

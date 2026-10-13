@@ -29,6 +29,7 @@ fn src(spec: FixtureSpec) -> Src {
 
 fn v(s: &Src, source_frame: i64) -> VideoPiece {
     VideoPiece::Source {
+        pace: Default::default(),
         media: "m".into(),
         path: s.path.clone(),
         origin: s.origin,

@@ -1,5 +1,6 @@
 //! The audio of a render plan: sample-exact source reads, de-click fades at
-//! cuts, and the mix of all lanes, as interleaved `f32`.
+//! cuts, pieces at other speeds stretched keeping their pitch, and the mix
+//! of all lanes, as interleaved `f32`.
 
 use std::path::{Path, PathBuf};
 
@@ -8,6 +9,7 @@ use vidcut_core::render::AudioPiece;
 use super::ahead::Ahead;
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, codec, ffi, format, frame, media};
+use crate::stretch::Stretch;
 
 /// Converts decoded audio of any format, layout and rate to interleaved `f32`
 /// with `channels` channels at `rate` Hz (libswresample).
@@ -425,6 +427,122 @@ pub(crate) fn discard_others(input: &format::context::Input, keep: usize) {
     }
 }
 
+/// Sound a start inside a piece at another speed begins before, dropped:
+/// the stretch fades its first fragment in.
+const PREROLL_SECS: f64 = 0.02;
+
+/// Source read at a time backward, in seconds: each read seeks.
+const BACK_SECS: f64 = 0.5;
+
+/// The sound of a piece at another speed (decision D48): its source read
+/// forward, or backward half a second at a time and reversed, stretched to
+/// the speed keeping its pitch.
+struct Paced {
+    speed: f64,
+    stretch: Option<Stretch>,
+    origin: f64,
+    /// The source sample read next: forward the first of the next read,
+    /// backward the one after its last.
+    next: i64,
+    /// Where the piece's source ends, the way it reads: silence past it,
+    /// where the stretch looks ahead.
+    bound: i64,
+    /// Made and not given yet (interleaved), from `cursor` on.
+    made: Vec<f32>,
+    cursor: usize,
+    /// Samples still to drop at the start.
+    drop: usize,
+}
+
+impl Paced {
+    fn new(
+        speed: f64,
+        origin: f64,
+        (next, bound): (i64, i64),
+        drop: usize,
+        rate: u32,
+        channels: u16,
+    ) -> Self {
+        let stretch =
+            (speed.abs() != 1.0).then(|| Stretch::new(speed.abs(), rate, usize::from(channels)));
+        Self {
+            speed,
+            stretch,
+            origin,
+            next,
+            bound,
+            made: Vec::new(),
+            cursor: 0,
+            drop,
+        }
+    }
+
+    /// Raw time (s) its stream opens at: where it reads first.
+    fn start(&self, rate: u32) -> f64 {
+        let first = if self.speed < 0.0 {
+            (self.next - back_samples(rate)).max(self.bound)
+        } else {
+            self.next
+        };
+        self.origin + first.max(0) as f64 / f64::from(rate)
+    }
+
+    /// Appends its next `n` samples (interleaved) to `out`, read from
+    /// `source`.
+    fn read(&mut self, source: &mut SourceAudio, n: usize, out: &mut Vec<f32>) -> Result<()> {
+        let ch = usize::from(source.channels);
+        let rate = source.rate;
+        if self.speed == 0.0 {
+            out.resize(out.len() + n * ch, 0.0);
+            return Ok(());
+        }
+        let mut read = Vec::new();
+        while (self.made.len() - self.cursor) / ch < n + self.drop {
+            read.clear();
+            let chunk = (rate / 10).max(1) as i64;
+            if self.speed > 0.0 {
+                let len = chunk.min(self.bound - self.next).max(0) as usize;
+                source.read(len, &mut read)?;
+                self.next += len as i64;
+                read.resize(read.len().max(chunk as usize * ch), 0.0);
+            } else {
+                let from = (self.next - back_samples(rate)).max(self.bound).max(0);
+                let len = (self.next - from) as usize;
+                if len == 0 {
+                    read.resize(chunk as usize * ch, 0.0);
+                } else {
+                    source.reposition(self.origin + from as f64 / f64::from(rate))?;
+                    source.read(len, &mut read)?;
+                    let frames: Vec<f32> = read.chunks_exact(ch).rev().flatten().copied().collect();
+                    read = frames;
+                    self.next = from;
+                }
+            }
+            match self.stretch.as_mut() {
+                Some(s) => {
+                    for block in s.push(&read) {
+                        self.made.extend_from_slice(&block.samples);
+                    }
+                }
+                None => self.made.extend_from_slice(&read),
+            }
+        }
+        self.cursor += std::mem::take(&mut self.drop) * ch;
+        out.extend_from_slice(&self.made[self.cursor..self.cursor + n * ch]);
+        self.cursor += n * ch;
+        if self.cursor > 1 << 16 {
+            self.made.drain(..self.cursor);
+            self.cursor = 0;
+        }
+        Ok(())
+    }
+}
+
+/// Source samples read at a time backward.
+fn back_samples(rate: u32) -> i64 {
+    (f64::from(rate) * BACK_SECS).round() as i64
+}
+
 /// One audio lane of a plan, read sequentially. A piece from the same stream
 /// as the one before it reads on with the same decoder; a piece from another
 /// stream is opened while the piece before it plays.
@@ -437,6 +555,8 @@ struct Lane {
     /// start and after a seek into one.
     started: bool,
     source: Option<SourceAudio>,
+    /// The current piece's sound, when it is at another speed.
+    paced: Option<Paced>,
     /// The next stream, opened ahead; named by where it opens.
     ahead: Ahead<SourceAudio, (PathBuf, u32, u64)>,
     declick: i64,
@@ -453,6 +573,7 @@ impl Lane {
             pos: 0,
             started: false,
             source: None,
+            paced: None,
             ahead: Ahead::new(),
             declick,
             scratch: Vec::new(),
@@ -554,21 +675,36 @@ impl Lane {
                 origin,
                 source_sample,
                 gain_db,
+                speed,
                 ..
             } = &piece
             {
                 // A piece starts at its first sample, or where a seek put
                 // the lane.
                 if take > 0 && (self.pos == 0 || !self.started) {
-                    let start = origin + (*source_sample + self.pos) as f64 / f64::from(rate);
+                    self.paced = None;
+                    let start = if *speed == 1.0 {
+                        origin + (*source_sample + self.pos) as f64 / f64::from(rate)
+                    } else {
+                        let preroll = (f64::from(rate) * PREROLL_SECS).round() as i64;
+                        let from = (self.pos - preroll).max(0);
+                        let at = *source_sample + (from as f64 * speed).round() as i64;
+                        let bound = *source_sample + (len as f64 * speed).round() as i64;
+                        let drop = (self.pos - from) as usize;
+                        let paced = Paced::new(*speed, *origin, (at, bound), drop, rate, channels);
+                        let start = paced.start(rate);
+                        self.paced = Some(paced);
+                        start
+                    };
                     self.start_piece(path, *stream, start, rate, channels)?;
                     self.started = true;
                 }
                 self.scratch.clear();
-                self.source
-                    .as_mut()
-                    .expect("open")
-                    .read(take, &mut self.scratch)?;
+                let source = self.source.as_mut().expect("open");
+                match self.paced.as_mut() {
+                    Some(paced) => paced.read(source, take, &mut self.scratch)?,
+                    None => source.read(take, &mut self.scratch)?,
+                }
                 let gain = 10f32.powf(*gain_db as f32 / 20.0) * self.trim;
                 // De-click fades at cuts inside the lane (not at the plan's ends).
                 let fade = self.declick.min(len / 2).max(1);

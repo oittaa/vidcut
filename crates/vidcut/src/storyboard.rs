@@ -50,14 +50,14 @@ pub fn render(
             media,
             path,
             origin,
-            source_frame,
             image,
             ..
         } => VideoPiece::Source {
+            pace: Default::default(),
             media: media.clone(),
             path: path.clone(),
             origin: *origin,
-            source_frame: source_frame + k,
+            source_frame: piece.position(k),
             frames: 1,
             image: image.clone(),
         },

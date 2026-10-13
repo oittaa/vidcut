@@ -327,6 +327,7 @@ mod tests {
 
     fn piece(media: &str, frames: i64) -> VideoPiece {
         VideoPiece::Source {
+            pace: Default::default(),
             media: media.into(),
             path: PathBuf::from(format!("/{media}.mov")),
             origin: 0.0,

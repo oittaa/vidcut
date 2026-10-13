@@ -97,6 +97,7 @@ fn piece(path: &Path, source_frame: i64, frames: i64) -> VideoPiece {
         .and_then(|v| v.first_frame_time)
         .unwrap_or(0.0);
     VideoPiece::Source {
+        pace: Default::default(),
         media: path.display().to_string(),
         path: path.to_path_buf(),
         origin,

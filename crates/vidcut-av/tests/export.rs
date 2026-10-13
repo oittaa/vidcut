@@ -14,7 +14,7 @@ use vidcut_core::export::{
     AudioCodec as ACodec, AudioSettings, Container as OutContainer, EncoderChoice, ExportSettings,
     HdrMode, VideoCodec as VCodec, VideoSettings,
 };
-use vidcut_core::render::{AudioPiece, Image, RenderPlan, VideoPiece};
+use vidcut_core::render::{AudioPiece, Image, Pace, RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
 
 /// A folder for one test's outputs, removed when it drops, also when the
@@ -44,6 +44,7 @@ fn src(spec: FixtureSpec) -> Src {
 
 fn v(s: &Src, source_frame: i64, frames: i64) -> VideoPiece {
     VideoPiece::Source {
+        pace: Default::default(),
         media: "m".into(),
         path: s.path.clone(),
         origin: s.origin,
@@ -55,6 +56,7 @@ fn v(s: &Src, source_frame: i64, frames: i64) -> VideoPiece {
 
 fn a(s: &Src, fps: Rational, rate: u32, source_frame: i64, frames: i64) -> AudioPiece {
     AudioPiece::Source {
+        speed: 1.0,
         media: "m".into(),
         path: s.path.clone(),
         stream: 0,
@@ -266,6 +268,111 @@ fn same_rate_cuts_are_frame_and_sample_exact() {
         assert!(
             (t - want).abs() < 0.001,
             "beep at {t:.4}, want {want:.4} (A/V offset > 1 ms)"
+        );
+    }
+}
+
+#[test]
+fn pieces_at_other_speeds_walk_their_source() {
+    // Decision D48: at speed 2 every other frame, at 0.5 each twice, at 0
+    // one held, at -1 backward; a piece cut from inside its clip keeps its
+    // clip's pace.
+    let fps = Rational::new(30, 1).unwrap();
+    let s = src(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (30, 1),
+        120,
+    ));
+    let paced = |source_frame, frames, speed, skip| {
+        let mut p = v(&s, source_frame, frames);
+        if let VideoPiece::Source { pace, .. } = &mut p {
+            *pace = Pace::of(speed, skip);
+        }
+        p
+    };
+    let pieces = vec![
+        paced(10, 5, 2.0, 0),
+        paced(40, 4, 0.5, 0),
+        paced(41, 3, 0.5, 1),
+        paced(60, 3, 0.0, 0),
+        paced(90, 4, -1.0, 0),
+        v(&s, 20, 2),
+    ];
+    let p = plan(fps, 320, 180, pieces, vec![]);
+    let dir = out_dir("speeds");
+    let out = dir.path().join("speeds.mkv");
+    render(&p, &lossless(), &out);
+    let want: Vec<Option<u32>> = [
+        10, 12, 14, 16, 18, 40, 40, 41, 41, 41, 42, 42, 60, 60, 60, 90, 89, 88, 87, 20, 21,
+    ]
+    .into_iter()
+    .map(Some)
+    .collect();
+    assert_eq!(barcodes(&out), want);
+}
+
+#[test]
+fn sound_at_other_speeds_keeps_its_time_and_pitch() {
+    // Decision D48: the sound of the frames shown, stretched keeping its
+    // pitch; backward, reversed.
+    use vidcut_av::export::audio::AudioMix;
+    use vidcut_av::fixture::Sound;
+    const RATE: f64 = 48_000.0;
+    let spec = |sound| {
+        FixtureSpec::new(VideoCodec::H264, Container::Mov, 320, 180, (30, 1), 330)
+            .with_audio(AudioCodec::PcmS16, 48_000, 2)
+            .sound(sound)
+    };
+    let (beeps, tone) = (src(spec(Sound::Beep)), src(spec(Sound::Tone)));
+    let paced = |s: &Src, from: f64, secs: f64, speed: f64| AudioPiece::Source {
+        media: "m".into(),
+        path: s.path.clone(),
+        stream: 0,
+        origin: s.origin,
+        source_sample: (from * RATE).round() as i64,
+        samples: (secs * RATE) as i64,
+        gain_db: 0.0,
+        speed,
+    };
+    let left = |lane: Vec<AudioPiece>| -> Vec<f32> {
+        let n = lane.iter().map(AudioPiece::samples).sum::<i64>() as usize;
+        let mut mix = AudioMix::new(&[lane], 48_000, 2, 0);
+        let both = mix.read(n).unwrap();
+        both.as_chunks::<2>().0.iter().map(|f| f[0]).collect()
+    };
+
+    // From 1.5 s twice as fast, the beeps of 2 to 5 s; from 6.5 s at half
+    // speed, the one of 7 s; back from 9.5 s, those of 9 and 8 s, each
+    // heard from its end. A stretched one rises within half a hop of the
+    // stretch's fragments (5 ms).
+    let mono = left(vec![
+        paced(&beeps, 1.5, 2.0, 2.0),
+        paced(&beeps, 6.5, 2.0, 0.5),
+        paced(&beeps, 9.5, 2.0, -1.0),
+    ]);
+    let onsets: Vec<f64> = vidcut_av::beep::onsets(&mono, 0.1, 4800)
+        .iter()
+        .map(|&i| i as f64 / RATE)
+        .collect();
+    let want = [0.25, 0.75, 1.25, 1.75, 3.0, 4.49, 5.49];
+    assert_eq!(onsets.len(), want.len(), "beeps at {onsets:?}");
+    for (got, want) in onsets.iter().zip(want) {
+        assert!((got - want).abs() < 0.007, "beep at {got:.4}, want {want}");
+    }
+
+    // The 1 kHz tone stays 1 kHz at every speed.
+    for speed in [2.0, 0.5, -1.0, -2.0] {
+        let mono = left(vec![paced(&tone, 5.0, 1.0, speed)]);
+        let rises = mono[4800..]
+            .windows(2)
+            .filter(|w| w[0] < 0.0 && w[1] >= 0.0)
+            .count();
+        assert!(
+            (880..=920).contains(&rises),
+            "{rises} cycles in 0.9 s at speed {speed}"
         );
     }
 }
@@ -1888,6 +1995,7 @@ fn gpu_encoders_produce_valid_frame_exact_output() {
 /// A piece of image `path` (a still, or a sequence's first file).
 fn pictures(path: &Path, image: Image, source_frame: i64, frames: i64) -> VideoPiece {
     VideoPiece::Source {
+        pace: Default::default(),
         media: "m".into(),
         path: path.to_path_buf(),
         origin: 0.0,

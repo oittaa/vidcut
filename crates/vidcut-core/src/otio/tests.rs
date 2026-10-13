@@ -2052,6 +2052,60 @@ fn compound_clips_are_carried() {
 }
 
 #[test]
+fn reversed_clips_read_and_write_as_editors_do() {
+    // Decision D48: an editor writes a reversed clip's source range from
+    // the lowest frame it shows, and its Media In, the room before its
+    // head (seconds): m1 frames 50..90 (of 250) shown from 89 down.
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.append("m1", 50, 90);
+    let mut doc = export(f.editor.project(), "rev", None, Locations::Absolute).unwrap();
+    let warp = json!({"OTIO_SCHEMA": "LinearTimeWarp.1", "name": "", "effect_name": "",
+        "time_scalar": -1.0});
+    for track in ["Video 1", "Audio 1"] {
+        let items = doc["tracks"]["children"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|t| t["name"] == track)
+            .unwrap()["children"]
+            .as_array_mut()
+            .unwrap();
+        items[0]["effects"] = json!([warp]);
+        items[0]["metadata"]["Resolve_OTIO"]["Media In"] = json!(6.4);
+    }
+
+    let mut g = Fixture::new(&[(10.0, true)]);
+    g.ok(req("timeline.import", json!({ "otio": doc })));
+    let c = g.editor.project().clip("c1").unwrap().clone();
+    assert!(c.audio.is_some(), "its sound paired with it");
+    assert_eq!((c.source_in, c.source_at(0), c.source_at(39)), (89, 89, 50));
+
+    // Written back the same way, from inside it too.
+    let start = |doc: &Value, track| {
+        let item = otio_clips(otio_track(doc, track))[0].clone();
+        let media_in = item["metadata"]["Resolve_OTIO"]["Media In"]
+            .as_f64()
+            .unwrap();
+        (
+            item["source_range"]["start_time"]["value"].clone(),
+            (media_in * 100.0).round(),
+        )
+    };
+    let out = export(g.editor.project(), "rev", None, Locations::Absolute).unwrap();
+    let part = export(
+        g.editor.project(),
+        "rev",
+        Some((10, 40)),
+        Locations::Absolute,
+    )
+    .unwrap();
+    for track in ["Video 1", "Audio 1"] {
+        assert_eq!(start(&out, track), (json!(50.0), 640.0), "{track}");
+        assert_eq!(start(&part, track), (json!(50.0), 680.0), "{track}");
+    }
+}
+
+#[test]
 fn speed_changes_are_carried_and_locked() {
     // As an editor writes them: a 0..100 | b 100..150 at twice its speed,
     // the time effect on its picture and sound | c 150..200.
@@ -2072,26 +2126,31 @@ fn speed_changes_are_carried_and_locked() {
             .as_array_mut()
             .unwrap();
         items[1]["effects"] = json!([warp]);
-        items[1]["metadata"]["Resolve_OTIO"]["Media In"] = json!(0.4);
     }
 
     let mut g = Fixture::new(&[(10.0, true), (10.0, true)]);
     let r = g.ok(req("timeline.import", json!({ "otio": doc })));
     assert_eq!(
         r.result["warnings"],
-        json!(["speed changes kept on their clips but played at normal speed: 200%"])
+        json!([
+            "speed changes kept on their clips, which play at them but can't be trimmed, \
+             split, slipped or rolled: 200%"
+        ])
     );
     let b = g.editor.project().clip("c2").unwrap().clone();
     let speed = b.speed.clone().unwrap();
-    assert_eq!((speed.effect, speed.media_in), (warp.clone(), Some(0.4)));
+    assert_eq!(speed.effect, warp);
     let r = g.ok(req("timeline.get", json!({})));
     assert_eq!(r.result["tracks"][0]["items"][1]["speed"], 2.0);
-    // Written back first among its effects, with its Media In.
+    // Written back first among its effects; forward, without Media In.
     let out = export(g.editor.project(), "spd", None, Locations::Absolute).unwrap();
     for track in ["Video 1", "Audio 1"] {
         let item = otio_clips(otio_track(&out, track))[1].clone();
         assert_eq!(item["effects"][0], warp, "{track}");
-        assert_eq!(item["metadata"]["Resolve_OTIO"]["Media In"], 0.4, "{track}");
+        assert!(
+            item["metadata"]["Resolve_OTIO"]["Media In"].is_null(),
+            "{track}"
+        );
     }
     // An export from inside it starts its source at its speed.
     let part = export(

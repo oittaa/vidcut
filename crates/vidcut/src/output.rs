@@ -713,8 +713,14 @@ fn clip_line(c: &Value) -> String {
         a if a["head"] != 0 || a["tail"] != 0 => format!("audio {:+}/{:+}", a["head"], a["tail"]),
         _ => "audio".to_string(),
     };
+    // At another speed (decision D48): 200%, -100%, freeze.
+    let speed = match c["speed"].as_f64() {
+        Some(0.0) => ", freeze".to_string(),
+        Some(x) => format!(", {}%", (x * 100.0).round()),
+        None => String::new(),
+    };
     format!(
-        "{:<5} {} -> {} {:>6}f  {}  [{} src {}..{}, {}{}]",
+        "{:<5} {} -> {} {:>6}f  {}  [{} src {}..{}, {}{}{}]",
         s("id"),
         s("start_tc"),
         s("end_tc"),
@@ -724,6 +730,7 @@ fn clip_line(c: &Value) -> String {
         c["source_in"],
         c["source_out"],
         audio,
+        speed,
         if c["enabled"] == false {
             ", disabled"
         } else {

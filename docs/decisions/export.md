@@ -47,6 +47,8 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
 - A still's one picture is decoded once and shows for every frame of its pieces. It is never sought: an image file has nothing past its picture.
 - A sequence is read by FFmpeg's `image2` demuxer (`decode::Input::Sequence`): picture `k` has timestamp `k` in a time base of one frame at the sequence's rate, so the rule above picks pictures as from a video file, frame for frame at the project's rate and nearest-frame otherwise. The run is the contiguous files from its first number: image2's `start_number_range` is 1, so a missing first file fails the open instead of starting a few numbers later. The last picture lasts its own frame, as a video's does: at a project rate above the sequence's, the last output frame or two sample a time just past it. A run that ends before the sequence's count (a missing file) fails the export instead of repeating the picture before the hole.
 
+**Speed changes** (spec D48): frame `k` of a piece at another speed shows source frame `source_frame + ⌊(skip + k) × speed⌋ − ⌊skip × speed⌋` (`render::Pace`; `skip` is how far into its clip the piece starts). A piece walking its source backward has its pictures made from the keyframe before them up, as many at a time as fit in 256 MB (at most 64; 4 for an encoder's frames on the GPU, whose pools are small): 1080p H.264 with keyframes 250 frames apart reads backward at 55–60 frames a second, where seeking for each frame would read a few.
+
 **Preview vs export:**
 - The preview (the player engine, [preview.md](preview.md)) reads with these same readers, so it shows the export's frames at every rate.
 
@@ -70,6 +72,7 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
 - **Loudness normalization** (`audio.loudness`): [agents.md](agents.md) §5.
 - Lanes are summed in Rust, with clip gain applied.
 - **De-click:** 3 ms linear fades at every cut inside a lane (on by default; `declick=false` turns them off). Silence-removal cuts would click without them.
+- **Speed changes** (spec D48): a piece at another speed reads its source forward, or backward half a second at a time (a seek each) with each read reversed, through the WSOLA stretch (`stretch.rs`, the player's) at its speed, keeping the pitch. Starting inside it, the stretch starts 20 ms before and that is dropped, as its first fragment fades in. A stretched beep rises within 5 ms of its place.
 
 **Verified:** beeps land within 1 ms of where they should across codec boundaries, and output sample counts are exact.
 

@@ -497,8 +497,8 @@ fn effects_badge(painter: &Painter, band: Rect, effects: &Effects) {
 }
 
 /// A badge at the top right of a clip's picture or sound band with the
-/// speed change it carries from another editor, played at normal speed
-/// (deviation X9): `200%`.
+/// speed change it carries from another editor (deviation X9), which it
+/// plays at (decision D48): `200%`.
 fn speed_badge(painter: &Painter, band: Rect, speed: &Speed) {
     let right = band.right().min(painter.clip_rect().right());
     if right - band.left().max(painter.clip_rect().left()) < 40.0 || band.height() < 13.0 {
@@ -556,7 +556,9 @@ fn filmstrip(
     let height = tiles::tile_height(rect.height() * painter.ctx().pixels_per_point());
     let width = (height as f32 * aspect).round().max(1.0) as u32;
     let step = tiles::tile_step(f64::from(tile_w) / scale.ppf);
-    let last = c.source_in + c.duration - 1;
+    let speed = c.speed();
+    let last = c.source_at(c.start + c.duration - 1);
+    let (lo, hi) = (c.source_in.min(last), c.source_in.max(last));
     let clip_rect = painter.clip_rect().intersect(rect);
     let mut x = rect.left();
     // Start at the first tile that is visible.
@@ -566,7 +568,7 @@ fn filmstrip(
     while x < rect.right().min(clip_rect.right()) {
         let offset = f64::from(x - rect.left()) / scale.ppf;
         let first = x <= rect.left();
-        let frame = tiles::tile_frame(c.source_in, offset, step, first).min(last);
+        let frame = tiles::tile_frame(c.source_in, offset, step, first, speed).clamp(lo, hi);
         let key = TileKey {
             media: c.media.clone(),
             frame,
@@ -618,6 +620,14 @@ fn waveform(
     let Some(w) = assets.waveforms.get(&c.media) else {
         return;
     };
+    // At its speed (decision D48): a held frame is silent, and backward
+    // the sound starts at the top of the first frame's stretch.
+    let speed = c.speed();
+    if speed == 0.0 {
+        return;
+    }
+    let first = c.source_in as f64 - speed.min(0.0);
+    let source = |at: f64| first + (at - c.start as f64) * speed;
     let origin = p
         .media(&c.media)
         .map(|m| {
@@ -638,8 +648,8 @@ fn waveform(
     let color = Color32::from_rgb(170, 230, 190);
     let mut x = visible.left().floor();
     while x < visible.right() {
-        let t0 = scale.frame(x) - c.start as f64 + c.source_in as f64;
-        let t1 = scale.frame(x + 1.0) - c.start as f64 + c.source_in as f64;
+        let (a, b) = (source(scale.frame(x)), source(scale.frame(x + 1.0)));
+        let (t0, t1) = (a.min(b), a.max(b));
         if let Some((lo, hi)) = w.range(origin + t0 / f, origin + t1 / f) {
             painter.line_segment(
                 [

@@ -736,6 +736,13 @@ impl VideoReader {
         self.pending.as_ref().and_then(|f| f.pts())
     }
 
+    /// Frames before this pts are passed over: right after a
+    /// [`seek`](Self::seek) its target, or the keyframe it landed on after
+    /// [`from_keyframe`](Self::from_keyframe).
+    pub fn passes_before(&self) -> Option<i64> {
+        self.min_pts
+    }
+
     /// After a [`seek`](Self::seek): the frames from the keyframe it
     /// landed on come next, not only those from its target, so a reader
     /// that looked for a keyframe decodes on from it instead of seeking

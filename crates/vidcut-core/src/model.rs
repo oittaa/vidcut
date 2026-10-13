@@ -623,8 +623,8 @@ pub struct Clip {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compound: Option<Compound>,
     /// A speed change another editor made, carried (deviation X9): the clip
-    /// plays at normal speed, and edits that would need speed math (trims,
-    /// splits, slips, rolls) refuse it.
+    /// plays at it (decision D48), and edits that would need speed math
+    /// (trims, splits, slips, rolls) refuse it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed: Option<Speed>,
 }
@@ -635,10 +635,6 @@ pub struct Speed {
     /// The OTIO time effect as read: a `LinearTimeWarp` (`time_scalar` 2.0
     /// for twice the speed, -1.0 reversed) or a `FreezeFrame`.
     pub effect: serde_json::Value,
-    /// Where the editor's metadata says a reversed clip's media start
-    /// (`Media In`, seconds), written back with it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub media_in: Option<f64>,
 }
 
 impl Speed {
@@ -752,9 +748,16 @@ impl Clip {
             .map(|a| (self.start + a.head, self.end() + a.tail))
     }
 
-    /// Source frame shown at timeline frame `t`.
+    /// Source frame shown at timeline frame `t`: at its speed (decision
+    /// D48), the frame at or before where it is.
     pub fn source_at(&self, t: i64) -> i64 {
-        self.source_in + (t - self.start)
+        self.source_in + crate::render::Pace::of(self.speed(), 0).offset(t - self.start)
+    }
+
+    /// Source frames per timeline frame: its speed change's (2.0 twice as
+    /// fast, -1.0 backward, 0 a held frame), else 1.
+    pub fn speed(&self) -> f64 {
+        self.speed.as_ref().and_then(Speed::scalar).unwrap_or(1.0)
     }
 }
 

@@ -57,6 +57,7 @@ fn main() {
                 break;
             }
             let piece = VideoPiece::Source {
+                pace: Default::default(),
                 media: "m".into(),
                 path: path.clone(),
                 origin,

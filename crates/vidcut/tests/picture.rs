@@ -34,6 +34,7 @@ fn piece(spec: FixtureSpec, from: i64, frames: i64) -> VideoPiece {
         .and_then(|v| v.first_frame_time)
         .unwrap_or(0.0);
     VideoPiece::Source {
+        pace: Default::default(),
         media: "m".into(),
         path,
         origin,
@@ -211,6 +212,7 @@ fn the_shader_draws_what_the_export_renders() {
     // 120: a still in its file's colors (RGB, coded BT.709 by the player).
     let still = fixture::ensure_images(&ImageSpec::still(123, W, H, "png")).unwrap();
     pieces.push(VideoPiece::Source {
+        pace: Default::default(),
         media: "s".into(),
         path: still[0].clone(),
         origin: 0.0,
@@ -221,6 +223,7 @@ fn the_shader_draws_what_the_export_renders() {
     // 130: full-range 4:2:0 (a JPEG still).
     let jpeg = fixture::ensure_images(&ImageSpec::still(321, W, H, "jpg")).unwrap();
     pieces.push(VideoPiece::Source {
+        pace: Default::default(),
         media: "j".into(),
         path: jpeg[0].clone(),
         origin: 0.0,

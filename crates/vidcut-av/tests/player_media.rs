@@ -45,6 +45,7 @@ fn plan_from(path: &Path, fps: i64, from: i64, secs: i64) -> RenderPlan {
         channels: 2,
         frames,
         video: vec![VideoPiece::Source {
+            pace: Default::default(),
             media: "m1".into(),
             path: path.to_path_buf(),
             origin,
@@ -53,6 +54,7 @@ fn plan_from(path: &Path, fps: i64, from: i64, secs: i64) -> RenderPlan {
             image: None,
         }],
         audio: vec![vec![AudioPiece::Source {
+            speed: 1.0,
             media: "m1".into(),
             path: path.to_path_buf(),
             stream: 0,
