@@ -451,3 +451,108 @@ fn pictures_in_gpu_memory_draw_as_copied_down() {
         );
     }
 }
+
+/// Pictures VA-API decoded, kept in GPU memory (the decoder's surfaces)
+/// and shown from there (imported as DMA-BUFs, taken over from VA-API):
+/// the same pixels as the same picture copied down and uploaded, NV12 and
+/// P010, at a size whose rows and chroma aren't round; interlaced ones come
+/// down for the CPU's deinterlacer. Needs VA-API, and an adapter that
+/// imports DMA-BUFs.
+#[cfg(target_os = "linux")]
+#[test]
+fn vaapi_pictures_draw_as_copied_down() {
+    use vidcut_av::hw::{GpuDecoder, Kind};
+    let Some((gpu, adapter)) = Gpu::headless_with_info() else {
+        eprintln!("skipping: no GPU adapter");
+        return;
+    };
+    if !gpu.imports_dma_bufs() {
+        eprintln!("skipping: the adapter imports no DMA-BUFs");
+        return;
+    }
+    // VA-API on the adapter's GPU, by its render node's PCI address, where
+    // the adapter says its own.
+    let pci = |node: &str| {
+        let name = std::path::Path::new(node).file_name()?.to_owned();
+        let device = std::path::Path::new("/sys/class/drm")
+            .join(name)
+            .join("device");
+        let address = std::fs::read_link(device).ok()?;
+        Some(address.file_name()?.to_string_lossy().to_lowercase())
+    };
+    let ours = adapter.device_pci_bus_id.to_lowercase();
+    let Some(vaapi) = GpuDecoder::all().into_iter().find(|d| {
+        d.kind() == Kind::Vaapi && (ours.is_empty() || pci(d.on()).as_deref() == Some(&*ours))
+    }) else {
+        eprintln!(
+            "skipping: no VA-API on the adapter's GPU ({})",
+            adapter.name
+        );
+        return;
+    };
+    let p = plan(vec![
+        piece(
+            FixtureSpec::new(VideoCodec::H264, Container::Mp4, W, H, (30, 1), 30),
+            0,
+            20,
+        ),
+        piece(
+            FixtureSpec::new(VideoCodec::Hevc10, Container::Mkv, W, H, (30, 1), 30),
+            0,
+            20,
+        ),
+        piece(
+            FixtureSpec::new(VideoCodec::H264, Container::Mkv, W, H, (30, 1), 30)
+                .interlaced(true)
+                .no_audio(),
+            0,
+            20,
+        ),
+        piece(
+            FixtureSpec::new(VideoCodec::H264, Container::Mp4, 330, 186, (30, 1), 30),
+            0,
+            20,
+        ),
+    ]);
+    let player = Player::new(
+        p.clone(),
+        Config {
+            audio_scrubbing: false,
+            hardware: true,
+            gpu: Some(vaapi),
+            gpu_pictures: true,
+            ..Config::default()
+        },
+        Box::new(ManualOutput::new()),
+    )
+    .unwrap();
+    let (mut shown, mut copied) = (Screen::new(), Screen::new());
+    for (t, memory) in [
+        (0, Memory::Vaapi),
+        (19, Memory::Vaapi),
+        (20, Memory::Vaapi),
+        (33, Memory::Vaapi),
+        (45, Memory::Cpu),
+        (60, Memory::Vaapi),
+        (79, Memory::Vaapi),
+    ] {
+        let picture = picture_at(&player, t);
+        assert_eq!(picture.memory(), memory, "frame {t}");
+        shown.draw(&gpu, Some(&picture), W, H);
+        if memory == Memory::Vaapi {
+            assert!(shown.shared(), "frame {t} was copied down to be shown");
+        }
+        let ours = shown.read(&gpu).unwrap();
+        let down = Arc::new(picture.copied_down().unwrap());
+        copied.draw(&gpu, Some(&down), W, H);
+        let theirs = copied.read(&gpu).unwrap();
+        let (mean, max) = diff(&ours.rgba, &theirs.rgba);
+        assert_eq!((mean, max), (0.0, 0), "frame {t}");
+        let rendered = vidcut_av::export::still::rgba(&piece_at(&p, t), p.fps, W, H).unwrap();
+        assert_eq!(
+            barcode(&ours.rgba, W, H),
+            barcode(&rendered.rgba, W, H),
+            "frame {t}"
+        );
+    }
+}

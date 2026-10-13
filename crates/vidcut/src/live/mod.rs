@@ -135,8 +135,8 @@ pub struct PlayerConfig {
     pub audio: MakeOutput,
     /// Memory for its pictures: what is shown, and the frame of what isn't.
     pub budget: vidcut_av::player::Budget,
-    /// The renderer shows pictures in CUDA memory from there: those NVDEC
-    /// decodes stay on the GPU (and kept ones in video memory).
+    /// The renderer shows pictures in GPU memory from there: those NVDEC or
+    /// VA-API decodes stay on the GPU (and kept ones in video memory).
     pub gpu_pictures: bool,
 }
 

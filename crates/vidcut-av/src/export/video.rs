@@ -705,10 +705,12 @@ impl VideoFrames {
         self
     }
 
-    /// Frames NVDEC decoded ([`decode_on`](Self::decode_on)) stay in GPU
-    /// memory when a display takes them as they are (NV12, P010): for a
-    /// display that shows them from there. Others, and other GPUs', are
-    /// copied down.
+    /// Frames NVDEC or VA-API decoded ([`decode_on`](Self::decode_on)) stay
+    /// in GPU memory when a display takes them as they are (NV12, P010): for
+    /// a display that shows them from there. Kept, they don't run the
+    /// decoder out: FFmpeg copies NVDEC's out of its few surfaces into a
+    /// pool that grows, and VA-API's own pool grows as it needs (libva 1.0
+    /// and later). Others, and other GPUs', are copied down.
     pub fn keep_on_gpu(mut self) -> Self {
         self.keep_on_gpu = true;
         self
@@ -1066,13 +1068,13 @@ impl VideoFrames {
             if changed || src.normalized.is_none() {
                 let (frame, _) = src.current.as_ref().expect("have a frame");
                 // Frames the GPU decoded come down to memory at their size,
-                // unless a display takes NVDEC's from the GPU as they are.
+                // unless a display takes NVDEC's or VA-API's from the GPU as
+                // they are.
                 src.normalized = Some(if crate::hw::on_gpu(frame) {
-                    let cuda = frame.format() == format::Pixel::CUDA;
-                    if self.keep_on_gpu && cuda && displayable(crate::hw::sw_format(frame)) {
-                        frame_ref(frame)?
-                    } else {
-                        relayout.run(&crate::hw::download(frame)?)?
+                    let keep = self.keep_on_gpu && displayable(crate::hw::sw_format(frame));
+                    match frame.format() {
+                        format::Pixel::CUDA | format::Pixel::VAAPI if keep => frame_ref(frame)?,
+                        _ => relayout.run(&crate::hw::download(frame)?)?,
                     }
                 } else {
                     relayout.run(frame)?

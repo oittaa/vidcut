@@ -16,7 +16,8 @@ pub enum Memory {
     Cpu,
     /// A CUDA surface (NVDEC's frames).
     Cuda,
-    /// A VAAPI surface.
+    /// A VA-API surface (the decoder's, whose pool grows as frames are
+    /// kept).
     Vaapi,
     /// A Vulkan image.
     Vulkan,
@@ -43,10 +44,10 @@ pub enum Layout {
 /// it to BT.709 RGB with a shader that reads it as the export does;
 /// `to_rgba` is that conversion on the CPU, the export's own, for a display
 /// without a GPU and for checking one. A picture is in memory
-/// ([`Memory::Cpu`]), or, decoded by NVDEC for a display that shows it from
-/// there, in GPU memory: the same frame with a hardware format and frames
-/// context ([`Memory::Cuda`]), which the engine passes along without
-/// looking at its pixels.
+/// ([`Memory::Cpu`]), or, decoded by NVDEC or VA-API for a display that
+/// shows it from there, in GPU memory: a frame with a hardware format and
+/// frames context ([`Memory::Cuda`], [`Memory::Vaapi`]), which the engine
+/// passes along without looking at its pixels.
 pub struct Picture {
     frame: frame::Video,
     rotation: u16,

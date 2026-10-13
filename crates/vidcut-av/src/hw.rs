@@ -805,3 +805,108 @@ unsafe fn intel_va(frame: &frame::Video) -> Option<usize> {
 unsafe fn intel_va(_: &frame::Video) -> Option<usize> {
     None
 }
+
+/// A VA-API frame's surface for another device to read: its planes as
+/// DMA-BUF files with their layouts and DRM format modifier
+/// (`AV_PIX_FMT_DRM_PRIME`), mapped once the GPU's work on it is done.
+/// Linux.
+#[cfg(target_os = "linux")]
+pub struct DrmFrame(frame::Video);
+
+/// One plane of a [`DrmFrame`].
+#[cfg(target_os = "linux")]
+#[derive(Debug, Clone, Copy)]
+pub struct DrmPlane<'a> {
+    /// The file holding it, the frame's.
+    pub fd: std::os::fd::BorrowedFd<'a>,
+    pub offset: u64,
+    /// Bytes from a row to the next.
+    pub pitch: u64,
+    /// How it is laid out in memory (tiled, compressed...).
+    pub modifier: u64,
+}
+
+#[cfg(target_os = "linux")]
+mod drm {
+    //! `libavutil/hwcontext_drm.h`.
+    pub(super) const MAX_PLANES: usize = 4;
+
+    #[repr(C)]
+    pub(super) struct Object {
+        pub(super) fd: std::ffi::c_int,
+        pub(super) size: usize,
+        pub(super) format_modifier: u64,
+    }
+
+    #[repr(C)]
+    pub(super) struct Plane {
+        pub(super) object_index: std::ffi::c_int,
+        pub(super) offset: isize,
+        pub(super) pitch: isize,
+    }
+
+    #[repr(C)]
+    pub(super) struct Layer {
+        pub(super) format: u32,
+        pub(super) nb_planes: std::ffi::c_int,
+        pub(super) planes: [Plane; MAX_PLANES],
+    }
+
+    #[repr(C)]
+    pub(super) struct Frame {
+        pub(super) nb_objects: std::ffi::c_int,
+        pub(super) objects: [Object; MAX_PLANES],
+        pub(super) nb_layers: std::ffi::c_int,
+        pub(super) layers: [Layer; MAX_PLANES],
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl DrmFrame {
+    /// `f`, a VA-API frame, mapped for reading: FFmpeg waits for the
+    /// surface's decoding (or copy) to be done, and exports a layer for each
+    /// plane.
+    pub fn export(f: &frame::Video) -> Result<Self> {
+        let mut map = frame::Video::empty();
+        // SAFETY: a fresh frame, mapped as DRM PRIME; unmapped when it drops.
+        let ret = unsafe {
+            (*map.as_mut_ptr()).format = ffi::AVPixelFormat::AV_PIX_FMT_DRM_PRIME as i32;
+            ffi::av_hwframe_map(
+                map.as_mut_ptr(),
+                f.as_ptr(),
+                ffi::AV_HWFRAME_MAP_READ as i32,
+            )
+        };
+        if ret < 0 {
+            return Err(Error::Ffmpeg {
+                context: "exporting a VA-API surface".into(),
+                source: ffmpeg::Error::from(ret),
+            });
+        }
+        Ok(Self(map))
+    }
+
+    /// Its planes: luma, then chroma (each layer's first).
+    pub fn planes(&self) -> Vec<DrmPlane<'_>> {
+        // SAFETY: a DRM PRIME frame's first data pointer is its descriptor,
+        // which lives as long as the mapping; its files are open as long.
+        unsafe {
+            let d = &*((*self.0.as_ptr()).data[0] as *const drm::Frame);
+            let layers = d.nb_layers.clamp(0, drm::MAX_PLANES as i32) as usize;
+            d.layers[..layers]
+                .iter()
+                .filter(|l| l.nb_planes > 0)
+                .filter_map(|l| {
+                    let p = &l.planes[0];
+                    let o = d.objects.get(usize::try_from(p.object_index).ok()?)?;
+                    Some(DrmPlane {
+                        fd: std::os::fd::BorrowedFd::borrow_raw(o.fd),
+                        offset: p.offset as u64,
+                        pitch: p.pitch as u64,
+                        modifier: o.format_modifier,
+                    })
+                })
+                .collect()
+        }
+    }
+}

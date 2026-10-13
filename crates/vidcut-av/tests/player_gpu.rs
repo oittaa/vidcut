@@ -240,18 +240,37 @@ fn gpu_pictures_are_the_cpus() {
     assert_eq!(cpu.status().decoder, Some(Decoder::Cpu));
 }
 
-/// NVDEC, whatever `VIDCUT_HWDEC` asks the player for: the pictures kept in
-/// video memory checked here are CUDA's.
-fn nvdec() -> Option<GpuDecoder> {
+/// The decoders whose pictures stay in GPU memory for a display that shows
+/// them from there: NVDEC's, and VA-API's (the decoder's surfaces), with
+/// the memory they are kept in.
+fn keeping_decoders() -> Vec<(GpuDecoder, Memory)> {
     GpuDecoder::all()
         .into_iter()
-        .find(|g| g.kind() == Kind::Nvdec)
+        .filter_map(|d| match d.kind() {
+            Kind::Nvdec => Some((d, Memory::Cuda)),
+            Kind::Vaapi => Some((d, Memory::Vaapi)),
+            Kind::D3d11va => None,
+        })
+        .collect()
+}
+
+/// A player on `gpu` keeping its pictures in GPU memory.
+fn keeping(plan: vidcut_core::render::RenderPlan, gpu: GpuDecoder) -> Player {
+    let config = Config {
+        audio_scrubbing: false,
+        hardware: true,
+        gpu: Some(gpu),
+        gpu_pictures: true,
+        ..Config::default()
+    };
+    Player::new(plan, config, Box::new(ManualOutput::new())).unwrap()
 }
 
 #[test]
 fn pictures_kept_in_gpu_memory_are_the_ones_copied_down() {
-    let Some(nvdec) = nvdec() else {
-        eprintln!("skipping: no NVDEC");
+    let decoders = keeping_decoders();
+    if decoders.is_empty() {
+        eprintln!("skipping: no NVDEC or VA-API");
         return;
     };
     let h264 = src(
@@ -286,48 +305,61 @@ fn pictures_kept_in_gpu_memory_are_the_ones_copied_down() {
         ],
         0,
     );
-    let kept = Player::new(
-        p.clone(),
-        Config {
-            audio_scrubbing: false,
-            hardware: true,
-            gpu: Some(nvdec.clone()),
-            gpu_pictures: true,
-            ..Config::default()
-        },
-        Box::new(ManualOutput::new()),
-    )
-    .unwrap();
-    let down = player_on(p.clone(), nvdec);
     let nv12 = (W * H * 3 / 2) as usize;
-    for (t, memory, layout, bytes) in [
-        (3, Memory::Cuda, Layout::Nv12, nv12),
-        (14, Memory::Cuda, Layout::P010, 2 * nv12),
-        (25, Memory::Cuda, Layout::Nv12, nv12),
-        (36, Memory::Cuda, Layout::P010, 2 * nv12),
-        (47, Memory::Cpu, Layout::P010, 2 * nv12),
-    ] {
-        let k = picture_at(&kept, t);
-        let d = picture_at(&down, t);
-        assert_eq!((k.memory(), k.layout()), (memory, layout), "frame {t}");
-        // The budget counts what the picture takes where it is.
-        assert_eq!(k.bytes(), bytes, "frame {t}");
-        assert_eq!((k.colors(), k.rotation()), (d.colors(), d.rotation()));
-        assert_eq!(
-            mean_diff(&k, &d),
-            0.0,
-            "frame {t}: kept against copied down"
-        );
-        let img = k.to_rgba(W, H).unwrap();
-        assert_eq!(code_rgba(&img.rgba, W, H), rendered(&p, t), "frame {t}");
+    for (gpu, on_gpu) in decoders {
+        let name = format!("{} {}", gpu.kind().name(), gpu.on());
+        let kept = keeping(p.clone(), gpu.clone());
+        let down = player_on(p.clone(), gpu.clone());
+        // Interlaced: deinterlaced on the GPU for NVDEC's, copied down for
+        // `bwdif` for the others'.
+        let interlaced = if gpu.kind() == Kind::Nvdec {
+            on_gpu
+        } else {
+            Memory::Cpu
+        };
+        for (t, memory, bytes) in [
+            (3, on_gpu, nv12),
+            (14, on_gpu, 2 * nv12),
+            (25, interlaced, nv12),
+            (36, on_gpu, 2 * nv12),
+            (47, Memory::Cpu, 2 * nv12),
+        ] {
+            let k = picture_at(&kept, t);
+            let d = picture_at(&down, t);
+            assert_eq!(k.memory(), memory, "{name}: frame {t}");
+            assert_eq!(k.layout(), d.layout(), "{name}: frame {t}");
+            if memory != Memory::Cpu {
+                let layout = if bytes == nv12 {
+                    Layout::Nv12
+                } else {
+                    Layout::P010
+                };
+                assert_eq!(k.layout(), layout, "{name}: frame {t}");
+            }
+            // The budget counts what the picture takes where it is.
+            assert_eq!(k.bytes(), bytes, "{name}: frame {t}");
+            assert_eq!((k.colors(), k.rotation()), (d.colors(), d.rotation()));
+            assert_eq!(
+                mean_diff(&k, &d),
+                0.0,
+                "{name}: frame {t}: kept against copied down"
+            );
+            let img = k.to_rgba(W, H).unwrap();
+            assert_eq!(
+                code_rgba(&img.rgba, W, H),
+                rendered(&p, t),
+                "{name}: frame {t}"
+            );
+        }
+        assert_eq!(kept.status().error, None, "{name}");
     }
-    assert_eq!(kept.status().error, None);
 }
 
 #[test]
 fn a_seek_in_video_memory_keeps_its_way_for_the_steps_back() {
-    let Some(nvdec) = nvdec() else {
-        eprintln!("skipping: no NVDEC");
+    let decoders = keeping_decoders();
+    if decoders.is_empty() {
+        eprintln!("skipping: no NVDEC or VA-API");
         return;
     };
     // Keyframes 120 frames apart, with B-frames.
@@ -338,34 +370,26 @@ fn a_seek_in_video_memory_keeps_its_way_for_the_steps_back() {
             .bframes(2),
     );
     let p = plan(&[clip(&long, 0, 300)], 0);
-    let player = Player::new(
-        p,
-        Config {
-            audio_scrubbing: false,
-            hardware: true,
-            gpu: Some(nvdec.clone()),
-            gpu_pictures: true,
-            ..Config::default()
-        },
-        Box::new(ManualOutput::new()),
-    )
-    .unwrap();
-    // In video memory: read once copied down.
-    let barcode = |p: &Picture| code(&p.copied_down().unwrap());
-    // The first picture says where pictures go: video memory.
-    assert_eq!(picture_at(&player, 10).memory(), Memory::Cuda);
-    // Frame 200 is 80 past its keyframe (120): the frames decoded on the
-    // way are kept, so steps back right after the seek show at once.
-    assert_eq!(barcode(&picture_at(&player, 200)), Some(200));
-    for t in (150..200).rev() {
-        player.step(-1);
-        assert!(
-            player.status().ready,
-            "step back to {t}: kept from the seek"
-        );
-        let shown = player.present(Instant::now()).unwrap();
-        assert_eq!((shown.frame, shown.exact), (t, true));
-        assert_eq!(barcode(&shown.picture), Some(t as u32));
+    for (gpu, memory) in decoders {
+        let name = format!("{} {}", gpu.kind().name(), gpu.on());
+        let player = keeping(p.clone(), gpu);
+        // In video memory: read once copied down.
+        let barcode = |p: &Picture| code(&p.copied_down().unwrap());
+        // The first picture says where pictures go: video memory.
+        assert_eq!(picture_at(&player, 10).memory(), memory, "{name}");
+        // Frame 200 is 80 past its keyframe (120): the frames decoded on the
+        // way are kept, so steps back right after the seek show at once.
+        assert_eq!(barcode(&picture_at(&player, 200)), Some(200), "{name}");
+        for t in (150..200).rev() {
+            player.step(-1);
+            assert!(
+                player.status().ready,
+                "{name}: step back to {t}: kept from the seek"
+            );
+            let shown = player.present(Instant::now()).unwrap();
+            assert_eq!((shown.frame, shown.exact), (t, true), "{name}");
+            assert_eq!(barcode(&shown.picture), Some(t as u32), "{name}");
+        }
     }
 }
 
