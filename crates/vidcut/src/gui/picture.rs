@@ -145,6 +145,13 @@ impl Gpu {
         self.shares
     }
 
+    /// Whether pictures in CUDA memory show from there: it shares memory,
+    /// and CUDA's GPU is its own. Opens CUDA, unlike
+    /// [`takes_gpu_pictures`](Self::takes_gpu_pictures).
+    pub fn shares_with_cuda(&self) -> bool {
+        self.shares && self.cuda().is_ok()
+    }
+
     fn cuda(&self) -> Result<&CudaDevice, String> {
         self.cuda
             .get_or_init(|| super::shared::cuda_on(&self.device))
