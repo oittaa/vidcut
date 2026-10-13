@@ -2027,19 +2027,18 @@ fn settings_form(
                         .selected_text(name(&v.encoder))
                         .show_ui(ui, |ui| {
                             // The GPU encoders this system has.
-                            let gpus = if cfg!(windows) {
-                                [EncoderChoice::Nvenc, EncoderChoice::Amf, EncoderChoice::Qsv]
+                            let gpus: &[EncoderChoice] = if cfg!(windows) {
+                                &[EncoderChoice::Nvenc, EncoderChoice::Amf, EncoderChoice::Qsv]
+                            } else if cfg!(target_os = "macos") {
+                                &[EncoderChoice::VideoToolbox]
                             } else {
-                                [
+                                &[
                                     EncoderChoice::Nvenc,
                                     EncoderChoice::Vaapi,
                                     EncoderChoice::Qsv,
                                 ]
                             };
-                            for e in [EncoderChoice::Auto, EncoderChoice::Cpu]
-                                .into_iter()
-                                .chain(gpus)
-                            {
+                            for &e in [EncoderChoice::Auto, EncoderChoice::Cpu].iter().chain(gpus) {
                                 let why = why_video(can, v.codec, e);
                                 choice(ui, &mut v.encoder, e, name(&e), why);
                             }

@@ -87,7 +87,7 @@ vidcut history undo                         # works across separate runs
 **Export and stills:**
 - `vidcut export start out.mp4` renders the timeline: its In–Out range when both marks are set, else everything.
   - The extension picks the container, and also the preset unless `--preset` is given.
-  - Extra options: `--preset youtube-1080p`, `--encoder nvenc|vaapi|amf|qsv|cpu|auto`, `--set video.quality=20`, `--range 1m..2m`, `--per-clip`, `--audio-only`, `--overwrite`.
+  - Extra options: `--preset youtube-1080p`, `--encoder nvenc|vaapi|amf|qsv|videotoolbox|cpu|auto`, `--set video.quality=20`, `--range 1m..2m`, `--per-clip`, `--audio-only`, `--overwrite`.
   - With NVENC, VAAPI on the render node the pieces decode on, or AMF on their Direct3D 11 adapter (and `gpu.acceleration` on), frames are made on the GPU where the piece qualifies (export.md §5). The result's `gpu_frames` counts them.
   - With `gpu.acceleration` and `gpu.decoding` on, pieces decode on the GPU the viewer decodes on, whatever the encoder (export.md §5); `gpu_decoded` counts the frames decoded there.
   - `vidcut export plan out.mp4` (or `export start` with `--dry-run`) prints the plan and the chosen encoder without encoding.

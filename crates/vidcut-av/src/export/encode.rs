@@ -135,9 +135,14 @@ fn passes(v: &VideoSettings, name: &str) -> Result<Passes> {
         n if n.ends_with("_nvenc") => Ok(Passes::TwoInside),
         // Unset passes stay one where there's no second.
         _ if v.passes.is_none() => Ok(Passes::One),
-        n if ["_vaapi", "_amf", "_qsv"].iter().any(|s| n.ends_with(s)) => Err(Error::Invalid(
-            format!("{n} makes one pass; two need encoder cpu or nvenc"),
-        )),
+        n if ["_vaapi", "_amf", "_qsv", "_videotoolbox"]
+            .iter()
+            .any(|s| n.ends_with(s)) =>
+        {
+            Err(Error::Invalid(format!(
+                "{n} makes one pass; two need encoder cpu or nvenc"
+            )))
+        }
         "libsvtav1" => Err(Error::Invalid(
             "libsvtav1 makes one pass in this FFmpeg (its rate control looks ahead on its \
              own); for two, use encoder nvenc or another codec"
@@ -222,9 +227,11 @@ fn cpu_ten_bit(name: &str) -> bool {
 
 /// The GPU encoders `auto` tries, best first: NVENC, then the other GPUs'
 /// own, AMF and QSV on Windows, VAAPI on Linux (AMD's and Intel's alike;
-/// QSV there is for asking by name).
+/// QSV there is for asking by name); VideoToolbox on macOS.
 const AUTO_GPU: &[EncoderChoice] = if cfg!(windows) {
     &[EncoderChoice::Nvenc, EncoderChoice::Amf, EncoderChoice::Qsv]
+} else if cfg!(target_os = "macos") {
+    &[EncoderChoice::VideoToolbox]
 } else {
     &[EncoderChoice::Nvenc, EncoderChoice::Vaapi]
 };
@@ -278,6 +285,8 @@ fn gpu_name(codec: VideoCodec, kind: EncoderChoice) -> Option<&'static str> {
         (VideoCodec::H264, EncoderChoice::Qsv) => "h264_qsv",
         (VideoCodec::Hevc, EncoderChoice::Qsv) => "hevc_qsv",
         (VideoCodec::Av1, EncoderChoice::Qsv) => "av1_qsv",
+        (VideoCodec::H264, EncoderChoice::VideoToolbox) => "h264_videotoolbox",
+        (VideoCodec::Hevc, EncoderChoice::VideoToolbox) => "hevc_videotoolbox",
         _ => return None,
     })
 }
@@ -411,6 +420,7 @@ fn video_encoder(
         EncoderChoice::Nvenc => nvenc_options(v, q, ten, passes),
         EncoderChoice::Amf => amf_options(v, q, ten),
         EncoderChoice::Qsv => qsv_options(v, q, ten),
+        EncoderChoice::VideoToolbox => videotoolbox_options(v, q, ten),
         _ => vaapi_options(v, q),
     };
     let (metadata, dynamic) = hdr_metadata(v);
@@ -515,6 +525,27 @@ fn amf_options(v: &VideoSettings, q: u32, ten: bool) -> Vec<(String, String)> {
             };
             options.push(opt("profile", profile));
         }
+        _ => {}
+    }
+    options
+}
+
+/// VideoToolbox's (Apple): constant quality, on its scale of 0 to 100 the
+/// higher the better (Apple Silicon has it), or a bitrate.
+fn videotoolbox_options(v: &VideoSettings, q: u32, ten: bool) -> Vec<(String, String)> {
+    let mut options = Vec::new();
+    match v.bitrate {
+        Some(b) => options.push(opt("b", b)),
+        None => {
+            // H.264's and HEVC's 0–51, the lower the better: 20 is 67.
+            let percent = 100 - q.min(51) * 100 / 60;
+            options.push(opt("flags", "+qscale"));
+            options.push(opt("global_quality", percent * ffi::FF_QP2LAMBDA as u32));
+        }
+    }
+    match v.codec {
+        VideoCodec::Hevc => options.push(opt("profile", if ten { "main10" } else { "main" })),
+        VideoCodec::H264 => options.push(opt("profile", v.profile.as_deref().unwrap_or("high"))),
         _ => {}
     }
     options
@@ -1096,7 +1127,7 @@ fn try_gpu(
     pixel: format::Pixel,
     device: Option<&str>,
 ) -> Result<()> {
-    let enc = VideoEncoder {
+    test_encode(&VideoEncoder {
         name: name.into(),
         kind,
         pixel,
@@ -1106,10 +1137,15 @@ fn try_gpu(
         passes: Passes::One,
         metadata: Default::default(),
         dynamic: Default::default(),
-    };
+    })
+}
+
+/// Encodes three black frames with `enc`: some packet must come out.
+fn test_encode(enc: &VideoEncoder) -> Result<()> {
+    let (name, pixel) = (enc.name.as_str(), enc.pixel);
     let (w, h) = (640, 360);
     let (mut encoder, vaapi) = open_video(
-        &enc,
+        enc,
         w,
         h,
         ffmpeg::Rational(30, 1),
@@ -1202,6 +1238,17 @@ pub fn detect() -> Availability {
         }
     }
     let nv12_p010 = &[format::Pixel::NV12, format::Pixel::P010LE][..];
+    if cfg!(target_os = "macos") {
+        check(
+            "h264_videotoolbox",
+            EncoderChoice::VideoToolbox,
+            format::Pixel::NV12,
+            None,
+        );
+        for &p in nv12_p010 {
+            check("hevc_videotoolbox", EncoderChoice::VideoToolbox, p, None);
+        }
+    }
     for (node, _driver) in render_nodes() {
         for (codec, pixels) in [
             ("h264_vaapi", &[format::Pixel::NV12][..]),
@@ -1305,6 +1352,61 @@ mod tests {
     use vidcut_core::export::{HdrMode, Multipass};
 
     use super::*;
+
+    /// VideoToolbox's quality on its 0–100 scale, the higher the better,
+    /// from the 0–51 of H.264 and HEVC; a bitrate as it is.
+    #[test]
+    fn videotoolbox_takes_the_quality_on_its_own_scale() {
+        let lambda = ffi::FF_QP2LAMBDA as u32;
+        let quality = |q| {
+            let v = video(VideoCodec::Hevc, EncoderChoice::VideoToolbox, None);
+            videotoolbox_options(&v, q, true)
+        };
+        let o = quality(20);
+        assert!(o.contains(&opt("flags", "+qscale")), "{o:?}");
+        assert!(o.contains(&opt("global_quality", 67 * lambda)), "{o:?}");
+        assert!(o.contains(&opt("profile", "main10")), "{o:?}");
+        assert!(quality(0).contains(&opt("global_quality", 100 * lambda)));
+        assert!(quality(51).contains(&opt("global_quality", 15 * lambda)));
+        let v = video(
+            VideoCodec::H264,
+            EncoderChoice::VideoToolbox,
+            Some(8_000_000),
+        );
+        let o = videotoolbox_options(&v, 20, false);
+        assert_eq!(o, [opt("b", 8_000_000), opt("profile", "high")]);
+    }
+
+    /// FFmpeg's VideoToolbox encoders take those settings: H.264 and 10-bit
+    /// HEVC, at a quality and at a bitrate. Apple's software encoders where
+    /// the machine has no media engine to use (CI's).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn videotoolbox_encodes_with_our_settings() {
+        crate::init();
+        for (codec, ten, bitrate) in [
+            (VideoCodec::H264, false, None),
+            (VideoCodec::H264, false, Some(2_000_000)),
+            (VideoCodec::Hevc, true, None),
+        ] {
+            let v = video(codec, EncoderChoice::VideoToolbox, bitrate);
+            let kind = EncoderChoice::VideoToolbox;
+            let mut options = videotoolbox_options(&v, 20, ten);
+            options.push(opt("allow_sw", 1));
+            let enc = VideoEncoder {
+                name: gpu_name(codec, kind).expect("a name").into(),
+                kind,
+                pixel: gpu_pixel(kind, ten),
+                device: None,
+                options,
+                hdr: None,
+                passes: Passes::One,
+                metadata: Default::default(),
+                dynamic: Default::default(),
+            };
+            test_encode(&enc).unwrap_or_else(|e| panic!("{codec:?}, {bitrate:?}: {e}"));
+        }
+    }
 
     fn video(codec: VideoCodec, encoder: EncoderChoice, bitrate: Option<u64>) -> VideoSettings {
         VideoSettings {

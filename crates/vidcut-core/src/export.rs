@@ -218,7 +218,7 @@ impl HdrMetadata {
 #[serde(rename_all = "lowercase")]
 pub enum EncoderChoice {
     /// GPU when available (NVENC; then AMF and QSV on Windows, VAAPI on
-    /// Linux), else CPU.
+    /// Linux; VideoToolbox on macOS), else CPU.
     #[default]
     Auto,
     Cpu,
@@ -230,16 +230,19 @@ pub enum EncoderChoice {
     Amf,
     /// Intel's Quick Sync Video, through oneVPL.
     Qsv,
+    /// Apple's VideoToolbox (macOS).
+    VideoToolbox,
 }
 
 impl EncoderChoice {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Auto,
         Self::Cpu,
         Self::Nvenc,
         Self::Vaapi,
         Self::Amf,
         Self::Qsv,
+        Self::VideoToolbox,
     ];
 
     /// Its name for people: `NVENC`, `the CPU`.
@@ -251,6 +254,7 @@ impl EncoderChoice {
             Self::Vaapi => "VAAPI",
             Self::Amf => "AMF",
             Self::Qsv => "QSV",
+            Self::VideoToolbox => "VideoToolbox",
         }
     }
 
