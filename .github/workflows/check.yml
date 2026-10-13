@@ -154,16 +154,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # Homebrew's FFmpeg: its newest release, with its headers and
-      # pkg-config files. Not pinned: Homebrew keeps one version of a
-      # formula. libclang, which generates the bindings, comes with Xcode.
+      # Homebrew's ffmpeg-full: the newest release with zimg (zscale, which
+      # HDR needs), its headers and pkg-config files. Keg-only. Not pinned:
+      # Homebrew keeps one version of a formula. libclang, which generates
+      # the bindings, comes with Xcode.
       - name: Install FFmpeg
         run: |
           set -euo pipefail
-          brew install ffmpeg
-          pkg-config --exists --print-errors             libavcodec libavformat libavfilter libavutil libswscale libswresample
+          brew install ffmpeg-full
+          prefix=$(brew --prefix ffmpeg-full)
+          export PKG_CONFIG_PATH="${prefix}/lib/pkgconfig"
+          echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
+          pkg-config --exists --print-errors \
+            libavcodec libavformat libavfilter libavutil libswscale libswresample
           pkg-config --modversion libavcodec libswresample
-          ffmpeg -hide_banner -version | head -1
+          "${prefix}/bin/ffmpeg" -hide_banner -version | head -1
+          "${prefix}/bin/ffmpeg" -hide_banner -filters | grep -w zscale
 
       - name: Install the pinned Rust toolchain
         run: |
@@ -185,3 +191,12 @@ jobs:
 
       - name: Fast gate
         run: scripts/check.sh
+
+      # TEMPORARY (macos-full-tests): the integration tests that failed on a Mac.
+      - name: Integration tests that failed on a Mac
+        run: |
+          status=0
+          cargo test -p vidcut --no-fail-fast --test export_color --test live --test picture || status=1
+          cargo test -p vidcut-av --no-fail-fast --test export --test hdr || status=1
+          VIDCUT_DEBUG_PLAYER=1 cargo test -p vidcut --test gui_import -- --nocapture || status=1
+          exit $status
