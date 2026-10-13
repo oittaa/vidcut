@@ -1760,17 +1760,18 @@ fn many_segments_keep_memory_flat() {
     assert_eq!(barcodes(&out).len(), 800);
 }
 
+/// The process's peak resident memory in MB, as the system counts it: a
+/// reading or a panic, never a stand-in that would pass.
 fn peak_rss_mb() -> i64 {
     #[cfg(unix)]
     {
-        std::fs::read_to_string("/proc/self/status")
-            .ok()
-            .and_then(|s| {
-                s.lines()
-                    .find(|l| l.starts_with("VmHWM:"))
-                    .map(|l| l.split_whitespace().nth(1).unwrap().parse::<i64>().unwrap() / 1024)
-            })
-            .unwrap_or(0)
+        let status = std::fs::read_to_string("/proc/self/status").expect("/proc/self/status");
+        let kb = status
+            .lines()
+            .find(|l| l.starts_with("VmHWM:"))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .expect("VmHWM in /proc/self/status");
+        kb.parse::<i64>().unwrap() / 1024
     }
     #[cfg(windows)]
     // SAFETY: fills the counters it is given, their size set first.
@@ -1781,7 +1782,11 @@ fn peak_rss_mb() -> i64 {
         use windows_sys::Win32::System::Threading::GetCurrentProcess;
         let mut c: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
         c.cb = size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
-        GetProcessMemoryInfo(GetCurrentProcess(), &mut c, c.cb);
+        assert!(
+            GetProcessMemoryInfo(GetCurrentProcess(), &mut c, c.cb) != 0,
+            "no memory counters: {}",
+            std::io::Error::last_os_error()
+        );
         (c.PeakWorkingSetSize >> 20) as i64
     }
 }

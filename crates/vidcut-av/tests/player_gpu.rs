@@ -136,7 +136,7 @@ fn gpu_pictures_are_the_cpus() {
         let kind = gpu_decoder.kind();
         let name = format!("{} {}", kind.name(), gpu_decoder.on());
         let h264 = gpu_decoder.decodes(vidcut_av::ffmpeg::codec::Id::H264);
-        let gpu = player_on(p.clone(), gpu_decoder);
+        let gpu = player_on(p.clone(), gpu_decoder.clone());
         for &t in &ts_checked {
             let g = picture_at(&gpu, t);
             let c = picture_at(&cpu, t);
@@ -159,7 +159,7 @@ fn gpu_pictures_are_the_cpus() {
         }
         // Which decoded what: H.264 every GPU that decodes it right (not
         // AMD's Direct3D 11), interlaced too; ProRes none; the rest NVDEC,
-        // and the other GPUs where they decode them.
+        // and the other GPUs where their drivers list the codec's profile.
         let on_gpu = Some(Decoder::Gpu(kind));
         let decoder = |t: i64| {
             let _ = picture_at(&gpu, t);
@@ -173,23 +173,31 @@ fn gpu_pictures_are_the_cpus() {
         assert_eq!(decoder(5), h264_on, "{name}: H.264");
         assert_eq!(picture_at(&gpu, 5).layout(), h264_layout);
         assert_eq!(decoder(starts[6] + 3), h264_on, "{name}: interlaced H.264");
-        for (t, what) in [
-            (35, "HEVC 10-bit"),
-            (starts[3] + 3, "VP9"),
-            (starts[4] + 3, "AV1"),
-            (starts[5] + 3, "HEVC in MPEG-TS"),
-            (starts[7] + 3, "HEVC turned"),
+        use vidcut_av::ffmpeg::codec::Id;
+        for (t, what, codec, bits) in [
+            (35, "HEVC 10-bit", Id::HEVC, 10),
+            (starts[3] + 3, "VP9", Id::VP9, 8),
+            (starts[4] + 3, "AV1", Id::AV1, 8),
+            (starts[5] + 3, "HEVC in MPEG-TS", Id::HEVC, 10),
+            (starts[7] + 3, "HEVC turned", Id::HEVC, 10),
         ] {
             let d = decoder(t);
-            eprintln!("{name}: {what} decodes on {d:?}");
-            if kind == Kind::Nvdec {
-                assert_eq!(d, on_gpu, "{name}: {what}");
-            } else {
-                assert!(d == on_gpu || d == Some(Decoder::Cpu), "{name}: {what}");
+            let listed = gpu_decoder.hardware_decodes(codec, bits);
+            eprintln!("{name}: {what} decodes on {d:?} (the driver lists it: {listed:?})");
+            match (kind, listed) {
+                (Kind::Nvdec, _) | (_, Some(true)) => assert_eq!(d, on_gpu, "{name}: {what}"),
+                (_, Some(false)) => assert_eq!(d, Some(Decoder::Cpu), "{name}: {what}"),
+                (_, None) => assert!(d == on_gpu || d == Some(Decoder::Cpu), "{name}: {what}"),
             }
         }
+        // P010 from the GPU and the CPU alike; NV12 from the GPU only.
         assert_eq!(picture_at(&gpu, 35).layout(), Layout::P010);
-        assert_eq!(picture_at(&gpu, starts[3] + 3).layout(), Layout::Nv12);
+        let vp9 = if decoder(starts[3] + 3) == on_gpu {
+            Layout::Nv12
+        } else {
+            Layout::Yuv420p
+        };
+        assert_eq!(picture_at(&gpu, starts[3] + 3).layout(), vp9);
         assert_eq!(decoder(starts[8] + 3), Some(Decoder::Cpu), "{name}: ProRes");
 
         // Steps both ways through HEVC, black and VP9 on the GPU.
@@ -232,12 +240,20 @@ fn gpu_pictures_are_the_cpus() {
     assert_eq!(cpu.status().decoder, Some(Decoder::Cpu));
 }
 
+/// NVDEC, whatever `VIDCUT_HWDEC` asks the player for: the pictures kept in
+/// video memory checked here are CUDA's.
+fn nvdec() -> Option<GpuDecoder> {
+    GpuDecoder::all()
+        .into_iter()
+        .find(|g| g.kind() == Kind::Nvdec)
+}
+
 #[test]
 fn pictures_kept_in_gpu_memory_are_the_ones_copied_down() {
-    if vidcut_av::cuda::CudaDevice::open().is_err() {
-        eprintln!("skipping: no CUDA device");
+    let Some(nvdec) = nvdec() else {
+        eprintln!("skipping: no NVDEC");
         return;
-    }
+    };
     let h264 = src(
         "m1",
         FixtureSpec::new(VideoCodec::H264, Container::Mp4, W, H, (30, 1), 30),
@@ -275,13 +291,14 @@ fn pictures_kept_in_gpu_memory_are_the_ones_copied_down() {
         Config {
             audio_scrubbing: false,
             hardware: true,
+            gpu: Some(nvdec.clone()),
             gpu_pictures: true,
             ..Config::default()
         },
         Box::new(ManualOutput::new()),
     )
     .unwrap();
-    let down = player(p.clone(), true);
+    let down = player_on(p.clone(), nvdec);
     let nv12 = (W * H * 3 / 2) as usize;
     for (t, memory, layout, bytes) in [
         (3, Memory::Cuda, Layout::Nv12, nv12),
@@ -309,10 +326,10 @@ fn pictures_kept_in_gpu_memory_are_the_ones_copied_down() {
 
 #[test]
 fn a_seek_in_video_memory_keeps_its_way_for_the_steps_back() {
-    if vidcut_av::cuda::CudaDevice::open().is_err() {
-        eprintln!("skipping: no CUDA device");
+    let Some(nvdec) = nvdec() else {
+        eprintln!("skipping: no NVDEC");
         return;
-    }
+    };
     // Keyframes 120 frames apart, with B-frames.
     let long = src(
         "m1",
@@ -326,6 +343,7 @@ fn a_seek_in_video_memory_keeps_its_way_for_the_steps_back() {
         Config {
             audio_scrubbing: false,
             hardware: true,
+            gpu: Some(nvdec.clone()),
             gpu_pictures: true,
             ..Config::default()
         },
@@ -351,6 +369,34 @@ fn a_seek_in_video_memory_keeps_its_way_for_the_steps_back() {
     }
 }
 
+/// How many keyframes of an H.264 file in MP4 (its NAL units each after
+/// its length) have slices that aren't IDR: the open GOPs' keyframes.
+fn open_gop_keyframes(path: &std::path::Path) -> usize {
+    use vidcut_av::ffmpeg::{format, media};
+    let mut input = format::input(path).unwrap();
+    let video = input.streams().best(media::Type::Video).unwrap().index();
+    let mut open = 0;
+    for (stream, packet) in input.packets() {
+        if stream.index() != video || !packet.is_key() {
+            continue;
+        }
+        let (data, mut at, mut types) = (packet.data().unwrap(), 0, Vec::new());
+        while let Some(len) = data.get(at..at + 4) {
+            let len = u32::from_be_bytes(len.try_into().unwrap()) as usize;
+            let Some(&header) = data.get(at + 4) else {
+                break;
+            };
+            types.push(header & 0x1f);
+            at += 4 + len;
+        }
+        // Type 1: a slice of a picture that isn't IDR; 5: of an IDR one.
+        if types.contains(&1) && !types.contains(&5) {
+            open += 1;
+        }
+    }
+    open
+}
+
 /// Seeks far into a long open GOP (keyframes 120 frames apart, B-frames
 /// referring to the GOP before), and steps on and back from there: every
 /// frame its own, on each GPU decoder. AMD's Direct3D 11 decoder showed one
@@ -370,12 +416,22 @@ fn seeks_into_long_open_gops_show_their_frames() {
             .bframes(2),
     );
     let p = plan(&[clip(&long, 0, 300)], 0);
+    // Its keyframes past the first aren't IDR: an open GOP each.
+    assert_eq!(open_gop_keyframes(&long.path), 2, "keyframes 120 and 240");
     for gpu in decoders {
         let name = format!("{} {}", gpu.kind().name(), gpu.on());
+        // On the GPU where it decodes H.264 right; on the CPU on AMD's
+        // Direct3D 11.
+        let decodes = if gpu.decodes(vidcut_av::ffmpeg::codec::Id::H264) {
+            Some(Decoder::Gpu(gpu.kind()))
+        } else {
+            Some(Decoder::Cpu)
+        };
         let player = player_on(p.clone(), gpu);
         for t in [200, 150, 260] {
             player.seek(t);
             assert_eq!(shown_at(&player, t), Some(t as u32), "{name}: seek to {t}");
+            assert_eq!(player.status().decoder, decodes, "{name}: seek to {t}");
         }
         player.seek(200);
         assert_eq!(shown_at(&player, 200), Some(200), "{name}");
