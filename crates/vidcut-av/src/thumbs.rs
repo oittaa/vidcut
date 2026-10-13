@@ -281,8 +281,9 @@ fn one_sequence_picture(
     }
 }
 
-/// The start of a filmstrip's cache form.
-const MAGIC: &[u8; 4] = b"vct1";
+/// The start of a filmstrip's cache form. `vct1`'s pictures went through
+/// swscale's default rounding, 2 levels green; those are made anew.
+const MAGIC: &[u8; 4] = b"vct2";
 
 /// JPEG quantizer scale for cached filmstrips (2 is best, 31 worst): about
 /// 6 KB a picture, where RGBA takes 83 KB, with no visible loss at
@@ -590,7 +591,9 @@ mod tests {
             assert!(diff < 3.0, "mean difference {diff}");
         }
         assert!(from_bytes(&bytes[..bytes.len() / 2]).is_none(), "cut short");
-        assert!(from_bytes(b"vct1").is_none());
+        assert!(from_bytes(MAGIC).is_none());
+        // The form before rounding was right is read as none.
+        assert!(from_bytes(&[b"vct1".as_slice(), &bytes[4..]].concat()).is_none());
         assert!(from_bytes(&[b"xxxx".as_slice(), &bytes[4..]].concat()).is_none());
         assert!(to_bytes(&images, &times[..2]).is_err(), "a time each");
     }

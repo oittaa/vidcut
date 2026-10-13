@@ -268,11 +268,11 @@ fn the_shader_draws_what_the_export_renders() {
         );
         assert_eq!(barcode(&ours.rgba, w, h), want, "frame {t}'s barcode");
         // The colors: within rounding of the export's where the picture is
-        // flat (swscale's conversion runs up to two or three levels low). At edges
+        // flat (lavapipe: SDR exact, PQ and HLG a level at most). At edges
         // the filters differ: at its own size the export repeats each
         // chroma sample, the shader interpolates between them.
         assert!(
-            flat < 1.5 && flat_max <= 3,
+            flat < 1.0 && flat_max <= 2,
             "frame {t}: {flat:.2}, {flat_max}"
         );
         assert!(mean < 2.0, "frame {t}: {mean:.2} levels apart on average");
