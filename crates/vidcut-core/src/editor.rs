@@ -1103,9 +1103,19 @@ fn mutate(
             name,
             color,
             note,
+            duration,
         } => {
             let at = resolve(p, at, playhead)?;
-            json!({ "marker": ops::add_marker(p, at, name.clone(), color.clone(), note.clone())? })
+            let duration = duration.as_ref().map(|d| length(p, d)).transpose()?;
+            let id = ops::add_marker(
+                p,
+                at,
+                duration.unwrap_or(1),
+                name.clone(),
+                color.clone(),
+                note.clone(),
+            )?;
+            json!({ "marker": id })
         }
         Request::MarkersMove { marker, to } => {
             let to = resolve(p, to, playhead)?;
@@ -1117,8 +1127,17 @@ fn mutate(
             name,
             color,
             note,
+            duration,
         } => {
-            ops::set_marker(p, marker, name.clone(), color.clone(), note.clone())?;
+            let duration = duration.as_ref().map(|d| length(p, d)).transpose()?;
+            ops::set_marker(
+                p,
+                marker,
+                name.clone(),
+                color.clone(),
+                note.clone(),
+                duration,
+            )?;
             Value::Null
         }
         Request::TrackSet {
@@ -1785,6 +1804,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         markers.push(ops::add_marker(
             p,
             offset + conv(k.at),
+            conv(k.duration).max(1),
             k.name.clone(),
             Some(k.color.clone()),
             k.note.clone(),

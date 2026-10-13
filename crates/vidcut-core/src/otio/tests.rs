@@ -273,6 +273,7 @@ fn reads_editor_style_files() {
         t.markers,
         vec![ImportedMarker {
             at: 30,
+            duration: 1,
             name: "look".into(),
             note: "fix".into(),
             color: "red".into()
@@ -771,6 +772,57 @@ fn writes_what_editors_read() {
 }
 
 #[test]
+fn marker_lengths_round_trip() {
+    // A marker keeps its length through OTIO, cut at the end of what is
+    // exported; markers.add and markers.set take it (spec D40).
+    let mut f = busy();
+    let r = f.ok(req(
+        "markers.add",
+        json!({"at": 20, "duration": "25f", "name": "long"}),
+    ));
+    let long = r.result["marker"].as_str().unwrap().to_string();
+    let r = f.ok(req("markers.add", json!({"at": 40, "name": "short"})));
+    let short = r.result["marker"].as_str().unwrap().to_string();
+    f.ok(req("markers.set", json!({"marker": short, "duration": 3})));
+    let e = f.err(req("markers.set", json!({"marker": long, "duration": 0})));
+    assert_eq!(e.code, crate::ErrorCode::InvalidEdit, "{e}");
+    let p = f.editor.project().clone();
+    let length = |id: &str| p.markers.iter().find(|k| k.id == id).unwrap().duration;
+    assert_eq!((length(&long), length(&short)), (25, 3));
+    let doc = export(&p, "busy", None, Locations::Absolute).unwrap();
+    let ranges = |doc: &Value| -> Vec<(f64, f64)> {
+        doc["tracks"]["markers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|k| {
+                let r = &k["marked_range"];
+                (
+                    r["start_time"]["value"].as_f64().unwrap(),
+                    r["duration"]["value"].as_f64().unwrap(),
+                )
+            })
+            .collect()
+    };
+    assert!(ranges(&doc).contains(&(20.0, 25.0)), "{doc}");
+    assert!(ranges(&doc).contains(&(40.0, 3.0)), "{doc}");
+    // An export ending at 30 cuts the long one there.
+    let cut = export(&p, "busy", Some((0, 30)), Locations::Absolute).unwrap();
+    assert!(ranges(&cut).contains(&(20.0, 10.0)), "{cut}");
+    // Back: the lengths stay.
+    let t = import(&doc, None).unwrap();
+    let at = |frame: i64| t.markers.iter().find(|k| k.at == frame).unwrap().duration;
+    assert_eq!((at(20), at(40)), (25, 3));
+    // Another editor's ranged marker keeps its length too.
+    let mut other = doc.clone();
+    other["tracks"]["markers"] = json!([{"OTIO_SCHEMA": "Marker.2", "name": "range",
+        "color": "YELLOW", "comment": "", "metadata": {},
+        "marked_range": range(30.0, 12.0, p.settings.fps.as_f64())}]);
+    let t = import(&other, None).unwrap();
+    assert_eq!((t.markers[0].at, t.markers[0].duration), (30, 12));
+}
+
+#[test]
 fn stills_and_sequences_round_trip() {
     // A still is available for one frame; a numbered sequence is an
     // ImageSequenceReference.
@@ -964,12 +1016,14 @@ fn reads_editor_exports() {
         vec![
             ImportedMarker {
                 at: 10,
+                duration: 1,
                 name: "focus".into(),
                 note: "soft".into(),
                 color: "green".into()
             },
             ImportedMarker {
                 at: 60,
+                duration: 1,
                 name: "track".into(),
                 note: String::new(),
                 color: "red".into()
