@@ -279,7 +279,10 @@ impl Decoder {
             Ok(picture(&frames, plan, *t, frame))
         })();
         match picture {
-            Ok(p) => self.shared.store.put(id, Arc::new(p)),
+            Ok(p) => {
+                self.shared.store.put(id, Arc::new(p));
+                self.shared.prepared();
+            }
             // Something new is wanted: the reader played with didn't move.
             Err(e) if is_cancelled(&e) => {}
             Err(e) => {

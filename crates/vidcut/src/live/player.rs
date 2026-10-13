@@ -44,6 +44,10 @@ struct Content {
     /// The tracks of the plan's audio lanes (the timeline's), for faders
     /// moved while it plays.
     lanes: Vec<LaneTrack>,
+    /// Gains on top of lanes while their faders are dragged
+    /// (`mixer.preview`), dB: heard again after a switch away and back. A
+    /// new plan has the saved levels and drops them.
+    faders: std::collections::BTreeMap<usize, f64>,
     /// Length of the content in frames (the playhead goes up to it).
     frames: i64,
     /// The playhead while the engine plays something else (remembered for
@@ -196,6 +200,7 @@ impl Player {
         c.plan = Some(plan);
         c.frames = frames;
         c.lanes = lanes;
+        c.faders.clear();
         c.error = None;
         if id != self.active {
             c.position = at.unwrap_or(c.position).clamp(0, frames);
@@ -254,6 +259,12 @@ impl Player {
         if self.plays != Some(id) {
             self.plays = Some(id);
             self.renderer.attach(self.engine.clone());
+        }
+        // A new plan starts without gains on top: faders still held again.
+        if let Some(e) = &self.engine {
+            for (&lane, &db) in &self.contents[id.index()].faders {
+                e.set_lane_gain(lane, db);
+            }
         }
         self.prepare_other();
         self.motion += 1;
@@ -449,17 +460,21 @@ impl Player {
     }
 
     /// Hears `track`'s fader at `volume_db` while the timeline plays, the
-    /// plan unchanged. `None`: the viewer doesn't play the timeline;
+    /// plan unchanged; held while the source is shown, and heard again
+    /// when the timeline is. `None`: the viewer doesn't play the timeline;
     /// `Some(false)`: the track has no sound in the plan.
-    pub fn preview_fader(&self, track: &str, volume_db: f64) -> Option<bool> {
-        let engine = self.engine_of(PlayerId::Timeline)?;
+    pub fn preview_fader(&mut self, track: &str, volume_db: f64) -> Option<bool> {
+        let c = &mut self.contents[PlayerId::Timeline.index()];
         let mut found = false;
-        let lanes = &self.contents[PlayerId::Timeline.index()].lanes;
-        for (lane, t) in lanes.iter().enumerate() {
+        for (lane, t) in c.lanes.iter().enumerate() {
             if t.track == track {
-                engine.set_lane_gain(lane, volume_db - t.volume_db);
+                c.faders.insert(lane, volume_db - t.volume_db);
                 found = true;
             }
+        }
+        let engine = self.engine_of(PlayerId::Timeline)?;
+        for (&lane, &db) in &self.contents[PlayerId::Timeline.index()].faders {
+            engine.set_lane_gain(lane, db);
         }
         Some(found)
     }

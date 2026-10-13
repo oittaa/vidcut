@@ -3,7 +3,7 @@
 **Status:** accepted (M3, October 2026); §8 added in M4, §9 in M5, §10 in M7; §1, §4, §5 and §7 revised when the viewers moved to vidcut's own player on wgpu ([preview.md](preview.md)).
 
 **Evidence** (all rerunnable):
-- [`crates/vidcut/tests/live.rs`](../../crates/vidcut/tests/live.rs): the live session with both player engines, a stand-in renderer and stand-in audio devices, no window. Covers frame-exact seeks at every boundary (also with a late renderer), pictures against the sound, the source viewers, the clipboard, edits from other processes, and errors.
+- [`crates/vidcut/tests/live.rs`](../../crates/vidcut/tests/live.rs): the live session with its one player engine, a stand-in renderer and a stand-in audio device, no window. Covers frame-exact seeks at every boundary (also with a late renderer), pictures against the sound, the source viewers and switching between them and the timeline (the frame kept ready, a fader held), the clipboard, edits from other processes, and errors.
 - [`crates/vidcut/tests/gui.rs`](../../crates/vidcut/tests/gui.rs) (`--features vidcut/gui-tests`, needs a display): the real GUI driven through the CLI. Covers edit latency, screenshot vs `vidcut frame render`, a minimized window, playing and the GPU preference.
 - `ipc::tests` in [`crates/vidcut/src/ipc/mod.rs`](../../crates/vidcut/src/ipc/mod.rs): the JSON-RPC wire format.
 - [`crates/vidcut/tests/jobs.rs`](../../crates/vidcut/tests/jobs.rs) and [`gui_export.rs`](../../crates/vidcut/tests/gui_export.rs): export jobs, and the export windows under simulated input (§9).
