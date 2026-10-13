@@ -758,6 +758,44 @@ mod tests {
         f
     }
 
+    /// What a scaler may take into the output as it is: video-range YUV in
+    /// the output's matrix and transfer, SDR and HDR alike.
+    #[test]
+    fn only_the_outputs_own_colors_are_kept() {
+        use Matrix::*;
+        let src = |hdr, matrix, full_range, rgb| Source {
+            hdr,
+            matrix,
+            full_range,
+            rgb,
+        };
+        // SDR into SDR: BT.709 in video range alone.
+        assert!(kept(src(None, Bt709, false, false), None));
+        assert!(!kept(src(None, Bt601, false, false), None));
+        assert!(!kept(src(None, Bt2020, false, false), None));
+        assert!(!kept(src(None, Bt709, true, false), None));
+        assert!(!kept(src(None, Bt709, false, true), None));
+        for hdr in [Hdr::Pq, Hdr::Hlg] {
+            // Into the same HDR, in BT.2020's matrix and video range.
+            assert!(kept(src(Some(hdr), Bt2020, false, false), Some(hdr)));
+            assert!(!kept(src(Some(hdr), Bt709, false, false), Some(hdr)));
+            assert!(!kept(src(Some(hdr), Bt2020, true, false), Some(hdr)));
+            // Into SDR, and SDR into it: converted.
+            assert!(!kept(src(Some(hdr), Bt2020, false, false), None));
+            assert!(!kept(src(None, Bt2020, false, false), Some(hdr)));
+            assert!(!kept(src(None, Bt709, false, false), Some(hdr)));
+        }
+        // One HDR into the other: converted.
+        assert!(!kept(
+            src(Some(Hdr::Pq), Bt2020, false, false),
+            Some(Hdr::Hlg)
+        ));
+        assert!(!kept(
+            src(Some(Hdr::Hlg), Bt2020, false, false),
+            Some(Hdr::Pq)
+        ));
+    }
+
     /// A picture shrunk from an untagged one is read with the matrix the
     /// untagged one is read with (its size says which), not the one its
     /// own size would say; a tagged picture's tag goes along.
