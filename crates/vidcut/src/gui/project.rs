@@ -1,6 +1,7 @@
-//! New Project and File > Project Settings: the picture size and frame rate
-//! (decision D37). New Project sends one `project.open` with `create` and
-//! the format, Project Settings one `project.set` with what changed.
+//! New Project and File > Project Settings: the picture size, frame rate
+//! (decision D37) and drop-frame timecode (decision D47). New Project sends
+//! one `project.open` with `create` and the format, Project Settings one
+//! `project.set` with what changed.
 
 use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
@@ -32,6 +33,8 @@ pub(super) struct Format {
     height: u32,
     /// The frame rate as typed: `25`, `29.97`, `30000/1001`, `12.5`.
     rate: String,
+    /// Timecode counts drop-frame, where the rate has it.
+    drop_frame: bool,
 }
 
 impl Default for Format {
@@ -40,6 +43,7 @@ impl Default for Format {
             width: 1920,
             height: 1080,
             rate: "30".into(),
+            drop_frame: false,
         }
     }
 }
@@ -50,12 +54,18 @@ impl Format {
             width: p.settings.width,
             height: p.settings.height,
             rate: rate_text(p.settings.fps),
+            drop_frame: p.settings.drop_frame,
         }
     }
 
     /// The typed rate, if it is one.
     fn fps(&self) -> Option<Rational> {
         self.rate.trim().parse().ok()
+    }
+
+    /// Drop-frame counting as chosen, at a rate that has it.
+    fn drop_frame(&self) -> bool {
+        self.drop_frame && self.fps().is_some_and(Rational::has_drop_frame)
     }
 
     /// The size and rate fields, `rate_enabled` or not.
@@ -145,6 +155,14 @@ impl Format {
                     });
                 });
                 ui.end_row();
+                // At 29.97 and 59.94 only: timecode counted drop-frame
+                // (`01:00:00;00`), which keeps to the clock.
+                if self.fps().is_some_and(Rational::has_drop_frame) {
+                    ui.label("Timecode");
+                    ui.checkbox(&mut self.drop_frame, "Drop-frame")
+                        .on_hover_text("01:00:00;00 is an hour of the clock: two frame numbers a minute are skipped (four at 59.94), but every tenth");
+                    ui.end_row();
+                }
             });
     }
 }
@@ -232,11 +250,15 @@ impl Workspace {
                     if ui.add_enabled(ok, egui::Button::new("Create…")).clicked() {
                         create = Some(if new.choose {
                             let fps = new.format.fps().expect("checked");
-                            json!({
+                            let mut format = json!({
                                 "fps": rate_text(fps),
                                 "width": new.format.width,
                                 "height": new.format.height,
-                            })
+                            });
+                            if new.format.drop_frame() {
+                                format["drop_frame"] = json!(true);
+                            }
+                            format
                         } else {
                             json!({})
                         });
@@ -311,6 +333,9 @@ fn changes(now: &Format, was: &Format) -> Value {
     if let Some(f) = now.fps().filter(|&f| Some(f) != was.fps()) {
         set.insert("fps".into(), json!(f.to_string()));
     }
+    if now.drop_frame() != was.drop_frame() {
+        set.insert("drop_frame".into(), json!(now.drop_frame()));
+    }
     Value::Object(set)
 }
 
@@ -356,5 +381,17 @@ mod tests {
             ..was.clone()
         };
         assert_eq!(changes(&rate, &was), json!({ "fps": "30000/1001" }));
+        // Drop-frame, where the rate has it (decision D47).
+        let drop = Format {
+            drop_frame: true,
+            ..rate.clone()
+        };
+        assert_eq!(changes(&drop, &rate), json!({ "drop_frame": true }));
+        let pal = Format {
+            rate: "25".into(),
+            drop_frame: true,
+            ..was.clone()
+        };
+        assert_eq!(changes(&pal, &was), json!({ "fps": "25" }), "none at 25");
     }
 }

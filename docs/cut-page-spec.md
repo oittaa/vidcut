@@ -121,6 +121,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 - **Display options** (right-click):
   - source timecode or source frame count (source modes)
   - record timecode or record frame (Timeline mode)
+  - drop-frame at 29.97 and 59.94, where the project counts so (decision D47)
   - Timer 1/2 and KeyKode (later)
 
 ### 4.4 In/Out (v1) (pp. 691–693, 700)
@@ -533,3 +534,8 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - **Dynamic metadata:** HDR10+ and Dolby Vision describe each frame's own picture, so each output frame keeps those of the frame it shows, where its transfer stays the same. HDR10+, PQ output only, is written when any picture shown has it: frames without it get HDR10+ made from their measured light (each channel's peak, the average and percentiles, no tone mapping curve), black frames that of no light. Dolby Vision is written when every picture shown has it, one profile: 8.1 into PQ, 8.4 into HLG (10 for AV1). An encoder writing it needs it on every frame, so black frames take the Dolby Vision of the frame before them, and black before the first picture leaves it out. libx265 and libsvtav1 write it, so `auto` then encodes on the CPU. `static`, `hdr10plus`, `dolby_vision`, `all` and `none` set what is written; `hdr10plus` makes HDR10+ for every frame when no picture has its own.
   - **Where:** in the bitstream (HEVC SEI at every keyframe, AV1 metadata OBUs; HDR10+ on every frame) and in the container (MP4/MOV `mdcv`/`clli`, Matroska/WebM's colour metadata, Dolby Vision's configuration; VP9's HDR10+ as WebM BlockAdditions).
   - **Said:** the plan and the result report each file's metadata and why (what was left out, and for what); the Export dialog shows it in one dim line, and offers the setting next to the dynamic range.
+- **D47. Drop-frame timecode** (§4.3; Resolve's project settings offer it at these rates). At 29.97 and 59.94 fps a project can count record timecode drop-frame: frame numbers 00 and 01 (00–03 at 59.94) are skipped at the start of every minute but every tenth, so `01:00:00;00` is an hour of the clock, frame 107892, where non-drop `01:00:00:00` is 108000.
+  - **Setting:** `project.set drop_frame` (`--drop-frame true`), and `project.create` and `project.open`'s create; New Project and File > Project Settings show it at those rates. Refused at other rates; a change to a rate without it turns it off.
+  - **Shown** with `;` before the frames wherever timecode is: the viewer, the ruler, storyboards, the `*_tc` of query results, lengths and source positions too. A media file's own timecode shows as it counts.
+  - **Typed:** `;` says drop-frame anywhere (`01:00:00;00`, `01;00;00;00`); in a drop-frame project `:` counts so too. A label drop-frame skips (`00:01:00;00`) is refused.
+  - **Set by itself:** the first video of a project whose format it sets (D37), and an OTIO import into an empty timeline, turn it on when the media's own timecode counts drop-frame (written with `;`). OTIO doesn't say whether a timeline counts so: only frame numbers travel.

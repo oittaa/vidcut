@@ -849,6 +849,9 @@ impl Workspace {
                         TimeContext {
                             fps: self.fps(),
                             start_tc: 0,
+                            drop_frame: self
+                                .project()
+                                .is_some_and(|p| p.settings.counts_drop_frame()),
                             end: 0,
                             mark_in: None,
                             mark_out: None,

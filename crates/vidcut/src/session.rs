@@ -62,9 +62,13 @@ pub fn run_with(
             height,
             sample_rate,
             channels,
+            drop_frame,
         } => {
             let mut settings =
                 vidcut_core::model::Settings::with_format(fps.as_deref(), size(*width, *height)?)?;
+            if let Some(d) = drop_frame {
+                settings.set_drop_frame(*d)?;
+            }
             if let Some(r) = sample_rate {
                 settings.sample_rate = *r;
             }

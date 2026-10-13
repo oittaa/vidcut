@@ -25,7 +25,7 @@ vidcut history undo                         # works across separate runs
 ```
 
 **Times:**
-- In strings, every time needs a unit: `450f`, `15s`, `1m30s`, `250ms`, `00:01:00:00` (non-drop-frame timecode), `HH:MM:SS.mmm`, `start`, `end`, `in`, `out`.
+- In strings, every time needs a unit: `450f`, `15s`, `1m30s`, `250ms`, `00:01:00:00` (timecode; `00:01:00;00` drop-frame, decision D47), `HH:MM:SS.mmm`, `start`, `end`, `in`, `out`.
 - In JSON params, a bare integer is a frame number.
 - Ranges are half-open: `A..B` excludes B; `A..+D` is D long.
 

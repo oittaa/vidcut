@@ -450,16 +450,23 @@ pub fn start_timecode(
 ) -> Option<StartTimecode> {
     match video {
         Some(v) if v.still => None,
-        Some(v) => timecode
-            .and_then(|tc| vidcut_core::time::parse_media_timecode(tc, v.fps))
-            .filter(|&count| count > 0)
-            .map(|count| StartTimecode { count, rate: v.fps }),
+        Some(v) => {
+            let tc = timecode?;
+            let count = vidcut_core::time::parse_media_timecode(tc, v.fps).filter(|&c| c > 0)?;
+            Some(StartTimecode {
+                count,
+                rate: v.fps,
+                // Written `01:00:00;00`: counted drop-frame (decision D47).
+                drop_frame: tc.contains([';', '.']) && v.fps.has_drop_frame(),
+            })
+        }
         None => {
             let rate = audio.first().map(|a| a.sample_rate)?;
             let count = i64::try_from(time_reference?).ok().filter(|&c| c > 0)?;
             Some(StartTimecode {
                 count,
                 rate: Rational::new(i64::from(rate), 1).ok()?,
+                drop_frame: false,
             })
         }
     }
@@ -532,7 +539,8 @@ mod tests {
             super::start_timecode(Some("01:00:00;00"), None, v, &info.audio),
             Some(StartTimecode {
                 count: 107_892,
-                rate: r(30000, 1001)
+                rate: r(30000, 1001),
+                drop_frame: true,
             })
         );
         assert_eq!(
@@ -548,7 +556,8 @@ mod tests {
             super::start_timecode(None, Some(172_800_000), None, &info.audio),
             Some(StartTimecode {
                 count: 172_800_000,
-                rate: r(48_000, 1)
+                rate: r(48_000, 1),
+                drop_frame: false,
             })
         );
         let mut still = info.video.clone().unwrap();
