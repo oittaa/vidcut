@@ -20,7 +20,9 @@ fn decode(reader: &mut VideoReader, frames: usize, down: bool) -> (usize, f64, f
         let Some(f) = reader.next_frame().unwrap() else {
             break;
         };
-        if down && reader.gpu().is_some() {
+        // Interlaced frames of VA-API and Direct3D 11 came down already,
+        // for the CPU to deinterlace.
+        if down && vidcut_av::hw::on_gpu(&f) {
             vidcut_av::hw::download(&f).unwrap();
         }
         n += 1;

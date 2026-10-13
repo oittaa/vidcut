@@ -463,6 +463,20 @@ fn media_urls_and_paths() {
         &[]
     };
     assert_eq!(w.paths, these(here));
+    // A server's file, with no timeline folder: on Windows the server with
+    // either slash; elsewhere `//` is the root's, and `\\` only a name.
+    let server: &[&str] = if cfg!(windows) {
+        &[r"\\server\share\a.mov"]
+    } else {
+        &["//server/share/a.mov"]
+    };
+    assert_eq!(paths("//server/share/a.mov", None), these(server));
+    let server: &[&str] = if cfg!(windows) {
+        &[r"\\server\share\a.mov"]
+    } else {
+        &[]
+    };
+    assert_eq!(paths(r"\\server\share\a.mov", None), these(server));
     // An image sequence named by its range.
     let s = locate("/renders/frame_[0001-0120].png", None, fps).unwrap();
     assert_eq!(s.paths, these(&["/renders/frame_0001.png"]));

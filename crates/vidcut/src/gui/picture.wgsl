@@ -7,8 +7,9 @@ struct Params {
     // Where the upright picture goes in the target: x, y, width, height in
     // pixels; outside it, black.
     place: vec4<f32>,
-    // The upright picture's size in luma samples (width, height; zw
-    // unused).
+    // The upright picture's size in luma samples (width, height), and how
+    // much of its textures' width and height the stored picture covers (zw:
+    // 1, but less where a texture is rounded up to even sides).
     upright: vec4<f32>,
     // y' = (sample - range.x) * range.y; chroma = (sample - range.z) * range.w.
     range: vec4<f32>,
@@ -58,7 +59,7 @@ fn stored(u: vec2<f32>) -> vec2<f32> {
 
 // The YUV samples at upright position `u`.
 fn yuv(u: vec2<f32>) -> vec3<f32> {
-    let s = stored(u);
+    let s = stored(u) * p.upright.zw;
     let y = textureSampleLevel(luma, bilinear, s, 0.0).r;
     if p.flags.z == 1u {
         let uv = textureSampleLevel(chroma_u, bilinear, s, 0.0).rg;
