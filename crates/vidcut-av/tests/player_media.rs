@@ -147,12 +147,12 @@ fn real_footage_seeks_steps_and_plays() {
         assert!(player.wait_ready(0, Duration::from_secs(20)));
         let pic = player.present(Instant::now()).unwrap().picture;
         eprintln!(
-            "{name}: pictures {}×{} {:?}, {:.1} MB each; a window back holds up to {} (a third of the budget)",
+            "{name}: pictures {}×{} {:?}, {:.1} MB each; a window back holds up to {} (half the budget)",
             pic.width(),
             pic.height(),
             pic.layout(),
             pic.bytes() as f64 / 1e6,
-            budget / 3 / pic.bytes()
+            budget / 2 / pic.bytes()
         );
 
         // Seeks, paused, each waited for.

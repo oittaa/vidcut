@@ -96,6 +96,27 @@ impl Store {
         self.lock().pictures.contains_key(id)
     }
 
+    /// How many of `ids`, in order, are kept before the first that isn't.
+    pub(crate) fn kept_run(&self, ids: impl IntoIterator<Item = Id>) -> usize {
+        let inner = self.lock();
+        ids.into_iter()
+            .take_while(|id| inner.pictures.contains_key(id))
+            .count()
+    }
+
+    /// Counts the pictures of `ids` as looked at now, in order, the last
+    /// most recently: pictures still to be shown go after those shown.
+    pub(crate) fn touch(&self, ids: impl IntoIterator<Item = Id>) {
+        let mut inner = self.lock();
+        for id in ids {
+            inner.clock += 1;
+            let now = inner.clock;
+            if let Some((_, used)) = inner.pictures.get_mut(&id) {
+                *used = now;
+            }
+        }
+    }
+
     /// Holds `id`'s picture whatever the budget (once it is kept), until
     /// another is held; `None` holds none.
     pub(crate) fn hold(&self, id: Option<Id>) {
@@ -222,5 +243,26 @@ mod tests {
         store.set_budget(Kind::Memory, one);
         assert!(store.contains(&m(0)) && !store.contains(&m(4)) && !store.contains(&m(5)));
         assert_eq!(store.usage(), (3, 3 * one));
+    }
+
+    #[test]
+    fn pictures_touched_go_after_those_looked_at_before() {
+        let one = picture(Kind::Memory).bytes();
+        let store = Store::new(4 * one, 0);
+        let m = |i| Id::of("m", i);
+        // Kept 0 to 3; 3 and 2 shown, then 0 and 1 counted as looked at.
+        for i in 0..4 {
+            store.put(m(i), picture(Kind::Memory));
+        }
+        store.get(&m(3));
+        store.get(&m(2));
+        assert_eq!(store.kept_run([1, 0, -1].map(m)), 2);
+        store.touch([0, 1].map(m));
+        // Two more push out the two shown, the one shown first first.
+        store.put(m(-1), picture(Kind::Memory));
+        assert!(!store.contains(&m(3)) && store.contains(&m(2)));
+        store.put(m(-2), picture(Kind::Memory));
+        assert!(!store.contains(&m(2)));
+        assert_eq!(store.kept_run((-2..=1).rev().map(m)), 4);
     }
 }
