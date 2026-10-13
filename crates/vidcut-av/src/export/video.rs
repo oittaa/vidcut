@@ -425,6 +425,23 @@ fn gpu_reader(input: &Input, gpu: &GpuSide) -> Option<(VideoReader, crate::cuda:
 /// may start for decoding on to it to beat a seek.
 const DECODE_AHEAD: f64 = 1.0;
 
+/// Memory for the pictures of a piece walking its source backward made at
+/// once ([`VideoFrames::reversed_frame`]), at most `REVERSED_MOST` of them;
+/// `REVERSED_ON_GPU` for an encoder's frames on the GPU, whose pools are
+/// small.
+const REVERSED_BYTES: usize = 256 << 20;
+const REVERSED_MOST: i64 = 64;
+const REVERSED_ON_GPU: i64 = 4;
+
+/// A picture of a piece walking its source backward, made ahead.
+struct Reversed {
+    input: Input,
+    pos: i64,
+    frame: frame::Video,
+    /// Its source frame's Dolby Vision, for black after it.
+    dolby_vision: frame::Video,
+}
+
 impl Source {
     /// Opens `path` with `current` at the first frame for `target`. The
     /// decoding up to there is most of the cost of starting a piece, so the
@@ -556,6 +573,19 @@ impl Source {
     /// hole. The frame it moves to is measured by `meter` when it has no
     /// HDR10+. Returns whether it moved.
     fn advance(&mut self, target: f64) -> Result<bool> {
+        // Back (a piece walking its source backward, decision D48): from
+        // the keyframe before. Just sought, the frames from where it
+        // landed come next.
+        let behind = match &self.current {
+            Some(_) => target < self.target - 1e-6,
+            None => self
+                .reader
+                .passes_before()
+                .is_some_and(|p| p as f64 * self.tick > target + 1e-6),
+        };
+        if self.pictures != Pictures::Still && behind {
+            self.seek(target)?;
+        }
         self.target = target;
         let mut changed = false;
         while self
@@ -699,6 +729,8 @@ pub struct VideoFrames {
     /// The Dolby Vision of the last source frame given: black after it
     /// takes it.
     last_dolby_vision: frame::Video,
+    /// Pictures of a piece walking its source backward, made ahead.
+    reversed: Vec<Reversed>,
 }
 
 /// Frames fitted into the output on the GPU ([`VideoFrames::fit_on_gpu`]).
@@ -850,6 +882,7 @@ impl VideoFrames {
             dynamic: Default::default(),
             light: Default::default(),
             last_dolby_vision: frame::Video::empty(),
+            reversed: Vec::new(),
         }
     }
 
@@ -1043,22 +1076,33 @@ impl VideoFrames {
                     origin,
                     source_frame,
                     image,
+                    pace,
                     ..
                 } => {
                     // A still's one picture serves every frame: it is never
                     // sought (an image file has nothing past it).
                     let pictures = Pictures::of(image.as_ref());
                     let still = pictures == Pictures::Still;
+                    let backward = pace.speed < 0.0 && !still;
                     if k == 0 {
                         let from = if still { 0 } else { source_frame };
                         self.start_piece(&input_of(&path, image.as_ref()), origin, from, pictures)?;
+                        if !backward {
+                            self.reversed.clear();
+                        }
                     }
                     let k = if still { 0 } else { k };
                     if picture {
                         self.rotation = self.source.as_ref().map_or(0, |s| s.reader.rotation());
                         self.last_decoder = self.source.as_ref().and_then(|s| s.decoder);
                         self.gpu_decoded += i64::from(self.last_decoder.is_some());
+                        if backward {
+                            return self.reversed_frame(k).map(|f| Some(Some(f)));
+                        }
                         self.source_frame(k).map(|f| Some(Some(f)))
+                    } else if backward {
+                        // Made when one is asked for, from a keyframe.
+                        Ok(Some(None))
                     } else {
                         self.pass_source_frame(k).map(|()| Some(None))
                     }
@@ -1250,13 +1294,28 @@ impl VideoFrames {
         });
     }
 
+    /// Source frames from the current piece's first to its output frame
+    /// `k`, at its pace.
+    fn step(&self, k: i64) -> i64 {
+        self.pieces
+            .get(self.piece)
+            .map_or(k, |p| p.position(k) - p.position(0))
+    }
+
     /// Moves the current source piece's file on to its output frame `k`
     /// without making the picture.
     fn pass_source_frame(&mut self, k: i64) -> Result<()> {
+        let step = self.step(k);
+        let first = self.source.as_ref().expect("open").source_frame;
+        self.pass_at(first + step)
+    }
+
+    /// Moves the open file on to source frame `pos` without making the
+    /// picture.
+    fn pass_at(&mut self, pos: i64) -> Result<()> {
         let fps = self.fps;
         let src = self.source.as_mut().expect("open");
-        let target = target(fps, src.origin, src.source_frame + k);
-        if src.advance(target)? {
+        if src.advance(target(fps, src.origin, pos))? {
             src.normalized = None;
         }
         Ok(())
@@ -1264,10 +1323,77 @@ impl VideoFrames {
 
     /// Output frame `k` of the current source piece.
     fn source_frame(&mut self, k: i64) -> Result<frame::Video> {
+        let step = self.step(k);
+        let first = self.source.as_ref().expect("open").source_frame;
+        self.frame_at(first + step)
+    }
+
+    /// Output frame `k` of the current piece, which walks its source
+    /// backward (decision D48): made with those it shows after it, as many
+    /// as fit, from the keyframe before the lowest up, so the file isn't
+    /// sought for each.
+    fn reversed_frame(&mut self, k: i64) -> Result<frame::Video> {
+        let piece = self.pieces[self.piece].clone();
+        let pos = piece.position(k);
+        let input = self.source.as_ref().expect("open").reader.input().clone();
+        let made = |r: &Reversed| r.pos == pos && r.input == input;
+        if !self.reversed.iter().any(made) {
+            self.reversed.clear();
+            let most = self.reversed_frames();
+            // Highest first.
+            let mut shown: Vec<i64> = Vec::new();
+            for j in k..piece.frames() {
+                let p = piece.position(j);
+                if shown.last() != Some(&p) {
+                    if shown.len() as i64 == most {
+                        break;
+                    }
+                    shown.push(p);
+                }
+            }
+            let low = *shown.last().expect("frame k");
+            for p in low..=pos {
+                if shown.contains(&p) {
+                    let frame = self.frame_at(p)?;
+                    self.reversed.push(Reversed {
+                        input: input.clone(),
+                        pos: p,
+                        frame,
+                        dolby_vision: dolby_vision(&self.last_dolby_vision)?,
+                    });
+                } else {
+                    self.pass_at(p)?;
+                }
+            }
+        }
+        let r = self.reversed.iter().find(|r| made(r)).expect("just made");
+        self.last_dolby_vision = dolby_vision(&r.dolby_vision)?;
+        frame_ref(&r.frame)
+    }
+
+    /// How many pictures [`reversed_frame`](Self::reversed_frame) makes at
+    /// once: what fits in `REVERSED_BYTES`, at 10 bits.
+    fn reversed_frames(&self) -> i64 {
+        let current = self.source.as_ref().and_then(|s| s.current.as_ref());
+        let (w, h) = match (&self.decoded, current) {
+            (Some(_), Some((f, _))) => (f.width(), f.height()),
+            _ => (self.out.0, self.out.1),
+        };
+        let bytes = (w as usize * h as usize * 3).max(1);
+        let most = if self.gpu.is_some() || self.fit.is_some() {
+            REVERSED_ON_GPU
+        } else {
+            REVERSED_MOST
+        };
+        ((REVERSED_BYTES / bytes) as i64).clamp(1, most)
+    }
+
+    /// The output frame of the open file's source frame `pos`.
+    fn frame_at(&mut self, pos: i64) -> Result<frame::Video> {
         let (out_w, out_h, out_fmt) = self.out;
         let fps = self.fps;
         let src = self.source.as_mut().expect("open");
-        let target = target(fps, src.origin, src.source_frame + k);
+        let target = target(fps, src.origin, pos);
         let changed = src.advance(target)?;
         if let Some(relayout) = self.decoded.as_mut() {
             if changed || src.normalized.is_none() {
@@ -1421,6 +1547,17 @@ impl VideoFrames {
         }
         Ok(out)
     }
+}
+
+/// A frame holding only `f`'s Dolby Vision.
+fn dolby_vision(f: &frame::Video) -> Result<frame::Video> {
+    let mut dv = frame::Video::empty();
+    let only = crate::hdr::Dynamic {
+        hdr10plus: false,
+        dolby_vision: true,
+    };
+    crate::hdr::copy_dynamic(f, &mut dv, only)?;
+    Ok(dv)
 }
 
 /// Fills a frame with black: video-range for YUV, zero for RGB, opaque alpha.

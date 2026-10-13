@@ -52,6 +52,7 @@ fn main() {
     let start = (start.parse::<f64>().unwrap() * fps.as_f64()).round() as i64;
     let frames = (secs.parse::<f64>().unwrap() * fps.as_f64()).round() as i64;
     let piece = VideoPiece::Source {
+        pace: Default::default(),
         media: "m".into(),
         path: path.clone(),
         origin: v.first_frame_time.unwrap_or(0.0),

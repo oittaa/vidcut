@@ -746,9 +746,16 @@ impl Clip {
             .map(|a| (self.start + a.head, self.end() + a.tail))
     }
 
-    /// Source frame shown at timeline frame `t`.
+    /// Source frame shown at timeline frame `t`: at its speed (decision
+    /// D48), the frame at or before where it is.
     pub fn source_at(&self, t: i64) -> i64 {
-        self.source_in + (t - self.start)
+        self.source_in + crate::render::Pace::of(self.speed(), 0).offset(t - self.start)
+    }
+
+    /// Source frames per timeline frame: its speed change's (2.0 twice as
+    /// fast, -1.0 backward, 0 a held frame), else 1.
+    pub fn speed(&self) -> f64 {
+        self.speed.as_ref().and_then(Speed::scalar).unwrap_or(1.0)
     }
 }
 

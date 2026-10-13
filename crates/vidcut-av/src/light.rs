@@ -147,7 +147,6 @@ impl Span {
         let VideoPiece::Source {
             path,
             origin,
-            source_frame,
             frames,
             image,
             ..
@@ -164,10 +163,12 @@ impl Span {
             });
         }
         let target = |pos| crate::export::video::target(fps, *origin, pos);
+        // Its first and last frames, whichever way it walks its source.
+        let (a, b) = (piece.position(0), piece.position(frames - 1));
         Some(Self {
             input,
-            from: target(*source_frame),
-            to: target(source_frame + frames),
+            from: target(a.min(b)),
+            to: target(a.max(b) + 1),
         })
     }
 }
@@ -176,20 +177,20 @@ impl Span {
 /// sampling rule, `export::video`): each shows the first source frame from
 /// then on, or the last. A still shows its one picture; black, none.
 pub fn sampled(piece: &VideoPiece, fps: Rational) -> impl Iterator<Item = f64> + use<> {
-    let (origin, first, n) = match piece {
+    let (origin, n) = match piece {
         VideoPiece::Source {
             image: Some(Image::Still),
             ..
-        } => (f64::NEG_INFINITY, 0, 1),
-        VideoPiece::Source {
-            origin,
-            source_frame,
-            frames,
-            ..
-        } => (*origin, *source_frame, *frames),
-        VideoPiece::Black { .. } => (0.0, 0, 0),
+        } => (f64::NEG_INFINITY, 1),
+        VideoPiece::Source { origin, frames, .. } => (*origin, *frames),
+        VideoPiece::Black { .. } => (0.0, 0),
     };
-    (0..n).map(move |k| crate::export::video::target(fps, origin, first + k))
+    let still = origin == f64::NEG_INFINITY;
+    let piece = piece.clone();
+    (0..n).map(move |k| {
+        let pos = if still { 0 } else { piece.position(k) };
+        crate::export::video::target(fps, origin, pos)
+    })
 }
 
 /// A transfer's light per normalized code, cd/m² (SDR: relative to its
@@ -1033,6 +1034,7 @@ mod tests {
     fn levels_count_the_frames_an_export_shows() {
         let fps = Rational::new(30, 1).unwrap();
         let piece = |frames, image| VideoPiece::Source {
+            pace: Default::default(),
             media: "m".into(),
             path: "clip.mov".into(),
             origin: 0.0,

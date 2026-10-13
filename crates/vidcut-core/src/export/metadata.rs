@@ -543,6 +543,7 @@ mod tests {
 
     fn piece(frames: i64, media: &str) -> VideoPiece {
         VideoPiece::Source {
+            pace: Default::default(),
             media: media.into(),
             path: PathBuf::from(format!("/{media}.mkv")),
             origin: 0.0,

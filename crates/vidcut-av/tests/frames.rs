@@ -42,6 +42,7 @@ fn tiles_show_their_own_frames() {
         .unwrap_or(0.0);
     let fps = Rational::new(30, 1).unwrap();
     let piece = |source_frame| VideoPiece::Source {
+        pace: Default::default(),
         media: "m".into(),
         path: path.clone(),
         origin,

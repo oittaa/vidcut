@@ -93,11 +93,11 @@ impl Plan {
     pub(crate) fn id(&self, t: i64) -> Id {
         let (i, k) = self.locate(t);
         let pos = match self.plan.video.get(i) {
-            Some(VideoPiece::Source {
-                source_frame,
-                image,
-                ..
-            }) if !matches!(image, Some(Image::Still)) => source_frame + k,
+            Some(piece @ VideoPiece::Source { image, .. })
+                if !matches!(image, Some(Image::Still)) =>
+            {
+                piece.position(k)
+            }
             // Every frame of black, or of a still, is one picture.
             _ => 0,
         };
@@ -150,11 +150,13 @@ fn cut(piece: &VideoPiece, k: i64) -> VideoPiece {
             source_frame,
             frames,
             image,
+            pace,
             ..
         } => {
             // A still's piece always reads its one picture from the start.
             if !matches!(image, Some(Image::Still)) {
-                *source_frame += k;
+                *source_frame = piece.position(k);
+                *pace = pace.after(k);
             }
             *frames -= k;
         }
@@ -209,6 +211,7 @@ mod tests {
 
     fn source(media: &str, source_frame: i64, frames: i64) -> VideoPiece {
         VideoPiece::Source {
+            pace: Default::default(),
             media: media.into(),
             path: PathBuf::from(format!("/{media}.mp4")),
             origin: 0.0,

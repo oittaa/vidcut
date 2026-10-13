@@ -79,6 +79,7 @@ fn pictures_are_yuv_as_decoded_and_render_as_frame_render() {
     );
     let still = fixture::ensure_images(&ImageSpec::still(777, W, H, "png")).unwrap();
     p.video[5] = VideoPiece::Source {
+        pace: Default::default(),
         media: "i".into(),
         path: still[0].clone(),
         origin: 0.0,
@@ -225,6 +226,7 @@ fn stills_and_image_sequences_show_their_pictures() {
     let files = fixture::ensure_images(&seq).unwrap();
     let pattern = files[0].parent().unwrap().join("img_%04d.png");
     let picture = |path: &std::path::Path, image, from, frames| VideoPiece::Source {
+        pace: Default::default(),
         media: "i".into(),
         path: path.to_path_buf(),
         origin: 0.0,
@@ -468,6 +470,98 @@ fn speeds_and_reverse_play() {
     }
     assert_eq!(player.status().position, 0);
     assert_eq!(shown_at(&player, 0), expect[0]);
+}
+
+#[test]
+fn pieces_at_other_speeds_show_their_source_frames() {
+    use vidcut_core::render::{Pace, VideoPiece};
+
+    // Keyframes 30 frames apart, with B-frames: the reversed piece decodes
+    // from keyframes behind the frames it shows.
+    let long = src(
+        "m5",
+        FixtureSpec::new(VideoCodec::H264, Container::Mp4, W, H, (30, 1), 300)
+            .gop(30)
+            .bframes(2),
+    );
+    let mut p = plan(
+        &[
+            clip(&long, 10, 10),
+            clip(&long, 100, 10),
+            clip(&long, 200, 40),
+            clip(&long, 50, 5),
+            clip(&long, 260, 5),
+        ],
+        0,
+    );
+    for (piece, speed) in p.video.iter_mut().zip([2.0, 0.5, -1.0, 0.0, 1.0]) {
+        if let VideoPiece::Source { pace, .. } = piece {
+            *pace = Pace::of(speed, 0);
+        }
+    }
+    let expect: Vec<Option<u32>> = [
+        (0..10).map(|k| 10 + 2 * k).collect::<Vec<_>>(),
+        (0..10).map(|k| 100 + k / 2).collect(),
+        (0..40).map(|k| 200 - k).collect(),
+        vec![50; 5],
+        (260..265).collect(),
+    ]
+    .concat()
+    .into_iter()
+    .map(|f| Some(f as u32))
+    .collect();
+    let n = expect.len() as i64;
+    for t in 0..n {
+        assert_eq!(rendered(&p, t), expect[t as usize], "frame render at {t}");
+    }
+    let (player, out) = manual(p);
+
+    for t in [0, 9, 10, 15, 19, 20, 35, 59, 60, 64, 65, 30] {
+        player.seek(t);
+        assert_eq!(shown_at(&player, t), expect[t as usize], "seek to {t}");
+    }
+    player.seek(0);
+    for t in 1..n {
+        player.step(1);
+        assert_eq!(shown_at(&player, t), expect[t as usize], "step to {t}");
+    }
+    for t in (0..n - 1).rev() {
+        player.step(-1);
+        assert_eq!(shown_at(&player, t), expect[t as usize], "step back to {t}");
+    }
+
+    // Playing both ways: every frame shown, each its source frame.
+    for (from, speed) in [(0, 1.0), (n - 1, -1.0)] {
+        player.pause();
+        player.seek(from);
+        assert!(player.wait_ready(from, Duration::from_secs(10)));
+        player.play(speed);
+        let mut shown = Vec::new();
+        let started = Instant::now();
+        while player.status().playing {
+            assert!(started.elapsed() < Duration::from_secs(60), "too slow");
+            pull_full(&out, 480);
+            let t = player.status().position;
+            assert!(player.wait_ready(t, Duration::from_secs(10)), "frame {t}");
+            let s = player.present(Instant::now()).unwrap();
+            assert_eq!(
+                code(&s.picture),
+                expect[s.frame as usize],
+                "frame {}",
+                s.frame
+            );
+            if shown.last() != Some(&s.frame) {
+                shown.push(s.frame);
+            }
+        }
+        let all: Vec<i64> = if speed > 0.0 {
+            (from..n).collect()
+        } else {
+            (0..=from).rev().collect()
+        };
+        assert_eq!(shown, all, "playing at {speed}");
+    }
+    assert_eq!(player.status().error, None);
 }
 
 #[test]

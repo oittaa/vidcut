@@ -53,6 +53,9 @@ pub enum VideoPiece {
         /// Pictures that aren't a video file's frames.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         image: Option<Image>,
+        /// How it walks its source: frame `k` shows [`VideoPiece::position`].
+        #[serde(default, skip_serializing_if = "Pace::is_normal")]
+        pace: Pace,
     },
     Black {
         frames: i64,
@@ -119,6 +122,61 @@ impl RenderPlan {
     }
 }
 
+/// How a picture piece walks its source (decision D48): frame `k` of it
+/// shows source frame `source_frame + offset(k)`, by the sampling rule
+/// (export.md §2): at speed 2 every other frame, at 0.5 each twice, at -1
+/// backward, at 0 the first held.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Pace {
+    /// Source frames per output frame.
+    pub speed: f64,
+    /// Frames of its clip before the piece: where in its pace it starts.
+    pub skip: i64,
+}
+
+impl Default for Pace {
+    fn default() -> Self {
+        Self::of(1.0, 0)
+    }
+}
+
+impl Pace {
+    pub fn of(speed: f64, skip: i64) -> Self {
+        Self { speed, skip }
+    }
+
+    pub fn is_normal(&self) -> bool {
+        self.speed == 1.0
+    }
+
+    /// Source frames from the piece's first to its frame `k`.
+    pub fn offset(&self, k: i64) -> i64 {
+        if self.is_normal() {
+            return k;
+        }
+        // A billionth over: 3 frames at a third of the speed make one.
+        let at = |n: i64| (n as f64 * self.speed + 1e-9).floor() as i64;
+        at(self.skip + k) - at(self.skip)
+    }
+
+    /// The pace `k` frames on.
+    pub fn after(&self, k: i64) -> Self {
+        Self::of(self.speed, self.skip + k)
+    }
+}
+
+impl VideoPiece {
+    /// The source frame frame `k` of the piece shows (0 for black).
+    pub fn position(&self, k: i64) -> i64 {
+        match self {
+            VideoPiece::Source {
+                source_frame, pace, ..
+            } => source_frame + pace.offset(k),
+            VideoPiece::Black { .. } => 0,
+        }
+    }
+}
+
 fn push_video(out: &mut Vec<VideoPiece>, piece: VideoPiece) {
     if piece.frames() <= 0 {
         return;
@@ -130,15 +188,23 @@ fn push_video(out: &mut Vec<VideoPiece>, piece: VideoPiece) {
                 media,
                 source_frame,
                 frames,
+                pace,
                 ..
             }),
             VideoPiece::Source {
                 media: m2,
                 source_frame: s2,
                 frames: f2,
+                pace: p2,
                 ..
             },
-        ) if media == m2 && *source_frame + *frames == *s2 => *frames += f2,
+        ) if media == m2
+            && pace.is_normal()
+            && p2.is_normal()
+            && *source_frame + *frames == *s2 =>
+        {
+            *frames += f2
+        }
         _ => out.push(piece),
     }
 }
@@ -273,6 +339,7 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                         source_frame: c.source_at(x),
                         frames: y - x,
                         image: p.media_image(&c.media),
+                        pace: Pace::of(c.speed(), x - c.start),
                     },
                 );
             }
@@ -420,6 +487,7 @@ pub fn media_frame(p: &Project, media: &str, at: i64) -> Result<VideoPiece> {
         .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
     Ok(match &m.info.video {
         Some(v) => VideoPiece::Source {
+            pace: Default::default(),
             media: media.into(),
             path: m.path.clone(),
             origin: v.first_pts,
@@ -461,6 +529,7 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
             push_video(
                 &mut video,
                 VideoPiece::Source {
+                    pace: Default::default(),
                     media: id.clone(),
                     path: path.clone(),
                     origin,

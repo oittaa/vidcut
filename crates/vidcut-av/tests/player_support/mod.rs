@@ -78,6 +78,7 @@ pub fn plan(clips: &[Clip], start: i64) -> RenderPlan {
         match c.src {
             Some(s) => {
                 video.push(VideoPiece::Source {
+                    pace: Default::default(),
                     media: s.media.clone(),
                     path: s.path.clone(),
                     origin: s.origin,
@@ -122,14 +123,17 @@ pub fn piece_at(plan: &RenderPlan, t: i64) -> VideoPiece {
     for p in &plan.video {
         if k < p.frames() {
             let mut one = p.clone();
+            let pos = p.position(k);
             match &mut one {
                 VideoPiece::Source {
                     source_frame,
                     frames,
+                    pace,
                     ..
                 } => {
-                    *source_frame += k;
+                    *source_frame = pos;
                     *frames = 1;
+                    *pace = Default::default();
                 }
                 VideoPiece::Black { frames } => *frames = 1,
             }

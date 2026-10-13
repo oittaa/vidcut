@@ -498,17 +498,20 @@ pub(crate) fn window(
     Ok(start.max(pos - max + 1).max(floor).max(0))
 }
 
-/// `piece` from source position `pos`, `frames` long.
+/// `piece` from source position `pos`, `frames` long, walking its source
+/// frame by frame.
 pub(crate) fn at(piece: &VideoPiece, pos: i64, frames: i64) -> VideoPiece {
     let mut p = piece.clone();
     match &mut p {
         VideoPiece::Source {
             source_frame,
             frames: n,
+            pace,
             ..
         } => {
             *source_frame = pos;
             *n = frames;
+            *pace = Default::default();
         }
         VideoPiece::Black { frames: n } => *n = frames,
     }

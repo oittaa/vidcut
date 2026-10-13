@@ -592,11 +592,26 @@ impl Decoder {
         let VideoPiece::Source {
             source_frame: pos,
             image: None,
+            pace,
             ..
         } = piece
         else {
             return Ok(t);
         };
+        // A piece at another speed (decision D48): two seconds, at least
+        // `min`, at most `max`, read from the keyframe before its first
+        // (the reader makes a backward one's from keyframes itself); a held
+        // one's one picture.
+        if !pace.is_normal() {
+            if pace.speed == 0.0 {
+                return Ok(t);
+            }
+            let n = ((plan.fps().as_f64() * WINDOW_SECS).round() as i64)
+                .max(min)
+                .min(max)
+                .max(1);
+            return Ok((t - n + 1).max(piece_start));
+        }
         let floor = pos - (t - piece_start);
         let frames = self.reader();
         let start = window(

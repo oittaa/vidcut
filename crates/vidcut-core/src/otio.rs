@@ -245,15 +245,6 @@ fn speed_of(item: &Value, effect: Option<Value>) -> Option<Speed> {
     })
 }
 
-/// Clip `c`'s source frame at timeline frame `t`: at its speed, when it
-/// carries one from another editor.
-fn source_at(c: &Clip, t: i64) -> i64 {
-    match c.speed.as_ref().and_then(Speed::scalar) {
-        Some(x) => c.source_in + ((t - c.start) as f64 * x).round() as i64,
-        None => c.source_at(t),
-    }
-}
-
 /// `effects`, after clip `c`'s speed change if it carries one: editors
 /// write the time effect first.
 fn with_speed(c: &Clip, mut effects: Vec<Value>) -> Vec<Value> {
@@ -372,7 +363,7 @@ pub fn export(
                     meta["muted"] = json!(au.muted);
                 }
                 if m.is_some_and(Media::is_still) {
-                    meta["source_in"] = json!(source_at(c, s));
+                    meta["source_in"] = json!(c.source_at(s));
                 }
                 let mut metadata = json!({ VIDCUT: meta });
                 if let Some(g) = group {
@@ -386,16 +377,16 @@ pub fn export(
                 let effects = with_speed(
                     c,
                     c.effects.as_ref().map_or_else(Vec::new, |x| {
-                        x.written(source_at(c, s), s > c.start, e < c.end())
+                        x.written(c.source_at(s), s > c.start, e < c.end())
                     }),
                 );
                 video.push(match &c.compound {
-                    Some(k) => compound_item(c, k, &label, source_at(c, s), e - s, effects, rate),
+                    Some(k) => compound_item(c, k, &label, c.source_at(s), e - s, effects, rate),
                     None => item(
                         &label,
                         c,
                         m,
-                        source_at(c, s),
+                        c.source_at(s),
                         e - s,
                         c.enabled,
                         metadata,
@@ -433,13 +424,13 @@ pub fn export(
                 let whole = c.audio_range().expect("has audio");
                 let effects = with_speed(
                     c,
-                    effects::sound(au, source_at(c, s), s > whole.0, e < whole.1),
+                    effects::sound(au, c.source_at(s), s > whole.0, e < whole.1),
                 );
                 audio.push(item(
                     &label,
                     c,
                     m,
-                    source_at(c, s),
+                    c.source_at(s),
                     e - s,
                     !au.muted,
                     json!({ VIDCUT: meta, EDITOR: editor }),
@@ -460,14 +451,14 @@ pub fn export(
                     let effects = with_speed(
                         c,
                         c.effects.as_ref().map_or_else(Vec::new, |x| {
-                            x.written(source_at(c, s), s > c.start, e < c.end())
+                            x.written(c.source_at(s), s > c.start, e < c.end())
                         }),
                     );
                     audio.push(compound_item(
                         c,
                         k,
                         &label,
-                        source_at(c, s),
+                        c.source_at(s),
                         e - s,
                         effects,
                         rate,
