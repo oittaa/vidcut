@@ -2146,3 +2146,84 @@ fn speed_changes_are_carried_and_locked() {
     g.ok(req("edit.delete", json!({"clips": "c2"})));
     assert!(g.editor.project().clip("c2").is_none());
 }
+
+#[test]
+fn compound_clips_decompose() {
+    // A clip 0..100; over it on a second track a compound clip (20..80) of
+    // two tracks, a 60-frame clip from source 30 and above it, at 40, a
+    // 20-frame one from source 30; a nested timeline's sound on an audio track (10..50).
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.append("m1", 0, 100);
+    let mut doc = export(f.editor.project(), "cmp", None, Locations::Absolute).unwrap();
+    let mut compound = otio_compound("my compound", "Compound Clip", "Video", 60.0);
+    compound["children"][0]["children"][0]["source_range"]["start_time"]["value"] = json!(30.0);
+    let mut upper = compound["children"][0].clone();
+    upper["children"][0]["source_range"]["duration"]["value"] = json!(20.0);
+    upper["children"] = json!([gap(40, 25.0), upper["children"][0].clone()]);
+    compound["children"].as_array_mut().unwrap().push(upper);
+    let sound = otio_compound("nested", "Timeline Clip", "Audio", 40.0);
+    let tracks = doc["tracks"]["children"].as_array_mut().unwrap();
+    let mut v2 = tracks[0].clone();
+    v2["name"] = json!("Video 2");
+    v2["metadata"] = json!({});
+    v2["children"] = json!([gap(20, 25.0), compound]);
+    tracks.insert(1, v2);
+    let mut score = tracks[2].clone();
+    score["name"] = json!("Score");
+    score["metadata"] = json!({});
+    score["children"] = json!([gap(10, 25.0), sound]);
+    tracks.push(score);
+    let rows = |p: &Project, track: &str| -> Vec<(i64, i64, i64, bool, bool)> {
+        p.track(track).map_or(vec![], |t| {
+            t.clips
+                .iter()
+                .map(|c| (c.start, c.end(), c.source_in, c.video, c.audio.is_some()))
+                .collect()
+        })
+    };
+
+    // Carried, then decomposed, the first 10 frames trimmed off.
+    let mut g = Fixture::new(&[(10.0, true)]);
+    g.ok(req("timeline.import", json!({ "otio": doc })));
+    let block = g.editor.project().track("V2").unwrap().clips[0].id.clone();
+    g.ok(req(
+        "edit.trim",
+        json!({"clip": block, "edge": "head", "by": 10}),
+    ));
+    let r = g.ok(req("edit.decompose", json!({"clips": [block]})));
+    let p = g.editor.project().clone();
+    assert!(crate::validate::violations(&p).is_empty());
+    assert_eq!(r.result["clips"].as_array().unwrap().len(), 2);
+    // Pictures only: the first track in its place, from source 40; the
+    // second on a track above.
+    assert_eq!(rows(&p, "V2"), [(30, 80, 40, true, false)]);
+    assert_eq!(rows(&p, "V3"), [(60, 80, 30, true, false)]);
+    // Its sound, on its audio track.
+    let sound = p.track("A1").unwrap().clips[0].id.clone();
+    g.ok(req("edit.decompose", json!({"clips": [sound]})));
+    assert_eq!(rows(g.editor.project(), "A1"), [(10, 50, 0, false, true)]);
+    // Undone, the blocks are back.
+    g.ok(req("history.undo", json!({"steps": 2})));
+    assert!(g.editor.project().clip(&block).unwrap().compound.is_some());
+    // Only compound clips decompose.
+    let e = g.err(req("edit.decompose", json!({"clips": ["c1"]})));
+    assert!(e.message.contains("isn't a compound clip"), "{e}");
+
+    // Flattened at import: no blocks, nor the warning about them.
+    let mut h = Fixture::new(&[(10.0, true)]);
+    let r = h.ok(req(
+        "timeline.import",
+        json!({ "otio": doc, "flatten": true }),
+    ));
+    assert_eq!(r.result["warnings"], json!([]), "{}", r.result);
+    let p = h.editor.project();
+    assert!(
+        p.tracks
+            .iter()
+            .flat_map(|t| &t.clips)
+            .all(|c| c.compound.is_none())
+    );
+    assert_eq!(rows(p, "V2"), [(20, 80, 30, true, false)]);
+    assert_eq!(rows(p, "V3"), [(60, 80, 30, true, false)]);
+    assert_eq!(rows(p, "A1"), [(10, 50, 0, false, true)]);
+}

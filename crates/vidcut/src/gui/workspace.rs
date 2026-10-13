@@ -597,7 +597,16 @@ impl Workspace {
                     .add_enabled(open, egui::Button::new("Import Timeline (OTIO)…"))
                     .clicked()
                 {
-                    self.import_timeline(ui.ctx());
+                    self.import_timeline(ui.ctx(), false);
+                }
+                if ui
+                    .add_enabled(
+                        open,
+                        egui::Button::new("Import Timeline, Decomposing Compound Clips…"),
+                    )
+                    .clicked()
+                {
+                    self.import_timeline(ui.ctx(), true);
                 }
                 if ui
                     .add_enabled(open, egui::Button::new("Export Timeline (OTIO)…"))

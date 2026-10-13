@@ -69,6 +69,7 @@ pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> Stri
             d.by()
         ),
         "edit.slip" => format!("Slip {} {}", d.clips("clip"), d.by()),
+        "edit.decompose" => format!("Decompose {}", d.clips("clips")),
         "edit.slide" => format!("Slide {} {}", d.clips("clip"), d.by()),
         "edit.audio_roll" => format!(
             "Move the audio cut at the {} of {} {}",

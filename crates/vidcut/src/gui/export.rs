@@ -196,6 +196,9 @@ pub struct ExportUi {
     /// The jobs window.
     pub show_jobs: bool,
     otio: Option<Otio>,
+    /// The timeline import under way decomposes compound clips (deviation
+    /// X9).
+    flatten: bool,
     /// Import warnings to show.
     warnings: Option<(String, Vec<String>)>,
     /// Closing was asked for while exports run.
@@ -1319,8 +1322,10 @@ impl Workspace {
     }
 
     /// File > Import Timeline / Export Timeline (OpenTimelineIO). An
-    /// `.otiod` bundle imports through its `content.otio`.
-    pub(super) fn import_timeline(&mut self, ctx: &egui::Context) {
+    /// `.otiod` bundle imports through its `content.otio`. `flatten`: its
+    /// compound clips decomposed.
+    pub(super) fn import_timeline(&mut self, ctx: &egui::Context, flatten: bool) {
+        self.export.flatten = flatten;
         let (dialogs, folder) = (self.dialogs.clone(), self.export_folder());
         self.export.otio = Some(Otio::PickImport(Picked::ask(ctx, move || {
             dialogs.pick_file("Import Timeline", &folder, &["otio", "otioz"])
@@ -1375,6 +1380,9 @@ impl Workspace {
             let mut params = json!({ "path": path, "replace": replace });
             if let Some(dir) = search {
                 params["search"] = json!([dir]);
+            }
+            if ws.export.flatten {
+                params["flatten"] = json!(true);
             }
             Otio::Importing {
                 ask: Ask::send(&ws.live, ctx, "timeline.import", params),

@@ -1228,6 +1228,7 @@ fn mutate(
             replace,
             search,
             unpack,
+            flatten,
         } => import_timeline(
             p,
             &Import {
@@ -1237,9 +1238,18 @@ fn mutate(
                 search,
                 unpack: unpack.as_deref(),
                 write: !dry_run,
+                flatten: *flatten,
             },
             env,
         )?,
+        Request::EditDecompose { clips } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let (mut made, mut warnings) = (Vec::new(), Vec::new());
+            for id in &ids {
+                made.extend(decompose(p, id, env, (&[], false), &mut warnings)?);
+            }
+            json!({ "clips": made, "warnings": warnings })
+        }
         Request::Apply { commands, .. } => {
             let mut results = Vec::new();
             for (i, cmd) in commands.iter().enumerate() {
@@ -1561,6 +1571,441 @@ struct Import<'a> {
     unpack: Option<&'a Path>,
     /// False in a dry run: a bundle's media aren't unpacked.
     write: bool,
+    /// Compound clips decomposed into their clips.
+    flatten: bool,
+}
+
+/// The pool's ids of an imported timeline's media, by [`media_key`].
+type MediaIds = HashMap<(String, bool), String>;
+
+/// How an imported timeline names a media file: an image sequence and a
+/// still of its first picture are named alike.
+fn media_key(m: &otio::MediaRef) -> (String, bool) {
+    (m.url.clone(), m.sequence.is_some())
+}
+
+/// The media of imported timeline `t`, added to the pool: each file probed
+/// once where the file says (or near it), else looked for by name in
+/// `dirs` (and subfolders). By [`media_key`], and their ids in order.
+/// `hint`: the error suggests search folders.
+fn find_media(
+    p: &mut Project,
+    t: &otio::Imported,
+    env: &dyn Env,
+    dirs: &[PathBuf],
+    hint: bool,
+) -> Result<(MediaIds, Vec<String>)> {
+    let mut ids = MediaIds::new();
+    let mut media = Vec::new();
+    let mut missing: Vec<&str> = Vec::new();
+    for c in t.clips.iter().filter(|c| !c.is_block()) {
+        let m = &c.media;
+        if ids.contains_key(&media_key(m)) || missing.contains(&m.shown.as_str()) {
+            continue;
+        }
+        // An image sequence is probed as one, at its rate.
+        let probe = |path: &Path| match m.sequence {
+            Some(rate) => env.probe_sequence(path, rate),
+            None => env.probe(path),
+        };
+        let probed = m
+            .paths
+            .iter()
+            .find_map(|path| probe(path).ok())
+            .or_else(|| {
+                (!m.file_name.is_empty())
+                    .then(|| {
+                        env.find_file(dirs, std::ffi::OsStr::new(&m.file_name))
+                            .iter()
+                            .find_map(|path| probe(path).ok())
+                    })
+                    .flatten()
+            });
+        match probed {
+            Some(probed) => {
+                let id = add_media(p, probed);
+                if !media.contains(&id) {
+                    media.push(id.clone());
+                }
+                ids.insert(media_key(m), id);
+            }
+            None => missing.push(&m.shown),
+        }
+    }
+    if !missing.is_empty() {
+        return Err(Error::media(format!(
+            "{} media file(s) not found: {}{}",
+            missing.len(),
+            missing.join(", "),
+            if hint {
+                "; pass `search` folders to look for them by name (subfolders too)"
+            } else {
+                ""
+            }
+        )));
+    }
+    Ok((ids, media))
+}
+
+/// Places the clips, transitions and markers of imported timeline `t` from
+/// timeline frame `offset`, on the tracks `tracks` maps its own to (the
+/// same ids otherwise), its media found as `ids`. The clips' and the
+/// markers' ids.
+fn place_imported(
+    p: &mut Project,
+    t: &otio::Imported,
+    ids: &MediaIds,
+    offset: i64,
+    tracks: &HashMap<String, String>,
+    warnings: &mut Vec<String>,
+) -> Result<(Vec<String>, Vec<String>)> {
+    let track_of = |id: &str| tracks.get(id).cloned().unwrap_or_else(|| id.to_string());
+    let from = t.fps;
+    let to = p.settings.fps;
+    let conv = |f: i64| rescale(f, from, to);
+    // Carried clip effects count from where their picture or sound starts
+    // in the file; their times and fade lengths are frames at its rate.
+    let carry = |list: &[Value], first: i64| {
+        (!list.is_empty()).then(|| {
+            let mut e = Effects {
+                from: first,
+                list: list.to_vec(),
+            };
+            if from != to {
+                e.retime(|x| (x * to.as_f64() / from.as_f64()).round());
+            }
+            e
+        })
+    };
+    // Where audio may start on each track without overlapping what is
+    // before `offset`.
+    let mut floors: HashMap<String, i64> = p
+        .tracks
+        .iter()
+        .map(|t| {
+            let end = t
+                .clips
+                .iter()
+                .filter(|c| c.start < offset)
+                .filter_map(|c| c.audio_range().map(|r| r.1))
+                .max();
+            (t.id.clone(), end.unwrap_or(0))
+        })
+        .collect();
+
+    let mut clips = Vec::new();
+    // The clips made, by key: (id, track).
+    let mut made: HashMap<usize, (String, String)> = HashMap::new();
+    for c in &t.clips {
+        // A generator, title or compound clip: a block of its length, no
+        // media.
+        if c.is_block() {
+            let (start, end) = (offset + conv(c.start), offset + conv(c.end()));
+            if end - start < 1 {
+                continue;
+            }
+            let source_in = conv(c.source_in);
+            // Its length covers what it shows, whatever rounding did.
+            let compound = c.compound.as_ref().map(|k| Compound {
+                stack: k.stack.clone(),
+                frames: conv(k.frames).max(source_in + end - start),
+            });
+            let id = p.alloc_clip_id();
+            clips.push(id.clone());
+            made.insert(c.key, (id.clone(), track_of(&c.track)));
+            let track = p.track_mut(&track_of(&c.track)).expect("made above");
+            track.clips.push(Clip {
+                id,
+                media: String::new(),
+                start,
+                duration: end - start,
+                source_in,
+                video: c.video,
+                audio: None,
+                enabled: c.enabled,
+                name: (!c.name.is_empty()).then(|| c.name.clone()),
+                effects: carry(&c.effects, source_in),
+                generator: c.generator.as_ref().map(|reference| Generator {
+                    reference: reference.clone(),
+                }),
+                compound,
+                speed: c.speed.clone(),
+            });
+            track.sort();
+            continue;
+        }
+        let m = p.media(&ids[&media_key(&c.media)]).expect("added").clone();
+        let frames = p.media_limit(&m);
+        let label = if c.name.is_empty() { &m.name } else { &c.name };
+        let mut start = offset + conv(c.start);
+        let end = offset + conv(c.end());
+        // A source range in the media's timecode (no available range said
+        // where the media start) counts from the media's first frame here.
+        let tc = match (c.timecoded, m.info.timecode) {
+            (true, Some(tc)) if m.sequence.is_none() => tc.frames_at(from).round() as i64,
+            _ => 0,
+        };
+        let mut source_in = conv(c.source_in - tc);
+        let effects = carry(&c.effects, source_in);
+        let sound_from = conv(c.source_in - tc + c.audio.map_or(0, |a| a.0));
+        if c.video && m.info.video.is_none() {
+            warnings.push(format!("{label}: {} has no video; left out", m.name));
+            continue;
+        }
+        // Keep to the media (rates and rounding may differ by a frame).
+        if source_in < 0 {
+            warnings.push(format!(
+                "{label}: {} frame(s) before the start of {} were left out",
+                -source_in, m.name
+            ));
+            start -= source_in;
+            source_in = 0;
+        }
+        let duration = (end - start).min(frames - source_in);
+        if duration < end - start {
+            warnings.push(format!(
+                "{label}: {} frame(s) past the end of {} were left out",
+                end - start - duration.max(0),
+                m.name
+            ));
+        }
+        if duration < 1 {
+            continue;
+        }
+        // The audio's timeline range, then as offsets from the video edges.
+        let audio = match (c.audio, t.has_audio_tracks) {
+            (Some((h, tl)), _) => Some((
+                offset + conv(c.start + h) - start,
+                offset + conv(c.end() + tl) - (start + duration),
+            )),
+            // No audio tracks in the file: clips bring their media's audio.
+            (None, false) => Some((0, 0)),
+            (None, true) => None,
+        };
+        let audio = audio
+            .filter(|_| !m.info.audio.is_empty())
+            .and_then(|(h, tl)| {
+                let floor = floors.get(&track_of(&c.track)).copied().unwrap_or(0);
+                let h = h.max(-source_in).max(floor - start);
+                let tl = tl.min(frames - source_in - duration);
+                (duration + tl - h >= 1).then_some(ClipAudio {
+                    stream: if (c.stream as usize) < m.info.audio.len() {
+                        c.stream
+                    } else {
+                        0
+                    },
+                    head: h,
+                    tail: tl,
+                    gain_db: c.gain_db.clamp(*GAIN.start(), *GAIN.end()),
+                    muted: c.muted,
+                    effects: carry(&c.audio_effects, sound_from),
+                })
+            });
+        if audio.is_some() && !GAIN.contains(&c.gain_db) {
+            warnings.push(format!(
+                "{label}: gain {:.1} dB set to the nearest of -60..24 dB",
+                c.gain_db
+            ));
+        }
+        if !c.video && audio.is_none() {
+            warnings.push(format!("{label}: {} has no audio; left out", m.name));
+            continue;
+        }
+        if let Some(a) = &audio {
+            floors.insert(track_of(&c.track), start + duration + a.tail);
+        }
+        let name = (!c.name.is_empty() && c.name != m.name && c.name != c.media.file_name)
+            .then(|| c.name.clone());
+        let id = p.alloc_clip_id();
+        clips.push(id.clone());
+        made.insert(c.key, (id.clone(), track_of(&c.track)));
+        let track = p.track_mut(&track_of(&c.track)).expect("made above");
+        track.clips.push(Clip {
+            id,
+            media: m.id.clone(),
+            start,
+            duration,
+            source_in,
+            video: c.video,
+            audio,
+            enabled: c.enabled,
+            name,
+            effects,
+            generator: None,
+            compound: None,
+            speed: c.speed.clone(),
+        });
+        track.sort();
+    }
+    // Transitions between clips made, on the track of both; those that don't
+    // fit their edit points here (media too short, a clip moved off it) go.
+    for x in &t.transitions {
+        let side = |k: Option<usize>| match k {
+            None => Some(None),
+            Some(k) => made.get(&k).map(Some),
+        };
+        let (Some(from), Some(to)) = (side(x.from), side(x.to)) else {
+            continue;
+        };
+        let track = match (from, to) {
+            (Some(f), Some(g)) if f.1 != g.1 => continue,
+            (_, Some(g)) => &g.1,
+            (Some(f), None) => &f.1,
+            (None, None) => continue,
+        };
+        p.track_mut(track)
+            .expect("made above")
+            .transitions
+            .push(Transition {
+                sound: x.sound,
+                from: from.map(|f| f.0.clone()),
+                to: to.map(|g| g.0.clone()),
+                before: conv(x.before),
+                after: conv(x.after),
+                otio: x.otio.clone(),
+            });
+    }
+    let dropped = otio::transitions::prune(p);
+    if dropped > 0 {
+        warnings.push(otio::transitions::dropped(dropped));
+    }
+    let mut markers = Vec::new();
+    for k in &t.markers {
+        markers.push(ops::add_marker(
+            p,
+            offset + conv(k.at),
+            conv(k.duration).max(1),
+            k.name.clone(),
+            Some(k.color.clone()),
+            k.note.clone(),
+        )?);
+    }
+    Ok((clips, markers))
+}
+
+/// Decompose in Place (deviation X9): compound clip `id` becomes the clips
+/// its stack holds, at their times, trimmed to the part it shows, their
+/// media looked for in `dirs` too. A picture block brings the stack's video
+/// tracks, pictures only; a sound block its audio tracks, sound only. The
+/// first goes in the block's place, each other on the next track of the
+/// kind above that is free there, or a new one. The block's own effects
+/// are dropped, which `warnings` says. `import`: a timeline import's own,
+/// which a locked track it made doesn't stop. The clips made.
+fn decompose(
+    p: &mut Project,
+    id: &str,
+    env: &dyn Env,
+    (dirs, import): (&[PathBuf], bool),
+    warnings: &mut Vec<String>,
+) -> Result<Vec<String>> {
+    let (ti, ci) = p
+        .find_clip(id)
+        .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
+    if p.tracks[ti].locked && !import {
+        return Err(Error::invalid(format!(
+            "track {} is locked",
+            p.tracks[ti].id
+        )));
+    }
+    let block = p.tracks[ti].clips[ci].clone();
+    let k = block
+        .compound
+        .clone()
+        .ok_or_else(|| Error::invalid(format!("{id} isn't a compound clip")))?;
+    if block.speed.is_some() {
+        return Err(Error::invalid(format!(
+            "{id} has a speed change from another editor (deviation X9): decomposing it would \
+             need speed math"
+        )));
+    }
+    // The stack as a timeline of its video (or audio) tracks.
+    let kind = if block.video { "Video" } else { "Audio" };
+    let tracks: Vec<Value> = k.stack["children"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|t| t["kind"] == kind)
+        .cloned()
+        .collect();
+    let doc = json!({
+        "OTIO_SCHEMA": "Timeline.1",
+        "name": k.stack["name"],
+        "tracks": { "OTIO_SCHEMA": "Stack.1", "children": tracks },
+    });
+    let mut t = otio::import(&doc, None)?;
+    if block.video {
+        t.has_audio_tracks = true;
+        for c in &mut t.clips {
+            c.audio = None;
+            c.audio_effects.clear();
+        }
+    }
+    // What the block shows, in the stack's frames.
+    let to = p.settings.fps;
+    let a = rescale(block.source_in, to, t.fps);
+    let b = rescale(block.source_in + block.duration, to, t.fps);
+    t.clips.retain_mut(|c| {
+        let (s, e) = (c.start.max(a), c.end().min(b));
+        c.source_in += s - c.start;
+        (c.start, c.duration) = (s - a, e - s);
+        e > s
+    });
+    t.markers.retain_mut(|m| {
+        m.at -= a;
+        (0..b - a).contains(&m.at)
+    });
+    let (ids, _) = find_media(p, &t, env, dirs, false)?;
+    for w in &t.warnings {
+        if !warnings.contains(w) {
+            warnings.push(w.clone());
+        }
+    }
+    // The block makes way; its tracks, the first in its place.
+    p.tracks[ti].clips.remove(ci);
+    let (start, end) = (block.start, block.end());
+    let track_kind = p.tracks[ti].kind;
+    let mut names: Vec<&str> = t.clips.iter().map(|c| c.track.as_str()).collect();
+    names.sort_by_key(|n| n[1..].parse::<usize>().unwrap_or(0));
+    names.dedup();
+    let free = |t: &crate::model::Track| {
+        !t.locked
+            && t.clips.iter().all(|c| {
+                let (s, e) = c.audio_range().map_or((c.start, c.end()), |(s, e)| {
+                    (s.min(c.start), e.max(c.end()))
+                });
+                e <= start || s >= end
+            })
+    };
+    let mut map = HashMap::new();
+    let mut at = ti;
+    for (n, name) in names.into_iter().enumerate() {
+        let target = if n == 0 {
+            p.tracks[ti].id.clone()
+        } else {
+            match (at + 1..p.tracks.len())
+                .find(|&i| p.tracks[i].kind == track_kind && free(&p.tracks[i]))
+            {
+                Some(i) => {
+                    at = i;
+                    p.tracks[i].id.clone()
+                }
+                None => {
+                    let made = ops::add_track(p, track_kind);
+                    at = p.track_index(&made).expect("made");
+                    made
+                }
+            }
+        };
+        map.insert(name.to_string(), target);
+    }
+    let (made, _) = place_imported(p, &t, &ids, start, &map, warnings)?;
+    if let Some(e) = &block.effects {
+        warnings.push(format!(
+            "{id}'s own effects were dropped: {}",
+            e.names().join(", ")
+        ));
+    }
+    Ok(made)
 }
 
 /// `timeline.import`: an OpenTimelineIO timeline onto V1 ([`otio`]).
@@ -1572,6 +2017,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         search,
         unpack,
         write,
+        flatten,
     } = *import;
     let (doc, file) = match (path, doc) {
         (Some(path), None) => {
@@ -1635,58 +2081,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     if let Some(b) = &bundle {
         dirs.push(b.folder.clone());
     }
-    // By how the file names them: an image sequence and a still of its
-    // first picture are named alike.
-    let key = |m: &otio::MediaRef| (m.url.clone(), m.sequence.is_some());
-    let mut ids: HashMap<(String, bool), String> = HashMap::new();
-    let mut media = Vec::new();
-    let mut missing: Vec<&str> = Vec::new();
-    for c in t.clips.iter().filter(|c| !c.is_block()) {
-        let m = &c.media;
-        if ids.contains_key(&key(m)) || missing.contains(&m.shown.as_str()) {
-            continue;
-        }
-        // An image sequence is probed as one, at its rate.
-        let probe = |path: &Path| match m.sequence {
-            Some(rate) => env.probe_sequence(path, rate),
-            None => env.probe(path),
-        };
-        let probed = m
-            .paths
-            .iter()
-            .find_map(|path| probe(path).ok())
-            .or_else(|| {
-                (!m.file_name.is_empty())
-                    .then(|| {
-                        env.find_file(&dirs, std::ffi::OsStr::new(&m.file_name))
-                            .iter()
-                            .find_map(|path| probe(path).ok())
-                    })
-                    .flatten()
-            });
-        match probed {
-            Some(probed) => {
-                let id = add_media(p, probed);
-                if !media.contains(&id) {
-                    media.push(id.clone());
-                }
-                ids.insert(key(m), id);
-            }
-            None => missing.push(&m.shown),
-        }
-    }
-    if !missing.is_empty() {
-        return Err(Error::media(format!(
-            "{} media file(s) not found: {}{}",
-            missing.len(),
-            missing.join(", "),
-            if search.is_empty() {
-                "; pass `search` folders to look for them by name (subfolders too)"
-            } else {
-                ""
-            }
-        )));
-    }
+    let (ids, media) = find_media(p, &t, env, &dirs, search.is_empty())?;
 
     if replace {
         for track in &mut p.tracks {
@@ -1705,14 +2100,14 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
                 .clips
                 .iter()
                 .filter(|c| !c.is_block())
-                .find_map(|c| p.media(&ids[&key(&c.media)])?.info.video.clone())
+                .find_map(|c| p.media(&ids[&media_key(&c.media)])?.info.video.clone())
         {
             adopt_size(p, &v);
         }
         // A file doesn't say whether its timecode counts drop-frame; its
         // media may (decision D47).
         let drop = t.clips.iter().filter(|c| !c.is_block()).any(|c| {
-            p.media(&ids[&key(&c.media)])
+            p.media(&ids[&media_key(&c.media)])
                 .and_then(|m| m.info.timecode)
                 .is_some_and(|tc| tc.drop_frame)
         });
@@ -1728,22 +2123,6 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
             t.fps, p.settings.fps
         ));
     }
-    let to = p.settings.fps;
-    let conv = |f: i64| rescale(f, from, to);
-    // Carried clip effects count from where their picture or sound starts
-    // in the file; their times and fade lengths are frames at its rate.
-    let carry = |list: &[Value], first: i64| {
-        (!list.is_empty()).then(|| {
-            let mut e = Effects {
-                from: first,
-                list: list.to_vec(),
-            };
-            if from != to {
-                e.retime(|x| (x * to.as_f64() / from.as_f64()).round());
-            }
-            e
-        })
-    };
     let offset = if empty { 0 } else { p.end() };
     // The tracks first (making video tracks moves the audio tracks' indexes).
     let mut needed: Vec<&str> = t.clips.iter().map(|c| c.track.as_str()).collect();
@@ -1765,206 +2144,31 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
             }
         }
     }
-    // Where audio may start on each track without overlapping.
-    let mut floors: HashMap<String, i64> = p
-        .tracks
-        .iter()
-        .map(|t| {
-            let end = t
-                .clips
-                .iter()
-                .filter_map(|c| c.audio_range().map(|r| r.1))
-                .max();
-            (t.id.clone(), end.unwrap_or(0))
-        })
-        .collect();
-
-    let mut clips = Vec::new();
-    // The clips made, by key: (id, track).
-    let mut made: HashMap<usize, (String, String)> = HashMap::new();
-    for c in &t.clips {
-        // A generator, title or compound clip: a block of its length, no
-        // media.
-        if c.is_block() {
-            let (start, end) = (offset + conv(c.start), offset + conv(c.end()));
-            if end - start < 1 {
+    let to = p.settings.fps;
+    let conv = |f: i64| rescale(f, from, to);
+    let (mut clips, markers) = place_imported(p, &t, &ids, offset, &HashMap::new(), &mut warnings)?;
+    // Flattened: each compound clip made becomes its clips, and theirs.
+    let compound = |p: &Project, id: &String| p.clip(id).is_some_and(|c| c.compound.is_some());
+    let mut pending: Vec<String> = clips.iter().filter(|id| compound(p, id)).cloned().collect();
+    while flatten && !pending.is_empty() {
+        let mut next = Vec::new();
+        for id in pending {
+            if p.clip(&id).is_some_and(|c| c.speed.is_some()) {
+                warnings.push(format!(
+                    "{id} has a speed change: kept as a compound clip, as decomposing it would \
+                     need speed math"
+                ));
                 continue;
             }
-            let source_in = conv(c.source_in);
-            // Its length covers what it shows, whatever rounding did.
-            let compound = c.compound.as_ref().map(|k| Compound {
-                stack: k.stack.clone(),
-                frames: conv(k.frames).max(source_in + end - start),
-            });
-            let id = p.alloc_clip_id();
-            clips.push(id.clone());
-            made.insert(c.key, (id.clone(), c.track.clone()));
-            let track = p.track_mut(&c.track).expect("made above");
-            track.clips.push(Clip {
-                id,
-                media: String::new(),
-                start,
-                duration: end - start,
-                source_in,
-                video: c.video,
-                audio: None,
-                enabled: c.enabled,
-                name: (!c.name.is_empty()).then(|| c.name.clone()),
-                effects: carry(&c.effects, source_in),
-                generator: c.generator.as_ref().map(|reference| Generator {
-                    reference: reference.clone(),
-                }),
-                compound,
-                speed: c.speed.clone(),
-            });
-            track.sort();
-            continue;
+            let made = decompose(p, &id, env, (&dirs, true), &mut warnings)?;
+            clips.retain(|c| c != &id);
+            next.extend(made.iter().filter(|m| compound(p, m)).cloned());
+            clips.extend(made);
         }
-        let m = p.media(&ids[&key(&c.media)]).expect("added").clone();
-        let frames = p.media_limit(&m);
-        let label = if c.name.is_empty() { &m.name } else { &c.name };
-        let mut start = offset + conv(c.start);
-        let end = offset + conv(c.end());
-        // A source range in the media's timecode (no available range said
-        // where the media start) counts from the media's first frame here.
-        let tc = match (c.timecoded, m.info.timecode) {
-            (true, Some(tc)) if m.sequence.is_none() => tc.frames_at(from).round() as i64,
-            _ => 0,
-        };
-        let mut source_in = conv(c.source_in - tc);
-        let effects = carry(&c.effects, source_in);
-        let sound_from = conv(c.source_in - tc + c.audio.map_or(0, |a| a.0));
-        if c.video && m.info.video.is_none() {
-            warnings.push(format!("{label}: {} has no video; left out", m.name));
-            continue;
-        }
-        // Keep to the media (rates and rounding may differ by a frame).
-        if source_in < 0 {
-            warnings.push(format!(
-                "{label}: {} frame(s) before the start of {} were left out",
-                -source_in, m.name
-            ));
-            start -= source_in;
-            source_in = 0;
-        }
-        let duration = (end - start).min(frames - source_in);
-        if duration < end - start {
-            warnings.push(format!(
-                "{label}: {} frame(s) past the end of {} were left out",
-                end - start - duration.max(0),
-                m.name
-            ));
-        }
-        if duration < 1 {
-            continue;
-        }
-        // The audio's timeline range, then as offsets from the video edges.
-        let audio = match (c.audio, t.has_audio_tracks) {
-            (Some((h, tl)), _) => Some((
-                offset + conv(c.start + h) - start,
-                offset + conv(c.end() + tl) - (start + duration),
-            )),
-            // No audio tracks in the file: clips bring their media's audio.
-            (None, false) => Some((0, 0)),
-            (None, true) => None,
-        };
-        let audio = audio
-            .filter(|_| !m.info.audio.is_empty())
-            .and_then(|(h, tl)| {
-                let floor = floors.get(&c.track).copied().unwrap_or(0);
-                let h = h.max(-source_in).max(floor - start);
-                let tl = tl.min(frames - source_in - duration);
-                (duration + tl - h >= 1).then_some(ClipAudio {
-                    stream: if (c.stream as usize) < m.info.audio.len() {
-                        c.stream
-                    } else {
-                        0
-                    },
-                    head: h,
-                    tail: tl,
-                    gain_db: c.gain_db.clamp(*GAIN.start(), *GAIN.end()),
-                    muted: c.muted,
-                    effects: carry(&c.audio_effects, sound_from),
-                })
-            });
-        if audio.is_some() && !GAIN.contains(&c.gain_db) {
-            warnings.push(format!(
-                "{label}: gain {:.1} dB set to the nearest of -60..24 dB",
-                c.gain_db
-            ));
-        }
-        if !c.video && audio.is_none() {
-            warnings.push(format!("{label}: {} has no audio; left out", m.name));
-            continue;
-        }
-        if let Some(a) = &audio {
-            floors.insert(c.track.clone(), start + duration + a.tail);
-        }
-        let name = (!c.name.is_empty() && c.name != m.name && c.name != c.media.file_name)
-            .then(|| c.name.clone());
-        let id = p.alloc_clip_id();
-        clips.push(id.clone());
-        made.insert(c.key, (id.clone(), c.track.clone()));
-        let track = p.track_mut(&c.track).expect("made above");
-        track.clips.push(Clip {
-            id,
-            media: m.id.clone(),
-            start,
-            duration,
-            source_in,
-            video: c.video,
-            audio,
-            enabled: c.enabled,
-            name,
-            effects,
-            generator: None,
-            compound: None,
-            speed: c.speed.clone(),
-        });
-        track.sort();
+        pending = next;
     }
-    // Transitions between clips made, on the track of both; those that don't
-    // fit their edit points here (media too short, a clip moved off it) go.
-    for x in &t.transitions {
-        let side = |k: Option<usize>| match k {
-            None => Some(None),
-            Some(k) => made.get(&k).map(Some),
-        };
-        let (Some(from), Some(to)) = (side(x.from), side(x.to)) else {
-            continue;
-        };
-        let track = match (from, to) {
-            (Some(f), Some(g)) if f.1 != g.1 => continue,
-            (_, Some(g)) => &g.1,
-            (Some(f), None) => &f.1,
-            (None, None) => continue,
-        };
-        p.track_mut(track)
-            .expect("made above")
-            .transitions
-            .push(Transition {
-                sound: x.sound,
-                from: from.map(|f| f.0.clone()),
-                to: to.map(|g| g.0.clone()),
-                before: conv(x.before),
-                after: conv(x.after),
-                otio: x.otio.clone(),
-            });
-    }
-    let dropped = otio::transitions::prune(p);
-    if dropped > 0 {
-        warnings.push(otio::transitions::dropped(dropped));
-    }
-    let mut markers = Vec::new();
-    for k in &t.markers {
-        markers.push(ops::add_marker(
-            p,
-            offset + conv(k.at),
-            conv(k.duration).max(1),
-            k.name.clone(),
-            Some(k.color.clone()),
-            k.note.clone(),
-        )?);
+    if flatten && !clips.iter().any(|id| compound(p, id)) {
+        warnings.retain(|w| !w.starts_with(otio::COMPOUNDS_KEPT));
     }
     if empty {
         let (i, o) = (t.marks.mark_in.map(conv), t.marks.mark_out.map(conv));

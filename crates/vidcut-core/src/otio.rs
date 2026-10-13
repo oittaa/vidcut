@@ -78,6 +78,9 @@ const VIDCUT: &str = "vidcut";
 /// Where other editors keep their own details: the key and values are
 /// theirs, so that they read what vidcut writes.
 const EDITOR: &str = "Resolve_OTIO";
+/// The import warning naming the compound clips it kept.
+pub const COMPOUNDS_KEPT: &str =
+    "compound clips and nested timelines kept as blocks but played as gaps";
 
 fn rt(value: f64, rate: f64) -> Value {
     json!({ "OTIO_SCHEMA": "RationalTime.1", "rate": rate, "value": value })
@@ -1655,10 +1658,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         }
     }
     if !nested.is_empty() {
-        warnings.push(format!(
-            "compound clips and nested timelines kept as blocks but played as gaps: {}",
-            nested.join(", ")
-        ));
+        warnings.push(format!("{COMPOUNDS_KEPT}: {}", nested.join(", ")));
     }
     // Transitions with a clip still on a side.
     let have: std::collections::HashSet<usize> = clips.iter().map(|c| c.key).collect();
