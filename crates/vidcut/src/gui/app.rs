@@ -109,9 +109,12 @@ pub struct App {
 /// ends without it.
 const QUIT_PATIENCE: Duration = Duration::from_secs(5);
 
-/// The player's sound: the system's default device.
+/// The player's sound: the device the preferences name, else the system's
+/// default; read whenever the player opens its device.
 fn audio_device() -> Box<dyn vidcut_av::player::AudioOutput> {
-    Box::new(vidcut_av::player::CpalOutput::new())
+    Box::new(vidcut_av::player::CpalOutput::on(
+        crate::preferences::audio_device(),
+    ))
 }
 
 impl App {

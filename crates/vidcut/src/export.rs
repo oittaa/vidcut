@@ -865,11 +865,11 @@ pub fn needs_gpu_info(settings: &ExportSettings) -> bool {
 }
 
 /// Runs a prepared export, one output after another, its pieces decoding
-/// on `decoder` where it decodes them (export.md §5).
+/// as `decoding` says (export.md §5).
 pub fn run(
     prepared: &Prepared,
     available: &Availability,
-    decoder: Option<&vidcut_av::hw::GpuDecoder>,
+    decoding: vidcut_av::hw::Decoding<'_>,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(usize, &Path, Progress),
 ) -> Result<Vec<Report>> {
@@ -884,7 +884,7 @@ pub fn run(
             &o.settings,
             &o.path,
             available,
-            decoder,
+            decoding,
             cancel,
             &mut |pr| progress(i, &o.path, pr),
         )

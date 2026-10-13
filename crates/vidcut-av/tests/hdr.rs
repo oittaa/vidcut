@@ -1,7 +1,7 @@
 //! HDR metadata in files: the fixtures carry it as encoders and muxers
 //! write it (the bitstream and the container), and the probe reads it.
 
-use vidcut_av::fixture::{self, Container, FixtureSpec, HdrMeta, VideoCodec};
+use vidcut_av::fixture::{self, Container, FixtureSpec, HdrMeta, Picture, VideoCodec};
 use vidcut_av::hdr;
 use vidcut_av::light::{self, Span};
 use vidcut_core::model::{Hdr, LightLevel};
@@ -778,4 +778,111 @@ fn light_levels_are_measured_where_the_sources_say_none() {
         );
         assert_eq!(stream_values(&out).light, Some(l), "{what}");
     }
+}
+
+#[test]
+fn a_highlight_of_two_pixels_is_the_peak() {
+    // Big enough for the average and the distribution to read every
+    // fourth pixel; the highlight is between those. Lossless, the SDR one
+    // is white exactly; the encode softens PQ's, far above the black
+    // around it still (a sampled peak read 0.07 cd/m²).
+    vidcut_av::init();
+    for (what, spec, peak) in [
+        (
+            "PQ",
+            FixtureSpec::new(VideoCodec::Hevc10, Container::Mkv, 1920, 1080, (30, 1), 3)
+                .hdr(Hdr::Pq),
+            20.0..=230.0,
+        ),
+        (
+            "SDR",
+            FixtureSpec::new(VideoCodec::Ffv1, Container::Mkv, 1920, 1080, (30, 1), 3),
+            202.9..=203.1,
+        ),
+    ] {
+        let path = fixture::ensure(&spec.picture(Picture::Highlight).no_audio()).unwrap();
+        let span = Span {
+            input: vidcut_av::decode::Input::File(path),
+            from: 0.0,
+            to: 0.1,
+        };
+        let a = light::analysis(&span, true, None, &mut |_| {})
+            .unwrap()
+            .unwrap();
+        assert_eq!(a.frames.len(), 3, "{what}");
+        for (t, f) in &a.frames {
+            // White: each channel's peak, as HDR10+ made from it says.
+            assert!(peak.contains(&f.max), "{what} at {t}: {f:?}");
+            for v in f.hdr10plus().maxscl {
+                assert!(peak.contains(&(v as f32)), "{what} at {t}: {f:?}");
+            }
+            // The rest is black.
+            assert!(
+                f.average < 0.1 && f.percentiles[8] < 0.1,
+                "{what} at {t}: {f:?}"
+            );
+        }
+        let level = a.level((0..3).map(|k| f64::from(k) / 30.0)).unwrap();
+        assert!(peak.contains(&(level.max_cll as f32)), "{what}: {level:?}");
+    }
+}
+
+/// With AMF on a Direct3D 11 decoder's adapter, frames made on the CPU go
+/// up into the encoder's own frames, their colors with them: AMF writes
+/// HDR10's metadata only with frames whose transfer is PQ. An SDR source
+/// into PQ output, every frame made on the CPU, gets its mastering display
+/// in the bitstream. Windows, with AMF: `gpu-tests`.
+#[cfg(all(windows, feature = "gpu-tests"))]
+#[test]
+fn amf_frames_made_on_the_cpu_keep_hdr10s_metadata() {
+    use vidcut_av::hw::{GpuDecoder, Kind};
+    vidcut_av::init();
+    let available = export::encode::detect();
+    let adapter = available
+        .encoders
+        .iter()
+        .find(|e| e.ok && e.encoder == "hevc_amf" && e.pixel == "p010le")
+        .and_then(|e| e.device.clone());
+    let Some(decoder) = adapter.and_then(|adapter| {
+        GpuDecoder::all()
+            .into_iter()
+            .find(|d| d.kind() == Kind::D3d11va && d.on() == adapter)
+    }) else {
+        eprintln!("skipping: no 10-bit AMF HEVC on a Direct3D 11 decoder's adapter here");
+        return;
+    };
+    let source = fixture::ensure(&FixtureSpec::new(
+        VideoCodec::Hevc10,
+        Container::Mkv,
+        640,
+        360,
+        (30, 1),
+        30,
+    ))
+    .unwrap();
+    let p = plan(vec![piece(&source, 0, 20)]);
+    let mut s = settings(VCodec::Hevc, OutContainer::Mkv, HdrMode::Pq);
+    let v = s.video.as_mut().unwrap();
+    v.encoder = EncoderChoice::Amf;
+    v.speed = None;
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("amf.mkv");
+    let r = export::run_decoding_on(
+        &p,
+        &s,
+        &out,
+        &available,
+        vidcut_av::hw::Decoding::Gpu(&decoder),
+        &AtomicBool::new(false),
+        &mut |_| {},
+    )
+    .unwrap();
+    assert_eq!(r.gpu_frames, 0, "SDR into PQ is made on the CPU");
+    let frames = hdr::read_frames(&out, false, usize::MAX).unwrap();
+    assert_eq!(frames.len(), 20);
+    assert!(
+        frames[0].metadata.mastering.is_some(),
+        "the first frame's mastering display: {:?}",
+        frames[0].metadata
+    );
 }

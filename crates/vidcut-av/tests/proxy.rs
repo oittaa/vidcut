@@ -104,7 +104,7 @@ fn matches_source(enc: &ProxyEncoder) {
             &dest,
             None,
             std::slice::from_ref(enc),
-            None,
+            vidcut_av::hw::Decoding::Nvdec,
         )
         .unwrap_or_else(|e| panic!("{} with {}: {e}", path.display(), enc.name));
         assert_eq!(written.encoder, *enc);
@@ -151,7 +151,7 @@ fn keyframes_and_order(enc: &ProxyEncoder) {
         &dest,
         None,
         std::slice::from_ref(enc),
-        None,
+        vidcut_av::hw::Decoding::Nvdec,
     )
     .unwrap();
     let mut input = ffmpeg::format::input(&dest).unwrap();
@@ -246,7 +246,7 @@ fn a_sequence_proxy_uses_the_sequence_timestamps() {
             &dest,
             None,
             std::slice::from_ref(&enc),
-            None,
+            vidcut_av::hw::Decoding::Nvdec,
         ) {
             Ok(w) => w,
             Err(e) => {
@@ -359,7 +359,7 @@ fn nvenc_proxies_decode_on_the_gpu_and_stay_exact() {
             &dest,
             None,
             &nvenc,
-            None,
+            vidcut_av::hw::Decoding::Nvdec,
         )
         .unwrap_or_else(|e| panic!("{what}: {e}"));
         assert_eq!(written.on_gpu, gpu, "{what}: on the GPU");
@@ -451,8 +451,12 @@ fn gpu_decoded_proxies_stay_exact() {
         .enumerate()
         .map(|(n, (what, spec, _))| {
             let dest = tmp.path().join(format!("cpu-{n}.mkv"));
-            write(&fixture::ensure(spec).unwrap(), &dest, None)
-                .unwrap_or_else(|e| panic!("CPU, {what}: {e}"));
+            write(
+                &fixture::ensure(spec).unwrap(),
+                &dest,
+                vidcut_av::hw::Decoding::Cpu,
+            )
+            .unwrap_or_else(|e| panic!("CPU, {what}: {e}"));
             pictures(&Input::File(dest))
         })
         .collect();
@@ -462,7 +466,7 @@ fn gpu_decoded_proxies_stay_exact() {
             let source = fixture::ensure(spec).unwrap();
             let dest = tmp.path().join(format!("decoded-{n}.mkv"));
             let turned = spec.rotation != 0 || spec.hdr.is_some();
-            let written = write(&source, &dest, Some(decoder))
+            let written = write(&source, &dest, vidcut_av::hw::Decoding::Gpu(decoder))
                 .unwrap_or_else(|e| panic!("{name}, {what}: {e}"));
             // Scaled on another GPU (or not), the pictures are the CPU's but
             // for the scalers' own rounding: on average within a level and

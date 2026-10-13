@@ -7,8 +7,10 @@
 //!
 //! Each pixel is read as the export converts it (`color::pq_light`): PQ's
 //! EOTF, HLG's inverse OETF and 1.2 system gamma on a 1000-nit display, SDR
-//! as BT.1886 with its white at 203 cd/m² in BT.2020. A grid of about half
-//! a million pixels is read in each frame, every pixel of smaller ones.
+//! as BT.1886 with its white at 203 cd/m² in BT.2020. The peaks are of
+//! every pixel, a highlight of one too; the average and the distribution
+//! come from a grid of at most half a million pixels in each frame, every
+//! pixel of smaller ones.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -231,16 +233,32 @@ fn table(hdr: Option<Hdr>) -> Arc<Vec<f32>> {
 const LUT: usize = 4096;
 
 fn lut(t: &[f32], c: f64) -> f32 {
-    t[((c.clamp(0.0, 1.0) * (LUT - 1) as f64).round()) as usize]
+    // Not negative after the clamp: a half added and cut off rounds.
+    t[(c.clamp(0.0, 1.0) * (LUT - 1) as f64 + 0.5) as usize]
+}
+
+/// The lowest of `lo..hi` where `f` holds, given that it fails below that
+/// and holds from it on; `hi` when nowhere.
+fn lowest(mut lo: usize, mut hi: usize, f: impl Fn(usize) -> bool) -> usize {
+    while lo < hi {
+        let m = lo + (hi - lo) / 2;
+        if f(m) {
+            hi = m;
+        } else {
+            lo = m + 1;
+        }
+    }
+    lo
 }
 
 /// The histogram bin of `nits`: 0.1 cd/m² wide up to 100 (as fine as
 /// HDR10+ counts), 1 wide above, to 10000.
 fn bin(nits: f32) -> usize {
+    // Not negative: a half added and cut off rounds.
     if nits < 100.0 {
-        (nits.max(0.0) * 10.0).round() as usize
+        (nits.max(0.0) * 10.0 + 0.5) as usize
     } else {
-        (900.0 + nits.min(10_000.0)).round() as usize
+        (900.0 + nits.min(10_000.0) + 0.5) as usize
     }
 }
 
@@ -253,19 +271,256 @@ fn bin_nits(i: usize) -> f32 {
     }
 }
 
-fn measure_with(
-    f: &frame::Video,
-    relayout: &mut crate::export::video::Relayout,
-) -> Result<FrameLight> {
-    let f = relayout.run(f)?;
-    let c = crate::color::pq_light(&f);
-    let t = table(c.hdr);
-    let (w, h) = (f.width() as usize, f.height() as usize);
-    // About half a million pixels, on the chroma grid.
-    let step = (((w * h) as f64 / 500_000.0).sqrt().ceil() as usize).max(1);
-    let step = if step > 1 { step + step % 2 } else { 1 };
-    let fmt = f.format();
-    let (bits, semi) = match fmt {
+/// A 4:2:0 picture's codes: each pixel's luma and the chroma its 2×2 block
+/// shares.
+struct Samples<'a> {
+    w: usize,
+    h: usize,
+    /// Y, then Cb and Cr (interleaved in the second with `semi`).
+    planes: [&'a [u8]; 3],
+    /// Each plane's row, in samples.
+    rows: [usize; 3],
+    /// Two bytes a sample, the code in the top ten bits (P010).
+    wide: bool,
+    semi: bool,
+}
+
+impl Samples<'_> {
+    fn at(&self, plane: usize, i: usize) -> u16 {
+        let data = self.planes[plane];
+        if self.wide {
+            u16::from_le_bytes([data[2 * i], data[2 * i + 1]]) >> 6
+        } else {
+            u16::from(data[i])
+        }
+    }
+
+    fn luma(&self, x: usize, y: usize) -> u16 {
+        self.at(0, y * self.rows[0] + x)
+    }
+
+    /// Cb and Cr of block (`cx`, `cy`).
+    fn chroma(&self, cx: usize, cy: usize) -> (u16, u16) {
+        if self.semi {
+            let i = cy * self.rows[1] + 2 * cx;
+            (self.at(1, i), self.at(1, i + 1))
+        } else {
+            (
+                self.at(1, cy * self.rows[1] + cx),
+                self.at(2, cy * self.rows[2] + cx),
+            )
+        }
+    }
+
+    /// The brightest luma code of each 2×2 block in block row `cy`, into
+    /// `top` (a block per entry).
+    fn tops(&self, cy: usize, top: &mut [u16]) {
+        let w = self.w;
+        top.fill(0);
+        let unit = 1 + usize::from(self.wide);
+        // An odd last row is its blocks' only one.
+        for y in [2 * cy, (2 * cy + 1).min(self.h - 1)] {
+            let row = &self.planes[0][y * self.rows[0] * unit..][..w * unit];
+            if self.wide {
+                let (pairs, rest) = row.as_chunks::<4>();
+                for (t, p) in top.iter_mut().zip(pairs) {
+                    let a = u16::from_le_bytes([p[0], p[1]]);
+                    let b = u16::from_le_bytes([p[2], p[3]]);
+                    *t = (*t).max(a.max(b));
+                }
+                if let [lo, hi] = *rest {
+                    top[w / 2] = top[w / 2].max(u16::from_le_bytes([lo, hi]));
+                }
+            } else {
+                let (pairs, rest) = row.as_chunks::<2>();
+                for (t, p) in top.iter_mut().zip(pairs) {
+                    *t = (*t).max(u16::from(p[0].max(p[1])));
+                }
+                if let [last] = *rest {
+                    top[w / 2] = top[w / 2].max(u16::from(last));
+                }
+            }
+        }
+        if self.wide {
+            for t in top.iter_mut() {
+                *t >>= 6;
+            }
+        }
+    }
+
+    /// The lowest and highest Cb, then Cr, of block row `cy`.
+    fn chroma_range(&self, cy: usize) -> [(u16, u16); 2] {
+        let cw = self.w.div_ceil(2);
+        let mut out = [(u16::MAX, 0); 2];
+        let mut see = |k: usize, v: u16| out[k] = (out[k].0.min(v), out[k].1.max(v));
+        match (self.semi, self.wide) {
+            (true, true) => {
+                let row = &self.planes[1][cy * self.rows[1] * 2..][..4 * cw];
+                for p in row.as_chunks::<4>().0 {
+                    see(0, u16::from_le_bytes([p[0], p[1]]));
+                    see(1, u16::from_le_bytes([p[2], p[3]]));
+                }
+            }
+            (true, false) => {
+                let row = &self.planes[1][cy * self.rows[1]..][..2 * cw];
+                for p in row.as_chunks::<2>().0 {
+                    see(0, u16::from(p[0]));
+                    see(1, u16::from(p[1]));
+                }
+            }
+            (false, _) => {
+                for k in 0..2 {
+                    for &v in &self.planes[1 + k][cy * self.rows[1 + k]..][..cw] {
+                        see(k, u16::from(v));
+                    }
+                }
+            }
+        }
+        if self.wide {
+            out = out.map(|(lo, hi)| (lo >> 6, hi >> 6));
+        }
+        out
+    }
+}
+
+/// How a picture's codes read as light in PQ output.
+struct Reading {
+    table: Arc<Vec<f32>>,
+    /// SDR's gamut into BT.2020; `None` for HDR, already in it.
+    gamut: Option<[[f64; 3]; 3]>,
+    /// Luma's black and scale, chroma's middle and scale.
+    y0: f64,
+    to_y: f64,
+    mid: f64,
+    to_c: f64,
+    kr: f64,
+    kb: f64,
+    /// What Cr adds to R', Cb to B', and G' per what they take.
+    cr_r: f64,
+    cb_b: f64,
+    to_g: f64,
+}
+
+impl Reading {
+    fn of(c: &crate::color::PqLight, bits: u32) -> Self {
+        let max_code = f64::from((1u32 << bits) - 1);
+        let (y0, ys, cs) = if c.full_range {
+            (0.0, max_code, max_code / 2.0)
+        } else {
+            let k = f64::from(1u32 << (bits - 8));
+            (16.0 * k, 219.0 * k, 112.0 * k)
+        };
+        Self {
+            table: table(c.hdr),
+            gamut: c.hdr.is_none().then_some(c.gamut),
+            y0,
+            to_y: 1.0 / ys,
+            mid: f64::from(1u32 << (bits - 1)),
+            to_c: 1.0 / (2.0 * cs),
+            kr: c.kr,
+            kb: c.kb,
+            cr_r: 2.0 * (1.0 - c.kr),
+            cb_b: 2.0 * (1.0 - c.kb),
+            to_g: 1.0 / (1.0 - c.kr - c.kb),
+        }
+    }
+
+    /// R', G', B' of a pixel: its luma's, plus what the chroma adds to
+    /// each. Each rises with the luma; R' with Cr, B' with Cb, G' against
+    /// both.
+    fn codes(&self, y: u16, cb: u16, cr: u16) -> [f64; 3] {
+        let yv = (f64::from(y) - self.y0) * self.to_y;
+        let r = self.cr_r * ((f64::from(cr) - self.mid) * self.to_c);
+        let b = self.cb_b * ((f64::from(cb) - self.mid) * self.to_c);
+        [yv + r, yv - (self.kr * r + self.kb * b) * self.to_g, yv + b]
+    }
+
+    /// The light of each channel, cd/m².
+    fn light(&self, [r, g, b]: [f64; 3]) -> [f32; 3] {
+        let t = &self.table;
+        let mut rgb = [lut(t, r), lut(t, g), lut(t, b)];
+        if let Some(m) = &self.gamut {
+            let l = rgb.map(f64::from);
+            for (i, row) in m.iter().enumerate() {
+                rgb[i] =
+                    ((row[0] * l[0] + row[1] * l[1] + row[2] * l[2]).max(0.0) as f32) * SDR_WHITE;
+            }
+        }
+        rgb
+    }
+}
+
+/// Each channel's brightest in the picture, of every pixel.
+///
+/// Each channel's light rises with its code: the transfers rise, and SDR's
+/// gamut has no negative coefficient (every source's primaries lie within
+/// BT.2020's). So in a 2×2 block, whose chroma is one, the brightest luma
+/// gives the brightest channels; and no block of a row is brighter than
+/// its luma with the row's chroma at its extremes. Only blocks whose luma
+/// could pass what is found are read. Without a gamut (HDR), each
+/// channel's light is of its own code alone: the highest codes are kept,
+/// and their light found at the end.
+fn peak(s: &Samples, r: &Reading) -> [f32; 3] {
+    let hdr = r.gamut.is_none();
+    let mut most = [f64::NEG_INFINITY; 3];
+    let mut maxscl = [0f32; 3];
+    // SDR: the first table entry that, in all three channels, would pass
+    // `maxscl` in one; a block whose every code is short of it can't.
+    let first_passing = |maxscl: [f32; 3]| {
+        lowest(0, LUT, |e| {
+            let l = r.light([e as f64 / (LUT - 1) as f64; 3]);
+            (0..3).any(|i| l[i] > maxscl[i])
+        }) as f64
+    };
+    let mut first = first_passing(maxscl);
+    let mut top = vec![0u16; s.w.div_ceil(2)];
+    for cy in 0..s.h.div_ceil(2) {
+        s.tops(cy, &mut top);
+        let [(cb_lo, cb_hi), (cr_lo, cr_hi)] = s.chroma_range(cy);
+        let may_add = |y: usize| {
+            let y = y as u16;
+            let (hi, lo) = (r.codes(y, cb_hi, cr_hi), r.codes(y, cb_lo, cr_lo));
+            let bound = [hi[0], lo[1], hi[2]];
+            if hdr {
+                (0..3).any(|i| bound[i] > most[i])
+            } else {
+                let l = r.light(bound);
+                (0..3).any(|i| l[i] > maxscl[i])
+            }
+        };
+        let brightest = usize::from(top.iter().copied().max().unwrap_or(0));
+        if !may_add(brightest) {
+            continue;
+        }
+        let from = lowest(0, brightest, may_add) as u16;
+        for (cx, &y) in top.iter().enumerate() {
+            if y < from {
+                continue;
+            }
+            let (cb, cr) = s.chroma(cx, cy);
+            let code = r.codes(y, cb, cr);
+            if hdr {
+                for i in 0..3 {
+                    if code[i] > most[i] {
+                        most[i] = code[i];
+                    }
+                }
+            } else if code[0].max(code[1]).max(code[2]) * (LUT - 1) as f64 + 0.5 >= first {
+                let l = r.light(code);
+                if (0..3).any(|i| l[i] > maxscl[i]) {
+                    maxscl = std::array::from_fn(|i| maxscl[i].max(l[i]));
+                    first = first_passing(maxscl);
+                }
+            }
+        }
+    }
+    if hdr { r.light(most) } else { maxscl }
+}
+
+/// `f`'s samples and how they read, for a picture in a layout a display
+/// takes (`export::video::Relayout`).
+fn reading(f: &frame::Video) -> Result<(Samples<'_>, Reading)> {
+    let (bits, semi) = match f.format() {
         format::Pixel::P010LE => (10, true),
         format::Pixel::NV12 => (8, true),
         format::Pixel::YUV420P | format::Pixel::YUVJ420P => (8, false),
@@ -275,61 +530,38 @@ fn measure_with(
             )));
         }
     };
-    let max_code = f64::from((1u32 << bits) - 1);
-    let (y0, ys, cs) = if c.full_range {
-        (0.0, max_code, max_code / 2.0)
-    } else {
-        let k = f64::from(1u32 << (bits - 8));
-        (16.0 * k, 219.0 * k, 112.0 * k)
+    let planes = if semi { 2 } else { 3 };
+    let unit = if bits > 8 { 2 } else { 1 };
+    let s = Samples {
+        w: f.width() as usize,
+        h: f.height() as usize,
+        planes: std::array::from_fn(|p| if p < planes { f.data(p) } else { &[] }),
+        rows: std::array::from_fn(|p| if p < planes { f.stride(p) / unit } else { 0 }),
+        wide: bits > 8,
+        semi,
     };
-    let mid = f64::from(1u32 << (bits - 1));
-    let sample = |plane: usize, x: usize, y: usize| -> f64 {
-        let stride = f.stride(plane);
-        let data = f.data(plane);
-        if bits > 8 {
-            let i = y * stride + 2 * x;
-            f64::from(u16::from_le_bytes([data[i], data[i + 1]]) >> 6)
-        } else {
-            f64::from(data[y * stride + x])
-        }
-    };
-    let (kr, kb) = (c.kr, c.kb);
-    let kg = 1.0 - kr - kb;
-    let g = c.gamut;
+    Ok((s, Reading::of(&crate::color::pq_light(f), bits)))
+}
+
+fn measure_with(
+    f: &frame::Video,
+    relayout: &mut crate::export::video::Relayout,
+) -> Result<FrameLight> {
+    let f = relayout.run(f)?;
+    let (s, r) = reading(&f)?;
+    let maxscl = peak(&s, &r);
+    // The average and the distribution, of at most half a million pixels
+    // on the chroma grid.
+    let (w, h) = (s.w, s.h);
+    let step = (((w * h) as f64 / 500_000.0).sqrt().ceil() as usize).max(1);
+    let step = if step > 1 { step + step % 2 } else { 1 };
     let mut hist = vec![0u32; bin(10_000.0) + 1];
-    let (mut max, mut sum, mut n) = (0f32, 0f64, 0u64);
-    let mut maxscl = [0f32; 3];
+    let (mut sum, mut n) = (0f64, 0u64);
     for y in (0..h).step_by(step) {
         for x in (0..w).step_by(step) {
-            let yv = (sample(0, x, y) - y0) / ys;
-            let (cb, cr) = if semi {
-                // Interleaved Cb, Cr.
-                (
-                    (sample(1, 2 * (x / 2), y / 2) - mid) / (2.0 * cs),
-                    (sample(1, 2 * (x / 2) + 1, y / 2) - mid) / (2.0 * cs),
-                )
-            } else {
-                (
-                    (sample(1, x / 2, y / 2) - mid) / (2.0 * cs),
-                    (sample(2, x / 2, y / 2) - mid) / (2.0 * cs),
-                )
-            };
-            let r = yv + 2.0 * (1.0 - kr) * cr;
-            let b = yv + 2.0 * (1.0 - kb) * cb;
-            let gr = (yv - kr * r - kb * b) / kg;
-            let mut rgb = [lut(&t, r), lut(&t, gr), lut(&t, b)];
-            if c.hdr.is_none() {
-                let l = rgb.map(f64::from);
-                for (i, row) in g.iter().enumerate() {
-                    rgb[i] = ((row[0] * l[0] + row[1] * l[1] + row[2] * l[2]).max(0.0) as f32)
-                        * SDR_WHITE;
-                }
-            }
+            let (cb, cr) = s.chroma(x / 2, y / 2);
+            let rgb = r.light(r.codes(s.luma(x, y), cb, cr));
             let m = rgb[0].max(rgb[1]).max(rgb[2]);
-            for i in 0..3 {
-                maxscl[i] = maxscl[i].max(rgb[i]);
-            }
-            max = max.max(m);
             sum += f64::from(m);
             n += 1;
             hist[bin(m)] += 1;
@@ -348,7 +580,7 @@ fn measure_with(
         }
     }
     Ok(FrameLight {
-        max,
+        max: maxscl[0].max(maxscl[1]).max(maxscl[2]),
         average: (sum / n.max(1) as f64) as f32,
         maxscl,
         percentiles,
@@ -409,7 +641,7 @@ fn key(input: &Input) -> String {
         .and_then(|m| m.modified().ok())
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map_or(0, |d| d.as_nanos());
-    let text = format!("{input:?}|{size}|{mtime}|v3");
+    let text = format!("{input:?}|{size}|{mtime}|v4");
     let hash = text.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
         (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
     });
@@ -628,6 +860,173 @@ mod tests {
         assert_eq!(LightAnalysis::default().level([0.0]), None);
         assert_eq!(a.at(0.7).map(|f| f.max), Some(900.5));
         assert_eq!(from_bytes(&to_bytes(&a)), Some(a));
+    }
+
+    /// Sets sample `i` of plane `p` to 10-bit code `v` (8-bit pictures take
+    /// its top eight bits).
+    fn put(f: &mut frame::Video, p: usize, i: usize, v: u16) {
+        if f.format() == format::Pixel::P010LE {
+            f.data_mut(p)[2 * i..2 * i + 2].copy_from_slice(&(v << 6).to_le_bytes());
+        } else {
+            f.data_mut(p)[i] = (v >> 2) as u8;
+        }
+    }
+
+    /// Sets pixel (`x`, `y`)'s luma, and its block's Cb and Cr, to 10-bit
+    /// codes.
+    fn paint(f: &mut frame::Video, (x, y): (usize, usize), [l, cb, cr]: [u16; 3]) {
+        let unit = if f.format() == format::Pixel::P010LE {
+            2
+        } else {
+            1
+        };
+        let rows = [0, 1, 2].map(|p| {
+            if p < f.planes() {
+                f.stride(p) / unit
+            } else {
+                0
+            }
+        });
+        put(f, 0, y * rows[0] + x, l);
+        let (cx, cy) = (x / 2, y / 2);
+        if f.format() == format::Pixel::YUV420P {
+            put(f, 1, cy * rows[1] + cx, cb);
+            put(f, 2, cy * rows[2] + cx, cr);
+        } else {
+            put(f, 1, cy * rows[1] + 2 * cx, cb);
+            put(f, 1, cy * rows[1] + 2 * cx + 1, cr);
+        }
+    }
+
+    /// A black `w`×`h` picture in `pixel` (P010, NV12 or 8-bit planar),
+    /// limited range: in `hdr`'s transfer and BT.2020, or SDR in BT.709.
+    fn black(pixel: format::Pixel, w: u32, h: u32, hdr: Option<Hdr>) -> frame::Video {
+        use crate::ffmpeg::ffi::{
+            AVColorPrimaries as P, AVColorRange as R, AVColorSpace as S,
+            AVColorTransferCharacteristic as T,
+        };
+        let mut f = frame::Video::new(pixel, w, h);
+        unsafe {
+            let raw = &mut *f.as_mut_ptr();
+            (raw.color_primaries, raw.colorspace, raw.color_trc) = match hdr {
+                Some(Hdr::Pq) => (
+                    P::AVCOL_PRI_BT2020,
+                    S::AVCOL_SPC_BT2020_NCL,
+                    T::AVCOL_TRC_SMPTE2084,
+                ),
+                Some(Hdr::Hlg) => (
+                    P::AVCOL_PRI_BT2020,
+                    S::AVCOL_SPC_BT2020_NCL,
+                    T::AVCOL_TRC_ARIB_STD_B67,
+                ),
+                None => (P::AVCOL_PRI_BT709, S::AVCOL_SPC_BT709, T::AVCOL_TRC_BT709),
+            };
+            raw.color_range = R::AVCOL_RANGE_MPEG;
+        }
+        for p in 0..f.planes() {
+            let v: u16 = if p == 0 { 64 } else { 512 };
+            if pixel == format::Pixel::P010LE {
+                for px in f.data_mut(p).as_chunks_mut::<2>().0 {
+                    *px = (v << 6).to_le_bytes();
+                }
+            } else {
+                f.data_mut(p).fill((v >> 2) as u8);
+            }
+        }
+        f
+    }
+
+    /// Each channel's brightest, pixel by pixel.
+    fn every_pixel(f: &frame::Video) -> [f32; 3] {
+        let (s, r) = reading(f).unwrap();
+        let mut out = [0f32; 3];
+        for y in 0..s.h {
+            for x in 0..s.w {
+                let (cb, cr) = s.chroma(x / 2, y / 2);
+                let l = r.light(r.codes(s.luma(x, y), cb, cr));
+                out = std::array::from_fn(|i| out[i].max(l[i]));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn the_peak_is_every_pixels() {
+        let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = |below: u16| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % u64::from(below)) as u16
+        };
+        for (pixel, hdr) in [
+            (format::Pixel::P010LE, Some(Hdr::Pq)),
+            (format::Pixel::P010LE, Some(Hdr::Hlg)),
+            (format::Pixel::P010LE, None),
+            (format::Pixel::NV12, None),
+            (format::Pixel::YUV420P, None),
+            (format::Pixel::YUV420P, Some(Hdr::Pq)),
+        ] {
+            // Odd sizes too: their last blocks are of one column, one row.
+            for (w, h) in [(64, 48), (37, 23)] {
+                let what = format!("{pixel:?} {hdr:?} {w}x{h}");
+                // Dim and gray, bright and colorful, anything.
+                for (lo, hi, spread) in [(64, 300, 40), (300, 900, 120), (0, 1023, 512)] {
+                    let mut f = black(pixel, w, h, hdr);
+                    for y in 0..h as usize {
+                        for x in 0..w as usize {
+                            let [l, cb, cr] =
+                                [lo + next(hi - lo), next(2 * spread), next(2 * spread)];
+                            paint(&mut f, (x, y), [l, 512 - spread + cb, 512 - spread + cr]);
+                        }
+                    }
+                    let (s, r) = reading(&f).unwrap();
+                    assert_eq!(peak(&s, &r), every_pixel(&f), "{what} {lo}..{hi}");
+                }
+                // Each row's brightest luma and its chroma's extremes in
+                // other blocks: bright gray ones between dark saturated
+                // ones, the brightest red.
+                let mut f = black(pixel, w, h, hdr);
+                for y in 0..h as usize {
+                    for x in 0..w as usize {
+                        let gray = (x / 2) % 2 == 0;
+                        let l = if gray { 600 + next(40) } else { 200 + next(40) };
+                        let (cb, cr) = if gray { (512, 512) } else { (400, 900) };
+                        paint(&mut f, (x, y), [l, cb, cr]);
+                    }
+                }
+                let (s, r) = reading(&f).unwrap();
+                let got = peak(&s, &r);
+                assert_eq!(got, every_pixel(&f), "{what}: gray and red");
+                assert!(got[0] > got[1], "{what}: {got:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_highlight_between_grid_points_is_measured() {
+        // Read every fourth pixel across and down for the average and the
+        // distribution; odd, so the last blocks are of one pixel.
+        let (w, h) = (1923, 1083);
+        for (pixel, hdr, gray) in [
+            // About 1000 cd/m² in PQ, white in SDR.
+            (format::Pixel::P010LE, Some(Hdr::Pq), [723, 512, 512]),
+            (format::Pixel::YUV420P, None, [940, 512, 512]),
+        ] {
+            let mut f = black(pixel, w, h, hdr);
+            let red = [300, 400, 900];
+            paint(&mut f, (961, 541), gray);
+            paint(&mut f, (1922, 1082), red);
+            let l = measure_with(&f, &mut crate::export::video::Relayout::new()).unwrap();
+            let (_, r) = reading(&f).unwrap();
+            let [g, rd] = [gray, red].map(|[y, cb, cr]| r.light(r.codes(y, cb, cr)));
+            let want: [f32; 3] = std::array::from_fn(|i| g[i].max(rd[i]));
+            assert_eq!(l.maxscl, want, "{hdr:?}");
+            assert_eq!(l.max, want[0].max(want[1]).max(want[2]), "{hdr:?}");
+            assert!(g[1] > if hdr.is_some() { 950.0 } else { 200.0 }, "{g:?}");
+            // The grid saw black alone.
+            assert_eq!((l.average, l.percentiles), (0.0, [0.0; 9]), "{hdr:?}");
+        }
     }
 
     #[test]

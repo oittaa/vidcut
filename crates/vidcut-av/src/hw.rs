@@ -207,6 +207,33 @@ pub struct GpuDecoder {
 /// AMD's PCI vendor id.
 const AMD: u32 = 0x1002;
 
+/// Where a job's pieces decode: an export's or a proxy's.
+#[derive(Clone, Copy)]
+pub enum Decoding<'a> {
+    /// NVENC's on NVDEC, so their frames stay on the GPU; the rest on the
+    /// CPU.
+    Nvdec,
+    /// On this GPU where it decodes their streams; NVENC's on NVDEC.
+    Gpu(&'a GpuDecoder),
+    /// All on the CPU, NVENC's too.
+    Cpu,
+}
+
+impl<'a> Decoding<'a> {
+    /// The GPU decoder for pieces that aren't NVENC's, when there is one.
+    pub fn decoder(self) -> Option<&'a GpuDecoder> {
+        match self {
+            Self::Gpu(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    /// Whether NVENC's pieces decode on NVDEC.
+    pub fn nvdec(self) -> bool {
+        !matches!(self, Self::Cpu)
+    }
+}
+
 /// The decoding profiles [`GpuDecoder::hardware_decodes`] asks a driver for.
 #[derive(Clone, Copy)]
 enum Profile {
@@ -1005,48 +1032,120 @@ impl Shrinker {
     }
 }
 
-/// Fits VA-API's frames into an output picture on the GPU, for an encoder
-/// on their device: scaled to the size they are shown at, into the
-/// output's layout (`scale_vaapi`), and centered on black where their
-/// aspect differs (`pad_vaapi`), at even offsets as the CPU pads.
+/// A frames context in GPU memory, counted.
+pub(crate) struct Frames(*mut ffi::AVBufferRef);
+
+// SAFETY: FFmpeg's frames contexts are reference-counted and may be used
+// on any thread.
+unsafe impl Send for Frames {}
+
+impl Frames {
+    /// Another reference to `frames`, a live frames context.
+    ///
+    /// # Safety
+    /// `frames` is a live buffer reference.
+    pub(crate) unsafe fn of(frames: *mut ffi::AVBufferRef) -> Result<Self> {
+        // SAFETY: as the caller says.
+        let frames = unsafe { ffi::av_buffer_ref(frames) };
+        if frames.is_null() {
+            return Err(Error::Invalid("no memory for frames".into()));
+        }
+        Ok(Self(frames))
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn as_ptr(&self) -> *mut ffi::AVBufferRef {
+        self.0
+    }
+}
+
+impl Drop for Frames {
+    fn drop(&mut self) {
+        // SAFETY: its own reference.
+        unsafe { ffi::av_buffer_unref(&mut self.0) };
+    }
+}
+
+/// Fits frames into an output picture on the GPU, for an encoder on their
+/// device: turned upright, scaled to the size they are shown at, into the
+/// output's layout, and centered on black where their aspect differs, at
+/// even offsets as the CPU pads. VA-API's with `transpose_vaapi`,
+/// `scale_vaapi` and `pad_vaapi`; Direct3D 11's on the video processor,
+/// into the encoder's own frames (AMF takes those alone).
 pub(crate) struct Fitter {
-    graph: ffmpeg::filter::Graph,
-    /// The frames context, layout and frame size it was made for, and the
-    /// size it scales to.
-    input: (KeptLike, (u32, u32)),
+    fitting: Fitting,
+    /// The frames context, layout and frame size it was made for, the size
+    /// it scales to, and the turn.
+    input: (KeptLike, (u32, u32), u16),
+}
+
+enum Fitting {
+    Filters(ffmpeg::filter::Graph),
+    #[cfg(windows)]
+    D3d11(d3d11::Scaler),
 }
 
 impl Fitter {
-    /// `f` scaled to `fitted` and placed in an `out` picture of `layout`
-    /// (NV12, P010), on the GPU, with its timestamp and colors, its pixels
-    /// square; `fitter` made for frames like it first.
+    /// `f` turned clockwise by `rotation` (0, 90, 180 or 270), scaled to
+    /// `fitted` and placed in an `out` picture of `layout` (NV12, P010), on
+    /// the GPU, with its timestamp and colors, its pixels square; `fitter`
+    /// made for frames like it first. Direct3D 11's go into `into`, the
+    /// encoder's frames.
     pub(crate) fn fit(
         fitter: &mut Option<Fitter>,
         f: &frame::Video,
+        rotation: u16,
         fitted: (u32, u32),
         (w, h): (u32, u32),
         layout: format::Pixel,
+        into: Option<&Frames>,
     ) -> Result<frame::Video> {
         let (frames, of) = frames_of(f)?;
-        let input = (of, fitted);
+        let input = (of, fitted, rotation);
         if fitter.as_ref().is_none_or(|x| x.input != input) {
-            let (fw, fh) = fitted;
-            let layout = if layout == format::Pixel::P010LE {
-                "p010"
-            } else {
-                "nv12"
+            let fitting = match f.format() {
+                format::Pixel::VAAPI => {
+                    let (fw, fh) = fitted;
+                    let layout = if layout == format::Pixel::P010LE {
+                        "p010"
+                    } else {
+                        "nv12"
+                    };
+                    // As the CPU's `transpose` and flips turn them.
+                    let turn = match rotation {
+                        90 => "transpose_vaapi=dir=clock,",
+                        180 => "transpose_vaapi=dir=reversal,",
+                        270 => "transpose_vaapi=dir=cclock,",
+                        _ => "",
+                    };
+                    let mut spec = format!("{turn}scale_vaapi=w={fw}:h={fh}:format={layout}");
+                    if fitted != (w, h) {
+                        let (x, y) = (((w - fw) / 2) & !1, ((h - fh) / 2) & !1);
+                        spec.push_str(&format!(",pad_vaapi=w={w}:h={h}:x={x}:y={y}:color=black"));
+                    }
+                    let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VAAPI;
+                    Fitting::Filters(gpu_graph(f, frames, pixel, &spec)?)
+                }
+                #[cfg(windows)]
+                format::Pixel::D3D11 => {
+                    let into = into.ok_or_else(|| {
+                        Error::Invalid("no frames to fit Direct3D 11's into".into())
+                    })?;
+                    // SAFETY: the encoder's frames, on the decoder's device.
+                    Fitting::D3d11(unsafe {
+                        d3d11::Scaler::into(f, frames, into.as_ptr(), fitted, rotation)?
+                    })
+                }
+                other => return Err(Error::Invalid(format!("no fitting {other:?} frames"))),
             };
-            let mut spec = format!("scale_vaapi=w={fw}:h={fh}:format={layout}");
-            if fitted != (w, h) {
-                let (x, y) = (((w - fw) / 2) & !1, ((h - fh) / 2) & !1);
-                spec.push_str(&format!(",pad_vaapi=w={w}:h={h}:x={x}:y={y}:color=black"));
-            }
-            let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VAAPI;
-            let graph = gpu_graph(f, frames, pixel, &spec)?;
-            *fitter = Some(Self { graph, input });
+            *fitter = Some(Self { fitting, input });
         }
-        let graph = &mut fitter.as_mut().expect("made above").graph;
-        let mut out = run_graph(graph, f, "fitting a frame on the GPU")?;
+        let _ = into;
+        let mut out = match &mut fitter.as_mut().expect("made above").fitting {
+            Fitting::Filters(graph) => run_graph(graph, f, "fitting a frame on the GPU")?,
+            #[cfg(windows)]
+            Fitting::D3d11(scaler) => scaler.scale(f)?,
+        };
         same_picture(&mut out, f);
         // SAFETY: a plain field of its own frame.
         unsafe { (*out.as_mut_ptr()).sample_aspect_ratio = ffi::AVRational { num: 1, den: 1 } };
@@ -1066,11 +1165,15 @@ pub(crate) mod d3d11 {
     use ::windows::Win32::Graphics::Direct3D11::{
         D3D11_BIND_DECODER, D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_BOX,
         D3D11_QUERY_DESC, D3D11_QUERY_EVENT, D3D11_RESOURCE_MISC_SHARED,
-        D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_TEX2D_VPIV, D3D11_TEX2D_VPOV,
-        D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE, D3D11_VIDEO_PROCESSOR_CONTENT_DESC,
-        D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT, D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT,
-        D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC, D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC_0,
-        D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC, D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0,
+        D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_TEX2D_VPIV, D3D11_TEX2D_VPOV, D3D11_VIDEO_COLOR,
+        D3D11_VIDEO_COLOR_0, D3D11_VIDEO_COLOR_RGBA, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE,
+        D3D11_VIDEO_PROCESSOR_CAPS, D3D11_VIDEO_PROCESSOR_CONTENT_DESC,
+        D3D11_VIDEO_PROCESSOR_FEATURE_CAPS_ROTATION, D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT,
+        D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT, D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC,
+        D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC_0, D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC,
+        D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0, D3D11_VIDEO_PROCESSOR_ROTATION,
+        D3D11_VIDEO_PROCESSOR_ROTATION_90, D3D11_VIDEO_PROCESSOR_ROTATION_180,
+        D3D11_VIDEO_PROCESSOR_ROTATION_270, D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY,
         D3D11_VIDEO_PROCESSOR_STREAM, D3D11_VIDEO_USAGE_PLAYBACK_NORMAL,
         D3D11_VPIV_DIMENSION_TEXTURE2D, D3D11_VPOV_DIMENSION_TEXTURE2D, ID3D11Device,
         ID3D11DeviceContext, ID3D11Query, ID3D11Texture2D, ID3D11VideoContext1, ID3D11VideoDevice,
@@ -1162,21 +1265,39 @@ pub(crate) mod d3d11 {
     /// `source` is a live D3D11 frames context.
     unsafe fn own_frames(
         source: *mut ffi::AVBufferRef,
+        size: (u32, u32),
+        flags: (i32, i32),
+        what: &str,
+    ) -> Result<*mut ffi::AVBufferRef> {
+        // SAFETY: a live frames context's device and layout.
+        unsafe {
+            let src = (*source).data as *const ffi::AVHWFramesContext;
+            frames_on((*src).device_ref, (*src).sw_format, size, flags, what)
+        }
+    }
+
+    /// Frames on `device`, a D3D11 device, in `layout` at `size`: single
+    /// textures bound and flagged so, in a pool that grows.
+    ///
+    /// # Safety
+    /// `device` is a live D3D11 device context.
+    pub(crate) unsafe fn frames_on(
+        device: *mut ffi::AVBufferRef,
+        layout: ffi::AVPixelFormat,
         (w, h): (u32, u32),
         (bind_flags, misc_flags): (i32, i32),
         what: &str,
     ) -> Result<*mut ffi::AVBufferRef> {
-        // SAFETY: frames made on the source frames' device, set up as
-        // FFmpeg's D3D11 frames are before they start; freed on failure.
+        // SAFETY: frames made on the device, set up as FFmpeg's D3D11 frames
+        // are before they start; freed on failure.
         unsafe {
-            let src = (*source).data as *const ffi::AVHWFramesContext;
-            let mut frames = ffi::av_hwframe_ctx_alloc((*src).device_ref);
+            let mut frames = ffi::av_hwframe_ctx_alloc(device);
             if frames.is_null() {
                 return Err(Error::Invalid("no memory for frames".into()));
             }
             let fc = (*frames).data as *mut ffi::AVHWFramesContext;
             (*fc).format = ffi::AVPixelFormat::AV_PIX_FMT_D3D11;
-            (*fc).sw_format = (*src).sw_format;
+            (*fc).sw_format = layout;
             (*fc).width = w as i32;
             (*fc).height = h as i32;
             (*fc).initial_pool_size = 0;
@@ -1193,6 +1314,22 @@ pub(crate) mod d3d11 {
             }
             Ok(frames)
         }
+    }
+
+    /// Frames on `device`, a D3D11 device, in `layout` at `size`, for an
+    /// encoder that takes them from the GPU (AMF) and the video processor
+    /// that draws them.
+    ///
+    /// # Safety
+    /// `device` is a live D3D11 device context.
+    pub(crate) unsafe fn encoder_frames(
+        device: *mut ffi::AVBufferRef,
+        layout: ffi::AVPixelFormat,
+        size: (u32, u32),
+    ) -> Result<*mut ffi::AVBufferRef> {
+        let flags = (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0, 0);
+        // SAFETY: as the caller says.
+        unsafe { frames_on(device, layout, size, flags, "for the encoder") }
     }
 
     /// A frame of `frames`' pool.
@@ -1352,17 +1489,23 @@ pub(crate) mod d3d11 {
     }
 
     /// Scales Direct3D 11's frames on the GPU's video processor, into
-    /// textures of its own in their layout and colors. FFmpeg's
-    /// `scale_d3d11` makes its textures for an encoder as well, which AMD's
-    /// driver refuses, and scales the padding of the decoder's textures in.
+    /// textures of its own in their layout and colors, or into an
+    /// encoder's frames, placed on black. FFmpeg's `scale_d3d11` makes its
+    /// textures for an encoder as well, which AMD's driver refuses, and
+    /// scales the padding of the decoder's textures in.
     pub(crate) struct Scaler {
-        /// Its own frames: single textures it draws to, a pool that grows.
+        /// The frames it draws to: single textures, a pool that grows.
         frames: *mut ffi::AVBufferRef,
         video: ID3D11VideoDevice,
         context: ID3D11VideoContext1,
         enumerator: ID3D11VideoProcessorEnumerator,
         processor: ID3D11VideoProcessor,
+        /// The size of the frames it draws, and where the picture goes in
+        /// them (x, y, width, height); the rest is black.
         size: (u32, u32),
+        place: (u32, u32, u32, u32),
+        /// The clockwise turn it gives them.
+        rotation: D3D11_VIDEO_PROCESSOR_ROTATION,
         /// The color space the processor is told the frames come in and go
         /// out in: their own, so they're only scaled.
         space: DXGI_COLOR_SPACE_TYPE,
@@ -1385,8 +1528,79 @@ pub(crate) mod d3d11 {
             source: *mut ffi::AVBufferRef,
             size: (u32, u32),
         ) -> Result<Self> {
+            // SAFETY: the frame's own frames context.
+            let layout = unsafe { (*((*source).data as *const ffi::AVHWFramesContext)).sw_format };
+            Self::checked(f, source, layout, size)
+        }
+
+        /// Turns frames like `f` (of `source`) clockwise by `rotation`,
+        /// scales them to `fitted` and places them in the middle of
+        /// `frames`' (an encoder's), at even offsets as the CPU pads, on
+        /// black, in their layout (10 bits into 8 too); checked as
+        /// [`new`](Self::new) checks.
+        ///
+        /// # Safety
+        /// `frames` is a live D3D11 frames context on `source`'s device.
+        pub(super) unsafe fn into(
+            f: &frame::Video,
+            source: *mut ffi::AVBufferRef,
+            frames: *mut ffi::AVBufferRef,
+            fitted: (u32, u32),
+            rotation: u16,
+        ) -> Result<Self> {
+            // SAFETY: a live frames context, the encoder's.
+            let (layout, size) = unsafe {
+                let fc = &*((*frames).data as *const ffi::AVHWFramesContext);
+                (fc.sw_format, (fc.width as u32, fc.height as u32))
+            };
+            // The same processor drawing into textures of its own first.
+            drop(Self::checked(f, source, layout, fitted)?);
+            let (fw, fh) = fitted;
+            let place = (((size.0 - fw) / 2) & !1, ((size.1 - fh) / 2) & !1, fw, fh);
+            // SAFETY: another reference to the encoder's frames.
+            let frames = unsafe { ffi::av_buffer_ref(frames) };
+            if frames.is_null() {
+                return Err(Error::Invalid("no memory for frames".into()));
+            }
             let input = (f.width(), f.height());
-            let mut scaler = Self::made(source, input, size, color_space(f))?;
+            let mut scaler = Self::made(source, input, frames, size, place, color_space(f))?;
+            scaler.rotation = match rotation {
+                90 => D3D11_VIDEO_PROCESSOR_ROTATION_90,
+                180 => D3D11_VIDEO_PROCESSOR_ROTATION_180,
+                270 => D3D11_VIDEO_PROCESSOR_ROTATION_270,
+                _ => D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY,
+            };
+            if scaler.rotation != D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY {
+                let mut caps = D3D11_VIDEO_PROCESSOR_CAPS::default();
+                // SAFETY: the processor's enumerator fills the caps.
+                let turns = unsafe { scaler.enumerator.GetVideoProcessorCaps(&mut caps) }.is_ok()
+                    && caps.FeatureCaps & D3D11_VIDEO_PROCESSOR_FEATURE_CAPS_ROTATION.0 as u32 != 0;
+                if !turns {
+                    return Err(Error::Invalid(
+                        "the video processor doesn't turn pictures".into(),
+                    ));
+                }
+            }
+            Ok(scaler)
+        }
+
+        /// A scaler of frames like `f` into textures of its own of `layout`
+        /// at `size`, which passes the test picture.
+        fn checked(
+            f: &frame::Video,
+            source: *mut ffi::AVBufferRef,
+            layout: ffi::AVPixelFormat,
+            size: (u32, u32),
+        ) -> Result<Self> {
+            let input = (f.width(), f.height());
+            let flags = (D3D11_BIND_RENDER_TARGET.0, 0);
+            // SAFETY: the device of the frame's own frames context.
+            let frames = unsafe {
+                let device = (*((*source).data as *const ffi::AVHWFramesContext)).device_ref;
+                frames_on(device, layout, size, flags, "to scale to")?
+            };
+            let place = (0, 0, size.0, size.1);
+            let mut scaler = Self::made(source, input, frames, size, place, color_space(f))?;
             if !scaler.keeps_levels(source, input)? {
                 return Err(Error::Invalid(
                     "the video processor changes the levels".into(),
@@ -1395,31 +1609,35 @@ pub(crate) mod d3d11 {
             Ok(scaler)
         }
 
-        /// A processor of frames of `source`'s layout at `input` to
-        /// `size`, told they come in and go out in `space`.
+        /// A processor of frames of `source`'s layout at `input` into
+        /// `frames` (its reference, freed on failure too) of `size`, the
+        /// picture at `place`, told they come in and go out in `space`.
         fn made(
             source: *mut ffi::AVBufferRef,
             input: (u32, u32),
+            mut frames: *mut ffi::AVBufferRef,
             size: (u32, u32),
+            place: (u32, u32, u32, u32),
             space: DXGI_COLOR_SPACE_TYPE,
         ) -> Result<Self> {
             let failed = |what: &'static str| {
                 move |e: ::windows::core::Error| Error::Invalid(format!("{what}: {e}"))
             };
-            // SAFETY: the device of a live frames context; the frames made
-            // are freed with the scaler.
-            unsafe {
-                let layout = match format::Pixel::from(
-                    (*((*source).data as *const ffi::AVHWFramesContext)).sw_format,
-                ) {
-                    format::Pixel::NV12 => DXGI_FORMAT_NV12,
-                    format::Pixel::P010LE => DXGI_FORMAT_P010,
-                    other => {
-                        return Err(Error::Invalid(format!(
-                            "no scaling {other:?} on Direct3D 11"
-                        )));
-                    }
-                };
+            let layout = |frames: *mut ffi::AVBufferRef| {
+                // SAFETY: a live frames context.
+                match format::Pixel::from(unsafe {
+                    (*((*frames).data as *const ffi::AVHWFramesContext)).sw_format
+                }) {
+                    format::Pixel::NV12 => Ok(DXGI_FORMAT_NV12),
+                    format::Pixel::P010LE => Ok(DXGI_FORMAT_P010),
+                    other => Err(Error::Invalid(format!(
+                        "no scaling {other:?} on Direct3D 11"
+                    ))),
+                }
+            };
+            // SAFETY: the device of a live frames context.
+            let made = (|| unsafe {
+                let (from, to) = (layout(source)?, layout(frames)?);
                 let dev = &*device_of(source);
                 let none = || Error::Invalid("no Direct3D 11 device".into());
                 let device = ID3D11Device::from_raw_borrowed(&dev.device).ok_or_else(none)?;
@@ -1443,31 +1661,40 @@ pub(crate) mod d3d11 {
                 let enumerator = video
                     .CreateVideoProcessorEnumerator(&desc)
                     .map_err(failed("no video processor"))?;
-                let both = (D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT.0
-                    | D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT.0)
-                    as u32;
-                let takes = enumerator
-                    .CheckVideoProcessorFormat(layout)
-                    .map_err(failed("no video processor"))?;
-                if takes & both != both {
+                let takes = |layout, how: i32| {
+                    enumerator
+                        .CheckVideoProcessorFormat(layout)
+                        .is_ok_and(|t| t & how as u32 != 0)
+                };
+                if !takes(from, D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT.0)
+                    || !takes(to, D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT.0)
+                {
                     return Err(Error::Invalid(format!(
-                        "the video processor doesn't scale {layout:?}"
+                        "the video processor doesn't scale {from:?} into {to:?}"
                     )));
                 }
                 let processor = video
                     .CreateVideoProcessor(&enumerator, 0)
                     .map_err(failed("no video processor"))?;
-                let flags = (D3D11_BIND_RENDER_TARGET.0, 0);
-                let frames = own_frames(source, size, flags, "to scale to")?;
-                Ok(Self {
+                Ok((video, context, enumerator, processor))
+            })();
+            match made {
+                Ok((video, context, enumerator, processor)) => Ok(Self {
                     frames,
                     video,
                     context,
                     enumerator,
                     processor,
                     size,
+                    place,
+                    rotation: D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY,
                     space,
-                })
+                }),
+                Err(e) => {
+                    // SAFETY: the reference it was given.
+                    unsafe { ffi::av_buffer_unref(&mut frames) };
+                    Err(e)
+                }
             }
         }
 
@@ -1486,10 +1713,13 @@ pub(crate) mod d3d11 {
             if ow < 4 * BANDS.len() || oh < 8 {
                 return Ok(false);
             }
-            // SAFETY: a live frames context.
-            let pixel = unsafe {
-                format::Pixel::from((*((*source).data as *const ffi::AVHWFramesContext)).sw_format)
+            let layout = |frames: *mut ffi::AVBufferRef| {
+                // SAFETY: a live frames context.
+                format::Pixel::from(unsafe {
+                    (*((*frames).data as *const ffi::AVHWFramesContext)).sw_format
+                })
             };
+            let pixel = layout(source);
             let wide = pixel == format::Pixel::P010LE;
             // 10-bit levels in a 16-bit word's top bits.
             let shift = if wide { 8 } else { 0 };
@@ -1538,9 +1768,10 @@ pub(crate) mod d3d11 {
                 frame
             };
             let got = download(&self.scale(&uploaded)?)?;
+            let wide_out = layout(self.frames) == format::Pixel::P010LE;
             let read = |plane: usize, x: usize, y: usize| {
                 let (stride, data) = (got.stride(plane), got.data(plane));
-                if wide {
+                if wide_out {
                     u16::from_le_bytes([data[y * stride + 2 * x], data[y * stride + 2 * x + 1]])
                         >> 6
                 } else {
@@ -1548,7 +1779,7 @@ pub(crate) mod d3d11 {
                 }
             };
             // A level either way (in 8 bits), in the middle of each band.
-            let (scale, near) = if wide { (4, 4) } else { (1, 1) };
+            let (scale, near) = if wide_out { (4, 4) } else { (1, 1) };
             // Below black and above white only where nothing clips them.
             let checked = if full_range(self.space) {
                 bands
@@ -1570,16 +1801,16 @@ pub(crate) mod d3d11 {
             }))
         }
 
-        /// `f` scaled into a texture of its own. The work is queued on the
-        /// device's immediate context, before what reads it next there (the
-        /// copy down).
+        /// `f` scaled into a texture of its frames, placed. The work is
+        /// queued on the device's immediate context, before what reads it
+        /// next there (the copy down, the encoder).
         pub(super) fn scale(&mut self, f: &frame::Video) -> Result<frame::Video> {
             let (w, h) = self.size;
-            let whole = |w: u32, h: u32| RECT {
-                left: 0,
-                top: 0,
-                right: w as i32,
-                bottom: h as i32,
+            let rect = |x: u32, y: u32, w: u32, h: u32| RECT {
+                left: x as i32,
+                top: y as i32,
+                right: (x + w) as i32,
+                bottom: (y + h) as i32,
             };
             let failed = |what: &'static str| {
                 move |e: ::windows::core::Error| Error::Invalid(format!("{what}: {e}"))
@@ -1634,15 +1865,38 @@ pub(crate) mod d3d11 {
                     c.VideoProcessorSetOutputColorSpace1(p, self.space);
                     // None of the driver's own enhancing.
                     c.VideoProcessorSetStreamAutoProcessingMode(p, 0, false);
+                    let turned = self.rotation != D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY;
+                    c.VideoProcessorSetStreamRotation(p, 0, turned, self.rotation);
                     // The picture alone: the decoder's textures are padded.
                     c.VideoProcessorSetStreamSourceRect(
                         p,
                         0,
                         true,
-                        Some(&whole(f.width(), f.height())),
+                        Some(&rect(0, 0, f.width(), f.height())),
                     );
-                    c.VideoProcessorSetStreamDestRect(p, 0, true, Some(&whole(w, h)));
-                    c.VideoProcessorSetOutputTargetRect(p, true, Some(&whole(w, h)));
+                    let (x, y, pw, ph) = self.place;
+                    c.VideoProcessorSetStreamDestRect(p, 0, true, Some(&rect(x, y, pw, ph)));
+                    c.VideoProcessorSetOutputTargetRect(p, true, Some(&rect(0, 0, w, h)));
+                    // Around the picture, video-range black: given as RGB,
+                    // which every driver reads (AMD's reads a YCbCr one as
+                    // RGB too). The frames are video range told full range
+                    // (`color_space`), where black is 16 of RGB's 255.
+                    let level = if full_range(self.space) {
+                        16.0 / 255.0
+                    } else {
+                        0.0
+                    };
+                    let black = D3D11_VIDEO_COLOR {
+                        Anonymous: D3D11_VIDEO_COLOR_0 {
+                            RGBA: D3D11_VIDEO_COLOR_RGBA {
+                                R: level,
+                                G: level,
+                                B: level,
+                                A: 1.0,
+                            },
+                        },
+                    };
+                    c.VideoProcessorSetOutputBackgroundColor(p, false, &black);
                     let mut stream = D3D11_VIDEO_PROCESSOR_STREAM {
                         Enable: true.into(),
                         pInputSurface: ManuallyDrop::new(input),

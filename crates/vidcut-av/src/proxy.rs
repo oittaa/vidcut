@@ -20,7 +20,7 @@ use vidcut_core::preferences::ProxyCodec;
 
 use crate::decode::{Input, VideoReader};
 use crate::error::{Context, Error, Result};
-use crate::export::encode::{Availability, Vaapi};
+use crate::export::encode::{Availability, Upload};
 use crate::export::video::Normalizer;
 use crate::ffmpeg::{self, codec, encoder, ffi, format, frame};
 
@@ -166,10 +166,11 @@ pub struct WrittenProxy {
 ///
 /// With NVENC, the frames of a video file are decoded on NVDEC, deinterlaced,
 /// turned, converted and scaled on the GPU, never copied to memory
-/// ([`CudaPictures`](crate::cuda::CudaPictures)). For every other encoder,
-/// and image sequences and streams NVDEC can't decode, the CPU scales: the
-/// frames decode on `decoder` where it decodes the stream, and on the CPU
-/// otherwise, shrunk on the GPU before they come down (`hw::Shrinker`).
+/// ([`CudaPictures`](crate::cuda::CudaPictures)), unless `decoding` keeps
+/// everything on the CPU. For every other encoder, and image sequences and
+/// streams NVDEC can't decode, the CPU scales: the frames decode on
+/// `decoding`'s GPU where it decodes the stream, shrunk there before they
+/// come down (`hw::Shrinker`), and on the CPU otherwise.
 pub fn write(
     input: &Input,
     width: u32,
@@ -177,7 +178,7 @@ pub fn write(
     dest: &Path,
     total: Option<u64>,
     encoders: &[ProxyEncoder],
-    decoder: Option<&crate::hw::GpuDecoder>,
+    decoding: crate::hw::Decoding<'_>,
 ) -> Result<WrittenProxy> {
     crate::init();
     if width < 2 || height < 2 || !width.is_multiple_of(2) || !height.is_multiple_of(2) {
@@ -218,7 +219,7 @@ pub fn write(
     // its own (`CudaDevice::with_own_stream`).
     let mut cuda = None;
     for enc in encoders {
-        if enc.kind == EncoderChoice::Nvenc && matches!(input, Input::File(_)) {
+        if enc.kind == EncoderChoice::Nvenc && matches!(input, Input::File(_)) && decoding.nvdec() {
             if cuda.is_none() {
                 cuda = crate::cuda::CudaDevice::open()
                     .and_then(|d| d.with_own_stream())
@@ -244,7 +245,7 @@ pub fn write(
             }
         }
         // A fresh reader: a failed attempt may have read frames already.
-        let mut reader = match decoder {
+        let mut reader = match decoding.decoder() {
             Some(d) => VideoReader::open_gpu_or_cpu(input, d)?,
             None => VideoReader::open_input(input)?,
         };
@@ -324,7 +325,7 @@ fn open(
     rate: Option<ffmpeg::Rational>,
     global: bool,
     gpu_frames: Option<*mut ffi::AVBufferRef>,
-) -> Result<(encoder::Video, ffmpeg::Codec, Option<Vaapi>)> {
+) -> Result<(encoder::Video, ffmpeg::Codec, Option<Upload>)> {
     let codec = encoder::find_by_name(&enc.name)
         .ok_or_else(|| Error::Invalid(format!("this FFmpeg has no {} encoder", enc.name)))?;
     let mut ctx = codec::context::Context::new_with_codec(codec)
@@ -363,7 +364,7 @@ fn open(
             None
         }
         (Some(node), EncoderChoice::Vaapi, _) => {
-            let v = Vaapi::new(node, enc.pixel(), width, height, None)?;
+            let v = Upload::vaapi(node, enc.pixel(), width, height, None)?;
             ctx.set_format(format::Pixel::VAAPI);
             hw_frames(&mut ctx, v.frames)?;
             Some(v)
@@ -388,7 +389,7 @@ fn open(
 struct Writer<'a> {
     octx: format::context::Output,
     encoder: encoder::Video,
-    vaapi: Option<Vaapi>,
+    vaapi: Option<Upload>,
     src_tb: ffmpeg::Rational,
     enc_tb: ffmpeg::Rational,
     durations: HashMap<i64, i64>,

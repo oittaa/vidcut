@@ -8,7 +8,8 @@
 //! - a CLI edit is applied by the GUI and shows in its window in < 100 ms;
 //! - live control keeps working while the window is minimized;
 //! - playing keeps with the clock;
-//! - GPU acceleration switches the viewer's decoder at once.
+//! - GPU acceleration, and GPU decoding alone, switch the viewer's decoder
+//!   at once.
 //!
 //! The session must be unlocked: the window screenshots need the window
 //! shown (a hidden window doesn't paint on every system); the viewer's work
@@ -333,6 +334,62 @@ fn gui_acceptance() {
     gui.check_frame(181);
     wait_for(&gui, &|h| h == before);
     gui.check_frame(182);
+    // Decoding alone off: the CPU decodes, the GPU on for the rest.
+    gui.cli(&["preferences", "set", "gpu.decoding=false"]);
+    wait_for(&gui, &|h| h == "no");
+    gui.check_frame(183);
+    gui.cli(&["preferences", "set", "gpu.decoding=true"]);
+    wait_for(&gui, &|h| h == before);
+    gui.check_frame(184);
+
+    // An audio device chosen from anywhere: the player opens on it where it
+    // stood, still frame-exact; one that isn't connected plays on the
+    // default, saying so; cleared, the system's default again.
+    let default = vidcut_av::player::output_devices()
+        .ok()
+        .and_then(|d| d.into_iter().find(|d| d.default));
+    if let Some(d) = default {
+        let audio = |gui: &Gui| {
+            let (st, _) = gui.cli(&["player", "state"]);
+            let r = &st["result"];
+            (
+                r["audio_device"].clone(),
+                r["audio_error"].as_str().map(str::to_string),
+            )
+        };
+        let wait_audio = |gui: &Gui, want: serde_json::Value, error: Option<&str>| {
+            let started = Instant::now();
+            loop {
+                let (device, e) = audio(gui);
+                let told = match (error, e.as_deref()) {
+                    (None, None) => true,
+                    (Some(want), Some(e)) => e.contains(want),
+                    _ => false,
+                };
+                if device == want && told {
+                    return;
+                }
+                assert!(
+                    started.elapsed() < Duration::from_secs(10),
+                    "the player stays on {device:?} ({e:?})"
+                );
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        };
+        gui.cli(&[
+            "preferences",
+            "set",
+            &format!("player.audio_device={}", d.id),
+        ]);
+        wait_audio(&gui, serde_json::json!(d.id), None);
+        gui.check_frame(185);
+        gui.cli(&["preferences", "set", "player.audio_device=wasapi:{gone}"]);
+        wait_audio(&gui, serde_json::Value::Null, Some("isn't connected"));
+        gui.check_frame(186);
+        gui.cli(&["preferences", "set", "player.audio_device="]);
+        wait_audio(&gui, serde_json::Value::Null, None);
+        gui.check_frame(187);
+    }
 
     // Quit cleanly: the instance unregisters.
     gui.cli(&["gui", "quit"]);

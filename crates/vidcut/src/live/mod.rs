@@ -456,7 +456,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         job_replies: HashMap::new(),
         next_job: 1,
         audio_scrubbing: true,
-        audio_noticed: false,
+        audio_noticed: None,
         playing: false,
         waits: Vec::new(),
         next_capture: 1,
@@ -653,8 +653,9 @@ struct Live {
     next_job: u64,
     /// Steps and paused seeks play their frame's sound (decision D42).
     audio_scrubbing: bool,
-    /// The audio device's failure was told once.
-    audio_noticed: bool,
+    /// What was last told about the sound ([`player::Player::audio_notice`]),
+    /// so each new reason is told once.
+    audio_noticed: Option<String>,
     /// Whether the viewer played when last looked at.
     playing: bool,
     waits: Vec<Wait>,
@@ -829,8 +830,9 @@ impl Live {
                 self.finish(job, result);
             }
             Msg::PreferencesChanged => {
-                let gpu = crate::preferences::gpu_acceleration();
+                let gpu = crate::preferences::gpu_decoding();
                 changed = self.player.follow_gpu(gpu);
+                changed |= self.player.follow_audio(crate::preferences::audio_device());
                 self.player.set_budget(crate::preferences::player_budget());
             }
             Msg::FileChanged => {
@@ -946,14 +948,13 @@ impl Live {
         } else if playing {
             soonest(now + Duration::from_millis(10));
         }
-        if let Some(e) = self
-            .player
-            .audio_error
-            .clone()
-            .filter(|_| !self.audio_noticed)
-        {
-            self.audio_noticed = true;
-            self.notice(format!("no sound: {e}"), true);
+        // Each new reason, once.
+        let audio = self.player.audio_notice();
+        if audio != self.audio_noticed {
+            if let Some(n) = &audio {
+                self.notice(n.clone(), true);
+            }
+            self.audio_noticed = audio;
         }
         self.sync_tape_selection();
         // Requests waiting for frames or captures.
@@ -2687,6 +2688,11 @@ impl Live {
             "selection": self.selection,
             "pool": self.pool,
             "muted": self.player.muted(),
+            // The audio device the sound plays on (the id of the one
+            // `player.audio_device` chose), null for the system's default,
+            // and why it isn't the one chosen.
+            "audio_device": self.player.audio_device(),
+            "audio_error": self.player.audio_error,
             "audio_scrubbing": self.audio_scrubbing,
             "clipboard": self.clipboard.len(),
             "preview": self.preview_error.as_deref().map_or(json!(true), |e| json!(e)),

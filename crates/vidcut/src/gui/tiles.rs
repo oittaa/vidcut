@@ -412,7 +412,7 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Co
         Some(gpu) => FrameReader::decoding_on(gpu),
         None => FrameReader::default(),
     };
-    let mut on_gpu = crate::preferences::gpu_acceleration();
+    let mut on_gpu = crate::preferences::gpu_decoding();
     let mut reader = reader_for(on_gpu);
     // Blocks read or written lately (a missing file is an empty block),
     // and tiles made but not yet on disk.
@@ -441,7 +441,7 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Co
             }
         };
         let picture = from_disk(&job, &mut blocks, &unwritten).or_else(|| {
-            let gpu = crate::preferences::gpu_acceleration();
+            let gpu = crate::preferences::gpu_decoding();
             if gpu != on_gpu {
                 on_gpu = gpu;
                 reader = reader_for(gpu);

@@ -126,7 +126,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 
 ## X12. Preferences hold only what vidcut needs
 - **Resolve:** the Preferences window has System and User panels with many settings: hardware, media storage, playback, the UI (p. 94). Caches and proxies are set up in the project settings and preferences (pp. 191–218).
-- **vidcut:** File > Preferences (Ctrl+,) holds settings for vidcut as a whole, kept in `~/.config/vidcut/preferences.toml`: GPU acceleration (one switch, everything on the CPU when off), the player's memory for decoded pictures (automatic unless set: [decisions/player.md](decisions/player.md) §3), the thumbnail disk cache and its limit, the timeline's picture memory, and the proxy rules, size and codec. `preferences.get` and `preferences.set` read and change them, from the CLI (`vidcut preferences`), IPC and MCP like everything else.
+- **vidcut:** File > Preferences (Ctrl+,) holds settings for vidcut as a whole, kept in `~/.config/vidcut/preferences.toml`: GPU acceleration (everything on the CPU when off) and GPU decoding (off, the CPU decodes, for a small GPU beside a large CPU), the player's memory for decoded pictures (automatic unless set: [decisions/player.md](decisions/player.md) §3) and its audio device, the thumbnail disk cache and its limit, the timeline's picture memory, and the proxy rules, size and codec. `preferences.get` and `preferences.set` read and change them, from the CLI (`vidcut preferences`), IPC and MCP like everything else.
 - **Why:** a preference belongs here only once vidcut has a behavior to choose. A plain TOML file can be edited by hand, kept in dotfiles, and changed by agents.
 
 ## X13. Deinterlacing has one quality

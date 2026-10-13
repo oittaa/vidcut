@@ -379,14 +379,14 @@ pub fn export_media(
     )?;
     // Decoded on the GPU the viewer decodes on, on a stream or device of
     // its own; on the CPU where that won't open.
-    let decoder = crate::preferences::gpu_acceleration()
+    let decoder = crate::preferences::gpu_decoding()
         .then(crate::preferences::gpu_decoder)
         .flatten()
         .and_then(|d| d.own().ok());
     let reports = export::run(
         &prepared,
         &available,
-        decoder.as_ref(),
+        crate::preferences::decoding(decoder.as_ref()),
         hooks.cancel,
         &mut |i, path, pr| (hooks.progress)(i, count, path, pr),
     )?;
@@ -496,6 +496,8 @@ pub fn doctor() -> Value {
         "system": crate::system::version(),
         "ffmpeg": vidcut_av::library_versions(),
         "audio_output": match vidcut_av::player::output_device() { Ok(d) => json!(d), Err(e) => json!(e.to_string()) },
+        // What `player.audio_device` takes.
+        "audio_outputs": match vidcut_av::player::output_devices() { Ok(d) => json!(d), Err(e) => json!(e.to_string()) },
         "gpus": crate::system::gpus(),
         "display_gpus": display_gpus(),
         "state_dir": state_dir(),

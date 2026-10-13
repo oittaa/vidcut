@@ -374,8 +374,12 @@ fn mat_mul(a: [[f64; 3]; 3], b: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
     std::array::from_fn(|r| std::array::from_fn(|k| (0..3).map(|i| a[r][i] * b[i][k]).sum()))
 }
 
-/// The matrix taking linear RGB in `from` primaries to `to`.
+/// The matrix taking linear RGB in `from` primaries to `to`: the identity
+/// itself for the same, not one off by rounding.
 fn gamut(from: Primaries, to: Primaries) -> [[f64; 3]; 3] {
+    if from == to {
+        return [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    }
     mat_mul(invert(to.to_xyz()), from.to_xyz())
 }
 
@@ -853,6 +857,16 @@ mod tests {
             for c in 0..3 {
                 assert!((m[r][c] - want[r][c]).abs() < 1e-4, "{m:?}");
             }
+        }
+    }
+
+    #[test]
+    fn every_gamut_into_bt2020_has_no_negative_coefficient() {
+        // Every source's primaries lie within BT.2020's: light measured in
+        // PQ output rises with each channel (`light::peak`).
+        for p in [Primaries::Bt709, Primaries::Smpte170m, Primaries::Bt2020] {
+            let m = gamut(p, Primaries::Bt2020);
+            assert!(m.iter().flatten().all(|&v| v >= 0.0), "{p:?}: {m:?}");
         }
     }
 
