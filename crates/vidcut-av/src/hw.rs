@@ -506,3 +506,210 @@ unsafe fn intel_va(frame: &frame::Video) -> bool {
 unsafe fn intel_va(_: &frame::Video) -> bool {
     false
 }
+
+/// Copies VA-API frames out of the decoder's few surfaces into a pool of
+/// their own that grows, so kept ones don't run the decoder out (FFmpeg does
+/// that with NVDEC's): `scale_vaapi` at their own size, a copy on the GPU
+/// that keeps every byte.
+pub(crate) struct Keeper {
+    graph: ffmpeg::filter::Graph,
+    /// The frames context and size it was made for.
+    input: (usize, u32, u32),
+}
+
+impl Keeper {
+    /// `f` (a VA-API frame) copied, with its timestamp and colors; `keeper`
+    /// made for frames like it first.
+    pub(crate) fn copy(keeper: &mut Option<Keeper>, f: &frame::Video) -> Result<frame::Video> {
+        // SAFETY: reads the frame's own field.
+        let frames = unsafe { (*f.as_ptr()).hw_frames_ctx };
+        if frames.is_null() {
+            return Err(Error::Invalid("a VA-API frame without its frames".into()));
+        }
+        // SAFETY: a live buffer reference.
+        let input = (unsafe { (*frames).data } as usize, f.width(), f.height());
+        if keeper.as_ref().is_none_or(|k| k.input != input) {
+            *keeper = Some(Self::new(f, frames, input)?);
+        }
+        let graph = &mut keeper.as_mut().expect("made above").graph;
+        // The source takes the frame it is given: another reference.
+        let mut given = frame::Video::empty();
+        // SAFETY: both frames are valid.
+        if unsafe { ffi::av_frame_ref(given.as_mut_ptr(), f.as_ptr()) } < 0 {
+            return Err(Error::Invalid("no memory for a frame".into()));
+        }
+        let ctx = || "copying a VA-API frame".to_string();
+        graph
+            .get("in")
+            .expect("source")
+            .source()
+            .add(&given)
+            .map_err(|e| Error::Ffmpeg {
+                context: ctx(),
+                source: e,
+            })?;
+        let mut out = frame::Video::empty();
+        graph
+            .get("out")
+            .expect("sink")
+            .sink()
+            .frame(&mut out)
+            .map_err(|e| Error::Ffmpeg {
+                context: ctx(),
+                source: e,
+            })?;
+        // SAFETY: both frames are valid; plain fields.
+        unsafe {
+            let (o, i) = (out.as_mut_ptr(), f.as_ptr());
+            (*o).pts = (*i).pts;
+            (*o).color_range = (*i).color_range;
+            (*o).colorspace = (*i).colorspace;
+            (*o).color_primaries = (*i).color_primaries;
+            (*o).color_trc = (*i).color_trc;
+            (*o).chroma_location = (*i).chroma_location;
+            (*o).sample_aspect_ratio = (*i).sample_aspect_ratio;
+        }
+        Ok(out)
+    }
+
+    fn new(
+        f: &frame::Video,
+        frames: *mut ffi::AVBufferRef,
+        input: (usize, u32, u32),
+    ) -> Result<Self> {
+        let mut graph = ffmpeg::filter::Graph::new();
+        let tb = ffi::AVRational { num: 1, den: 1000 };
+        crate::cuda::add_source(
+            &mut graph,
+            c"in",
+            ffi::AVPixelFormat::AV_PIX_FMT_VAAPI,
+            (f.width(), f.height()),
+            (tb, f.aspect_ratio()),
+            frames,
+            None,
+        )?;
+        let sink = ffmpeg::filter::find("buffersink")
+            .ok_or_else(|| Error::Invalid("no buffersink filter".into()))?;
+        let failed = |context: &str| {
+            let context = context.to_string();
+            move |source| Error::Ffmpeg { context, source }
+        };
+        graph
+            .add(&sink, "out", "")
+            .map_err(failed("creating the copy's sink"))?;
+        graph
+            .output("in", 0)
+            .and_then(|p| p.input("out", 0))
+            .and_then(|p| p.parse("scale_vaapi=mode=fast"))
+            .map_err(failed("building scale_vaapi"))?;
+        graph
+            .validate()
+            .map_err(failed("configuring scale_vaapi"))?;
+        Ok(Self { graph, input })
+    }
+}
+
+/// A VA-API frame's surface for another device to read: its planes as
+/// DMA-BUF files with their layouts and DRM format modifier
+/// (`AV_PIX_FMT_DRM_PRIME`), mapped once the GPU's work on it is done.
+/// Linux.
+#[cfg(target_os = "linux")]
+pub struct DrmFrame(frame::Video);
+
+/// One plane of a [`DrmFrame`].
+#[cfg(target_os = "linux")]
+#[derive(Debug, Clone, Copy)]
+pub struct DrmPlane<'a> {
+    /// The file holding it, the frame's.
+    pub fd: std::os::fd::BorrowedFd<'a>,
+    pub offset: u64,
+    /// Bytes from a row to the next.
+    pub pitch: u64,
+    /// How it is laid out in memory (tiled, compressed...).
+    pub modifier: u64,
+}
+
+#[cfg(target_os = "linux")]
+mod drm {
+    //! `libavutil/hwcontext_drm.h`.
+    pub(super) const MAX_PLANES: usize = 4;
+
+    #[repr(C)]
+    pub(super) struct Object {
+        pub(super) fd: std::ffi::c_int,
+        pub(super) size: usize,
+        pub(super) format_modifier: u64,
+    }
+
+    #[repr(C)]
+    pub(super) struct Plane {
+        pub(super) object_index: std::ffi::c_int,
+        pub(super) offset: isize,
+        pub(super) pitch: isize,
+    }
+
+    #[repr(C)]
+    pub(super) struct Layer {
+        pub(super) format: u32,
+        pub(super) nb_planes: std::ffi::c_int,
+        pub(super) planes: [Plane; MAX_PLANES],
+    }
+
+    #[repr(C)]
+    pub(super) struct Frame {
+        pub(super) nb_objects: std::ffi::c_int,
+        pub(super) objects: [Object; MAX_PLANES],
+        pub(super) nb_layers: std::ffi::c_int,
+        pub(super) layers: [Layer; MAX_PLANES],
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl DrmFrame {
+    /// `f`, a VA-API frame, mapped for reading: FFmpeg waits for the
+    /// surface's decoding (or copy) to be done, and exports a layer for each
+    /// plane.
+    pub fn export(f: &frame::Video) -> Result<Self> {
+        let mut map = frame::Video::empty();
+        // SAFETY: a fresh frame, mapped as DRM PRIME; unmapped when it drops.
+        let ret = unsafe {
+            (*map.as_mut_ptr()).format = ffi::AVPixelFormat::AV_PIX_FMT_DRM_PRIME as i32;
+            ffi::av_hwframe_map(
+                map.as_mut_ptr(),
+                f.as_ptr(),
+                ffi::AV_HWFRAME_MAP_READ as i32,
+            )
+        };
+        if ret < 0 {
+            return Err(Error::Ffmpeg {
+                context: "exporting a VA-API surface".into(),
+                source: ffmpeg::Error::from(ret),
+            });
+        }
+        Ok(Self(map))
+    }
+
+    /// Its planes: luma, then chroma (each layer's first).
+    pub fn planes(&self) -> Vec<DrmPlane<'_>> {
+        // SAFETY: a DRM PRIME frame's first data pointer is its descriptor,
+        // which lives as long as the mapping; its files are open as long.
+        unsafe {
+            let d = &*((*self.0.as_ptr()).data[0] as *const drm::Frame);
+            let layers = d.nb_layers.clamp(0, drm::MAX_PLANES as i32) as usize;
+            d.layers[..layers]
+                .iter()
+                .filter(|l| l.nb_planes > 0)
+                .filter_map(|l| {
+                    let p = &l.planes[0];
+                    let o = d.objects.get(usize::try_from(p.object_index).ok()?)?;
+                    Some(DrmPlane {
+                        fd: std::os::fd::BorrowedFd::borrow_raw(o.fd),
+                        offset: p.offset as u64,
+                        pitch: p.pitch as u64,
+                        modifier: o.format_modifier,
+                    })
+                })
+                .collect()
+        }
+    }
+}

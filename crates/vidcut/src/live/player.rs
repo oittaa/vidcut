@@ -67,8 +67,8 @@ pub struct Player {
     on_picture: Arc<dyn Fn() + Send + Sync>,
     /// Memory for the engine's pictures.
     budget: engine::Budget,
-    /// The renderer shows pictures NVDEC decoded from GPU memory: they stay
-    /// there.
+    /// The renderer shows pictures NVDEC or VA-API decoded from GPU memory:
+    /// they stay there.
     gpu_pictures: bool,
     engine: Option<Arc<engine::Player>>,
     /// Whose plan the engine plays. The renderer shows the engine when

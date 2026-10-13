@@ -149,9 +149,9 @@ pub struct Config {
     /// The GPU to decode on when `hardware` is on; `None`: the best there
     /// is.
     pub gpu: Option<crate::hw::GpuDecoder>,
-    /// Pictures NVDEC decodes stay in GPU memory (NV12, P010), for a
-    /// display that shows them from there ([`Memory::Cuda`]); kept ones
-    /// take video memory then.
+    /// Pictures NVDEC or VA-API decodes stay in GPU memory (NV12, P010), for
+    /// a display that shows them from there ([`Memory::Cuda`],
+    /// [`Memory::Vaapi`]); kept ones take video memory then.
     pub gpu_pictures: bool,
 }
 

@@ -74,7 +74,7 @@ impl Shared {
 /// The viewer thread, and what the UI shows of it.
 pub struct Viewer {
     shared: Arc<Shared>,
-    /// It shows pictures in CUDA memory from there.
+    /// It shows pictures in GPU memory (CUDA's, VA-API's) from there.
     gpu_pictures: bool,
     thread: Option<JoinHandle<()>>,
     /// The egui texture of the target, and the target's generation.
@@ -118,8 +118,8 @@ impl Viewer {
         }
     }
 
-    /// Whether it shows pictures NVDEC decoded from GPU memory, so a
-    /// player may keep them there.
+    /// Whether it shows pictures NVDEC or VA-API decoded from GPU memory, so
+    /// a player may keep them there.
     pub fn takes_gpu_pictures(&self) -> bool {
         self.gpu_pictures
     }

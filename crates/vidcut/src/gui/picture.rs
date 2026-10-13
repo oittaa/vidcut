@@ -1,6 +1,7 @@
 //! The viewer's picture on the GPU (docs/decisions/preview.md §4): a
 //! player's decoded YUV picture uploaded as textures at its own size (from
-//! memory, or copied on the GPU from NVDEC's frames, [`super::shared`]), and
+//! memory, or copied on the GPU from NVDEC's frames, [`super::shared`], and
+//! from VA-API's, their surfaces imported as DMA-BUFs), and
 //! drawn by one shader pass (`picture.wgsl`) into a target the viewer's
 //! size: fitted as export fits it (`Picture::placement`), turned upright,
 //! scaled in YUV and converted to BT.709 RGB with the export's math
@@ -31,6 +32,8 @@ pub struct Gpu {
     wide: bool,
     /// The device can share memory with CUDA ([`super::shared`]).
     shares: bool,
+    /// The device imports DMA-BUFs, VA-API's surfaces among them (Linux).
+    dma_buf: bool,
     /// CUDA's device on this GPU, once a picture in CUDA memory came.
     cuda: OnceLock<Result<CudaDevice, String>>,
 }
@@ -41,9 +44,13 @@ const MAX_SHARED: usize = 4;
 /// The format targets are drawn in, which egui shows as it is.
 const TARGET: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
-/// The device features the viewer uses where the adapter has them.
+/// The device features the viewer uses where the adapter has them: 16-bit
+/// textures, and DMA-BUFs for VA-API's pictures (Linux).
 pub fn features(adapter: &wgpu::Adapter) -> wgpu::Features {
-    adapter.features() & wgpu::Features::TEXTURE_FORMAT_16BIT_NORM
+    let wanted = wgpu::Features::TEXTURE_FORMAT_16BIT_NORM;
+    #[cfg(target_os = "linux")]
+    let wanted = wanted | wgpu::Features::VULKAN_EXTERNAL_MEMORY_DMA_BUF;
+    adapter.features() & wanted
 }
 
 impl Gpu {
@@ -134,15 +141,26 @@ impl Gpu {
                 .features()
                 .contains(wgpu::Features::TEXTURE_FORMAT_16BIT_NORM),
             shares: super::shared::possible(device),
+            dma_buf: device
+                .features()
+                .contains(wgpu::Features::VULKAN_EXTERNAL_MEMORY_DMA_BUF),
             cuda: OnceLock::new(),
         }
     }
 
-    /// Whether it may show pictures in CUDA memory from there: a player
-    /// can keep NVDEC's pictures on the GPU for it. Those it can't share
-    /// after all (CUDA on another GPU) are copied down to be shown.
+    /// Whether it may show pictures in GPU memory from there: a player can
+    /// keep NVDEC's pictures on the GPU for it, where it shares memory with
+    /// CUDA, and VA-API's, where it imports DMA-BUFs. Those it can't take
+    /// after all (CUDA on another GPU, a surface it won't import) are copied
+    /// down to be shown.
     pub fn takes_gpu_pictures(&self) -> bool {
-        self.shares
+        self.shares || self.dma_buf
+    }
+
+    /// Whether it imports VA-API's surfaces (DMA-BUFs) to show pictures in
+    /// VA-API memory from there.
+    pub fn imports_dma_bufs(&self) -> bool {
+        self.dma_buf
     }
 
     /// Whether pictures in CUDA memory show from there: it shares memory,
@@ -214,7 +232,13 @@ pub struct Screen {
     filled: Option<usize>,
     /// Sharing failed: pictures in CUDA memory are copied down from then on.
     unshared: bool,
-    /// The last picture in CUDA memory was copied on the GPU, not down.
+    /// Importing failed: pictures in VA-API memory are copied down from then
+    /// on.
+    unimported: bool,
+    /// The picture being drawn, imported: held until the copies out of its
+    /// surface are done, so the surface isn't reused under them.
+    imported: Option<Arc<Picture>>,
+    /// The last picture in GPU memory was copied on the GPU, not down.
     last_shared: bool,
 }
 
@@ -249,8 +273,8 @@ impl Screen {
         self.drawn = None;
     }
 
-    /// The last picture in CUDA memory went into the planes on the GPU,
-    /// not copied down.
+    /// The last picture in GPU memory went into the planes on the GPU, not
+    /// copied down.
     pub fn shared(&self) -> bool {
         self.last_shared
     }
@@ -280,12 +304,11 @@ impl Screen {
                 return Drawn::Same;
             }
         }
-        // Pictures in VAAPI or Vulkan memory have no planes here, and one
-        // larger than the device's textures can't go up (wgpu would panic):
-        // black.
+        // Pictures in Vulkan memory have no planes here, and one larger than
+        // the device's textures can't go up (wgpu would panic): black.
         let limit = gpu.device.limits().max_texture_dimension_2d;
         let picture = picture.filter(|p| {
-            matches!(p.memory(), Memory::Cpu | Memory::Cuda)
+            matches!(p.memory(), Memory::Cpu | Memory::Cuda | Memory::Vaapi)
                 && p.width() <= limit
                 && p.height() <= limit
         });
@@ -365,21 +388,41 @@ impl Screen {
         if let Some(i) = self.filled.take() {
             self.shared[i].used(&gpu.queue);
         }
+        if let Some(held) = self.imported.take() {
+            gpu.queue.on_submitted_work_done(move || drop(held));
+        }
         self.drawn = Some(picture.cloned());
         drawn
     }
 
     /// Puts `picture`'s planes into its textures, making them for its size
-    /// and layout when they changed: from memory, or for a picture in CUDA
-    /// memory, copied on the GPU by `encoder` (`filled` says through which
-    /// shared buffer). A picture in CUDA memory that can't be shared is
-    /// copied down.
-    fn upload(&mut self, gpu: &Gpu, picture: &Picture, encoder: &mut wgpu::CommandEncoder) {
+    /// and layout when they changed: from memory, or for a picture in GPU
+    /// memory, copied on the GPU by `encoder` (out of a shared buffer,
+    /// `filled` says which, for CUDA's; out of its own surface, imported,
+    /// for VA-API's). A picture in GPU memory that can't be shared or
+    /// imported is copied down.
+    fn upload(&mut self, gpu: &Gpu, picture: &Arc<Picture>, encoder: &mut wgpu::CommandEncoder) {
         self.make_planes(gpu, picture);
-        if picture.memory() != Memory::Cuda {
-            return self.write_planes(gpu, picture);
-        }
         self.last_shared = false;
+        match picture.memory() {
+            Memory::Cuda => {}
+            Memory::Vaapi => {
+                if !self.unimported {
+                    match self.import_on_gpu(gpu, picture, encoder) {
+                        Ok(()) => {
+                            self.last_shared = true;
+                            return;
+                        }
+                        Err(e) => {
+                            eprintln!("vidcut: pictures come down from the GPU to be shown: {e}");
+                            self.unimported = true;
+                        }
+                    }
+                }
+                return self.copy_down(gpu, picture);
+            }
+            _ => return self.write_planes(gpu, picture),
+        }
         if !self.unshared {
             match self.copy_on_gpu(gpu, picture, encoder) {
                 Ok(true) => {
@@ -395,10 +438,123 @@ impl Screen {
                 }
             }
         }
+        self.copy_down(gpu, picture);
+    }
+
+    /// A picture in GPU memory copied down and uploaded.
+    fn copy_down(&mut self, gpu: &Gpu, picture: &Picture) {
         match picture.copied_down() {
             Ok(down) => self.write_planes(gpu, &down),
             Err(e) => eprintln!("vidcut: a picture didn't come down from the GPU: {e}"),
         }
+    }
+
+    /// Copies a picture in VA-API memory into the planes on the GPU: its
+    /// surface exported as DMA-BUFs, each plane imported as a texture of the
+    /// device's, and copied by `encoder` into the planes' textures. The
+    /// picture is held until those copies are done (`imported`).
+    #[cfg(target_os = "linux")]
+    fn import_on_gpu(
+        &mut self,
+        gpu: &Gpu,
+        picture: &Arc<Picture>,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<(), String> {
+        use wgpu::hal::api::Vulkan;
+        if !gpu.dma_buf {
+            return Err("the display's device imports no DMA-BUFs".into());
+        }
+        let (one, two) = match picture.layout() {
+            Layout::Nv12 => (wgpu::TextureFormat::R8Unorm, wgpu::TextureFormat::Rg8Unorm),
+            Layout::P010 if gpu.wide => (
+                wgpu::TextureFormat::R16Unorm,
+                wgpu::TextureFormat::Rg16Unorm,
+            ),
+            Layout::P010 => return Err("no 16-bit textures for P010".into()),
+            Layout::Yuv420p => return Err("planar pictures aren't VA-API's".into()),
+        };
+        let drm = vidcut_av::hw::DrmFrame::export(picture.frame()).map_err(|e| e.to_string())?;
+        let planes = drm.planes();
+        let [y, uv, ..] = planes[..] else {
+            return Err(format!("a surface exported in {} planes", planes.len()));
+        };
+        let (w, h) = (picture.width(), picture.height());
+        let ours = self.planes.as_ref().expect("made by upload");
+        for (plane, (width, height), format, texture) in [
+            (y, (w, h), one, &ours.y),
+            (uv, (w.div_ceil(2), h.div_ceil(2)), two, &ours.u),
+        ] {
+            let size = wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            };
+            let fd = plane
+                .fd
+                .try_clone_to_owned()
+                .map_err(|e| format!("a surface's file: {e}"))?;
+            let label = Some("vidcut VA-API plane");
+            // SAFETY: the file holds the plane, at its offset and pitch,
+            // laid out as its modifier says; Vulkan takes the file over.
+            let raw = unsafe {
+                let hal = gpu.device.as_hal::<Vulkan>().ok_or("not Vulkan")?;
+                hal.texture_from_dmabuf_fd(
+                    fd,
+                    &wgpu::hal::TextureDescriptor {
+                        label,
+                        size,
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format,
+                        usage: wgpu::TextureUses::COPY_SRC,
+                        memory_flags: wgpu::hal::MemoryFlags::empty(),
+                        view_formats: Vec::new(),
+                    },
+                    plane.modifier,
+                    plane.pitch,
+                    plane.offset,
+                )
+                .map_err(|e| format!("importing a VA-API surface: {e}"))?
+            };
+            // SAFETY: made on this device, as described; a new image, its
+            // layout undefined, though its memory holds the picture.
+            let imported = unsafe {
+                gpu.device.create_texture_from_hal::<Vulkan>(
+                    raw,
+                    &wgpu::TextureDescriptor {
+                        label,
+                        size,
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format,
+                        usage: wgpu::TextureUsages::COPY_SRC,
+                        view_formats: &[],
+                    },
+                    wgpu::TextureUses::UNINITIALIZED,
+                )
+            };
+            // wgpu keeps the texture until the copy is done.
+            encoder.copy_texture_to_texture(
+                imported.as_image_copy(),
+                texture.as_image_copy(),
+                size,
+            );
+        }
+        self.imported = Some(picture.clone());
+        Ok(())
+    }
+
+    /// VA-API is Linux's.
+    #[cfg(not(target_os = "linux"))]
+    fn import_on_gpu(
+        &mut self,
+        _: &Gpu,
+        _: &Arc<Picture>,
+        _: &mut wgpu::CommandEncoder,
+    ) -> Result<(), String> {
+        Err("VA-API pictures are Linux's".into())
     }
 
     /// Copies a picture in CUDA memory into the planes on the GPU: CUDA
