@@ -616,6 +616,12 @@ pub struct Clip {
     /// no audio, and any length.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generator: Option<Generator>,
+    /// A compound clip or nested timeline another editor made, carried
+    /// (deviation X9): a block that plays as a gap, with no media and no
+    /// audio. On an audio track it stands for the nested timeline's sound
+    /// (`video` false).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compound: Option<Compound>,
 }
 
 /// A generator or title from another editor's file (deviation X9).
@@ -623,6 +629,17 @@ pub struct Clip {
 pub struct Generator {
     /// The OTIO media reference as read: a `GeneratorReference`.
     pub reference: serde_json::Value,
+}
+
+/// A compound clip or nested timeline from another editor's file
+/// (deviation X9).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Compound {
+    /// The nested OTIO `Stack` as read, without its source range and clip
+    /// effects (the clip's own).
+    pub stack: serde_json::Value,
+    /// Its length in project frames: the clip's source range stays within.
+    pub frames: i64,
 }
 
 /// Clip effects another editor applied, which vidcut keeps without showing
@@ -671,6 +688,12 @@ impl Clip {
     /// media.
     pub fn is_generator(&self) -> bool {
         self.generator.is_some()
+    }
+
+    /// Whether it is a block from another editor without media: a
+    /// generator or a compound clip.
+    pub fn is_block(&self) -> bool {
+        self.generator.is_some() || self.compound.is_some()
     }
 
     /// First frame after the clip.
@@ -854,6 +877,17 @@ impl Project {
             self.frames_in(STILL_LIMIT_SECS)
         } else {
             self.media_frames(media)
+        }
+    }
+
+    /// The source frames clip `c` may use: its media's, a compound's
+    /// length; none for a generator, which has any length, or a clip whose
+    /// media is gone.
+    pub fn source_frames(&self, c: &Clip) -> Option<i64> {
+        match (&c.compound, &c.generator) {
+            (Some(k), _) => Some(k.frames),
+            (None, Some(_)) => None,
+            (None, None) => self.media(&c.media).map(|m| self.media_limit(m)),
         }
     }
 

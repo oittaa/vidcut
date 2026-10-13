@@ -51,9 +51,10 @@
 //! - Clip effects in use stay on their clips' pictures and sounds
 //!   ([`effects`]), not shown or played, and are written back. So do
 //!   transitions, on their edit points ([`transitions`]): shown as cuts.
-//! - Generators and titles (`GeneratorReference`s) become generator clips:
-//!   blocks that play as gaps, their references kept.
-//! - Everything else is left out with a warning: nested compositions (gaps
+//! - Generators and titles (`GeneratorReference`s) become generator clips,
+//!   and nested `Stack`s (compound clips, nested timelines) compound clips:
+//!   blocks that play as gaps, their references and stacks kept.
+//! - Everything else is left out with a warning: nested tracks (gaps
 //!   instead), speed changes.
 
 use std::collections::HashMap;
@@ -62,7 +63,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, Marks, Media, Project, TrackKind};
+use crate::model::{Clip, Compound, Marks, Media, Project, TrackKind};
 use crate::time::Rational;
 
 pub mod effects;
@@ -221,9 +222,7 @@ pub fn used_media(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
     for t in &p.tracks {
         for c in &t.clips {
             let shows = c.video && c.start.max(a) < c.end().min(b);
-            if (shows || audio_part(c, a, b).is_some())
-                && !c.is_generator()
-                && !used.contains(&c.media)
+            if (shows || audio_part(c, a, b).is_some()) && !c.is_block() && !used.contains(&c.media)
             {
                 used.push(c.media.clone());
             }
@@ -310,7 +309,7 @@ pub fn export(
         let mut channels: Vec<u16> = Vec::new();
         for c in &t.clips {
             let m = p.media(&c.media);
-            if m.is_none() && !c.is_generator() {
+            if m.is_none() && !c.is_block() {
                 return Err(Error::internal(format!("no media {}", c.media)));
             }
             let label = c
@@ -352,16 +351,19 @@ pub fn export(
                 let effects = c.effects.as_ref().map_or_else(Vec::new, |x| {
                     x.written(c.source_at(s), s > c.start, e < c.end())
                 });
-                video.push(item(
-                    &label,
-                    c,
-                    m,
-                    c.source_at(s),
-                    e - s,
-                    c.enabled,
-                    metadata,
-                    effects,
-                ));
+                video.push(match &c.compound {
+                    Some(k) => compound_item(c, k, &label, c.source_at(s), e - s, effects, rate),
+                    None => item(
+                        &label,
+                        c,
+                        m,
+                        c.source_at(s),
+                        e - s,
+                        c.enabled,
+                        metadata,
+                        effects,
+                    ),
+                });
                 if let Some(x) = transitions::tail(p, t, c, false, e, rate) {
                     video.push(x);
                 }
@@ -403,6 +405,28 @@ pub fn export(
                     audio.push(x);
                 }
                 ta = e;
+            }
+            // A compound clip's sound, on its audio track.
+            if let Some(k) = c.compound.as_ref().filter(|_| !c.video) {
+                let (s, e) = (c.start.max(a).max(ta), c.end().min(b));
+                if e > s {
+                    if s > ta {
+                        audio.push(gap(s - ta, rate));
+                    }
+                    let effects = c.effects.as_ref().map_or_else(Vec::new, |x| {
+                        x.written(c.source_at(s), s > c.start, e < c.end())
+                    });
+                    audio.push(compound_item(
+                        c,
+                        k,
+                        &label,
+                        c.source_at(s),
+                        e - s,
+                        effects,
+                        rate,
+                    ));
+                    ta = e;
+                }
             }
         }
         transitions::close(&mut video, rate);
@@ -488,6 +512,72 @@ pub fn export(
     }))
 }
 
+/// Nested `Stack` `item` as a compound clip: the stack without its source
+/// range, clip effects and markers (the clip's own) and its link group
+/// (whose number another editor gave); its length, the longest of its
+/// tracks, at `fps`.
+fn compound_of(item: &Value, fps: Rational) -> Compound {
+    let frames = item["children"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|t| {
+            t["children"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|i| !schema(i).starts_with("Transition"))
+                .map(|i| item_len(i, fps))
+                .sum::<i64>()
+        })
+        .max()
+        .unwrap_or(0);
+    let mut stack = item.clone();
+    if let Some(o) = stack.as_object_mut() {
+        for key in ["source_range", "effects", "markers"] {
+            o.remove(key);
+        }
+    }
+    if let Some(m) = stack
+        .pointer_mut(&format!("/metadata/{EDITOR}"))
+        .and_then(Value::as_object_mut)
+    {
+        m.remove("Link Group ID");
+    }
+    Compound { stack, frames }
+}
+
+/// Compound clip `c`'s OTIO item: its stack, showing `frames` from
+/// `source`.
+fn compound_item(
+    c: &Clip,
+    k: &Compound,
+    label: &str,
+    source: i64,
+    frames: i64,
+    effects: Vec<Value>,
+    rate: f64,
+) -> Value {
+    let mut v = k.stack.clone();
+    v["name"] = json!(label);
+    v["source_range"] = range(source as f64, frames as f64, rate);
+    v["effects"] = json!(effects);
+    v["markers"] = json!([]);
+    v["enabled"] = json!(c.enabled);
+    v["metadata"][VIDCUT] = json!({ "clip": c.id });
+    v
+}
+
+/// What compound `k` is, as its stack says: `Compound Clip`, `Timeline
+/// Clip`.
+pub fn compound_kind(k: &Compound) -> String {
+    k.stack["metadata"][EDITOR]["Sequence Type"]
+        .as_str()
+        .filter(|n| !n.is_empty())
+        .unwrap_or("compound")
+        .to_string()
+}
+
 /// What generator `g` makes, as its reference says: `Solid Color`, `Rich`.
 pub fn generator_kind(g: &crate::model::Generator) -> String {
     let r = &g.reference;
@@ -552,11 +642,52 @@ pub struct ImportedClip {
     /// A generator or title: its `GeneratorReference`, as the file has
     /// it. It has no media (`media` is empty).
     pub generator: Option<Value>,
+    /// A compound clip or nested timeline: its `Stack`, frames at
+    /// [`Imported::fps`]. It has no media; on an audio track, no picture.
+    pub compound: Option<Compound>,
 }
 
 impl ImportedClip {
     pub fn end(&self) -> i64 {
         self.start + self.duration
+    }
+
+    /// Whether it is a generator or compound clip, without media.
+    pub fn is_block(&self) -> bool {
+        self.generator.is_some() || self.compound.is_some()
+    }
+
+    /// A block without media (`generator` or `compound` set by the
+    /// caller) for OTIO `item` on `track`, at `start` for `len` frames.
+    fn block(
+        key: usize,
+        track: &str,
+        item: &Value,
+        (start, len): (i64, i64),
+        fps: Rational,
+    ) -> Self {
+        Self {
+            key,
+            track: track.to_string(),
+            media: MediaRef::default(),
+            name: item["name"].as_str().unwrap_or("").to_string(),
+            start,
+            duration: len,
+            source_in: time(&item["source_range"]["start_time"])
+                .map_or(0, |(v, r)| frames(v, r, fps)),
+            timecoded: false,
+            video: true,
+            enabled: item["enabled"].as_bool().unwrap_or(true),
+            audio: None,
+            stream: 0,
+            gain_db: 0.0,
+            muted: false,
+            link: None,
+            effects: Vec::new(),
+            audio_effects: Vec::new(),
+            generator: None,
+            compound: None,
+        }
     }
 
     fn audio_range(&self) -> Option<(i64, i64)> {
@@ -1044,12 +1175,9 @@ fn walk<'a>(
             });
             continue;
         }
-        if s.starts_with("Stack") || s.starts_with("Track") {
-            warn(
-                warnings,
-                "nested stacks and tracks (compound clips) were left out (gaps instead)",
-            );
-        } else if !s.starts_with("Gap") && !is_clip(item) {
+        if s.starts_with("Track") {
+            warn(warnings, "nested tracks were left out (gaps instead)");
+        } else if !s.starts_with("Gap") && !s.starts_with("Stack") && !is_clip(item) {
             warn(warnings, &format!("{s} items were left out (gaps instead)"));
         }
         let len = item_len(item, fps);
@@ -1197,35 +1325,23 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         let (items, between) = walk(v, fps, &mut warnings);
         let mut keys = vec![None; items.len()];
         for (i, (start, len, item)) in items.into_iter().enumerate() {
-            if !is_clip(item) || len <= 0 {
+            let stack = schema(item).starts_with("Stack");
+            if !(is_clip(item) || stack) || len <= 0 {
                 continue;
             }
             let effects = effects::read(item, &mut warnings);
             let reference = media_reference_of(item);
-            if schema(reference).starts_with("GeneratorReference") {
+            if stack || schema(reference).starts_with("GeneratorReference") {
                 clip_markers(item, start, len, fps, &mut markers);
                 keys[i] = Some(clips.len());
-                clips.push(ImportedClip {
-                    key: clips.len(),
-                    track: id.clone(),
-                    media: MediaRef::default(),
-                    name: item["name"].as_str().unwrap_or("").to_string(),
-                    start,
-                    duration: len,
-                    source_in: time(&item["source_range"]["start_time"])
-                        .map_or(0, |(v, r)| frames(v, r, fps)),
-                    timecoded: false,
-                    video: true,
-                    enabled: item["enabled"].as_bool().unwrap_or(true),
-                    audio: None,
-                    stream: 0,
-                    gain_db: 0.0,
-                    muted: false,
-                    link: None,
-                    effects,
-                    audio_effects: Vec::new(),
-                    generator: Some(reference.clone()),
-                });
+                let mut c = ImportedClip::block(clips.len(), &id, item, (start, len), fps);
+                c.effects = effects;
+                if stack {
+                    c.compound = Some(compound_of(item, fps));
+                } else {
+                    c.generator = Some(reference.clone());
+                }
+                clips.push(c);
                 continue;
             }
             match clip_source(item, fps, base) {
@@ -1253,6 +1369,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         effects,
                         audio_effects: Vec::new(),
                         generator: None,
+                        compound: None,
                     });
                 }
                 Err(e) => warnings.push(format!("{}; left as a gap", e.message)),
@@ -1271,10 +1388,31 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         let (items, between) = walk(a, fps, &mut warnings);
         let mut keys = vec![None; items.len()];
         for (i, (start, len, item)) in items.into_iter().enumerate() {
-            if !is_clip(item) || len <= 0 {
+            let stack = schema(item).starts_with("Stack");
+            if !(is_clip(item) || stack) || len <= 0 {
                 continue;
             }
             let effects = effects::read(item, &mut warnings);
+            // A compound clip's sound: a block on an audio track.
+            if stack {
+                clip_markers(item, start, len, fps, &mut markers);
+                let track = match &hint {
+                    Some(h) if h.starts_with('A') => h.clone(),
+                    _ => own
+                        .get_or_insert_with(|| {
+                            foreign_audio += 1;
+                            format!("A{foreign_audio}")
+                        })
+                        .clone(),
+                };
+                keys[i] = Some(clips.len());
+                let mut c = ImportedClip::block(clips.len(), &track, item, (start, len), fps);
+                c.video = false;
+                c.effects = effects;
+                c.compound = Some(compound_of(item, fps));
+                clips.push(c);
+                continue;
+            }
             let (media, source_in, timecoded) = match clip_source(item, fps, base) {
                 Ok(s) => s,
                 Err(e) => {
@@ -1351,6 +1489,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 effects: Vec::new(),
                 audio_effects: effects,
                 generator: None,
+                compound: None,
             });
         }
         transitions_of(between, &keys, true, fps, &mut found);
@@ -1437,6 +1576,18 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         warnings.push(format!(
             "generators and titles kept as blocks but played as gaps: {}",
             made.join(", ")
+        ));
+    }
+    let mut nested: Vec<&str> = Vec::new();
+    for c in clips.iter().filter(|c| c.compound.is_some()) {
+        if !nested.contains(&c.name.as_str()) {
+            nested.push(&c.name);
+        }
+    }
+    if !nested.is_empty() {
+        warnings.push(format!(
+            "compound clips and nested timelines kept as blocks but played as gaps: {}",
+            nested.join(", ")
         ));
     }
     // Transitions with a clip still on a side.

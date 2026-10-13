@@ -1868,10 +1868,7 @@ fn generators_are_carried() {
         "analyze.silence",
         json!({"clips": [p.track("V1").unwrap().clips[1].id]}),
     ));
-    assert!(
-        e.message.contains("is a generator from another editor"),
-        "{e}"
-    );
+    assert!(e.message.contains("is a block from another editor"), "{e}");
 }
 
 #[test]
@@ -1887,4 +1884,169 @@ fn numbers_read_exactly() {
         let v: Value = serde_json::from_str(text).unwrap();
         assert_eq!(v.as_f64(), text.parse::<f64>().ok(), "{text}");
     }
+}
+
+/// A nested stack as an editor writes a compound clip or a nested
+/// timeline's sound: one track of `kind` holding a clip of `/media/1.mp4`,
+/// `frames` long.
+fn otio_compound(name: &str, sequence: &str, kind: &str, frames: f64) -> Value {
+    let t = |v: f64| json!({"OTIO_SCHEMA": "RationalTime.1", "rate": 25.0, "value": v});
+    let r = |s: f64, d: f64| json!({"OTIO_SCHEMA": "TimeRange.1", "start_time": t(s), "duration": t(d)});
+    let inner = json!({"OTIO_SCHEMA": "Clip.2", "name": "1.mp4", "source_range": r(0.0, frames),
+        "media_references": {"DEFAULT_MEDIA": {"OTIO_SCHEMA": "ExternalReference.1",
+            "target_url": "/media/1.mp4", "available_range": r(0.0, 250.0)}},
+        "active_media_reference_key": "DEFAULT_MEDIA", "effects": [], "markers": [], "enabled": true, "metadata": {}});
+    json!({"OTIO_SCHEMA": "Stack.1", "name": name, "source_range": r(0.0, frames), "enabled": true,
+        "effects": [], "markers": [],
+        "metadata": {"Resolve_OTIO": {"Link Group ID": 3, "Sequence Type": sequence}},
+        "children": [{"OTIO_SCHEMA": "Track.1", "name": "Video 1", "kind": kind, "children": [inner],
+            "effects": [], "markers": [], "enabled": true, "source_range": null, "metadata": {}}]})
+}
+
+/// The stacks written on OTIO track `track`: (where, source start, length,
+/// stack without what vidcut writes of its own).
+fn written_stacks(doc: &Value, track: &str) -> Vec<(i64, i64, i64, Value)> {
+    let mut at = 0;
+    let mut out = Vec::new();
+    for item in otio_track(doc, track)["children"].as_array().unwrap() {
+        if schema(item).starts_with("Transition") {
+            continue;
+        }
+        let len = item["source_range"]["duration"]["value"].as_f64().unwrap() as i64;
+        if schema(item).starts_with("Stack") {
+            let start = item["source_range"]["start_time"]["value"]
+                .as_f64()
+                .unwrap() as i64;
+            let mut stack = item.clone();
+            let o = stack.as_object_mut().unwrap();
+            for key in ["source_range", "effects", "markers", "enabled"] {
+                o.remove(key);
+            }
+            o["metadata"].as_object_mut().unwrap().remove(VIDCUT);
+            out.push((at, start, len, stack));
+        }
+        at += len;
+    }
+    out
+}
+
+#[test]
+fn compound_clips_are_carried() {
+    // As an editor writes them: a clip 0..100, a compound clip over it on
+    // a second track (20..80), and a nested timeline's sound on an audio
+    // track of its own (10..50).
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.append("m1", 0, 100);
+    let mut doc = export(f.editor.project(), "cmp", None, Locations::Absolute).unwrap();
+    let compound = otio_compound("my compound", "Compound Clip", "Video", 60.0);
+    let sound = otio_compound("nested", "Timeline Clip", "Audio", 40.0);
+    let tracks = doc["tracks"]["children"].as_array_mut().unwrap();
+    let mut v2 = tracks[0].clone();
+    v2["name"] = json!("Video 2");
+    v2["metadata"] = json!({});
+    v2["children"] = json!([gap(20, 25.0), compound.clone()]);
+    tracks.insert(1, v2);
+    let mut score = tracks[2].clone();
+    score["name"] = json!("Score");
+    score["metadata"] = json!({});
+    score["children"] = json!([gap(10, 25.0), sound.clone()]);
+    tracks.push(score);
+
+    let mut g = Fixture::new(&[(10.0, true)]);
+    let r = g.ok(req("timeline.import", json!({ "otio": doc })));
+    assert_eq!(
+        r.result["warnings"],
+        json!([
+            "compound clips and nested timelines kept as blocks but played as gaps: nested, my compound"
+        ])
+    );
+    let p = g.editor.project().clone();
+    assert!(crate::validate::violations(&p).is_empty());
+    let block = |track: &str| p.track(track).unwrap().clips[0].clone();
+    let (v2, a1) = (block("V2"), block("A1"));
+    assert_eq!(
+        (v2.start, v2.end(), v2.video, v2.media.as_str()),
+        (20, 80, true, "")
+    );
+    assert_eq!(
+        (a1.start, a1.end(), a1.video, a1.audio.is_none()),
+        (10, 50, false, true)
+    );
+    let k = v2.compound.clone().unwrap();
+    assert_eq!(k.frames, 60);
+    assert_eq!(
+        k.stack["metadata"]["Resolve_OTIO"],
+        json!({"Sequence Type": "Compound Clip"}),
+        "no link group"
+    );
+    // By kind in the timeline.
+    let r = g.ok(req("timeline.get", json!({})));
+    assert_eq!(
+        r.result["tracks"][1]["items"][1]["compound"],
+        "Compound Clip"
+    );
+    // It plays as a gap: the clip under it shows.
+    let plan = crate::render::flatten(&p, 0, 100).unwrap();
+    assert!(matches!(
+        plan.video.as_slice(),
+        [crate::render::VideoPiece::Source { frames: 100, .. }]
+    ));
+    // Written back as it came, where it was.
+    let out = export(&p, "cmp", None, Locations::Absolute).unwrap();
+    let as_read = |v: &Value| {
+        let mut v = v.clone();
+        let o = v.as_object_mut().unwrap();
+        for key in ["source_range", "effects", "markers", "enabled"] {
+            o.remove(key);
+        }
+        v["metadata"]["Resolve_OTIO"]
+            .as_object_mut()
+            .unwrap()
+            .remove("Link Group ID");
+        v
+    };
+    assert_eq!(
+        written_stacks(&out, "Video 2"),
+        vec![(20, 0, 60, as_read(&compound))]
+    );
+    assert_eq!(
+        written_stacks(&out, "Score"),
+        vec![(10, 0, 40, as_read(&sound))]
+    );
+
+    // Trimmed within its length, not past it.
+    let id = v2.id.clone();
+    let e = g.err(req(
+        "edit.trim",
+        json!({"clip": id, "edge": "tail", "by": 1}),
+    ));
+    assert!(e.message.contains("of its compound"), "{e}");
+    g.ok(req(
+        "edit.trim",
+        json!({"clip": id, "edge": "head", "by": 10}),
+    ));
+    let out = export(g.editor.project(), "cmp", None, Locations::Absolute).unwrap();
+    let (at, start, len, _) = written_stacks(&out, "Video 2").remove(0);
+    assert_eq!(
+        (at, start, len),
+        (30, 10, 50),
+        "from frame 10 of the compound"
+    );
+    // Its sound stays on audio tracks.
+    let e = g.err(req(
+        "edit.move",
+        json!({"clips": a1.id, "to": 10, "track": "V1", "mode": "overwrite"}),
+    ));
+    assert!(e.message.contains("goes on audio tracks"), "{e}");
+    let copied = g.ok(req("edit.copy", json!({"clips": [a1.id]})));
+    g.ok(req(
+        "edit.paste",
+        json!({"clips": copied.result["clips"], "at": 200}),
+    ));
+    let p = g.editor.project();
+    assert!(crate::validate::violations(p).is_empty());
+    assert_eq!(p.track("A1").unwrap().clips.len(), 2);
+    // Nothing to measure in one.
+    let e = g.err(req("analyze.silence", json!({"clips": [id]})));
+    assert!(e.message.contains("is a block from another editor"), "{e}");
 }

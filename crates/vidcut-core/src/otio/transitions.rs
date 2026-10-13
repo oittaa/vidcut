@@ -78,11 +78,10 @@ pub fn place(p: &Project, track: &Track, t: &Transition) -> Option<i64> {
     {
         return None;
     }
-    if let Some(f) = from.filter(|f| !f.is_generator()) {
-        let m = p.media(&f.media)?;
-        if f.source_at(cut) + t.after > p.media_limit(m) {
-            return None;
-        }
+    if let Some(f) = from.filter(|f| !f.is_generator())
+        && f.source_at(cut) + t.after > p.source_frames(f)?
+    {
+        return None;
     }
     Some(cut)
 }

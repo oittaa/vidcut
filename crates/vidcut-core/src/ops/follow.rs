@@ -79,6 +79,7 @@ impl Mapper<'_> {
         let shows = |n: &Clip| {
             n.media == c.media
                 && n.generator == c.generator
+                && n.compound == c.compound
                 && n.source_in <= s
                 && s < n.source_in + n.duration
         };

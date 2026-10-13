@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use crate::analysis::{self, AudioLevels, Loudness, PictureStats, SilenceSettings, Span};
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, ClipAudio, Effects, Generator, ImageSequence, Media, MediaInfo, Project, Proxy,
+    Clip, ClipAudio, Compound, Effects, Generator, ImageSequence, Media, MediaInfo, Project, Proxy,
     Transition, VideoInfo,
 };
 use crate::ops::{self, ClipProps, Edge, Source};
@@ -993,8 +993,8 @@ fn mutate(
             let mut removed = Vec::new();
             for id in &ids {
                 let c = p.clip(id).expect("resolved");
-                // A generator plays as a gap: no sound to look at.
-                if c.is_generator() {
+                // A block plays as a gap: no sound to look at.
+                if c.is_block() {
                     continue;
                 }
                 let found = silent_parts(p, env, &Target::Clip(c), &settings)?;
@@ -1023,8 +1023,8 @@ fn mutate(
             let mut created = Vec::new();
             for id in &ids {
                 let c = p.clip(id).expect("resolved");
-                // A generator plays as a gap: no pictures to look at.
-                if c.is_generator() {
+                // A block plays as a gap: no pictures to look at.
+                if c.is_block() {
                     continue;
                 }
                 let found = scene_cuts(p, env, &Target::Clip(c), *threshold)?;
@@ -1613,7 +1613,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     let mut ids: HashMap<(String, bool), String> = HashMap::new();
     let mut media = Vec::new();
     let mut missing: Vec<&str> = Vec::new();
-    for c in t.clips.iter().filter(|c| c.generator.is_none()) {
+    for c in t.clips.iter().filter(|c| !c.is_block()) {
         let m = &c.media;
         if ids.contains_key(&key(m)) || missing.contains(&m.shown.as_str()) {
             continue;
@@ -1676,14 +1676,14 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
             && let Some(v) = t
                 .clips
                 .iter()
-                .filter(|c| c.generator.is_none())
+                .filter(|c| !c.is_block())
                 .find_map(|c| p.media(&ids[&key(&c.media)])?.info.video.clone())
         {
             adopt_size(p, &v);
         }
         // A file doesn't say whether its timecode counts drop-frame; its
         // media may (decision D47).
-        let drop = t.clips.iter().filter(|c| c.generator.is_none()).any(|c| {
+        let drop = t.clips.iter().filter(|c| !c.is_block()).any(|c| {
             p.media(&ids[&key(&c.media)])
                 .and_then(|m| m.info.timecode)
                 .is_some_and(|tc| tc.drop_frame)
@@ -1755,13 +1755,19 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     // The clips made, by key: (id, track).
     let mut made: HashMap<usize, (String, String)> = HashMap::new();
     for c in &t.clips {
-        // A generator or title: a block of its length, no media.
-        if let Some(reference) = &c.generator {
+        // A generator, title or compound clip: a block of its length, no
+        // media.
+        if c.is_block() {
             let (start, end) = (offset + conv(c.start), offset + conv(c.end()));
             if end - start < 1 {
                 continue;
             }
             let source_in = conv(c.source_in);
+            // Its length covers what it shows, whatever rounding did.
+            let compound = c.compound.as_ref().map(|k| Compound {
+                stack: k.stack.clone(),
+                frames: conv(k.frames).max(source_in + end - start),
+            });
             let id = p.alloc_clip_id();
             clips.push(id.clone());
             made.insert(c.key, (id.clone(), c.track.clone()));
@@ -1772,14 +1778,15 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
                 start,
                 duration: end - start,
                 source_in,
-                video: true,
+                video: c.video,
                 audio: None,
                 enabled: c.enabled,
                 name: (!c.name.is_empty()).then(|| c.name.clone()),
                 effects: carry(&c.effects, source_in),
-                generator: Some(Generator {
+                generator: c.generator.as_ref().map(|reference| Generator {
                     reference: reference.clone(),
                 }),
+                compound,
             });
             track.sort();
             continue;
@@ -1882,6 +1889,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
             name,
             effects,
             generator: None,
+            compound: None,
         });
         track.sort();
     }
@@ -2514,9 +2522,9 @@ fn targets<'a>(
             .iter()
             .map(|id| {
                 let c = p.clip(id).expect("resolved");
-                if c.is_generator() {
+                if c.is_block() {
                     return Err(Error::invalid(format!(
-                        "{id} is a generator from another editor: it has no media"
+                        "{id} is a block from another editor: it has no media"
                     )));
                 }
                 Ok(Target::Clip(c))
@@ -2526,7 +2534,7 @@ fn targets<'a>(
             .tracks
             .iter()
             .flat_map(|t| &t.clips)
-            .filter(|c| !c.is_generator())
+            .filter(|c| !c.is_block())
             .filter(|c| if audio { c.audio.is_some() } else { c.video })
             .map(Target::Clip)
             .collect()),
@@ -2660,9 +2668,12 @@ pub fn clip_json(p: &Project, c: &Clip, track: &str) -> Value {
         "source_in_tc": p.settings.length_timecode(c.source_in),
         "enabled": c.enabled,
     });
-    // A generator from another editor (deviation X9), by kind.
+    // A block from another editor (deviation X9), by kind.
     if let Some(g) = &c.generator {
         v["generator"] = json!(otio::generator_kind(g));
+    }
+    if let Some(k) = &c.compound {
+        v["compound"] = json!(otio::compound_kind(k));
     }
     // Carried clip effects by name (deviation X9); `project.get` has them
     // whole.

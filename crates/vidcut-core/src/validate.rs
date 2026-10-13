@@ -53,10 +53,28 @@ pub fn violations(p: &Project) -> Vec<String> {
                 v.push(format!("{} overlaps the previous clip on {}", c.id, t.id));
             }
             prev_end = Some(c.end());
-            // A generator (deviation X9): no media, no audio.
-            if c.is_generator() {
-                if !c.media.is_empty() || c.audio.is_some() || !c.video {
-                    v.push(format!("{}: a generator with media or audio", c.id));
+            // A block from another editor (deviation X9): no media, no
+            // audio; a generator shows a picture, a compound clip shows one
+            // on a video track and stands for sound on an audio track.
+            if c.is_block() {
+                let video = c.is_generator() || t.kind == TrackKind::Video;
+                if !c.media.is_empty()
+                    || c.audio.is_some()
+                    || c.video != video
+                    || (c.is_generator() && c.compound.is_some())
+                {
+                    v.push(format!("{}: a block with media, audio or no place", c.id));
+                }
+                if let Some(k) = &c.compound
+                    && (c.source_in < 0 || c.source_in + c.duration > k.frames)
+                {
+                    v.push(format!(
+                        "{}: source {}..{} outside its compound (0..{})",
+                        c.id,
+                        c.source_in,
+                        c.source_in + c.duration,
+                        k.frames
+                    ));
                 }
                 continue;
             }
