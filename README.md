@@ -202,6 +202,12 @@ vidcut -p talk.vidcut export start talk.mp4 --set audio.loudness=-14  # YouTube 
 
 Every command is a method of the protocol: `vidcut edit split` is `edit.split`, and its flags are the method's parameters (`--volume-db` for `volume_db`). Every command takes `--json` for machine-readable output. `vidcut schema` lists the full protocol. Add `--headless` to work on the file directly even while a GUI has it open.
 
+## Moving a project
+
+- **Keep the media in the project's folder**, or under it: the project file stores their paths relative to it, so the folder can move or go to another computer and the project still finds them. So do proxies made beside the project. Media elsewhere keep their absolute paths; point one at its new place with `vidcut -p talk.vidcut media relink m1 /new/place/cam.mp4`.
+- **To DaVinci Resolve:** export `cut.otioz` (File > Export Timeline with Media (OTIOZ)…), which carries the media, and import it in Resolve with File > Import Timeline: the media unpack next to it and link themselves. A `.otio` names the media by absolute path; when they aren't there, Resolve asks for the folder they are in and looks in its subfolders too. Clips still offline relink from the Media Pool with Relink Media or Relink Selected Clips.
+- **Back from Resolve or another computer:** `vidcut -p cut.vidcut timeline import cut.otio` finds media named relative to the file, or in a project folder that moved with it; `--search /mnt/footage` looks for the rest by file name, subfolders too. In the GUI, File > Import Timeline (OTIO)… asks for that folder.
+
 ## Use with AI agents
 
 `vidcut mcp` serves the Model Context Protocol, so an AI agent can use every vidcut command as a tool. If the project is open in the GUI, you watch the agent's edits happen. With Claude Code:

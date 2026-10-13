@@ -6,6 +6,10 @@
 //! with the project state it was recorded against. If the file on disk differs
 //! from that state, someone edited it externally; the difference becomes one
 //! undoable "external change" step.
+//!
+//! Media and proxy files in or under the project's folder are written
+//! relative to it, so the folder moves with its media (to another computer,
+//! say); the others stay absolute. In memory every path is absolute.
 
 use std::fs::File;
 use std::io::Write;
@@ -82,7 +86,8 @@ impl Store {
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
         std::fs::create_dir_all(parent).map_err(|e| io(path, e))?;
-        write_atomic(path, &to_json(project)?).map_err(|e| io(path, e))?;
+        let dir = parent.canonicalize().map_err(|e| io(path, e))?;
+        write_atomic(path, &to_json(project, &dir)?).map_err(|e| io(path, e))?;
         let store = Self::open(path)?;
         // A fresh project starts with fresh history.
         let _ = std::fs::remove_file(&store.history_path);
@@ -118,6 +123,11 @@ impl Store {
         &self.path
     }
 
+    /// The project's folder, which relative paths in the file start from.
+    fn dir(&self) -> &Path {
+        self.path.parent().unwrap_or(Path::new("/"))
+    }
+
     /// The project file's current text.
     pub fn read(&self) -> Result<String> {
         std::fs::read_to_string(&self.path).map_err(|e| io(&self.path, e))
@@ -131,7 +141,7 @@ impl Store {
 
     /// Like [`load`](Self::load), for file text the caller already read.
     pub fn load_text(&self, text: &str) -> Result<Editor> {
-        let project = parse(&self.path, text)?;
+        let project = parse(&self.path, self.dir(), text)?;
         let sidecar = std::fs::read_to_string(&self.history_path)
             .ok()
             .and_then(|t| serde_json::from_str::<Sidecar>(&t).ok())
@@ -180,7 +190,7 @@ impl Store {
     /// Writes the project and its history. Callers hold the
     /// [`lock`](Self::lock).
     pub fn save(&self, editor: &Editor) -> Result<Saved> {
-        let text = to_json(editor.project())?;
+        let text = to_json(editor.project(), self.dir())?;
         let sidecar = Sidecar {
             project_path: self.path.clone(),
             head: editor.project().clone(),
@@ -237,16 +247,38 @@ fn io(path: &Path, e: std::io::Error) -> Error {
     Error::internal(format!("{}: {e}", path.display()))
 }
 
-fn to_json(project: &Project) -> Result<String> {
+/// The paths of the files a project names: its media and their proxies.
+fn files(project: &mut Project) -> impl Iterator<Item = &mut PathBuf> {
+    project
+        .media
+        .iter_mut()
+        .flat_map(|m| std::iter::once(&mut m.path).chain(m.proxy.as_mut().map(|p| &mut p.path)))
+}
+
+/// The file's text, with the paths in or under `dir` relative to it.
+fn to_json(project: &Project, dir: &Path) -> Result<String> {
+    let mut project = project.clone();
+    for path in files(&mut project) {
+        if let Ok(relative) = path.strip_prefix(dir) {
+            *path = relative.to_path_buf();
+        }
+    }
     let mut s =
-        serde_json::to_string_pretty(project).map_err(|e| Error::internal(e.to_string()))?;
+        serde_json::to_string_pretty(&project).map_err(|e| Error::internal(e.to_string()))?;
     s.push('\n');
     Ok(s)
 }
 
-fn parse(path: &Path, text: &str) -> Result<Project> {
-    let project: Project = serde_json::from_str(text)
+/// The project in the file's `text`, its relative paths made absolute from
+/// `dir`.
+fn parse(path: &Path, dir: &Path, text: &str) -> Result<Project> {
+    let mut project: Project = serde_json::from_str(text)
         .map_err(|e| Error::invalid(format!("{} is not a vidcut project: {e}", path.display())))?;
+    for file in files(&mut project) {
+        if file.is_relative() {
+            *file = dir.join(&*file);
+        }
+    }
     if project.vidcut > FORMAT_VERSION {
         return Err(Error::invalid(format!(
             "{} uses project format {}, newer than this vidcut ({FORMAT_VERSION})",
@@ -294,10 +326,19 @@ mod tests {
     use crate::test_support::FakeEnv;
     use serde_json::json;
 
-    fn isolated_state(dir: &Path) {
-        // SAFETY: tests in this module only set XDG_STATE_HOME to a temp dir
-        // and never read it concurrently with a different value.
-        unsafe { std::env::set_var("XDG_STATE_HOME", dir.join("state")) };
+    /// Points `XDG_STATE_HOME` at one temp dir for all of this module's
+    /// tests, which run in parallel: set once, before any of them reads it.
+    fn isolated_state() {
+        static STATE: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+        STATE.get_or_init(|| {
+            let dir = tempfile::Builder::new()
+                .prefix("vidcut-state-")
+                .tempdir()
+                .unwrap();
+            // SAFETY: nothing else in this test binary reads or writes it.
+            unsafe { std::env::set_var("XDG_STATE_HOME", dir.path()) };
+            dir
+        });
     }
 
     fn apply(store: &Store, env: &dyn Env, req: serde_json::Value) -> Result<crate::Response> {
@@ -313,7 +354,7 @@ mod tests {
             .tempdir()
             .unwrap();
         let dir = tmp.path();
-        isolated_state(dir);
+        isolated_state();
         let env = FakeEnv::default().with(
             "/m.mp4",
             crate::test_support::media_info(4.0, crate::time::Rational::new(25, 1).unwrap(), true),
@@ -412,5 +453,88 @@ mod tests {
             .unwrap();
         assert!(history_error.is_some_and(|e| e.contains(".json")));
         assert_eq!(other.load().unwrap().project().media.len(), 1);
+    }
+
+    #[test]
+    fn media_in_the_project_folder_move_with_it() {
+        let tmp = tempfile::Builder::new()
+            .prefix("vidcut-store-")
+            .tempdir()
+            .unwrap();
+        let dir = tmp.path().canonicalize().unwrap();
+        isolated_state();
+        let film = dir.join("film");
+        let inside = film.join("footage").join("a.mp4");
+        let info =
+            crate::test_support::media_info(4.0, crate::time::Rational::new(25, 1).unwrap(), true);
+        let env = FakeEnv::default()
+            .with(inside.to_str().unwrap(), info.clone())
+            .with("/elsewhere/b.mp4", info);
+        let path = film.join("p.vidcut");
+        let store = Store::create(&path, &Project::new(Settings::default())).unwrap();
+        apply(
+            &store,
+            &env,
+            json!({"method": "media.add", "params": {"paths": [inside, "/elsewhere/b.mp4"]}}),
+        )
+        .unwrap();
+        let file = |path: &Path| -> serde_json::Value {
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+        };
+        let paths = |path: &Path| -> Vec<PathBuf> {
+            Store::open(path)
+                .unwrap()
+                .load()
+                .unwrap()
+                .project()
+                .media
+                .iter()
+                .map(|m| m.path.clone())
+                .collect()
+        };
+
+        // In the file, the media in the folder are relative; in memory,
+        // absolute.
+        let text = file(&path);
+        assert_eq!(text["media"][0]["path"], "footage/a.mp4");
+        assert_eq!(text["media"][1]["path"], "/elsewhere/b.mp4");
+        assert_eq!(
+            paths(&path),
+            [inside.clone(), PathBuf::from("/elsewhere/b.mp4")]
+        );
+
+        // Proxies beside the project too.
+        let mut text = text;
+        text["media"][0]["proxy"] = json!({
+            "path": film.join("proxies").join("a.mov"),
+            "source_size": 0, "source_mtime_ns": 0,
+            "width": 640, "height": 360, "codec": "h264",
+        });
+        std::fs::write(&path, text.to_string()).unwrap();
+        apply(
+            &store,
+            &env,
+            json!({"method": "marks.set", "params": {"in": 1, "out": 2}}),
+        )
+        .unwrap();
+        assert_eq!(file(&path)["media"][0]["proxy"]["path"], "proxies/a.mov");
+
+        // A copy of the folder finds its own media; the others stay where
+        // they were.
+        let moved = dir.join("moved");
+        std::fs::create_dir_all(&moved).unwrap();
+        std::fs::copy(&path, moved.join("p.vidcut")).unwrap();
+        let project = Store::open(&moved.join("p.vidcut"))
+            .unwrap()
+            .load()
+            .unwrap()
+            .project()
+            .clone();
+        assert_eq!(project.media[0].path, moved.join("footage").join("a.mp4"));
+        assert_eq!(project.media[1].path, PathBuf::from("/elsewhere/b.mp4"));
+        assert_eq!(
+            project.media[0].proxy.as_ref().unwrap().path,
+            moved.join("proxies").join("a.mov")
+        );
     }
 }
