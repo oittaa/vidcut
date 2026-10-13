@@ -907,6 +907,12 @@ for f in ["cut.otio", "cut.otioz", "cut.otiod"]:
     print(f, len(tl.find_clips()), c.source_range.start_time.value,
           c.available_range().start_time.value, c.range_in_parent().start_time.value)
 tl = otio.adapters.read_from_file("cut.otio")
+# Its bundler needs Windows paths as file: URLs (deviation X9).
+import pathlib, re
+for c in tl.find_clips():
+    r = c.media_reference
+    if isinstance(r, otio.schema.ExternalReference) and re.match(r"[A-Za-z]:[\\/]", r.target_url):
+        r.target_url = pathlib.Path(r.target_url).as_uri()
 otio.adapters.write_to_file(tl, "py.otioz")
 "#,
     );
