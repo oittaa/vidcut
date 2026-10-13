@@ -262,6 +262,12 @@ impl FrameReader {
         }
     }
 
+    /// The GPU that decoded the last frame it rendered (`None`: the CPU,
+    /// or black).
+    pub fn decoded_on(&self) -> Option<crate::hw::Kind> {
+        self.frames.as_ref().and_then(|(.., f)| f.decoded_on())
+    }
+
     /// `piece`'s first frame as export samples it, at `width`×`height`
     /// (packed RGBA, the picture fit inside, padded black).
     pub fn rgba(
