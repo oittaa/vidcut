@@ -157,6 +157,10 @@ pub enum Picture {
     /// Luma noise, new in every frame: as hard to compress as a picture
     /// gets (for rate control tests).
     Noise,
+    /// Black but for a highlight of two white pixels side by side (SDR
+    /// white in HDR), at [`Picture::highlight`]: between the points of any
+    /// grid of every other pixel or fewer (for measured light).
+    Highlight,
 }
 
 impl Picture {
@@ -169,6 +173,12 @@ impl Picture {
         (120, 100, 110),
         (80, 150, 150),
     ];
+
+    /// The left pixel of [`Picture::Highlight`] in a `w`×`h` picture: an
+    /// odd column on an odd row, near the middle.
+    pub fn highlight(w: u32, h: u32) -> (u32, u32) {
+        ((w / 2) | 1, (h / 2) | 1)
+    }
 
     /// Luma of shot `s` of [`Picture::Shots`]: 16 (black) for every fourth.
     pub fn shot_level(s: u32) -> u8 {
@@ -474,6 +484,7 @@ impl FixtureSpec {
             (true, Picture::Shots { frames }) => format!("shots{frames}-"),
             (true, Picture::Colors) => "colors".to_string(),
             (true, Picture::Noise) => "noise".to_string(),
+            (true, Picture::Highlight) => "hl".to_string(),
         };
         let rot = match self.rotation {
             0 => String::new(),
@@ -1045,6 +1056,12 @@ impl VideoTrack {
             }
             Picture::Barcode => crate::barcode::paint(k, &mut self.luma8, w, h, w),
             Picture::Black => self.luma8.fill(16),
+            Picture::Highlight => {
+                self.luma8.fill(16);
+                let (x, y) = Picture::highlight(spec.width, spec.height);
+                let i = y as usize * w + x as usize;
+                self.luma8[i..i + 2].fill(235);
+            }
             Picture::Noise => {
                 // xorshift, seeded by the frame: the same file every time.
                 let mut x = 0x9E37_79B9_7F4A_7C15u64 ^ u64::from(k).wrapping_mul(0x2545_F491);

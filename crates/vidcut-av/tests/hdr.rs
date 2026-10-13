@@ -1,7 +1,7 @@
 //! HDR metadata in files: the fixtures carry it as encoders and muxers
 //! write it (the bitstream and the container), and the probe reads it.
 
-use vidcut_av::fixture::{self, Container, FixtureSpec, HdrMeta, VideoCodec};
+use vidcut_av::fixture::{self, Container, FixtureSpec, HdrMeta, Picture, VideoCodec};
 use vidcut_av::hdr;
 use vidcut_av::light::{self, Span};
 use vidcut_core::model::{Hdr, LightLevel};
@@ -777,6 +777,53 @@ fn light_levels_are_measured_where_the_sources_say_none() {
             m.why
         );
         assert_eq!(stream_values(&out).light, Some(l), "{what}");
+    }
+}
+
+#[test]
+fn a_highlight_of_two_pixels_is_the_peak() {
+    // Big enough for the average and the distribution to read every
+    // fourth pixel; the highlight is between those. Lossless, the SDR one
+    // is white exactly; the encode softens PQ's, far above the black
+    // around it still (a sampled peak read 0.07 cd/m²).
+    vidcut_av::init();
+    for (what, spec, peak) in [
+        (
+            "PQ",
+            FixtureSpec::new(VideoCodec::Hevc10, Container::Mkv, 1920, 1080, (30, 1), 3)
+                .hdr(Hdr::Pq),
+            20.0..=230.0,
+        ),
+        (
+            "SDR",
+            FixtureSpec::new(VideoCodec::Ffv1, Container::Mkv, 1920, 1080, (30, 1), 3),
+            202.9..=203.1,
+        ),
+    ] {
+        let path = fixture::ensure(&spec.picture(Picture::Highlight).no_audio()).unwrap();
+        let span = Span {
+            input: vidcut_av::decode::Input::File(path),
+            from: 0.0,
+            to: 0.1,
+        };
+        let a = light::analysis(&span, true, None, &mut |_| {})
+            .unwrap()
+            .unwrap();
+        assert_eq!(a.frames.len(), 3, "{what}");
+        for (t, f) in &a.frames {
+            // White: each channel's peak, as HDR10+ made from it says.
+            assert!(peak.contains(&f.max), "{what} at {t}: {f:?}");
+            for v in f.hdr10plus().maxscl {
+                assert!(peak.contains(&(v as f32)), "{what} at {t}: {f:?}");
+            }
+            // The rest is black.
+            assert!(
+                f.average < 0.1 && f.percentiles[8] < 0.1,
+                "{what} at {t}: {f:?}"
+            );
+        }
+        let level = a.level((0..3).map(|k| f64::from(k) / 30.0)).unwrap();
+        assert!(peak.contains(&(level.max_cll as f32)), "{what}: {level:?}");
     }
 }
 
