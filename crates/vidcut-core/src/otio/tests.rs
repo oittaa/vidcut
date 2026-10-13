@@ -2437,3 +2437,85 @@ fn a_clip_keeps_its_pace_through_an_export() {
     let first: Vec<i64> = (0..4).map(|t| c.source_at(t)).collect();
     assert_eq!((first, c.source_at(98)), (vec![148, 147, 147, 146], 99));
 }
+
+#[test]
+fn a_compound_clip_plays_what_it_holds_at_its_speed() {
+    // Decision D48: a clip 0..100 under a compound clip (20..80) holding A,
+    // 30 frames from source 30, then B, 30 from source 100.
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.append("m1", 0, 100);
+    let mut doc = export(f.editor.project(), "cmp", None, Locations::Absolute).unwrap();
+    let mut compound = otio_compound("my compound", "Compound Clip", "Video", 60.0);
+    let mut a = compound["children"][0]["children"][0].clone();
+    a["source_range"]["start_time"]["value"] = json!(30.0);
+    a["source_range"]["duration"]["value"] = json!(30.0);
+    let mut b = a.clone();
+    b["source_range"]["start_time"]["value"] = json!(100.0);
+    compound["children"][0]["children"] = json!([a, b]);
+    let tracks = doc["tracks"]["children"].as_array_mut().unwrap();
+    let mut v2 = tracks[0].clone();
+    v2["name"] = json!("Video 2");
+    v2["metadata"] = json!({});
+    v2["children"] = json!([gap(20, 25.0), compound]);
+    tracks.insert(1, v2);
+    let fresh = || {
+        let mut g = Fixture::new(&[(10.0, true)]);
+        g.ok(req("timeline.import", json!({ "otio": doc.clone() })));
+        let id = g.editor.project().track("V2").unwrap().clips[0].id.clone();
+        (g, id)
+    };
+    let shown = |g: &Fixture| -> Vec<(i64, i64, f64)> {
+        crate::render::flatten(g.editor.project(), 0, 100)
+            .unwrap()
+            .video
+            .iter()
+            .map(|v| match v {
+                crate::render::VideoPiece::Source {
+                    source_frame,
+                    frames,
+                    pace,
+                    ..
+                } => (*source_frame, *frames, pace.speed),
+                crate::render::VideoPiece::Black { frames } => (-1, *frames, 0.0),
+            })
+            .collect()
+    };
+
+    // Twice as fast it shows all 60 frames in 30, then the clip under it.
+    let (mut g, id) = fresh();
+    g.ok(req(
+        "edit.change_speed",
+        json!({"clips": id, "speed": 2.0, "ripple": false}),
+    ));
+    assert_eq!(
+        shown(&g),
+        [(0, 20, 1.0), (30, 15, 2.0), (100, 15, 2.0), (50, 50, 1.0)]
+    );
+
+    // Backward, B from its last frame, then A.
+    let (mut g, id) = fresh();
+    g.ok(req(
+        "edit.change_speed",
+        json!({"clips": id, "speed": -1.0, "ripple": false}),
+    ));
+    assert_eq!(
+        shown(&g),
+        [(0, 20, 1.0), (129, 30, -1.0), (59, 30, -1.0), (80, 20, 1.0)]
+    );
+    // Decomposed, the same clips at the same speed.
+    g.ok(req("edit.decompose", json!({"clips": [id]})));
+    let held: Vec<(i64, i64, i64, f64)> = g
+        .editor
+        .project()
+        .track("V2")
+        .unwrap()
+        .clips
+        .iter()
+        .map(|c| (c.start, c.duration, c.source_in, c.speed()))
+        .collect();
+    assert_eq!(held, [(20, 30, 129, -1.0), (50, 30, 59, -1.0)]);
+    assert_eq!(
+        shown(&g),
+        [(0, 20, 1.0), (129, 30, -1.0), (59, 30, -1.0), (80, 20, 1.0)]
+    );
+}
