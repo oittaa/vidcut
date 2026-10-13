@@ -39,6 +39,11 @@ fn filters() -> [(&'static str, Vec<&'static str>); 3] {
     ]
 }
 
+/// Every file type vidcut imports, for a file dialog.
+pub(super) fn media_types() -> Vec<&'static str> {
+    [MEDIA_TYPES, IMAGE_TYPES].concat()
+}
+
 fn extension(path: &Path) -> String {
     path.extension()
         .map(|e| e.to_string_lossy().to_lowercase())

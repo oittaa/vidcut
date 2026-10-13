@@ -204,7 +204,8 @@ Every command is a method of the protocol: `vidcut edit split` is `edit.split`, 
 
 ## Moving a project
 
-- **Keep the media in the project's folder**, or under it: the project file stores their paths relative to it, so the folder can move or go to another computer and the project still finds them. So do proxies made beside the project. Media elsewhere keep their absolute paths; point one at its new place with `vidcut -p talk.vidcut media relink m1 /new/place/cam.mp4`.
+- **Keep the media in the project's folder**, or under it: the project file stores their paths relative to it, so the folder can move or go to another computer and the project still finds them. So do proxies made beside the project. Media elsewhere keep their absolute paths.
+- **Media that moved** are marked MISSING in the Media Pool. Relink Media in its header asks for a folder, looks there and in its subfolders for every missing file by name, and relinks the ones that are the same file (size, streams and a fingerprint of the content); the others are listed with why. From the CLI: `vidcut -p talk.vidcut media relink --search /mnt/footage`.
 - **To DaVinci Resolve:** export `cut.otioz` (File > Export Timeline with Media (OTIOZ)…), which carries the media, and import it in Resolve with File > Import Timeline: the media unpack next to it and link themselves. A `.otio` names the media by absolute path; when they aren't there, Resolve asks for the folder they are in and looks in its subfolders too. Clips still offline relink from the Media Pool with Relink Media or Relink Selected Clips.
 - **Back from Resolve or another computer:** `vidcut -p cut.vidcut timeline import cut.otio` finds media named relative to the file, or in a project folder that moved with it; `--search /mnt/footage` looks for the rest by file name, subfolders too. In the GUI, File > Import Timeline (OTIO)… asks for that folder.
 

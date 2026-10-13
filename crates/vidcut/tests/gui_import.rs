@@ -1,6 +1,7 @@
 //! Importing media under simulated input (egui_kittest, no window): numbered
 //! images are asked about, one clip per run (an image sequence, spec D39) or
-//! separate stills (deviation X17), and the import is one request.
+//! separate stills (deviation X17), and the import is one request. Media
+//! that moved are marked and relinked from a folder (deviation X1).
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -41,6 +42,8 @@ struct FakeDialogs {
     picks: Arc<Mutex<u32>>,
     /// The folder each one started in.
     folders: Arc<Mutex<Vec<PathBuf>>>,
+    /// What a folder dialog picks.
+    folder: Arc<Mutex<Option<PathBuf>>>,
 }
 
 impl Dialogs for FakeDialogs {
@@ -52,7 +55,7 @@ impl Dialogs for FakeDialogs {
         None
     }
     fn pick_folder(&self, _: &str, _: &Path) -> Option<PathBuf> {
-        None
+        self.folder.lock().unwrap().clone()
     }
     fn pick_files(&self, _: &str, folder: &Path, _: &[(&str, &[&str])]) -> Vec<PathBuf> {
         *self.picks.lock().unwrap() += 1;
@@ -160,10 +163,12 @@ fn numbered_images_are_asked_about() {
     let picked = Arc::new(Mutex::new(Vec::new()));
     let picks = Arc::new(Mutex::new(0));
     let folders = Arc::new(Mutex::new(Vec::new()));
+    let folder = Arc::new(Mutex::new(None));
     let dialogs = Arc::new(FakeDialogs {
         files: picked.clone(),
         picks: picks.clone(),
         folders: folders.clone(),
+        folder: folder.clone(),
     });
     let mut ws = Workspace::new(h.clone());
     ws.set_dialogs(dialogs.clone());
@@ -345,6 +350,43 @@ fn numbered_images_are_asked_about() {
         !folders.lock().unwrap().is_empty()
     });
     assert_eq!(*folders.lock().unwrap(), [images]);
+
+    // 7. A file that moved is marked missing; Relink Media looks for it in
+    // the folder chosen and its subfolders, and relinks it as it is the same
+    // file.
+    let footage = dir.join("footage");
+    std::fs::create_dir_all(&footage).unwrap();
+    std::fs::copy(&video, footage.join("moved.mp4")).unwrap();
+    let added = call(
+        &h,
+        "media.add",
+        json!({ "paths": [footage.join("moved.mp4")] }),
+    );
+    let id = added.result["media"][0].as_str().unwrap().to_string();
+    let disk = dir.join("disk");
+    std::fs::create_dir_all(&disk).unwrap();
+    std::fs::rename(&footage, disk.join("footage")).unwrap();
+    until(&mut harness, "the missing file", |h| {
+        has(h, "Relink Media (1)")
+    });
+    let listed = call(&h, "media.get", json!({ "media": id })).result;
+    assert_eq!(listed["missing"], true);
+    *folder.lock().unwrap() = Some(disk.clone());
+    harness.get_by_label("Relink Media (1)").click();
+    until(&mut harness, "the result", |h| has(h, "1 relinked"));
+    let m = call(&h, "media.get", json!({ "media": id })).result;
+    let moved = disk
+        .join("footage")
+        .join("moved.mp4")
+        .canonicalize()
+        .unwrap();
+    assert_eq!(m["path"], json!(moved));
+    assert!(m.get("missing").is_none(), "{m}");
+    until(&mut harness, "no missing file", |h| {
+        !has(h, "Relink Media (")
+    });
+    harness.get_by_label("Close").click();
+    until(&mut harness, "the window closed", |h| !has(h, "1 relinked"));
 
     drop(harness);
     h.shutdown();

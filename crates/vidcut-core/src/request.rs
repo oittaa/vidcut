@@ -80,9 +80,23 @@ pub enum Request {
         #[serde(default)]
         force: bool,
     },
-    /// Point a pool entry at another file (re-probed).
+    /// Point pool items at their files again (re-probed): one at `path`, or
+    /// each found by name in the `search` folders and their subfolders.
+    /// A file found is relinked only if it is the item's file (the same
+    /// size, streams and fingerprint); the result lists the others with
+    /// why. A file given as `path` is relinked either way.
     #[serde(rename = "media.relink")]
-    MediaRelink { media: String, path: PathBuf },
+    MediaRelink {
+        /// Media ids. Absent: every item whose file is missing.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        media: Option<OneOrMany<String>>,
+        /// The file, for one item.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<PathBuf>,
+        /// Folders to look in by file name, subfolders too.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        search: Vec<PathBuf>,
+    },
     #[serde(rename = "media.rename")]
     MediaRename { media: String, name: String },
     // Decisions D5, D6.
@@ -1256,8 +1270,10 @@ impl Request {
     pub fn paths_mut(&mut self) -> Vec<&mut PathBuf> {
         match self {
             Self::MediaAdd { paths, .. } => paths.iter_mut().collect(),
-            Self::MediaRelink { path, .. }
-            | Self::Probe { path }
+            Self::MediaRelink { path, search, .. } => {
+                path.iter_mut().chain(search.iter_mut()).collect()
+            }
+            Self::Probe { path }
             | Self::ProjectOpen { path, .. }
             | Self::ProjectCreate { path, .. } => vec![path],
             Self::TimelineImport {

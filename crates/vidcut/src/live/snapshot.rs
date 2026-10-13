@@ -1,7 +1,7 @@
 //! What the live session publishes for the GUI: an immutable snapshot the UI
 //! thread reads without ever waiting on the session.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -181,6 +181,8 @@ pub struct Snapshot {
     pub log: Arc<VecDeque<LogEntry>>,
     pub notices: Arc<VecDeque<Notice>>,
     pub thumbs: Arc<HashMap<String, Arc<Filmstrip>>>,
+    /// Media whose files are missing (an image sequence's first picture).
+    pub missing: Arc<HashSet<String>>,
     /// Audio peaks of media (their first audio stream).
     pub waveforms: Arc<HashMap<String, Arc<vidcut_av::waveform::Waveform>>>,
     /// Export jobs, oldest first.
