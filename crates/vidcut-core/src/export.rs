@@ -245,7 +245,9 @@ pub struct VideoSettings {
     /// luminance in 1/10000 cd/m². Unset: from the sources.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mastering_display: Option<String>,
-    /// MaxCLL and MaxFALL in cd/m² (`1000,400`). Unset: from the sources.
+    /// MaxCLL and MaxFALL in cd/m² (`1000,400`), or `measure`: measured
+    /// in every picture shown. Unset: from the sources, measured where they
+    /// say none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_cll: Option<String>,
 }
@@ -704,7 +706,7 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
         if let Some(m) = &v.mastering_display {
             metadata::parse_mastering(m)?;
         }
-        if let Some(l) = &v.max_cll {
+        if let Some(l) = v.max_cll.as_deref().filter(|l| *l != metadata::MEASURE) {
             metadata::parse_light(l)?;
         }
         if v.hdr_metadata.dolby_vision() && !matches!(v.codec, V::Hevc | V::Av1) {

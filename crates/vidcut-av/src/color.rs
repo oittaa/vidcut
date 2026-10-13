@@ -124,6 +124,37 @@ pub fn colors_of(f: &frame::Video) -> Colors {
     }
 }
 
+/// How to read `f`'s samples as the light they have in PQ output, as the
+/// export converts them: the YUV matrix and range, the transfer, and the
+/// gamut to BT.2020 in linear light (the identity for HDR).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PqLight {
+    pub kr: f64,
+    pub kb: f64,
+    pub full_range: bool,
+    /// Already RGB (images): no matrix.
+    pub rgb: bool,
+    pub hdr: Option<Hdr>,
+    pub gamut: [[f64; 3]; 3],
+}
+
+pub(crate) fn pq_light(f: &frame::Video) -> PqLight {
+    let s = Source::of(f);
+    let sc = shader_colors(Colors {
+        matrix: s.matrix,
+        full_range: s.full_range,
+        hdr: s.hdr,
+    });
+    PqLight {
+        kr: sc.kr,
+        kb: sc.kb,
+        full_range: s.full_range,
+        rgb: s.rgb,
+        hdr: s.hdr,
+        gamut: gamut(Primaries::of(s), Primaries::Bt2020),
+    }
+}
+
 fn is_rgb(p: format::Pixel) -> bool {
     p.descriptor()
         .is_some_and(|d| unsafe { (*d.as_ptr()).flags } & ffi::AV_PIX_FMT_FLAG_RGB as u64 != 0)

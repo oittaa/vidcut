@@ -3,6 +3,7 @@
 
 use vidcut_av::fixture::{self, Container, FixtureSpec, HdrMeta, VideoCodec};
 use vidcut_av::hdr;
+use vidcut_av::light::{self, Span};
 use vidcut_core::model::{Hdr, LightLevel};
 
 fn close(a: f64, b: f64) -> bool {
@@ -77,6 +78,7 @@ fn hdr10_values_are_in_the_stream_the_container_and_the_probe() {
 // ---------------------------------------------------------------- exports
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use vidcut_av::export::{self, encode::Availability};
@@ -249,7 +251,13 @@ fn mixed_sources_give_the_widest_values_and_sdr_none() {
     vidcut_av::init();
     let a = hdr10_source(1000, (1000, 400), true);
     let b = hdr10_source(4000, (2000, 300), false);
-    let p = plan(vec![piece(&a, 0, 10), piece(&b, 0, 10)]);
+    let mut p = plan(vec![
+        piece(&a, 0, 10),
+        piece(&b, 0, 10),
+        VideoPiece::Black { frames: 5 },
+    ]);
+    p.frames = 25;
+    p.range.1 = 25;
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("mixed.mkv");
     let r = render(
@@ -258,11 +266,11 @@ fn mixed_sources_give_the_widest_values_and_sdr_none() {
         &out,
     );
     let m = r.metadata.unwrap();
-    assert_eq!(m.mode, HdrMetadata::Static, "{:?}", m.why);
+    assert_eq!(m.mode, HdrMetadata::Hdr10plus, "{:?}", m.why);
     assert!(
         m.why
             .iter()
-            .any(|w| w == "No HDR10+: 50% of the picture has none"),
+            .any(|w| w == "HDR10+: kept, and made from the measured light of the 60% without it"),
         "{:?}",
         m.why
     );
@@ -275,13 +283,25 @@ fn mixed_sources_give_the_widest_values_and_sdr_none() {
             max_fall: 400
         })
     );
-    // No frame has HDR10+: neither the clip that had it, nor the other.
-    assert!(
-        hdr::read_frames(&out, true, usize::MAX)
-            .unwrap()
-            .iter()
-            .all(|f| f.hdr10plus.is_none())
-    );
+    // The clip that had HDR10+ keeps each frame's; the other's frames get
+    // it made from their measured light, black of none.
+    let frames = hdr::read_frames(&out, true, usize::MAX).unwrap();
+    assert_eq!(frames.len(), 25);
+    let span = Span::of(&p.video[1], p.fps).unwrap();
+    let measured = light::analysis(&span, false, None, &mut |_| {})
+        .unwrap()
+        .expect("measured for the export");
+    for (i, f) in frames.iter().enumerate() {
+        let want = match i {
+            0..10 => fixture::hdr10plus_t35(i as u32),
+            10..20 => measured.frames[i - 10].1.hdr10plus().t35(),
+            _ => light::FrameLight::default().hdr10plus().t35(),
+        };
+        assert_eq!(f.hdr10plus.as_deref(), Some(want.as_slice()), "frame {i}");
+    }
+    // Made from the frame's light: SDR white at the 99th percentile.
+    let made = &measured.frames[0].1.hdr10plus();
+    assert!((195.0..=212.0).contains(&made.percentiles[8].1), "{made:?}");
 
     // SDR: tone-mapped, nothing of the sources' metadata left.
     let out = dir.path().join("sdr.mkv");
@@ -348,7 +368,8 @@ fn real_clips_keep_their_hdr_metadata() {
     }
 
     // HDR10+ on every frame of 4K AV1, scaled down: each frame keeps its
-    // own. The clip has no static values: BT.2020 at 1000 cd/m² is assumed.
+    // own. The clip has no mastering display: BT.2020 at 1000 cd/m² is
+    // assumed.
     if let Some(plus) = media("hdr10plus-croatia-av1", "B_1.mp4") {
         let out = dir.path().join("plus.webm");
         let r = render(
@@ -359,7 +380,11 @@ fn real_clips_keep_their_hdr_metadata() {
         let m = r.metadata.unwrap();
         assert_eq!(m.mode, HdrMetadata::Hdr10plus, "{:?}", m.why);
         assert!(close(m.mastering.unwrap().max_nits, 1000.0));
-        assert_eq!(m.light, None);
+        // Nor light levels: measured, highlights of some thousand cd/m² in a
+        // dark picture.
+        let l = m.light.expect("measured");
+        assert!(l.max_cll > 2000 && l.max_fall < 100, "{l:?}");
+        assert_eq!(stream_values(&out).light, Some(l));
         let source = hdr::read_frames(&plus, true, 30).unwrap();
         let output = hdr::read_frames(&out, true, 30).unwrap();
         assert_eq!(output.len(), 30);
@@ -404,25 +429,36 @@ fn real_clips_keep_their_hdr_metadata() {
             assert_eq!(frames.len(), 30);
             assert!(frames.iter().all(|f| f.dolby_vision), "{container:?}");
         }
-        // A gap's black frames have no RPU: Dolby Vision is left out, and
+        // A gap's black frames take the RPU of the frame before; before
+        // the first picture there is none, so Dolby Vision is left out, and
         // the export goes on (libx265 stops at a frame without one).
-        let mut p = clip_plan(&dv, 60, 20, 960, 540);
-        p.video.push(VideoPiece::Black { frames: 10 });
-        p.frames += 10;
-        p.range.1 += 10;
-        let out = dir.path().join("dv-gap.mkv");
-        let r = render(
-            &p,
-            &settings(VCodec::Hevc, OutContainer::Mkv, HdrMode::Auto),
-            &out,
-        );
-        assert_eq!(r.metadata.unwrap().mode, HdrMetadata::None);
-        assert!(
-            hdr::read_frames(&out, true, usize::MAX)
-                .unwrap()
-                .iter()
-                .all(|f| !f.dolby_vision)
-        );
+        for leading in [false, true] {
+            let mut p = clip_plan(&dv, 60, 20, 960, 540);
+            let black = VideoPiece::Black { frames: 10 };
+            if leading {
+                p.video.insert(0, black);
+            } else {
+                p.video.push(black);
+            }
+            p.frames += 10;
+            p.range.1 += 10;
+            let out = dir.path().join("dv-gap.mkv");
+            let r = render(
+                &p,
+                &settings(VCodec::Hevc, OutContainer::Mkv, HdrMode::Auto),
+                &out,
+            );
+            let m = r.metadata.unwrap();
+            let frames = hdr::read_frames(&out, true, usize::MAX).unwrap();
+            assert_eq!(frames.len(), 30);
+            if leading {
+                assert_eq!(m.mode, HdrMetadata::None, "{:?}", m.why);
+                assert!(frames.iter().all(|f| !f.dolby_vision));
+            } else {
+                assert_eq!(m.mode, HdrMetadata::DolbyVision, "{:?}", m.why);
+                assert!(frames.iter().all(|f| f.dolby_vision));
+            }
+        }
     }
 }
 
@@ -532,7 +568,7 @@ fn gpu_encoders_write_the_hdr_metadata() {
         }
 
         // With an SDR clip (converted into PQ, by libplacebo on NVENC):
-        // the widest values, and no HDR10+.
+        // the widest values, and HDR10+ made for the SDR clip's frames.
         let p = plan(vec![piece(&sdr, 0, 10), piece(&plus, 0, 10)]);
         let out = dir
             .path()
@@ -546,13 +582,122 @@ fn gpu_encoders_write_the_hdr_metadata() {
             &mut |_| {},
         )
         .unwrap();
-        assert_eq!(r.metadata.unwrap().mode, HdrMetadata::Static, "{name}");
+        assert_eq!(r.metadata.unwrap().mode, HdrMetadata::Hdr10plus, "{name}");
         assert_eq!(stream_values(&out).light, want.light, "{name}: mixed");
         let frames = hdr::read_frames(&out, true, usize::MAX).unwrap();
+        assert_eq!(frames.len(), 20, "{name}: mixed");
+        for (i, f) in frames.iter().enumerate().skip(10) {
+            assert_eq!(
+                f.hdr10plus.as_deref(),
+                Some(fixture::hdr10plus_t35(i as u32 - 10).as_slice()),
+                "{name}: mixed, frame {i}"
+            );
+        }
         assert!(
-            frames.iter().all(|f| f.hdr10plus.is_none()),
+            frames[..10].iter().all(|f| f.hdr10plus.is_some()),
             "{name}: mixed"
         );
     }
     assert!(tried > 0, "no GPU encoder of HEVC or AV1 here");
+}
+
+// ---------------------------------------------------------------- measured light
+
+#[test]
+fn light_is_measured_as_a_pq_export_shows_it() {
+    // The barcodes' white is SDR white in each: 203 cd/m² in PQ output,
+    // whatever the source's transfer. 33 frames: no other test measures
+    // these files.
+    vidcut_av::init();
+    for (what, spec) in [
+        (
+            "PQ",
+            FixtureSpec::new(VideoCodec::Hevc10, Container::Mkv, 320, 180, (30, 1), 33)
+                .hdr(Hdr::Pq),
+        ),
+        (
+            "HLG",
+            FixtureSpec::new(VideoCodec::Hevc10, Container::Mkv, 320, 180, (30, 1), 33)
+                .hdr(Hdr::Hlg),
+        ),
+        (
+            "SDR",
+            FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 33),
+        ),
+    ] {
+        let path = fixture::ensure(&spec.no_audio()).unwrap();
+        let span = |from, to| Span {
+            input: vidcut_av::decode::Input::File(path.clone()),
+            from,
+            to,
+        };
+        // Only what is asked for is measured, and the frame after.
+        let mut done = 0.0;
+        let part = light::analysis(&span(0.4, 0.7), true, None, &mut |s| done = s)
+            .unwrap()
+            .unwrap();
+        assert!(
+            (9..=11).contains(&part.frames.len()),
+            "{what}: {:?}",
+            part.spans
+        );
+        assert!(done > 0.8, "{what}: {done}");
+        assert!(
+            light::analysis(&span(0.0, 2.0), false, None, &mut |_| {})
+                .unwrap()
+                .is_none()
+        );
+        let a = light::analysis(&span(0.0, 2.0), true, None, &mut |_| {})
+            .unwrap()
+            .unwrap();
+        assert_eq!(a.frames.len(), 33, "{what}");
+        let level = a.level(0.0, 1.0).unwrap();
+        let f = a.at(0.5).unwrap();
+        // The white at the 99th percentile; the encode overshoots a little
+        // at the barcode's edges, which the peak shows.
+        assert!((195.0..=212.0).contains(&f.percentiles[8]), "{what}: {f:?}");
+        assert!(f.percentiles[0] < 1.0, "{what}: black, {f:?}");
+        assert!((200..=260).contains(&level.max_cll), "{what}: {level:?}");
+        // Half of the picture is white.
+        assert!((90..=115).contains(&level.max_fall), "{what}: {level:?}");
+        // Kept: the second time comes from memory.
+        let again = light::analysis(&span(0.1, 0.2), false, None, &mut |_| {})
+            .unwrap()
+            .unwrap();
+        assert!(Arc::ptr_eq(&a, &again));
+    }
+}
+
+#[test]
+fn light_levels_are_measured_where_the_sources_say_none() {
+    vidcut_av::init();
+    let dir = tempfile::tempdir().unwrap();
+    let hlg = fixture::ensure(
+        &FixtureSpec::new(VideoCodec::Hevc10, Container::Mkv, 320, 180, (30, 1), 30)
+            .hdr(Hdr::Hlg)
+            .no_audio(),
+    )
+    .unwrap();
+    let pq = hdr10_source(1000, (1000, 400), false);
+    let s = settings(VCodec::Hevc, OutContainer::Mkv, HdrMode::Pq);
+    let mut measure = s.clone();
+    measure.video.as_mut().unwrap().max_cll = Some("measure".into());
+    for (what, source, s) in [("HLG", &hlg, &s), ("measure", &pq, &measure)] {
+        let out = dir.path().join(format!("{what}.mkv"));
+        let r = render(&plan(vec![piece(source, 0, 20)]), s, &out);
+        let m = r.metadata.unwrap();
+        // The barcode's white, SDR white in PQ output, and a little
+        // overshoot at its edges.
+        let l = m.light.expect("measured");
+        assert!((200..=260).contains(&l.max_cll), "{what}: {l:?}");
+        assert!((90..=115).contains(&l.max_fall), "{what}: {l:?}");
+        assert!(
+            m.why
+                .iter()
+                .any(|w| w.starts_with("MaxCLL") && w.ends_with(": measured")),
+            "{what}: {:?}",
+            m.why
+        );
+        assert_eq!(stream_values(&out).light, Some(l), "{what}");
+    }
 }

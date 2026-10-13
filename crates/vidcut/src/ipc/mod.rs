@@ -68,7 +68,7 @@ pub fn run(
                     progress(&json!({
                         "output": i, "outputs": n, "path": path,
                         "frames": p.frames, "total": p.total,
-                        "pass": p.pass, "passes": p.passes,
+                        "pass": p.pass, "passes": p.passes, "measuring": p.measuring,
                         "elapsed": p.elapsed.as_secs_f64(),
                     }))
                 },

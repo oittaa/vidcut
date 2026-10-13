@@ -227,6 +227,8 @@ pub(crate) enum Msg {
         /// The run over the range, of `passes` (decision D45).
         pass: u8,
         passes: u8,
+        /// Measuring light, before encoding (decision D46).
+        measuring: bool,
     },
     JobDone {
         id: String,
@@ -879,12 +881,13 @@ impl Live {
                 total,
                 pass,
                 passes,
+                measuring,
             } => {
                 if let Some(j) = Arc::make_mut(&mut self.jobs)
                     .iter_mut()
                     .find(|j| j.id == id)
                 {
-                    j.progressed(output, frames, total, (pass, passes));
+                    j.progressed(output, frames, total, (pass, passes), measuring);
                 }
             }
             Msg::JobDone { id, result } => self.job_done(id, result),
@@ -1298,12 +1301,13 @@ impl Live {
                     total: p.total,
                     pass: p.pass,
                     passes: p.passes,
+                    measuring: p.measuring,
                 });
                 if let Some(ptx) = &progress_tx {
                     let _ = ptx.send(ReplyEvent::Progress(json!({
                         "job": id, "output": i, "outputs": n, "path": out,
                         "frames": p.frames, "total": p.total,
-                        "pass": p.pass, "passes": p.passes,
+                        "pass": p.pass, "passes": p.passes, "measuring": p.measuring,
                         "elapsed": p.elapsed.as_secs_f64(),
                     })));
                 }
@@ -1393,6 +1397,7 @@ impl Live {
                             total: p.total,
                             pass: p.pass,
                             passes: p.passes,
+                            measuring: p.measuring,
                         });
                         if let Some(ptx) = &progress {
                             let _ = ptx.send(ReplyEvent::Progress(json!({
@@ -2013,7 +2018,7 @@ impl Live {
                             let _ = tx.send(ReplyEvent::Progress(json!({
                                 "output": i, "outputs": n, "path": out,
                                 "frames": p.frames, "total": p.total,
-                                "pass": p.pass, "passes": p.passes,
+                                "pass": p.pass, "passes": p.passes, "measuring": p.measuring,
                                 "elapsed": p.elapsed.as_secs_f64(),
                             })));
                         }

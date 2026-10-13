@@ -290,34 +290,14 @@ pub fn mastering(max_nits: u32) -> vidcut_core::model::MasteringDisplay {
 /// window, MaxSCL and the average MaxRGB counting up with `k`, so each frame's
 /// is its own.
 pub fn hdr10plus_t35(k: u32) -> Vec<u8> {
-    struct Bits(Vec<u8>, u32);
-    impl Bits {
-        fn put(&mut self, value: u32, n: u32) {
-            for i in (0..n).rev() {
-                if self.1.is_multiple_of(8) {
-                    self.0.push(0);
-                }
-                let bit = (value >> i) & 1;
-                *self.0.last_mut().expect("pushed") |= (bit as u8) << (7 - self.1 % 8);
-                self.1 += 1;
-            }
-        }
+    let light = |raw: u32| f64::from(raw) / 10.0;
+    crate::hdr::Hdr10Plus {
+        targeted_max_luminance: 400,
+        maxscl: [0, 1, 2].map(|c| light(10_000 + 100 * k + c)),
+        average_maxrgb: light(5_000 + 100 * k),
+        percentiles: Vec::new(),
     }
-    let mut b = Bits(vec![0xB5, 0x00, 0x3C, 0x00, 0x01, 0x04], 48);
-    b.put(1, 8); // application_version
-    b.put(1, 2); // num_windows
-    b.put(400, 27); // targeted_system_display_maximum_luminance
-    b.put(0, 1); // targeted_system_display_actual_peak_luminance_flag
-    for c in 0..3 {
-        b.put(10_000 + 100 * k + c, 17); // maxscl
-    }
-    b.put(5_000 + 100 * k, 17); // average_maxrgb
-    b.put(0, 4); // num_distribution_maxrgb_percentiles
-    b.put(0, 10); // fraction_bright_pixels
-    b.put(0, 1); // mastering_display_actual_peak_luminance_flag
-    b.put(0, 1); // tone_mapping_flag
-    b.put(0, 1); // color_saturation_mapping_flag
-    b.0
+    .t35()
 }
 
 /// 10-bit codes (limited range) of SDR reference white in HDR: 203 nits in

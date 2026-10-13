@@ -7,8 +7,9 @@ use std::sync::atomic::AtomicBool;
 use serde_json::{Value, json};
 use vidcut_av::export::encode::Availability;
 use vidcut_av::export::{self as engine, Progress, Report};
+use vidcut_av::light::Span;
 use vidcut_core::export::color::{self, ColorChoice, PictureKind, PictureShare};
-use vidcut_core::export::metadata::PieceMeta;
+use vidcut_core::export::metadata::{Measured, PieceMeta};
 use vidcut_core::export::{
     Container, EncoderChoice, ExportSettings, Preset, apply_overrides, builtin_presets, validate,
 };
@@ -546,6 +547,7 @@ fn piece_meta(p: &Project, piece: &render::VideoPiece) -> PieceMeta {
             light: v.light,
             hdr10plus: v.hdr10plus,
             dolby_vision: v.dolby_vision,
+            measured: Measured::No,
         })
 }
 
@@ -573,11 +575,38 @@ pub fn fill_hdr_metadata(p: &mut Project, ids: &[String]) {
     }
 }
 
+/// Light measuring for [`choose_colors`] as an export starts: its cancel
+/// flag, and what hears the share measured.
+pub struct Measuring<'a> {
+    pub cancel: &'a AtomicBool,
+    pub progress: &'a mut dyn FnMut(f64),
+}
+
 /// Chooses each output's dynamic range and bit depth from the pictures it
 /// shows, where the settings leave them to the export (decision D44): with
 /// the encoders the export may use (`settings` as the preferences allow).
-/// Then its HDR metadata (decision D46).
-pub fn choose_colors(prepared: &mut Prepared, p: &Project, available: &Availability) {
+/// Then its HDR metadata (decision D46), with the light measured before;
+/// with `measure`, what the metadata needs and isn't measured is measured
+/// first: light levels the sources don't say, frames HDR10+ is made for.
+pub fn choose_colors(
+    prepared: &mut Prepared,
+    p: &Project,
+    available: &Availability,
+    measure: Option<Measuring<'_>>,
+) -> Result<()> {
+    let todo = choose_once(prepared, p, available);
+    if let Some(m) = measure
+        && !todo.is_empty()
+    {
+        measure_spans(&todo, m)?;
+        choose_once(prepared, p, available);
+    }
+    Ok(())
+}
+
+/// [`choose_colors`] with the light measured before; returns what the
+/// metadata needs measured and isn't.
+fn choose_once(prepared: &mut Prepared, p: &Project, available: &Availability) -> Vec<Span> {
     let ids: Vec<String> = prepared
         .outputs
         .iter()
@@ -589,6 +618,7 @@ pub fn choose_colors(prepared: &mut Prepared, p: &Project, available: &Availabil
         .collect();
     let mut filled = p.clone();
     fill_hdr_metadata(&mut filled, &ids);
+    let mut todo: Vec<Span> = Vec::new();
     for o in &mut prepared.outputs {
         o.settings = prepared.settings.clone();
         o.color = vidcut_av::export::choose_color(&o.plan, &o.settings, available, |piece| {
@@ -597,13 +627,71 @@ pub fn choose_colors(prepared: &mut Prepared, p: &Project, available: &Availabil
         if let (Some(c), Some(v)) = (&o.color, o.settings.video.as_mut()) {
             c.apply(v);
         }
+        let fps = o.plan.fps;
+        let colored = o.settings.video.clone();
         o.metadata = vidcut_av::export::choose_metadata(&o.plan, &o.settings, |piece| {
-            piece_meta(&filled, piece)
+            let mut m = piece_meta(&filled, piece);
+            if let Some(v) = &colored {
+                m.measured = engine::measured_light(piece, fps, v, &m, false, None);
+                if m.measured == Measured::Pending {
+                    todo.extend(Span::of(piece, fps));
+                }
+            }
+            m
         });
         if let (Some(c), Some(v)) = (&o.metadata, o.settings.video.as_mut()) {
             c.apply(v);
         }
+        let Some(v) = o.settings.video.as_ref() else {
+            continue;
+        };
+        for piece in &o.plan.video {
+            if !engine::makes_hdr10plus(v, &piece_meta(&filled, piece)) {
+                continue;
+            }
+            if let Some(span) = Span::of(piece, fps)
+                && !matches!(
+                    vidcut_av::light::analysis(&span, false, None, &mut |_| {}),
+                    Ok(Some(_))
+                )
+            {
+                todo.push(span);
+            }
+        }
     }
+    let mut unique: Vec<Span> = Vec::new();
+    for s in todo {
+        if !unique.contains(&s) {
+            unique.push(s);
+        }
+    }
+    unique
+}
+
+/// Measures `todo`, telling `m` the share done, by length.
+fn measure_spans(todo: &[Span], m: Measuring<'_>) -> Result<()> {
+    // A still is one frame.
+    let weight = |s: &Span| {
+        let d = s.to - s.from;
+        if d.is_finite() { d.max(0.04) } else { 0.04 }
+    };
+    let total: f64 = todo.iter().map(weight).sum();
+    let mut done = 0.0;
+    for s in todo {
+        let w = weight(s);
+        let measured = vidcut_av::light::analysis(s, true, Some(m.cancel), &mut |share| {
+            (m.progress)((done + share * w) / total)
+        });
+        // What can't be read is left out of the metadata.
+        if let Err(e) = measured
+            && engine::is_cancelled(&e)
+        {
+            return Err(Error::new(ErrorCode::Cancelled, "export cancelled"));
+        }
+        done += w;
+        (m.progress)(done / total);
+    }
+    Ok(())
 }
 
 /// Quiet notes about a prepared export: HDR picture tone-mapped into SDR

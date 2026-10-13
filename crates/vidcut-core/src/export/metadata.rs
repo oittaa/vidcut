@@ -4,10 +4,13 @@
 //! PQ output gets a mastering display and content light levels, given
 //! (`video.mastering_display`, `video.max_cll`) or from the sources: the
 //! widest color volume and the highest light levels of what it shows. HLG
-//! and SDR output get none. HDR10+ and Dolby Vision describe each frame's
-//! own picture, so they are kept only when every shown picture has them and
-//! is kept as it was (the same transfer). What is decided is pure: the
-//! facts about each piece come from the caller.
+//! and SDR output get none; light levels a source doesn't say are measured
+//! from its frames. HDR10+ and Dolby Vision describe each frame's own
+//! picture, kept as it was (the same transfer): HDR10+ is kept when some
+//! shown picture has it, and frames without it get it made from their
+//! measured light; Dolby Vision only when every shown picture has it, black
+//! frames after one taking its RPU. What is decided is pure: the facts
+//! about each piece come from the caller.
 
 use serde::Serialize;
 
@@ -25,6 +28,25 @@ pub struct PieceMeta {
     pub light: Option<LightLevel>,
     pub hdr10plus: bool,
     pub dolby_vision: Option<DolbyVision>,
+    /// Its light levels in PQ output, measured from its frames.
+    pub measured: Measured,
+}
+
+/// A piece's measured light levels.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Measured {
+    /// Not measured, nor to be.
+    #[default]
+    No,
+    /// Measured when the export starts: a plan doesn't measure.
+    Pending,
+    Known(LightLevel),
+}
+
+/// Why light levels aren't known.
+enum Unknown {
+    Pending,
+    Missing(&'static str),
 }
 
 /// The metadata an output writes, and why.
@@ -132,17 +154,27 @@ fn widest(volumes: &[MasteringDisplay]) -> MasteringDisplay {
 }
 
 /// The light levels of what `metas` show in PQ output: the highest of
-/// theirs, SDR at its white; or why there are none.
-fn light_levels(metas: &[PieceMeta]) -> std::result::Result<LightLevel, &'static str> {
+/// theirs (measured where they say none, or for all with `measure_all`),
+/// SDR at its white; or why there are none.
+fn light_levels(
+    metas: &[PieceMeta],
+    measure_all: bool,
+) -> std::result::Result<LightLevel, Unknown> {
     let mut out = LightLevel {
         max_cll: 0,
         max_fall: 0,
     };
     for m in metas {
+        let measured = |none| match m.measured {
+            Measured::Known(l) => Ok(l),
+            Measured::Pending => Err(Unknown::Pending),
+            Measured::No => Err(Unknown::Missing(none)),
+        };
         let l = match (m.hdr, m.light) {
+            _ if measure_all => measured("a picture wasn't measured")?,
             (Some(Hdr::Pq), Some(l)) => l,
-            (Some(Hdr::Pq), None) => return Err("a PQ source has none"),
-            (Some(Hdr::Hlg), _) => return Err("HLG pictures have none"),
+            (Some(Hdr::Pq), None) => measured("a PQ source has none")?,
+            (Some(Hdr::Hlg), _) => measured("HLG pictures have none")?,
             (None, _) => LightLevel {
                 max_cll: SDR_WHITE,
                 max_fall: SDR_WHITE,
@@ -230,6 +262,9 @@ pub fn parse_mastering(s: &str) -> Result<MasteringDisplay> {
     })
 }
 
+/// `video.max_cll` for light levels measured from every picture shown.
+pub const MEASURE: &str = "measure";
+
 /// MaxCLL and MaxFALL as `video.max_cll` writes them: `1000,400`.
 pub fn format_light(l: &LightLevel) -> String {
     format!("{},{}", l.max_cll, l.max_fall)
@@ -302,13 +337,20 @@ pub fn choose(
     let metas: Vec<PieceMeta> = shown.iter().map(|(_, m)| *m).collect();
     // Black frames (gaps) show no source: they don't count for the values,
     // but an encoder writing Dolby Vision needs an RPU on every frame.
-    let black: i64 = video
-        .iter()
-        .map(|p| match p {
-            VideoPiece::Black { frames } => *frames,
-            _ => 0,
-        })
-        .sum();
+    let black_in = |pieces: &mut dyn Iterator<Item = &VideoPiece>| -> i64 {
+        pieces
+            .map(|p| match p {
+                VideoPiece::Black { frames } => *frames,
+                _ => 0,
+            })
+            .sum()
+    };
+    let black = black_in(&mut video.iter());
+    let leading_black = black_in(
+        &mut video
+            .iter()
+            .take_while(|p| !matches!(p, VideoPiece::Source { frames, .. } if *frames > 0)),
+    );
 
     // The static values, PQ only.
     if out == Hdr::Pq {
@@ -343,21 +385,36 @@ pub fn choose(
                 Some(m)
             }
         };
+        let measure_all = v.max_cll.as_deref() == Some(MEASURE);
         choice.light = match &v.max_cll {
-            Some(s) => {
+            Some(s) if !measure_all => {
                 choice.why.push("Light levels: given".into());
                 parse_light(s).ok()
             }
-            None if metas.is_empty() => None,
-            None => match light_levels(&metas) {
+            _ if metas.is_empty() => None,
+            _ => match light_levels(&metas, measure_all) {
                 Ok(l) => {
+                    let measured = |m: &PieceMeta| matches!(m.measured, Measured::Known(_));
+                    let from = if metas.iter().all(measured) {
+                        "measured"
+                    } else if metas.iter().any(measured) {
+                        "the highest of the sources, measured where they say none"
+                    } else {
+                        "the highest of the sources"
+                    };
                     choice.why.push(format!(
-                        "MaxCLL {}, MaxFALL {}: the highest of the sources",
+                        "MaxCLL {}, MaxFALL {}: {from}",
                         l.max_cll, l.max_fall
                     ));
                     Some(l)
                 }
-                Err(why) => {
+                Err(Unknown::Pending) => {
+                    choice
+                        .why
+                        .push("MaxCLL and MaxFALL: measured when the export starts".into());
+                    None
+                }
+                Err(Unknown::Missing(why)) => {
                     choice.why.push(format!("No light levels: {why}"));
                     None
                 }
@@ -369,7 +426,7 @@ pub fn choose(
             .push("No mastering display or light levels: HLG is scene-referred".into());
     }
 
-    // Dynamic metadata: every picture has it, kept as it was.
+    // Dynamic metadata, kept as it was.
     let auto = asked == HdrMetadata::Auto;
     let kept_as_is = |m: &PieceMeta| m.hdr == Some(out);
     let mut hdr10plus = false;
@@ -383,21 +440,16 @@ pub fn choose(
             if asked.hdr10plus() || with > 0 {
                 choice.why.push("No HDR10+: it needs PQ".into());
             }
-        } else if with == 0 {
-            if asked.hdr10plus() {
-                choice.why.push("No HDR10+: no picture has it".into());
-            }
-        } else if auto && with < total {
-            choice.why.push(format!(
-                "No HDR10+: {} of the picture has none",
-                percent(total - with, total)
-            ));
-        } else {
+        } else if with > 0 || asked.hdr10plus() {
+            // Frames without it get it made from their measured light.
             hdr10plus = true;
-            choice.why.push(if with < total {
+            let all = total + black;
+            choice.why.push(if with == 0 {
+                "HDR10+: made from each frame's measured light".into()
+            } else if with < all {
                 format!(
-                    "HDR10+: kept where frames have it ({})",
-                    percent(with, total)
+                    "HDR10+: kept, and made from the measured light of the {} without it",
+                    percent(all - with, all)
                 )
             } else {
                 "HDR10+: kept, every picture has it".into()
@@ -431,9 +483,11 @@ pub fn choose(
                 "{} of the picture has none (or another profile)",
                 percent(total - with, total)
             )),
-            Some(_) if black > 0 => Some(format!(
-                "the black frames ({}, gaps) have none, and every frame needs it",
-                percent(black, total + black)
+            // Black after a picture takes its RPU; before the first there
+            // is none to take.
+            Some(_) if leading_black > 0 => Some(format!(
+                "the black frames at the start ({}) have none, and every frame needs it",
+                percent(leading_black, total + black)
             )),
             Some(_) if !matches!(v.codec, VideoCodec::Hevc | VideoCodec::Av1) => {
                 Some("it needs HEVC or AV1".into())
@@ -542,7 +596,7 @@ mod tests {
     }
 
     #[test]
-    fn black_frames_rule_out_dolby_vision_but_not_hdr10plus() {
+    fn black_frames_take_dolby_vision_from_the_picture_before() {
         let v = settings(HdrMode::Pq, HdrMetadata::Auto);
         let mut dv = pq(1000.0, Some((1000, 400)));
         dv.dolby_vision = Some(DolbyVision {
@@ -552,14 +606,61 @@ mod tests {
         dv.hdr10plus = true;
         let video = vec![piece(30, "m0"), VideoPiece::Black { frames: 10 }];
         let c = choose(&v, &video, |_| dv, true);
+        assert_eq!(c.mode, HdrMetadata::All, "{:?}", c.why);
+        // Before the first picture there is none to take.
+        let video = vec![VideoPiece::Black { frames: 10 }, piece(30, "m0")];
+        let c = choose(&v, &video, |_| dv, true);
         assert_eq!(c.mode, HdrMetadata::Hdr10plus, "{:?}", c.why);
         assert!(
-            c.why
-                .iter()
-                .any(|w| w == "No Dolby Vision: the black frames (25%, gaps) have none, and every frame needs it"),
+            c.why.iter().any(|w| w
+                == "No Dolby Vision: the black frames at the start (25%) have none, and every \
+                    frame needs it"),
             "{:?}",
             c.why
         );
+    }
+
+    #[test]
+    fn measured_light_stands_in_where_the_sources_say_none() {
+        let v = settings(HdrMode::Pq, HdrMetadata::Auto);
+        let level = |max_cll, max_fall| LightLevel { max_cll, max_fall };
+        let mut bare = pq(1000.0, None);
+        bare.measured = Measured::Pending;
+        let c = run(&v, &[(10, bare), (10, pq(1000.0, Some((800, 300))))], false);
+        assert_eq!(c.light, None);
+        assert!(
+            c.why
+                .iter()
+                .any(|w| w == "MaxCLL and MaxFALL: measured when the export starts"),
+            "{:?}",
+            c.why
+        );
+        bare.measured = Measured::Known(level(1200, 250));
+        let c = run(&v, &[(10, bare), (10, pq(1000.0, Some((800, 300))))], false);
+        assert_eq!(c.light, Some(level(1200, 300)), "{:?}", c.why);
+        assert!(
+            c.why[1].ends_with("measured where they say none"),
+            "{:?}",
+            c.why
+        );
+        // HLG in PQ output has none of its own.
+        let hlg = PieceMeta {
+            hdr: Some(Hdr::Hlg),
+            measured: Measured::Known(level(900, 150)),
+            ..PieceMeta::default()
+        };
+        let c = run(&v, &[(10, hlg)], false);
+        assert_eq!(c.light, Some(level(900, 150)));
+        // `measure`: measured for every picture, the files' values unused.
+        let mut all = v.clone();
+        all.max_cll = Some(MEASURE.into());
+        let mut said = pq(1000.0, Some((4000, 1000)));
+        said.measured = Measured::Known(level(700, 100));
+        let c = run(&all, &[(10, said), (10, hlg)], false);
+        assert_eq!(c.light, Some(level(900, 150)), "{:?}", c.why);
+        said.measured = Measured::No;
+        let c = run(&all, &[(10, said)], false);
+        assert_eq!(c.light, None);
     }
 
     #[test]
@@ -704,30 +805,32 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_metadata_is_kept_when_every_picture_has_it() {
+    fn dynamic_metadata_is_kept_or_made() {
         let v = settings(HdrMode::Pq, HdrMetadata::Auto);
         let mut plus = pq(1000.0, Some((1000, 400)));
         plus.hdr10plus = true;
         let c = run(&v, &[(30, plus), (30, plus)], false);
         assert_eq!(c.mode, HdrMetadata::Hdr10plus);
-        // A clip without it: none, and why.
+        // A clip without it gets it made from its measured light.
         let c = run(
             &v,
             &[(30, plus), (10, pq(1000.0, Some((1000, 400))))],
             false,
         );
-        assert_eq!(c.mode, HdrMetadata::Static);
+        assert_eq!(c.mode, HdrMetadata::Hdr10plus);
         assert!(
-            c.why
-                .iter()
-                .any(|w| w == "No HDR10+: 25% of the picture has none"),
+            c.why.iter().any(
+                |w| w == "HDR10+: kept, and made from the measured light of the 25% without it"
+            ),
             "{:?}",
             c.why
         );
-        // Asked for, it is kept where frames have it.
+        // None has it: only when asked for.
+        let c = run(&v, &[(10, pq(1000.0, None))], false);
+        assert_eq!(c.mode, HdrMetadata::Static);
         let c = run(
             &settings(HdrMode::Pq, HdrMetadata::Hdr10plus),
-            &[(30, plus), (10, pq(1000.0, None))],
+            &[(10, pq(1000.0, None))],
             false,
         );
         assert_eq!(c.mode, HdrMetadata::Hdr10plus);

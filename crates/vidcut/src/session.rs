@@ -240,7 +240,7 @@ pub fn render(
             } else {
                 Default::default()
             };
-            export::choose_colors(&mut prepared, project, &available);
+            export::choose_colors(&mut prepared, project, &available, None)?;
             answer(export::describe(&prepared, &available))
         }
         Request::ExportStart(params) => export_media(project, path, params, hooks, &mut |_| {})?,
@@ -350,7 +350,6 @@ pub fn export_media(
     } else {
         Default::default()
     };
-    export::choose_colors(&mut prepared, p, &available);
     started(
         prepared
             .outputs
@@ -359,6 +358,25 @@ pub fn export_media(
             .collect(),
     );
     let count = prepared.outputs.len();
+    let clock = std::time::Instant::now();
+    let first = prepared.outputs[0].path.clone();
+    let progress = &mut *hooks.progress;
+    export::choose_colors(
+        &mut prepared,
+        p,
+        &available,
+        Some(export::Measuring {
+            cancel: hooks.cancel,
+            progress: &mut |share| {
+                progress(
+                    0,
+                    count,
+                    &first,
+                    Progress::measuring(share, clock.elapsed()),
+                )
+            },
+        }),
+    )?;
     let reports = export::run(&prepared, &available, hooks.cancel, &mut |i, path, pr| {
         (hooks.progress)(i, count, path, pr)
     })?;

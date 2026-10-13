@@ -488,6 +488,13 @@ pub struct VideoFrames {
     /// The dynamic HDR metadata each output frame keeps from its source
     /// frame (decision D46). Other HDR metadata of the sources goes.
     dynamic: crate::hdr::Dynamic,
+    /// Measured light of the files whose frames without HDR10+ get it
+    /// made, by path (`with_light`).
+    light:
+        std::collections::HashMap<std::path::PathBuf, std::sync::Arc<crate::light::LightAnalysis>>,
+    /// The Dolby Vision of the last source frame given: black after it
+    /// takes it.
+    last_dolby_vision: frame::Video,
 }
 
 /// The layouts a display takes: 8-bit 4:2:0 (planar, or NV12 as hardware
@@ -625,6 +632,8 @@ impl VideoFrames {
             rotation: 0,
             last_nvdec: false,
             dynamic: Default::default(),
+            light: Default::default(),
+            last_dolby_vision: frame::Video::empty(),
         }
     }
 
@@ -698,6 +707,20 @@ impl VideoFrames {
         self
     }
 
+    /// Output frames keeping HDR10+ get it made from `light`, the measured
+    /// light of their source files by path, where their source frame has
+    /// none; black gets HDR10+ of no light.
+    pub fn with_light(
+        mut self,
+        light: std::collections::HashMap<
+            std::path::PathBuf,
+            std::sync::Arc<crate::light::LightAnalysis>,
+        >,
+    ) -> Self {
+        self.light = light;
+        self
+    }
+
     /// Frames decoded and scaled on the GPU so far.
     pub fn gpu_frames(&self) -> i64 {
         self.gpu.as_ref().map_or(0, |g| g.made)
@@ -742,10 +765,23 @@ impl VideoFrames {
                     self.rotation = 0;
                     self.last_nvdec = false;
                     let black = frame_ref(self.black()?)?;
-                    match &self.gpu {
-                        Some(g) => g.frames.upload(&black).map(|f| Some(Some(f))),
-                        None => Ok(Some(Some(black))),
+                    let mut out = match &self.gpu {
+                        Some(g) => g.frames.upload(&black)?,
+                        None => black,
+                    };
+                    if self.dynamic.hdr10plus {
+                        crate::light::FrameLight::default()
+                            .hdr10plus()
+                            .attach(&mut out)?;
                     }
+                    if self.dynamic.dolby_vision {
+                        let dv = crate::hdr::Dynamic {
+                            hdr10plus: false,
+                            dolby_vision: true,
+                        };
+                        crate::hdr::copy_dynamic(&self.last_dolby_vision, &mut out, dv)?;
+                    }
+                    Ok(Some(Some(out)))
                 }
                 VideoPiece::Source {
                     path,
@@ -1009,6 +1045,23 @@ impl VideoFrames {
         crate::hdr::strip(&mut out);
         if self.dynamic != crate::hdr::Dynamic::default() {
             crate::hdr::copy_dynamic(&src.dynamic, &mut out, self.dynamic)?;
+        }
+        if self.dynamic.hdr10plus
+            && !crate::hdr::has_hdr10plus(&out)
+            && let Some(l) = self
+                .light
+                .get(src.reader.path())
+                .and_then(|a| a.at(src.current.as_ref().expect("have a frame").1))
+        {
+            l.hdr10plus().attach(&mut out)?;
+        }
+        if self.dynamic.dolby_vision {
+            self.last_dolby_vision = frame::Video::empty();
+            let dv = crate::hdr::Dynamic {
+                hdr10plus: false,
+                dolby_vision: true,
+            };
+            crate::hdr::copy_dynamic(&src.dynamic, &mut self.last_dolby_vision, dv)?;
         }
         Ok(out)
     }
