@@ -1,6 +1,6 @@
-# AI agents: MCP, measurements and storyboards (M7)
+# AI agents: MCP, measurements and storyboards
 
-**Status:** accepted (M7, October 2026).
+**Status:** accepted.
 
 ## 1. MCP server (`vidcut mcp`, `crates/vidcut/src/mcp.rs`)
 
@@ -33,7 +33,7 @@
 - **Where:** in the process and on disk (`~/.cache/vidcut/analysis/`, keyed by path, size and modification time).
 - **Why:** they don't depend on thresholds, so an agent can try settings quickly. Decoding a whole stream is the slow part: Big Buck Bunny's 10.5 minutes of 1080p30 take about 10 s.
 
-**Pictures are measured small** (96×54 luma), enough to tell shots apart. scdet's score (spec D30) found Big Buck Bunny's cuts on their exact frames.
+**Pictures are measured small** (96×54 luma), enough to tell shots apart. scdet's score (spec D30) finds Big Buck Bunny's cuts on their exact frames.
 
 ## 3. In the live session
 

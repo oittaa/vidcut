@@ -7,8 +7,6 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 **Key names:** the manual uses Mac keys. On Linux, Command → Ctrl and Option → Alt.
 
 **Status markers:**
-- **(v1)** planned for the single-track (V1) milestones M1–M5.
-- **(M6)** waits for multi-track; **(M7)** belongs to the agent-extras milestone.
 - **(later)** wanted, not yet scheduled.
 - **(out)** out of scope.
 
@@ -49,26 +47,26 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 
 ## 3. Media Pool (Ch. 34, pp. 653–675)
 
-- **Import (v1)** (p. 654):
+- **Import** (p. 654):
   - Ctrl+I, the Import Media button, or right-click > Import Media opens a file dialog with multi-select. It starts in the folder media were last imported from, remembered across runs, else in the project's folder. Open Project and New Project start where a project was last opened or created, and exports where the last one went, the same way.
   - Import Media Folder imports a whole folder.
   - The first import into an empty project offers to change the project frame rate to match the media.
-- **Stills and image sequences (M9)** (pp. 114, 366, 1194):
+- **Stills and image sequences** (pp. 114, 366, 1194):
   - An image file (PNG, JPEG, TIFF, EXR, DPX, …) comes in as a still. Edited without a range or marks it lasts the standard still duration; its clips can be made up to 17 h 40 min long (D38).
   - Numbered image files (renders, scans) can come in as one clip, an image sequence, at a frame rate (D39).
-- **Remove (v1)** (p. 654): Delete or Backspace, after a confirmation. Only the pool entry goes; files on disk stay.
+- **Remove** (p. 654): Delete or Backspace, after a confirmation. Only the pool entry goes; files on disk stay.
 - **Views:**
-  - **Thumbnail (v1)** (p. 664):
+  - **Thumbnail** (p. 664):
     - hovering scrubs the clip
     - I/O while hovering marks source In/Out
     - clicking the thumbnail's lower-right corner shows its metadata
-  - **List (v1)** (p. 665): sortable columns.
+  - **List** (p. 665): sortable columns.
   - **Filmstrip** and **Metadata** cards (later).
-- **Sort and search (v1; sort M6)** (pp. 666–667):
+- **Sort and search** (pp. 666–667):
   - Sort Media By: Clip Name, Date Imported, Date Modified, Duration (ours), Timecode, ascending or descending. vidcut sorts by date added (the default), name, duration or file date.
   - The sort order is also the Source Tape order.
   - The search field filters live. It looks through the open bin and the bins inside it.
-- **Bins (M6)** (pp. 655–656, 377):
+- **Bins** (pp. 655–656, 377):
   - The Master bin is the top level. The pool shows the open bin's own clips and the bins inside it as folders. A path at the top (Master › Interviews › Day 1) opens any level, and the Bins menu lists every bin as a hierarchy.
   - Double-click a bin to open it. New Bin is on the File menu (Shift+Ctrl+N), the Bins menu and the pool's right-click menu. Right-clicking a bin offers Rename Bin and Remove Bin.
   - Drag clips onto a bin (or onto a level of the path) to move them into it. A clip's menu offers Move to Bin and Create Bin With Selected Clips ("Bin N", p. 656).
@@ -85,7 +83,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 
 ## 4. Viewer (pp. 639–640, 679–693, 713)
 
-### 4.1 Modes (v1)
+### 4.1 Modes
 - **Source Clip** (p. 680):
   - shows the selected pool clip
   - a scroll area under the picture represents the whole clip, with the playhead, a zoomed-in waveform and draggable In/Out handles
@@ -101,7 +99,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
   - Double-clicking a pool clip switches to Source Clip.
   - Any click or drag in the timeline area switches to Timeline (p. 681).
 
-### 4.2 Transport (v1) (pp. 640, 687–688, 870–872)
+### 4.2 Transport (pp. 640, 687–688, 870–872)
 - **Play and step:**
   - Space: play/stop.
   - J/K/L: shuttle. Repeated J/L speeds up; K+J or K+L plays slowly; holding K and tapping J/L steps a frame (pp. 696, 871).
@@ -112,7 +110,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 - **Loop:** Ctrl+/ (later).
 - **Jog control:** click and drag to scrub finely (later).
 
-### 4.3 Timecode (v1) (pp. 640, 688, 713–714)
+### 4.3 Timecode (pp. 640, 688, 713–714)
 - **Go to a time:**
   - `=` then a timecode goes to that absolute time.
   - `+` or `-` then a value jumps relative to the current position.
@@ -122,7 +120,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
   - record timecode or record frame (Timeline mode)
   - Timer 1/2 and KeyKode (later)
 
-### 4.4 In/Out (v1) (pp. 691–693, 700)
+### 4.4 In/Out (pp. 691–693, 700)
 - **Source In/Out:**
   - I/O in a source mode, or while hovering a pool thumbnail
   - or by dragging the scroll-area handles
@@ -138,13 +136,13 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 
 ## 5. Dual timeline (pp. 643–646, 689–692, 716–718)
 
-**Upper timeline (v1):**
+**Upper timeline:**
 - Always shows the whole program at full width; it has no zoom.
 - Its playhead moves freely, and dragging its ruler scrubs the whole program.
 - Most edits work there too, and clips can be dragged between the two timelines.
 - It shows the timeline In/Out range and markers.
 
-**Lower timeline (v1):**
+**Lower timeline:**
 - A detail view at a fixed zoom around the playhead (p. 644).
 - **Fixed Playhead on (default):** the playhead stays at the center and the clips move under it. Dragging the ruler drags the clips. Clips don't snap to the fixed playhead (p. 717).
 - **Fixed Playhead off (Timeline Options):**
@@ -165,7 +163,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 **Track headers:**
 - Enlarge (one track at a time), Lock, Mute (audio), Video Enable (pp. 647, 678, 717): icons, enlarge on the left of the name, the others in columns at the right (D43).
 
-**Automatic tools (M7):**
+**Automatic tools:**
 - **Boring Detector** (Timeline Options, p. 690): highlights clips longer than "Boring Clips" (light gray) and shorter than "Jump Cuts" (red) on the upper timeline, live as you edit. Analyze Timeline Edits sets both (D31).
 - **Detect Scene Cuts** (Timeline Actions, p. 690): splits the selected clips where their shots change (D30). Resolve's is Studio-only; vidcut has it in every build.
 
@@ -175,12 +173,12 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
   - insert, delete, move and trim on Track 1 ripple, so it never has gaps
   - with **Ripple On** turned off it behaves like the other tracks
   - holding Alt while trimming turns rippling off temporarily
-- **Tracks 2+ are B-roll (M6):**
+- **Tracks 2+ are B-roll:**
   - they never ripple themselves, and clips sit freely with gaps
   - each higher-track clip is attached to the Track 1 clip under its In point and follows that clip when Track 1 ripples (p. 649; D21)
   - trimming the anchor's Out to before the attached clip's In deletes the attached clip (p. 727)
   - higher tracks only ripple where there is no Track 1 video under them (p. 721; D22)
-- **Audio tracks (M6):** A1, A2, … sit below the video tracks and hold sound alone, such as music. Media without video go there by default (D26).
+- **Audio tracks:** A1, A2, … sit below the video tracks and hold sound alone, such as music. Media without video go there by default (D26).
 - **Track header** (p. 647): the target-track toggle (D3), lock, mute and video on/off. The target track's header and row are lighter, the header with an accent edge. Right-click adds a video or audio track or removes one (D27).
 - **Overlapping video:** the highest enabled track is visible (p. 647). A disabled clip or a track with its video off shows what is under it.
 - **Sound:** every audible track plays, mixed; mute and solo (§9) decide which are audible.
@@ -197,24 +195,24 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 
 Video Only and Audio Only limit what an edit takes (p. 694).
 
-### 7.1 Smart Indicator (v1) (p. 696)
+### 7.1 Smart Indicator (p. 696)
 - **What it marks:** a marker on the ruler shows the edit point nearest the playhead. Some functions use that point instead of the exact playhead frame.
 - **How it looks:** after idling it bobs, and the chosen edit flashes green. It flashes red if the clip there has no media left beyond its edge. vidcut shows the colors without the motion (deviation X15).
 
 ### 7.2 Edit functions
-- **Smart Insert (v1)** (F9 in the Edit page; p. 697):
+- **Smart Insert** (F9 in the Edit page; p. 697):
   - inserts at the Smart Indicator's edit point on the target track, never at an arbitrary frame
   - on Track 1, everything after that point moves right by the incoming duration
-- **Append (v1)** (Shift+F12; p. 697): ignores the playhead and places the clip after the last clip.
-- **Ripple Overwrite (v1)** (Shift+F10; p. 698):
+- **Append** (Shift+F12; p. 697): ignores the playhead and places the clip after the last clip.
+- **Ripple Overwrite** (Shift+F10; p. 698):
   - with no timeline marks, it replaces the whole clip under the playhead
   - with a timeline In/Out, it replaces exactly that range, possibly across several clips
   - everything after shifts by (incoming − replaced) duration, in either direction
   - the source duration always wins; nothing is fitted to the gap
-- **Overwrite (v1)** (F10; p. 701):
+- **Overwrite** (F10; p. 701):
   - writes over the target track at the playhead, at the timeline In, or backtimed to a lone timeline Out
   - other clips don't move
-- **Place On Top (M6)** (F12; pp. 699–700):
+- **Place On Top** (F12; pp. 699–700):
   - goes to the first track above every clip at that position, creating one if needed (D24)
   - ignores the selected track and never ripples
   - **Alignment priority:**
@@ -224,18 +222,18 @@ Video Only and Audio Only limit what an edit takes (p. 694).
     4. Otherwise it lines up with the playhead.
 - **Close Up, Source Overwrite (out).**
 
-### 7.3 Drag and drop from the pool or Viewer (v1) (pp. 648, 679, 694–695)
+### 7.3 Drag and drop from the pool or Viewer (pp. 648, 679, 694–695)
 - **Onto an empty timeline, or left of the first clip:** becomes the first clip.
 - **Past either end of all clips:** appended or prepended.
 - **Onto a clip, released right away** (the whole clip highlights): Ripple Overwrite replaces that clip.
 - **Onto a clip after hovering briefly** (the highlight narrows to the incoming footprint): a plain Overwrite with no ripple, which may split the target.
 - **Onto an edit point:** insert at that edit.
-- **Into the gray area above the top track:** creates a new video+audio track (M6). Below the bottom track, an audio clip creates an audio-only track (M6).
-- **Onto another track (M6):** an overwrite there, never a ripple (only Track 1 pushes; D23). Sound alone dropped on a video track goes to the first audio track instead.
+- **Into the gray area above the top track:** creates a new video+audio track. Below the bottom track, an audio clip creates an audio-only track.
+- **Onto another track:** an overwrite there, never a ripple (only Track 1 pushes; D23). Sound alone dropped on a video track goes to the first audio track instead.
 
 ## 8. Timeline editing (Ch. 36, pp. 715–732)
 
-### 8.1 Selection (v1) (pp. 719–720)
+### 8.1 Selection (pp. 719–720)
 - **Clips:**
   - click selects, Ctrl+click toggles, Shift+click selects a range
   - a marquee from empty space selects what it touches
@@ -247,29 +245,29 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Ctrl+click adds edits
   - V selects the edit nearest the playhead; U cycles outgoing / incoming / both
 
-### 8.2 Moving clips (v1 for Track 1; M6 for others) (pp. 720–723)
+### 8.2 Moving clips (pp. 720–723)
 - **Onto another Track 1 clip, released quickly:** replaces it and ripples.
 - **After hovering first:** overwrites the middle of the target, splitting it; the gap left behind closes on Track 1.
 - **Over a neighbor's edge, the pointer not reaching it** (p. 722): the overlapping part of the neighbor is overwritten and the gap left behind closes, so the neighbor ends up shorter.
 - **Onto an edit point** (it highlights): insert-at-edit. The gap left behind closes, and later clips (with their attached higher-track clips) shift. Works with several clips.
 - **Track 1 clip dropped onto another track:** can only overwrite (p. 721). Track 1 closes up behind it.
-- **Higher-track clips:** move freely and leave gaps (M6). Moves between tracks: D25.
+- **Higher-track clips:** move freely and leave gaps. Moves between tracks: D25.
 
-### 8.3 Copy, cut, paste (v1) (p. 723)
+### 8.3 Copy, cut, paste (p. 723)
 - Ctrl+C copies.
 - Ctrl+X cuts and ripples the gap closed.
 - Ctrl+V pastes at the playhead on the original track, overwriting.
 
-### 8.4 Delete (v1) (pp. 721, 724–725)
+### 8.4 Delete (pp. 721, 724–725)
 - **Delete:** removes the selected clips. On Track 1 with Ripple On it ripples, and attached clips follow.
 - **With a timeline In/Out set:** Delete removes that range.
 - **Disable:** D disables or enables a clip's video. Right-click > Mute silences its audio.
 
-### 8.5 Split (v1) (pp. 646, 723, 950)
+### 8.5 Split (pp. 646, 723, 950)
 - Ctrl+\, the Split button, or Split Clips splits at the playhead.
 - Join Match Edit Clips rejoins the halves of a split clip (later).
 
-### 8.6 Trimming (v1 unless noted) (pp. 693, 716, 718, 726–732)
+### 8.6 Trimming (pp. 693, 716, 718, 726–732)
 - **The pointer position picks the operation:**
   - **Clip edge: resize.** A tooltip shows the frame delta and new duration. On Track 1 with Ripple On it ripples; elsewhere only that clip changes.
   - **Edit center: roll.** The total duration stays the same, and a white overlay shows the available handle media.
@@ -281,46 +279,46 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - the Viewer shows the outgoing filmstrip on top and the incoming one below
   - the top handle trims the outgoing Out, the bottom handle the incoming In, and the middle handle rolls
   - ±1-frame buttons
-  - vidcut v1 shows the outgoing clip's last frame beside the incoming clip's first frame with the ±1 buttons; the draggable filmstrips are (later).
+  - vidcut shows the outgoing clip's last frame beside the incoming clip's first frame with the ±1 buttons; the draggable filmstrips are (later).
 - **Trim Start/End to Playhead** (Edit Actions, p. 729): moves a clip's head or tail to the playhead.
 - **Change Clip Duration** (Ctrl+D, p. 693):
   - enter frames or a timecode, or pick 1/5/15 seconds
   - End extends to the end of the media
   - "Extend Beyond Clip Length" pads with black (later)
   - applies to every selected clip
-- **Dynamic Trim (M7)** (W, pp. 730–732): W toggles the mode and the playhead turns yellow. J/K/L then trim the selected edit (Out, In or both by U), or slip or slide the selected clips (right-click the Dynamic Trim button to choose), instead of playing. With nothing selected it takes the edit nearest the playhead. Space plays around the selection; Up/Down move to another edit. Details: D32 and deviation X11.
-- **Slide (M7):** moves a clip keeping its media; the clip before it gets longer and the one after it shorter (Dynamic Trim, p. 731; `edit.slide`).
+- **Dynamic Trim** (W, pp. 730–732): W toggles the mode and the playhead turns yellow. J/K/L then trim the selected edit (Out, In or both by U), or slip or slide the selected clips (right-click the Dynamic Trim button to choose), instead of playing. With nothing selected it takes the edit nearest the playhead. Space plays around the selection; Up/Down move to another edit. Details: D32 and deviation X11.
+- **Slide:** moves a clip keeping its media; the clip before it gets longer and the one after it shorter (Dynamic Trim, p. 731; `edit.slide`).
 
-### 8.7 J/L cuts (v1) (p. 728)
+### 8.7 J/L cuts (p. 728)
 Hover the lower audio part of a clip at an edit until the cursor shows a note, then drag. Only the audio edit point moves, as an audio roll. A click selects that audio edit, and `,` / `.` move it (D20).
 
-### 8.8 Snapping (v1) (pp. 716–717)
+### 8.8 Snapping (pp. 716–717)
 - N toggles snapping. Clip edges, markers, the playhead and the timeline In/Out snap to each other, and a white line shows the alignment.
 - Pressing N mid-drag is temporary; pressing it between drags sticks.
 
-### 8.9 Markers (v1) (pp. 718–719)
+### 8.9 Markers (pp. 718–719)
 - M adds a marker at the playhead, or edits the marker under it.
 - Shift+Up/Down jumps between markers.
 - Markers can be dragged.
 - Alt+M deletes the marker at the playhead; Delete removes selected markers.
 
-### 8.10 Undo (v1) (pp. 651–652)
+### 8.10 Undo (pp. 651–652)
 - Ctrl+Z / Ctrl+Shift+Z, unlimited.
 - A History list shows recent steps and can jump back to one.
 - A new change discards the redo steps.
 
 ## 9. Audio (pp. 642, 649–650, 743, 771, 773)
 
-- **Meter (v1):** green is safe, yellow is near the limit, red risks clipping.
-- **Mixer (M6)** (pp. 649–650): the Mixer button opens a channel strip per track with sound: name, meter, fader (dB) and mute/solo, plus the mix's meter. A dB scale stands beside each fader, its numbers thinned out when the fader is short, with 0 dB in the accent color and a line across the fader. Solo silences the tracks that aren't soloed, and mute/solo apply to export too (p. 650). A fader is heard as it is dragged (`mixer.preview`, preview.md §7) and saved when it is let go, as one `track.set`. Track pan and FX are out of scope.
-- **Viewer meter and monitoring mute (M6)** (p. 642): a meter beside the viewer shows what it plays. Its speaker button mutes playback only, not the export.
-- **Clip volume (v1):** one gain value per clip, and clip mute.
-- **Ripple Delete Silence (M7)** (p. 773): select clips, then Clip > Audio Operations > Ripple Delete Silence (vidcut: the clip's right-click menu or Timeline Actions).
+- **Meter:** green is safe, yellow is near the limit, red risks clipping.
+- **Mixer** (pp. 649–650): the Mixer button opens a channel strip per track with sound: name, meter, fader (dB) and mute/solo, plus the mix's meter. A dB scale stands beside each fader, its numbers thinned out when the fader is short, with 0 dB in the accent color and a line across the fader. Solo silences the tracks that aren't soloed, and mute/solo apply to export too (p. 650). A fader is heard as it is dragged (`mixer.preview`, preview.md §7) and saved when it is let go, as one `track.set`. Track pan and FX are out of scope.
+- **Viewer meter and monitoring mute** (p. 642): a meter beside the viewer shows what it plays. Its speaker button mutes playback only, not the export.
+- **Clip volume:** one gain value per clip, and clip mute.
+- **Ripple Delete Silence** (p. 773): select clips, then Clip > Audio Operations > Ripple Delete Silence (vidcut: the clip's right-click menu or Timeline Actions).
   - settings: threshold (dB), pre-head, post-tail, minimum to trip
   - previews the parts to remove as red stripes; Remove cuts them and closes the gaps, as one undo step
   - details and defaults: D29; the crossfade option is deviation X11
 
-## 10. Quick Export (v1, M5) (Ch. 39, pp. 788–790, 4095–4096, 4104–4109)
+## 10. Quick Export (Ch. 39, pp. 788–790, 4095–4096, 4104–4109)
 
 - **Flow:** File > Quick Export or the toolbar button, then pick a preset from the icon row, then Export, then choose a file name, then a progress dialog.
 - **Range:** the timeline In–Out range if one is set, otherwise the whole timeline.
@@ -359,7 +357,7 @@ Shortcuts do nothing while a text field has focus or a question (a modal dialog)
 | F9 | Smart Insert | 889† |
 | F10 | Overwrite | 701 |
 | Shift+F10 | Ripple Overwrite | 890† |
-| F12 | Place On Top (M6) | 890† |
+| F12 | Place On Top | 890† |
 | Shift+F12 | Append | 890† |
 | Ctrl+\ | Split at playhead | 723 |
 | Delete / Backspace | Delete selection (ripples on Track 1) | 725 |
@@ -409,7 +407,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - Within 6 px of an edit point a drop inserts there; the moved clips' own edges don't count.
   - On another clip: replace if released within 0.8 s of reaching it (D11), else overwrite at the block's position. Several clips always overwrite (Replace takes one clip).
   - Past the last clip: the clips move (or the media is appended) to the end. Left of the first clip: inserted at the start.
-  - The row under the pointer is the destination track (M6). The strip above the top row means a new video track. The bottom row sits on the timeline's lower edge, and up to 24 px below it means a new audio track, shown there while the drag lasts.
+  - The row under the pointer is the destination track. The strip above the top row means a new video track. The bottom row sits on the timeline's lower edge, and up to 24 px below it means a new audio track, shown there while the drag lasts.
   - Dragged off the tracks (more than 24 px to either side, above the top strip or further below), or Esc during the drag: cancelled, nothing changes.
 - **D19. Trimming with the pointer.**
   - Edges follow the pointer's movement from the press (they don't jump to it), snapped to targets (§8.8).
@@ -459,12 +457,12 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - **The selection:** the selected edit follows the trim. An undo, or someone else's edit, that takes the selected cut away clears the selection.
   - **Applying it:** K stops the run and applies it as one request (`edit.trim`, `edit.roll`, `edit.slip`, `edit.slide`, or `edit.audio_roll` when the selected edit is the J/L handle). K held with a tap of J or L applies one frame. W also applies what is pending before leaving.
   - **Play around:** Space plays from 2 s before the selection to 2 s after it.
-- **D33. Rotation metadata** (M8). The manual doesn't say. Media show as players show them: the rotation in a file's display matrix is applied in the preview, export, frames, thumbnails and storyboards. Phones store portrait video sideways with one. A portrait clip that sets the project format makes a portrait project, and `media.get` reports the size as shown, with the rotation. Mirrored display matrices are taken as rotations only.
-- **D34. Interlaced sources** (M8; Deinterlace Quality, p. 741).
+- **D33. Rotation metadata.** The manual doesn't say. Media show as players show them: the rotation in a file's display matrix is applied in the preview, export, frames, thumbnails and storyboards. Phones store portrait video sideways with one. A portrait clip that sets the project format makes a portrait project, and `media.get` reports the size as shown, with the rotation. Mirrored display matrices are taken as rotations only.
+- **D34. Interlaced sources** (Deinterlace Quality, p. 741).
   - **Detection:** a stream is interlaced if its field order says so, or if its first frame is flagged interlaced. `media.get` reports the field shown first as `fields`.
   - **Deinterlacing:** frames flagged interlaced are deinterlaced everywhere (export, frames, storyboards, the preview), one progressive frame per frame. The first field (in time) is kept and the second rebuilt from it and the neighboring frames (`bwdif`). Like the Cut page's playback, which always uses Normal quality, there is one method (deviation X13).
   - **Rates:** output is never interlaced, and an interlaced clip in a project at twice its frame rate shows each frame twice (no field-rate output).
-- **D35. HDR and color** (M8; Resolve's color management, pp. 230–239).
+- **D35. HDR and color** (Resolve's color management, pp. 230–239).
   - **Detection:** a clip is HDR when its transfer is PQ (SMPTE ST 2084) or HLG; `media.get` reports it as `hdr`.
   - **SDR output:** HDR clips are tone-mapped to BT.709. Up to 80% of the 203-nit reference white stays as it was, and brighter highlights roll off, up to 1000 nits. Which output an export gets is D44.
   - **HDR output:** PQ or HLG (`video.hdr`, chosen by D44 or set) writes BT.2100 in 10 bits. SDR clips are placed with their white at 203 nits (BT.2408), as Resolve's "203 nits" option does (p. 238).
@@ -486,7 +484,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - Numbers zero-padded to a width (`%06d`) or not (`%d`) both work; the width shows in the file names.
   - The pool calls it as Resolve does: `frame_[000001-000120].png`.
   - Without `sequence`, a numbered image is a still (deviation X17).
-- **D40. Timeline interchange with Resolve** (deviation X9; pp. 527–530, 4160). The manual describes Resolve's OTIO import and export, not the files. Decided from files Resolve exports and from what its import was seen to need:
+- **D40. Timeline interchange with Resolve** (deviation X9; pp. 527–530, 4160). The manual describes Resolve's OTIO import and export, not the files. Decided from files Resolve exports and from what its import needs:
   - **Source positions are timecode.** A source range counts from the media file's start timecode (a `tmcd` track, MXF's, a broadcast WAV's time reference), as Resolve writes and reads it; the available range starts there too. Media without one start at 0. Drop-frame timecode counts its skipped numbers out.
   - **Paths are plain.** Resolve reads `target_url` as a path: `file://` URLs and `%20` escapes don't find the file. vidcut writes plain absolute paths, and reads URLs, escaped or not, too. In bundles, paths are relative.
   - **Audio stays with its video** through Resolve's link group number, written on both and read when there.
@@ -522,7 +520,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - **Settings, with their defaults:** `first_pass` `fast` (quicker settings for the measuring run; `full`), `multipass` `quarter` (NVENC's first look at a quarter of the resolution; `full`), and `lookahead` 32 frames on NVENC whatever the rate control (0 to 32; 0 for none). Measured in export.md §5.
   - **While it runs:** progress says which run it is; cancelling either leaves nothing; the statistics, in a hidden folder beside the output, are removed however it ends. A per-clip export makes both for each file. The Export dialog shows the passes at a bitrate, with the first-pass speed or NVENC's settings for the encoder the plan names.
 - **D46. HDR metadata follows the footage** (§10; deviation X19). The manual's HDR exports carry what the grading setup says (the Mastering Display, Export/Embed HDR10 Metadata, p. 4117); vidcut doesn't grade, so it carries what the sources say.
-  - **Read** when media are added: the mastering display (SMPTE ST 2086), the content light levels (MaxCLL, MaxFALL), whether frames have HDR10+ (ST 2094-40), and the stream's Dolby Vision profile. Media added before vidcut kept them are probed again at export.
+  - **Read** when media are added: the mastering display (SMPTE ST 2086), the content light levels (MaxCLL, MaxFALL), whether frames have HDR10+ (ST 2094-40), and the stream's Dolby Vision profile. HDR media with none of them recorded are probed again at export.
   - **Static values (`video.hdr_metadata`: `auto`, the default), PQ output only:** the widest color volume of the pictures shown (primaries that hold all of theirs, the highest peak, the lowest black) and their highest MaxCLL and MaxFALL. SDR pictures count as BT.709 at 203 cd/m²; PQ ones without values as BT.2020 at 1000 cd/m², the peak vidcut's tone mapping assumes; HLG ones as BT.2020 at 1000 cd/m², HLG's reference display. Light levels are left out when they aren't known for every picture: a PQ source without them, or HLG pictures converted into PQ (keeping only the others' would understate them). `video.mastering_display` and `video.max_cll` (x265's forms) set them. HLG and SDR output carry none.
   - **Dynamic metadata:** HDR10+ and Dolby Vision describe each frame's own picture, so each output frame keeps those of the frame it shows, and only when every picture shown has them and keeps its transfer. Black frames (gaps) carry none: harmless for HDR10+, but an encoder writing Dolby Vision needs it on every frame, so a gap leaves Dolby Vision out. HDR10+ needs PQ; Dolby Vision 8.1 goes into PQ and 8.4 into HLG (10 for AV1), written by libx265 and libsvtav1, so `auto` then encodes on the CPU. `static`, `hdr10plus`, `dolby_vision`, `all` and `none` set what is written.
   - **Where:** in the bitstream (HEVC SEI at every keyframe, AV1 metadata OBUs; HDR10+ on every frame) and in the container (MP4/MOV `mdcv`/`clli`, Matroska/WebM's colour metadata, Dolby Vision's configuration; VP9's HDR10+ as WebM BlockAdditions).

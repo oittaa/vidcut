@@ -1,6 +1,6 @@
-# GUI and live control: decisions from M3
+# GUI and live control
 
-**Status:** accepted (M3, October 2026); §8 added in M4, §9 in M5, §10 in M7; §1, §4, §5 and §7 revised when the viewers moved to vidcut's own player on wgpu ([preview.md](preview.md)).
+**Status:** accepted. The viewers play through vidcut's own player on wgpu ([preview.md](preview.md)).
 
 **Evidence** (all rerunnable):
 - [`crates/vidcut/tests/live.rs`](../../crates/vidcut/tests/live.rs): the live session with its one player engine, a stand-in renderer and a stand-in audio device, no window. Covers frame-exact seeks at every boundary (also with a late renderer), pictures against the sound, the source viewers and switching between them and the timeline (the frame kept ready, a fader held), the clipboard, edits from other processes, and errors.
@@ -23,7 +23,7 @@
 **How they talk:**
 - **One inbox.** Everyone talks to the session through one `mpsc` inbox (`Handle`).
 - **Snapshots out.** After each batch of messages, the session publishes an immutable `Arc<Snapshot>`, and the UI reads the latest one each frame. Publishing is a pointer swap under a mutex.
-- **Answers after the snapshot.** The session sends a request's answer only once the snapshot shows its result. A client that looks right after hearing back (the GUI, a test stepping it) never sees the state from before. Answering first let a loaded test draw a stale selection and send nothing.
+- **Answers after the snapshot.** The session sends a request's answer only once the snapshot shows its result. A client that looks right after hearing back (the GUI, a test stepping it) never sees the state from before. Answered first, a busy client could draw a stale selection and send nothing.
 - **No blocking.** The UI therefore never blocks on the session, and the session never blocks on the UI.
 - **Repaints.** The session calls `request_repaint` when it publishes or asks the UI for something (a capture of the window, a window change), and the viewer thread when a picture it drew changed. Nothing else wakes the UI. While playing, the session publishes as the clock moves to each frame.
 
@@ -118,9 +118,9 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 
 **Reloads.** Timeline reloads are coalesced: one at once, then at most one per 100 ms while edits keep coming. Every live request (state, screenshots, playback, viewer changes) applies a pending reload first, so it sees the timeline as edited; a seek or step loads straight at its target. A reload gives the engine the new plan: its position, open files and kept pictures stay, and it plays on if it plays. While the source is shown, the timeline's new frame is prepared instead.
 
-**Stills and image sequences (M9).** The engine reads them as export does. The pool's thumbnails of a sequence spread over its own pictures — its count, even when more numbered files follow in the same folder — and picture measurements stop at that count. A still has its one picture. A thumbnail time past the last of those pictures stays on the last one and does not open the next path.
+**Stills and image sequences.** The engine reads them as export does. The pool's thumbnails of a sequence spread over its own pictures — its count, even when more numbered files follow in the same folder — and picture measurements stop at that count. A still has its one picture. A thumbnail time past the last of those pictures stays on the last one and does not open the next path.
 
-**Importing numbered images (M9).** Import Media (Ctrl+I, `gui/import.rs`) looks for numbered runs among the files picked, counting each run on disk. If there are any, it asks once:
+**Importing numbered images.** Import Media (Ctrl+I, `gui/import.rs`) looks for numbered runs among the files picked, counting each run on disk. If there are any, it asks once:
 - **One clip each, at a frame rate:** an image sequence per run (`media.add sequence`), at the project's rate unless typed over. Offered first when a run is of a frame type (PNG, TIFF, EXR, DPX, TGA, BMP).
 - **Separate stills:** every file a still. Offered first for numbered JPEGs, which are usually photos.
 - The import stays one request: `media.add`, or an `apply` of two when sequences come with other files.
@@ -132,7 +132,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 
 **Shuttle.** J/K/L play at their speeds, backward too, with the sound reversed or stretched at its pitch (player.md §4).
 
-## 8. The timeline (M4)
+## 8. The timeline
 
 **Two timelines** (spec §5):
 - **Upper:** the whole program at full width.
@@ -152,30 +152,30 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 
 **The Trim Editor** draws exact frames rendered by the export engine on a background thread (`gui/stills.rs`).
 
-**Several tracks (M6).**
+**Several tracks.**
 - **Rows:** both timelines draw every track: V*n*…V1, then A1…. The upper timeline grows a little per track, and the lower one shares its height among the rows (Track 1 gets the most).
 - **The header column's boxes** (spec §5, as the Cut page has them): beside the overview, icons for the Timeline Options, Timeline Actions (tracks, split, marker, Ripple Delete Silence, Detect Scene Cuts) and Edit Actions (trim to playhead, clip duration) menus, and a selector of the target track for edit functions; beside the lower ruler, toggles for Ripple On, Dynamic Trim, Split, Add Marker and Snap (where the Cut page has Keyframes: vidcut has no effects). The icons are Phosphor's (`egui-phosphor`); each is read by its name (accessibility, tests) and says its name and key on hover. The row above the timelines keeps the In/Out marks, zoom and what the timeline holds.
 - **Headers:** the lower timeline's track headers hold the enlarge button, the target-track toggle (the name, with a menu to add or remove tracks) and the lock, audio and video buttons, as icons (spec D43). Every row puts them on one line centered in it, each button in the same column row under row: enlarge on the left, the others at the right edge, the name in what they leave (cut short if need be).
 - **Rows sit on the bottom:** the lower timeline lays its rows out upward from a fixed strip above its bottom edge (room to drop a new audio track), so V1 or the last audio track stays put whatever the panel's height; the spare room is above the top track, where a drop makes a new video track. Many tracks shrink to fit between the strips.
 - **Destination row:** a drag's destination is the row under the pointer, and the strips above and below the rows stand for a new track (spec D18). `gesture.rs` turns the destination into the request (`track`, D25), and its unit tests cover the rows.
 
-**Mixer and meters (M6, `gui/mixer.rs`).**
+**Mixer and meters (`gui/mixer.rs`).**
 - **Strips:** the Mixer panel (top bar, or `gui.show mixer`) has a strip per track with sound: one meter bar per channel, a fader, M and S. The mix gets the same per-channel meter.
 - **One request per fader drag:** the fader sends `track.set` once, when it's let go, so a drag is one undo step. Double-click resets it to 0 dB.
 - **Meters** are one bar per project channel (spec D28), with a 1.5 s peak hold on each bar. They read the cached waveforms at the playhead, playing or not, so they need no tap of the player's output, work while paused and while scrubbing, and apply the same gains, mutes and solos as the export. The waveforms' channel envelopes are mixed to the project's channels by the export's resampler, so they are measured again when that count changes.
 - **Viewer:** a meter beside the viewer shows what it plays, one bar per channel, and its speaker button is `player.mute`. That mute silences the viewer meter. In source modes the meter is the source media at the source playhead.
 
-**Bins (M6).**
+**Bins.**
 - **Pool view:** the pool shows the open bin (`pool.set`: bin, sort, direction). That view lives in the session, not the project, so Source Tape and agents see the same order. It follows a renamed bin, and moves to the parent bin when its own is removed.
 - **Drops:** the pool records where bins are drawn each frame (a folder, or a level of the path) and the drag's release checks them. A clip drop sends `media.move`. A bin drop sends one `bins.rename`, from the dragged bin to `<target>/<name>`. Nothing is sent when the target is the bin itself, a bin inside it, or its current parent. If the name is taken, `bins.rename` fails and the status bar shows the error, the same as other pool actions. The open bin follows a renamed bin, as any rename does.
 - **One undo step:** Create Bin With Selected Clips is one `apply` batch (`bins.add` and `media.move`). A bin drag is the one `bins.rename`.
 - **Tests:** `tests/gui_tracks.rs` (egui_kittest) covers the target track, a drag onto a new track, Place On Top, a fader drag, solo, New Bin, a clip dropped into a bin, and a bin dropped into another bin. Each sends exactly one request. Which bin drops move is unit-tested in `gui/pool.rs`.
 
-## 9. Export windows and jobs (M5)
+## 9. Export windows and jobs
 
 **Jobs.** Every media export and proxy encode in a running GUI is a job (`live/jobs.rs`), whoever started it:
 - **A thread per job** prepares the export from a copy of the project (§2), reports its files and their lengths (`JobPlanned`), then encodes, sending progress about ten times a second. The session keeps each job's state for `jobs.*` and the snapshot.
-- **Foreground** (an IPC client without `background`): progress notifications carry the job id, the reply comes when the job ends, and a closed connection cancels it, as in M3. That same closed connection cancels a `frame.render`, a storyboard, an analysis and the loudness measure before the export, which send no progress of their own. A background job is cancelled only by `jobs.cancel`.
+- **Foreground** (an IPC client without `background`): progress notifications carry the job id, the reply comes when the job ends, and a closed connection cancels it. That same closed connection cancels a `frame.render`, a storyboard, an analysis and the loudness measure before the export, which send no progress of their own. A background job is cancelled only by `jobs.cancel`.
 - **Background** (`background: true`, and every GUI export): the reply comes once the files are planned, so mistakes (an unknown preset, an existing file) still fail the request itself. The job goes on without the client.
 - **`jobs.wait`** is a wait-list entry like a seek's (§2), without the 10 s limit unless given a `timeout`; it fails the way the job failed. `jobs.cancel` sets the job's cancel flag, and the engine removes partial files.
 - **Low priority:** every thread the app starts goes through `threads::spawn` and says what its work is. A job (`Work::Job`) drops to the lowest CPU priority as it starts, Linux's idle scheduling class, and the FFmpeg threads it starts inherit it. Not nice 19: NVIDIA's driver, opening NVENC, copies the calling thread's nice value onto the main thread, and nothing unprivileged raises it again; the idle class leaves nice values alone. The GUI, playback and other programs come first, and the job still takes every core they leave idle. So do the other requests that decode whole files: the measuring before Detect Scene Cuts and Ripple Delete Silence, `analyze.*` and storyboards. Frames and plans keep their priority: someone waits for them, and they're quick. Headless runs keep their priority: a terminal waits for them.
@@ -189,7 +189,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 
 **The windows only send requests:**
 - **Quick Export** (p. 788) lists the presets marked `quick_export`; Export… asks for a file name, then starts a background export and opens its progress window.
-- **The Export dialog** always starts from a preset. What the user changes becomes `--set` overrides of that preset (a JSON diff of the settings), so every GUI export reads as `vidcut export start OUT --preset NAME --set …`. The dialog shows that command; `tests/gui_export.rs` parses it with the real CLI parser and checks it makes the same request as the GUI, and that the plan headless equals the plan in the GUI (M5 acceptance).
+- **The Export dialog** always starts from a preset. What the user changes becomes `--set` overrides of that preset (a JSON diff of the settings), so every GUI export reads as `vidcut export start OUT --preset NAME --set …`. The dialog shows that command; `tests/gui_export.rs` parses it with the real CLI parser and checks it makes the same request as the GUI, and that the plan headless equals the plan in the GUI.
 - **The plan** is `export.plan`, asked again whenever the params change (one request in flight). Mistakes the dialog can see itself (codec vs container) don't go to the session. Plans never change anything: per-clip folders are made when the export runs.
 - **Asking the session:** windows that need answers (presets, plans, starting an export, imports) call `Handle::call` on a helper thread and poll the result each frame (`Ask`), so the UI never waits. These lookups are left out of the command log, and their errors show in the window instead of the status bar.
 - **File dialogs** run on helper threads behind a `Dialogs` trait; tests answer them directly.
@@ -198,7 +198,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 - **Timeline interchange** (deviation X9): File > Import Timeline (`.otio` or `.otioz`; an `.otiod` through its `content.otio`) asks Append or Replace when the timeline has clips, and asks for a folder when media aren't found (p. 529). Import warnings show in a window. An `.otioz` import unpacks its media on a worker first (`Step::Measure`), so the session keeps answering meanwhile. File > Export Timeline writes `.otio`; File > Export Timeline with Media writes an `.otioz` as a job, as Resolve's export offers both (p. 4160).
 - **`gui.show`** opens any of these windows (or the log, or the Mixer) for the person at the GUI, e.g. after an agent prepared an export.
 
-## 10. Automatic tools (M7)
+## 10. Automatic tools
 
 - **Ripple Delete Silence:** the dialog (`gui/timeline/tools.rs`) dry-runs `edit.ripple_delete_silence` on a helper thread whenever its settings change. It draws the parts as red stripes on both timelines while it is open. Remove sends the request once.
 - **Measuring first:** the session measures media on a worker before such an edit runs (agents.md §3), so the GUI stays live while a long clip decodes.
@@ -213,12 +213,12 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 
 - **Filmstrips are kept on disk** (`thumbcache.rs`): 24 pictures of a media file, fitted in 192×108, as one JPEG strip in `~/.cache/vidcut/thumbs` (about 6 KB a picture, where the RGBA in memory takes 83 KB). The file name holds the media file's path hash, size and modification time, and the strip's layout, so a changed file or another layout never reads a stale strip.
 - **Eviction:** a strip's modification time is its last use. After each new strip, the least recently used go until the rest fit `thumbnails.cache_limit_mb` (512 MB by default, about 3,000 media files).
-- **Why:** decoding 24 pictures takes from a tenth of a second to seconds per clip, much more from a network share, and it ran again for every clip each time a project opened. The project still keeps no pictures (deviation X1).
-- **Preferences** (`preferences.toml`, deviation X12) are read whenever a thumbnail job, an export or a proxy runs, so a change from the CLI applies to a running GUI at once. GPU acceleration also reaches the player at once: the session watches the preferences file, and when the preference changed, whoever changed it (the Preferences window, a CLI run, the file by hand), the engine switches its decoder and decodes its pictures anew, the one shown first (preview.md §3). The player's memory (`player.memory_mb`, `player.video_memory_mb`) reaches it the same way: over a smaller limit, the pictures kept least recently go at once. `preferences.set` empties the cache when it is turned off and trims it when the limit drops.
+- **Why:** decoding 24 pictures takes from a tenth of a second to seconds per clip, much more from a network share, and without the cache it runs again for every clip each time a project opens. The project still keeps no pictures (deviation X1).
+- **Preferences** (`preferences.toml`, deviation X12) are read whenever a thumbnail job, an export or a proxy runs, so a change from the CLI applies to a running GUI at once. GPU acceleration also reaches the player at once: the session watches the preferences file, and when the preference changes, whoever changes it (the Preferences window, a CLI run, the file by hand), the engine switches its decoder and decodes its pictures anew, the one shown first (preview.md §3). The player's memory (`player.memory_mb`, `player.video_memory_mb`) reaches it the same way: over a smaller limit, the pictures kept least recently go at once. `preferences.set` empties the cache when it is turned off and trims it when the limit drops.
 - **Tests:** `tests/thumbnails.rs` opens a project whose media moved away and still gets its thumbnails, then turns the cache off in the Preferences window with one request.
 
 **Timeline filmstrips** (`gui/tiles.rs`): each tile shows the frame under it.
-- **Why not the pool's pictures:** 24 per file is one every 30 s of a 12-minute film. A 5 s clip showed one picture over and over, often from another shot.
+- **Why not the pool's pictures:** 24 per file is one every 30 s of a 12-minute film. A 5 s clip would show one picture over and over, often from another shot.
 - **Keys:** a tile asks for its media, source frame and height in pixels (rounded up to a multiple of 16). The first tile shows the clip's first frame; the others the first multiple of a step at or after their left edge, where the step is the largest power of two frames no wider than a tile. Zooming in or out by two keeps half of the frames.
 - **Memory:** pictures are textures, kept up to `thumbnails.timeline_memory_mb` (256 MB by default, about 12,000 tiles 56 px tall). Above it, those shown least recently go, down to nine tenths; never one shown in the last frame.
 - **Making them:** four worker threads at the lowest CPU priority take the tiles painting asked for, in its order, and replace their queue with each frame's asks, so tiles scrolled away aren't made. A worker goes on along a file while the next tile is asked for within 4 s ahead (decoding on beats a seek), and a fresh pick avoids what another worker is near. Frames come from `vidcut_av::export::renderer::FrameReader`, the export's sampling at the tile's size, from a fresh proxy when there is one.

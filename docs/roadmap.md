@@ -23,7 +23,7 @@ These guide what gets built and what gets tested.
 
 Moving an edit between vidcut and Resolve, in either direction and between computers, should take no fixing by hand.
 
-What is still open is in [docs/todo/](todo/), one file per item.
+What is open is in [docs/todo/](todo/), one file per item.
 
 ## Order
 
