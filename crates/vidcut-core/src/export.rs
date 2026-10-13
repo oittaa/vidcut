@@ -93,6 +93,18 @@ pub enum VideoCodec {
     Dnxhr,
 }
 
+impl VideoCodec {
+    /// The worst constant quality (`video.quality`) its encoders take:
+    /// H.264's and HEVC's quantizers end at 51, AV1's and VP9's scales at
+    /// 63. A larger one is taken as that.
+    pub fn worst_quality(self) -> u32 {
+        match self {
+            VideoCodec::H264 | VideoCodec::Hevc => 51,
+            _ => 63,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AudioCodec {
@@ -202,7 +214,8 @@ pub struct VideoSettings {
     #[serde(default)]
     pub encoder: EncoderChoice,
     /// Constant-quality level (CRF/CQ/QP style: lower is better), unless
-    /// `bitrate` is set.
+    /// `bitrate` is set: up to 51 for H.264 and HEVC, 63 for AV1 and VP9
+    /// (more is taken as that).
     #[serde(default)]
     pub quality: Option<u32>,
     /// Target bitrate in bits per second.

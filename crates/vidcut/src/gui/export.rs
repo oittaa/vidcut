@@ -1948,7 +1948,7 @@ fn settings_form(ui: &mut egui::Ui, d: &mut Dialog, size: (u32, u32), audio: (u3
                     if by_quality {
                         let mut q = v.quality.unwrap_or(20);
                         if ui
-                            .add(egui::DragValue::new(&mut q).range(0..=63))
+                            .add(egui::DragValue::new(&mut q).range(0..=v.codec.worst_quality()))
                             .on_hover_text("lower is better (CRF / CQ)")
                             .changed()
                         {
