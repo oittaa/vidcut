@@ -485,7 +485,11 @@ fn display_gpus() -> Vec<String> {
         .iter()
         .map(|a| {
             let info = a.get_info();
-            format!("{} ({:?}, {})", info.name, info.backend, info.driver)
+            // Metal names no driver.
+            match info.driver.as_str() {
+                "" => format!("{} ({:?})", info.name, info.backend),
+                driver => format!("{} ({:?}, {driver})", info.name, info.backend),
+            }
         })
         .collect()
 }
