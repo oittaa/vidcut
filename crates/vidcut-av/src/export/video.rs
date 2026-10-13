@@ -210,11 +210,7 @@ impl Normalizer {
             conv.after,
             fmt_name(out_fmt)
         );
-        graph
-            .output("in", 0)
-            .and_then(|p| p.input("out", 0))
-            .and_then(|p| p.parse(&spec))
-            .ctx(|| format!("building filter {spec}"))?;
+        crate::parts::parse_filters(&mut graph, &spec)?;
         graph
             .validate()
             .ctx(|| format!("configuring filter {spec}"))?;
@@ -700,11 +696,7 @@ impl Relayout {
         graph
             .add(&find("buffersink")?, "out", "")
             .ctx(|| "creating video sink".into())?;
-        graph
-            .output("in", 0)
-            .and_then(|p| p.input("out", 0))
-            .and_then(|p| p.parse(&spec))
-            .ctx(|| format!("building filter {spec}"))?;
+        crate::parts::parse_filters(&mut graph, &spec)?;
         graph
             .validate()
             .ctx(|| format!("configuring filter {spec}"))?;

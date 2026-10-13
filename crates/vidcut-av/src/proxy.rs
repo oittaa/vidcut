@@ -135,7 +135,7 @@ pub fn encoders(choice: ProxyCodec, available: &Availability) -> Vec<ProxyEncode
         ProxyCodec::Av1 => ProxyEncoder::software("libsvtav1", "av1"),
         ProxyCodec::Auto | ProxyCodec::H264 => ProxyEncoder::software("libx264", "h264"),
     };
-    if encoder::find_by_name(&software.name).is_some() {
+    if crate::parts::has_encoder(&software.name) {
         out.push(software);
     }
     out

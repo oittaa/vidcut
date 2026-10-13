@@ -251,13 +251,7 @@ pub fn abilities(v: &VideoSettings, available: &Availability) -> Abilities {
     };
     let writes = |kind: EncoderChoice, ten: bool| match (kind, name(kind)) {
         (_, None) => false,
-        (EncoderChoice::Cpu, Some(n)) => {
-            if ten {
-                cpu_ten_bit(n)
-            } else {
-                encoder::find_by_name(n).is_some()
-            }
-        }
+        (EncoderChoice::Cpu, Some(n)) => crate::parts::has_encoder(n) && (!ten || cpu_ten_bit(n)),
         (k, Some(n)) => available.find(n, gpu_pixel(k, ten)).is_some(),
     };
     let first = kinds.iter().copied().find(|&k| writes(k, false));
@@ -660,8 +654,11 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
             ("dnxhd", pixel, vec![opt("profile", format!("dnxhr_{p}"))])
         }
     };
-    if encoder::find_by_name(name).is_none() {
-        return Err(Error::Invalid(format!("this FFmpeg has no {name} encoder")));
+    if !crate::parts::has_encoder(name) {
+        return Err(crate::parts::missing_error(
+            crate::parts::Kind::Encoder,
+            name,
+        ));
     }
     Ok(VideoEncoder {
         name: name.into(),
@@ -688,8 +685,11 @@ pub fn resolve_audio(a: &AudioSettings, rate: u32, channels: u16) -> Result<Audi
         AudioCodec::PcmS16 => ("pcm_s16le", Sample::I16(Packed), None),
         AudioCodec::PcmS24 => ("pcm_s24le", Sample::I32(Packed), None),
     };
-    if encoder::find_by_name(name).is_none() {
-        return Err(Error::Invalid(format!("this FFmpeg has no {name} encoder")));
+    if !crate::parts::has_encoder(name) {
+        return Err(crate::parts::missing_error(
+            crate::parts::Kind::Encoder,
+            name,
+        ));
     }
     let mut rate = a.sample_rate.unwrap_or(rate);
     if a.codec == AudioCodec::Opus {

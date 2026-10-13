@@ -31,12 +31,15 @@ pub fn audio_levels(path: &Path, ordinal: u32, per_second: u32) -> Result<AudioL
     discard_others(&input, index);
     // Same end as export: a past-end timestamp is not a hole in the levels.
     let file_end = crate::decode::container_end(&input, start_pts, tick);
-    let mut decoder = codec::context::Context::from_parameters(params)
-        .and_then(|mut c| {
+    let id = params.id();
+    let mut decoder = crate::parts::decoder_opened(
+        codec::context::Context::from_parameters(params).and_then(|mut c| {
             unsafe { (*c.as_mut_ptr()).pkt_timebase = tb.into() };
             c.decoder().audio()
-        })
-        .ctx(|| "opening audio decoder".into())?;
+        }),
+        id,
+        "audio",
+    )?;
     let per_second = per_second.max(1);
     let mut resampler: Option<(Resampler, u32, usize)> = None;
     let mut samples = Vec::new();
@@ -130,10 +133,8 @@ pub fn picture_stats(source: &crate::decode::Input, pictures: Option<u64>) -> Re
         kind: codec::threading::Type::Frame,
         count: 0,
     });
-    let mut decoder = ctx
-        .decoder()
-        .video()
-        .ctx(|| "opening video decoder".into())?;
+    let id = stream.parameters().id();
+    let mut decoder = crate::parts::decoder_opened(ctx.decoder().video(), id, "video")?;
     discard_others(&input, index);
     let (w, h) = MEASURE;
     let count = (w * h) as usize;
@@ -334,11 +335,7 @@ pub fn mix_loudness(
         )
         .ctx(|| "creating the audio sink".into())?;
     let spec = "ebur128=peak=true:metadata=1";
-    graph
-        .output("in", 0)
-        .and_then(|p| p.input("out", 0))
-        .and_then(|p| p.parse(spec))
-        .ctx(|| format!("building filter {spec}"))?;
+    crate::parts::parse_filters(&mut graph, spec)?;
     graph
         .validate()
         .ctx(|| format!("configuring filter {spec}"))?;
