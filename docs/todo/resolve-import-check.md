@@ -14,7 +14,7 @@ Import vidcut's `.otio` and `.otioz` files into the current free and Studio vers
 - `.otioz`: the media unpack into a folder named after the bundle, and link, image sequences too (two in one bundle, 120 and 30 pictures). One import hung once, with a blank dialog on screen; twelve more of bundles with sequences didn't, that same bundle among them, nor did a half-written one (refused at once).
 - `.otiod`: the import takes its `content.otio`, not the folder, and finds the media.
 - Back to vidcut: everything structural survives the round trip; In/Out, track faders and track settings don't, as Resolve drops vidcut's metadata (deviation X9).
-- Resolve's own timelines (transitions, speed, effects, generators, compound clips): see the carrying items (`otio-carry-*`, `otio-compound-clips`, `otio-speed-carry`).
+- Nested stacks (compound clips, nested timelines): the API import fails with `importSourceClips` on, for vidcut's files as for Resolve's own; with it off, a compound clip comes in with its clips offline and a nested timeline as an offline clip.
 - EDL and FCPXML keep less than OTIO: the EDL one video track, no markers or audio tracks; the FCPXML (1.10) no markers.
 - Odd: Resolve's API import of its own export of such a timeline failed with `importSourceClips` on, and rebuilt it with it off. The cause wasn't found (not its generators, Text+, compound clips, transitions or speeds).
 

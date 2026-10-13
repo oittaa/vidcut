@@ -288,6 +288,8 @@ fn clip(
         theme::CLIP_DISABLED
     } else if c.is_generator() {
         theme::GENERATOR
+    } else if c.compound.is_some() {
+        theme::COMPOUND
     } else {
         theme::CLIP
     };
@@ -320,6 +322,11 @@ fn clip(
             assets,
             fps,
         );
+    }
+    // A compound clip's sound: a block on the audio band.
+    if c.compound.is_some() && !c.video {
+        let band = Rect::from_x_y_ranges(x0..=x1, tr.audio_top..=rect.bottom());
+        painter.rect_filled(band.shrink2(vec2(0.5, 0.0)), CornerRadius::same(2), fill);
     }
     // Audio, offset by J/L cuts.
     if let Some((ra, rb)) = c.audio_range() {
@@ -359,6 +366,7 @@ fn clip(
             .clone()
             .or_else(|| p.media(&c.media).map(|m| m.name.clone()))
             .or_else(|| c.generator.as_ref().map(vidcut_core::otio::generator_kind))
+            .or_else(|| c.compound.as_ref().map(vidcut_core::otio::compound_kind))
             .unwrap_or_default();
         // Pinned to the visible part of the clip.
         let left = x0.max(painter.clip_rect().left());

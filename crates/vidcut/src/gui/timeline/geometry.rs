@@ -553,6 +553,7 @@ mod tests {
             name: None,
             effects: None,
             generator: None,
+            compound: None,
         }
     }
 

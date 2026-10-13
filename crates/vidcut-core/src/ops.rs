@@ -281,6 +281,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         name: None,
         effects: None,
         generator: None,
+        compound: None,
     })
 }
 
@@ -400,8 +401,8 @@ pub fn edit_has_handles(p: &Project, e: i64) -> bool {
     };
     !t.clips.iter().filter(|c| !c.is_generator()).any(|c| {
         let at_end = c.end() == e
-            && p.media(&c.media)
-                .is_some_and(|m| c.source_in + c.duration >= p.media_limit(m));
+            && p.source_frames(c)
+                .is_some_and(|frames| c.source_in + c.duration >= frames);
         let at_start = c.start == e && c.source_in <= 0;
         at_end || at_start
     })
@@ -949,6 +950,14 @@ pub fn move_clips(
             p.tracks[dest].id
         )));
     }
+    if p.tracks[dest].kind == TrackKind::Video
+        && clips.iter().any(|(_, c)| c.compound.is_some() && !c.video)
+    {
+        return Err(Error::invalid(format!(
+            "{} is a video track: a compound clip's sound goes on audio tracks",
+            p.tracks[dest].id
+        )));
+    }
     let on_main: Vec<Clip> = clips
         .iter()
         .filter(|(ti, _)| *ti == main)
@@ -1182,6 +1191,18 @@ fn check_source(p: &Project, c: &Clip) -> Result<()> {
         )));
     }
     if c.is_generator() {
+        return Ok(());
+    }
+    if let Some(k) = &c.compound {
+        if c.source_in < 0 || c.source_in + c.duration > k.frames {
+            return Err(Error::invalid(format!(
+                "{} would need frames {}..{} of its compound, which has 0..{}",
+                c.id,
+                c.source_in,
+                c.source_in + c.duration,
+                k.frames
+            )));
+        }
         return Ok(());
     }
     let m = p
@@ -1454,10 +1475,10 @@ pub fn extend_to_media_end(p: &mut Project, ids: &[String], ripple: Option<bool>
         if c.is_generator() {
             continue;
         }
-        let media = p
-            .media(&c.media)
+        let frames = p
+            .source_frames(c)
             .ok_or_else(|| Error::not_found(format!("no media {}", c.media)))?;
-        let room = p.media_limit(media) - c.source_in - c.duration;
+        let room = frames - c.source_in - c.duration;
         targets.push((c.start, id.clone(), room));
     }
     targets.sort();
@@ -1804,15 +1825,19 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
     let first = clips[0].clip.start;
     let mut ids = Vec::new();
     for TrackClip { track, clip: c } in clips {
-        // A generator from another editor has no media (deviation X9).
-        let has_video = if c.is_generator() {
-            if c.duration <= 0 || !c.media.is_empty() || c.audio.is_some() {
+        // A block from another editor has no media (deviation X9).
+        let has_video = if c.is_block() {
+            let outside = c
+                .compound
+                .as_ref()
+                .is_some_and(|k| c.source_in < 0 || c.source_in + c.duration > k.frames);
+            if c.duration <= 0 || !c.media.is_empty() || c.audio.is_some() || outside {
                 return Err(Error::invalid(format!(
-                    "pasted clip {} is a generator with media or audio",
+                    "pasted clip {} is a block with media, audio or frames it hasn't",
                     c.id
                 )));
             }
-            true
+            c.video
         } else {
             let media = p
                 .media(&c.media)
@@ -1844,8 +1869,11 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
         let mut clip = c;
         clip.id = p.alloc_clip_id();
         clip.start = start;
-        clip.video = clip.video && has_video && p.tracks[ti].kind == TrackKind::Video;
-        if !clip.video && clip.audio.is_none() {
+        let on_video = p.tracks[ti].kind == TrackKind::Video;
+        // A compound clip's sound block goes on audio tracks only.
+        let sound_block = clip.compound.is_some() && !clip.video;
+        clip.video = clip.video && has_video && on_video;
+        if (!clip.video && clip.audio.is_none() && !sound_block) || (sound_block && on_video) {
             return Err(Error::invalid(format!(
                 "pasted clip has nothing for track {}",
                 p.tracks[ti].id
