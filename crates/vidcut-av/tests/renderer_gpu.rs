@@ -25,6 +25,7 @@ fn piece(path: &std::path::Path, source_frame: i64) -> VideoPiece {
         source_frame,
         frames: 1,
         image: None,
+        pace: Default::default(),
     }
 }
 
