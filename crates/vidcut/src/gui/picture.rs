@@ -681,25 +681,16 @@ impl Screen {
             };
             imports.push((raw, size, format, texture));
         }
-        // Taken over from VA-API with the picture they hold, ready to copy
-        // from.
-        // SAFETY: the images were just made on wgpu's device, which hasn't
-        // used them.
-        unsafe {
-            let images: Vec<_> = imports.iter().map(|(raw, ..)| raw.raw_handle()).collect();
-            gpu.acquire(
-                &images,
-                ash::vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-                ash::vk::PipelineStageFlags::TRANSFER,
-                ash::vk::AccessFlags::TRANSFER_READ,
-            )?;
-        }
+        // wgpu's textures first: one it refuses leaves nothing queued that
+        // names its image, and those it makes it keeps until its work on
+        // them is done.
         let textures = gpu.checked(|| {
             imports
                 .into_iter()
                 .map(|(raw, size, format, texture)| {
                     // SAFETY: made on this device, as described, and in the
-                    // layout copies read from (acquired above).
+                    // layout copies read from before wgpu reads it
+                    // (acquired below).
                     let imported = unsafe {
                         gpu.device.create_texture_from_hal::<Vulkan>(
                             raw,
@@ -720,6 +711,25 @@ impl Screen {
                 })
                 .collect::<Vec<_>>()
         })?;
+        // Taken over from VA-API with the picture they hold, ready to copy
+        // from.
+        // SAFETY: the images of textures just made on wgpu's device, which
+        // hasn't used them; only their handles are read.
+        unsafe {
+            let images: Vec<_> = textures
+                .iter()
+                .filter_map(|(imported, ..)| imported.as_hal::<Vulkan>().map(|t| t.raw_handle()))
+                .collect();
+            if images.len() != textures.len() {
+                return Err("not Vulkan".into());
+            }
+            gpu.acquire(
+                &images,
+                ash::vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                ash::vk::PipelineStageFlags::TRANSFER,
+                ash::vk::AccessFlags::TRANSFER_READ,
+            )?;
+        }
         for (imported, size, texture) in textures {
             // wgpu keeps the texture until the copy is done.
             encoder.copy_texture_to_texture(
@@ -823,21 +833,10 @@ impl Screen {
             let _ = CloseHandle(handle);
             raw?.map_err(|e| format!("importing a Direct3D 11 texture: {e}"))?
         };
-        // Taken over from Direct3D 11 with the picture it holds, ready to
-        // sample.
-        // SAFETY: the image was just made on wgpu's device, which hasn't
-        // used it.
-        unsafe {
-            gpu.acquire(
-                &[raw.raw_handle()],
-                ash::vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                ash::vk::PipelineStageFlags::FRAGMENT_SHADER,
-                ash::vk::AccessFlags::SHADER_READ,
-            )?;
-        }
-        let (y, uv) = gpu.checked(|| {
+        // wgpu's texture first, as for VA-API's.
+        let (image, y, uv) = gpu.checked(|| {
             // SAFETY: made on this device, as described, and in the layout
-            // shaders sample (acquired above).
+            // shaders sample before wgpu reads it (acquired below).
             let imported = unsafe {
                 gpu.device.create_texture_from_hal::<Vulkan>(
                     raw,
@@ -854,6 +853,8 @@ impl Screen {
                     wgpu::TextureUses::RESOURCE,
                 )
             };
+            // SAFETY: wgpu's own texture; only its handle is read.
+            let image = unsafe { imported.as_hal::<Vulkan>().map(|t| t.raw_handle()) };
             let plane = |format, aspect| {
                 imported.create_view(&wgpu::TextureViewDescriptor {
                     label,
@@ -863,10 +864,23 @@ impl Screen {
                 })
             };
             (
+                image,
                 plane(one, wgpu::TextureAspect::Plane0),
                 plane(two, wgpu::TextureAspect::Plane1),
             )
         })?;
+        // Taken over from Direct3D 11 with the picture it holds, ready to
+        // sample.
+        // SAFETY: the image of a texture just made on wgpu's device, which
+        // hasn't used it.
+        unsafe {
+            gpu.acquire(
+                &[image.ok_or("not Vulkan")?],
+                ash::vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                ash::vk::PipelineStageFlags::FRAGMENT_SHADER,
+                ash::vk::AccessFlags::SHADER_READ,
+            )?;
+        }
         self.views = Some((y, uv, (desc.Width, desc.Height)));
         self.imported = Some(picture.clone());
         Ok(())
