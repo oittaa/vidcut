@@ -170,7 +170,7 @@ pub struct WrittenProxy {
 /// everything on the CPU. For every other encoder, and image sequences and
 /// streams NVDEC can't decode, the CPU scales: the frames decode on
 /// `decoding`'s GPU where it decodes the stream, shrunk there before they
-/// come down, and on the CPU otherwise.
+/// come down (`hw::Shrinker`), and on the CPU otherwise.
 pub fn write(
     input: &Input,
     width: u32,

@@ -395,10 +395,13 @@ fn video_encoder(
         }
         return Ok(None);
     };
-    let q = v.quality.unwrap_or(match v.codec {
-        VideoCodec::Av1 => 30,
-        _ => 20,
-    });
+    let q = v
+        .quality
+        .unwrap_or(match v.codec {
+            VideoCodec::Av1 => 30,
+            _ => 20,
+        })
+        .min(v.codec.worst_quality());
     let passes = passes(v, name)?;
     let options = match kind {
         EncoderChoice::Nvenc => nvenc_options(v, q, ten, passes),
@@ -557,7 +560,10 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
     let speed = |default: &str| opt("preset", v.speed.as_deref().unwrap_or(default));
     let quality = |key: &str, default: u32| match v.bitrate {
         Some(b) => opt("b", b),
-        None => opt(key, v.quality.unwrap_or(default)),
+        None => opt(
+            key,
+            v.quality.unwrap_or(default).min(v.codec.worst_quality()),
+        ),
     };
     let (name, pixel, options) = match v.codec {
         VideoCodec::H264 => {
@@ -801,7 +807,10 @@ impl Upload {
         }
     }
 
-    /// Copies a frame in memory into one of these (keeping its pts).
+    /// Copies a frame in memory into one of these, keeping its timestamp
+    /// and colors, as an encoder given the frame in memory would see them
+    /// (AMF reads HDR10's metadata only off frames whose transfer is PQ;
+    /// `hdr::insert_static` puts it in the file regardless).
     pub(crate) fn upload(&self, src: &frame::Video) -> Result<frame::Video> {
         let mut hw = frame::Video::empty();
         unsafe {
@@ -821,6 +830,16 @@ impl Upload {
             }
         }
         hw.set_pts(src.pts());
+        // SAFETY: both frames are valid; plain fields.
+        unsafe {
+            let (o, i) = (hw.as_mut_ptr(), src.as_ptr());
+            (*o).color_range = (*i).color_range;
+            (*o).colorspace = (*i).colorspace;
+            (*o).color_primaries = (*i).color_primaries;
+            (*o).color_trc = (*i).color_trc;
+            (*o).chroma_location = (*i).chroma_location;
+            (*o).sample_aspect_ratio = (*i).sample_aspect_ratio;
+        }
         Ok(hw)
     }
 }
@@ -907,14 +926,17 @@ pub(crate) fn open_video(
         // own there (a VA-API one beneath it on Linux, which keeps libva's
         // messages in FFmpeg's log), AMF on Direct3D 11's on that adapter.
         Some(on) if matches!(enc.kind, EncoderChoice::Qsv | EncoderChoice::Amf) => {
-            let ty = match enc.kind {
-                EncoderChoice::Qsv => ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_QSV,
-                _ => ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_D3D11VA,
+            let device = match enc.kind {
+                EncoderChoice::Qsv => crate::hw::Device::qsv(on)?,
+                _ => crate::hw::Device::of_type(ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_D3D11VA, on)?,
             };
-            let device = crate::hw::Device::of_type(ty, on)?;
             ctx.set_format(enc.pixel);
             // SAFETY: the context takes a reference of its own.
-            unsafe { (*ctx.as_mut_ptr()).hw_device_ctx = ffi::av_buffer_ref(device.0) };
+            let device = unsafe { ffi::av_buffer_ref(device.0) };
+            if device.is_null() {
+                return Err(Error::Invalid("no memory for a GPU device".into()));
+            }
+            unsafe { (*ctx.as_mut_ptr()).hw_device_ctx = device };
             None
         }
         _ => {
@@ -1543,6 +1565,39 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn qualities_past_a_codecs_scale_are_its_worst() {
+        crate::init();
+        let at = |codec, kind, name: &str, key: &str| {
+            let mut v = video(codec, kind, None);
+            v.quality = Some(63);
+            let available = match kind {
+                EncoderChoice::Cpu => Availability::default(),
+                _ => only(name, kind, gpu_pixel(kind, false)),
+            };
+            let e = resolve_video(&v, &available).unwrap();
+            assert_eq!(e.name, name);
+            e.options
+                .iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| v.clone())
+                .unwrap_or_else(|| panic!("no {key} in {name}: {:?}", e.options))
+        };
+        // H.264's and HEVC's end at 51 on every encoder (FFmpeg won't open
+        // NVENC, AMF, VAAPI or x265 past it).
+        for (codec, kind, name, key) in [
+            (VideoCodec::H264, EncoderChoice::Nvenc, "h264_nvenc", "cq"),
+            (VideoCodec::Hevc, EncoderChoice::Amf, "hevc_amf", "qp_i"),
+            (VideoCodec::H264, EncoderChoice::Vaapi, "h264_vaapi", "qp"),
+            (VideoCodec::Hevc, EncoderChoice::Cpu, "libx265", "crf"),
+        ] {
+            assert_eq!(at(codec, kind, name, key), "51", "{name}");
+        }
+        // AV1's scale goes on to 63.
+        let av1 = at(VideoCodec::Av1, EncoderChoice::Nvenc, "av1_nvenc", "cq");
+        assert_eq!(av1, "63");
     }
 
     #[test]

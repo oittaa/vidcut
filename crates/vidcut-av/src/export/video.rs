@@ -201,8 +201,9 @@ impl Normalizer {
         let color = crate::color::Source::of(src);
         let conv = crate::color::conversion(color, out_fmt, target);
         let spec = format!(
-            "{}scale={sw}:{sh}:flags=bicubic{},pad={out_w}:{out_h}:{}:{}:color=black,setsar=1{},format={}",
+            "{}scale={sw}:{sh}:flags={}{},pad={out_w}:{out_h}:{}:{}:color=black,setsar=1{},format={}",
             upright(rotation),
+            conv.flags,
             conv.scale,
             (out_w - sw) / 2,
             (out_h - sh) / 2,
@@ -573,8 +574,8 @@ pub struct VideoFrames {
     /// (`keep_on_gpu`).
     decoder: Option<crate::hw::GpuDecoder>,
     keep_on_gpu: bool,
-    /// Copies VA-API's and Direct3D 11's frames kept on the GPU out of the
-    /// decoder's surfaces.
+    /// Copies Direct3D 11's frames kept on the GPU out of the decoder's
+    /// texture array; `None` too once that failed, when they come down.
     keeper: Option<crate::hw::Keeper>,
     /// Shrinks VA-API's and Direct3D 11's frames on the GPU before they
     /// come down to be fitted into the output.
@@ -582,6 +583,8 @@ pub struct VideoFrames {
     /// Fits frames into the output on the GPU, for an encoder on their
     /// device ([`fit_on_gpu`](Self::fit_on_gpu)).
     fit: Option<GpuFit>,
+    /// Keeping Direct3D 11's frames failed: they come down from then on.
+    unkept: bool,
     /// The clockwise turn that shows the last frame given upright.
     rotation: u16,
     /// The GPU that decoded the last frame given.
@@ -744,6 +747,7 @@ impl VideoFrames {
             keeper: None,
             shrinker: None,
             fit: None,
+            unkept: false,
             rotation: 0,
             last_decoder: None,
             gpu_decoded: 0,
@@ -803,9 +807,11 @@ impl VideoFrames {
 
     /// Frames the GPU decoded ([`decode_on`](Self::decode_on)) stay in GPU
     /// memory when a display takes them as they are (NV12, P010): for a
-    /// display that shows them from there. VA-API's and Direct3D 11's are
-    /// copied out of the decoder's surfaces on the GPU
-    /// ([`crate::hw::Keeper`]). Others are copied down.
+    /// display that shows them from there. Kept, they don't run the decoder
+    /// out: FFmpeg copies NVDEC's out of its few surfaces into a pool that
+    /// grows, VA-API's own pool grows as it needs (libva 1.0 and later), and
+    /// Direct3D 11's are copied out of the decoder's texture array on the
+    /// GPU ([`crate::hw::Keeper`]). Others are copied down.
     pub fn keep_on_gpu(mut self) -> Self {
         self.keep_on_gpu = true;
         self
@@ -1175,9 +1181,17 @@ impl VideoFrames {
                 src.normalized = Some(if crate::hw::on_gpu(frame) {
                     let keep = self.keep_on_gpu && displayable(crate::hw::sw_format(frame));
                     match frame.format() {
-                        format::Pixel::CUDA if keep => frame_ref(frame)?,
-                        format::Pixel::VAAPI | format::Pixel::D3D11 if keep => {
-                            crate::hw::Keeper::copy(&mut self.keeper, frame)?
+                        format::Pixel::CUDA | format::Pixel::VAAPI if keep => frame_ref(frame)?,
+                        format::Pixel::D3D11 if keep && !self.unkept => {
+                            match crate::hw::Keeper::copy(&mut self.keeper, frame) {
+                                Ok(kept) => kept,
+                                // Down to memory, as before they were kept.
+                                Err(_) => {
+                                    self.unkept = true;
+                                    self.keeper = None;
+                                    relayout.run(&crate::hw::download(frame)?)?
+                                }
+                            }
                         }
                         _ => relayout.run(&crate::hw::download(frame)?)?,
                     }
@@ -1356,8 +1370,148 @@ pub(crate) fn fill_black(f: &mut frame::Video) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{fill_black, fit};
-    use crate::ffmpeg::{format::Pixel, frame};
+    use super::{Normalizer, fill_black, fit};
+    use crate::ffmpeg::{self, format::Pixel, frame};
+
+    /// Bands of `values` (8-bit Y, Cb, Cr) side by side in `pixel` (8-bit
+    /// planar, or 10-bit with each sample 4 times as large), tagged with
+    /// `matrix`, and full range when `full`.
+    fn bands(
+        (w, h): (u32, u32),
+        values: &[[u8; 3]],
+        matrix: ffmpeg::ffi::AVColorSpace,
+        full: bool,
+        pixel: Pixel,
+    ) -> frame::Video {
+        let mut f = frame::Video::new(pixel, w, h);
+        let wide = pixel == Pixel::YUV420P10LE;
+        let planes = [(w, h), (w / 2, h / 2), (w / 2, h / 2)];
+        for (p, (pw, ph)) in planes.into_iter().enumerate() {
+            let stride = f.stride(p);
+            for y in 0..ph as usize {
+                for x in 0..pw as usize {
+                    let v = values[x * values.len() / pw as usize][p];
+                    if wide {
+                        let at = y * stride + 2 * x;
+                        f.data_mut(p)[at..at + 2]
+                            .copy_from_slice(&(u16::from(v) << 2).to_le_bytes());
+                    } else {
+                        f.data_mut(p)[y * stride + x] = v;
+                    }
+                }
+            }
+        }
+        use ffmpeg::ffi::AVColorRange as R;
+        // SAFETY: plain fields of its own frame.
+        unsafe {
+            (*f.as_mut_ptr()).colorspace = matrix;
+            (*f.as_mut_ptr()).color_range = if full {
+                R::AVCOL_RANGE_JPEG
+            } else {
+                R::AVCOL_RANGE_MPEG
+            };
+        }
+        f
+    }
+
+    /// 8-bit Y, Cb, Cr, video range or `full`, in the matrix of `(kr, kb)`
+    /// as RGB, 0 to 1.
+    fn rgb(yuv: [u8; 3], (kr, kb): (f64, f64), full: bool) -> [f64; 3] {
+        let (black, luma, chroma) = if full {
+            (0.0, 255.0, 255.0)
+        } else {
+            (16.0, 219.0, 224.0)
+        };
+        let y = (f64::from(yuv[0]) - black) / luma;
+        let cb = (f64::from(yuv[1]) - 128.0) / chroma;
+        let cr = (f64::from(yuv[2]) - 128.0) / chroma;
+        let r = y + 2.0 * (1.0 - kr) * cr;
+        let b = y + 2.0 * (1.0 - kb) * cb;
+        [r, (y - kr * r - kb * b) / (1.0 - kr - kb), b]
+    }
+
+    /// RGB (0 to 1) as video-range Y, Cb, Cr in the matrix of `(kr, kb)`.
+    fn yuv([r, g, b]: [f64; 3], (kr, kb): (f64, f64)) -> [f64; 3] {
+        let y = kr * r + (1.0 - kr - kb) * g + kb * b;
+        [
+            16.0 + 219.0 * y,
+            128.0 + 224.0 * (b - y) / (2.0 * (1.0 - kb)),
+            128.0 + 224.0 * (r - y) / (2.0 * (1.0 - kr)),
+        ]
+    }
+
+    /// Converting colors, the normalizer rounds them as the math does: grays
+    /// come out at the nearest level, from BT.601 to BT.709, from full range
+    /// to video range, from 10 bits to 8 and into RGB, scaled or at their
+    /// own size (swscale's defaults took BT.601's white to 233 and to 253),
+    /// and colors within a level.
+    #[test]
+    fn conversions_keep_levels() {
+        crate::init();
+        use ffmpeg::ffi::AVColorSpace as S;
+        const BT601: (f64, f64) = (0.299, 0.114);
+        const BT709: (f64, f64) = (0.2126, 0.0722);
+        let (sd, hd) = (S::AVCOL_SPC_SMPTE170M, S::AVCOL_SPC_BT709);
+        // Black, gray and white; BT.601's 75% red, green and blue.
+        let values = [
+            [16, 128, 128],
+            [126, 128, 128],
+            [235, 128, 128],
+            [65, 100, 212],
+            [112, 72, 58],
+            [35, 212, 114],
+        ];
+        let (big, small) = ((1280, 720), (640, 360));
+        let (planar, ten) = (Pixel::YUV420P, Pixel::YUV420P10LE);
+        // The source's matrix, its tag, its range, layout and size, and the
+        // output's layout (640x360).
+        for (matrix, tag, full, pixel, size, out) in [
+            (BT601, sd, false, planar, big, Pixel::YUV420P),
+            (BT601, sd, false, planar, big, Pixel::RGB24),
+            (BT709, hd, false, planar, big, Pixel::RGB24),
+            // At its own size, which swscale converts without scaling.
+            (BT601, sd, false, planar, small, Pixel::YUV420P),
+            (BT601, sd, false, planar, small, Pixel::RGB24),
+            // Full range into video range.
+            (BT709, hd, true, planar, big, Pixel::YUV420P),
+            (BT709, hd, true, planar, small, Pixel::YUV420P),
+            (BT601, sd, true, planar, big, Pixel::RGB24),
+            // 10 bits into 8.
+            (BT601, sd, false, ten, big, Pixel::YUV420P),
+            (BT709, hd, false, ten, big, Pixel::RGB24),
+        ] {
+            let f = bands(size, &values, tag, full, pixel);
+            let got = Normalizer::new(&f, 0, 640, 360, out, None)
+                .and_then(|mut n| n.run(&f))
+                .unwrap();
+            for (k, v) in values.iter().enumerate() {
+                // The middle of band k.
+                let x = (2 * k + 1) * 640 / (2 * values.len());
+                let (want, got) = if out == Pixel::RGB24 {
+                    let p = &got.data(0)[180 * got.stride(0) + 3 * x..][..3];
+                    (
+                        rgb(*v, matrix, full).map(|c| (c * 255.0).clamp(0.0, 255.0)),
+                        [p[0], p[1], p[2]],
+                    )
+                } else {
+                    let at = |p: usize, x: usize, y: usize| got.data(p)[y * got.stride(p) + x];
+                    (
+                        yuv(rgb(*v, matrix, full), BT709),
+                        [at(0, x, 180), at(1, x / 2, 90), at(2, x / 2, 90)],
+                    )
+                };
+                // Grays at the nearest level, colors within one.
+                let near = if k < 3 { 0.5 } else { 1.0 };
+                for c in 0..3 {
+                    assert!(
+                        (f64::from(got[c]) - want[c]).abs() <= near,
+                        "{tag:?} {v:?} ({pixel:?}, full {full}, {size:?}) into {out:?}: \
+                         {got:?}, the math says {want:.1?}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn black_is_video_range_black_in_every_layout() {

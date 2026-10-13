@@ -281,8 +281,9 @@ fn one_sequence_picture(
     }
 }
 
-/// The start of a filmstrip's cache form.
-const MAGIC: &[u8; 4] = b"vct1";
+/// The start of a filmstrip's cache form. `vct1`'s pictures went through
+/// swscale's default rounding, 2 levels green; those are made anew.
+const MAGIC: &[u8; 4] = b"vct2";
 
 /// JPEG quantizer scale for cached filmstrips (2 is best, 31 worst): about
 /// 6 KB a picture, where RGBA takes 83 KB, with no visible loss at
@@ -377,7 +378,8 @@ fn jpeg(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>> {
         format::Pixel::YUVJ420P,
         width,
         height,
-        scaling::Flags::BICUBIC,
+        // Exact rounding: by default white came back 2 levels green.
+        scaling::Flags::BICUBIC | scaling::Flags::ACCURATE_RND | scaling::Flags::FULL_CHR_H_INT,
     )
     .and_then(|mut s| s.run(&src, &mut yuv))
     .ctx(|| "converting thumbnails for JPEG".into())?;
@@ -442,7 +444,8 @@ fn unjpeg(jpeg: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
         format::Pixel::RGBA,
         width,
         height,
-        scaling::Flags::BICUBIC,
+        // Exact rounding: by default white came back 2 levels green.
+        scaling::Flags::BICUBIC | scaling::Flags::ACCURATE_RND | scaling::Flags::FULL_CHR_H_INT,
     )
     .and_then(|mut s| s.run(&f, &mut rgba))
     .ok()?;
@@ -515,6 +518,39 @@ fn packed(f: &frame::Video) -> Image {
 mod tests {
     use super::*;
 
+    /// Through the JPEG of the cache and back, white stays white and gray
+    /// gray (swscale's default rounding brought them back 2 levels green).
+    #[test]
+    fn the_cache_form_keeps_levels() {
+        let (w, h) = (64, 32);
+        let colors = [
+            [255, 255, 255, 255],
+            [128, 128, 128, 255],
+            [0, 0, 0, 255],
+            [191, 0, 0, 255],
+        ];
+        let rgba: Vec<u8> = (0..w * h)
+            .flat_map(|i| colors[(i % w) * colors.len() / w])
+            .collect();
+        let back = unjpeg(
+            &jpeg(w as u32, h as u32, &rgba).unwrap(),
+            w as u32,
+            h as u32,
+        )
+        .unwrap();
+        for (k, want) in colors.iter().enumerate() {
+            // The middle of band k, in the middle row.
+            let x = (2 * k + 1) * w / (2 * colors.len());
+            let got = &back[(h / 2 * w + x) * 4..][..3];
+            // Grays exact; JPEG's quantizing may move red's channels a level.
+            let near = if k < 3 { 0 } else { 1 };
+            assert!(
+                got.iter().zip(want).all(|(g, w)| g.abs_diff(*w) <= near),
+                "{want:?} came back {got:?}"
+            );
+        }
+    }
+
     #[test]
     fn the_cache_form_keeps_sizes_times_and_pictures() {
         // Three 64x36 gradients, each a different hue.
@@ -555,7 +591,9 @@ mod tests {
             assert!(diff < 3.0, "mean difference {diff}");
         }
         assert!(from_bytes(&bytes[..bytes.len() / 2]).is_none(), "cut short");
-        assert!(from_bytes(b"vct1").is_none());
+        assert!(from_bytes(MAGIC).is_none());
+        // The form before rounding was right is read as none.
+        assert!(from_bytes(&[b"vct1".as_slice(), &bytes[4..]].concat()).is_none());
         assert!(from_bytes(&[b"xxxx".as_slice(), &bytes[4..]].concat()).is_none());
         assert!(to_bytes(&images, &times[..2]).is_err(), "a time each");
     }

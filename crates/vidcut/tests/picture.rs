@@ -268,11 +268,11 @@ fn the_shader_draws_what_the_export_renders() {
         );
         assert_eq!(barcode(&ours.rgba, w, h), want, "frame {t}'s barcode");
         // The colors: within rounding of the export's where the picture is
-        // flat (swscale's conversion runs up to two or three levels low). At edges
+        // flat (lavapipe: SDR exact, PQ and HLG a level at most). At edges
         // the filters differ: at its own size the export repeats each
         // chroma sample, the shader interpolates between them.
         assert!(
-            flat < 1.5 && flat_max <= 3,
+            flat < 1.0 && flat_max <= 2,
             "frame {t}: {flat:.2}, {flat_max}"
         );
         assert!(mean < 2.0, "frame {t}: {mean:.2} levels apart on average");
@@ -452,8 +452,8 @@ fn pictures_in_gpu_memory_draw_as_copied_down() {
     }
 }
 
-/// Pictures VA-API decoded, kept in GPU memory (copied out of the decoder's
-/// surfaces) and shown from there (their surfaces imported as DMA-BUFs):
+/// Pictures VA-API decoded, kept in GPU memory (the decoder's surfaces)
+/// and shown from there (imported as DMA-BUFs, taken over from VA-API):
 /// the same pixels as the same picture copied down and uploaded, NV12 and
 /// P010, at a size whose rows and chroma aren't round; interlaced ones come
 /// down for the CPU's deinterlacer. Needs VA-API, and an adapter that
@@ -462,7 +462,7 @@ fn pictures_in_gpu_memory_draw_as_copied_down() {
 #[test]
 fn vaapi_pictures_draw_as_copied_down() {
     use vidcut_av::hw::{GpuDecoder, Kind};
-    let Some(gpu) = Gpu::headless() else {
+    let Some((gpu, adapter)) = Gpu::headless_with_info() else {
         eprintln!("skipping: no GPU adapter");
         return;
     };
@@ -470,11 +470,24 @@ fn vaapi_pictures_draw_as_copied_down() {
         eprintln!("skipping: the adapter imports no DMA-BUFs");
         return;
     }
-    let Some(vaapi) = GpuDecoder::all()
-        .into_iter()
-        .find(|d| d.kind() == Kind::Vaapi)
-    else {
-        eprintln!("skipping: no VA-API");
+    // VA-API on the adapter's GPU, by its render node's PCI address, where
+    // the adapter says its own.
+    let pci = |node: &str| {
+        let name = std::path::Path::new(node).file_name()?.to_owned();
+        let device = std::path::Path::new("/sys/class/drm")
+            .join(name)
+            .join("device");
+        let address = std::fs::read_link(device).ok()?;
+        Some(address.file_name()?.to_string_lossy().to_lowercase())
+    };
+    let ours = adapter.device_pci_bus_id.to_lowercase();
+    let Some(vaapi) = GpuDecoder::all().into_iter().find(|d| {
+        d.kind() == Kind::Vaapi && (ours.is_empty() || pci(d.on()).as_deref() == Some(&*ours))
+    }) else {
+        eprintln!(
+            "skipping: no VA-API on the adapter's GPU ({})",
+            adapter.name
+        );
         return;
     };
     let p = plan(vec![
