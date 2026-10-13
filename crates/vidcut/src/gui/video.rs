@@ -102,7 +102,9 @@ impl Viewer {
             wake: Condvar::new(),
         });
         let gpu = Gpu::new(&render.device, &render.queue);
-        let gpu_pictures = gpu.takes_gpu_pictures();
+        // Pictures in the memory of the GPU the player decodes on.
+        let gpu_pictures =
+            vidcut_av::hw::GpuDecoder::best().is_some_and(|d| gpu.takes_gpu_pictures(d.kind()));
         let s = shared.clone();
         let thread = crate::threads::spawn(
             "vidcut-viewer",
@@ -118,8 +120,8 @@ impl Viewer {
         }
     }
 
-    /// Whether it shows pictures NVDEC or VA-API decoded from GPU memory, so
-    /// a player may keep them there.
+    /// Whether it shows the pictures the player's GPU decodes (NVDEC's,
+    /// VA-API's) from GPU memory, so the player may keep them there.
     pub fn takes_gpu_pictures(&self) -> bool {
         self.gpu_pictures
     }
