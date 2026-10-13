@@ -1957,7 +1957,7 @@ fn compound_clips_are_carried() {
     assert_eq!(
         r.result["warnings"],
         json!([
-            "compound clips and nested timelines kept as blocks but played as gaps: nested, my compound"
+            "compound clips and nested timelines kept as blocks, playing their clips: nested, my compound"
         ])
     );
     let p = g.editor.project().clone();
@@ -1985,12 +1985,12 @@ fn compound_clips_are_carried() {
         r.result["tracks"][1]["items"][1]["compound"],
         "Compound Clip"
     );
-    // It plays as a gap: the clip under it shows.
+    // It plays the clip it holds, over the clip under it.
     let plan = crate::render::flatten(&p, 0, 100).unwrap();
-    assert!(matches!(
-        plan.video.as_slice(),
-        [crate::render::VideoPiece::Source { frames: 100, .. }]
-    ));
+    assert_eq!(
+        pictures(&plan),
+        [(Some(0), 20), (Some(0), 60), (Some(80), 20)]
+    );
     // Written back as it came, where it was.
     let out = export(&p, "cmp", None, Locations::Absolute).unwrap();
     let as_read = |v: &Value| {
@@ -2226,4 +2226,106 @@ fn compound_clips_decompose() {
     assert_eq!(rows(p, "V2"), [(20, 80, 30, true, false)]);
     assert_eq!(rows(p, "V3"), [(60, 80, 30, true, false)]);
     assert_eq!(rows(p, "A1"), [(10, 50, 0, false, true)]);
+}
+
+/// What a plan shows: each piece's first source frame (none for black) and
+/// length.
+fn pictures(plan: &crate::render::RenderPlan) -> Vec<(Option<i64>, i64)> {
+    plan.video
+        .iter()
+        .map(|v| match v {
+            crate::render::VideoPiece::Source {
+                source_frame,
+                frames,
+                ..
+            } => (Some(*source_frame), *frames),
+            crate::render::VideoPiece::Black { frames } => (None, *frames),
+        })
+        .collect()
+}
+
+#[test]
+fn compound_clips_play_what_they_hold() {
+    // A clip 0..100; a compound clip over it (20..80) holding a 60-frame
+    // clip from source 30; a nested timeline's sound on an audio track
+    // (10..50).
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.append("m1", 0, 100);
+    let mut doc = export(f.editor.project(), "cmp", None, Locations::Absolute).unwrap();
+    let mut compound = otio_compound("my compound", "Compound Clip", "Video", 60.0);
+    compound["children"][0]["children"][0]["source_range"]["start_time"]["value"] = json!(30.0);
+    let sound = otio_compound("nested", "Timeline Clip", "Audio", 40.0);
+    let tracks = doc["tracks"]["children"].as_array_mut().unwrap();
+    let mut v2 = tracks[0].clone();
+    v2["name"] = json!("Video 2");
+    v2["metadata"] = json!({});
+    v2["children"] = json!([gap(20, 25.0), compound]);
+    tracks.insert(1, v2);
+    let mut score = tracks[2].clone();
+    score["name"] = json!("Score");
+    score["metadata"] = json!({});
+    score["children"] = json!([gap(10, 25.0), sound]);
+    tracks.push(score);
+
+    let mut g = Fixture::new(&[(10.0, true)]);
+    g.ok(req("timeline.import", json!({ "otio": doc })));
+    let plan = |g: &Fixture| crate::render::flatten(g.editor.project(), 0, 100).unwrap();
+    assert_eq!(
+        pictures(&plan(&g)),
+        [(Some(0), 20), (Some(30), 60), (Some(80), 20)]
+    );
+    // Its sound plays on its track's lane.
+    let (sound_plan, lanes) = crate::render::flatten_lanes(g.editor.project(), 0, 100).unwrap();
+    let a1 = lanes
+        .iter()
+        .position(|l| l.track == "A1")
+        .expect("A1's lane");
+    let heard: Vec<i64> = sound_plan.audio[a1]
+        .iter()
+        .filter_map(|piece| match piece {
+            crate::render::AudioPiece::Source { samples, .. } => Some(*samples),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        heard,
+        [g.editor.project().settings.fps.frame_to_sample(40, 48_000)]
+    );
+
+    // Trimmed, it shows less of what it holds.
+    let id = g.editor.project().track("V2").unwrap().clips[0].id.clone();
+    g.ok(req(
+        "edit.trim",
+        json!({"clip": id, "edge": "head", "by": 10}),
+    ));
+    assert_eq!(
+        pictures(&plan(&g)),
+        [(Some(0), 30), (Some(40), 50), (Some(80), 20)]
+    );
+    // Disabled, it shows nothing; its track muted, its sound neither.
+    g.ok(req("clip.set", json!({"clips": id, "enabled": false})));
+    assert_eq!(pictures(&plan(&g)), [(Some(0), 100)]);
+    g.ok(req("track.set", json!({"track": "A1", "muted": true})));
+    let (_, lanes) = crate::render::flatten_lanes(g.editor.project(), 0, 100).unwrap();
+    assert!(lanes.iter().all(|l| l.track != "A1"));
+
+    // Its media missing, it plays as a gap, and the import says so.
+    let mut h = Fixture::new(&[]);
+    h.env = FakeEnv::default().with(
+        "/media/1.mp4",
+        media_info(10.0, Rational::new(25, 1).unwrap(), true),
+    );
+    let mut gone = doc.clone();
+    gone["tracks"]["children"][1]["children"][1]["children"][0]["children"][0]["media_references"]
+        ["DEFAULT_MEDIA"]["target_url"] = json!("/elsewhere/2.mp4");
+    let r = h.ok(req("timeline.import", json!({ "otio": gone })));
+    let w = r.result["warnings"].to_string();
+    assert!(
+        w.contains("my compound: its clips weren't found, so it plays as a gap"),
+        "{w}"
+    );
+    assert_eq!(
+        pictures(&crate::render::flatten(h.editor.project(), 0, 100).unwrap()),
+        [(Some(0), 100)]
+    );
 }

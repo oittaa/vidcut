@@ -80,7 +80,7 @@ const VIDCUT: &str = "vidcut";
 const EDITOR: &str = "Resolve_OTIO";
 /// The import warning naming the compound clips it kept.
 pub const COMPOUNDS_KEPT: &str =
-    "compound clips and nested timelines kept as blocks but played as gaps";
+    "compound clips and nested timelines kept as blocks, playing their clips";
 
 fn rt(value: f64, rate: f64) -> Value {
     json!({ "OTIO_SCHEMA": "RationalTime.1", "rate": rate, "value": value })
@@ -591,7 +591,11 @@ fn compound_of(item: &Value, fps: Rational) -> Compound {
     {
         m.remove("Link Group ID");
     }
-    Compound { stack, frames }
+    Compound {
+        stack,
+        frames,
+        tracks: Vec::new(),
+    }
 }
 
 /// Compound clip `c`'s OTIO item: its stack, showing `frames` from

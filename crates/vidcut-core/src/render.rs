@@ -207,6 +207,75 @@ impl Project {
     }
 }
 
+/// Whether `c` is a compound clip from another editor whose clips play.
+fn plays_inside(c: &Clip) -> bool {
+    c.compound.as_ref().is_some_and(|k| !k.tracks.is_empty())
+}
+
+/// `p` as it plays when it holds compound clips from another editor
+/// (deviation X9): each replaced by the clips it holds, trimmed to the part
+/// it shows, on tracks of their own just above its track with that track's
+/// id, fader, mute and solo; those it holds in turn too. A disabled one
+/// plays nothing.
+fn expanded(p: &Project) -> Option<Project> {
+    let holds = |p: &Project| p.tracks.iter().any(|t| t.clips.iter().any(plays_inside));
+    if !holds(p) {
+        return None;
+    }
+    let mut out = p.clone();
+    // Compound clips inside compound clips, a few deep.
+    for _ in 0..8 {
+        if !holds(&out) {
+            break;
+        }
+        let mut tracks = Vec::new();
+        for t in &out.tracks {
+            let mut host = t.clone();
+            host.clips.retain(|c| !plays_inside(c));
+            let mut inner = Vec::new();
+            for c in t.clips.iter().filter(|c| plays_inside(c) && c.enabled) {
+                let k = c.compound.as_ref().expect("plays inside");
+                for n in k.tracks.iter().filter(|n| n.kind == t.kind) {
+                    let mut v = n.clone();
+                    v.id = t.id.clone();
+                    v.muted |= t.muted;
+                    v.solo = t.solo;
+                    v.volume_db = t.volume_db;
+                    v.video_enabled &= t.video_enabled;
+                    v.transitions.clear();
+                    v.clips = n.clips.iter().filter_map(|x| inside(x, c)).collect();
+                    inner.push(v);
+                }
+            }
+            tracks.push(host);
+            tracks.extend(inner);
+        }
+        out.tracks = tracks;
+    }
+    Some(out)
+}
+
+/// Clip `x` of compound clip `c`, trimmed to the part `c` shows and placed
+/// where it shows it.
+fn inside(x: &Clip, c: &Clip) -> Option<Clip> {
+    let (first, last) = (c.source_in, c.source_in + c.duration);
+    let (s, e) = (x.start.max(first), x.end().min(last));
+    if e <= s {
+        return None;
+    }
+    let mut y = x.clone();
+    y.source_in += s - x.start;
+    y.start = c.start + s - first;
+    y.duration = e - s;
+    if let Some(a) = y.audio.as_mut()
+        && (s > x.start || e < x.end())
+    {
+        a.head = 0;
+        a.tail = 0;
+    }
+    Some(y)
+}
+
 /// Plans the timeline range `[a, b)`.
 pub fn flatten(p: &Project, a: i64, b: i64) -> Result<RenderPlan> {
     flatten_lanes(p, a, b).map(|(plan, _)| plan)
@@ -226,12 +295,15 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
     if a < 0 || b <= a {
         return Err(Error::invalid(format!("nothing to render in {a}..{b}")));
     }
+    let expanded = expanded(p);
+    let p = expanded.as_ref().unwrap_or(p);
     let s = &p.settings;
     let sample = |t: i64| s.fps.frame_to_sample(t - a, s.sample_rate);
 
     // Video: at every frame the highest video track with a visible clip
     // there shows; clips above cover the ones below.
-    // A generator from another editor plays as a gap (deviation X9).
+    // A block from another editor plays as a gap (deviation X9); a compound
+    // clip whose clips were found plays them instead (`expanded`).
     let visible = |t: &crate::model::Track, c: &Clip| {
         t.video_enabled && c.enabled && c.video && !c.is_block()
     };

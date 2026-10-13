@@ -1248,6 +1248,7 @@ fn mutate(
             for id in &ids {
                 made.extend(decompose(p, id, env, (&[], false), &mut warnings)?);
             }
+            fill_contents(p, &made, env, &[], &mut warnings);
             json!({ "clips": made, "warnings": warnings })
         }
         Request::Apply { commands, .. } => {
@@ -1709,6 +1710,7 @@ fn place_imported(
             let compound = c.compound.as_ref().map(|k| Compound {
                 stack: k.stack.clone(),
                 frames: conv(k.frames).max(source_in + end - start),
+                tracks: Vec::new(),
             });
             let id = p.alloc_clip_id();
             clips.push(id.clone());
@@ -1883,6 +1885,109 @@ fn place_imported(
     Ok((clips, markers))
 }
 
+/// The stack of compound `k` as an imported timeline of its video tracks,
+/// pictures only (`video`), or of its audio tracks.
+fn nested(k: &Compound, video: bool) -> Result<otio::Imported> {
+    let kind = if video { "Video" } else { "Audio" };
+    let tracks: Vec<Value> = k.stack["children"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|t| t["kind"] == kind)
+        .cloned()
+        .collect();
+    let doc = json!({
+        "OTIO_SCHEMA": "Timeline.1",
+        "name": k.stack["name"],
+        "tracks": { "OTIO_SCHEMA": "Stack.1", "children": tracks },
+    });
+    let mut t = otio::import(&doc, None)?;
+    if video {
+        t.has_audio_tracks = true;
+        for c in &mut t.clips {
+            c.audio = None;
+            c.audio_effects.clear();
+        }
+    }
+    Ok(t)
+}
+
+/// What compound `k` (a picture block if `video`) plays (deviation X9): the
+/// clips its stack holds placed as an import places them, on tracks of
+/// their own, frames from its first, its media added to the pool, and
+/// what compound clips among them play in turn (`depth` deep).
+fn compound_contents(
+    p: &mut Project,
+    k: &Compound,
+    video: bool,
+    env: &dyn Env,
+    dirs: &[PathBuf],
+    depth: usize,
+) -> Result<Vec<crate::model::Track>> {
+    let t = nested(k, video)?;
+    let (ids, _) = find_media(p, &t, env, dirs, false)?;
+    let mut inner = Project::new(p.settings.clone());
+    inner.media = p.media.clone();
+    let mut needed: Vec<&str> = t.clips.iter().map(|c| c.track.as_str()).collect();
+    needed.sort_by_key(|id| (!id.starts_with('V'), id[1..].parse::<usize>().unwrap_or(0)));
+    needed.dedup();
+    for id in needed {
+        ops::ensure_track(&mut inner, id)?;
+    }
+    place_imported(&mut inner, &t, &ids, 0, &HashMap::new(), &mut Vec::new())?;
+    if depth > 0 {
+        for ti in 0..inner.tracks.len() {
+            for ci in 0..inner.tracks[ti].clips.len() {
+                let c = inner.tracks[ti].clips[ci].clone();
+                if let Some(nk) = &c.compound {
+                    let tracks =
+                        compound_contents(p, nk, c.video, env, dirs, depth - 1).unwrap_or_default();
+                    if let Some(nk) = inner.tracks[ti].clips[ci].compound.as_mut() {
+                        nk.tracks = tracks;
+                    }
+                }
+            }
+        }
+    }
+    Ok(inner
+        .tracks
+        .into_iter()
+        .filter(|t| !t.clips.is_empty())
+        .collect())
+}
+
+/// Gives each compound clip among `ids` what it plays (deviation X9); one
+/// whose clips aren't found plays as a gap, which `warnings` says.
+fn fill_contents(
+    p: &mut Project,
+    ids: &[String],
+    env: &dyn Env,
+    dirs: &[PathBuf],
+    warnings: &mut Vec<String>,
+) {
+    for id in ids {
+        let Some((ti, ci)) = p.find_clip(id) else {
+            continue;
+        };
+        let c = p.tracks[ti].clips[ci].clone();
+        let Some(k) = &c.compound else {
+            continue;
+        };
+        match compound_contents(p, k, c.video, env, dirs, 8) {
+            Ok(tracks) => {
+                if let Some(k) = p.tracks[ti].clips[ci].compound.as_mut() {
+                    k.tracks = tracks;
+                }
+            }
+            Err(e) => warnings.push(format!(
+                "{}: its clips weren't found, so it plays as a gap: {}",
+                c.name.as_deref().unwrap_or(id),
+                e.message
+            )),
+        }
+    }
+}
+
 /// Decompose in Place (deviation X9): compound clip `id` becomes the clips
 /// its stack holds, at their times, trimmed to the part it shows, their
 /// media looked for in `dirs` too. A picture block brings the stack's video
@@ -1918,28 +2023,7 @@ fn decompose(
              need speed math"
         )));
     }
-    // The stack as a timeline of its video (or audio) tracks.
-    let kind = if block.video { "Video" } else { "Audio" };
-    let tracks: Vec<Value> = k.stack["children"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|t| t["kind"] == kind)
-        .cloned()
-        .collect();
-    let doc = json!({
-        "OTIO_SCHEMA": "Timeline.1",
-        "name": k.stack["name"],
-        "tracks": { "OTIO_SCHEMA": "Stack.1", "children": tracks },
-    });
-    let mut t = otio::import(&doc, None)?;
-    if block.video {
-        t.has_audio_tracks = true;
-        for c in &mut t.clips {
-            c.audio = None;
-            c.audio_effects.clear();
-        }
-    }
+    let mut t = nested(&k, block.video)?;
     // What the block shows, in the stack's frames.
     let to = p.settings.fps;
     let a = rescale(block.source_in, to, t.fps);
@@ -2170,6 +2254,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     if flatten && !clips.iter().any(|id| compound(p, id)) {
         warnings.retain(|w| !w.starts_with(otio::COMPOUNDS_KEPT));
     }
+    fill_contents(p, &clips, env, &dirs, &mut warnings);
     if empty {
         let (i, o) = (t.marks.mark_in.map(conv), t.marks.mark_out.map(conv));
         if !matches!((i, o), (Some(i), Some(o)) if i >= o) {
