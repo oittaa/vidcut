@@ -698,13 +698,14 @@ pub fn resolve_audio(a: &AudioSettings, rate: u32, channels: u16) -> Result<Audi
     })
 }
 
-/// A VAAPI device and frame pool for uploading frames to the GPU encoder.
-pub(crate) struct Vaapi {
+/// A GPU encoder's own frames, on a device, which frames from memory go up
+/// into: VAAPI's, and AMF's on a Direct3D 11 decoder's device.
+pub(crate) struct Upload {
     device: *mut ffi::AVBufferRef,
     pub(crate) frames: *mut ffi::AVBufferRef,
 }
 
-impl Drop for Vaapi {
+impl Drop for Upload {
     fn drop(&mut self) {
         unsafe {
             ffi::av_buffer_unref(&mut self.frames);
@@ -713,10 +714,11 @@ impl Drop for Vaapi {
     }
 }
 
-impl Vaapi {
-    /// Frames on `node`, or on `shared`, a device already open there (a
-    /// decoder's, whose frames then go to the encoder as they are).
-    pub(crate) fn new(
+impl Upload {
+    /// VAAPI's frames on `node`, or on `shared`, a device already open
+    /// there (a decoder's, whose frames then go to the encoder as they
+    /// are).
+    pub(crate) fn vaapi(
         node: &str,
         sw: format::Pixel,
         width: u32,
@@ -774,21 +776,46 @@ impl Vaapi {
         }
     }
 
-    /// Copies a system-memory frame into a GPU frame (keeping its pts).
+    /// Frames on `decoder`'s Direct3D 11 device, which its frames are drawn
+    /// into for AMF, the only frames it takes from the GPU.
+    #[cfg(windows)]
+    pub(crate) fn d3d11(
+        decoder: &crate::hw::GpuDecoder,
+        sw: format::Pixel,
+        width: u32,
+        height: u32,
+    ) -> Result<Self> {
+        // SAFETY: the decoder's live device, another reference to it.
+        unsafe {
+            let mut device = ffi::av_buffer_ref(decoder.as_ptr());
+            if device.is_null() {
+                return Err(Error::Invalid("no memory for the device".into()));
+            }
+            match crate::hw::d3d11::encoder_frames(device, sw.into(), (width, height)) {
+                Ok(frames) => Ok(Self { device, frames }),
+                Err(e) => {
+                    ffi::av_buffer_unref(&mut device);
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    /// Copies a frame in memory into one of these (keeping its pts).
     pub(crate) fn upload(&self, src: &frame::Video) -> Result<frame::Video> {
         let mut hw = frame::Video::empty();
         unsafe {
             let ret = ffi::av_hwframe_get_buffer(self.frames, hw.as_mut_ptr(), 0);
             if ret < 0 {
                 return Err(Error::Ffmpeg {
-                    context: "getting a VAAPI frame".into(),
+                    context: "getting a GPU frame to upload to".into(),
                     source: ffmpeg::Error::from(ret),
                 });
             }
             let ret = ffi::av_hwframe_transfer_data(hw.as_mut_ptr(), src.as_ptr(), 0);
             if ret < 0 {
                 return Err(Error::Ffmpeg {
-                    context: "uploading to VAAPI".into(),
+                    context: "uploading a frame to the GPU".into(),
                     source: ffmpeg::Error::from(ret),
                 });
             }
@@ -799,11 +826,12 @@ impl Vaapi {
 }
 
 /// Opens a video encoder for `enc` at `width`×`height` and `fps`.
-/// Returns the opened encoder and, for VAAPI, the upload context.
-/// With `gpu_frames` (NVENC), the encoder takes frames in GPU memory of
-/// that frames context. VAAPI opens on `shared`'s device when given (a
-/// VA-API decoder on its render node), so that decoder's frames can go to
-/// it without leaving the GPU.
+/// Returns the opened encoder and, for VAAPI (and AMF on `shared`'s
+/// device), the frames to upload to. With `gpu_frames` (NVENC), the
+/// encoder takes frames in GPU memory of that frames context. VAAPI opens
+/// on `shared`'s device when given (a VA-API decoder on its render node),
+/// and AMF on a Direct3D 11 decoder's on its adapter, so that decoder's
+/// frames can go to it without leaving the GPU.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn open_video(
     enc: &VideoEncoder,
@@ -814,7 +842,7 @@ pub(crate) fn open_video(
     gpu_frames: Option<*mut ffi::AVBufferRef>,
     shared: Option<&crate::hw::GpuDecoder>,
     pass: Pass<'_>,
-) -> Result<(encoder::Video, Option<Vaapi>)> {
+) -> Result<(encoder::Video, Option<Upload>)> {
     let codec = encoder::find_by_name(&enc.name)
         .ok_or_else(|| Error::Invalid(format!("no {} encoder", enc.name)))?;
     let mut ctx = codec::context::Context::new_with_codec(codec)
@@ -850,7 +878,7 @@ pub(crate) fn open_video(
             None
         }
         Some(node) if enc.kind == EncoderChoice::Vaapi => {
-            let v = Vaapi::new(node, enc.pixel, width, height, shared)?;
+            let v = Upload::vaapi(node, enc.pixel, width, height, shared)?;
             ctx.set_format(format::Pixel::VAAPI);
             let frames = unsafe { ffi::av_buffer_ref(v.frames) };
             if frames.is_null() {
@@ -858,6 +886,22 @@ pub(crate) fn open_video(
             }
             unsafe { (*ctx.as_mut_ptr()).hw_frames_ctx = frames };
             Some(v)
+        }
+        // AMF on the Direct3D 11 device of a decoder on its adapter, its
+        // frames drawn into the encoder's own.
+        #[cfg(windows)]
+        Some(_)
+            if enc.kind == EncoderChoice::Amf
+                && shared.is_some_and(|d| d.kind() == crate::hw::Kind::D3d11va) =>
+        {
+            let up = Upload::d3d11(shared.expect("checked"), enc.pixel, width, height)?;
+            ctx.set_format(format::Pixel::D3D11);
+            let frames = unsafe { ffi::av_buffer_ref(up.frames) };
+            if frames.is_null() {
+                return Err(Error::Invalid("no memory for the encoder's frames".into()));
+            }
+            unsafe { (*ctx.as_mut_ptr()).hw_frames_ctx = frames };
+            Some(up)
         }
         // Frames from memory, encoded on that GPU: QSV on a device of its
         // own there (a VA-API one beneath it on Linux, which keeps libva's

@@ -29,7 +29,7 @@ use vidcut_core::time::Rational;
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, encoder, ffi, format, frame};
 use audio::AudioMix;
-use encode::{AudioEncoder, Availability, Vaapi};
+use encode::{AudioEncoder, Availability, Upload};
 use video::VideoFrames;
 
 /// Progress of a running export.
@@ -559,7 +559,7 @@ pub(crate) fn write_packet(
 
 struct VideoOut {
     encoder: encoder::Video,
-    vaapi: Option<Vaapi>,
+    vaapi: Option<Upload>,
     frames: VideoFrames,
     enc_tb: ffmpeg::Rational,
     stream_tb: ffmpeg::Rational,
@@ -749,12 +749,15 @@ fn encode(
                     break;
                 }
                 // VAAPI on the decoder's own device, where the decoder is
-                // VA-API on its render node: frames fitted on the GPU go to
-                // it as they are.
+                // VA-API on its render node, and AMF where it is Direct3D 11
+                // on its adapter: frames fitted on the GPU go to it there.
                 let shared = decoder.filter(|d| {
-                    enc.kind == EncoderChoice::Vaapi
-                        && d.kind() == crate::hw::Kind::Vaapi
-                        && enc.device.as_deref() == Some(d.on())
+                    let pair = matches!(
+                        (enc.kind, d.kind()),
+                        (EncoderChoice::Vaapi, crate::hw::Kind::Vaapi)
+                            | (EncoderChoice::Amf, crate::hw::Kind::D3d11va)
+                    );
+                    pair && enc.device.as_deref() == Some(d.on())
                 });
                 match encode::open_video(&enc, w, h, fps, global_header, None, shared, pass) {
                     Ok(o) => {
@@ -823,7 +826,14 @@ fn encode(
                 frames = frames.decode_on(d.clone());
             }
             if fit_on_gpu {
-                frames = frames.fit_on_gpu();
+                frames = match &vaapi {
+                    // AMF takes Direct3D 11's frames of its own frames only.
+                    Some(up) if enc.kind == EncoderChoice::Amf => {
+                        // SAFETY: the encoder's live frames.
+                        frames.fit_on_gpu_into(unsafe { crate::hw::Frames::of(up.frames)? })
+                    }
+                    _ => frames.fit_on_gpu(),
+                };
             }
             // HDR10+ goes into HEVC and AV1 packets here; libvpx-vp9 takes
             // it from the frames, and WebM and Matroska carry it.
