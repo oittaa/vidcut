@@ -20,6 +20,8 @@
 //! - Editor metadata besides ([`EDITOR`]): a link group joining each clip's
 //!   video and audio, the stream and channels its audio plays, clip gain as
 //!   a clip volume, track lock and solo, marker notes.
+//! - The clip effects a clip carries from another editor's file, as they
+//!   came ([`effects`]).
 //! - Timeline markers go on the top-level stack, with their lengths.
 //! - Details OTIO has no field for (clip gain, mute and audio stream, track
 //!   settings, marker colors, the In/Out marks) are kept under
@@ -45,6 +47,8 @@
 //!   map picks the stream, its clip volume the gain.
 //! - Markers on the timeline, on tracks and on clips become timeline
 //!   markers, keeping their lengths.
+//! - Clip effects in use stay on their clips' pictures and sounds
+//!   ([`effects`]), not shown or played, and are written back.
 //! - Everything else is left out with a warning: transitions (cuts instead),
 //!   nested compositions and generators (gaps instead), speed changes.
 
@@ -57,6 +61,7 @@ use crate::error::{Error, Result};
 use crate::model::{Marks, Media, Project, TrackKind};
 use crate::time::Rational;
 
+pub mod effects;
 #[cfg(test)]
 mod tests;
 
@@ -195,24 +200,6 @@ fn media_reference(p: &Project, m: &Media, locations: Locations, rate: f64) -> V
     })
 }
 
-/// A clip volume effect at `db`, in the editor metadata.
-fn editor_volume(db: f64) -> Value {
-    json!({
-        "OTIO_SCHEMA": "Effect.1",
-        "name": "",
-        "effect_name": "Resolve Effect",
-        "metadata": { EDITOR: {
-            "Effect Name": "Fairlight Clip Volume and Fades",
-            "Enabled": true,
-            "Name": "Volume",
-            "Type": 62,
-            "Parameters": [
-                { "Parameter ID": "volume", "Parameter Value": db, "Variant Type": "Double" }
-            ],
-        } },
-    })
-}
-
 /// The timeline range `[a, b)` of the clip's audio an export of `[a, b)`
 /// writes, if any.
 fn audio_part(c: &crate::model::Clip, a: i64, b: i64) -> Option<(i64, i64)> {
@@ -334,6 +321,11 @@ pub fn export(
                 if let Some(g) = group {
                     metadata[EDITOR] = json!({ "Link Group ID": g });
                 }
+                // Carried effects, keyframes moved to where the item
+                // starts, fades cut where the export does.
+                let effects = c.effects.as_ref().map_or_else(Vec::new, |x| {
+                    x.written(c.source_at(s), s > c.start, e < c.end())
+                });
                 video.push(item(
                     &label,
                     m,
@@ -341,7 +333,7 @@ pub fn export(
                     e - s,
                     c.enabled,
                     metadata,
-                    vec![],
+                    effects,
                 ));
                 tv = e;
             }
@@ -364,11 +356,8 @@ pub fn export(
                 if let Some(g) = group {
                     editor["Link Group ID"] = json!(g);
                 }
-                let effects = if au.gain_db == 0.0 {
-                    vec![]
-                } else {
-                    vec![editor_volume(au.gain_db)]
-                };
+                let whole = c.audio_range().expect("has audio");
+                let effects = effects::sound(au, c.source_at(s), s > whole.0, e < whole.1);
                 audio.push(item(
                     &label,
                     m,
@@ -506,6 +495,10 @@ pub struct ImportedClip {
     pub muted: bool,
     /// The link group joining a clip's video and audio.
     pub link: Option<i64>,
+    /// The clip effects in use on its picture and on its sound
+    /// ([`effects`]), as the file has them.
+    pub effects: Vec<Value>,
+    pub audio_effects: Vec<Value>,
 }
 
 impl ImportedClip {
@@ -955,108 +948,6 @@ fn editor_stream(item: &Value) -> Option<u32> {
     u32::try_from(track).ok()
 }
 
-/// The clip volume in dB, noting what of it is left out.
-fn editor_gain(item: &Value, warnings: &mut Vec<String>) -> Option<f64> {
-    for e in item["effects"].as_array().into_iter().flatten() {
-        let r = &e["metadata"][EDITOR];
-        if r["Effect Name"] != "Fairlight Clip Volume and Fades" || r["Enabled"] == false {
-            continue;
-        }
-        let mut gain = None;
-        for p in r["Parameters"].as_array().into_iter().flatten() {
-            let value = p["Parameter Value"].as_f64();
-            match p["Parameter ID"].as_str() {
-                Some("volume") => {
-                    gain = value;
-                    if p["Key Frames"].as_object().is_some_and(|k| !k.is_empty()) {
-                        warn(
-                            warnings,
-                            "clip volume keyframes were left out (the clips keep their base level)",
-                        );
-                    }
-                }
-                Some("faderIn" | "faderOut") if value.is_some_and(|v| v > 0.0) => {
-                    warn(warnings, "audio fades were left out")
-                }
-                _ => {}
-            }
-        }
-        // Editors write -16.999998 for -17.
-        return gain.map(|g| (g * 100.0).round() / 100.0);
-    }
-    None
-}
-
-/// Notes the effects of `item` that are left out: speed changes, and clip
-/// effects in use. The editor writes its whole stack of clip effects on
-/// every clip (Transform, Cropping, Pan, …), untouched ones included:
-/// those are nothing to note. The clip volume is read (`editor_gain`).
-fn note_effects(item: &Value, warnings: &mut Vec<String>) {
-    for e in item["effects"].as_array().into_iter().flatten() {
-        let s = schema(e);
-        if s.starts_with("LinearTimeWarp")
-            || s.starts_with("FreezeFrame")
-            || s.starts_with("TimeEffect")
-        {
-            warn(
-                warnings,
-                "speed changes were left out (those clips play at normal speed)",
-            );
-        } else if let Some(name) = effect_in_use(e) {
-            warn(warnings, &format!("the {name} clip effect was left out"));
-        }
-    }
-}
-
-/// The name of clip effect `e` if it changes the clip: one of the editor's
-/// switched on with a setting off its default (Dynamic Zoom moves the
-/// picture whenever it is on), or another program's, which says nothing
-/// of its defaults.
-fn effect_in_use(e: &Value) -> Option<String> {
-    let r = &e["metadata"][EDITOR];
-    let Some(name) = r["Effect Name"].as_str() else {
-        return e["effect_name"]
-            .as_str()
-            .or_else(|| e["name"].as_str())
-            .filter(|n| !n.is_empty())
-            .map(String::from);
-    };
-    if r["Enabled"] == false || name == "Fairlight Clip Volume and Fades" {
-        return None;
-    }
-    let off = |v: &Value, default: &Value| !same_value(v, default);
-    let changed = name == "Dynamic Zoom"
-        || r["Parameters"].as_array().into_iter().flatten().any(|p| {
-            let default = &p["Default Parameter Value"];
-            off(&p["Parameter Value"], default)
-                || p["Key Frames"]
-                    .as_object()
-                    .into_iter()
-                    .flatten()
-                    .any(|(_, k)| off(&k["Value"], default))
-        });
-    let shown = r["Name"].as_str().filter(|n| !n.is_empty()).unwrap_or(name);
-    changed.then(|| shown.to_string())
-}
-
-/// Whether two parameter values are the same, numbers to a millionth
-/// (editors write -16.999998 for -17).
-fn same_value(a: &Value, b: &Value) -> bool {
-    match (a, b) {
-        (Value::Number(x), Value::Number(y)) => {
-            let (x, y) = (
-                x.as_f64().unwrap_or(f64::NAN),
-                y.as_f64().unwrap_or(f64::NAN),
-            );
-            (x - y).abs() <= 1e-6 * x.abs().max(y.abs()).max(1.0)
-        }
-        (Value::Array(x), Value::Array(y)) => {
-            x.len() == y.len() && x.iter().zip(y).all(|(x, y)| same_value(x, y))
-        }
-        _ => a == b,
-    }
-}
-
 /// A track's items that take time, as `(start, length, item)`. Transitions
 /// overlap their neighbors instead, so they are left out.
 fn walk<'a>(
@@ -1198,7 +1089,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             if !is_clip(item) || len <= 0 {
                 continue;
             }
-            note_effects(item, &mut warnings);
+            let effects = effects::read(item, &mut warnings);
             match clip_source(item, fps, base) {
                 Ok((media, source_in, timecoded)) => {
                     let meta = &item["metadata"][VIDCUT];
@@ -1219,6 +1110,8 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         gain_db: meta["gain_db"].as_f64().unwrap_or(0.0),
                         muted: meta["muted"].as_bool().unwrap_or(false),
                         link: link_group(item),
+                        effects,
+                        audio_effects: Vec::new(),
                     });
                 }
                 Err(e) => warnings.push(format!("{}; left as a gap", e.message)),
@@ -1237,7 +1130,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             if !is_clip(item) || len <= 0 {
                 continue;
             }
-            note_effects(item, &mut warnings);
+            let effects = effects::read(item, &mut warnings);
             let (media, source_in, timecoded) = match clip_source(item, fps, base) {
                 Ok(s) => s,
                 Err(e) => {
@@ -1250,9 +1143,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             let meta = &item["metadata"][VIDCUT];
             let muted = item["enabled"].as_bool() == Some(false);
             let link = link_group(item);
-            let gain = meta["gain_db"]
-                .as_f64()
-                .or_else(|| editor_gain(item, &mut warnings));
+            let gain = meta["gain_db"].as_f64().or_else(|| effects::gain(item));
             let stream = meta["stream"]
                 .as_u64()
                 .map(|s| s as u32)
@@ -1283,6 +1174,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 if let Some(s) = stream {
                     c.stream = s;
                 }
+                c.audio_effects = effects;
                 continue;
             }
             let track = match &hint {
@@ -1309,6 +1201,8 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 gain_db: gain.unwrap_or(0.0),
                 muted,
                 link,
+                effects: Vec::new(),
+                audio_effects: effects,
             });
         }
         match (&hint, own) {
@@ -1351,6 +1245,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         {
             dropped += 1;
             c.audio = None;
+            c.audio_effects.clear();
         }
         kept.push(c);
     }
@@ -1367,6 +1262,22 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         ));
     }
     settings.retain(|t| t.id.starts_with('V') || clips.iter().any(|c| c.track == t.id));
+    let mut kept: Vec<String> = Vec::new();
+    for e in clips
+        .iter()
+        .flat_map(|c| c.effects.iter().chain(&c.audio_effects))
+    {
+        let name = effects::name(e);
+        if !kept.contains(&name) {
+            kept.push(name);
+        }
+    }
+    if !kept.is_empty() {
+        warnings.push(format!(
+            "clip effects kept on their clips but not shown or played: {}",
+            kept.join(", ")
+        ));
+    }
 
     // Markers of the timeline and of its tracks (tracks start with it).
     for list in

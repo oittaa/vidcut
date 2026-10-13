@@ -10,7 +10,9 @@ use serde_json::{Value, json};
 
 use crate::analysis::{self, AudioLevels, Loudness, PictureStats, SilenceSettings, Span};
 use crate::error::{Error, Result};
-use crate::model::{Clip, ClipAudio, ImageSequence, Media, MediaInfo, Project, Proxy, VideoInfo};
+use crate::model::{
+    Clip, ClipAudio, Effects, ImageSequence, Media, MediaInfo, Project, Proxy, VideoInfo,
+};
 use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
 use crate::render::RenderPlan;
@@ -1667,6 +1669,20 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     }
     let to = p.settings.fps;
     let conv = |f: i64| rescale(f, from, to);
+    // Carried clip effects count from where their picture or sound starts
+    // in the file; their times and fade lengths are frames at its rate.
+    let carry = |list: &[Value], first: i64| {
+        (!list.is_empty()).then(|| {
+            let mut e = Effects {
+                from: first,
+                list: list.to_vec(),
+            };
+            if from != to {
+                e.retime(|x| (x * to.as_f64() / from.as_f64()).round());
+            }
+            e
+        })
+    };
     let offset = if empty { 0 } else { p.end() };
     // The tracks first (making video tracks moves the audio tracks' indexes).
     let mut needed: Vec<&str> = t.clips.iter().map(|c| c.track.as_str()).collect();
@@ -1716,6 +1732,8 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
             _ => 0,
         };
         let mut source_in = conv(c.source_in - tc);
+        let effects = carry(&c.effects, source_in);
+        let sound_from = conv(c.source_in - tc + c.audio.map_or(0, |a| a.0));
         if c.video && m.info.video.is_none() {
             warnings.push(format!("{label}: {} has no video; left out", m.name));
             continue;
@@ -1766,6 +1784,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
                     tail: tl,
                     gain_db: c.gain_db.clamp(*GAIN.start(), *GAIN.end()),
                     muted: c.muted,
+                    effects: carry(&c.audio_effects, sound_from),
                 })
             });
         if audio.is_some() && !GAIN.contains(&c.gain_db) {
@@ -1796,6 +1815,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
             audio,
             enabled: c.enabled,
             name,
+            effects,
         });
         track.sort();
     }
@@ -2536,8 +2556,16 @@ pub fn clip_json(p: &Project, c: &Clip, track: &str) -> Value {
         "source_in_tc": format_timecode(c.source_in, fps, 0),
         "enabled": c.enabled,
     });
+    // Carried clip effects by name (deviation X9); `project.get` has them
+    // whole.
+    if let Some(e) = &c.effects {
+        v["effects"] = json!(e.names());
+    }
     if let Some(a) = &c.audio {
         v["audio"] = json!({ "stream": a.stream, "head": a.head, "tail": a.tail, "gain_db": a.gain_db, "muted": a.muted });
+        if let Some(e) = &a.effects {
+            v["audio"]["effects"] = json!(e.names());
+        }
     }
     v
 }

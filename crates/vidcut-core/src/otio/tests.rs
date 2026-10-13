@@ -1180,7 +1180,7 @@ fn source_timecode_without_available_ranges() {
 }
 
 #[test]
-fn notes_clip_effects_in_use() {
+fn keeps_clip_effects_in_use() {
     let effect = |meta: Value| json!({"OTIO_SCHEMA": "Effect.1", "name": "", "effect_name": "Resolve Effect", "metadata": {"Resolve_OTIO": meta}});
     // The editor's stack on every clip, untouched: nothing to note.
     let zoom = |on: bool| {
@@ -1206,15 +1206,25 @@ fn notes_clip_effects_in_use() {
         let tracks = doc["tracks"]["children"].as_array_mut().unwrap();
         tracks[0]["children"][0]["effects"] = json!(video);
         tracks[1]["children"][0]["effects"] = json!(audio);
-        import(&doc, None).unwrap().warnings
+        import(&doc, None).unwrap()
     };
-    let noted = |w: &[String]| -> Vec<String> {
-        w.iter()
+    // The first clip's kept effects, picture and sound.
+    let kept = |t: &Imported| -> (Vec<String>, Vec<String>) {
+        let names = |l: &[Value]| l.iter().map(effects::name).collect();
+        (names(&t.clips[0].effects), names(&t.clips[0].audio_effects))
+    };
+    let noted = |t: &Imported| -> Vec<String> {
+        t.warnings
+            .iter()
             .filter(|w| w.contains("clip effect"))
             .cloned()
             .collect()
     };
-    assert!(noted(&with(untouched.clone(), vec![])).is_empty());
+    let t = with(untouched.clone(), vec![]);
+    assert_eq!((kept(&t), noted(&t)), ((vec![], vec![]), vec![]));
+    // The editor's clip volume is the gain: nothing to keep.
+    let t = import(&editor_export(), None).unwrap();
+    assert_eq!((kept(&t), t.clips[0].gain_db), ((vec![], vec![]), -17.0));
 
     // In use: a setting off its default, Dynamic Zoom switched on, a
     // setting that moves, and another program's effect.
@@ -1228,21 +1238,235 @@ fn notes_clip_effects_in_use() {
             "Key Frames": {"0": {"Value": 0.0}, "24": {"Value": -0.5}}, "Variant Type": "Double"}]}),
     );
     let blur = json!({"OTIO_SCHEMA": "Effect.1", "name": "", "effect_name": "Gaussian Blur", "metadata": {}});
-    let w = with(vec![zoomed, zoom(true), blur], vec![panned]);
+    let t = with(vec![zoomed.clone(), zoom(true), blur], vec![panned]);
     assert_eq!(
-        noted(&w),
+        kept(&t),
+        (
+            vec![
+                "Transform".to_string(),
+                "Dynamic Zoom".into(),
+                "Gaussian Blur".into()
+            ],
+            vec!["Pan".to_string()]
+        )
+    );
+    assert_eq!(t.clips[0].effects[0], zoomed, "as it came");
+    assert_eq!(
+        noted(&t),
         [
-            "the Transform clip effect was left out",
-            "the Dynamic Zoom clip effect was left out",
-            "the Gaussian Blur clip effect was left out",
-            "the Pan clip effect was left out",
-        ],
-        "{w:?}"
+            "clip effects kept on their clips but not shown or played: Transform, Dynamic Zoom, \
+             Gaussian Blur, Pan"
+        ]
     );
     // Switched off, a changed setting changes nothing.
     let off = effect(
         json!({"Effect Name": "Cropping", "Enabled": false, "Name": "Cropping", "Type": 3,
         "Parameters": [{"Parameter ID": "cropLeft", "Default Parameter Value": 0.0, "Parameter Value": 0.2}]}),
     );
-    assert!(noted(&with(vec![off], vec![])).is_empty());
+    let t = with(vec![off], vec![]);
+    assert_eq!((kept(&t), noted(&t)), ((vec![], vec![]), vec![]));
+}
+
+/// One of the editor's clip effects, switched on.
+fn editor_effect(name: &str, shown: &str, parameters: Value) -> Value {
+    json!({"OTIO_SCHEMA": "Effect.1", "name": "", "effect_name": "Resolve Effect", "metadata": {"Resolve_OTIO": {
+        "Effect Name": name, "Enabled": true, "Name": shown, "Type": 1, "Parameters": parameters}}})
+}
+
+/// The effects written on the clips of OTIO track `track`.
+fn written(doc: &Value, track: &str) -> Vec<Value> {
+    otio_clips(otio_track(doc, track))
+        .into_iter()
+        .map(|c| c["effects"].clone())
+        .collect()
+}
+
+/// The keyframe times of an effect's first parameter, as written.
+fn key_times(effect: &Value) -> Vec<String> {
+    let mut t: Vec<String> = effect["metadata"]["Resolve_OTIO"]["Parameters"][0]["Key Frames"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
+    t.sort_by_key(|t| t.parse::<i64>().unwrap());
+    t
+}
+
+/// A parameter's value, as written.
+fn param(effect: &Value, id: &str) -> Value {
+    effect["metadata"]["Resolve_OTIO"]["Parameters"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["Parameter ID"] == id)
+        .map_or(Value::Null, |p| p["Parameter Value"].clone())
+}
+
+#[test]
+fn clip_effects_are_carried() {
+    // A clip from source frame 50, as another editor wrote it: effects in
+    // use on its picture and sound, an untouched one besides.
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.append("m1", 50, 150);
+    let mut doc = export(f.editor.project(), "fx", None, Locations::Absolute).unwrap();
+    let transform = editor_effect(
+        "Transform",
+        "Transform",
+        json!([{"Parameter ID": "transformationZoomX", "Default Parameter Value": 1.0, "Parameter Value": 1.2, "Key Frames": {}}]),
+    );
+    // Keyframe times count from the clip's first source frame: these are
+    // on source frames 0 and 1000.
+    let zoom = editor_effect(
+        "Dynamic Zoom",
+        "Dynamic Zoom",
+        json!([{"Parameter ID": "dynamicZoomScale", "Default Parameter Value": 1.0, "Parameter Value": 1.0,
+            "Key Frames": {"-50": {"Value": 0.8}, "950": {"Value": 1.0}}}]),
+    );
+    let faders = editor_effect(
+        "Video Faders",
+        "Video Faders",
+        json!([{"Parameter ID": "videoFaderIn", "Default Parameter Value": 0.0, "Parameter Value": 10.0},
+               {"Parameter ID": "videoFaderOut", "Default Parameter Value": 0.0, "Parameter Value": 5.0}]),
+    );
+    let untouched = editor_effect(
+        "Cropping",
+        "Cropping",
+        json!([{"Parameter ID": "cropLeft", "Default Parameter Value": 0.0, "Parameter Value": 0.0}]),
+    );
+    let volume = editor_effect(
+        "Fairlight Clip Volume and Fades",
+        "Volume",
+        json!([{"Parameter ID": "volume", "Default Parameter Value": 0.0, "Parameter Value": -8.0, "Key Frames": {}},
+               {"Parameter ID": "faderIn", "Default Parameter Value": 0.0, "Parameter Value": 25.0},
+               {"Parameter ID": "faderOut", "Default Parameter Value": 0.0, "Parameter Value": 0.0}]),
+    );
+    let pan = editor_effect(
+        "Fairlight Clip Pan",
+        "Pan",
+        json!([{"Parameter ID": "pan", "Default Parameter Value": 0.0, "Parameter Value": -50.0}]),
+    );
+    for (track, list) in [
+        ("Video 1", json!([transform, zoom, untouched, faders])),
+        ("Audio 1", json!([volume, pan])),
+    ] {
+        let items = doc["tracks"]["children"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|t| t["name"] == track)
+            .unwrap()["children"]
+            .as_array_mut()
+            .unwrap();
+        items[0]["effects"] = list;
+        items[0]["metadata"].as_object_mut().unwrap().remove(VIDCUT);
+    }
+
+    let mut g = Fixture::new(&[(10.0, true)]);
+    let r = g.ok(req("timeline.import", json!({ "otio": doc })));
+    assert_eq!(
+        r.result["warnings"],
+        json!([
+            "clip effects kept on their clips but not shown or played: Transform, Dynamic Zoom, \
+             Video Faders, Volume, Pan"
+        ])
+    );
+    let c = g.editor.project().clip("c1").unwrap().clone();
+    let picture = c.effects.clone().unwrap();
+    assert_eq!(
+        (picture.from, picture.list),
+        (50, vec![transform.clone(), zoom.clone(), faders.clone()])
+    );
+    let au = c.audio.clone().unwrap();
+    let sound = au.effects.unwrap();
+    assert_eq!(
+        (au.gain_db, sound.from, sound.list),
+        (-8.0, 50, vec![volume.clone(), pan.clone()])
+    );
+    // By name in the timeline.
+    let r = g.ok(req("timeline.get", json!({})));
+    let clip = &r.result["tracks"][0]["items"][0];
+    assert_eq!(
+        (&clip["effects"], &clip["audio"]["effects"]),
+        (
+            &json!(["Transform", "Dynamic Zoom", "Video Faders"]),
+            &json!(["Volume", "Pan"])
+        ),
+        "{clip}"
+    );
+    // Written back as they came.
+    let out = export(g.editor.project(), "fx", None, Locations::Absolute).unwrap();
+    assert_eq!(
+        (written(&out, "Video 1"), written(&out, "Audio 1")),
+        (
+            vec![json!([transform, zoom, faders])],
+            vec![json!([volume, pan])]
+        )
+    );
+
+    // A trimmed head: the keyframes stay on their source frames.
+    g.ok(req(
+        "edit.trim",
+        json!({"clip": "c1", "edge": "head", "by": 10}),
+    ));
+    assert_eq!(g.v1(), vec![crate::test_support::row("c1", 0, 90, 60)]);
+    let out = export(g.editor.project(), "fx", None, Locations::Absolute).unwrap();
+    let v = written(&out, "Video 1");
+    assert_eq!(key_times(&v[0][1]), ["-60", "940"]);
+    let fades = |e: &Value| (param(e, "videoFaderIn"), param(e, "videoFaderOut"));
+    assert_eq!(fades(&v[0][2]), (json!(10.0), json!(5.0)));
+
+    // A split: the fade-in stays on the first part, the fade-out on the
+    // last. A sound fade cut away leaves the gain as a clip volume.
+    g.ok(req("edit.split", json!({"at": 40})));
+    g.ok(req("clip.set", json!({"clips": "c1", "gain_db": -3.0})));
+    let out = export(g.editor.project(), "fx", None, Locations::Absolute).unwrap();
+    let (v, a) = (written(&out, "Video 1"), written(&out, "Audio 1"));
+    assert_eq!(fades(&v[0][2]), (json!(10.0), json!(0.0)));
+    assert_eq!(fades(&v[1][2]), (json!(0.0), json!(5.0)));
+    assert_eq!(
+        key_times(&v[1][1]),
+        ["-100", "900"],
+        "from source frame 100"
+    );
+    assert_eq!(
+        (param(&a[0][0], "volume"), param(&a[0][0], "faderIn")),
+        (json!(-3.0), json!(25.0)),
+        "the gain, and the fade kept"
+    );
+    assert_eq!(a[1], json!([effects::volume(-8.0), pan]));
+    let p = g.editor.project();
+    let right = p.clip("c2").unwrap().audio.as_ref().unwrap();
+    assert_eq!(right.effects.as_ref().unwrap().names(), ["Pan"]);
+
+    // Through vidcut's own file, the same.
+    let before = p.clone();
+    let mut h = Fixture::new(&[(10.0, true)]);
+    let r = h.ok(req("timeline.import", json!({ "otio": out })));
+    assert!(
+        r.result["warnings"][0]
+            .as_str()
+            .unwrap()
+            .starts_with("clip effects kept"),
+        "{}",
+        r.result
+    );
+    let again = export(h.editor.project(), "fx", None, Locations::Absolute).unwrap();
+    assert_eq!(
+        again,
+        export(&before, "fx", None, Locations::Absolute).unwrap()
+    );
+
+    // Into a 50 fps project: keyframe times and fade lengths double.
+    let mut k = Fixture::new(&[(10.0, true)]);
+    k.ok(req("project.set", json!({"fps": "50"})));
+    k.append("m1", 0, 10);
+    k.ok(req("timeline.import", json!({ "otio": doc })));
+    let c = k.editor.project().clip("c2").unwrap().clone();
+    let e = c.effects.unwrap();
+    assert_eq!(e.from, 100);
+    assert_eq!(key_times(&e.list[1]), ["-100", "1900"]);
+    assert_eq!(fades(&e.list[2]), (json!(20.0), json!(10.0)));
+    let sound = c.audio.unwrap().effects.unwrap();
+    assert_eq!(param(&sound.list[0], "faderIn"), json!(50.0));
 }

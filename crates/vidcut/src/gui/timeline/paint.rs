@@ -9,7 +9,7 @@ use eframe::egui::{
     vec2,
 };
 use vidcut_av::waveform::Waveform;
-use vidcut_core::model::{Clip, Project, Track};
+use vidcut_core::model::{Clip, Effects, Project, Track};
 use vidcut_core::ops;
 use vidcut_core::time::{Rational, format_timecode};
 
@@ -336,6 +336,11 @@ fn clip(
                 theme::TEXT_DIM,
             );
         }
+        if look.status
+            && let Some(e) = c.audio.as_ref().and_then(|a| a.effects.as_ref())
+        {
+            effects_badge(&ap, audio, e);
+        }
     }
     if look.names && width > 30.0 {
         let name = c
@@ -372,6 +377,12 @@ fn clip(
             Color32::from_white_alpha(200),
         );
     }
+    if look.status
+        && has_picture
+        && let Some(e) = &c.effects
+    {
+        effects_badge(&painter, video, e);
+    }
     if look.status && width > 40.0 {
         let status = if offline {
             Some(("offline", Color32::WHITE))
@@ -397,6 +408,36 @@ fn clip(
             StrokeKind::Inside,
         );
     }
+}
+
+/// A badge at the bottom right of a clip's picture or sound band naming
+/// the effects it carries from another editor, kept but not shown
+/// (deviation X9): `fx Transform, Cropping`, or `fx` where that won't fit.
+fn effects_badge(painter: &Painter, band: Rect, effects: &Effects) {
+    let right = band.right().min(painter.clip_rect().right());
+    // Clear of the duration at the bottom left.
+    let room = right - band.left().max(painter.clip_rect().left()) - 40.0;
+    if room < 16.0 || band.height() < 13.0 {
+        return;
+    }
+    let names = format!("fx {}", effects.names().join(", "));
+    let fits = (room / 5.5) as usize;
+    let text = if fits >= 6 {
+        elide(&names, fits)
+    } else {
+        "fx".to_string()
+    };
+    let galley = painter.layout_no_wrap(text, FontId::proportional(9.0), theme::ACCENT);
+    let pos = pos2(
+        right - galley.size().x - 4.0,
+        band.bottom() - galley.size().y - 2.0,
+    );
+    painter.rect_filled(
+        Rect::from_min_size(pos - vec2(2.0, 0.0), galley.size() + vec2(4.0, 1.0)),
+        CornerRadius::same(2),
+        Color32::from_black_alpha(140),
+    );
+    painter.galley(pos, galley, theme::ACCENT);
 }
 
 /// Pool thumbnails tiled along a clip, each from the source time at its place.

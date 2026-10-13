@@ -500,6 +500,23 @@ pub struct Clip {
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Effects on its picture, carried from another editor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effects: Option<Effects>,
+}
+
+/// Clip effects another editor applied, which vidcut keeps without showing
+/// or playing them (deviation X9): the OTIO effects of a clip's picture or
+/// of its sound. `otio::effects` reads, cuts and writes them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Effects {
+    /// The source frame their keyframe times count from: the first of the
+    /// picture or sound when they were read. Keyframes stay on their source
+    /// frames through trims, slips and splits.
+    pub from: i64,
+    /// OTIO `Effect`s as read, keyframe times and fade lengths in project
+    /// frames.
+    pub list: Vec<serde_json::Value>,
 }
 
 /// A clip with the track it is on: what `edit.copy` returns and `edit.paste`
@@ -523,6 +540,10 @@ pub struct ClipAudio {
     pub tail: i64,
     pub gain_db: f64,
     pub muted: bool,
+    /// Effects on its sound, carried from another editor. The clip volume
+    /// is `gain_db`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effects: Option<Effects>,
 }
 
 impl Clip {

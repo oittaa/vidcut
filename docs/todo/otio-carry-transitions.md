@@ -1,6 +1,6 @@
 # Carry transitions through vidcut
 
-**When:** next, after [clip effects](otio-carry-clip-effects.md), whose **Shared** part applies here.
+**When:** next. Carried as [clip effects](../deviations.md#x9-opentimelineio-interchange) are (deviation X9): kept as data, shown, played as today, written back unchanged; Resolve rebuilds what it wrote and drops other programs' metadata.
 
 Resolve writes a video dissolve as OTIO's standard `Transition` (`SMPTE_Dissolve`, with in and out offsets) and an audio crossfade as a `Custom_Transition` named after it ("Cross Fade +3 dB"). Blender's coming OTIO support writes its crossfades and wipes the same way.
 
