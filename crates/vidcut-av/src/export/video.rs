@@ -165,8 +165,9 @@ impl Normalizer {
         let color = crate::color::Source::of(src);
         let conv = crate::color::conversion(color, out_fmt, target);
         let spec = format!(
-            "{}scale={sw}:{sh}:flags=bicubic{},pad={out_w}:{out_h}:{}:{}:color=black,setsar=1{},format={}",
+            "{}scale={sw}:{sh}:flags={}{},pad={out_w}:{out_h}:{}:{}:color=black,setsar=1{},format={}",
             upright(rotation),
+            conv.flags,
             conv.scale,
             (out_w - sw) / 2,
             (out_h - sh) / 2,
@@ -1181,8 +1182,108 @@ pub(crate) fn fill_black(f: &mut frame::Video) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{fill_black, fit};
-    use crate::ffmpeg::{format::Pixel, frame};
+    use super::{Normalizer, fill_black, fit};
+    use crate::ffmpeg::{self, format::Pixel, frame};
+
+    /// Bands of `values` (8-bit video-range Y, Cb, Cr) side by side, tagged
+    /// with `matrix`.
+    fn bands(
+        w: u32,
+        h: u32,
+        values: &[[u8; 3]],
+        matrix: ffmpeg::ffi::AVColorSpace,
+    ) -> frame::Video {
+        let mut f = frame::Video::new(Pixel::YUV420P, w, h);
+        let planes = [(w, h), (w / 2, h / 2), (w / 2, h / 2)];
+        for (p, (pw, ph)) in planes.into_iter().enumerate() {
+            let stride = f.stride(p);
+            for y in 0..ph as usize {
+                for x in 0..pw as usize {
+                    f.data_mut(p)[y * stride + x] = values[x * values.len() / pw as usize][p];
+                }
+            }
+        }
+        // SAFETY: plain fields of its own frame.
+        unsafe {
+            (*f.as_mut_ptr()).colorspace = matrix;
+            (*f.as_mut_ptr()).color_range = ffmpeg::ffi::AVColorRange::AVCOL_RANGE_MPEG;
+        }
+        f
+    }
+
+    /// Video-range Y, Cb, Cr in the matrix of `(kr, kb)` as RGB, 0 to 1.
+    fn rgb(yuv: [u8; 3], (kr, kb): (f64, f64)) -> [f64; 3] {
+        let y = (f64::from(yuv[0]) - 16.0) / 219.0;
+        let cb = (f64::from(yuv[1]) - 128.0) / 224.0;
+        let cr = (f64::from(yuv[2]) - 128.0) / 224.0;
+        let r = y + 2.0 * (1.0 - kr) * cr;
+        let b = y + 2.0 * (1.0 - kb) * cb;
+        [r, (y - kr * r - kb * b) / (1.0 - kr - kb), b]
+    }
+
+    /// RGB (0 to 1) as video-range Y, Cb, Cr in the matrix of `(kr, kb)`.
+    fn yuv([r, g, b]: [f64; 3], (kr, kb): (f64, f64)) -> [f64; 3] {
+        let y = kr * r + (1.0 - kr - kb) * g + kb * b;
+        [
+            16.0 + 219.0 * y,
+            128.0 + 224.0 * (b - y) / (2.0 * (1.0 - kb)),
+            128.0 + 224.0 * (r - y) / (2.0 * (1.0 - kr)),
+        ]
+    }
+
+    /// Converting colors, the normalizer rounds them as the math does: grays
+    /// keep their levels from BT.601 to BT.709 and into RGB (swscale's
+    /// defaults took white to 233 and to 253), and colors are within a
+    /// level.
+    #[test]
+    fn conversions_keep_levels() {
+        crate::init();
+        use ffmpeg::ffi::AVColorSpace as S;
+        const BT601: (f64, f64) = (0.299, 0.114);
+        const BT709: (f64, f64) = (0.2126, 0.0722);
+        // Black, gray and white; BT.601's 75% red, green and blue.
+        let values = [
+            [16, 128, 128],
+            [126, 128, 128],
+            [235, 128, 128],
+            [65, 100, 212],
+            [112, 72, 58],
+            [35, 212, 114],
+        ];
+        for (matrix, tag, out) in [
+            (BT601, S::AVCOL_SPC_SMPTE170M, Pixel::YUV420P),
+            (BT601, S::AVCOL_SPC_SMPTE170M, Pixel::RGB24),
+            (BT709, S::AVCOL_SPC_BT709, Pixel::RGB24),
+        ] {
+            let f = bands(1280, 720, &values, tag);
+            let got = Normalizer::new(&f, 0, 640, 360, out, None)
+                .and_then(|mut n| n.run(&f))
+                .unwrap();
+            for (k, v) in values.iter().enumerate() {
+                // The middle of band k.
+                let x = (2 * k + 1) * 640 / (2 * values.len());
+                let (want, got) = if out == Pixel::RGB24 {
+                    let p = &got.data(0)[180 * got.stride(0) + 3 * x..][..3];
+                    (
+                        rgb(*v, matrix).map(|c| (c * 255.0).clamp(0.0, 255.0)),
+                        [p[0], p[1], p[2]],
+                    )
+                } else {
+                    let at = |p: usize, x: usize, y: usize| got.data(p)[y * got.stride(p) + x];
+                    (
+                        yuv(rgb(*v, matrix), BT709),
+                        [at(0, x, 180), at(1, x / 2, 90), at(2, x / 2, 90)],
+                    )
+                };
+                for c in 0..3 {
+                    assert!(
+                        (f64::from(got[c]) - want[c]).abs() <= 1.0,
+                        "{tag:?} {v:?} into {out:?}: {got:?}, the math says {want:.1?}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn black_is_video_range_black_in_every_layout() {

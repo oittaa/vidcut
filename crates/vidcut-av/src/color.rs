@@ -562,13 +562,22 @@ fn transfer(hdr: Option<Hdr>) -> &'static str {
     }
 }
 
-/// How a normalizer brings a source to its output: options for the `scale`
-/// filter, and filters to run after padding (which happens in the source's
-/// format), before the final `format`.
+/// How a normalizer brings a source to its output: flags and options for
+/// the `scale` filter, and filters to run after padding (which happens in
+/// the source's format), before the final `format`.
 pub(crate) struct Conversion {
+    pub flags: &'static str,
     pub scale: String,
     pub after: String,
 }
+
+/// swscale's flags for a picture it only resamples.
+const RESAMPLE: &str = "bicubic";
+
+/// swscale's flags for a picture whose colors it converts too (YUV to RGB
+/// or back, another matrix or range): left to its defaults, it rounds them
+/// low (export.md §4).
+const CONVERT: &str = "bicubic+accurate_rnd+full_chroma_int";
 
 /// `scale` options that keep a YUV picture's matrix and range (its tags,
 /// or what is assumed without them) while it is resampled: told nothing,
@@ -598,6 +607,7 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
     };
     let in_range = if src.full_range { "full" } else { "limited" };
     let none = || Conversion {
+        flags: RESAMPLE,
         scale: String::new(),
         after: String::new(),
     };
@@ -616,10 +626,12 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
         // SDR to SDR: swscale converts the matrix and range as it scales.
         (None, None) if src.rgb && rgb_out => none(),
         (None, None) if src.rgb => Conversion {
+            flags: CONVERT,
             scale: ":out_color_matrix=bt709:out_range=limited".into(),
             after: String::new(),
         },
         (None, None) if rgb_out => Conversion {
+            flags: CONVERT,
             scale: format!(
                 ":in_color_matrix={in_matrix}:in_range={in_range},format={}",
                 name(out)
@@ -627,6 +639,11 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
             after: String::new(),
         },
         (None, None) => Conversion {
+            flags: if src.matrix == Matrix::Bt709 && !src.full_range {
+                RESAMPLE
+            } else {
+                CONVERT
+            },
             scale: format!(
                 ":in_color_matrix={in_matrix}:in_range={in_range}:out_color_matrix=bt709:out_range=limited"
             ),
@@ -634,6 +651,7 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
         },
         // The same HDR transfer: nothing to convert.
         (Some(s), Some(t)) if s == t && !src.rgb && src.matrix == Matrix::Bt2020 => Conversion {
+            flags: RESAMPLE,
             scale: keep,
             after: String::new(),
         },
@@ -646,6 +664,7 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
                 format!("zscale=t=709:m=709:r=limited{}", zscale_writes(out))
             };
             Conversion {
+                flags: RESAMPLE,
                 scale: keep,
                 after: format!(
                     ",zscale={},format=gbrpf32le,zscale=p=709,\
@@ -657,6 +676,7 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
         }
         // Into HDR: linear light with SDR white at the reference white.
         (_, Some(t)) => Conversion {
+            flags: RESAMPLE,
             scale: keep,
             after: format!(
                 ",zscale={},format=gbrpf32le,\
