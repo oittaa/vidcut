@@ -864,6 +864,7 @@ mod tests {
             enabled: true,
             name: None,
             effects: None,
+            generator: None,
         }
     }
 

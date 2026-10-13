@@ -18,6 +18,8 @@ pub const CLIP_DISABLED: Color32 = Color32::from_rgb(52, 58, 68);
 /// A clip whose file is missing, and the viewer's Media Offline frame.
 pub const OFFLINE: Color32 = Color32::from_rgb(150, 46, 42);
 pub const AUDIO: Color32 = Color32::from_rgb(52, 120, 84);
+/// A generator or title carried from another editor (deviation X9).
+pub const GENERATOR: Color32 = Color32::from_rgb(112, 84, 156);
 pub const MARKED: Color32 = Color32::from_rgba_premultiplied(70, 70, 76, 70);
 pub const ERROR: Color32 = Color32::from_rgb(235, 98, 88);
 pub const OK: Color32 = Color32::from_rgb(120, 190, 120);

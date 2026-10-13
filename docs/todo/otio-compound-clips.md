@@ -1,6 +1,6 @@
 # Compound clips and nested timelines
 
-**When:** next, after [generators](otio-carry-generators.md). Carried as [clip effects](../deviations.md#x9-opentimelineio-interchange) are (deviation X9): kept as data, shown, played as today, written back unchanged; Resolve rebuilds what it wrote and drops other programs' metadata.
+**When:** next. Carried as [clip effects](../deviations.md#x9-opentimelineio-interchange) are (deviation X9): kept as data, shown, played as today, written back unchanged; Resolve rebuilds what it wrote and drops other programs' metadata.
 
 Resolve writes a compound clip or a nested timeline as a nested OTIO `Stack` with all of its own tracks and clips (`Resolve_OTIO` says `Compound Clip` or `Timeline Clip`, with an id), and rebuilds the compound clip from it. Today vidcut leaves the whole item out: a gap, its picture and sound gone.
 

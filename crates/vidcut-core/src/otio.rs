@@ -22,7 +22,7 @@
 //!   a clip volume, track lock and solo, marker notes.
 //! - The clip effects a clip carries from another editor's file, as they
 //!   came ([`effects`]), and the transitions on its edit points that still
-//!   fit there ([`transitions`]).
+//!   fit there ([`transitions`]). A generator clip's reference, as it came.
 //! - Timeline markers go on the top-level stack, with their lengths.
 //! - Details OTIO has no field for (clip gain, mute and audio stream, track
 //!   settings, marker colors, the In/Out marks) are kept under
@@ -51,8 +51,10 @@
 //! - Clip effects in use stay on their clips' pictures and sounds
 //!   ([`effects`]), not shown or played, and are written back. So do
 //!   transitions, on their edit points ([`transitions`]): shown as cuts.
-//! - Everything else is left out with a warning: nested compositions and
-//!   generators (gaps instead), speed changes.
+//! - Generators and titles (`GeneratorReference`s) become generator clips:
+//!   blocks that play as gaps, their references kept.
+//! - Everything else is left out with a warning: nested compositions (gaps
+//!   instead), speed changes.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -60,7 +62,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Marks, Media, Project, TrackKind};
+use crate::model::{Clip, Marks, Media, Project, TrackKind};
 use crate::time::Rational;
 
 pub mod effects;
@@ -219,7 +221,10 @@ pub fn used_media(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
     for t in &p.tracks {
         for c in &t.clips {
             let shows = c.video && c.start.max(a) < c.end().min(b);
-            if (shows || audio_part(c, a, b).is_some()) && !used.contains(&c.media) {
+            if (shows || audio_part(c, a, b).is_some())
+                && !c.is_generator()
+                && !used.contains(&c.media)
+            {
                 used.push(c.media.clone());
             }
         }
@@ -242,27 +247,37 @@ pub fn export(
         return Err(Error::invalid("nothing to export: the range is empty"));
     }
     let item = |label: &str,
-                m: &Media,
+                c: &Clip,
+                m: Option<&Media>,
                 source: i64,
                 frames: i64,
                 enabled: bool,
                 meta: Value,
                 effects: Vec<Value>| {
         // Source positions count from the media's start timecode; stills
-        // have one picture.
-        let start = if m.is_still() {
-            0.0
-        } else if m.sequence.is_some() {
-            source as f64
-        } else {
-            start_tc(m, fps) + source as f64
+        // have one picture. A generator's reference is written as it came.
+        let (start, reference) = match m {
+            Some(m) if m.is_still() => (0.0, media_reference(p, m, locations, rate)),
+            Some(m) if m.sequence.is_some() => {
+                (source as f64, media_reference(p, m, locations, rate))
+            }
+            Some(m) => (
+                start_tc(m, fps) + source as f64,
+                media_reference(p, m, locations, rate),
+            ),
+            None => (
+                source as f64,
+                c.generator
+                    .as_ref()
+                    .map_or(Value::Null, |g| g.reference.clone()),
+            ),
         };
         json!({
             "OTIO_SCHEMA": "Clip.2",
             "name": label,
             "source_range": range(start, frames as f64, rate),
             "media_references": {
-                "DEFAULT_MEDIA": media_reference(p, m, locations, rate),
+                "DEFAULT_MEDIA": reference,
             },
             "active_media_reference_key": "DEFAULT_MEDIA",
             "effects": effects,
@@ -294,10 +309,15 @@ pub fn export(
         // The channel counts of the audio on this track.
         let mut channels: Vec<u16> = Vec::new();
         for c in &t.clips {
-            let m = p
-                .media(&c.media)
-                .ok_or_else(|| Error::internal(format!("no media {}", c.media)))?;
-            let label = c.name.clone().unwrap_or_else(|| m.name.clone());
+            let m = p.media(&c.media);
+            if m.is_none() && !c.is_generator() {
+                return Err(Error::internal(format!("no media {}", c.media)));
+            }
+            let label = c
+                .name
+                .clone()
+                .or_else(|| m.map(|m| m.name.clone()))
+                .unwrap_or_default();
             let (s, e) = (c.start.max(a), c.end().min(b));
             let shows = c.video && e > s;
             let sounds = audio_part(c, a, b).map(|(s, e)| (s.max(ta), e));
@@ -320,7 +340,7 @@ pub fn export(
                     meta["gain_db"] = json!(au.gain_db);
                     meta["muted"] = json!(au.muted);
                 }
-                if m.is_still() {
+                if m.is_some_and(Media::is_still) {
                     meta["source_in"] = json!(c.source_at(s));
                 }
                 let mut metadata = json!({ VIDCUT: meta });
@@ -334,6 +354,7 @@ pub fn export(
                 });
                 video.push(item(
                     &label,
+                    c,
                     m,
                     c.source_at(s),
                     e - s,
@@ -355,9 +376,7 @@ pub fn export(
                 }
                 let meta = json!({ "clip": c.id, "stream": au.stream, "gain_db": au.gain_db });
                 let n = m
-                    .info
-                    .audio
-                    .get(au.stream as usize)
+                    .and_then(|m| m.info.audio.get(au.stream as usize))
                     .map_or(2, |x| x.channels);
                 channels.push(n);
                 let mut editor = json!({
@@ -372,6 +391,7 @@ pub fn export(
                 let effects = effects::sound(au, c.source_at(s), s > whole.0, e < whole.1);
                 audio.push(item(
                     &label,
+                    c,
                     m,
                     c.source_at(s),
                     e - s,
@@ -468,8 +488,19 @@ pub fn export(
     }))
 }
 
+/// What generator `g` makes, as its reference says: `Solid Color`, `Rich`.
+pub fn generator_kind(g: &crate::model::Generator) -> String {
+    let r = &g.reference;
+    [&r["generator_kind"], &r["name"]]
+        .into_iter()
+        .filter_map(Value::as_str)
+        .find(|n| !n.is_empty())
+        .unwrap_or("generator")
+        .to_string()
+}
+
 /// A clip's media file as an OTIO file names it.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct MediaRef {
     /// As written: a URL or a path (for an image sequence, its first
     /// picture's).
@@ -518,6 +549,9 @@ pub struct ImportedClip {
     /// ([`effects`]), as the file has them.
     pub effects: Vec<Value>,
     pub audio_effects: Vec<Value>,
+    /// A generator or title: its `GeneratorReference`, as the file has
+    /// it. It has no media (`media` is empty).
+    pub generator: Option<Value>,
 }
 
 impl ImportedClip {
@@ -1167,6 +1201,33 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 continue;
             }
             let effects = effects::read(item, &mut warnings);
+            let reference = media_reference_of(item);
+            if schema(reference).starts_with("GeneratorReference") {
+                clip_markers(item, start, len, fps, &mut markers);
+                keys[i] = Some(clips.len());
+                clips.push(ImportedClip {
+                    key: clips.len(),
+                    track: id.clone(),
+                    media: MediaRef::default(),
+                    name: item["name"].as_str().unwrap_or("").to_string(),
+                    start,
+                    duration: len,
+                    source_in: time(&item["source_range"]["start_time"])
+                        .map_or(0, |(v, r)| frames(v, r, fps)),
+                    timecoded: false,
+                    video: true,
+                    enabled: item["enabled"].as_bool().unwrap_or(true),
+                    audio: None,
+                    stream: 0,
+                    gain_db: 0.0,
+                    muted: false,
+                    link: None,
+                    effects,
+                    audio_effects: Vec::new(),
+                    generator: Some(reference.clone()),
+                });
+                continue;
+            }
             match clip_source(item, fps, base) {
                 Ok((media, source_in, timecoded)) => {
                     let meta = &item["metadata"][VIDCUT];
@@ -1191,6 +1252,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         link: link_group(item),
                         effects,
                         audio_effects: Vec::new(),
+                        generator: None,
                     });
                 }
                 Err(e) => warnings.push(format!("{}; left as a gap", e.message)),
@@ -1288,6 +1350,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 link,
                 effects: Vec::new(),
                 audio_effects: effects,
+                generator: None,
             });
         }
         transitions_of(between, &keys, true, fps, &mut found);
@@ -1362,6 +1425,18 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         warnings.push(format!(
             "clip effects kept on their clips but not shown or played: {}",
             kept.join(", ")
+        ));
+    }
+    let mut made: Vec<&str> = Vec::new();
+    for c in clips.iter().filter(|c| c.generator.is_some()) {
+        if !made.contains(&c.name.as_str()) {
+            made.push(&c.name);
+        }
+    }
+    if !made.is_empty() {
+        warnings.push(format!(
+            "generators and titles kept as blocks but played as gaps: {}",
+            made.join(", ")
         ));
     }
     // Transitions with a clip still on a side.

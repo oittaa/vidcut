@@ -16,11 +16,9 @@ fn clips(p: &Project) -> Vec<(String, crate::model::Clip, PathBuf)> {
         .iter()
         .flat_map(|t| {
             t.clips.iter().map(|c| {
-                (
-                    t.id.clone(),
-                    c.clone(),
-                    p.media(&c.media).unwrap().path.clone(),
-                )
+                // A generator has no media.
+                let path = p.media(&c.media).map_or(PathBuf::new(), |m| m.path.clone());
+                (t.id.clone(), c.clone(), path)
             })
         })
         .collect()
@@ -262,7 +260,10 @@ fn reads_editor_style_files() {
         (60, 24, 10, false)
     );
     assert_eq!(b.audio, None);
-    assert_eq!(v1.len(), 2, "the title has no media file");
+    // The title: a generator clip, without media.
+    assert_eq!(v1.len(), 3);
+    assert_eq!((v1[2].start, v1[2].duration), (84, 24));
+    assert!(v1[2].generator.is_some());
     // The music, alone on its audio track, gets an audio track (A1).
     let music: Vec<&ImportedClip> = t.clips.iter().filter(|c| c.track == "A1").collect();
     assert_eq!(
@@ -280,7 +281,7 @@ fn reads_editor_style_files() {
         }]
     );
     let w = t.warnings.join("\n");
-    for expected in ["transitions", "GeneratorReference"] {
+    for expected in ["transitions kept", "generators and titles kept"] {
         assert!(w.contains(expected), "{expected:?} in {w}");
     }
     assert!(!w.contains("overlapped"), "nothing else was left out: {w}");
@@ -302,8 +303,10 @@ fn reads_editor_style_files() {
         vec![
             crate::test_support::row("c1", 0, 48, 48),
             crate::test_support::row("c3", 60, 24, 10),
+            crate::test_support::row("c4", 84, 24, 0),
         ]
     );
+    assert!(p.clip("c4").unwrap().is_generator(), "the title");
     assert_eq!(
         f.track("A1"),
         vec![crate::test_support::row("c2", 54, 30, 0)]
@@ -1678,4 +1681,210 @@ fn transitions_are_carried() {
             sides("Fade Out", 10.0, 0.0, "3.mp4", "gap"),
         ]
     );
+}
+
+/// A generator clip as an editor writes one, `frames` long.
+fn otio_generator(name: &str, kind: &str, frames: f64) -> Value {
+    let t = |v: f64| json!({"OTIO_SCHEMA": "RationalTime.1", "rate": 25.0, "value": v});
+    json!({"OTIO_SCHEMA": "Clip.2", "name": name,
+        "source_range": {"OTIO_SCHEMA": "TimeRange.1", "start_time": t(0.0), "duration": t(frames)},
+        "media_references": {"DEFAULT_MEDIA": {"OTIO_SCHEMA": "GeneratorReference.1", "name": name,
+            "generator_kind": kind, "available_range": null, "available_image_bounds": null,
+            "parameters": {"Resolve_OTIO": [{"Effect Name": name, "Enabled": true, "Name": "Generator",
+                "Parameters": [{"Parameter ID": "color", "Parameter Value": "#000000", "Variant Type": "Color"}]}]},
+            "metadata": {"Resolve_OTIO": {"Generator Type": kind}}}},
+        "active_media_reference_key": "DEFAULT_MEDIA", "effects": [], "markers": [], "enabled": true,
+        "metadata": {"Resolve_OTIO": {}}})
+}
+
+/// The generator clips written on OTIO track `track`: (where, length,
+/// name, reference).
+fn written_generators(doc: &Value, track: &str) -> Vec<(i64, i64, String, Value)> {
+    let mut at = 0;
+    let mut out = Vec::new();
+    for item in otio_track(doc, track)["children"].as_array().unwrap() {
+        if schema(item).starts_with("Transition") {
+            continue;
+        }
+        let len = item["source_range"]["duration"]["value"].as_f64().unwrap() as i64;
+        let reference = media_reference_of(item);
+        if schema(reference).starts_with("GeneratorReference") {
+            let name = item["name"].as_str().unwrap().to_string();
+            out.push((at, len, name, reference.clone()));
+        }
+        at += len;
+    }
+    out
+}
+
+#[test]
+fn generators_are_carried() {
+    // As an editor writes them: a clip 0..100, a solid color 100..150 and a
+    // title 150..175 after it, an empty title, and a solid color over the
+    // clip on a second track (60..80).
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.append("m1", 0, 100);
+    let mut doc = export(f.editor.project(), "gen", None, Locations::Absolute).unwrap();
+    let solid = otio_generator("Solid Color", "Solid Color", 50.0);
+    let title = otio_generator("Text", "Rich", 25.0);
+    let mut empty = otio_generator("Text+", "", 25.0);
+    empty["media_references"]["DEFAULT_MEDIA"] =
+        json!({"OTIO_SCHEMA": "MissingReference.1", "name": "", "metadata": {}});
+    let tracks = doc["tracks"]["children"].as_array_mut().unwrap();
+    let v1 = tracks[0]["children"].as_array_mut().unwrap();
+    v1.extend([solid.clone(), title.clone(), empty]);
+    let mut v2 = tracks[0].clone();
+    v2["name"] = json!("Video 2");
+    v2["metadata"] = json!({});
+    v2["children"] = json!([
+        gap(60, 25.0),
+        otio_generator("Solid Color", "Solid Color", 20.0)
+    ]);
+    tracks.insert(1, v2);
+
+    let mut g = Fixture::new(&[(10.0, true)]);
+    let r = g.ok(req("timeline.import", json!({ "otio": doc })));
+    assert_eq!(
+        r.result["warnings"],
+        json!([
+            "clip \"Text+\" has no media file (MissingReference.1); left as a gap",
+            "generators and titles kept as blocks but played as gaps: Solid Color, Text"
+        ])
+    );
+    let p = g.editor.project().clone();
+    assert!(crate::validate::violations(&p).is_empty());
+    let shape = |p: &Project, track: &str| -> Vec<(i64, i64, String, Option<Value>)> {
+        p.track(track)
+            .unwrap()
+            .clips
+            .iter()
+            .map(|c| {
+                let reference = c.generator.as_ref().map(|g| g.reference.clone());
+                (c.start, c.end(), c.media.clone(), reference)
+            })
+            .collect()
+    };
+    let reference = |v: &Value| Some(v["media_references"]["DEFAULT_MEDIA"].clone());
+    assert_eq!(
+        shape(&p, "V1"),
+        vec![
+            (0, 100, "m1".to_string(), None),
+            (100, 150, String::new(), reference(&solid)),
+            (150, 175, String::new(), reference(&title)),
+        ]
+    );
+    assert_eq!(shape(&p, "V2").len(), 1);
+    // By kind in the timeline.
+    let r = g.ok(req("timeline.get", json!({})));
+    let kinds: Vec<&Value> = r.result["tracks"][0]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|i| i.get("generator"))
+        .collect();
+    assert_eq!(kinds, [&json!("Solid Color"), &json!("Rich")]);
+    // They play as gaps: the clip under the solid color shows through.
+    let plan = crate::render::flatten(&p, 0, 175).unwrap();
+    let pieces: Vec<(bool, i64)> = plan
+        .video
+        .iter()
+        .map(|v| match v {
+            crate::render::VideoPiece::Source { frames, .. } => (true, *frames),
+            crate::render::VideoPiece::Black { frames } => (false, *frames),
+        })
+        .collect();
+    assert_eq!(pieces, [(true, 100), (false, 75)]);
+    // Written back as they came.
+    let out = export(&p, "gen", None, Locations::Absolute).unwrap();
+    let solid_ref = reference(&solid).unwrap();
+    let title_ref = reference(&title).unwrap();
+    assert_eq!(
+        written_generators(&out, "Video 1"),
+        vec![
+            (100, 50, "Solid Color".to_string(), solid_ref.clone()),
+            (150, 25, "Text".to_string(), title_ref.clone()),
+        ]
+    );
+    assert_eq!(written_generators(&out, "Video 2")[0].0, 60);
+    assert!(
+        crate::otio::used_media(&p, None) == ["m1"],
+        "no media of their own"
+    );
+
+    // Any length: a trim past where it ended, extending to the media's end
+    // leaving it as it is, a split into two, a copy pasted after it (at
+    // Track 1's end, with Ripple on).
+    let title_id = p.track("V1").unwrap().clips[2].id.clone();
+    let solid_id = p.track("V1").unwrap().clips[1].id.clone();
+    g.ok(req(
+        "edit.trim",
+        json!({"clip": title_id, "edge": "tail", "by": 500}),
+    ));
+    g.ok(req(
+        "edit.change_duration",
+        json!({"clips": [title_id.clone()], "duration": "end"}),
+    ));
+    g.ok(req("edit.split", json!({"at": 120, "clips": [solid_id]})));
+    let copied = g.ok(req("edit.copy", json!({"clips": [title_id]})));
+    g.ok(req(
+        "edit.paste",
+        json!({"clips": copied.result["clips"], "at": 2000}),
+    ));
+    let p = g.editor.project().clone();
+    assert!(crate::validate::violations(&p).is_empty());
+    let v1: Vec<(i64, i64, bool)> = p
+        .track("V1")
+        .unwrap()
+        .clips
+        .iter()
+        .map(|c| (c.start, c.end(), c.is_generator()))
+        .collect();
+    assert_eq!(
+        v1,
+        [
+            (0, 100, false),
+            (100, 120, true),
+            (120, 150, true),
+            (150, 675, true),
+            (675, 1200, true)
+        ]
+    );
+    let out = export(&p, "gen", None, Locations::Absolute).unwrap();
+    let written = written_generators(&out, "Video 1");
+    assert_eq!(
+        written
+            .iter()
+            .map(|(at, len, _, r)| (*at, *len, r == &title_ref))
+            .collect::<Vec<_>>(),
+        [
+            (100, 20, false),
+            (120, 30, false),
+            (150, 525, true),
+            (675, 525, true)
+        ]
+    );
+    // Nothing to measure in one.
+    let e = g.err(req(
+        "analyze.silence",
+        json!({"clips": [p.track("V1").unwrap().clips[1].id]}),
+    ));
+    assert!(
+        e.message.contains("is a generator from another editor"),
+        "{e}"
+    );
+}
+
+#[test]
+fn numbers_read_exactly() {
+    // What another editor wrote is written back as read: each number the
+    // nearest double to the file's (serde_json's float_roundtrip), as the
+    // standard library reads it. These are an editor's, 17 digits long.
+    for text in [
+        "0.037037037037037038",
+        "0.052083333333333336",
+        "-16.999998092651367",
+    ] {
+        let v: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(v.as_f64(), text.parse::<f64>().ok(), "{text}");
+    }
 }
