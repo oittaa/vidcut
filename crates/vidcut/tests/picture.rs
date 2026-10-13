@@ -2,7 +2,7 @@
 //! each kind of picture the player hands out (8-bit planar, P010, NV12,
 //! turned every way, pillarboxed, SD and HD colors, full range, PQ and HLG)
 //! drawn on the GPU shows the barcode `frame render` shows, and its pixels
-//! are within a level or so of `Picture::to_rgba`, the export's own
+//! are within a level of `Picture::to_rgba`, the export's own
 //! filters. Pictures NVDEC, VA-API and Direct3D 11 decoded show from GPU
 //! memory as they do copied down. Runs on any adapter, lavapipe too; skips
 //! without one, and each GPU's checks without that GPU.
@@ -268,11 +268,12 @@ fn the_shader_draws_what_the_export_renders() {
         );
         assert_eq!(barcode(&ours.rgba, w, h), want, "frame {t}'s barcode");
         // The colors: within rounding of the export's where the picture is
-        // flat (lavapipe: SDR exact, PQ and HLG a level at most). At edges
-        // the filters differ: at its own size the export repeats each
-        // chroma sample, the shader interpolates between them.
+        // flat, no sample more than a level off (SDR exact on NVIDIA's,
+        // Intel's and lavapipe, PQ and HLG a level at most). At edges the
+        // filters differ: at its own size the export repeats each chroma
+        // sample, the shader interpolates between them.
         assert!(
-            flat < 1.0 && flat_max <= 2,
+            flat < 1.0 && flat_max <= 1,
             "frame {t}: {flat:.2}, {flat_max}"
         );
         assert!(mean < 2.0, "frame {t}: {mean:.2} levels apart on average");
@@ -455,8 +456,8 @@ fn pictures_in_gpu_memory_draw_as_copied_down() {
 /// Pictures VA-API decoded, kept in GPU memory (the decoder's surfaces)
 /// and shown from there (imported as DMA-BUFs, taken over from VA-API):
 /// the same pixels as the same picture copied down and uploaded, NV12 and
-/// P010, at a size whose rows and chroma aren't round; interlaced ones come
-/// down for the CPU's deinterlacer. Needs VA-API, and an adapter that
+/// P010, at a size whose rows and chroma aren't round, odd sides too;
+/// interlaced ones come down for the CPU's deinterlacer. Needs VA-API, and an adapter that
 /// imports DMA-BUFs.
 #[cfg(target_os = "linux")]
 #[test]
@@ -508,8 +509,11 @@ fn vaapi_pictures_draw_as_copied_down() {
             0,
             20,
         ),
+        // Odd sides, in colors: the surface rounded up, its chroma read
+        // where the copy's is.
         piece(
-            FixtureSpec::new(VideoCodec::H264, Container::Mp4, 330, 186, (30, 1), 30),
+            FixtureSpec::new(VideoCodec::Vp9, Container::Webm, 331, 187, (30, 1), 30)
+                .picture(Content::Colors),
             0,
             20,
         ),
@@ -562,7 +566,7 @@ fn vaapi_pictures_draw_as_copied_down() {
 /// (each texture imported by wgpu's Vulkan device on the same adapter, its
 /// planes drawn from views of it): the same pixels as the same picture copied
 /// down and uploaded, NV12 and P010, at a size whose rows and chroma aren't
-/// round. Needs Direct3D 11 decoding, and a Vulkan adapter on the same GPU
+/// round, odd sides too. Needs Direct3D 11 decoding, and a Vulkan adapter on the same GPU
 /// that imports its textures (Windows).
 #[cfg(windows)]
 #[test]
@@ -594,8 +598,11 @@ fn d3d11_pictures_draw_as_copied_down() {
             0,
             20,
         ),
+        // Odd sides, in colors: the texture rounded up, its chroma read
+        // where the copy's is.
         piece(
-            FixtureSpec::new(VideoCodec::Vp9, Container::Webm, 330, 186, (30, 1), 30),
+            FixtureSpec::new(VideoCodec::Vp9, Container::Webm, 331, 187, (30, 1), 30)
+                .picture(Content::Colors),
             0,
             20,
         ),

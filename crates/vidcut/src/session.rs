@@ -378,7 +378,8 @@ pub fn export_media(
         }),
     )?;
     // Decoded on the GPU the viewer decodes on, on a stream or device of
-    // its own; on the CPU where that won't open.
+    // its own. Where that won't open, NVENC's pieces still decode on NVDEC
+    // and the rest on the CPU (`preferences::decoding`).
     let decoder = crate::preferences::gpu_decoding()
         .then(crate::preferences::gpu_decoder)
         .flatten()

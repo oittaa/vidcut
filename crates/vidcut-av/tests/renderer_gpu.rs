@@ -126,8 +126,11 @@ fn gpu_decoded_tiles_and_two_up_are_the_cpus() {
                 && decoder.decodes(*codec)
                 && decoder.hardware_decodes(*codec, *bits) != Some(false))
             .then_some(decoder.kind());
+            // On a stream or device of their own, as the GUI's tiles and
+            // two-up take it (`preferences::timeline_decoder`).
+            let own = || decoder.own().unwrap_or_else(|e| panic!("{name}: {e}"));
             // Tiles: frames far apart, in order.
-            let mut reader = FrameReader::decoding_on(decoder.clone());
+            let mut reader = FrameReader::decoding_on(own());
             for (&k, (want_code, want_img)) in jumps.iter().zip(&cpu) {
                 let img = reader.rgba(&piece(&path, k), fps, w, h).unwrap();
                 assert_eq!(code(&img), *want_code, "{name}: tile of frame {k}");
@@ -143,7 +146,7 @@ fn gpu_decoded_tiles_and_two_up_are_the_cpus() {
             }
             // The two-up: back a frame at a time across a keyframe, the
             // pictures the CPU's as the tiles are.
-            let mut r = StillRenderer::default().decoding_on(decoder.clone());
+            let mut r = StillRenderer::default().decoding_on(own());
             for k in (40..=75).rev() {
                 let img = r.rgba(&piece(&path, k), 0, fps, w, h).unwrap();
                 let (want_code, want_img) = want(k);

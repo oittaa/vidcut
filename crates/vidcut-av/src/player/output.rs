@@ -1,8 +1,9 @@
 //! Where a player's sound goes: an audio device whose callback pulls the
 //! mix, and with it the clock pictures follow.
 //!
-//! [`CpalOutput`] is the system's default device (ALSA, which PipeWire and
-//! PulseAudio serve on Linux). [`PacedOutput`] stands in for a device
+//! [`CpalOutput`] is a device of the system's (ALSA on Linux, which PipeWire
+//! and PulseAudio serve; WASAPI on Windows): its default, or one chosen by
+//! its id ([`output_devices`]). [`PacedOutput`] stands in for a device
 //! without one: a thread that pulls in real time, optionally recording what
 //! it pulled and when it would have been heard. [`ManualOutput`] pulls only
 //! when a test says so, so a test sets the clock itself.
@@ -135,7 +136,8 @@ pub fn output_devices() -> Result<Vec<OutputDevice>> {
 /// Names that repeat made distinct: ALSA's outputs of one card share the
 /// card's name, told apart by their description's next line (`Front
 /// output / input`, `Default Audio Device`); those still alike (a mixer's
-/// two outputs named alike) are numbered.
+/// two outputs named alike) are numbered, skipping numbers whose name
+/// another device has.
 fn distinct_names(devices: &mut [OutputDevice], details: &[Option<String>]) {
     let repeats = |devices: &[OutputDevice], name: &str| {
         devices.iter().filter(|d| d.name == name).count() > 1
@@ -149,8 +151,18 @@ fn distinct_names(devices: &mut [OutputDevice], details: &[Option<String>]) {
     for i in 0..devices.len() {
         let name = devices[i].name.clone();
         if repeats(devices, &name) {
-            for (n, d) in devices.iter_mut().filter(|d| d.name == name).enumerate() {
-                d.name = format!("{name} ({})", n + 1);
+            let mut n = 0;
+            for j in 0..devices.len() {
+                if devices[j].name != name {
+                    continue;
+                }
+                devices[j].name = loop {
+                    n += 1;
+                    let numbered = format!("{name} ({n})");
+                    if !devices.iter().any(|d| d.name == numbered) {
+                        break numbered;
+                    }
+                };
             }
         }
     }
@@ -448,11 +460,14 @@ mod tests {
             device("alsa:front:CARD=PCH,DEV=0", "HDA Intel PCH, ALC897 Analog"),
             device("wasapi:a", "Speakers"),
             device("wasapi:b", "Speakers"),
+            // Named as numbering would name the first.
+            device("wasapi:c", "Speakers (1)"),
         ];
         let details = [
             Some("Playback/recording through the PulseAudio sound server".into()),
             Some("Default Audio Device".into()),
             Some("Front output / input".into()),
+            None,
             None,
             None,
         ];
@@ -464,8 +479,9 @@ mod tests {
                 "Default ALSA Output",
                 "HDA Intel PCH, ALC897 Analog (Default Audio Device)",
                 "HDA Intel PCH, ALC897 Analog (Front output / input)",
-                "Speakers (1)",
                 "Speakers (2)",
+                "Speakers (3)",
+                "Speakers (1)",
             ]
         );
     }

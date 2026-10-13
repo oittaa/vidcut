@@ -184,10 +184,12 @@ fn gpu_pictures_are_the_cpus() {
             let d = decoder(t);
             let listed = gpu_decoder.hardware_decodes(codec, bits);
             eprintln!("{name}: {what} decodes on {d:?} (the driver lists it: {listed:?})");
-            match (kind, listed) {
-                (Kind::Nvdec, _) | (_, Some(true)) => assert_eq!(d, on_gpu, "{name}: {what}"),
-                (_, Some(false)) => assert_eq!(d, Some(Decoder::Cpu), "{name}: {what}"),
-                (_, None) => assert!(d == on_gpu || d == Some(Decoder::Cpu), "{name}: {what}"),
+            // NVDEC's capabilities answer for every codec.
+            assert!(kind != Kind::Nvdec || listed.is_some(), "{name}: {what}");
+            match listed {
+                Some(true) => assert_eq!(d, on_gpu, "{name}: {what}"),
+                Some(false) => assert_eq!(d, Some(Decoder::Cpu), "{name}: {what}"),
+                None => assert!(d == on_gpu || d == Some(Decoder::Cpu), "{name}: {what}"),
             }
         }
         // P010 from the GPU and the CPU alike; NV12 from the GPU only.

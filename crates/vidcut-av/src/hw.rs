@@ -322,12 +322,23 @@ impl GpuDecoder {
 
     /// Whether its hardware decodes `codec` in `bits` (8 or 10), as its
     /// driver lists the profiles it decodes (VA-API's; Direct3D 11's video
-    /// device's): H.264 High, HEVC Main or Main 10, VP9 profile 0 or 2, AV1
-    /// Main. `None` where the driver isn't asked (NVDEC) or doesn't say.
-    /// What [`decodes`](Self::decodes) knows of streams decoded wrong is
-    /// apart from this.
+    /// device's; NVDEC's capabilities in 4:2:0): H.264 High, HEVC Main or
+    /// Main 10, VP9 profile 0 or 2, AV1 Main. `None` where the driver
+    /// doesn't say. What [`decodes`](Self::decodes) knows of streams
+    /// decoded wrong is apart from this.
     pub fn hardware_decodes(&self, codec: ffmpeg::codec::Id, bits: u8) -> Option<bool> {
         use ffmpeg::codec::Id;
+        if let Some(cuda) = &self.cuda {
+            // `cuviddec.h`'s `cudaVideoCodec`.
+            let nvdec = match codec {
+                Id::H264 => 4,
+                Id::HEVC => 8,
+                Id::VP9 => 10,
+                Id::AV1 => 11,
+                _ => return None,
+            };
+            return cuda.nvdec_decodes(nvdec, bits).ok();
+        }
         // Only VA-API's and Direct3D 11's drivers are asked.
         #[cfg_attr(not(any(target_os = "linux", windows)), allow(unused_variables))]
         let profile = match (codec, bits) {
@@ -340,7 +351,6 @@ impl GpuDecoder {
             _ => return None,
         };
         match self.kind {
-            Kind::Nvdec => None,
             // SAFETY: a VA-API device FFmpeg made.
             #[cfg(target_os = "linux")]
             Kind::Vaapi => unsafe { va_lists(&self.device, profile) },
