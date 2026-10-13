@@ -30,7 +30,7 @@
 
 ## 3. Decoding: on the GPU when there is one
 
-- **The GPU decodes every stream it can**, while GPU acceleration is on (the preferences' `gpu.acceleration`, the default): H.264, HEVC, AV1 and VP9 where the GPU has them (`VideoReader::open_gpu_or_cpu`). The decoder is the best the computer has (`vidcut_av::hw::GpuDecoder::best`): NVDEC on an NVIDIA GPU; else VA-API on Linux (Mesa's driver for AMD, Intel's own) on the first render node that isn't NVIDIA's, or Direct3D 11's video decoding on Windows on the first adapter that isn't. FFmpeg's own decoders do it through its hardware contexts, so every one gives the same frames. Streams the GPU doesn't decode (ProRes, VP8, a profile the GPU lacks) decode on the CPU, as do stills and image sequences. Measured with `decode_speed` on this machine (16 threads, RTX 4080 SUPER):
+- **The GPU decodes every stream it can**, while GPU acceleration is on (the preferences' `gpu.acceleration`, the default): H.264, HEVC, AV1 and VP9 where the GPU has them (`VideoReader::open_gpu_or_cpu`). The decoder is the best the computer has (`vidcut_av::hw::GpuDecoder::best`): NVDEC on an NVIDIA GPU; else VA-API on Linux (Mesa's driver for AMD, Intel's own) on the first render node that isn't NVIDIA's, or Direct3D 11's video decoding on Windows on the first adapter that isn't. FFmpeg's own decoders do it through its hardware contexts, so every one gives the same frames. Streams the GPU doesn't decode (ProRes, VP8, a profile the GPU lacks) decode on the CPU, as do stills and image sequences, and H.264 where AMD's Direct3D 11 decoder would (`GpuDecoder::decodes`, gotchas.md). Measured with `decode_speed` on this machine (16 threads, RTX 4080 SUPER):
 
 | Stream | CPU | NVDEC |
 |---|---|---|

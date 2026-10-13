@@ -633,6 +633,13 @@ impl VideoReader {
         }
         let codec_id = stream.parameters().id();
         let decoder = match device {
+            Some(d) if !d.decodes(codec_id) => {
+                return Err(Error::Invalid(format!(
+                    "{}: {} doesn't decode {codec_id:?} right",
+                    path.display(),
+                    d.kind().name()
+                )));
+            }
             // FFmpeg's default decoder may decode on the CPU only (libdav1d
             // for AV1): one that can use the GPU, when there is one.
             Some(d) => match gpu_decoder(codec_id, d.kind()) {
