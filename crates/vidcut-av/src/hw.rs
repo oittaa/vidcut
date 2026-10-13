@@ -80,6 +80,12 @@ impl Device {
     /// FFmpeg's device of `kind` on `on`: a render node, an adapter's
     /// index; the default one when empty.
     fn open(kind: Kind, on: &str) -> Result<Self> {
+        Self::of_type(kind.device_type(), on)
+    }
+
+    /// FFmpeg's device of type `ty` on `on`, as [`open`](Self::open): for
+    /// an encoder, which runs on one too.
+    pub(crate) fn of_type(ty: ffi::AVHWDeviceType, on: &str) -> Result<Self> {
         crate::init();
         let name = std::ffi::CString::new(on)
             .map_err(|_| Error::Invalid(format!("a device name with a NUL: {on:?}")))?;
@@ -88,7 +94,7 @@ impl Device {
         let ret = unsafe {
             ffi::av_hwdevice_ctx_create(
                 &mut device,
-                kind.device_type(),
+                ty,
                 if on.is_empty() {
                     ptr::null()
                 } else {
@@ -104,8 +110,17 @@ impl Device {
             } else {
                 on
             };
+            // SAFETY: FFmpeg's static name of a type, or null.
+            let what = unsafe {
+                let n = ffi::av_hwdevice_get_type_name(ty);
+                if n.is_null() {
+                    "a GPU device".into()
+                } else {
+                    std::ffi::CStr::from_ptr(n).to_string_lossy()
+                }
+            };
             return Err(Error::Ffmpeg {
-                context: format!("opening {} on {on}", kind.name()),
+                context: format!("opening {what} on {on}"),
                 source: ffmpeg::Error::from(ret),
             });
         }
@@ -232,7 +247,7 @@ impl GpuDecoder {
 }
 
 #[cfg(windows)]
-mod windows {
+pub(crate) mod windows {
     use std::ffi::c_void;
     use std::ptr;
 
@@ -241,8 +256,10 @@ mod windows {
     use super::{Device, Kind};
     use crate::ffmpeg::ffi;
 
-    /// NVIDIA's PCI vendor id.
-    pub(super) const NVIDIA: u32 = 0x10de;
+    /// PCI vendor ids.
+    pub(crate) const NVIDIA: u32 = 0x10de;
+    pub(crate) const AMD: u32 = 0x1002;
+    pub(crate) const INTEL: u32 = 0x8086;
 
     /// Microsoft's: its Basic Render Driver, which draws on the CPU and
     /// decodes nothing.
@@ -250,7 +267,7 @@ mod windows {
 
     /// The adapters with a GPU behind them: their index, what Direct3D 11
     /// is opened on, and their PCI vendor.
-    pub(super) fn adapters() -> Vec<(u32, u32)> {
+    pub(crate) fn adapters() -> Vec<(u32, u32)> {
         let mut adapters = Vec::new();
         for i in 0..8 {
             let Ok(device) = Device::open(Kind::D3d11va, &i.to_string()) else {

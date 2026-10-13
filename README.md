@@ -14,7 +14,7 @@ A simple, fully scriptable video cutting tool for Linux and Windows. Behavior fo
   - several tracks: B-roll that follows the main story on Track 1, music on audio tracks
   - a mixer with faders, mute, solo and meters
   - snapping, markers, undo
-- **Export:** Quick Export and an Export dialog (deviation X3), including GPU encoding and background jobs. Dynamic range, bit depth and HDR metadata follow the footage (spec D44, D46). A loudness target is [docs/decisions/agents.md](docs/decisions/agents.md) §5.
+- **Export:** Quick Export and an Export dialog (deviation X3), including GPU encoding (NVIDIA, AMD, Intel) and background jobs. Dynamic range, bit depth and HDR metadata follow the footage (spec D44, D46). A loudness target is [docs/decisions/agents.md](docs/decisions/agents.md) §5.
 - **Automatic tools:** Ripple Delete Silence, Detect Scene Cuts and the Boring Detector (spec D29–D31).
 - **Interchange:** OpenTimelineIO, `.otio` and `.otioz` (deviation X9).
 - **Everything scriptable.** Every action in the GUI is also a CLI command and a JSON-RPC call on the running app, so scripts and AI agents can edit with you. `vidcut mcp` offers it all to AI agents over the Model Context Protocol.

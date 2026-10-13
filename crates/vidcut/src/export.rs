@@ -822,13 +822,14 @@ pub fn describe(prepared: &Prepared, available: &Availability) -> Value {
 
 /// Encoder availability, from the cache when it matches this system.
 pub fn availability(refresh: bool) -> Availability {
-    // FFmpeg, the system and the GPUs' drivers: a change of any of them
-    // tests the encoders again.
+    // FFmpeg, the system, the GPUs' drivers and what is tested: a change of
+    // any of them tests the encoders again.
     let key = format!(
-        "{:?}|{}|{}",
+        "{:?}|{}|{}|{}",
         vidcut_av::library_versions(),
         crate::system::version(),
-        Value::from(crate::system::gpus())
+        Value::from(crate::system::gpus()),
+        vidcut_av::export::encode::DETECTS
     );
     let path = cache_dir().join("encoders.json");
     if !refresh

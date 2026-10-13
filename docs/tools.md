@@ -6,7 +6,7 @@
 cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 60 600
 ```
 
-**GPU encoders:** `cargo run -p vidcut-av --example encoders` test-encodes every NVENC/VAAPI option, uncached.
+**GPU encoders:** `cargo run -p vidcut-av --example encoders` test-encodes every GPU encoder (NVENC, VAAPI, AMF, QSV) on every GPU it runs on, uncached.
 
 **Other FFmpeg versions** (`scripts/ffmpeg-check.sh`, needs Docker): builds an image per target, then runs `cargo build --workspace` and `scripts/check.sh full` in it against the checkout (mounted read-only), and prints a summary.
 - Targets: `lts` (Ubuntu 26.04's FFmpeg 8.0), `release` (the newest FFmpeg release, built from the official tarball on Ubuntu 26.04) and `master` (FFmpeg's git master, the same way; an early warning, allowed to fail). Without targets: `lts release`.
