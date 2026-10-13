@@ -113,6 +113,7 @@ vidcut history undo                         # works across separate runs
 - `vidcut export start out.mp4 --set audio.loudness=-14` normalizes the mix to −14 LUFS (one gain, true peak ≤ −1 dBTP); the result reports the gain.
 - `vidcut export start out.mp4 --set video.codec=hevc --set video.hdr=pq` (or `hlg`) exports HDR in 10 bits (HEVC, AV1 or VP9) whatever the footage; `video.hdr=sdr` tone-maps HDR sources to SDR. `vidcut media get` reports each clip's `hdr`, `rotation` and interlaced `fields`, and its HDR metadata: `mastering`, `light`, `hdr10plus`, `dolby_vision`.
 - `vidcut edit slide c3 --by 5f` moves a clip keeping its media; its neighbors give and take.
+- `vidcut edit change-speed c3 --speed 0.5` plays a clip at half speed (`--speed=-1` backward, `0` a freeze frame at the playhead or `--at`); `--ripple false` keeps its length instead of its source (spec D48).
 - Measuring decodes a file once; the results are cached (`~/.cache/vidcut/analysis/`), so trying other settings is quick.
 
 **Timeline interchange (OpenTimelineIO, deviation X9).** What the file contains is that deviation.
