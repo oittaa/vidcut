@@ -87,6 +87,7 @@ pub fn plan(clips: &[Clip], start: i64) -> RenderPlan {
                     image: None,
                 });
                 lane.push(AudioPiece::Source {
+                    speed: 1.0,
                     media: s.media.clone(),
                     path: s.path.clone(),
                     stream: 0,

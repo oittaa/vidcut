@@ -45,7 +45,6 @@ mod plan;
 mod ring;
 mod scrub;
 mod store;
-mod stretch;
 mod video;
 
 use std::sync::atomic::AtomicBool;

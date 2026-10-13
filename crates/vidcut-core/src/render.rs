@@ -93,6 +93,10 @@ pub enum AudioPiece {
         source_sample: i64,
         samples: i64,
         gain_db: f64,
+        /// Source samples per sample heard (decision D48), the pitch kept;
+        /// below 0 the source plays backward from `source_sample`.
+        #[serde(default = "normal_speed", skip_serializing_if = "is_normal_speed")]
+        speed: f64,
     },
     Silence {
         samples: i64,
@@ -105,6 +109,14 @@ impl VideoPiece {
             Self::Source { frames, .. } | Self::Black { frames } => *frames,
         }
     }
+}
+
+fn normal_speed() -> f64 {
+    1.0
+}
+
+fn is_normal_speed(speed: &f64) -> bool {
+    *speed == 1.0
 }
 
 impl AudioPiece {
@@ -224,6 +236,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
                 source_sample,
                 samples,
                 gain_db,
+                speed,
                 ..
             }),
             AudioPiece::Source {
@@ -232,9 +245,16 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
                 source_sample: s2,
                 samples: n2,
                 gain_db: g2,
+                speed: sp2,
                 ..
             },
-        ) if media == m2 && stream == st2 && gain_db == g2 && *source_sample + *samples == *s2 => {
+        ) if media == m2
+            && stream == st2
+            && gain_db == g2
+            && *speed == 1.0
+            && *sp2 == 1.0
+            && *source_sample + *samples == *s2 =>
+        {
             *samples += n2
         }
         _ => out.push(piece),
@@ -421,21 +441,32 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
     Ok((plan, lanes))
 }
 
-/// Audio of clip `c` from timeline frame `x`, `samples` long.
+/// Audio of clip `c` from timeline frame `x`, `samples` long. At its speed
+/// (decision D48) the sound of the frames it shows, held frames silent;
+/// backward from the end of the frame shown.
 fn source_audio(p: &Project, c: &Clip, x: i64, samples: i64) -> Result<AudioPiece> {
     let audio = c.audio.as_ref().expect("has audio");
     let (path, origin) = p.media_origin(&c.media)?;
+    let (fps, rate) = (p.settings.fps, p.settings.sample_rate);
+    let speed = c.speed();
+    let source_sample = if speed == 1.0 {
+        fps.frame_to_sample(c.source_at(x), rate)
+    } else if speed == 0.0 {
+        return Ok(AudioPiece::Silence { samples });
+    } else {
+        let first = c.source_in + i64::from(speed < 0.0);
+        let since = fps.frame_to_sample(x, rate) - fps.frame_to_sample(c.start, rate);
+        fps.frame_to_sample(first, rate) + (since as f64 * speed).round() as i64
+    };
     Ok(AudioPiece::Source {
         media: c.media.clone(),
         path,
         stream: audio.stream,
         origin,
-        source_sample: p
-            .settings
-            .fps
-            .frame_to_sample(c.source_at(x), p.settings.sample_rate),
+        source_sample,
         samples,
         gain_db: audio.gain_db,
+        speed,
     })
 }
 
@@ -548,6 +579,7 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
             push_audio(
                 &mut lane,
                 AudioPiece::Source {
+                    speed: 1.0,
                     media: id.clone(),
                     path,
                     stream: 0,
@@ -737,6 +769,74 @@ mod tests {
         let plan = flatten(f.editor.project(), 0, 100).unwrap();
         assert_eq!(plan.video.len(), 1, "a split clip renders as one read");
         assert_eq!(plan.audio[0].len(), 1);
+    }
+
+    #[test]
+    fn clips_at_other_speeds_carry_their_pace_and_speed() {
+        // Decision D48: c1 twice as fast, c2 backward from source frame
+        // 100, c3 held.
+        let mut f = fixture();
+        f.append("m1", 0, 100);
+        f.append("m1", 100, 150);
+        f.append("m2", 0, 50);
+        let mut p = f.editor.project().clone();
+        let speed = |x: f64| {
+            Some(crate::model::Speed {
+                effect: json!({"OTIO_SCHEMA": "LinearTimeWarp.1", "time_scalar": x}),
+                media_in: None,
+            })
+        };
+        let track = p
+            .tracks
+            .iter_mut()
+            .find(|t| t.clips.iter().any(|c| c.id == "c1"))
+            .unwrap();
+        for (c, x) in track.clips.iter_mut().zip([2.0, -1.0, 0.0]) {
+            c.speed = speed(x);
+        }
+        let per_frame = p.settings.fps.frame_to_sample(1, p.settings.sample_rate);
+        // From frame 10 on: c1's piece starts at its source frame 20, ten
+        // frames into its pace.
+        let plan = flatten(&p, 10, 200).unwrap();
+        let video: Vec<(i64, i64, Pace)> = plan
+            .video
+            .iter()
+            .map(|v| match v {
+                VideoPiece::Source {
+                    source_frame,
+                    frames,
+                    pace,
+                    ..
+                } => (*source_frame, *frames, *pace),
+                VideoPiece::Black { .. } => panic!("no black"),
+            })
+            .collect();
+        assert_eq!(
+            video,
+            vec![
+                (20, 90, Pace::of(2.0, 10)),
+                (100, 50, Pace::of(-1.0, 0)),
+                (0, 50, Pace::of(0.0, 0)),
+            ]
+        );
+        assert_eq!(video[1].2.offset(49), -49);
+        // The sound: c1's from source frame 20 at twice the speed; c2's
+        // back from the end of frame 100; c3's silence.
+        let audio: Vec<(i64, f64)> = plan.audio[0]
+            .iter()
+            .map(|a| match a {
+                AudioPiece::Source {
+                    source_sample,
+                    speed,
+                    ..
+                } => (*source_sample, *speed),
+                AudioPiece::Silence { .. } => (-1, 0.0),
+            })
+            .collect();
+        assert_eq!(
+            audio,
+            vec![(20 * per_frame, 2.0), (101 * per_frame, -1.0), (-1, 0.0)]
+        );
     }
 
     #[test]

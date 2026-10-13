@@ -1,10 +1,7 @@
 # Speed changes
 
-**When:** later. Until then they are carried and locked (deviation X9). Out of scope today (spec §1), so this needs a deviation.
+**When:** next. Clips at a speed play (spec D48); edits that would need speed math are refused (deviation X9).
 
-Playing and exporting clips at a constant speed (2, ½, −1 for reverse, 0 for a freeze), and setting it (Resolve's Cut page has Change Clip Speed):
-
-- **Editing:** every edit at a clip's edge converts timeline frames to media frames through its speed: trim, roll, ripple, slip, slide, split, J/L rolls. Splitting a clip at 200% at its 25th frame splits its media at frame 50.
-- **Picture:** output frame `t` shows media frame `in + (t − start) × speed`, by the sampling rule (export.md §2): every other frame at 200%, each frame twice at 50% (Resolve's frame blending and optical flow stay out). Reverse decodes backward, as the viewer already does for J; exports would too. The same in the preview, exports, frame renders, storyboards and proxies.
-- **Sound:** pitch kept, as Resolve's pitch correction does by default: the player's time-stretch (`player/stretch.rs`) and reversed sound, in the export's mix too.
-- **Interchange:** OTIO's `LinearTimeWarp` both ways, replacing the carrying.
+- **Editing:** every edit at a clip's edge converts timeline frames to media frames through its speed: trim, roll, ripple, slip, slide, split, J/L rolls. Splitting a clip at 200% at its 25th frame splits its media at frame 50. Media limits count through it too.
+- **Setting:** Change Clip Speed (Resolve's Cut page has it) in the GUI, CLI, IPC and MCP, and speed changes into scope (spec §1).
+- **Interchange:** OTIO's `LinearTimeWarp` both ways as the clip's own speed, replacing the carrying.

@@ -2079,7 +2079,10 @@ fn speed_changes_are_carried_and_locked() {
     let r = g.ok(req("timeline.import", json!({ "otio": doc })));
     assert_eq!(
         r.result["warnings"],
-        json!(["speed changes kept on their clips but played at normal speed: 200%"])
+        json!([
+            "speed changes kept on their clips, which play at them but can't be trimmed, \
+             split, slipped or rolled: 200%"
+        ])
     );
     let b = g.editor.project().clip("c2").unwrap().clone();
     let speed = b.speed.clone().unwrap();

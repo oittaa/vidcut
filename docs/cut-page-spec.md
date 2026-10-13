@@ -23,7 +23,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 **Out of scope (out):**
 - effects, transitions, titles, generators, keyframes
 - color, Fusion, Smart Reframe, Close Up
-- speed changes, Sync Bin, Multi Source, Source Overwrite, Live Overwrite
+- setting speed changes (a clip with one from an OTIO file plays at it, D48), Sync Bin, Multi Source, Source Overwrite, Live Overwrite
 - Replay, voiceover, subtitles
 - AI tools: scene detection, transcription, voice/dialogue tools
 - Mixer FX, Paste Attributes, proxies, guides
@@ -539,3 +539,6 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - **Shown** with `;` before the frames wherever timecode is: the viewer, the ruler, storyboards, the `*_tc` of query results, lengths and source positions too. A media file's own timecode shows as it counts.
   - **Typed:** `;` says drop-frame anywhere (`01:00:00;00`, `01;00;00;00`); in a drop-frame project `:` counts so too. A label drop-frame skips (`00:01:00;00`) is refused.
   - **Set by itself:** the first video of a project whose format it sets (D37), and an OTIO import into an empty timeline, turn it on when the media's own timecode counts drop-frame (written with `;`). OTIO doesn't say whether a timeline counts so: only frame numbers travel.
+- **D48. Clips at another speed** (§1; deviation X9). A clip's constant speed from an OTIO file plays wherever its pictures and sound go: the viewer, exports, frame renders, storyboards and analyses.
+  - **Pictures:** frame `k` of the clip shows source frame `in + ⌊k × speed⌋` by the sampling rule (export.md §2): every other frame at 200%, each twice at 50%, backward from its first frame at −100%, its first frame held at 0 (a freeze). No frame blending or optical flow.
+  - **Sound:** the sound of the frames shown, stretched keeping its pitch; backward reversed, from the end of the first frame shown. A freeze is silent.

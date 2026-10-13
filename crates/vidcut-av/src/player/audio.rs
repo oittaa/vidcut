@@ -16,11 +16,11 @@ use std::time::Duration;
 use super::clock::Marker;
 use super::plan::Plan;
 use super::scrub::{Waiting, snippet};
-use super::stretch::Stretch;
 use super::{AudioSnap, Mode, Shared};
 use crate::error::Result;
 use crate::export::DECLICK_MS;
 use crate::export::audio::AudioMix;
+use crate::stretch::Stretch;
 
 /// Sound kept queued ahead of the device.
 const AHEAD_SECS: f64 = 0.1;

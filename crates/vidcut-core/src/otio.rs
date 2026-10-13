@@ -54,8 +54,8 @@
 //! - Generators and titles (`GeneratorReference`s) become generator clips,
 //!   and nested `Stack`s (compound clips, nested timelines) compound clips:
 //!   blocks that play as gaps, their references and stacks kept.
-//! - Speed changes (time effects) stay on their clips, which play at
-//!   normal speed and refuse edits that would need speed math.
+//! - Speed changes (time effects) stay on their clips, which play at them
+//!   (decision D48) and refuse edits that would need speed math.
 //! - Everything else is left out with a warning: nested tracks (gaps
 //!   instead).
 
@@ -1638,7 +1638,8 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     }
     if !speeds.is_empty() {
         warnings.push(format!(
-            "speed changes kept on their clips but played at normal speed: {}",
+            "speed changes kept on their clips, which play at them but can't be trimmed, \
+             split, slipped or rolled: {}",
             speeds.join(", ")
         ));
     }

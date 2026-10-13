@@ -623,8 +623,8 @@ pub struct Clip {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compound: Option<Compound>,
     /// A speed change another editor made, carried (deviation X9): the clip
-    /// plays at normal speed, and edits that would need speed math (trims,
-    /// splits, slips, rolls) refuse it.
+    /// plays at it (decision D48), and edits that would need speed math
+    /// (trims, splits, slips, rolls) refuse it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed: Option<Speed>,
 }
