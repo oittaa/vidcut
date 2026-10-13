@@ -864,10 +864,12 @@ pub fn needs_gpu_info(settings: &ExportSettings) -> bool {
         .is_some_and(|v| v.encoder != EncoderChoice::Cpu)
 }
 
-/// Runs a prepared export, one output after another.
+/// Runs a prepared export, one output after another, its pieces decoding
+/// on `decoder` where it decodes them (export.md §5).
 pub fn run(
     prepared: &Prepared,
     available: &Availability,
+    decoder: Option<&vidcut_av::hw::GpuDecoder>,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(usize, &Path, Progress),
 ) -> Result<Vec<Report>> {
@@ -877,11 +879,12 @@ pub fn run(
             std::fs::create_dir_all(dir)
                 .map_err(|e| Error::usage(format!("{}: {e}", dir.display())))?;
         }
-        let report = engine::run(
+        let report = engine::run_decoding_on(
             &o.plan,
             &o.settings,
             &o.path,
             available,
+            decoder,
             cancel,
             &mut |pr| progress(i, &o.path, pr),
         )

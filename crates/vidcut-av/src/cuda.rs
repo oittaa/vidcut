@@ -335,24 +335,12 @@ enum Layout {
 const COUNTED: ffi::AVRational = ffi::AVRational { num: 1, den: 1 };
 
 /// The filters from `w`×`h` frames to `width`×`height` NV12 pictures.
-/// `scale_cuda` samples a fixed few pixels around each output pixel, which
-/// aliases when it shrinks a lot (4K to 960 wide): halvings first, each a
-/// bilinear sample between four pixels, so their average, then one bicubic
-/// step to the size.
 fn filters(
     (w, h): (u32, u32),
     (fit_w, fit_h): (u32, u32),
     (width, height, out): (u32, u32, &str),
 ) -> String {
-    let mut steps = Vec::new();
-    let (mut w, mut h) = (w, h);
-    while w >= 2 * fit_w && h >= 2 * fit_h && w >= 4 && h >= 4 {
-        (w, h) = ((w / 2) & !1, (h / 2) & !1);
-        steps.push(format!("scale_cuda=w={w}:h={h}:interp_algo=bilinear"));
-    }
-    steps.push(format!(
-        "scale_cuda=w={fit_w}:h={fit_h}:format={out}:interp_algo=bicubic"
-    ));
+    let mut steps = scaling((w, h), (fit_w, fit_h), &format!(":format={out}"));
     // Centered on black, as the CPU's normalizer pads.
     if (fit_w, fit_h) != (width, height) {
         let (x, y) = centered((fit_w, fit_h), (width, height));
@@ -361,6 +349,28 @@ fn filters(
         ));
     }
     steps.join(",")
+}
+
+/// `scale_cuda` steps from `w`×`h` frames to `fit_w`×`fit_h` (with
+/// `options` for the last). `scale_cuda` samples a fixed few pixels around
+/// each output pixel, which aliases when it shrinks a lot (4K to 960 wide):
+/// halvings first, each a bilinear sample between four pixels, so their
+/// average, then one bicubic step to the size.
+pub(crate) fn scaling(
+    (w, h): (u32, u32),
+    (fit_w, fit_h): (u32, u32),
+    options: &str,
+) -> Vec<String> {
+    let mut steps = Vec::new();
+    let (mut w, mut h) = (w, h);
+    while w >= 2 * fit_w && h >= 2 * fit_h && w >= 4 && h >= 4 {
+        (w, h) = ((w / 2) & !1, (h / 2) & !1);
+        steps.push(format!("scale_cuda=w={w}:h={h}:interp_algo=bilinear"));
+    }
+    steps.push(format!(
+        "scale_cuda=w={fit_w}:h={fit_h}{options}:interp_algo=bicubic"
+    ));
+    steps
 }
 
 /// Where a `fit_w`×`fit_h` picture goes in a `width`×`height` frame:

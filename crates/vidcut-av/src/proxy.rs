@@ -534,7 +534,7 @@ fn encode_into(
     let mut encoding = || -> Result<()> {
         while let Some(src) = reader.next_frame()? {
             let src = if crate::hw::on_gpu(&src) {
-                down(&mut shrinker, &src, rotation, (width, height))?
+                crate::export::video::down(&mut shrinker, &src, rotation, (width, height))?
             } else {
                 src
             };
@@ -551,42 +551,6 @@ fn encode_into(
     };
     encoding().map_err(Failed::Encoding)?;
     writer.finish(reader.path()).map_err(Failed::Encoding)
-}
-
-/// A frame in GPU memory brought down to be scaled on the CPU: VA-API's and
-/// Direct3D 11's scaled on the GPU first to the size the proxy shows it at
-/// (in the frame's own orientation and layout, its pixels square), so a
-/// fraction comes down; NVDEC's whole (`scale_cuda` aliases shrinking
-/// far). The CPU does the rest as for any frame: turning, colors, HDR.
-fn down(
-    shrinker: &mut Option<crate::hw::Shrinker>,
-    src: &frame::Video,
-    rotation: u16,
-    (out_w, out_h): (u32, u32),
-) -> Result<frame::Video> {
-    let (w, h) = (src.width(), src.height());
-    let sar = src.aspect_ratio();
-    let sar = (sar.numerator(), sar.denominator());
-    // As the normalizer fits it, upright; then in the frame's orientation.
-    let (fw, fh) = if rotation % 180 == 90 {
-        let (sw, sh) = crate::export::video::fit(h, w, (sar.1, sar.0), out_w, out_h);
-        (sh, sw)
-    } else {
-        crate::export::video::fit(w, h, sar, out_w, out_h)
-    };
-    // Textures of 4:2:0 frames have even sides.
-    let size = (fw.next_multiple_of(2), fh.next_multiple_of(2));
-    let shrinks = size.0 < w && size.1 < h;
-    if !shrinks || !matches!(src.format(), format::Pixel::VAAPI | format::Pixel::D3D11) {
-        return crate::hw::download(src);
-    }
-    let mut small = crate::hw::Shrinker::down(shrinker, src, size)?;
-    // Unless it came down whole.
-    if (small.width(), small.height()) == size {
-        // SAFETY: a plain field of its own frame.
-        unsafe { (*small.as_mut_ptr()).sample_aspect_ratio = ffi::AVRational { num: 1, den: 1 } };
-    }
-    Ok(small)
 }
 
 /// Decodes on NVDEC, scales on the GPU and hands NVENC the frames there.

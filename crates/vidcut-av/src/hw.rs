@@ -663,8 +663,8 @@ fn run_graph(
     Ok(out)
 }
 
-/// Scales VA-API's and Direct3D 11's frames down on the GPU, so they come
-/// down to memory small, in the frames' own layout (NV12, P010).
+/// Scales frames down on the GPU (VA-API's, Direct3D 11's and CUDA's), so
+/// they come down to memory small, in the frames' own layout (NV12, P010).
 pub(crate) struct Shrinker {
     /// `None`: the GPU won't scale these frames, so they come down whole.
     scaling: Option<Scaling>,
@@ -674,8 +674,8 @@ pub(crate) struct Shrinker {
 }
 
 enum Scaling {
-    /// `scale_vaapi`.
-    Vaapi(ffmpeg::filter::Graph),
+    /// `scale_vaapi`, or `scale_cuda` in steps.
+    Filters(ffmpeg::filter::Graph),
     /// The GPU's video processor.
     #[cfg(windows)]
     D3d11(d3d11::Scaler),
@@ -687,7 +687,12 @@ impl Scaling {
             format::Pixel::VAAPI => {
                 let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VAAPI;
                 let spec = format!("scale_vaapi=w={w}:h={h}");
-                Ok(Self::Vaapi(gpu_graph(f, frames, pixel, &spec)?))
+                Ok(Self::Filters(gpu_graph(f, frames, pixel, &spec)?))
+            }
+            format::Pixel::CUDA => {
+                let pixel = ffi::AVPixelFormat::AV_PIX_FMT_CUDA;
+                let spec = crate::cuda::scaling((f.width(), f.height()), (w, h), "").join(",");
+                Ok(Self::Filters(gpu_graph(f, frames, pixel, &spec)?))
             }
             #[cfg(windows)]
             format::Pixel::D3D11 => Ok(Self::D3d11(d3d11::Scaler::new(f, frames, (w, h))?)),
@@ -713,7 +718,7 @@ impl Shrinker {
             *shrinker = Some(Self { scaling, input });
         }
         let scaled = match &mut shrinker.as_mut().expect("made above").scaling {
-            Some(Scaling::Vaapi(graph)) => run_graph(graph, f, "scaling a frame on the GPU")?,
+            Some(Scaling::Filters(graph)) => run_graph(graph, f, "scaling a frame on the GPU")?,
             #[cfg(windows)]
             Some(Scaling::D3d11(scaler)) => scaler.scale(f)?,
             None => return download(f),
