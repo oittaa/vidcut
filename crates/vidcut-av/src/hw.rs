@@ -252,6 +252,20 @@ impl GpuDecoder {
         })
     }
 
+    /// One of its own on the same GPU, for work beside the viewer's (an
+    /// export, a proxy, the timeline's pictures): NVDEC on a CUDA stream of
+    /// its own on the same context ([`CudaDevice::with_own_stream`]),
+    /// VA-API and Direct3D 11 on a device of their own on the same render
+    /// node or adapter. On the viewer's, its work would wait in line with
+    /// playback's and hold playback up: CUDA's default stream runs every
+    /// user's work in turn, and a Direct3D 11 device's context is one lock.
+    pub fn own(&self) -> Result<Self> {
+        match &self.cuda {
+            Some(cuda) => Ok(Self::nvdec(cuda.with_own_stream()?)),
+            None => Self::open(self.kind, &self.on),
+        }
+    }
+
     pub fn kind(&self) -> Kind {
         self.kind
     }

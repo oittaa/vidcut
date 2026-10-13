@@ -2256,25 +2256,37 @@ fn gpu_decoded_exports_match_the_cpu() {
     for decoder in &decoders {
         let name = format!("{} {}", decoder.kind().name(), decoder.on());
         let out = dir.path().join("gpu.mkv");
+        // On a stream or device of its own, as an export takes it.
+        let own = decoder.own().unwrap_or_else(|e| panic!("{name}: {e}"));
         let report = export::run_decoding_on(
             &p,
             &settings,
             &out,
             &Availability::default(),
-            Some(decoder),
+            Some(&own),
             &AtomicBool::new(false),
             &mut |_| {},
         )
         .unwrap_or_else(|e| panic!("{name}: {e}"));
-        // H.264 on AMD's Direct3D 11, and any codec a GPU lacks, decode on
-        // the CPU; black is no one's.
-        eprintln!(
-            "{name}: {} of 290 frames decoded on the GPU",
-            report.gpu_decoded
-        );
-        assert!(
-            report.gpu_decoded > 0 && report.gpu_decoded <= 290,
-            "{name}"
+        // The frames of each codec (black's 10 are no one's) decode on the
+        // GPU where its driver lists the codec, but H.264 on AMD's Direct3D
+        // 11: 290 frames, or 115 there.
+        use vidcut_av::ffmpeg::codec::Id;
+        let on_gpu: usize = [
+            (Id::H264, 8, 175),
+            (Id::HEVC, 10, 55),
+            (Id::VP9, 8, 40),
+            (Id::AV1, 8, 20),
+        ]
+        .into_iter()
+        .filter(|&(codec, bits, _)| {
+            decoder.decodes(codec) && decoder.hardware_decodes(codec, bits) != Some(false)
+        })
+        .map(|(_, _, frames)| frames)
+        .sum();
+        assert_eq!(
+            report.gpu_decoded as usize, on_gpu,
+            "{name}: frames decoded on the GPU"
         );
         assert_eq!(barcodes(&out), want, "{name}");
         let (mut got, mut cpu_frames) = (
