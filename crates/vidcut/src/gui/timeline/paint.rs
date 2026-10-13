@@ -1,7 +1,7 @@
 //! Drawing the timelines (spec §5): rulers, clips with filmstrips and
 //! waveforms, marks, markers, the playhead and gesture previews.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use eframe::egui::{
@@ -38,6 +38,8 @@ pub struct Assets<'a> {
     pub waveforms: &'a HashMap<String, Arc<Waveform>>,
     /// Each tile's own frame (`None` in windows without them).
     pub tiles: Option<&'a Tiles>,
+    /// Media whose files are missing: their clips are red.
+    pub missing: &'a HashSet<String>,
 }
 
 pub fn marker_color(name: &str) -> Color32 {
@@ -268,7 +270,12 @@ fn clip(
         rect.y_range(),
     )));
     let enabled = c.enabled && t.video_enabled;
-    let fill = if enabled {
+    // Offline clips are red, as in the Media Pool, with nothing drawn of
+    // their file.
+    let offline = assets.missing.contains(&c.media);
+    let fill = if offline {
+        theme::OFFLINE
+    } else if enabled {
         theme::CLIP
     } else {
         theme::CLIP_DISABLED
@@ -286,7 +293,13 @@ fn clip(
         );
     }
     let width = x1 - x0;
-    if look.filmstrips && enabled && has_picture && video.height() >= 24.0 && width > 24.0 {
+    if look.filmstrips
+        && enabled
+        && !offline
+        && has_picture
+        && video.height() >= 24.0
+        && width > 24.0
+    {
         filmstrip(
             &painter,
             video.shrink2(vec2(1.0, 1.0)),
@@ -302,14 +315,16 @@ fn clip(
         let audio =
             Rect::from_x_y_ranges(scale.xf(ra)..=scale.xf(rb), tr.audio_top..=rect.bottom());
         let muted = c.audio.as_ref().is_some_and(|x| x.muted) || t.muted;
-        let color = if muted {
+        let color = if offline {
+            theme::OFFLINE
+        } else if muted {
             theme::CLIP_DISABLED
         } else {
             theme::AUDIO
         };
         let ap = track_painter.with_clip_rect(rect.intersect(audio.expand(1.0)));
         ap.rect_filled(audio.shrink2(vec2(0.5, 0.0)), CornerRadius::same(2), color);
-        if look.waveforms && !muted && audio.height() >= 8.0 {
+        if look.waveforms && !muted && !offline && audio.height() >= 8.0 {
             waveform(&ap, audio, scale, p, c, assets, fps);
         }
         if muted && look.status {
@@ -357,14 +372,22 @@ fn clip(
             Color32::from_white_alpha(200),
         );
     }
-    if look.status && !c.enabled && has_picture && width > 40.0 {
-        painter.text(
-            video.center(),
-            Align2::CENTER_CENTER,
-            "disabled",
-            FontId::proportional(10.0),
-            theme::TEXT_DIM,
-        );
+    if look.status && width > 40.0 {
+        let status = if offline {
+            Some(("offline", Color32::WHITE))
+        } else {
+            (!c.enabled).then_some(("disabled", theme::TEXT_DIM))
+        };
+        let band = if has_picture { Some(video) } else { None };
+        if let (Some((text, color)), Some(band)) = (status, band) {
+            painter.text(
+                band.center(),
+                Align2::CENTER_CENTER,
+                text,
+                FontId::proportional(10.0),
+                color,
+            );
+        }
     }
     if selected {
         painter.rect_stroke(

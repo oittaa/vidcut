@@ -837,6 +837,7 @@ mod tests {
             bin: String::new(),
             sequence: None,
             proxy: None,
+            fingerprint: None,
         }
     }
 

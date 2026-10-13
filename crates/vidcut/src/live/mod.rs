@@ -17,6 +17,7 @@
 //! encoder) reply later, without blocking other requests.
 
 mod jobs;
+mod missing;
 mod player;
 mod project;
 pub mod snapshot;
@@ -165,6 +166,8 @@ pub(crate) struct Job {
 }
 
 pub(crate) enum Msg {
+    /// The media whose files are missing now ([`missing`]).
+    Missing(HashSet<String>),
     Request {
         envelope: Envelope,
         origin: Origin,
@@ -401,6 +404,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         log: Arc::new(VecDeque::new()),
         notices: Arc::new(VecDeque::new()),
         thumbs: Arc::new(HashMap::new()),
+        missing: Arc::new(HashSet::new()),
         waveforms: Arc::new(HashMap::new()),
         jobs: Arc::new(Vec::new()),
         audio_scrubbing: true,
@@ -439,6 +443,8 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         notices: Arc::new(VecDeque::new()),
         notice_seq: 0,
         thumbs: Arc::new(HashMap::new()),
+        missing: Arc::new(HashSet::new()),
+        missing_watch: missing::MissingWatch::start(tx.clone()),
         thumbs_wanted: HashMap::new(),
         waveforms: Arc::new(HashMap::new()),
         waveforms_wanted: HashMap::new(),
@@ -626,6 +632,9 @@ struct Live {
     notices: Arc<VecDeque<Notice>>,
     notice_seq: u64,
     thumbs: Arc<HashMap<String, Arc<Filmstrip>>>,
+    /// Media whose files are missing, and what looks.
+    missing: Arc<HashSet<String>>,
+    missing_watch: missing::MissingWatch,
     /// What each media's thumbnails and waveform are being made, or were
     /// made, for: its file as `media_version` gives it (the waveform's with
     /// the channel count). Media ids are only a project's: another project,
@@ -849,6 +858,7 @@ impl Live {
                 }
                 Err(e) => self.notice(format!("waveform of {media}: {e}"), true),
             },
+            Msg::Missing(missing) => self.missing = Arc::new(missing),
             Msg::Thumbs { media, wanted, .. }
                 if self.thumbs_wanted.get(&media) != Some(&wanted) =>
             {
@@ -1063,6 +1073,7 @@ impl Live {
             log: self.log.clone(),
             notices: self.notices.clone(),
             thumbs: self.thumbs.clone(),
+            missing: self.missing.clone(),
             waveforms: self.waveforms.clone(),
             jobs: self.jobs.clone(),
             audio_scrubbing: self.audio_scrubbing,
@@ -2151,9 +2162,16 @@ impl Live {
     fn project_changed(&mut self, response: Option<&Response>) {
         let Some(open) = &self.project else {
             self.project_snap = None;
+            self.missing_watch.watch(Vec::new());
             return;
         };
         let p = open.project();
+        self.missing_watch.watch(
+            p.media
+                .iter()
+                .map(|m| (m.id.clone(), m.path.clone()))
+                .collect(),
+        );
         let history = open.editor.history();
         self.project_snap = Some(ProjectSnap {
             path: open.store.path().to_path_buf(),

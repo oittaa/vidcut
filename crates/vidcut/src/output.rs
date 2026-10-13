@@ -97,6 +97,23 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 }
             );
         }
+        if let Some(relinked) = r.result.get("relinked").and_then(Value::as_array) {
+            let field = |v: &Value, k: &str| v[k].as_str().unwrap_or_default().to_string();
+            for x in relinked {
+                let (id, path) = (field(x, "media"), field(x, "path"));
+                match x["why"].as_str() {
+                    Some(why) => println!("  relinked {id}  {path}  (not the same file: {why})"),
+                    None => println!("  relinked {id}  {path}"),
+                }
+            }
+            for x in r.result["different"].as_array().into_iter().flatten() {
+                let (id, path, why) = (field(x, "media"), field(x, "path"), field(x, "why"));
+                println!("  differs  {id}  {path}: {why}");
+            }
+            for x in r.result["not_found"].as_array().into_iter().flatten() {
+                println!("  missing  {}  {}", field(x, "media"), field(x, "name"));
+            }
+        }
         if let Some(undone) = r
             .result
             .get("undone")
@@ -778,8 +795,13 @@ fn media_list(m: &Value) {
             Some(true) => "  proxy (stale)",
             None => "",
         };
+        let missing = if i["missing"] == true {
+            "  MISSING"
+        } else {
+            ""
+        };
         println!(
-            "{:<5} {:<30} {} ({} frames)  {}, {} audio{bin}{proxy}",
+            "{:<5} {:<30} {} ({} frames)  {}, {} audio{bin}{proxy}{missing}",
             i["id"].as_str().unwrap_or_default(),
             i["name"].as_str().unwrap_or_default(),
             i["duration_tc"].as_str().unwrap_or_default(),

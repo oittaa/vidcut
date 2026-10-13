@@ -1,7 +1,8 @@
 //! Applies requests to a project with snapshot undo, revisions and dry runs.
 
 use crate::validate::GAIN;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -29,6 +30,8 @@ pub struct ProbedMedia {
     pub info: MediaInfo,
     /// For an image sequence, its files.
     pub sequence: Option<ImageSequence>,
+    /// [`Media::fingerprint`]; none when the file couldn't be read for it.
+    pub fingerprint: Option<String>,
 }
 
 /// A proxy file the editor records on a pool item.
@@ -56,8 +59,21 @@ pub trait Env {
 
     /// Files named `name` in `dirs` or their subfolders, nearest first: how
     /// an import finds media that moved.
-    fn find_file(&self, dirs: &[PathBuf], name: &std::ffi::OsStr) -> Vec<PathBuf> {
-        let mut found = Vec::new();
+    fn find_file(&self, dirs: &[PathBuf], name: &OsStr) -> Vec<PathBuf> {
+        let names = HashSet::from([name.to_os_string()]);
+        self.find_files(dirs, &names)
+            .remove(name)
+            .unwrap_or_default()
+    }
+
+    /// The files named any of `names` in `dirs` or their subfolders, by
+    /// name, nearest first: one walk for many files.
+    fn find_files(
+        &self,
+        dirs: &[PathBuf],
+        names: &HashSet<OsString>,
+    ) -> HashMap<OsString, Vec<PathBuf>> {
+        let mut found: HashMap<OsString, Vec<PathBuf>> = HashMap::new();
         for dir in dirs {
             let mut queue = std::collections::VecDeque::from([(dir.clone(), 0)]);
             while let Some((d, depth)) = queue.pop_front() {
@@ -67,12 +83,10 @@ pub trait Env {
                 let mut subdirs = Vec::new();
                 for e in entries.flatten() {
                     let is_dir = e.file_type().is_ok_and(|t| t.is_dir());
-                    if !is_dir && e.file_name() == name {
-                        found.push(e.path());
-                    } else if is_dir
-                        && depth < 8
-                        && !e.file_name().to_string_lossy().starts_with('.')
-                    {
+                    let name = e.file_name();
+                    if !is_dir && names.contains(&name) {
+                        found.entry(name).or_default().push(e.path());
+                    } else if is_dir && depth < 8 && !name.to_string_lossy().starts_with('.') {
                         subdirs.push(e.path());
                     }
                 }
@@ -81,6 +95,11 @@ pub trait Env {
             }
         }
         found
+    }
+
+    /// Whether `m`'s file is there (an image sequence's first picture).
+    fn present(&self, m: &Media) -> bool {
+        m.path.is_file()
     }
 
     /// Peak levels of audio stream `stream` of `media`. Measuring decodes
@@ -699,37 +718,11 @@ fn mutate(
             forget_tape_marks(p, media);
             Value::Null
         }
-        Request::MediaRelink { media, path } => {
-            let old = p
-                .media(media)
-                .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
-            let frames = p.media_frames(old);
-            // A sequence stays a sequence at its rate.
-            let probed = match (&old.sequence, &old.info.video) {
-                (Some(_), Some(v)) => env.probe_sequence(path, v.fps)?,
-                _ => env.probe(path)?,
-            };
-            let m = p
-                .media
-                .iter_mut()
-                .find(|m| &m.id == media)
-                .expect("found above");
-            // The proxy was made from the previous file.
-            if let Some(old) = m.proxy.take()
-                && !dry_run
-            {
-                env.remove_proxy_file(&old.path)?;
-            }
-            m.path = probed.path;
-            m.size = probed.size;
-            m.mtime_ns = probed.mtime_ns;
-            m.info = probed.info;
-            m.sequence = probed.sequence;
-            if p.media(media).map(|m| p.media_frames(m)) != Some(frames) {
-                forget_tape_marks(p, media);
-            }
-            Value::Null
-        }
+        Request::MediaRelink {
+            media,
+            path,
+            search,
+        } => relink(p, env, media.as_ref(), path.as_deref(), search, dry_run)?,
         Request::ProxyGenerate { media, width, auto } => {
             proxy_generate(p, env, media.as_ref(), *width, *auto, dry_run)?
         }
@@ -1257,8 +1250,218 @@ fn add_media(p: &mut Project, probed: ProbedMedia) -> String {
         bin: String::new(),
         sequence: probed.sequence,
         proxy: None,
+        fingerprint: probed.fingerprint,
     });
     id
+}
+
+/// `media.relink`: one item to `path`, or the items (all missing ones when
+/// none are named) to their files found by name in `search`.
+fn relink(
+    p: &mut Project,
+    env: &dyn Env,
+    media: Option<&OneOrMany<String>>,
+    path: Option<&Path>,
+    search: &[PathBuf],
+    dry_run: bool,
+) -> Result<Value> {
+    let ids = match media {
+        Some(m) => m.to_vec(),
+        None => p
+            .media
+            .iter()
+            .filter(|m| !env.present(m))
+            .map(|m| m.id.clone())
+            .collect(),
+    };
+    let targets: Vec<Media> = ids
+        .iter()
+        .map(|id| {
+            p.media(id)
+                .cloned()
+                .ok_or_else(|| Error::not_found(format!("no media {id}")))
+        })
+        .collect::<Result<_>>()?;
+    // An image sequence is probed as one, at its rate.
+    let probe = |m: &Media, path: &Path| match (&m.sequence, &m.info.video) {
+        (Some(_), Some(v)) => env.probe_sequence(path, v.fps),
+        _ => env.probe(path),
+    };
+    let (mut relinked, mut different, mut not_found) = (Vec::new(), Vec::new(), Vec::new());
+    match (path, search.is_empty()) {
+        (Some(path), true) => {
+            let [m] = targets.as_slice() else {
+                return Err(Error::usage(
+                    "media.relink with a `path` takes one media id",
+                ));
+            };
+            let probed = probe(m, path)?;
+            let why = differs(m, &probed);
+            relinked.push(json!({
+                "media": m.id, "path": probed.path, "same": why.is_none(), "why": why,
+            }));
+            replace_file(p, env, &m.id, probed, why.is_none(), dry_run)?;
+        }
+        (None, false) => {
+            let name = |m: &Media| m.path.file_name().map(OsStr::to_os_string);
+            let names: HashSet<OsString> = targets.iter().filter_map(name).collect();
+            let found = env.find_files(search, &names);
+            for m in &targets {
+                let mut candidates = name(m)
+                    .and_then(|n| found.get(&n))
+                    .cloned()
+                    .unwrap_or_default();
+                // Files named alike (a camera's C0001.MP4 on every card):
+                // those in folders named like the old one's first.
+                candidates.sort_by_key(|c| std::cmp::Reverse(common_tail(&m.path, c)));
+                let mut first_difference = None;
+                let mut matched = None;
+                for c in candidates.iter().filter(|c| **c != m.path) {
+                    let Ok(probed) = probe(m, c) else { continue };
+                    match differs(m, &probed) {
+                        None => {
+                            matched = Some(probed);
+                            break;
+                        }
+                        Some(why) => {
+                            first_difference.get_or_insert((probed.path, why));
+                        }
+                    }
+                }
+                match (matched, first_difference) {
+                    (Some(probed), _) => {
+                        relinked.push(json!({ "media": m.id, "path": probed.path, "same": true }));
+                        replace_file(p, env, &m.id, probed, true, dry_run)?;
+                    }
+                    (None, Some((path, why))) => {
+                        different.push(json!({ "media": m.id, "path": path, "why": why }));
+                    }
+                    (None, None) => not_found.push(json!({ "media": m.id, "name": m.name })),
+                }
+            }
+        }
+        _ => {
+            return Err(Error::usage(
+                "media.relink takes either a `path` for one item or `search` folders",
+            ));
+        }
+    }
+    Ok(json!({ "relinked": relinked, "different": different, "not_found": not_found }))
+}
+
+/// Why the probed file isn't `m`'s file, if it isn't: another size,
+/// other streams or another fingerprint.
+fn differs(m: &Media, probed: &ProbedMedia) -> Option<String> {
+    let (a, b) = (&m.info, &probed.info);
+    match (&m.sequence, &probed.sequence) {
+        (Some(s), Some(t)) if s.count != t.count => {
+            return Some(format!("{} pictures, not {}", t.count, s.count));
+        }
+        (Some(_), None) | (None, Some(_)) => {
+            return Some("an image sequence and a single file".into());
+        }
+        _ => {}
+    }
+    if probed.size != m.size {
+        return Some(format!("{} bytes, not {}", probed.size, m.size));
+    }
+    match (&a.video, &b.video) {
+        (Some(v), Some(w)) => {
+            if (v.codec.as_str(), v.width, v.height) != (w.codec.as_str(), w.width, w.height) {
+                return Some(format!(
+                    "{} {}×{}, not {} {}×{}",
+                    w.codec, w.width, w.height, v.codec, v.width, v.height
+                ));
+            }
+            if v.fps != w.fps {
+                return Some(format!("{} fps, not {}", w.fps, v.fps));
+            }
+        }
+        (None, None) => {}
+        _ => return Some("one has pictures, the other not".into()),
+    }
+    let sound = |i: &MediaInfo| -> Vec<(String, u32, u16)> {
+        i.audio
+            .iter()
+            .map(|s| (s.codec.clone(), s.sample_rate, s.channels))
+            .collect()
+    };
+    if sound(a) != sound(b) {
+        return Some("other audio streams".into());
+    }
+    // The same file probes alike; half a frame (or a millisecond) allows
+    // for another FFmpeg rounding otherwise.
+    let slack = a.video.as_ref().map_or(0.001, |v| 0.5 / v.fps.as_f64());
+    if (a.duration - b.duration).abs() > slack {
+        return Some(format!("{:.3} s long, not {:.3}", b.duration, a.duration));
+    }
+    if a.timecode != b.timecode {
+        return Some("another start timecode".into());
+    }
+    match (&m.fingerprint, &probed.fingerprint) {
+        (Some(x), Some(y)) if x != y => Some("other content (fingerprint)".into()),
+        _ => None,
+    }
+}
+
+/// How many folder names `a` and `b` share at the end of their parents.
+fn common_tail(a: &Path, b: &Path) -> usize {
+    let dirs = |p: &Path| -> Vec<OsString> {
+        p.parent()
+            .into_iter()
+            .flat_map(Path::components)
+            .map(|c| c.as_os_str().to_os_string())
+            .collect()
+    };
+    let (a, b) = (dirs(a), dirs(b));
+    a.iter()
+        .rev()
+        .zip(b.iter().rev())
+        .take_while(|(x, y)| x == y)
+        .count()
+}
+
+/// Points `id` at the probed file. The proxy stays when it is the same
+/// file (the proxy was made from it), else it goes.
+fn replace_file(
+    p: &mut Project,
+    env: &dyn Env,
+    id: &str,
+    probed: ProbedMedia,
+    same: bool,
+    dry_run: bool,
+) -> Result<()> {
+    let old = p
+        .media(id)
+        .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
+    let frames = p.media_frames(old);
+    let m = p
+        .media
+        .iter_mut()
+        .find(|m| m.id == id)
+        .expect("found above");
+    match m.proxy.as_mut() {
+        Some(proxy) if same => {
+            (proxy.source_size, proxy.source_mtime_ns) = (probed.size, probed.mtime_ns);
+        }
+        Some(_) => {
+            let old = m.proxy.take().expect("a proxy");
+            if !dry_run {
+                env.remove_proxy_file(&old.path)?;
+            }
+        }
+        None => {}
+    }
+    m.path = probed.path;
+    m.size = probed.size;
+    m.mtime_ns = probed.mtime_ns;
+    m.info = probed.info;
+    m.sequence = probed.sequence;
+    m.fingerprint = probed.fingerprint;
+    if p.media(id).map(|m| p.media_frames(m)) != Some(frames) {
+        forget_tape_marks(p, id);
+    }
+    Ok(())
 }
 
 /// Takes the picture size of `v` as shown (square pixels, rotated, even)
@@ -1854,13 +2057,18 @@ pub fn query(
             "tape_marks": p.tape_marks,
         }),
         Request::MediaList {} => {
-            json!(p.media.iter().map(|m| media_json(p, m)).collect::<Vec<_>>())
+            json!(
+                p.media
+                    .iter()
+                    .map(|m| media_json(p, m, env))
+                    .collect::<Vec<_>>()
+            )
         }
         Request::MediaGet { media } => {
             let m = p
                 .media(media)
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
-            let mut v = media_json(p, m);
+            let mut v = media_json(p, m, env);
             v["info"] = serde_json::to_value(&m.info).unwrap_or_default();
             v["used_by"] = json!(
                 p.tracks
@@ -2233,7 +2441,7 @@ fn scene_cuts(
     Ok(analysis::scene_cuts(&target.span(p)?, &stats, threshold))
 }
 
-fn media_json(p: &Project, m: &Media) -> Value {
+fn media_json(p: &Project, m: &Media, env: &dyn Env) -> Value {
     let frames = p.media_frames(m);
     let mut v = json!({
         "id": m.id,
@@ -2248,6 +2456,9 @@ fn media_json(p: &Project, m: &Media) -> Value {
         }),
         "audio_streams": m.info.audio.len(),
     });
+    if !env.present(m) {
+        v["missing"] = json!(true);
+    }
     if !m.marks.is_empty() {
         v["marks"] = json!(m.marks);
     }

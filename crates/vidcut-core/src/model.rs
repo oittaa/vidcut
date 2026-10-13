@@ -168,6 +168,13 @@ pub struct Media {
     /// A smaller copy the preview can play. Absent until one is generated.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy: Option<Proxy>,
+    /// SHA-256 of the file when it was added or relinked
+    /// ([`fingerprint`](crate::fingerprint)): of the whole file up to
+    /// 10 MiB (its `sha256sum`), else of 1 MiB from its start, middle and
+    /// end; for an image sequence, of its first, middle and last pictures'.
+    /// Relinking checks the files it finds against it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<String>,
 }
 
 /// A playback proxy of a pool item: an easy-to-play file whose frames carry

@@ -116,6 +116,7 @@ impl Env for AvEnv {
             .map_or(0, |d| d.as_nanos() as i64);
         let info = vidcut_av::probe::probe(&canonical).map_err(|e| Error::media(e.to_string()))?;
         Ok(ProbedMedia {
+            fingerprint: vidcut_core::fingerprint::file(&canonical).ok(),
             path: canonical,
             size: meta.len(),
             mtime_ns,
@@ -157,6 +158,13 @@ impl Env for AvEnv {
                     .map_or(0, |d| d.as_nanos() as i64);
                 (size + meta.len(), newest.max(mtime))
             });
+        let picture = |k: u64| sequence.file(dir, k);
+        probed.fingerprint = vidcut_core::fingerprint::pictures(
+            &picture(0),
+            &picture(sequence.count / 2),
+            &picture(sequence.count.saturating_sub(1)),
+        )
+        .ok();
         probed.sequence = Some(sequence);
         Ok(probed)
     }

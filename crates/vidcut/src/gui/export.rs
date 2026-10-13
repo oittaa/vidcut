@@ -128,10 +128,13 @@ impl Dialogs for RfdDialogs {
 
 /// A file dialog's answer, filled in by its helper thread.
 #[derive(Clone)]
-struct Picked(Arc<Mutex<Option<Option<PathBuf>>>>);
+pub(super) struct Picked(Arc<Mutex<Option<Option<PathBuf>>>>);
 
 impl Picked {
-    fn ask(ctx: &egui::Context, f: impl FnOnce() -> Option<PathBuf> + Send + 'static) -> Self {
+    pub(super) fn ask(
+        ctx: &egui::Context,
+        f: impl FnOnce() -> Option<PathBuf> + Send + 'static,
+    ) -> Self {
         let slot = Arc::new(Mutex::new(None));
         let (out, ctx) = (slot.clone(), ctx.clone());
         let _ = crate::threads::spawn(
@@ -147,7 +150,7 @@ impl Picked {
     }
 
     /// `Some(None)`: cancelled.
-    fn take(&self) -> Option<Option<PathBuf>> {
+    pub(super) fn take(&self) -> Option<Option<PathBuf>> {
         self.0.lock().unwrap_or_else(|e| e.into_inner()).take()
     }
 }
