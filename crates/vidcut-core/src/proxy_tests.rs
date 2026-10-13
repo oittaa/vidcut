@@ -181,6 +181,8 @@ fn remove_clears_the_proxy_and_relink_drops_a_stale_one() {
         PathBuf::from("/media/other.mp4"),
         crate::test_support::media_info(4.0, crate::time::Rational::new(25, 1).unwrap(), true),
     );
+    // Another file (another size): its proxy would show other pictures.
+    f.env.sizes.insert(PathBuf::from("/media/other.mp4"), 2);
     f.ok(req(
         "media.relink",
         json!({"media": "m1", "path": "/media/other.mp4"}),

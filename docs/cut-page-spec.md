@@ -76,6 +76,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
   - Source Tape strings together the open bin's clips and its bins' clips, in the sort order (pp. 680, 696).
   - Removing a bin keeps its clips (deviation X6). Dragging a bin onto another bin (a folder, or a level of the path) moves it and everything inside it with `bins.rename`, keeping its name. Dropping it on itself, on a bin inside it, or on its current parent does nothing.
 - **Clip color (later)** (pp. 667–668).
+- **Relinking media** (pp. 668–669): an item whose file is missing is marked MISSING (red in the list). The Relink Media button, shown while files are missing, finds them in a folder chosen (subfolders too); a clip's menu offers Relink… for one file. vidcut checks each file it finds (deviation X1).
 - **Interaction:**
   - **Click:** selects. In Source Clip mode the Viewer shows the clip; in Source Tape mode the playhead jumps to the clip's first frame (pp. 680, 704).
   - **Double-click:** opens the clip in the Viewer as Source Clip (p. 680).

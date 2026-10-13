@@ -155,6 +155,19 @@ impl Workspace {
                     self.send("project.set", json!({ "use_proxies": on }));
                 }
             }
+            let missing = snap.missing.len();
+            if missing > 0
+                && ui
+                    .button(RichText::new(format!("Relink Media ({missing})")).color(theme::ERROR))
+                    .on_hover_text(format!(
+                        "{missing} file(s) missing. Choose a folder: they are looked for by \
+                         name there and in its subfolders, and each one found is relinked if \
+                         it is the same file (size, streams and fingerprint)"
+                    ))
+                    .clicked()
+            {
+                self.relink_missing(ui.ctx());
+            }
             ui.selectable_value(&mut self.pool_view, PoolView::Thumbnails, "Grid")
                 .on_hover_text("Thumbnail view");
             ui.selectable_value(&mut self.pool_view, PoolView::List, "List")
@@ -612,6 +625,20 @@ impl Workspace {
             border,
             egui::StrokeKind::Inside,
         );
+        let missing = self.snap.missing.contains(&m.id);
+        if missing {
+            let galley = painter.layout_no_wrap(
+                "MISSING".to_string(),
+                egui::FontId::proportional(10.0),
+                theme::ERROR,
+            );
+            let badge = Rect::from_min_size(
+                picture.left_top() + vec2(3.0, 3.0),
+                galley.size() + vec2(6.0, 2.0),
+            );
+            painter.rect_filled(badge, CornerRadius::same(2), theme::PANEL_DARK);
+            painter.galley(badge.min + vec2(3.0, 1.0), galley, theme::ERROR);
+        }
         let proxy = proxy_state(m);
         if let Some((text, color, _)) = proxy {
             let galley =
@@ -646,9 +673,14 @@ impl Workspace {
             theme::TEXT_DIM,
         );
         let resp = resp.on_hover_text(format!(
-            "{}\n{}\n{}I/O while hovering marks the clip; double-click opens it",
+            "{}\n{}\n{}{}I/O while hovering marks the clip; double-click opens it",
             m.name,
             m.path.display(),
+            if missing {
+                "The file is missing: Relink Media finds it, or right-click > Relink…\n"
+            } else {
+                ""
+            },
             proxy.map_or(String::new(), |(_, _, tip)| format!("{tip}\n")),
         ));
         self.media_interaction(&resp, m);
@@ -690,9 +722,16 @@ impl Workspace {
                 }
                 for m in media {
                     let selected = self.snap.selection.media.contains(&m.id);
-                    let resp = ui
-                        .selectable_label(selected, elide(&m.name, 40))
-                        .interact(Sense::drag());
+                    let mut name = RichText::new(elide(&m.name, 40));
+                    if self.snap.missing.contains(&m.id) {
+                        name = name.color(theme::ERROR);
+                    }
+                    let resp = ui.selectable_label(selected, name).interact(Sense::drag());
+                    let resp = if self.snap.missing.contains(&m.id) {
+                        resp.on_hover_text(format!("Missing: {}", m.path.display()))
+                    } else {
+                        resp
+                    };
                     self.media_interaction(&resp, m);
                     let frames = self.project().map_or(0, |p| p.media_frames(m));
                     ui.label(self.src_tc(frames));
@@ -827,6 +866,14 @@ impl Workspace {
             }
             if m.proxy.is_some() && ui.button("Remove Proxy").clicked() {
                 self.send("proxy.remove", json!({ "media": m.id }));
+                ui.close();
+            }
+            if ui
+                .button("Relink…")
+                .on_hover_text("Point it at another file")
+                .clicked()
+            {
+                self.relink_one(ui.ctx(), &m.id);
                 ui.close();
             }
             ui.separator();

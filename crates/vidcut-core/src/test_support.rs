@@ -83,6 +83,10 @@ pub struct FakeEnv {
     pub pictures: HashMap<PathBuf, PictureStats>,
     /// The preferences' proxy rules.
     pub proxy_rules: crate::preferences::Proxies,
+    /// File sizes by path; others are 1 byte.
+    pub sizes: HashMap<PathBuf, u64>,
+    /// Fingerprints by path; others have none.
+    pub fingerprints: HashMap<PathBuf, String>,
 }
 
 /// Levels at 100 per second: loud (0.5) during `loud` seconds, otherwise
@@ -162,10 +166,11 @@ impl Env for FakeEnv {
             .ok_or_else(|| Error::media(format!("cannot open {}", path.display())))?;
         Ok(ProbedMedia {
             path: path.to_path_buf(),
-            size: 1,
+            size: self.sizes.get(path).copied().unwrap_or(1),
             mtime_ns: 0,
             info,
             sequence: None,
+            fingerprint: self.fingerprints.get(path).cloned(),
         })
     }
 
@@ -183,10 +188,11 @@ impl Env for FakeEnv {
         (v.codec, v.width, v.height) = ("png".into(), *w, *h);
         Ok(ProbedMedia {
             path: first.clone(),
-            size: 1,
+            size: self.sizes.get(first).copied().unwrap_or(1),
             mtime_ns: 0,
             info,
             sequence: Some(s.clone()),
+            fingerprint: self.fingerprints.get(first).cloned(),
         })
     }
 
@@ -262,15 +268,29 @@ impl Env for FakeEnv {
         })
     }
 
-    fn find_file(&self, dirs: &[PathBuf], name: &std::ffi::OsStr) -> Vec<PathBuf> {
-        let mut found: Vec<PathBuf> = self
-            .files
-            .keys()
-            .filter(|p| p.file_name() == Some(name) && dirs.iter().any(|d| p.starts_with(d)))
-            .cloned()
-            .collect();
-        found.sort();
+    fn find_files(
+        &self,
+        dirs: &[PathBuf],
+        names: &std::collections::HashSet<std::ffi::OsString>,
+    ) -> HashMap<std::ffi::OsString, Vec<PathBuf>> {
+        let mut found: HashMap<std::ffi::OsString, Vec<PathBuf>> = HashMap::new();
+        let mut paths: Vec<&PathBuf> = self.files.keys().chain(self.sequences.keys()).collect();
+        paths.sort();
+        for p in paths {
+            if let Some(name) = p.file_name().filter(|n| names.contains(*n))
+                && dirs.iter().any(|d| p.starts_with(d))
+            {
+                found
+                    .entry(name.to_os_string())
+                    .or_default()
+                    .push(p.clone());
+            }
+        }
         found
+    }
+
+    fn present(&self, m: &Media) -> bool {
+        self.files.contains_key(&m.path) || self.sequences.contains_key(&m.path)
     }
 }
 

@@ -11,6 +11,7 @@ pub mod picture;
 mod pool;
 mod preferences;
 mod project;
+mod relink;
 mod shared;
 mod stills;
 mod theme;

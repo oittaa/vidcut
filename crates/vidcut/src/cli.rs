@@ -656,13 +656,15 @@ fn leaf(name: &str, m: &Method) -> Command {
         }
         _ => {}
     }
+    let last = m.params.iter().filter_map(|p| p.position).max();
     for p in &m.params {
-        cmd = cmd.arg(arg(p));
+        cmd = cmd.arg(arg(p, p.position < last));
     }
     cmd
 }
 
-fn arg(p: &Param) -> Arg {
+/// The argument for `p`; `followed` when a positional comes after it.
+fn arg(p: &Param, followed: bool) -> Arg {
     let mut a = Arg::new(p.name.clone()).help(p.help.clone());
     a = match p.position {
         Some(i) => a.index(i + 1),
@@ -689,6 +691,11 @@ fn arg(p: &Param) -> Arg {
         Kind::Bool => a
             .value_parser(clap::value_parser!(bool))
             .value_name("true|false"),
+        // A list with a positional after it takes one value (`m1,m2`), so
+        // the next value is that positional's.
+        Kind::List(item) if followed && p.position.is_some() => one(a, item, false)
+            .value_delimiter(',')
+            .action(ArgAction::Set),
         Kind::List(item) => one(a, item, false)
             .num_args(1..)
             .value_delimiter(',')

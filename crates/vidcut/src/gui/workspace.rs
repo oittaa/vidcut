@@ -118,6 +118,7 @@ pub struct Workspace {
     pub(super) preferences: super::preferences::PreferencesUi,
     pub(super) project_ui: super::project::ProjectUi,
     pub(super) import: super::import::ImportUi,
+    pub(super) relink: super::relink::RelinkUi,
     pub(super) dialogs: Arc<dyn super::export::Dialogs>,
     /// Where file dialogs start, remembered across runs.
     pub(super) folders: super::folders::Folders,
@@ -240,6 +241,7 @@ impl Workspace {
             preferences: Default::default(),
             project_ui: Default::default(),
             import: Default::default(),
+            relink: Default::default(),
             dialogs: Arc::new(super::export::RfdDialogs),
             folders: super::folders::Folders::load(),
             tiles: Some(super::tiles::Tiles::new(
@@ -1478,6 +1480,7 @@ impl Workspace {
         self.preferences_window(&ctx);
         self.project_windows(&ctx);
         self.import_window(&ctx);
+        self.relink_window(&ctx);
         egui::Panel::top("top")
             .frame(egui::Frame::new().fill(theme::BG).inner_margin(4))
             .show(ui, |ui| self.top_bar(ui));

@@ -17,7 +17,14 @@ pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> Stri
         "project.create" => format!("Create {}", d.file("path")),
         "media.add" => format!("Import {}", d.files("paths")),
         "media.remove" => format!("Remove {}", d.media("media")),
-        "media.relink" => format!("Relink {} to {}", d.media("media"), d.file("path")),
+        "media.relink" if d.params.get("path").is_some_and(|v| !v.is_null()) => {
+            format!("Relink {} to {}", d.media("media"), d.file("path"))
+        }
+        "media.relink" => format!(
+            "Relink {} from {}",
+            d.media_or("media", "missing media"),
+            d.files("search")
+        ),
         "media.rename" => format!("Rename {} to {}", d.media("media"), d.text("name")),
         "media.marks.set" => format!("Source marks of {}: {}", d.media("media"), d.in_out()),
         "media.marks.clear" => format!("Clear the source marks of {}", d.media("media")),

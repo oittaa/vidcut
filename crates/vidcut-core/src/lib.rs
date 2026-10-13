@@ -8,6 +8,7 @@ pub mod describe;
 pub mod editor;
 pub mod error;
 pub mod export;
+pub mod fingerprint;
 pub mod model;
 pub mod ops;
 pub mod otio;
@@ -36,6 +37,8 @@ mod ops_tests;
 mod prop_tests;
 #[cfg(test)]
 mod proxy_tests;
+#[cfg(test)]
+mod relink_tests;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
