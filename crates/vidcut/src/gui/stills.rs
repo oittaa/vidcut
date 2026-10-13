@@ -147,12 +147,13 @@ impl Stills {
                 format!("vidcut-stills-{n}"),
                 crate::threads::Work::Interactive,
                 move || {
-                    let mut renderer = cell_renderer();
+                    let mut on_gpu = crate::preferences::gpu_acceleration();
+                    let mut renderer = cell_renderer(on_gpu);
                     loop {
                         let mut job = match rx.recv_timeout(IDLE) {
                             Ok(job) => job,
                             Err(RecvTimeoutError::Timeout) => {
-                                renderer = cell_renderer();
+                                renderer = cell_renderer(on_gpu);
                                 match rx.recv() {
                                     Ok(job) => job,
                                     Err(_) => return,
@@ -160,6 +161,13 @@ impl Stills {
                             }
                             Err(RecvTimeoutError::Disconnected) => return,
                         };
+                        // The preferences as each frame is asked for: a
+                        // change reaches the two-up at once.
+                        let gpu = crate::preferences::gpu_acceleration();
+                        if gpu != on_gpu {
+                            on_gpu = gpu;
+                            renderer = cell_renderer(gpu);
+                        }
                         let mut skipped = 0;
                         for newer in rx.try_iter() {
                             if tx.send((job.0, n, Outcome::Skipped)).is_err() {
@@ -252,14 +260,11 @@ impl Stills {
     }
 }
 
-/// A renderer for a cell, decoding on the GPU as the viewer does while
-/// `gpu.acceleration` is on.
-fn cell_renderer() -> StillRenderer {
+/// A renderer for a cell, decoding on the GPU the viewer decodes on while
+/// `on_gpu` (`gpu.acceleration`).
+fn cell_renderer(on_gpu: bool) -> StillRenderer {
     let renderer = StillRenderer::with_budget(BUDGET);
-    match crate::preferences::gpu_acceleration()
-        .then(crate::preferences::gpu_decoder)
-        .flatten()
-    {
+    match crate::preferences::timeline_decoder(on_gpu) {
         Some(gpu) => renderer.decoding_on(gpu),
         None => renderer,
     }

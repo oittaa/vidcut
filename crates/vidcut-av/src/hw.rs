@@ -10,7 +10,7 @@
 //! (`d3d11va:1` for an adapter by its index), or `none`.
 
 use std::ptr;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::cuda::CudaDevice;
 use crate::error::{Error, Result};
@@ -99,6 +99,50 @@ impl Device {
         Self::of_type(kind.device_type(), on)
     }
 
+    /// QSV's device on `on`: a render node (Linux) or an adapter's index
+    /// (Windows), the first Intel GPU when empty. FFmpeg reads QSV's own
+    /// device string as the implementation to load (`1` is the software
+    /// one), so the GPU goes in as the device QSV runs on top of
+    /// (`child_device`): VA-API's on Linux, Direct3D 11's on Windows.
+    pub(crate) fn qsv(on: &str) -> Result<Self> {
+        crate::init();
+        let mut options = ffmpeg::Dictionary::new();
+        options.set(
+            "child_device_type",
+            if cfg!(windows) { "d3d11va" } else { "vaapi" },
+        );
+        if !on.is_empty() {
+            options.set("child_device", on);
+        }
+        let mut device = ptr::null_mut();
+        // SAFETY: the options' dictionary is FFmpeg's to read and is freed
+        // after; FFmpeg makes the device from it.
+        let ret = unsafe {
+            let mut raw = options.disown();
+            let ret = ffi::av_hwdevice_ctx_create(
+                &mut device,
+                ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_QSV,
+                ptr::null(),
+                raw,
+                0,
+            );
+            ffi::av_dict_free(&mut raw);
+            ret
+        };
+        if ret < 0 || device.is_null() {
+            let on = if on.is_empty() {
+                "the first Intel GPU"
+            } else {
+                on
+            };
+            return Err(Error::Ffmpeg {
+                context: format!("opening QSV on {on}"),
+                source: ffmpeg::Error::from(ret),
+            });
+        }
+        Ok(Self(device))
+    }
+
     /// FFmpeg's device of type `ty` on `on`, as [`open`](Self::open): for
     /// an encoder, which runs on one too.
     pub(crate) fn of_type(ty: ffi::AVHWDeviceType, on: &str) -> Result<Self> {
@@ -163,6 +207,17 @@ pub struct GpuDecoder {
 /// AMD's PCI vendor id.
 const AMD: u32 = 0x1002;
 
+/// The decoding profiles [`GpuDecoder::hardware_decodes`] asks a driver for.
+#[derive(Clone, Copy)]
+enum Profile {
+    H264High,
+    HevcMain,
+    HevcMain10,
+    Vp9Profile0,
+    Vp9Profile2,
+    Av1Main,
+}
+
 impl GpuDecoder {
     /// NVDEC, on `cuda`.
     pub fn nvdec(cuda: CudaDevice) -> Self {
@@ -201,6 +256,20 @@ impl GpuDecoder {
         })
     }
 
+    /// One of its own on the same GPU, for work beside the viewer's (an
+    /// export, a proxy, the timeline's pictures): NVDEC on a CUDA stream of
+    /// its own on the same context ([`CudaDevice::with_own_stream`]),
+    /// VA-API and Direct3D 11 on a device of their own on the same render
+    /// node or adapter. On the viewer's, its work would wait in line with
+    /// playback's and hold playback up: CUDA's default stream runs every
+    /// user's work in turn, and a Direct3D 11 device's context is one lock.
+    pub fn own(&self) -> Result<Self> {
+        match &self.cuda {
+            Some(cuda) => Ok(Self::nvdec(cuda.with_own_stream()?)),
+            None => Self::open(self.kind, &self.on),
+        }
+    }
+
     pub fn kind(&self) -> Kind {
         self.kind
     }
@@ -222,6 +291,36 @@ impl GpuDecoder {
     pub fn without(mut self, codec: ffmpeg::codec::Id) -> Self {
         self.left.push(codec);
         self
+    }
+
+    /// Whether its hardware decodes `codec` in `bits` (8 or 10), as its
+    /// driver lists the profiles it decodes (VA-API's; Direct3D 11's video
+    /// device's): H.264 High, HEVC Main or Main 10, VP9 profile 0 or 2, AV1
+    /// Main. `None` where the driver isn't asked (NVDEC) or doesn't say.
+    /// What [`decodes`](Self::decodes) knows of streams decoded wrong is
+    /// apart from this.
+    pub fn hardware_decodes(&self, codec: ffmpeg::codec::Id, bits: u8) -> Option<bool> {
+        use ffmpeg::codec::Id;
+        let profile = match (codec, bits) {
+            (Id::H264, 8) => Profile::H264High,
+            (Id::HEVC, 8) => Profile::HevcMain,
+            (Id::HEVC, 10) => Profile::HevcMain10,
+            (Id::VP9, 8) => Profile::Vp9Profile0,
+            (Id::VP9, 10) => Profile::Vp9Profile2,
+            (Id::AV1, 8 | 10) => Profile::Av1Main,
+            _ => return None,
+        };
+        match self.kind {
+            Kind::Nvdec => None,
+            // SAFETY: a VA-API device FFmpeg made.
+            #[cfg(target_os = "linux")]
+            Kind::Vaapi => unsafe { va_lists(&self.device, profile) },
+            // SAFETY: a D3D11VA device FFmpeg made.
+            #[cfg(windows)]
+            Kind::D3d11va => unsafe { windows::lists(&self.device, profile) },
+            #[allow(unreachable_patterns)]
+            _ => None,
+        }
     }
 
     /// The render node or adapter it is on; empty for the default one.
@@ -318,7 +417,7 @@ pub(crate) mod windows {
     use ::windows::Win32::Graphics::Dxgi::{DXGI_ADAPTER_DESC, IDXGIDevice};
     use ::windows::core::Interface;
 
-    use super::{Device, Kind};
+    use super::{Device, Kind, Profile};
     use crate::ffmpeg::ffi;
 
     /// PCI vendor ids.
@@ -347,6 +446,41 @@ pub(crate) mod windows {
         adapters
     }
 
+    /// Whether a D3D11VA device's video device lists `profile` among its
+    /// decoders' (`GetVideoDecoderProfile`).
+    ///
+    /// # Safety
+    /// `device` is a D3D11VA device context.
+    pub(super) unsafe fn lists(device: &Device, profile: Profile) -> Option<bool> {
+        use ::windows::Win32::Graphics::Direct3D11::{
+            D3D11_DECODER_PROFILE_AV1_VLD_PROFILE0, D3D11_DECODER_PROFILE_H264_VLD_NOFGT,
+            D3D11_DECODER_PROFILE_HEVC_VLD_MAIN, D3D11_DECODER_PROFILE_HEVC_VLD_MAIN10,
+            D3D11_DECODER_PROFILE_VP9_VLD_10BIT_PROFILE2, D3D11_DECODER_PROFILE_VP9_VLD_PROFILE0,
+            ID3D11VideoDevice,
+        };
+        let want = match profile {
+            Profile::H264High => D3D11_DECODER_PROFILE_H264_VLD_NOFGT,
+            Profile::HevcMain => D3D11_DECODER_PROFILE_HEVC_VLD_MAIN,
+            Profile::HevcMain10 => D3D11_DECODER_PROFILE_HEVC_VLD_MAIN10,
+            Profile::Vp9Profile0 => D3D11_DECODER_PROFILE_VP9_VLD_PROFILE0,
+            Profile::Vp9Profile2 => D3D11_DECODER_PROFILE_VP9_VLD_10BIT_PROFILE2,
+            Profile::Av1Main => D3D11_DECODER_PROFILE_AV1_VLD_PROFILE0,
+        };
+        // SAFETY: a D3D11VA device's context is an AVD3D11VADeviceContext,
+        // whose video device FFmpeg asked its device for and which lives as
+        // long as it.
+        unsafe {
+            let ctx = (*device.0).data as *const ffi::AVHWDeviceContext;
+            let hw = (*ctx).hwctx as *const ffi::AVD3D11VADeviceContext;
+            let raw = (*hw).video_device as *mut c_void;
+            let video = ID3D11VideoDevice::from_raw_borrowed(&raw)?;
+            Some(
+                (0..video.GetVideoDecoderProfileCount())
+                    .any(|i| video.GetVideoDecoderProfile(i).is_ok_and(|g| g == want)),
+            )
+        }
+    }
+
     /// The description of the adapter a D3D11VA device is on: its Direct3D
     /// device asked for its DXGI device, that for its adapter.
     ///
@@ -367,7 +501,7 @@ pub(crate) mod windows {
 }
 
 /// Whether `frame` is in GPU memory: a hardware frame of any kind.
-pub(crate) fn on_gpu(frame: &frame::Video) -> bool {
+pub fn on_gpu(frame: &frame::Video) -> bool {
     // SAFETY: reads the frame's own field.
     unsafe { !(*frame.as_ptr()).hw_frames_ctx.is_null() }
 }
@@ -393,11 +527,27 @@ pub(crate) fn sw_format(frame: &frame::Video) -> format::Pixel {
 /// timestamp.
 pub fn download(src: &frame::Video) -> Result<frame::Video> {
     // SAFETY: a valid frame.
-    if unsafe { intel_va(src) }
-        && let Some(f) = mapped_down(src)?
-    {
-        return Ok(f);
+    let Some(display) = (unsafe { intel_va(src) }) else {
+        return fetched(src);
+    };
+    if Ways::maps(display) {
+        let started = std::time::Instant::now();
+        match mapped_down(src)? {
+            Some(f) => {
+                Ways::took(display, Way::Mapped, started.elapsed(), &f);
+                return Ok(f);
+            }
+            None => Ways::unmapped(display),
+        }
     }
+    let started = std::time::Instant::now();
+    let f = fetched(src)?;
+    Ways::took(display, Way::Fetched, started.elapsed(), &f);
+    Ok(f)
+}
+
+/// `src` copied down FFmpeg's way.
+fn fetched(src: &frame::Video) -> Result<frame::Video> {
     let mut dst = frame::Video::empty();
     // SAFETY: both frames are valid; the destination is allocated by the
     // transfer, in the source frames' software format.
@@ -414,10 +564,91 @@ pub fn download(src: &frame::Video) -> Result<frame::Video> {
     Ok(dst)
 }
 
+/// The ways Intel's VA-API frames come down.
+#[derive(Clone, Copy)]
+enum Way {
+    /// The surface mapped itself (`mapped_down`).
+    Mapped,
+    /// FFmpeg's copy of it (`fetched`).
+    Fetched,
+}
+
+/// Which way Intel's frames come down faster on a VA-API display, timed on
+/// its first frames, each way in turn. Mapped, an N150's take half the time
+/// (gotchas.md); FFmpeg finds Gen7–Gen9's mapped memory uncached, so slow
+/// to read, and a card of its own reads its memory across the bus.
+#[derive(Clone, Copy)]
+struct Ways {
+    /// The display it is for.
+    display: usize,
+    /// Each way's quickest time a megabyte, in seconds, and its frames
+    /// timed (mapping that failed counts as never quicker).
+    mapped: (f64, u32),
+    fetched: (f64, u32),
+}
+
+/// The frames timed each way before one is kept.
+const WAY_TRIALS: u32 = 4;
+
+/// The displays' [`Ways`].
+static WAYS: Mutex<Vec<Ways>> = Mutex::new(Vec::new());
+
+impl Ways {
+    /// Whether the next frame on `display` is mapped: in turn while they
+    /// are timed, then the quicker way.
+    fn maps(display: usize) -> bool {
+        let ways = WAYS.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(w) = ways.iter().find(|w| w.display == display) else {
+            return true;
+        };
+        if w.mapped.1 < WAY_TRIALS || w.fetched.1 < WAY_TRIALS {
+            w.mapped.1 <= w.fetched.1
+        } else {
+            w.mapped.0 <= w.fetched.0
+        }
+    }
+
+    /// `display`'s, made at the first frame.
+    fn of(ways: &mut Vec<Ways>, display: usize) -> &mut Ways {
+        let i = match ways.iter().position(|w| w.display == display) {
+            Some(i) => i,
+            None => {
+                ways.push(Ways {
+                    display,
+                    mapped: (f64::INFINITY, 0),
+                    fetched: (f64::INFINITY, 0),
+                });
+                ways.len() - 1
+            }
+        };
+        &mut ways[i]
+    }
+
+    /// A frame `f` came down `way` on `display` in `took`.
+    fn took(display: usize, way: Way, took: std::time::Duration, f: &frame::Video) {
+        let mb = (0..f.planes()).map(|p| f.data(p).len()).sum::<usize>() as f64 / 1e6;
+        let per_mb = took.as_secs_f64() / mb.max(1e-6);
+        let mut ways = WAYS.lock().unwrap_or_else(|e| e.into_inner());
+        let w = Self::of(&mut ways, display);
+        let slot = match way {
+            Way::Mapped => &mut w.mapped,
+            Way::Fetched => &mut w.fetched,
+        };
+        *slot = (slot.0.min(per_mb), slot.1.saturating_add(1));
+    }
+
+    /// A frame on `display` wouldn't map: its frames come down FFmpeg's
+    /// way from now on.
+    fn unmapped(display: usize) {
+        let mut ways = WAYS.lock().unwrap_or_else(|e| e.into_inner());
+        Self::of(&mut ways, display).mapped = (f64::INFINITY, WAY_TRIALS);
+    }
+}
+
 /// `src` copied out of its surface mapped for reading itself
 /// (`vaDeriveImage`), where FFmpeg's copy-down reads a copy the driver makes
-/// of it (`vaGetImage`): on an Intel N150 a 2160p P010 frame took 15 ms of a
-/// core so, 38 ms FFmpeg's way. `None` when it doesn't map.
+/// of it (`vaGetImage`): on an Intel N150 in half the time (gotchas.md).
+/// `None` when it doesn't map.
 fn mapped_down(src: &frame::Video) -> Result<Option<frame::Video>> {
     let mut map = frame::Video::empty();
     let flags = ffi::AV_HWFRAME_MAP_READ as i32 | ffi::AV_HWFRAME_MAP_DIRECT as i32;
@@ -452,13 +683,67 @@ fn props(dst: &mut frame::Video, src: &frame::Video) -> Result<()> {
     Ok(())
 }
 
-/// `frame` is a VA-API frame of Intel's driver (iHD), by the vendor string
-/// libva gives its display.
+/// Whether a VA-API device's driver lists `profile` with the entry point
+/// for decoding (`VAEntrypointVLD`); `None` without libva to ask.
+///
+/// # Safety
+/// `device` is a VA-API device context.
+#[cfg(target_os = "linux")]
+unsafe fn va_lists(device: &Device, profile: Profile) -> Option<bool> {
+    use std::ffi::{c_int, c_void};
+    /// `AVVAAPIDeviceContext`.
+    #[repr(C)]
+    struct VaapiDevice {
+        display: *mut c_void,
+        driver_quirks: std::ffi::c_uint,
+    }
+    type Max = unsafe extern "C" fn(*mut c_void) -> c_int;
+    type Entrypoints = unsafe extern "C" fn(*mut c_void, c_int, *mut c_int, *mut c_int) -> c_int;
+    // va.h's `VAProfile` and `VAEntrypointVLD`.
+    let va_profile = match profile {
+        Profile::H264High => 7,
+        Profile::HevcMain => 17,
+        Profile::HevcMain10 => 18,
+        Profile::Vp9Profile0 => 19,
+        Profile::Vp9Profile2 => 21,
+        Profile::Av1Main => 32,
+    };
+    const VLD: c_int = 1;
+    // SAFETY: libva's functions as va.h declares them, looked up in the
+    // process (loaded with FFmpeg); the device's context is an
+    // AVVAAPIDeviceContext with its display; the list holds as many entry
+    // points as libva says there can be.
+    unsafe {
+        let max = libc::dlsym(libc::RTLD_DEFAULT, c"vaMaxNumEntrypoints".as_ptr());
+        let query = libc::dlsym(libc::RTLD_DEFAULT, c"vaQueryConfigEntrypoints".as_ptr());
+        if max.is_null() || query.is_null() {
+            return None;
+        }
+        let max = std::mem::transmute::<*mut c_void, Max>(max);
+        let query = std::mem::transmute::<*mut c_void, Entrypoints>(query);
+        let ctx = (*device.0).data as *const ffi::AVHWDeviceContext;
+        let display = (*((*ctx).hwctx as *const VaapiDevice)).display;
+        if display.is_null() {
+            return None;
+        }
+        let mut entrypoints = vec![0; usize::try_from(max(display)).ok()?.max(1)];
+        let mut n: c_int = 0;
+        // A profile the driver lacks: an error, not an empty list.
+        if query(display, va_profile, entrypoints.as_mut_ptr(), &mut n) != 0 {
+            return Some(false);
+        }
+        let n = usize::try_from(n).unwrap_or(0).min(entrypoints.len());
+        Some(entrypoints[..n].contains(&VLD))
+    }
+}
+
+/// The display of `frame` when it is a VA-API frame of Intel's driver
+/// (iHD), by the vendor string libva gives the display.
 ///
 /// # Safety
 /// `frame` is a valid frame.
 #[cfg(target_os = "linux")]
-unsafe fn intel_va(frame: &frame::Video) -> bool {
+unsafe fn intel_va(frame: &frame::Video) -> Option<usize> {
     use std::ffi::{CStr, c_char, c_void};
     /// `AVVAAPIDeviceContext`.
     #[repr(C)]
@@ -478,26 +763,25 @@ unsafe fn intel_va(frame: &frame::Video) -> bool {
             (!f.is_null()).then(|| std::mem::transmute::<*mut c_void, Query>(f))
         }
     });
-    let Some(query) = query else {
-        return false;
-    };
+    let query = (*query)?;
     // SAFETY: a hardware frame's frames context holds its device's, and a
     // VA-API device's context is an AVVAAPIDeviceContext with its display.
     unsafe {
         let frames = (*frame.as_ptr()).hw_frames_ctx;
         if frames.is_null() {
-            return false;
+            return None;
         }
         let device = (*((*frames).data as *const ffi::AVHWFramesContext)).device_ctx;
         if device.is_null() || (*device).type_ != ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VAAPI {
-            return false;
+            return None;
         }
         let va = (*device).hwctx as *const VaapiDevice;
         if va.is_null() || (*va).display.is_null() {
-            return false;
+            return None;
         }
         let vendor = query((*va).display);
-        !vendor.is_null() && CStr::from_ptr(vendor).to_bytes().starts_with(b"Intel iHD")
+        (!vendor.is_null() && CStr::from_ptr(vendor).to_bytes().starts_with(b"Intel iHD"))
+            .then_some((*va).display as usize)
     }
 }
 
@@ -506,61 +790,57 @@ unsafe fn intel_va(frame: &frame::Video) -> bool {
 /// # Safety
 /// None.
 #[cfg(not(target_os = "linux"))]
-unsafe fn intel_va(_: &frame::Video) -> bool {
-    false
+unsafe fn intel_va(_: &frame::Video) -> Option<usize> {
+    None
 }
 
-/// Copies frames kept on the GPU out of the decoder's few surfaces into a
-/// pool of their own that grows, so kept ones don't run the decoder out
-/// (FFmpeg does that with NVDEC's): VA-API's by `scale_vaapi` at their own
-/// size, a copy on the GPU that keeps every byte; Direct3D 11's into
-/// textures of their own that another device can open (Windows).
+/// Copies frames kept on the GPU out of a decoder whose few surfaces don't
+/// grow, so kept ones don't run it out: Direct3D 11's, into textures of
+/// their own that another device can open (Windows). FFmpeg copies NVDEC's
+/// itself, and VA-API's pool grows as it needs.
 pub(crate) enum Keeper {
-    Vaapi(VaapiKeeper),
     #[cfg(windows)]
     D3d11(d3d11::Keeper),
 }
 
+/// What a keeper or shrinker is made for: the frames context a frame comes
+/// from, its layout, and the frame's size.
+type KeptLike = (usize, format::Pixel, u32, u32);
+
 /// The frames context a hardware frame comes from, and what a keeper made
-/// for it is made for: that context and the frame's size.
-fn frames_of(f: &frame::Video) -> Result<(*mut ffi::AVBufferRef, (usize, u32, u32))> {
+/// for it is made for ([`KeptLike`]).
+fn frames_of(f: &frame::Video) -> Result<(*mut ffi::AVBufferRef, KeptLike)> {
     // SAFETY: reads the frame's own field, and a live buffer reference.
     unsafe {
         let frames = (*f.as_ptr()).hw_frames_ctx;
         if frames.is_null() {
             return Err(Error::Invalid("a GPU frame without its frames".into()));
         }
-        Ok((frames, ((*frames).data as usize, f.width(), f.height())))
+        let like = ((*frames).data as usize, sw_format(f), f.width(), f.height());
+        Ok((frames, like))
     }
 }
 
 impl Keeper {
-    /// `f` (a VA-API or Direct3D 11 frame) copied, with its timestamp and
-    /// colors; `keeper` made for frames like it first.
+    /// `f` (a Direct3D 11 frame) copied, with its timestamp and colors;
+    /// `keeper` made for frames like it first.
     pub(crate) fn copy(keeper: &mut Option<Keeper>, f: &frame::Video) -> Result<frame::Video> {
-        let (frames, input) = frames_of(f)?;
-        match f.format() {
-            format::Pixel::VAAPI => {
-                if !matches!(keeper, Some(Keeper::Vaapi(k)) if k.input == input) {
-                    *keeper = Some(Keeper::Vaapi(VaapiKeeper::new(f, frames, input)?));
-                }
-                let Some(Keeper::Vaapi(k)) = keeper else {
-                    unreachable!("made above")
-                };
-                k.copy(f)
+        #[cfg(windows)]
+        if f.format() == format::Pixel::D3D11 {
+            let (frames, like) = frames_of(f)?;
+            if !matches!(keeper, Some(Keeper::D3d11(k)) if k.like == like) {
+                *keeper = Some(Keeper::D3d11(d3d11::Keeper::new(f, frames, like)?));
             }
-            #[cfg(windows)]
-            format::Pixel::D3D11 => {
-                if !matches!(keeper, Some(Keeper::D3d11(k)) if k.input == input) {
-                    *keeper = Some(Keeper::D3d11(d3d11::Keeper::new(f, frames, input)?));
-                }
-                let Some(Keeper::D3d11(k)) = keeper else {
-                    unreachable!("made above")
-                };
-                k.copy(f)
-            }
-            other => Err(Error::Invalid(format!("no keeping {other:?} frames"))),
+            let Some(Keeper::D3d11(k)) = keeper else {
+                unreachable!("made above")
+            };
+            return k.copy(f);
         }
+        let _ = keeper;
+        Err(Error::Invalid(format!(
+            "no keeping {:?} frames",
+            f.format()
+        )))
     }
 }
 
@@ -578,32 +858,6 @@ fn same_picture(to: &mut frame::Video, from: &frame::Video) {
         (*o).color_trc = (*i).color_trc;
         (*o).chroma_location = (*i).chroma_location;
         (*o).sample_aspect_ratio = (*i).sample_aspect_ratio;
-    }
-}
-
-/// VA-API's keeper: `scale_vaapi` at the frames' own size, whose output
-/// pool grows.
-pub(crate) struct VaapiKeeper {
-    graph: ffmpeg::filter::Graph,
-    /// The frames context and size it was made for.
-    input: (usize, u32, u32),
-}
-
-impl VaapiKeeper {
-    fn copy(&mut self, f: &frame::Video) -> Result<frame::Video> {
-        let mut out = run_graph(&mut self.graph, f, "copying a VA-API frame")?;
-        same_picture(&mut out, f);
-        Ok(out)
-    }
-
-    fn new(
-        f: &frame::Video,
-        frames: *mut ffi::AVBufferRef,
-        input: (usize, u32, u32),
-    ) -> Result<Self> {
-        let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VAAPI;
-        let graph = gpu_graph(f, frames, pixel, "scale_vaapi=mode=fast")?;
-        Ok(Self { graph, input })
     }
 }
 
@@ -680,9 +934,9 @@ fn run_graph(
 pub(crate) struct Shrinker {
     /// `None`: the GPU won't scale these frames, so they come down whole.
     scaling: Option<Scaling>,
-    /// The frames context and frame size it was made for, and the size it
-    /// scales to.
-    input: ((usize, u32, u32), (u32, u32)),
+    /// The frames context, layout and frame size it was made for, and the
+    /// size it scales to.
+    input: (KeptLike, (u32, u32)),
 }
 
 enum Scaling {
@@ -729,16 +983,25 @@ impl Shrinker {
             let scaling = Scaling::new(f, frames, size).ok();
             *shrinker = Some(Self { scaling, input });
         }
-        let scaled = match &mut shrinker.as_mut().expect("made above").scaling {
-            Some(Scaling::Filters(graph)) => run_graph(graph, f, "scaling a frame on the GPU")?,
+        let shrinker = shrinker.as_mut().expect("made above");
+        let scaled = match &mut shrinker.scaling {
+            Some(Scaling::Filters(graph)) => run_graph(graph, f, "scaling a frame on the GPU"),
             #[cfg(windows)]
-            Some(Scaling::D3d11(scaler)) => scaler.scale(f)?,
+            Some(Scaling::D3d11(scaler)) => scaler.scale(f),
             None => return download(f),
         };
-        let mut small = download(&scaled)?;
-        same_picture(&mut small, f);
-        crate::color::keep_matrix(&mut small, f);
-        Ok(small)
+        match scaled.and_then(|scaled| download(&scaled)) {
+            Ok(mut small) => {
+                same_picture(&mut small, f);
+                crate::color::keep_matrix(&mut small, f);
+                Ok(small)
+            }
+            // The GPU failed it after all: these frames come down whole.
+            Err(_) => {
+                shrinker.scaling = None;
+                download(f)
+            }
+        }
     }
 }
 
@@ -784,9 +1047,9 @@ impl Drop for Frames {
 /// into the encoder's own frames (AMF takes those alone).
 pub(crate) struct Fitter {
     fitting: Fitting,
-    /// The frames context and frame size it was made for, the size it
-    /// scales to, and the turn.
-    input: ((usize, u32, u32), (u32, u32), u16),
+    /// The frames context, layout and frame size it was made for, the size
+    /// it scales to, and the turn.
+    input: (KeptLike, (u32, u32), u16),
 }
 
 enum Fitting {
@@ -893,10 +1156,7 @@ pub(crate) mod d3d11 {
         DXGI_COLOR_SPACE_TYPE, DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P601,
         DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P709, DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P2020,
         DXGI_COLOR_SPACE_YCBCR_FULL_GHLG_TOPLEFT_P2020,
-        DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P601, DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709,
-        DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P2020,
-        DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020,
-        DXGI_COLOR_SPACE_YCBCR_STUDIO_GHLG_TOPLEFT_P2020, DXGI_FORMAT_NV12, DXGI_FORMAT_P010,
+        DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020, DXGI_FORMAT_NV12, DXGI_FORMAT_P010,
     };
     use ::windows::core::Interface;
 
@@ -1065,27 +1325,38 @@ pub(crate) mod d3d11 {
     pub(crate) struct Keeper {
         /// Its own frames: single textures, shareable, a pool that grows.
         frames: *mut ffi::AVBufferRef,
+        /// The decoder's frames it copies out of, held so that another
+        /// context can't come at their address while it is made for them.
+        source: *mut ffi::AVBufferRef,
         /// Signalled once the copy before it is done.
         done: ID3D11Query,
-        pub(super) input: (usize, u32, u32),
+        pub(super) like: super::KeptLike,
     }
 
-    // SAFETY: the frames context is reference-counted and may be used on
+    // SAFETY: the frames contexts are reference-counted and may be used on
     // any thread; the query is used under the device's lock.
     unsafe impl Send for Keeper {}
 
     impl Drop for Keeper {
         fn drop(&mut self) {
-            // SAFETY: its own reference.
-            unsafe { ffi::av_buffer_unref(&mut self.frames) };
+            // SAFETY: its own references.
+            unsafe {
+                ffi::av_buffer_unref(&mut self.frames);
+                ffi::av_buffer_unref(&mut self.source);
+            }
         }
     }
+
+    /// How long a copy may take before the keeper gives up on it: far past
+    /// any copy (a 2160p frame takes well under a millisecond), short of
+    /// holding the decoder for long where the device was lost.
+    const COPY_DEADLINE: std::time::Duration = std::time::Duration::from_secs(2);
 
     impl Keeper {
         pub(super) fn new(
             f: &frame::Video,
             source: *mut ffi::AVBufferRef,
-            input: (usize, u32, u32),
+            like: super::KeptLike,
         ) -> Result<Self> {
             // Textures of 4:2:0 frames have even sides.
             let size = (
@@ -1113,10 +1384,16 @@ pub(crate) mod d3d11 {
                     ffi::av_buffer_unref(&mut frames);
                     return Err(Error::Invalid("no Direct3D 11 query".into()));
                 };
+                let source = ffi::av_buffer_ref(source);
+                if source.is_null() {
+                    ffi::av_buffer_unref(&mut frames);
+                    return Err(Error::Invalid("no memory for frames".into()));
+                }
                 Ok(Self {
                     frames,
+                    source,
                     done,
-                    input,
+                    like,
                 })
             }
         }
@@ -1147,20 +1424,31 @@ pub(crate) mod d3d11 {
                     context.End(&self.done);
                     context.Flush();
                 });
-                // The event's BOOL turns true once the copy is done (the call
-                // succeeds either way).
+                // The event's BOOL turns true once the copy is done; until
+                // then the call says not yet (`S_FALSE`). Failing (a device
+                // lost) or past the deadline, the frame isn't kept.
+                let started = std::time::Instant::now();
                 loop {
                     let mut done = ::windows::core::BOOL(0);
+                    let mut asked = Ok(());
                     locked(dev, || {
-                        let _ = context.GetData(
+                        asked = context.GetData(
                             &self.done,
                             Some((&raw mut done).cast()),
                             size_of::<::windows::core::BOOL>() as u32,
                             0,
                         );
                     });
+                    if let Err(e) = asked {
+                        return Err(Error::Invalid(format!(
+                            "waiting for a Direct3D 11 copy: {e}"
+                        )));
+                    }
                     if done.as_bool() {
                         break;
+                    }
+                    if started.elapsed() > COPY_DEADLINE {
+                        return Err(Error::Invalid("a Direct3D 11 copy didn't finish".into()));
                     }
                     std::thread::sleep(std::time::Duration::from_micros(100));
                 }
@@ -1391,6 +1679,13 @@ pub(crate) mod d3d11 {
             source: *mut ffi::AVBufferRef,
             input: (u32, u32),
         ) -> Result<bool> {
+            // Each band's middle, a few samples across in luma and chroma,
+            // must be there to read: smaller, the scaler isn't trusted and
+            // the frames come down whole.
+            let (ow, oh) = (self.size.0 as usize, self.size.1 as usize);
+            if ow < 4 * BANDS.len() || oh < 8 {
+                return Ok(false);
+            }
             let layout = |frames: *mut ffi::AVBufferRef| {
                 // SAFETY: a live frames context.
                 format::Pixel::from(unsafe {
@@ -1458,8 +1753,13 @@ pub(crate) mod d3d11 {
             };
             // A level either way (in 8 bits), in the middle of each band.
             let (scale, near) = if wide_out { (4, 4) } else { (1, 1) };
-            let (ow, oh) = (self.size.0 as usize, self.size.1 as usize);
-            Ok(BANDS.iter().enumerate().all(|(k, [y, u, v])| {
+            // Below black and above white only where nothing clips them.
+            let checked = if full_range(self.space) {
+                bands
+            } else {
+                bands - OUTSIDE
+            };
+            Ok(BANDS[..checked].iter().enumerate().all(|(k, [y, u, v])| {
                 let middle = (2 * k + 1) * ow / (2 * bands);
                 let luma = (oh / 4..oh * 3 / 4).all(|row| {
                     (middle - 1..middle + 1).all(|x| read(0, x, row).abs_diff(y * scale) <= near)
@@ -1550,14 +1850,21 @@ pub(crate) mod d3d11 {
                     let (x, y, pw, ph) = self.place;
                     c.VideoProcessorSetStreamDestRect(p, 0, true, Some(&rect(x, y, pw, ph)));
                     c.VideoProcessorSetOutputTargetRect(p, true, Some(&rect(0, 0, w, h)));
-                    // Around the picture, black: given as RGB, which every
-                    // driver reads (AMD's reads a YCbCr one as RGB too).
+                    // Around the picture, video-range black: given as RGB,
+                    // which every driver reads (AMD's reads a YCbCr one as
+                    // RGB too). The frames are video range told full range
+                    // (`color_space`), where black is 16 of RGB's 255.
+                    let level = if full_range(self.space) {
+                        16.0 / 255.0
+                    } else {
+                        0.0
+                    };
                     let black = D3D11_VIDEO_COLOR {
                         Anonymous: D3D11_VIDEO_COLOR_0 {
                             RGBA: D3D11_VIDEO_COLOR_RGBA {
-                                R: 0.0,
-                                G: 0.0,
-                                B: 0.0,
+                                R: level,
+                                G: level,
+                                B: level,
                                 A: 1.0,
                             },
                         },
@@ -1578,8 +1885,10 @@ pub(crate) mod d3d11 {
     }
 
     /// The test picture's bands (8-bit levels, Y, Cb, Cr): grays from black
-    /// to white, then BT.709's red, green and blue.
-    const BANDS: [[u16; 3]; 8] = [
+    /// to white, BT.709's red, green and blue, and levels below black and
+    /// above white with chroma near its ends, which video keeps and a
+    /// scaler mustn't clip.
+    const BANDS: [[u16; 3]; 10] = [
         [16, 128, 128],
         [64, 128, 128],
         [128, 128, 128],
@@ -1588,34 +1897,35 @@ pub(crate) mod d3d11 {
         [63, 102, 240],
         [173, 42, 26],
         [32, 240, 118],
+        [4, 8, 128],
+        [250, 128, 248],
     ];
 
-    /// The color space `f`'s values are read in (untagged, as its size
-    /// implies), for the video processor to keep.
+    /// The last bands, outside video range.
+    const OUTSIDE: usize = 2;
+
+    /// The color space the video processor is told `f`'s values are in, and
+    /// go out in: its matrix (untagged, as its size implies), in full range
+    /// where DXGI has one, as nothing is converted. Told studio range, AMD's
+    /// processor clips levels below black and above white (gotchas.md); PQ
+    /// has studio range alone.
     fn color_space(f: &frame::Video) -> DXGI_COLOR_SPACE_TYPE {
         use crate::color::Matrix;
         use vidcut_core::model::Hdr;
         let colors = crate::color::colors_of(f);
-        let range = |studio, full| if colors.full_range { full } else { studio };
         match (colors.hdr, colors.matrix) {
             (Some(Hdr::Pq), _) => DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020,
-            (Some(Hdr::Hlg), _) => range(
-                DXGI_COLOR_SPACE_YCBCR_STUDIO_GHLG_TOPLEFT_P2020,
-                DXGI_COLOR_SPACE_YCBCR_FULL_GHLG_TOPLEFT_P2020,
-            ),
-            (None, Matrix::Bt2020) => range(
-                DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P2020,
-                DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P2020,
-            ),
-            (None, Matrix::Bt601) => range(
-                DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P601,
-                DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P601,
-            ),
-            (None, Matrix::Bt709) => range(
-                DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709,
-                DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P709,
-            ),
+            (Some(Hdr::Hlg), _) => DXGI_COLOR_SPACE_YCBCR_FULL_GHLG_TOPLEFT_P2020,
+            (None, Matrix::Bt2020) => DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P2020,
+            (None, Matrix::Bt601) => DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P601,
+            (None, Matrix::Bt709) => DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P709,
         }
+    }
+
+    /// Whether `space` is one of the full-range ones [`color_space`] tells,
+    /// which keep every level.
+    fn full_range(space: DXGI_COLOR_SPACE_TYPE) -> bool {
+        space != DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020
     }
 }
 

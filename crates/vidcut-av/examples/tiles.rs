@@ -3,6 +3,7 @@
 //! viewer decodes on (`VIDCUT_HWDEC` picks another).
 //!
 //! `cargo run --release -p vidcut-av --example tiles -- FILE [HEIGHT] [gpu]`
+//! (`gpu` may come without a height).
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -14,11 +15,14 @@ use vidcut_core::time::Rational;
 fn main() {
     let mut args = std::env::args().skip(1);
     let path = PathBuf::from(args.next().expect("FILE"));
-    let height: u32 = args.next().map_or(112, |h| h.parse().expect("HEIGHT"));
-    let gpu = match args.next().as_deref() {
-        Some("gpu") => Some(vidcut_av::hw::GpuDecoder::best().expect("a GPU decoder")),
-        Some(other) => panic!("not gpu: {other}"),
-        None => None,
+    let rest: Vec<String> = args.collect();
+    let gpu = rest
+        .iter()
+        .any(|a| a == "gpu")
+        .then(|| vidcut_av::hw::GpuDecoder::best().expect("a GPU decoder"));
+    let height: u32 = match rest.iter().find(|a| *a != "gpu") {
+        Some(h) => h.parse().expect("HEIGHT"),
+        None => 112,
     };
     let info = vidcut_av::probe::probe(&path).expect("probe");
     let video = info.video.expect("a video stream");
