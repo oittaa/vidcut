@@ -925,11 +925,7 @@ fn gpu_graph(
     graph
         .add(&sink, "out", "")
         .map_err(failed("creating a GPU filter's sink".into()))?;
-    graph
-        .output("in", 0)
-        .and_then(|p| p.input("out", 0))
-        .and_then(|p| p.parse(spec))
-        .map_err(failed(format!("building {spec}")))?;
+    crate::parts::parse_filters(&mut graph, spec)?;
     graph
         .validate()
         .map_err(failed(format!("configuring {spec}")))?;

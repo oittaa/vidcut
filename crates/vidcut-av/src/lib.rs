@@ -15,6 +15,7 @@ pub mod fixture;
 pub mod hdr;
 pub mod hw;
 pub mod light;
+pub mod parts;
 pub mod player;
 pub mod probe;
 pub mod progress;

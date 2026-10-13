@@ -74,6 +74,8 @@ vidcut history undo                         # works across separate runs
 | 9 | `CANCELLED` |
 | 10 | `DEPENDENCY` |
 
+**FFmpeg's parts:** `vidcut doctor` lists what this FFmpeg build lacks of the parts vidcut uses (`ffmpeg_missing`: each one's name, kind, library and use). An export that needs one fails with `DEPENDENCY` before writing anything.
+
 **Safe automation:**
 - `--dry-run` reports `changes` without writing anything.
 - `--if-rev N` fails with `CONFLICT` if someone else changed the project after you read revision `N`. (The project's `edited`, milliseconds since 1970 UTC, says when it last changed, for people: the GUI's status bar shows it. Compare `rev`, not times.) Every request on the project checks it: edits, exports, frames, measurements, queries, and live ones such as seeks and screenshots. An export encodes the project as it was when it started, whatever edits follow.

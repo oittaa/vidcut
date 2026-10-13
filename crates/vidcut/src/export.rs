@@ -463,7 +463,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
             p.settings.sample_rate,
             p.settings.channels,
         )
-        .map_err(|e| Error::new(ErrorCode::Export, e.to_string()))?;
+        .map_err(|e| av_error(&e, ErrorCode::Export, String::new()))?;
         proj.settings.sample_rate = enc.rate;
         proj.settings.channels = enc.channels;
     }
@@ -873,6 +873,7 @@ pub fn run(
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(usize, &Path, Progress),
 ) -> Result<Vec<Report>> {
+    check(prepared, available, vidcut_av::parts::has_filter)?;
     let mut reports = Vec::new();
     for (i, o) in prepared.outputs.iter().enumerate() {
         if let Some(dir) = o.path.parent().filter(|d| !d.as_os_str().is_empty()) {
@@ -892,7 +893,7 @@ pub fn run(
             if engine::is_cancelled(&e) {
                 Error::new(ErrorCode::Cancelled, "export cancelled")
             } else {
-                Error::new(ErrorCode::Export, format!("{}: {e}", o.path.display()))
+                av_error(&e, ErrorCode::Export, format!("{}: ", o.path.display()))
             }
         })?;
         reports.push(Report {
@@ -904,14 +905,50 @@ pub fn run(
     Ok(reports)
 }
 
+/// What the outputs need of this FFmpeg, before any file is written: an
+/// encoder for the picture, and where it changes transfer (HDR and SDR,
+/// PQ and HLG) the `zscale` filter, as `has_filter` says.
+fn check(
+    prepared: &Prepared,
+    available: &Availability,
+    has_filter: impl Fn(&str) -> bool,
+) -> Result<()> {
+    for o in &prepared.outputs {
+        let at = format!("{}: ", o.path.display());
+        if let Some(v) = &o.settings.video {
+            vidcut_av::export::encode::resolve_video(v, available)
+                .map_err(|e| av_error(&e, ErrorCode::Export, at.clone()))?;
+        }
+        if let Some(c) = &o.color
+            && c.converted() > 0
+            && !has_filter("zscale")
+        {
+            let e = vidcut_av::parts::missing_error(vidcut_av::parts::Kind::Filter, "zscale");
+            let what = format!("{at}{} frames change between HDR and SDR: ", c.converted());
+            return Err(av_error(&e, ErrorCode::Export, what));
+        }
+    }
+    Ok(())
+}
+
 /// A still render's failure. The cancel flag is the export's, so a client
 /// that left is `CANCELLED`.
 fn from_av(e: vidcut_av::error::Error) -> Error {
     if vidcut_av::export::is_cancelled(&e) {
         Error::new(ErrorCode::Cancelled, "cancelled")
     } else {
-        Error::new(ErrorCode::Export, e.to_string())
+        av_error(&e, ErrorCode::Export, String::new())
     }
+}
+
+/// A media-layer failure as `code`, its message after `prefix`; a part
+/// this FFmpeg lacks is `DEPENDENCY` whatever failed.
+pub fn av_error(e: &vidcut_av::error::Error, code: ErrorCode, prefix: String) -> Error {
+    let code = match e {
+        vidcut_av::error::Error::Missing(_) => ErrorCode::Dependency,
+        _ => code,
+    };
+    Error::new(code, format!("{prefix}{e}"))
 }
 
 /// Renders the timeline (or a media item) at `at` to a PNG.

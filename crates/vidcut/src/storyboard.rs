@@ -145,7 +145,7 @@ pub fn render(
         }));
     }
     let png = vidcut_av::export::still::png_rgba(cw as u32, ch as u32, &canvas)
-        .map_err(|e| Error::new(ErrorCode::Export, e.to_string()))?;
+        .map_err(|e| crate::export::av_error(&e, ErrorCode::Export, String::new()))?;
     let part = out.with_extension("part.png");
     std::fs::write(&part, png)
         .and_then(|()| std::fs::rename(&part, out))
@@ -195,7 +195,7 @@ fn from_av(e: vidcut_av::error::Error) -> Error {
     if vidcut_av::export::is_cancelled(&e) {
         Error::new(ErrorCode::Cancelled, "cancelled")
     } else {
-        Error::new(ErrorCode::Export, e.to_string())
+        crate::export::av_error(&e, ErrorCode::Export, String::new())
     }
 }
 

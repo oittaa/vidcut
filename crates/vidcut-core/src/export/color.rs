@@ -278,6 +278,17 @@ impl ColorChoice {
         }
     }
 
+    /// Frames converted between transfers: HDR into SDR, and SDR or the
+    /// other HDR transfer into HDR.
+    pub fn converted(&self) -> i64 {
+        let p = &self.picture;
+        match self.hdr {
+            HdrMode::Pq => p.frames - p.pq,
+            HdrMode::Hlg => p.frames - p.hlg,
+            HdrMode::Sdr | HdrMode::Auto => p.hdr(),
+        }
+    }
+
     /// HDR picture is tone-mapped although SDR wasn't asked for: worth a
     /// quiet note (decision D44).
     pub fn worth_a_note(&self) -> bool {
@@ -422,6 +433,20 @@ mod tests {
                 deep: 40
             }
         );
+    }
+
+    #[test]
+    fn frames_converted_between_transfers_are_counted() {
+        let s = share(&[("pq", 30), ("hlg", 20), ("sdr", 10), ("black", 5)]);
+        let into = |hdr| ColorChoice {
+            hdr,
+            ..choose(&video(VideoCodec::Hevc), &s, ALL)
+        };
+        assert_eq!(into(HdrMode::Sdr).converted(), 50);
+        assert_eq!(into(HdrMode::Pq).converted(), 30);
+        assert_eq!(into(HdrMode::Hlg).converted(), 40);
+        let sdr = share(&[("sdr", 10), ("deep", 10)]);
+        assert_eq!(choose(&video(VideoCodec::H264), &sdr, ALL).converted(), 0);
     }
 
     #[test]

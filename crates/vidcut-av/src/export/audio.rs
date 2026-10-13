@@ -171,15 +171,18 @@ impl SourceAudio {
         // Duration is a length on the packet clock, not an end at zero, and
         // a missing duration does not mean the file goes on forever.
         let end = crate::decode::container_end(&input, stream_start, tick);
-        let decoder = codec::context::Context::from_parameters(params)
-            .and_then(|mut c| {
+        let id = params.id();
+        let decoder = crate::parts::decoder_opened(
+            codec::context::Context::from_parameters(params).and_then(|mut c| {
                 // Without the packet time base, FFmpeg can't shift a frame's
                 // timestamp past skipped priming samples (Opus pre-skip, AAC
                 // priming), and audio would start that much late.
                 unsafe { (*c.as_mut_ptr()).pkt_timebase = tb.into() };
                 c.decoder().audio()
-            })
-            .ctx(|| "opening audio decoder".into())?;
+            }),
+            id,
+            "audio",
+        )?;
         let mut s = Self {
             path: path.to_path_buf(),
             ordinal,
