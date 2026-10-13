@@ -7,7 +7,7 @@
 - [`tests/player_sound.rs`](../../crates/vidcut-av/tests/player_sound.rs): backward sound reversed to the sample; pictures with the sound through a device with latency at −1×, 2×, 0.5× and −2×; other speeds both ways keeping the pitch; audio scrubbing: steps play their frame's sound, held steps don't pile up, the `Scrubber` alone.
 - [`tests/player_decodes.rs`](../../crates/vidcut-av/tests/player_decodes.rs): what is decoded, playing both ways, across an edit, for seeks in a row, and after switching to a prepared plan (nothing).
 - [`tests/player_media.rs`](../../crates/vidcut-av/tests/player_media.rs): numbers on the real 1080p30 and 2160p60 clips, on the CPU and with `--features gpu-tests` on NVDEC too (§7), and what one player for a viewer's source and timeline costs in its one budget; `VIDCUT_PLAYER_MEDIA` measures other files, `VIDCUT_PLAYER_BUDGET_MB` another budget.
-- [`tests/player_gpu.rs`](../../crates/vidcut-av/tests/player_gpu.rs) (`--features vidcut-av/gpu-tests`): pictures decoded on each GPU decoder the machine has are the CPU's (§3), and NVDEC's kept in video memory are the ones copied down.
+- [`tests/player_gpu.rs`](../../crates/vidcut-av/tests/player_gpu.rs) (`--features vidcut-av/gpu-tests`): pictures decoded on each GPU decoder the machine has are the CPU's (§3), seeks far into a long open GOP show their frames, and NVDEC's kept in video memory are the ones copied down.
 - [`tests/player_device.rs`](../../crates/vidcut-av/tests/player_device.rs) (`--features vidcut-av/audio-tests`): the system's audio device runs the clock (it plays silence).
 
 ## 1. Threads

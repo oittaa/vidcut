@@ -139,7 +139,12 @@ pub struct GpuDecoder {
     on: String,
     /// NVDEC's CUDA device, with what it does besides decoding.
     cuda: Option<CudaDevice>,
+    /// Its GPU's PCI vendor, where known (Direct3D 11's adapter's).
+    vendor: Option<u32>,
 }
+
+/// AMD's PCI vendor id.
+const AMD: u32 = 0x1002;
 
 impl GpuDecoder {
     /// NVDEC, on `cuda`.
@@ -149,6 +154,7 @@ impl GpuDecoder {
             device: Arc::new(Device(unsafe { ffi::av_buffer_ref(cuda.as_ptr()) })),
             on: String::new(),
             cuda: Some(cuda),
+            vendor: None,
         }
     }
 
@@ -159,16 +165,36 @@ impl GpuDecoder {
         if kind == Kind::Nvdec {
             return CudaDevice::open().map(Self::nvdec);
         }
+        let device = Device::open(kind, on)?;
+        #[cfg(windows)]
+        // SAFETY: a D3D11VA device FFmpeg made.
+        let vendor = (kind == Kind::D3d11va)
+            .then(|| unsafe { windows::vendor(&device) })
+            .flatten();
+        #[cfg(not(windows))]
+        let vendor = None;
         Ok(Self {
             kind,
-            device: Arc::new(Device::open(kind, on)?),
+            device: Arc::new(device),
             on: on.to_string(),
             cuda: None,
+            vendor,
         })
     }
 
     pub fn kind(&self) -> Kind {
         self.kind
+    }
+
+    /// Whether it decodes `codec` right, as far as known. AMD's Direct3D 11
+    /// decoder loses its way in H.264 sought into an open GOP (a keyframe
+    /// that isn't IDR): some frames on, it shows one picture over and over,
+    /// where NVIDIA's and VA-API on Intel decode on. The CPU decodes H.264
+    /// there.
+    pub fn decodes(&self, codec: ffmpeg::codec::Id) -> bool {
+        !(self.kind == Kind::D3d11va
+            && self.vendor == Some(AMD)
+            && codec == ffmpeg::codec::Id::H264)
     }
 
     /// The render node or adapter it is on; empty for the default one.
@@ -306,7 +332,7 @@ mod windows {
     ///
     /// # Safety
     /// `device` is a D3D11VA device context.
-    unsafe fn vendor(device: &Device) -> Option<u32> {
+    pub(super) unsafe fn vendor(device: &Device) -> Option<u32> {
         type QueryInterface =
             unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> i32;
         type Release = unsafe extern "system" fn(*mut c_void) -> u32;

@@ -135,6 +135,7 @@ fn gpu_pictures_are_the_cpus() {
     for gpu_decoder in decoders {
         let kind = gpu_decoder.kind();
         let name = format!("{} {}", kind.name(), gpu_decoder.on());
+        let h264 = gpu_decoder.decodes(vidcut_av::ffmpeg::codec::Id::H264);
         let gpu = player_on(p.clone(), gpu_decoder);
         for &t in &ts_checked {
             let g = picture_at(&gpu, t);
@@ -156,16 +157,22 @@ fn gpu_pictures_are_the_cpus() {
             let diff = mean_diff(&g, &c);
             assert!(diff < 2.0, "frame {t}: {diff:.2} levels from the CPU's");
         }
-        // Which decoded what: H.264 every GPU, interlaced too; ProRes none;
-        // the rest NVDEC, and the other GPUs where they decode them.
+        // Which decoded what: H.264 every GPU that decodes it right (not
+        // AMD's Direct3D 11), interlaced too; ProRes none; the rest NVDEC,
+        // and the other GPUs where they decode them.
         let on_gpu = Some(Decoder::Gpu(kind));
         let decoder = |t: i64| {
             let _ = picture_at(&gpu, t);
             gpu.status().decoder
         };
-        assert_eq!(decoder(5), on_gpu, "{name}: H.264");
-        assert_eq!(picture_at(&gpu, 5).layout(), Layout::Nv12);
-        assert_eq!(decoder(starts[6] + 3), on_gpu, "{name}: interlaced H.264");
+        let (h264_on, h264_layout) = if h264 {
+            (on_gpu, Layout::Nv12)
+        } else {
+            (Some(Decoder::Cpu), Layout::Yuv420p)
+        };
+        assert_eq!(decoder(5), h264_on, "{name}: H.264");
+        assert_eq!(picture_at(&gpu, 5).layout(), h264_layout);
+        assert_eq!(decoder(starts[6] + 3), h264_on, "{name}: interlaced H.264");
         for (t, what) in [
             (35, "HEVC 10-bit"),
             (starts[3] + 3, "VP9"),
@@ -215,7 +222,7 @@ fn gpu_pictures_are_the_cpus() {
         assert_eq!(shown_at(&gpu, 5), expect[5]);
         gpu.set_hardware(true);
         let started = Instant::now();
-        while shows(&gpu) != on_gpu {
+        while shows(&gpu) != h264_on {
             assert!(started.elapsed() < Duration::from_secs(10), "still the CPU");
             std::thread::sleep(Duration::from_millis(5));
         }
@@ -341,5 +348,44 @@ fn a_seek_in_video_memory_keeps_its_way_for_the_steps_back() {
         let shown = player.present(Instant::now()).unwrap();
         assert_eq!((shown.frame, shown.exact), (t, true));
         assert_eq!(barcode(&shown.picture), Some(t as u32));
+    }
+}
+
+/// Seeks far into a long open GOP (keyframes 120 frames apart, B-frames
+/// referring to the GOP before), and steps on and back from there: every
+/// frame its own, on each GPU decoder. AMD's Direct3D 11 decoder showed one
+/// picture over and over doing so with H.264, which the CPU decodes there
+/// instead (`GpuDecoder::decodes`).
+#[test]
+fn seeks_into_long_open_gops_show_their_frames() {
+    let decoders = GpuDecoder::all();
+    if decoders.is_empty() {
+        eprintln!("skipping: no GPU decoder");
+        return;
+    }
+    let long = src(
+        "m1",
+        FixtureSpec::new(VideoCodec::H264, Container::Mp4, W, H, (30, 1), 300)
+            .gop(120)
+            .bframes(2),
+    );
+    let p = plan(&[clip(&long, 0, 300)], 0);
+    for gpu in decoders {
+        let name = format!("{} {}", gpu.kind().name(), gpu.on());
+        let player = player_on(p.clone(), gpu);
+        for t in [200, 150, 260] {
+            player.seek(t);
+            assert_eq!(shown_at(&player, t), Some(t as u32), "{name}: seek to {t}");
+        }
+        player.seek(200);
+        assert_eq!(shown_at(&player, 200), Some(200), "{name}");
+        for t in 201..210 {
+            player.step(1);
+            assert_eq!(shown_at(&player, t), Some(t as u32), "{name}: step to {t}");
+        }
+        for t in (190..209).rev() {
+            player.step(-1);
+            assert_eq!(shown_at(&player, t), Some(t as u32), "{name}: back to {t}");
+        }
     }
 }
