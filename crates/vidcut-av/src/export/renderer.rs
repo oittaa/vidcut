@@ -95,9 +95,8 @@ impl StillRenderer {
         }
     }
 
-    /// Files decode on `gpu` where it decodes their streams, but H.264
-    /// (`frames`), the frames shrunk there before they come down
-    /// ([`VideoFrames::decode_on`]).
+    /// Files decode on `gpu` where it decodes their streams, the frames
+    /// shrunk there before they come down ([`VideoFrames::decode_on`]).
     pub fn decoding_on(mut self, gpu: crate::hw::GpuDecoder) -> Self {
         self.decoder = Some(gpu);
         self
@@ -252,9 +251,8 @@ pub struct FrameReader {
 }
 
 impl FrameReader {
-    /// Files decode on `gpu` where it decodes their streams, but H.264
-    /// (`frames`), the frames shrunk there before they come down
-    /// ([`VideoFrames::decode_on`]).
+    /// Files decode on `gpu` where it decodes their streams, the frames
+    /// shrunk there before they come down ([`VideoFrames::decode_on`]).
     pub fn decoding_on(gpu: crate::hw::GpuDecoder) -> Self {
         Self {
             frames: None,
@@ -298,9 +296,7 @@ impl FrameReader {
 const RGBA: format::Pixel = format::Pixel::RGBA;
 
 /// Frames as `pixel` pictures of `width`×`height` at `fps`, decoding on
-/// `decoder` where it decodes a stream: HEVC, AV1 and VP9. H.264, which the
-/// CPU decodes cheaply, stays on the CPU: frames read in jumps seek at every
-/// one, and FFmpeg 8 makes the GPU's H.264 decoder anew at each (gotchas.md).
+/// `decoder` where it decodes a stream.
 pub(crate) fn frames(
     fps: Rational,
     (width, height): (u32, u32),
@@ -309,10 +305,7 @@ pub(crate) fn frames(
 ) -> VideoFrames {
     let frames = VideoFrames::new(&[], fps, width, height, pixel, None);
     match decoder {
-        Some(d) => frames.decode_on(d.clone().without(
-            crate::ffmpeg::codec::Id::H264,
-            "frames read in jumps seek at every one, and the CPU decodes H.264 sooner",
-        )),
+        Some(d) => frames.decode_on(d.clone()),
         None => frames,
     }
 }

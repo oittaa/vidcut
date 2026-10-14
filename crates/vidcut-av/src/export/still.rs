@@ -11,8 +11,7 @@ use crate::ffmpeg::{self, codec, encoder, format};
 
 /// Renders one video piece frame (a single-frame piece) as PNG bytes at
 /// `width`×`height` (the picture fit inside, padded black). The file
-/// decodes on `decoder` where it decodes its stream, but H.264
-/// (`renderer::frames`).
+/// decodes on `decoder` where it decodes its stream.
 pub fn png(
     piece: &VideoPiece,
     fps: Rational,
