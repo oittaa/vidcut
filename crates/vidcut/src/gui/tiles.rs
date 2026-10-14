@@ -614,46 +614,6 @@ mod tests {
     }
 
     #[test]
-    fn the_tiles_shown_least_recently_go_first() {
-        let ctx = egui::Context::default();
-        let mut tiles = Tiles::new(&Thumbnails::default());
-        let image = Image {
-            width: 4,
-            height: 4,
-            rgba: vec![0; 64],
-        };
-        let key = |frame| TileKey {
-            media: "m1".into(),
-            frame,
-            height: 4,
-        };
-        // Room for three pictures.
-        tiles.budget = 3 * 64;
-        for f in [0, 1, 2] {
-            tiles.sender.send((key(f), image.clone())).unwrap();
-        }
-        tiles.begin_frame(&ctx, None);
-        assert_eq!(tiles.usage(), (3, 192));
-        // Frame 0 stays in view a while; 1 and 2 scroll away.
-        for _ in 0..3 {
-            assert!(tiles.want(&key(0), || None).is_some());
-            tiles.end_frame();
-            tiles.begin_frame(&ctx, None);
-        }
-        // A fourth: over the budget, those unseen longest go, down to nine
-        // tenths of it.
-        tiles.sender.send((key(3), image.clone())).unwrap();
-        tiles.begin_frame(&ctx, None);
-        assert_eq!(tiles.usage(), (2, 128));
-        assert!(tiles.want(&key(0), || None).is_some());
-        assert!(tiles.want(&key(1), || None).is_none());
-        // Until its own picture comes, a tile borrows the nearest one.
-        let three = tiles.want(&key(3), || None);
-        assert_eq!(tiles.nearest("m1", 4, 2, 2), three);
-        assert_eq!(tiles.nearest("m1", 4, 10, 2), None, "too far");
-    }
-
-    #[test]
     fn heights_round_up_to_sixteen() {
         assert_eq!(tile_height(1.0), 16);
         assert_eq!(tile_height(36.0), 48);

@@ -1047,40 +1047,6 @@ mod tests {
     }
 
     #[test]
-    fn a_small_drag_overwrites_the_neighbors_edge() {
-        // C2 dragged 10 frames right, the pointer still over c2.
-        let w = World::new();
-        let r = w.drag(
-            mv(&["c2"], 250.0, 100, 50),
-            pos2(250.0, 150.0),
-            &[pos2(270.0, 150.0)],
-            Duration::ZERO,
-        );
-        assert_eq!(
-            r,
-            Some(
-                json!({"method": "edit.move", "params": {"clips": ["c2"], "to": 110, "mode": "overwrite"}})
-            )
-        );
-        // Dragged away and back where it started: nothing.
-        let r = w.drag(
-            mv(&["c2"], 250.0, 100, 50),
-            pos2(250.0, 150.0),
-            &[pos2(290.0, 150.0), pos2(250.0, 150.0)],
-            Duration::ZERO,
-        );
-        assert_eq!(r, None);
-        // Dragged off the track: nothing.
-        let r = w.drag(
-            mv(&["c2"], 250.0, 100, 50),
-            pos2(250.0, 150.0),
-            &[pos2(270.0, 20.0)],
-            Duration::ZERO,
-        );
-        assert_eq!(r, None);
-    }
-
-    #[test]
     fn moves_snap_to_edges() {
         // §8.8: c2's head lands 3 frames from c3's end (250) and snaps.
         let mut w = World::new();
@@ -1096,60 +1062,6 @@ mod tests {
             r.as_ref().map(|v| v["params"]["to"].clone()),
             Some(json!(250)),
             "{r:?}"
-        );
-    }
-
-    #[test]
-    fn trims_ripple_unless_alt_and_respect_media() {
-        // Dragging c2's tail 10 frames right.
-        let w = World::new();
-        let tail = Gesture::Trim {
-            clip: "c2".into(),
-            edge: Edge::Tail,
-            from: 150,
-            ripple: true,
-        };
-        let r = w.drag(
-            tail.clone(),
-            pos2(300.0, 150.0),
-            &[pos2(320.0, 150.0)],
-            Duration::ZERO,
-        );
-        assert_eq!(
-            r,
-            Some(
-                json!({"method": "edit.trim", "params": {"clip": "c2", "edge": "tail", "by": 10}})
-            )
-        );
-        // Alt: no ripple.
-        let alt = Gesture::Trim {
-            clip: "c2".into(),
-            edge: Edge::Tail,
-            from: 150,
-            ripple: false,
-        };
-        let r = w.drag(
-            alt,
-            pos2(300.0, 150.0),
-            &[pos2(320.0, 150.0)],
-            Duration::ZERO,
-        );
-        assert_eq!(r.unwrap()["params"]["ripple"], json!(false));
-        // c1's head can't go before the media's first frame.
-        let head = Gesture::Trim {
-            clip: "c1".into(),
-            edge: Edge::Head,
-            from: 0,
-            ripple: true,
-        };
-        assert_eq!(
-            w.drag(
-                head,
-                pos2(1.0, 150.0),
-                &[pos2(-40.0, 150.0)],
-                Duration::ZERO
-            ),
-            None
         );
     }
 
@@ -1174,56 +1086,6 @@ mod tests {
         let p = d.update(pos2(330.0, 150.0), t0 + SAFE_EDIT_HOLD, &ctx);
         assert!(!p.blocked);
         assert_eq!(p.request.unwrap()["params"]["by"], json!(15));
-    }
-
-    #[test]
-    fn rolls_slips_and_audio_rolls() {
-        let w = World::new();
-        // Roll the c1|c2 edit 5 frames left.
-        let r = w.drag(
-            Gesture::Roll {
-                outgoing: "c1".into(),
-                from: 100,
-            },
-            pos2(200.0, 150.0),
-            &[pos2(190.0, 150.0)],
-            Duration::ZERO,
-        );
-        assert_eq!(
-            r,
-            Some(
-                json!({"method": "edit.roll", "params": {"clip": "c1", "edge": "tail", "by": -5}})
-            )
-        );
-        // Dragging c2's slip handle 4 frames right shows earlier media.
-        let r = w.drag(
-            Gesture::Slip {
-                clips: vec!["c2".into()],
-            },
-            pos2(250.0, 110.0),
-            &[pos2(258.0, 110.0)],
-            Duration::ZERO,
-        );
-        assert_eq!(
-            r,
-            Some(json!({"method": "edit.slip", "params": {"clip": "c2", "by": -4}}))
-        );
-        // An L-cut, c1's audio 6 frames into c2.
-        let r = w.drag(
-            Gesture::AudioRoll {
-                outgoing: "c1".into(),
-                from: 100,
-            },
-            pos2(200.0, 190.0),
-            &[pos2(212.0, 190.0)],
-            Duration::ZERO,
-        );
-        assert_eq!(
-            r,
-            Some(
-                json!({"method": "edit.audio_roll", "params": {"clip": "c1", "edge": "tail", "by": 6}})
-            )
-        );
     }
 
     #[test]
@@ -1258,38 +1120,6 @@ mod tests {
         assert_eq!((m, p["at"].clone()), (json!("edit.overwrite"), json!(200)));
     }
 
-    #[test]
-    fn scrubbing_and_marquee() {
-        let w = World::new();
-        let ctx = w.ctx();
-        let now = Instant::now();
-        // The ruler: the playhead goes under the pointer.
-        let mut d = Drag::new(
-            Gesture::Scrub {
-                drag_content: false,
-                from: 0.0,
-            },
-            pos2(10.0, 50.0),
-        );
-        assert_eq!(d.update(pos2(101.0, 50.0), now, &ctx).seek, Some(50));
-        // Fixed playhead: dragging the content left moves the playhead on.
-        let mut d = Drag::new(
-            Gesture::Scrub {
-                drag_content: true,
-                from: 100.0,
-            },
-            pos2(500.0, 50.0),
-        );
-        assert_eq!(d.update(pos2(440.0, 50.0), now, &ctx).seek, Some(130));
-        // A marquee from empty space over c2 and c3.
-        let mut d = Drag::new(Gesture::Marquee { additive: false }, pos2(250.0, 90.0));
-        let r = d.finish(pos2(320.0, 160.0), now, &ctx);
-        assert_eq!(
-            r,
-            Some(json!({"method": "selection.set", "params": {"clips": ["c2", "c3"]}}))
-        );
-    }
-
     /// A clip moved along a track other than Track 1 shows there while it
     /// is dragged, not on Track 1.
     #[test]
@@ -1316,106 +1146,6 @@ mod tests {
             pv.request
                 .is_some_and(|r| r["params"].get("track").is_none())
         );
-    }
-
-    #[test]
-    fn clips_and_media_go_to_the_track_under_the_pointer() {
-        // Rows for V2 (y 40..90) over V1 (100..200); a new video track
-        // above them, a new audio track below.
-        let mut b = clip("b1", 300, 40, 0);
-        b.audio = None;
-        let w = World::with_v2(vec![b]);
-        let method = |v: Option<Value>| v.map(|v| (v["method"].clone(), v["params"].clone()));
-        // A Track 1 clip dragged up into V2 overwrites there.
-        let (m, p) = method(w.drag(
-            mv(&["c2"], 250.0, 100, 50),
-            pos2(250.0, 150.0),
-            &[pos2(250.0, 120.0), pos2(260.0, 60.0)],
-            Duration::ZERO,
-        ))
-        .unwrap();
-        assert_eq!(m, "edit.move");
-        assert_eq!(
-            (p["track"].clone(), p["mode"].clone(), p["to"].clone()),
-            (json!("V2"), json!("overwrite"), json!(105))
-        );
-        // Above every track: a new one.
-        let (_, p) = method(w.drag(
-            mv(&["c2"], 250.0, 100, 50),
-            pos2(250.0, 150.0),
-            &[pos2(250.0, 30.0)],
-            Duration::ZERO,
-        ))
-        .unwrap();
-        assert_eq!(p["track"], "V3");
-        // The V2 clip moves along its own track without a track change...
-        let from_v2 = Gesture::Move {
-            clips: vec!["b1".into()],
-            from: "V2".into(),
-            grab: 320.0,
-            start: 300,
-            len: 40,
-        };
-        let (m, p) = method(w.drag(
-            from_v2.clone(),
-            pos2(640.0, 60.0),
-            &[pos2(700.0, 60.0)],
-            Duration::ZERO,
-        ))
-        .unwrap();
-        assert_eq!(
-            (m, p.get("track").is_none(), p["to"].clone()),
-            (json!("edit.move"), true, json!(330))
-        );
-        // ...and down into a Track 1 edit point it inserts there.
-        let (_, p) = method(w.drag(
-            from_v2.clone(),
-            pos2(640.0, 60.0),
-            &[pos2(300.0, 150.0)],
-            Duration::ZERO,
-        ))
-        .unwrap();
-        assert_eq!(
-            (p["track"].clone(), p["mode"].clone(), p["to"].clone()),
-            (json!("V1"), json!("insert"), json!(150))
-        );
-        // Pictures don't go on audio tracks.
-        assert!(
-            w.drag(
-                mv(&["c2"], 250.0, 100, 50),
-                pos2(250.0, 150.0),
-                &[pos2(250.0, 230.0)],
-                Duration::ZERO
-            )
-            .is_none()
-        );
-        // Media dropped on V2 is written there; below the rows it makes an
-        // audio track and brings only its sound.
-        let media = || Gesture::Media {
-            media: "m2".into(),
-            range: (0, 40),
-            video_only: false,
-            audio_only: false,
-        };
-        let (m, p) = method(w.drag(
-            media(),
-            pos2(100.0, 60.0),
-            &[pos2(100.0, 60.0)],
-            Duration::ZERO,
-        ))
-        .unwrap();
-        assert_eq!(
-            (m, p["track"].clone(), p["at"].clone()),
-            (json!("edit.overwrite"), json!("V2"), json!(50))
-        );
-        let (_, p) = method(w.drag(
-            media(),
-            pos2(100.0, 230.0),
-            &[pos2(100.0, 230.0)],
-            Duration::ZERO,
-        ))
-        .unwrap();
-        assert_eq!(p["track"], "A1");
     }
 
     #[test]

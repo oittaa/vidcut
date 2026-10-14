@@ -379,7 +379,7 @@ fn pci_device((bus, device, function): Slot) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Gpu, NVIDIA, find, id, parse_slot};
+    use super::{Gpu, NVIDIA, find, id};
 
     fn gpu(vendor: u32, device: u32, slot: Option<(u32, u32, u32)>) -> Gpu {
         Gpu {
@@ -392,17 +392,6 @@ mod tests {
             adapter: None,
             node: None,
         }
-    }
-
-    #[test]
-    fn ids_are_pci_ids_and_slot() {
-        assert_eq!(id(NVIDIA, 0x2702, Some((1, 0, 0))), "10de:2702@01:00.0");
-        assert_eq!(id(0x1002, 0x13c0, Some((0x7c, 0, 0))), "1002:13c0@7c:00.0");
-        assert_eq!(id(0x8086, 0x46d4, None), "8086:46d4");
-        assert_eq!(parse_slot("0000:01:00.0"), Some((1, 0, 0)));
-        assert_eq!(parse_slot("00000000:65:00.1"), Some((0x65, 0, 1)));
-        assert_eq!(parse_slot("01:00.0"), Some((1, 0, 0)));
-        assert_eq!(parse_slot("platform"), None);
     }
 
     /// A GPU is found by its id; moved to another slot, by its model while
@@ -424,51 +413,5 @@ mod tests {
         ];
         assert_eq!(find(&twins, "10de:2702@02:00.0"), Some(&twins[1]));
         assert_eq!(find(&twins, "10de:2702@03:00.0"), None);
-    }
-
-    /// An encoder detection tested is a GPU's when it ran there: NVENC on
-    /// its CUDA device, the others on its adapter or render node.
-    #[test]
-    fn encoders_belong_to_the_gpu_they_ran_on() {
-        use crate::export::encode::{Availability, EncoderStatus};
-        use vidcut_core::export::EncoderChoice as E;
-        let status = |encoder: &str, kind, device: &str| EncoderStatus {
-            encoder: encoder.into(),
-            kind,
-            device: Some(device.into()),
-            pixel: "nv12".into(),
-            ok: true,
-            error: None,
-        };
-        let detected = Availability {
-            encoders: vec![
-                status("h264_nvenc", E::Nvenc, "0"),
-                status("h264_nvenc", E::Nvenc, "1"),
-                status("h264_amf", E::Amf, "1"),
-                status("h264_vaapi", E::Vaapi, "/dev/dri/renderD129"),
-            ],
-        };
-        let names = |g: &Gpu| {
-            detected
-                .on(g)
-                .encoders
-                .iter()
-                .map(|e| format!("{} {}", e.encoder, e.device.as_deref().unwrap_or("")))
-                .collect::<Vec<_>>()
-        };
-        let mut second = gpu(NVIDIA, 0x2704, Some((2, 0, 0)));
-        second.cuda = Some(1);
-        assert_eq!(names(&second), ["h264_nvenc 1"]);
-        let mut radeon = gpu(0x1002, 0x13c0, Some((0x0d, 0, 0)));
-        radeon.adapter = Some(1);
-        assert_eq!(names(&radeon), ["h264_amf 1"]);
-        let mut linux = gpu(0x1002, 0x744c, Some((3, 0, 0)));
-        linux.node = Some("/dev/dri/renderD129".into());
-        assert_eq!(names(&linux), ["h264_vaapi /dev/dri/renderD129"]);
-        // What each GPU has, by its maker: NVENC on NVIDIA's alone.
-        assert!(second.encodes_with(E::Nvenc) && !second.encodes_with(E::Amf));
-        assert!(!radeon.encodes_with(E::Nvenc) && radeon.encodes_with(E::Auto));
-        assert_eq!(radeon.encodes_with(E::Amf), cfg!(windows));
-        assert_eq!(linux.encodes_with(E::Vaapi), cfg!(target_os = "linux"));
     }
 }

@@ -993,10 +993,9 @@ fn mutate(
             let mut removed = Vec::new();
             for id in &ids {
                 let c = p.clip(id).expect("resolved");
-                // A block plays as a gap: no sound to look at. A clip at
-                // another speed isn't looked at: the analyses map source to
-                // timeline at normal speed.
-                if c.is_block() || c.speed.is_some() {
+                // A block plays as a gap, and a held frame is silent: no
+                // sound to look at.
+                if c.is_block() || c.speed() == 0.0 {
                     continue;
                 }
                 let found = silent_parts(p, env, &Target::Clip(c), &settings)?;
@@ -1025,10 +1024,9 @@ fn mutate(
             let mut created = Vec::new();
             for id in &ids {
                 let c = p.clip(id).expect("resolved");
-                // A block plays as a gap: no pictures to look at. A clip at
-                // another speed isn't looked at: the analyses map source to
-                // timeline at normal speed.
-                if c.is_block() || c.speed.is_some() {
+                // A block plays as a gap: no pictures to look at; a held
+                // frame has no shots.
+                if c.is_block() || c.speed() == 0.0 {
                     continue;
                 }
                 let found = scene_cuts(p, env, &Target::Clip(c), *threshold)?;
@@ -1642,6 +1640,63 @@ fn find_media(
 /// timeline frame `offset`, on the tracks `tracks` maps its own to (the
 /// same ids otherwise), its media found as `ids`. The clips' and the
 /// markers' ids.
+/// Imported timeline `t` at the project's frame rate: clip edges, sources
+/// (one in its media's timecode counted from the media's first frame), J/L
+/// offsets, carried effects' times and fade lengths, compound clips'
+/// lengths, transitions, markers and marks. Each edge converts on its own,
+/// so clips that meet still meet. Its media are among `ids`.
+fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
+    let (from, to) = (t.fps, p.settings.fps);
+    let conv = |f: i64| rescale(f, from, to);
+    let retime = |list: &mut Vec<Value>| {
+        if from != to && !list.is_empty() {
+            let mut e = Effects {
+                from: 0,
+                list: std::mem::take(list),
+            };
+            e.retime(|x| (x * to.as_f64() / from.as_f64()).round());
+            *list = e.list;
+        }
+    };
+    for c in &mut t.clips {
+        // A source range in the media's timecode (no available range said
+        // where the media start) counts from the media's first frame here.
+        let tc = match (c.is_block(), c.timecoded) {
+            (false, true) => p
+                .media(&ids[&media_key(&c.media)])
+                .filter(|m| m.sequence.is_none())
+                .and_then(|m| m.info.timecode)
+                .map_or(0, |tc| tc.frames_at(from).round() as i64),
+            _ => 0,
+        };
+        c.timecoded = false;
+        let (start, end) = (conv(c.start), conv(c.end()));
+        if let Some((h, tl)) = c.audio {
+            c.audio = Some((conv(c.start + h) - start, conv(c.end() + tl) - end));
+        }
+        c.source_in = conv(c.source_in - tc);
+        // A compound clip's length covers what it shows, whatever rounding
+        // did.
+        if let Some(k) = c.compound.as_mut() {
+            k.frames = conv(k.frames).max(c.source_in + end - start);
+        }
+        retime(&mut c.effects);
+        retime(&mut c.audio_effects);
+        (c.start, c.duration) = (start, end - start);
+    }
+    for x in &mut t.transitions {
+        (x.before, x.after) = (conv(x.before), conv(x.after));
+    }
+    for k in &mut t.markers {
+        (k.at, k.duration) = (conv(k.at), conv(k.duration).max(1));
+    }
+    t.marks = crate::model::Marks {
+        mark_in: t.marks.mark_in.map(conv),
+        mark_out: t.marks.mark_out.map(conv),
+    };
+    t.fps = to;
+}
+
 fn place_imported(
     p: &mut Project,
     t: &otio::Imported,
@@ -1650,22 +1705,13 @@ fn place_imported(
     tracks: &HashMap<String, String>,
     warnings: &mut Vec<String>,
 ) -> Result<(Vec<String>, Vec<String>)> {
+    debug_assert_eq!(t.fps, p.settings.fps, "converted first (at_project_rate)");
     let track_of = |id: &str| tracks.get(id).cloned().unwrap_or_else(|| id.to_string());
-    let from = t.fps;
-    let to = p.settings.fps;
-    let conv = |f: i64| rescale(f, from, to);
-    // Carried clip effects count from where their picture or sound starts
-    // in the file; their times and fade lengths are frames at its rate.
+    // Carried clip effects count from where their picture or sound starts.
     let carry = |list: &[Value], first: i64| {
-        (!list.is_empty()).then(|| {
-            let mut e = Effects {
-                from: first,
-                list: list.to_vec(),
-            };
-            if from != to {
-                e.retime(|x| (x * to.as_f64() / from.as_f64()).round());
-            }
-            e
+        (!list.is_empty()).then(|| Effects {
+            from: first,
+            list: list.to_vec(),
         })
     };
     // Where audio may start on each track without overlapping what is
@@ -1691,15 +1737,14 @@ fn place_imported(
         // A generator, title or compound clip: a block of its length, no
         // media.
         if c.is_block() {
-            let (start, end) = (offset + conv(c.start), offset + conv(c.end()));
+            let (start, end) = (offset + c.start, offset + c.end());
             if end - start < 1 {
                 continue;
             }
-            let source_in = conv(c.source_in);
-            // Its length covers what it shows, whatever rounding did.
+            let source_in = c.source_in;
             let compound = c.compound.as_ref().map(|k| Compound {
                 stack: k.stack.clone(),
-                frames: conv(k.frames).max(source_in + end - start),
+                frames: k.frames,
                 tracks: Vec::new(),
             });
             let id = p.alloc_clip_id();
@@ -1729,17 +1774,11 @@ fn place_imported(
         let m = p.media(&ids[&media_key(&c.media)]).expect("added").clone();
         let frames = p.media_limit(&m);
         let label = if c.name.is_empty() { &m.name } else { &c.name };
-        let mut start = offset + conv(c.start);
-        let end = offset + conv(c.end());
-        // A source range in the media's timecode (no available range said
-        // where the media start) counts from the media's first frame here.
-        let tc = match (c.timecoded, m.info.timecode) {
-            (true, Some(tc)) if m.sequence.is_none() => tc.frames_at(from).round() as i64,
-            _ => 0,
-        };
-        let mut source_in = conv(c.source_in - tc);
+        let mut start = offset + c.start;
+        let end = offset + c.end();
+        let mut source_in = c.source_in;
         let effects = carry(&c.effects, source_in);
-        let sound_from = conv(c.source_in - tc + c.audio.map_or(0, |a| a.0));
+        let sound_from = c.source_in + c.audio.map_or(0, |a| a.0);
         if c.video && m.info.video.is_none() {
             warnings.push(format!("{label}: {} has no video; left out", m.name));
             continue;
@@ -1764,11 +1803,12 @@ fn place_imported(
         if duration < 1 {
             continue;
         }
-        // The audio's timeline range, then as offsets from the video edges.
+        // The audio's offsets from the video edges, which keeping to the
+        // media may have moved.
         let audio = match (c.audio, t.has_audio_tracks) {
             (Some((h, tl)), _) => Some((
-                offset + conv(c.start + h) - start,
-                offset + conv(c.end() + tl) - (start + duration),
+                offset + c.start + h - start,
+                offset + c.end() + tl - (start + duration),
             )),
             // No audio tracks in the file: clips bring their media's audio.
             (None, false) => Some((0, 0)),
@@ -1852,8 +1892,8 @@ fn place_imported(
                 sound: x.sound,
                 from: from.map(|f| f.0.clone()),
                 to: to.map(|g| g.0.clone()),
-                before: conv(x.before),
-                after: conv(x.after),
+                before: x.before,
+                after: x.after,
                 otio: x.otio.clone(),
             });
     }
@@ -1865,8 +1905,8 @@ fn place_imported(
     for k in &t.markers {
         markers.push(ops::add_marker(
             p,
-            offset + conv(k.at),
-            conv(k.duration).max(1),
+            offset + k.at,
+            k.duration,
             k.name.clone(),
             Some(k.color.clone()),
             k.note.clone(),
@@ -1914,8 +1954,9 @@ fn compound_contents(
     dirs: &[PathBuf],
     depth: usize,
 ) -> Result<Vec<crate::model::Track>> {
-    let t = nested(k, video)?;
+    let mut t = nested(k, video)?;
     let (ids, _) = find_media(p, &t, env, dirs, false)?;
+    at_project_rate(p, &mut t, &ids);
     let mut inner = Project::new(p.settings.clone());
     inner.media = p.media.clone();
     let mut needed: Vec<&str> = t.clips.iter().map(|c| c.track.as_str()).collect();
@@ -2007,28 +2048,51 @@ fn decompose(
         .compound
         .clone()
         .ok_or_else(|| Error::invalid(format!("{id} isn't a compound clip")))?;
-    if block.speed.is_some() {
-        return Err(Error::invalid(format!(
-            "{id} has a speed change, so it can't be decomposed: its clips would have to play \
-             at that speed"
-        )));
-    }
     let mut t = nested(&k, block.video)?;
-    // What the block shows, in the stack's frames.
+    // What the block shows, in the stack's frames: its clips there, their
+    // media found, at the project's rate.
     let to = p.settings.fps;
-    let a = rescale(block.source_in, to, t.fps);
-    let b = rescale(block.source_in + block.duration, to, t.fps);
-    t.clips.retain_mut(|c| {
-        let (s, e) = (c.start.max(a), c.end().min(b));
-        c.walk(s - c.start);
-        (c.start, c.duration) = (s - a, e - s);
-        e > s
-    });
-    t.markers.retain_mut(|m| {
-        m.at -= a;
-        (0..b - a).contains(&m.at)
-    });
+    let conv = |f: i64| rescale(f, t.fps, to);
+    let (lo, hi) = block.shown();
+    t.clips.retain(|c| conv(c.start) < hi && conv(c.end()) > lo);
+    t.markers.retain(|m| (lo..hi).contains(&conv(m.at)));
     let (ids, _) = find_media(p, &t, env, dirs, false)?;
+    at_project_rate(p, &mut t, &ids);
+    if block.speed() != 1.0 {
+        // At its speed (decision D48): each clip where the block shows it,
+        // through its pace, at both speeds together.
+        t.clips.retain_mut(|c| {
+            let Some((k0, k1)) = crate::render::shown_between(&block, c.start, c.end()) else {
+                return false;
+            };
+            c.walk(block.source_at(block.start + k0) - c.start);
+            (c.start, c.duration) = (k0, k1 - k0);
+            c.speed = crate::render::paced(&block, c.speed.as_ref(), k0);
+            if let Some(a) = c.audio.as_mut() {
+                *a = (0, 0);
+            }
+            true
+        });
+        t.markers.retain_mut(
+            |m| match crate::render::shown_between(&block, m.at, m.at + 1) {
+                Some((k, _)) => {
+                    m.at = k;
+                    true
+                }
+                None => false,
+            },
+        );
+    } else {
+        t.clips.retain_mut(|c| {
+            let (s, e) = (c.start.max(lo), c.end().min(hi));
+            c.walk(s - c.start);
+            (c.start, c.duration) = (s - lo, e - s);
+            e > s
+        });
+        for m in &mut t.markers {
+            m.at -= lo;
+        }
+    }
     for w in &t.warnings {
         if !warnings.contains(w) {
             warnings.push(w.clone());
@@ -2108,7 +2172,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
             ));
         }
     };
-    let t = otio::import(&doc, file.as_ref().map(|f| f.base.as_path()))?;
+    let mut t = otio::import(&doc, file.as_ref().map(|f| f.base.as_path()))?;
     // Some editors write no timeline name: the file's then.
     let name = match (t.name.as_str(), path) {
         ("", Some(path)) => path
@@ -2167,7 +2231,6 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     // An empty timeline takes the file's rate and start timecode; otherwise
     // positions are converted to the project's rate.
     let empty = p.tracks.iter().all(|t| t.clips.is_empty());
-    let from = t.fps;
     if empty {
         if p.settings.auto_format
             && let Some(v) = t
@@ -2197,6 +2260,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
             t.fps, p.settings.fps
         ));
     }
+    at_project_rate(p, &mut t, &ids);
     let offset = if empty { 0 } else { p.end() };
     // The tracks first (making video tracks moves the audio tracks' indexes).
     let mut needed: Vec<&str> = t.clips.iter().map(|c| c.track.as_str()).collect();
@@ -2218,8 +2282,6 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
             }
         }
     }
-    let to = p.settings.fps;
-    let conv = |f: i64| rescale(f, from, to);
     let (mut clips, markers) = place_imported(p, &t, &ids, offset, &HashMap::new(), &mut warnings)?;
     // Flattened: each compound clip made becomes its clips, and theirs.
     let compound = |p: &Project, id: &String| p.clip(id).is_some_and(|c| c.compound.is_some());
@@ -2227,13 +2289,6 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     while flatten && !pending.is_empty() {
         let mut next = Vec::new();
         for id in pending {
-            if p.clip(&id).is_some_and(|c| c.speed.is_some()) {
-                warnings.push(format!(
-                    "{id} has a speed change: kept as a compound clip, as its clips would have \
-                     to play at that speed"
-                ));
-                continue;
-            }
             let made = decompose(p, &id, env, (&dirs, true), &mut warnings)?;
             clips.retain(|c| c != &id);
             next.extend(made.iter().filter(|m| compound(p, m)).cloned());
@@ -2246,7 +2301,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     }
     fill_contents(p, &clips, env, &dirs, &mut warnings);
     if empty {
-        let (i, o) = (t.marks.mark_in.map(conv), t.marks.mark_out.map(conv));
+        let (i, o) = (t.marks.mark_in, t.marks.mark_out);
         if !matches!((i, o), (Some(i), Some(o)) if i >= o) {
             p.marks = crate::model::Marks {
                 mark_in: i.filter(|&i| i >= 0),
@@ -2759,6 +2814,7 @@ impl Target<'_> {
             Target::Media(m) => {
                 let (_, origin) = p.media_origin(&m.id)?;
                 Span {
+                    pace: Default::default(),
                     start: 0,
                     end: p.media_frames(m),
                     source_in: 0,

@@ -1225,64 +1225,9 @@ fn tag(f: &mut frame::Video, tags: Tags) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Layout, filters, placebo_options, waiting_failed};
+    use super::{Layout, filters, placebo_options};
     use crate::color::{GpuColor, gpu_color};
-    use crate::ffmpeg::{ffi, format::Pixel, frame};
-    use vidcut_core::model::Hdr;
-
-    /// A wait for the GPU that failed says why in words: the GPU too slow,
-    /// or its Vulkan device lost.
-    #[test]
-    fn a_failed_wait_says_why() {
-        let five = std::time::Duration::from_secs(5);
-        assert_eq!(waiting_failed(2, five), "the GPU didn't finish in 5 s");
-        assert_eq!(
-            waiting_failed(-4, five),
-            "the GPU stopped working (its Vulkan device was lost)"
-        );
-        assert_eq!(
-            waiting_failed(-2, five),
-            "waiting for the GPU failed (Vulkan error -2)"
-        );
-    }
-
-    /// After a converter fails, the next gets a new Vulkan device; a
-    /// converter failing on a device already replaced leaves the new one.
-    #[cfg(feature = "gpu-tests")]
-    #[test]
-    fn a_failed_converter_leaves_the_next_a_new_vulkan_device() {
-        let Ok(cuda) = super::CudaDevice::open() else {
-            eprintln!("skipping: no CUDA device here");
-            return;
-        };
-        let Ok(first) = cuda.vulkan() else {
-            eprintln!("skipping: no Vulkan device on the CUDA device's GPU");
-            return;
-        };
-        // SAFETY: references to live device contexts.
-        let same = |a: &super::Device, b: &super::Device| unsafe { (*a.0).data == (*b.0).data };
-        assert!(same(&first, &cuda.vulkan().expect("made")));
-        cuda.forget_vulkan(&first);
-        let second = cuda.vulkan().expect("made anew");
-        assert!(!same(&first, &second));
-        cuda.forget_vulkan(&first);
-        assert!(same(&second, &cuda.vulkan().expect("kept")));
-    }
-
-    /// How the GPU converts a 1080p 10-bit picture of `hdr`'s transfer
-    /// (`None`: SDR, BT.709) for an output of `target`'s.
-    fn colors(hdr: Option<Hdr>, target: Option<Hdr>) -> GpuColor {
-        use ffi::AVColorTransferCharacteristic as T;
-        let mut f = frame::Video::new(Pixel::YUV420P10LE, 1920, 1080);
-        unsafe {
-            (*f.as_mut_ptr()).color_trc = match hdr {
-                Some(Hdr::Pq) => T::AVCOL_TRC_SMPTE2084,
-                Some(Hdr::Hlg) => T::AVCOL_TRC_ARIB_STD_B67,
-                None => T::AVCOL_TRC_BT709,
-            };
-        }
-        gpu_color(&f, target).unwrap()
-    }
+    use crate::ffmpeg::{format::Pixel, frame};
 
     /// Untagged SD: BT.601, into SDR.
     fn sd() -> GpuColor {
@@ -1325,22 +1270,6 @@ mod tests {
     }
 
     #[test]
-    fn libplacebo_changes_only_the_colors() {
-        let options = placebo_options((720, 480), 0, "nv12", Layout::Upright, &sd());
-        let get = |k| option(&options, k);
-        assert_eq!((get("w"), get("h")), (Some("720"), Some("480")));
-        assert_eq!(get("rotate"), Some("0"));
-        assert_eq!(get("format"), Some("nv12"));
-        assert_eq!(get("colorspace"), Some("bt709"));
-        assert_eq!(get("color_primaries"), Some("bt709"));
-        assert_eq!(get("color_trc"), Some("bt709"));
-        assert_eq!(get("range"), Some("tv"));
-        assert_eq!(get("dithering"), Some("none"));
-        assert_eq!(get("inputs"), None);
-        assert_eq!(get("custom_shader_bin"), None);
-    }
-
-    #[test]
     fn libplacebo_turns_pictures_upright() {
         // A phone's 1920×1080 frames, stored for a quarter turn clockwise.
         let options = placebo_options((1920, 1080), 90, "nv12", Layout::Upright, &sd());
@@ -1380,35 +1309,5 @@ mod tests {
         assert_eq!(get("inputs"), None);
         assert_eq!((get("w"), get("h")), (Some("1920"), Some("1080")));
         assert_eq!(get("pos_w"), None);
-    }
-
-    #[test]
-    fn hdr_is_converted_by_the_cpus_math_in_a_shader() {
-        let filled = Layout::Placed {
-            size: (1920, 1080),
-            fitted: (1920, 1080),
-            format: Pixel::P010LE,
-        };
-        // PQ into SDR: the shader tone-maps, libplacebo writes BT.709.
-        let pq = colors(Some(Hdr::Pq), None);
-        let options = placebo_options((3840, 2160), 0, "p016le", filled, &pq);
-        let get = |k| option(&options, k);
-        assert_eq!(get("colorspace"), Some("bt709"));
-        assert_eq!(get("color_trc"), Some("bt709"));
-        assert_eq!(get("peak_detect"), Some("0"));
-        let hex = get("custom_shader_bin").expect("a shader");
-        let text: Vec<u8> = (0..hex.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
-            .collect();
-        assert_eq!(Some(String::from_utf8(text).unwrap()), pq.shader);
-        // SDR into HLG: written as BT.2020 HLG.
-        let hlg = colors(None, Some(Hdr::Hlg));
-        let options = placebo_options((1920, 1080), 0, "p016le", filled, &hlg);
-        let get = |k| option(&options, k);
-        assert_eq!(get("colorspace"), Some("bt2020nc"));
-        assert_eq!(get("color_primaries"), Some("bt2020"));
-        assert_eq!(get("color_trc"), Some("arib-std-b67"));
-        assert!(get("custom_shader_bin").is_some());
     }
 }

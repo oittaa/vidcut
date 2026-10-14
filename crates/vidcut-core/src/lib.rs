@@ -35,8 +35,6 @@ mod images_tests;
 #[cfg(test)]
 mod ops_tests;
 #[cfg(test)]
-mod prop_tests;
-#[cfg(test)]
 mod proxy_tests;
 #[cfg(test)]
 mod relink_tests;

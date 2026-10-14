@@ -17,6 +17,9 @@ vidcut is a video cutting tool modeled on DaVinci Resolve's Cut page, in Rust: t
 5. **No ffmpeg/ffprobe subprocesses.** Use `vidcut-av`, the FFmpeg libraries, for exports and the preview alike.
 6. **License:** MIT.
 7. **FFmpeg:** 8.0 (the latest Ubuntu LTS) up to the newest release. No code for FFmpeg before 8.0.
+8. **A unit test is a unit test:** one behavior, a fixed input, and the output it must give written out, like `assert_eq!(sha("test text"), "abcd")`.
+   - It doesn't reimplement the code to work out what to expect, doesn't test a dozen things at once, and isn't 100+ lines stuffed together.
+   - Anything that needs more than that is an end-to-end test (`crates/*/tests/`).
 
 ## Quality gates
 
@@ -24,7 +27,7 @@ These are mandatory.
 
 | When | Command | Runs |
 |---|---|---|
-| Before **every commit** (enforced by `.githooks/pre-commit`) | `scripts/check.sh` | no binary files in git, `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, unit tests (`--lib --bins`) |
+| Before **every commit** that changes more than `.md` files (enforced by `.githooks/pre-commit`) | `scripts/check.sh` | no binary files in git, `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, unit tests (`--lib --bins`) |
 | After a **bigger change** | `scripts/check.sh full` | the above plus all integration/e2e tests and doc tests |
 
 **Enable the hook once per clone:** `git config core.hooksPath .githooks`.

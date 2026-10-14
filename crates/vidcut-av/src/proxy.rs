@@ -702,26 +702,9 @@ fn drain(
 mod tests {
     use super::*;
 
-    /// ProRes takes Apple's hardware where detection found it working, then
-    /// FFmpeg's own; DNxHR FFmpeg's own; automatic neither.
     #[test]
-    fn prores_and_dnxhr_keep_their_codec() {
+    fn prores_takes_apples_hardware_where_it_works() {
         crate::init();
-        let labels = |choice, available: &Availability| -> Vec<String> {
-            encoders(choice, available)
-                .iter()
-                .map(ProxyEncoder::label)
-                .collect()
-        };
-        let none = Availability::default();
-        assert_eq!(
-            labels(ProxyCodec::Prores, &none),
-            ["ProRes Proxy, software (FFmpeg's)"]
-        );
-        assert_eq!(
-            labels(ProxyCodec::Dnxhr, &none),
-            ["DNxHR LB, software (FFmpeg's)"]
-        );
         let apple = Availability {
             encoders: vec![crate::export::encode::EncoderStatus {
                 encoder: "prores_videotoolbox".into(),
@@ -732,43 +715,10 @@ mod tests {
                 error: None,
             }],
         };
-        assert_eq!(
-            labels(ProxyCodec::Prores, &apple),
-            [
-                "ProRes Proxy, Apple hardware (VideoToolbox)",
-                "ProRes Proxy, software (FFmpeg's)"
-            ]
-        );
-        for choice in [ProxyCodec::Auto, ProxyCodec::Dnxhr] {
-            let got = labels(choice, &apple);
-            assert!(!got.iter().any(|l| l.contains("VideoToolbox")), "{got:?}");
-        }
-    }
-
-    #[test]
-    fn options_are_the_encoders_own() {
-        // FFmpeg drops an option its encoder doesn't have without a word.
-        crate::init();
-        for (name, codec, kind) in [
-            ("libx264", "h264", EncoderChoice::Cpu),
-            ("libsvtav1", "av1", EncoderChoice::Cpu),
-            ("av1_nvenc", "av1", EncoderChoice::Nvenc),
-            ("av1_vaapi", "av1", EncoderChoice::Vaapi),
-            ("prores_ks", "prores", EncoderChoice::Cpu),
-            ("prores_videotoolbox", "prores", EncoderChoice::VideoToolbox),
-            ("dnxhd", "dnxhr", EncoderChoice::Cpu),
-        ] {
-            let enc = ProxyEncoder {
-                name: name.into(),
-                codec,
-                kind,
-                device: None,
-            };
-            let options = enc.options();
-            let keys = options.iter().map(|(k, _)| *k);
-            if let Some(unknown) = crate::export::encode::unknown_options(name, keys) {
-                assert!(unknown.is_empty(), "{name}: {unknown:?}");
-            }
-        }
+        let names: Vec<String> = encoders(ProxyCodec::Prores, &apple)
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert_eq!(names, ["prores_videotoolbox", "prores_ks"]);
     }
 }

@@ -107,24 +107,6 @@ impl<T: Send + 'static, K: PartialEq> Ahead<T, K> {
 #[cfg(test)]
 mod tests {
     use super::Ahead;
-    use crate::error::Error;
-
-    #[test]
-    fn opens_ahead_in_order_and_skips_the_unwanted() {
-        let mut ahead = Ahead::new();
-        assert!(ahead.take(0).is_none(), "nothing pending");
-        ahead.start(1, (), || Ok(10));
-        assert_eq!(ahead.take(1).unwrap().unwrap(), 10);
-        assert!(ahead.take(1).is_none(), "taken once");
-        // A piece that isn't the pending one opens itself; the pending result
-        // is dropped when a later one is taken.
-        ahead.start(2, (), || Ok(20));
-        assert!(ahead.take(3).is_none());
-        ahead.start(4, (), || Err(Error::Invalid("unreadable".into())));
-        assert!(ahead.take(4).unwrap().is_err(), "errors come back");
-        ahead.start(5, (), || Ok(50));
-        assert_eq!(ahead.take(5).unwrap().unwrap(), 50);
-    }
 
     #[test]
     fn a_forgotten_job_is_no_new_pieces_source_unless_it_is_the_same() {

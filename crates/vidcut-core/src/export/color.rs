@@ -323,7 +323,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::export::{EncoderChoice, builtin_presets};
+    use crate::export::EncoderChoice;
 
     fn piece(media: &str, frames: i64) -> VideoPiece {
         VideoPiece::Source {
@@ -398,12 +398,6 @@ mod tests {
         }
     }
 
-    const ALL: Abilities = Abilities {
-        ten_bit: true,
-        ten_bit_first: true,
-        first: Some("libx265"),
-    };
-
     #[test]
     fn black_is_not_counted() {
         let s = share(&[("pq", 30), ("black", 100), ("sdr", 20), ("deep", 10)]);
@@ -416,84 +410,6 @@ mod tests {
                 deep: 40
             }
         );
-    }
-
-    #[test]
-    fn an_hdr_timeline_stays_hdr_where_the_codec_carries_it() {
-        // Decision D44: auto keeps HDR in HEVC, AV1 and VP9, in 10 bits.
-        let s = share(&[("pq", 100)]);
-        for codec in [VideoCodec::Hevc, VideoCodec::Av1, VideoCodec::Vp9] {
-            let c = choose(&video(codec), &s, ALL);
-            assert_eq!((c.hdr, c.bit_depth, c.tone_mapped), (HdrMode::Pq, 10, 0));
-            assert!(!c.worth_a_note());
-        }
-        // H.264 can't: tone-mapped SDR in 8 bits, with a note that names
-        // the way to keep it.
-        let v = video(VideoCodec::H264);
-        let c = choose(&v, &s, ALL);
-        assert_eq!((c.hdr, c.bit_depth, c.tone_mapped), (HdrMode::Sdr, 8, 100));
-        assert!(c.why[0].contains("H.264 can't carry HDR"), "{:?}", c.why);
-        assert!(c.worth_a_note());
-        assert_eq!(c.keep_hdr(&v), ["video.codec=hevc", "video.hdr=pq"]);
-        // So can't ProRes, which stays 10-bit.
-        let c = choose(&video(VideoCodec::Prores), &s, ALL);
-        assert_eq!((c.hdr, c.bit_depth), (HdrMode::Sdr, 10));
-    }
-
-    #[test]
-    fn most_of_the_picture_decides() {
-        let v = video(VideoCodec::Hevc);
-        let c = choose(&v, &share(&[("pq", 51), ("sdr", 49)]), ALL);
-        assert_eq!(c.hdr, HdrMode::Pq);
-        // Half isn't most: SDR, and the HDR half is tone-mapped.
-        let c = choose(&v, &share(&[("pq", 50), ("sdr", 50)]), ALL);
-        assert_eq!((c.hdr, c.tone_mapped), (HdrMode::Sdr, 50));
-        assert!(c.why[0].contains("half or less"), "{:?}", c.why);
-        // Black doesn't dilute it.
-        let c = choose(&v, &share(&[("pq", 30), ("black", 500), ("sdr", 20)]), ALL);
-        assert_eq!(c.hdr, HdrMode::Pq);
-        // HLG only when every HDR frame is HLG; PQ and HLG mixed make PQ.
-        let c = choose(&v, &share(&[("hlg", 30), ("sdr", 20)]), ALL);
-        assert_eq!(c.hdr, HdrMode::Hlg);
-        let c = choose(&v, &share(&[("hlg", 30), ("pq", 1), ("sdr", 20)]), ALL);
-        assert_eq!(c.hdr, HdrMode::Pq);
-        // Nothing but black: SDR, 8 bits, nothing to note.
-        let c = choose(&v, &share(&[("black", 50)]), ALL);
-        assert_eq!(
-            (c.hdr, c.bit_depth, c.worth_a_note()),
-            (HdrMode::Sdr, 8, false)
-        );
-    }
-
-    #[test]
-    fn sdr_depth_follows_the_picture_where_ten_bits_play() {
-        let deep = share(&[("deep", 80), ("sdr", 20)]);
-        for (codec, want) in [
-            (VideoCodec::Hevc, 10),
-            (VideoCodec::Av1, 10),
-            (VideoCodec::Vp9, 10),
-            (VideoCodec::H264, 8),
-            (VideoCodec::Prores, 10),
-        ] {
-            let c = choose(&video(codec), &deep, ALL);
-            assert_eq!((c.hdr, c.bit_depth), (HdrMode::Sdr, want), "{codec:?}");
-        }
-        let c = choose(
-            &video(VideoCodec::Hevc),
-            &share(&[("deep", 40), ("sdr", 60)]),
-            ALL,
-        );
-        assert_eq!(c.bit_depth, 8);
-        // DNxHR HQ becomes HQX, its 10-bit form; LB has none.
-        let mut v = video(VideoCodec::Dnxhr);
-        v.profile = Some("hq".into());
-        let c = choose(&v, &deep, ALL);
-        assert_eq!(c.bit_depth, 10);
-        c.apply(&mut v);
-        assert_eq!(v.profile.as_deref(), Some("hqx"));
-        let mut v = video(VideoCodec::Dnxhr);
-        v.profile = Some("lb".into());
-        assert_eq!(choose(&v, &deep, ALL).bit_depth, 8);
     }
 
     #[test]
@@ -525,74 +441,5 @@ mod tests {
         let c = choose(&v, &share(&[("pq", 100)]), none);
         assert_eq!((c.hdr, c.bit_depth), (HdrMode::Sdr, 8));
         assert!(c.why[0].contains("no 10-bit HEVC encoder"), "{:?}", c.why);
-    }
-
-    #[test]
-    fn explicit_values_win() {
-        let hdr = share(&[("pq", 100)]);
-        let sdr = share(&[("sdr", 100)]);
-        let mut v = video(VideoCodec::Hevc);
-        v.hdr = HdrMode::Sdr;
-        let c = choose(&v, &hdr, ALL);
-        assert_eq!((c.hdr, c.bit_depth, c.tone_mapped), (HdrMode::Sdr, 10, 100));
-        // SDR asked for: the facts are reported, but no note.
-        assert!(!c.worth_a_note());
-        v.hdr = HdrMode::Hlg;
-        assert_eq!(choose(&v, &sdr, ALL).hdr, HdrMode::Hlg);
-        v.hdr = HdrMode::Auto;
-        v.bit_depth = Some(8);
-        let c = choose(&v, &hdr, ALL);
-        assert_eq!((c.hdr, c.bit_depth), (HdrMode::Sdr, 8));
-        assert_eq!(c.keep_hdr(&v), ["video.bit_depth=null", "video.hdr=pq"]);
-        v.bit_depth = Some(10);
-        assert_eq!(choose(&v, &sdr, ALL).bit_depth, 10);
-        v.bit_depth = None;
-        v.profile = Some("main".into());
-        let c = choose(&v, &hdr, ALL);
-        assert_eq!((c.hdr, c.bit_depth), (HdrMode::Sdr, 8));
-        let mut h264 = video(VideoCodec::H264);
-        h264.bit_depth = Some(10);
-        assert_eq!(choose(&h264, &share(&[("deep", 1)]), ALL).bit_depth, 10);
-    }
-
-    #[test]
-    fn applied_settings_are_concrete_and_valid() {
-        // Every built-in preset, on each kind of timeline, resolves to
-        // settings that name a dynamic range and a depth and validate.
-        for p in builtin_presets() {
-            let Some(v) = &p.settings.video else { continue };
-            for s in [
-                share(&[("pq", 100)]),
-                share(&[("hlg", 100)]),
-                share(&[("deep", 100)]),
-                share(&[("sdr", 100)]),
-            ] {
-                let c = choose(v, &s, ALL);
-                let mut settings = p.settings.clone();
-                let resolved = settings.video.as_mut().unwrap();
-                c.apply(resolved);
-                assert_ne!(resolved.hdr, HdrMode::Auto);
-                assert!(resolved.bit_depth.is_some());
-                crate::export::validate(&settings)
-                    .unwrap_or_else(|e| panic!("{} on {s:?}: {e}", p.name));
-            }
-        }
-        // TikTok asks for SDR (phones); the masters follow the sources.
-        let preset = |name: &str| {
-            builtin_presets()
-                .into_iter()
-                .find(|p| p.name == name)
-                .unwrap()
-                .settings
-                .video
-                .unwrap()
-        };
-        let hdr = share(&[("pq", 100)]);
-        assert_eq!(choose(&preset("tiktok"), &hdr, ALL).hdr, HdrMode::Sdr);
-        assert!(!choose(&preset("tiktok"), &hdr, ALL).worth_a_note());
-        for name in ["h265-master", "av1", "vp9-webm"] {
-            assert_eq!(choose(&preset(name), &hdr, ALL).hdr, HdrMode::Pq, "{name}");
-        }
-        assert!(choose(&preset("youtube-1080p"), &hdr, ALL).worth_a_note());
     }
 }

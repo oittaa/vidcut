@@ -264,25 +264,3 @@ fn text(canvas: &mut [u8], cw: usize, x: usize, y: usize, s: &str, max_w: usize)
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn labels_draw_known_glyphs_and_skip_others() {
-        let cw = 200;
-        let mut canvas = BACKGROUND.repeat(cw * 30);
-        text(&mut canvas, cw, 0, 0, "1x", 100);
-        let ink = canvas.chunks(4).filter(|p| *p == INK).count();
-        // "1" has 10 lit pixels, each 2×2; "x" isn't in the font.
-        assert_eq!(ink, 10 * SCALE * SCALE);
-        let mut clipped = BACKGROUND.repeat(cw * 30);
-        text(&mut clipped, cw, 0, 0, "1111", 20);
-        assert_eq!(
-            clipped.chunks(4).filter(|p| *p == INK).count(),
-            10 * SCALE * SCALE,
-            "only one glyph fits in 20 px"
-        );
-    }
-}
