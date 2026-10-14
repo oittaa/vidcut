@@ -181,10 +181,15 @@ impl Span {
     }
 }
 
+/// A click, a sound shorter than `CLICK` seconds with at least `CLICK_GAP`
+/// seconds of silence on both sides, counts as silence (spec D29).
+const CLICK: f64 = 0.05;
+const CLICK_GAP: f64 = 0.1;
+
 /// Silent stretches of `levels` between raw times `from` and `to`, at least
 /// `min` seconds long: where every peak, after `gain_db`, stays below
-/// `threshold_db` dBFS. Time without audio (before or after the stream)
-/// counts as silent. Raw seconds, clipped to the window.
+/// `threshold_db` dBFS, clicks aside. Time without audio (before or after
+/// the stream) counts as silent. Raw seconds, clipped to the window.
 pub fn silences(
     levels: &AudioLevels,
     from: f64,
@@ -197,17 +202,26 @@ pub fn silences(
     let limit = linear(threshold_db - gain_db) as f32;
     let bucket = |x: f64| ((x - levels.start) * rate).floor() as i64;
     let time = |i: i64| levels.start + i as f64 / rate;
-    let quiet = |i: i64| {
-        usize::try_from(i)
-            .ok()
-            .and_then(|i| levels.peaks.get(i))
-            .is_none_or(|&p| p < limit)
-    };
     let (first, last) = (bucket(from), bucket(to - 1e-9));
+    // The window's buckets, and `CLICK_GAP` more on each side to see what
+    // is around a click at its edge.
+    let gap = (CLICK_GAP * rate).round().max(1.0) as usize;
+    let lo = first - gap as i64;
+    let mut quiet: Vec<bool> = (lo..=last + gap as i64)
+        .map(|i| {
+            usize::try_from(i)
+                .ok()
+                .and_then(|i| levels.peaks.get(i))
+                .is_none_or(|&p| p < limit)
+        })
+        .collect();
+    for (a, b) in clicks(&quiet, (CLICK * rate).round() as usize, gap) {
+        quiet[a..b].fill(true);
+    }
     let mut out = Vec::new();
     let mut run: Option<i64> = None;
     for i in first..=last + 1 {
-        let silent = i <= last && quiet(i);
+        let silent = i <= last && quiet[(i - lo) as usize];
         match (silent, run) {
             (true, None) => run = Some(i),
             (false, Some(s)) => {
@@ -219,6 +233,29 @@ pub fn silences(
             }
             _ => {}
         }
+    }
+    out
+}
+
+/// The runs of sound in `quiet` shorter than `len` buckets with at least
+/// `gap` quiet buckets on both sides, as index ranges.
+fn clicks(quiet: &[bool], len: usize, gap: usize) -> Vec<(usize, usize)> {
+    let quiet_at = |r: Option<std::ops::Range<usize>>| {
+        r.and_then(|r| quiet.get(r))
+            .is_some_and(|s| s.iter().all(|&q| q))
+    };
+    let mut out = Vec::new();
+    let mut a = 0;
+    for run in quiet.chunk_by(|x, y| x == y) {
+        let b = a + run.len();
+        if !run[0]
+            && run.len() < len
+            && quiet_at(a.checked_sub(gap).map(|s| s..a))
+            && quiet_at(Some(b..b + gap))
+        {
+            out.push((a, b));
+        }
+        a = b;
     }
     out
 }
@@ -407,6 +444,22 @@ mod tests {
         assert!(silences(&l, 0.0, 4.0, -40.0, 30.0, 0.1).is_empty());
         // Past the stream's end counts as silent.
         assert_eq!(silences(&l, 3.5, 5.0, -40.0, 0.0, 1.0), vec![(3.5, 5.0)]);
+    }
+
+    #[test]
+    fn a_click_in_silence_is_silent() {
+        let l = levels(2.0, &[(1.0, 1.02)]);
+        assert_eq!(silences(&l, 0.0, 2.0, -40.0, 0.0, 0.5), vec![(0.0, 2.0)]);
+    }
+
+    #[test]
+    fn a_click_just_after_sound_is_sound() {
+        // 0.05 s after the speech: too little silence before it.
+        let l = levels(3.0, &[(1.0, 1.5), (1.55, 1.57)]);
+        assert_eq!(
+            silences(&l, 0.0, 3.0, -40.0, 0.0, 0.5),
+            vec![(0.0, 1.0), (1.57, 3.0)]
+        );
     }
 
     #[test]
