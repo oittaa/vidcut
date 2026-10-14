@@ -902,6 +902,14 @@ fn mutate(
             let selected = resolve_clips(p, clips, playhead)?;
             json!({ "created": ops::split(p, &points, &selected)? })
         }
+        Request::EditJoin { at, clips } => {
+            let at = match at {
+                Some(t) => Some(resolve(p, t, playhead)?),
+                None => playhead,
+            };
+            let selected = resolve_clips(p, clips, playhead)?;
+            json!({ "joined": ops::join(p, at, &selected)? })
+        }
         Request::EditDelete { clips, lift } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             ops::delete(p, &ids, *lift)?;

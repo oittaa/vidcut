@@ -179,6 +179,11 @@ const EXAMPLES: &[(&str, &str)] = &[
     ),
     ("edit.split", "vidcut edit split --at 1m,1m30s"),
     (
+        "edit.join",
+        "vidcut edit join --at 1m
+  vidcut edit join --clips c3,c4,c5",
+    ),
+    (
         "edit.trim",
         "vidcut edit trim c3 --edge tail --by -12f\n  vidcut edit trim c3 --edge head --to 1m --ripple false",
     ),

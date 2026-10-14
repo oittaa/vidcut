@@ -366,6 +366,19 @@ pub enum Request {
         #[serde(default)]
         clips: Vec<ClipRef>,
     },
+    /// Join Match Edit Clips: clips that a split left join back into one.
+    /// Two or more `clips` join where they meet. Otherwise the clips that
+    /// meet at `at` (default: the playhead) join, only the given ones if
+    /// any are there (decision D49).
+    #[serde(rename = "edit.join")]
+    EditJoin {
+        /// Where the clips meet. Default: the playhead.
+        #[serde(default)]
+        at: Option<TimeSpec>,
+        /// The clips to join.
+        #[serde(default)]
+        clips: Vec<ClipRef>,
+    },
     /// Delete clips. On V1 it ripples unless `lift`, and the other tracks
     /// follow; elsewhere gaps close only where V1 has nothing.
     #[serde(rename = "edit.delete")]

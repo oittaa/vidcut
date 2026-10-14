@@ -269,7 +269,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 
 ### 8.5 Split (v1) (pp. 646, 723, 950)
 - Ctrl+\, the Split button, or Split Clips splits at the playhead.
-- Join Match Edit Clips rejoins the halves of a split clip (later).
+- Join Match Edit Clips (Timeline Actions) joins the parts of a split clip back into one (D49).
 
 ### 8.6 Trimming (v1 unless noted) (pp. 693, 716, 718, 726–732)
 - **The pointer position picks the operation:**
@@ -549,3 +549,7 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - **Editing:** trims, rolls, slides, splits and J/L rolls count timeline frames through the speed, and so do media limits. A clip keeps where in its pace it starts, so an edit leaves every frame showing what it showed: a 50% clip split at its 25th frame starts its second part half a source frame in. A slip moves the content by frames of the clip (two source frames at 200%).
   - **Interchange:** a reversed clip's OTIO source range starts at the bottom of what it shows, with Resolve's `Media In`, the room above its top in seconds of timeline, which Resolve places it by (deviation X9). Read from Resolve, a reversed clip at a fraction of normal speed pairs its frames as Resolve shows them; vidcut's own file keeps each clip's pace (`metadata.vidcut`). A speed set in vidcut is written as OTIO's `LinearTimeWarp`, a freeze as `FreezeFrame`.
   - **Compound clips:** the clips one holds play at their own speeds. A compound clip at a speed plays each where it shows it, through its pace, at both speeds together, backward in reverse order; Decompose in Place leaves them so.
+- **D49. What Join Match Edit Clips joins** (pp. 646, 950). The manual says only that it rejoins the parts of a split clip.
+  - Two clips join when the second plays on from where the first stops, so joining changes nothing you see or hear. They sit side by side on one track, with the same media, speed and settings and no frames missing between them. A fade or a carried transition where they meet keeps them apart.
+  - With two or more clips selected, the ones that meet join. Otherwise the clips that meet at the playhead join: the selected ones there, or else those on every unlocked track, as with Split (D2).
+  - A run of parts becomes its first part, which keeps its id.

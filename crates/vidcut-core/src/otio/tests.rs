@@ -1,7 +1,7 @@
 //! OTIO interchange tests (deviation X9).
 
 use super::*;
-use crate::model::{AudioInfo, MediaInfo};
+use crate::model::{AudioInfo, Effects, MediaInfo};
 use crate::test_support::{FakeEnv, Fixture, media_info};
 
 fn req(method: &str, params: Value) -> Value {
@@ -81,4 +81,35 @@ fn rates_become_exact() {
     assert_eq!(rational(12.5).unwrap(), r(25, 2));
     // Ten hours of 23.976 timecode doesn't drift.
     assert_eq!(frames(863_136.0, 23.976, r(24000, 1001)), 863_136);
+}
+
+/// Picture effects with a fade-in and a fade-out, in frames.
+fn faded(fade_in: f64, fade_out: f64) -> Option<Effects> {
+    let fades = json!([
+        {"Parameter ID": "videoFaderIn", "Parameter Value": fade_in},
+        {"Parameter ID": "videoFaderOut", "Parameter Value": fade_out},
+    ]);
+    Some(Effects {
+        from: 0,
+        list: vec![json!({
+            "OTIO_SCHEMA": "Effect.1",
+            "metadata": { EDITOR: { "Effect Name": "Transform", "Enabled": true, "Parameters": fades } },
+        })],
+    })
+}
+
+#[test]
+fn joined_parts_get_both_fades_back() {
+    // Decision D49: the first part's fade-in and the second's fade-out.
+    let whole = faded(10.0, 20.0);
+    let (mut first, mut second) = (whole.clone(), whole.clone());
+    effects::cut(&mut first, false, true);
+    effects::cut(&mut second, true, false);
+    assert_eq!(effects::join(&first, &second), Some(whole));
+}
+
+#[test]
+fn a_fade_where_parts_meet_keeps_them_apart() {
+    // Decision D49: joining would lose the fade-out in the middle.
+    assert_eq!(effects::join(&faded(0.0, 20.0), &None), None);
 }

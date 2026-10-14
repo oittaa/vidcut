@@ -20,7 +20,7 @@ pub use tracks::{TrackProps, add_track, remove_track, set_track};
 
 use crate::error::{Error, Result};
 use crate::model::{Clip, ClipAudio, Marker, Project, Speed, Track, TrackClip, TrackKind};
-use crate::otio::effects::cut;
+use crate::otio::effects::{self, cut};
 use follow::{Before, Edit};
 
 /// The main (magnetic) track.
@@ -690,6 +690,109 @@ pub fn split(p: &mut Project, at: &[i64], selected: &[String]) -> Result<Vec<Str
         fix_audio(p, ti);
     }
     Ok(created)
+}
+
+/// `a` and `b` as one clip with `a`'s id, when `b` comes right after `a`
+/// on track `t` and plays on from where `a` stops: what a split leaves.
+/// None where joining would change what plays.
+fn joined(t: &Track, a: &Clip, b: &Clip) -> Option<Clip> {
+    let between = |x: &crate::model::Transition| {
+        x.from.as_deref() == Some(a.id.as_str()) && x.to.as_deref() == Some(b.id.as_str())
+    };
+    if a.end() != b.start || t.transitions.iter().any(between) {
+        return None;
+    }
+    let effects = effects::join(&a.effects, &b.effects)?;
+    let sound = match (&a.audio, &b.audio) {
+        (Some(x), Some(y)) if x.tail == y.head => Some(effects::join(&x.effects, &y.effects)?),
+        (None, None) => None,
+        _ => return None,
+    };
+    let mut whole = a.clone();
+    whole.duration += b.duration;
+    if let (Some(w), Some(y)) = (whole.audio.as_mut(), &b.audio) {
+        w.tail = y.tail;
+    }
+    // Splitting the whole where they meet must give `b` back.
+    let mut rest = whole.clone();
+    rest.move_head(a.duration);
+    rest.id.clone_from(&b.id);
+    rest.effects.clone_from(&b.effects);
+    if let (Some(r), Some(y)) = (rest.audio.as_mut(), &b.audio) {
+        r.head = y.head;
+        r.effects.clone_from(&y.effects);
+    }
+    if rest != *b {
+        return None;
+    }
+    whole.effects = effects;
+    if let (Some(w), Some(e)) = (whole.audio.as_mut(), sound) {
+        w.effects = e;
+    }
+    Some(whole)
+}
+
+/// Join Match Edit Clips (decision D49): where a clip plays on from the
+/// one before it, as a split leaves them, the two become one again. Two or
+/// more of `selected` join where they meet. Otherwise the clips meeting at
+/// `at` join: the selected ones there, or those on every unlocked track.
+/// Returns the joined clips.
+pub fn join(p: &mut Project, at: Option<i64>, selected: &[String]) -> Result<Vec<String>> {
+    for id in selected {
+        locate(p, id)?;
+    }
+    // The clips that can join, as (track, first, second, where they meet).
+    let mut pairs = Vec::new();
+    for (ti, t) in p.tracks.iter().enumerate().filter(|(_, t)| !t.locked) {
+        for w in t.clips.windows(2) {
+            if joined(t, &w[0], &w[1]).is_some() {
+                pairs.push((ti, w[0].id.clone(), w[1].id.clone(), w[1].start));
+            }
+        }
+    }
+    let has = |id: &String| selected.contains(id);
+    let mut chosen: Vec<_> = pairs
+        .iter()
+        .filter(|(_, a, b, _)| has(a) && has(b))
+        .cloned()
+        .collect();
+    if chosen.is_empty() {
+        let at = at.ok_or_else(|| Error::usage("edit.join needs `at` or two clips"))?;
+        let there: Vec<_> = pairs.into_iter().filter(|x| x.3 == at).collect();
+        chosen = there
+            .iter()
+            .filter(|(_, a, b, _)| has(a) || has(b))
+            .cloned()
+            .collect();
+        if chosen.is_empty() {
+            chosen = there;
+        }
+    }
+    if chosen.is_empty() {
+        return Err(Error::invalid(
+            "nothing to join: no clip there continues the one before it",
+        ));
+    }
+    // From the right, so a run of parts joins into its first.
+    let (mut kept, mut gone) = (Vec::new(), Vec::new());
+    for (ti, a, b, _) in chosen.iter().rev() {
+        let t = &mut p.tracks[*ti];
+        let (ia, ib) = (clip_index(t, a), clip_index(t, b));
+        let Some(whole) = joined(t, &t.clips[ia], &t.clips[ib]) else {
+            continue;
+        };
+        t.clips[ia] = whole;
+        t.clips.remove(ib);
+        for x in &mut t.transitions {
+            if x.from.as_ref() == Some(b) {
+                x.from = Some(a.clone());
+            }
+        }
+        kept.insert(0, a.clone());
+        gone.push(b.clone());
+    }
+    kept.retain(|a| !gone.contains(a));
+    Ok(kept)
 }
 
 /// Delete clips. On Track 1 with ripple (Ripple On unless

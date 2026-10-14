@@ -19,6 +19,7 @@ export VIDCUT_PROJECT=talk.vidcut           # or pass -p FILE every time
 vidcut media add cam.mp4 screen.mkv --json  # -> media ids m1, m2
 vidcut edit append m1 --range 10s..2m
 vidcut edit split --at 1m,1m30s
+vidcut edit join --at 1m30s                 # joins the parts again (spec D49)
 vidcut edit delete V1@1m10s                 # the clip under 1m10s; ripples Track 1
 vidcut timeline get --json                  # clips and gaps with frames and timecodes
 vidcut history undo                         # works across separate runs

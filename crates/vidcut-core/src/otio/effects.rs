@@ -208,6 +208,45 @@ pub fn cut(effects: &mut Option<Effects>, head: bool, tail: bool) {
     }
 }
 
+/// The effects of two parts of a clip joined into one: the first's fade-in
+/// and the second's fade-out. None when that would change what plays: they
+/// differ in more than those fades, or a fade sits where they meet.
+pub fn join(first: &Option<Effects>, second: &Option<Effects>) -> Option<Option<Effects>> {
+    let fades = |e: &Option<Effects>, head: bool| {
+        e.iter().flat_map(|e| &e.list).flat_map(params).any(|p| {
+            fade(p) == Some(head) && p["Parameter Value"].as_f64().is_some_and(|v| v > 0.0)
+        })
+    };
+    let without_fades = |e: &Option<Effects>| {
+        let mut e = e.clone();
+        cut(&mut e, true, true);
+        e
+    };
+    if fades(first, false) || fades(second, true) || without_fades(first) != without_fades(second) {
+        return None;
+    }
+    let Some(second) = second else {
+        return Some(first.clone());
+    };
+    let mut joined = first.clone().unwrap_or_else(|| Effects {
+        from: second.from,
+        list: Vec::new(),
+    });
+    for e in &second.list {
+        let mut missing = false;
+        for p in params(e).filter(|p| fade(p) == Some(false)) {
+            match params_mut(&mut joined.list).find(|q| q["Parameter ID"] == p["Parameter ID"]) {
+                Some(q) => q["Parameter Value"] = p["Parameter Value"].clone(),
+                None => missing = true,
+            }
+        }
+        if missing {
+            joined.list.push(e.clone());
+        }
+    }
+    Some(Some(joined))
+}
+
 impl Effects {
     /// Their names, once each: `Transform`, `Cropping`.
     pub fn names(&self) -> Vec<String> {
