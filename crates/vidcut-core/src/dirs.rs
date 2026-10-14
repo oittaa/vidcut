@@ -87,8 +87,35 @@ pub fn state() -> PathBuf {
 /// path (`\\?\C:\…`); it is kept in the usual form (`C:\…`, `\\server\…`)
 /// where that names the same file, so paths compare and show as people
 /// write them and project files stay readable.
+///
+/// A file opened to be resolved just as another process renames a file
+/// over it (a project being saved) resolves on Windows to the replaced
+/// one, which its volume keeps in `\$Extend\$Deleted` until it is closed.
+/// Such a path is resolved again.
 pub fn canonical(path: &Path) -> std::io::Result<PathBuf> {
-    path.canonicalize().map(|p| plain(&p))
+    for _ in 0..100 {
+        let p = path.canonicalize()?;
+        if !replaced(&p) {
+            return Ok(plain(&p));
+        }
+    }
+    Err(std::io::Error::other(format!(
+        "{} is replaced each time it is opened",
+        path.display()
+    )))
+}
+
+/// Whether `path` names a file deleted or replaced while open: Windows'
+/// NTFS keeps those in `\$Extend\$Deleted` until they are closed.
+fn replaced(path: &Path) -> bool {
+    use std::path::Component;
+    let mut names = path.components().filter_map(|c| match c {
+        Component::Normal(name) => Some(name),
+        _ => None,
+    });
+    cfg!(windows)
+        && names.next().is_some_and(|n| n == "$Extend")
+        && names.next().is_some_and(|n| n == "$Deleted")
 }
 
 /// `path` without a verbatim prefix that it doesn't need.
