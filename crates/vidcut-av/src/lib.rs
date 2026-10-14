@@ -9,6 +9,8 @@ pub mod cancel;
 pub mod color;
 pub mod copies;
 pub mod cuda;
+#[cfg(windows)]
+mod d3d11_vulkan;
 pub mod decode;
 pub mod error;
 pub mod export;

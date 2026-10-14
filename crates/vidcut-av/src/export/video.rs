@@ -793,7 +793,7 @@ impl Fitting {
             return Self::default();
         };
         let scaler = crate::cuda::CudaPictures::new(device, reader, out, format, target, at_once);
-        Self::nvdec(scaler.ok())
+        Self::scaled(scaler.ok())
     }
 
     /// For a Vulkan encoder on NVDEC's GPU: the frames `reader` decodes
@@ -816,12 +816,34 @@ impl Fitting {
                 reader.path().display()
             );
         }
-        Self::nvdec(made.ok())
+        Self::scaled(made.ok())
     }
 
-    /// NVDEC's frames fitted on the GPU by `scaler`, or the CPU's to make
-    /// without one.
-    fn nvdec(scaler: Option<crate::cuda::CudaPictures>) -> Self {
+    /// For a Vulkan encoder on the Direct3D 11 decoder's GPU (Windows): the
+    /// frames `reader` decodes there, opened on `vulkan`, the encoder's
+    /// device, and made into `out` pictures of `format` by libplacebo, each
+    /// with the next frame. The CPU makes those it won't take.
+    #[cfg(windows)]
+    pub(crate) fn for_d3d11_vulkan(
+        reader: &VideoReader,
+        vulkan: &crate::hw::Device,
+        out: (u32, u32),
+        format: format::Pixel,
+    ) -> Self {
+        let made = crate::cuda::CudaPictures::for_d3d11(vulkan, reader, out, format);
+        if let Err(e) = &made {
+            crate::debug!(
+                "decoding",
+                "{}: libplacebo won't make the pictures, the CPU does: {e}",
+                reader.path().display()
+            );
+        }
+        Self::scaled(made.ok())
+    }
+
+    /// Frames fitted on the GPU by `scaler`, or the CPU's to make without
+    /// one.
+    fn scaled(scaler: Option<crate::cuda::CudaPictures>) -> Self {
         Self {
             route: scaler.is_some().then_some(Route::Gpu),
             fit_failed: scaler.is_none(),

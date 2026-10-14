@@ -1,5 +1,5 @@
 //! Makes a proxy of each barcode fixture with every encoder proxies can be
-//! made with here, decoding on the CPU and on each GPU decoder there is.
+//! made with here, on every GPU, decoding on the CPU and on each GPU decoder there is.
 //! Says how each proxy's frames went, the frames copied to and from the
 //! GPU, and where a proxy's frames differ from the source's: frame `k` must
 //! show barcode `k`, as the fixture's does, at the source frame's time.
@@ -63,16 +63,21 @@ fn main() {
     }
     println!("FFmpeg {}", vidcut_av::ffmpeg_version());
     let available = vidcut_av::export::encode::detect(true);
+    // Each GPU's encoders, then the CPU's.
+    let mut on = vec![available.clone()];
+    on.extend(vidcut_av::gpus::list().iter().map(|g| available.on(g)));
     let mut all: Vec<ProxyEncoder> = Vec::new();
-    for codec in [
-        ProxyCodec::Av1,
-        ProxyCodec::H264,
-        ProxyCodec::Prores,
-        ProxyCodec::Dnxhr,
-    ] {
-        for e in encoders(codec, &available, &[]) {
-            if !all.iter().any(|a| a.name == e.name && a.device == e.device) {
-                all.push(e);
+    for a in &on {
+        for codec in [
+            ProxyCodec::Av1,
+            ProxyCodec::H264,
+            ProxyCodec::Prores,
+            ProxyCodec::Dnxhr,
+        ] {
+            for e in encoders(codec, a, &[]) {
+                if !all.iter().any(|x| x.name == e.name && x.device == e.device) {
+                    all.push(e);
+                }
             }
         }
     }

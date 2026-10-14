@@ -1010,6 +1010,12 @@ impl Upload {
         }
     }
 
+    /// The device these frames are on.
+    pub(crate) fn device(&self) -> crate::hw::Device {
+        // SAFETY: another reference to its live device.
+        crate::hw::Device(unsafe { ffi::av_buffer_ref(self.device) })
+    }
+
     /// Whether these frames are on `device`.
     pub(crate) fn is_on(&self, device: &crate::hw::Device) -> bool {
         // SAFETY: references to live device contexts, the same device when

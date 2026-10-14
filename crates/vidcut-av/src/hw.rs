@@ -456,6 +456,20 @@ impl GpuDecoder {
         &self.on
     }
 
+    /// Whether it is on the GPU `id` names (`gpus::Gpu::id`): Direct3D 11
+    /// on its adapter, VA-API on its render node.
+    pub(crate) fn is_on(&self, id: &str) -> bool {
+        let Some(gpu) = crate::gpus::list().iter().find(|g| g.id == id) else {
+            return false;
+        };
+        match self.kind {
+            // The first adapter when none is named.
+            Kind::D3d11va => gpu.adapter == Some(self.on.parse().unwrap_or(0)),
+            Kind::Vaapi => gpu.node.as_deref() == Some(self.on.as_str()),
+            Kind::Nvdec | Kind::VideoToolbox => false,
+        }
+    }
+
     /// NVDEC's CUDA device.
     pub fn cuda(&self) -> Option<&CudaDevice> {
         self.cuda.as_ref()

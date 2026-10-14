@@ -327,7 +327,7 @@ pub struct CudaPictures {
 /// CUDA frame, never leaving the GPU.
 struct Placebo {
     graph: filter::Graph,
-    input: HwFrames,
+    input: Feed,
     /// The CUDA frames the pictures are copied back into; `None`: they stay
     /// in Vulkan, for an encoder there.
     output: Option<HwFrames>,
@@ -349,8 +349,43 @@ struct Placebo {
     sar: ffi::AVRational,
     /// The device the converter was made on, and its Vulkan device, dropped
     /// there when the converter fails ([`Placebo::checked`]).
-    device: CudaDevice,
+    device: Option<CudaDevice>,
     vulkan: Device,
+}
+
+/// Where a converter's frames come from.
+enum Decoded<'a> {
+    /// NVDEC's: CUDA frames of `decoded`, on `device`.
+    Cuda {
+        device: &'a CudaDevice,
+        decoded: *mut ffi::AVBufferRef,
+    },
+    /// Direct3D 11's, opened by `importer` on `vulkan` (Windows).
+    #[cfg(windows)]
+    D3d11 {
+        vulkan: Device,
+        importer: Box<crate::d3d11_vulkan::Importer>,
+    },
+}
+
+/// How frames reach libplacebo.
+enum Feed {
+    /// Copied from CUDA into these Vulkan frames, on the GPU.
+    Cuda(HwFrames),
+    /// Opened on the Vulkan device (Windows).
+    #[cfg(windows)]
+    D3d11(Box<crate::d3d11_vulkan::Importer>),
+}
+
+impl Feed {
+    /// The Vulkan frames context of the frames it gives.
+    fn frames(&self) -> *mut ffi::AVBufferRef {
+        match self {
+            Self::Cuda(input) => input.0,
+            #[cfg(windows)]
+            Self::D3d11(importer) => importer.frames,
+        }
+    }
 }
 
 /// One converter at work at a time in the process: made, fed, read or
@@ -837,10 +872,9 @@ impl CudaPictures {
         let placebo = match layout {
             Some(layout) => {
                 let stream = (stored, sar, rotation);
+                let from = Decoded::Cuda { device, decoded };
                 let to = Back::Cuda;
-                Some(Placebo::new(
-                    device, decoded, stream, &color, layout, at_once, to,
-                )?)
+                Some(Placebo::new(from, stream, &color, layout, at_once, to)?)
             }
             None => None,
         };
@@ -926,8 +960,66 @@ impl CudaPictures {
             format,
         };
         let stream = (stored, sar, rotation);
-        let to = Back::Vulkan;
-        let placebo = Placebo::new(device, decoded, stream, &color, layout, at_once, to)?;
+        let from = Decoded::Cuda { device, decoded };
+        let placebo = Placebo::new(from, stream, &color, layout, at_once, Back::Vulkan)?;
+        Ok(Self {
+            graph: None,
+            placebo: Some(placebo),
+        })
+    }
+
+    /// The pictures for the Direct3D 11 frames `reader` decodes, opened on
+    /// `vulkan`, the Vulkan device of the same GPU, and made there by
+    /// libplacebo as [`for_vulkan`](Self::for_vulkan) makes NVDEC's; each
+    /// comes with the next frame (Windows).
+    #[cfg(windows)]
+    pub(crate) fn for_d3d11(
+        vulkan: &Device,
+        reader: &VideoReader,
+        (width, height): (u32, u32),
+        format: format::Pixel,
+    ) -> Result<Self> {
+        let first = reader
+            .peek()
+            .ok_or_else(|| Error::Invalid("no frames".into()))?;
+        let rotation = reader.rotation();
+        if first.format() != format::Pixel::D3D11 {
+            return Err(Error::Invalid("not Direct3D 11's frames".into()));
+        }
+        if !matches!(rotation, 0 | 90 | 180 | 270) {
+            return Err(Error::Invalid(format!("a rotation of {rotation}°")));
+        }
+        let color = crate::color::gpu_color(first, None)
+            .ok_or_else(|| Error::Invalid("RGB pictures".into()))?;
+        let stored = (first.width(), first.height());
+        let sar = first.aspect_ratio();
+        let (shown, shown_sar) = if rotation % 180 == 90 {
+            (
+                (stored.1, stored.0),
+                ffmpeg::Rational(sar.denominator(), sar.numerator()),
+            )
+        } else {
+            (stored, sar)
+        };
+        let fitted = crate::export::video::fit(
+            shown.0,
+            shown.1,
+            (shown_sar.numerator(), shown_sar.denominator()),
+            width,
+            height,
+        );
+        let layout = Layout::Placed {
+            size: (width, height),
+            fitted,
+            format,
+        };
+        let importer = Box::new(crate::d3d11_vulkan::Importer::new(vulkan, first)?);
+        let from = Decoded::D3d11 {
+            vulkan: vulkan.clone(),
+            importer,
+        };
+        let stream = (stored, sar, rotation);
+        let placebo = Placebo::new(from, stream, &color, layout, false, Back::Vulkan)?;
         Ok(Self {
             graph: None,
             placebo: Some(placebo),
@@ -984,12 +1076,11 @@ impl CudaPictures {
 }
 
 impl Placebo {
-    /// The converter for frames of `decoded` (a CUDA frames context) of
-    /// `width`×`height` with sample aspect `sar`, stored turned by
-    /// `rotation`, converted as `color` says, laid out as `layout`.
+    /// The converter for frames `from` a decoder, of `width`×`height` with
+    /// sample aspect `sar`, stored turned by `rotation`, converted as
+    /// `color` says, laid out as `layout`.
     fn new(
-        device: &CudaDevice,
-        decoded: *mut ffi::AVBufferRef,
+        from: Decoded<'_>,
         ((width, height), sar, rotation): ((u32, u32), ffmpeg::Rational, u16),
         color: &GpuColor,
         layout: Layout,
@@ -998,8 +1089,19 @@ impl Placebo {
     ) -> Result<Self> {
         use ffi::AVPixelFormat::{AV_PIX_FMT_CUDA as CUDA, AV_PIX_FMT_VULKAN as VULKAN};
         let _one = converting();
-        let vulkan = device.vulkan()?;
-        let sw = unsafe { (*((*decoded).data as *mut ffi::AVHWFramesContext)).sw_format };
+        // SAFETY: live frames contexts' layouts.
+        let layout_of = |frames: *mut ffi::AVBufferRef| unsafe {
+            (*((*frames).data as *mut ffi::AVHWFramesContext)).sw_format
+        };
+        let (vulkan, sw, device) = match &from {
+            Decoded::Cuda { device, decoded } => {
+                (device.vulkan()?, layout_of(*decoded), Some(*device))
+            }
+            #[cfg(windows)]
+            Decoded::D3d11 { vulkan, importer } => {
+                (vulkan.clone(), layout_of(importer.frames), None)
+            }
+        };
         let turned = rotation % 180 == 90;
         // Upright at its own size in the source's depth, or placed.
         let (out_size, out_pixel, out_sar) = match layout {
@@ -1030,16 +1132,25 @@ impl Placebo {
             format::Pixel::YUV422P10LE => ("yuv422p10le", format::Pixel::YUV422P10LE),
             _ => ("nv12", format::Pixel::NV12),
         };
-        let input = HwFrames::new(vulkan.0, VULKAN, as_read(sw), width, height)?;
-        let output = match to {
-            Back::Cuda => Some(HwFrames::new(
+        let input = match from {
+            Decoded::Cuda { .. } => {
+                Feed::Cuda(HwFrames::new(vulkan.0, VULKAN, as_read(sw), width, height)?)
+            }
+            #[cfg(windows)]
+            Decoded::D3d11 { importer, .. } => Feed::D3d11(importer),
+        };
+        let output = match (to, device) {
+            (Back::Cuda, Some(device)) => Some(HwFrames::new(
                 device.as_ptr(),
                 CUDA,
                 out_pixel.into(),
                 out_size.0,
                 out_size.1,
             )?),
-            Back::Vulkan => None,
+            (Back::Cuda, None) => {
+                return Err(Error::Invalid("no CUDA device to copy pictures to".into()));
+            }
+            (Back::Vulkan, _) => None,
         };
         let mut graph = filter::Graph::new();
         // Black in the output's colors: a shader passes it on as black.
@@ -1067,7 +1178,7 @@ impl Placebo {
             VULKAN,
             (width, height),
             timing,
-            input.0,
+            input.frames(),
             Some((tags.matrix, tags.range)),
         )?;
         add_sink(&mut graph)?;
@@ -1121,17 +1232,21 @@ impl Placebo {
             }
         }
         graph.validate().ctx(|| "configuring libplacebo".into())?;
-        let filler = if at_once {
+        let filler = match (&input, at_once) {
+            (_, false) => None,
             // Any picture will do: a black one.
-            let size = (width, height);
-            Some(Blacks::new(
-                input.share(),
+            (Feed::Cuda(frames), true) => Some(Blacks::new(
+                frames.share(),
                 as_read(sw).into(),
-                size,
+                (width, height),
                 color.input,
-            )?)
-        } else {
-            None
+            )?),
+            #[cfg(windows)]
+            (Feed::D3d11(_), true) => {
+                return Err(Error::Invalid(
+                    "Direct3D 11's pictures come a frame late".into(),
+                ));
+            }
         };
         Ok(Self {
             graph,
@@ -1146,7 +1261,7 @@ impl Placebo {
                 num: out_sar.0,
                 den: out_sar.1,
             },
-            device: device.clone(),
+            device: device.cloned(),
             vulkan,
         })
     }
@@ -1155,13 +1270,16 @@ impl Placebo {
     /// fails all the same, and the next converter makes another device
     /// ([`CudaDevice::forget_vulkan`]).
     fn checked<T>(&self, r: Result<T>) -> Result<T> {
-        if r.is_err() {
-            self.device.forget_vulkan(&self.vulkan);
+        if r.is_err()
+            && let Some(device) = &self.device
+        {
+            device.forget_vulkan(&self.vulkan);
         }
         r
     }
 
-    /// Feeds `f` (a CUDA frame), or the end of the stream (`None`).
+    /// Feeds `f` (a CUDA or Direct3D 11 frame), or the end of the stream
+    /// (`None`).
     fn push(&mut self, f: Option<&frame::Video>) -> Result<()> {
         let _one = converting();
         let fed = self.feed_frame(f);
@@ -1180,8 +1298,16 @@ impl Placebo {
             }
             return Ok(());
         };
-        let mut v = self.input.copy(f, "copying to Vulkan")?;
-        wait_done(&v, "copying to Vulkan")?;
+        let mut v = match &mut self.input {
+            Feed::Cuda(input) => {
+                let v = input.copy(f, "copying to Vulkan")?;
+                wait_done(&v, "copying to Vulkan")?;
+                v
+            }
+            // libplacebo waits for the takeover on the frame's semaphore.
+            #[cfg(windows)]
+            Feed::D3d11(importer) => importer.import(f)?,
+        };
         unsafe {
             ffi::av_frame_copy_props(v.as_mut_ptr(), f.as_ptr());
             // No side data: the CPU converts by the tags alone. libplacebo
@@ -1250,6 +1376,11 @@ impl Placebo {
             // libplacebo has read the input frame once its output is
             // done, so the next copy can't overwrite it (`wait_done`).
             wait_done(&out, "converting on the GPU")?;
+            // Imports it let go of before are done with too.
+            #[cfg(windows)]
+            if let Feed::D3d11(importer) = &self.input {
+                importer.sweep();
+            }
             let mut c = match &self.output {
                 Some(output) => {
                     let mut c = output.copy(&out, "copying back from Vulkan")?;

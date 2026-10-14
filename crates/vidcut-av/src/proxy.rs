@@ -425,11 +425,14 @@ enum Failed {
 /// Where an encoder takes frames on a GPU from.
 #[derive(Clone, Copy)]
 struct OnGpu<'a> {
-    /// NVDEC's CUDA device, for NVENC.
+    /// NVDEC's CUDA device, for NVENC and Vulkan's encoder.
     cuda: Option<&'a crate::cuda::CudaDevice>,
     /// The decoder's device, for an encoder that takes its frames there
     /// (`route::shares`).
     shared: Option<&'a crate::hw::GpuDecoder>,
+    /// A Direct3D 11 decoder on the GPU of Vulkan's encoder, whose frames
+    /// it opens.
+    d3d11: Option<&'a crate::hw::GpuDecoder>,
 }
 
 /// Opens `enc` for `width`×`height` frames timed in `enc_tb`, and what it
@@ -530,12 +533,14 @@ fn open(
             to(Some(Place::D3d11), Up::Frames(up), Some(into))
         }
         // NVDEC's frames reach it through libplacebo on the Vulkan device of
-        // its GPU, where the encoder is on the same one.
+        // its GPU, where the encoder is on the same one, and Direct3D 11's
+        // opened on the encoder's.
         (Some(gpu), EncoderChoice::Vulkan, cuda) => {
             let up = Upload::vulkan(gpu, enc.pixel(), width, height)?;
             ctx.set_format(format::Pixel::VULKAN);
             hw_frames(&mut ctx, up.frames)?;
-            let reached = cuda.is_some_and(|d| d.vulkan().is_ok_and(|v| up.is_on(&v)));
+            let reached =
+                cuda.is_some_and(|d| d.vulkan().is_ok_and(|v| up.is_on(&v))) || on.d3d11.is_some();
             Output::Encoder(EncoderFrames {
                 place: reached.then_some(Place::Vulkan),
                 up: Up::Frames(up),
@@ -609,9 +614,10 @@ impl<'a> Writer<'a> {
         let in_memory = OnGpu {
             cuda: None,
             shared: None,
+            d3d11: None,
         };
         let opened = match open(enc, size, enc_tb, rate, global, on) {
-            Err(e) if on.cuda.is_some() || on.shared.is_some() => {
+            Err(e) if on.cuda.is_some() || on.shared.is_some() || on.d3d11.is_some() => {
                 crate::debug!("decoding", "{} takes frames from memory: {e}", enc.name);
                 open(enc, size, enc_tb, rate, global, in_memory)
             }
@@ -737,6 +743,13 @@ fn encode_into(
             .cuda()
             .filter(|_| matches!(enc.kind, EncoderChoice::Nvenc | EncoderChoice::Vulkan)),
         shared: decoder.filter(|d| crate::route::shares(enc.kind, enc.device.as_deref(), d)),
+        d3d11: decoder.filter(|d| {
+            let on_its_gpu = enc.device.as_deref().is_some_and(|gpu| d.is_on(gpu));
+            cfg!(windows)
+                && enc.kind == EncoderChoice::Vulkan
+                && d.kind() == crate::hw::Kind::D3d11va
+                && on_its_gpu
+        }),
     };
     let (mut writer, output) = Writer::new(tmp, enc, size, times, on, shown)?;
     let pixel = match &output {
@@ -753,10 +766,11 @@ fn encode_into(
         (
             Output::Encoder(EncoderFrames {
                 place: Some(Place::Vulkan),
+                up,
                 ..
             }),
             None,
-        ) => Fitting::for_vulkan(reader, size, pixel, false),
+        ) => vulkan_fitting(reader, up, size, pixel),
         _ => Fitting::default(),
     };
     let path = reader.path().to_path_buf();
@@ -785,6 +799,26 @@ fn encode_into(
     encoding().map_err(Failed::Encoding)?;
     let frames = writer.finish(&path).map_err(Failed::Encoding)?;
     Ok((frames, fitting.went))
+}
+
+/// How the frames `reader` decodes reach Vulkan's encoder, whose frames go
+/// up through `up`: NVDEC's through libplacebo on its GPU, Direct3D 11's
+/// opened on the encoder's device.
+fn vulkan_fitting(
+    reader: &VideoReader,
+    up: &Up,
+    size: (u32, u32),
+    pixel: format::Pixel,
+) -> Fitting {
+    if reader.cuda().is_some() {
+        return Fitting::for_vulkan(reader, size, pixel, false);
+    }
+    #[cfg(windows)]
+    if let Up::Frames(up) = up {
+        return Fitting::for_d3d11_vulkan(reader, &up.device(), size, pixel);
+    }
+    let _ = up;
+    Fitting::default()
 }
 
 fn drain(

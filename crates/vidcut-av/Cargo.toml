@@ -19,6 +19,8 @@ libc.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
 windows.workspace = true
+# Direct3D 11's frames opened on FFmpeg's Vulkan device (`d3d11_vulkan`).
+ash.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
