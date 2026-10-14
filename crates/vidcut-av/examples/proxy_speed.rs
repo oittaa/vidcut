@@ -44,22 +44,21 @@ fn main() {
     .expect("proxy");
     let seconds = clock.elapsed().as_secs_f64();
     let cores = (vidcut_av::cpu_seconds() - cpu) / seconds;
+    let decoded = written.decoder.map_or("the CPU", |k| k.label());
+    let stayed = if written.on_gpu {
+        "stayed on the GPU"
+    } else {
+        "came down to the CPU"
+    };
+    println!("Source:  {} {}x{}", video.codec, video.width, video.height);
+    println!("Proxy:   {}", written.encoder.label());
+    println!("Decoded: on {decoded}");
+    println!("Frames:  {stayed}");
     println!(
-        "{} {}x{} {}: {}, {} frames in {seconds:.1} s ({:.0} fps on {cores:.1} cores), \
-         decoded on {}, frames {} the GPU",
-        video.codec,
-        video.width,
-        video.height,
-        video.pix_fmt,
-        written.encoder.label(),
+        "Speed:   {} frames in {seconds:.1} s, {:.0} frames a second",
         written.frames,
-        written.frames as f64 / seconds,
-        written.decoder.map_or("the CPU", |k| k.name()),
-        if written.on_gpu {
-            "stayed on"
-        } else {
-            "came down from"
-        },
+        written.frames as f64 / seconds
     );
+    println!("CPU:     {cores:.1} cores busy");
     let _ = std::fs::remove_dir_all(&dir);
 }
