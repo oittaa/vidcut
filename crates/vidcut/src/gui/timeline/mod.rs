@@ -1652,8 +1652,14 @@ impl Workspace {
                 json!({ "clips": clips, "muted": !a.muted }),
             );
         }
+        let current = self.project().and_then(|p| {
+            let shown = clips
+                .iter()
+                .map(|id| p.clip(id).and_then(|c| p.clip_color(c)));
+            theme::same_color(shown).map(str::to_string)
+        });
         ui.menu_button("Clip Color", |ui| {
-            if let Some(color) = theme::clip_color_menu(ui) {
+            if let Some(color) = theme::clip_color_menu(ui, current.as_deref()) {
                 self.send("clip.set", json!({ "clips": clips, "color": color }));
                 ui.close();
             }

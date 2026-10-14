@@ -596,18 +596,7 @@ fn filmstrip(
                 t.want(&key, || t.job(p, &key, width))
                     .or_else(|| t.nearest(&c.media, height, frame, 2 * step.max(1)))
             })
-            .or_else(|| {
-                let t = pool?;
-                let secs = fps.frames_to_secs(frame);
-                let i = t
-                    .strip
-                    .times
-                    .iter()
-                    .enumerate()
-                    .min_by(|a, b| (a.1 - secs).abs().total_cmp(&(b.1 - secs).abs()))?
-                    .0;
-                t.textures.get(i).map(egui::TextureHandle::id)
-            });
+            .or_else(|| pool?.nearest(fps.frames_to_secs(frame)));
         if let Some(texture) = texture {
             let tile = Rect::from_min_size(pos2(x, rect.top()), vec2(tile_w, rect.height()));
             painter.image(
