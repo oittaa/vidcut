@@ -157,18 +157,24 @@ pub(crate) fn down(
     Ok(small)
 }
 
-/// The size `src` is shown at in an `out_w`×`out_h` output, as the
-/// normalizer fits it upright, in the frame's own orientation.
-fn shown_size(src: &frame::Video, rotation: u16, (out_w, out_h): (u32, u32)) -> (u32, u32) {
+/// The size `src` is shown at in an `out` picture, as the normalizer fits
+/// it upright: as shown, a quarter turn swapping the sides and the pixel
+/// aspect.
+fn fitted(src: &frame::Video, rotation: u16, (out_w, out_h): (u32, u32)) -> (u32, u32) {
     let (w, h) = (src.width(), src.height());
     let sar = src.aspect_ratio();
     let sar = (sar.numerator(), sar.denominator());
     if rotation % 180 == 90 {
-        let (sw, sh) = fit(h, w, (sar.1, sar.0), out_w, out_h);
-        (sh, sw)
+        fit(h, w, (sar.1, sar.0), out_w, out_h)
     } else {
         fit(w, h, sar, out_w, out_h)
     }
+}
+
+/// [`fitted`], in the frame's own orientation.
+fn shown_size(src: &frame::Video, rotation: u16, out: (u32, u32)) -> (u32, u32) {
+    let (w, h) = fitted(src, rotation, out);
+    if rotation % 180 == 90 { (h, w) } else { (w, h) }
 }
 
 impl Normalizer {
@@ -861,7 +867,8 @@ impl Maker {
             _ => crate::hw::sw_format(frame),
         };
         let color = crate::color::Source::of(frame);
-        let (w, h) = shown_size(frame, rotation, (self.out.0, self.out.1));
+        let out = (self.out.0, self.out.1);
+        let (w, h) = shown_size(frame, rotation, out);
         Facts {
             place,
             layout,
@@ -869,6 +876,7 @@ impl Maker {
             rgb: color.rgb(),
             colors_kept: crate::color::kept(color, self.target),
             shrinks: w < frame.width() && h < frame.height(),
+            pads: fitted(frame, rotation, out) != out,
             out_layout: self.out.2,
             into: self.into().is_some(),
             fit_failed,
@@ -953,16 +961,7 @@ impl Maker {
     /// the encoder there.
     fn fit(&mut self, frame: &frame::Video, rotation: u16) -> Result<frame::Video> {
         let (out_w, out_h, out_fmt) = self.out;
-        let sar = frame.aspect_ratio();
-        let sar = (sar.numerator(), sar.denominator());
-        // Fitted as shown: a quarter turn swaps the sides and the pixel
-        // aspect.
-        let (w, h) = (frame.width(), frame.height());
-        let fitted = if rotation % 180 == 90 {
-            fit(h, w, (sar.1, sar.0), out_w, out_h)
-        } else {
-            fit(w, h, sar, out_w, out_h)
-        };
+        let fitted = fitted(frame, rotation, (out_w, out_h));
         let into = match &self.output {
             Output::Encoder(e) => e.into.as_ref(),
             _ => None,

@@ -433,9 +433,9 @@ struct OnGpu<'a> {
 }
 
 /// Opens `enc` for `width`×`height` frames timed in `enc_tb`, and what it
-/// takes them in: NVENC frames in CUDA memory on `on.cuda`, VAAPI and AMF
-/// frames on the decoder's device where it is `on.shared`, VAAPI and Vulkan
-/// frames uploaded to them; the rest frames in memory.
+/// takes them in: NVENC frames in CUDA memory on `on.cuda`; VAAPI, AMF and
+/// VideoToolbox frames on the decoder's device where it is `on.shared`;
+/// VAAPI and Vulkan frames uploaded to them; the rest frames in memory.
 fn open(
     enc: &ProxyEncoder,
     (width, height): (u32, u32),
@@ -534,6 +534,17 @@ fn open(
             ctx.set_format(format::Pixel::VULKAN);
             hw_frames(&mut ctx, up.frames)?;
             to(None, Up::Frames(up), None)
+        }
+        // VideoToolbox's encoders take each frame's own pixel buffer
+        // (videotoolboxenc.c), in the layout `sw_pix_fmt` says.
+        (_, EncoderChoice::VideoToolbox, _) if on.shared.is_some() => {
+            let decoder = on.shared.expect("checked");
+            let up = Upload::videotoolbox(decoder, enc.pixel(), width, height)?;
+            ctx.set_format(format::Pixel::VIDEOTOOLBOX);
+            // SAFETY: a plain field of the context being set up.
+            unsafe { (*ctx.as_mut_ptr()).sw_pix_fmt = enc.pixel().into() };
+            hw_frames(&mut ctx, up.frames)?;
+            to(Some(Place::VideoToolbox), Up::Frames(up), None)
         }
         (Some(adapter), EncoderChoice::Amf | EncoderChoice::Qsv, _) => {
             crate::export::encode::on_device(&mut ctx, enc.kind, adapter)?;

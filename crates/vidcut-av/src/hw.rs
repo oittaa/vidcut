@@ -1079,7 +1079,7 @@ pub(crate) struct Shrinker {
 }
 
 enum Scaling {
-    /// `scale_vaapi`, or `scale_cuda` in steps.
+    /// `scale_vaapi`, `scale_vt`, or `scale_cuda` in steps.
     Filters(ffmpeg::filter::Graph),
     /// The GPU's video processor.
     #[cfg(windows)]
@@ -1097,6 +1097,12 @@ impl Scaling {
             format::Pixel::CUDA => {
                 let pixel = ffi::AVPixelFormat::AV_PIX_FMT_CUDA;
                 let spec = crate::cuda::scaling((f.width(), f.height()), (w, h), "").join(",");
+                Ok(Self::Filters(gpu_graph(f, frames, pixel, &spec)?))
+            }
+            // In the frames' own layout (vf_scale_vt.c).
+            format::Pixel::VIDEOTOOLBOX => {
+                let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
+                let spec = format!("scale_vt=w={w}:h={h}");
                 Ok(Self::Filters(gpu_graph(f, frames, pixel, &spec)?))
             }
             #[cfg(windows)]
@@ -1199,7 +1205,9 @@ impl Drop for Frames {
 /// output's layout, and centered on black where their aspect differs, at
 /// even offsets as the CPU pads. VA-API's with `transpose_vaapi`,
 /// `scale_vaapi` and `pad_vaapi`; Direct3D 11's on the video processor,
-/// into the encoder's own frames (AMF takes those alone).
+/// into the encoder's own frames (AMF takes those alone); VideoToolbox's
+/// with `transpose_vt` and `scale_vt`, which neither pad nor change the
+/// layout.
 pub(crate) struct Fitter {
     fitting: Fitting,
     /// The frames context, layout and frame size it was made for, the size
@@ -1252,6 +1260,29 @@ impl Fitter {
                         spec.push_str(&format!(",pad_vaapi=w={w}:h={h}:x={x}:y={y}:color=black"));
                     }
                     let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VAAPI;
+                    Fitting::Filters(gpu_graph(f, frames, pixel, &spec)?)
+                }
+                format::Pixel::VIDEOTOOLBOX => {
+                    if fitted != (w, h) {
+                        return Err(Error::Invalid(
+                            "VideoToolbox doesn't place pictures on black".into(),
+                        ));
+                    }
+                    if sw_format(f) != layout {
+                        return Err(Error::Invalid(format!(
+                            "VideoToolbox's scaler doesn't make {layout:?} of {:?}",
+                            sw_format(f)
+                        )));
+                    }
+                    let (fw, fh) = fitted;
+                    let turn = match rotation {
+                        90 => "transpose_vt=dir=clock,",
+                        180 => "transpose_vt=dir=reversal,",
+                        270 => "transpose_vt=dir=cclock,",
+                        _ => "",
+                    };
+                    let spec = format!("{turn}scale_vt=w={fw}:h={fh}");
+                    let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
                     Fitting::Filters(gpu_graph(f, frames, pixel, &spec)?)
                 }
                 #[cfg(windows)]

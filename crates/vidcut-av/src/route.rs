@@ -42,21 +42,21 @@ pub fn takes(kind: EncoderChoice) -> Option<Place> {
         EncoderChoice::Vaapi => Some(Place::Vaapi),
         EncoderChoice::Amf => Some(Place::D3d11),
         EncoderChoice::Vulkan => Some(Place::Vulkan),
-        EncoderChoice::VideoToolbox
-        | EncoderChoice::Qsv
-        | EncoderChoice::Cpu
-        | EncoderChoice::Auto => None,
+        EncoderChoice::VideoToolbox => Some(Place::VideoToolbox),
+        EncoderChoice::Qsv | EncoderChoice::Cpu | EncoderChoice::Auto => None,
     }
 }
 
 /// Whether an encoder of `kind` on `device` (as the encoder check names it)
-/// takes `decoder`'s frames on the decoder's own device.
+/// takes `decoder`'s frames on the decoder's own device. A Mac has one
+/// VideoToolbox, which names no device.
 pub(crate) fn shares(
     kind: EncoderChoice,
     device: Option<&str>,
     decoder: &crate::hw::GpuDecoder,
 ) -> bool {
-    takes(kind) == Some(decoder.kind().place()) && device == Some(decoder.on())
+    takes(kind) == Some(decoder.kind().place())
+        && (kind == EncoderChoice::VideoToolbox || device == Some(decoder.on()))
 }
 
 /// Where a job's pictures go.
@@ -86,6 +86,8 @@ pub struct Facts {
     pub colors_kept: bool,
     /// They are bigger than the output picture each way.
     pub shrinks: bool,
+    /// Their picture is placed on black in the output: its aspect differs.
+    pub pads: bool,
     /// The output's layout.
     pub out_layout: format::Pixel,
     /// Direct3D 11: the encoder's frames are there to fit into (AMF takes
@@ -175,14 +177,22 @@ fn fits(facts: &Facts) -> bool {
                 && !(facts.layout == format::Pixel::NV12
                     && facts.out_layout == format::Pixel::P010LE)
         }
-        Place::VideoToolbox | Place::Vulkan | Place::Memory => false,
+        // `transpose_vt` and `scale_vt`: no padding, and the layout stays
+        // the frames' (vf_scale_vt.c).
+        Place::VideoToolbox => {
+            turnable && facts.colors_kept && !facts.pads && facts.layout == facts.out_layout
+        }
+        Place::Vulkan | Place::Memory => false,
     }
 }
 
 /// Whether the GPU where frames are shrinks them before they come down
 /// (`hw::Shrinker`).
 fn shrinks(place: Place) -> bool {
-    matches!(place, Place::Cuda | Place::Vaapi | Place::D3d11)
+    matches!(
+        place,
+        Place::Cuda | Place::Vaapi | Place::D3d11 | Place::VideoToolbox
+    )
 }
 
 /// The layouts a display takes: 8-bit 4:2:0 (planar, or NV12 as hardware
@@ -207,6 +217,7 @@ mod tests {
             rgb: false,
             colors_kept: true,
             shrinks: true,
+            pads: false,
             out_layout: NV12,
             into: false,
             fit_failed: false,
@@ -317,11 +328,41 @@ mod tests {
     }
 
     #[test]
-    fn videotoolboxs_frames_come_down_whole() {
-        assert_eq!(
-            plan(&decoded(Place::VideoToolbox), Dest::Memory),
-            Route::Whole
-        );
+    fn videotoolboxs_frames_stay_on_the_gpu_for_its_encoder() {
+        let dest = Dest::Encoder {
+            place: Place::VideoToolbox,
+        };
+        assert_eq!(plan(&decoded(Place::VideoToolbox), dest), Route::Gpu);
+    }
+
+    #[test]
+    fn videotoolboxs_10_bit_frames_shrink_and_come_down_for_8_bit_output() {
+        let facts = Facts {
+            layout: P010LE,
+            ..decoded(Place::VideoToolbox)
+        };
+        let dest = Dest::Encoder {
+            place: Place::VideoToolbox,
+        };
+        assert_eq!(plan(&facts, dest), Route::Shrunk);
+    }
+
+    #[test]
+    fn videotoolboxs_frames_placed_on_black_shrink_and_come_down() {
+        let facts = Facts {
+            pads: true,
+            ..decoded(Place::VideoToolbox)
+        };
+        let dest = Dest::Encoder {
+            place: Place::VideoToolbox,
+        };
+        assert_eq!(plan(&facts, dest), Route::Shrunk);
+    }
+
+    #[test]
+    fn videotoolboxs_frames_shrink_before_they_come_down() {
+        let dest = Dest::Memory;
+        assert_eq!(plan(&decoded(Place::VideoToolbox), dest), Route::Shrunk);
     }
 
     #[test]
