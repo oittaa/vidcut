@@ -38,6 +38,7 @@ pub(super) struct Thumbs {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PoolView {
     Thumbnails,
+    Filmstrip,
     List,
 }
 

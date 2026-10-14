@@ -1,4 +1,4 @@
-//! The Media Pool (spec §3): bins, thumbnails with hover
+//! The Media Pool (spec §3): bins, thumbnails and filmstrips with hover
 //! scrubbing, a list view, search and sort, and the edit-function buttons
 //! below it (spec §2, §7).
 
@@ -12,6 +12,9 @@ use super::timeline::gesture::Gesture;
 use super::workspace::{PoolView, Workspace, dim, fit};
 
 const TILE: egui::Vec2 = egui::Vec2::new(176.0, 99.0);
+/// The Filmstrip view's pictures, and the name line above them.
+const STRIP_HEIGHT: f32 = 54.0;
+const HEADER: f32 = 20.0;
 
 /// The pool's bins: where a dragged clip or bin can be dropped, the order
 /// media are shown in, and a bin being renamed.
@@ -104,6 +107,67 @@ fn bin_name(path: &str) -> &str {
     }
 }
 
+/// The whole of a picture, as egui maps a texture.
+const FULL: Rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
+
+/// The source frame under the pointer at `x`, `frames` spread across
+/// `rect`.
+fn frame_at(rect: Rect, x: f32, frames: i64) -> i64 {
+    let f = ((x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+    ((f64::from(f) * frames as f64) as i64).min((frames - 1).max(0))
+}
+
+/// Which of `thumbs` pictures, spread evenly over a clip, each of `slots`
+/// places across its filmstrip shows: the one at the place's middle.
+fn strip_pictures(slots: usize, thumbs: usize) -> Vec<usize> {
+    (0..slots)
+        .map(|i| ((i as f64 + 0.5) / slots as f64 * thumbs as f64) as usize)
+        .collect()
+}
+
+/// A pool item without pictures (yet).
+fn no_pictures(painter: &egui::Painter, rect: Rect, m: &Media) {
+    let text = if m.info.video.is_none() {
+        "♪ audio"
+    } else {
+        "…"
+    };
+    painter.text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        text,
+        egui::FontId::proportional(16.0),
+        theme::TEXT_DIM,
+    );
+}
+
+/// A pool item's source marks along the bottom of its pictures, and the
+/// hovered frame as a line: `frames` spread across `rect`.
+fn marks(painter: &egui::Painter, rect: Rect, m: &Media, frames: i64, hovered: Option<i64>) {
+    if frames <= 0 {
+        return;
+    }
+    let x = |f: i64| rect.left() + rect.width() * (f as f32 / frames as f32);
+    if !m.marks.is_empty() {
+        let a = x(m.marks.mark_in.unwrap_or(0));
+        let b = x(m.marks.mark_out.unwrap_or(frames));
+        painter.rect_filled(
+            Rect::from_min_max(
+                Pos2::new(a, rect.bottom() - 4.0),
+                Pos2::new(b, rect.bottom()),
+            ),
+            CornerRadius::ZERO,
+            Color32::WHITE,
+        );
+    }
+    if let Some(f) = hovered {
+        painter.line_segment(
+            [Pos2::new(x(f), rect.top()), Pos2::new(x(f), rect.bottom())],
+            Stroke::new(1.0, theme::PLAYHEAD),
+        );
+    }
+}
+
 fn sort_label(s: PoolSort) -> &'static str {
     match s {
         PoolSort::Added => "Added",
@@ -170,6 +234,8 @@ impl Workspace {
             }
             ui.selectable_value(&mut self.pool_view, PoolView::Thumbnails, "Grid")
                 .on_hover_text("Thumbnail view");
+            ui.selectable_value(&mut self.pool_view, PoolView::Filmstrip, "Filmstrip")
+                .on_hover_text("Each clip as a strip of its pictures");
             ui.selectable_value(&mut self.pool_view, PoolView::List, "List")
                 .on_hover_text("List view");
             ui.add(
@@ -265,6 +331,14 @@ impl Workspace {
                                 self.tile(ui, m);
                             }
                         });
+                    }
+                    PoolView::Filmstrip => {
+                        for b in &folders {
+                            self.folder_row(ui, p, b);
+                        }
+                        for m in &media {
+                            self.filmstrip(ui, m);
+                        }
                     }
                     PoolView::List => self.list(ui, p, &folders, &media),
                 }
@@ -435,6 +509,23 @@ impl Workspace {
         self.bin_interaction(&resp, path);
     }
 
+    /// A bin in the Filmstrip view: a row with its name and how many clips
+    /// it holds.
+    fn folder_row(&mut self, ui: &mut egui::Ui, p: &Project, path: &str) {
+        let count = p.media.iter().filter(|m| within(&m.bin, path)).count();
+        let r = ui
+            .selectable_label(
+                false,
+                format!("📁 {}   {count} clip(s)", elide(leaf(path), 60)),
+            )
+            .interact(Sense::drag())
+            .on_hover_text(format!(
+                "{path}\nDouble-click opens the bin; drag it onto another bin to move it"
+            ));
+        self.drop_highlight(ui, r.rect, path);
+        self.bin_interaction(&r, path);
+    }
+
     /// Double-click opens a bin; dragging it onto another bin moves it;
     /// its menu renames or removes it.
     fn bin_interaction(&mut self, resp: &egui::Response, path: &str) {
@@ -545,14 +636,9 @@ impl Workspace {
             ui.allocate_exact_size(vec2(TILE.x, TILE.y + 30.0), Sense::click_and_drag());
         let picture = Rect::from_min_size(rect.min, TILE);
         let painter = ui.painter_at(rect);
-        let selected = self.snap.selection.media.contains(&m.id);
-        let open = self.snap.source_at().map(|(id, _)| id) == Some(m.id.as_str());
         painter.rect_filled(picture, CornerRadius::same(3), theme::TRACK);
         let frames = self.project().map_or(0, |p| p.media_frames(m));
-        let hovered_frame = resp.hover_pos().map(|pos| {
-            let f = ((pos.x - picture.left()) / picture.width()).clamp(0.0, 1.0);
-            ((f64::from(f) * frames as f64) as i64).min((frames - 1).max(0))
-        });
+        let hovered_frame = resp.hover_pos().map(|pos| frame_at(picture, pos.x, frames));
         if let Some(f) = hovered_frame {
             self.hover = Some((m.id.clone(), f));
         }
@@ -565,94 +651,16 @@ impl Workspace {
                 let tex = &t.textures[i.min(n - 1)];
                 let size = tex.size_vec2();
                 let r = fit(picture, size.x / size.y.max(1.0));
-                painter.image(
-                    tex.id(),
-                    r,
-                    Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                    Color32::WHITE,
-                );
+                painter.image(tex.id(), r, FULL, Color32::WHITE);
             }
-            _ => {
-                let text = if m.info.video.is_none() {
-                    "♪ audio"
-                } else {
-                    "…"
-                };
-                painter.text(
-                    picture.center(),
-                    egui::Align2::CENTER_CENTER,
-                    text,
-                    egui::FontId::proportional(16.0),
-                    theme::TEXT_DIM,
-                );
-            }
+            _ => no_pictures(&painter, picture, m),
         }
-        // Source marks along the bottom edge, hover position as a line.
-        if frames > 0 {
-            let x = |f: i64| picture.left() + picture.width() * (f as f32 / frames as f32);
-            if !m.marks.is_empty() {
-                let a = x(m.marks.mark_in.unwrap_or(0));
-                let b = x(m.marks.mark_out.unwrap_or(frames));
-                painter.rect_filled(
-                    Rect::from_min_max(
-                        Pos2::new(a, picture.bottom() - 4.0),
-                        Pos2::new(b, picture.bottom()),
-                    ),
-                    CornerRadius::ZERO,
-                    Color32::WHITE,
-                );
-            }
-            if let Some(f) = hovered_frame {
-                painter.line_segment(
-                    [
-                        Pos2::new(x(f), picture.top()),
-                        Pos2::new(x(f), picture.bottom()),
-                    ],
-                    Stroke::new(1.0, theme::PLAYHEAD),
-                );
-            }
-        }
+        marks(&painter, picture, m, frames, hovered_frame);
         if let Some(color) = m.color.as_deref().and_then(theme::clip_color) {
             painter.circle_filled(picture.right_bottom() + vec2(-9.0, -11.0), 4.5, color);
         }
-        let border = if selected {
-            Stroke::new(2.0, theme::ACCENT)
-        } else if open {
-            Stroke::new(1.0, theme::TEXT_DIM)
-        } else {
-            Stroke::NONE
-        };
-        painter.rect_stroke(
-            picture,
-            CornerRadius::same(3),
-            border,
-            egui::StrokeKind::Inside,
-        );
-        let missing = self.snap.missing.contains(&m.id);
-        if missing {
-            let galley = painter.layout_no_wrap(
-                "MISSING".to_string(),
-                egui::FontId::proportional(10.0),
-                theme::ERROR,
-            );
-            let badge = Rect::from_min_size(
-                picture.left_top() + vec2(3.0, 3.0),
-                galley.size() + vec2(6.0, 2.0),
-            );
-            painter.rect_filled(badge, CornerRadius::same(2), theme::PANEL_DARK);
-            painter.galley(badge.min + vec2(3.0, 1.0), galley, theme::ERROR);
-        }
-        let proxy = proxy_state(m);
-        if let Some((text, color, _)) = proxy {
-            let galley =
-                painter.layout_no_wrap(text.to_string(), egui::FontId::proportional(10.0), color);
-            let badge = Rect::from_min_size(
-                Pos2::new(picture.right() - galley.size().x - 8.0, picture.top() + 3.0),
-                galley.size() + vec2(6.0, 2.0),
-            );
-            painter.rect_filled(badge, CornerRadius::same(2), theme::PANEL_DARK);
-            painter.galley(badge.min + vec2(3.0, 1.0), galley, color);
-        }
+        self.outline(&painter, picture, m);
+        let tip = self.badges(&painter, picture, m);
         let label = |pos: Pos2, text: String, color: Color32| {
             painter.text(
                 pos,
@@ -669,13 +677,126 @@ impl Workspace {
         );
         label(
             Pos2::new(picture.left(), picture.bottom() + 16.0),
-            match hovered_frame {
-                Some(f) => self.src_tc(f),
-                None => self.src_tc(frames),
-            },
+            self.src_tc(hovered_frame.unwrap_or(frames)),
             theme::TEXT_DIM,
         );
-        let resp = resp.on_hover_text(format!(
+        let resp = resp.on_hover_text(tip);
+        self.media_interaction(&resp, m);
+    }
+
+    /// A clip in the Filmstrip view (spec §3): its name over a strip of its
+    /// pictures as wide as the pool. Hovering scrubs it, and I/O mark the
+    /// clip there.
+    fn filmstrip(&mut self, ui: &mut egui::Ui, m: &Media) {
+        let width = ui.available_width();
+        let (rect, resp) =
+            ui.allocate_exact_size(vec2(width, STRIP_HEIGHT + HEADER), Sense::click_and_drag());
+        let header = Rect::from_min_size(rect.min, vec2(width, HEADER - 2.0));
+        let film = Rect::from_min_max(Pos2::new(rect.left(), header.bottom() + 2.0), rect.max);
+        let painter = ui.painter_at(rect);
+        let frames = self.project().map_or(0, |p| p.media_frames(m));
+        let hovered_frame = resp.hover_pos().map(|pos| frame_at(film, pos.x, frames));
+        if let Some(f) = hovered_frame {
+            self.hover = Some((m.id.clone(), f));
+        }
+        if let Some(color) = m.color.as_deref().and_then(theme::clip_color) {
+            painter.rect_filled(header, CornerRadius::same(2), color.gamma_multiply(0.6));
+        }
+        let font = egui::FontId::proportional(12.0);
+        let time = self.src_tc(hovered_frame.unwrap_or(frames));
+        let time = painter.layout_no_wrap(time, font.clone(), theme::TEXT_DIM);
+        let room = ((width - time.size().x - 16.0) / 6.5).max(3.0) as usize;
+        let name = painter.layout_no_wrap(elide(&m.name, room), font, theme::TEXT);
+        let y = header.center().y;
+        painter.galley(
+            Pos2::new(header.left() + 4.0, y - name.size().y / 2.0),
+            name,
+            theme::TEXT,
+        );
+        painter.galley(
+            Pos2::new(
+                header.right() - time.size().x - 4.0,
+                y - time.size().y / 2.0,
+            ),
+            time,
+            theme::TEXT_DIM,
+        );
+        painter.rect_filled(film, CornerRadius::same(3), theme::TRACK);
+        match self.thumbs.get(&m.id) {
+            Some(t) if !t.textures.is_empty() => {
+                let n = t.textures.len();
+                let w = STRIP_HEIGHT * t.strip.width as f32 / t.strip.height.max(1) as f32;
+                let slots = (film.width() / w).ceil().max(1.0) as usize;
+                let mut shown = strip_pictures(slots, n);
+                // The place under the pointer shows the hovered frame.
+                if let (Some(f), Some(pos)) = (hovered_frame, resp.hover_pos()) {
+                    let slot = (((pos.x - film.left()) / w) as usize).min(slots - 1);
+                    shown[slot] = ((f as f64 / frames.max(1) as f64) * n as f64) as usize;
+                }
+                for (i, k) in shown.into_iter().enumerate() {
+                    let r = Rect::from_min_size(
+                        film.min + vec2(i as f32 * w, 0.0),
+                        vec2(w, film.height()),
+                    );
+                    painter.image(t.textures[k.min(n - 1)].id(), r, FULL, Color32::WHITE);
+                }
+            }
+            _ => no_pictures(&painter, film, m),
+        }
+        marks(&painter, film, m, frames, hovered_frame);
+        self.outline(&painter, film, m);
+        let tip = self.badges(&painter, film, m);
+        let resp = resp.on_hover_text(tip);
+        self.media_interaction(&resp, m);
+    }
+
+    /// The border of a pool item's pictures: the accent when selected, a
+    /// thin line when the source viewer shows it.
+    fn outline(&self, painter: &egui::Painter, rect: Rect, m: &Media) {
+        let selected = self.snap.selection.media.contains(&m.id);
+        let open = self.snap.source_at().map(|(id, _)| id) == Some(m.id.as_str());
+        let border = if selected {
+            Stroke::new(2.0, theme::ACCENT)
+        } else if open {
+            Stroke::new(1.0, theme::TEXT_DIM)
+        } else {
+            Stroke::NONE
+        };
+        painter.rect_stroke(
+            rect,
+            CornerRadius::same(3),
+            border,
+            egui::StrokeKind::Inside,
+        );
+    }
+
+    /// MISSING and the proxy's badge on a pool item's pictures. Returns
+    /// what hovering it says.
+    fn badges(&self, painter: &egui::Painter, rect: Rect, m: &Media) -> String {
+        let badge = |text: &str, color: Color32, right: bool| {
+            let galley =
+                painter.layout_no_wrap(text.to_string(), egui::FontId::proportional(10.0), color);
+            let x = if right {
+                rect.right() - galley.size().x - 8.0
+            } else {
+                rect.left() + 3.0
+            };
+            let r = Rect::from_min_size(
+                Pos2::new(x, rect.top() + 3.0),
+                galley.size() + vec2(6.0, 2.0),
+            );
+            painter.rect_filled(r, CornerRadius::same(2), theme::PANEL_DARK);
+            painter.galley(r.min + vec2(3.0, 1.0), galley, color);
+        };
+        let missing = self.snap.missing.contains(&m.id);
+        if missing {
+            badge("MISSING", theme::ERROR, false);
+        }
+        let proxy = proxy_state(m);
+        if let Some((text, color, _)) = &proxy {
+            badge(text, *color, true);
+        }
+        format!(
             "{}\n{}\n{}{}I/O while hovering marks the clip; double-click opens it",
             m.name,
             m.path.display(),
@@ -685,8 +806,7 @@ impl Workspace {
                 ""
             },
             proxy.map_or(String::new(), |(_, _, tip)| format!("{tip}\n")),
-        ));
-        self.media_interaction(&resp, m);
+        )
     }
 
     fn list(&mut self, ui: &mut egui::Ui, p: &Project, folders: &[String], media: &[Media]) {
@@ -1035,6 +1155,11 @@ pub(super) fn elide(s: &str, n: usize) -> String {
 mod tests {
 
     use super::*;
+
+    #[test]
+    fn each_place_on_a_filmstrip_shows_the_picture_at_its_middle() {
+        assert_eq!(strip_pictures(4, 24), vec![3, 9, 15, 21]);
+    }
 
     #[test]
     fn bin_drop_to_names_the_moved_bin() {
