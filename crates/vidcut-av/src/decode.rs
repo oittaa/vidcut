@@ -634,11 +634,6 @@ impl VideoReader {
         );
     }
 
-    /// Decoding on NVDEC on `device` ([`open_on`](Self::open_on)).
-    pub fn open_cuda(source: &Input, device: &crate::cuda::CudaDevice) -> Result<Self> {
-        Self::open_on(source, &crate::hw::GpuDecoder::nvdec(device.clone()))
-    }
-
     fn open_with(source: &Input, device: Option<&crate::hw::GpuDecoder>) -> Result<Self> {
         let mut reader = Self::open_raw(source, device)?;
         // Learn `o` up front; keep the frame as look-ahead so reading from the
@@ -745,6 +740,11 @@ impl VideoReader {
     /// The GPU decoding, when one does: its frames are in its memory.
     pub fn gpu(&self) -> Option<crate::hw::Kind> {
         self.gpu.as_ref().map(crate::hw::GpuDecoder::kind)
+    }
+
+    /// NVDEC's CUDA device, when it decodes.
+    pub(crate) fn cuda(&self) -> Option<&crate::cuda::CudaDevice> {
+        self.gpu.as_ref().and_then(crate::hw::GpuDecoder::cuda)
     }
 
     /// The stream's frames are interlaced (and deinterlaced here, on the

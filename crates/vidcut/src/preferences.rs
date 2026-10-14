@@ -110,17 +110,6 @@ impl GpuDecoding {
             .flatten()
             .and_then(|d| d.own().ok())
     }
-
-    /// Where an export's or a proxy's pieces decode: on a decoder of their
-    /// own on the GPU in use, and NVENC's on NVDEC (also without one),
-    /// unless the CPU decodes everything.
-    pub fn for_jobs(&self) -> vidcut_av::hw::Decoding {
-        use vidcut_av::hw::Decoding;
-        if !self.on {
-            return Decoding::Cpu;
-        }
-        self.own_decoder().map_or(Decoding::Nvdec, Decoding::Gpu)
-    }
 }
 
 /// The viewer's memory for pictures: `player.memory_mb` and

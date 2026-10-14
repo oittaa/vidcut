@@ -224,33 +224,6 @@ pub struct GpuDecoder {
     left: Vec<(ffmpeg::codec::Id, &'static str)>,
 }
 
-/// Where a job's pieces decode: an export's or a proxy's.
-#[derive(Clone)]
-pub enum Decoding {
-    /// NVENC's on NVDEC, so their frames stay on the GPU; the rest on the
-    /// CPU.
-    Nvdec,
-    /// On this GPU where it decodes their streams; NVENC's on NVDEC.
-    Gpu(GpuDecoder),
-    /// All on the CPU, NVENC's too.
-    Cpu,
-}
-
-impl Decoding {
-    /// The GPU decoder for pieces that aren't NVENC's, when there is one.
-    pub fn decoder(&self) -> Option<&GpuDecoder> {
-        match self {
-            Self::Gpu(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    /// Whether NVENC's pieces decode on NVDEC.
-    pub fn nvdec(&self) -> bool {
-        !matches!(self, Self::Cpu)
-    }
-}
-
 impl GpuDecoder {
     /// NVDEC, on `cuda`.
     pub fn nvdec(cuda: CudaDevice) -> Self {
