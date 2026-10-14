@@ -690,7 +690,8 @@ fn hdr_colors_keep_their_matrix() {
     let sdr = dir.path().join("sdr.mkv");
     render(&p, &lossless(), &sdr);
     // The stripes tone-mapped into SDR BT.709, within rounding and zimg's
-    // float approximations.
+    // float approximations. Those differ by CPU: on a Mac (ARM) the third
+    // stripe's luma is 1.9 low.
     const SDR: [[f64; 3]; 4] = [
         [62.5, 102.4, 239.8],
         [98.0, 203.9, 74.8],
@@ -700,7 +701,7 @@ fn hdr_colors_keep_their_matrix() {
     for (i, (got, want)) in stripes(&sdr).iter().zip(SDR).enumerate() {
         for c in 0..3 {
             assert!(
-                (got[c] - want[c]).abs() <= 1.5,
+                (got[c] - want[c]).abs() <= 2.0,
                 "SDR stripe {i}: {got:?}, not {want:?}"
             );
         }

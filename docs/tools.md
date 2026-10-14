@@ -6,6 +6,8 @@
 cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 60 600
 ```
 
+`g=GOP` and `b=BFRAMES` set the keyframe spacing and B-frames (H.264 with B-frames has open GOPs).
+
 **GPU encoders:** `cargo run -p vidcut-av --example encoders` test-encodes every GPU encoder (NVENC, VAAPI, AMF, QSV) on every GPU, uncached.
 
 **Other FFmpeg versions:** `scripts/ffmpeg-check.sh [TARGET…]` (Docker) runs `scripts/check.sh full` against the checkout in a container per target, and prints a summary.
@@ -25,6 +27,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `packets FILE [FROM TO]`: video packets in decode order, with pts, dts and keyframe flags.
 - `filmstrip FILE OUTDIR [N]`: pool thumbnails, timed.
 - `tiles FILE [HEIGHT] [gpu]`: timeline tiles, timed at spacings from 0.25 to 30 s; `gpu` decodes on the GPU in use.
+- `seek_check FILE...`: seeks to every frame of barcode fixtures on the CPU and on each GPU decoder, and lists the seeks that show other frames.
 - `decode_speed FILE [FRAMES]`: decoding speed, cores and seek times on the CPU and on each GPU decoder.
 - `passes FILE START_S SECONDS CODEC ENCODER MBPS [key=value…]` (release build): exports a stretch at a bitrate (`qN`: constant quality) with `video.*` settings (`passes=2`), and prints the bitrate reached, the time and the luma PSNR.
 
