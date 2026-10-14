@@ -205,3 +205,33 @@ fn the_levels_are_the_peaks_of_the_sound_heard() {
     player.pause();
     assert_eq!(player.levels(Instant::now()), None, "paused");
 }
+
+#[test]
+fn backward_the_lanes_show_the_sound_heard() {
+    // Back from frame 35, the first 200 ms read hold the beep at 1 s, heard
+    // only at their end: the first 20 ms heard are silent.
+    let a = beeps();
+    let (player, out) = player(plan(&[clip(&a, 0, 120)], 0), false);
+    player.seek(35);
+    assert!(player.wait_ready(35, Duration::from_secs(10)));
+    player.play(-1.0);
+    let heard = [pull_full(&out, 480), pull_full(&out, 480)].concat();
+    assert!(heard.iter().all(|&s| s == 0.0), "silence heard");
+    let levels = player.levels(Instant::now()).expect("playing");
+    assert_eq!(levels.lanes, vec![vec![0.0, 0.0]]);
+}
+
+#[test]
+fn muted_the_mix_meter_still_shows_the_sound() {
+    // The monitoring mute silences what is heard, and in the GUI the
+    // viewer's meter, not the mix's (spec D28).
+    let a = beeps();
+    let (player, out) = player(plan(&[clip(&a, 0, 120)], 0), false);
+    assert!(player.wait_ready(0, Duration::from_secs(10)));
+    player.set_muted(true);
+    player.play(1.0);
+    let heard = [pull_full(&out, 480), pull_full(&out, 480)].concat();
+    assert!(heard.iter().all(|&s| s == 0.0), "muted");
+    let levels = player.levels(Instant::now()).expect("playing");
+    assert!(levels.mix[0] > 0.1, "the beep on the mix's meter");
+}
