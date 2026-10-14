@@ -224,7 +224,7 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "timeline.import",
         "vidcut -p cut.vidcut timeline import their-cut.otio\n  \
-         vidcut -p cut.vidcut timeline import cut.otio --replace --search /mnt/footage\n  \
+         vidcut -p cut.vidcut timeline import cut.otio --mode replace --search /mnt/footage\n  \
          vidcut -p cut.vidcut timeline import cut.otioz --unpack /mnt/fast/cut-media",
     ),
     (

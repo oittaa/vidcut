@@ -13,6 +13,7 @@ use vidcut_core::export::{
     AudioCodec, AudioSettings, Container, EncoderChoice, ExportSettings, HdrMode, VideoCodec,
     VideoSettings, apply_overrides, validate,
 };
+use vidcut_core::request::ImportMode;
 use vidcut_core::{Envelope, Error, Response};
 
 use super::folders::Kind;
@@ -208,8 +209,8 @@ pub struct ExportUi {
 }
 
 impl ExportUi {
-    /// A question is up: append or replace an imported timeline, where its
-    /// media are, or quitting while jobs run.
+    /// A question is up: where an imported timeline goes, where its media
+    /// are, or quitting while jobs run.
     pub(super) fn asking(&self, jobs: &[JobInfo]) -> bool {
         matches!(self.otio, Some(Otio::Choose(_) | Otio::Missing { .. }))
             || (self.confirm_quit && jobs.iter().any(JobInfo::unfinished))
@@ -238,23 +239,24 @@ struct Starting {
 enum Otio {
     /// Asking which file to import.
     PickImport(Picked),
-    /// The timeline has clips: append or replace?
+    /// Where the timeline goes: after the last clip, instead of the
+    /// timeline, as a compound clip, or only its media into the pool?
     Choose(PathBuf),
     Importing {
         ask: Ask,
         path: PathBuf,
-        replace: bool,
+        mode: ImportMode,
     },
     /// Media files weren't where the file says: look in a folder?
     Missing {
         path: PathBuf,
-        replace: bool,
+        mode: ImportMode,
         message: String,
     },
     PickSearch {
         picked: Picked,
         path: PathBuf,
-        replace: bool,
+        mode: ImportMode,
     },
     /// Where to write, and the extension it gets if it has none.
     PickExport(Picked, &'static str),
@@ -1328,7 +1330,7 @@ impl Workspace {
         let Some(state) = self.export.otio.take() else {
             return;
         };
-        let import = |ws: &mut Self, path: PathBuf, replace: bool, search: Option<PathBuf>| {
+        let import = |ws: &mut Self, path: PathBuf, mode: ImportMode, search: Option<PathBuf>| {
             if vidcut_core::editor::is_otioz(&path) {
                 ws.say(format!(
                     "Unpacking the media of {}…",
@@ -1336,7 +1338,7 @@ impl Workspace {
                         .map_or(String::new(), |n| n.to_string_lossy().into_owned())
                 ));
             }
-            let mut params = json!({ "path": path, "replace": replace });
+            let mut params = json!({ "path": path, "mode": mode });
             if let Some(dir) = search {
                 params["search"] = json!([dir]);
             }
@@ -1346,25 +1348,20 @@ impl Workspace {
             Otio::Importing {
                 ask: Ask::send(&ws.live, ctx, "timeline.import", params),
                 path,
-                replace,
+                mode,
             }
         };
         self.export.otio = match state {
             Otio::PickImport(p) => match p.take() {
                 None => Some(Otio::PickImport(p)),
                 Some(None) => None,
-                Some(Some(path)) => {
-                    let empty = self
-                        .project()
-                        .is_none_or(|p| p.tracks.iter().all(|t| t.clips.is_empty()));
-                    Some(if empty {
-                        import(self, path, false, None)
-                    } else {
-                        Otio::Choose(path)
-                    })
-                }
+                Some(Some(path)) => Some(Otio::Choose(path)),
             },
             Otio::Choose(path) => {
+                let empty = self
+                    .project()
+                    .is_none_or(|p| p.tracks.iter().all(|t| t.clips.is_empty()));
+                let flatten = self.export.flatten;
                 let mut choice = None;
                 let modal = egui::Modal::new(egui::Id::new("otio-import-choice")).show(ctx, |ui| {
                     ui.label(format!(
@@ -1374,10 +1371,16 @@ impl Workspace {
                     ));
                     ui.horizontal(|ui| {
                         if ui.button("Append to the Timeline").clicked() {
-                            choice = Some(Some(false));
+                            choice = Some(Some(ImportMode::Append));
                         }
-                        if ui.button("Replace the Timeline").clicked() {
-                            choice = Some(Some(true));
+                        if !empty && ui.button("Replace the Timeline").clicked() {
+                            choice = Some(Some(ImportMode::Replace));
+                        }
+                        if !flatten && ui.button("As a Compound Clip").clicked() {
+                            choice = Some(Some(ImportMode::Compound));
+                        }
+                        if ui.button("Media Only").clicked() {
+                            choice = Some(Some(ImportMode::Media));
                         }
                         if ui.button("Cancel").clicked() {
                             choice = Some(None);
@@ -1390,12 +1393,12 @@ impl Workspace {
                 match choice {
                     None => Some(Otio::Choose(path)),
                     Some(None) => None,
-                    Some(Some(replace)) => Some(import(self, path, replace, None)),
+                    Some(Some(mode)) => Some(import(self, path, mode, None)),
                 }
             }
             Otio::Missing {
                 path,
-                replace,
+                mode,
                 message,
             } => {
                 let mut choice = None;
@@ -1418,7 +1421,7 @@ impl Workspace {
                 match choice {
                     None => Some(Otio::Missing {
                         path,
-                        replace,
+                        mode,
                         message,
                     }),
                     Some(false) => None,
@@ -1429,28 +1432,20 @@ impl Workspace {
                                 dialogs.pick_folder("Where Is the Media?", &folder)
                             }),
                             path,
-                            replace,
+                            mode,
                         })
                     }
                 }
             }
-            Otio::PickSearch {
-                picked,
-                path,
-                replace,
-            } => match picked.take() {
-                None => Some(Otio::PickSearch {
-                    picked,
-                    path,
-                    replace,
-                }),
+            Otio::PickSearch { picked, path, mode } => match picked.take() {
+                None => Some(Otio::PickSearch { picked, path, mode }),
                 Some(None) => None,
-                Some(Some(dir)) => Some(import(self, path, replace, Some(dir))),
+                Some(Some(dir)) => Some(import(self, path, mode, Some(dir))),
             },
-            Otio::Importing { ask, path, replace } => match ask.take() {
-                None => Some(Otio::Importing { ask, path, replace }),
+            Otio::Importing { ask, path, mode } => match ask.take() {
+                None => Some(Otio::Importing { ask, path, mode }),
                 Some(Ok(r)) => {
-                    let n = r.result["clips"].as_array().map_or(0, Vec::len);
+                    let count = |key: &str| r.result[key].as_array().map_or(0, Vec::len);
                     let warnings: Vec<String> = r.result["warnings"]
                         .as_array()
                         .into_iter()
@@ -1461,7 +1456,13 @@ impl Workspace {
                         .as_str()
                         .unwrap_or("the timeline")
                         .to_string();
-                    self.say(format!("Imported {n} clip(s) from {name}"));
+                    self.say(match mode {
+                        ImportMode::Compound => format!("Imported {name} as a compound clip"),
+                        ImportMode::Media => {
+                            format!("Imported {} media file(s) from {name}", count("media"))
+                        }
+                        _ => format!("Imported {} clip(s) from {name}", count("clips")),
+                    });
                     if !warnings.is_empty() {
                         self.export.warnings = Some((name, warnings));
                     }
@@ -1469,7 +1470,7 @@ impl Workspace {
                 }
                 Some(Err(e)) if e.code == vidcut_core::ErrorCode::Media => Some(Otio::Missing {
                     path,
-                    replace,
+                    mode,
                     message: e.message,
                 }),
                 Some(Err(e)) => {

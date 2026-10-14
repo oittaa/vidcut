@@ -1457,6 +1457,57 @@ fn kept_color(item: &Value) -> Option<Option<String>> {
         .then(|| our_str(item, "color"))
 }
 
+/// `doc`'s timeline as one compound clip named `name`: a timeline that
+/// holds its tracks' stack on a video track for the picture and on an
+/// audio track for the sound, as compound clips with sound are written.
+/// The stack keeps its markers, which an import places on the timeline.
+pub fn as_compound(doc: &Value, name: &str) -> Result<Value> {
+    let tl = find_timeline(doc).ok_or_else(|| Error::usage("no Timeline in this OTIO file"))?;
+    let tracks: Vec<&Value> = tl["tracks"]["children"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .collect();
+    let fps = file_rate(tl, &tracks)?;
+    let mut stack = tl["tracks"].clone();
+    stack["name"] = json!(name);
+    stack["source_range"] = range(0.0, item_len(&tl["tracks"], fps) as f64, fps.as_f64());
+    let track = |kind: &str| {
+        json!({
+            "OTIO_SCHEMA": "Track.1",
+            "kind": kind,
+            "children": [stack.clone()],
+        })
+    };
+    let children: Vec<Value> = ["Video", "Audio"]
+        .into_iter()
+        .filter(|kind| tracks.iter().any(|t| t["kind"] == *kind))
+        .map(track)
+        .collect();
+    Ok(json!({
+        "OTIO_SCHEMA": "Timeline.1",
+        "name": name,
+        "global_start_time": tl["global_start_time"],
+        "tracks": { "OTIO_SCHEMA": "Stack.1", "children": children },
+        "metadata": { VIDCUT: { "fps": fps } },
+    }))
+}
+
+/// The timeline's rate: ours if we wrote the file, else the one most items
+/// have.
+fn file_rate(tl: &Value, tracks: &[&Value]) -> Result<Rational> {
+    let ours = tl["metadata"][VIDCUT]["fps"]
+        .as_str()
+        .and_then(|s| s.parse::<Rational>().ok());
+    match ours {
+        Some(r) => Ok(r),
+        None => rational(
+            timeline_rate(tl, tracks)
+                .ok_or_else(|| Error::usage("this OTIO file has no frame rate"))?,
+        ),
+    }
+}
+
 /// Whether `doc` is an OTIO file vidcut wrote of a whole timeline, which
 /// holds the rest of its project too.
 pub fn holds_project(doc: &Value) -> bool {
@@ -1527,17 +1578,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     };
     let (video_tracks, audio_tracks) = (of_kind("Video"), of_kind("Audio"));
     let mut warnings = Vec::new();
-    // The rate: ours if we wrote the file, else the one most items have.
-    let ours = tl["metadata"][VIDCUT]["fps"]
-        .as_str()
-        .and_then(|s| s.parse::<Rational>().ok());
-    let fps = match ours {
-        Some(r) => r,
-        None => rational(
-            timeline_rate(tl, &tracks)
-                .ok_or_else(|| Error::usage("this OTIO file has no frame rate"))?,
-        )?,
-    };
+    let fps = file_rate(tl, &tracks)?;
     let start_tc = time(&tl["global_start_time"]).map_or(0, |(v, r)| frames(v, r, fps));
     let mut markers = Vec::new();
 

@@ -78,7 +78,7 @@ fn a_clip_color_comes_back_from_the_file() {
     let doc = export(f.editor.project(), "t", None, Locations::Absolute).unwrap();
     f.ok(req(
         "timeline.import",
-        json!({"otio": doc, "replace": true}),
+        json!({"otio": doc, "mode": "replace"}),
     ));
     let c = &f.editor.project().tracks[0].clips[0];
     assert_eq!(c.color.as_deref(), Some("teal"));
@@ -268,4 +268,99 @@ fn a_timeline_comes_back_from_an_otio_file() {
         json!({"track": "V1", "name": "Picture", "locked": true}),
     ));
     assert_eq!(as_saved(&reopened(&f)), as_saved(f.editor.project()));
+}
+
+/// `f`'s whole timeline as vidcut writes it, named `t`.
+fn written(f: &Fixture) -> Value {
+    export(f.editor.project(), "t", None, Locations::Absolute).unwrap()
+}
+
+#[test]
+fn a_vidcut_files_media_come_into_a_bin_named_after_it() {
+    let mut f = Fixture::new(&[(4.0, true)]);
+    f.ok(req("bins.add", json!({"path": "Interviews"})));
+    f.ok(req(
+        "media.move",
+        json!({"media": "m1", "bin": "Interviews"}),
+    ));
+    f.ok(req("media.set", json!({"media": "m1", "color": "teal"})));
+    f.append("m1", 0, 50);
+    let mut other = Fixture::new(&[]);
+    other.ok(req("timeline.import", json!({"otio": written(&f)})));
+    let m = &other.editor.project().media[0];
+    assert_eq!(
+        (m.bin.as_str(), m.color.as_deref()),
+        ("t/Interviews", Some("teal"))
+    );
+}
+
+#[test]
+fn a_file_the_pool_has_keeps_its_pool_item() {
+    let mut f = Fixture::new(&[(4.0, true)]);
+    f.ok(req("media.set", json!({"media": "m1", "color": "teal"})));
+    f.append("m1", 0, 50);
+    let mut other = Fixture::new(&[(4.0, true)]);
+    other.ok(req("timeline.import", json!({"otio": written(&f)})));
+    let p = other.editor.project();
+    assert_eq!((p.media.len(), p.media[0].color.as_deref()), (1, None));
+}
+
+#[test]
+fn media_only_brings_the_pool_without_the_timeline() {
+    let mut f = Fixture::new(&[(4.0, true), (4.0, true)]);
+    f.append("m1", 0, 50);
+    let mut other = Fixture::new(&[]);
+    other.ok(req(
+        "timeline.import",
+        json!({"otio": written(&f), "mode": "media"}),
+    ));
+    let p = other.editor.project();
+    assert_eq!((p.media.len(), p.end()), (2, 0));
+}
+
+#[test]
+fn a_timeline_imports_as_one_compound_clip() {
+    let mut f = Fixture::new(&[(4.0, true)]);
+    f.append("m1", 0, 50);
+    f.append("m1", 60, 90);
+    let mut other = Fixture::new(&[(4.0, true)]);
+    other.ok(req(
+        "timeline.import",
+        json!({"otio": written(&f), "mode": "compound"}),
+    ));
+    let clips = &other.editor.project().tracks[0].clips;
+    assert_eq!(
+        (clips.len(), clips[0].duration, clips[0].compound.is_some()),
+        (1, 80, true)
+    );
+}
+
+/// Points every media reference in `v` that names `from` at `to`.
+fn relink(v: &mut Value, from: &str, to: &str) {
+    match v {
+        Value::Object(o) => {
+            if o.get("target_url").and_then(Value::as_str) == Some(from) {
+                o.insert("target_url".into(), json!(to));
+            }
+            o.values_mut().for_each(|x| relink(x, from, to));
+        }
+        Value::Array(a) => a.iter_mut().for_each(|x| relink(x, from, to)),
+        _ => {}
+    }
+}
+
+#[test]
+fn a_clip_relinked_in_the_file_takes_the_files_media() {
+    // OTIO's own items win over the project the file holds.
+    let mut f = Fixture::new(&[(4.0, true)]);
+    f.append("m1", 0, 50);
+    let mut doc = written(&f);
+    relink(&mut doc, "/media/1.mp4", "/media/2.mp4");
+    let mut other = Fixture::new(&[(4.0, true), (4.0, true)]);
+    other.ok(req("timeline.import", json!({"otio": doc})));
+    let p = other.editor.project();
+    assert_eq!(
+        (p.media.len(), p.tracks[0].clips[0].media.as_str()),
+        (2, "m2")
+    );
 }
