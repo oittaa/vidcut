@@ -30,7 +30,7 @@ use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, encoder, ffi, format, frame};
 use audio::AudioMix;
 use encode::{AudioEncoder, Availability, Upload};
-use video::VideoFrames;
+use video::{Output, VideoFrames};
 
 /// Progress of a running export.
 #[derive(Debug, Clone, Copy)]
@@ -824,27 +824,27 @@ fn encode(
             ost.set_parameters(&encoder);
             ost.set_time_base(fps.invert());
             ost.set_avg_frame_rate(fps);
-            let mut frames = match gpu {
-                Some((device, frames)) => {
-                    VideoFrames::new(&plan.video, plan.fps, w, h, gpu_pixel(&enc), enc.hdr)
-                        .with_gpu(device, frames)
+            let (pixel, output) = match gpu {
+                Some((device, frames)) => (gpu_pixel(&enc), Output::Cuda { device, frames }),
+                None if fit_on_gpu => {
+                    let into = match &vaapi {
+                        // AMF takes Direct3D 11's frames of its own frames
+                        // only. SAFETY: the encoder's live frames.
+                        Some(up) if enc.kind == EncoderChoice::Amf => {
+                            Some(unsafe { crate::hw::Frames::of(up.frames)? })
+                        }
+                        _ => None,
+                    };
+                    (enc.pixel, Output::FittedOnGpu { into })
                 }
-                None => VideoFrames::new(&plan.video, plan.fps, w, h, enc.pixel, enc.hdr),
-            }
-            .with_dynamic(enc.dynamic)
-            .with_light(light);
+                None => (enc.pixel, Output::Fitted),
+            };
+            let mut frames = VideoFrames::new(&plan.video, plan.fps, w, h, pixel, enc.hdr)
+                .output(output)
+                .with_dynamic(enc.dynamic)
+                .with_light(light);
             if let Some(d) = decoder {
                 frames = frames.decode_on(d.clone());
-            }
-            if fit_on_gpu {
-                frames = match &vaapi {
-                    // AMF takes Direct3D 11's frames of its own frames only.
-                    Some(up) if enc.kind == EncoderChoice::Amf => {
-                        // SAFETY: the encoder's live frames.
-                        frames.fit_on_gpu_into(unsafe { crate::hw::Frames::of(up.frames)? })
-                    }
-                    _ => frames.fit_on_gpu(),
-                };
             }
             // HDR10+ goes into HEVC and AV1 packets here; libvpx-vp9 takes
             // it from the frames, and WebM and Matroska carry it.
