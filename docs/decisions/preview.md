@@ -27,7 +27,7 @@
 
 ## 3. Decoding: on the GPU when there is one
 
-- **The GPU decodes every stream it can** while `gpu.acceleration` and `gpu.decoding` are on. `preferences::gpu_decoding` decides it for the viewer, exports, proxies, tiles and the two-up. The decoder is on the GPU in use (`gpu.device`, else NVIDIA's, else the first other; `GpuDecoder::best`): NVDEC on NVIDIA's, VA-API on the others on Linux, Direct3D 11 on the others on Windows, VideoToolbox on a Mac. FFmpeg's own decoders do it, so every one gives the same frames. The CPU decodes what the GPU doesn't (ProRes, VP8, a profile the GPU lacks), stills and image sequences, and H.264 on AMD's Direct3D 11 (`GpuDecoder::why_not`, gotchas.md). Measured with `decode_speed` on this machine (16 threads, RTX 4080 SUPER):
+- **The GPU decodes every stream it can** while `gpu.acceleration` and `gpu.decoding` are on. `preferences::gpu_decoding` decides it for the viewer, exports, proxies, tiles, the two-up, `frame render` and storyboards (the last four leave H.264 to the CPU, as frames read in jumps seek at every one). The decoder is on the GPU in use (`gpu.device`, else NVIDIA's, else the first other; `GpuDecoder::best`): NVDEC on NVIDIA's, VA-API on the others on Linux, Direct3D 11 on the others on Windows, VideoToolbox on a Mac. FFmpeg's own decoders do it, so every one gives the same frames. The CPU decodes what the GPU doesn't (ProRes, VP8, a profile the GPU lacks), stills and image sequences, and H.264 on AMD's Direct3D 11 (`GpuDecoder::why_not`, gotchas.md). Measured with `decode_speed` on this machine (16 threads, RTX 4080 SUPER):
 
 | Stream | CPU | NVDEC |
 |---|---|---|

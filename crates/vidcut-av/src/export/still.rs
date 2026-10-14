@@ -9,21 +9,22 @@ use vidcut_core::time::Rational;
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, codec, encoder, format};
 
-use super::video::VideoFrames;
-
 /// Renders one video piece frame (a single-frame piece) as PNG bytes at
-/// `width`×`height` (the picture fit inside, padded black).
-pub fn png(piece: &VideoPiece, fps: Rational, width: u32, height: u32) -> Result<Vec<u8>> {
+/// `width`×`height` (the picture fit inside, padded black). The file
+/// decodes on `decoder` where it decodes its stream, but H.264
+/// (`renderer::frames`).
+pub fn png(
+    piece: &VideoPiece,
+    fps: Rational,
+    width: u32,
+    height: u32,
+    decoder: Option<&crate::hw::GpuDecoder>,
+) -> Result<Vec<u8>> {
     crate::cancel::stop()?;
     crate::init();
-    let mut frames = VideoFrames::new(
-        std::slice::from_ref(piece),
-        fps,
-        width,
-        height,
-        format::Pixel::RGB24,
-        None,
-    );
+    let pixel = format::Pixel::RGB24;
+    let mut frames = super::renderer::frames(fps, (width, height), pixel, decoder);
+    frames.read_piece(piece);
     let mut frame = frames
         .next_frame()?
         .ok_or_else(|| Error::Invalid("no frame to render".into()))?;
@@ -95,15 +96,16 @@ pub fn png_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>> {
     Ok(packet.data().unwrap_or_default().to_vec())
 }
 
-/// Writes a PNG of one piece frame to `path`.
+/// Writes a PNG of one piece frame to `path` ([`png`]).
 pub fn write_png(
     piece: &VideoPiece,
     fps: Rational,
     width: u32,
     height: u32,
     path: &Path,
+    decoder: Option<&crate::hw::GpuDecoder>,
 ) -> Result<()> {
-    let bytes = png(piece, fps, width, height)?;
+    let bytes = png(piece, fps, width, height, decoder)?;
     std::fs::write(path, bytes)?;
     Ok(())
 }
