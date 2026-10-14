@@ -114,17 +114,18 @@ pub struct Report {
 }
 
 /// What a piece's pictures carry, read from its file: its transfer and HDR
-/// metadata (each file probed once), and its light measured where output
-/// with `v` needs it ([`measured_light`]).
+/// metadata (each file probed once), and its light measured on `decoder`
+/// where output with `v` needs it ([`measured_light`]).
 pub fn probed_metadata<'a>(
     fps: Rational,
     v: &'a VideoSettings,
+    decoder: Option<&'a crate::hw::GpuDecoder>,
     cancel: Option<&'a AtomicBool>,
 ) -> impl FnMut(&VideoPiece) -> PieceMeta + 'a {
     let mut probe = probed_files();
     move |piece| {
         let mut m = probe(piece);
-        m.measured = measured_light(piece, fps, v, &m, true, cancel);
+        m.measured = measured_light(piece, fps, v, &m, true, decoder, cancel);
         m
     }
 }
@@ -148,20 +149,21 @@ pub fn needs_light(v: &VideoSettings, m: &PieceMeta) -> bool {
     }
 }
 
-/// A piece's light levels where [`needs_light`]: measured now with
-/// `measure_now`, else as measured before, or pending.
+/// A piece's light levels where [`needs_light`]: measured now on `decoder`
+/// with `measure_now`, else as measured before, or pending.
 pub fn measured_light(
     piece: &VideoPiece,
     fps: Rational,
     v: &VideoSettings,
     m: &PieceMeta,
     measure_now: bool,
+    decoder: Option<&crate::hw::GpuDecoder>,
     cancel: Option<&AtomicBool>,
 ) -> Measured {
     if !needs_light(v, m) {
         return Measured::No;
     }
-    match crate::light::piece_level(piece, fps, measure_now, cancel, &mut |_| {}) {
+    match crate::light::piece_level(piece, fps, measure_now, decoder, cancel, &mut |_| {}) {
         Ok(Some(l)) => Measured::Known(l),
         Ok(None) if !measure_now => Measured::Pending,
         // A cancelled export stops after.
@@ -375,8 +377,8 @@ pub fn run_decoding_on(
         .is_some_and(|v| v.hdr_metadata == HdrMetadata::Auto)
     {
         let v = settings.video.clone().expect("checked");
-        let c = choose_metadata(plan, &settings, probed_metadata(plan.fps, &v, Some(cancel)))
-            .expect("the settings have video");
+        let probed = probed_metadata(plan.fps, &v, decoder, Some(cancel));
+        let c = choose_metadata(plan, &settings, probed).expect("the settings have video");
         c.apply(settings.video.as_mut().expect("checked"));
         metadata_chosen = Some(c);
     }
@@ -445,11 +447,12 @@ impl Drop for PassFiles {
 }
 
 /// The measured light of the files whose frames get HDR10+ made (decision
-/// D46), by path: what the plan shows of each, measured now unless it was
-/// before.
+/// D46), by path: what the plan shows of each, measured now on `decoder`
+/// unless it was before.
 fn made_hdr10plus_light(
     plan: &RenderPlan,
     enc: &encode::VideoEncoder,
+    decoder: Option<&crate::hw::GpuDecoder>,
     cancel: &AtomicBool,
 ) -> Result<std::collections::HashMap<PathBuf, std::sync::Arc<crate::light::LightAnalysis>>> {
     let mut out = std::collections::HashMap::new();
@@ -464,7 +467,7 @@ fn made_hdr10plus_light(
         if probe(piece).hdr10plus {
             continue;
         }
-        match crate::light::analysis(&span, true, Some(cancel), &mut |_| {}) {
+        match crate::light::analysis(&span, true, decoder, Some(cancel), &mut |_| {}) {
             // The latest holds what the ones before did.
             Ok(Some(a)) => {
                 out.insert(span.input.path().to_path_buf(), a);
@@ -785,7 +788,7 @@ fn encode(
                     why.join("; ")
                 )));
             };
-            let light = made_hdr10plus_light(plan, &enc, cancel)?;
+            let light = made_hdr10plus_light(plan, &enc, decoder, cancel)?;
             // Two runs: the first measures, then the encoder opens again
             // for the second with what it wrote.
             let (encoder, vaapi) = match &pass_files {

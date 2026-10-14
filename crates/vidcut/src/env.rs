@@ -193,7 +193,12 @@ impl Env for AvEnv {
         measured(
             &PICTURES,
             paths::media_cache("analysis", media, &key),
-            || vidcut_av::analysis::picture_stats(&input_of(media), pictures),
+            || {
+                // Decoded on the GPU the viewer decodes on, on a decoder of
+                // its own.
+                let decoder = crate::preferences::gpu_decoding().own_decoder();
+                vidcut_av::analysis::picture_stats(&input_of(media), pictures, decoder.as_ref())
+            },
             PictureStats::to_bytes,
             PictureStats::from_bytes,
         )

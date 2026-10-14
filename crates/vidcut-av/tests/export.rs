@@ -475,7 +475,7 @@ fn rotated_sources_export_upright() {
         want.extend((from..from + 20).map(|f| Some(f as u32)));
         // Pool thumbnails show upright too, at the shown aspect.
         let input = vidcut_av::decode::Input::File(s.path.clone());
-        let (images, _) = vidcut_av::thumbs::filmstrip(&input, 4, 192, 108).unwrap();
+        let (images, _) = vidcut_av::thumbs::filmstrip(&input, 4, 192, 108, None).unwrap();
         for img in &images {
             assert_eq!((img.width, img.height), (192, 108), "rotation {rotation}");
             let w = img.width as usize;
@@ -598,7 +598,7 @@ fn hdr_is_tone_mapped_for_sdr_and_kept_for_hdr() {
         want.extend((5..15).map(Some));
         // Pool thumbnails are tone-mapped too.
         let input = vidcut_av::decode::Input::File(s.path.clone());
-        let (images, _) = vidcut_av::thumbs::filmstrip(&input, 2, 192, 108).unwrap();
+        let (images, _) = vidcut_av::thumbs::filmstrip(&input, 2, 192, 108, None).unwrap();
         for img in &images {
             let w = img.width as usize;
             let code =

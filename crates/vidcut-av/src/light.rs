@@ -588,16 +588,21 @@ fn measure_with(
     })
 }
 
-/// Measures the frames of `span`, decoded on the CPU, and the first one
-/// from its end on; and whether the file ended before that. `progress`
-/// hears the share done.
+/// Measures the frames of `span`, decoded on `decoder` where it decodes
+/// the file (copied down whole) or on the CPU, and the first one from its end
+/// on; and whether the file ended before that. `progress` hears the share
+/// done.
 fn measure(
     span: &Span,
+    decoder: Option<&crate::hw::GpuDecoder>,
     cancel: Option<&AtomicBool>,
     progress: &mut dyn FnMut(f64),
 ) -> Result<(Vec<(f64, FrameLight)>, bool)> {
     crate::init();
-    let mut reader = VideoReader::open_input(&span.input)?;
+    let mut reader = match decoder {
+        Some(gpu) => VideoReader::open_gpu_or_cpu(&span.input, gpu)?,
+        None => VideoReader::open_input(&span.input)?,
+    };
     let tb = reader.time_base();
     let tick = f64::from(tb.numerator()) / f64::from(tb.denominator());
     if span.from.is_finite()
@@ -614,6 +619,7 @@ fn measure(
             return Err(Error::Invalid(crate::export::CANCELLED.into()));
         }
         let t = f.pts().unwrap_or(0) as f64 * tick;
+        let f = crate::decode::in_memory(f)?;
         frames.push((t, measure_with(&f, &mut relayout)?));
         if t >= span.to - EPS {
             return Ok((frames, false));
@@ -709,12 +715,13 @@ fn from_bytes(b: &[u8]) -> Option<LightAnalysis> {
 }
 
 /// The measurement of `span`'s file that covers it: kept in memory, or on
-/// disk, or (with `measure_now`) made now and kept. `None` when it isn't
-/// there and `measure_now` is false. `progress` hears the share of `span`
-/// measured.
+/// disk, or (with `measure_now`) made now on `decoder` and kept. `None`
+/// when it isn't there and `measure_now` is false. `progress` hears the
+/// share of `span` measured.
 pub fn analysis(
     span: &Span,
     measure_now: bool,
+    decoder: Option<&crate::hw::GpuDecoder>,
     cancel: Option<&AtomicBool>,
     progress: &mut dyn FnMut(f64),
 ) -> Result<Option<Arc<LightAnalysis>>> {
@@ -740,7 +747,7 @@ pub fn analysis(
     if !measure_now {
         return Ok(None);
     }
-    let (frames, ended) = measure(span, cancel, progress)?;
+    let (frames, ended) = measure(span, decoder, cancel, progress)?;
     let to = if ended { f64::INFINITY } else { span.to };
     // Added to what is known now: another measurement may have ended
     // meanwhile.
@@ -771,13 +778,15 @@ pub fn piece_level(
     piece: &VideoPiece,
     fps: Rational,
     measure_now: bool,
+    decoder: Option<&crate::hw::GpuDecoder>,
     cancel: Option<&AtomicBool>,
     progress: &mut dyn FnMut(f64),
 ) -> Result<Option<LightLevel>> {
     let Some(span) = Span::of(piece, fps) else {
         return Ok(None);
     };
-    Ok(analysis(&span, measure_now, cancel, progress)?.and_then(|a| a.level(sampled(piece, fps))))
+    let a = analysis(&span, measure_now, decoder, cancel, progress)?;
+    Ok(a.and_then(|a| a.level(sampled(piece, fps))))
 }
 
 /// Measures single frames as they are decoded, on the CPU or copied down
