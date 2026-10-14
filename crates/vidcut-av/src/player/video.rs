@@ -509,6 +509,7 @@ impl Decoder {
                 "player",
                 "a new reader decodes on the CPU: GPU decoding is off"
             );
+            self.shared.decodes_on_cpu(Some("GPU decoding is off"));
             return frames.output(decoded(false));
         }
         let gpu = self.gpu.get_or_insert_with(crate::hw::GpuDecoder::best);
@@ -517,8 +518,10 @@ impl Decoder {
                 "player",
                 "a new reader decodes on the CPU: no GPU decoder here"
             );
+            self.shared.decodes_on_cpu(Some("no GPU decoder here"));
             return frames.output(decoded(false));
         };
+        self.shared.decodes_on_cpu(None);
         // The GPU's pictures may stay in video memory, which then has a
         // budget of its own.
         let shows = &self.shared.gpu_pictures;
@@ -682,8 +685,8 @@ fn picture(
     t: i64,
     frame: crate::ffmpeg::frame::Video,
 ) -> Picture {
-    let decoder = plan
-        .shows_a_file(t)
-        .then(|| frames.decoded_on().map_or(Decoding::Cpu, Decoding::Gpu));
-    Picture::new(frame, frames.rotation(), decoder)
+    let file = plan.shows_a_file(t);
+    let decoder = file.then(|| frames.decoded_on().map_or(Decoding::Cpu, Decoding::Gpu));
+    let decoding = frames.decoding().filter(|_| file);
+    Picture::new(frame, frames.rotation(), decoder, decoding)
 }

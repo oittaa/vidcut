@@ -705,8 +705,10 @@ pub struct VideoFrames {
     gpu_made: i64,
     /// The clockwise turn that shows the last frame given upright.
     rotation: u16,
-    /// The GPU that decoded the last frame given.
+    /// The GPU that decoded the last frame given, and what its file holds
+    /// and what decoded it (`VideoReader::decoding`).
     last_decoder: Option<crate::hw::Kind>,
+    last_decoding: Option<std::sync::Arc<str>>,
     /// Frames given so far whose source frame a GPU decoded.
     gpu_decoded: i64,
     /// The dynamic HDR metadata each output frame keeps from its source
@@ -875,6 +877,7 @@ impl VideoFrames {
             gpu_made: 0,
             rotation: 0,
             last_decoder: None,
+            last_decoding: None,
             gpu_decoded: 0,
             dynamic: Default::default(),
             light: Default::default(),
@@ -910,6 +913,12 @@ impl VideoFrames {
     /// frames decoded on the CPU).
     pub fn decoded_on(&self) -> Option<crate::hw::Kind> {
         self.last_decoder
+    }
+
+    /// What the file of the last frame given holds and what decoded it
+    /// (`VideoReader::decoding`); `None` for black.
+    pub fn decoding(&self) -> Option<std::sync::Arc<str>> {
+        self.last_decoding.clone()
     }
 
     /// The clockwise turn (0, 90, 180 or 270) that shows the last frame
@@ -1004,6 +1013,7 @@ impl VideoFrames {
                 VideoPiece::Black { .. } => {
                     self.rotation = 0;
                     self.last_decoder = None;
+                    self.last_decoding = None;
                     let black = frame_ref(self.black()?)?;
                     let mut out = match &self.output {
                         Output::Cuda { frames, .. } => frames.upload(&black)?,
@@ -1047,6 +1057,8 @@ impl VideoFrames {
                     if picture {
                         self.rotation = self.source.as_ref().map_or(0, |s| s.reader.rotation());
                         self.last_decoder = self.source.as_ref().and_then(|s| s.decoder);
+                        self.last_decoding =
+                            self.source.as_ref().map(|s| s.reader.decoding().clone());
                         self.gpu_decoded += i64::from(self.last_decoder.is_some());
                         if backward {
                             return self.reversed_frame(k).map(|f| Some(Some(f)));

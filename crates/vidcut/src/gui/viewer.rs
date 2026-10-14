@@ -183,7 +183,7 @@ impl Workspace {
             self.trim_editor_view(ui, area, aspect);
             return;
         }
-        let area_resp = ui.allocate_rect(area, Sense::drag());
+        let area_resp = ui.allocate_rect(area, Sense::click_and_drag());
         // Dragging the source picture onto the timeline edits it in (spec §7.3).
         if mode.is_source()
             && area_resp.drag_started()
@@ -258,6 +258,16 @@ impl Workspace {
                 FontId::proportional(12.0),
                 theme::ERROR,
             );
+        }
+        area_resp.context_menu(|ui| {
+            let mut shown = self.snap.stats;
+            if ui.checkbox(&mut shown, "Stats for Nerds").clicked() {
+                self.send("player.stats", json!({ "show": shown }));
+                ui.close();
+            }
+        });
+        if let Some(stats) = self.stats.as_ref().filter(|_| self.snap.stats) {
+            stats_panel(&painter, picture, stats);
         }
 
         ui.add_space(4.0);
@@ -894,6 +904,23 @@ impl Workspace {
 /// What was typed into a timecode field, as a TimeSpec: digits fill a
 /// timecode from the right ("100" is 00:00:01:00);
 /// anything else (`5s`, `1m30s`, `450f`, `00:01:00:00`) is used as is.
+/// Stats for nerds over the picture's top left: a line for each part of
+/// what the player does.
+fn stats_panel(painter: &egui::Painter, picture: Rect, stats: &crate::live::stats::PlayerStats) {
+    let text = stats
+        .lines()
+        .iter()
+        .map(|(name, facts)| format!("{name:<9} {facts}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let wrap = (picture.width() - 32.0).max(120.0);
+    let galley = painter.layout(text, FontId::monospace(11.0), Color32::WHITE, wrap);
+    let at = picture.left_top() + vec2(8.0, 8.0);
+    let rect = Rect::from_min_size(at, galley.size() + vec2(16.0, 12.0));
+    painter.rect_filled(rect, CornerRadius::same(4), Color32::from_black_alpha(200));
+    painter.galley(rect.min + vec2(8.0, 6.0), galley, Color32::WHITE);
+}
+
 pub(super) fn timecode_input(text: &str) -> Option<String> {
     let t = text.trim().trim_start_matches(['+', '-', '=']);
     if t.is_empty() {

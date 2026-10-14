@@ -88,6 +88,9 @@ pub struct Workspace {
     /// wants it rendered at.
     pub picture: Picture,
     pub want: [i32; 2],
+    /// What the viewer's player does, while the viewer shows it (stats for
+    /// nerds).
+    pub stats: Option<live::stats::PlayerStats>,
     /// The GPU the window draws on, for the status bar's versions.
     pub display: Option<String>,
     // View state (not part of the project).
@@ -231,6 +234,7 @@ impl Workspace {
             live,
             thumbs: HashMap::new(),
             picture: Picture::default(),
+            stats: None,
             want: [640, 360],
             display: None,
             pool_view: PoolView::Thumbnails,

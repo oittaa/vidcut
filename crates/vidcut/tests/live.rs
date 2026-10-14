@@ -266,6 +266,14 @@ fn exact_seeks_external_edit_and_proxies() {
         assert_eq!(h.shown(dir), Some(expected(t)), "timeline frame {t}");
     }
 
+    // Stats for nerds tell of the picture shown, and the panel toggles.
+    let stats = h.ok("player.state", json!({})).result["stats"].clone();
+    assert_eq!(stats["picture"]["frame"], json!(149), "{stats}");
+    assert_eq!(stats["picture"]["size"], json!([W, H]), "{stats}");
+    assert!(stats["kept"]["pictures"].as_u64() > Some(0), "{stats}");
+    let toggled = h.ok("player.stats", json!({})).result;
+    assert_eq!(toggled["stats_shown"], json!(true));
+
     // A headless edit by another process (bypassing the GUI) shows up.
     let rev = h.ok("project.summary", json!({})).rev;
     let store = Store::open(&path).unwrap();

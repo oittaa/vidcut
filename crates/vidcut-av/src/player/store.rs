@@ -162,6 +162,11 @@ impl Store {
         inner.bytes = [0; 2];
     }
 
+    /// The bytes kept of `kind`.
+    pub(crate) fn bytes(&self, kind: Kind) -> usize {
+        self.lock().bytes[kind.index()]
+    }
+
     /// How many pictures are kept, and their bytes.
     pub(crate) fn usage(&self) -> (usize, usize) {
         let inner = self.lock();

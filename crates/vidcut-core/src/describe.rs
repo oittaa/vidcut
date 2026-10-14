@@ -156,6 +156,11 @@ pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> Stri
             Some(false) => "Unmute the viewer".into(),
             None => "Mute or unmute the viewer".into(),
         },
+        "player.stats" => match params["show"].as_bool() {
+            Some(true) => "Show stats for nerds".into(),
+            Some(false) => "Hide stats for nerds".into(),
+            None => "Show or hide stats for nerds".into(),
+        },
         "player.audio_scrubbing" => match params["on"].as_bool() {
             Some(true) => "Audio scrubbing on".into(),
             Some(false) => "Audio scrubbing off".into(),

@@ -179,6 +179,16 @@ impl Player {
         }
     }
 
+    /// What the engine shown does, with what the viewer tells of itself
+    /// (stats for nerds); `None` while no engine is shown.
+    pub fn stats(
+        &self,
+        viewer: Option<super::stats::ViewerStats>,
+    ) -> Option<super::stats::PlayerStats> {
+        self.shown_engine()
+            .map(|e| super::stats::PlayerStats::of(e, viewer))
+    }
+
     pub fn playing(&self) -> bool {
         self.status().is_some_and(|s| s.playing)
     }

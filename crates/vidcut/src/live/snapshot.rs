@@ -189,6 +189,8 @@ pub struct Snapshot {
     pub jobs: Arc<Vec<super::JobInfo>>,
     /// Steps and paused seeks play their frame's sound (decision D42).
     pub audio_scrubbing: bool,
+    /// The viewer shows its stats for nerds (`player.stats`).
+    pub stats: bool,
     /// Why there is no preview, if so.
     pub preview_error: Option<String>,
 }
