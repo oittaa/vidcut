@@ -22,6 +22,8 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 
 **A smaller FFmpeg:** `VIDCUT_FFMPEG_WITHOUT=zscale,libx264` treats those parts as missing.
 
+**GPU round trips on a Mac:** `scripts/proxy-gpu-check.sh [FILE...]` makes H.264 and ProRes Proxy proxies of each file, by default 4K60 HEVC and AV1 fixtures. For each it prints the time, the CPU time, and whether frames were copied down to memory or scaled on the CPU (macOS's `sample` catching `av_hwframe_transfer_data` and libswscale).
+
 **Media inspection** (`crates/vidcut-av/examples/`):
 - `read_barcode FILE...`: the barcode index in images or video.
 - `packets FILE [FROM TO]`: video packets in decode order, with pts, dts and keyframe flags.
