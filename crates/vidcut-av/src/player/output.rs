@@ -2,8 +2,8 @@
 //! mix, and with it the clock pictures follow.
 //!
 //! [`CpalOutput`] is a device of the system's (ALSA on Linux, which PipeWire
-//! and PulseAudio serve; WASAPI on Windows): its default, or one chosen by
-//! its id ([`output_devices`]). [`PacedOutput`] stands in for a device
+//! and PulseAudio serve; WASAPI on Windows; Core Audio on macOS): its
+//! default, or one chosen by its id ([`output_devices`]). [`PacedOutput`] stands in for a device
 //! without one: a thread that pulls in real time, optionally recording what
 //! it pulled and when it would have been heard. [`ManualOutput`] pulls only
 //! when a test says so, so a test sets the clock itself.
@@ -297,7 +297,11 @@ fn open_stream(source: AudioSource, device: Option<&str>) -> Result<(cpal::Strea
                 let latency = t.playback.duration_since(t.callback);
                 source.fill(out, Instant::now() + latency);
             },
-            move |e| failed.fail(e.to_string()),
+            move |e| {
+                if fails(e.kind()) {
+                    failed.fail(e.to_string());
+                }
+            },
             None,
         )
         .map_err(|e| {
@@ -310,6 +314,14 @@ fn open_stream(source: AudioSource, device: Option<&str>) -> Result<(cpal::Strea
         .play()
         .map_err(|e| Error::Invalid(format!("the audio device won't start: {e}")))?;
     Ok((stream, plays_on))
+}
+
+/// Whether a stream's error stops its sound. A glitch (an underrun) and a
+/// route the stream followed (macOS's default output, moved to headphones)
+/// don't: it plays on.
+fn fails(kind: cpal::ErrorKind) -> bool {
+    use cpal::ErrorKind as K;
+    !matches!(kind, K::Xrun | K::DeviceChanged | K::RealtimeDenied)
 }
 
 /// What a [`PacedOutput`] pulled.
@@ -446,6 +458,16 @@ impl AudioOutput for ManualOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_followed_route_change_is_no_failure() {
+        assert!(!fails(cpal::ErrorKind::DeviceChanged));
+    }
+
+    #[test]
+    fn a_device_gone_is_a_failure() {
+        assert!(fails(cpal::ErrorKind::DeviceNotAvailable));
+    }
 
     #[test]
     fn repeated_device_names_are_told_apart() {
