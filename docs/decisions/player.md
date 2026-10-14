@@ -6,6 +6,7 @@
 - [`crates/vidcut-av/tests/player.rs`](../../crates/vidcut-av/tests/player.rs): pictures against `frame render` at seeks and steps both ways across cuts, files, codecs, black, stills and image sequences; playing shows every frame in order; the beep lands on its sample; 2×, reverse; pieces at other speeds, at seeks, steps and playing both ways.
 - [`tests/player_sound.rs`](../../crates/vidcut-av/tests/player_sound.rs): backward sound reversed to the sample; other speeds both ways keeping the pitch; audio scrubbing: steps play their frame's sound.
 - [`tests/player_decodes.rs`](../../crates/vidcut-av/tests/player_decodes.rs): pictures playing on across an edit, after an edit that moves every frame, and stepping back over a keyframe.
+- [`tests/player_back.rs`](../../crates/vidcut-av/tests/player_back.rs): playing 300 frames backward on the CPU decodes about 300, as the windows behind are kept whole.
 
 ## 1. Threads
 

@@ -60,6 +60,22 @@ enum Reach {
     /// From a keyframe, reaching back over more to hold `min` frames, at
     /// most `max`: all kept.
     Window { min: i64, max: i64 },
+    /// A seek: from its frame's keyframe, keeping what its own pictures
+    /// allow ([`Keep::Seek`]).
+    Seek { max: i64 },
+}
+
+/// What a decode keeps on its way to the frame it wants.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Keep {
+    /// The frames from the viewer's on.
+    Ahead,
+    /// All of them: a window.
+    Window,
+    /// A seek's: as much as a window of pictures like its first holds
+    /// (`chunk`). In video memory that is all of a GOP, in memory its last
+    /// half second.
+    Seek,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -277,12 +293,11 @@ impl Decoder {
                 // there: kept, they cost nothing more); in memory the last
                 // half second, as each kept there takes new memory, and a
                 // 10-bit one a conversion, slowing the seek down. Its own
-                // first picture says which (`decode_from`), not the one
+                // first picture says which (`Keep::Seek`), not the one
                 // shown before it (black, a still, another clip). The rest
                 // behind comes when nothing else is wanted. It reaches back
                 // no further than the seek's keyframe.
-                Direction::Paused => Reach::Window {
-                    min: 1,
+                Direction::Paused => Reach::Seek {
                     max: self.windows(2).1,
                 },
                 _ => Reach::Forward,
@@ -401,7 +416,7 @@ impl Decoder {
             "window {first}..={next} behind, {behind} waiting there"
         );
         store.touch((low..=focus).map(|t| plan.id(t)));
-        self.decode_from(snap, Some(first), next, true)?;
+        self.decode_from(snap, Some(first), next, Keep::Window)?;
         self.back_windows.push((first, next));
         Ok(true)
     }
@@ -421,7 +436,7 @@ impl Decoder {
             to: t,
             plan_gen: snap.plan_gen,
         }));
-        self.decode_from(snap, from, t, true)
+        self.decode_from(snap, from, t, Keep::Window)
     }
 
     /// Decodes the prepared frame of the plan played next, when it isn't
@@ -568,19 +583,24 @@ impl Decoder {
         } else {
             Some(match reach {
                 Reach::Window { min, max } => self.window_start(t, min, max)?,
+                Reach::Seek { max } => self.window_start(t, 1, max)?,
                 Reach::Forward => t,
             })
         };
         let first = from.or(self.next).unwrap_or(t);
-        self.decode_from(snap, from, t, matches!(reach, Reach::Window { .. }))?;
+        let keep = match reach {
+            Reach::Forward => Keep::Ahead,
+            Reach::Window { .. } => Keep::Window,
+            Reach::Seek { .. } => Keep::Seek,
+        };
+        self.decode_from(snap, from, t, keep)?;
         Ok(first)
     }
 
     /// Decodes up to timeline frame `t`: from `from` (`None`: on from where
-    /// the reader stands), keeping those from the viewer's on, and when
-    /// `back` the window on the way: all of it when its first picture is in
-    /// video memory, its last half second when in memory (`memory_chunk`).
-    fn decode_from(&mut self, snap: &Snap, from: Option<i64>, t: i64, back: bool) -> Result<()> {
+    /// the reader stands), keeping those from the viewer's on and what
+    /// `keep` says of the rest.
+    fn decode_from(&mut self, snap: &Snap, from: Option<i64>, t: i64, keep: Keep) -> Result<()> {
         let plan = self.plan.clone();
         if let Some(from) = from {
             self.reader().read_pieces(&plan.pieces_from(from));
@@ -591,21 +611,29 @@ impl Decoder {
             "player",
             "decode {r}..={t} (viewer at {}{})",
             snap.focus,
-            if back { ", keeping a window" } else { "" }
+            if keep == Keep::Ahead {
+                ""
+            } else {
+                ", keeping a window"
+            }
         );
         let started = Instant::now();
-        let recent = t - self.memory_chunk() + 1;
-        let mut kind = None;
+        // A seek keeps from here on, once its first picture says where its
+        // pictures go.
+        let mut seek_keeps: Option<i64> = None;
         for i in r..=t {
             // Frames before the one wanted: kept going back (they are the
-            // window: the first to see where its pictures are, the rest by
-            // that) and when they are still ahead of the viewer; passed
+            // window) and when they are still ahead of the viewer; passed
             // over otherwise.
-            let window = back && (i >= recent || kind != Some(Kind::Memory));
-            let keep =
+            let window = match keep {
+                Keep::Ahead => false,
+                Keep::Window => true,
+                Keep::Seek => seek_keeps.is_none_or(|from| i >= from),
+            };
+            let kept =
                 i == t || window || (i >= snap.focus && !self.shared.store.contains(&plan.id(i)));
             let frames = self.reader();
-            if keep {
+            if kept {
                 let frame = frames
                     .next_frame()?
                     .ok_or_else(|| Error::Invalid(format!("no frame {i} to play")))?;
@@ -613,7 +641,9 @@ impl Decoder {
                 self.next = Some(i + 1);
                 self.picture_bytes = picture.bytes();
                 self.picture_kind = Kind::of(&picture);
-                kind.get_or_insert(self.picture_kind);
+                if keep == Keep::Seek && seek_keeps.is_none() {
+                    seek_keeps = Some(t - self.chunk() + 1);
+                }
                 self.shared.store.put(plan.id(i), Arc::new(picture));
                 if i == snap.focus {
                     self.shared.landed(snap.plan_gen, plan.id(i));
