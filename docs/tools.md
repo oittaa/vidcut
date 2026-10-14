@@ -25,7 +25,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 **Media inspection** (`crates/vidcut-av/examples/`):
 - `read_barcode FILE...`: the barcode index in images or video.
 - `packets FILE [FROM TO]`: video packets in decode order, with pts, dts and keyframe flags.
-- `filmstrip FILE OUTDIR [N]`: pool thumbnails, timed.
+- `filmstrip FILE OUTDIR [N [WxH]]`: pool thumbnails, timed, with the frames copied down from the GPU (`WxH`: a box other than 192×108).
 - `tiles FILE [HEIGHT] [gpu]`: timeline tiles, timed at spacings from 0.25 to 30 s; `gpu` decodes on the GPU in use.
 - `seek_check FILE...`: seeks to every frame of barcode fixtures on the CPU and on each GPU decoder, and lists the seeks that show other frames.
 - `proxy_check [--side N] FILE...` (release build): makes a proxy of each barcode fixture with every proxy encoder here, decoding on the CPU and on each GPU decoder. For each it prints how the frames went, the frames copied down and up, and the frames whose barcode or timestamp isn't the source's.

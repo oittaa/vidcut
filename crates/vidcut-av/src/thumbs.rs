@@ -132,6 +132,8 @@ fn strip_on(
     };
     // Export's normalizer: upright, tone-mapped to SDR, as RGBA.
     let mut normalizer: Option<crate::export::video::Normalizer> = None;
+    // The GPU's frames shrunk there before they come down.
+    let mut shrinker: Option<crate::hw::Shrinker> = None;
 
     // image2's duration counts every numbered file after the first. A
     // sequence is only its own pictures, at `rate`.
@@ -180,7 +182,7 @@ fn strip_on(
                     keep(
                         &mut images,
                         &mut times,
-                        &mut normalizer,
+                        (&mut normalizer, &mut shrinker),
                         &decoded,
                         (rotation, tw, th),
                         t,
@@ -225,7 +227,7 @@ fn strip_on(
         keep(
             &mut images,
             &mut times,
-            &mut normalizer,
+            (&mut normalizer, &mut shrinker),
             &decoded,
             (rotation, tw, th),
             t,
@@ -237,11 +239,15 @@ fn strip_on(
     Ok(Some((images, times)))
 }
 
-/// Appends one fitted picture and the sample time it stands for.
+/// Appends one fitted picture and the sample time it stands for. A GPU's
+/// frame is shrunk there to the size it is shown at before it comes down.
 fn keep(
     images: &mut Vec<Image>,
     times: &mut Vec<f64>,
-    normalizer: &mut Option<crate::export::video::Normalizer>,
+    (normalizer, shrinker): (
+        &mut Option<crate::export::video::Normalizer>,
+        &mut Option<crate::hw::Shrinker>,
+    ),
     decoded: &frame::Video,
     place: (u16, u32, u32),
     t: f64,
@@ -249,7 +255,7 @@ fn keep(
     let (rotation, tw, th) = place;
     let down;
     let decoded = if crate::hw::on_gpu(decoded) {
-        down = crate::hw::download(decoded)?;
+        down = crate::export::video::down(shrinker, decoded, rotation, (tw, th))?;
         &down
     } else {
         decoded
