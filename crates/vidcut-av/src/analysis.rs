@@ -19,7 +19,7 @@ use crate::ffmpeg::{self, codec, filter, format, frame, media, software::scaling
 pub fn audio_levels(path: &Path, ordinal: u32, per_second: u32) -> Result<AudioLevels> {
     crate::cancel::stop()?;
     crate::init();
-    let mut input = format::input(path).ctx(|| format!("opening {}", path.display()))?;
+    let mut input = crate::decode::open_file(path)?;
     let stream = input
         .streams()
         .filter(|s| s.parameters().medium() == media::Type::Audio)

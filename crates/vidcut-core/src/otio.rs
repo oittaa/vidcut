@@ -1106,11 +1106,7 @@ fn is_local_absolute(s: &str) -> bool {
 /// a Unix one on Windows. Its last parts are looked for next to the
 /// timeline file.
 fn is_foreign_absolute(s: &str) -> bool {
-    if cfg!(windows) {
-        s.starts_with('/') && !s.starts_with("//")
-    } else {
-        is_windows_absolute(s)
-    }
+    crate::store::absolute_elsewhere(s, cfg!(windows))
 }
 
 /// A path written with `/` (or on Windows either separator) as this system

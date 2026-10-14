@@ -100,9 +100,10 @@ pub trait Env {
         found
     }
 
-    /// Whether `m`'s file is there (an image sequence's first picture).
+    /// Whether `m`'s file is there (an image sequence's first picture). A
+    /// path from another kind of system names none here.
     fn present(&self, m: &Media) -> bool {
-        m.path.is_file()
+        !crate::store::from_another_system(&m.path) && m.path.is_file()
     }
 
     /// Peak levels of audio stream `stream` of `media`. Measuring decodes

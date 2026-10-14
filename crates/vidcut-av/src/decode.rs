@@ -185,7 +185,7 @@ impl Input {
     pub fn open(&self) -> Result<format::context::Input> {
         crate::init();
         match self {
-            Input::File(p) => format::input(p).ctx(|| format!("opening {}", p.display())),
+            Input::File(p) => open_file(p),
             Input::Sequence {
                 pattern,
                 first,
@@ -193,6 +193,19 @@ impl Input {
             } => open_sequence(pattern, *first, *rate),
         }
     }
+}
+
+/// Opens the media file at `path` for demuxing. A path from another kind
+/// of system names no file here (`vidcut_core::store::from_another_system`):
+/// on Windows, `/Users/x/a.mp4` would open another file on this drive.
+pub(crate) fn open_file(path: &Path) -> Result<format::context::Input> {
+    if vidcut_core::store::from_another_system(path) {
+        return Err(Error::Invalid(format!(
+            "{} is a path on another kind of system: relink the media",
+            path.display()
+        )));
+    }
+    format::input(path).ctx(|| format!("opening {}", path.display()))
 }
 
 fn open_sequence(pattern: &Path, first: u64, rate: (i32, i32)) -> Result<format::context::Input> {
