@@ -198,22 +198,151 @@ impl Device {
             } else {
                 on
             };
-            // SAFETY: FFmpeg's static name of a type, or null.
-            let what = unsafe {
-                let n = ffi::av_hwdevice_get_type_name(ty);
-                if n.is_null() {
-                    "a GPU device".into()
-                } else {
-                    std::ffi::CStr::from_ptr(n).to_string_lossy()
-                }
-            };
             return Err(Error::Ffmpeg {
-                context: format!("opening {what} on {on}"),
+                context: format!("opening {} on {on}", type_name(ty)),
                 source: ffmpeg::Error::from(ret),
             });
         }
         Ok(Self(device))
     }
+
+    /// FFmpeg's Vulkan device on `gpu`, for its Vulkan encoders: on
+    /// NVIDIA's the one made from its CUDA device (FFmpeg matches their
+    /// UUIDs), on Linux one made from its render node (their DRM nodes,
+    /// else their PCI ids through VA-API), on Windows the one with its
+    /// adapter's LUID.
+    pub(crate) fn vulkan_on(gpu: &crate::gpus::Gpu) -> Result<Self> {
+        if let Some(index) = gpu.cuda {
+            return CudaDevice::on(index)?.vulkan();
+        }
+        let _one = making_vulkan();
+        #[cfg(target_os = "linux")]
+        if let Some(node) = &gpu.node {
+            use ffi::AVHWDeviceType::{
+                AV_HWDEVICE_TYPE_DRM, AV_HWDEVICE_TYPE_VAAPI, AV_HWDEVICE_TYPE_VULKAN,
+            };
+            return Self::of_type(AV_HWDEVICE_TYPE_DRM, node)
+                .and_then(|drm| drm.derive(AV_HWDEVICE_TYPE_VULKAN))
+                .or_else(|_| {
+                    Self::of_type(AV_HWDEVICE_TYPE_VAAPI, node)?.derive(AV_HWDEVICE_TYPE_VULKAN)
+                });
+        }
+        #[cfg(windows)]
+        if let Some(luid) = gpu.adapter.and_then(crate::gpus::adapter_luid) {
+            // FFmpeg takes Vulkan's devices by their index, in Vulkan's
+            // order, which isn't DXGI's.
+            for index in 0.. {
+                let Ok(device) = Self::of_type(
+                    ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VULKAN,
+                    &index.to_string(),
+                ) else {
+                    break;
+                };
+                // SAFETY: a Vulkan device FFmpeg made.
+                if unsafe { vulkan_luid(&device) } == Some(luid) {
+                    return Ok(device);
+                }
+            }
+        }
+        Err(Error::Invalid(format!(
+            "Vulkan doesn't list {} here",
+            gpu.name
+        )))
+    }
+
+    /// FFmpeg's device of type `ty` on the same GPU as this one.
+    #[cfg(target_os = "linux")]
+    fn derive(&self, ty: ffi::AVHWDeviceType) -> Result<Self> {
+        let mut device = ptr::null_mut();
+        // SAFETY: FFmpeg makes the device from this live one.
+        let ret = unsafe { ffi::av_hwdevice_ctx_create_derived(&mut device, ty, self.0, 0) };
+        if ret < 0 || device.is_null() {
+            // SAFETY: a hardware device context's data.
+            let from = unsafe { (*((*self.0).data as *const ffi::AVHWDeviceContext)).type_ };
+            return Err(Error::Ffmpeg {
+                context: format!("making {} from {}", type_name(ty), type_name(from)),
+                source: ffmpeg::Error::from(ret),
+            });
+        }
+        Ok(Self(device))
+    }
+}
+
+/// FFmpeg's name for a type of device: `vulkan`, `cuda`.
+fn type_name(ty: ffi::AVHWDeviceType) -> std::borrow::Cow<'static, str> {
+    // SAFETY: FFmpeg's static name of a type, or null.
+    unsafe {
+        let n = ffi::av_hwdevice_get_type_name(ty);
+        if n.is_null() {
+            "a GPU device".into()
+        } else {
+            std::ffi::CStr::from_ptr(n).to_string_lossy()
+        }
+    }
+}
+
+/// Held while FFmpeg makes a Vulkan device: the Vulkan loader crashed when
+/// two threads made instances at the same time (two exports at once).
+pub(crate) fn making_vulkan() -> std::sync::MutexGuard<'static, ()> {
+    static MAKING: Mutex<()> = Mutex::new(());
+    MAKING.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The LUID of the GPU FFmpeg's Vulkan `device` is on, as Windows knows
+/// its adapters.
+///
+/// # Safety
+/// `device` is FFmpeg's Vulkan device.
+#[cfg(windows)]
+unsafe fn vulkan_luid(device: &Device) -> Option<[u8; 8]> {
+    /// `VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2`.
+    const PROPERTIES_2: i32 = 1_000_059_001;
+    /// `VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES`.
+    const ID_PROPERTIES: i32 = 1_000_071_004;
+    /// `VkPhysicalDeviceIDProperties`.
+    #[repr(C)]
+    struct IdProperties {
+        s_type: i32,
+        next: *mut std::ffi::c_void,
+        device_uuid: [u8; 16],
+        driver_uuid: [u8; 16],
+        device_luid: [u8; 8],
+        node_mask: u32,
+        luid_valid: u32,
+    }
+    /// `VkPhysicalDeviceProperties2`, room for its properties (824 bytes),
+    /// which aren't read.
+    #[repr(C)]
+    struct Properties2 {
+        s_type: i32,
+        next: *mut std::ffi::c_void,
+        properties: [u64; 128],
+    }
+    type GetProperties2 = unsafe extern "system" fn(ffi::VkPhysicalDevice, *mut Properties2);
+    let mut id = IdProperties {
+        s_type: ID_PROPERTIES,
+        next: ptr::null_mut(),
+        device_uuid: [0; 16],
+        driver_uuid: [0; 16],
+        device_luid: [0; 8],
+        node_mask: 0,
+        luid_valid: 0,
+    };
+    let mut properties = Properties2 {
+        s_type: PROPERTIES_2,
+        next: (&raw mut id).cast(),
+        properties: [0; 128],
+    };
+    // SAFETY: a Vulkan device context, as the caller says; the call as
+    // vulkan.h declares it, looked up through the device's loader.
+    unsafe {
+        let hw = &*((*device.0).data as *const ffi::AVHWDeviceContext);
+        let dev = &*(hw.hwctx as *const ffi::AVVulkanDeviceContext);
+        let get = dev.get_proc_addr?(dev.inst, c"vkGetPhysicalDeviceProperties2".as_ptr())?;
+        let get: GetProperties2 = std::mem::transmute(get);
+        get(dev.phys_dev, &mut properties);
+    }
+    (id.luid_valid != 0).then_some(id.device_luid)
 }
 
 /// A device the GPU decodes on.
@@ -496,6 +625,35 @@ pub fn decoders(dir: &std::path::Path) -> Vec<DecoderStatus> {
         }
     }
     out
+}
+
+/// The proxy codecs `gpu` decodes, by their names in the preferences
+/// (`h264`, `av1`, `prores`): a short clip of each, made in `dir` once and
+/// kept ([`decoders`]' clips), decoded through on it. No GPU decodes DNxHR.
+pub fn plays(gpu: &GpuDecoder, dir: &std::path::Path) -> Vec<&'static str> {
+    use crate::fixture::{Container, FixtureSpec, VideoCodec};
+    use ffmpeg::codec::Id;
+    crate::init();
+    [
+        ("h264", VideoCodec::H264, Container::Mp4, Id::H264),
+        ("av1", VideoCodec::Av1, Container::Mp4, Id::AV1),
+        (
+            "prores",
+            VideoCodec::ProRes422Hq,
+            Container::Mov,
+            Id::PRORES,
+        ),
+    ]
+    .into_iter()
+    .filter(|&(_, video, container, id)| {
+        let spec = FixtureSpec::new(video, container, 640, 360, (30, 1), 8).no_audio();
+        // Proxies close their GOPs.
+        crate::fixture::ensure_in(dir, &spec).is_ok_and(|clip| {
+            gpu.why_not(id, || false).is_none() && decodes_all(gpu, &clip).is_ok()
+        })
+    })
+    .map(|(codec, ..)| codec)
+    .collect()
 }
 
 /// Decodes all 8 frames of the clip at `path` on `gpu`.

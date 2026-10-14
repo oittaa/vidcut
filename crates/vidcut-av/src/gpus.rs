@@ -145,7 +145,8 @@ pub fn in_use() -> Option<Gpu> {
 impl Gpu {
     /// Whether it has encoders of `kind`: NVENC on NVIDIA's, AMF on AMD's
     /// (Windows), QSV on Intel's, VAAPI on the others' render nodes (Linux),
-    /// VideoToolbox on a Mac's.
+    /// VideoToolbox on a Mac's; Vulkan on every listed one
+    /// ([`hw::Device::vulkan_on`](crate::hw)).
     pub fn encodes_with(&self, kind: vidcut_core::export::EncoderChoice) -> bool {
         use vidcut_core::export::EncoderChoice as E;
         match kind {
@@ -155,11 +156,13 @@ impl Gpu {
             E::Qsv => self.pci_vendor == INTEL,
             E::Vaapi => cfg!(target_os = "linux") && self.pci_vendor != NVIDIA,
             E::VideoToolbox => cfg!(target_os = "macos"),
+            E::Vulkan => self.cuda.is_some() || self.adapter.is_some() || self.node.is_some(),
         }
     }
 
     /// Whether `status`, an encoder detection tested, ran on it: NVENC on
-    /// NVIDIA's, the others on its adapter or render node.
+    /// NVIDIA's, Vulkan's on the GPU its id names, the others on its
+    /// adapter or render node.
     pub(crate) fn ran(&self, status: &crate::export::encode::EncoderStatus) -> bool {
         use vidcut_core::export::EncoderChoice as E;
         let Some(on) = status.device.as_deref() else {
@@ -167,6 +170,7 @@ impl Gpu {
         };
         match status.kind {
             E::Nvenc => self.cuda.is_some_and(|c| c.to_string() == on),
+            E::Vulkan => self.id == on,
             E::VideoToolbox => true,
             _ => {
                 self.node.as_deref() == Some(on)
@@ -216,6 +220,24 @@ fn listed() -> Vec<Gpu> {
     }
     with_cuda(&mut gpus, &cuda);
     gpus
+}
+
+/// The LUID of DXGI's adapter `index`, as Vulkan gives a device's
+/// (`VkPhysicalDeviceIDProperties::deviceLUID`): its low part, then its
+/// high part, little-endian.
+#[cfg(windows)]
+pub(crate) fn adapter_luid(index: u32) -> Option<[u8; 8]> {
+    use ::windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1};
+    // SAFETY: DXGI's factory and the adapter at that index, as `listed`.
+    let desc = unsafe {
+        let factory = CreateDXGIFactory1::<IDXGIFactory1>().ok()?;
+        factory.EnumAdapters1(index).ok()?.GetDesc1().ok()?
+    };
+    let luid = desc.AdapterLuid;
+    let mut bytes = [0; 8];
+    bytes[..4].copy_from_slice(&luid.LowPart.to_le_bytes());
+    bytes[4..].copy_from_slice(&luid.HighPart.to_le_bytes());
+    Some(bytes)
 }
 
 /// The PCI slot of the adapter `luid` names, as its kernel driver says.

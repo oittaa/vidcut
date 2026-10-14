@@ -35,7 +35,7 @@ fn software() -> Vec<ProxyEncoder> {
         ProxyCodec::Dnxhr,
     ]
     .into_iter()
-    .flat_map(|c| encoders(c, &none))
+    .flat_map(|c| encoders(c, &none, &[]))
     .collect()
 }
 

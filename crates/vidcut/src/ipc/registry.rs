@@ -60,7 +60,7 @@ pub fn unregister(pid: u32) {
 
 /// Whether a process with this pid exists.
 #[cfg(unix)]
-fn alive(pid: u32) -> bool {
+pub(crate) fn alive(pid: u32) -> bool {
     let Ok(pid) = libc::pid_t::try_from(pid) else {
         return false;
     };
@@ -71,7 +71,7 @@ fn alive(pid: u32) -> bool {
 
 /// Whether a process with this pid is running.
 #[cfg(windows)]
-fn alive(pid: u32) -> bool {
+pub(crate) fn alive(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::{
         CloseHandle, ERROR_ACCESS_DENIED, GetLastError, STILL_ACTIVE,
     };

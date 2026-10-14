@@ -249,7 +249,11 @@ impl Env for AvEnv {
             ))
         };
         let prefs = crate::preferences::load().unwrap_or_default();
-        let encoders = proxy_encoders(prefs.proxies.codec, prefs.gpu.acceleration);
+        let encoders = proxy_encoders(
+            prefs.proxies.codec,
+            prefs.gpu.acceleration,
+            prefs.gpu.acceleration && prefs.gpu.decoding,
+        );
         let planned = encoders.first().map_or("h264", |e| e.codec);
         let mut path = name(planned);
         let mut codec = planned;
@@ -316,17 +320,27 @@ impl Env for AvEnv {
 }
 
 /// The encoders proxies are made with here for the `codec` preference, best
-/// first: software ones only without GPU acceleration (`gpu`).
+/// first: software ones only without GPU acceleration (`gpu`); automatic's
+/// as the GPU plays them while `decoding` (GPU decoding on).
 pub fn proxy_encoders(
     codec: vidcut_core::preferences::ProxyCodec,
     gpu: bool,
+    decoding: bool,
 ) -> Vec<vidcut_av::proxy::ProxyEncoder> {
     let available = if gpu {
         crate::export::availability(false)
     } else {
         Default::default()
     };
-    vidcut_av::proxy::encoders(codec, &available)
+    let plays = match codec {
+        vidcut_core::preferences::ProxyCodec::Auto => crate::export::plays(decoding),
+        _ => None,
+    };
+    let plays: Vec<&str> = plays
+        .iter()
+        .flat_map(|(_, codecs)| codecs.iter().map(String::as_str))
+        .collect();
+    vidcut_av::proxy::encoders(codec, &available, &plays)
 }
 
 /// A measurement's failure. Cancellation uses the same flag as an export, so

@@ -43,10 +43,10 @@ pub struct CudaDevice {
     /// one whose context this one shares with a stream of its own
     /// ([`CudaDevice::with_own_stream`]).
     base: Device,
-    /// The Vulkan device on the same GPU, for libplacebo: made from the
-    /// base the first time it is needed (that takes a quarter of a
-    /// second), then shared by every clone, until a converter on it fails
-    /// ([`CudaDevice::forget_vulkan`]).
+    /// The Vulkan device on the same GPU, for libplacebo and Vulkan's
+    /// encoders: made from the base the first time it is needed (that
+    /// takes a quarter of a second), then shared by every clone, until a
+    /// converter on it fails ([`CudaDevice::forget_vulkan`]).
     vulkan: Arc<Mutex<Option<std::result::Result<Device, String>>>>,
 }
 
@@ -62,9 +62,7 @@ impl CudaDevice {
 
     /// The CUDA device of index `index`, in CUDA's order: one for each in
     /// the whole process, shared by every export and proxy, and never
-    /// closed. Its Vulkan device is made one thread at a time: the Vulkan
-    /// loader crashed when two threads made instances at the same time (two
-    /// exports at once).
+    /// closed.
     pub(crate) fn on(index: i32) -> Result<Self> {
         static SHARED: Mutex<Vec<(i32, std::result::Result<CudaDevice, String>)>> =
             Mutex::new(Vec::new());
@@ -144,10 +142,12 @@ impl CudaDevice {
         self.cuda.0
     }
 
-    /// The Vulkan device, made if there is none.
-    fn vulkan(&self) -> Result<Device> {
+    /// The Vulkan device, made if there is none: libplacebo's, and Vulkan's
+    /// encoders' on this GPU.
+    pub(crate) fn vulkan(&self) -> Result<Device> {
         let mut slot = self.vulkan.lock().unwrap_or_else(|e| e.into_inner());
         slot.get_or_insert_with(|| {
+            let _one = crate::hw::making_vulkan();
             let mut vulkan = ptr::null_mut();
             let ret = unsafe {
                 ffi::av_hwdevice_ctx_create_derived(

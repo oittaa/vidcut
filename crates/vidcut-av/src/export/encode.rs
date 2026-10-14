@@ -426,6 +426,11 @@ fn video_encoder(
     if kind == EncoderChoice::Cpu {
         return cpu_video(v, ten).map(Some);
     }
+    if kind == EncoderChoice::Vulkan {
+        return Err(Error::Invalid(
+            "exports don't encode with Vulkan: it only makes ProRes proxies".into(),
+        ));
+    }
     let (title, codec) = (kind.title(), v.codec.title());
     let Some(name) = gpu_name(v.codec, kind) else {
         if asked {
@@ -830,7 +835,7 @@ pub fn resolve_audio(a: &AudioSettings, rate: u32, channels: u16) -> Result<Audi
 }
 
 /// A GPU encoder's own frames, on a device, which frames from memory go up
-/// into: VAAPI's, and AMF's on a Direct3D 11 decoder's device.
+/// into: VAAPI's, Vulkan's, and AMF's on a Direct3D 11 decoder's device.
 pub(crate) struct Upload {
     device: *mut ffi::AVBufferRef,
     pub(crate) frames: *mut ffi::AVBufferRef,
@@ -904,6 +909,40 @@ impl Upload {
                 });
             }
             Ok(Self { device, frames })
+        }
+    }
+
+    /// Vulkan's frames on the GPU `gpu` names (`gpus::Gpu::id`).
+    pub(crate) fn vulkan(gpu: &str, sw: format::Pixel, width: u32, height: u32) -> Result<Self> {
+        let found = crate::gpus::list()
+            .iter()
+            .find(|g| g.id == gpu)
+            .ok_or_else(|| Error::Invalid(format!("GPU {gpu} isn't here")))?;
+        let device = crate::hw::Device::vulkan_on(found)?;
+        // SAFETY: frames FFmpeg allocates on the device, which they hold a
+        // reference to; ours to free if they don't set up.
+        unsafe {
+            let mut frames = ffi::av_hwframe_ctx_alloc(device.0);
+            if frames.is_null() {
+                return Err(Error::Invalid("cannot allocate Vulkan frames".into()));
+            }
+            let fc = &mut *((*frames).data as *mut ffi::AVHWFramesContext);
+            fc.format = ffi::AVPixelFormat::AV_PIX_FMT_VULKAN;
+            fc.sw_format = sw.into();
+            fc.width = width as i32;
+            fc.height = height as i32;
+            let ret = ffi::av_hwframe_ctx_init(frames);
+            if ret < 0 {
+                ffi::av_buffer_unref(&mut frames);
+                return Err(Error::Ffmpeg {
+                    context: format!("setting up Vulkan frames on {}", found.name),
+                    source: ffmpeg::Error::from(ret),
+                });
+            }
+            Ok(Self {
+                device: ffi::av_buffer_ref(device.0),
+                frames,
+            })
         }
     }
 
@@ -1037,6 +1076,16 @@ pub(crate) fn open_video(
             }
             unsafe { (*ctx.as_mut_ptr()).hw_frames_ctx = frames };
             Some(v)
+        }
+        Some(gpu) if enc.kind == EncoderChoice::Vulkan => {
+            let up = Upload::vulkan(gpu, enc.pixel, width, height)?;
+            ctx.set_format(format::Pixel::VULKAN);
+            let frames = unsafe { ffi::av_buffer_ref(up.frames) };
+            if frames.is_null() {
+                return Err(Error::Invalid("no memory for the Vulkan frames".into()));
+            }
+            unsafe { (*ctx.as_mut_ptr()).hw_frames_ctx = frames };
+            Some(up)
         }
         // AMF on the Direct3D 11 device of a decoder on its adapter, its
         // frames drawn into the encoder's own.
@@ -1265,14 +1314,20 @@ pub fn render_nodes() -> Vec<(String, String)> {
     nodes
 }
 
-/// Test-encodes every GPU encoder and pixel format the presets can use.
-pub fn detect() -> Availability {
+/// Test-encodes every GPU encoder and pixel format the presets and proxies
+/// can use; Vulkan's only with `vulkan` (vidcut stopped during the last
+/// test, and they are the likeliest to have stopped it).
+pub fn detect(vulkan: bool) -> Availability {
     crate::init();
     let mut encoders = Vec::new();
     let mut check =
         |name: &str, kind: EncoderChoice, pixel: format::Pixel, device: Option<&str>| {
             let result = if encoder::find_by_name(name).is_none() {
                 Err(Error::Invalid(format!("{name} not built into this FFmpeg")))
+            } else if kind == EncoderChoice::Vulkan && !vulkan {
+                Err(Error::Invalid(
+                    "not tested: vidcut stopped during the last test of the GPU encoders".into(),
+                ))
             } else {
                 try_gpu(name, kind, pixel, device)
             };
@@ -1349,6 +1404,15 @@ pub fn detect() -> Availability {
                     check(codec, kind, p, Some(&on));
                 }
             }
+        }
+        // For ProRes proxies (FFmpeg 8.1 and later), on the GPU itself.
+        if gpu.encodes_with(EncoderChoice::Vulkan) {
+            check(
+                "prores_ks_vulkan",
+                EncoderChoice::Vulkan,
+                format::Pixel::YUV422P10LE,
+                Some(&gpu.id),
+            );
         }
     }
     Availability { encoders }
