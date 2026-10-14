@@ -106,6 +106,14 @@ pub enum Request {
     },
     #[serde(rename = "media.rename")]
     MediaRename { media: String, name: String },
+    /// Set the Clip Color of media items, which their clips show unless
+    /// they have their own.
+    #[serde(rename = "media.set")]
+    MediaSet {
+        media: OneOrMany<String>,
+        /// A color as `clip.set` takes it. Empty string clears it.
+        color: String,
+    },
     // Decisions D5, D6.
     /// Set a media item's source In and/or Out (I/O in a source viewer or over
     /// a pool thumbnail). Source time, `out` exclusive. Edits without a `range`
@@ -561,7 +569,8 @@ pub enum Request {
         #[serde(default)]
         name: Option<String>,
     },
-    /// Enable/disable video (D), mute, gain (dB, -60..24) and name.
+    /// Enable/disable video (D), mute, gain (dB, -60..24), name and Clip
+    /// Color.
     #[serde(rename = "clip.set")]
     ClipSet {
         clips: OneOrMany<ClipRef>,
@@ -574,6 +583,12 @@ pub enum Request {
         /// Empty string clears the name.
         #[serde(default)]
         name: Option<String>,
+        /// Clip Color: orange, apricot, yellow, lime, olive, green, teal,
+        /// navy, blue, purple, violet, pink, tan, beige, brown or
+        /// chocolate. Empty string clears it, and the clip shows its
+        /// media's color.
+        #[serde(default)]
+        color: Option<String>,
     },
     /// The timeline's In and Out marks.
     #[serde(rename = "marks.get")]

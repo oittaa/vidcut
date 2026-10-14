@@ -70,6 +70,28 @@ fn files_without_audio_tracks_bring_media_audio() {
 }
 
 #[test]
+fn a_clip_color_comes_back_from_the_file() {
+    // Spec §3: the color a clip shows travels as OTIO's item color.
+    let mut f = Fixture::new(&[(4.0, true)]);
+    f.append("m1", 0, 50);
+    f.ok(req("media.set", json!({"media": "m1", "color": "teal"})));
+    let doc = export(f.editor.project(), "t", None, Locations::Absolute).unwrap();
+    f.ok(req(
+        "timeline.import",
+        json!({"otio": doc, "replace": true}),
+    ));
+    let c = &f.editor.project().tracks[0].clips[0];
+    assert_eq!(c.color.as_deref(), Some("teal"));
+}
+
+#[test]
+fn another_editors_color_becomes_the_nearest_clip_color() {
+    let item =
+        json!({"color": {"OTIO_SCHEMA": "Color.1", "r": 0.1, "g": 0.6, "b": 0.55, "a": 1.0}});
+    assert_eq!(clip_color(&item).as_deref(), Some("teal"));
+}
+
+#[test]
 fn rates_become_exact() {
     let r = |n, d| Rational::new(n, d).unwrap();
     assert_eq!(rational(24.0).unwrap(), r(24, 1));

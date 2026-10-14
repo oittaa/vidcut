@@ -54,6 +54,8 @@ vidcut history undo                         # works across separate runs
 - `vidcut media relink --search /mnt/footage` looks for all of them by file name there and in its subfolders, and relinks each file that is the same one (size, streams, fingerprint). `media relink m1,m4 --search DIR` looks for those only; `--dry-run` says what it would do.
 - The result lists `relinked`, `different` (found by name, but another file, with `why`) and `not_found`. `vidcut media relink m1 new.mp4` uses that file either way, saying how it differs if it does.
 
+**Clip Color (spec §3):** `vidcut media set m1 --color teal` colors a pool item, and its clips show it. `vidcut clip set c4 --color pink` gives a clip its own. `--color ""` clears either.
+
 **Bins:** `vidcut bins list` lists them. `bins add "Interviews/Day 1"` (parents too), `bins rename A B`, `bins remove A` (its media move up a level, deviation X6), `media add FILE --bin A`, `media move m1 m2 --bin A` (`""` is the top level). `media list` shows each item's bin.
 
 **JSON output:**

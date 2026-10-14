@@ -839,6 +839,7 @@ mod tests {
             bin: String::new(),
             sequence: None,
             proxy: None,
+            color: None,
             fingerprint: None,
         }
     }
@@ -865,6 +866,7 @@ mod tests {
             generator: None,
             compound: None,
             speed: None,
+            color: None,
         }
     }
 

@@ -443,3 +443,24 @@ fn an_edit_that_changes_nothing_is_no_undo_step() {
     let v1 = f.editor.project().track("V1").unwrap().volume_db;
     assert_eq!(v1, 0.0, "the undo took back the real change");
 }
+
+#[test]
+fn a_clip_shows_its_media_color_until_it_has_its_own() {
+    // Spec §3, Clip Color.
+    let mut f = three_clips();
+    f.ok(req("media.set", json!({"media": "m1", "color": "teal"})));
+    f.ok(req("clip.set", json!({"clips": "c3", "color": "pink"})));
+    let p = f.editor.project();
+    let shown: Vec<Option<&str>> = ["c1", "c2", "c3"]
+        .iter()
+        .map(|id| p.clip_color(p.clip(id).unwrap()))
+        .collect();
+    assert_eq!(shown, vec![Some("teal"), None, Some("pink")]);
+}
+
+#[test]
+fn an_unknown_clip_color_is_refused() {
+    // Spec §3: red is a marker color, not a clip color.
+    let mut f = three_clips();
+    f.err(req("clip.set", json!({"clips": "c1", "color": "red"})));
+}

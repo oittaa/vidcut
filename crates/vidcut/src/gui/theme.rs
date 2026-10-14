@@ -27,6 +27,44 @@ pub const MARKED: Color32 = Color32::from_rgba_premultiplied(70, 70, 76, 70);
 pub const ERROR: Color32 = Color32::from_rgb(235, 98, 88);
 pub const OK: Color32 = Color32::from_rgb(120, 190, 120);
 
+/// How Clip Color `name` looks (spec §3); none for a name it doesn't know.
+pub fn clip_color(name: &str) -> Option<Color32> {
+    vidcut_core::ops::CLIP_COLORS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, [r, g, b])| Color32::from_rgb(*r, *g, *b))
+}
+
+/// The Clip Color submenu (spec §3): each color, then Clear Color. Returns
+/// the one picked, empty for Clear Color.
+pub fn clip_color_menu(ui: &mut egui::Ui) -> Option<String> {
+    let mut picked = None;
+    for (name, [r, g, b]) in vidcut_core::ops::CLIP_COLORS {
+        let mut title = name.to_string();
+        title[..1].make_ascii_uppercase();
+        let clicked = ui
+            .horizontal(|ui| {
+                let (swatch, _) =
+                    ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+                ui.painter().rect_filled(
+                    swatch,
+                    CornerRadius::same(2),
+                    Color32::from_rgb(*r, *g, *b),
+                );
+                ui.button(title).clicked()
+            })
+            .inner;
+        if clicked {
+            picked = Some(name.to_string());
+        }
+    }
+    ui.separator();
+    if ui.button("Clear Color").clicked() {
+        picked = Some(String::new());
+    }
+    picked
+}
+
 pub fn apply(ctx: &egui::Context) {
     // Phosphor's icons, mixed into ordinary text.
     let mut fonts = egui::FontDefinitions::default();

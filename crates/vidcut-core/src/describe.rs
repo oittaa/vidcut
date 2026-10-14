@@ -25,6 +25,10 @@ pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> Stri
             d.files("search")
         ),
         "media.rename" => format!("Rename {} to {}", d.media("media"), d.text("name")),
+        "media.set" if d.text("color").is_empty() => {
+            format!("Clear the color of {}", d.media("media"))
+        }
+        "media.set" => format!("Color {} {}", d.media("media"), d.text("color")),
         "media.marks.set" => format!("Source marks of {}: {}", d.media("media"), d.in_out()),
         "media.marks.clear" => format!("Clear the source marks of {}", d.media("media")),
         "tape.marks.set" => format!("Source Tape marks: {}", d.in_out()),
@@ -492,6 +496,11 @@ impl Words<'_> {
         }
         if let Some(n) = p["name"].as_str() {
             parts.push(format!("named \u{201c}{n}\u{201d}"));
+        }
+        match p["color"].as_str() {
+            Some("") => parts.push("no color".to_string()),
+            Some(c) => parts.push(c.to_string()),
+            None => {}
         }
         if parts.is_empty() {
             "unchanged".into()

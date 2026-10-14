@@ -282,10 +282,13 @@ fn clip(
     // Offline clips are red, as in the Media Pool, with nothing drawn of
     // their file.
     let offline = assets.missing.contains(&c.media);
+    let tint = p.clip_color(c).and_then(theme::clip_color);
     let fill = if offline {
         theme::OFFLINE
     } else if !enabled {
         theme::CLIP_DISABLED
+    } else if let Some(t) = tint {
+        t
     } else if c.is_generator() {
         theme::GENERATOR
     } else if c.compound.is_some() {
@@ -322,6 +325,14 @@ fn clip(
             assets,
             fps,
         );
+        // Its Clip Color over the pictures.
+        if let Some(t) = tint {
+            painter.rect_filled(
+                video.shrink2(vec2(0.5, 0.0)),
+                CornerRadius::same(2),
+                t.gamma_multiply(0.35),
+            );
+        }
     }
     // A compound clip's sound: a block on the audio band.
     if c.compound.is_some() && !c.video {
@@ -337,6 +348,9 @@ fn clip(
             theme::OFFLINE
         } else if muted {
             theme::CLIP_DISABLED
+        } else if let Some(t) = tint {
+            let dim = |v: u8| (f32::from(v) * 0.8) as u8;
+            Color32::from_rgb(dim(t.r()), dim(t.g()), dim(t.b()))
         } else {
             theme::AUDIO
         };
