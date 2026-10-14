@@ -14,12 +14,12 @@ Three mechanisms move frames, each with its own switch on the kind of GPU:
 |---|---|---|---|
 | `cuda::CudaPictures` | NVDEC's frames turned and converted (libplacebo on Vulkan), scaled and padded, for NVENC | NVIDIA | exports, proxies |
 | `hw::Fitter` | frames turned, scaled and padded on the decoder's device, for an encoder there | VA-API, Direct3D 11 | exports only |
-| `hw::Shrinker` | frames scaled on the GPU, then copied down (`export::video::down`) | VA-API, CUDA, Direct3D 11 | proxies, exports to encoders that take frames from memory, tiles, the two-up |
+| `hw::Shrinker` | frames scaled on the GPU, then copied down (`export::video::down`) | VA-API, CUDA, Direct3D 11 | proxies, exports to encoders that take frames from memory, tiles, the two-up, thumbnails |
 
 Around them:
 - **The choice is made per job, by encoder name.** Exports take the CUDA path when the encoder is NVENC (`gpu_output` in export/mod.rs). They fit on the GPU only for the pairs VAAPI with VA-API and AMF with Direct3D 11 (`encode` in export/mod.rs). Proxies check for NVENC again (`proxy::encode_into`).
 - **Proxies have an encode loop of their own** (`proxy::encode_into`), beside the export's (`export::video::VideoFrames`), so they don't get the export's GPU fitting.
-- **Thumbnails come down whole** and are shrunk on the CPU (`thumbs::keep`). Light measurements and analyses also come down whole, on purpose: their values must be the CPU's to the bit (export.md §4).
+- **Light measurements and analyses come down whole**, on purpose: their values must be the CPU's to the bit (export.md §4).
 - **The player keeps frames on the GPU** (`hw::Keeper`), and the GUI imports them for each GPU (gui/shared.rs, gui/picture.rs). Where a display can't take them, they come down whole (`player::frame`).
 - **VideoToolbox is in none of the three.** On a Mac every frame comes down whole and the CPU scales it: `hw::Shrinker` finds no scaler for VideoToolbox's frames.
 
@@ -63,8 +63,7 @@ Each step is measured against the step before it on the RTX 4080 SUPER, the Rade
 1. **Planner and backends over today's code:** wrap `CudaPictures`, `Fitter`, `Shrinker`, `Keeper` and the `Normalizer` as backends. The planner reproduces today's routes exactly, and puts the route in `made_with`. No other behavior changes, and every test and barcode check passes unchanged.
 2. **Proxies through the export engine:** drop `encode_into`'s own loop. VA-API and AMF proxies then fit on the GPU as exports do.
 3. **VideoToolbox backend:** `scale_vt` and `transpose_vt`, with VideoToolbox's encoders taking its frames. Not known yet, and to be tested on the M4: whether the H.264 encoder takes 10-bit frames.
-4. **Thumbnails** shrink on the GPU before they come down, as tiles do.
-5. **Vulkan as a backend** (libplacebo) for colors and HDR where a GPU's own fitting lacks them, as NVIDIA's path already uses it. FFmpeg makes its Vulkan device from VA-API, DRM and CUDA devices only, so VA-API's frames can go to it through FFmpeg. Direct3D 11's need an import of vidcut's own, as the viewer has (gui/picture.rs).
+4. **Vulkan as a backend** (libplacebo) for colors and HDR where a GPU's own fitting lacks them, as NVIDIA's path already uses it. FFmpeg makes its Vulkan device from VA-API, DRM and CUDA devices only, so VA-API's frames can go to it through FFmpeg. Direct3D 11's need an import of vidcut's own, as the viewer has (gui/picture.rs).
 
 ## Tests
 

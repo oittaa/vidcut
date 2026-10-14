@@ -130,8 +130,7 @@ fn strip_on(
     } else {
         crate::export::video::fit(w, h, sar, max_w, max_h)
     };
-    // Export's normalizer: upright, tone-mapped to SDR, as RGBA.
-    let mut normalizer: Option<crate::export::video::Normalizer> = None;
+    let mut fit = Fit::default();
 
     // image2's duration counts every numbered file after the first. A
     // sequence is only its own pictures, at `rate`.
@@ -180,7 +179,7 @@ fn strip_on(
                     keep(
                         &mut images,
                         &mut times,
-                        &mut normalizer,
+                        &mut fit,
                         &decoded,
                         (rotation, tw, th),
                         t,
@@ -225,7 +224,7 @@ fn strip_on(
         keep(
             &mut images,
             &mut times,
-            &mut normalizer,
+            &mut fit,
             &decoded,
             (rotation, tw, th),
             t,
@@ -241,33 +240,50 @@ fn strip_on(
 fn keep(
     images: &mut Vec<Image>,
     times: &mut Vec<f64>,
-    normalizer: &mut Option<crate::export::video::Normalizer>,
+    fit: &mut Fit,
     decoded: &frame::Video,
     place: (u16, u32, u32),
     t: f64,
 ) -> Result<()> {
-    let (rotation, tw, th) = place;
-    let down;
-    let decoded = if crate::hw::on_gpu(decoded) {
-        down = crate::hw::download(decoded)?;
-        &down
-    } else {
-        decoded
-    };
-    let n = match normalizer {
-        Some(n) if n.matches(decoded, rotation) => n,
-        _ => normalizer.insert(crate::export::video::Normalizer::new(
-            decoded,
-            rotation,
-            tw,
-            th,
-            format::Pixel::RGBA,
-            None,
-        )?),
-    };
-    images.push(packed(&n.run(decoded)?));
+    images.push(fit.picture(decoded, place)?);
     times.push(t);
     Ok(())
+}
+
+/// Fits a decoded frame into a thumbnail: a GPU's frame shrinks there to
+/// the size it is shown at before it comes down, then export's normalizer
+/// turns it upright, tone-maps it to SDR and converts it to RGBA.
+#[derive(Default)]
+struct Fit {
+    normalizer: Option<crate::export::video::Normalizer>,
+    shrinker: Option<crate::hw::Shrinker>,
+}
+
+impl Fit {
+    /// `decoded` turned by `rotation` and fitted in `tw`×`th`.
+    fn picture(&mut self, decoded: &frame::Video, place: (u16, u32, u32)) -> Result<Image> {
+        let (rotation, tw, th) = place;
+        let down;
+        let decoded = if crate::hw::on_gpu(decoded) {
+            down = crate::export::video::down(&mut self.shrinker, decoded, rotation, (tw, th))?;
+            &down
+        } else {
+            decoded
+        };
+        let normalizer = &mut self.normalizer;
+        let n = match normalizer {
+            Some(n) if n.matches(decoded, rotation) => n,
+            _ => normalizer.insert(crate::export::video::Normalizer::new(
+                decoded,
+                rotation,
+                tw,
+                th,
+                format::Pixel::RGBA,
+                None,
+            )?),
+        };
+        Ok(packed(&n.run(decoded)?))
+    }
 }
 
 /// Frames per second of `stream`, from its average rate or its time base.
