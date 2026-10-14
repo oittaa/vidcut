@@ -35,6 +35,20 @@ pub(super) struct Thumbs {
     pub textures: Vec<egui::TextureHandle>,
 }
 
+impl Thumbs {
+    /// The picture nearest `secs` of the source.
+    pub(super) fn nearest(&self, secs: f64) -> Option<egui::TextureId> {
+        let i = self
+            .strip
+            .times
+            .iter()
+            .enumerate()
+            .min_by(|a, b| (a.1 - secs).abs().total_cmp(&(b.1 - secs).abs()))?
+            .0;
+        self.textures.get(i).map(egui::TextureHandle::id)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PoolView {
     Thumbnails,
@@ -1528,9 +1542,6 @@ impl Workspace {
             .min_size(140.0)
             .frame(egui::Frame::new().fill(theme::PANEL).inner_margin(6))
             .show(ui, |ui| self.timeline_panel(ui));
-        if let Some(tiles) = &mut self.tiles {
-            tiles.end_frame();
-        }
         if self.show_mixer {
             egui::Panel::right("mixer")
                 .resizable(true)
@@ -1543,6 +1554,10 @@ impl Workspace {
             .min_size(260.0)
             .frame(egui::Frame::new().fill(theme::PANEL).inner_margin(6))
             .show(ui, |ui| self.pool_panel(ui));
+        // The timeline and the pool have asked for their tiles.
+        if let Some(tiles) = &mut self.tiles {
+            tiles.end_frame();
+        }
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(theme::BG).inner_margin(6))
             .show(ui, |ui| self.viewer_panel(ui));

@@ -64,6 +64,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
     - clicking the thumbnail's lower-right corner shows its metadata
   - **List (v1)** (p. 665): sortable columns.
   - **Filmstrip** (p. 664): each clip is a row of its pictures as wide as the pool, under its name. Hovering scrubs it, and I/O mark the clip there, as on a thumbnail.
+  - Hovering shows the frame under the pointer in both views. A sound file shows its waveform.
   - **Metadata** cards (later).
 - **Sort and search (v1; sort M6)** (pp. 666–667):
   - Sort Media By: Clip Name, Date Imported, Date Modified, Duration (ours), Timecode, ascending or descending. vidcut sorts by date added (the default), name, duration or file date.

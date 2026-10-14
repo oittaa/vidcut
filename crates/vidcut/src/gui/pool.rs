@@ -117,12 +117,20 @@ fn frame_at(rect: Rect, x: f32, frames: i64) -> i64 {
     ((f64::from(f) * frames as f64) as i64).min((frames - 1).max(0))
 }
 
-/// Which of `thumbs` pictures, spread evenly over a clip, each of `slots`
-/// places across its filmstrip shows: the one at the place's middle.
-fn strip_pictures(slots: usize, thumbs: usize) -> Vec<usize> {
+/// The frame each of `slots` places across a filmstrip of `frames` shows:
+/// the one at its middle.
+fn strip_frames(slots: usize, frames: i64) -> Vec<i64> {
     (0..slots)
-        .map(|i| ((i as f64 + 0.5) / slots as f64 * thumbs as f64) as usize)
+        .map(|i| ((i as f64 + 0.5) / slots as f64 * frames as f64) as i64)
         .collect()
+}
+
+/// The frame hover scrubbing shows for `frame` of `frames` spread over
+/// `px` points: on a grid of a power of two frames no wider than a point,
+/// so going back over a spot shows the picture made for it.
+fn scrub_frame(frame: i64, frames: i64, px: f32) -> i64 {
+    let step = super::tiles::tile_step(frames as f64 / f64::from(px.max(1.0)));
+    frame - frame.rem_euclid(step)
 }
 
 /// A pool item without pictures (yet).
@@ -644,14 +652,19 @@ impl Workspace {
         }
         match self.thumbs.get(&m.id) {
             Some(t) if !t.textures.is_empty() => {
-                let n = t.textures.len();
-                let i = hovered_frame.map_or(0, |f| {
-                    ((f as f64 / frames.max(1) as f64) * n as f64).floor() as usize
-                });
-                let tex = &t.textures[i.min(n - 1)];
-                let size = tex.size_vec2();
+                let size = t.textures[0].size_vec2();
                 let r = fit(picture, size.x / size.y.max(1.0));
-                painter.image(tex.id(), r, FULL, Color32::WHITE);
+                // The frame under the pointer, else the first picture.
+                let shown = hovered_frame
+                    .and_then(|f| {
+                        let f = scrub_frame(f, frames, picture.width());
+                        self.pool_picture(ui.ctx(), m, f, r.height(), frames)
+                    })
+                    .unwrap_or_else(|| t.textures[0].id());
+                painter.image(shown, r, FULL, Color32::WHITE);
+            }
+            _ if m.info.video.is_none() && ui.is_rect_visible(rect) => {
+                self.sound(&painter, picture, m);
             }
             _ => no_pictures(&painter, picture, m),
         }
@@ -723,24 +736,31 @@ impl Workspace {
         );
         painter.rect_filled(film, CornerRadius::same(3), theme::TRACK);
         match self.thumbs.get(&m.id) {
+            _ if !ui.is_rect_visible(rect) => {}
             Some(t) if !t.textures.is_empty() => {
-                let n = t.textures.len();
-                let w = STRIP_HEIGHT * t.strip.width as f32 / t.strip.height.max(1) as f32;
+                let w = film.height() * t.strip.width as f32 / t.strip.height.max(1) as f32;
                 let slots = (film.width() / w).ceil().max(1.0) as usize;
-                let mut shown = strip_pictures(slots, n);
-                // The place under the pointer shows the hovered frame.
+                let mut at = strip_frames(slots, frames);
+                // Until its own frame comes, a place shows the nearest
+                // picture within half a place; the one under the pointer
+                // the nearest anywhere.
+                let mut within = vec![frames / slots as i64 / 2; slots];
                 if let (Some(f), Some(pos)) = (hovered_frame, resp.hover_pos()) {
                     let slot = (((pos.x - film.left()) / w) as usize).min(slots - 1);
-                    shown[slot] = ((f as f64 / frames.max(1) as f64) * n as f64) as usize;
+                    at[slot] = scrub_frame(f, frames, film.width());
+                    within[slot] = frames;
                 }
-                for (i, k) in shown.into_iter().enumerate() {
+                for (i, f) in at.into_iter().enumerate() {
                     let r = Rect::from_min_size(
                         film.min + vec2(i as f32 * w, 0.0),
                         vec2(w, film.height()),
                     );
-                    painter.image(t.textures[k.min(n - 1)].id(), r, FULL, Color32::WHITE);
+                    if let Some(shown) = self.pool_picture(ui.ctx(), m, f, r.height(), within[i]) {
+                        painter.image(shown, r, FULL, Color32::WHITE);
+                    }
                 }
             }
+            _ if m.info.video.is_none() => self.sound(&painter, film, m),
             _ => no_pictures(&painter, film, m),
         }
         marks(&painter, film, m, frames, hovered_frame);
@@ -748,6 +768,63 @@ impl Workspace {
         let tip = self.badges(&painter, film, m);
         let resp = resp.on_hover_text(tip);
         self.media_interaction(&resp, m);
+    }
+
+    /// The picture of `m` at `frame` for a place `px` points tall: the
+    /// timeline's tiles decode that frame. Until it comes, the nearest one
+    /// they have within `within` frames, else the pool's nearest.
+    fn pool_picture(
+        &self,
+        ctx: &egui::Context,
+        m: &Media,
+        frame: i64,
+        px: f32,
+        within: i64,
+    ) -> Option<egui::TextureId> {
+        let p = self.project()?;
+        let thumbs = self.thumbs.get(&m.id)?;
+        let aspect = thumbs.strip.width as f32 / thumbs.strip.height.max(1) as f32;
+        let height = super::tiles::tile_height(px * ctx.pixels_per_point());
+        let width = (height as f32 * aspect).round().max(1.0) as u32;
+        let key = super::tiles::TileKey {
+            media: m.id.clone(),
+            frame,
+            height,
+        };
+        self.tiles
+            .as_ref()
+            .and_then(|t| {
+                t.want(&key, || t.job(p, &key, width))
+                    .or_else(|| t.nearest(&m.id, height, frame, within))
+            })
+            .or_else(|| thumbs.nearest(p.settings.fps.frames_to_secs(frame)))
+    }
+
+    /// A sound file's waveform across `rect`, the whole file, from the
+    /// peaks the timeline draws. Its label until they are measured.
+    fn sound(&self, painter: &egui::Painter, rect: Rect, m: &Media) {
+        let (Some(w), Some(p)) = (self.snap.waveforms.get(&m.id), self.project()) else {
+            return no_pictures(painter, rect, m);
+        };
+        let secs = p.settings.fps.frames_to_secs(p.media_frames(m));
+        let origin = m.info.audio.first().map_or(0.0, |a| a.first_pts);
+        let per_px = secs / f64::from(rect.width().max(1.0));
+        let (mid, half) = (rect.center().y, rect.height() / 2.0 - 1.0);
+        painter.rect_filled(rect, CornerRadius::same(3), theme::AUDIO);
+        let mut x = rect.left().floor();
+        while x < rect.right() {
+            let t = origin + f64::from(x - rect.left()) * per_px;
+            if let Some((lo, hi)) = w.range(t, t + per_px) {
+                painter.line_segment(
+                    [
+                        Pos2::new(x + 0.5, mid - hi * half),
+                        Pos2::new(x + 0.5, mid - lo * half + 0.5),
+                    ],
+                    Stroke::new(1.0, Color32::from_rgb(170, 230, 190)),
+                );
+            }
+            x += 1.0;
+        }
     }
 
     /// The border of a pool item's pictures: the accent when selected, a
@@ -1157,8 +1234,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn each_place_on_a_filmstrip_shows_the_picture_at_its_middle() {
-        assert_eq!(strip_pictures(4, 24), vec![3, 9, 15, 21]);
+    fn each_place_on_a_filmstrip_shows_the_frame_at_its_middle() {
+        assert_eq!(strip_frames(4, 100), vec![12, 37, 62, 87]);
+    }
+
+    #[test]
+    fn scrubbing_a_long_clip_steps_by_whole_frames_per_point() {
+        // 18,000 frames over 400 points: 45 a point, so steps of 32.
+        assert_eq!(scrub_frame(1000, 18_000, 400.0), 992);
     }
 
     #[test]
