@@ -1817,6 +1817,19 @@ pub fn add_marker(
     color: Option<String>,
     note: String,
 ) -> Result<String> {
+    add_marker_as(p, None, at, duration, name, color, note)
+}
+
+/// [`add_marker`] with id `kept` when no marker has it.
+pub fn add_marker_as(
+    p: &mut Project,
+    kept: Option<&str>,
+    at: i64,
+    duration: i64,
+    name: String,
+    color: Option<String>,
+    note: String,
+) -> Result<String> {
     if at < 0 {
         return Err(Error::invalid("marker before 0"));
     }
@@ -1824,7 +1837,10 @@ pub fn add_marker(
     if let Some(c) = &color {
         check_color(c)?;
     }
-    let id = p.alloc_marker_id();
+    let id = match kept.filter(|k| p.markers.iter().all(|m| m.id != *k)) {
+        Some(k) => k.to_string(),
+        None => p.alloc_marker_id(),
+    };
     p.markers.push(Marker {
         id: id.clone(),
         at,

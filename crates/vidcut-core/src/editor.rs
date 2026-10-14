@@ -1902,7 +1902,22 @@ fn place_imported(
     offset: i64,
     tracks: &HashMap<String, String>,
     warnings: &mut Vec<String>,
+    keep_ids: bool,
 ) -> Result<(Vec<String>, Vec<String>)> {
+    // As the file keeps it when `keep_ids` (the file is the project): the
+    // clip's own color, which the color it shows is otherwise.
+    let color = |c: &otio::ImportedClip| match (&c.own_color, keep_ids) {
+        (Some(own), true) => own.clone(),
+        _ => c.color.clone(),
+    };
+    // The clip's id from the file when `keep_ids` and no clip has it.
+    let clip_id = |p: &mut Project, kept: &Option<String>| match kept
+        .as_ref()
+        .filter(|id| keep_ids && p.clip(id).is_none())
+    {
+        Some(id) => id.clone(),
+        None => p.alloc_clip_id(),
+    };
     debug_assert_eq!(t.fps, p.settings.fps, "converted first (at_project_rate)");
     let track_of = |id: &str| tracks.get(id).cloned().unwrap_or_else(|| id.to_string());
     // Carried clip effects count from where their picture or sound starts.
@@ -1945,7 +1960,7 @@ fn place_imported(
                 frames: k.frames,
                 tracks: Vec::new(),
             });
-            let id = p.alloc_clip_id();
+            let id = clip_id(p, &c.id);
             clips.push(id.clone());
             made.insert(c.key, (id.clone(), track_of(&c.track)));
             let track = p.track_mut(&track_of(&c.track)).expect("made above");
@@ -1965,7 +1980,7 @@ fn place_imported(
                 }),
                 compound,
                 speed: c.speed.clone(),
-                color: c.color.clone(),
+                color: color(c),
             });
             track.sort();
             continue;
@@ -2047,7 +2062,7 @@ fn place_imported(
         }
         let name = (!c.name.is_empty() && c.name != m.name && c.name != c.media.file_name)
             .then(|| c.name.clone());
-        let id = p.alloc_clip_id();
+        let id = clip_id(p, &c.id);
         clips.push(id.clone());
         made.insert(c.key, (id.clone(), track_of(&c.track)));
         let track = p.track_mut(&track_of(&c.track)).expect("made above");
@@ -2065,7 +2080,7 @@ fn place_imported(
             generator: None,
             compound: None,
             speed: c.speed.clone(),
-            color: c.color.clone(),
+            color: color(c),
         });
         track.sort();
     }
@@ -2103,8 +2118,9 @@ fn place_imported(
     }
     let mut markers = Vec::new();
     for k in &t.markers {
-        markers.push(ops::add_marker(
+        markers.push(ops::add_marker_as(
             p,
+            k.id.as_deref().filter(|_| keep_ids),
             offset + k.at,
             k.duration,
             k.name.clone(),
@@ -2165,7 +2181,15 @@ fn compound_contents(
     for id in needed {
         ops::ensure_track(&mut inner, id)?;
     }
-    place_imported(&mut inner, &t, &ids, 0, &HashMap::new(), &mut Vec::new())?;
+    place_imported(
+        &mut inner,
+        &t,
+        &ids,
+        0,
+        &HashMap::new(),
+        &mut Vec::new(),
+        false,
+    )?;
     if depth > 0 {
         for ti in 0..inner.tracks.len() {
             for ci in 0..inner.tracks[ti].clips.len() {
@@ -2336,7 +2360,7 @@ fn decompose(
         };
         map.insert(name.to_string(), target);
     }
-    let (made, _) = place_imported(p, &t, &ids, start, &map, warnings)?;
+    let (made, _) = place_imported(p, &t, &ids, start, &map, warnings, false)?;
     if let Some(e) = &block.effects {
         warnings.push(format!(
             "{id}'s own effects were dropped: {}",
@@ -2462,27 +2486,9 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     }
     at_project_rate(p, &mut t, &ids);
     let offset = if empty { 0 } else { p.end() };
-    // The tracks first (making video tracks moves the audio tracks' indexes).
-    let mut needed: Vec<&str> = t.clips.iter().map(|c| c.track.as_str()).collect();
-    needed.extend(t.tracks.iter().map(|t| t.id.as_str()));
-    needed.sort_by_key(|id| (!id.starts_with('V'), id[1..].parse::<usize>().unwrap_or(0)));
-    needed.dedup();
-    for id in needed {
-        ops::ensure_track(p, id)?;
-    }
-    if empty {
-        for s in &t.tracks {
-            if let Some(track) = p.track_mut(&s.id) {
-                track.locked = s.locked;
-                track.muted = s.muted;
-                track.solo = s.solo;
-                track.volume_db = s.volume_db.clamp(-60.0, 24.0);
-                track.video_enabled = s.video_enabled;
-                track.name = s.name.clone();
-            }
-        }
-    }
-    let (mut clips, markers) = place_imported(p, &t, &ids, offset, &HashMap::new(), &mut warnings)?;
+    add_tracks(p, &t, empty)?;
+    let (mut clips, markers) =
+        place_imported(p, &t, &ids, offset, &HashMap::new(), &mut warnings, false)?;
     // Flattened: each compound clip made becomes its clips, and theirs.
     let compound = |p: &Project, id: &String| p.clip(id).is_some_and(|c| c.compound.is_some());
     let mut pending: Vec<String> = clips.iter().filter(|id| compound(p, id)).cloned().collect();
@@ -2521,6 +2527,96 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         result["bundle"] = json!(b);
     }
     Ok(result)
+}
+
+/// The tracks `t`'s clips go on, made first: making video tracks moves the
+/// audio tracks' indexes. With `settings`, they take the file's track
+/// settings.
+fn add_tracks(p: &mut Project, t: &otio::Imported, settings: bool) -> Result<()> {
+    let mut needed: Vec<&str> = t.clips.iter().map(|c| c.track.as_str()).collect();
+    needed.extend(t.tracks.iter().map(|t| t.id.as_str()));
+    needed.sort_by_key(|id| (!id.starts_with('V'), id[1..].parse::<usize>().unwrap_or(0)));
+    needed.dedup();
+    for id in needed {
+        ops::ensure_track(p, id)?;
+    }
+    if settings {
+        for s in &t.tracks {
+            if let Some(track) = p.track_mut(&s.id) {
+                track.locked = s.locked;
+                track.muted = s.muted;
+                track.solo = s.solo;
+                track.volume_db = s.volume_db.clamp(-60.0, 24.0);
+                track.video_enabled = s.video_enabled;
+                track.name = s.name.clone();
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The project in an OTIO file of a whole timeline that vidcut wrote, and
+/// the import's warnings. `None` for other files.
+///
+/// The pool, settings, marks and ids come from `metadata.vidcut.project`.
+/// The timeline comes from the file's own items. Clips find their media by
+/// the ids the file keeps. Clips another editor added are probed, as an
+/// import probes them. Relative media paths start at `base`, the file's
+/// folder.
+pub fn open_otio(
+    doc: &Value,
+    base: Option<&Path>,
+    env: &dyn Env,
+) -> Result<Option<(Project, Vec<String>)>> {
+    let mut t = otio::import(doc, base)?;
+    let Some(meta) = t.project.take() else {
+        return Ok(None);
+    };
+    let mut p = Project::new(meta.settings);
+    // Ids given here come after those the file kept.
+    p.next_id = meta.next_id;
+    p.media = meta.media;
+    p.bins = meta.bins;
+    p.tape_marks = meta.tape_marks;
+    // The file's own items say where it starts.
+    p.settings.start_tc = t.start_tc;
+    let mut warnings = t.warnings.clone();
+    let mut ids = MediaIds::new();
+    for c in t.clips.iter().filter(|c| !c.is_block()) {
+        if let Some(id) = c.media_id.as_ref().filter(|id| p.media(id).is_some()) {
+            ids.insert(media_key(&c.media), id.clone());
+        }
+    }
+    let others = otio::Imported {
+        clips: t
+            .clips
+            .iter()
+            .filter(|c| !c.is_block() && !ids.contains_key(&media_key(&c.media)))
+            .cloned()
+            .collect(),
+        ..t.clone()
+    };
+    let (found, _) = find_media(&mut p, &others, env, &[], false)?;
+    ids.extend(found);
+    if t.fps != p.settings.fps {
+        warnings.push(format!(
+            "converted from {} to the project's {} fps: cuts may move by up to half a frame",
+            t.fps, p.settings.fps
+        ));
+    }
+    at_project_rate(&p, &mut t, &ids);
+    add_tracks(&mut p, &t, true)?;
+    let (clips, _) = place_imported(&mut p, &t, &ids, 0, &HashMap::new(), &mut warnings, true)?;
+    fill_contents(&mut p, &clips, env, &[], &mut warnings);
+    p.marks = t.marks.clone();
+    let problems = validate::violations(&p);
+    if !problems.is_empty() {
+        return Err(Error::invalid(format!(
+            "the file's project is inconsistent: {}",
+            problems.join("; ")
+        )));
+    }
+    Ok(Some((p, warnings)))
 }
 
 fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {

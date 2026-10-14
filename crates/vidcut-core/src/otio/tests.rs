@@ -146,3 +146,126 @@ fn a_fade_where_parts_meet_keeps_them_apart() {
     // Decision D49: joining would lose the fade-out in the middle.
     assert_eq!(effects::join(&faded(0.0, 20.0), &None), None);
 }
+
+/// `f`'s project written as an OTIO file of its whole timeline and opened
+/// again, with no media files to probe.
+fn reopened(f: &Fixture) -> Project {
+    let doc = export(f.editor.project(), "t", None, Locations::Absolute).unwrap();
+    let opened = crate::editor::open_otio(&doc, None, &FakeEnv::default()).unwrap();
+    opened.expect("vidcut's own file").0
+}
+
+/// The project as an opened file has it: its revision and time start anew.
+fn as_saved(p: &Project) -> Project {
+    let mut p = p.clone();
+    p.rev = 0;
+    p.edited = None;
+    p
+}
+
+#[test]
+fn the_pool_comes_back_from_an_otio_file() {
+    let mut f = Fixture::new(&[(10.0, true), (10.0, true), (8.0, false)]);
+    f.ok(req("bins.add", json!({"path": "Interviews"})));
+    f.ok(req(
+        "media.move",
+        json!({"media": "m2", "bin": "Interviews"}),
+    ));
+    f.ok(req("media.set", json!({"media": "m1", "color": "teal"})));
+    f.ok(req(
+        "media.marks.set",
+        json!({"media": "m3", "in": "10f", "out": "40f"}),
+    ));
+    f.ok(req(
+        "edit.append",
+        json!({"media": "m1", "range": "0f..50f"}),
+    ));
+    assert_eq!(as_saved(&reopened(&f)), as_saved(f.editor.project()));
+}
+
+#[test]
+fn the_settings_come_back_from_an_otio_file() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.ok(req(
+        "project.set",
+        json!({"fps": "30000/1001", "drop_frame": true, "width": 1280, "height": 720,
+               "sample_rate": 44100, "channels": 6, "ripple_on": false,
+               "start_tc": "01:00:00;00", "still_duration": "3s", "use_proxies": true}),
+    ));
+    f.ok(req(
+        "edit.append",
+        json!({"media": "m1", "range": "0f..50f"}),
+    ));
+    assert_eq!(as_saved(&reopened(&f)), as_saved(f.editor.project()));
+}
+
+#[test]
+fn ids_come_back_from_an_otio_file() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    for range in ["0f..20f", "20f..40f", "40f..60f"] {
+        f.ok(req("edit.append", json!({"media": "m1", "range": range})));
+    }
+    f.ok(req("edit.delete", json!({"clips": "c2", "lift": true})));
+    f.ok(req("markers.add", json!({"at": "5f", "name": "a"})));
+    f.ok(req("markers.add", json!({"at": "45f", "name": "b"})));
+    f.ok(req("markers.remove", json!({"marker": "k1"})));
+    assert_eq!(as_saved(&reopened(&f)), as_saved(f.editor.project()));
+}
+
+#[test]
+fn tape_marks_come_back_from_an_otio_file() {
+    let mut f = Fixture::new(&[(10.0, true), (10.0, true)]);
+    f.ok(req(
+        "edit.append",
+        json!({"media": "m1", "range": "0f..50f"}),
+    ));
+    f.ok(req(
+        "tape.marks.set",
+        json!({"in": "10f", "out": "30f", "order": ["m1", "m2"]}),
+    ));
+    assert_eq!(as_saved(&reopened(&f)), as_saved(f.editor.project()));
+}
+
+#[test]
+fn a_timeline_comes_back_from_an_otio_file() {
+    let mut f = Fixture::new(&[(10.0, true), (10.0, true), (8.0, false), (6.0, true)]);
+    f.ok(req(
+        "edit.append",
+        json!({"media": "m1", "range": "0f..50f"}),
+    ));
+    f.ok(req(
+        "edit.append",
+        json!({"media": "m2", "range": "25f..75f"}),
+    ));
+    f.ok(req(
+        "edit.append",
+        json!({"media": "m3", "range": "0f..40f"}),
+    ));
+    f.ok(req("edit.split", json!({"at": "20f"})));
+    f.ok(req(
+        "edit.append",
+        json!({"media": "m4", "range": "0f..30f", "audio_only": true, "track": "A1"}),
+    ));
+    f.ok(req(
+        "track.set",
+        json!({"track": "A1", "volume_db": -6.0, "solo": true}),
+    ));
+    f.ok(req(
+        "clip.set",
+        json!({"clips": "c1", "gain_db": -3.0, "color": "pink", "name": "First"}),
+    ));
+    f.ok(req(
+        "edit.change_speed",
+        json!({"clips": "c3", "speed": 2.0}),
+    ));
+    f.ok(req(
+        "markers.add",
+        json!({"at": "20f", "name": "look", "color": "rose", "note": "fix", "duration": "5f"}),
+    ));
+    f.ok(req("marks.set", json!({"in": "5f", "out": "80f"})));
+    f.ok(req(
+        "track.set",
+        json!({"track": "V1", "name": "Picture", "locked": true}),
+    ));
+    assert_eq!(as_saved(&reopened(&f)), as_saved(f.editor.project()));
+}
