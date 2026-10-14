@@ -52,7 +52,7 @@ pub struct Saved {
     pub compact: bool,
 }
 
-/// A project file and its sidecar.
+/// A project file and its undo history.
 #[derive(Debug, Clone)]
 pub struct Store {
     path: PathBuf,

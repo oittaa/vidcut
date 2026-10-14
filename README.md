@@ -15,7 +15,7 @@ A simple, fully scriptable video cutting tool for Linux, Windows and macOS. Beha
   - several tracks: B-roll that follows the main story on Track 1, music on audio tracks
   - a mixer with faders, mute, solo and meters
   - snapping, markers, undo
-- **Export:** Quick Export and an Export dialog (deviation X3), including GPU encoding (NVIDIA, AMD, Intel, Apple) and background jobs. Dynamic range, bit depth and HDR metadata follow the footage (spec D44, D46). A loudness target is [docs/decisions/agents.md](docs/decisions/agents.md) §5.
+- **Export:** Quick Export and an Export dialog (deviation X3), including GPU encoding (NVIDIA, AMD, Intel, Apple) and background jobs. Dynamic range, bit depth and HDR metadata follow the footage (spec D44, D46), and a loudness target can be set ([docs/decisions/agents.md](docs/decisions/agents.md) §5).
 - **Automatic tools:** Ripple Delete Silence, Detect Scene Cuts and the Boring Detector (spec D29–D31).
 - **Interchange:** OpenTimelineIO, `.otio` and `.otioz` (deviation X9).
 - **Everything scriptable.** Every action in the GUI is also a CLI command and a JSON-RPC call on the running app, so scripts and AI agents can edit with you. `vidcut mcp` offers it all to AI agents over the Model Context Protocol.
@@ -50,9 +50,9 @@ brew install ffmpeg-full rustup
 
 The GUI draws with Metal and plays sound through Core Audio.
 
-Nothing else is needed at run time: vidcut plays video with its own player, on the FFmpeg libraries. The player, proxies and exports decode H.264, HEVC, AV1 and VP9 on the GPU where it can: NVDEC on NVIDIA GPUs, on AMD and Intel GPUs VA-API on Linux (Mesa's driver, Intel's media driver) and Direct3D 11 on Windows, and VideoToolbox on a Mac.
+Nothing else is needed at run time. vidcut decodes H.264, HEVC, AV1 and VP9 on the GPU where it can: NVDEC on NVIDIA GPUs, VA-API on AMD and Intel GPUs on Linux, Direct3D 11 on Windows, and VideoToolbox on a Mac.
 
-vidcut works with FFmpeg 8.0 (Ubuntu 26.04 LTS) up to the newest release, 9.0; both ends are tested.
+vidcut works with FFmpeg 8.0 (Ubuntu 26.04 LTS) up to the newest release, 9.0. Both ends are tested.
 
 Rust comes from [rustup](https://rustup.rs). The repository pins its Rust version in `rust-toolchain.toml`, and rustup downloads that toolchain the first time you build.
 
@@ -123,4 +123,4 @@ Read [AGENTS.md](AGENTS.md) first; it's written for AI agents but applies to hum
 
 vidcut's source code is released under the [MIT License](LICENSE).
 
-vidcut links the FFmpeg libraries, which are LGPL or GPL depending on how they were built; Ubuntu's builds are GPL. Binaries you distribute together with them must therefore comply with their licenses. vidcut's own source stays MIT.
+vidcut links the FFmpeg libraries, which are LGPL or GPL depending on how they were built; Ubuntu's builds are GPL. Binaries you distribute together with them must comply with their licenses.

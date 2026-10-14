@@ -2,7 +2,7 @@
 
 **When:** next time on a Linux desktop with sound cards.
 
-Choosing the audio device (`player.audio_device`, player.md §6) is checked on Windows: all twelve WASAPI outputs of the test machine play as themselves, and the GUI switches to a device chosen from the CLI. On Linux it is checked only on WSL, whose ALSA lists one device (`null`) and whose default won't open. Neither test machine reaches a real card: gmktec's are there, but its user isn't in the `audio` group. So the case the lookup was fixed for, ids like `alsa:sysdefault:CARD=PCH` that cpal's own lookup misses (gotchas.md), has run on no card yet.
+Check choosing the audio device (`player.audio_device`, player.md §6) on real ALSA cards, with ids like `alsa:sysdefault:CARD=PCH` that cpal's own lookup misses (gotchas.md).
 
 On a desktop with cards (PipeWire or PulseAudio serving ALSA):
 - `vidcut doctor`: `audio_outputs` names a card's outputs apart ("…, ALC897 Analog (Front output / input)").
