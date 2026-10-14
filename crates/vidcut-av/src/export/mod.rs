@@ -8,6 +8,7 @@
 mod ahead;
 pub mod audio;
 pub mod encode;
+pub(crate) mod make;
 pub(crate) mod normalize;
 pub mod renderer;
 pub mod still;
@@ -31,7 +32,8 @@ use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, encoder, ffi, format, frame};
 use audio::AudioMix;
 use encode::{AudioEncoder, Availability, Upload};
-use video::{Output, VideoFrames};
+use make::Output;
+use video::VideoFrames;
 
 /// Progress of a running export.
 #[derive(Debug, Clone, Copy)]
