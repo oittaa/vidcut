@@ -145,6 +145,10 @@ pub fn run_with(
             answer_json["audio"] = can["audio"].clone();
             answer(answer_json)
         }
+        Request::DecodersList {} => {
+            let clips = vidcut_core::dirs::cache().join("decoder-tests");
+            answer(json!({ "decoders": vidcut_av::hw::decoders(&clips) }))
+        }
         Request::PreferencesGet {} => answer(crate::preferences::get()?),
         Request::PreferencesSet(patch) => answer(crate::preferences::set(patch, envelope.dry_run)?),
         Request::ExportStart(params) if params.background => {

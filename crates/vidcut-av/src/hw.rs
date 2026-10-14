@@ -424,6 +424,81 @@ impl std::fmt::Display for GpuDecoder {
     }
 }
 
+/// What a GPU decoder does with a test clip of one codec
+/// ([`decoders`]).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct DecoderStatus {
+    /// The decoder and its GPU: `NVDEC on NVIDIA GeForce RTX 4080 SUPER`.
+    pub decoder: String,
+    /// Its kind: `nvdec`, `vaapi`, `d3d11va`, `videotoolbox`.
+    pub kind: &'static str,
+    /// The clip's codec, and its bits where they aren't 8: `h264`,
+    /// `hevc 10-bit`.
+    pub codec: &'static str,
+    pub ok: bool,
+    /// Why not: why vidcut leaves the codec to the CPU there, or what
+    /// failed.
+    pub error: Option<String>,
+}
+
+/// What each GPU decoder here ([`GpuDecoder::all`]) decodes: a short clip
+/// of each codec cameras and renders make, made in `dir` once and kept,
+/// decoded through on each.
+pub fn decoders(dir: &std::path::Path) -> Vec<DecoderStatus> {
+    use crate::fixture::{Container, FixtureSpec, VideoCodec};
+    use ffmpeg::codec::Id;
+    crate::init();
+    let clips = [
+        ("h264", VideoCodec::H264, Container::Mp4, Id::H264),
+        ("hevc 10-bit", VideoCodec::Hevc10, Container::Mp4, Id::HEVC),
+        ("vp9", VideoCodec::Vp9, Container::Webm, Id::VP9),
+        ("av1 10-bit", VideoCodec::Av1, Container::Mp4, Id::AV1),
+        (
+            "prores",
+            VideoCodec::ProRes422Hq,
+            Container::Mov,
+            Id::PRORES,
+        ),
+    ]
+    .map(|(codec, video, container, id)| {
+        let spec = FixtureSpec::new(video, container, 640, 360, (30, 1), 8).no_audio();
+        (codec, id, crate::fixture::ensure_in(dir, &spec))
+    });
+    let mut out = Vec::new();
+    for gpu in GpuDecoder::all() {
+        for (codec, id, clip) in &clips {
+            let result = match (clip, gpu.why_not(*id)) {
+                (Err(e), _) => Err(format!("no test clip: {e}")),
+                (Ok(_), Some(why)) => Err(format!("left to the CPU: {why}")),
+                (Ok(path), None) => decodes_all(&gpu, path).map_err(|e| e.to_string()),
+            };
+            out.push(DecoderStatus {
+                decoder: gpu.to_string(),
+                kind: gpu.kind().name(),
+                codec,
+                ok: result.is_ok(),
+                error: result.err(),
+            });
+        }
+    }
+    out
+}
+
+/// Decodes all 8 frames of the clip at `path` on `gpu`.
+fn decodes_all(gpu: &GpuDecoder, path: &std::path::Path) -> Result<()> {
+    let input = crate::decode::Input::File(path.to_path_buf());
+    let mut reader = crate::decode::VideoReader::open_on(&input, gpu)?;
+    let mut frames = 0;
+    while reader.next_frame()?.is_some() {
+        frames += 1;
+    }
+    if frames == 8 {
+        Ok(())
+    } else {
+        Err(Error::Invalid(format!("it gave {frames} of 8 frames")))
+    }
+}
+
 /// Whether `frame` is in GPU memory: a hardware frame of any kind.
 pub fn on_gpu(frame: &frame::Video) -> bool {
     // SAFETY: reads the frame's own field.

@@ -731,6 +731,10 @@ pub enum Request {
         #[serde(default)]
         refresh: bool,
     },
+    /// Which codecs each GPU decoder here decodes: a short clip of each,
+    /// made once and kept, decoded through on each.
+    #[serde(rename = "decoders.list")]
+    DecodersList {},
     /// Application preferences (`~/.config/vidcut/preferences.toml`, on
     /// Windows in `%APPDATA%\vidcut`, on macOS in `~/Library/Application
     /// Support/vidcut`) and what the thumbnail cache holds.
@@ -1302,6 +1306,7 @@ impl Request {
                 | Self::PresetsSave { .. }
                 | Self::PresetsDelete { .. }
                 | Self::EncodersList { .. }
+                | Self::DecodersList {}
                 | Self::PreferencesGet {}
                 | Self::PreferencesSet(_)
         )
@@ -1342,6 +1347,7 @@ impl Request {
                     | Self::PresetsSave { .. }
                     | Self::PresetsDelete { .. }
                     | Self::EncodersList { .. }
+                    | Self::DecodersList {}
                     | Self::PreferencesGet {}
                     | Self::PreferencesSet(_)
                     | Self::EditCopy { .. }
