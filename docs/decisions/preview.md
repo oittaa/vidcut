@@ -50,7 +50,7 @@ Each proxy frame keeps the source frame's presentation timestamp (the source tim
 
 **Decoded on the GPU without NVENC** (the decoder the viewer takes, `GpuDecoder::best`: NVDEC, VA-API, Direct3D 11, on a stream or device of its own), a proxy's frames are shrunk on the GPU to the size the proxy shows them at, in their own orientation and layout. They come down that small for the CPU to turn, convert and encode (`hw::Shrinker`). NVDEC's scale with `scale_cuda` in halving steps (export.md §5), VA-API's with `scale_vaapi`. Direct3D 11's scale on the GPU's video processor, told the frames' matrix in and out as full range where DXGI has such a space, so it keeps every level (PQ's aside, gotchas.md), once it has given back a test picture of grays and colors as it went in (`hw::d3d11::Scaler`; FFmpeg's `scale_d3d11` fails on AMD, gotchas.md). Where a GPU won't scale a layout, the frames come down whole.
 
-**Tests:** `tests/proxy.rs` makes x264, SVT-AV1, ProRes and DNxHR proxies and checks that every frame's barcode and timestamp are the source's. `proxy.rs`'s unit tests check automatic's order. `proxy.generate` says how each proxy was made (`made_with`: `decoded on the GPU (Direct3D 11), H.264, software (x264)`). `tests/live.rs` checks that a proxy shows the same frames as its original.
+**Tests:** `tests/proxy.rs` makes x264, SVT-AV1, ProRes and DNxHR proxies and checks that every frame's barcode and timestamp are the source's. `proxy.rs`'s unit tests check automatic's order. `proxy.generate` says how each proxy was made (`made_with`: `decoded on the GPU (Direct3D 11), frames came down at 960×540, H.264, software (x264)`). `tests/live.rs` checks that a proxy shows the same frames as its original.
 
 ## 7. Sound
 
