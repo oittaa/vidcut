@@ -28,6 +28,7 @@ use vidcut_core::preferences::Thumbnails;
 use vidcut_core::render::VideoPiece;
 use vidcut_core::time::Rational;
 
+use crate::preferences::GpuDecoding;
 use crate::thumbcache::{self, TILE_BLOCK};
 
 /// Decoding threads.
@@ -414,12 +415,12 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Co
     static TRIMMED: Mutex<Option<Instant>> = Mutex::new(None);
     // Decoded on the GPU the viewer decodes on while the preferences say
     // so, read as a tile is decoded: a change reaches the tiles at once.
-    let reader_for = |on_gpu: bool| match crate::preferences::timeline_decoder(on_gpu) {
+    let reader_for = |d: &GpuDecoding| match d.own_decoder() {
         Some(gpu) => FrameReader::decoding_on(gpu),
         None => FrameReader::default(),
     };
-    let mut on_gpu = crate::preferences::decoding_gpu();
-    let mut reader = reader_for(on_gpu.is_some());
+    let mut decoding = crate::preferences::gpu_decoding();
+    let mut reader = reader_for(&decoding);
     // Blocks read or written lately (a missing file is an empty block),
     // and tiles made but not yet on disk.
     let mut blocks: Vec<(PathBuf, Block)> = Vec::new();
@@ -447,10 +448,10 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Co
             }
         };
         let picture = from_disk(&job, &mut blocks, &unwritten).or_else(|| {
-            let gpu = crate::preferences::decoding_gpu();
-            if gpu != on_gpu {
-                reader = reader_for(gpu.is_some());
-                on_gpu = gpu;
+            let now = crate::preferences::gpu_decoding();
+            if now != decoding {
+                reader = reader_for(&now);
+                decoding = now;
             }
             let made = job
                 .pieces

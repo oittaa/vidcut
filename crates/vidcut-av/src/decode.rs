@@ -533,7 +533,9 @@ impl VideoReader {
     }
 
     pub fn open_input(source: &Input) -> Result<Self> {
-        Self::open_with(source, None)
+        let reader = Self::open_with(source, None)?;
+        reader.opened(None);
+        Ok(reader)
     }
 
     /// Decoding on `gpu`: frames stay in its memory (`Pixel::CUDA`, `VAAPI`,
@@ -544,12 +546,15 @@ impl VideoReader {
     pub fn open_on(source: &Input, gpu: &crate::hw::GpuDecoder) -> Result<Self> {
         let reader = Self::open_with(source, Some(gpu))?;
         match reader.pending.as_ref().map(|f| f.format()) {
-            Some(p) if p == gpu.kind().pixel() => Ok(reader),
-            _ => Err(Error::Invalid(format!(
-                "{}: {} doesn't decode this stream",
-                source.path().display(),
-                gpu.kind().name()
-            ))),
+            Some(p) if p == gpu.kind().pixel() => {
+                reader.opened(None);
+                Ok(reader)
+            }
+            _ => Err(Error::Invalid(
+                "FFmpeg decoded it in memory: the GPU's decoder wouldn't take the stream \
+                 (VIDCUT_AV_LOG=verbose shows FFmpeg's reason)"
+                    .into(),
+            )),
         }
     }
 
@@ -557,7 +562,89 @@ impl VideoReader {
     /// memory), on the CPU otherwise (frames in memory): ProRes, VP8, a
     /// profile the GPU lacks.
     pub fn open_gpu_or_cpu(source: &Input, gpu: &crate::hw::GpuDecoder) -> Result<Self> {
-        Self::open_on(source, gpu).or_else(|_| Self::open_input(source))
+        Self::open_on(source, gpu).or_else(|e| {
+            let reader = Self::open_with(source, None)?;
+            reader.opened(Some(&format!("not on {gpu}: {e}")));
+            Ok(reader)
+        })
+    }
+
+    /// Says under `VIDCUT_DEBUG` what the file holds and what decodes it:
+    /// the codec and profile, the first frame's size, layout and colors,
+    /// FFmpeg's decoder and where it runs, `why` when that is the CPU
+    /// though a GPU was asked, and where the frames are.
+    fn opened(&self, why: Option<&str>) {
+        if !crate::debug() {
+            return;
+        }
+        let name = |p: *const std::ffi::c_char| {
+            // SAFETY: FFmpeg's static names, or null.
+            (!p.is_null()).then(|| unsafe { std::ffi::CStr::from_ptr(p) }.to_string_lossy())
+        };
+        // SAFETY: the opened decoder's context, read only.
+        let (id, profile) = unsafe {
+            let ctx = &*self.decoder.as_ptr();
+            (ctx.codec_id, ctx.profile)
+        };
+        let profile = name(unsafe { ffmpeg::ffi::avcodec_profile_name(id, profile) });
+        let codec = codec::Id::from(id).name();
+        let stream = match profile {
+            Some(p) => format!("{codec} {p}"),
+            None => codec.to_string(),
+        };
+        let frame = match self.pending.as_ref() {
+            Some(f) => {
+                // SAFETY: FFmpeg's names of a frame's own tags.
+                let (layout, matrix, range, transfer) = unsafe {
+                    let raw = &*f.as_ptr();
+                    (
+                        name(ffmpeg::ffi::av_get_pix_fmt_name(
+                            crate::hw::sw_format(f).into(),
+                        )),
+                        name(ffmpeg::ffi::av_color_space_name(raw.colorspace)),
+                        name(ffmpeg::ffi::av_color_range_name(raw.color_range)),
+                        name(ffmpeg::ffi::av_color_transfer_name(raw.color_trc)),
+                    )
+                };
+                let unknown = || "unknown".into();
+                let at = if crate::hw::on_gpu(f) {
+                    "GPU memory"
+                } else {
+                    "memory"
+                };
+                format!(
+                    "{}x{} {}, matrix {}, {} range, transfer {}; frames in {at}",
+                    f.width(),
+                    f.height(),
+                    layout.unwrap_or_else(unknown),
+                    matrix.unwrap_or_else(unknown),
+                    range.unwrap_or_else(unknown),
+                    transfer.unwrap_or_else(unknown),
+                )
+            }
+            None => "no frame".into(),
+        };
+        let decoder = self
+            .decoder
+            .codec()
+            .map_or("?".into(), |c| c.name().to_string());
+        let on = match &self.gpu {
+            Some(gpu) => gpu.to_string(),
+            None => "the CPU".into(),
+        };
+        let why = why.map_or(String::new(), |w| format!(" ({w})"));
+        let mut shape = String::new();
+        if self.interlaced {
+            shape.push_str(", interlaced");
+        }
+        if self.rotation != 0 {
+            shape.push_str(&format!(", shown turned {}°", self.rotation));
+        }
+        eprintln!(
+            "[decoding] {}, {}: {stream}{shape}, {frame}; FFmpeg's {decoder} on {on}{why}",
+            std::thread::current().name().unwrap_or("a thread"),
+            self.path().display()
+        );
     }
 
     /// Decoding on NVDEC on `device` ([`open_on`](Self::open_on)).
@@ -629,12 +716,8 @@ impl VideoReader {
         }
         let codec_id = stream.parameters().id();
         let decoder = match device {
-            Some(d) if !d.decodes(codec_id) => {
-                return Err(Error::Invalid(format!(
-                    "{}: {} doesn't decode {codec_id:?} right",
-                    path.display(),
-                    d.kind().name()
-                )));
+            Some(d) if let Some(why) = d.why_not(codec_id) => {
+                return Err(Error::Invalid(why.into()));
             }
             // FFmpeg's default decoder may decode on the CPU only (libdav1d
             // for AV1): one that can use the GPU, when there is one.
@@ -642,9 +725,9 @@ impl VideoReader {
                 Some(codec) => ctx.decoder().open_as(codec).and_then(|d| d.video()),
                 None => {
                     return Err(Error::Invalid(format!(
-                        "{}: no {} decoder for {codec_id:?}",
-                        path.display(),
-                        d.kind().name()
+                        "FFmpeg has no {} decoder for {}",
+                        d.kind().label(),
+                        codec_id.name()
                     )));
                 }
             },

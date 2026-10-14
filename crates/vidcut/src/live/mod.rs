@@ -39,7 +39,7 @@ use vidcut_core::time::{Keyword, Rational, TimeContext, TimeSpec, format_timecod
 use vidcut_core::{Envelope, Error, Project, Request, Response, Result};
 
 pub use jobs::{JobInfo, JobOutput, JobState};
-pub use player::{MakeOutput, debug};
+pub use player::MakeOutput;
 pub use snapshot::*;
 pub use vidcut_av::thumbs::Image;
 
@@ -135,9 +135,9 @@ pub struct PlayerConfig {
     pub audio: MakeOutput,
     /// Memory for its pictures: what is shown, and the frame of what isn't.
     pub budget: vidcut_av::player::Budget,
-    /// The renderer shows pictures in GPU memory from there: those NVDEC or
-    /// VA-API decodes stay on the GPU (and kept ones in video memory).
-    pub gpu_pictures: bool,
+    /// The decoders whose pictures the renderer shows from GPU memory:
+    /// they stay on the GPU (and kept ones in video memory).
+    pub gpu_pictures: Vec<vidcut_av::hw::Kind>,
 }
 
 /// Progress and the final answer of one request.
@@ -368,7 +368,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     let pid = std::process::id();
     let (audio, budget, gpu_pictures) = match config.player {
         Some(p) => (Some(p.audio), p.budget, p.gpu_pictures),
-        None => (None, vidcut_av::player::Budget::both(0), false),
+        None => (None, vidcut_av::player::Budget::both(0), Vec::new()),
     };
     let player = {
         let (tx, notify) = (tx.clone(), config.notify.clone());
@@ -830,9 +830,9 @@ impl Live {
                 self.finish(job, result);
             }
             Msg::PreferencesChanged => {
-                let gpu = crate::preferences::gpu_decoding();
-                changed = self.player.follow_gpu(gpu);
-                changed |= self.player.follow_gpu_in_use();
+                changed = self
+                    .player
+                    .follow_decoding(crate::preferences::gpu_decoding());
                 changed |= self.player.follow_audio(crate::preferences::audio_device());
                 self.player.set_budget(crate::preferences::player_budget());
             }
@@ -907,9 +907,11 @@ impl Live {
         let Some(motion) = self.player.present_due(Instant::now()) else {
             return;
         };
-        if debug() {
-            eprintln!("[{:?}] present motion {motion}", PlayerId::of(self.viewer));
-        }
+        vidcut_av::debug!(
+            "session",
+            "{:?}: present motion {motion}",
+            PlayerId::of(self.viewer)
+        );
         let tx = self.tx.clone();
         self.renderer.present(Box::new(move |frame| {
             let _ = tx.send(Msg::Presented { motion, frame });

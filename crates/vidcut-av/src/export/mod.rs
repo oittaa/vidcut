@@ -343,7 +343,7 @@ pub fn run(
         settings,
         output,
         available,
-        crate::hw::Decoding::Nvdec,
+        &crate::hw::Decoding::Nvdec,
         cancel,
         progress,
     )
@@ -359,7 +359,7 @@ pub fn run_decoding_on(
     settings: &ExportSettings,
     output: &Path,
     available: &Availability,
-    decoding: crate::hw::Decoding<'_>,
+    decoding: &crate::hw::Decoding,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<Report> {
@@ -698,7 +698,7 @@ fn encode(
     part: &Path,
     output: &Path,
     available: &Availability,
-    decoding: crate::hw::Decoding<'_>,
+    decoding: &crate::hw::Decoding,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<Report> {

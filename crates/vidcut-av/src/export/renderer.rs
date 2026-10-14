@@ -305,7 +305,10 @@ fn frames(
 ) -> VideoFrames {
     let frames = VideoFrames::new(&[], fps, width, height, format::Pixel::RGBA, None);
     match decoder {
-        Some(d) => frames.decode_on(d.clone().without(crate::ffmpeg::codec::Id::H264)),
+        Some(d) => frames.decode_on(d.clone().without(
+            crate::ffmpeg::codec::Id::H264,
+            "frames read in jumps seek at every one, and the CPU decodes H.264 sooner",
+        )),
         None => frames,
     }
 }

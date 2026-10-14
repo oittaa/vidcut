@@ -1337,7 +1337,7 @@ impl Workspace {
                 },
             }
         };
-        if crate::live::debug() {
+        if vidcut_av::debug() {
             eprintln!("[gesture] {gesture:?}");
         }
         self.show_timeline();

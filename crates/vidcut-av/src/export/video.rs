@@ -1471,6 +1471,13 @@ impl VideoFrames {
                     out_fmt,
                     gpu_fit.into.as_ref(),
                 )
+                .inspect_err(|e| {
+                    crate::debug!(
+                        "decoding",
+                        "{}: the GPU won't fit the frames for the encoder, the CPU makes them: {e}",
+                        src.reader.path().display()
+                    )
+                })
                 .ok()
             });
             src.fit_failed |= tried && fitted.is_none();

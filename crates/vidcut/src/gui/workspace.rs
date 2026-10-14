@@ -966,9 +966,9 @@ impl Workspace {
     /// question is up: they are read before the windows are drawn, so a
     /// modal doesn't stop them itself.
     fn keys(&mut self, ctx: &egui::Context) {
-        // `VIDCUT_DEBUG_PLAYER=1` traces key presses too: what a keyboard
+        // `VIDCUT_DEBUG` traces key presses too: what a keyboard
         // layout sends for a shortcut.
-        if crate::live::debug() {
+        if vidcut_av::debug() {
             ctx.input(|i| {
                 for e in &i.events {
                     if let egui::Event::Key {

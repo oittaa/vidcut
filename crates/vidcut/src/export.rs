@@ -981,7 +981,7 @@ pub fn needs_gpu_info(settings: &ExportSettings) -> bool {
 pub fn run(
     prepared: &Prepared,
     available: &Availability,
-    decoding: vidcut_av::hw::Decoding<'_>,
+    decoding: &vidcut_av::hw::Decoding,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(usize, &Path, Progress),
 ) -> Result<Vec<Report>> {

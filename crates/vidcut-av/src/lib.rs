@@ -51,6 +51,25 @@ pub fn init() {
     });
 }
 
+/// Whether `VIDCUT_DEBUG` is set: vidcut then says on stderr what it
+/// decodes, plays and draws, and why ([`debug!`]). Nobody sees it in
+/// normal use, so it says all that helps.
+pub fn debug() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VIDCUT_DEBUG").is_some())
+}
+
+/// Says a line on stderr under `[area]` while `VIDCUT_DEBUG` is set
+/// ([`debug`]): `debug!("decoding", "{path}: on NVDEC")`.
+#[macro_export]
+macro_rules! debug {
+    ($area:literal, $($arg:tt)*) => {
+        if $crate::debug() {
+            eprintln!("[{}] {}", $area, format_args!($($arg)*));
+        }
+    };
+}
+
 /// FFmpeg's version as its build says it: `8.0.1-3ubuntu2` from a
 /// distribution, `N-…-g…` from git.
 pub fn ffmpeg_version() -> String {

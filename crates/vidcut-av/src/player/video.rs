@@ -24,7 +24,7 @@ use vidcut_core::time::Rational;
 use super::frame::Picture;
 use super::plan::Plan;
 use super::store::Kind;
-use super::{Busy, Decoder as Decoding, Mode, Shared, Snap, trace};
+use super::{Busy, Decoder as Decoding, Mode, Shared, Snap};
 use crate::error::{Error, Result};
 use crate::export::is_cancelled;
 use crate::export::renderer::{at, window};
@@ -285,7 +285,7 @@ impl Decoder {
                 self.seek_cost = (self.seek_cost * 3 + took) / 4;
             }
             if target > focus {
-                trace!("caught up at {target}, the clock at {focus}");
+                crate::debug!("player", "caught up at {target}, the clock at {focus}");
                 self.caught_up = Some(target);
             }
             return Ok(true);
@@ -385,7 +385,10 @@ impl Decoder {
             first
         };
         self.next_window = None;
-        trace!("window {first}..={next} behind, {behind} waiting there");
+        crate::debug!(
+            "player",
+            "window {first}..={next} behind, {behind} waiting there"
+        );
         store.touch((low..=focus).map(|t| plan.id(t)));
         self.decode_from(snap, Some(first), next, true)?;
         self.back_windows.push((first, next));
@@ -421,7 +424,7 @@ impl Decoder {
         if self.shared.store.contains(&id) || self.prepared_failed == Some(snap.version) {
             return Ok(false);
         }
-        trace!("prepare {t} of the plan played next");
+        crate::debug!("player", "prepare {t} of the plan played next");
         let picture = (|| {
             let mut frames = self.new_reader(&plan.plan);
             frames.read_pieces(&plan.pieces_from(*t));
@@ -438,7 +441,7 @@ impl Decoder {
             // Something new is wanted: the reader played with didn't move.
             Err(e) if is_cancelled(&e) => {}
             Err(e) => {
-                trace!("preparing {t} failed: {e}");
+                crate::debug!("player", "preparing {t} failed: {e}");
                 self.prepared_failed = Some(snap.version);
             }
         }
@@ -498,22 +501,40 @@ impl Decoder {
     fn new_reader(&mut self, p: &RenderPlan) -> VideoFrames {
         let mut frames =
             VideoFrames::new(&[], p.fps, p.width, p.height, format::Pixel::YUV420P, None).decoded();
-        if self.hardware {
-            let shared = &self.shared;
-            let gpu = self
-                .gpu
-                .get_or_insert_with(|| shared.gpu.clone().or_else(crate::hw::GpuDecoder::best));
-            if let Some(gpu) = gpu {
-                frames = frames.decode_on(gpu.clone());
-                // The GPU's pictures may stay in video memory, which then
-                // has a budget of its own.
-                if self.shared.gpu_pictures {
-                    frames = frames.keep_on_gpu();
-                }
-                if let Some(cuda) = gpu.cuda() {
-                    self.shared.gpu_found(cuda);
-                }
-            }
+        if !self.hardware {
+            crate::debug!(
+                "player",
+                "a new reader decodes on the CPU: GPU decoding is off"
+            );
+            return frames;
+        }
+        let gpu = self.gpu.get_or_insert_with(crate::hw::GpuDecoder::best);
+        let Some(gpu) = gpu else {
+            crate::debug!(
+                "player",
+                "a new reader decodes on the CPU: no GPU decoder here"
+            );
+            return frames;
+        };
+        frames = frames.decode_on(gpu.clone());
+        // The GPU's pictures may stay in video memory, which then has a
+        // budget of its own.
+        let shows = &self.shared.gpu_pictures;
+        if shows.contains(&gpu.kind()) {
+            frames = frames.keep_on_gpu();
+            crate::debug!(
+                "player",
+                "a new reader decodes on {gpu} where it can; its pictures stay in GPU memory"
+            );
+        } else {
+            crate::debug!(
+                "player",
+                "a new reader decodes on {gpu} where it can; its pictures come down to \
+                 memory: the viewer shows only {shows:?} pictures from GPU memory"
+            );
+        }
+        if let Some(cuda) = gpu.cuda() {
+            self.shared.gpu_found(cuda);
         }
         frames
     }
@@ -546,11 +567,13 @@ impl Decoder {
             self.next = Some(from);
         }
         let r = self.next.expect("positioned");
-        trace!(
+        crate::debug!(
+            "player",
             "decode {r}..={t} (viewer at {}{})",
             snap.focus,
             if back { ", keeping a window" } else { "" }
         );
+        let started = Instant::now();
         for i in r..=t {
             // Frames before the one wanted: kept going back (they are the
             // window) and when they are still ahead of the viewer; passed
@@ -574,6 +597,26 @@ impl Decoder {
                 frames.skip_frame()?;
                 self.next = Some(i + 1);
             }
+        }
+        if crate::debug() {
+            let took = started.elapsed().as_secs_f64() * 1000.0;
+            let n = t - r + 1;
+            let on = self
+                .reader()
+                .decoded_on()
+                .map_or("the CPU", crate::hw::Kind::label);
+            let store = &self.shared.store;
+            let (kept, bytes) = store.usage();
+            crate::debug!(
+                "player",
+                "decoded {r}..={t} on {on}: {n} frames in {took:.1} ms, {:.2} ms each; \
+                 {kept} pictures kept in {} MB (budgets {} MB of memory, {} MB of video \
+                 memory)",
+                took / n as f64,
+                bytes >> 20,
+                store.budget(Kind::Memory) >> 20,
+                store.budget(Kind::Video) >> 20,
+            );
         }
         Ok(())
     }
