@@ -38,11 +38,30 @@ impl Kind {
         }
     }
 
+    const ALL: [Kind; 3] = [Kind::Nvdec, Kind::Vaapi, Kind::D3d11va];
+
     /// The kind a [`name`](Self::name) names.
     pub fn named(name: &str) -> Option<Self> {
-        [Kind::Nvdec, Kind::Vaapi, Kind::D3d11va]
-            .into_iter()
-            .find(|k| k.name() == name)
+        Self::ALL.into_iter().find(|k| k.name() == name)
+    }
+
+    /// The kind whose GPU memory `f` is in; `None` for a frame in memory.
+    pub fn of_frame(f: &frame::Video) -> Option<Self> {
+        Self::ALL.into_iter().find(|k| k.pixel() == f.format())
+    }
+
+    /// The kind of FFmpeg's hardware device `device` (a codec's
+    /// `hw_device_ctx`), when vidcut decodes on that kind.
+    ///
+    /// # Safety
+    /// `device` is null or a reference to a hardware device context.
+    pub(crate) unsafe fn of_device(device: *const ffi::AVBufferRef) -> Option<Self> {
+        if device.is_null() {
+            return None;
+        }
+        // SAFETY: a hardware device context's data, as the caller says.
+        let ty = unsafe { (*((*device).data as *const ffi::AVHWDeviceContext)).type_ };
+        Self::ALL.into_iter().find(|k| k.device_type() == ty)
     }
 
     /// What it is called, for people: `NVDEC`, `VA-API`, `Direct3D 11`.
@@ -232,17 +251,6 @@ impl Decoding {
     }
 }
 
-/// The decoding profiles [`GpuDecoder::hardware_decodes`] asks a driver for.
-#[derive(Clone, Copy)]
-enum Profile {
-    H264High,
-    HevcMain,
-    HevcMain10,
-    Vp9Profile0,
-    Vp9Profile2,
-    Av1Main,
-}
-
 impl GpuDecoder {
     /// NVDEC, on `cuda`.
     pub fn nvdec(cuda: CudaDevice) -> Self {
@@ -266,7 +274,7 @@ impl GpuDecoder {
         #[cfg(windows)]
         // SAFETY: a D3D11VA device FFmpeg made.
         let vendor = (kind == Kind::D3d11va)
-            .then(|| unsafe { windows::desc(&device) }.map(|d| d.VendorId))
+            .then(|| unsafe { d3d11::desc(&device) }.map(|d| d.VendorId))
             .flatten();
         #[cfg(not(windows))]
         let vendor = None;
@@ -324,48 +332,6 @@ impl GpuDecoder {
         self
     }
 
-    /// Whether its hardware decodes `codec` in `bits` (8 or 10), as its
-    /// driver lists the profiles it decodes (VA-API's; Direct3D 11's video
-    /// device's; NVDEC's capabilities in 4:2:0): H.264 High, HEVC Main or
-    /// Main 10, VP9 profile 0 or 2, AV1 Main. `None` where the driver
-    /// doesn't say. What [`why_not`](Self::why_not) knows of streams
-    /// decoded wrong is apart from this.
-    pub fn hardware_decodes(&self, codec: ffmpeg::codec::Id, bits: u8) -> Option<bool> {
-        use ffmpeg::codec::Id;
-        if let Some(cuda) = &self.cuda {
-            // `cuviddec.h`'s `cudaVideoCodec`.
-            let nvdec = match codec {
-                Id::H264 => 4,
-                Id::HEVC => 8,
-                Id::VP9 => 10,
-                Id::AV1 => 11,
-                _ => return None,
-            };
-            return cuda.nvdec_decodes(nvdec, bits).ok();
-        }
-        // Only VA-API's and Direct3D 11's drivers are asked.
-        #[cfg_attr(not(any(target_os = "linux", windows)), allow(unused_variables))]
-        let profile = match (codec, bits) {
-            (Id::H264, 8) => Profile::H264High,
-            (Id::HEVC, 8) => Profile::HevcMain,
-            (Id::HEVC, 10) => Profile::HevcMain10,
-            (Id::VP9, 8) => Profile::Vp9Profile0,
-            (Id::VP9, 10) => Profile::Vp9Profile2,
-            (Id::AV1, 8 | 10) => Profile::Av1Main,
-            _ => return None,
-        };
-        match self.kind {
-            // SAFETY: a VA-API device FFmpeg made.
-            #[cfg(target_os = "linux")]
-            Kind::Vaapi => unsafe { va_lists(&self.device, profile) },
-            // SAFETY: a D3D11VA device FFmpeg made.
-            #[cfg(windows)]
-            Kind::D3d11va => unsafe { windows::lists(&self.device, profile) },
-            #[allow(unreachable_patterns)]
-            _ => None,
-        }
-    }
-
     /// The render node or adapter it is on; empty for the default one.
     pub fn on(&self) -> &str {
         &self.on
@@ -374,22 +340,6 @@ impl GpuDecoder {
     /// NVDEC's CUDA device.
     pub fn cuda(&self) -> Option<&CudaDevice> {
         self.cuda.as_ref()
-    }
-
-    /// The LUID of the adapter a Direct3D 11 decoder is on (Windows), which
-    /// says which GPU it is: a device importing its textures must be on that
-    /// one.
-    pub fn luid(&self) -> Option<[u8; 8]> {
-        #[cfg(windows)]
-        if self.kind == Kind::D3d11va {
-            // SAFETY: a D3D11VA device.
-            let luid = unsafe { windows::desc(&self.device) }?.AdapterLuid;
-            let mut bytes = [0; 8];
-            bytes[..4].copy_from_slice(&luid.LowPart.to_le_bytes());
-            bytes[4..].copy_from_slice(&luid.HighPart.to_le_bytes());
-            return Some(bytes);
-        }
-        None
     }
 
     pub(crate) fn as_ptr(&self) -> *mut ffi::AVBufferRef {
@@ -476,71 +426,6 @@ impl std::fmt::Display for GpuDecoder {
             _ if self.on.is_empty() => Ok(()),
             Kind::D3d11va => write!(f, " on adapter {}", self.on),
             _ => write!(f, " on {}", self.on),
-        }
-    }
-}
-
-#[cfg(windows)]
-pub(crate) mod windows {
-    use std::ffi::c_void;
-
-    use ::windows::Win32::Graphics::Direct3D11::ID3D11Device;
-    use ::windows::Win32::Graphics::Dxgi::{DXGI_ADAPTER_DESC, IDXGIDevice};
-    use ::windows::core::Interface;
-
-    use super::{Device, Profile};
-    use crate::ffmpeg::ffi;
-
-    /// Whether a D3D11VA device's video device lists `profile` among its
-    /// decoders' (`GetVideoDecoderProfile`).
-    ///
-    /// # Safety
-    /// `device` is a D3D11VA device context.
-    pub(super) unsafe fn lists(device: &Device, profile: Profile) -> Option<bool> {
-        use ::windows::Win32::Graphics::Direct3D11::{
-            D3D11_DECODER_PROFILE_AV1_VLD_PROFILE0, D3D11_DECODER_PROFILE_H264_VLD_NOFGT,
-            D3D11_DECODER_PROFILE_HEVC_VLD_MAIN, D3D11_DECODER_PROFILE_HEVC_VLD_MAIN10,
-            D3D11_DECODER_PROFILE_VP9_VLD_10BIT_PROFILE2, D3D11_DECODER_PROFILE_VP9_VLD_PROFILE0,
-            ID3D11VideoDevice,
-        };
-        let want = match profile {
-            Profile::H264High => D3D11_DECODER_PROFILE_H264_VLD_NOFGT,
-            Profile::HevcMain => D3D11_DECODER_PROFILE_HEVC_VLD_MAIN,
-            Profile::HevcMain10 => D3D11_DECODER_PROFILE_HEVC_VLD_MAIN10,
-            Profile::Vp9Profile0 => D3D11_DECODER_PROFILE_VP9_VLD_PROFILE0,
-            Profile::Vp9Profile2 => D3D11_DECODER_PROFILE_VP9_VLD_10BIT_PROFILE2,
-            Profile::Av1Main => D3D11_DECODER_PROFILE_AV1_VLD_PROFILE0,
-        };
-        // SAFETY: a D3D11VA device's context is an AVD3D11VADeviceContext,
-        // whose video device FFmpeg asked its device for and which lives as
-        // long as it.
-        unsafe {
-            let ctx = (*device.0).data as *const ffi::AVHWDeviceContext;
-            let hw = (*ctx).hwctx as *const ffi::AVD3D11VADeviceContext;
-            let raw = (*hw).video_device as *mut c_void;
-            let video = ID3D11VideoDevice::from_raw_borrowed(&raw)?;
-            Some(
-                (0..video.GetVideoDecoderProfileCount())
-                    .any(|i| video.GetVideoDecoderProfile(i).is_ok_and(|g| g == want)),
-            )
-        }
-    }
-
-    /// The description of the adapter a D3D11VA device is on: its Direct3D
-    /// device asked for its DXGI device, that for its adapter.
-    ///
-    /// # Safety
-    /// `device` is a D3D11VA device context.
-    pub(super) unsafe fn desc(device: &Device) -> Option<DXGI_ADAPTER_DESC> {
-        // SAFETY: a D3D11VA device's context is an AVD3D11VADeviceContext,
-        // whose Direct3D device lives as long as it.
-        unsafe {
-            let ctx = (*device.0).data as *const ffi::AVHWDeviceContext;
-            let hw = (*ctx).hwctx as *const ffi::AVD3D11VADeviceContext;
-            let raw = (*hw).device as *mut c_void;
-            let d3d11 = ID3D11Device::from_raw_borrowed(&raw)?;
-            let dxgi: IDXGIDevice = d3d11.cast().ok()?;
-            dxgi.GetAdapter().ok()?.GetDesc().ok()
         }
     }
 }
@@ -728,60 +613,6 @@ fn props(dst: &mut frame::Video, src: &frame::Video) -> Result<()> {
     Ok(())
 }
 
-/// Whether a VA-API device's driver lists `profile` with the entry point
-/// for decoding (`VAEntrypointVLD`); `None` without libva to ask.
-///
-/// # Safety
-/// `device` is a VA-API device context.
-#[cfg(target_os = "linux")]
-unsafe fn va_lists(device: &Device, profile: Profile) -> Option<bool> {
-    use std::ffi::{c_int, c_void};
-    /// `AVVAAPIDeviceContext`.
-    #[repr(C)]
-    struct VaapiDevice {
-        display: *mut c_void,
-        driver_quirks: std::ffi::c_uint,
-    }
-    type Max = unsafe extern "C" fn(*mut c_void) -> c_int;
-    type Entrypoints = unsafe extern "C" fn(*mut c_void, c_int, *mut c_int, *mut c_int) -> c_int;
-    // va.h's `VAProfile` and `VAEntrypointVLD`.
-    let va_profile = match profile {
-        Profile::H264High => 7,
-        Profile::HevcMain => 17,
-        Profile::HevcMain10 => 18,
-        Profile::Vp9Profile0 => 19,
-        Profile::Vp9Profile2 => 21,
-        Profile::Av1Main => 32,
-    };
-    const VLD: c_int = 1;
-    // SAFETY: libva's functions as va.h declares them, looked up in the
-    // process (loaded with FFmpeg); the device's context is an
-    // AVVAAPIDeviceContext with its display; the list holds as many entry
-    // points as libva says there can be.
-    unsafe {
-        let max = libc::dlsym(libc::RTLD_DEFAULT, c"vaMaxNumEntrypoints".as_ptr());
-        let query = libc::dlsym(libc::RTLD_DEFAULT, c"vaQueryConfigEntrypoints".as_ptr());
-        if max.is_null() || query.is_null() {
-            return None;
-        }
-        let max = std::mem::transmute::<*mut c_void, Max>(max);
-        let query = std::mem::transmute::<*mut c_void, Entrypoints>(query);
-        let ctx = (*device.0).data as *const ffi::AVHWDeviceContext;
-        let display = (*((*ctx).hwctx as *const VaapiDevice)).display;
-        if display.is_null() {
-            return None;
-        }
-        let mut entrypoints = vec![0; usize::try_from(max(display)).ok()?.max(1)];
-        let mut n: c_int = 0;
-        // A profile the driver lacks: an error, not an empty list.
-        if query(display, va_profile, entrypoints.as_mut_ptr(), &mut n) != 0 {
-            return Some(false);
-        }
-        let n = usize::try_from(n).unwrap_or(0).min(entrypoints.len());
-        Some(entrypoints[..n].contains(&VLD))
-    }
-}
-
 /// The display of `frame` when it is a VA-API frame of Intel's driver
 /// (iHD), by the vendor string libva gives the display.
 ///
@@ -839,10 +670,10 @@ unsafe fn intel_va(_: &frame::Video) -> Option<usize> {
     None
 }
 
-/// Copies frames kept on the GPU out of a decoder whose few surfaces don't
-/// grow, so kept ones don't run it out: Direct3D 11's, into textures of
-/// their own that another device can open (Windows). FFmpeg copies NVDEC's
-/// itself, and VA-API's pool grows as it needs.
+/// Keeps the GPU's frames there without running its decoder out of
+/// surfaces: Direct3D 11's are copied into textures of their own that
+/// another device can open (Windows). FFmpeg copies NVDEC's itself, and
+/// VA-API's pool grows as it needs.
 pub(crate) enum Keeper {
     #[cfg(windows)]
     D3d11(d3d11::Keeper),
@@ -867,25 +698,31 @@ fn frames_of(f: &frame::Video) -> Result<(*mut ffi::AVBufferRef, KeptLike)> {
 }
 
 impl Keeper {
-    /// `f` (a Direct3D 11 frame) copied, with its timestamp and colors;
-    /// `keeper` made for frames like it first.
-    pub(crate) fn copy(keeper: &mut Option<Keeper>, f: &frame::Video) -> Result<frame::Video> {
-        #[cfg(windows)]
-        if f.format() == format::Pixel::D3D11 {
-            let (frames, like) = frames_of(f)?;
-            if !matches!(keeper, Some(Keeper::D3d11(k)) if k.like == like) {
-                *keeper = Some(Keeper::D3d11(d3d11::Keeper::new(f, frames, like)?));
+    /// `f`, a frame in GPU memory, to keep there, with its timestamp and
+    /// colors; `keeper` made for frames like it first.
+    pub(crate) fn keep(keeper: &mut Option<Keeper>, f: &frame::Video) -> Result<frame::Video> {
+        match Kind::of_frame(f) {
+            Some(Kind::Nvdec | Kind::Vaapi) => crate::export::video::frame_ref(f),
+            #[cfg(windows)]
+            Some(Kind::D3d11va) => {
+                let (frames, like) = frames_of(f)?;
+                if !matches!(keeper, Some(Keeper::D3d11(k)) if k.like == like) {
+                    *keeper = Some(Keeper::D3d11(d3d11::Keeper::new(f, frames, like)?));
+                }
+                let Some(Keeper::D3d11(k)) = keeper else {
+                    unreachable!("made above")
+                };
+                k.copy(f)
             }
-            let Some(Keeper::D3d11(k)) = keeper else {
-                unreachable!("made above")
-            };
-            return k.copy(f);
+            _ => {
+                // Only Direct3D 11's take a keeper.
+                let _ = keeper;
+                Err(Error::Invalid(format!(
+                    "no keeping {:?} frames",
+                    f.format()
+                )))
+            }
         }
-        let _ = keeper;
-        Err(Error::Invalid(format!(
-            "no keeping {:?} frames",
-            f.format()
-        )))
     }
 }
 
@@ -1116,6 +953,20 @@ enum Fitting {
 }
 
 impl Fitter {
+    /// Whether the GPU fits `f` into `layout` for an encoder on its device:
+    /// VA-API's frames, and Direct3D 11's into the encoder's frames (`into`),
+    /// but not 8-bit ones into 10 (AMD's video processor won't).
+    pub(crate) fn fits(f: &frame::Video, layout: format::Pixel, into: Option<&Frames>) -> bool {
+        match f.format() {
+            format::Pixel::VAAPI => true,
+            format::Pixel::D3D11 => {
+                into.is_some()
+                    && !(sw_format(f) == format::Pixel::NV12 && layout == format::Pixel::P010LE)
+            }
+            _ => false,
+        }
+    }
+
     /// `f` turned clockwise by `rotation` (0, 90, 180 or 270), scaled to
     /// `fitted` and placed in an `out` picture of `layout` (NV12, P010), on
     /// the GPU, with its timestamp and colors, its pixels square; `fitter`
@@ -1215,9 +1066,28 @@ pub(crate) mod d3d11 {
         DXGI_COLOR_SPACE_YCBCR_FULL_GHLG_TOPLEFT_P2020,
         DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020, DXGI_FORMAT_NV12, DXGI_FORMAT_P010,
     };
+    use ::windows::Win32::Graphics::Dxgi::{DXGI_ADAPTER_DESC, IDXGIDevice};
     use ::windows::core::Interface;
 
     use super::*;
+
+    /// The description of the adapter a D3D11VA device is on: its Direct3D
+    /// device asked for its DXGI device, that for its adapter.
+    ///
+    /// # Safety
+    /// `device` is a D3D11VA device context.
+    pub(super) unsafe fn desc(device: &Device) -> Option<DXGI_ADAPTER_DESC> {
+        // SAFETY: a D3D11VA device's context is an AVD3D11VADeviceContext,
+        // whose Direct3D device lives as long as it.
+        unsafe {
+            let ctx = (*device.0).data as *const ffi::AVHWDeviceContext;
+            let hw = (*ctx).hwctx as *const ffi::AVD3D11VADeviceContext;
+            let raw = (*hw).device as *mut c_void;
+            let d3d11 = ID3D11Device::from_raw_borrowed(&raw)?;
+            let dxgi: IDXGIDevice = d3d11.cast().ok()?;
+            dxgi.GetAdapter().ok()?.GetDesc().ok()
+        }
+    }
 
     /// `AVD3D11VADeviceContext`.
     #[repr(C)]

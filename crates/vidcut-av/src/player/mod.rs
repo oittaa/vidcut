@@ -54,7 +54,7 @@ use std::time::{Duration, Instant};
 
 use vidcut_core::render::RenderPlan;
 
-pub use frame::{Layout, Memory, Picture, Shown};
+pub use frame::{Layout, Picture, Shown};
 pub use output::{
     AudioOutput, AudioSource, CpalOutput, ManualOutput, OutputDevice, PacedOutput, PlaysOn,
     Recording, output_device, output_devices,
@@ -148,8 +148,7 @@ pub struct Config {
     /// ([`set_hardware`](Player::set_hardware)).
     pub hardware: bool,
     /// The decoders whose pictures stay in GPU memory (NV12, P010), for a
-    /// display that shows them from there ([`Memory::Cuda`],
-    /// [`Memory::Vaapi`], [`Memory::D3d11`]); kept ones take video memory
+    /// display that shows them from there; kept ones take video memory
     /// then.
     pub gpu_pictures: Vec<crate::hw::Kind>,
 }

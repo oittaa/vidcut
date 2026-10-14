@@ -702,8 +702,7 @@ pub struct VideoFrames {
     /// (`keep_on_gpu`).
     decoder: Option<crate::hw::GpuDecoder>,
     keep_on_gpu: bool,
-    /// Copies Direct3D 11's frames kept on the GPU out of the decoder's
-    /// texture array; `None` too once that failed, when they come down.
+    /// Keeps the GPU's frames there ([`crate::hw::Keeper`]).
     keeper: Option<crate::hw::Keeper>,
     /// Shrinks the frames a GPU decoded (NVDEC's, VA-API's, Direct3D 11's)
     /// on the GPU before they come down to be fitted into the output.
@@ -711,7 +710,7 @@ pub struct VideoFrames {
     /// Fits frames into the output on the GPU, for an encoder on their
     /// device ([`fit_on_gpu`](Self::fit_on_gpu)).
     fit: Option<GpuFit>,
-    /// Keeping Direct3D 11's frames failed: they come down from then on.
+    /// Keeping the GPU's frames failed: they come down from then on.
     unkept: bool,
     /// The clockwise turn that shows the last frame given upright.
     rotation: u16,
@@ -1401,26 +1400,20 @@ impl VideoFrames {
                 // Frames the GPU decoded come down to memory at their size,
                 // unless a display takes them from the GPU as they are.
                 src.normalized = Some(if crate::hw::on_gpu(frame) {
-                    let keep = self.keep_on_gpu && displayable(crate::hw::sw_format(frame));
-                    match frame.format() {
-                        format::Pixel::CUDA | format::Pixel::VAAPI if keep => frame_ref(frame)?,
-                        format::Pixel::D3D11 if keep && !self.unkept => {
-                            match crate::hw::Keeper::copy(&mut self.keeper, frame) {
-                                Ok(kept) => kept,
-                                // Down to memory, as before they were kept:
-                                // a copy that failed or took two seconds
-                                // would again.
-                                Err(e) => {
-                                    eprintln!(
-                                        "vidcut: Direct3D 11 pictures come down to be shown: {e}"
-                                    );
-                                    self.unkept = true;
-                                    self.keeper = None;
-                                    relayout.run(&crate::hw::download(frame)?)?
-                                }
-                            }
+                    let keep = self.keep_on_gpu
+                        && !self.unkept
+                        && displayable(crate::hw::sw_format(frame));
+                    match keep.then(|| crate::hw::Keeper::keep(&mut self.keeper, frame)) {
+                        Some(Ok(kept)) => kept,
+                        // Down to memory, as before they were kept: a copy
+                        // that failed or took two seconds would again.
+                        Some(Err(e)) => {
+                            eprintln!("vidcut: GPU pictures come down to be shown: {e}");
+                            self.unkept = true;
+                            self.keeper = None;
+                            relayout.run(&crate::hw::download(frame)?)?
                         }
-                        _ => relayout.run(&crate::hw::download(frame)?)?,
+                        None => relayout.run(&crate::hw::download(frame)?)?,
                     }
                 } else {
                     relayout.run(frame)?
@@ -1432,20 +1425,10 @@ impl VideoFrames {
             let (frame, _) = src.current.as_ref().expect("have a frame");
             let rotation = src.reader.rotation();
             // Frames that need nothing but turning and fitting stay on the
-            // GPU, for an encoder on their device. AMD's video processor
-            // won't draw 8-bit frames of a decoder into 10-bit ones: those
-            // come down.
+            // GPU, for an encoder on their device.
             let on_gpu = self.fit.as_mut().filter(|fit| {
-                let fits = match frame.format() {
-                    format::Pixel::VAAPI => true,
-                    format::Pixel::D3D11 => {
-                        fit.into.is_some()
-                            && !(crate::hw::sw_format(frame) == format::Pixel::NV12
-                                && out_fmt == format::Pixel::P010LE)
-                    }
-                    _ => false,
-                };
-                fits && !src.fit_failed
+                crate::hw::Fitter::fits(frame, out_fmt, fit.into.as_ref())
+                    && !src.fit_failed
                     && crate::color::kept(crate::color::Source::of(frame), self.target)
             });
             let tried = on_gpu.is_some();

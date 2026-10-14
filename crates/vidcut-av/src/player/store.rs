@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Instant;
 
-use super::frame::{Memory, Picture};
+use super::frame::Picture;
 use super::plan::Id;
 
 /// Where a picture's pixels are, for the budgets: memory, or video memory.
@@ -20,9 +20,9 @@ pub(crate) enum Kind {
 
 impl Kind {
     pub(crate) fn of(picture: &Picture) -> Self {
-        match picture.memory() {
-            Memory::Cpu => Self::Memory,
-            _ => Self::Video,
+        match picture.gpu() {
+            None => Self::Memory,
+            Some(_) => Self::Video,
         }
     }
 

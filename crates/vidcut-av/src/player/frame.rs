@@ -9,23 +9,6 @@ use crate::export::video::{Normalizer, fit};
 use crate::ffmpeg::{self, format, frame};
 use crate::thumbs::Image;
 
-/// Where a picture's pixels are.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Memory {
-    /// Planes in memory, for the CPU to read or upload.
-    Cpu,
-    /// A CUDA surface (NVDEC's frames).
-    Cuda,
-    /// A VA-API surface (the decoder's, whose pool grows as frames are
-    /// kept).
-    Vaapi,
-    /// A Direct3D 11 texture (Direct3D 11's frames, copied out of the
-    /// decoder's texture array into a texture of its own).
-    D3d11,
-    /// A Vulkan image.
-    Vulkan,
-}
-
 /// How a picture's samples are laid out: the layouts decoders give, which a
 /// display's shader reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,11 +29,10 @@ pub enum Layout {
 /// A display fits it into the viewer (`placement`), turns it, and converts
 /// it to BT.709 RGB with a shader that reads it as the export does;
 /// `to_rgba` is that conversion on the CPU, the export's own, for a display
-/// without a GPU and for checking one. A picture is in memory
-/// ([`Memory::Cpu`]), or, decoded on the GPU for a display that shows it
-/// from there, in GPU memory: a frame with a hardware format and frames
-/// context ([`Memory::Cuda`], [`Memory::Vaapi`], [`Memory::D3d11`]), which
-/// the engine passes along without looking at its pixels.
+/// without a GPU and for checking one. A picture is in memory, or, decoded
+/// on the GPU for a display that shows it from there, in the GPU's memory
+/// ([`gpu`](Self::gpu)), which the engine passes along without looking at
+/// its pixels.
 pub struct Picture {
     frame: frame::Video,
     rotation: u16,
@@ -84,14 +66,9 @@ impl Picture {
         self.frame.height()
     }
 
-    pub fn memory(&self) -> Memory {
-        match self.frame.format() {
-            format::Pixel::CUDA => Memory::Cuda,
-            format::Pixel::VAAPI => Memory::Vaapi,
-            format::Pixel::D3D11 => Memory::D3d11,
-            format::Pixel::VULKAN => Memory::Vulkan,
-            _ => Memory::Cpu,
-        }
+    /// The GPU decoder in whose memory it is; `None` in memory.
+    pub fn gpu(&self) -> Option<crate::hw::Kind> {
+        crate::hw::Kind::of_frame(&self.frame)
     }
 
     /// The samples' layout; for a GPU surface, that of its frames context.
@@ -135,9 +112,9 @@ impl Picture {
     /// The picture with its planes in memory: copied down from GPU memory,
     /// or itself (by reference) when it is in memory already.
     pub fn copied_down(&self) -> Result<Picture> {
-        let frame = match self.memory() {
-            Memory::Cpu => crate::export::video::frame_ref(&self.frame)?,
-            _ => crate::hw::download(&self.frame)?,
+        let frame = match self.gpu() {
+            None => crate::export::video::frame_ref(&self.frame)?,
+            Some(_) => crate::hw::download(&self.frame)?,
         };
         Ok(Self::new(frame, self.rotation, self.decoder))
     }
@@ -153,7 +130,7 @@ impl Picture {
     /// and what a display's shader must match. Pictures in GPU memory are
     /// copied down first.
     pub fn to_rgba(&self, width: u32, height: u32) -> Result<Image> {
-        if self.memory() != Memory::Cpu {
+        if self.gpu().is_some() {
             return self.copied_down()?.to_rgba(width, height);
         }
         let mut normalizer = Normalizer::new(
