@@ -874,7 +874,7 @@ impl Workspace {
             badge(text, *color, true);
         }
         format!(
-            "{}\n{}\n{}{}I/O while hovering marks the clip; double-click opens it",
+            "{}\n{}\n{}{}{}I/O while hovering marks the clip; double-click opens it",
             m.name,
             m.path.display(),
             if missing {
@@ -883,6 +883,9 @@ impl Workspace {
                 ""
             },
             proxy.map_or(String::new(), |(_, _, tip)| format!("{tip}\n")),
+            m.color.as_deref().map_or(String::new(), |c| {
+                format!("Clip Color: {}\n", theme::color_title(c))
+            }),
         )
     }
 
@@ -1095,8 +1098,14 @@ impl Workspace {
             } else {
                 vec![m.id.clone()]
             };
+            let current = self.project().and_then(|p| {
+                let colors = ids
+                    .iter()
+                    .map(|id| p.media(id).and_then(|m| m.color.as_deref()));
+                theme::same_color(colors).map(str::to_string)
+            });
             ui.menu_button("Clip Color", |ui| {
-                if let Some(color) = theme::clip_color_menu(ui) {
+                if let Some(color) = theme::clip_color_menu(ui, current.as_deref()) {
                     self.send("media.set", json!({ "media": ids, "color": color }));
                     ui.close();
                 }

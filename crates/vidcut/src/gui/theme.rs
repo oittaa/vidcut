@@ -35,13 +35,28 @@ pub fn clip_color(name: &str) -> Option<Color32> {
         .map(|(_, [r, g, b])| Color32::from_rgb(*r, *g, *b))
 }
 
-/// The Clip Color submenu (spec §3): each color, then Clear Color. Returns
-/// the one picked, empty for Clear Color.
-pub fn clip_color_menu(ui: &mut egui::Ui) -> Option<String> {
+/// A Clip Color's name as shown: `Teal`.
+pub fn color_title(name: &str) -> String {
+    let mut title = name.to_string();
+    if let Some(first) = title.get_mut(..1) {
+        first.make_ascii_uppercase();
+    }
+    title
+}
+
+/// The color all of `colors` have, if they have the same one.
+pub fn same_color<'a>(mut colors: impl Iterator<Item = Option<&'a str>>) -> Option<&'a str> {
+    let first = colors.next()??;
+    colors.all(|c| c == Some(first)).then_some(first)
+}
+
+/// The Clip Color submenu (spec §3): each color, the `current` one
+/// selected, then Clear Color. Returns the one picked, empty for Clear
+/// Color.
+pub fn clip_color_menu(ui: &mut egui::Ui, current: Option<&str>) -> Option<String> {
     let mut picked = None;
     for (name, [r, g, b]) in vidcut_core::ops::CLIP_COLORS {
-        let mut title = name.to_string();
-        title[..1].make_ascii_uppercase();
+        let title = color_title(name);
         let clicked = ui
             .horizontal(|ui| {
                 let (swatch, _) =
@@ -51,7 +66,8 @@ pub fn clip_color_menu(ui: &mut egui::Ui) -> Option<String> {
                     CornerRadius::same(2),
                     Color32::from_rgb(*r, *g, *b),
                 );
-                ui.button(title).clicked()
+                ui.add(egui::Button::selectable(current == Some(*name), title))
+                    .clicked()
             })
             .inner;
         if clicked {
@@ -97,4 +113,22 @@ pub fn apply(ctx: &egui::Context) {
         s.spacing.item_spacing = egui::vec2(6.0, 4.0);
         s.spacing.button_padding = egui::vec2(8.0, 3.0);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clips_of_one_color_show_it_in_the_menu() {
+        assert_eq!(
+            same_color([Some("teal"), Some("teal")].into_iter()),
+            Some("teal")
+        );
+    }
+
+    #[test]
+    fn clips_of_mixed_colors_show_none_in_the_menu() {
+        assert_eq!(same_color([Some("teal"), None].into_iter()), None);
+    }
 }
