@@ -150,27 +150,27 @@ pub fn plan(facts: &Facts, dest: Dest) -> Route {
     match dest {
         Dest::Display { keep } if keep && displayable(facts.layout) => Route::Kept,
         Dest::Display { .. } => Route::Whole,
-        Dest::Encoder { place } if place == facts.place && !facts.fit_failed && fits(facts) => {
-            Route::Gpu
-        }
+        Dest::Encoder { place } if !facts.fit_failed && fits(facts, place) => Route::Gpu,
         _ if facts.shrinks && shrinks(facts.place) => Route::Shrunk,
         _ => Route::Whole,
     }
 }
 
 /// Whether the GPU where `facts`' frames are fits them into the output for
-/// an encoder there: turns, scales, converts and pads them.
-fn fits(facts: &Facts) -> bool {
+/// an encoder that takes frames on `to`, on the same GPU: turns, scales,
+/// converts and pads them.
+fn fits(facts: &Facts, to: Place) -> bool {
     let turnable = matches!(facts.rotation, 0 | 90 | 180 | 270);
-    match facts.place {
+    match (facts.place, to) {
         // `cuda::CudaPictures`: libplacebo turns them and converts their
-        // colors, HDR too; it takes no RGB.
-        Place::Cuda => turnable && !facts.rgb,
+        // colors, HDR too; it takes no RGB. For a Vulkan encoder its
+        // pictures stay in Vulkan.
+        (Place::Cuda, Place::Cuda | Place::Vulkan) => turnable && !facts.rgb,
         // `hw::Fitter`: turned, scaled and padded, colors as they are.
-        Place::Vaapi => turnable && facts.colors_kept,
+        (Place::Vaapi, Place::Vaapi) => turnable && facts.colors_kept,
         // The video processor, into the encoder's frames; AMD's makes no
         // 10-bit pictures of 8-bit ones.
-        Place::D3d11 => {
+        (Place::D3d11, Place::D3d11) => {
             turnable
                 && facts.colors_kept
                 && facts.into
@@ -179,10 +179,10 @@ fn fits(facts: &Facts) -> bool {
         }
         // `transpose_vt` and `scale_vt`: no padding, and the layout stays
         // the frames' (vf_scale_vt.c).
-        Place::VideoToolbox => {
+        (Place::VideoToolbox, Place::VideoToolbox) => {
             turnable && facts.colors_kept && !facts.pads && facts.layout == facts.out_layout
         }
-        Place::Vulkan | Place::Memory => false,
+        _ => false,
     }
 }
 
@@ -239,6 +239,14 @@ mod tests {
     #[test]
     fn nvdecs_frames_stay_on_the_gpu_for_nvenc() {
         let dest = Dest::Encoder { place: Place::Cuda };
+        assert_eq!(plan(&decoded(Place::Cuda), dest), Route::Gpu);
+    }
+
+    #[test]
+    fn nvdecs_frames_stay_on_the_gpu_for_a_vulkan_encoder() {
+        let dest = Dest::Encoder {
+            place: Place::Vulkan,
+        };
         assert_eq!(plan(&decoded(Place::Cuda), dest), Route::Gpu);
     }
 

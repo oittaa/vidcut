@@ -26,6 +26,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 
 **Media inspection** (`crates/vidcut-av/examples/`):
 - `read_barcode FILE...`: the barcode index in images or video.
+- `compare A B [OUTDIR K]` (release build): two videos picture by picture, decoded on the CPU and made RGB at A's size: the mean difference in levels, each channel's mean of B minus A, and the largest. Writes picture K of each as PNG.
 - `packets FILE [FROM TO]`: video packets in decode order, with pts, dts and keyframe flags.
 - `filmstrip FILE OUTDIR [N [WxH]]`: pool thumbnails, timed, with the frames copied down from the GPU (`WxH`: a box other than 192×108).
 - `tiles FILE [HEIGHT] [gpu]`: timeline tiles, timed at spacings from 0.25 to 30 s; `gpu` decodes on the GPU in use.

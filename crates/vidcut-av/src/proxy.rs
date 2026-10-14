@@ -529,11 +529,18 @@ fn open(
             let into = unsafe { crate::hw::Frames::of(up.frames)? };
             to(Some(Place::D3d11), Up::Frames(up), Some(into))
         }
-        (Some(gpu), EncoderChoice::Vulkan, _) => {
+        // NVDEC's frames reach it through libplacebo on the Vulkan device of
+        // its GPU, where the encoder is on the same one.
+        (Some(gpu), EncoderChoice::Vulkan, cuda) => {
             let up = Upload::vulkan(gpu, enc.pixel(), width, height)?;
             ctx.set_format(format::Pixel::VULKAN);
             hw_frames(&mut ctx, up.frames)?;
-            to(None, Up::Frames(up), None)
+            let reached = cuda.is_some_and(|d| d.vulkan().is_ok_and(|v| up.is_on(&v)));
+            Output::Encoder(EncoderFrames {
+                place: reached.then_some(Place::Vulkan),
+                up: Up::Frames(up),
+                into: None,
+            })
         }
         // VideoToolbox's encoders take each frame's own pixel buffer
         // (videotoolboxenc.c), in the layout `sw_pix_fmt` says.
@@ -726,7 +733,9 @@ fn encode_into(
     let times = (reader.time_base(), reader.frame_rate());
     let size = (width, height);
     let on = OnGpu {
-        cuda: reader.cuda().filter(|_| enc.kind == EncoderChoice::Nvenc),
+        cuda: reader
+            .cuda()
+            .filter(|_| matches!(enc.kind, EncoderChoice::Nvenc | EncoderChoice::Vulkan)),
         shared: decoder.filter(|d| crate::route::shares(enc.kind, enc.device.as_deref(), d)),
     };
     let (mut writer, output) = Writer::new(tmp, enc, size, times, on, shown)?;
@@ -739,17 +748,36 @@ fn encode_into(
     };
     let mut maker = Maker::new((width, height, pixel), None);
     maker.output = output;
-    let mut fitting = match maker.cuda_device() {
-        Some(_) => Fitting::for_nvenc(reader, size, pixel, None),
-        None => Fitting::default(),
+    let mut fitting = match (&maker.output, maker.cuda_device()) {
+        (_, Some(_)) => Fitting::for_nvenc(reader, size, pixel, None, false),
+        (
+            Output::Encoder(EncoderFrames {
+                place: Some(Place::Vulkan),
+                ..
+            }),
+            None,
+        ) => Fitting::for_vulkan(reader, size, pixel, false),
+        _ => Fitting::default(),
     };
     let path = reader.path().to_path_buf();
     let mut encoding = || -> Result<()> {
         while let Some(src) = reader.next_frame()? {
             // Read first: a GPU's scaler empties the frame it takes.
             let pts = src.pts();
-            let (picture, on_gpu) = maker.make(&src, rotation, &mut fitting, &path)?;
-            let picture = if on_gpu { picture } else { maker.up(picture)? };
+            // NVIDIA's pictures may come a frame late, with their own
+            // timestamps: none is needed at once, which halves libplacebo's
+            // work.
+            match maker.make(&src, rotation, &mut fitting, &path)? {
+                Some((picture, true)) => {
+                    let pts = picture.pts();
+                    writer.push(picture, pts)?;
+                }
+                Some((picture, false)) => writer.push(maker.up(picture)?, pts)?,
+                None => {}
+            }
+        }
+        for picture in maker.rest(&mut fitting)? {
+            let pts = picture.pts();
             writer.push(picture, pts)?;
         }
         Ok(())

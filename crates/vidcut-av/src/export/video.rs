@@ -468,7 +468,7 @@ impl Source {
             None => VideoReader::open_input(input)?,
         };
         let fitting = match gpu {
-            Some(g) => Fitting::for_nvenc(&reader, g.out, g.format, g.target),
+            Some(g) => Fitting::for_nvenc(&reader, g.out, g.format, g.target, true),
             None => Fitting::default(),
         };
         let decoder = reader.gpu();
@@ -780,16 +780,48 @@ impl Fitting {
     /// to `out` in `format` and `target`'s dynamic range, where the scaler
     /// builds (libplacebo needs Vulkan for turned pictures, other matrices
     /// than BT.709, and HDR). The CPU makes those it won't take.
+    /// `at_once`: each picture is wanted as its frame goes in, not with the
+    /// next one ([`Maker::make`]).
     pub(crate) fn for_nvenc(
         reader: &VideoReader,
         out: (u32, u32),
         format: format::Pixel,
         target: Option<Hdr>,
+        at_once: bool,
     ) -> Self {
         let Some(device) = reader.cuda() else {
             return Self::default();
         };
-        let scaler = crate::cuda::CudaPictures::new(device, reader, out, format, target, true).ok();
+        let scaler = crate::cuda::CudaPictures::new(device, reader, out, format, target, at_once);
+        Self::nvdec(scaler.ok())
+    }
+
+    /// For a Vulkan encoder on NVDEC's GPU: the frames `reader` decodes
+    /// there, made into `out` pictures of `format` by libplacebo and left
+    /// in Vulkan. The CPU makes those it won't take.
+    pub(crate) fn for_vulkan(
+        reader: &VideoReader,
+        out: (u32, u32),
+        format: format::Pixel,
+        at_once: bool,
+    ) -> Self {
+        let Some(device) = reader.cuda() else {
+            return Self::default();
+        };
+        let made = crate::cuda::CudaPictures::for_vulkan(device, reader, out, format, at_once);
+        if let Err(e) = &made {
+            crate::debug!(
+                "decoding",
+                "{}: libplacebo won't make the pictures, the CPU does: {e}",
+                reader.path().display()
+            );
+        }
+        Self::nvdec(made.ok())
+    }
+
+    /// NVDEC's frames fitted on the GPU by `scaler`, or the CPU's to make
+    /// without one.
+    fn nvdec(scaler: Option<crate::cuda::CudaPictures>) -> Self {
         Self {
             route: scaler.is_some().then_some(Route::Gpu),
             fit_failed: scaler.is_none(),
@@ -885,15 +917,17 @@ impl Maker {
 
     /// The picture of `frame`, its source's frame shown turned by
     /// `rotation`, along the source's route; and whether the GPU made it,
-    /// for the encoder there. `path` names the file in what `VIDCUT_DEBUG`
-    /// says.
+    /// for the encoder there. `None`: NVIDIA's scaler, made to save its GPU
+    /// work, gives it with the next frame ([`rest`](Self::rest) gives the
+    /// last); such a picture keeps its source frame's timestamp. `path`
+    /// names the file in what `VIDCUT_DEBUG` says.
     pub(crate) fn make(
         &mut self,
         frame: &frame::Video,
         rotation: u16,
         fitting: &mut Fitting,
         path: &Path,
-    ) -> Result<(frame::Video, bool)> {
+    ) -> Result<Option<(frame::Video, bool)>> {
         // NVDEC's frames fit on the GPU only through the scaler their
         // source made at opening.
         if fitting.route.is_none() && Place::of(frame) == Place::Cuda && fitting.scaler.is_none() {
@@ -913,7 +947,7 @@ impl Maker {
                 Route::Kept => match crate::hw::Keeper::keep(&mut self.keeper, frame) {
                     Ok(kept) => {
                         fitting.went = Some(Went::Stayed);
-                        return Ok((kept, false));
+                        return Ok(Some((kept, false)));
                     }
                     // Down to memory, as before they were kept: a copy that
                     // failed or took two seconds would again.
@@ -926,16 +960,17 @@ impl Maker {
                 },
                 Route::Gpu => {
                     if let Some(scaler) = fitting.scaler.as_mut() {
-                        let picture = cuda_picture(scaler, frame)?;
+                        scaler.push(Some(frame))?;
+                        let picture = scaler.pull()?;
                         fitting.went = Some(Went::Stayed);
-                        return Ok((picture, true));
+                        return Ok(picture.map(|p| (p, true)));
                     }
                     // A GPU that won't fit them (a driver's limits) leaves
                     // the file's frames to the CPU.
                     match self.fit(frame, rotation) {
                         Ok(picture) => {
                             fitting.went = Some(Went::Stayed);
-                            return Ok((picture, true));
+                            return Ok(Some((picture, true)));
                         }
                         Err(e) => {
                             crate::debug!(
@@ -951,10 +986,23 @@ impl Maker {
                 Route::Shrunk | Route::Whole | Route::Cpu => {
                     let (picture, went) = self.on_cpu(frame, rotation)?;
                     fitting.went = Some(went);
-                    return Ok((picture, false));
+                    return Ok(Some((picture, false)));
                 }
             }
         }
+    }
+
+    /// The pictures a source's scaler still holds once its last frame went
+    /// in ([`make`](Self::make)).
+    pub(crate) fn rest(&mut self, fitting: &mut Fitting) -> Result<Vec<frame::Video>> {
+        let mut rest = Vec::new();
+        if let Some(scaler) = fitting.scaler.as_mut() {
+            scaler.push(None)?;
+            while let Some(p) = scaler.pull()? {
+                rest.push(p);
+            }
+        }
+        Ok(rest)
     }
 
     /// `frame` fitted into the output on VA-API's or Direct3D 11's GPU, for
@@ -1636,9 +1684,12 @@ impl VideoFrames {
         if changed || src.normalized.is_none() {
             let (frame, _) = src.current.as_ref().expect("have a frame");
             let rotation = src.reader.rotation();
+            let made = self
+                .maker
+                .make(frame, rotation, &mut src.fitting, src.reader.path())?;
+            // Its scaler gives each picture at once.
             let (picture, on_gpu) =
-                self.maker
-                    .make(frame, rotation, &mut src.fitting, src.reader.path())?;
+                made.ok_or_else(|| Error::Invalid("the GPU scaler gave no picture".into()))?;
             src.normalized = Some(picture);
             src.made_on_gpu = on_gpu;
         }

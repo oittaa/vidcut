@@ -312,9 +312,12 @@ fn shader_cache() -> Option<String> {
 /// fit `width`×`height` keeping the display aspect and padded with black to
 /// it, as the CPU's normalizer does, as `format` (8-bit NV12 or 10-bit
 /// P010) in the output's colors, square pixels, all in GPU memory.
-/// Timestamps stay the source's.
+/// Timestamps stay the source's. Or the same in Vulkan memory, for a Vulkan
+/// encoder on the GPU ([`CudaPictures::for_vulkan`]).
 pub struct CudaPictures {
-    graph: filter::Graph,
+    /// The CUDA filters after libplacebo; `None` where the pictures stay in
+    /// Vulkan.
+    graph: Option<filter::Graph>,
     placebo: Option<Placebo>,
 }
 
@@ -325,7 +328,9 @@ pub struct CudaPictures {
 struct Placebo {
     graph: filter::Graph,
     input: HwFrames,
-    output: HwFrames,
+    /// The CUDA frames the pictures are copied back into; `None`: they stay
+    /// in Vulkan, for an encoder there.
+    output: Option<HwFrames>,
     /// Black, under each picture placed on a bigger frame
     /// (`Layout::Placed`).
     background: Option<Blacks>,
@@ -477,6 +482,14 @@ struct SemaphoreWaitInfo {
     count: u32,
     semaphores: *const ffi::VkSemaphore,
     values: *const u64,
+}
+
+/// Where libplacebo's pictures go: copied back to CUDA frames, or left in
+/// Vulkan for an encoder there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Back {
+    Cuda,
+    Vulkan,
 }
 
 /// What libplacebo makes of a picture.
@@ -824,8 +837,9 @@ impl CudaPictures {
         let placebo = match layout {
             Some(layout) => {
                 let stream = (stored, sar, rotation);
+                let to = Back::Cuda;
                 Some(Placebo::new(
-                    device, decoded, stream, &color, layout, at_once,
+                    device, decoded, stream, &color, layout, at_once, to,
                 )?)
             }
             None => None,
@@ -837,7 +851,10 @@ impl CudaPictures {
             let spec = filters(size, fitted, (width, height, out), fixed_kernels());
             (size, spec, shown_sar)
         };
-        let frames = placebo.as_ref().map_or(decoded, |p| p.output.0);
+        let frames = placebo
+            .as_ref()
+            .and_then(|p| p.output.as_ref())
+            .map_or(decoded, |o| o.0);
         let mut graph = filter::Graph::new();
         add_source(
             &mut graph,
@@ -851,19 +868,80 @@ impl CudaPictures {
         add_sink(&mut graph)?;
         crate::parts::parse_filters(&mut graph, &spec)?;
         graph.validate().ctx(|| format!("configuring {spec}"))?;
-        Ok(Self { graph, placebo })
+        Ok(Self {
+            graph: Some(graph),
+            placebo,
+        })
     }
 
-    /// The frames context of the pictures: what NVENC is opened with.
-    pub fn frames_ctx(&mut self) -> *mut ffi::AVBufferRef {
-        unsafe {
-            ffi::av_buffersink_get_hw_frames_ctx(self.graph.get("out").expect("sink").as_mut_ptr())
+    /// The pictures for the frames `reader` decodes on `device`, made by
+    /// libplacebo at `width`×`height` in `format` (SDR BT.709) on the GPU's
+    /// Vulkan device ([`CudaDevice::vulkan`]), and left there for a Vulkan
+    /// encoder on it. `at_once` as for [`new`](Self::new).
+    pub fn for_vulkan(
+        device: &CudaDevice,
+        reader: &VideoReader,
+        (width, height): (u32, u32),
+        format: format::Pixel,
+        at_once: bool,
+    ) -> Result<Self> {
+        let first = reader
+            .peek()
+            .ok_or_else(|| Error::Invalid("no frames".into()))?;
+        let rotation = reader.rotation();
+        if first.format() != format::Pixel::CUDA {
+            return Err(Error::Invalid("not frames in GPU memory".into()));
         }
+        if !matches!(rotation, 0 | 90 | 180 | 270) {
+            return Err(Error::Invalid(format!("a rotation of {rotation}°")));
+        }
+        let color = crate::color::gpu_color(first, None)
+            .ok_or_else(|| Error::Invalid("RGB pictures".into()))?;
+        let stored = (first.width(), first.height());
+        let sar = first.aspect_ratio();
+        let (shown, shown_sar) = if rotation % 180 == 90 {
+            (
+                (stored.1, stored.0),
+                ffmpeg::Rational(sar.denominator(), sar.numerator()),
+            )
+        } else {
+            (stored, sar)
+        };
+        let fitted = crate::export::video::fit(
+            shown.0,
+            shown.1,
+            (shown_sar.numerator(), shown_sar.denominator()),
+            width,
+            height,
+        );
+        let decoded = unsafe { (*first.as_ptr()).hw_frames_ctx };
+        if decoded.is_null() {
+            return Err(Error::Invalid(
+                "decoded frames without a frames context".into(),
+            ));
+        }
+        let layout = Layout::Placed {
+            size: (width, height),
+            fitted,
+            format,
+        };
+        let stream = (stored, sar, rotation);
+        let to = Back::Vulkan;
+        let placebo = Placebo::new(device, decoded, stream, &color, layout, at_once, to)?;
+        Ok(Self {
+            graph: None,
+            placebo: Some(placebo),
+        })
     }
 
     /// Feeds the next decoded frame, or the end of the stream (`None`).
     pub fn push(&mut self, f: Option<&frame::Video>) -> Result<()> {
-        let mut source = self.graph.get("in").expect("source");
+        let Some(graph) = self.graph.as_mut() else {
+            // The pictures stay in Vulkan: `pull` takes them from libplacebo.
+            let p = self.placebo.as_mut().expect("libplacebo makes them");
+            return p.push(f);
+        };
+        let mut source = graph.get("in").expect("source");
         let Some(p) = &mut self.placebo else {
             return match f {
                 Some(f) => source.source().add(f).ctx(|| "scaling on the GPU".into()),
@@ -891,7 +969,11 @@ impl CudaPictures {
 
     /// The next picture, if one is ready: timed in the source's time base.
     pub fn pull(&mut self) -> Result<Option<frame::Video>> {
-        let Some((mut out, _)) = take(&mut self.graph, "scaling on the GPU")? else {
+        let Some(graph) = self.graph.as_mut() else {
+            let p = self.placebo.as_mut().expect("libplacebo makes them");
+            return p.pull();
+        };
+        let Some((mut out, _)) = take(graph, "scaling on the GPU")? else {
             return Ok(None);
         };
         unsafe {
@@ -912,6 +994,7 @@ impl Placebo {
         color: &GpuColor,
         layout: Layout,
         at_once: bool,
+        to: Back,
     ) -> Result<Self> {
         use ffi::AVPixelFormat::{AV_PIX_FMT_CUDA as CUDA, AV_PIX_FMT_VULKAN as VULKAN};
         let _one = converting();
@@ -942,16 +1025,22 @@ impl Placebo {
         // into P010 frames as they are: NVENC reads the top 10 bits.
         let (out, vulkan_out) = match out_pixel {
             format::Pixel::P010LE => ("p016le", format::Pixel::P016LE),
+            // ProRes, for Vulkan's encoder: 10 bits in the low ones, which
+            // libplacebo writes as they are.
+            format::Pixel::YUV422P10LE => ("yuv422p10le", format::Pixel::YUV422P10LE),
             _ => ("nv12", format::Pixel::NV12),
         };
         let input = HwFrames::new(vulkan.0, VULKAN, as_read(sw), width, height)?;
-        let output = HwFrames::new(
-            device.as_ptr(),
-            CUDA,
-            out_pixel.into(),
-            out_size.0,
-            out_size.1,
-        )?;
+        let output = match to {
+            Back::Cuda => Some(HwFrames::new(
+                device.as_ptr(),
+                CUDA,
+                out_pixel.into(),
+                out_size.0,
+                out_size.1,
+            )?),
+            Back::Vulkan => None,
+        };
         let mut graph = filter::Graph::new();
         // Black in the output's colors: a shader passes it on as black.
         let black_tags = color.output;
@@ -1135,7 +1224,7 @@ impl Placebo {
     }
 
     /// The next converted frame, if one is ready, with its properties and
-    /// timestamp, in a CUDA frame.
+    /// timestamp, in a CUDA frame, or as libplacebo made it in Vulkan.
     fn pull(&mut self) -> Result<Option<frame::Video>> {
         let _one = converting();
         let pulled = self.converted();
@@ -1161,11 +1250,15 @@ impl Placebo {
             // libplacebo has read the input frame once its output is
             // done, so the next copy can't overwrite it (`wait_done`).
             wait_done(&out, "converting on the GPU")?;
-            let mut c = self.output.copy(&out, "copying back from Vulkan")?;
-            unsafe {
-                ffi::av_frame_copy_props(c.as_mut_ptr(), out.as_ptr());
-                (*c.as_mut_ptr()).sample_aspect_ratio = self.sar;
-            }
+            let mut c = match &self.output {
+                Some(output) => {
+                    let mut c = output.copy(&out, "copying back from Vulkan")?;
+                    unsafe { ffi::av_frame_copy_props(c.as_mut_ptr(), out.as_ptr()) };
+                    c
+                }
+                None => out,
+            };
+            unsafe { (*c.as_mut_ptr()).sample_aspect_ratio = self.sar };
             c.set_pts(pts);
             return Ok(Some(c));
         }

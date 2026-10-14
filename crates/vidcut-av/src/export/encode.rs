@@ -1010,6 +1010,13 @@ impl Upload {
         }
     }
 
+    /// Whether these frames are on `device`.
+    pub(crate) fn is_on(&self, device: &crate::hw::Device) -> bool {
+        // SAFETY: references to live device contexts, the same device when
+        // they point to the same data.
+        unsafe { (*self.device).data == (*device.0).data }
+    }
+
     /// Copies a frame in memory into one of these, keeping its timestamp
     /// and colors, as an encoder given the frame in memory would see them
     /// (AMF reads HDR10's metadata only off frames whose transfer is PQ;
