@@ -158,6 +158,11 @@ impl ProgressBar {
             return;
         }
         self.last = Instant::now();
+        if v["queued"].as_bool() == Some(true) {
+            let title = v["title"].as_str().unwrap_or_default();
+            eprintln!("{title}: waiting for the jobs before it");
+            return;
+        }
         let file = path
             .file_name()
             .map(|f| f.to_string_lossy().into_owned())

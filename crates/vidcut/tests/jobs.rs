@@ -1,6 +1,7 @@
 //! Exports in the live session. Cancelling one leaves no file. An edit sent
-//! right after one starts doesn't change what it encodes. Quitting during one
-//! leaves no partial file. No player and no display.
+//! right after one starts doesn't change what it encodes. A second one waits
+//! for the first. Quitting during one leaves no partial file. No player and
+//! no display.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -162,7 +163,26 @@ fn cancel_edit_and_quit_during_exports() {
         frames
     );
 
-    // 3. Quitting while an export runs leaves no partial file.
+    // 3. Exports take turns: a second one waits while the first runs, and
+    // runs once the first ends.
+    let mut slow = quick(&dir.join("q1.mkv"));
+    slow["set"] = json!([
+        "video.width=3840",
+        "video.height=2160",
+        "video.speed=veryslow"
+    ]);
+    slow["background"] = json!(true);
+    let first = ok(&h, "export.start", slow)["id"].clone();
+    let mut next = quick(&dir.join("q2.mkv"));
+    next["background"] = json!(true);
+    let second = ok(&h, "export.start", next);
+    assert_eq!(second["state"], "queued", "{second}");
+    ok(&h, "jobs.cancel", json!({ "job": first }));
+    let done = ok(&h, "jobs.wait", json!({ "job": second["id"] }));
+    assert_eq!(done["frames"], done["total"], "{done}");
+    assert!(dir.join("q2.mkv").exists());
+
+    // 4. Quitting while an export runs leaves no partial file.
     let mut slow = quick(&dir.join("h.mkv"));
     slow["set"] = json!([
         "video.width=3840",

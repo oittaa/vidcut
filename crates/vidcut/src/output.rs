@@ -663,6 +663,7 @@ fn job_line(j: &Value) -> String {
     let time = match (state, j["eta"].as_f64()) {
         ("running", Some(eta)) => format!("ETA {}", clock(eta)),
         ("running", None) => "starting".into(),
+        ("queued", _) => "waiting".into(),
         _ => format!("took {}", clock(j["elapsed"].as_f64().unwrap_or(0.0))),
     };
     let error = j["error"]["message"]

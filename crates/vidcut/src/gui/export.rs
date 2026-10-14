@@ -212,7 +212,7 @@ impl ExportUi {
     /// media are, or quitting while jobs run.
     pub(super) fn asking(&self, jobs: &[JobInfo]) -> bool {
         matches!(self.otio, Some(Otio::Choose(_) | Otio::Missing { .. }))
-            || (self.confirm_quit && jobs.iter().any(JobInfo::running))
+            || (self.confirm_quit && jobs.iter().any(JobInfo::unfinished))
     }
 }
 
@@ -1221,7 +1221,7 @@ impl Workspace {
                     if job_view(ui, j, true, |method, params| self.send(method, params)) {
                         close.push(id.clone());
                     }
-                    if j.running()
+                    if j.unfinished()
                         && ui
                             .button("Hide")
                             .on_hover_text("Keep exporting; Jobs shows it")
@@ -1520,7 +1520,7 @@ impl Workspace {
 
     /// Asked to close while exports run.
     fn quit_window(&mut self, ctx: &egui::Context) {
-        let running = self.snap.jobs.iter().filter(|j| j.running()).count();
+        let running = self.snap.jobs.iter().filter(|j| j.unfinished()).count();
         if ctx.input(|i| i.viewport().close_requested())
             && running > 0
             && !self.export.quit_confirmed
@@ -1562,6 +1562,12 @@ impl Workspace {
 fn job_view(ui: &mut egui::Ui, j: &JobInfo, closable: bool, send: impl Fn(&str, Value)) -> bool {
     let mut closed = false;
     match j.state {
+        JobState::Queued => {
+            ui.label(dim("Waiting for the jobs before it"));
+            if ui.button("Cancel").clicked() {
+                send("jobs.cancel", json!({ "job": j.id }));
+            }
+        }
         JobState::Running => {
             let text = match j.eta {
                 _ if j.measuring => format!(

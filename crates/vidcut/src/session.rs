@@ -249,7 +249,7 @@ pub fn render(
             answer(export::timeline(project, &name, params, None, None)?)
         }
         Request::ExportStart(params) if export::timeline_format(&params.output).is_some() => {
-            export_media(project, path, params, hooks, &mut |_| {})?
+            export_media(project, path, params, hooks, &mut |_| Ok(()))?
         }
         Request::ExportPlan(params) => {
             let mut prepared = export::prepare(project, params, None)?;
@@ -262,7 +262,9 @@ pub fn render(
             export::choose_colors(&mut prepared, project, &available, None)?;
             answer(export::describe(&prepared, &available))
         }
-        Request::ExportStart(params) => export_media(project, path, params, hooks, &mut |_| {})?,
+        Request::ExportStart(params) => {
+            export_media(project, path, params, hooks, &mut |_| Ok(()))?
+        }
         Request::FrameRender {
             at,
             out,
@@ -321,14 +323,14 @@ pub fn export_media(
     path: &Path,
     params: &vidcut_core::request::ExportParams,
     hooks: &mut Hooks<'_>,
-    started: &mut dyn FnMut(Vec<(std::path::PathBuf, i64)>),
+    started: &mut dyn FnMut(Vec<(std::path::PathBuf, i64)>) -> Result<()>,
 ) -> Result<Response> {
     if export::timeline_format(&params.output).is_some() {
         let name = export::timeline_name(path);
         // Planned (and checked) first; bytes copied count as frames done.
         let plan = export::timeline(p, &name, params, None, None)?;
         let frames = plan["outputs"][0]["frames"].as_i64().unwrap_or(0);
-        started(vec![(params.output.clone(), frames)]);
+        started(vec![(params.output.clone(), frames)])?;
         let clock = std::time::Instant::now();
         let output = params.output.clone();
         let progress = &mut *hooks.progress;
@@ -372,7 +374,7 @@ pub fn export_media(
             .iter()
             .map(|o| (o.path.clone(), o.plan.frames))
             .collect(),
-    );
+    )?;
     let count = prepared.outputs.len();
     let clock = std::time::Instant::now();
     let first = prepared.outputs[0].path.clone();

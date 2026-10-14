@@ -453,6 +453,8 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         workers: Workers::new(2),
         jobs: Arc::new(Vec::new()),
         job_cancels: HashMap::new(),
+        turns: jobs::Turns::default(),
+        gates: HashMap::new(),
         job_replies: HashMap::new(),
         next_job: 1,
         audio_scrubbing: true,
@@ -648,6 +650,10 @@ struct Live {
     /// Export jobs, oldest first.
     jobs: Arc<Vec<JobInfo>>,
     job_cancels: HashMap<String, Arc<AtomicBool>>,
+    /// Whose turn it is to encode, and the gates of the jobs waiting for
+    /// theirs: each job waits at its gate once its files are planned.
+    turns: jobs::Turns,
+    gates: HashMap<String, Sender<()>>,
     /// Requests answered when their job is planned (`background`) or done.
     job_replies: HashMap<String, (Job, bool)>,
     next_job: u64,
@@ -718,10 +724,12 @@ impl Live {
     }
 
     fn shutdown(&mut self) {
-        // Running exports cancel, removing their partial files.
+        // Running exports cancel, removing their partial files. Waiting
+        // ones wake, cancelled.
         for c in self.job_cancels.values() {
             c.store(true, Ordering::Relaxed);
         }
+        self.gates.clear();
         let deadline = Instant::now() + Duration::from_secs(3);
         while !self.job_cancels.is_empty() {
             match self
@@ -1007,7 +1015,7 @@ impl Live {
                     .jobs
                     .iter()
                     .find(|j| &j.id == id)
-                    .filter(|j| !j.running())
+                    .filter(|j| !j.unfinished())
                     .map(job_answer),
             };
             let expired = w.deadline.is_some_and(|d| now >= d);
@@ -1284,7 +1292,9 @@ impl Live {
             .filter(|_| !background)
             .map(|r| r.tx.clone());
         let info = JobInfo::new(id.clone(), job.origin.name(), job.params.clone());
+        let title = info.title.clone();
         self.add_job(info, cancel.clone());
+        let gate = self.take_turn(&id, true, &title, progress_tx.as_ref());
         if job.reply.is_some() {
             self.job_replies.insert(id.clone(), (job, background));
         } else {
@@ -1330,6 +1340,12 @@ impl Live {
                         id: id.clone(),
                         outputs,
                     });
+                    // Its turn to encode.
+                    let _ = gate.recv();
+                    if cancel.load(Ordering::Relaxed) {
+                        return Err(cancelled());
+                    }
+                    Ok(())
                 },
             );
             let _ = tx.send(Msg::JobDone { id, result });
@@ -1342,11 +1358,11 @@ impl Live {
         self.job_cancels.insert(info.id.clone(), cancel);
         let jobs = Arc::make_mut(&mut self.jobs);
         jobs.push(info);
-        let finished = jobs.iter().filter(|j| !j.running()).count();
+        let finished = jobs.iter().filter(|j| !j.unfinished()).count();
         if finished > JOBS_KEPT {
             let mut drop = finished - JOBS_KEPT;
             jobs.retain(|j| {
-                let gone = drop > 0 && !j.running();
+                let gone = drop > 0 && !j.unfinished();
                 drop -= usize::from(gone);
                 !gone
             });
@@ -1368,11 +1384,20 @@ impl Live {
             .as_ref()
             .map(|r| r.cancel.clone())
             .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
-        let info = JobInfo::proxies(id.clone(), job.origin.name(), job.params.clone(), title);
-        self.add_job(info, cancel.clone());
         let progress = job.reply.as_ref().map(|r| r.tx.clone());
+        let info = JobInfo::proxies(
+            id.clone(),
+            job.origin.name(),
+            job.params.clone(),
+            title.clone(),
+        );
+        self.add_job(info, cancel.clone());
+        let gate = self.take_turn(&id, false, &title, progress.as_ref());
         let tx = self.tx.clone();
         let _ = crate::threads::spawn(format!("vidcut-{id}"), Work::Job, move || {
+            // Its turn to encode.
+            let _ = gate.recv();
+            let stopped = cancel.load(Ordering::Relaxed);
             let _guard = vidcut_av::cancel::Guard::set(cancel);
             let _report = {
                 let (tx, id) = (tx.clone(), id.clone());
@@ -1414,7 +1439,7 @@ impl Live {
                     },
                 ))
             };
-            let result = encode();
+            let result = if stopped { Err(cancelled()) } else { encode() };
             let _ = tx.send(Msg::Measured {
                 job,
                 envelope: then,
@@ -1422,6 +1447,49 @@ impl Live {
                 encode: Some(id),
             });
         });
+    }
+
+    /// Job `id` (an export, or a proxy encode) asks for its turn to
+    /// encode. Returns its gate: open when its turn comes. A job that has
+    /// to wait shows as queued, and its client hears so.
+    fn take_turn(
+        &mut self,
+        id: &str,
+        export: bool,
+        title: &str,
+        progress: Option<&Sender<ReplyEvent>>,
+    ) -> Receiver<()> {
+        let (go, gate) = channel();
+        if self.turns.ask(id, export) {
+            let _ = go.send(());
+            return gate;
+        }
+        self.gates.insert(id.to_string(), go);
+        if let Some(j) = Arc::make_mut(&mut self.jobs)
+            .iter_mut()
+            .find(|j| j.id == id)
+        {
+            j.state = JobState::Queued;
+        }
+        if let Some(p) = progress {
+            let _ = p.send(ReplyEvent::Progress(
+                json!({ "job": id, "title": title, "queued": true }),
+            ));
+        }
+        gate
+    }
+
+    /// It is job `id`'s turn: its gate opens.
+    fn start_turn(&mut self, id: &str) {
+        if let Some(go) = self.gates.remove(id) {
+            let _ = go.send(());
+        }
+        if let Some(j) = Arc::make_mut(&mut self.jobs)
+            .iter_mut()
+            .find(|j| j.id == id)
+        {
+            j.begin();
+        }
     }
 
     fn job_planned(&mut self, id: String, outputs: Vec<(PathBuf, i64)>) {
@@ -1450,6 +1518,10 @@ impl Live {
     /// session did (automatic proxies).
     fn job_ended(&mut self, id: &str, result: &Result<Response>) {
         self.job_cancels.remove(id);
+        self.gates.remove(id);
+        if let Some(next) = self.turns.ended(id) {
+            self.start_turn(&next);
+        }
         self.dirty = true;
         let Some(j) = Arc::make_mut(&mut self.jobs)
             .iter_mut()
@@ -1668,7 +1740,7 @@ impl Live {
         for j in self
             .jobs
             .iter()
-            .filter(|j| j.kind == "proxy" && j.running())
+            .filter(|j| j.kind == "proxy" && j.unfinished())
         {
             match &j.params["media"] {
                 Value::String(id) => {
@@ -1921,6 +1993,10 @@ impl Live {
             Request::JobsCancel { job } => {
                 if let Some(c) = self.job_cancels.get(&job) {
                     c.store(true, Ordering::Relaxed);
+                }
+                // A waiting job leaves the queue and wakes, cancelled.
+                if self.gates.remove(&job).is_some() {
+                    self.turns.ended(&job);
                 }
                 Step::Now(self.job_json(&job).map(answer))
             }
@@ -2820,6 +2896,11 @@ fn new_settings(
 
 fn no_project() -> Error {
     Error::usage("no project is open in this vidcut GUI (project.open opens one)")
+}
+
+/// A job cancelled before its turn came.
+fn cancelled() -> Error {
+    Error::new(vidcut_core::ErrorCode::Cancelled, "cancelled")
 }
 
 /// Edit functions that place new clips (spec §7).

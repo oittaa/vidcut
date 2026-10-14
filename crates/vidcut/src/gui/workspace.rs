@@ -720,7 +720,7 @@ impl Workspace {
                     ui.toggle_value(&mut self.show_mixer, "Mixer")
                         .on_hover_text("Track faders, mute, solo and meters");
                 }
-                let running = self.snap.jobs.iter().filter(|j| j.running()).count();
+                let running = self.snap.jobs.iter().filter(|j| j.unfinished()).count();
                 let jobs = if running > 0 {
                     format!("Jobs ({running})")
                 } else {
