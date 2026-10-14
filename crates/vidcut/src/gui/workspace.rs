@@ -372,6 +372,15 @@ impl Workspace {
             .map_or(Rational::new(30, 1).expect("valid"), |p| p.settings.fps)
     }
 
+    /// The frame numbers timecode skips at each minute but every tenth
+    /// where the project counts drop-frame, else 0 (decision D47).
+    pub(super) fn dropped(&self) -> i64 {
+        match self.project() {
+            Some(p) if p.settings.counts_drop_frame() => p.settings.fps.dropped_per_minute(),
+            _ => 0,
+        }
+    }
+
     /// Record timecode of a timeline frame.
     pub(super) fn tc(&self, frame: i64) -> String {
         match self.project() {

@@ -460,12 +460,15 @@ pub fn start_timecode(
         Some(v) if v.still => None,
         Some(v) => {
             let tc = timecode?;
-            let count = vidcut_core::time::parse_media_timecode(tc, v.fps).filter(|&c| c > 0)?;
+            // Written `01:00:00;00`: counted drop-frame (decision D47).
+            let drop_frame = tc.contains([';', '.']) && v.fps.has_drop_frame();
+            // A start at zero says nothing, but how it counts.
+            let count = vidcut_core::time::parse_media_timecode(tc, v.fps)
+                .filter(|&c| c > 0 || drop_frame)?;
             Some(StartTimecode {
                 count,
                 rate: v.fps,
-                // Written `01:00:00;00`: counted drop-frame (decision D47).
-                drop_frame: tc.contains([';', '.']) && v.fps.has_drop_frame(),
+                drop_frame,
             })
         }
         None => {
@@ -501,7 +504,40 @@ pub fn fill_timecodes(p: &mut vidcut_core::Project, ids: &[String]) {
 
 #[cfg(test)]
 mod tests {
-    use super::frame_rate;
+    use super::{frame_rate, start_timecode};
+    use vidcut_core::model::{StartTimecode, VideoInfo};
+    use vidcut_core::time::Rational;
+
+    #[test]
+    fn a_drop_frame_start_at_zero_says_how_it_counts() {
+        let fps = Rational::new(30000, 1001).unwrap();
+        let video = VideoInfo {
+            codec: "h264".into(),
+            width: 1920,
+            height: 1080,
+            sar: [1, 1],
+            pix_fmt: "yuv420p".into(),
+            fps,
+            vfr: false,
+            first_pts: 0.0,
+            duration: 10.0,
+            rotation: 0,
+            fields: None,
+            hdr: None,
+            still: false,
+            mastering: None,
+            light: None,
+            hdr10plus: false,
+            dolby_vision: None,
+        };
+        let tc = start_timecode(Some("00:00:00;00"), None, Some(&video), &[]);
+        let want = StartTimecode {
+            count: 0,
+            rate: fps,
+            drop_frame: true,
+        };
+        assert_eq!(tc, Some(want));
+    }
 
     #[test]
     fn frame_rates_from_stream_fields() {

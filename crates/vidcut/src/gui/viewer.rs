@@ -802,7 +802,7 @@ impl Workspace {
             if r.lost_focus() {
                 let submit = ui.input(|i| i.key_pressed(Key::Enter));
                 let entry = self.timecode.take().expect("editing");
-                if submit && let Some(spec) = timecode_input(&entry.text) {
+                if submit && let Some(spec) = timecode_input(&entry.text, self.dropped()) {
                     let at = match entry.sign {
                         Some(1) => format!("+{spec}"),
                         Some(_) => format!("-{spec}"),
@@ -857,7 +857,7 @@ impl Workspace {
             if r.lost_focus() {
                 let submit = ui.input(|i| i.key_pressed(Key::Enter));
                 let text = self.duration_text.take().unwrap_or_default();
-                let length = timecode_input(&text)
+                let length = timecode_input(&text, self.dropped())
                     .and_then(|spec| TimeSpec::parse(&spec).ok())
                     .and_then(|t| {
                         TimeContext {
@@ -957,9 +957,12 @@ fn stats_panel(painter: &egui::Painter, picture: Rect, stats: &crate::live::stat
 }
 
 /// What was typed into a timecode field, as a TimeSpec: digits fill a
-/// timecode from the right ("100" is 00:00:01:00);
-/// anything else (`5s`, `1m30s`, `450f`, `00:01:00:00`) is used as is.
-pub(super) fn timecode_input(text: &str) -> Option<String> {
+/// timecode from the right ("100" is 00:00:01:00), and where the timecode
+/// counts drop-frame, skipping `dropped` frame numbers at each minute but
+/// every tenth, a label it skips lands on the minute's first frame
+/// (`10000`, a minute, is 00:01:00;02 at 29.97: decision D47); anything
+/// else (`5s`, `1m30s`, `450f`, `00:01:00:00`) is used as is.
+pub(super) fn timecode_input(text: &str, dropped: i64) -> Option<String> {
     let t = text.trim().trim_start_matches(['+', '-', '=']);
     if t.is_empty() {
         return None;
@@ -967,13 +970,12 @@ pub(super) fn timecode_input(text: &str) -> Option<String> {
     if t.chars().all(|c| c.is_ascii_digit()) {
         let padded = format!("{t:0>8}");
         let d = &padded[padded.len() - 8..];
-        return Some(format!(
-            "{}:{}:{}:{}",
-            &d[0..2],
-            &d[2..4],
-            &d[4..6],
-            &d[6..8]
-        ));
+        let field = |i: usize| d[i..i + 2].parse::<i64>().unwrap_or(0);
+        let (m, s, mut f) = (field(2), field(4), field(6));
+        if s == 0 && f < dropped && m % 10 != 0 {
+            f = dropped;
+        }
+        return Some(format!("{}:{m:02}:{s:02}:{f:02}", &d[0..2]));
     }
     Some(t.to_string())
 }
@@ -984,10 +986,15 @@ mod tests {
 
     #[test]
     fn digits_fill_timecodes_from_the_right() {
-        assert_eq!(timecode_input("100").as_deref(), Some("00:00:01:00"));
-        assert_eq!(timecode_input("+12").as_deref(), Some("00:00:00:12"));
-        assert_eq!(timecode_input("1000000").as_deref(), Some("01:00:00:00"));
-        assert_eq!(timecode_input("5s").as_deref(), Some("5s"));
-        assert_eq!(timecode_input("  ").as_deref(), None);
+        assert_eq!(timecode_input("100", 0).as_deref(), Some("00:00:01:00"));
+        assert_eq!(timecode_input("+12", 0).as_deref(), Some("00:00:00:12"));
+        assert_eq!(timecode_input("1000000", 0).as_deref(), Some("01:00:00:00"));
+        assert_eq!(timecode_input("5s", 0).as_deref(), Some("5s"));
+        assert_eq!(timecode_input("  ", 0).as_deref(), None);
+    }
+
+    #[test]
+    fn a_minute_typed_in_drop_frame_lands_on_its_first_frame() {
+        assert_eq!(timecode_input("10000", 2).as_deref(), Some("00:01:00:02"));
     }
 }
