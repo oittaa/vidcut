@@ -156,6 +156,20 @@ fn request(method: &str, params: Value) -> Option<Value> {
     Some(json!({ "method": method, "params": params }))
 }
 
+/// Where a sideways two-finger swipe of `dx` points takes the playhead from
+/// frame `from`, as dragging the ruler would. With `drag_content` (the
+/// lower timeline with a fixed playhead) the clips follow the fingers, so a
+/// swipe to the left moves on. Otherwise the playhead follows them.
+pub fn swipe(from: f64, dx: f32, ppf: f64, drag_content: bool, end: i64) -> f64 {
+    let frames = f64::from(dx) / ppf;
+    let to = if drag_content {
+        from - frames
+    } else {
+        from + frames
+    };
+    to.clamp(0.0, end as f64)
+}
+
 /// A gesture in progress.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Drag {
@@ -1183,5 +1197,30 @@ mod tests {
             )
             .unwrap();
         assert_eq!(r["params"]["clips"], json!(["b1", "c1"]));
+    }
+
+    #[test]
+    fn swiping_left_under_a_fixed_playhead_moves_on() {
+        assert_eq!(swipe(100.0, -20.0, 4.0, true, 1000), 105.0);
+    }
+
+    #[test]
+    fn swiping_left_on_the_upper_timeline_moves_back() {
+        assert_eq!(swipe(100.0, -20.0, 4.0, false, 1000), 95.0);
+    }
+
+    #[test]
+    fn a_swipe_keeps_less_than_a_frame() {
+        assert_eq!(swipe(100.0, -1.0, 4.0, true, 1000), 100.25);
+    }
+
+    #[test]
+    fn a_swipe_stops_at_the_end() {
+        assert_eq!(swipe(998.0, -20.0, 4.0, true, 1000), 1000.0);
+    }
+
+    #[test]
+    fn a_swipe_stops_at_the_start() {
+        assert_eq!(swipe(2.0, 20.0, 4.0, true, 1000), 0.0);
     }
 }

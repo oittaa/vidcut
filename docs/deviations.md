@@ -190,3 +190,8 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 - **Resolve:** the viewer shows nothing of how it plays.
 - **vidcut:** the viewer's right-click menu opens a panel over the picture. It has a group for each part of the player, with one fact on each row: decoding, the picture, the viewer, playback, the pictures kept and the sound. `player.stats` toggles it, and `player.state` has the same facts as `stats`.
 - **Why:** where the GPU decodes and draws differs from machine to machine. This shows it without a debug log.
+
+## X21. The lower timeline zooms
+- **Resolve:** the lower timeline's zoom is fixed (p. 644).
+- **vidcut:** Ctrl+wheel, a pinch on a trackpad, and the − and + buttons zoom it. The zoom is kept between runs.
+- **Why:** one zoom can't suit both trims frame by frame and clips minutes long.
