@@ -136,20 +136,21 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 - Skimming with C held (later).
 - Audio scrubbing (Shift+S; on by default, p. 876): dragging the playhead, and frame steps, play the sound under it (decision D42). Shift+S, Timeline > Audio Scrubbing and `player.audio_scrubbing` turn it off and on.
 
-## 5. Dual timeline (pp. 643–646, 689–692, 716–718)
+## 5. Dual timeline (pp. 66, 643–646, 689–692, 716–718)
 
 **Upper timeline:**
 - Always shows the whole program at full width; it has no zoom.
-- Its playhead moves freely, and dragging its ruler scrubs the whole program.
+- Its playhead moves freely, and dragging its ruler scrubs the whole program. A sideways two-finger swipe on a trackpad moves the playhead too.
 - Most edits work there too, and clips can be dragged between the two timelines.
 - It shows the timeline In/Out range and markers.
 
 **Lower timeline:**
-- A detail view at a fixed zoom around the playhead (p. 644).
-- **Fixed Playhead on (default):** the playhead stays at the center and the clips move under it. Dragging the ruler drags the clips. Clips don't snap to the fixed playhead (p. 717).
+- A detail view around the playhead (p. 644). Ctrl+wheel, a pinch on a trackpad, and − and + zoom it. Resolve Studio 21.1.1 zooms it too, though the manual calls its zoom fixed.
+- A sideways two-finger swipe on a trackpad scrolls it (p. 66).
+- **Fixed Playhead on (default):** the playhead stays at the center and the clips move under it. Dragging the ruler or a swipe moves the clips. Clips don't snap to the fixed playhead (p. 717).
 - **Fixed Playhead off (Timeline Options):**
   - the clips stay put and the playhead moves
-  - the view pages when the playhead reaches an edge
+  - the view pages when the playhead reaches an edge, and a swipe scrolls it
   - clicking the ruler moves the playhead, and the playhead can be dragged
 
 **Track display:**

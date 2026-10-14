@@ -10,7 +10,7 @@ pub mod gesture;
 pub mod paint;
 pub mod tools;
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Align2, Color32, FontId, Key, Pos2, Rect, RichText, Sense, pos2, vec2};
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ use crate::gui::workspace::{Workspace, dim};
 use crate::gui::{keys, theme};
 use crate::live::PlayerId;
 use geometry::{Hit, NEW_TRACK_STRIP, Rows, Scale, Snap, hit_rows};
-use gesture::{Ctx, Drag, Gesture, Preview};
+use gesture::{Ctx, Drag, Gesture, Preview, swipe};
 use paint::{Assets, Look};
 
 /// Which part of an edit is selected (V, U).
@@ -199,6 +199,9 @@ pub struct TimelineView {
     pub clip_menu: Option<(bool, String)>,
     /// The last frame a scrub showed (to send each frame once).
     pub scrub_sent: Option<i64>,
+    /// A two-finger swipe moving the playhead: the frame it has reached, and
+    /// when it last moved.
+    pub swipe: Option<(f64, Instant)>,
     /// Marker being edited, and its fields.
     pub marker_dialog: Option<MarkerDialog>,
     /// Change Clip Duration (Ctrl+D), the typed value.
@@ -236,6 +239,7 @@ impl Default for TimelineView {
             edit: None,
             clip_menu: None,
             scrub_sent: None,
+            swipe: None,
             marker_dialog: None,
             duration_dialog: None,
             speed_dialog: None,
@@ -780,8 +784,10 @@ impl Workspace {
             if resp.drag_started() {
                 self.start_drag(ui, &p, is_upper, &layout);
             }
+            self.wheel(ui, resp, &p, is_upper, &layout, now);
             self.clicks(ui, resp, &p, is_upper, &layout);
         }
+        self.end_swipe(ui.ctx(), now);
         self.run_drag(ui, &p, &layout, now);
         if let Some(d) = &self.timeline.drag {
             let (rows, scale) = if d.upper {
@@ -1468,6 +1474,71 @@ impl Workspace {
         ui.ctx().request_repaint();
     }
 
+    /// The wheel and the trackpad over a timeline (spec §5). Ctrl+wheel and
+    /// a pinch zoom the lower timeline: egui gives both as a zoom, as it
+    /// gives Cmd+wheel on a Mac. A sideways swipe scrolls the timeline: under
+    /// a fixed playhead it moves the clips, as dragging the ruler does, and
+    /// with Fixed Playhead off it scrolls the view. On the upper timeline,
+    /// which shows the whole program, it moves the playhead.
+    fn wheel(
+        &mut self,
+        ui: &egui::Ui,
+        resp: &egui::Response,
+        p: &Project,
+        upper: bool,
+        layout: &Layout,
+        now: Instant,
+    ) {
+        if !resp.hovered() || self.timeline.drag.is_some() {
+            return;
+        }
+        let (zoom, scroll) = ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta));
+        if !upper && zoom != 1.0 {
+            let o = &mut self.timeline.options;
+            o.ppf = (o.ppf * f64::from(zoom)).clamp(0.01, 40.0);
+            o.save();
+            return;
+        }
+        if scroll.x == 0.0 {
+            return;
+        }
+        if !upper && !self.timeline.options.fixed_playhead {
+            self.timeline.scroll =
+                (self.timeline.scroll - f64::from(scroll.x) / layout.lower_scale.ppf).max(0.0);
+            return;
+        }
+        let ppf = if upper {
+            layout.upper_scale.ppf
+        } else {
+            layout.lower_scale.ppf
+        };
+        let from = self
+            .timeline
+            .swipe
+            .map_or(self.snap.timeline.position as f64, |(f, _)| f);
+        let to = swipe(from, scroll.x, ppf, !upper, p.end());
+        if to.round() != from.round() {
+            self.seek(PlayerId::Timeline, to.round() as i64, true);
+        }
+        self.timeline.swipe = Some((to, now));
+    }
+
+    /// A swipe ends once nothing has moved it for a moment. Its frame is then
+    /// sought once more as a plain seek, for the command log, as a scrub's
+    /// release does.
+    fn end_swipe(&mut self, ctx: &egui::Context, now: Instant) {
+        const QUIET: Duration = Duration::from_millis(300);
+        let Some((frame, last)) = self.timeline.swipe else {
+            return;
+        };
+        if now.duration_since(last) < QUIET {
+            ctx.request_repaint_after(QUIET);
+            return;
+        }
+        self.timeline.swipe = None;
+        self.seek(PlayerId::Timeline, frame.round() as i64, false);
+    }
+
     /// Clicks that didn't become drags: select, seek, menus, dialogs.
     fn clicks(
         &mut self,
@@ -1482,19 +1553,6 @@ impl Workspace {
         } else {
             (layout.lower_ruler, &layout.lower, layout.lower_scale)
         };
-        // Ctrl+wheel zooms the lower timeline. egui gives it as a zoom, not
-        // a scroll, as it gives Cmd+wheel on a Mac and a trackpad's pinch.
-        if !upper && resp.hovered() {
-            let (zoom, scroll) = ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta));
-            if zoom != 1.0 {
-                let o = &mut self.timeline.options;
-                o.ppf = (o.ppf * f64::from(zoom)).clamp(0.01, 40.0);
-                o.save();
-            } else if !self.timeline.options.fixed_playhead && scroll.x != 0.0 {
-                self.timeline.scroll =
-                    (self.timeline.scroll - f64::from(scroll.x) / scale.ppf).max(0.0);
-            }
-        }
         if resp.secondary_clicked()
             && let Some(pos) = resp.interact_pointer_pos()
         {

@@ -119,7 +119,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 
 **Two timelines** (spec §5):
 - **Upper:** the whole program at full width.
-- **Lower:** a detail view at a zoom you choose (Ctrl+wheel, −/+), its playhead fixed in the middle unless Timeline Options says otherwise.
+- **Lower:** a detail view at a zoom you choose (Ctrl+wheel, a pinch, −/+), its playhead fixed in the middle unless Timeline Options says otherwise.
 - **Shared drawing.** Both draw the same clips: names, durations, status, filmstrips (§11), waveforms from per-media peaks (100 per second, cached in `~/.cache/vidcut/waveforms/`).
 
 **Gestures are pure functions** (`gui/timeline/geometry.rs`, `gesture.rs`), unit-tested for zones, snapping and every drop rule:
@@ -127,6 +127,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 - A click on the audio edit selects that J/L handle. `,` and `.` then send `edit.audio_roll` for its offset (spec D20).
 - While dragging, a `Preview` says what the release would do. The timeline draws it: the target, the moved block, the snap line, a tooltip.
 - The release sends that one request. Scrubs only seek.
+- **Swipes.** A sideways two-finger swipe moves the playhead as a ruler drag does (`gesture::swipe`), with Fixed Playhead off scrolling the lower view. Its seeks are scrubs. Once it rests for 0.3 s, its frame is sought once more for the command log.
 - **Clock.** Gesture timing (the 0.8 s hover, Safe Edit's 0.6 s) uses egui's clock, so tests drive it.
 
 **The Trim Editor** draws exact frames rendered by the export engine on a background thread (`gui/stills.rs`).
