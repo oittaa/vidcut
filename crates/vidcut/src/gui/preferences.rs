@@ -489,7 +489,8 @@ impl Workspace {
                                 .response
                                 .on_hover_text(
                                     "Automatic: AV1 on a hardware encoder when there is one, \
-                                     else H.264 with x264, which stays quick on old computers. \
+                                     else H.264 on one, else H.264 with x264, which stays quick \
+                                     on old computers. H.264 also takes a hardware encoder first. \
                                      AV1 files are smaller; making them in software (SVT-AV1) is \
                                      slower than x264. ProRes Proxy and DNxHR LB make every frame \
                                      a keyframe: a jump decodes one frame instead of up to 60, \

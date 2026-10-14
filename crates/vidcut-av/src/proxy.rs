@@ -31,15 +31,18 @@ const KEYFRAMES: u32 = 60;
 /// An encoder proxies can be made with.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProxyEncoder {
-    /// FFmpeg's encoder: `av1_nvenc`, `av1_vaapi`, `libsvtav1`, `libx264`
-    /// (where this FFmpeg has neither of those two `libopenh264` or
-    /// `prores_ks`), `prores_videotoolbox`, `prores_ks` or `dnxhd`.
+    /// FFmpeg's encoder: `av1_nvenc`, `av1_vaapi`, `h264_nvenc`,
+    /// `h264_amf`, `h264_vaapi`, `h264_qsv`, `h264_videotoolbox`,
+    /// `libsvtav1`, `libx264` (where this FFmpeg has neither of those two
+    /// `libopenh264` or `prores_ks`), `prores_videotoolbox`, `prores_ks` or
+    /// `dnxhd`.
     pub name: String,
     /// `av1`, `h264`, `prores` or `dnxhr`.
     pub codec: &'static str,
-    /// Hardware (NVENC, VAAPI, VideoToolbox) or software (CPU).
+    /// Hardware (NVENC, AMF, VAAPI, QSV, VideoToolbox) or software (CPU).
     pub kind: EncoderChoice,
-    /// A VAAPI render node.
+    /// The GPU it runs on, as the encoder check names it: a VAAPI render
+    /// node, an AMF or QSV adapter or node.
     pub device: Option<String>,
 }
 
@@ -63,6 +66,8 @@ impl ProxyEncoder {
         };
         let what = match (self.kind, self.name.as_str()) {
             (EncoderChoice::Nvenc, _) => "NVIDIA hardware (NVENC)".to_string(),
+            (EncoderChoice::Amf, _) => "AMD hardware (AMF)".to_string(),
+            (EncoderChoice::Qsv, _) => "Intel hardware (QSV)".to_string(),
             (EncoderChoice::Vaapi, _) => format!(
                 "VAAPI hardware ({})",
                 self.device.as_deref().unwrap_or("GPU")
@@ -79,7 +84,13 @@ impl ProxyEncoder {
 
     fn pixel(&self) -> format::Pixel {
         match (self.kind, self.codec) {
-            (EncoderChoice::Vaapi | EncoderChoice::VideoToolbox, _) => format::Pixel::NV12,
+            (
+                EncoderChoice::Amf
+                | EncoderChoice::Qsv
+                | EncoderChoice::Vaapi
+                | EncoderChoice::VideoToolbox,
+                _,
+            ) => format::Pixel::NV12,
             (_, "prores") => format::Pixel::YUV422P10LE,
             (_, "dnxhr") => format::Pixel::YUV422P,
             _ => format::Pixel::YUV420P,
@@ -105,12 +116,27 @@ impl ProxyEncoder {
                 ("crf", "32".into()),
                 ("svtav1-params", "scd=0:pred-struct=1".into()),
             ],
-            "av1_nvenc" => vec![
+            "av1_nvenc" | "h264_nvenc" => vec![
                 ("preset", "p4".into()),
                 ("tune", "hq".into()),
                 ("rc", "vbr".into()),
-                ("cq", "32".into()),
+                ("cq", if self.codec == "av1" { "32" } else { "20" }.into()),
                 ("b", "0".into()),
+            ],
+            // One quantizer for every frame, as x264's CRF 20.
+            "h264_amf" => vec![
+                ("rc", "cqp".into()),
+                ("qp_i", "20".into()),
+                ("qp_p", "20".into()),
+            ],
+            "h264_vaapi" => vec![("rc_mode", "CQP".into()), ("qp", "20".into())],
+            // Its intelligent constant quality.
+            "h264_qsv" => vec![("global_quality", "20".into())],
+            // Constant quality on its scale of 0 to 100, the higher the
+            // better: 67 is the exports' for x264's CRF 20.
+            "h264_videotoolbox" => vec![
+                ("flags", "+qscale".into()),
+                ("global_quality", (67 * ffi::FF_QP2LAMBDA).to_string()),
             ],
             // One quantizer for every frame, near x264's CRF 20.
             "libopenh264" => vec![
@@ -134,25 +160,36 @@ impl ProxyEncoder {
     }
 }
 
-/// The encoders `choice` makes proxies with here, best first: hardware AV1
-/// (NVENC, then VAAPI) or ProRes (VideoToolbox) when this machine has a
-/// working one, then x264 for automatic and H.264, SVT-AV1 for AV1 (without
-/// those, OpenH264, else ProRes Proxy), FFmpeg's own for ProRes and DNxHR.
-/// A proxy takes the first that opens: NVENC allows a few sessions at a
-/// time.
+/// The encoders `choice` makes proxies with here, best first: the hardware
+/// ones this machine has working, AV1's (NVENC, then VAAPI) for automatic
+/// and AV1, then H.264's (NVENC, AMF, VAAPI, QSV, VideoToolbox) for
+/// automatic and H.264, ProRes's (VideoToolbox) for ProRes; then x264 for
+/// automatic and H.264, SVT-AV1 for AV1 (without those, OpenH264, else
+/// ProRes Proxy), FFmpeg's own for ProRes and DNxHR. A proxy takes the
+/// first that opens: NVENC allows a few sessions at a time.
 pub fn encoders(choice: ProxyCodec, available: &Availability) -> Vec<ProxyEncoder> {
-    use EncoderChoice::{Nvenc, Vaapi, VideoToolbox};
+    use EncoderChoice::{Amf, Nvenc, Qsv, Vaapi, VideoToolbox};
     use format::Pixel::{NV12, YUV420P};
-    let hardware: &[(&str, &'static str, EncoderChoice, format::Pixel)] = match choice {
-        ProxyCodec::Auto | ProxyCodec::Av1 => &[
-            ("av1_nvenc", "av1", Nvenc, YUV420P),
-            ("av1_vaapi", "av1", Vaapi, NV12),
-        ],
-        ProxyCodec::Prores => &[("prores_videotoolbox", "prores", VideoToolbox, NV12)],
-        ProxyCodec::H264 | ProxyCodec::Dnxhr => &[],
+    let av1: &[_] = &[
+        ("av1_nvenc", "av1", Nvenc, YUV420P),
+        ("av1_vaapi", "av1", Vaapi, NV12),
+    ];
+    let h264: &[_] = &[
+        ("h264_nvenc", "h264", Nvenc, YUV420P),
+        ("h264_amf", "h264", Amf, NV12),
+        ("h264_vaapi", "h264", Vaapi, NV12),
+        ("h264_qsv", "h264", Qsv, NV12),
+        ("h264_videotoolbox", "h264", VideoToolbox, NV12),
+    ];
+    let hardware = match choice {
+        ProxyCodec::Auto => [av1, h264].concat(),
+        ProxyCodec::Av1 => av1.to_vec(),
+        ProxyCodec::H264 => h264.to_vec(),
+        ProxyCodec::Prores => vec![("prores_videotoolbox", "prores", VideoToolbox, NV12)],
+        ProxyCodec::Dnxhr => Vec::new(),
     };
     let mut out = Vec::new();
-    for &(name, codec, kind, pixel) in hardware {
+    for (name, codec, kind, pixel) in hardware {
         if let Some(status) = available.find(name, pixel) {
             out.push(ProxyEncoder {
                 name: name.into(),
@@ -397,6 +434,11 @@ fn open(
             ctx.set_format(format::Pixel::VAAPI);
             hw_frames(&mut ctx, v.frames)?;
             Some(v)
+        }
+        (Some(on), EncoderChoice::Amf | EncoderChoice::Qsv, _) => {
+            crate::export::encode::on_device(&mut ctx, enc.kind, on)?;
+            ctx.set_format(enc.pixel());
+            None
         }
         _ => {
             ctx.set_format(enc.pixel());
@@ -669,5 +711,22 @@ mod tests {
             .map(|e| e.name)
             .collect();
         assert_eq!(names, ["prores_videotoolbox", "prores_ks"]);
+    }
+
+    #[test]
+    fn automatic_takes_hardware_h264_without_hardware_av1() {
+        crate::init();
+        let apple = Availability {
+            encoders: vec![crate::export::encode::EncoderStatus {
+                encoder: "h264_videotoolbox".into(),
+                kind: EncoderChoice::VideoToolbox,
+                device: None,
+                pixel: "nv12".into(),
+                ok: true,
+                error: None,
+            }],
+        };
+        let first = encoders(ProxyCodec::Auto, &apple).remove(0);
+        assert_eq!(first.name, "h264_videotoolbox");
     }
 }
