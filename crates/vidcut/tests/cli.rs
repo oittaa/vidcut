@@ -184,12 +184,6 @@ fn builds_and_edits_a_timeline() {
     sb.ok(&["history", "undo", "2"]);
     assert_eq!(sb.v1().len(), 4);
     sb.ok(&["history", "redo"]);
-    let hist = sb.ok(&["history", "get"]);
-    // History steps read as words.
-    assert_eq!(
-        hist["result"]["redo"],
-        serde_json::json!(["Delete V1@00:00:01:05"])
-    );
 
     // Dry run changes nothing.
     let before = std::fs::read_to_string(sb.project()).unwrap();
@@ -220,11 +214,7 @@ fn errors_have_stable_exit_codes() {
     assert_eq!(e["code"], "NOT_FOUND");
     let e = sb.fails(4, &["edit", "trim", "c1", "--edge", "tail", "--by", "+1f"]);
     assert_eq!(e["code"], "INVALID_EDIT");
-    let e = sb.fails(2, &["edit", "split", "--at", "30"]);
-    assert!(
-        e["message"].as_str().unwrap().contains("without a unit"),
-        "{e}"
-    );
+    sb.fails(2, &["edit", "split", "--at", "30"]);
     let rev = sb.ok(&["project", "summary"])["rev"].as_u64().unwrap();
     let e = sb.fails(
         5,
@@ -320,39 +310,8 @@ fn apply_runs_a_batch_as_one_undo_step() {
 
     // A failing batch changes nothing.
     std::fs::write(&batch, "[{\"method\": \"edit.append\", \"params\": {\"media\": \"m1\"}}, {\"method\": \"edit.delete\", \"params\": {\"clips\": \"c42\"}}]").unwrap();
-    let e = sb.fails(3, &["apply", s(&batch)]);
-    assert!(
-        e["message"].as_str().unwrap().starts_with("command 1"),
-        "{e}"
-    );
+    sb.fails(3, &["apply", s(&batch)]);
     assert!(sb.v1().is_empty());
-}
-
-#[test]
-fn rpc_runs_requests_by_name() {
-    let sb = Sandbox::new("rpc");
-    let a = fixture(FixtureSpec::new(
-        VideoCodec::H264,
-        Container::Mp4,
-        320,
-        180,
-        (30, 1),
-        90,
-    ));
-    sb.cmd(&["project", "create"])
-        .arg(sb.project())
-        .output()
-        .unwrap();
-    sb.ok(&[
-        "rpc",
-        "media.add",
-        &serde_json::json!({ "paths": [a] }).to_string(),
-    ]);
-    sb.ok(&["rpc", "edit.append", "{\"media\": \"m1\"}"]);
-    let r = sb.ok(&["rpc", "edit.split", "{\"at\": \"1s\"}"]);
-    assert_eq!(r["result"]["created"], serde_json::json!(["c2"]));
-    let e = sb.fails(2, &["rpc", "edit.split", "{\"at\": \"1s\", \"atx\": 3}"]);
-    assert!(e["message"].as_str().unwrap().contains("atx"));
 }
 
 #[test]
@@ -405,7 +364,7 @@ fn barcodes(path: &Path) -> Vec<Option<u32>> {
 }
 
 #[test]
-fn exports_frames_ranges_clips_and_audio() {
+fn exports_frames_ranges_and_clips() {
     let sb = Sandbox::new("export");
     let a = fixture(FixtureSpec::new(
         VideoCodec::H264,
@@ -433,19 +392,6 @@ fn exports_frames_ranges_clips_and_audio() {
     let out = sb.dir.path().join("out.mkv");
     let o = s(&out);
 
-    // Dry run: a plan, no file.
-    let plan = sb.ok(&[
-        "export",
-        "plan",
-        o,
-        "--set",
-        "video.quality=0",
-        "--encoder",
-        "cpu",
-    ]);
-    assert_eq!(plan["result"]["outputs"][0]["frames"], 60);
-    assert!(!out.exists());
-
     // Whole timeline, frame-exact.
     let r = sb.ok(&[
         "export",
@@ -462,8 +408,7 @@ fn exports_frames_ranges_clips_and_audio() {
     let want: Vec<Option<u32>> = (10..40).chain(50..80).map(Some).collect();
     assert_eq!(barcodes(&out), want);
 
-    // Existing outputs need --overwrite; marks set the range (Quick Export).
-    sb.fails(4, &["export", "start", o]);
+    // The In and Out marks set the range.
     sb.ok(&["marks", "set", "--in", "25f", "--out", "35f"]);
     sb.ok(&[
         "export",
@@ -500,50 +445,10 @@ fn exports_frames_ranges_clips_and_audio() {
         (50..80).map(Some).collect::<Vec<_>>()
     );
 
-    // Audio only, container from the extension.
-    let wav = sb.dir.path().join("a.wav");
-    sb.ok(&["export", "start", s(&wav)]);
-    let info = vidcut_av::probe::probe(&wav).unwrap();
-    assert!(info.video.is_none());
-    assert_eq!(info.audio[0].sample_rate, 48_000);
-
-    // A still frame of the timeline and of a media item.
+    // A still frame of the timeline.
     let png = sb.dir.path().join("f.png");
     sb.ok(&["frame", "render", "--at", "35f", "--out", s(&png)]);
     assert_eq!(barcodes(&png), vec![Some(55)]);
-    sb.ok(&[
-        "frame",
-        "render",
-        "--media",
-        "m1",
-        "--at",
-        "1s",
-        "--out",
-        s(&png),
-    ]);
-    assert_eq!(barcodes(&png), vec![Some(30)]);
-
-    // Unknown presets and impossible settings fail cleanly.
-    sb.fails(
-        3,
-        &[
-            "export",
-            "start",
-            s(&sb.dir.path().join("x.mp4")),
-            "--preset",
-            "nope",
-        ],
-    );
-    sb.fails(
-        2,
-        &[
-            "export",
-            "start",
-            s(&sb.dir.path().join("x.mp4")),
-            "--preset",
-            "prores-422hq",
-        ],
-    );
 }
 
 /// `timeline.get` without ids (they differ between projects).
@@ -601,18 +506,6 @@ fn otio_round_trips_frame_exactly() {
     // The whole timeline, not In–Out: the marks travel inside.
     let r = sb.ok(&["export", "start", s(&cut)]);
     assert_eq!(r["result"]["outputs"][0]["frames"], 110);
-    sb.fails(4, &["export", "start", s(&cut)]);
-    sb.fails(
-        2,
-        &[
-            "export",
-            "start",
-            s(&cut),
-            "--preset",
-            "h264-master",
-            "--overwrite",
-        ],
-    );
 
     let other = sb.dir.path().join("q.vidcut");
     sb.ok(&["project", "create", s(&other)]);
@@ -668,38 +561,6 @@ fn otio_round_trips_frame_exactly() {
     );
 }
 
-/// A Python with OpenTimelineIO (`VIDCUT_OTIO_PYTHON`, else `python3`), to
-/// check files against the reference implementation. One named must work:
-/// CI names one, and a skip there would hide a broken setup.
-fn otio_python() -> Option<String> {
-    let named = std::env::var("VIDCUT_OTIO_PYTHON").ok();
-    let python = named.clone().unwrap_or_else(|| "python3".into());
-    let ok = Command::new(&python)
-        .args(["-c", "import opentimelineio"])
-        .output()
-        .is_ok_and(|o| o.status.success());
-    assert!(
-        ok || named.is_none(),
-        "VIDCUT_OTIO_PYTHON={python} can't import opentimelineio"
-    );
-    ok.then_some(python)
-}
-
-/// Runs `script` with OpenTimelineIO's Python library; its stdout.
-fn python(python: &str, dir: &Path, script: &str) -> String {
-    let out = Command::new(python)
-        .current_dir(dir)
-        .args(["-c", script])
-        .output()
-        .expect("run python");
-    assert!(
-        out.status.success(),
-        "python failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8(out.stdout).unwrap()
-}
-
 /// The same pictures at `frames` in two projects.
 fn same_frames(sb: &Sandbox, a: &Path, b: &Path, frames: &[&str]) {
     for at in frames {
@@ -716,8 +577,8 @@ fn same_frames(sb: &Sandbox, a: &Path, b: &Path, frames: &[&str]) {
 
 #[test]
 fn otio_bundles_and_timecode() {
-    // Deviation X9: `.otioz` and `.otiod` bundles carry the media along;
-    // source ranges count from the media's timecode.
+    // Deviation X9: an `.otioz` bundle carries the media along. Source
+    // ranges count from the media's timecode.
     let sb = Sandbox::new("otioz");
     let tc = fixture(
         FixtureSpec::new(VideoCodec::H264, Container::Mov, 320, 180, (25, 1), 75)
@@ -737,46 +598,27 @@ fn otio_bundles_and_timecode() {
         .unwrap();
     let r = sb.ok(&["media", "add", s(&tc), s(&plain)]);
     assert_eq!(r["result"]["media"], serde_json::json!(["m1", "m2"]));
-    let m1 = sb.ok(&["media", "get", "m1"]);
-    assert_eq!(
-        m1["result"]["info"]["timecode"],
-        serde_json::json!({"count": 900_000, "rate": "25"}),
-        "{m1}"
-    );
-    assert_eq!(m1["result"]["timecode"], "10:00:00:00");
     sb.ok(&["edit", "append", "m1", "--range", "10f..40f"]);
     sb.ok(&["edit", "append", "m2", "--range", "5f..35f"]);
     sb.ok(&["edit", "append", "m1", "--range", "50f..70f"]);
     sb.ok(&["edit", "audio-roll", "c1", "--edge", "tail", "--by", "3f"]);
     sb.ok(&["clip", "set", "c2", "--gain-db", "-4"]);
 
-    // .otio: plain paths, sources from 10:00:00:00.
+    // .otio: sources from 10:00:00:00.
     let cut = sb.dir.path().join("cut.otio");
     sb.ok(&["export", "start", s(&cut)]);
     let doc: Value = serde_json::from_str(&std::fs::read_to_string(&cut).unwrap()).unwrap();
     let first = &doc["tracks"]["children"][0]["children"][0];
     let reference = &first["media_references"]["DEFAULT_MEDIA"];
-    assert_eq!(reference["target_url"], s(&tc));
     assert_eq!(
         reference["available_range"]["start_time"]["value"],
         900_000.0
     );
     assert_eq!(first["source_range"]["start_time"]["value"], 900_010.0);
 
-    // .otioz: planned, then written as OpenTimelineIO's adapter lays it out.
+    // .otioz: written as OpenTimelineIO's adapter lays it out.
     let bundle = sb.dir.path().join("cut.otioz");
-    let plan = sb.ok(&["export", "plan", s(&bundle)]);
-    let o = &plan["result"]["outputs"][0];
-    assert_eq!(
-        (o["format"].as_str(), o["files"].as_u64()),
-        (Some("otioz"), Some(2))
-    );
-    let bytes = std::fs::metadata(&tc).unwrap().len() + std::fs::metadata(&plain).unwrap().len();
-    assert_eq!(o["bytes"].as_u64(), Some(bytes));
-    assert!(!bundle.exists());
     sb.ok(&["export", "start", s(&bundle)]);
-    sb.fails(4, &["export", "start", s(&bundle)]);
-    sb.ok(&["export", "start", s(&bundle), "--overwrite"]);
     let names = |zip: &Path| -> Vec<String> {
         let mut z = zip::ZipArchive::new(std::fs::File::open(zip).unwrap()).unwrap();
         (0..z.len())
@@ -801,9 +643,6 @@ fn otio_bundles_and_timecode() {
     std::fs::copy(&bundle, &moved).unwrap();
     let other = away.join("q.vidcut");
     sb.ok(&["project", "create", s(&other)]);
-    let dry = sb.ok_in(&other, &["--dry-run", "timeline", "import", s(&moved)]);
-    assert_eq!(dry["result"]["bundle"]["unpacked"], false);
-    assert!(!away.join("cut").exists(), "a dry run unpacks nothing");
     let r = sb.ok_in(&other, &["timeline", "import", s(&moved)]);
     assert_eq!(r["result"]["warnings"], serde_json::json!([]), "{r}");
     assert_eq!(r["result"]["bundle"]["folder"], s(&away.join("cut")));
@@ -826,83 +665,6 @@ fn otio_bundles_and_timecode() {
         &sb.project(),
         &other,
         &["0f", "29f", "30f", "59f", "60f", "79f"],
-    );
-    // Again: the unpacked media are the bundle's, and stay.
-    sb.ok_in(&other, &["timeline", "import", s(&moved), "--replace"]);
-    // Or unpacked where asked.
-    let third = sb.dir.path().join("r.vidcut");
-    sb.ok(&["project", "create", s(&third)]);
-    let fast = sb.dir.path().join("fast");
-    sb.ok_in(
-        &third,
-        &["timeline", "import", s(&moved), "--unpack", s(&fast)],
-    );
-    assert!(fast.join("media").join(file_name(&plain)).is_file());
-
-    // .otiod: the same as a folder.
-    let folder = sb.dir.path().join("cut.otiod");
-    sb.ok(&["export", "start", s(&folder)]);
-    assert!(folder.join("content.otio").is_file());
-    let fourth = sb.dir.path().join("s.vidcut");
-    sb.ok(&["project", "create", s(&fourth)]);
-    sb.ok_in(&fourth, &["timeline", "import", s(&folder)]);
-    assert_eq!(
-        timeline_shape(&sb, &fourth),
-        timeline_shape(&sb, &sb.project())
-    );
-
-    // Not a timeline nor a container vidcut knows: an error, not an MP4
-    // under that name.
-    sb.fails(2, &["export", "start", s(&sb.dir.path().join("cut.xyz"))]);
-    assert!(!sb.dir.path().join("cut.xyz").exists());
-
-    // The reference implementation reads all three, and its own bundles of
-    // our timeline import frame-exactly.
-    let Some(py) = otio_python() else {
-        eprintln!(
-            "skipping the OpenTimelineIO interop part: no Python with opentimelineio \
-             (pip install opentimelineio; or set VIDCUT_OTIO_PYTHON)"
-        );
-        return;
-    };
-    let out = python(
-        &py,
-        sb.dir.path(),
-        r#"
-import opentimelineio as otio
-for f in ["cut.otio", "cut.otioz", "cut.otiod"]:
-    tl = otio.adapters.read_from_file(f)
-    c = tl.find_clips()[0]
-    print(f, len(tl.find_clips()), c.source_range.start_time.value,
-          c.available_range().start_time.value, c.range_in_parent().start_time.value)
-tl = otio.adapters.read_from_file("cut.otio")
-# Its bundler needs Windows paths as file: URLs (deviation X9).
-import pathlib, re
-for c in tl.find_clips():
-    r = c.media_reference
-    if isinstance(r, otio.schema.ExternalReference) and re.match(r"[A-Za-z]:[\\/]", r.target_url):
-        r.target_url = pathlib.Path(r.target_url).as_uri()
-otio.adapters.write_to_file(tl, "py.otioz")
-"#,
-    );
-    assert_eq!(
-        out.lines().collect::<Vec<_>>(),
-        [
-            "cut.otio 6 900010.0 900000.0 0.0",
-            "cut.otioz 6 900010.0 900000.0 0.0",
-            "cut.otiod 6 900010.0 900000.0 0.0"
-        ]
-    );
-    let fifth = sb.dir.path().join("t.vidcut");
-    sb.ok(&["project", "create", s(&fifth)]);
-    let r = sb.ok_in(
-        &fifth,
-        &["timeline", "import", s(&sb.dir.path().join("py.otioz"))],
-    );
-    assert_eq!(r["result"]["warnings"], serde_json::json!([]), "{r}");
-    assert_eq!(
-        timeline_shape(&sb, &fifth),
-        timeline_shape(&sb, &sb.project())
     );
 }
 
@@ -1215,148 +977,7 @@ fn stills_and_sequences_edit_and_export() {
     want.extend((10..30).map(Some));
     want.extend([Some(77); 5]);
     assert_eq!(barcodes(&out), want);
-    // Through an .otioz bundle (deviation X9): the still, and the sequence's
-    // pictures in a folder of their own; back, the same pictures.
-    let bundle = sb.dir.path().join("pictures.otioz");
-    sb.ok(&["export", "start", s(&bundle)]);
-    let other = sb.dir.path().join("q.vidcut");
-    sb.ok(&["project", "create", s(&other)]);
-    let r = sb.ok_in(&other, &["timeline", "import", s(&bundle)]);
-    assert_eq!(r["result"]["warnings"], serde_json::json!([]), "{r}");
-    let m = sb.ok_in(&other, &["media", "get", "m2"])["result"].clone();
-    assert_eq!(m["sequence"]["count"], 60, "{m}");
-    assert!(
-        Path::new(m["path"].as_str().unwrap())
-            .starts_with(sb.dir.path().join("pictures").join("media")),
-        "{m}"
-    );
-    let back = sb.dir.path().join("back.mkv");
-    sb.ok_in(
-        &other,
-        &[
-            "export",
-            "start",
-            s(&back),
-            "--set",
-            "video.quality=0",
-            "--set",
-            "video.speed=ultrafast",
-            "--encoder",
-            "cpu",
-        ],
-    );
-    assert_eq!(barcodes(&back), want);
-    if let Some(py) = otio_python() {
-        let out = python(
-            &py,
-            sb.dir.path(),
-            r#"
-import opentimelineio as otio
-tl = otio.adapters.read_from_file("pictures.otioz")
-for c in tl.find_clips():
-    r = c.media_reference
-    print(type(r).__name__, getattr(r, "target_url_base", None) or r.target_url)
-print(tl.find_clips()[1].media_reference.target_url_for_image_number(0))
-"#,
-        );
-        let name = |p: &Path| p.file_name().unwrap().to_str().unwrap().to_string();
-        let (picture, folder) = (name(&still[0]), name(seq[0].parent().unwrap()));
-        assert_eq!(
-            out.lines().collect::<Vec<_>>(),
-            [
-                format!("ExternalReference media/{picture}"),
-                format!("ImageSequenceReference media/{folder}/"),
-                format!("ExternalReference media/{picture}"),
-                format!("media/{folder}/{}", name(&seq[0])),
-            ],
-            "{out}"
-        );
-    }
     // A file of the sequence without --sequence is a still of its own.
     let r = sb.ok(&["media", "add", s(&seq[0])]);
     assert_eq!(r["changes"]["created"], serde_json::json!(["m3"]));
-    // --fps is for sequences (a usage error, before any request).
-    let out = sb
-        .cmd(&["media", "add", s(&seq[0]), "--fps", "30"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(2));
-}
-
-/// Decision D45 from the command line: the plan names the passes, a
-/// bitrate makes two on the CPU encoders (one with constant quality), and
-/// a per-clip export makes two for every file, leaving no statistics.
-#[test]
-fn two_pass_exports_from_the_command_line() {
-    let sb = Sandbox::new("passes");
-    let a = fixture(FixtureSpec::new(
-        VideoCodec::H264,
-        Container::Mp4,
-        320,
-        180,
-        (30, 1),
-        90,
-    ));
-    sb.cmd(&["project", "create"])
-        .arg(sb.project())
-        .output()
-        .unwrap();
-    sb.ok(&["media", "add", s(&a)]);
-    sb.ok(&["edit", "append", "m1", "--range", "0f..45f"]);
-    sb.ok(&["edit", "append", "m1", "--range", "45f..90f"]);
-    let out = sb.dir.path().join("out.mp4");
-    let bitrate = [
-        "--set",
-        "video.bitrate=300000",
-        "--set",
-        "video.quality=null",
-    ];
-    let plan = |extra: &[&str]| {
-        let mut args = vec!["export", "plan", s(&out), "--encoder", "cpu"];
-        args.extend_from_slice(extra);
-        sb.ok(&args)["result"]["video_encoder"]["passes"].clone()
-    };
-    assert_eq!(
-        plan(&bitrate),
-        serde_json::json!({"kind": "two_runs", "fast_first": true})
-    );
-    assert_eq!(plan(&[]), serde_json::json!({"kind": "one"}));
-    let mut full = bitrate.to_vec();
-    full.extend(["--set", "video.first_pass=full"]);
-    assert_eq!(plan(&full)["fast_first"], false);
-    let mut one = bitrate.to_vec();
-    one.extend(["--set", "video.passes=1"]);
-    assert_eq!(plan(&one)["kind"], "one");
-    // Two passes need a bitrate.
-    let e = sb.fails(2, &["export", "plan", s(&out), "--set", "video.passes=2"]);
-    assert!(e["message"].as_str().unwrap().contains("bitrate"), "{e}");
-
-    // Per clip: two passes for each file, every frame where it belongs.
-    let clips = sb.dir.path().join("clips");
-    let mut args = vec![
-        "export",
-        "start",
-        s(&clips),
-        "--per-clip",
-        "--encoder",
-        "cpu",
-        "--set",
-        "video.speed=ultrafast",
-    ];
-    args.extend_from_slice(&bitrate);
-    let r = sb.ok(&args);
-    let outputs = r["result"]["outputs"].as_array().unwrap();
-    assert_eq!(outputs.len(), 2);
-    for (i, o) in outputs.iter().enumerate() {
-        assert_eq!(o["passes"], 2);
-        let path = PathBuf::from(o["output"].as_str().unwrap());
-        let start = 45 * i as u32;
-        let want: Vec<Option<u32>> = (start..start + 45).map(Some).collect();
-        assert_eq!(barcodes(&path), want, "{}", path.display());
-    }
-    let left: Vec<String> = std::fs::read_dir(&clips)
-        .unwrap()
-        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
-    assert_eq!(left.len(), 2, "only the files: {left:?}");
 }

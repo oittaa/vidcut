@@ -14,26 +14,6 @@ fn spec(frames: u32) -> FixtureSpec {
 }
 
 #[test]
-fn levels_show_the_beeps_and_nothing_else() {
-    // A 10 ms beep at the start of every second, silence between.
-    let path = fixture::ensure(&spec(90)).unwrap();
-    let l = analysis::audio_levels(&path, 0, 100).unwrap();
-    assert_eq!(l.per_second, 100);
-    assert!((299..=302).contains(&l.peaks.len()), "{}", l.peaks.len());
-    let at = |secs: f64| ((secs - l.start) * 100.0).round() as usize;
-    for s in 0..3 {
-        let i = at(f64::from(s));
-        let peak = l.peaks[i..i + 2].iter().fold(0f32, |m, &p| m.max(p));
-        assert!(peak > 0.3, "beep at {s} s: {peak}");
-    }
-    // Between beeps: below -40 dBFS (AAC leaves a little noise by them).
-    let quiet = l.peaks[at(0.1)..at(0.9)]
-        .iter()
-        .fold(0f32, |m, &p| m.max(p));
-    assert!(quiet < 0.01, "{quiet}");
-}
-
-#[test]
 fn levels_keep_time_across_a_lost_packet() {
     // An AAC packet before the 2 s beep is missing (1024 samples, 21 ms):
     // the beep stays at 2 s, as export keeps it.

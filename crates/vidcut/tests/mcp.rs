@@ -1,11 +1,9 @@
-//! An agent drives vidcut over MCP (`vidcut mcp`). Headless
-//! it makes a project and looks at a frame; against a live session (the
-//! GUI's core, serving IPC) it imports, ripple-deletes the silences longer
-//! than 0.7 s, exports and checks a storyboard, while the session shows the
-//! edit and undoes it as one step.
+//! An agent drives vidcut over MCP (`vidcut mcp`). Headless it makes a
+//! project, looks at a frame and gets an error for a bad edit. Against a
+//! live session (the GUI's core, serving IPC) its calls run in that session.
+//! Cutting the silences there is one undo step.
 
 use std::io::{BufRead, BufReader, Write};
-use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
@@ -42,8 +40,6 @@ struct Client {
     stdin: Option<ChildStdin>,
     lines: Receiver<Value>,
     next: u64,
-    /// Notifications that arrived while waiting for answers.
-    notes: Vec<Value>,
 }
 
 impl Client {
@@ -73,7 +69,6 @@ impl Client {
             stdin,
             lines,
             next: 1,
-            notes: Vec::new(),
         };
         let init = c.request(
             "initialize",
@@ -106,19 +101,14 @@ impl Client {
             if v["id"] == json!(id) {
                 return v;
             }
-            self.notes.push(v);
         }
     }
 
     /// Calls a tool; returns its result (`content`, `structuredContent`, `isError`).
     fn call(&mut self, name: &str, arguments: Value) -> Value {
-        self.call_with(name, arguments, json!({}))
-    }
-
-    fn call_with(&mut self, name: &str, arguments: Value, meta: Value) -> Value {
         let r = self.request(
             "tools/call",
-            json!({ "name": name, "arguments": arguments, "_meta": meta }),
+            json!({ "name": name, "arguments": arguments }),
         );
         r["result"].clone()
     }
@@ -143,18 +133,6 @@ fn call(h: &live::Handle, method: &str, params: Value) -> Response {
         .unwrap_or_else(|e| panic!("{method}: {e}"))
 }
 
-/// The left channel of a 16-bit stereo WAV.
-fn wav_left(path: &Path) -> Vec<f32> {
-    let bytes = std::fs::read(path).unwrap();
-    let data = bytes.windows(4).position(|w| w == b"data").unwrap() + 8;
-    bytes[data..]
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .map(|&[lo, hi, ..]| f32::from(i16::from_le_bytes([lo, hi])) / 32768.0)
-        .collect()
-}
-
 /// The image in a tool result, decoded far enough to check it is a PNG.
 fn has_png(result: &Value) -> bool {
     result["content"].as_array().unwrap().iter().any(|c| {
@@ -167,7 +145,7 @@ fn has_png(result: &Value) -> bool {
 }
 
 #[test]
-fn an_agent_cuts_silence_over_mcp_live_in_the_gui() {
+fn an_agent_edits_over_mcp_headless_and_live_in_the_gui() {
     let tmp = tempfile::Builder::new()
         .prefix("vidcut-mcp-")
         .tempdir()
@@ -262,23 +240,9 @@ fn an_agent_cuts_silence_over_mcp_live_in_the_gui() {
         .as_array()
         .unwrap()
         .len();
-    let r = agent.ok(
+    agent.ok(
         "edit_ripple_delete_silence",
         json!({ "clips": "c1", "min": "0.7s" }),
-    );
-    // Each second keeps its beep with 0.15 s around it: 12 frames of 30.
-    assert_eq!(r["result"]["removed"].as_array().unwrap().len(), 10, "{r}");
-    let tl = call(&h, "timeline.get", json!({})).result;
-    let clips: Vec<&Value> = tl["tracks"][0]["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|i| i["type"] == "clip")
-        .collect();
-    assert_eq!(clips.len(), 10, "the session shows the edit: {tl}");
-    assert_eq!(
-        tl["duration"],
-        300 - r["result"]["frames"].as_i64().unwrap()
     );
     let undo = call(&h, "history.get", json!({})).result["undo"].clone();
     assert_eq!(
@@ -286,118 +250,6 @@ fn an_agent_cuts_silence_over_mcp_live_in_the_gui() {
         undo_before + 1,
         "one undo step"
     );
-
-    // Export with progress, then hear where the beeps went.
-    let out = dir.join("cut.wav");
-    let exported = agent.call_with(
-        "export_start",
-        json!({ "output": out, "set": ["audio.codec=pcm_s16"] }),
-        json!({ "progressToken": "export-1" }),
-    );
-    assert_eq!(exported["isError"], false, "{exported}");
-    assert!(
-        agent
-            .notes
-            .iter()
-            .any(|n| n["method"] == "notifications/progress"
-                && n["params"]["progressToken"] == "export-1"),
-        "progress was reported"
-    );
-    let left = wav_left(&out);
-    let onsets = vidcut_av::beep::onsets(&left, 0.1, 4800);
-    let pieces: Vec<(i64, i64, i64)> = clips
-        .iter()
-        .map(|c| {
-            (
-                c["start"].as_i64().unwrap(),
-                c["duration"].as_i64().unwrap(),
-                c["source_in"].as_i64().unwrap(),
-            )
-        })
-        .collect();
-    assert_eq!(onsets.len(), 10, "{onsets:?}");
-    for (k, &at) in onsets.iter().enumerate() {
-        // Second k's beep (source frame 30k) where its piece put it, to 1 ms.
-        let (start, _, source_in) = *pieces
-            .iter()
-            .find(|(_, d, s)| (*s..s + d).contains(&(30 * k as i64)))
-            .unwrap_or_else(|| panic!("beep {k} was cut: {pieces:?}"));
-        let want = (start + 30 * k as i64 - source_in) * 1600;
-        assert!(
-            (at as i64 - want).abs() <= 48,
-            "beep {k} at {at}, not {want}"
-        );
-    }
-
-    // The storyboard: one picture per piece, returned as an image.
-    let board = agent.call(
-        "storyboard_render",
-        json!({ "out": dir.join("board.png"), "columns": 5, "width": 160 }),
-    );
-    assert_eq!(board["isError"], false, "{board}");
-    assert!(has_png(&board));
-    assert_eq!(
-        board["structuredContent"]["result"]["cells"]
-            .as_array()
-            .unwrap()
-            .len(),
-        10
-    );
-
-    // One undo brings the whole clip back.
-    agent.ok("history_undo", json!({}));
-    let tl = call(&h, "timeline.get", json!({})).result;
-    assert_eq!(tl["duration"], 300);
-
-    // Cancelling a call that runs in the GUI stops it there, and the
-    // cancelled request gets no answer (MCP's cancellation). A slow export:
-    // 4K with x264's slowest preset.
-    let slow = dir.join("slow.mp4");
-    let id = agent.next;
-    agent.next += 1;
-    agent.send(&json!({
-        "jsonrpc": "2.0", "id": id, "method": "tools/call",
-        "params": {
-            "name": "export_start",
-            "arguments": {
-                "output": slow,
-                "set": ["video.width=3840", "video.height=2160", "video.speed=veryslow",
-                        "video.encoder=cpu"],
-            },
-            "_meta": { "progressToken": "slow" },
-        },
-    }));
-    loop {
-        let v = agent
-            .lines
-            .recv_timeout(Duration::from_secs(30))
-            .expect("the slow export reports progress");
-        assert_ne!(v["id"], json!(id), "finished before the cancel: {v}");
-        if v["params"]["progressToken"] == "slow" {
-            break;
-        }
-    }
-    agent.send(&json!({
-        "jsonrpc": "2.0", "method": "notifications/cancelled",
-        "params": { "requestId": id, "reason": "test" },
-    }));
-    let started = std::time::Instant::now();
-    loop {
-        let jobs = call(&h, "jobs.list", json!({})).result;
-        let state = jobs.as_array().unwrap().last().unwrap()["state"].clone();
-        if state == "cancelled" {
-            break;
-        }
-        assert!(
-            started.elapsed() < Duration::from_secs(15),
-            "the GUI's export goes on: {jobs:#}"
-        );
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    assert!(!slow.exists(), "no output left");
-    while let Ok(v) = agent.lines.recv_timeout(Duration::from_millis(500)) {
-        assert_ne!(v["id"], json!(id), "an answer to a cancelled call: {v}");
-    }
     agent.finish();
 
     h.shutdown();

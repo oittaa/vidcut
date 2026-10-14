@@ -4,21 +4,20 @@
 
 NVENC exports convert turned, BT.601, HDR and 10-bit placed pieces with libplacebo on a Vulkan device derived from CUDA (export.md §5). On Windows (RTX 4080 SUPER), three exports at once used to hang or show the previous frame because of a libplacebo bug (gotchas.md). vidcut now works around it. Nobody has checked the workaround on Linux with an NVIDIA GPU: the N150 is Intel, WSL has no NVIDIA Vulkan driver, and CI has no GPU.
 
-On the desktop:
+On the desktop, make a project `check.vidcut` from the barcode fixtures in `$VIDCUT_TEST_DATA`: a turned clip, an SD clip, an HDR clip and a 10-bit clip. Export it with `--encoder cpu` to `cpu.mp4` once. Then run three NVENC exports at once, 60 times:
 
 ```bash
-for i in $(seq 1 60); do timeout 180 cargo test -p vidcut-av --features gpu-tests --test export -- nvenc_exports --nocapture > run-$i.log 2>&1; echo "run $i exit $?"; done
+for i in $(seq 1 60); do for j in 1 2 3; do (VIDCUT_AV_LOG=error timeout 180 vidcut -p check.vidcut export start out-$i-$j.mp4 --encoder nvenc > run-$i-$j.log 2>&1; echo "run $i.$j exit $?") & done; wait; done
 ```
 
 - Exit 124 is a hang. Before the timeout kills it, take every thread's stack:
 
   ```bash
-  gdb -p "$(pgrep -n export-)" -batch -ex 'thread apply all bt' > stacks.txt
+  gdb -p "$(pgrep -n vidcut)" -batch -ex 'thread apply all bt' > stacks.txt
   ```
 
-- In the logs, look for:
-  - a barcode assertion (`frame N: Some(a)` against `Some(b)`): a wrong picture;
-  - `VK_ERROR_DEVICE_LOST` or `VkResult -4`: run with `VIDCUT_AV_LOG=error` to see it.
+- A wrong picture: `cargo run -p vidcut-av --example read_barcode` prints other barcodes for an `out-*.mp4` than for `cpu.mp4`.
+- A lost device: `VK_ERROR_DEVICE_LOST` or `VkResult -4` in the logs.
 - Note the driver and FFmpeg versions (`nvidia-smi`, `vidcut doctor`).
 
 The same desktop has the [ALSA check](alsa-audio-devices.md) to do.

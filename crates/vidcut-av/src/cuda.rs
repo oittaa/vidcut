@@ -349,8 +349,8 @@ struct Placebo {
 
 /// One converter at work at a time in the process: made, fed, read or
 /// torn down. Without this, the Vulkan device was sometimes lost when
-/// converters started at the same time (1 in 76 runs of the parallel
-/// `nvenc_exports` tests). The cause isn't known.
+/// converters started at the same time (1 in 76 test runs with NVENC
+/// exports at once). The cause isn't known.
 fn converting() -> std::sync::MutexGuard<'static, ()> {
     static CONVERTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
     CONVERTING.lock().unwrap_or_else(|e| e.into_inner())
