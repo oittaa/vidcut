@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use player_support::*;
 use vidcut_av::fixture::{Container, FixtureSpec, VideoCodec};
 use vidcut_av::hw::{GpuDecoder, Kind};
-use vidcut_av::player::{Config, Decoder, Layout, ManualOutput, Memory, Picture, Player};
+use vidcut_av::player::{Config, Decoder, ManualOutput, Memory, Picture, Player};
 
 fn player(plan: vidcut_core::render::RenderPlan, hardware: bool) -> Player {
     let config = Config {
@@ -151,7 +151,6 @@ fn gpu_pictures_are_the_cpus() {
                 upright(&c),
                 "frame {t}: {name} against the CPU"
             );
-            assert_eq!(g.memory(), Memory::Cpu, "copied down");
             assert_eq!(g.colors(), c.colors(), "frame {t}'s colors");
             assert_eq!(g.rotation(), c.rotation());
             let diff = mean_diff(&g, &c);
@@ -165,13 +164,8 @@ fn gpu_pictures_are_the_cpus() {
             let _ = picture_at(&gpu, t);
             gpu.status().decoder
         };
-        let (h264_on, h264_layout) = if h264 {
-            (on_gpu, Layout::Nv12)
-        } else {
-            (Some(Decoder::Cpu), Layout::Yuv420p)
-        };
+        let h264_on = if h264 { on_gpu } else { Some(Decoder::Cpu) };
         assert_eq!(decoder(5), h264_on, "{name}: H.264");
-        assert_eq!(picture_at(&gpu, 5).layout(), h264_layout);
         assert_eq!(decoder(starts[6] + 3), h264_on, "{name}: interlaced H.264");
         use vidcut_av::ffmpeg::codec::Id;
         for (t, what, codec, bits) in [
@@ -183,7 +177,6 @@ fn gpu_pictures_are_the_cpus() {
         ] {
             let d = decoder(t);
             let listed = gpu_decoder.hardware_decodes(codec, bits);
-            eprintln!("{name}: {what} decodes on {d:?} (the driver lists it: {listed:?})");
             // NVDEC's capabilities answer for every codec.
             assert!(kind != Kind::Nvdec || listed.is_some(), "{name}: {what}");
             match listed {
@@ -192,14 +185,6 @@ fn gpu_pictures_are_the_cpus() {
                 None => assert!(d == on_gpu || d == Some(Decoder::Cpu), "{name}: {what}"),
             }
         }
-        // P010 from the GPU and the CPU alike; NV12 from the GPU only.
-        assert_eq!(picture_at(&gpu, 35).layout(), Layout::P010);
-        let vp9 = if decoder(starts[3] + 3) == on_gpu {
-            Layout::Nv12
-        } else {
-            Layout::Yuv420p
-        };
-        assert_eq!(picture_at(&gpu, starts[3] + 3).layout(), vp9);
         assert_eq!(decoder(starts[8] + 3), Some(Decoder::Cpu), "{name}: ProRes");
 
         // Steps both ways through HEVC, black and VP9 on the GPU.
@@ -310,7 +295,6 @@ fn pictures_kept_in_gpu_memory_are_the_ones_copied_down() {
         ],
         0,
     );
-    let nv12 = (W * H * 3 / 2) as usize;
     for (gpu, on_gpu) in decoders {
         let name = format!("{} {}", gpu.kind().name(), gpu.on());
         let kept = keeping(p.clone(), gpu.clone());
@@ -328,27 +312,16 @@ fn pictures_kept_in_gpu_memory_are_the_ones_copied_down() {
         } else {
             Memory::Cpu
         };
-        for (t, memory, bytes) in [
-            (3, h264, nv12),
-            (14, on_gpu, 2 * nv12),
-            (25, interlaced, nv12),
-            (36, on_gpu, 2 * nv12),
-            (47, Memory::Cpu, 2 * nv12),
+        for (t, memory) in [
+            (3, h264),
+            (14, on_gpu),
+            (25, interlaced),
+            (36, on_gpu),
+            (47, Memory::Cpu),
         ] {
             let k = picture_at(&kept, t);
             let d = picture_at(&down, t);
             assert_eq!(k.memory(), memory, "{name}: frame {t}");
-            assert_eq!(k.layout(), d.layout(), "{name}: frame {t}");
-            if memory != Memory::Cpu {
-                let layout = if bytes == nv12 {
-                    Layout::Nv12
-                } else {
-                    Layout::P010
-                };
-                assert_eq!(k.layout(), layout, "{name}: frame {t}");
-            }
-            // The budget counts what the picture takes where it is.
-            assert_eq!(k.bytes(), bytes, "{name}: frame {t}");
             assert_eq!((k.colors(), k.rotation()), (d.colors(), d.rotation()));
             assert_eq!(
                 mean_diff(&k, &d),

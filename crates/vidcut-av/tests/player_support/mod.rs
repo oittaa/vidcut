@@ -198,58 +198,6 @@ pub fn pull_full(out: &ManualOutput, frames: usize) -> Vec<f32> {
     out.pull(frames, Instant::now() - length)
 }
 
-/// When the clock moved to each frame, read at exact instants half a
-/// millisecond apart (`Player::frame_at`), so a test thread the scheduler
-/// runs late measures the same: the clock remembers what the device played
-/// for about half a second.
-pub struct ClockTrace {
-    next: Instant,
-    /// Each frame the clock moved to, and the first instant read at it.
-    pub moves: Vec<(i64, Instant)>,
-}
-
-impl ClockTrace {
-    pub fn new(from: Instant) -> Self {
-        Self {
-            next: from,
-            moves: Vec::new(),
-        }
-    }
-
-    /// Reads the clock at every half millisecond up to `until` (not after
-    /// now).
-    pub fn read(&mut self, player: &Player, until: Instant) {
-        assert!(
-            until.duration_since(self.next) < Duration::from_millis(400),
-            "the test fell too far behind the clock's memory"
-        );
-        while self.next <= until {
-            let f = player.frame_at(self.next);
-            if self.moves.last().is_none_or(|(m, _)| *m != f) {
-                self.moves.push((f, self.next));
-            }
-            self.next += Duration::from_micros(500);
-        }
-    }
-
-    /// When the clock first was at `frame`.
-    pub fn first_at(&self, frame: i64) -> Option<Instant> {
-        self.moves
-            .iter()
-            .find(|(f, _)| *f == frame)
-            .map(|(_, t)| *t)
-    }
-}
-
-/// Milliseconds from `a` to `b`, negative when `b` is earlier.
-pub fn ms_between(a: Instant, b: Instant) -> f64 {
-    if b >= a {
-        (b - a).as_secs_f64() * 1e3
-    } else {
-        -(a - b).as_secs_f64() * 1e3
-    }
-}
-
 /// The first channel of interleaved stereo.
 pub fn left(stereo: &[f32]) -> Vec<f32> {
     stereo.chunks(2).map(|c| c[0]).collect()

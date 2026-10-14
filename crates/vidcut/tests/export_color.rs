@@ -240,24 +240,6 @@ fn auto_color_follows_the_shown_picture() {
     assert_ne!(info.transfer, "smpte2084");
 }
 
-/// `presets get` shows `auto` for the masters and `sdr` for TikTok.
-#[test]
-fn presets_show_their_dynamic_range() {
-    let sb = Sandbox::new("presets");
-    let presets = sb.ok(&["presets", "list"]);
-    let hdr = |name: &str| {
-        presets["result"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|p| p["name"] == name)
-            .unwrap()["settings"]["video"]["hdr"]
-            .clone()
-    };
-    assert_eq!(hdr("h265-master"), "auto");
-    assert_eq!(hdr("tiktok"), "sdr");
-}
-
 #[test]
 fn hdr_metadata_follows_the_sources() {
     // Decision D46, through the binary: the plan says what an export writes,

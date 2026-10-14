@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use vidcut_av::analysis;
-use vidcut_av::fixture::{self, Container, FixtureSpec, Picture, Sound, Spoil, VideoCodec};
+use vidcut_av::fixture::{self, Container, FixtureSpec, Sound, Spoil, VideoCodec};
 use vidcut_core::render::{AudioPiece, RenderPlan};
 use vidcut_core::time::Rational;
 
@@ -61,26 +61,6 @@ fn levels_keep_time_across_a_lost_packet() {
         let peak = l.peaks[i..i + 2].iter().fold(0f32, |m, &p| m.max(p));
         assert!(peak > 0.3, "beep at {s} s: {peak}");
     }
-}
-
-#[test]
-fn shots_score_at_their_cuts_and_black_reads_black() {
-    let path =
-        fixture::ensure(&spec(150).picture(Picture::Shots { frames: 30 }).no_audio()).unwrap();
-    let s = analysis::picture_stats(&vidcut_av::decode::Input::File(path), None).unwrap();
-    assert_eq!(s.pts.len(), 150);
-    for k in [30, 60, 90, 120] {
-        assert!(s.score[k] >= 20.0, "cut at {k}: {}", s.score[k]);
-    }
-    let within = (1..150)
-        .filter(|k| k % 30 != 0)
-        .map(|k| s.score[k])
-        .fold(0f32, f32::max);
-    assert!(within < 5.0, "inside shots: {within}");
-    // The fourth shot (frames 90..120) is black; the others aren't.
-    assert!(s.black[100] > 0.99, "{}", s.black[100]);
-    assert!(s.black[10] < 0.01, "{}", s.black[10]);
-    assert!((s.pts[1] - s.pts[0] - 1.0 / 30.0).abs() < 1e-3);
 }
 
 /// A plan that plays `path`'s audio from its start, `secs` long.

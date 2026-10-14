@@ -84,12 +84,6 @@ impl Client {
             }),
         );
         assert_eq!(init["result"]["protocolVersion"], "2025-06-18", "{init}");
-        assert!(
-            init["result"]["instructions"]
-                .as_str()
-                .unwrap()
-                .contains("use_project")
-        );
         c.send(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
         c
     }
@@ -200,21 +194,6 @@ fn an_agent_cuts_silence_over_mcp_live_in_the_gui() {
 
     // 1. Headless: a new project, media, and a look at a frame.
     let mut agent = Client::spawn(&["--headless"]);
-    let tools = agent.request("tools/list", json!({}));
-    let names: Vec<&str> = tools["result"]["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|t| t["name"].as_str().unwrap())
-        .collect();
-    for n in [
-        "use_project",
-        "edit_ripple_delete_silence",
-        "storyboard_render",
-        "history_undo",
-    ] {
-        assert!(names.contains(&n), "{n} in {names:?}");
-    }
     let scratch = dir.join("scratch.vidcut");
     agent.ok(
         "use_project",

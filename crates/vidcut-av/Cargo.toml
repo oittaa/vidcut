@@ -31,3 +31,6 @@ workspace = true
 gpu-tests = []
 # Tests that play on the system's audio device (silence): `--features audio-tests`.
 audio-tests = []
+# Tests on the real clips of tests/media-manifest.toml, fetched by
+# scripts/fetch-test-media.sh: `--features media-tests`.
+media-tests = []

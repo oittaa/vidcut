@@ -107,15 +107,10 @@ fn tiles_are_made_kept_on_disk_and_found_again() {
         std::env::set_var("XDG_CACHE_HOME", &cache);
         std::env::set_var("XDG_RUNTIME_DIR", dir.join("run"));
     }
-    let fixture = match fixture::ensure(
+    let fixture = fixture::ensure(
         &FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 600).gop(120),
-    ) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("skipping: {e}");
-            return;
-        }
-    };
+    )
+    .unwrap();
     let clip = dir.join("clip.mp4");
     std::fs::copy(&fixture, &clip).unwrap();
     let project = dir.join("tiles.vidcut");
