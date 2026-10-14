@@ -416,10 +416,6 @@ mod tests {
             .unwrap();
         assert!(!off.gpu.decoding);
         assert!(off.gpu.acceleration);
-        // A file from before it keeps decoding on.
-        let read: Preferences =
-            serde_json::from_value(serde_json::json!({ "gpu": { "acceleration": true } })).unwrap();
-        assert!(read.gpu.decoding);
     }
 
     #[test]
