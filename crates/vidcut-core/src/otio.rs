@@ -67,6 +67,7 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 use crate::model::{Clip, Compound, Marks, Media, Project, Speed, TrackKind};
+use crate::store::{absolute_elsewhere, is_drive, windows_absolute};
 use crate::time::Rational;
 
 pub mod effects;
@@ -1080,36 +1081,13 @@ fn percent_decoded(s: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-/// A drive letter and colon (`C:`).
-fn is_drive(s: &str) -> bool {
-    let b = s.as_bytes();
-    b.len() == 2 && b[0].is_ascii_alphabetic() && b[1] == b':'
-}
-
-/// A Windows absolute path: `C:\…`, `C:/…` or `\\server\share\…`.
-fn is_windows_absolute(s: &str) -> bool {
-    s.starts_with("\\\\")
-        || (s.len() > 2 && is_drive(&s[..2]) && matches!(s.as_bytes()[2], b'\\' | b'/'))
-}
-
 /// An absolute path on this system: `/…`, or on Windows a Windows one (a
 /// server's written `//server/…` too).
 fn is_local_absolute(s: &str) -> bool {
     if cfg!(windows) {
-        is_windows_absolute(s) || s.starts_with("//")
+        windows_absolute(s) || s.starts_with("//")
     } else {
         s.starts_with('/')
-    }
-}
-
-/// An absolute path on the other kind of system: a Windows path on Linux,
-/// a Unix one on Windows. Its last parts are looked for next to the
-/// timeline file.
-fn is_foreign_absolute(s: &str) -> bool {
-    if cfg!(windows) {
-        s.starts_with('/') && !s.starts_with("//")
-    } else {
-        is_windows_absolute(s)
     }
 }
 
@@ -1151,13 +1129,13 @@ fn locate(url: &str, base: Option<&Path>, fps: Rational) -> Option<MediaRef> {
                 Some(r) if r.starts_with('/') => r,
                 Some(r) => match r.strip_prefix("localhost") {
                     Some(r) if r.starts_with('/') => r,
-                    _ if is_windows_absolute(r) => r,
+                    _ if windows_absolute(r) => r,
                     _ => return None,
                 },
             };
             let path = path
                 .strip_prefix('/')
-                .filter(|p| is_windows_absolute(p))
+                .filter(|p| windows_absolute(p))
                 .unwrap_or(path);
             (percent_decoded(path), Some(path.to_string()))
         }
@@ -1188,7 +1166,7 @@ fn locate(url: &str, base: Option<&Path>, fps: Rational) -> Option<MediaRef> {
     let mut paths: Vec<PathBuf> = Vec::new();
     for f in &forms {
         let local = is_local_absolute(f);
-        if !local && !is_foreign_absolute(f) {
+        if !local && !absolute_elsewhere(f, cfg!(windows)) {
             // Relative to the timeline file.
             if let Some(b) = base {
                 paths.push(b.join(native(f)));

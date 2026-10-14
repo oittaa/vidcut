@@ -6,6 +6,7 @@
 - [`crates/vidcut-av/tests/player.rs`](../../crates/vidcut-av/tests/player.rs): pictures against `frame render` at seeks and steps both ways across cuts, files, codecs, black, stills and image sequences; playing shows every frame in order; the beep lands on its sample; 2×, reverse; pieces at other speeds, at seeks, steps and playing both ways.
 - [`tests/player_sound.rs`](../../crates/vidcut-av/tests/player_sound.rs): backward sound reversed to the sample; other speeds both ways keeping the pitch; audio scrubbing: steps play their frame's sound.
 - [`tests/player_decodes.rs`](../../crates/vidcut-av/tests/player_decodes.rs): pictures playing on across an edit, after an edit that moves every frame, and stepping back over a keyframe.
+- [`tests/player_back.rs`](../../crates/vidcut-av/tests/player_back.rs): playing 300 frames backward on the CPU decodes about 300, as the windows behind are kept whole.
 
 ## 1. Threads
 
@@ -20,7 +21,7 @@
 
 vidcut-av starts them as it starts its other threads (`std::thread::Builder`, named `vidcut-…`). Someone watches what they make, so they keep their priority: the app's own rule (`threads::spawn`, gui.md §9) gives interactive work no other.
 
-**The player comes first** (`vidcut_av::first`). While a player plays, or decodes the picture its viewer waits for, the app's jobs stop decoding between frames: exports, proxies, the filmstrip and analyses. They go on when it stops. They share the GPU's decoder with the player, and no thread priority reaches that.
+**The player comes first** (`vidcut_av::first`). While a player plays, or decodes the picture its viewer waits for, the app's jobs stop decoding between frames: exports, proxies, filmstrips, pool pictures and analyses. They go on when it stops (`tests/first.rs`). They share the GPU's decoder with the player, and no thread priority reaches that.
 
 ## 2. Requests: one wanted state, merged and cancelled
 

@@ -126,6 +126,7 @@ where
         // The same flag the export frame loop loads, so a client that left
         // stops a measurement between frames.
         crate::cancel::stop()?;
+        crate::first::wait()?;
         match decoder.receive_frame(frame) {
             Ok(()) => {
                 damaged = 0;
@@ -185,7 +186,7 @@ impl Input {
     pub fn open(&self) -> Result<format::context::Input> {
         crate::init();
         match self {
-            Input::File(p) => format::input(p).ctx(|| format!("opening {}", p.display())),
+            Input::File(p) => open_file(p),
             Input::Sequence {
                 pattern,
                 first,
@@ -193,6 +194,19 @@ impl Input {
             } => open_sequence(pattern, *first, *rate),
         }
     }
+}
+
+/// Opens the media file at `path` for demuxing. A path from another kind
+/// of system names no file here (`vidcut_core::store::from_another_system`):
+/// on Windows, `/Users/x/a.mp4` would open another file on this drive.
+pub(crate) fn open_file(path: &Path) -> Result<format::context::Input> {
+    if vidcut_core::store::from_another_system(path) {
+        return Err(Error::Invalid(format!(
+            "{} is a path on another kind of system: relink the media",
+            path.display()
+        )));
+    }
+    format::input(path).ctx(|| format!("opening {}", path.display()))
 }
 
 fn open_sequence(pattern: &Path, first: u64, rate: (i32, i32)) -> Result<format::context::Input> {
@@ -564,9 +578,16 @@ fn keyframes_not_idr(source: &Input) -> Result<bool> {
             .then(|| usize::from(*p.extradata.add(4) & 3) + 1)
     };
     let duration = input.duration().max(0);
+    // Seeks take times from the file's start, which a recording may have
+    // hours in.
+    // SAFETY: the opened context's own field, read only.
+    let start = match unsafe { (*input.as_ptr()).start_time } {
+        ffmpeg::ffi::AV_NOPTS_VALUE => 0,
+        t => t,
+    };
     for k in 0..5 {
         if k > 0 {
-            let ts = duration * k / 5;
+            let ts = start + duration * k / 5;
             if input.seek(ts, ..ts).is_err() {
                 break;
             }

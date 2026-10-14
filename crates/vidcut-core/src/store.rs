@@ -283,17 +283,13 @@ fn native(relative: &Path) -> PathBuf {
 /// Windows drive's (`C:\…`, `C:/…`) or server's (`\\server\…`). One written
 /// on the other kind of system names nothing here, so it is kept as it was
 /// written rather than joined onto the project's folder: it shows as it
-/// was, and goes back into the file unchanged.
+/// was, and goes back into the file unchanged. Its media are missing
+/// ([`from_another_system`]).
 fn absolute_anywhere(path: &Path) -> bool {
     let Some(s) = path.to_str() else {
         return path.is_absolute();
     };
-    let b = s.as_bytes();
-    s.starts_with(['/', '\\'])
-        || (b.len() > 2
-            && b[0].is_ascii_alphabetic()
-            && b[1] == b':'
-            && matches!(b[2], b'\\' | b'/'))
+    s.starts_with(['/', '\\']) || windows_absolute(s)
 }
 
 /// The project in the file's `text`, its relative paths made absolute from
@@ -335,4 +331,60 @@ fn write_atomic(path: &Path, data: &str) -> std::io::Result<()> {
         let _ = std::fs::remove_file(&tmp);
     }
     result
+}
+
+/// Whether `path` is absolute only on the other kind of system: `/…` on
+/// Windows, where it has no drive, and a drive's or a server's (`C:\…`,
+/// `\\server\…`) elsewhere. It names no file here: its media are missing
+/// until relinked (deviation X1), and it is never opened, as on Windows it
+/// would name another file on this drive.
+pub fn from_another_system(path: &Path) -> bool {
+    path.to_str()
+        .is_some_and(|s| absolute_elsewhere(s, cfg!(windows)))
+}
+
+/// [`from_another_system`] on Windows (`windows`), or on macOS and Linux.
+pub(crate) fn absolute_elsewhere(s: &str, windows: bool) -> bool {
+    if windows {
+        s.starts_with('/') && !s.starts_with("//")
+    } else {
+        windows_absolute(s)
+    }
+}
+
+/// A Windows absolute path: a drive's (`C:\…`, `C:/…`) or a server's
+/// (`\\server\…`).
+pub(crate) fn windows_absolute(s: &str) -> bool {
+    s.starts_with("\\\\")
+        || (s.get(..2).is_some_and(is_drive) && matches!(s.as_bytes().get(2), Some(b'\\' | b'/')))
+}
+
+/// A drive letter and colon (`C:`).
+pub(crate) fn is_drive(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 2 && b[0].is_ascii_alphabetic() && b[1] == b':'
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{absolute_elsewhere, windows_absolute};
+
+    #[test]
+    fn a_name_starting_with_a_wide_character_is_relative() {
+        assert!(!windows_absolute("日本/a.mp4"));
+    }
+
+    #[test]
+    fn a_path_from_the_root_names_nothing_on_windows() {
+        assert!(absolute_elsewhere("/Users/x/a.mp4", true));
+        assert!(!absolute_elsewhere("//server/share/a.mp4", true));
+        assert!(!absolute_elsewhere(r"C:\x\a.mp4", true));
+    }
+
+    #[test]
+    fn a_drive_or_server_path_names_nothing_elsewhere() {
+        assert!(absolute_elsewhere(r"C:\x\a.mp4", false));
+        assert!(absolute_elsewhere(r"\\server\share\a.mp4", false));
+        assert!(!absolute_elsewhere("/Users/x/a.mp4", false));
+    }
 }

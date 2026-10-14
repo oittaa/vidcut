@@ -36,7 +36,9 @@ impl MissingWatch {
                     let files = list.lock().unwrap_or_else(|e| e.into_inner()).clone();
                     let missing: HashSet<String> = files
                         .into_iter()
-                        .filter(|(_, path)| !path.is_file())
+                        .filter(|(_, path)| {
+                            vidcut_core::store::from_another_system(path) || !path.is_file()
+                        })
                         .map(|(id, _)| id)
                         .collect();
                     if missing != last {
