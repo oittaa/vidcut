@@ -24,6 +24,7 @@ use crate::error::{Context, Error, Result};
 use crate::export::encode::{Availability, Upload};
 use crate::export::normalize::Normalizer;
 use crate::ffmpeg::{self, codec, encoder, ffi, format, frame};
+use crate::route::{Dest, Facts, Ops, Place, Route, Went, plan};
 
 /// Frames between keyframes.
 const KEYFRAMES: u32 = 60;
@@ -283,11 +284,11 @@ pub struct WrittenProxy {
     pub frames: u64,
     /// The encoder it was made with.
     pub encoder: ProxyEncoder,
-    /// Decoded and scaled on the GPU (NVDEC and CUDA), frames never leaving
-    /// it, rather than on the CPU.
-    pub on_gpu: bool,
-    /// The GPU that decoded it (frames copied down unless `on_gpu`); `None`:
-    /// the CPU.
+    /// How its frames went from the decoder to the encoder, by the first
+    /// one: they stayed on the GPU, came down, or the CPU decoded them.
+    /// `None` before any frame.
+    pub went: Option<Went>,
+    /// The GPU that decoded it; `None`: the CPU.
     pub decoder: Option<crate::hw::Kind>,
     /// The frames copied between GPU memory and memory to make it, its
     /// failed attempts too.
@@ -301,8 +302,9 @@ pub struct WrittenProxy {
 ///
 /// The frames decode on `decoder`, a GPU's, where it decodes the stream,
 /// on the CPU otherwise. NVENC takes NVDEC's frames deinterlaced, turned,
-/// converted and scaled on the GPU, never copied to memory
-/// ([`CudaPictures`](crate::cuda::CudaPictures)). For every other encoder
+/// converted and scaled on the GPU, never copied to memory, where the
+/// planner leaves them there ([`plan`],
+/// [`CudaPictures`](crate::cuda::CudaPictures)). For every other encoder
 /// the CPU scales, the GPU's frames shrunk there before they come down
 /// (`hw::Shrinker`).
 pub fn write(
@@ -337,7 +339,7 @@ pub fn write(
         total: total.map_or(0, |t| t as i64),
         started: std::time::Instant::now(),
     };
-    let done = |frames, enc: &ProxyEncoder, on_gpu, decoder| -> Result<WrittenProxy> {
+    let done = |frames, enc: &ProxyEncoder, went, decoder| -> Result<WrittenProxy> {
         std::fs::rename(&tmp, dest)
             .map_err(|e| Error::Invalid(format!("replacing {}: {e}", dest.display())))?;
         Ok(WrittenProxy {
@@ -346,7 +348,7 @@ pub fn write(
             height,
             frames,
             encoder: enc.clone(),
-            on_gpu,
+            went,
             decoder,
             copies: copies.counted(),
         })
@@ -359,7 +361,7 @@ pub fn write(
             None => VideoReader::open_input(input)?,
         };
         match encode_into(&mut reader, enc, (width, height), &tmp, &shown) {
-            Ok((frames, on_gpu)) => return done(frames, enc, on_gpu, reader.gpu()),
+            Ok((frames, went)) => return done(frames, enc, went, reader.gpu()),
             Err(Failed::Encoding(e)) => {
                 let _ = std::fs::remove_file(&tmp);
                 return Err(e);
@@ -656,24 +658,38 @@ impl<'a> Writer<'a> {
 }
 
 /// Encodes what `reader` decodes: for NVENC, NVDEC's frames scaled on the
-/// GPU and handed to it there; otherwise scaled with the export's
-/// normalizer, on the CPU or shrunk on the GPU first. The frames written,
-/// and whether they stayed on the GPU.
+/// GPU and handed to it there, where the planner leaves them there;
+/// otherwise scaled with the export's normalizer, on the CPU or shrunk on
+/// the GPU first. The frames written, and how the first one went.
 fn encode_into(
     reader: &mut VideoReader,
     enc: &ProxyEncoder,
     (width, height): (u32, u32),
     tmp: &Path,
     shown: &Shown<'_>,
-) -> std::result::Result<(u64, bool), Failed> {
+) -> std::result::Result<(u64, Option<Went>), Failed> {
     let rotation = reader.rotation();
     let times = (reader.time_base(), reader.frame_rate());
     let size = (width, height);
+    let decoded_on_gpu = reader.gpu().is_some();
+    let stays = |first: &frame::Video| {
+        let ops = Ops::of(first, rotation, format::Pixel::NV12, None, false);
+        let cuda = Dest::Encoder { place: Place::Cuda };
+        plan(&Facts::of(first, &ops, size), cuda) == Route::Gpu
+    };
     let mut pictures = reader
         .cuda()
-        .filter(|_| enc.kind == EncoderChoice::Nvenc)
+        .filter(|_| enc.kind == EncoderChoice::Nvenc && reader.peek().is_some_and(stays))
         .and_then(|d| {
-            crate::cuda::CudaPictures::new(d, reader, size, format::Pixel::NV12, None, false).ok()
+            crate::cuda::CudaPictures::new(d, reader, size, format::Pixel::NV12, None, false)
+                .inspect_err(|e| {
+                    crate::debug!(
+                        "decoding",
+                        "{}: the GPU won't scale the frames for NVENC, the CPU makes them: {e}",
+                        reader.path().display()
+                    )
+                })
+                .ok()
         });
     let gpu_frames = pictures
         .as_mut()
@@ -685,12 +701,16 @@ fn encode_into(
     let mut writer = Writer::new(tmp, enc, size, times, gpu_frames, shown)?;
     let mut normalizer: Option<Normalizer> = None;
     let mut shrinker = None;
+    let mut went = None;
     let mut encoding = || -> Result<()> {
         loop {
             let src = reader.next_frame()?;
             // NVENC's go to the GPU's scaler, and to the encoder as it
             // makes them; nothing goes in at the end, for the last ones.
             if let Some(pictures) = pictures.as_mut() {
+                if src.is_some() {
+                    went.get_or_insert(Went::Stayed);
+                }
                 pictures.push(src.as_ref())?;
                 while let Some(p) = pictures.pull()? {
                     let pts = p.pts();
@@ -705,8 +725,21 @@ fn encode_into(
                 return Ok(());
             };
             let src = if crate::hw::on_gpu(&src) {
-                crate::export::normalize::down(&mut shrinker, &src, rotation, size)?
+                let small = crate::export::normalize::down(&mut shrinker, &src, rotation, size)?;
+                let at = (small.width(), small.height());
+                went.get_or_insert(Went::Down {
+                    size: at,
+                    whole: at == (src.width(), src.height()),
+                });
+                small
             } else {
+                // A GPU's frames in memory came down whole in the reader,
+                // which deinterlaces them there.
+                let whole = Went::Down {
+                    size: (src.width(), src.height()),
+                    whole: true,
+                };
+                went.get_or_insert(if decoded_on_gpu { whole } else { Went::Cpu });
                 src
             };
             let picture = scale(&mut normalizer, &src, rotation, size, enc.pixel())?;
@@ -714,9 +747,8 @@ fn encode_into(
         }
     };
     encoding().map_err(Failed::Encoding)?;
-    let on_gpu = pictures.is_some();
     let frames = writer.finish(reader.path()).map_err(Failed::Encoding)?;
-    Ok((frames, on_gpu))
+    Ok((frames, went))
 }
 
 fn scale(
