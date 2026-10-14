@@ -85,6 +85,17 @@ fn a_clip_color_comes_back_from_the_file() {
 }
 
 #[test]
+fn a_marker_past_the_last_clip_keeps_its_length() {
+    // Spec D40: a marker keeps its length, and the whole timeline takes it.
+    let mut f = Fixture::new(&[(4.0, true)]);
+    f.append("m1", 0, 50);
+    f.ok(req("markers.add", json!({"at": "40f", "duration": "30f"})));
+    let doc = export(f.editor.project(), "t", None, Locations::Absolute).unwrap();
+    let range = &doc["tracks"]["markers"][0]["marked_range"];
+    assert_eq!(range["duration"]["value"], json!(30.0));
+}
+
+#[test]
 fn another_editors_color_becomes_the_nearest_clip_color() {
     let item =
         json!({"color": {"OTIO_SCHEMA": "Color.1", "r": 0.1, "g": 0.6, "b": 0.55, "a": 1.0}});
