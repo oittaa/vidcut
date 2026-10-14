@@ -368,7 +368,8 @@ enum Failed {
 
 /// Opens `enc` for `width`×`height` frames timed in `enc_tb`: for VAAPI,
 /// with the context that uploads them; with `gpu_frames`, for frames in
-/// GPU memory of that frames context.
+/// GPU memory of that frames context; with `vt`, VideoToolbox's encoder on
+/// that decoder's device, for its frames and those uploaded.
 fn open(
     enc: &ProxyEncoder,
     (width, height): (u32, u32),
@@ -376,6 +377,7 @@ fn open(
     rate: Option<ffmpeg::Rational>,
     global: bool,
     gpu_frames: Option<*mut ffi::AVBufferRef>,
+    vt: Option<&crate::hw::GpuDecoder>,
 ) -> Result<(encoder::Video, ffmpeg::Codec, Option<Upload>)> {
     // FFmpeg's DNxHR takes nothing smaller ("Input dimensions too small").
     if enc.name == "dnxhd" && (width < 256 || height < 120) {
@@ -435,6 +437,12 @@ fn open(
             hw_frames(&mut ctx, v.frames)?;
             Some(v)
         }
+        (_, EncoderChoice::VideoToolbox, _) if vt.is_some() => {
+            let up = Upload::videotoolbox(vt.expect("checked"), enc.pixel(), width, height)?;
+            ctx.set_format(format::Pixel::VIDEOTOOLBOX);
+            hw_frames(&mut ctx, up.frames)?;
+            Some(up)
+        }
         (Some(on), EncoderChoice::Amf | EncoderChoice::Qsv, _) => {
             crate::export::encode::on_device(&mut ctx, enc.kind, on)?;
             ctx.set_format(enc.pixel());
@@ -479,6 +487,7 @@ impl<'a> Writer<'a> {
         size: (u32, u32),
         (src_tb, rate): (ffmpeg::Rational, Option<ffmpeg::Rational>),
         gpu_frames: Option<*mut ffi::AVBufferRef>,
+        vt: Option<&crate::hw::GpuDecoder>,
         shown: &'a Shown<'a>,
     ) -> std::result::Result<Self, Failed> {
         let enc_tb = encode_time_base(src_tb);
@@ -487,7 +496,7 @@ impl<'a> Writer<'a> {
             .map_err(Failed::Encoding)?;
         let global = octx.format().flags().contains(format::Flags::GLOBAL_HEADER);
         let (encoder, codec, vaapi) =
-            open(enc, size, enc_tb, rate, global, gpu_frames).map_err(Failed::Opening)?;
+            open(enc, size, enc_tb, rate, global, gpu_frames, vt).map_err(Failed::Opening)?;
         let mut header = || -> Result<()> {
             let mut ost = octx
                 .add_stream(Some(codec))
@@ -540,9 +549,10 @@ impl<'a> Writer<'a> {
         // The source's picture type would force it on the encoder.
         picture.set_kind(ffmpeg::picture::Type::None);
         unsafe { (*picture.as_mut_ptr()).duration = dur };
+        // Pictures on the GPU are on the encoder's device already.
         let mut picture = match &self.vaapi {
-            Some(v) => v.upload(&picture)?,
-            None => picture,
+            Some(v) if !crate::hw::on_gpu(&picture) => v.upload(&picture)?,
+            _ => picture,
         };
         picture.set_pts(Some(pts));
         self.durations.insert(pts, dur);
@@ -615,9 +625,19 @@ fn encode_into(
     if gpu_frames.is_none() {
         pictures = None;
     }
-    let mut writer = Writer::new(tmp, enc, size, times, gpu_frames, shown)?;
+    // VideoToolbox's encoders take its decoder's frames on the GPU.
+    let vt = reader
+        .gpu_decoder()
+        .filter(|d| {
+            pictures.is_none()
+                && enc.kind == EncoderChoice::VideoToolbox
+                && d.kind() == crate::hw::Kind::VideoToolbox
+        })
+        .cloned();
+    let mut writer = Writer::new(tmp, enc, size, times, gpu_frames, vt.as_ref(), shown)?;
     let mut normalizer: Option<Normalizer> = None;
     let mut shrinker = None;
+    let (mut fitter, mut fit_failed, mut fitted) = (None, false, 0u64);
     let mut encoding = || -> Result<()> {
         loop {
             let src = reader.next_frame()?;
@@ -637,6 +657,29 @@ fn encode_into(
             let Some(src) = src else {
                 return Ok(());
             };
+            // VideoToolbox's 8-bit frames in the proxy's colors are turned
+            // and scaled on the GPU, and go to its encoder there.
+            if vt.is_some()
+                && !fit_failed
+                && crate::hw::Fitter::fits(&src, format::Pixel::NV12, None)
+                && crate::color::kept(crate::color::Source::of(&src), None)
+            {
+                let nv12 = format::Pixel::NV12;
+                match crate::hw::Fitter::fit(&mut fitter, &src, rotation, size, size, nv12, None) {
+                    Ok(picture) => {
+                        writer.push(picture, src.pts())?;
+                        fitted += 1;
+                        continue;
+                    }
+                    Err(e) => {
+                        crate::debug!(
+                            "decoding",
+                            "the GPU won't scale the frames for the proxy, the CPU makes them: {e}"
+                        );
+                        fit_failed = true;
+                    }
+                }
+            }
             let src = if crate::hw::on_gpu(&src) {
                 crate::export::video::down(&mut shrinker, &src, rotation, size)?
             } else {
@@ -647,8 +690,8 @@ fn encode_into(
         }
     };
     encoding().map_err(Failed::Encoding)?;
-    let on_gpu = pictures.is_some();
     let frames = writer.finish(reader.path()).map_err(Failed::Encoding)?;
+    let on_gpu = pictures.is_some() || (fitted > 0 && fitted == frames);
     Ok((frames, on_gpu))
 }
 

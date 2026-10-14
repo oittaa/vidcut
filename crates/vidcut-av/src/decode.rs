@@ -959,6 +959,11 @@ impl VideoReader {
         self.gpu.as_ref().map(crate::hw::GpuDecoder::kind)
     }
 
+    /// The GPU decoder it decodes on.
+    pub(crate) fn gpu_decoder(&self) -> Option<&crate::hw::GpuDecoder> {
+        self.gpu.as_ref()
+    }
+
     /// NVDEC's CUDA device, when it decodes.
     pub(crate) fn cuda(&self) -> Option<&crate::cuda::CudaDevice> {
         self.gpu.as_ref().and_then(crate::hw::GpuDecoder::cuda)
