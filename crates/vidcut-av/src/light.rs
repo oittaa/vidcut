@@ -614,32 +614,17 @@ fn measure(
         reader.seek(((span.from - EPS) / tick).floor() as i64)?;
     }
     let threads = std::thread::available_parallelism().map_or(2, |n| n.get().clamp(2, 4));
-    let (to_measure, inbox) = std::sync::mpsc::sync_channel::<(f64, frame::Video)>(threads);
-    let inbox = Mutex::new(inbox);
-    let (mut frames, ended) = std::thread::scope(|scope| -> Result<_> {
-        let measuring: Vec<_> = (0..threads)
-            .map(|_| {
-                scope.spawn(|| -> Result<Vec<(f64, FrameLight)>> {
-                    let mut relayout = crate::export::video::Relayout::new();
-                    let mut out = Vec::new();
-                    loop {
-                        let next = inbox.lock().unwrap_or_else(|e| e.into_inner()).recv();
-                        let Ok((t, f)) = next else {
-                            return Ok(out);
-                        };
-                        out.push((t, measure_with(&f, &mut relayout)?));
-                    }
-                })
-            })
-            .collect();
-        let decoded = (|| -> Result<bool> {
+    let (mut frames, ended) = on_threads(
+        threads,
+        crate::export::video::Relayout::new,
+        |give| {
             while let Some(f) = reader.next_frame()? {
                 if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
                     return Err(Error::Invalid(crate::export::CANCELLED.into()));
                 }
                 let t = f.pts().unwrap_or(0) as f64 * tick;
-                // Measuring stopped: its error follows.
-                if to_measure.send((t, crate::decode::in_memory(f)?)).is_err() {
+                // Measuring failed: its error follows.
+                if !give((t, crate::decode::in_memory(f)?)) {
                     return Ok(false);
                 }
                 if t >= span.to - EPS {
@@ -650,16 +635,60 @@ fn measure(
                 }
             }
             Ok(true)
-        })();
-        drop(to_measure);
-        let mut frames = Vec::new();
-        for m in measuring {
-            frames.extend(m.join().expect("measuring light")?);
-        }
-        Ok((frames, decoded?))
-    })?;
+        },
+        |relayout, (t, f): (f64, frame::Video)| Ok((t, measure_with(&f, relayout)?)),
+    )?;
     frames.sort_by(|a, b| a.0.total_cmp(&b.0));
     Ok((frames, ended))
+}
+
+/// Hands what `feed` gives to `threads` threads, which `work` it, each
+/// with its own `state`. `give` says whether to go on: once a thread
+/// fails, the others take what comes and drop it, so `feed` never waits
+/// for them. What they made and what `feed` returned, or the first error.
+fn on_threads<T: Send, R: Send, S>(
+    threads: usize,
+    state: impl Fn() -> S + Sync,
+    feed: impl FnOnce(&mut dyn FnMut(T) -> bool) -> Result<bool>,
+    work: impl Fn(&mut S, T) -> Result<R> + Sync,
+) -> Result<(Vec<R>, bool)> {
+    let (to_work, inbox) = std::sync::mpsc::sync_channel::<T>(threads);
+    let inbox = Mutex::new(inbox);
+    let failed = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        let working: Vec<_> = (0..threads)
+            .map(|_| {
+                scope.spawn(|| -> Result<Vec<R>> {
+                    let mut own = state();
+                    let mut made = Vec::new();
+                    let mut error = None;
+                    loop {
+                        let next = inbox.lock().unwrap_or_else(|e| e.into_inner()).recv();
+                        let Ok(item) = next else {
+                            return error.map_or(Ok(made), Err);
+                        };
+                        if error.is_some() || failed.load(Ordering::Relaxed) {
+                            continue;
+                        }
+                        match work(&mut own, item) {
+                            Ok(r) => made.push(r),
+                            Err(e) => {
+                                failed.store(true, Ordering::Relaxed);
+                                error = Some(e);
+                            }
+                        }
+                    }
+                })
+            })
+            .collect();
+        let fed = feed(&mut |item| !failed.load(Ordering::Relaxed) && to_work.send(item).is_ok());
+        drop(to_work);
+        let mut made = Vec::new();
+        for w in working {
+            made.extend(w.join().expect("a working thread")?);
+        }
+        Ok((made, fed?))
+    })
 }
 
 static CACHE: OnceLock<PathBuf> = OnceLock::new();
@@ -838,5 +867,25 @@ impl Meter {
             crate::export::video::frame_ref(f)?
         };
         measure_with(&f, &mut self.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failing_thread_ends_the_work() {
+        let feed = |give: &mut dyn FnMut(u32) -> bool| {
+            for i in 0..1000 {
+                if !give(i) {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        };
+        let fail =
+            |_: &mut (), _: u32| -> Result<u32> { Err(Error::Invalid("unmeasurable".into())) };
+        assert!(on_threads(2, || (), feed, fail).is_err());
     }
 }
