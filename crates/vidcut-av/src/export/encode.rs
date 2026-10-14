@@ -1010,7 +1010,8 @@ impl Upload {
         }
     }
 
-    /// The device these frames are on.
+    /// The device these frames are on (Direct3D 11's frames open on it).
+    #[cfg(windows)]
     pub(crate) fn device(&self) -> crate::hw::Device {
         // SAFETY: another reference to its live device.
         crate::hw::Device(unsafe { ffi::av_buffer_ref(self.device) })
