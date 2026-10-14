@@ -297,7 +297,7 @@ impl FrameReader {
 /// Frames as RGBA pictures of `width`×`height` at `fps`, decoding on
 /// `decoder` where it decodes a stream: HEVC, AV1 and VP9. H.264, which the
 /// CPU decodes cheaply, stays on the CPU: frames read in jumps seek at every
-/// one, and a seek makes NVDEC's H.264 decoder anew (gotchas.md).
+/// one, and FFmpeg 8 makes the GPU's H.264 decoder anew at each (gotchas.md).
 fn frames(
     fps: Rational,
     (width, height): (u32, u32),
