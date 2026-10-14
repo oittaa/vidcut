@@ -563,6 +563,113 @@ fn otio_round_trips_frame_exactly() {
     );
 }
 
+/// V1's clips in `project` as (start, duration).
+fn clips_in(sb: &Sandbox, project: &Path) -> Vec<(i64, i64)> {
+    let t = sb.ok_in(project, &["timeline", "get"]);
+    t["result"]["tracks"][0]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|i| i["type"] == "clip")
+        .map(|i| {
+            (
+                i["start"].as_i64().unwrap(),
+                i["duration"].as_i64().unwrap(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn projects_come_from_otio_files() {
+    // Deviation X9: `project create --from` makes a project file of an OTIO
+    // file.
+    let sb = Sandbox::new("from-otio");
+    let a = fixture(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (24, 1),
+        96,
+    ));
+    sb.ok(&["project", "create", s(&sb.project())]);
+    sb.ok(&["media", "add", s(&a)]);
+    sb.ok(&["edit", "append", "m1", "--range", "0f..48f"]);
+    sb.ok(&["edit", "append", "m1", "--range", "60f..84f"]);
+    sb.ok(&["markers", "add", "--at", "10f", "--name", "look"]);
+    let cut = sb.dir.path().join("cut.otio");
+    sb.ok(&["export", "start", s(&cut)]);
+    let path = |name: &str| sb.dir.path().join(name);
+
+    // vidcut's file: the project it holds, ids and all.
+    let own = path("own.vidcut");
+    let r = sb.ok(&["project", "create", s(&own), "--from", s(&cut)]);
+    assert_eq!(r["result"]["warnings"], serde_json::json!([]));
+    assert_eq!(
+        sb.ok_in(&own, &["timeline", "get"])["result"],
+        sb.ok(&["timeline", "get"])["result"]
+    );
+    // Its format is its own.
+    let other = path("other.vidcut");
+    sb.fails(
+        2,
+        &[
+            "project",
+            "create",
+            s(&other),
+            "--from",
+            s(&cut),
+            "--fps",
+            "25",
+        ],
+    );
+    // A file is never overwritten.
+    sb.fails(4, &["project", "create", s(&own), "--from", s(&cut)]);
+
+    // Another editor's file: the format comes from it and its video.
+    let mut doc: Value = serde_json::from_str(&std::fs::read_to_string(&cut).unwrap()).unwrap();
+    doc["metadata"]["vidcut"]
+        .as_object_mut()
+        .unwrap()
+        .remove("project");
+    let theirs = path("theirs.otio");
+    std::fs::write(&theirs, doc.to_string()).unwrap();
+    let made = path("made.vidcut");
+    let r = sb.ok(&["project", "create", s(&made), "--from", s(&theirs)]);
+    // The rate the video probes as, which the project took first.
+    let settings = &r["result"]["settings"];
+    let rate = sb.ok(&["project", "summary"])["result"]["settings"]["fps"].clone();
+    assert_eq!(
+        (&settings["fps"], &settings["width"], &settings["height"]),
+        (&rate, &serde_json::json!(320), &serde_json::json!(180))
+    );
+    assert_eq!(
+        timeline_shape(&sb, &made),
+        timeline_shape(&sb, &sb.project())
+    );
+    // A format given: the timeline is converted to it, and the start counts
+    // at its rate.
+    let at25 = path("at25.vidcut");
+    let r = sb.ok(&[
+        "project",
+        "create",
+        s(&at25),
+        "--from",
+        s(&theirs),
+        "--fps",
+        "25",
+        "--width",
+        "640",
+        "--height",
+        "360",
+        "--start-tc",
+        "01:00:00:00",
+    ]);
+    assert_eq!(r["result"]["settings"]["start_tc"], 90_000);
+    assert_eq!(clips_in(&sb, &at25), [(0, 50), (50, 25)]);
+}
+
 /// Moves every media file an OTIO document names to `/nonexistent/footage/`,
 /// keeping its file name.
 fn move_media(doc: &mut Value) {

@@ -1,11 +1,12 @@
 //! Runs requests: headless against a project file, live in the GUI.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::{Value, json};
 use vidcut_av::export::Progress;
+use vidcut_core::model::Format;
 use vidcut_core::store::{Store, state_dir};
 use vidcut_core::{Editor, Envelope, Error, ErrorCode, Project, Request, Response, Result};
 
@@ -57,6 +58,7 @@ pub fn run_with(
         Request::Doctor {} => answer(doctor()),
         Request::ProjectCreate {
             path,
+            from,
             fps,
             width,
             height,
@@ -65,28 +67,33 @@ pub fn run_with(
             drop_frame,
             start_tc,
         } => {
-            let mut settings =
-                vidcut_core::model::Settings::with_format(fps.as_deref(), size(*width, *height)?)?;
-            if let Some(d) = drop_frame {
-                settings.set_drop_frame(*d)?;
-            }
-            if let Some(tc) = start_tc {
-                settings.set_start_tc(tc)?;
-            }
-            if let Some(r) = sample_rate {
-                settings.sample_rate = *r;
-            }
-            if let Some(c) = channels {
-                settings.channels = *c;
-            }
-            let path = if envelope.dry_run {
-                path.clone()
-            } else {
-                Store::create(path, &vidcut_core::Project::new(settings.clone()))?
-                    .path()
-                    .to_path_buf()
+            let format = Format {
+                fps: fps.clone(),
+                size: size(*width, *height)?,
+                drop_frame: *drop_frame,
+                start_tc: start_tc.clone(),
+                sample_rate: *sample_rate,
+                channels: *channels,
             };
-            answer(json!({ "project": path, "settings": settings }))
+            if let Some(from) = from {
+                let (project, path, warnings) =
+                    create_from_otio(path, from, &format, envelope.dry_run)?;
+                answer(json!({
+                    "project": path,
+                    "settings": project.settings,
+                    "warnings": warnings,
+                }))
+            } else {
+                let settings = format.settings()?;
+                let path = if envelope.dry_run {
+                    path.clone()
+                } else {
+                    Store::create(path, &vidcut_core::Project::new(settings.clone()))?
+                        .path()
+                        .to_path_buf()
+                };
+                answer(json!({ "project": path, "settings": settings }))
+            }
         }
         Request::PresetsList {} => {
             let (available, gpu) = (
@@ -439,6 +446,30 @@ fn watches_cancel(request: &Request) -> bool {
 }
 
 /// A new project's picture size from `width` and `height`: both or neither.
+/// `project.create` with `from`: makes the project file `path` from the
+/// OpenTimelineIO file `from`, with `format` if another editor wrote it.
+/// The project, its file and what couldn't be imported. A dry run makes no
+/// file and unpacks no bundle.
+pub fn create_from_otio(
+    path: &Path,
+    from: &Path,
+    format: &Format,
+    dry_run: bool,
+) -> Result<(Project, PathBuf, Vec<String>)> {
+    // Before the work of reading the file.
+    if path.exists() {
+        return Err(Error::invalid(format!("{} already exists", path.display())));
+    }
+    let env = AvEnv::for_project(path);
+    let (project, warnings) = vidcut_core::editor::project_from_otio(from, format, !dry_run, &env)?;
+    let path = if dry_run {
+        path.to_path_buf()
+    } else {
+        Store::create(path, &project)?.path().to_path_buf()
+    };
+    Ok((project, path, warnings))
+}
+
 pub fn size(width: Option<u32>, height: Option<u32>) -> Result<Option<(u32, u32)>> {
     match (width, height) {
         (Some(w), Some(h)) => Ok(Some((w, h))),

@@ -38,6 +38,14 @@ pub enum Request {
     ProjectCreate {
         /// The new `.vidcut` file.
         path: PathBuf,
+        /// An OpenTimelineIO file to make the project from: `.otio`, an
+        /// `.otioz` bundle (its media are unpacked next to it) or an `.otiod`
+        /// bundle folder. A file vidcut wrote of its whole timeline gives the
+        /// project it holds, and takes no format. Another editor's timeline
+        /// is imported. Without a format, the project then takes the file's
+        /// frame rate and start timecode, and its first video's size.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<PathBuf>,
         /// Frame rate, like `25`, `29.97` or `30000/1001`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fps: Option<String>,
@@ -769,29 +777,37 @@ pub enum Request {
     },
 
     // ---------------------------------------------------------------- live (a running GUI)
-    /// Open (or with `create`, create) a project in the running GUI.
+    /// Open (or with `create`, create) a project in the running GUI. An
+    /// OpenTimelineIO file opens as a new project file made from it, as
+    /// `project.create` with `from` makes it.
     #[serde(rename = "project.open")]
     ProjectOpen {
         path: PathBuf,
         #[serde(default)]
         create: bool,
-        /// With `create`, the new project's frame rate, like `25`, `29.97`
-        /// or `30000/1001`. Without a rate and a size, the first video added
-        /// sets the format.
+        /// For an OpenTimelineIO file: the project file to make (default:
+        /// next to it, named alike, like `cut.vidcut` for `cut.otio`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        save_as: Option<PathBuf>,
+        /// With `create` or an OpenTimelineIO file, the new project's frame
+        /// rate, like `25`, `29.97` or `30000/1001`. Without a rate and a
+        /// size, the first video added sets the format.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fps: Option<String>,
-        /// With `create`, the new project's frame width; give the height too.
+        /// With `create` or an OpenTimelineIO file, the new project's frame
+        /// width; give the height too.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         width: Option<u32>,
-        /// With `create`, the new project's frame height; give the width too.
+        /// With `create` or an OpenTimelineIO file, the new project's frame
+        /// height; give the width too.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         height: Option<u32>,
-        /// With `create`, count record timecode drop-frame (29.97 and 59.94;
-        /// decision D47).
+        /// With `create` or an OpenTimelineIO file, count record timecode
+        /// drop-frame (29.97 and 59.94; decision D47).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         drop_frame: Option<bool>,
-        /// With `create`, the record timecode of the first frame
-        /// (deviation X7).
+        /// With `create` or an OpenTimelineIO file, the record timecode of
+        /// the first frame (deviation X7).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         start_tc: Option<TimeSpec>,
     },
@@ -1373,9 +1389,13 @@ impl Request {
             Self::MediaRelink { path, search, .. } => {
                 path.iter_mut().chain(search.iter_mut()).collect()
             }
-            Self::Probe { path }
-            | Self::ProjectOpen { path, .. }
-            | Self::ProjectCreate { path, .. } => vec![path],
+            Self::Probe { path } => vec![path],
+            Self::ProjectOpen { path, save_as, .. } => {
+                std::iter::once(path).chain(save_as.iter_mut()).collect()
+            }
+            Self::ProjectCreate { path, from, .. } => {
+                std::iter::once(path).chain(from.iter_mut()).collect()
+            }
             Self::TimelineImport {
                 path,
                 search,

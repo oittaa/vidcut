@@ -319,5 +319,17 @@ fn exact_seeks_external_edit_and_proxies() {
         assert_eq!(h.shown(dir), want, "proxy, timeline frame {t}");
     }
 
+    // An OTIO file opens as a project file made next to it (deviation X9).
+    let cut = dir.join("cut.otio");
+    h.ok("export.start", json!({ "output": cut }));
+    let tracks = h.ok("timeline.get", json!({})).result["tracks"].clone();
+    let opened = h.ok("project.open", json!({ "path": cut })).result;
+    assert_eq!(opened["warnings"], json!([]));
+    let project = PathBuf::from(opened["project"].as_str().unwrap());
+    assert_eq!(project.file_name().unwrap(), "cut.vidcut");
+    assert_eq!(h.ok("timeline.get", json!({})).result["tracks"], tracks);
+    // The name is taken now.
+    assert!(h.call("project.open", json!({ "path": cut })).is_err());
+
     drop(h);
 }

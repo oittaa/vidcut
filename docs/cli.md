@@ -123,6 +123,7 @@ vidcut history undo                         # works across separate runs
   - An `.otioz`'s media unpack next to it, into a folder named after it (`cut/media/…`), or into `--unpack DIR`. A dry run unpacks nothing and says what it would.
   - Media that moved: paths relative to the file and a project folder moved with the file are found by themselves. Otherwise `--search /mnt/footage` looks for them by file name, subfolders too. Missing media fail the import (exit 7) with the list of files.
   - What can't be imported (clips overlapping others on their track) is listed in `warnings`. Clip effects, transitions, speed changes, generators, titles and compound clips from another editor are kept and written back (deviation X9). `timeline get` lists them in `effects`, each track's `transitions`, `speed`, `generator` and `compound`.
+- `vidcut project create p.vidcut --from cut.otio` makes a project of the file. A file vidcut wrote of its whole timeline gives the project it holds. Another editor's timeline is imported, in the format given or else the file's.
 - Raw: `timeline.import` also takes the document inline as `otio` (relative media paths then can't be found but by `search`).
 
 **Live control of a running GUI** ([docs/decisions/gui.md](decisions/gui.md)):
@@ -140,7 +141,7 @@ vidcut history undo                         # works across separate runs
 | `vidcut selection set --clips c1,c2 --media m3`, `selection get` | the selection |
 | `vidcut gui screenshot --out v.png [--target window]` | the viewer picture as shown (works while minimized), or the whole window |
 | `vidcut gui log [--since N]` | what everyone (the human too) did: each entry's `summary` in words, and the request as sent |
-| `vidcut gui window --size 1600,1000`, `project open FILE [--create [--fps 25 --width 1920 --height 1080]]`, `gui quit` | window and project |
+| `vidcut gui window --size 1600,1000`, `project open FILE [--create [--fps 25 --width 1920 --height 1080]]`, `gui quit` | window and project. `project open cut.otio` opens a project file made next to it, `cut.vidcut` (or `--save-as FILE`), as `project create --from` makes it |
 | `vidcut jobs list`, `jobs get\|wait\|cancel J [--timeout S]` | export and proxy jobs, the GUI's own included. They run one at a time, and the others are `queued`. `wait` fails like the job did |
 | `vidcut pool set --bin A --sort name --descending true` | the bin the Media Pool shows and its order; Source Tape follows it |
 | `vidcut player mute [true\|false]` | the viewer's monitoring mute (not the export); without a value, toggles |

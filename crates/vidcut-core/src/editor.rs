@@ -13,8 +13,8 @@ use crate::change::Change;
 use crate::error::{Error, Result};
 use crate::history::HistoryFile;
 use crate::model::{
-    Clip, ClipAudio, Compound, Effects, Generator, ImageSequence, Media, MediaInfo, Project, Proxy,
-    Transition, VideoInfo,
+    Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Media, MediaInfo,
+    Project, Proxy, Transition, VideoInfo,
 };
 use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
@@ -209,6 +209,16 @@ pub struct Unpacked {
 pub fn is_otioz(path: &Path) -> bool {
     path.extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("otioz"))
+}
+
+/// Whether `path` names an OpenTimelineIO file: `.otio`, an `.otioz`
+/// bundle or an `.otiod` bundle folder.
+pub fn is_timeline_file(path: &Path) -> bool {
+    path.extension().is_some_and(|e| {
+        ["otio", "otioz", "otiod"]
+            .iter()
+            .any(|x| e.eq_ignore_ascii_case(x))
+    })
 }
 
 /// Reads an `.otio` file, or the `content.otio` of an `.otiod` folder.
@@ -1437,6 +1447,7 @@ fn mutate(
                 unpack: unpack.as_deref(),
                 write: !dry_run,
                 flatten: *flatten,
+                adopt_rate: true,
             },
             env,
         )?,
@@ -1773,6 +1784,9 @@ struct Import<'a> {
     write: bool,
     /// Compound clips decomposed into their clips.
     flatten: bool,
+    /// An empty timeline takes the file's frame rate. Otherwise the file is
+    /// converted to the project's.
+    adopt_rate: bool,
 }
 
 /// The pool's ids of an imported timeline's media, by [`media_key`].
@@ -2393,6 +2407,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         unpack,
         write,
         flatten,
+        adopt_rate,
     } = *import;
     let (doc, file) = match (path, doc) {
         (Some(path), None) => {
@@ -2485,13 +2500,19 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
                 .and_then(|m| m.info.timecode)
                 .is_some_and(|tc| tc.drop_frame)
         });
+        let rate = p.settings.fps;
         p.settings.set_fps(t.fps);
         if drop && t.fps.has_drop_frame() {
             p.settings.drop_frame = true;
         }
         p.settings.start_tc = t.start_tc;
+        // The file's start keeps its label at the project's rate.
+        if !adopt_rate {
+            p.settings.set_fps(rate);
+        }
         p.settings.auto_format = false;
-    } else if t.fps != p.settings.fps {
+    }
+    if t.fps != p.settings.fps {
         warnings.push(format!(
             "converted from {} to the project's {} fps: cuts may move by up to half a frame",
             t.fps, p.settings.fps
@@ -2630,6 +2651,72 @@ pub fn open_otio(
         )));
     }
     Ok(Some((p, warnings)))
+}
+
+/// The project the OTIO file at `path` makes, and what couldn't be
+/// imported. A file vidcut wrote of its whole timeline gives the project it
+/// holds ([`open_otio`]). Another file's timeline is imported into a new
+/// project of `format`. What `format` doesn't give comes from the file: its
+/// frame rate and start timecode, and its first video's size. `write` is
+/// false in a dry run: a bundle isn't unpacked.
+pub fn project_from_otio(
+    path: &Path,
+    format: &Format,
+    write: bool,
+    env: &dyn Env,
+) -> Result<(Project, Vec<String>)> {
+    let file = env.open_timeline(path, None, write)?;
+    let doc = serde_json::from_str::<Value>(&file.text)
+        .map_err(|e| Error::usage(format!("{}: not an OTIO (JSON) file: {e}", path.display())))?;
+    if otio::holds_project(&doc) {
+        if !format.is_empty() {
+            return Err(Error::usage(format!(
+                "{} holds a vidcut project, with its own format: leave out the format",
+                path.display()
+            )));
+        }
+        if let Some(opened) = open_otio(&doc, Some(&file.base), env)? {
+            return Ok(opened);
+        }
+    }
+    // The start counts at the rate the import settles on.
+    let first = Format {
+        drop_frame: None,
+        start_tc: None,
+        ..format.clone()
+    };
+    let mut p = Project::new(first.settings()?);
+    let import = Import {
+        path: Some(path),
+        doc: None,
+        replace: false,
+        search: &[],
+        unpack: None,
+        write,
+        flatten: false,
+        adopt_rate: format.fps.is_none(),
+    };
+    let result = import_timeline(&mut p, &import, env)?;
+    if let Some(d) = format.drop_frame {
+        p.settings.set_drop_frame(d)?;
+    }
+    if let Some(tc) = &format.start_tc {
+        p.settings.set_start_tc(tc)?;
+    }
+    let mut warnings: Vec<String> =
+        serde_json::from_value(result["warnings"].clone()).unwrap_or_default();
+    let dropped = otio::transitions::prune(&mut p);
+    if dropped > 0 {
+        warnings.push(otio::transitions::dropped(dropped));
+    }
+    let problems = validate::violations(&p);
+    if !problems.is_empty() {
+        return Err(Error::internal(format!(
+            "the imported project breaks invariants (a vidcut bug): {}",
+            problems.join("; ")
+        )));
+    }
+    Ok((p, warnings))
 }
 
 fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
