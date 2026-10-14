@@ -2,7 +2,7 @@
 
 **When:** next time on a Linux desktop with an NVIDIA GPU. High priority.
 
-NVENC exports convert turned, BT.601, HDR and 10-bit placed pieces with libplacebo on a Vulkan device derived from CUDA (export.md §5). On Windows (RTX 4080 SUPER), three exports at once used to hang or show the previous frame because of a libplacebo bug (gotchas.md). vidcut now works around it. Nobody has checked the workaround on Linux with an NVIDIA GPU: the N150 is Intel, WSL has no NVIDIA Vulkan driver, and CI has no GPU.
+NVENC exports convert turned, BT.601, HDR and 10-bit placed pieces with libplacebo on a Vulkan device derived from CUDA (export.md §5). A libplacebo bug makes exports hang or show the previous frame, and vidcut works around it (gotchas.md). Check the workaround on Linux with an NVIDIA GPU.
 
 On the desktop, make a project `check.vidcut` from the barcode fixtures in `$VIDCUT_TEST_DATA`: a turned clip, an SD clip, an HDR clip and a 10-bit clip. Export it with `--encoder cpu` to `cpu.mp4` once. Then run three NVENC exports at once, 60 times:
 
