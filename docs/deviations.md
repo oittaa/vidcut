@@ -85,6 +85,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
     - the audio of each video track's clips, as an audio track (J/L cuts become audio clips offset from the video edits)
     - each audio track, and markers
     - in `metadata.vidcut`: the In/Out marks, clip gain/mute and track settings (lock, mute, solo, fader, name)
+    - for the whole timeline, also the rest of the project in `metadata.vidcut.project`: the settings, the media pool with its bins, and the source tape marks. Clips, markers and media keep their ids.
     - each clip's Clip Color, as OpenTimelineIO's item color, which vidcut's import reads back
     - the clip effects, transitions, generators, compound clips and speed changes carried from another editor's file (below)
 

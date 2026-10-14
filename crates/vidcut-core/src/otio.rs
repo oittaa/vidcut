@@ -251,6 +251,19 @@ fn media_reference(p: &Project, m: &Media, locations: Locations, rate: f64) -> V
     })
 }
 
+/// Where the file of `m` is, as `locations` names it: in a bundle, its
+/// place there.
+fn written_path(m: &Media, locations: Locations) -> PathBuf {
+    match locations {
+        Locations::Bundle(names) => match (names.get(&m.id), &m.sequence) {
+            (Some(dir), Some(_)) => PathBuf::from(dir).join(m.path.file_name().unwrap_or_default()),
+            (Some(path), None) => PathBuf::from(path),
+            (None, _) => m.path.clone(),
+        },
+        Locations::Absolute => m.path.clone(),
+    }
+}
+
 /// The timeline range `[a, b)` of the clip's audio an export of `[a, b)`
 /// writes, if any.
 fn audio_part(c: &crate::model::Clip, a: i64, b: i64) -> Option<(i64, i64)> {
@@ -450,7 +463,7 @@ pub fn export(
                 if let Some(x) = transitions::head(p, t, c, false, s, &video, rate) {
                     video.push(x);
                 }
-                let mut meta = json!({ "clip": c.id, "media": c.media });
+                let mut meta = json!({ "clip": c.id, "media": c.media, "color": c.color });
                 if let Some(au) = &c.audio {
                     meta["stream"] = json!(au.stream);
                     meta["gain_db"] = json!(au.gain_db);
@@ -504,7 +517,10 @@ pub fn export(
                 if let Some(x) = transitions::head(p, t, c, true, s, &audio, rate) {
                     audio.push(x);
                 }
-                let mut meta = json!({ "clip": c.id, "stream": au.stream, "gain_db": au.gain_db });
+                let mut meta = json!({
+                    "clip": c.id, "media": c.media, "color": c.color, "stream": au.stream,
+                    "gain_db": au.gain_db,
+                });
                 own_pace(&mut meta, c, s);
                 let n = m
                     .and_then(|m| m.info.audio.get(au.stream as usize))
@@ -622,7 +638,10 @@ pub fn export(
                 "comment": k.note,
                 "color": otio_color(&k.color),
                 "marked_range": range((k.at - a) as f64, length as f64, rate),
-                "metadata": { VIDCUT: { "color": k.color }, EDITOR: { "Note": k.note } },
+                "metadata": {
+                    VIDCUT: { "marker": k.id, "color": k.color },
+                    EDITOR: { "Note": k.note },
+                },
             })
         })
         .collect();
@@ -638,6 +657,24 @@ pub fn export(
             .filter(|o| *o > a && *o <= b)
             .map(|o| o - a),
     };
+    let mut ours = json!({ "fps": p.settings.fps, "marks": marks });
+    // The whole timeline is the project: the rest of it goes along.
+    if span.is_none() {
+        ours["project"] = json!(ProjectMeta {
+            settings: p.settings.clone(),
+            media: p
+                .media
+                .iter()
+                .map(|m| Media {
+                    path: written_path(m, locations),
+                    ..m.clone()
+                })
+                .collect(),
+            bins: p.bins.clone(),
+            tape_marks: p.tape_marks.clone(),
+            next_id: p.next_id.clone(),
+        });
+    }
     Ok(json!({
         "OTIO_SCHEMA": "Timeline.1",
         "name": name,
@@ -653,7 +690,7 @@ pub fn export(
             "metadata": {},
         },
         "metadata": {
-            VIDCUT: { "fps": p.settings.fps, "marks": marks },
+            VIDCUT: ours,
             EDITOR: { "Resolve OTIO Meta Version": "1.0" },
         },
     }))
@@ -715,7 +752,7 @@ fn compound_item(
     v["effects"] = json!(effects);
     v["markers"] = json!([]);
     v["enabled"] = json!(c.enabled);
-    v["metadata"][VIDCUT] = json!({ "clip": c.id });
+    v["metadata"][VIDCUT] = json!({ "clip": c.id, "color": c.color });
     v
 }
 
@@ -764,6 +801,9 @@ pub struct MediaRef {
 pub struct ImportedClip {
     /// Which clip it is, for [`ImportedTransition`]s.
     pub key: usize,
+    /// Its id and its media's in vidcut, when vidcut wrote the file.
+    pub id: Option<String>,
+    pub media_id: Option<String>,
     /// The track it goes on: `V<n>` or `A<n>`.
     pub track: String,
     pub media: MediaRef,
@@ -798,8 +838,10 @@ pub struct ImportedClip {
     pub compound: Option<Compound>,
     /// Its speed change: a time effect, as the file has it.
     pub speed: Option<Speed>,
-    /// Its Clip Color.
+    /// The Clip Color it shows, and its own as vidcut wrote it
+    /// ([`kept_color`]).
     pub color: Option<String>,
+    pub own_color: Option<Option<String>>,
 }
 
 impl ImportedClip {
@@ -833,6 +875,8 @@ impl ImportedClip {
     ) -> Self {
         Self {
             key,
+            id: our_str(item, "clip"),
+            media_id: None,
             track: track.to_string(),
             media: MediaRef::default(),
             name: item["name"].as_str().unwrap_or("").to_string(),
@@ -854,6 +898,7 @@ impl ImportedClip {
             compound: None,
             speed: None,
             color: clip_color(item),
+            own_color: kept_color(item),
         }
     }
 
@@ -938,6 +983,21 @@ pub struct ImportedMarker {
     pub name: String,
     pub note: String,
     pub color: String,
+    /// Its id in vidcut, when vidcut wrote the file.
+    pub id: Option<String>,
+}
+
+/// What a project holds besides its timeline, as an OTIO file of the
+/// whole timeline keeps it (`metadata.vidcut.project`). Other editors read
+/// the timeline from the file's own items.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ProjectMeta {
+    pub settings: crate::model::Settings,
+    /// The pool. In a bundle, paths are relative to its folder.
+    pub media: Vec<Media>,
+    pub bins: Vec<String>,
+    pub tape_marks: crate::model::TapeMarks,
+    pub next_id: crate::model::NextIds,
 }
 
 /// A timeline read from an OTIO file.
@@ -957,6 +1017,8 @@ pub struct Imported {
     /// Whether the file has audio tracks. Without any, clips take their
     /// media's audio.
     pub has_audio_tracks: bool,
+    /// The rest of the project, when vidcut wrote the file.
+    pub project: Option<ProjectMeta>,
     pub warnings: Vec<String>,
 }
 
@@ -1387,6 +1449,19 @@ fn timeline_rate(tl: &Value, tracks: &[&Value]) -> Option<f64> {
     most.or_else(|| time(&tl["global_start_time"]).map(|(_, r)| r))
 }
 
+/// A clip's own Clip Color in a file vidcut wrote: `Some(None)` when the
+/// clip shows its media's. `None` for other files.
+fn kept_color(item: &Value) -> Option<Option<String>> {
+    item["metadata"][VIDCUT]["clip"]
+        .is_string()
+        .then(|| our_str(item, "color"))
+}
+
+/// A string vidcut keeps in `item`'s metadata.
+fn our_str(item: &Value, key: &str) -> Option<String> {
+    item["metadata"][VIDCUT][key].as_str().map(String::from)
+}
+
 /// A marker at timeline frame `at`.
 fn marker(k: &Value, at: i64, fps: Rational) -> ImportedMarker {
     let color = match k["metadata"][VIDCUT]["color"].as_str() {
@@ -1406,6 +1481,7 @@ fn marker(k: &Value, at: i64, fps: Rational) -> ImportedMarker {
         name: k["name"].as_str().unwrap_or("").to_string(),
         note: note.to_string(),
         color,
+        id: our_str(k, "marker"),
     }
 }
 
@@ -1502,6 +1578,8 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                     keys[i] = Some(clips.len());
                     clips.push(ImportedClip {
                         key: clips.len(),
+                        id: our_str(item, "clip"),
+                        media_id: our_str(item, "media"),
                         track: id.clone(),
                         media,
                         name: item["name"].as_str().unwrap_or("").to_string(),
@@ -1523,6 +1601,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         compound: None,
                         speed,
                         color: clip_color(item),
+                        own_color: kept_color(item),
                     });
                 }
                 Err(e) => warnings.push(format!("{}; left as a gap", e.message)),
@@ -1646,6 +1725,8 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             keys[i] = Some(clips.len());
             clips.push(ImportedClip {
                 key: clips.len(),
+                id: our_str(item, "clip"),
+                media_id: our_str(item, "media"),
                 track,
                 media,
                 name: item["name"].as_str().unwrap_or("").to_string(),
@@ -1666,6 +1747,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 compound: None,
                 speed,
                 color: clip_color(item),
+                own_color: kept_color(item),
             });
         }
         transitions_of(between, &keys, true, fps, &mut found);
@@ -1819,6 +1901,20 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     markers.dedup();
     let marks: Marks =
         serde_json::from_value(tl["metadata"][VIDCUT]["marks"].clone()).unwrap_or_default();
+    let project = tl["metadata"][VIDCUT]
+        .get("project")
+        .and_then(|v| serde_json::from_value::<ProjectMeta>(v.clone()).ok())
+        .map(|mut meta| {
+            // Relative to the file's folder, as in a bundle.
+            if let Some(base) = base {
+                for m in &mut meta.media {
+                    if m.path.is_relative() {
+                        m.path = base.join(native(&m.path.to_string_lossy()));
+                    }
+                }
+            }
+            meta
+        });
     Ok(Imported {
         name: tl["name"].as_str().unwrap_or("").to_string(),
         fps,
@@ -1829,6 +1925,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         markers,
         marks,
         has_audio_tracks: !audio_tracks.is_empty(),
+        project,
         warnings,
     })
 }
