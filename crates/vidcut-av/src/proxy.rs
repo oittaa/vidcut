@@ -1,5 +1,5 @@
 //! Playback proxies: a small, easy-to-decode copy of a source's pictures,
-//! AV1 or H.264 (decision D41).
+//! AV1, H.264, ProRes Proxy or DNxHR LB (decision D41).
 //!
 //! Each proxy frame keeps the source frame's presentation timestamp, in the
 //! source time base when that base is ordinary and in microseconds otherwise.
@@ -7,10 +7,11 @@
 //! (decision D41). Audio is not copied: preview audio stays on the original.
 //!
 //! The file is Matroska, written to a temporary name and renamed into place.
-//! Pictures are turned upright and scaled to `width`×`height` as 8-bit 4:2:0.
-//! Every encoder makes a keyframe every 60 frames and shows frames in the
-//! order it codes them: a seek decodes at most 60 frames, and the preview
-//! needs no tail patches for a proxy.
+//! Pictures are turned upright and scaled to `width`×`height` as 8-bit 4:2:0
+//! (ProRes 10-bit 4:2:2, DNxHR 8-bit 4:2:2). Every encoder makes
+//! a keyframe every 60 frames (ProRes and DNxHR every frame) and shows frames
+//! in the order it codes them: a seek decodes at most 60 frames, and the
+//! preview needs no tail patches for a proxy.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -30,13 +31,13 @@ const KEYFRAMES: u32 = 60;
 /// An encoder proxies can be made with.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProxyEncoder {
-    /// FFmpeg's encoder: `av1_nvenc`, `av1_vaapi`, `libsvtav1`, `libx264`,
-    /// or where this FFmpeg has neither of those two `libopenh264` or
-    /// `prores_ks`.
+    /// FFmpeg's encoder: `av1_nvenc`, `av1_vaapi`, `libsvtav1`, `libx264`
+    /// (where this FFmpeg has neither of those two `libopenh264` or
+    /// `prores_ks`), `prores_videotoolbox`, `prores_ks` or `dnxhd`.
     pub name: String,
-    /// `av1`, `h264` or `prores`.
+    /// `av1`, `h264`, `prores` or `dnxhr`.
     pub codec: &'static str,
-    /// Hardware (NVENC, VAAPI) or software (CPU).
+    /// Hardware (NVENC, VAAPI, VideoToolbox) or software (CPU).
     pub kind: EncoderChoice,
     /// A VAAPI render node.
     pub device: Option<String>,
@@ -57,6 +58,7 @@ impl ProxyEncoder {
         let codec = match self.codec {
             "av1" => "AV1",
             "prores" => "ProRes Proxy",
+            "dnxhr" => "DNxHR LB",
             _ => "H.264",
         };
         let what = match (self.kind, self.name.as_str()) {
@@ -65,10 +67,11 @@ impl ProxyEncoder {
                 "VAAPI hardware ({})",
                 self.device.as_deref().unwrap_or("GPU")
             ),
+            (EncoderChoice::VideoToolbox, _) => "Apple hardware (VideoToolbox)".to_string(),
             (_, "libsvtav1") => "software (SVT-AV1)".to_string(),
             (_, "libx264") => "software (x264)".to_string(),
             (_, "libopenh264") => "software (OpenH264)".to_string(),
-            (_, "prores_ks") => "software (FFmpeg's)".to_string(),
+            (_, "prores_ks" | "dnxhd") => "software (FFmpeg's)".to_string(),
             (_, other) => format!("software ({other})"),
         };
         format!("{codec}, {what}")
@@ -76,8 +79,9 @@ impl ProxyEncoder {
 
     fn pixel(&self) -> format::Pixel {
         match (self.kind, self.codec) {
-            (EncoderChoice::Vaapi, _) => format::Pixel::NV12,
+            (EncoderChoice::Vaapi | EncoderChoice::VideoToolbox, _) => format::Pixel::NV12,
             (_, "prores") => format::Pixel::YUV422P10LE,
+            (_, "dnxhr") => format::Pixel::YUV422P,
             _ => format::Pixel::YUV420P,
         }
     }
@@ -117,6 +121,11 @@ impl ProxyEncoder {
             ],
             // ProRes Proxy: every frame a keyframe.
             "prores_ks" => vec![("profile", "0".into()), ("vendor", "apl0".into())],
+            // Apple's ProRes hardware only: without it the session won't
+            // open, and FFmpeg's own takes over.
+            "prores_videotoolbox" => vec![("profile", "proxy".into()), ("allow_sw", "0".into())],
+            // DNxHR LB, 8-bit 4:2:2: every frame a keyframe.
+            "dnxhd" => vec![("profile", "dnxhr_lb".into())],
             // AV1's quantizer index (0–255) is its global quality: it has
             // no `qp`.
             "av1_vaapi" => vec![("rc_mode", "CQP".into()), ("global_quality", "128".into())],
@@ -126,29 +135,35 @@ impl ProxyEncoder {
 }
 
 /// The encoders `choice` makes proxies with here, best first: hardware AV1
-/// (NVENC, then VAAPI) when this machine has a working one, then x264 for
-/// automatic and H.264, SVT-AV1 for AV1; without those, OpenH264, else
-/// ProRes Proxy. A proxy takes the first that opens: NVENC allows a few
-/// sessions at a time.
+/// (NVENC, then VAAPI) or ProRes (VideoToolbox) when this machine has a
+/// working one, then x264 for automatic and H.264, SVT-AV1 for AV1 (without
+/// those, OpenH264, else ProRes Proxy), FFmpeg's own for ProRes and DNxHR.
+/// A proxy takes the first that opens: NVENC allows a few sessions at a
+/// time.
 pub fn encoders(choice: ProxyCodec, available: &Availability) -> Vec<ProxyEncoder> {
+    use EncoderChoice::{Nvenc, Vaapi, VideoToolbox};
+    use format::Pixel::{NV12, YUV420P};
+    let hardware: &[(&str, &'static str, EncoderChoice, format::Pixel)] = match choice {
+        ProxyCodec::Auto | ProxyCodec::Av1 => &[
+            ("av1_nvenc", "av1", Nvenc, YUV420P),
+            ("av1_vaapi", "av1", Vaapi, NV12),
+        ],
+        ProxyCodec::Prores => &[("prores_videotoolbox", "prores", VideoToolbox, NV12)],
+        ProxyCodec::H264 | ProxyCodec::Dnxhr => &[],
+    };
     let mut out = Vec::new();
-    if choice != ProxyCodec::H264 {
-        for (name, kind, pixel) in [
-            ("av1_nvenc", EncoderChoice::Nvenc, format::Pixel::YUV420P),
-            ("av1_vaapi", EncoderChoice::Vaapi, format::Pixel::NV12),
-        ] {
-            if let Some(status) = available.find(name, pixel) {
-                out.push(ProxyEncoder {
-                    name: name.into(),
-                    codec: "av1",
-                    kind,
-                    device: status.device.clone(),
-                });
-            }
+    for &(name, codec, kind, pixel) in hardware {
+        if let Some(status) = available.find(name, pixel) {
+            out.push(ProxyEncoder {
+                name: name.into(),
+                codec,
+                kind,
+                device: status.device.clone(),
+            });
         }
     }
-    // The first software encoder this FFmpeg has. ProRes is FFmpeg's own,
-    // in every build.
+    // The first software encoder this FFmpeg has. ProRes and DNxHR are
+    // FFmpeg's own, in every build.
     let software: &[(&str, &'static str)] = match choice {
         ProxyCodec::Av1 => &[
             ("libsvtav1", "av1"),
@@ -161,6 +176,8 @@ pub fn encoders(choice: ProxyCodec, available: &Availability) -> Vec<ProxyEncode
             ("libopenh264", "h264"),
             ("prores_ks", "prores"),
         ],
+        ProxyCodec::Prores => &[("prores_ks", "prores")],
+        ProxyCodec::Dnxhr => &[("dnxhd", "dnxhr")],
     };
     if let Some((name, codec)) = software.iter().find(|(n, _)| crate::parts::has_encoder(n)) {
         out.push(ProxyEncoder::software(name, codec));
@@ -353,6 +370,13 @@ fn open(
     global: bool,
     gpu_frames: Option<*mut ffi::AVBufferRef>,
 ) -> Result<(encoder::Video, ffmpeg::Codec, Option<Upload>)> {
+    // FFmpeg's DNxHR takes nothing smaller ("Input dimensions too small").
+    if enc.name == "dnxhd" && (width < 256 || height < 120) {
+        return Err(Error::Invalid(format!(
+            "DNxHR proxies are at least 256×120 pixels, and this one would be \
+             {width}×{height}: make the proxy size larger or choose another codec"
+        )));
+    }
     let codec = encoder::find_by_name(&enc.name)
         .ok_or_else(|| Error::Invalid(format!("this FFmpeg has no {} encoder", enc.name)))?;
     let mut ctx = codec::context::Context::new_with_codec(codec)
@@ -368,6 +392,14 @@ fn open(
     ctx.set_gop(KEYFRAMES);
     // Nothing coded ahead of where it shows.
     ctx.set_max_b_frames(0);
+    // FFmpeg's own ProRes and DNxHR encoders use one core unless told
+    // otherwise.
+    if matches!(enc.name.as_str(), "prores_ks" | "dnxhd") {
+        ctx.set_threading(codec::threading::Config {
+            kind: codec::threading::Type::Frame,
+            count: 0, // let FFmpeg choose
+        });
+    }
     // Closed GOPs: every keyframe decodes on its own, so a seek can start
     // there (SVT-AV1 otherwise makes forward keyframes nothing seeks to).
     let mut flags = codec::Flags::CLOSED_GOP;
@@ -664,4 +696,29 @@ fn drain(
             .ctx(|| "writing a proxy packet".into())?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prores_takes_apples_hardware_where_it_works() {
+        crate::init();
+        let apple = Availability {
+            encoders: vec![crate::export::encode::EncoderStatus {
+                encoder: "prores_videotoolbox".into(),
+                kind: EncoderChoice::VideoToolbox,
+                device: None,
+                pixel: "nv12".into(),
+                ok: true,
+                error: None,
+            }],
+        };
+        let names: Vec<String> = encoders(ProxyCodec::Prores, &apple)
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert_eq!(names, ["prores_videotoolbox", "prores_ks"]);
+    }
 }

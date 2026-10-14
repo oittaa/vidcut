@@ -130,6 +130,12 @@ pub enum ProxyCodec {
     Av1,
     /// H.264 with x264.
     H264,
+    /// ProRes 422 Proxy: every frame a keyframe, the files many times larger.
+    /// On Apple's ProRes hardware (VideoToolbox) when there is one.
+    Prores,
+    /// DNxHR LB: every frame a keyframe, the files many times larger. At
+    /// least 256×120.
+    Dnxhr,
 }
 
 impl Default for Proxies {

@@ -13,17 +13,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::time::{Rational, TimeContext, TimeSpec, format_timecode};
 
-/// Version of the project file format.
-pub const FORMAT_VERSION: u32 = 1;
-
 /// How long a still may last in the timeline, seconds: 17 h 40 min.
 pub const STILL_LIMIT_SECS: f64 = 63_600.0;
 
 /// A whole project: one timeline (deviation X2) plus its media pool.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Project {
-    /// File format version ([`FORMAT_VERSION`]).
-    pub vidcut: u32,
     /// Increases with every change, including undo/redo. Mutations may pass
     /// `if_rev` to fail instead of clobbering a concurrent edit.
     pub rev: u64,
@@ -942,7 +937,6 @@ impl Project {
     /// An empty project with the given settings and one track, V1.
     pub fn new(settings: Settings) -> Self {
         Self {
-            vidcut: FORMAT_VERSION,
             rev: 0,
             edited: None,
             settings,

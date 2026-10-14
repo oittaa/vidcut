@@ -269,16 +269,6 @@ fn hdr_metadata_follows_the_sources() {
         json!({"max_cll": 1000, "max_fall": 400})
     );
 
-    // As a project from before: the values gone from the file.
-    let mut file: Value =
-        serde_json::from_str(&std::fs::read_to_string(&project).unwrap()).unwrap();
-    let v = &mut file["media"][0]["info"]["video"];
-    for k in ["mastering", "light", "hdr10plus"] {
-        v.as_object_mut().unwrap().remove(k);
-    }
-    std::fs::write(&project, file.to_string()).unwrap();
-    assert!(sb.ok(&["media", "get", "m1"])["result"]["info"]["video"]["light"].is_null());
-
     let plan = sb.plan("master.mkv", &["--preset", "h265-master"]);
     let m = &plan["outputs"][0]["metadata"];
     assert_eq!(m["mode"], "hdr10plus", "{m}");

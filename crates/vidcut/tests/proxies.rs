@@ -262,6 +262,31 @@ fn proxies_encode_beside_the_session() {
         "the replaced proxy's file went: {:?}",
         files(&proxies)
     );
+    // ProRes Proxy and DNxHR LB the same, each in place of the one before;
+    // the answer says what made it.
+    for (codec, encoder) in [
+        ("prores", "ProRes Proxy, software (FFmpeg's)"),
+        ("dnxhr", "DNxHR LB, software (FFmpeg's)"),
+    ] {
+        ok(
+            &h,
+            "preferences.set",
+            json!({ "proxies": { "codec": codec } }),
+        );
+        let made = ok(&h, "proxy.generate", json!({ "media": "m1" }));
+        let how = made["proxies"][0]["made_with"].as_str().unwrap_or_default();
+        assert!(how.ends_with(encoder), "{made}");
+        let proxy = ok(&h, "media.get", json!({ "media": "m1" }))["proxy"].clone();
+        assert_eq!(proxy["codec"], codec, "{proxy}");
+        assert!(
+            proxy["path"]
+                .as_str()
+                .unwrap()
+                .ends_with(&format!("-{codec}.mkv")),
+            "{proxy}"
+        );
+        assert_eq!(files(&proxies).len(), 1, "{:?}", files(&proxies));
+    }
     ok(
         &h,
         "preferences.set",
