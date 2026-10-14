@@ -79,8 +79,8 @@ pub struct ViewerStats {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaybackStats {
-    /// Frames shown exactly. While playing, presents late and frames
-    /// passed over.
+    /// Frames shown exactly. While playing, frames late and frames passed
+    /// over.
     pub frames: u64,
     pub late: u64,
     pub skipped: u64,

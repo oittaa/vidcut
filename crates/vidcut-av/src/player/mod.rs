@@ -172,7 +172,7 @@ pub struct Stats {
     /// The frame the viewer is at, and the picture shown last.
     pub position: i64,
     pub shown: Option<Shown>,
-    /// Frames shown exactly; while playing, presents late and frames passed
+    /// Frames shown exactly; while playing, frames late and frames passed
     /// over ([`Status`]).
     pub frames: u64,
     pub late: u64,
@@ -215,11 +215,11 @@ pub struct Status {
     pub presented: Option<i64>,
     /// The plan's timeline frames, `[first, end)`.
     pub range: (i64, i64),
-    /// While playing: presents that had to show an older picture because
-    /// the clock's frame wasn't decoded yet.
+    /// While the clock runs: frames it reached before their pictures were
+    /// decoded, each counted once.
     pub late: u64,
-    /// While playing at up to normal speed: frames the clock passed between
-    /// two presents without being shown.
+    /// While the clock runs at up to normal speed: frames it passed between
+    /// two presents of one play request without being shown.
     pub skipped: u64,
     /// Pictures kept, and the memory they take.
     pub kept: (usize, usize),
@@ -332,12 +332,47 @@ struct Presenter {
     /// presented.
     shown_landing: u64,
     presented: Option<i64>,
+    /// The play request whose running clock last showed a frame exactly.
+    presented_in: Option<u64>,
     /// Frames shown exactly, each counted once in a row.
     frames: u64,
     /// What decoded the picture of a file shown last.
     decoder: Option<Decoder>,
     late: u64,
+    /// The frame counted late last.
+    late_at: Option<i64>,
     skipped: u64,
+}
+
+impl Presenter {
+    /// The clock is at `pos`, and its picture is shown. `clock`: the play
+    /// request whose clock runs at up to normal speed. The frames it passed
+    /// since it showed one before were skipped. A seek or a scrub starts
+    /// another request, so its jump isn't.
+    fn shows(&mut self, clock: Option<u64>, pos: i64) {
+        if let (Some(epoch), Some(before)) = (clock, self.presented)
+            && self.presented_in == Some(epoch)
+        {
+            let passed = (pos - before).abs() - 1;
+            if passed > 0 {
+                self.skipped += passed as u64;
+            }
+        }
+        if self.presented != Some(pos) {
+            self.frames += 1;
+        }
+        self.presented = Some(pos);
+        self.presented_in = clock;
+    }
+
+    /// The clock is at `pos`, and its picture isn't decoded. Late once the
+    /// clock runs, each frame once however often the viewer looks.
+    fn missed(&mut self, runs: bool, pos: i64) {
+        if runs && self.late_at != Some(pos) {
+            self.late += 1;
+            self.late_at = Some(pos);
+        }
+    }
 }
 
 /// The decode thread's view of what is wanted.
@@ -964,33 +999,24 @@ impl Player {
     /// shows each frame a seek decodes, though it has moved on by then.
     /// `None` before the first picture is decoded.
     pub fn present(&self, now: Instant) -> Option<Shown> {
-        let (id, pos, speed, plan_gen) = {
+        let (id, pos, speed, clock, plan_gen) = {
             let mut ctl = self.shared.control();
             let pos = self.shared.position(&mut ctl, now);
-            let speed = match ctl.mode {
-                Mode::Playing { speed, .. } => speed,
-                Mode::Paused { .. } => 0.0,
+            // The clock runs once the sound of the play request is heard.
+            let (speed, clock) = match ctl.mode {
+                Mode::Playing { speed, epoch, .. } => {
+                    (speed, self.shared.clock_sample(epoch, now).map(|_| epoch))
+                }
+                Mode::Paused { .. } => (0.0, None),
             };
-            (ctl.plan.id(pos), pos, speed, ctl.plan_gen)
+            (ctl.plan.id(pos), pos, speed, clock, ctl.plan_gen)
         };
         let picture = self.shared.store.get(&id);
         let landed = lock(&self.shared.landed).clone();
         let mut p = lock(&self.shared.presenter);
         match picture {
             Some(picture) => {
-                if speed != 0.0
-                    && speed.abs() <= 1.0
-                    && let Some(before) = p.presented
-                {
-                    let passed = (pos - before).abs() - 1;
-                    if passed > 0 && passed < 64 {
-                        p.skipped += passed as u64;
-                    }
-                }
-                if p.presented != Some(pos) {
-                    p.frames += 1;
-                }
-                p.presented = Some(pos);
+                p.shows(clock.filter(|_| speed.abs() <= 1.0), pos);
                 if let Some(d) = picture.decoder() {
                     p.decoder = Some(d);
                 }
@@ -1004,9 +1030,7 @@ impl Player {
                 Some(shown)
             }
             None => {
-                if speed != 0.0 {
-                    p.late += 1;
-                }
+                p.missed(clock.is_some(), pos);
                 if let (n, g, Some(newer)) = landed
                     && n > p.shown_landing
                     && g == plan_gen
@@ -1246,5 +1270,43 @@ impl Drop for Player {
             let _ = t.join();
         }
         lock(&self.output).take();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Presenter;
+
+    #[test]
+    fn a_late_frame_counts_once() {
+        let mut p = Presenter::default();
+        for _ in 0..5 {
+            p.missed(true, 40);
+        }
+        p.missed(true, 41);
+        assert_eq!(p.late, 2);
+    }
+
+    #[test]
+    fn a_seek_skips_no_frames() {
+        let mut p = Presenter::default();
+        p.shows(Some(1), 40);
+        p.shows(Some(2), 50);
+        assert_eq!(p.skipped, 0);
+    }
+
+    #[test]
+    fn frames_the_running_clock_passes_are_skipped() {
+        let mut p = Presenter::default();
+        p.shows(Some(1), 40);
+        p.shows(Some(1), 43);
+        assert_eq!(p.skipped, 2);
+    }
+
+    #[test]
+    fn nothing_is_late_before_the_clock_runs() {
+        let mut p = Presenter::default();
+        p.missed(false, 40);
+        assert_eq!(p.late, 0);
     }
 }

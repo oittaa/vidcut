@@ -660,9 +660,9 @@ impl Player {
         self.contents[self.active.index()].error.as_ref()
     }
 
-    /// Since the engine was made: presents that showed an older picture
-    /// because the clock's frame wasn't decoded yet (playing), and frames
-    /// the clock passed between two presents without being shown.
+    /// Since the engine was made: frames the running clock reached before
+    /// their pictures were decoded, and frames it passed between two
+    /// presents without being shown.
     pub fn misses(&self) -> (u64, u64) {
         self.engine.as_ref().map_or((0, 0), |e| {
             let s = e.status();
