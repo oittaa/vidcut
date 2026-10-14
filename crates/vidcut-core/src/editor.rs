@@ -233,12 +233,28 @@ pub struct History {
     pub redo: Vec<Entry>,
 }
 
+/// What happened to the history, for its file to add.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Moved {
+    /// A new step on top. The steps to redo are gone.
+    Step(Entry),
+    /// Steps undone.
+    Undo(u32),
+    /// Steps redone.
+    Redo(u32),
+}
+
 /// Maximum undo steps kept.
 pub const HISTORY_CAP: usize = 100;
 
 pub struct Editor {
     project: Project,
     history: History,
+    /// What happened to the history since it was last saved.
+    moved: Vec<Moved>,
+    /// The history file as this editor last read or wrote it.
+    pub(crate) on_disk: Option<crate::store::OnDisk>,
 }
 
 /// Now, in milliseconds since 1970 UTC (`Project::edited`).
@@ -249,8 +265,15 @@ fn now_ms() -> u64 {
 }
 
 impl Editor {
-    pub fn new(project: Project, history: History) -> Self {
-        Self { project, history }
+    pub fn new(project: Project, mut history: History) -> Self {
+        let over = history.undo.len().saturating_sub(HISTORY_CAP);
+        history.undo.drain(..over);
+        Self {
+            project,
+            history,
+            moved: Vec::new(),
+            on_disk: None,
+        }
     }
 
     pub fn project(&self) -> &Project {
@@ -263,6 +286,11 @@ impl Editor {
 
     pub fn into_parts(self) -> (Project, History) {
         (self.project, self.history)
+    }
+
+    /// What happened to the history since this was last called.
+    pub(crate) fn take_moved(&mut self) -> Vec<Moved> {
+        std::mem::take(&mut self.moved)
     }
 
     /// Applies one request. `playhead` is the live playhead, if any.
@@ -337,7 +365,9 @@ impl Editor {
         working.rev = self.project.rev + 1;
         working.edited = Some(now_ms());
         self.project = working;
-        self.history.undo.push(Entry { label, change });
+        let entry = Entry { label, change };
+        self.moved.push(Moved::Step(entry.clone()));
+        self.history.undo.push(entry);
         if self.history.undo.len() > HISTORY_CAP {
             self.history.undo.remove(0);
         }
@@ -363,10 +393,12 @@ impl Editor {
             project.edited = Some(now_ms());
         }
         self.project = project;
-        self.history.undo.push(Entry {
+        let entry = Entry {
             label: "external change".into(),
             change,
-        });
+        };
+        self.moved.push(Moved::Step(entry.clone()));
+        self.history.undo.push(entry);
         self.history.redo.clear();
     }
 
@@ -418,6 +450,11 @@ impl Editor {
         project.edited = Some(now_ms());
         self.project = project;
         self.history = history;
+        self.moved.push(if undo {
+            Moved::Undo(steps)
+        } else {
+            Moved::Redo(steps)
+        });
         Ok(Response {
             rev: self.project.rev,
             changes,
