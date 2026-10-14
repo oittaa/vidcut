@@ -65,6 +65,9 @@ struct Run {
     /// is queued yet, for `VIDCUT_DEBUG`.
     taken: std::time::Instant,
     queued: bool,
+    /// Each lane's peaks in the sound mixed last, `channels` a lane, for
+    /// the meters ([`super::Levels`]).
+    lanes: Vec<f32>,
 }
 
 impl Run {
@@ -198,6 +201,7 @@ impl Producer {
             ended: false,
             taken: std::time::Instant::now(),
             queued: false,
+            lanes: Vec::new(),
         });
         self.restart(from);
     }
@@ -209,6 +213,8 @@ impl Producer {
         };
         let ring = &self.shared.ring;
         ring.discard_all();
+        // What was queued won't be heard: neither are its levels.
+        self.shared.forget_levels();
         if run.speed > 0.0 {
             self.mix.seek(at);
         }
@@ -304,7 +310,20 @@ impl Producer {
         if self.muted {
             piece.samples.fill(0.0);
         }
+        let at = ring.written();
         let pushed = ring.push(&piece.samples) * channels;
+        let mut mix = vec![0.0f32; channels];
+        for frame in piece.samples.chunks(channels) {
+            for (m, s) in mix.iter_mut().zip(frame) {
+                *m = m.max(s.abs());
+            }
+        }
+        self.shared.level(super::Level {
+            at,
+            frames: (pushed / channels.max(1)) as u64,
+            mix,
+            lanes: run.lanes.clone(),
+        });
         debug_assert_eq!(pushed, piece.samples.len(), "no room for a chunk");
         if !run.queued {
             run.queued = true;
@@ -330,13 +349,19 @@ impl Producer {
         let total = self.plan.samples;
         let run = self.run.as_mut()?;
         let channels = usize::from(self.mix.channels());
-        let read = |mix: &mut AudioMix, n: usize, failed: &mut Option<_>| match mix.read(n) {
-            Ok(s) => s,
-            Err(e) => {
-                *failed = Some(e);
-                vec![0.0; n * channels]
-            }
-        };
+        let read =
+            |mix: &mut AudioMix, n: usize, failed: &mut Option<_>, lanes: &mut Vec<f32>| match mix
+                .read_metered(n)
+            {
+                Ok((s, peaks)) => {
+                    *lanes = peaks;
+                    s
+                }
+                Err(e) => {
+                    *failed = Some(e);
+                    vec![0.0; n * channels]
+                }
+            };
         let mut failed = None;
         let mixed = if run.speed > 0.0 {
             let n = ((CHUNK_SECS * rate * run.speed).round() as i64)
@@ -346,7 +371,7 @@ impl Producer {
                 None
             } else {
                 run.cursor += n;
-                Some(read(&mut self.mix, n as usize, &mut failed))
+                Some(read(&mut self.mix, n as usize, &mut failed, &mut run.lanes))
             }
         } else if run.cursor < 0 {
             None
@@ -355,7 +380,8 @@ impl Producer {
             let n = ((BLOCK_SECS * rate * run.speed.abs()).round() as i64).max(1);
             let lo = (run.cursor + 1 - n).max(0);
             self.mix.seek(lo);
-            let mut s = read(&mut self.mix, (run.cursor + 1 - lo) as usize, &mut failed);
+            let n = (run.cursor + 1 - lo) as usize;
+            let mut s = read(&mut self.mix, n, &mut failed, &mut run.lanes);
             reverse(&mut s, channels);
             run.cursor = lo - 1;
             Some(s)

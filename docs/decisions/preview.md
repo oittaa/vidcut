@@ -129,4 +129,3 @@ The Trim Editor's and Dynamic Trim's two-up show frames of a copy of the project
 ## 10. Still open
 
 - Vulkan Video decoding and AMD's VA-API pictures shown from video memory (untested): own-player.md.
-- The meters show the edit's levels, not the engine's output: todo/meters-tap-player-output.md.

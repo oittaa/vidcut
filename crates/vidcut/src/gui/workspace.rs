@@ -93,6 +93,8 @@ pub struct Workspace {
     pub stats: Option<live::stats::PlayerStats>,
     /// The GPU the window draws on, for the status bar's versions.
     pub display: Option<String>,
+    /// The peaks of the sound the viewer plays now, while it plays.
+    pub levels: Option<vidcut_av::player::Levels>,
     // View state (not part of the project).
     pub(super) pool_view: PoolView,
     pub(super) search: String,
@@ -237,6 +239,7 @@ impl Workspace {
             stats: None,
             want: [640, 360],
             display: None,
+            levels: None,
             pool_view: PoolView::Thumbnails,
             search: String::new(),
             bins: Default::default(),

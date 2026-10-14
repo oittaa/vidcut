@@ -264,6 +264,7 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let (texture, has_frame) = self.viewer.sync(&self.render, self.ws.want);
         self.ws.picture = Picture { texture, has_frame };
+        self.ws.levels = self.viewer.levels();
         let ctx = ui.ctx().clone();
         // Stats for nerds, looked at again four times a second while shown.
         self.ws.stats = self.ws.snap.stats.then(|| self.viewer.stats()).flatten();
