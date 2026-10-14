@@ -158,7 +158,9 @@ const EXAMPLES: &[(&str, &str)] = &[
     ),
     (
         "project.create",
-        "vidcut project create talk.vidcut\n  vidcut project create talk.vidcut --fps 30000/1001 --width 1920 --height 1080",
+        "vidcut project create talk.vidcut\n  \
+         vidcut project create talk.vidcut --fps 30000/1001 --width 1920 --height 1080\n  \
+         vidcut project create cut.vidcut --from cut.otio",
     ),
     (
         "project.set",

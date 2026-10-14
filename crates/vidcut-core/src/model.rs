@@ -91,6 +91,43 @@ impl Default for Settings {
     }
 }
 
+/// The format a new project is given (decision D37). What isn't given
+/// comes from the first video added, or from the timeline it is made from.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Format {
+    /// Like `25`, `29.97` or `30000/1001`.
+    pub fps: Option<String>,
+    pub size: Option<(u32, u32)>,
+    pub drop_frame: Option<bool>,
+    pub start_tc: Option<TimeSpec>,
+    pub sample_rate: Option<u32>,
+    pub channels: Option<u16>,
+}
+
+impl Format {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// A new project's settings in this format.
+    pub fn settings(&self) -> crate::error::Result<Settings> {
+        let mut s = Settings::with_format(self.fps.as_deref(), self.size)?;
+        if let Some(d) = self.drop_frame {
+            s.set_drop_frame(d)?;
+        }
+        if let Some(tc) = &self.start_tc {
+            s.set_start_tc(tc)?;
+        }
+        if let Some(r) = self.sample_rate {
+            s.sample_rate = r;
+        }
+        if let Some(c) = self.channels {
+            s.channels = c;
+        }
+        Ok(s)
+    }
+}
+
 impl Settings {
     /// A new project's settings with the frame rate (`25`, `29.97`,
     /// `30000/1001`, any positive rate) and the picture size given. Either

@@ -17,7 +17,7 @@ A simple, fully scriptable video cutting tool for Linux, Windows and macOS. Beha
   - snapping, markers, undo
 - **Export:** Quick Export and an Export dialog (deviation X3), including GPU encoding (NVIDIA, AMD, Intel, Apple) and background jobs. Dynamic range, bit depth and HDR metadata follow the footage (spec D44, D46), and a loudness target can be set ([docs/decisions/agents.md](docs/decisions/agents.md) §5).
 - **Automatic tools:** Ripple Delete Silence, Detect Scene Cuts and the Boring Detector (spec D29–D31).
-- **Interchange:** OpenTimelineIO, `.otio` and `.otioz` (deviation X9).
+- **Interchange:** OpenTimelineIO, `.otio` and `.otioz`, which also open as projects (deviation X9).
 - **Everything scriptable.** Every action in the GUI is also a CLI command and a JSON-RPC call on the running app, so scripts and AI agents can edit with you. `vidcut mcp` offers it all to AI agents over the Model Context Protocol.
 - **Deliberately not included:** effects, transitions, titles or color grading. Clip effects, transitions, generators, titles and compound clips from another editor's OTIO file are kept and written back (deviation X9).
 

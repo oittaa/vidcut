@@ -2,13 +2,19 @@
 //! (decision D37), drop-frame timecode (decision D47) and start timecode
 //! (deviation X7). New Project sends one `project.open` with `create` and
 //! the format, Project Settings one `project.set` with what changed.
+//! Opening an OpenTimelineIO file makes a project file next to it
+//! (deviation X9): another editor's file asks for the format first.
+
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
 use vidcut_core::Project;
+use vidcut_core::model::Settings;
 use vidcut_core::time::{Rational, STANDARD_RATES, TimeSpec};
 
-use super::export::near_center;
+use super::export::{Ask, Picked, near_center};
 use super::theme;
 use super::workspace::Workspace;
 
@@ -262,6 +268,61 @@ pub(super) struct NewProject {
     /// Set the format now rather than by the first video.
     choose: bool,
     format: Format,
+    /// The OpenTimelineIO file the project is made from.
+    from: Option<OtioFile>,
+}
+
+/// An OpenTimelineIO file to open, and the project file made from it.
+#[derive(Debug, Clone)]
+pub(super) struct OtioFile {
+    otio: PathBuf,
+    /// The `.vidcut` file to make.
+    target: PathBuf,
+    /// vidcut wrote it of a whole project, format and all.
+    ours: bool,
+    /// The file's frame rate and start timecode.
+    format: Format,
+}
+
+impl OtioFile {
+    /// Reads the file at `otio`: a helper thread's work.
+    pub(super) fn read(otio: PathBuf) -> Result<Self, String> {
+        use vidcut_core::Env;
+        let file = crate::env::AvEnv::new()
+            .open_timeline(&otio, None, false)
+            .map_err(|e| e.message)?;
+        let doc: Value = serde_json::from_str(&file.text)
+            .map_err(|e| format!("{} isn't an OTIO file: {e}", file_name(&otio)))?;
+        let t = vidcut_core::otio::import(&doc, None).map_err(|e| e.message)?;
+        let settings = Settings {
+            fps: t.fps,
+            start_tc: t.start_tc,
+            ..Settings::default()
+        };
+        Ok(Self {
+            target: otio.with_extension("vidcut"),
+            ours: vidcut_core::otio::holds_project(&doc),
+            format: Format {
+                rate: rate_text(t.fps),
+                start: settings.timecode(0),
+                ..Format::default()
+            },
+            otio,
+        })
+    }
+}
+
+/// What Open Project's helper thread found in an OpenTimelineIO file.
+pub(super) type Found = Arc<Mutex<Option<Result<OtioFile, String>>>>;
+
+/// Opening an OpenTimelineIO file, after its dialog.
+enum OpenOtio {
+    /// The project file's name is taken.
+    Taken(OtioFile),
+    /// Another name for it, being picked.
+    SaveAs(OtioFile, Picked),
+    /// `project.open` is making and opening it.
+    Opening(OtioFile, Ask),
 }
 
 #[derive(Default)]
@@ -270,11 +331,141 @@ pub(super) struct ProjectUi {
     /// Project Settings while open: the fields, and what the project had
     /// when it opened.
     settings: Option<(Format, Format)>,
+    /// An OpenTimelineIO file from Open Project's dialog.
+    pub(super) found: Found,
+    otio: Option<OpenOtio>,
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map_or(String::new(), |n| n.to_string_lossy().into_owned())
 }
 
 impl Workspace {
     pub(super) fn open_new_project(&mut self) {
         self.project_ui.new = Some(NewProject::default());
+    }
+
+    /// The next question for `f`: a name that is taken, then the format of
+    /// another editor's file.
+    fn otio_next(&mut self, ctx: &egui::Context, f: OtioFile) {
+        if f.target.exists() {
+            self.project_ui.otio = Some(OpenOtio::Taken(f));
+        } else if f.ours {
+            self.open_otio(ctx, f, json!({}));
+        } else {
+            self.project_ui.new = Some(NewProject {
+                choose: false,
+                format: f.format.clone(),
+                from: Some(f),
+            });
+        }
+    }
+
+    /// Makes the project file from `f` in `format` and opens it.
+    fn open_otio(&mut self, ctx: &egui::Context, f: OtioFile, format: Value) {
+        let mut params = json!({ "path": f.otio, "save_as": f.target });
+        if let (Some(p), Some(more)) = (params.as_object_mut(), format.as_object()) {
+            p.extend(more.clone());
+        }
+        self.say(format!("Opening {}…", file_name(&f.otio)));
+        let ask = Ask::send(&self.live, ctx, "project.open", params);
+        self.project_ui.otio = Some(OpenOtio::Opening(f, ask));
+    }
+
+    fn open_otio_window(&mut self, ctx: &egui::Context) {
+        let found = self
+            .project_ui
+            .found
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        match found {
+            Some(Ok(f)) => self.otio_next(ctx, f),
+            Some(Err(message)) => self.say(message),
+            None => {}
+        }
+        let Some(state) = self.project_ui.otio.take() else {
+            return;
+        };
+        self.project_ui.otio = match state {
+            OpenOtio::Taken(f) => {
+                let mut choice = None;
+                let modal = egui::Modal::new(egui::Id::new("otio-open-taken")).show(ctx, |ui| {
+                    ui.label(format!(
+                        "{} is already there. Open it, or save the project from {} under another name.",
+                        file_name(&f.target),
+                        file_name(&f.otio)
+                    ));
+                    ui.horizontal(|ui| {
+                        if ui.button("Open It").clicked() {
+                            choice = Some(Some(true));
+                        }
+                        if ui.button("Save As…").clicked() {
+                            choice = Some(Some(false));
+                        }
+                        if ui.button("Cancel").clicked() {
+                            choice = Some(None);
+                        }
+                    });
+                });
+                if choice.is_none() && super::workspace::escape_cancels(ctx, &modal) {
+                    choice = Some(None);
+                }
+                match choice {
+                    None => Some(OpenOtio::Taken(f)),
+                    Some(None) => None,
+                    Some(Some(true)) => {
+                        self.send("project.open", json!({ "path": f.target }));
+                        None
+                    }
+                    Some(Some(false)) => {
+                        let dialogs = self.dialogs.clone();
+                        let folder = f.target.parent().map(Path::to_path_buf).unwrap_or_default();
+                        let name = file_name(&f.target);
+                        let picked = Picked::ask(ctx, move || {
+                            dialogs.save_file("Save the Project As", &folder, &name, &["vidcut"])
+                        });
+                        Some(OpenOtio::SaveAs(f, picked))
+                    }
+                }
+            }
+            OpenOtio::SaveAs(mut f, picked) => match picked.take() {
+                None => Some(OpenOtio::SaveAs(f, picked)),
+                Some(None) => None,
+                Some(Some(mut path)) => {
+                    if path.extension().is_none() {
+                        path.set_extension("vidcut");
+                    }
+                    f.target = path;
+                    self.otio_next(ctx, f);
+                    self.project_ui.otio.take()
+                }
+            },
+            OpenOtio::Opening(f, ask) => match ask.take() {
+                None => Some(OpenOtio::Opening(f, ask)),
+                Some(Ok(r)) => {
+                    let warnings: Vec<String> = r.result["warnings"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|w| w.as_str().map(String::from))
+                        .collect();
+                    if !warnings.is_empty() {
+                        self.show_import_warnings(file_name(&f.otio), warnings);
+                    }
+                    None
+                }
+                Some(Err(e)) => {
+                    self.say(format!(
+                        "Couldn't open {}: {}",
+                        file_name(&f.otio),
+                        e.message
+                    ));
+                    None
+                }
+            },
+        };
     }
 
     pub(super) fn open_project_settings(&mut self) {
@@ -287,6 +478,7 @@ impl Workspace {
     pub(super) fn project_windows(&mut self, ctx: &egui::Context) {
         self.new_project_window(ctx);
         self.project_settings_window(ctx);
+        self.open_otio_window(ctx);
     }
 
     fn new_project_window(&mut self, ctx: &egui::Context) {
@@ -302,12 +494,24 @@ impl Workspace {
             .default_pos(near_center(ctx, 420.0, 200.0))
             .open(&mut open)
             .show(ctx, |ui| {
-                ui.radio_value(&mut new.choose, false, "Take the format of the first video added");
+                let auto = match &new.from {
+                    Some(f) => {
+                        ui.label(format!(
+                            "The project from {}, an OpenTimelineIO file from another editor:",
+                            file_name(&f.otio)
+                        ));
+                        "Take the file's frame rate and start, and its first video's size"
+                    }
+                    None => "Take the format of the first video added",
+                };
+                ui.radio_value(&mut new.choose, false, auto);
                 ui.radio_value(&mut new.choose, true, "Choose it now:");
                 ui.add_enabled_ui(new.choose, |ui| {
                     ui.indent("format", |ui| new.format.edit(ui, true));
                 });
-                new.format.edit_start(ui);
+                if new.from.is_none() || new.choose {
+                    new.format.edit_start(ui);
+                }
                 ui.label(
                     RichText::new(
                         "The size can change later; the frame rate only while the timeline is empty.",
@@ -319,7 +523,13 @@ impl Workspace {
                 ui.horizontal(|ui| {
                     let ok = (!new.choose || new.format.fps().is_some())
                         && new.format.start().is_some();
-                    if ui.add_enabled(ok, egui::Button::new("Create…")).clicked() {
+                    // A project from a file goes next to it: no dialog.
+                    let button = if new.from.is_some() {
+                        "Create"
+                    } else {
+                        "Create…"
+                    };
+                    if ui.add_enabled(ok, egui::Button::new(button)).clicked() {
                         let mut format = if new.choose {
                             let fps = new.format.fps().expect("checked");
                             let mut format = json!({
@@ -334,7 +544,12 @@ impl Workspace {
                         } else {
                             json!({})
                         };
-                        if !new.format.starts_at_zero() {
+                        // From a file, the field shows the file's start.
+                        let start = match new.from {
+                            Some(_) => new.choose,
+                            None => !new.format.starts_at_zero(),
+                        };
+                        if start {
                             format["start_tc"] = json!(new.format.start());
                         }
                         create = Some(format);
@@ -345,7 +560,10 @@ impl Workspace {
                 });
             });
         if let Some(format) = create {
-            self.pick_project(Some(format));
+            match new.from {
+                Some(f) => self.open_otio(ctx, f, format),
+                None => self.pick_project(ctx, Some(format)),
+            }
         } else if open && !cancel {
             self.project_ui.new = Some(new);
         }

@@ -1304,6 +1304,11 @@ impl Workspace {
         ));
     }
 
+    /// What an import left out of the timeline from `name`.
+    pub(super) fn show_import_warnings(&mut self, name: String, warnings: Vec<String>) {
+        self.export.warnings = Some((name, warnings));
+    }
+
     fn otio_windows(&mut self, ctx: &egui::Context) {
         if let Some((name, warnings)) = self.export.warnings.clone() {
             let mut open = true;

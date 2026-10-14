@@ -593,7 +593,7 @@ impl Workspace {
                     self.open_new_project();
                 }
                 if ui.button("Open Project…").clicked() {
-                    self.pick_project(None);
+                    self.pick_project(ui.ctx(), None);
                 }
                 ui.menu_button("Open Recent", |ui| {
                     for p in self.recent.clone() {
@@ -848,7 +848,7 @@ impl Workspace {
                     self.open_new_project();
                 }
                 if ui.button("Open Project…").clicked() {
-                    self.pick_project(None);
+                    self.pick_project(ui.ctx(), None);
                 }
             });
             if !self.recent.is_empty() {
@@ -941,14 +941,16 @@ impl Workspace {
     /// `project.open` params (its format), on a helper thread: portal
     /// dialogs block. The dialog starts where a project was last opened or
     /// created, else in the open project's folder, else the most recent
-    /// project's.
-    pub(super) fn pick_project(&self, new: Option<Value>) {
+    /// project's. An OpenTimelineIO file is read there too, for the
+    /// questions before it opens.
+    pub(super) fn pick_project(&self, ctx: &egui::Context, new: Option<Value>) {
         use super::folders::Kind;
         let (live, dialogs, folders) = (
             self.live.clone(),
             self.dialogs.clone(),
             self.folders.clone(),
         );
+        let (found, ctx) = (self.project_ui.found.clone(), ctx.clone());
         let folder = folders
             .get(Kind::Projects)
             .or_else(|| self.project_folder())
@@ -965,9 +967,17 @@ impl Workspace {
                 let path = if new.is_some() {
                     dialogs.save_file("New Project", &folder, "untitled.vidcut", &["vidcut"])
                 } else {
-                    dialogs.pick_file("Open Project", &folder, &["vidcut"])
+                    dialogs.pick_file("Open Project", &folder, &["vidcut", "otio", "otioz"])
                 };
-                if let Some(mut path) = path {
+                if let Some(path) = path
+                    .as_ref()
+                    .filter(|p| new.is_none() && vidcut_core::editor::is_timeline_file(p))
+                {
+                    folders.remember(Kind::Projects, path);
+                    let file = super::project::OtioFile::read(path.clone());
+                    *found.lock().unwrap_or_else(|e| e.into_inner()) = Some(file);
+                    ctx.request_repaint();
+                } else if let Some(mut path) = path {
                     let mut params = json!({ "path": path });
                     if let Some(format) = new {
                         if path.extension().is_none() {

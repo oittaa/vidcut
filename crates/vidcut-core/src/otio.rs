@@ -1457,6 +1457,12 @@ fn kept_color(item: &Value) -> Option<Option<String>> {
         .then(|| our_str(item, "color"))
 }
 
+/// Whether `doc` is an OTIO file vidcut wrote of a whole timeline, which
+/// holds the rest of its project too.
+pub fn holds_project(doc: &Value) -> bool {
+    doc["metadata"][VIDCUT]["project"].is_object()
+}
+
 /// A string vidcut keeps in `item`'s metadata.
 fn our_str(item: &Value, key: &str) -> Option<String> {
     item["metadata"][VIDCUT][key].as_str().map(String::from)
@@ -1903,7 +1909,15 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         serde_json::from_value(tl["metadata"][VIDCUT]["marks"].clone()).unwrap_or_default();
     let project = tl["metadata"][VIDCUT]
         .get("project")
-        .and_then(|v| serde_json::from_value::<ProjectMeta>(v.clone()).ok())
+        .and_then(|v| match serde_json::from_value::<ProjectMeta>(v.clone()) {
+            Ok(meta) => Some(meta),
+            Err(e) => {
+                warnings.push(format!(
+                    "the vidcut project in the file couldn't be read ({e}): only its timeline was"
+                ));
+                None
+            }
+        })
         .map(|mut meta| {
             // Relative to the file's folder, as in a bundle.
             if let Some(base) = base {

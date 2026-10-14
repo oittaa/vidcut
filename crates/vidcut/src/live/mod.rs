@@ -33,7 +33,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::{Value, json};
 use vidcut_core::editor::{media_context, resolve_clip};
-use vidcut_core::model::{Clip, Settings};
+use vidcut_core::model::{Clip, Format, Settings};
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{GuiPanel, OneOrMany, ScreenshotTarget, ViewerMode};
 use vidcut_core::time::{Keyword, Rational, TimeContext, TimeSpec, format_timecode};
@@ -195,6 +195,11 @@ pub(crate) enum Msg {
     TaskDone {
         job: Job,
         result: Result<Response>,
+    },
+    /// A project file is made: open it. What couldn't be imported.
+    Made {
+        job: Job,
+        result: Result<(PathBuf, Vec<String>)>,
     },
     /// What a request needed is measured: now it runs. `encode` is the job
     /// a proxy encode ran as.
@@ -480,7 +485,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     let create = config.create;
     let thread = crate::threads::spawn("vidcut-session", Work::Interactive, move || {
         if let Some(path) = project
-            && let Err(e) = new_settings(&path, create, None, (None, None), None, None)
+            && let Err(e) = new_settings(&path, create, &Format::default())
                 .and_then(|settings| live.open_project(&path, settings))
         {
             live.notice(
@@ -836,6 +841,15 @@ impl Live {
             }
             Msg::Captured { id, result } => self.captured(id, result),
             Msg::TaskDone { job, result } => self.finish(job, result),
+            Msg::Made { job, result } => {
+                let result = result.and_then(|(path, warnings)| {
+                    self.open_project(&path, None)?;
+                    let mut r = self.state_response();
+                    r.result["warnings"] = json!(warnings);
+                    Ok(r)
+                });
+                self.finish(job, result);
+            }
             Msg::Measured {
                 job,
                 envelope,
@@ -1220,6 +1234,16 @@ impl Live {
                 deadline: limit.map(|l| Instant::now() + l),
             }),
             Step::Task(work, task) => self.spawn_task(Job { rev: None, ..job }, work, task),
+            Step::Make(make) => {
+                let tx = self.tx.clone();
+                let job = Job { rev: None, ..job };
+                let _ = crate::threads::spawn("vidcut-make", Work::Interactive, move || {
+                    let _ = tx.send(Msg::Made {
+                        job,
+                        result: make(),
+                    });
+                });
+            }
             Step::Measure(measure, then) => {
                 let tx = self.tx.clone();
                 // The same flag a closed connection sets. Measuring is the
@@ -1811,23 +1835,61 @@ impl Live {
             Request::ProjectOpen {
                 path,
                 create,
+                save_as,
                 fps,
                 width,
                 height,
                 drop_frame,
                 start_tc,
-            } => Step::Now(
-                new_settings(
-                    &path,
-                    create,
-                    fps.as_deref(),
-                    (width, height),
+            } => {
+                let format = crate::session::size(width, height).map(|size| Format {
+                    fps,
+                    size,
                     drop_frame,
-                    start_tc.as_ref(),
+                    start_tc,
+                    ..Format::default()
+                });
+                if vidcut_core::editor::is_timeline_file(&path) {
+                    // Made on a worker (media are probed, a bundle is
+                    // unpacked), then opened here.
+                    let target = save_as.unwrap_or_else(|| path.with_extension("vidcut"));
+                    let format = match format {
+                        Ok(format) => format,
+                        Err(e) => return Step::Now(Err(e)),
+                    };
+                    // A dry run says what it would make.
+                    if envelope.dry_run {
+                        return Step::Task(
+                            Work::Interactive,
+                            Box::new(move |_| {
+                                let (project, path, warnings) = crate::session::create_from_otio(
+                                    &target, &path, &format, true,
+                                )?;
+                                Ok(answer(json!({
+                                    "project": path,
+                                    "settings": project.settings,
+                                    "warnings": warnings,
+                                })))
+                            }),
+                        );
+                    }
+                    return Step::Make(Box::new(move || {
+                        crate::session::create_from_otio(&target, &path, &format, false)
+                            .map(|(_, path, warnings)| (path, warnings))
+                    }));
+                }
+                if save_as.is_some() {
+                    return Step::Now(Err(Error::usage(
+                        "save_as is for opening an OpenTimelineIO file",
+                    )));
+                }
+                Step::Now(
+                    format
+                        .and_then(|format| new_settings(&path, create, &format))
+                        .and_then(|settings| self.open_project(&path, settings))
+                        .map(|()| self.state_response()),
                 )
-                .and_then(|settings| self.open_project(&path, settings))
-                .map(|()| self.state_response()),
-            ),
+            }
             Request::ViewerSet { mode } => {
                 let motion = self.set_viewer(mode);
                 self.shown(motion)
@@ -2830,6 +2892,8 @@ enum Step {
     Wait(Until),
     /// A task on a thread of its own, at the priority its work calls for.
     Task(Work, Task),
+    /// Make a project file on a worker, then open it here.
+    Make(Make),
     /// Measure media (or unpack a bundle's) on a worker, then run the
     /// request here (docs/decisions/agents.md §3).
     Measure(Measure, Box<Envelope>),
@@ -2841,6 +2905,9 @@ enum Step {
 /// Slow work on media that a request needs, done before it runs:
 /// measuring, unpacking.
 type Measure = Box<dyn FnOnce() -> Result<()> + Send>;
+
+/// Makes a project file: its path, and what couldn't be imported.
+type Make = Box<dyn FnOnce() -> Result<(PathBuf, Vec<String>)> + Send>;
 
 fn reply(reply: Option<Reply>, result: Result<Response>) {
     if let Some(r) = reply {
@@ -2888,26 +2955,17 @@ fn job_answer(j: &JobInfo) -> Result<Response> {
 }
 
 /// What `project.open` creates: with `create` and no file at `path`, a
-/// project with the format given; `None` opens an existing file. A format
-/// needs `create`, and a file that isn't there yet.
-fn new_settings(
-    path: &Path,
-    create: bool,
-    fps: Option<&str>,
-    (width, height): (Option<u32>, Option<u32>),
-    drop_frame: Option<bool>,
-    start_tc: Option<&TimeSpec>,
-) -> Result<Option<Settings>> {
-    let size = crate::session::size(width, height)?;
-    let format = fps.is_some() || size.is_some() || drop_frame.is_some() || start_tc.is_some();
-    if format && !create {
+/// project in `format`; `None` opens an existing file. A format needs
+/// `create`, and a file that isn't there yet.
+fn new_settings(path: &Path, create: bool, format: &Format) -> Result<Option<Settings>> {
+    if !format.is_empty() && !create {
         return Err(Error::usage("a frame rate or size needs create"));
     }
     if !create {
         return Ok(None);
     }
     if path.exists() {
-        if format {
+        if !format.is_empty() {
             return Err(Error::invalid(format!(
                 "{} already exists: open it, or create another file",
                 path.display()
@@ -2915,14 +2973,7 @@ fn new_settings(
         }
         return Ok(None);
     }
-    let mut settings = Settings::with_format(fps, size)?;
-    if let Some(d) = drop_frame {
-        settings.set_drop_frame(d)?;
-    }
-    if let Some(tc) = start_tc {
-        settings.set_start_tc(tc)?;
-    }
-    Ok(Some(settings))
+    format.settings().map(Some)
 }
 
 fn no_project() -> Error {
