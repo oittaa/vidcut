@@ -312,6 +312,7 @@ fn decode_pictures(
         if got >= pictures {
             return Ok(());
         }
+        crate::first::wait()?;
         match decoder.receive_frame(&mut frame) {
             Ok(()) => {
                 damaged = 0;
