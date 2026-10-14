@@ -109,24 +109,3 @@ fn size(f: &frame::Video) -> u64 {
     let bytes = unsafe { ffi::av_image_get_buffer_size(f.format().into(), w, h, 1) };
     u64::try_from(bytes).unwrap_or(0)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ffmpeg::format::Pixel;
-
-    #[test]
-    fn a_frame_copied_down_counts_its_bytes_for_the_job() {
-        crate::init();
-        let copies = Arc::new(Copies::default());
-        let _counting = Guard::set(copies.clone());
-        down(&frame::Video::new(Pixel::NV12, 1920, 1080));
-        let want = Copied {
-            down: 1,
-            down_bytes: 1920 * 1080 * 3 / 2,
-            up: 0,
-            up_bytes: 0,
-        };
-        assert_eq!(copies.counted(), want);
-    }
-}

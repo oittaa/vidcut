@@ -6,7 +6,7 @@
 cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 60 600
 ```
 
-`g=GOP` and `b=BFRAMES` set the keyframe spacing and B-frames (H.264 with B-frames has open GOPs). `r=90` (180, 270) stores the pictures turned, like phone video.
+`g=GOP` and `b=BFRAMES` set the keyframe spacing and B-frames (H.264 with B-frames has open GOPs).
 
 **Project speed:** `scripts/history-speed.sh [EDITS]` (release builds) makes a project of 300 media and 2000 clips in a temporary folder, with `FILL` undo steps (100). It then times EDITS edits, each followed by a command that only reads, and prints the history's size after each.
 
@@ -26,12 +26,10 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 
 **Media inspection** (`crates/vidcut-av/examples/`):
 - `read_barcode FILE...`: the barcode index in images or video.
-- `compare A B [OUTDIR K]` (release build): two videos picture by picture, decoded on the CPU and made RGB at A's size: the mean difference in levels, each channel's mean of B minus A, and the largest. Writes picture K of each as PNG.
 - `packets FILE [FROM TO]`: video packets in decode order, with pts, dts and keyframe flags.
-- `filmstrip FILE OUTDIR [N [WxH]]`: pool thumbnails, timed, with the frames copied down from the GPU (`WxH`: a box other than 192×108).
+- `filmstrip FILE OUTDIR [N]`: pool thumbnails, timed.
 - `tiles FILE [HEIGHT] [gpu]`: timeline tiles, timed at spacings from 0.25 to 30 s; `gpu` decodes on the GPU in use.
 - `seek_check FILE...`: seeks to every frame of barcode fixtures on the CPU and on each GPU decoder, and lists the seeks that show other frames.
-- `proxy_check [--side N] FILE...` (release build): makes a proxy of each barcode fixture with every proxy encoder on every GPU here, decoding on the CPU and on each GPU decoder. For each it prints how the frames went, the frames copied down and up, and the frames whose barcode or timestamp isn't the source's.
 - `decode_speed FILE [FRAMES]`: decoding speed, cores and seek times on the CPU and on each GPU decoder.
 - `passes FILE START_S SECONDS CODEC ENCODER MBPS [key=value…]` (release build): exports a stretch at a bitrate (`qN`: constant quality) with `video.*` settings (`passes=2`), and prints the bitrate reached, the time and the luma PSNR.
 

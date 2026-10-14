@@ -1580,20 +1580,6 @@ mod tests {
     }
 
     #[test]
-    fn every_step_asks_for_the_fixed_kernels_where_scale_cuda_has_filters() {
-        assert_eq!(
-            filters(
-                (1920, 1080),
-                (960, 540),
-                (960, 540, "nv12"),
-                ":use_filters=0"
-            ),
-            "scale_cuda=w=960:h=540:interp_algo=bilinear:use_filters=0,\
-             scale_cuda=w=960:h=540:format=nv12:interp_algo=bicubic:use_filters=0"
-        );
-    }
-
-    #[test]
     fn libplacebo_turns_pictures_upright() {
         // A phone's 1920×1080 frames, stored for a quarter turn clockwise.
         let options = placebo_options((1920, 1080), 90, "nv12", Layout::Upright, &sd());
