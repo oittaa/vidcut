@@ -708,7 +708,7 @@ pub struct VideoFrames {
     /// The GPU that decoded the last frame given, and what its file holds
     /// and what decoded it (`VideoReader::decoding`).
     last_decoder: Option<crate::hw::Kind>,
-    last_decoding: Option<std::sync::Arc<str>>,
+    last_decoding: Option<std::sync::Arc<crate::decode::Decoding>>,
     /// Frames given so far whose source frame a GPU decoded.
     gpu_decoded: i64,
     /// The dynamic HDR metadata each output frame keeps from its source
@@ -917,7 +917,7 @@ impl VideoFrames {
 
     /// What the file of the last frame given holds and what decoded it
     /// (`VideoReader::decoding`); `None` for black.
-    pub fn decoding(&self) -> Option<std::sync::Arc<str>> {
+    pub fn decoding(&self) -> Option<std::sync::Arc<crate::decode::Decoding>> {
         self.last_decoding.clone()
     }
 

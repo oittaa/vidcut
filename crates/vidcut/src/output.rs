@@ -614,8 +614,11 @@ fn live(method: &str, r: &Response) -> Option<()> {
             println!("{}", state_line(v));
             let stats =
                 serde_json::from_value::<crate::live::stats::PlayerStats>(v["stats"].clone());
-            for (name, facts) in stats.iter().flat_map(|s| s.lines()) {
-                println!("  {name:<9} {facts}");
+            for (heading, rows) in stats.iter().flat_map(|s| s.groups()) {
+                println!("  {heading}");
+                for (label, fact) in rows {
+                    println!("    {label:<12}  {fact}");
+                }
             }
         }
         "gui.screenshot" => println!(

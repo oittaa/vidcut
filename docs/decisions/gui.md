@@ -81,7 +81,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 
 **Encoding.** PNG encoding runs on a task thread.
 
-**Stats for nerds** (deviation X20) come from the engine (`Player::stats`), the picture shown (what its reader said of its file and decoder) and the viewer thread (its size, how the picture got on screen, wgpu's adapter). `live::stats` makes them both `player.state`'s `stats` and the panel's lines.
+**Stats for nerds** (deviation X20) come from the engine (`Player::stats`), the picture shown (what its reader said of its file and decoder) and the viewer thread (its size, how the picture got on screen, wgpu's adapter). `live::stats` makes them both `player.state`'s `stats` and the panel's groups.
 
 **Aspect.** The viewer shows the timeline's aspect in every mode, and sources are fitted inside it the way export fits them. Render targets are sized to the fitted picture in physical pixels.
 

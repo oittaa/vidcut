@@ -116,7 +116,14 @@ impl Viewer {
             "draws with {renderer}; shows {gpu_pictures:?} pictures from GPU memory, \
              uploads the rest"
         );
-        shared.lock().stats.renderer = renderer;
+        {
+            let mut s = shared.lock();
+            s.stats.backend = backend_name(info.backend);
+            s.stats.gpu = info.name.clone();
+            s.stats.driver = format!("{} {}", info.driver, info.driver_info)
+                .trim()
+                .to_string();
+        }
         let s = shared.clone();
         let thread = crate::threads::spawn(
             "vidcut-viewer",
@@ -301,7 +308,7 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
             view: view.clone(),
         });
         let has_frame = shown.is_some();
-        let shown_how = how(shown.as_ref(), &screen);
+        let shown_how = shown.as_ref().map(|s| how(s, &screen));
         let presented = shown.filter(|s| s.exact).map(|s| s.frame);
         // Playing: look again when the clock moves to the next frame.
         next = engine
@@ -313,7 +320,7 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
             s.target = target;
             s.has_frame = has_frame;
             s.stats.size = [w.max(2) as u32, h.max(2) as u32];
-            s.stats.shown = shown_how.into();
+            s.stats.shown = shown_how.map(String::from);
         }
         for task in tasks {
             match task {
@@ -336,11 +343,22 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
 }
 
 /// How the picture shown got on screen.
-fn how(shown: Option<&vidcut_av::player::Shown>, screen: &Screen) -> &'static str {
-    match shown.and_then(|s| s.picture.gpu()) {
+fn how(shown: &vidcut_av::player::Shown, screen: &Screen) -> &'static str {
+    match shown.picture.gpu() {
         None => "uploaded",
         Some(_) if screen.shared() => "shown from GPU memory",
         Some(_) => "copied down and uploaded",
+    }
+}
+
+/// wgpu's backend as people name it: `Vulkan`, `Direct3D 12`.
+fn backend_name(backend: wgpu::Backend) -> String {
+    match backend {
+        wgpu::Backend::Vulkan => "Vulkan".into(),
+        wgpu::Backend::Metal => "Metal".into(),
+        wgpu::Backend::Dx12 => "Direct3D 12".into(),
+        wgpu::Backend::Gl => "OpenGL".into(),
+        other => format!("{other:?}"),
     }
 }
 
@@ -352,7 +370,7 @@ fn drew(shown: Option<&vidcut_av::player::Shown>, screen: &Screen) -> String {
         return "nothing".into();
     };
     let p = &s.picture;
-    let how = how(Some(s), screen);
+    let how = how(s, screen);
     let c = p.colors();
     let hdr = c.hdr.map_or(String::new(), |h| format!(", {h:?}"));
     let range = if c.full_range { "full" } else { "video" };

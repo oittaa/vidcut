@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use crate::color::{Colors, colors_of};
+use crate::decode::Decoding;
 use crate::error::Result;
 use crate::export::video::{Normalizer, fit};
 use crate::ffmpeg::{self, format, frame};
@@ -38,7 +39,7 @@ pub struct Picture {
     rotation: u16,
     bytes: usize,
     decoder: Option<super::Decoder>,
-    decoding: Option<std::sync::Arc<str>>,
+    decoding: Option<Arc<Decoding>>,
 }
 
 impl Picture {
@@ -48,7 +49,7 @@ impl Picture {
         frame: frame::Video,
         rotation: u16,
         decoder: Option<super::Decoder>,
-        decoding: Option<std::sync::Arc<str>>,
+        decoding: Option<Arc<Decoding>>,
     ) -> Self {
         let bytes = bytes_of(&frame);
         Self {
@@ -63,7 +64,7 @@ impl Picture {
     /// What its file holds and what decoded it: the codec, profile and
     /// rate, FFmpeg's decoder and where it ran, and why that was the CPU
     /// when a GPU was asked (`VideoReader::decoding`). `None` for black.
-    pub fn decoding(&self) -> Option<&str> {
+    pub fn decoding(&self) -> Option<&Decoding> {
         self.decoding.as_deref()
     }
 

@@ -177,9 +177,6 @@ pub struct Stats {
     pub frames: u64,
     pub late: u64,
     pub skipped: u64,
-    /// The timeline's picture size and rate.
-    pub size: (u32, u32),
-    pub fps: vidcut_core::time::Rational,
     /// Pictures kept right after the frame the viewer is at and right
     /// before it, a minute each way at most, and all of them.
     pub ahead: usize,
@@ -1054,8 +1051,6 @@ impl Player {
             frames,
             late,
             skipped,
-            size: (plan.plan.width, plan.plan.height),
-            fps: plan.fps(),
             ahead: store.kept_run(ahead),
             behind: store.kept_run(behind),
             kept: store.usage().0,

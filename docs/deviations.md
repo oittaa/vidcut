@@ -192,5 +192,5 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 
 ## X20. Stats for nerds
 - **Resolve:** the viewer shows nothing of how it plays.
-- **vidcut:** the viewer's right-click menu opens a panel over the picture: the picture and what decoded it (FFmpeg's decoder and the GPU it ran on, or the CPU and why), frames shown, late and skipped, pictures kept against the memory budgets, the sound device and its latency, and the GPU drawing it. `player.stats` toggles it, and `player.state` has the same as `stats`.
+- **vidcut:** the viewer's right-click menu opens a panel over the picture. It has a group for each part of the player, with one fact on each row: decoding, the picture, the viewer, playback, the pictures kept and the sound. `player.stats` toggles it, and `player.state` has the same facts as `stats`.
 - **Why:** where the GPU decodes and draws differs from machine to machine. This shows it without a debug log.
