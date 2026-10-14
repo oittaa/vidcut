@@ -351,6 +351,16 @@ impl Keeper {
     }
 }
 
+/// Whether the video processor fits a frame into the output as `ops` says
+/// ([`super::Fitter`]): into the encoder's own frames, where its colors
+/// stay as they are, but not 8-bit frames into 10-bit ones. AMD's
+/// processor refuses to draw NV12 into P010.
+pub(crate) fn can_fit(ops: &crate::route::Ops) -> bool {
+    ops.colors_kept
+        && ops.into
+        && !(ops.layout == format::Pixel::NV12 && ops.out_layout == format::Pixel::P010LE)
+}
+
 /// Scales Direct3D 11's frames on the GPU's video processor, into
 /// textures of its own in their layout and colors, or into an
 /// encoder's frames, placed on black. FFmpeg's `scale_d3d11` makes its
@@ -806,4 +816,44 @@ fn color_space(f: &frame::Video) -> DXGI_COLOR_SPACE_TYPE {
 /// which keep every level.
 fn full_range(space: DXGI_COLOR_SPACE_TYPE) -> bool {
     space != DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::route::Ops;
+
+    /// An upright NV12 frame into the encoder's NV12 frames, in its own
+    /// colors.
+    fn into_frames() -> Ops {
+        Ops {
+            rotation: 0,
+            layout: format::Pixel::NV12,
+            out_layout: format::Pixel::NV12,
+            rgb: false,
+            colors_kept: true,
+            into: true,
+        }
+    }
+
+    #[test]
+    fn frames_fit_into_the_encoders_frames() {
+        assert!(can_fit(&into_frames()));
+    }
+
+    #[test]
+    fn frames_dont_fit_without_the_encoders_frames() {
+        assert!(!can_fit(&Ops {
+            into: false,
+            ..into_frames()
+        }));
+    }
+
+    #[test]
+    fn eight_bit_frames_dont_fit_into_ten_bit_ones() {
+        assert!(!can_fit(&Ops {
+            out_layout: format::Pixel::P010LE,
+            ..into_frames()
+        }));
+    }
 }

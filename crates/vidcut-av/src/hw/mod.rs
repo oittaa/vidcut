@@ -21,6 +21,7 @@ use std::sync::{Arc, Mutex};
 use crate::cuda::CudaDevice;
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, ffi, format, frame};
+use crate::route::{Ops, Place};
 
 /// A kind of GPU decoder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -90,6 +91,16 @@ impl Kind {
             Kind::Vaapi => T::AV_HWDEVICE_TYPE_VAAPI,
             Kind::D3d11va => T::AV_HWDEVICE_TYPE_D3D11VA,
             Kind::VideoToolbox => T::AV_HWDEVICE_TYPE_VIDEOTOOLBOX,
+        }
+    }
+
+    /// Where its frames are.
+    pub fn place(self) -> Place {
+        match self {
+            Kind::Nvdec => Place::Cuda,
+            Kind::Vaapi => Place::Vaapi,
+            Kind::D3d11va => Place::D3d11,
+            Kind::VideoToolbox => Place::VideoToolbox,
         }
     }
 
@@ -1024,6 +1035,19 @@ enum Fitting {
     Filters(ffmpeg::filter::Graph),
     #[cfg(windows)]
     D3d11(d3d11::Scaler),
+}
+
+/// Whether a frame's GPU (`place`) fits it into the output as `ops` says,
+/// for an encoder on its device. Each backend says for its own frames.
+/// Frames in memory, VideoToolbox's and Vulkan's never fit.
+pub(crate) fn can_fit(place: Place, ops: &Ops) -> bool {
+    match place {
+        Place::Cuda => crate::cuda::can_fit(ops),
+        Place::Vaapi => vaapi::can_fit(ops),
+        #[cfg(windows)]
+        Place::D3d11 => d3d11::can_fit(ops),
+        _ => false,
+    }
 }
 
 impl Fitter {

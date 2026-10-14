@@ -750,6 +750,12 @@ fn take(graph: &mut filter::Graph, what: &str) -> Result<Option<(frame::Video, f
     }
 }
 
+/// Whether NVENC's pictures can be made on the GPU from a CUDA frame as
+/// `ops` says ([`CudaPictures`]): YUV pictures, turned by quarter turns.
+pub(crate) fn can_fit(ops: &crate::route::Ops) -> bool {
+    !ops.rgb && matches!(ops.rotation, 0 | 90 | 180 | 270)
+}
+
 impl CudaPictures {
     /// The pictures for the frames `reader` decodes on `device`, shown as
     /// its stream says (turned upright), for an output of
@@ -1252,13 +1258,47 @@ fn tag(f: &mut frame::Video, tags: Tags) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Layout, filters, placebo_options};
+    use super::{Layout, can_fit, filters, placebo_options};
     use crate::color::{GpuColor, gpu_color};
     use crate::ffmpeg::{format::Pixel, frame};
+    use crate::route::Ops;
 
     /// Untagged SD: BT.601, into SDR.
     fn sd() -> GpuColor {
         gpu_color(&frame::Video::new(Pixel::YUV420P, 720, 480), None).unwrap()
+    }
+
+    /// An upright YUV frame into NV12 pictures.
+    fn upright_yuv() -> Ops {
+        Ops {
+            rotation: 0,
+            layout: Pixel::NV12,
+            out_layout: Pixel::NV12,
+            rgb: false,
+            colors_kept: true,
+            into: false,
+        }
+    }
+
+    #[test]
+    fn upright_yuv_frames_fit_on_the_gpu() {
+        assert!(can_fit(&upright_yuv()));
+    }
+
+    #[test]
+    fn rgb_pictures_dont_fit_on_the_gpu() {
+        assert!(!can_fit(&Ops {
+            rgb: true,
+            ..upright_yuv()
+        }));
+    }
+
+    #[test]
+    fn a_turn_other_than_quarter_turns_doesnt_fit_on_the_gpu() {
+        assert!(!can_fit(&Ops {
+            rotation: 45,
+            ..upright_yuv()
+        }));
     }
 
     /// The value libplacebo is given for option `key`.

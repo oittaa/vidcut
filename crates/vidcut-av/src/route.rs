@@ -5,6 +5,8 @@
 //! VA-API's, `hw::d3d11` for Direct3D 11's and `export::normalize` for the
 //! CPU.
 
+use vidcut_core::model::Hdr;
+
 use crate::ffmpeg::{format, frame};
 
 /// Where a frame's picture is: in memory, or in a GPU's.
@@ -63,6 +65,30 @@ pub struct Ops {
     pub into: bool,
 }
 
+impl Ops {
+    /// What fitting `f`, shown turned by `rotation`, into pictures of
+    /// `out_layout` in `target`'s dynamic range takes (`None`: SDR
+    /// BT.709). With `into`, the encoder's own frames are there to fit
+    /// into.
+    pub fn of(
+        f: &frame::Video,
+        rotation: u16,
+        out_layout: format::Pixel,
+        target: Option<Hdr>,
+        into: bool,
+    ) -> Self {
+        let colors = crate::color::Source::of(f);
+        Self {
+            rotation,
+            layout: crate::hw::sw_format(f),
+            out_layout,
+            rgb: colors.rgb(),
+            colors_kept: crate::color::kept(colors, target),
+            into,
+        }
+    }
+}
+
 /// What the planner knows of one frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Facts {
@@ -79,6 +105,23 @@ pub struct Facts {
     pub displayable: bool,
     /// Keeping the job's frames on the GPU failed before.
     pub keep_failed: bool,
+}
+
+impl Facts {
+    /// What the planner knows of `f`, fitted as `ops` says into an `out`
+    /// picture, before anything failed.
+    pub fn of(f: &frame::Video, ops: &Ops, out: (u32, u32)) -> Self {
+        let place = Place::of(f);
+        let (w, h) = crate::export::normalize::shown_size(f, ops.rotation, out);
+        Self {
+            place,
+            fits: crate::hw::can_fit(place, ops),
+            fit_failed: false,
+            shrinks: w < f.width() && h < f.height(),
+            displayable: crate::export::normalize::displayable(ops.layout),
+            keep_failed: false,
+        }
+    }
 }
 
 /// How a frame's picture is made.
