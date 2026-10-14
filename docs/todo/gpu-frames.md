@@ -14,7 +14,7 @@ Three mechanisms move frames, each with its own switch on the kind of GPU:
 |---|---|---|---|
 | `cuda::CudaPictures` | NVDEC's frames turned and converted (libplacebo on Vulkan), scaled and padded, for NVENC | NVIDIA | exports, proxies |
 | `hw::Fitter` | frames turned, scaled and padded on the decoder's device, for an encoder there | VA-API, Direct3D 11 | exports only |
-| `hw::Shrinker` | frames scaled on the GPU, then copied down (`export::video::down`) | VA-API, CUDA, Direct3D 11 | proxies, exports to encoders that take frames from memory, tiles, the two-up, thumbnails |
+| `hw::Shrinker` | frames scaled on the GPU, then copied down (`export::normalize::down`) | VA-API, CUDA, Direct3D 11 | proxies, exports to encoders that take frames from memory, tiles, the two-up, thumbnails |
 
 Around them:
 - **The choice is made per job, by encoder name.** Exports take the CUDA path when the encoder is NVENC (`gpu_output` in export/mod.rs). They fit on the GPU only for the pairs VAAPI with VA-API and AMF with Direct3D 11 (`encode` in export/mod.rs). Proxies check for NVENC again (`proxy::encode_into`).

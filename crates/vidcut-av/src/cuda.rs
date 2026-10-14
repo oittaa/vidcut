@@ -792,7 +792,7 @@ impl CudaPictures {
         } else {
             (stored, sar)
         };
-        let fitted = crate::export::video::fit(
+        let fitted = crate::export::normalize::fit(
             size.0,
             size.1,
             (shown_sar.numerator(), shown_sar.denominator()),

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::color::{Colors, colors_of};
 use crate::decode::Decoding;
 use crate::error::Result;
-use crate::export::video::{Normalizer, fit};
+use crate::export::normalize::{Normalizer, fit};
 use crate::ffmpeg::{self, format, frame};
 use crate::thumbs::Image;
 

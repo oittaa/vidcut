@@ -22,7 +22,7 @@ use vidcut_core::preferences::ProxyCodec;
 use crate::decode::{Input, VideoReader};
 use crate::error::{Context, Error, Result};
 use crate::export::encode::{Availability, Upload};
-use crate::export::video::Normalizer;
+use crate::export::normalize::Normalizer;
 use crate::ffmpeg::{self, codec, encoder, ffi, format, frame};
 
 /// Frames between keyframes.
@@ -705,7 +705,7 @@ fn encode_into(
                 return Ok(());
             };
             let src = if crate::hw::on_gpu(&src) {
-                crate::export::video::down(&mut shrinker, &src, rotation, size)?
+                crate::export::normalize::down(&mut shrinker, &src, rotation, size)?
             } else {
                 src
             };

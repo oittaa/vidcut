@@ -126,9 +126,9 @@ fn strip_on(
     let sar = (sar.numerator(), sar.denominator());
     // Fitted as shown (turned upright, square pixels), as export fits.
     let (tw, th) = if rotation % 180 == 90 {
-        crate::export::video::fit(h, w, (sar.1, sar.0), max_w, max_h)
+        crate::export::normalize::fit(h, w, (sar.1, sar.0), max_w, max_h)
     } else {
-        crate::export::video::fit(w, h, sar, max_w, max_h)
+        crate::export::normalize::fit(w, h, sar, max_w, max_h)
     };
     let mut fit = Fit::default();
 
@@ -255,7 +255,7 @@ fn keep(
 /// turns it upright, tone-maps it to SDR and converts it to RGBA.
 #[derive(Default)]
 struct Fit {
-    normalizer: Option<crate::export::video::Normalizer>,
+    normalizer: Option<crate::export::normalize::Normalizer>,
     shrinker: Option<crate::hw::Shrinker>,
 }
 
@@ -265,7 +265,7 @@ impl Fit {
         let (rotation, tw, th) = place;
         let down;
         let decoded = if crate::hw::on_gpu(decoded) {
-            down = crate::export::video::down(&mut self.shrinker, decoded, rotation, (tw, th))?;
+            down = crate::export::normalize::down(&mut self.shrinker, decoded, rotation, (tw, th))?;
             &down
         } else {
             decoded
@@ -273,7 +273,7 @@ impl Fit {
         let normalizer = &mut self.normalizer;
         let n = match normalizer {
             Some(n) if n.matches(decoded, rotation) => n,
-            _ => normalizer.insert(crate::export::video::Normalizer::new(
+            _ => normalizer.insert(crate::export::normalize::Normalizer::new(
                 decoded,
                 rotation,
                 tw,

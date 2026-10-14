@@ -519,7 +519,7 @@ fn peak(s: &Samples, r: &Reading) -> [f32; 3] {
 }
 
 /// `f`'s samples and how they read, for a picture in a layout a display
-/// takes (`export::video::Relayout`).
+/// takes (`export::normalize::Relayout`).
 fn reading(f: &frame::Video) -> Result<(Samples<'_>, Reading)> {
     let (bits, semi) = match f.format() {
         format::Pixel::P010LE => (10, true),
@@ -546,7 +546,7 @@ fn reading(f: &frame::Video) -> Result<(Samples<'_>, Reading)> {
 
 fn measure_with(
     f: &frame::Video,
-    relayout: &mut crate::export::video::Relayout,
+    relayout: &mut crate::export::normalize::Relayout,
 ) -> Result<FrameLight> {
     let f = relayout.run(f)?;
     let (s, r) = reading(&f)?;
@@ -616,7 +616,7 @@ fn measure(
     let threads = std::thread::available_parallelism().map_or(2, |n| n.get().clamp(2, 4));
     let (mut frames, ended) = on_threads(
         threads,
-        crate::export::video::Relayout::new,
+        crate::export::normalize::Relayout::new,
         |give| {
             while let Some(f) = reader.next_frame()? {
                 if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
@@ -848,11 +848,11 @@ pub fn piece_level(
 
 /// Measures single frames as they are decoded, on the CPU or copied down
 /// from the GPU: for HDR10+ made for frames of a file not measured ahead.
-pub(crate) struct Meter(crate::export::video::Relayout);
+pub(crate) struct Meter(crate::export::normalize::Relayout);
 
 impl Meter {
     pub(crate) fn new() -> Self {
-        Self(crate::export::video::Relayout::new())
+        Self(crate::export::normalize::Relayout::new())
     }
 
     /// `f` stays as it is: a layout to convert goes through a filter, which

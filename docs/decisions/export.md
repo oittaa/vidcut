@@ -67,7 +67,7 @@ Beeps land within 1 ms of where they should across codec boundaries, and output 
 
 ## 4. Video normalization
 
-- Each source frame goes through a libavfilter graph: `scale` (fit inside the output keeping the display aspect, honoring the sample aspect ratio), `pad` (black, centered), `setsar=1`, `format=<encoder pixel format>`. The fit is computed in Rust (`export::video::fit`).
+- Each source frame goes through a libavfilter graph: `scale` (fit inside the output keeping the display aspect, honoring the sample aspect ratio), `pad` (black, centered), `setsar=1`, `format=<encoder pixel format>`. The fit is computed in Rust (`export::normalize::fit`).
 - **Rotation** (spec D33): a stream's display matrix turns the picture upright first: `transpose=clock` or `cclock`, or `hflip,vflip` for 180°. The fit then uses the shown aspect. Thumbnails turn their pictures the same way.
 - **Interlaced sources** (spec D34): `VideoReader` deinterlaces streams flagged interlaced, in decode order and before the sampling rule picks frames, so `bwdif` sees each frame's real neighbors.
   - It runs `bwdif=mode=send_frame:deint=interlaced`: one frame per frame, the first field kept, progressive frames passing through. Frames NVDEC decodes go through `bwdif_cuda` with the same options (§5).
