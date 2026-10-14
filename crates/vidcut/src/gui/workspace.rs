@@ -88,6 +88,8 @@ pub struct Workspace {
     /// wants it rendered at.
     pub picture: Picture,
     pub want: [i32; 2],
+    /// The peaks of the sound the viewer plays now, while it plays.
+    pub levels: Option<vidcut_av::player::Levels>,
     /// The GPU the window draws on, for the status bar's versions.
     pub display: Option<String>,
     // View state (not part of the project).
@@ -231,6 +233,7 @@ impl Workspace {
             live,
             thumbs: HashMap::new(),
             picture: Picture::default(),
+            levels: None,
             want: [640, 360],
             display: None,
             pool_view: PoolView::Thumbnails,

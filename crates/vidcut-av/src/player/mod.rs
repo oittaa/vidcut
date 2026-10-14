@@ -166,6 +166,16 @@ impl Default for Config {
     }
 }
 
+/// The peaks of the sound heard now, while playing, linear per channel:
+/// what the meters show of the player.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Levels {
+    /// The mix (silent while the monitoring mute is on).
+    pub mix: Vec<f32>,
+    /// Each of the plan's audio lanes, in order, with its gain on top.
+    pub lanes: Vec<Vec<f32>>,
+}
+
 /// What a player is doing.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Status {
@@ -355,7 +365,25 @@ pub(crate) struct Shared {
     gpu_memory: std::sync::OnceLock<usize>,
     /// The latest play request whose sound was heard, for `VIDCUT_DEBUG`.
     heard_epoch: std::sync::atomic::AtomicU64,
+    /// The peaks of the sound queued lately, oldest first ([`Level`]).
+    levels: Mutex<std::collections::VecDeque<Level>>,
 }
+
+/// The peaks of a run of sound queued for the device, from ring frame `at`
+/// on: the mix's per channel, and each lane's, `channels` a lane.
+pub(crate) struct Level {
+    pub at: u64,
+    pub frames: u64,
+    pub mix: Vec<f32>,
+    pub lanes: Vec<f32>,
+}
+
+/// Runs of sound whose peaks are kept: well over a second of 10 ms chunks,
+/// more than the device holds queued.
+const LEVELS_KEPT: usize = 160;
+
+/// How far back the levels heard now reach.
+const LEVELS_SECS: f64 = 0.05;
 
 /// A seek that has decoded this long holds a newer one up no more.
 const PATIENCE: Duration = Duration::from_secs(1);
@@ -541,6 +569,20 @@ impl Shared {
         }
     }
 
+    /// The audio thread queued sound with these peaks.
+    pub(crate) fn level(&self, level: Level) {
+        let mut levels = lock(&self.levels);
+        if levels.len() == LEVELS_KEPT {
+            levels.pop_front();
+        }
+        levels.push_back(level);
+    }
+
+    /// What was queued won't be heard (a new play request, a pause).
+    pub(crate) fn forget_levels(&self) {
+        lock(&self.levels).clear();
+    }
+
     /// The picture of the frame the viewer is at landed: `id`, of the plan
     /// of change `plan_gen`.
     pub(crate) fn landed(&self, plan_gen: u64, id: plan::Id) {
@@ -643,6 +685,7 @@ impl Player {
             video_auto: AtomicBool::new(config.budget.video.is_none()),
             gpu_memory: std::sync::OnceLock::new(),
             heard_epoch: std::sync::atomic::AtomicU64::new(0),
+            levels: Mutex::new(std::collections::VecDeque::new()),
         });
         output.start(source)?;
         let mut player = Self {
@@ -938,6 +981,40 @@ impl Player {
                 })
             }
         }
+    }
+
+    /// The peaks of the sound heard at `now`, over the last 50 ms; `None`
+    /// while paused, or before any is heard.
+    pub fn levels(&self, now: Instant) -> Option<Levels> {
+        if !matches!(self.shared.control().mode, Mode::Playing { .. }) {
+            return None;
+        }
+        let counter = self.shared.heard.counter_at(now)?;
+        let (rate, channels) = self.shared.format;
+        let ch = usize::from(channels).max(1);
+        let from = counter.saturating_sub((f64::from(rate) * LEVELS_SECS) as u64);
+        let levels = lock(&self.shared.levels);
+        let mut heard = levels
+            .iter()
+            .filter(|l| l.at < counter && l.at + l.frames > from)
+            .peekable();
+        heard.peek()?;
+        let mut mix = vec![0.0f32; ch];
+        let mut lanes: Vec<Vec<f32>> = Vec::new();
+        for l in heard {
+            for (m, p) in mix.iter_mut().zip(&l.mix) {
+                *m = m.max(*p);
+            }
+            for (i, peaks) in l.lanes.chunks(ch).enumerate() {
+                if lanes.len() <= i {
+                    lanes.push(vec![0.0; ch]);
+                }
+                for (a, b) in lanes[i].iter_mut().zip(peaks) {
+                    *a = a.max(*b);
+                }
+            }
+        }
+        Some(Levels { mix, lanes })
     }
 
     /// The device its sound plays on ([`AudioOutput::plays_on`]).

@@ -260,6 +260,7 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let (texture, has_frame) = self.viewer.sync(&self.render, self.ws.want);
         self.ws.picture = Picture { texture, has_frame };
+        self.ws.levels = self.viewer.levels();
         let ctx = ui.ctx().clone();
         self.window_screenshots(&ctx);
         self.ws.ui(ui);

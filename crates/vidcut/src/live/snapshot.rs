@@ -66,6 +66,9 @@ pub struct PlayerSnap {
     /// `d3d11va`) or `no` (the CPU); empty before any.
     pub hwdec: String,
     pub error: Option<String>,
+    /// The track each of its plan's audio lanes plays, in lane order (the
+    /// timeline's; none for a source).
+    pub lanes: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

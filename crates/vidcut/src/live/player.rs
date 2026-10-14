@@ -686,6 +686,7 @@ impl Player {
             speed: status.as_ref().map_or(0.0, |s| s.speed),
             hwdec: hwdec(status.as_ref().map_or(c.decoder, |s| s.decoder)).into(),
             error: c.error.clone().or_else(|| status.and_then(|s| s.error)),
+            lanes: c.lanes.iter().map(|l| l.track.clone()).collect(),
         }
     }
 }

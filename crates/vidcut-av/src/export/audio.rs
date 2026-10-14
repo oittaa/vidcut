@@ -810,6 +810,31 @@ impl AudioMix {
         self.seek(sample);
     }
 
+    /// [`read`](Self::read), with each lane's peak per channel, before the
+    /// mix's gain: lane by lane, `channels` peaks each.
+    pub fn read_metered(&mut self, n: usize) -> Result<(Vec<f32>, Vec<f32>)> {
+        let ch = usize::from(self.channels);
+        let mut out = vec![0.0f32; n * ch];
+        let mut lane_out = vec![0.0f32; n * ch];
+        let mut peaks = vec![0.0f32; self.lanes.len() * ch];
+        for (lane, peaks) in self.lanes.iter_mut().zip(peaks.chunks_mut(ch)) {
+            lane_out.fill(0.0);
+            lane.mix_into(&mut lane_out, self.rate, self.channels)?;
+            for (frame, mixed) in lane_out.chunks(ch).zip(out.chunks_mut(ch)) {
+                for ((s, m), p) in frame.iter().zip(mixed.iter_mut()).zip(peaks.iter_mut()) {
+                    *m += s;
+                    *p = p.max(s.abs());
+                }
+            }
+        }
+        if self.gain != 1.0 {
+            for s in &mut out {
+                *s *= self.gain;
+            }
+        }
+        Ok((out, peaks))
+    }
+
     /// The next `n` mixed samples, interleaved.
     pub fn read(&mut self, n: usize) -> Result<Vec<f32>> {
         let mut out = vec![0.0f32; n * usize::from(self.channels)];

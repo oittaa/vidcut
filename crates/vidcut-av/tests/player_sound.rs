@@ -177,3 +177,31 @@ fn a_step_plays_the_sound_of_its_frame() {
     assert!(take(&out).is_empty(), "scrubbing off");
     assert_eq!(player.status().position, 30);
 }
+
+#[test]
+fn the_levels_are_the_peaks_of_the_sound_heard() {
+    let a = beeps();
+    let (player, out) = player(plan(&[clip(&a, 0, 120)], 0), false);
+    assert!(player.wait_ready(0, Duration::from_secs(10)));
+    player.play(1.0);
+    // 20 ms heard: the first beep's 10 ms, then silence.
+    let heard = [pull_full(&out, 480), pull_full(&out, 480)].concat();
+    let mut peaks = vec![0.0f32; 2];
+    for frame in heard.chunks(2) {
+        for (p, s) in peaks.iter_mut().zip(frame) {
+            *p = p.max(s.abs());
+        }
+    }
+    assert!(peaks[0] > 0.1, "the beep was heard");
+    let levels = player.levels(Instant::now()).expect("playing");
+    assert_eq!(levels.mix, peaks);
+    assert_eq!(levels.lanes, vec![peaks]);
+    // 100 ms more of silence: the last 50 ms heard are silent.
+    for _ in 0..10 {
+        pull_full(&out, 480);
+    }
+    let levels = player.levels(Instant::now()).expect("playing");
+    assert_eq!(levels.mix, vec![0.0, 0.0]);
+    player.pause();
+    assert_eq!(player.levels(Instant::now()), None, "paused");
+}
