@@ -577,12 +577,13 @@ pub fn print(method: &str, r: &Response, json: bool) {
         "history.get" => {
             for (title, key) in [("undo (newest first)", "undo"), ("redo", "redo")] {
                 let items = r.result[key].as_array().cloned().unwrap_or_default();
+                let steps = r.result[format!("{key}_steps")].as_u64().unwrap_or(0);
                 println!(
                     "{title}: {}",
-                    if items.is_empty() {
+                    if steps == 0 {
                         "-".into()
                     } else {
-                        items.len().to_string()
+                        steps.to_string()
                     }
                 );
                 for l in items {

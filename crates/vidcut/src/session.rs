@@ -166,7 +166,7 @@ pub fn run_with(
         | Request::AnalyzeBlack { .. }
         | Request::AnalyzeLoudness { .. } => {
             let store = open(project)?;
-            let editor = store.load()?;
+            let editor = store.load_project()?;
             envelope.check_rev(editor.project().rev)?;
             render(editor.project(), store.path(), &envelope, hooks)?
         }
@@ -192,7 +192,7 @@ pub fn run_with(
                 }
                 r
             } else {
-                store.load()?.apply(envelope, &env, None)?
+                store.load_project()?.apply(envelope, &env, None)?
             }
         }
     };
@@ -211,7 +211,7 @@ fn encode_proxies(
     env: &AvEnv,
     hooks: &mut Hooks<'_>,
 ) -> Result<()> {
-    let mut copy = store.load()?;
+    let mut copy = store.load_project()?;
     let (tx, rx) = std::sync::mpsc::channel::<(std::path::PathBuf, Progress)>();
     let cancel = hooks.cancel.clone();
     std::thread::scope(|scope| {
@@ -418,8 +418,8 @@ pub fn export_media(
 /// Says that the undo history wasn't saved with an edit, and what follows.
 pub fn history_unsaved(error: &str) -> String {
     format!(
-        "the edit is saved, but its undo history isn't ({error}): other vidcut runs see \
-         the edit as an outside change, or start with no history"
+        "the edit is saved, but its undo history isn't ({error}). The edits before it may \
+         not be undoable"
     )
 }
 

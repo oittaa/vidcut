@@ -708,11 +708,8 @@ fn key(input: &Input) -> String {
         .and_then(|m| m.modified().ok())
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map_or(0, |d| d.as_nanos());
-    let text = format!("{input:?}|{size}|{mtime}|v4");
-    let hash = text.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
-        (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
-    });
-    format!("{hash:016x}")
+    let text = format!("{input:?}|{size}|{mtime}");
+    format!("{:016x}", vidcut_core::hash64(text.as_bytes()))
 }
 
 fn to_bytes(a: &LightAnalysis) -> Vec<u8> {

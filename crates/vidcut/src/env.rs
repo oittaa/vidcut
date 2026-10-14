@@ -243,7 +243,7 @@ impl Env for AvEnv {
         let name = |codec: &str| {
             dir.join(format!(
                 "{:016x}-{}-{}-{w}x{h}-{codec}.mkv",
-                paths::fnv1a(media.path.as_os_str().as_encoded_bytes()),
+                vidcut_core::hash64(media.path.as_os_str().as_encoded_bytes()),
                 media.size,
                 media.mtime_ns,
             ))

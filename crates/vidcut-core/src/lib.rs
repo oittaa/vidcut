@@ -11,6 +11,7 @@ pub mod editor;
 pub mod error;
 pub mod export;
 pub mod fingerprint;
+mod history;
 pub mod model;
 pub mod ops;
 pub mod otio;
@@ -28,6 +29,20 @@ pub use error::{Error, ErrorCode, Result};
 pub use model::Project;
 pub use request::{Envelope, Request, Response};
 pub use store::Store;
+
+/// A stable 64-bit hash for file names and checks, not for security:
+/// rapidhash V3, whose output stays the same from release to release.
+pub fn hash64(bytes: &[u8]) -> u64 {
+    rapidhash::v3::rapidhash_v3(bytes)
+}
+
+#[cfg(test)]
+mod hash_tests {
+    #[test]
+    fn a_text_keeps_its_hash() {
+        assert_eq!(super::hash64(b"vidcut"), 0xd6d1_8020_3c15_d32f);
+    }
+}
 
 #[cfg(test)]
 mod analysis_tests;

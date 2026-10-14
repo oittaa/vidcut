@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use crate::analysis::{self, AudioLevels, Loudness, PictureStats, SilenceSettings, Span};
 use crate::change::Change;
 use crate::error::{Error, Result};
+use crate::history::HistoryFile;
 use crate::model::{
     Clip, ClipAudio, Compound, Effects, Generator, ImageSequence, Media, MediaInfo, Project, Proxy,
     Transition, VideoInfo,
@@ -245,16 +246,32 @@ pub enum Moved {
     Redo(u32),
 }
 
-/// Maximum undo steps kept.
-pub const HISTORY_CAP: usize = 100;
+/// Undo steps kept. Past it the oldest 10% go, and 90% of it stay.
+pub const HISTORY_CAP: usize = 1 << 17;
+
+/// Undo and redo labels `history.get` gives, newest first.
+const LABELS: usize = 100;
+
+/// How many of the oldest of `len` undo steps go: past the limit, all but
+/// 90% of it.
+fn over(len: usize) -> usize {
+    if len > HISTORY_CAP {
+        len - (HISTORY_CAP - HISTORY_CAP / 10)
+    } else {
+        0
+    }
+}
 
 pub struct Editor {
     project: Project,
+    /// The steps while the editor holds them: until its first save to a
+    /// history file, and always without one.
     history: History,
     /// What happened to the history since it was last saved.
     moved: Vec<Moved>,
-    /// The history file as this editor last read or wrote it.
-    pub(crate) on_disk: Option<crate::store::OnDisk>,
+    /// The history file the steps are in, and the hash of the project text
+    /// the editor's last save there wrote (or that it read).
+    pub(crate) file: Option<(HistoryFile, String)>,
 }
 
 /// Now, in milliseconds since 1970 UTC (`Project::edited`).
@@ -266,13 +283,21 @@ fn now_ms() -> u64 {
 
 impl Editor {
     pub fn new(project: Project, mut history: History) -> Self {
-        let over = history.undo.len().saturating_sub(HISTORY_CAP);
-        history.undo.drain(..over);
+        history.undo.drain(..over(history.undo.len()));
         Self {
             project,
             history,
             moved: Vec::new(),
-            on_disk: None,
+            file: None,
+        }
+    }
+
+    /// An editor whose steps are in `file`, which a save of `hash` (the
+    /// project's text) ends.
+    pub(crate) fn on_file(project: Project, file: HistoryFile, hash: String) -> Self {
+        Self {
+            file: Some((file, hash)),
+            ..Self::new(project, History::default())
         }
     }
 
@@ -280,17 +305,104 @@ impl Editor {
         &self.project
     }
 
-    pub fn history(&self) -> &History {
+    /// The steps it holds: none once they are in a file.
+    pub(crate) fn held(&self) -> &History {
         &self.history
-    }
-
-    pub fn into_parts(self) -> (Project, History) {
-        (self.project, self.history)
     }
 
     /// What happened to the history since this was last called.
     pub(crate) fn take_moved(&mut self) -> Vec<Moved> {
         std::mem::take(&mut self.moved)
+    }
+
+    /// Its steps are in `file` now, which a save of `hash` ends.
+    pub(crate) fn saved_to(&mut self, file: HistoryFile, hash: String) {
+        self.history = History::default();
+        self.file = Some((file, hash));
+    }
+
+    /// Its history file couldn't take the last save: the steps there are
+    /// lost, and the next save writes the file anew.
+    pub(crate) fn lost_file(&mut self) {
+        if self.file.take().is_some() {
+            self.history = History::default();
+        }
+    }
+
+    /// How many steps there are to undo and to redo.
+    pub fn history_counts(&self) -> (usize, usize) {
+        let Some((file, _)) = &self.file else {
+            return (self.history.undo.len(), self.history.redo.len());
+        };
+        let (mut u, mut r) = file.tail().map_or((0, 0), |(t, _)| (t.undo, t.redo));
+        for m in &self.moved {
+            match m {
+                Moved::Step(_) => (u, r) = (u + 1, 0),
+                Moved::Undo(n) => {
+                    let n = (*n as usize).min(u);
+                    (u, r) = (u - n, r + n);
+                }
+                Moved::Redo(n) => {
+                    let n = (*n as usize).min(r);
+                    (u, r) = (u + n, r - n);
+                }
+            }
+        }
+        (u, r)
+    }
+
+    /// The newest `n` steps to undo and the next `n` to redo (most recent
+    /// last, as in [`History`]).
+    pub fn history_view(&self, n: usize) -> Result<History> {
+        let newest = |v: &[Entry]| v[v.len().saturating_sub(n)..].to_vec();
+        let Some((file, _)) = &self.file else {
+            return Ok(History {
+                undo: newest(&self.history.undo),
+                redo: newest(&self.history.redo),
+            });
+        };
+        let unreadable = |e: std::io::Error| {
+            Error::internal(format!(
+                "the undo history {} can't be read: {e}",
+                file.path().display()
+            ))
+        };
+        // Enough from the file for what happened since it was saved.
+        let k = n + self.moved.len();
+        let mut h = match file.tail() {
+            Some((tail, end)) => {
+                let (mut undo, mut redo) = file.top(&tail, end, k, k).map_err(unreadable)?;
+                undo.reverse();
+                redo.reverse();
+                History { undo, redo }
+            }
+            None => History::default(),
+        };
+        for m in &self.moved {
+            match m {
+                Moved::Step(e) => {
+                    h.undo.push(e.clone());
+                    h.redo.clear();
+                }
+                Moved::Undo(n) => shift(*n, &mut h.undo, &mut h.redo),
+                Moved::Redo(n) => shift(*n, &mut h.redo, &mut h.undo),
+            }
+        }
+        Ok(History {
+            undo: newest(&h.undo),
+            redo: newest(&h.redo),
+        })
+    }
+
+    /// Notes a new step on top.
+    fn push(&mut self, entry: Entry) {
+        self.moved.push(Moved::Step(entry.clone()));
+        if self.file.is_none() {
+            self.history.undo.push(entry);
+            self.history.redo.clear();
+            let over = over(self.history.undo.len());
+            self.history.undo.drain(..over);
+        }
     }
 
     /// Applies one request. `playhead` is the live playhead, if any.
@@ -304,8 +416,23 @@ impl Editor {
         let Envelope {
             request, dry_run, ..
         } = envelope;
+        if let Request::HistoryGet {} = request {
+            let (undo, redo) = self.history_counts();
+            let view = self.history_view(LABELS)?;
+            let mut result = query(&self.project, &view, &request, env, playhead)?;
+            result["undo_steps"] = undo.into();
+            result["redo_steps"] = redo.into();
+            return Ok(Response {
+                rev: self.project.rev,
+                changes: Changes::default(),
+                result,
+                dry_run: false,
+                via: String::new(),
+                warnings: Vec::new(),
+            });
+        }
         if !request.is_mutation() {
-            let result = query(&self.project, &self.history, &request, env, playhead)?;
+            let result = query(&self.project, &History::default(), &request, env, playhead)?;
             return Ok(Response {
                 rev: self.project.rev,
                 changes: Changes::default(),
@@ -365,13 +492,7 @@ impl Editor {
         working.rev = self.project.rev + 1;
         working.edited = Some(now_ms());
         self.project = working;
-        let entry = Entry { label, change };
-        self.moved.push(Moved::Step(entry.clone()));
-        self.history.undo.push(entry);
-        if self.history.undo.len() > HISTORY_CAP {
-            self.history.undo.remove(0);
-        }
-        self.history.redo.clear();
+        self.push(Entry { label, change });
         Ok(Response {
             rev: self.project.rev,
             changes,
@@ -393,21 +514,15 @@ impl Editor {
             project.edited = Some(now_ms());
         }
         self.project = project;
-        let entry = Entry {
+        self.push(Entry {
             label: "external change".into(),
             change,
-        };
-        self.moved.push(Moved::Step(entry.clone()));
-        self.history.undo.push(entry);
-        self.history.redo.clear();
+        });
     }
 
     fn step_history(&mut self, steps: u32, undo: bool, dry_run: bool) -> Result<Response> {
-        let available = if undo {
-            self.history.undo.len()
-        } else {
-            self.history.redo.len()
-        };
+        let (u, r) = self.history_counts();
+        let available = if undo { u } else { r };
         if available < steps as usize || steps == 0 {
             return Err(Error::invalid(format!(
                 "cannot {} {steps} step(s): {available} available",
@@ -415,7 +530,11 @@ impl Editor {
             )));
         }
         let mut json = to_json(&self.project);
-        let mut history = self.history.clone();
+        // Without a file, all of it; with one, the steps to take.
+        let mut history = match self.file {
+            None => self.history.clone(),
+            Some(_) => self.history_view(steps as usize)?,
+        };
         let mut labels = Vec::new();
         for _ in 0..steps {
             let (from, to) = if undo {
@@ -449,7 +568,9 @@ impl Editor {
         project.rev = self.project.rev + 1;
         project.edited = Some(now_ms());
         self.project = project;
-        self.history = history;
+        if self.file.is_none() {
+            self.history = history;
+        }
         self.moved.push(if undo {
             Moved::Undo(steps)
         } else {
@@ -463,6 +584,15 @@ impl Editor {
             via: String::new(),
             warnings: Vec::new(),
         })
+    }
+}
+
+/// Moves the newest `n` steps from one stack to the other, as many as there
+/// are.
+fn shift(n: u32, from: &mut Vec<Entry>, to: &mut Vec<Entry>) {
+    for _ in 0..n {
+        let Some(e) = from.pop() else { return };
+        to.push(e);
     }
 }
 
@@ -3204,4 +3334,14 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
 /// A fixed rate for tests and tools that need one.
 pub fn rate(num: i64, den: i64) -> Rational {
     Rational::new(num, den).expect("valid rate")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::over;
+
+    #[test]
+    fn past_the_limit_all_but_90_percent_of_it_go() {
+        assert_eq!(over((1 << 17) + 1), 13108);
+    }
 }

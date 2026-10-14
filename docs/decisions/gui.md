@@ -47,10 +47,11 @@ Every action is a [`Request`](../../crates/vidcut-core/src/request.rs), the same
 
 **Saving.** Every committed change is saved before the reply, under the same lock headless runs take. The lock is retried every 5 ms.
 
-**Watching.** The session watches the project's directory (`notify`, non-recursive, ignoring access events). Changes made by other processes are read back under the lock, so the project file and its history sidecar are always seen together.
+**Watching.** The session watches the project's directory (`notify`, non-recursive, ignoring access events). Changes made by other processes are read back under the lock, so the project file and its history are always seen together.
 
-**Write order.** `Store::save` writes the history sidecar before the project file, so the new state shows up with its history and a headless edit isn't taken for an outside change.
-- If the sidecar can't be written, the edit is saved all the same, and the command's JSON result says so in `warnings` (stderr without `--json`; a GUI also shows a notice), routed into the GUI or not. The old sidecar stays whole, so another run sees the edit as one outside change, or starts with no history if there was none. The GUI that made the edit keeps its undo history in memory.
+**Write order.** `Store::save` writes the history before the project file, so the new state shows up with its history and a headless edit isn't taken for an outside change.
+- If the history can't be written, the edit is saved all the same, and the command's JSON result says so in `warnings` (stderr without `--json`; a GUI also shows a notice), routed into the GUI or not. The history starts again at the next save.
+- Past its limit the history is written anew (`Store::compact`): in a GUI on a thread of its own, from the command line after the edit. The lock is taken only to put the new file in place.
 
 ## 4. When a frame is "on screen"
 

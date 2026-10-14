@@ -756,7 +756,8 @@ pub enum Request {
         #[serde(default = "one")]
         steps: u32,
     },
-    /// Undo and redo labels, newest first.
+    /// How many steps there are to undo and redo (`undo_steps`,
+    /// `redo_steps`), and the newest 100 of each by label, newest first.
     #[serde(rename = "history.get")]
     HistoryGet {},
     /// Apply requests atomically as one undo step.
@@ -1506,9 +1507,8 @@ pub struct Response {
     /// Where the request ran: `headless` or `gui:<pid>`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub via: String,
-    /// Problems that did not fail the request. A history sidecar that could
-    /// not be written is one: the edit is saved, and the text says what the
-    /// next load can undo.
+    /// Problems that did not fail the request. An undo history that could
+    /// not be written is one: the edit is saved, and the text says so.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
 }

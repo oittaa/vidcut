@@ -22,17 +22,10 @@ pub fn cache_dir() -> PathBuf {
 pub fn media_cache(dir: &str, media: &vidcut_core::model::Media, ext: &str) -> PathBuf {
     cache_dir().join(dir).join(format!(
         "{:016x}-{}-{}.{ext}",
-        fnv1a(media.path.as_os_str().as_encoded_bytes()),
+        vidcut_core::hash64(media.path.as_os_str().as_encoded_bytes()),
         media.size,
         media.mtime_ns
     ))
-}
-
-/// FNV-1a: stable 64-bit hash for cache file names.
-pub(crate) fn fnv1a(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, b| {
-        (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
-    })
 }
 
 /// `~/.local/state/vidcut` (`%LOCALAPPDATA%\vidcut\state` on Windows,
