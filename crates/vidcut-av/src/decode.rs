@@ -445,38 +445,25 @@ fn gpu_decoder(id: codec::Id, kind: crate::hw::Kind) -> Option<ffmpeg::Codec> {
     }
 }
 
-/// Picks the GPU's frames (format `F`) when the decoder offers them, else
-/// FFmpeg's choice (decoding on the CPU), which `open_on` refuses.
-unsafe extern "C" fn gpu_format<const F: i32>(
+/// Picks the frames of the decoder's GPU (its device's kind) when the
+/// decoder offers them, else FFmpeg's choice (decoding on the CPU), which
+/// `open_on` refuses.
+unsafe extern "C" fn gpu_format(
     ctx: *mut ffmpeg::ffi::AVCodecContext,
     formats: *const ffmpeg::ffi::AVPixelFormat,
 ) -> ffmpeg::ffi::AVPixelFormat {
-    let mut p = formats;
-    // SAFETY: FFmpeg's list ends with AV_PIX_FMT_NONE.
+    // SAFETY: the context's device, set before it opened; FFmpeg's list
+    // ends with AV_PIX_FMT_NONE.
     unsafe {
+        let wanted = crate::hw::Kind::of_device((*ctx).hw_device_ctx).map(|k| k.pixel().into());
+        let mut p = formats;
         while *p != ffmpeg::ffi::AVPixelFormat::AV_PIX_FMT_NONE {
-            if *p as i32 == F {
+            if Some(*p) == wanted {
                 return *p;
             }
             p = p.add(1);
         }
         ffmpeg::ffi::avcodec_default_get_format(ctx, formats)
-    }
-}
-
-/// The `get_format` that picks `kind`'s frames.
-fn format_for(
-    kind: crate::hw::Kind,
-) -> unsafe extern "C" fn(
-    *mut ffmpeg::ffi::AVCodecContext,
-    *const ffmpeg::ffi::AVPixelFormat,
-) -> ffmpeg::ffi::AVPixelFormat {
-    use crate::hw::Kind;
-    use ffmpeg::ffi::AVPixelFormat as P;
-    match kind {
-        Kind::Nvdec => gpu_format::<{ P::AV_PIX_FMT_CUDA as i32 }>,
-        Kind::Vaapi => gpu_format::<{ P::AV_PIX_FMT_VAAPI as i32 }>,
-        Kind::D3d11va => gpu_format::<{ P::AV_PIX_FMT_D3D11 as i32 }>,
     }
 }
 
@@ -704,7 +691,7 @@ impl VideoReader {
             Some(d) => unsafe {
                 let raw = ctx.as_mut_ptr();
                 (*raw).hw_device_ctx = ffmpeg::ffi::av_buffer_ref(d.as_ptr());
-                (*raw).get_format = Some(format_for(d.kind()));
+                (*raw).get_format = Some(gpu_format);
                 // Frames a filter graph and the encoder hold on to.
                 (*raw).extra_hw_frames = 8;
                 (*raw).thread_count = 1;

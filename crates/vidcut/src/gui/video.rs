@@ -310,15 +310,14 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
 /// layout and colors, where it was, what decoded it and how it got on
 /// screen.
 fn drew(shown: Option<&vidcut_av::player::Shown>, screen: &Screen) -> String {
-    use vidcut_av::player::Memory;
     let Some(s) = shown else {
         return "nothing".into();
     };
     let p = &s.picture;
-    let how = match p.memory() {
-        Memory::Cpu => "uploaded",
-        _ if screen.shared() => "shown from GPU memory",
-        _ => "copied down and uploaded",
+    let how = match p.gpu() {
+        None => "uploaded",
+        Some(_) if screen.shared() => "shown from GPU memory",
+        Some(_) => "copied down and uploaded",
     };
     let c = p.colors();
     let hdr = c.hdr.map_or(String::new(), |h| format!(", {h:?}"));
@@ -333,14 +332,14 @@ fn drew(shown: Option<&vidcut_av::player::Shown>, screen: &Screen) -> String {
         " (still the picture before it)"
     };
     format!(
-        "frame {}{late}: {}x{} {:?}, {:?} {range} range{hdr}{turned}, in {:?} memory, \
+        "frame {}{late}: {}x{} {:?}, {:?} {range} range{hdr}{turned}, in {} memory, \
          decoded by {}, {how}",
         s.frame,
         p.width(),
         p.height(),
         p.layout(),
         c.matrix,
-        p.memory(),
+        p.gpu().map_or("CPU", |k| k.label()),
         p.decoder().map_or("nothing (black)", |d| d.name()),
     )
 }

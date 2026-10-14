@@ -8,15 +8,13 @@
 //! (`vidcut_av::color::shader_colors`, HDR tone-mapped as the export does).
 //! egui shows the target as an image, and a screenshot reads it back: what
 //! the viewer shows, to the pixel.
-//!
-//! Nothing here needs a window: the GUI draws with eframe's device, tests
-//! with a device of their own ([`Gpu::headless`]).
 
 use std::sync::{Arc, OnceLock};
 
 use vidcut_av::color::shader_colors;
 use vidcut_av::cuda::{CudaDevice, PlaneCopy};
-use vidcut_av::player::{Layout, Memory, Picture};
+use vidcut_av::hw::Kind;
+use vidcut_av::player::{Layout, Picture};
 use vidcut_av::thumbs::Image;
 use vidcut_core::model::Hdr;
 
@@ -190,41 +188,6 @@ impl Gpu {
         .collect()
     }
 
-    /// Whether it imports VA-API's surfaces (DMA-BUFs) to show pictures in
-    /// VA-API memory from there.
-    pub fn imports_dma_bufs(&self) -> bool {
-        self.dma_buf
-    }
-
-    /// Whether it imports Direct3D 11's textures to show pictures in
-    /// Direct3D 11 memory from there.
-    pub fn imports_d3d11(&self) -> bool {
-        self.d3d11
-    }
-
-    /// Its adapter's LUID (Windows), which says which GPU it is: the
-    /// Direct3D 11 textures it imports must be on that one.
-    #[cfg(any(target_os = "linux", windows))]
-    pub fn luid(&self) -> Option<[u8; 8]> {
-        use ash::vk;
-        // SAFETY: reads the physical device's properties.
-        unsafe {
-            let hal = self.device.as_hal::<wgpu::hal::api::Vulkan>()?;
-            let mut id = vk::PhysicalDeviceIDProperties::default();
-            let mut props = vk::PhysicalDeviceProperties2::default().push_next(&mut id);
-            hal.shared_instance()
-                .raw_instance()
-                .get_physical_device_properties2(hal.raw_physical_device(), &mut props);
-            (id.device_luid_valid == vk::TRUE).then_some(id.device_luid)
-        }
-    }
-
-    /// Without Vulkan (macOS), none.
-    #[cfg(not(any(target_os = "linux", windows)))]
-    pub fn luid(&self) -> Option<[u8; 8]> {
-        None
-    }
-
     /// Takes `images` (just imported, not yet used by wgpu) over from the API
     /// that wrote them, into `layout` for `access` at `stage`, in a command
     /// buffer of its own submitted on wgpu's queue: work submitted after it
@@ -282,63 +245,11 @@ impl Gpu {
         }
     }
 
-    /// Whether pictures in CUDA memory show from there: it shares memory,
-    /// and CUDA's GPU is its own. Opens CUDA, unlike
-    /// [`gpu_pictures`](Self::gpu_pictures).
-    pub fn shares_with_cuda(&self) -> bool {
-        self.shares && self.cuda().is_ok()
-    }
-
     fn cuda(&self) -> Result<&CudaDevice, String> {
         self.cuda
             .get_or_init(|| super::shared::cuda_on(&self.device))
             .as_ref()
             .map_err(Clone::clone)
-    }
-
-    /// A device of its own, without a window: the first adapter there is
-    /// (a GPU, or a software one such as lavapipe). `None` without one.
-    pub fn headless() -> Option<Self> {
-        Self::headless_with_info().map(|(gpu, _)| gpu)
-    }
-
-    /// [`headless`](Self::headless), and what its adapter is (its PCI
-    /// address says which GPU).
-    pub fn headless_with_info() -> Option<(Self, wgpu::AdapterInfo)> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            ..Default::default()
-        }))
-        .ok()?;
-        Some((Self::on(&adapter)?, adapter.get_info()))
-    }
-
-    /// A device of its own on each Vulkan adapter there is, without a
-    /// window.
-    pub fn headless_all() -> Vec<Self> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN,
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
-        });
-        pollster::block_on(instance.enumerate_adapters(wgpu::Backends::VULKAN))
-            .iter()
-            .filter_map(Self::on)
-            .collect()
-    }
-
-    fn on(adapter: &wgpu::Adapter) -> Option<Self> {
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("vidcut"),
-            required_features: features(adapter),
-            ..Default::default()
-        }))
-        .ok()?;
-        Some(Self::new(&device, &queue))
-    }
-
-    pub fn device(&self) -> &wgpu::Device {
-        &self.device
     }
 }
 
@@ -410,16 +321,6 @@ impl Screen {
         self.target.as_ref().map(|t| &t.view)
     }
 
-    /// The target's size.
-    pub fn size(&self) -> Option<(u32, u32)> {
-        self.target.as_ref().map(|t| t.size)
-    }
-
-    /// Forgets what the target shows: the next draw draws it again.
-    pub fn invalidate(&mut self) {
-        self.drawn = None;
-    }
-
     /// The last picture in GPU memory went into the planes on the GPU, not
     /// copied down.
     pub fn shared(&self) -> bool {
@@ -451,11 +352,10 @@ impl Screen {
                 return Drawn::Same;
             }
         }
-        // Pictures in Vulkan memory have no planes here, and one larger than
-        // the device's textures can't go up (wgpu would panic): black.
+        // A picture larger than the device's textures can't go up (wgpu
+        // would panic): black.
         let limit = gpu.device.limits().max_texture_dimension_2d;
-        let picture = picture
-            .filter(|p| p.memory() != Memory::Vulkan && p.width() <= limit && p.height() <= limit);
+        let picture = picture.filter(|p| p.width() <= limit && p.height() <= limit);
         let mut encoder = gpu
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -560,15 +460,18 @@ impl Screen {
     fn upload(&mut self, gpu: &Gpu, picture: &Arc<Picture>, encoder: &mut wgpu::CommandEncoder) {
         self.make_planes(gpu, picture);
         self.last_shared = false;
-        match picture.memory() {
-            Memory::Cuda => {}
-            memory @ (Memory::Vaapi | Memory::D3d11) => {
+        match picture.gpu() {
+            None => return self.write_planes(gpu, picture),
+            Some(Kind::Nvdec) => {}
+            Some(kind) => {
                 let layout = picture.layout();
                 if !self.unimported.contains(&layout) {
-                    let imported = if memory == Memory::Vaapi {
-                        self.import_on_gpu(gpu, picture, encoder)
-                    } else {
-                        self.import_d3d11(gpu, picture)
+                    let imported = match kind {
+                        #[cfg(target_os = "linux")]
+                        Kind::Vaapi => self.import_on_gpu(gpu, picture, encoder),
+                        #[cfg(windows)]
+                        Kind::D3d11va => self.import_d3d11(gpu, picture),
+                        _ => Err(format!("{} pictures aren't this system's", kind.label())),
                     };
                     match imported {
                         Ok(()) => {
@@ -585,7 +488,6 @@ impl Screen {
                 }
                 return self.copy_down(gpu, picture);
             }
-            _ => return self.write_planes(gpu, picture),
         }
         if !self.unshared {
             match self.copy_on_gpu(gpu, picture, encoder) {
@@ -745,17 +647,6 @@ impl Screen {
         Ok(())
     }
 
-    /// VA-API is Linux's.
-    #[cfg(not(target_os = "linux"))]
-    fn import_on_gpu(
-        &mut self,
-        _: &Gpu,
-        _: &Arc<Picture>,
-        _: &mut wgpu::CommandEncoder,
-    ) -> Result<(), String> {
-        Err("VA-API pictures are Linux's".into())
-    }
-
     /// Shows a picture in Direct3D 11 memory from there: its texture (one of
     /// its own, the engine's copy out of the decoder's, done) opened by
     /// wgpu's Vulkan device through an NT handle, and its planes' views drawn
@@ -887,12 +778,6 @@ impl Screen {
         self.views = Some((y, uv, (desc.Width, desc.Height)));
         self.imported = Some(picture.clone());
         Ok(())
-    }
-
-    /// Direct3D 11 is Windows's.
-    #[cfg(not(windows))]
-    fn import_d3d11(&mut self, _: &Gpu, _: &Arc<Picture>) -> Result<(), String> {
-        Err("Direct3D 11 pictures are Windows's".into())
     }
 
     /// Copies a picture in CUDA memory into the planes on the GPU: CUDA
