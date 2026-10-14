@@ -63,6 +63,21 @@ windows = { version = "0.62", features = [
 # Vulkan calls on wgpu's own device (the version wgpu-hal uses): memory the
 # viewer shares with CUDA. MIT or Apache-2.0.
 ash = { version = "0.38", default-features = false, features = ["std"] }
+# Metal textures of VideoToolbox's IOSurfaces on wgpu's Metal device
+# (macOS), the versions wgpu-hal uses. Zlib, Apache-2.0 or MIT.
+objc2-metal = { version = "0.3", default-features = false, features = [
+    "std",
+    "MTLAllocation",
+    "MTLDevice",
+    "MTLPixelFormat",
+    "MTLResource",
+    "MTLTexture",
+    "objc2-io-surface",
+] }
+objc2-io-surface = { version = "0.3", default-features = false, features = [
+    "std",
+    "IOSurfaceRef",
+] }
 # Loads CUDA's driver library for the calls FFmpeg doesn't make (memory a
 # display shares). ISC.
 libloading = "0.9"
