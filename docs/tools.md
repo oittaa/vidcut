@@ -8,6 +8,8 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 
 `g=GOP` and `b=BFRAMES` set the keyframe spacing and B-frames (H.264 with B-frames has open GOPs).
 
+**Project speed:** `scripts/history-speed.sh [EDITS]` (release builds) makes a project of 300 media and 2000 clips with a full undo history in a temporary folder. It then times EDITS edits, each followed by a command that only reads, and prints the history's size after each.
+
 **GPU encoders:** `cargo run -p vidcut-av --example encoders` test-encodes every GPU encoder (NVENC, VAAPI, AMF, QSV) on every GPU, uncached.
 
 **Other FFmpeg versions:** `scripts/ffmpeg-check.sh [TARGET…]` (Docker) runs `scripts/check.sh full` against the checkout in a container per target, and prints a summary.
