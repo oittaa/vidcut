@@ -301,7 +301,7 @@ fn gpu_encoder(v: &VideoSettings, kind: EncoderChoice) -> Option<&'static str> {
 /// Whether the `kind` encoder of `codec` encodes only at a bitrate. Intel's
 /// VP9 has no intelligent constant quality, and FFmpeg holds QSV's constant
 /// quantizer to H.264's 51, where VP9's goes to 255.
-fn bitrate_only(codec: VideoCodec, kind: EncoderChoice) -> bool {
+pub fn bitrate_only(codec: VideoCodec, kind: EncoderChoice) -> bool {
     codec == VideoCodec::Vp9 && kind == EncoderChoice::Qsv
 }
 
@@ -426,14 +426,10 @@ fn video_encoder(
     if kind == EncoderChoice::Cpu {
         return cpu_video(v, ten).map(Some);
     }
-    let Some(name) = gpu_encoder(v, kind) else {
+    let (title, codec) = (kind.title(), v.codec.title());
+    let Some(name) = gpu_name(v.codec, kind) else {
         if asked {
-            let (title, codec) = (kind.title(), v.codec.title());
-            return Err(Error::Invalid(if bitrate_only(v.codec, kind) {
-                format!("{title} encodes {codec} only at a bitrate: set video.bitrate")
-            } else {
-                format!("{title} doesn't support {codec}")
-            }));
+            return Err(Error::Invalid(format!("{title} doesn't support {codec}")));
         }
         return Ok(None);
     };
@@ -441,13 +437,20 @@ fn video_encoder(
     let Some(status) = available.find(name, pixel) else {
         if asked {
             return Err(Error::Invalid(format!(
-                "{} isn't available on this machine ({name}, {})",
-                kind.title(),
+                "{title} isn't available on this machine ({name}, {})",
                 pixel_name(pixel)
             )));
         }
         return Ok(None);
     };
+    if gpu_encoder(v, kind).is_none() {
+        if asked {
+            return Err(Error::Invalid(format!(
+                "{title} encodes {codec} only at a bitrate: set video.bitrate"
+            )));
+        }
+        return Ok(None);
+    }
     // The CPU encoders' defaults: SVT-AV1's 30, libvpx's 32.
     let q = v
         .quality

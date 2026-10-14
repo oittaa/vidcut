@@ -2017,7 +2017,18 @@ fn settings_form(
                 ui.label("");
                 ui.horizontal(|ui| {
                     let mut by_quality = v.bitrate.is_none();
-                    if ui.radio_value(&mut by_quality, true, "Quality").changed() {
+                    let bitrate_only = vidcut_av::export::encode::bitrate_only(v.codec, v.encoder);
+                    let quality = ui
+                        .add_enabled_ui(!bitrate_only, |ui| {
+                            ui.radio_value(&mut by_quality, true, "Quality")
+                        })
+                        .inner
+                        .on_disabled_hover_text(format!(
+                            "{} encodes {} only at a bitrate",
+                            v.encoder.title(),
+                            v.codec.title()
+                        ));
+                    if quality.changed() {
                         v.bitrate = None;
                         v.quality = v.quality.or(Some(20));
                         // Two passes are for a bitrate.
