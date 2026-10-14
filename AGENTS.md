@@ -24,6 +24,10 @@ vidcut is a video cutting tool modeled on DaVinci Resolve's Cut page, in Rust: t
    - Never move work to the CPU because the CPU is faster. A GPU that is fast enough is what counts, and it saves CPU and battery.
    - The only exception is a GPU that gives wrong results, such as wrong frames after a seek. Name it in `GpuDecoder::why_not` and gotchas.md.
 10. **The user's settings reach the encoder as they are.** No hidden rescaling, clamping or substitution of quality, speed, codec or any preference. Where an encoder can't take a value, ask before adding a conversion, and show it where the user sets it and in the export's report.
+11. **The docs aren't a history. Git is.** The `.md` files say what is true now, as briefly as they can.
+   - No progress notes, past attempts, "before, X did Y" or why a mistake happened. That goes in commit messages and PR descriptions.
+   - A todo file says what is open, not what got done.
+   - A PR that touches a doc also cuts the stale text in the parts it touches.
 
 ## Quality gates
 
