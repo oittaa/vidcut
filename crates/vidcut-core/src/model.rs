@@ -136,12 +136,14 @@ impl Settings {
     }
 
     /// Makes `change` keeping the start timecode's label (deviation X7):
-    /// `01:00:00:00` stays so, another frame count at another rate. A label
-    /// the new rate hasn't (frame 29 at 25 fps) keeps its time instead.
+    /// `01:00:00:00` stays so, another frame count at another rate or
+    /// counting. A label the new rate hasn't (frame 29 at 25 fps) keeps its
+    /// time instead.
     fn relabel(&mut self, change: impl FnOnce(&mut Self)) {
         let (label, secs) = (self.timecode(0), self.fps.frames_to_secs(self.start_tc));
         change(self);
-        self.start_tc = TimeSpec::parse(&label)
+        // Read as the project counts now: `;` would count drop-frame still.
+        self.start_tc = TimeSpec::parse(&label.replace(';', ":"))
             .ok()
             .and_then(|t| self.start_context().resolve(&t).ok())
             .unwrap_or_else(|| self.fps.secs_to_frames(secs));
@@ -1145,5 +1147,22 @@ impl Track {
     /// Restores start order after edits.
     pub fn sort(&mut self) {
         self.clips.sort_by_key(|c| c.start);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Settings;
+    use crate::time::TimeSpec;
+
+    #[test]
+    fn turning_drop_frame_off_keeps_the_start_label() {
+        let mut s = Settings::with_format(Some("29.97"), None).unwrap();
+        s.set_drop_frame(true).unwrap();
+        s.set_start_tc(&TimeSpec::parse("01:00:00;00").unwrap())
+            .unwrap();
+        assert_eq!(s.start_tc, 107_892);
+        s.set_drop_frame(false).unwrap();
+        assert_eq!(s.start_tc, 108_000);
     }
 }

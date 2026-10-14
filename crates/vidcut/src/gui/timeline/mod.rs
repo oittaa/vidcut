@@ -2114,7 +2114,7 @@ impl Workspace {
                     }
                 });
                 if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                    if let Some(spec) = crate::gui::viewer::timecode_input(&text) {
+                    if let Some(spec) = crate::gui::viewer::timecode_input(&text, self.dropped()) {
                         set(json!(spec));
                     }
                     done = true;
