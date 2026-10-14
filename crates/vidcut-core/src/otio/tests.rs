@@ -2519,3 +2519,71 @@ fn a_compound_clip_plays_what_it_holds_at_its_speed() {
         [(0, 20, 1.0), (129, 30, -1.0), (59, 30, -1.0), (80, 20, 1.0)]
     );
 }
+
+#[test]
+fn a_compound_clip_at_another_rate_decomposes_at_its_speed() {
+    // Decision D48: in a 25 fps project, a compound clip (20..70) whose
+    // clips are at 24 fps: A, a second from source 1 s, then B, a second
+    // from 4 s. At the project's rate A is 0..25 from source 25 and B
+    // 25..50 from 100; backward, B shows 124 down to 100, then A 49 to 25.
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.append("m1", 0, 100);
+    let mut doc = export(f.editor.project(), "cmp", None, Locations::Absolute).unwrap();
+    let mut compound = otio_compound("my compound", "Compound Clip", "Video", 50.0);
+    let mut a = compound["children"][0]["children"][0].clone();
+    a["source_range"] = json!({"OTIO_SCHEMA": "TimeRange.1",
+        "start_time": {"OTIO_SCHEMA": "RationalTime.1", "rate": 24.0, "value": 24.0},
+        "duration": {"OTIO_SCHEMA": "RationalTime.1", "rate": 24.0, "value": 24.0}});
+    a["media_references"]["DEFAULT_MEDIA"]["available_range"] = json!({"OTIO_SCHEMA": "TimeRange.1",
+        "start_time": {"OTIO_SCHEMA": "RationalTime.1", "rate": 24.0, "value": 0.0},
+        "duration": {"OTIO_SCHEMA": "RationalTime.1", "rate": 24.0, "value": 240.0}});
+    let mut b = a.clone();
+    b["source_range"]["start_time"]["value"] = json!(96.0);
+    compound["children"][0]["children"] = json!([a, b]);
+    let tracks = doc["tracks"]["children"].as_array_mut().unwrap();
+    let mut v2 = tracks[0].clone();
+    v2["name"] = json!("Video 2");
+    v2["metadata"] = json!({});
+    v2["children"] = json!([gap(20, 25.0), compound]);
+    tracks.insert(1, v2);
+    let mut g = Fixture::new(&[(10.0, true)]);
+    g.ok(req("timeline.import", json!({ "otio": doc })));
+    let id = g.editor.project().track("V2").unwrap().clips[0].id.clone();
+    let shown = |g: &Fixture| -> Vec<(i64, i64, f64)> {
+        crate::render::flatten(g.editor.project(), 0, 100)
+            .unwrap()
+            .video
+            .iter()
+            .map(|v| match v {
+                crate::render::VideoPiece::Source {
+                    source_frame,
+                    frames,
+                    pace,
+                    ..
+                } => (*source_frame, *frames, pace.speed),
+                crate::render::VideoPiece::Black { frames } => (-1, *frames, 0.0),
+            })
+            .collect()
+    };
+    g.ok(req(
+        "edit.change_speed",
+        json!({"clips": id, "speed": -1.0, "ripple": false}),
+    ));
+    let played = shown(&g);
+    assert_eq!(
+        played,
+        [(0, 20, 1.0), (124, 25, -1.0), (49, 25, -1.0), (70, 30, 1.0)]
+    );
+    g.ok(req("edit.decompose", json!({"clips": [id]})));
+    let held: Vec<(i64, i64, i64, f64)> = g
+        .editor
+        .project()
+        .track("V2")
+        .unwrap()
+        .clips
+        .iter()
+        .map(|c| (c.start, c.duration, c.source_in, c.speed()))
+        .collect();
+    assert_eq!(held, [(20, 25, 124, -1.0), (45, 25, 49, -1.0)]);
+    assert_eq!(shown(&g), played);
+}
