@@ -100,7 +100,7 @@ impl OpenProject {
         let result = self.editor.apply(envelope, env, playhead);
         let committed = self.editor.project().rev != rev;
         if committed {
-            match self.store.save(&self.editor) {
+            match self.store.save(&mut self.editor) {
                 Ok(saved) => {
                     self.disk = saved.text;
                     self.history_error = saved.history_error;

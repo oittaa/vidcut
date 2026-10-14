@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # How long edits and loads take on a big project, and how large its undo
 # history grows. It makes a project of 300 media and 2000 clips, fills the
-# history with 100 steps, then times EDITS edits (a trim, a ripple delete
+# history with FILL steps (100), then times EDITS edits (a trim, a ripple delete
 # and a marker in turn), each followed by a command that only reads.
 #
 #   scripts/history-speed.sh [EDITS]
@@ -35,8 +35,9 @@ for i in $(seq 0 1999); do
     printf '{"method":"edit.append","params":{"media":"m%d","range":"0f..50f"}}\n' $((i % 300 + 1))
 done >"$work/clips.jsonl"
 run apply "$work/clips.jsonl"
-echo "filling the history"
-for i in $(seq 1 100); do run markers add --at "${i}s" --name "fill $i"; done
+fill=${FILL:-100}
+echo "filling the history with $fill steps"
+for i in $(seq 1 "$fill"); do run markers add --at "$((i % 3000))s" --name "fill $i"; done
 
 t0=$(now)
 "$vidcut" --version >/dev/null

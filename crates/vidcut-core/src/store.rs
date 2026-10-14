@@ -2,10 +2,14 @@
 //! history sidecar that lets `vidcut history undo` work across CLI runs (deviation X4).
 //!
 //! The project is one pretty-printed JSON file. History lives outside it, in
-//! `$XDG_STATE_HOME/vidcut/history/<hash of the project path>.json`, together
-//! with the project state it was recorded against. Each step is what its
-//! edit changed (`crate::change`). If the file on disk differs
-//! from that state, someone edited it externally; the difference becomes one
+//! `$XDG_STATE_HOME/vidcut/history/<hash of the project path>.jsonl`, one
+//! JSON line each ([`Line`]): the project file it is of, the project before
+//! its first step, then the steps (what each edit changed, `crate::change`),
+//! undos and redos as they happened, each save ending with the hash of the
+//! project text it wrote. A save adds lines at the end. The file is written
+//! whole when it is new, when another process wrote it last, or when it
+//! holds twice [`HISTORY_CAP`] steps. If the project file's hash isn't the
+//! last one saved, someone edited it outside: the difference becomes one
 //! undoable "external change" step.
 //!
 //! Media and proxy files in or under the project's folder are written
@@ -18,8 +22,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
-use crate::editor::{Editor, Entry, History};
+use crate::editor::{Editor, Entry, HISTORY_CAP, History, Moved};
 use crate::error::{Error, Result};
 use crate::model::Project;
 
@@ -39,13 +44,74 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     })
 }
 
+/// A line of the history file.
 #[derive(Serialize, Deserialize)]
-struct Sidecar {
-    project_path: PathBuf,
-    /// The project as of the last recorded change.
-    head: Project,
-    undo: Vec<Entry>,
-    redo: Vec<Entry>,
+#[serde(rename_all = "lowercase")]
+enum Line {
+    /// The first: the project file the history is of.
+    Of(PathBuf),
+    /// The second: the project before the first step.
+    Base(Value),
+    Step(Entry),
+    Undo(u32),
+    Redo(u32),
+    /// The hash of the project text a save wrote ([`text_hash`]).
+    Saved(String),
+}
+
+impl From<Moved> for Line {
+    fn from(m: Moved) -> Self {
+        match m {
+            Moved::Step(e) => Self::Step(e),
+            Moved::Undo(n) => Self::Undo(n),
+            Moved::Redo(n) => Self::Redo(n),
+        }
+    }
+}
+
+/// The history file as an editor last read or wrote it: its length, and
+/// the steps in it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct OnDisk {
+    len: u64,
+    steps: usize,
+}
+
+/// What a history file holds.
+struct Read {
+    /// Its second line, the project before the first step, as written.
+    base: String,
+    /// Every step in it, not only the newest [`HISTORY_CAP`].
+    history: History,
+    /// The hash the last save wrote.
+    saved: Option<String>,
+    /// Where it can take more lines: `None` when its last line is cut off.
+    on_disk: Option<OnDisk>,
+}
+
+impl Read {
+    /// The project as the history's last save left it: its first project
+    /// with every step made again. `None` when they don't fit.
+    fn last_saved(&self) -> Option<Project> {
+        let Ok(Line::Base(mut json)) = serde_json::from_str(&self.base) else {
+            return None;
+        };
+        for e in &self.history.undo {
+            e.change.apply(&mut json, true).ok()?;
+        }
+        serde_json::from_value(json).ok()
+    }
+}
+
+/// The hash of a project file's text, as the history keeps it.
+fn text_hash(text: &str) -> String {
+    format!("{:016x}", fnv1a(text.as_bytes()))
+}
+
+fn line(l: &Line) -> String {
+    let mut s = serde_json::to_string(l).expect("history lines are JSON");
+    s.push('\n');
+    s
 }
 
 /// What [`Store::save`] wrote.
@@ -88,6 +154,11 @@ impl Store {
 
     /// Opens an existing project file.
     pub fn open(path: &Path) -> Result<Self> {
+        Self::open_in(path, &state_dir())
+    }
+
+    /// [`open`](Self::open), its history in `state` (`state_dir`).
+    fn open_in(path: &Path, state: &Path) -> Result<Self> {
         let path = crate::dirs::canonical(path).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 Error::not_found(format!("no project file {}", path.display()))
@@ -101,9 +172,7 @@ impl Store {
             .unwrap_or_default();
         let lock_path = path.with_file_name(format!(".{name}.lock"));
         let hash = fnv1a(path.as_os_str().as_encoded_bytes());
-        let history_path = state_dir()
-            .join("history")
-            .join(format!("{hash:016x}.json"));
+        let history_path = state.join("history").join(format!("{hash:016x}.jsonl"));
         Ok(Self {
             path,
             lock_path,
@@ -134,31 +203,68 @@ impl Store {
     /// Like [`load`](Self::load), for file text the caller already read.
     pub fn load_text(&self, text: &str) -> Result<Editor> {
         let project = parse(&self.path, self.dir(), text)?;
-        let sidecar = std::fs::read_to_string(&self.history_path)
-            .ok()
-            .and_then(|t| serde_json::from_str::<Sidecar>(&t).ok())
-            .filter(|s| s.project_path == self.path);
-        Ok(match sidecar {
-            Some(s) if s.head == project => Editor::new(
-                project,
-                History {
-                    undo: s.undo,
-                    redo: s.redo,
-                },
-            ),
-            Some(s) => {
-                let mut editor = Editor::new(
-                    s.head,
-                    History {
-                        undo: s.undo,
-                        redo: s.redo,
-                    },
-                );
-                editor.record_external(project);
-                editor
+        let Some(read) = self.read_history() else {
+            return Ok(Editor::new(project, History::default()));
+        };
+        if read.saved.as_deref() == Some(text_hash(text).as_str()) {
+            let mut editor = Editor::new(project, read.history);
+            editor.on_disk = read.on_disk;
+            return Ok(editor);
+        }
+        // Edited outside: the project as the history left it, and then the
+        // file as it is now, one step.
+        let Some(last) = read.last_saved() else {
+            return Ok(Editor::new(project, History::default()));
+        };
+        let mut editor = Editor::new(last, read.history);
+        editor.on_disk = read.on_disk;
+        editor.record_external(project);
+        Ok(editor)
+    }
+
+    /// The history file, when it is this project's and whole but for maybe
+    /// its last line.
+    fn read_history(&self) -> Option<Read> {
+        let text = std::fs::read_to_string(&self.history_path).ok()?;
+        let mut lines = text.split_inclusive('\n');
+        match serde_json::from_str(lines.next()?).ok()? {
+            Line::Of(path) if path == self.path => {}
+            _ => return None,
+        }
+        let mut read = Read {
+            base: lines.next()?.to_string(),
+            history: History::default(),
+            saved: None,
+            on_disk: None,
+        };
+        let (mut steps, mut whole) = (0, true);
+        for l in lines {
+            if !whole {
+                return None;
             }
-            None => Editor::new(project, History::default()),
-        })
+            let Ok(l) = serde_json::from_str::<Line>(l) else {
+                // Cut off while it was written: the lines before it stand.
+                whole = false;
+                continue;
+            };
+            let h = &mut read.history;
+            match l {
+                Line::Step(e) => {
+                    h.undo.push(e);
+                    h.redo.clear();
+                    steps += 1;
+                }
+                Line::Undo(n) => shift(n, &mut h.undo, &mut h.redo)?,
+                Line::Redo(n) => shift(n, &mut h.redo, &mut h.undo)?,
+                Line::Saved(hash) => read.saved = Some(hash),
+                Line::Of(_) | Line::Base(_) => return None,
+            }
+        }
+        read.on_disk = whole.then_some(OnDisk {
+            len: text.len() as u64,
+            steps,
+        });
+        Some(read)
     }
 
     /// Runs `f` on the project under an exclusive lock and saves the result if
@@ -172,7 +278,7 @@ impl Store {
         let before = editor.project().clone();
         let out = f(&mut editor)?;
         let history_error = if editor.project() != &before {
-            self.save(&editor)?.history_error
+            self.save(&mut editor)?.history_error
         } else {
             None
         };
@@ -181,23 +287,14 @@ impl Store {
 
     /// Writes the project and its history. Callers hold the
     /// [`lock`](Self::lock).
-    pub fn save(&self, editor: &Editor) -> Result<Saved> {
+    pub fn save(&self, editor: &mut Editor) -> Result<Saved> {
         let text = to_json(editor.project(), self.dir())?;
-        let sidecar = Sidecar {
-            project_path: self.path.clone(),
-            head: editor.project().clone(),
-            undo: editor.history().undo.clone(),
-            redo: editor.history().redo.clone(),
-        };
-        // The sidecar goes first: whoever sees the new project file (a file
+        // The history goes first: whoever sees the new project file (a file
         // watcher, say) then also finds the history that matches it, instead
-        // of mistaking the change for an external edit.
-        // Failing to save the history must not lose the edit. A failed write
-        // leaves the old sidecar whole (`write_atomic`).
-        let dir = self.history_path.parent().expect("history dir");
-        let json = serde_json::to_string(&sidecar).map_err(|e| Error::internal(e.to_string()))?;
-        let history_error = std::fs::create_dir_all(dir)
-            .and_then(|()| write_atomic(&self.history_path, &json))
+        // of mistaking the change for an external edit. Failing to save the
+        // history must not lose the edit: the next load sees it as one.
+        let history_error = self
+            .save_history(editor, &text_hash(&text))
             .err()
             .map(|e| format!("{}: {e}", self.history_path.display()));
         write_atomic(&self.path, &text).map_err(|e| io(&self.path, e))?;
@@ -205,6 +302,57 @@ impl Store {
             text,
             history_error,
         })
+    }
+
+    /// Adds what happened to `editor`'s history since it was last saved to
+    /// the history file, or writes the file whole.
+    fn save_history(&self, editor: &mut Editor, hash: &str) -> std::io::Result<()> {
+        let moved = editor.take_moved();
+        let steps = moved.iter().filter(|m| matches!(m, Moved::Step(_))).count();
+        let len = std::fs::metadata(&self.history_path).map(|m| m.len()).ok();
+        // Until it is written, where the file stands isn't known.
+        let on_disk = editor.on_disk.take();
+        if let Some(d) = on_disk
+            && Some(d.len) == len
+            && d.steps + steps <= 2 * HISTORY_CAP
+        {
+            let mut add: String = moved.into_iter().map(|m| line(&m.into())).collect();
+            add.push_str(&line(&Line::Saved(hash.into())));
+            File::options()
+                .append(true)
+                .open(&self.history_path)?
+                .write_all(add.as_bytes())?;
+            editor.on_disk = Some(OnDisk {
+                len: d.len + add.len() as u64,
+                steps: d.steps + steps,
+            });
+            return Ok(());
+        }
+        let h = editor.history();
+        let mut base = serde_json::to_value(editor.project()).map_err(std::io::Error::other)?;
+        for e in h.undo.iter().rev() {
+            e.change
+                .apply(&mut base, false)
+                .map_err(std::io::Error::other)?;
+        }
+        let mut text = line(&Line::Of(self.path.clone()));
+        text.push_str(&line(&Line::Base(base)));
+        // The steps to redo as if made and then undone.
+        for e in h.undo.iter().chain(h.redo.iter().rev()) {
+            text.push_str(&line(&Line::Step(e.clone())));
+        }
+        if !h.redo.is_empty() {
+            text.push_str(&line(&Line::Undo(h.redo.len() as u32)));
+        }
+        text.push_str(&line(&Line::Saved(hash.into())));
+        let steps = h.undo.len() + h.redo.len();
+        std::fs::create_dir_all(self.history_path.parent().expect("history dir"))?;
+        write_atomic(&self.history_path, &text)?;
+        editor.on_disk = Some(OnDisk {
+            len: text.len() as u64,
+            steps,
+        });
+        Ok(())
     }
 
     /// Takes the project's write lock (released when the returned file is
@@ -233,6 +381,14 @@ impl Store {
             }
         }
     }
+}
+
+/// Moves the newest `n` steps from one stack to the other.
+fn shift(n: u32, from: &mut Vec<Entry>, to: &mut Vec<Entry>) -> Option<()> {
+    for _ in 0..n {
+        to.push(from.pop()?);
+    }
+    Some(())
 }
 
 fn io(path: &Path, e: std::io::Error) -> Error {
@@ -368,7 +524,98 @@ pub(crate) fn is_drive(s: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{absolute_elsewhere, windows_absolute};
+    use serde_json::json;
+
+    use super::*;
+    use crate::model::Settings;
+    use crate::request::Envelope;
+    use crate::test_support::FakeEnv;
+
+    /// An empty project in `dir`, its history there too.
+    fn project_in(dir: &Path) -> Store {
+        let path = dir.join("p.vidcut");
+        let project = Project::new(Settings {
+            auto_format: false,
+            ..Settings::default()
+        });
+        std::fs::write(&path, to_json(&project, dir).unwrap()).unwrap();
+        Store::open_in(&path, &dir.join("state")).unwrap()
+    }
+
+    /// Adds bin `name` to the project and saves it.
+    fn add_bin(store: &Store, name: &str) {
+        let mut editor = store.load().unwrap();
+        let request = json!({"method": "bins.add", "params": {"path": name}});
+        editor
+            .apply(
+                Envelope::from_json(request).unwrap(),
+                &FakeEnv::default(),
+                None,
+            )
+            .unwrap();
+        store.save(&mut editor).unwrap();
+    }
+
+    fn history_text(store: &Store) -> String {
+        std::fs::read_to_string(&store.history_path).unwrap()
+    }
+
+    #[test]
+    fn a_save_adds_lines_to_the_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = project_in(dir.path());
+        add_bin(&store, "a");
+        let before = history_text(&store);
+        add_bin(&store, "b");
+        let after = history_text(&store);
+        assert!(after.len() > before.len() && after.starts_with(&before));
+    }
+
+    #[test]
+    fn an_outside_edit_is_one_undo_step() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = project_in(dir.path());
+        add_bin(&store, "a");
+        let text = store
+            .read()
+            .unwrap()
+            .replace("\"ripple_on\": true", "\"ripple_on\": false");
+        std::fs::write(store.path(), text).unwrap();
+        let editor = store.load().unwrap();
+        let labels: Vec<&str> = editor
+            .history()
+            .undo
+            .iter()
+            .map(|e| e.label.as_str())
+            .collect();
+        assert_eq!(labels.last(), Some(&"external change"));
+    }
+
+    #[test]
+    fn a_cut_off_last_line_is_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = project_in(dir.path());
+        add_bin(&store, "a");
+        add_bin(&store, "b");
+        let mut text = history_text(&store);
+        text.push_str("{\"step\": {\"lab");
+        std::fs::write(&store.history_path, text).unwrap();
+        assert_eq!(store.load().unwrap().history().undo.len(), 2);
+    }
+
+    #[test]
+    fn past_twice_the_limit_the_history_is_written_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = project_in(dir.path());
+        for i in 0..=2 * HISTORY_CAP {
+            add_bin(&store, &format!("b{i}"));
+        }
+        let steps = history_text(&store)
+            .lines()
+            .filter(|l| l.starts_with("{\"step\""))
+            .count();
+        assert_eq!(steps, HISTORY_CAP);
+    }
 
     #[test]
     fn a_name_starting_with_a_wide_character_is_relative() {
