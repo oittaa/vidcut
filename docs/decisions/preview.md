@@ -27,7 +27,7 @@
 
 ## 3. Decoding: on the GPU when there is one
 
-- **The GPU decodes every stream it can** while `gpu.acceleration` and `gpu.decoding` are on. `preferences::gpu_decoding` decides it for the viewer, exports, proxies, tiles and the two-up. The decoder is on the GPU in use (`gpu.device`, else NVIDIA's, else the first other; `GpuDecoder::best`): NVDEC on NVIDIA's, VA-API on the others on Linux, Direct3D 11 on the others on Windows, VideoToolbox on a Mac. FFmpeg's own decoders do it, so every one gives the same frames. The CPU decodes what the GPU doesn't (ProRes, VP8, a profile the GPU lacks), stills and image sequences, and H.264 on AMD's Direct3D 11 (`GpuDecoder::why_not`, gotchas.md). Measured with `decode_speed` on this machine (16 threads, RTX 4080 SUPER):
+- **The GPU decodes every stream it can** while `gpu.acceleration` and `gpu.decoding` are on. `preferences::gpu_decoding` decides it for the viewer, exports, proxies, tiles, the two-up, `frame render` and storyboards. The decoder is on the GPU in use (`gpu.device`, else NVIDIA's, else the first other; `GpuDecoder::best`): NVDEC on NVIDIA's, VA-API on the others on Linux, Direct3D 11 on the others on Windows, VideoToolbox on a Mac. FFmpeg's own decoders do it, so every one gives the same frames. The CPU decodes what the GPU doesn't (ProRes, VP8, a profile the GPU lacks), stills and image sequences, and H.264 on AMD's Direct3D 11 (`GpuDecoder::why_not`, gotchas.md). Measured with `decode_speed` on this machine (16 threads, RTX 4080 SUPER):
 
 | Stream | CPU | NVDEC |
 |---|---|---|
@@ -122,11 +122,10 @@ The Trim Editor's and Dynamic Trim's two-up show frames of a copy of the project
 - **Back:** a window renders at once, from a keyframe up to the frame asked for, and is kept. The keyframe is found with one seek and one decoded frame (where the seek lands), and the window starts at the first frame sampled at or after it, so a seek for it lands on that keyframe and nothing in the window decodes twice. A window reaches back over more keyframes to hold at least 2 s, and holds at most half the memory budget (256 MB a cell).
 - **Ahead:** windows render on a second thread (`Prefetch`) before they are needed. Wherever the position is, even after a jump, at least 2 s behind it are kept; going back, a whole window more, so the next window back renders while the position goes through this one. Asked for a frame a window is rendering, the renderer waits for it instead of rendering it too.
 - **Floor:** the cell says where the shown stretch of the file starts. Windows never reach behind it: frames before a clip's first one aren't shown there.
-- **On the GPU:** while `gpu.acceleration` and `gpu.decoding` are on, HEVC, AV1 and VP9 decode on the GPU the viewer decodes on (`StillRenderer::decoding_on`, on a stream or device of their own; the preferences are read as each frame is asked for), shrunk there to the cell's size (interlaced ones of VA-API and Direct3D 11 come down whole, for the CPU to deinterlace); H.264 stays on the CPU, as for the timeline's tiles (gui.md §11).
+- **On the GPU:** while `gpu.acceleration` and `gpu.decoding` are on, the streams the GPU decodes decode on the GPU the viewer decodes on (`StillRenderer::decoding_on`, on a stream or device of their own; the preferences are read as each frame is asked for), shrunk there to the cell's size (interlaced ones of VA-API and Direct3D 11 come down whole, for the CPU to deinterlace).
 - **Eviction:** over the budget, the pictures kept or looked at least recently go first. Moving back and forth over a cut keeps both sides whole: a hole in the kept frames would decode from a keyframe while the cell waits.
 - **Measured** (keyframes 120 frames apart, with B-frames): 50 steps forward decode 50 frames; 299 steps back decode 306. On a 1080p HEVC file with keyframes 8 s apart, a step back takes under 5 ms except once a window, and the first picture after a seek about 0.7 s.
 
 ## 10. Still open
 
 - Vulkan Video decoding and AMD's VA-API pictures shown from video memory (untested): own-player.md.
-- The meters show the edit's levels, not the engine's output: todo/meters-tap-player-output.md.

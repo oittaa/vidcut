@@ -2,10 +2,11 @@
 //! per track with a meter, a fader, mute and solo, and the viewer's meter
 //! with the monitoring mute.
 //!
-//! Each meter is one bar per project channel (spec D28). The bars read the
-//! cached waveform peaks at the playhead, playing or not, with clip gain,
-//! faders, mute and solo applied: they show the edit's levels rather than
-//! the player's output, and move while paused.
+//! Each meter is one bar per project channel (spec D28). While the viewer
+//! plays, the bars show the player's sound as it is heard: the mix, and
+//! each track's lane. Paused, they read the cached waveform peaks at the
+//! playhead, with clip gain, faders, mute and solo applied, so they move
+//! while paused and scrubbing too.
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -272,6 +273,36 @@ fn timeline_meters(p: &Project, at: i64, waveforms: &Waves) -> TimelineMeters {
     TimelineMeters { tracks, mix }
 }
 
+/// The meters from the sound heard while playing: each track shows its
+/// lanes' peaks (`lanes` names each lane's track), silent without one (not
+/// heard), and the mix the mix's.
+fn heard_meters(
+    p: &Project,
+    levels: &vidcut_av::player::Levels,
+    lanes: &[String],
+) -> TimelineMeters {
+    let n = project_channels(p);
+    let tracks = p
+        .tracks
+        .iter()
+        .map(|t| {
+            let mut level = vec![0.0; n];
+            for (lane, peaks) in lanes.iter().zip(&levels.lanes) {
+                if *lane == t.id {
+                    for (dst, src) in level.iter_mut().zip(map_channels(peaks, n)) {
+                        *dst = f32::max(*dst, src);
+                    }
+                }
+            }
+            (t.id.clone(), level)
+        })
+        .collect();
+    TimelineMeters {
+        tracks,
+        mix: map_channels(&levels.mix, n),
+    }
+}
+
 /// The loudest channel, for the number under the mix meter.
 fn loudest(levels: &[f32]) -> f32 {
     levels.iter().copied().fold(0.0, f32::max)
@@ -295,6 +326,14 @@ impl Workspace {
                 mix: Vec::new(),
             };
         };
+        let timeline = &self.snap.timeline;
+        if let Some(levels) = self
+            .levels
+            .as_ref()
+            .filter(|_| self.snap.viewer == ViewerMode::Timeline && timeline.playing)
+        {
+            return heard_meters(p, levels, &timeline.lanes);
+        }
         // A fader being dragged is heard at its new level; so it shows.
         if self.mixer.dragging.is_empty() {
             return timeline_meters(p, self.snap.timeline.position, &self.snap.waveforms);
@@ -321,6 +360,9 @@ impl Workspace {
         }
         if self.snap.viewer == ViewerMode::Timeline {
             return self.timeline_levels().mix;
+        }
+        if let Some(levels) = self.levels.as_ref().filter(|_| self.snap.active().playing) {
+            return map_channels(&levels.mix, n);
         }
         let Some((media, frame)) = self.snap.source_at() else {
             return vec![0.0; n];

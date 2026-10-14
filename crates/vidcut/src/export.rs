@@ -1113,6 +1113,9 @@ pub fn frame(
         ),
         None => (w, h),
     };
-    vidcut_av::export::still::write_png(&piece, fps, w.max(2), h.max(2), out).map_err(from_av)?;
+    // Decoded on the GPU the viewer decodes on, on a decoder of its own.
+    let decoder = crate::preferences::gpu_decoding().own_decoder();
+    vidcut_av::export::still::write_png(&piece, fps, w.max(2), h.max(2), out, decoder.as_ref())
+        .map_err(from_av)?;
     Ok(json!({ "path": out, "frame": frame, "width": w, "height": h }))
 }

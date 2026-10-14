@@ -183,6 +183,14 @@ impl ViewerHandle {
 }
 
 impl Viewer {
+    /// The peaks of the sound the engine shown plays now, while it plays.
+    pub fn levels(&self) -> Option<vidcut_av::player::Levels> {
+        let engine = self.shared.lock().engine.clone()?;
+        engine.levels(Instant::now())
+    }
+}
+
+impl Viewer {
     /// The UI's side, each frame: the size the viewer shows the picture
     /// at; the picture's egui texture (registered anew with each new
     /// target) and whether it holds a picture.

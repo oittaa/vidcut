@@ -198,7 +198,8 @@ impl Workspace {
                         // where none is listed (macOS).
                         let gpus = state["gpus"].as_array().cloned().unwrap_or_default();
                         if !gpus.is_empty() {
-                            let name = |g: &Value| g["name"].as_str().unwrap_or_default().to_string();
+                            let name =
+                                |g: &Value| g["name"].as_str().unwrap_or_default().to_string();
                             let automatic = match state["gpu_automatic"].is_object() {
                                 true => format!("Automatic ({})", name(&state["gpu_automatic"])),
                                 false => "Automatic".to_string(),
@@ -230,7 +231,11 @@ impl Workspace {
                                     })
                                     .response
                                     .on_hover_text(
-                                        "The graphics card that decodes and encodes, in the                                          viewer, exports and proxies. Automatic: NVIDIA's when                                          there is one, else the first other. A card is known by                                          its model and its slot, so the choice holds on every                                          system this computer starts",
+                                        "The graphics card that decodes and encodes, in the \
+                                         viewer, exports and proxies. Automatic: NVIDIA's when \
+                                         there is one, else the first other. A card is known by \
+                                         its model and its slot, so the choice holds on every \
+                                         system this computer starts",
                                     );
                             });
                             if pick != current {

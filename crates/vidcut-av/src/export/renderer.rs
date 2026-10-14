@@ -95,9 +95,8 @@ impl StillRenderer {
         }
     }
 
-    /// Files decode on `gpu` where it decodes their streams, but H.264
-    /// (`frames`), the frames shrunk there before they come down
-    /// ([`VideoFrames::decode_on`]).
+    /// Files decode on `gpu` where it decodes their streams, the frames
+    /// shrunk there before they come down ([`VideoFrames::decode_on`]).
     pub fn decoding_on(mut self, gpu: crate::hw::GpuDecoder) -> Self {
         self.decoder = Some(gpu);
         self
@@ -121,7 +120,7 @@ impl StillRenderer {
         let same =
             matches!(&self.frames, Some((f, w, h, _)) if (*f, *w, *h) == (fps, width, height));
         if !same {
-            let frames = frames(fps, (width, height), self.decoder.as_ref());
+            let frames = frames(fps, (width, height), RGBA, self.decoder.as_ref());
             self.frames = Some((fps, width, height, frames));
         }
         let VideoPiece::Source {
@@ -252,9 +251,8 @@ pub struct FrameReader {
 }
 
 impl FrameReader {
-    /// Files decode on `gpu` where it decodes their streams, but H.264
-    /// (`frames`), the frames shrunk there before they come down
-    /// ([`VideoFrames::decode_on`]).
+    /// Files decode on `gpu` where it decodes their streams, the frames
+    /// shrunk there before they come down ([`VideoFrames::decode_on`]).
     pub fn decoding_on(gpu: crate::hw::GpuDecoder) -> Self {
         Self {
             frames: None,
@@ -282,7 +280,7 @@ impl FrameReader {
         let same =
             matches!(&self.frames, Some((f, w, h, _)) if (*f, *w, *h) == (fps, width, height));
         if !same {
-            let frames = frames(fps, (width, height), self.decoder.as_ref());
+            let frames = frames(fps, (width, height), RGBA, self.decoder.as_ref());
             self.frames = Some((fps, width, height, frames));
         }
         let (.., frames) = self.frames.as_mut().expect("set above");
@@ -294,21 +292,20 @@ impl FrameReader {
     }
 }
 
-/// Frames as RGBA pictures of `width`×`height` at `fps`, decoding on
-/// `decoder` where it decodes a stream: HEVC, AV1 and VP9. H.264, which the
-/// CPU decodes cheaply, stays on the CPU: frames read in jumps seek at every
-/// one, and a seek makes NVDEC's H.264 decoder anew (gotchas.md).
-fn frames(
+/// Pictures packed for these renderers' images.
+const RGBA: format::Pixel = format::Pixel::RGBA;
+
+/// Frames as `pixel` pictures of `width`×`height` at `fps`, decoding on
+/// `decoder` where it decodes a stream.
+pub(crate) fn frames(
     fps: Rational,
     (width, height): (u32, u32),
+    pixel: format::Pixel,
     decoder: Option<&crate::hw::GpuDecoder>,
 ) -> VideoFrames {
-    let frames = VideoFrames::new(&[], fps, width, height, format::Pixel::RGBA, None);
+    let frames = VideoFrames::new(&[], fps, width, height, pixel, None);
     match decoder {
-        Some(d) => frames.decode_on(d.clone().without(
-            crate::ffmpeg::codec::Id::H264,
-            "frames read in jumps seek at every one, and the CPU decodes H.264 sooner",
-        )),
+        Some(d) => frames.decode_on(d.clone()),
         None => frames,
     }
 }
@@ -344,7 +341,12 @@ impl Prefetch {
     /// for meanwhile, rather than rendering it again.
     pub fn run(self) -> Result<()> {
         crate::init();
-        let mut frames = frames(self.fps, (self.width, self.height), self.decoder.as_ref());
+        let mut frames = frames(
+            self.fps,
+            (self.width, self.height),
+            RGBA,
+            self.decoder.as_ref(),
+        );
         let start = window(
             &mut frames,
             &self.piece,
