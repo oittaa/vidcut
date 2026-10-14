@@ -1077,6 +1077,10 @@ impl VideoReader {
         if self.deinterlacer.is_some() {
             self.deinterlacer = Some(Deinterlacer::new(self.time_base));
         }
+        // What it held is from before: a seek cut short (cancelled) leaves
+        // none of it to read on from, its position unknown.
+        self.pending = None;
+        self.min_pts = None;
         // Seek to a keyframe at or before the target. Demuxers without an index
         // (e.g. MPEG-TS) may land after it, so back off until the first decoded
         // frame is not past the target. Targets before the first frame, or

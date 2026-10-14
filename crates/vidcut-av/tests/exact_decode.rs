@@ -118,6 +118,22 @@ fn fixtures_decode_frame_exact() {
     }
 }
 
+/// A seek cancelled before it lands leaves no frame from before to read
+/// on from: the player's next read seeks again rather than taking it for
+/// the frame the seek landed on.
+#[test]
+fn a_cancelled_seek_leaves_no_frame_behind() {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    let spec = FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 90);
+    let path = fixture::ensure(&spec).unwrap();
+    let mut reader = VideoReader::open(&path).unwrap();
+    assert!(reader.pending_pts().is_some(), "its first frame, looked at");
+    let _cancel = vidcut_av::cancel::Guard::set(Arc::new(AtomicBool::new(true)));
+    assert!(reader.seek(60 * 512).is_err());
+    assert_eq!(reader.pending_pts(), None);
+}
+
 #[test]
 fn probe_reports_first_frame_and_duration() {
     for spec in matrix() {
