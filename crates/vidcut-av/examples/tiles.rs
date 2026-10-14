@@ -1,7 +1,8 @@
 //! Times timeline filmstrip tiles: frames of FILE at a fixed spacing, read
 //! in order as the timeline asks for them; `gpu` decodes on the GPU the
 //! viewer decodes on (`VIDCUT_HWDEC` picks another). `compare` makes twenty
-//! tiles both on that GPU and on the CPU, and says how far apart they are.
+//! tiles both on that GPU and on the CPU, says how far apart they are, and
+//! saves the first of each as a PNG in the temp folder's `vidcut-compare`.
 //!
 //! `cargo run --release -p vidcut-av --example tiles -- FILE [HEIGHT] [gpu|compare]`
 //! (`gpu` or `compare` may come without a height).
@@ -52,7 +53,10 @@ fn main() {
         image: None,
     };
     if let (true, Some(gpu)) = (comparing, gpu.clone()) {
-        compare(&piece, frames, fps, (width, height), gpu);
+        let name = path
+            .file_stem()
+            .map_or("tile".into(), |s| s.to_string_lossy());
+        compare(&piece, frames, fps, (width, height), gpu, &name);
         return;
     }
     for spacing in [0.25, 1.0, 2.0, 4.0, 8.0, 30.0] {
@@ -86,14 +90,18 @@ fn main() {
 
 /// Twenty tiles a second apart from a third of the way in, made on `gpu`
 /// and on the CPU: how many the GPU decoded, and how far its red, green and
-/// blue are from the CPU's.
+/// blue are from the CPU's. The first of each is saved as `NAME-gpu.png`
+/// and `NAME-cpu.png`.
 fn compare(
     piece: &dyn Fn(i64) -> VideoPiece,
     frames: i64,
     fps: Rational,
     (width, height): (u32, u32),
     gpu: GpuDecoder,
+    name: &str,
 ) {
+    let dir = std::env::temp_dir().join("vidcut-compare");
+    std::fs::create_dir_all(&dir).expect("temp folder");
     let mut on_gpu = FrameReader::decoding_on(gpu);
     let mut on_cpu = FrameReader::default();
     let (mut tiles, mut decoded) = (0, 0);
@@ -110,6 +118,15 @@ fn compare(
         let b = on_cpu
             .rgba(&piece(at), fps, width, height)
             .expect("CPU tile");
+        if tiles == 0 {
+            for (img, on) in [(&a, "gpu"), (&b, "cpu")] {
+                let png = vidcut_av::export::still::png_rgba(img.width, img.height, &img.rgba)
+                    .expect("PNG");
+                let file = dir.join(format!("{name}-{on}.png"));
+                std::fs::write(&file, png).expect("saving the PNG");
+                println!("  saved {}", file.display());
+            }
+        }
         for (p, q) in a
             .rgba
             .as_chunks::<4>()

@@ -122,7 +122,7 @@ fn main() {
     std::fs::create_dir_all(&dir).unwrap();
     let out = dir.join("out.mkv");
     let available = vidcut_av::export::encode::detect();
-    let clock = Instant::now();
+    let (clock, cpu) = (Instant::now(), vidcut_av::cpu_seconds());
     let report = export::run_decoding_on(
         &plan,
         &settings,
@@ -134,6 +134,7 @@ fn main() {
     )
     .expect("export");
     let seconds = clock.elapsed().as_secs_f64();
+    let cores = (vidcut_av::cpu_seconds() - cpu) / seconds;
     let bytes = std::fs::metadata(&out).unwrap().len();
     let got = bytes as f64 * 8.0 / (frames as f64 / fps.as_f64()) / 1e6;
     let target: f64 = mbps.parse().unwrap_or(got);
@@ -142,19 +143,27 @@ fn main() {
     let mut reader = VideoReader::open(&out).unwrap();
     let (mut sum, mut worst, mut n) = (0.0, f64::MAX, 0);
     while let Some(f) = reader.next_frame().unwrap() {
+        // 8-bit output only.
+        if f.format() != Pixel::YUV420P {
+            break;
+        }
         let s = source.next_frame().unwrap().unwrap();
         let p = psnr_y(&s, &f);
         sum += p;
         worst = worst.min(p);
         n += 1;
     }
+    let psnr = match n {
+        0 => "no PSNR (not 8-bit)".to_string(),
+        n => format!("PSNR {:.2} dB (worst frame {worst:.2})", sum / f64::from(n)),
+    };
     println!(
-        "{codec} {encoder} {} {}: {got:.3} Mb/s for {target} ({:+.1}%), {seconds:.1} s, \
-         PSNR {:.2} dB (worst frame {worst:.2}), passes {:?}",
+        "{codec} {encoder} {} {}: {got:.3} Mb/s for {target} ({:+.1}%), {seconds:.1} s \
+         ({:.0} fps on {cores:.1} cores), {psnr}, passes {:?}",
         report.video_encoder.as_deref().unwrap_or("?"),
         rest.join(" "),
         (got / target - 1.0) * 100.0,
-        sum / f64::from(n),
+        frames as f64 / seconds,
         report.passes,
     );
     if let Some(gpu) = &gpu {
