@@ -1,8 +1,4 @@
-# Fast gate only: scripts/check.sh (fmt, clippy -D warnings, unit tests), on
-# Linux, Windows and macOS.
-# scripts/check.sh full (integration, e2e, doc tests) is intentionally not run here,
-# but for one cross-check on Linux and Windows: vidcut's OTIO files against
-# OpenTimelineIO's own library, which those tests skip without.
+# The fast gate, scripts/check.sh, on Linux, Windows and macOS.
 name: check
 
 on:
@@ -29,9 +25,7 @@ env:
 jobs:
   check:
     name: fmt, clippy, unit tests
-    # Pin Ubuntu 26.04. Its apt archive ships FFmpeg 8.0 (libavcodec 62).
-    # ubuntu-24.04, and ubuntu-latest until the October 2026 migration,
-    # ship FFmpeg 6. Those headers do not match this tree (swr_convert).
+    # Ubuntu 26.04's apt has FFmpeg 8.0, the oldest vidcut supports.
     runs-on: ubuntu-26.04
     timeout-minutes: 120
     steps:
@@ -41,8 +35,6 @@ jobs:
       - name: Install FFmpeg 8, ALSA and libclang
         run: |
           set -euo pipefail
-          # Ubuntu 26.04 (resolute) publishes FFmpeg 8 in the archive.
-          # libasound2-dev: the player's audio output (cpal) builds on ALSA.
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             libavcodec-dev \
@@ -72,7 +64,6 @@ jobs:
           set -euo pipefail
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.cargo/bin:$PATH"
-          # rust-toolchain.toml selects the channel and rustfmt/clippy.
           rustup show active-toolchain
           rustc --version
           cargo fmt --version
@@ -85,15 +76,10 @@ jobs:
           fi
 
       # After the toolchain step: the cache key includes the rustc version.
-      # It keeps the compiled dependencies (target/, not vidcut's own crates)
-      # and the downloaded crates. After a Cargo.lock change it restores the
-      # previous cache, so only the changed dependencies are compiled again.
       - name: Cache compiled dependencies
         uses: Swatinem/rust-cache@v2
 
       - name: Fast gate
-        # CI is set, so scripts/check.sh omits cargo --quiet and the log
-        # shows each crate as it compiles.
         run: scripts/check.sh
 
   windows:
@@ -107,19 +93,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # FFmpeg's newest release as a shared build with its headers and
-      # import libraries, as macOS takes Homebrew's newest (Linux builds
-      # against the oldest supported, Ubuntu's): BtbN's rolling `latest`
-      # release has a build of each recent release branch, and its
-      # checksum file names them. No version here to keep up to date; the
-      # step prints the one it took. LLVM, whose libclang generates the
-      # bindings, comes with the runner.
+      # The newest FFmpeg release, as a shared build from BtbN. LLVM comes
+      # with the runner.
       - name: Install FFmpeg
         run: |
           set -euo pipefail
           base=https://github.com/BtbN/FFmpeg-Builds/releases/download/latest
           curl -fsSL -o checksums.sha256 "$base/checksums.sha256"
-          # The newest release branch's: ffmpeg-n9.0-latest-win64-gpl-shared-9.0.zip.
+          # Such as ffmpeg-n9.0-latest-win64-gpl-shared-9.0.zip.
           zip=$(grep -oE 'ffmpeg-n[0-9]+\.[0-9]+-latest-win64-gpl-shared-[0-9.]+\.zip' checksums.sha256 | sort -V | tail -1)
           curl -fsSL -o "$zip" "$base/$zip"
           grep "  ${zip}\$" checksums.sha256 | sha256sum -c -
@@ -153,17 +134,14 @@ jobs:
 
   macos:
     name: macOS, fmt, clippy, unit tests
-    # Apple Silicon (arm64), pinned like the others.
     runs-on: macos-26
     timeout-minutes: 120
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # Homebrew's ffmpeg-full: the newest release with zimg (zscale, which
-      # HDR needs), its headers and pkg-config files. Keg-only. Not pinned:
-      # Homebrew keeps one version of a formula. libclang, which generates
-      # the bindings, comes with Xcode.
+      # ffmpeg-full, not ffmpeg, because HDR needs its zscale filter.
+      # libclang comes with Xcode.
       - name: Install FFmpeg
         run: |
           set -euo pipefail
@@ -189,9 +167,6 @@ jobs:
             exit 1
           fi
 
-      # As on Linux and Windows: master's run saves the compiled
-      # dependencies, and every later run (pull requests too) starts from
-      # them.
       - name: Cache compiled dependencies
         uses: Swatinem/rust-cache@v2
 
