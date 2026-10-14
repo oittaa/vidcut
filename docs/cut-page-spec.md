@@ -145,7 +145,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 - It shows the timeline In/Out range and markers.
 
 **Lower timeline:**
-- A detail view around the playhead (p. 644). Ctrl+wheel, a pinch on a trackpad, and − and + zoom it (deviation X21).
+- A detail view around the playhead (p. 644). Ctrl+wheel, a pinch on a trackpad, and − and + zoom it. Resolve Studio 21.1.1 zooms it too, though the manual calls its zoom fixed.
 - A sideways two-finger swipe on a trackpad scrolls it (p. 66).
 - **Fixed Playhead on (default):** the playhead stays at the center and the clips move under it. Dragging the ruler or a swipe moves the clips. Clips don't snap to the fixed playhead (p. 717).
 - **Fixed Playhead off (Timeline Options):**
@@ -379,7 +379,7 @@ Shortcuts do nothing while a text field has focus or a question (a modal dialog)
 | M / Alt+M | Add-or-edit marker / delete marker at playhead | 718 |
 | W | Dynamic Trim on/off (then J/K/L trim, Space plays around) | 731 |
 | Shift+S | Audio scrubbing on/off | 876 |
-| Ctrl+mouse wheel | Zoom the lower timeline (deviation X21) | 644 |
+| Ctrl+mouse wheel | Zoom the lower timeline | 644 |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / redo | 651 |
 | Ctrl+I | Import media | 654 |
 | Shift+Ctrl+N | New bin | 655 |

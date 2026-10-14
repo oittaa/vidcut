@@ -119,7 +119,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 
 **Two timelines** (spec §5):
 - **Upper:** the whole program at full width.
-- **Lower:** a detail view at a zoom you choose (Ctrl+wheel, a pinch, −/+; deviation X21), its playhead fixed in the middle unless Timeline Options says otherwise.
+- **Lower:** a detail view at a zoom you choose (Ctrl+wheel, a pinch, −/+), its playhead fixed in the middle unless Timeline Options says otherwise.
 - **Shared drawing.** Both draw the same clips: names, durations, status, filmstrips (§11), waveforms from per-media peaks (100 per second, cached in `~/.cache/vidcut/waveforms/`).
 
 **Gestures are pure functions** (`gui/timeline/geometry.rs`, `gesture.rs`), unit-tested for zones, snapping and every drop rule:
