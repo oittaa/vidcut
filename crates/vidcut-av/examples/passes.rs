@@ -102,7 +102,7 @@ fn main() {
     let dir = std::env::temp_dir().join(format!("vidcut-passes-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let out = dir.join("out.mkv");
-    let available = vidcut_av::export::encode::detect();
+    let available = vidcut_av::export::encode::detect(true);
     let clock = Instant::now();
     let report = export::run(
         &plan,

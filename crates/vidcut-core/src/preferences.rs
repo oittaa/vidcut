@@ -122,20 +122,22 @@ pub struct Proxies {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ProxyCodec {
-    /// AV1 on a hardware encoder when this machine has one, else H.264 with
-    /// x264, which stays quick on old computers.
+    /// The first of DNxHR LB, ProRes Proxy, AV1 and H.264 that the GPU's
+    /// video engine makes and the GPU plays. Else the first the GPU plays,
+    /// else the first it makes, else DNxHR LB in software.
     #[default]
     Auto,
-    /// AV1: on a hardware encoder when there is one, else with SVT-AV1.
-    Av1,
-    /// H.264 with x264.
-    H264,
-    /// ProRes 422 Proxy: every frame a keyframe, the files many times larger.
-    /// On Apple's ProRes hardware (VideoToolbox) when there is one.
-    Prores,
     /// DNxHR LB: every frame a keyframe, the files many times larger. At
     /// least 256×120.
     Dnxhr,
+    /// ProRes 422 Proxy: every frame a keyframe, the files many times larger.
+    /// On Apple's ProRes hardware (VideoToolbox) when there is one, else on
+    /// the GPU through Vulkan (FFmpeg 8.1 and later).
+    Prores,
+    /// AV1: on a hardware encoder when there is one, else with SVT-AV1.
+    Av1,
+    /// H.264: on a hardware encoder when there is one, else with x264.
+    H264,
 }
 
 impl Default for Proxies {

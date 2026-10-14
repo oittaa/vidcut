@@ -857,17 +857,21 @@ pub fn availability(refresh: bool) -> Availability {
     detected(refresh).in_use()
 }
 
-/// The GPU encoders that work here, on every GPU: tested once, then kept
-/// until something they depend on changes.
-pub fn detected(refresh: bool) -> Availability {
-    // FFmpeg, the system and the GPUs' drivers: a change of any of them
-    // tests the encoders again.
-    let key = format!(
+/// What the GPU tests depend on: FFmpeg, the system and the GPUs' drivers.
+/// A change of any of them tests again.
+fn tested_with() -> String {
+    format!(
         "{:?}|{}|{}",
         vidcut_av::library_versions(),
         crate::system::version(),
         Value::from(crate::system::gpus()),
-    );
+    )
+}
+
+/// The GPU encoders that work here, on every GPU: tested once, then kept
+/// until something they depend on changes.
+pub fn detected(refresh: bool) -> Availability {
+    let key = tested_with();
     let path = cache_dir().join("encoders.json");
     if !refresh
         && let Ok(text) = std::fs::read_to_string(&path)
@@ -877,11 +881,62 @@ pub fn detected(refresh: bool) -> Availability {
     {
         return a;
     }
-    let a = vidcut_av::export::encode::detect();
-    if std::fs::create_dir_all(cache_dir()).is_ok() {
+    // A test that takes the process down (a GPU driver's crash) leaves this
+    // file behind, naming a process that is gone: the next test leaves out
+    // Vulkan's encoders, the newest, so it can't happen again and again.
+    let testing = cache_dir().join("encoders.testing");
+    let crashed = std::fs::read_to_string(&testing)
+        .ok()
+        .and_then(|pid| pid.trim().parse().ok())
+        .is_some_and(|pid| !crate::ipc::registry::alive(pid));
+    let dir = std::fs::create_dir_all(cache_dir()).is_ok();
+    if dir {
+        let _ = std::fs::write(&testing, std::process::id().to_string());
+    }
+    let a = vidcut_av::export::encode::detect(!crashed);
+    if dir {
         let _ = std::fs::write(&path, json!({ "key": key, "availability": a }).to_string());
+        let _ = std::fs::remove_file(&testing);
     }
     a
+}
+
+/// The GPU decoder the player uses here, by its name (`NVDEC`), and the
+/// proxy codecs it plays (`hw::plays`), while `decoding` (GPU decoding on);
+/// `None` where the CPU plays them all. Tested once on each GPU, then kept
+/// as the encoders are.
+pub fn plays(decoding: bool) -> Option<(String, Vec<String>)> {
+    if !decoding {
+        return None;
+    }
+    let tested = tested_with();
+    let gpu = vidcut_av::gpus::in_use().map_or(String::new(), |g| g.id);
+    let key = format!("{tested}|{gpu}");
+    let path = cache_dir().join("plays.json");
+    let mut cached: serde_json::Map<String, Value> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default();
+    if let Some(entry) = cached.get(&key)
+        && let Ok(found) = serde_json::from_value(entry.clone())
+    {
+        return found;
+    }
+    let found = vidcut_av::hw::GpuDecoder::best().map(|d| {
+        let clips = vidcut_core::dirs::cache().join("decoder-tests");
+        let codecs = vidcut_av::hw::plays(&d, &clips);
+        (
+            d.kind().label().to_string(),
+            codecs.into_iter().map(String::from).collect::<Vec<_>>(),
+        )
+    });
+    // Each GPU's, on this FFmpeg, system and drivers.
+    cached.retain(|k, _| k.starts_with(&tested));
+    cached.insert(key, json!(found));
+    if std::fs::create_dir_all(cache_dir()).is_ok() {
+        let _ = std::fs::write(&path, Value::Object(cached).to_string());
+    }
+    found
 }
 
 /// The export as the preferences allow: without GPU acceleration every

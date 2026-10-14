@@ -233,9 +233,13 @@ pub enum EncoderChoice {
     Qsv,
     /// Apple's VideoToolbox (macOS).
     VideoToolbox,
+    /// FFmpeg's Vulkan encoders on the GPU in use (FFmpeg 8.1 and later).
+    /// Only ProRes proxies use it: exports don't.
+    Vulkan,
 }
 
 impl EncoderChoice {
+    /// The choices exports take.
     pub const ALL: [Self; 7] = [
         Self::Auto,
         Self::Cpu,
@@ -256,6 +260,7 @@ impl EncoderChoice {
             Self::Amf => "AMF",
             Self::Qsv => "QSV",
             Self::VideoToolbox => "VideoToolbox",
+            Self::Vulkan => "Vulkan",
         }
     }
 

@@ -34,15 +34,16 @@ pub struct ProxyEncoder {
     /// FFmpeg's encoder: `av1_nvenc`, `av1_vaapi`, `h264_nvenc`,
     /// `h264_amf`, `h264_vaapi`, `h264_qsv`, `h264_videotoolbox`,
     /// `libsvtav1`, `libx264` (where this FFmpeg has neither of those two
-    /// `libopenh264` or `prores_ks`), `prores_videotoolbox`, `prores_ks` or
-    /// `dnxhd`.
+    /// `libopenh264` or `prores_ks`), `prores_videotoolbox`,
+    /// `prores_ks_vulkan`, `prores_ks` or `dnxhd`.
     pub name: String,
     /// `av1`, `h264`, `prores` or `dnxhr`.
     pub codec: &'static str,
-    /// Hardware (NVENC, AMF, VAAPI, QSV, VideoToolbox) or software (CPU).
+    /// Hardware (NVENC, AMF, VAAPI, QSV, VideoToolbox), the GPU through
+    /// Vulkan, or software (CPU).
     pub kind: EncoderChoice,
     /// The GPU it runs on, as the encoder check names it: a VAAPI render
-    /// node, an AMF or QSV adapter or node.
+    /// node, an AMF or QSV adapter or node, Vulkan's GPU by its id.
     pub device: Option<String>,
 }
 
@@ -73,6 +74,7 @@ impl ProxyEncoder {
                 self.device.as_deref().unwrap_or("GPU")
             ),
             (EncoderChoice::VideoToolbox, _) => "Apple hardware (VideoToolbox)".to_string(),
+            (EncoderChoice::Vulkan, _) => "GPU (Vulkan)".to_string(),
             (_, "libsvtav1") => "software (SVT-AV1)".to_string(),
             (_, "libx264") => "software (x264)".to_string(),
             (_, "libopenh264") => "software (OpenH264)".to_string(),
@@ -146,7 +148,9 @@ impl ProxyEncoder {
                 ("qmax", "22".into()),
             ],
             // ProRes Proxy: every frame a keyframe.
-            "prores_ks" => vec![("profile", "0".into()), ("vendor", "apl0".into())],
+            "prores_ks" | "prores_ks_vulkan" => {
+                vec![("profile", "0".into()), ("vendor", "apl0".into())]
+            }
             // Apple's ProRes hardware only: without it the session won't
             // open, and FFmpeg's own takes over.
             "prores_videotoolbox" => vec![("profile", "proxy".into()), ("allow_sw", "0".into())],
@@ -160,36 +164,82 @@ impl ProxyEncoder {
     }
 }
 
-/// The encoders `choice` makes proxies with here, best first: the hardware
-/// ones this machine has working, AV1's (NVENC, then VAAPI) for automatic
-/// and AV1, then H.264's (NVENC, AMF, VAAPI, QSV, VideoToolbox) for
-/// automatic and H.264, ProRes's (VideoToolbox) for ProRes; then x264 for
-/// automatic and H.264, SVT-AV1 for AV1 (without those, OpenH264, else
-/// ProRes Proxy), FFmpeg's own for ProRes and DNxHR. A proxy takes the
-/// first that opens: NVENC allows a few sessions at a time.
-pub fn encoders(choice: ProxyCodec, available: &Availability) -> Vec<ProxyEncoder> {
-    use EncoderChoice::{Amf, Nvenc, Qsv, Vaapi, VideoToolbox};
-    use format::Pixel::{NV12, YUV420P};
-    let av1: &[_] = &[
-        ("av1_nvenc", "av1", Nvenc, YUV420P),
-        ("av1_vaapi", "av1", Vaapi, NV12),
-    ];
-    let h264: &[_] = &[
-        ("h264_nvenc", "h264", Nvenc, YUV420P),
-        ("h264_amf", "h264", Amf, NV12),
-        ("h264_vaapi", "h264", Vaapi, NV12),
-        ("h264_qsv", "h264", Qsv, NV12),
-        ("h264_videotoolbox", "h264", VideoToolbox, NV12),
-    ];
-    let hardware = match choice {
-        ProxyCodec::Auto => [av1, h264].concat(),
-        ProxyCodec::Av1 => av1.to_vec(),
-        ProxyCodec::H264 => h264.to_vec(),
-        ProxyCodec::Prores => vec![("prores_videotoolbox", "prores", VideoToolbox, NV12)],
-        ProxyCodec::Dnxhr => Vec::new(),
+/// The codecs automatic chooses among, in its order: those that make every
+/// frame a keyframe first.
+pub const AUTOMATIC: [ProxyCodec; 4] = [
+    ProxyCodec::Dnxhr,
+    ProxyCodec::Prores,
+    ProxyCodec::Av1,
+    ProxyCodec::H264,
+];
+
+/// The encoders `choice` makes proxies with here, best first, where the GPU
+/// in use plays the codecs `plays` names (`av1`, `h264`, `prores`).
+///
+/// A codec's own: the hardware ones this machine has working (AV1's NVENC,
+/// then VAAPI; H.264's NVENC, AMF, VAAPI, QSV, VideoToolbox; ProRes's
+/// VideoToolbox, then the GPU's through Vulkan), then the first software
+/// one this FFmpeg has: SVT-AV1 for AV1 and x264 for H.264 (without those,
+/// OpenH264, else ProRes Proxy), FFmpeg's own for ProRes and DNxHR.
+///
+/// Automatic takes every codec's ([`AUTOMATIC`]) in four rounds, each in
+/// that order: those the GPU's video engine makes and the GPU plays, those
+/// it plays, those the GPU makes (through Vulkan too), the rest. A proxy
+/// takes the first that opens: NVENC allows a few sessions at a time, and
+/// DNxHR's are at least 256×120.
+pub fn encoders(choice: ProxyCodec, available: &Availability, plays: &[&str]) -> Vec<ProxyEncoder> {
+    if choice != ProxyCodec::Auto {
+        return own(choice, available);
+    }
+    let mut all: Vec<ProxyEncoder> = Vec::new();
+    for codec in AUTOMATIC {
+        for e in own(codec, available) {
+            if !all.iter().any(|a| a.name == e.name) {
+                all.push(e);
+            }
+        }
+    }
+    all.sort_by_key(|e| round(e, plays));
+    all
+}
+
+/// Automatic's round for `e`, the first 0: made by the GPU's video engine
+/// and played on the GPU; played on it (made in software or through
+/// Vulkan); made on it; neither.
+fn round(e: &ProxyEncoder, plays: &[&str]) -> u8 {
+    let played = plays.contains(&e.codec);
+    match e.kind {
+        EncoderChoice::Cpu | EncoderChoice::Vulkan if played => 1,
+        EncoderChoice::Cpu => 3,
+        _ if played => 0,
+        _ => 2,
+    }
+}
+
+/// `codec`'s own encoders here, best first ([`encoders`]).
+fn own(codec: ProxyCodec, available: &Availability) -> Vec<ProxyEncoder> {
+    use EncoderChoice::{Amf, Nvenc, Qsv, Vaapi, VideoToolbox, Vulkan};
+    use format::Pixel::{NV12, YUV420P, YUV422P10LE};
+    let hardware: &[(&str, &'static str, EncoderChoice, format::Pixel)] = match codec {
+        ProxyCodec::Av1 => &[
+            ("av1_nvenc", "av1", Nvenc, YUV420P),
+            ("av1_vaapi", "av1", Vaapi, NV12),
+        ],
+        ProxyCodec::H264 => &[
+            ("h264_nvenc", "h264", Nvenc, YUV420P),
+            ("h264_amf", "h264", Amf, NV12),
+            ("h264_vaapi", "h264", Vaapi, NV12),
+            ("h264_qsv", "h264", Qsv, NV12),
+            ("h264_videotoolbox", "h264", VideoToolbox, NV12),
+        ],
+        ProxyCodec::Prores => &[
+            ("prores_videotoolbox", "prores", VideoToolbox, NV12),
+            ("prores_ks_vulkan", "prores", Vulkan, YUV422P10LE),
+        ],
+        ProxyCodec::Dnxhr | ProxyCodec::Auto => &[],
     };
     let mut out = Vec::new();
-    for (name, codec, kind, pixel) in hardware {
+    for &(name, codec, kind, pixel) in hardware {
         if let Some(status) = available.find(name, pixel) {
             out.push(ProxyEncoder {
                 name: name.into(),
@@ -201,20 +251,21 @@ pub fn encoders(choice: ProxyCodec, available: &Availability) -> Vec<ProxyEncode
     }
     // The first software encoder this FFmpeg has. ProRes and DNxHR are
     // FFmpeg's own, in every build.
-    let software: &[(&str, &'static str)] = match choice {
+    let software: &[(&str, &'static str)] = match codec {
         ProxyCodec::Av1 => &[
             ("libsvtav1", "av1"),
             ("libx264", "h264"),
             ("libopenh264", "h264"),
             ("prores_ks", "prores"),
         ],
-        ProxyCodec::Auto | ProxyCodec::H264 => &[
+        ProxyCodec::H264 => &[
             ("libx264", "h264"),
             ("libopenh264", "h264"),
             ("prores_ks", "prores"),
         ],
         ProxyCodec::Prores => &[("prores_ks", "prores")],
         ProxyCodec::Dnxhr => &[("dnxhd", "dnxhr")],
+        ProxyCodec::Auto => &[],
     };
     if let Some((name, codec)) = software.iter().find(|(n, _)| crate::parts::has_encoder(n)) {
         out.push(ProxyEncoder::software(name, codec));
@@ -366,9 +417,9 @@ enum Failed {
     Encoding(Error),
 }
 
-/// Opens `enc` for `width`×`height` frames timed in `enc_tb`: for VAAPI,
-/// with the context that uploads them; with `gpu_frames`, for frames in
-/// GPU memory of that frames context.
+/// Opens `enc` for `width`×`height` frames timed in `enc_tb`: for VAAPI
+/// and Vulkan, with the context that uploads them; with `gpu_frames`, for
+/// frames in GPU memory of that frames context.
 fn open(
     enc: &ProxyEncoder,
     (width, height): (u32, u32),
@@ -423,7 +474,7 @@ fn open(
         unsafe { (*ctx.as_mut_ptr()).hw_frames_ctx = frames };
         Ok(())
     };
-    let vaapi = match (&enc.device, enc.kind, gpu_frames) {
+    let upload = match (&enc.device, enc.kind, gpu_frames) {
         (_, EncoderChoice::Nvenc, Some(frames)) => {
             ctx.set_format(format::Pixel::CUDA);
             hw_frames(&mut ctx, frames)?;
@@ -434,6 +485,12 @@ fn open(
             ctx.set_format(format::Pixel::VAAPI);
             hw_frames(&mut ctx, v.frames)?;
             Some(v)
+        }
+        (Some(gpu), EncoderChoice::Vulkan, _) => {
+            let up = Upload::vulkan(gpu, enc.pixel(), width, height)?;
+            ctx.set_format(format::Pixel::VULKAN);
+            hw_frames(&mut ctx, up.frames)?;
+            Some(up)
         }
         (Some(on), EncoderChoice::Amf | EncoderChoice::Qsv, _) => {
             crate::export::encode::on_device(&mut ctx, enc.kind, on)?;
@@ -452,7 +509,7 @@ fn open(
     let opened = ctx
         .open_as_with(codec, opts)
         .ctx(|| format!("opening {}", enc.name))?;
-    Ok((opened, codec, vaapi))
+    Ok((opened, codec, upload))
 }
 
 /// The proxy file being written: pictures go in in order, each one's
@@ -460,7 +517,7 @@ fn open(
 struct Writer<'a> {
     octx: format::context::Output,
     encoder: encoder::Video,
-    vaapi: Option<Upload>,
+    upload: Option<Upload>,
     src_tb: ffmpeg::Rational,
     enc_tb: ffmpeg::Rational,
     durations: HashMap<i64, i64>,
@@ -486,7 +543,7 @@ impl<'a> Writer<'a> {
             .ctx(|| format!("creating {}", tmp.display()))
             .map_err(Failed::Encoding)?;
         let global = octx.format().flags().contains(format::Flags::GLOBAL_HEADER);
-        let (encoder, codec, vaapi) =
+        let (encoder, codec, upload) =
             open(enc, size, enc_tb, rate, global, gpu_frames).map_err(Failed::Opening)?;
         let mut header = || -> Result<()> {
             let mut ost = octx
@@ -502,7 +559,7 @@ impl<'a> Writer<'a> {
         Ok(Self {
             octx,
             encoder,
-            vaapi,
+            upload,
             src_tb,
             enc_tb,
             durations: HashMap::new(),
@@ -540,8 +597,8 @@ impl<'a> Writer<'a> {
         // The source's picture type would force it on the encoder.
         picture.set_kind(ffmpeg::picture::Type::None);
         unsafe { (*picture.as_mut_ptr()).duration = dur };
-        let mut picture = match &self.vaapi {
-            Some(v) => v.upload(&picture)?,
+        let mut picture = match &self.upload {
+            Some(up) => up.upload(&picture)?,
             None => picture,
         };
         picture.set_pts(Some(pts));
@@ -692,41 +749,95 @@ fn drain(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use EncoderChoice::{Nvenc, VideoToolbox, Vulkan};
 
-    #[test]
-    fn prores_takes_apples_hardware_where_it_works() {
-        crate::init();
-        let apple = Availability {
-            encoders: vec![crate::export::encode::EncoderStatus {
-                encoder: "prores_videotoolbox".into(),
-                kind: EncoderChoice::VideoToolbox,
-                device: None,
-                pixel: "nv12".into(),
+    /// GPU encoders that work: their names, kinds and pixel formats.
+    fn working(list: &[(&str, EncoderChoice, &str)]) -> Availability {
+        let status = |&(encoder, kind, pixel): &(&str, EncoderChoice, &str)| {
+            crate::export::encode::EncoderStatus {
+                encoder: encoder.into(),
+                kind,
+                device: Some("0".into()),
+                pixel: pixel.into(),
                 ok: true,
                 error: None,
-            }],
+            }
         };
-        let names: Vec<String> = encoders(ProxyCodec::Prores, &apple)
+        Availability {
+            encoders: list.iter().map(status).collect(),
+        }
+    }
+
+    fn names(choice: ProxyCodec, available: &Availability, plays: &[&str]) -> Vec<String> {
+        crate::init();
+        encoders(choice, available, plays)
             .into_iter()
             .map(|e| e.name)
-            .collect();
-        assert_eq!(names, ["prores_videotoolbox", "prores_ks"]);
+            .collect()
     }
 
     #[test]
-    fn automatic_takes_hardware_h264_without_hardware_av1() {
-        crate::init();
-        let apple = Availability {
-            encoders: vec![crate::export::encode::EncoderStatus {
-                encoder: "h264_videotoolbox".into(),
-                kind: EncoderChoice::VideoToolbox,
-                device: None,
-                pixel: "nv12".into(),
-                ok: true,
-                error: None,
-            }],
-        };
-        let first = encoders(ProxyCodec::Auto, &apple).remove(0);
-        assert_eq!(first.name, "h264_videotoolbox");
+    fn prores_takes_apples_hardware_where_it_works() {
+        let apple = working(&[("prores_videotoolbox", VideoToolbox, "nv12")]);
+        let got = names(ProxyCodec::Prores, &apple, &[]);
+        assert_eq!(got, ["prores_videotoolbox", "prores_ks"]);
+    }
+
+    #[test]
+    fn prores_takes_vulkan_where_it_works() {
+        let gpu = working(&[("prores_ks_vulkan", Vulkan, "yuv422p10le")]);
+        let got = names(ProxyCodec::Prores, &gpu, &[]);
+        assert_eq!(got, ["prores_ks_vulkan", "prores_ks"]);
+    }
+
+    #[test]
+    fn automatic_takes_what_the_gpu_both_makes_and_plays() {
+        let nvidia = working(&[
+            ("av1_nvenc", Nvenc, "yuv420p"),
+            ("h264_nvenc", Nvenc, "yuv420p"),
+            ("prores_ks_vulkan", Vulkan, "yuv422p10le"),
+        ]);
+        let got = names(ProxyCodec::Auto, &nvidia, &["av1", "h264"]);
+        assert_eq!(got[..2], ["av1_nvenc", "h264_nvenc"]);
+    }
+
+    #[test]
+    fn automatic_takes_apples_prores_hardware() {
+        let apple = working(&[
+            ("h264_videotoolbox", VideoToolbox, "nv12"),
+            ("prores_videotoolbox", VideoToolbox, "nv12"),
+        ]);
+        let got = names(ProxyCodec::Auto, &apple, &["h264", "prores"]);
+        assert_eq!(got[0], "prores_videotoolbox");
+    }
+
+    #[test]
+    fn automatic_puts_the_gpus_video_engine_before_vulkan() {
+        let nvidia = working(&[
+            ("av1_nvenc", Nvenc, "yuv420p"),
+            ("prores_ks_vulkan", Vulkan, "yuv422p10le"),
+        ]);
+        let got = names(ProxyCodec::Auto, &nvidia, &["av1", "prores"]);
+        assert_eq!(got[..2], ["av1_nvenc", "prores_ks_vulkan"]);
+    }
+
+    #[test]
+    fn automatic_takes_what_the_gpu_plays_before_what_it_makes() {
+        let gpu = working(&[("av1_nvenc", Nvenc, "yuv420p")]);
+        let got = names(ProxyCodec::Auto, &gpu, &["prores"]);
+        assert_eq!(got[..2], ["prores_ks", "av1_nvenc"]);
+    }
+
+    #[test]
+    fn automatic_takes_what_the_gpu_makes_before_software() {
+        let apple = working(&[("h264_videotoolbox", VideoToolbox, "nv12")]);
+        let got = names(ProxyCodec::Auto, &apple, &[]);
+        assert_eq!(got[0], "h264_videotoolbox");
+    }
+
+    #[test]
+    fn automatic_without_a_gpu_makes_dnxhr_then_prores() {
+        let got = names(ProxyCodec::Auto, &Availability::default(), &[]);
+        assert_eq!(got[..2], ["dnxhd", "prores_ks"]);
     }
 }

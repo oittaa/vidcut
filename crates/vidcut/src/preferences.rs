@@ -171,24 +171,28 @@ pub fn set(patch: &PreferencesPatch, dry_run: bool) -> Result<Value> {
 fn describe(p: &Preferences) -> Value {
     use vidcut_core::preferences::ProxyCodec;
     let (files, bytes) = thumbcache::usage();
-    // What each proxy codec choice makes proxies with on this machine.
-    let codecs: Vec<Value> = [
-        ProxyCodec::Auto,
-        ProxyCodec::Av1,
-        ProxyCodec::H264,
-        ProxyCodec::Prores,
-        ProxyCodec::Dnxhr,
-    ]
-    .into_iter()
-    .map(|c| {
-        let encoders = crate::env::proxy_encoders(c, p.gpu.acceleration);
-        json!({
-            "codec": c,
-            "encoder": encoders.first().map(|e| e.name.clone()),
-            "uses": encoders.first().map(|e| e.label()),
+    // What each proxy codec choice makes proxies with on this machine, and
+    // the GPU decoder that plays them (`null`: the CPU).
+    let decoding = p.gpu.acceleration && p.gpu.decoding;
+    let played = crate::export::plays(decoding);
+    let codecs: Vec<Value> = std::iter::once(ProxyCodec::Auto)
+        .chain(vidcut_av::proxy::AUTOMATIC)
+        .map(|c| {
+            let encoders = crate::env::proxy_encoders(c, p.gpu.acceleration, decoding);
+            let first = encoders.first();
+            let plays_on = played.as_ref().and_then(|(decoder, codecs)| {
+                first
+                    .is_some_and(|e| codecs.iter().any(|played| played == e.codec))
+                    .then(|| decoder.clone())
+            });
+            json!({
+                "codec": c,
+                "encoder": first.map(|e| e.name.clone()),
+                "uses": first.map(|e| e.label()),
+                "plays_on": plays_on,
+            })
         })
-    })
-    .collect();
+        .collect();
     json!({
         "path": path(),
         "preferences": p,

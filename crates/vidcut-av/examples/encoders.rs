@@ -1,10 +1,10 @@
 //! Prints which GPU encoders work on this machine (test encodes).
 fn main() {
     let started = std::time::Instant::now();
-    let a = vidcut_av::export::encode::detect();
+    let a = vidcut_av::export::encode::detect(true);
     for e in &a.encoders {
         println!(
-            "{:<11} {:<6} {:<8} {:<19} {}",
+            "{:<16} {:<6} {:<11} {:<19} {}",
             e.encoder,
             format!("{:?}", e.kind).to_lowercase(),
             e.pixel,

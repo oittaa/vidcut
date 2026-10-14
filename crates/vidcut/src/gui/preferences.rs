@@ -458,7 +458,7 @@ impl Workspace {
                             .unwrap_or_default();
                         let text = |c: &Value| {
                             let uses = c["uses"].as_str().unwrap_or("nothing that works here");
-                            match c["codec"].as_str().unwrap_or_default() {
+                            let made = match c["codec"].as_str().unwrap_or_default() {
                                 "auto" => format!("Automatic: {uses}"),
                                 "av1" => format!("AV1: {}", uses.trim_start_matches("AV1, ")),
                                 "h264" => format!("H.264: {}", uses.trim_start_matches("H.264, ")),
@@ -470,6 +470,10 @@ impl Workspace {
                                     format!("DNxHR LB: {}", uses.trim_start_matches("DNxHR LB, "))
                                 }
                                 other => format!("{other}: {uses}"),
+                            };
+                            match c["plays_on"].as_str() {
+                                Some(decoder) => format!("{made}, played on the GPU ({decoder})"),
+                                None => format!("{made}, played on the CPU"),
                             }
                         };
                         let shown = choices
@@ -493,13 +497,14 @@ impl Workspace {
                                 })
                                 .response
                                 .on_hover_text(
-                                    "Automatic: AV1 on a hardware encoder when there is one, \
-                                     else H.264 on one, else H.264 with x264, which stays quick \
-                                     on old computers. H.264 also takes a hardware encoder first. \
-                                     AV1 files are smaller; making them in software (SVT-AV1) is \
-                                     slower than x264. ProRes Proxy and DNxHR LB make every frame \
-                                     a keyframe: a jump decodes one frame instead of up to 60, \
-                                     but the files are many times larger",
+                                    "Automatic: the first of DNxHR LB, ProRes Proxy, AV1 and \
+                                     H.264 that the GPU's video engine makes and the GPU plays. \
+                                     Else the first the GPU plays, else the first it makes, else \
+                                     DNxHR LB in software. ProRes Proxy and DNxHR LB make every \
+                                     frame a keyframe: a jump decodes one frame instead of up to \
+                                     60, but the files are many times larger. AV1 files are the \
+                                     smallest. Made in software (SVT-AV1), they take longer than \
+                                     H.264 with x264",
                                 );
                         });
                         ui.end_row();

@@ -426,8 +426,12 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 println!("{line}");
             }
             for c in r.result["proxy_codecs"].as_array().into_iter().flatten() {
+                let plays = match c["plays_on"].as_str() {
+                    Some(decoder) => format!("the GPU ({decoder})"),
+                    None => "the CPU".into(),
+                };
                 println!(
-                    "proxies.codec={} makes proxies with {}",
+                    "proxies.codec={} makes proxies with {}, played on {plays}",
                     c["codec"].as_str().unwrap_or_default(),
                     c["uses"].as_str().unwrap_or("nothing that works here")
                 );
