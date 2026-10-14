@@ -252,6 +252,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 if let Some(n) = o["gpu_frames"].as_i64().filter(|n| *n > 0) {
                     println!("  {n} of the frames decoded and scaled on the GPU");
                 }
+                print_copies(&o["copies"]);
                 print_color(&o["color"]);
                 print_metadata(&o["metadata"]);
             }
@@ -534,6 +535,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 if let Some(how) = p["made_with"].as_str() {
                     println!("  {how}");
                 }
+                print_copies(&p["copies"]);
             }
         }
         "proxy.remove" => {
@@ -981,6 +983,23 @@ fn print_metadata(m: &Value) {
         return;
     }
     println!("    HDR metadata: {}", crate::export::metadata_words(m));
+}
+
+/// A job's frames copied down from the GPU and up to it, with their bytes;
+/// nothing when it copied none.
+fn print_copies(c: &Value) {
+    let n = |key: &str| c[key].as_u64().unwrap_or(0);
+    if n("down") + n("up") == 0 {
+        return;
+    }
+    let mb = |key: &str| n(key) as f64 / f64::from(1 << 20);
+    println!(
+        "  frames copied down from the GPU: {} ({:.0} MB), up to it: {} ({:.0} MB)",
+        n("down"),
+        mb("down_bytes"),
+        n("up"),
+        mb("up_bytes")
+    );
 }
 
 /// An export's notes, with the overrides each suggests.

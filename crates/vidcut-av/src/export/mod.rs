@@ -111,6 +111,9 @@ pub struct Report {
     /// chose it (`video.hdr_metadata = auto`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<MetadataChoice>,
+    /// Frames copied between GPU memory and memory for the export: its
+    /// probes, passes and pieces.
+    pub copies: vidcut_core::editor::Copied,
 }
 
 /// What a piece's pictures carry, read from its file: its transfer and HDR
@@ -365,6 +368,8 @@ pub fn run_decoding_on(
 ) -> Result<Report> {
     crate::init();
     validate(settings).map_err(|e| Error::Invalid(e.message))?;
+    let copies = std::sync::Arc::new(crate::copies::Copies::default());
+    let _counting = crate::copies::Guard::set(copies.clone());
     // Settings left to the export choose from the files (decision D44).
     let mut settings = settings.clone();
     let mut chosen = None;
@@ -401,6 +406,7 @@ pub fn run_decoding_on(
     match result.map(|r| Report {
         color: chosen,
         metadata: metadata_chosen,
+        copies: copies.counted(),
         ..r
     }) {
         Ok(report) => match std::fs::rename(&part, output) {
@@ -516,6 +522,7 @@ fn first_run(
             .ok_or_else(|| Error::Invalid("plan has fewer video frames than expected".into()))?;
         f.set_pts(Some(j));
         f.set_kind(ffmpeg::picture::Type::None);
+        crate::copies::to_encoder(&f, enc.kind);
         encoder
             .send_frame(&f)
             .ctx(|| format!("first pass: frame {j} with {}", enc.name))?;
@@ -585,6 +592,8 @@ struct VideoOut {
     hdr10plus: Option<(ffmpeg::codec::Id, std::collections::HashMap<i64, Vec<u8>>)>,
     /// The codec, for static values put into keyframes that lack them.
     codec: ffmpeg::codec::Id,
+    /// The kind of encoder: a GPU's copies frames from memory up itself.
+    kind: EncoderChoice,
 }
 
 impl VideoOut {
@@ -864,6 +873,7 @@ fn encode(
                 metadata: enc.metadata,
                 hdr10plus,
                 codec: id,
+                kind: enc.kind,
             })
         }
         None => None,
@@ -1007,6 +1017,7 @@ fn encode(
             // Pieces decode and convert on streams of their own (`gpu_reader`):
             // the encoder reads a frame once its stream's work is done.
             crate::cuda::share::wait_for(&f)?;
+            crate::copies::to_encoder(&f, v.kind);
             v.encoder
                 .send_frame(&f)
                 .ctx(|| format!("encoding frame {j} with {}", v.name))?;
@@ -1055,5 +1066,6 @@ fn encode(
         loudness: normalized,
         color: None,
         metadata: None,
+        copies: Default::default(),
     })
 }

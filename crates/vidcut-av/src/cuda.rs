@@ -283,6 +283,7 @@ impl CudaFrames {
     /// frame, keeping its timestamp.
     pub fn upload(&self, src: &frame::Video) -> Result<frame::Video> {
         let mut hw = self.0.copy(src, "uploading to the GPU")?;
+        crate::copies::up(src);
         hw.set_pts(src.pts());
         Ok(hw)
     }

@@ -50,6 +50,19 @@ pub struct GeneratedProxy {
     /// with what (`decoded on the GPU (NVDEC), AV1, NVIDIA hardware
     /// (NVENC)`).
     pub made_with: Option<String>,
+    /// The frames copied between GPU memory and memory to make it, when it
+    /// was made now.
+    pub copies: Option<Copied>,
+}
+
+/// Frames copied between GPU memory and memory for a job: how many went
+/// down to memory and up to the GPU, and their bytes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub struct Copied {
+    pub down: u64,
+    pub down_bytes: u64,
+    pub up: u64,
+    pub up_bytes: u64,
 }
 
 /// What the editor needs from the outside world.
@@ -2785,6 +2798,9 @@ fn proxy_generate(
         });
         if let Some(how) = made.made_with {
             done["made_with"] = json!(how);
+        }
+        if let Some(copies) = made.copies {
+            done["copies"] = json!(copies);
         }
         proxies.push(done);
     }
