@@ -1,6 +1,7 @@
 //! The GPU's video decoders, whatever the GPU: FFmpeg's hardware devices.
 //! NVIDIA's NVDEC on CUDA ([`crate::cuda`]); on other GPUs VA-API on Linux
-//! (AMD, Intel) and Direct3D 11 on Windows (AMD, Intel). A reader decoding
+//! (AMD, Intel) and Direct3D 11 on Windows (AMD, Intel); VideoToolbox on a
+//! Mac. A reader decoding
 //! on one gives its frames in that device's memory: CUDA's stay there for a
 //! display that shows them from there, every other kind comes down to
 //! memory as it is decoded, its surface going back to the decoder at once.
@@ -8,7 +9,7 @@
 //! `VIDCUT_HWDEC` picks one for tests and debugging: `nvdec` (`nvdec:1`
 //! for a CUDA device by its index), `vaapi` (`vaapi:/dev/dri/renderD129`
 //! for a render node), `d3d11va` (`d3d11va:1` for an adapter by its
-//! index), or `none`.
+//! index), `videotoolbox`, or `none`.
 
 use std::ptr;
 use std::sync::{Arc, Mutex};
@@ -26,19 +27,22 @@ pub enum Kind {
     Vaapi,
     /// Direct3D 11 video decoding (Windows).
     D3d11va,
+    /// VideoToolbox (macOS).
+    VideoToolbox,
 }
 
 impl Kind {
-    /// A short name: `nvdec`, `vaapi` or `d3d11va`.
+    /// A short name: `nvdec`, `vaapi`, `d3d11va` or `videotoolbox`.
     pub fn name(self) -> &'static str {
         match self {
             Kind::Nvdec => "nvdec",
             Kind::Vaapi => "vaapi",
             Kind::D3d11va => "d3d11va",
+            Kind::VideoToolbox => "videotoolbox",
         }
     }
 
-    const ALL: [Kind; 3] = [Kind::Nvdec, Kind::Vaapi, Kind::D3d11va];
+    const ALL: [Kind; 4] = [Kind::Nvdec, Kind::Vaapi, Kind::D3d11va, Kind::VideoToolbox];
 
     /// The kind a [`name`](Self::name) names.
     pub fn named(name: &str) -> Option<Self> {
@@ -64,12 +68,14 @@ impl Kind {
         Self::ALL.into_iter().find(|k| k.device_type() == ty)
     }
 
-    /// What it is called, for people: `NVDEC`, `VA-API`, `Direct3D 11`.
+    /// What it is called, for people: `NVDEC`, `VA-API`, `Direct3D 11`,
+    /// `VideoToolbox`.
     pub fn label(self) -> &'static str {
         match self {
             Kind::Nvdec => "NVDEC",
             Kind::Vaapi => "VA-API",
             Kind::D3d11va => "Direct3D 11",
+            Kind::VideoToolbox => "VideoToolbox",
         }
     }
 
@@ -79,6 +85,7 @@ impl Kind {
             Kind::Nvdec => T::AV_HWDEVICE_TYPE_CUDA,
             Kind::Vaapi => T::AV_HWDEVICE_TYPE_VAAPI,
             Kind::D3d11va => T::AV_HWDEVICE_TYPE_D3D11VA,
+            Kind::VideoToolbox => T::AV_HWDEVICE_TYPE_VIDEOTOOLBOX,
         }
     }
 
@@ -88,6 +95,7 @@ impl Kind {
             Kind::Nvdec => format::Pixel::CUDA,
             Kind::Vaapi => format::Pixel::VAAPI,
             Kind::D3d11va => format::Pixel::D3D11,
+            Kind::VideoToolbox => format::Pixel::VIDEOTOOLBOX,
         }
     }
 }
@@ -342,7 +350,7 @@ impl GpuDecoder {
                         format!("{} ({}), the GPU in use, won't decode: {e}", g.name, g.id),
                     ),
                 },
-                None => (None, "no GPU is listed here".into()),
+                None => Self::unlisted(),
             },
         };
         match &decoder {
@@ -353,12 +361,25 @@ impl GpuDecoder {
         decoder
     }
 
-    /// Every decoder this computer has: one on each GPU (`gpus::list`).
+    /// Every decoder this computer has: one on each GPU (`gpus::list`), or
+    /// a Mac's.
     pub fn all() -> Vec<Self> {
-        crate::gpus::list()
+        let listed = crate::gpus::list()
             .iter()
-            .filter_map(|g| Self::on_gpu(g).ok())
-            .collect()
+            .filter_map(|g| Self::on_gpu(g).ok());
+        listed.chain(Self::unlisted().0).collect()
+    }
+
+    /// The decoder where no GPU is listed, and how it came: VideoToolbox on
+    /// a Mac, whose one GPU decodes; none elsewhere.
+    fn unlisted() -> (Option<Self>, String) {
+        if !cfg!(target_os = "macos") {
+            return (None, "no GPU is listed here".into());
+        }
+        match Self::open(Kind::VideoToolbox, "") {
+            Ok(d) => (Some(d), "the Mac's".into()),
+            Err(e) => (None, format!("VideoToolbox won't open: {e}")),
+        }
     }
 
     /// The decoder on `gpu`: NVDEC on NVIDIA's CUDA device, Direct3D 11 on
