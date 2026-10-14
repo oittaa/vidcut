@@ -470,6 +470,92 @@ unsafe extern "C" fn gpu_format(
     }
 }
 
+/// Whether the H.264 video of `source` has open GOPs: a keyframe that isn't
+/// IDR, so decoding from it leans on the GOP before. Reads the first
+/// keyframe and those at a few points through the file, not the whole
+/// file. Kept for each file (by path, size and time).
+pub fn h264_open_gop(source: &Input) -> bool {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    static KNOWN: Mutex<Option<HashMap<String, bool>>> = Mutex::new(None);
+    let meta = std::fs::metadata(source.path()).ok();
+    let mtime = meta.as_ref().and_then(|m| m.modified().ok());
+    let key = format!("{source:?}|{:?}|{mtime:?}", meta.map(|m| m.len()));
+    let mut known = KNOWN.lock().unwrap_or_else(|e| e.into_inner());
+    *known
+        .get_or_insert_with(HashMap::new)
+        .entry(key)
+        .or_insert_with(|| keyframes_not_idr(source).unwrap_or(false))
+}
+
+/// [`h264_open_gop`] read from the file: the first keyframe, then the one
+/// at or before each fifth of the way.
+fn keyframes_not_idr(source: &Input) -> Result<bool> {
+    let mut input = source.open()?;
+    let Some(stream) = input.streams().best(media::Type::Video) else {
+        return Ok(false);
+    };
+    let index = stream.index();
+    // MP4's and Matroska's NAL units come after their lengths (avcC's
+    // size of them), others' after start codes.
+    // SAFETY: the stream's parameters, read only.
+    let lengths = unsafe {
+        let p = &*stream.parameters().as_ptr();
+        (p.extradata_size > 4 && *p.extradata == 1)
+            .then(|| usize::from(*p.extradata.add(4) & 3) + 1)
+    };
+    let duration = input.duration().max(0);
+    for k in 0..5 {
+        if k > 0 {
+            let ts = duration * k / 5;
+            if input.seek(ts, ..ts).is_err() {
+                break;
+            }
+        }
+        let mut packet = ffmpeg::Packet::empty();
+        // The first keyframe from there.
+        for _ in 0..1000 {
+            if packet.read(&mut input).is_err() {
+                break;
+            }
+            if packet.stream() == index && packet.is_key() {
+                if not_idr(packet.data().unwrap_or_default(), lengths) {
+                    return Ok(true);
+                }
+                break;
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// Whether the H.264 picture `data` is one that isn't IDR: it has a slice
+/// of such a picture (NAL type 1) and none of an IDR one (5). Its NAL units
+/// come after their lengths in `lengths` bytes, or after start codes.
+fn not_idr(data: &[u8], lengths: Option<usize>) -> bool {
+    let mut types = Vec::new();
+    match lengths {
+        Some(n) => {
+            let mut at = 0;
+            while let Some(len) = data.get(at..at + n) {
+                let Some(&header) = data.get(at + n) else {
+                    break;
+                };
+                types.push(header & 0x1f);
+                at += n + len.iter().fold(0, |l, &b| l << 8 | usize::from(b));
+            }
+        }
+        None => {
+            for w in data.windows(4) {
+                if w[..3] == [0, 0, 1] {
+                    types.push(w[3] & 0x1f);
+                }
+            }
+        }
+    }
+    types.contains(&1) && !types.contains(&5)
+}
+
 /// Facts carried by a decoded frame rather than the stream.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FrameProps {
@@ -722,7 +808,7 @@ impl VideoReader {
         }
         let codec_id = stream.parameters().id();
         let decoder = match device {
-            Some(d) if let Some(why) = d.why_not(codec_id) => {
+            Some(d) if let Some(why) = d.why_not(codec_id, || h264_open_gop(source)) => {
                 return Err(Error::Invalid(why.into()));
             }
             // FFmpeg's default decoder may decode on the CPU only (libdav1d
@@ -1098,5 +1184,30 @@ pub fn read_barcode(frame: &frame::Video) -> Result<Option<u32>> {
                 .ctx(|| "converting frame to gray".into())?;
             Ok(crate::barcode::read(gray.data(0), w, h, gray.stride(0)))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::not_idr;
+
+    #[test]
+    fn a_slice_of_a_picture_not_idr_makes_it_not_idr() {
+        // Its length in 4 bytes, then NAL type 1.
+        assert!(not_idr(&[0, 0, 0, 2, 0x41, 0x9a], Some(4)));
+    }
+
+    #[test]
+    fn an_idr_slice_makes_it_idr() {
+        assert!(!not_idr(&[0, 0, 0, 2, 0x65, 0x88], Some(4)));
+    }
+
+    #[test]
+    fn start_codes_lead_to_the_nal_units() {
+        // An access unit delimiter (9), then an IDR slice (5).
+        assert!(!not_idr(
+            &[0, 0, 0, 1, 0x09, 0xf0, 0, 0, 1, 0x65, 0x88],
+            None
+        ));
     }
 }

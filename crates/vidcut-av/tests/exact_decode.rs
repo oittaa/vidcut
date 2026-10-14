@@ -200,3 +200,17 @@ fn probe_reads_start_timecodes() {
     let plain = fixture::ensure(&FixtureSpec::new(H264, Mp4, 320, 180, (25, 1), 50)).unwrap();
     assert_eq!(probe::probe(&plain).unwrap().timecode, None);
 }
+
+/// x264 through FFmpeg makes open GOPs with B-frames (the keyframes after
+/// the first aren't IDR) and IDR keyframes without. MPEG-TS holds the
+/// NAL units after start codes.
+#[test]
+fn open_gops_are_told_from_closed_ones() {
+    use vidcut_av::decode::{Input, h264_open_gop};
+    let spec =
+        |container| FixtureSpec::new(VideoCodec::H264, container, 320, 180, (30, 1), 300).gop(120);
+    let open = |s: FixtureSpec| h264_open_gop(&Input::File(fixture::ensure(&s).unwrap()));
+    assert!(open(spec(Container::Mp4)));
+    assert!(!open(spec(Container::Mp4).bframes(0)));
+    assert!(open(spec(Container::MpegTs)));
+}
