@@ -701,9 +701,9 @@ impl Player {
     }
 }
 
-/// `player.state`'s `hwdec`: the GPU's decoder (`nvdec`, `vaapi`, `d3d11va`)
-/// while it decodes the picture shown, `no` while the CPU does; empty
-/// before any.
+/// `player.state`'s `hwdec`: the GPU's decoder (`nvdec`, `vaapi`, `d3d11va`,
+/// `videotoolbox`) while it decodes the picture shown, `no` while the CPU
+/// does; empty before any.
 fn hwdec(decoder: Option<Decoder>) -> &'static str {
     match decoder {
         Some(Decoder::Cpu) => "no",
