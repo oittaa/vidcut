@@ -560,6 +560,9 @@ fn piece_meta(p: &Project, piece: &render::VideoPiece) -> PieceMeta {
 /// Probes again the HDR media among `ids` that were probed before vidcut
 /// kept their metadata: those with none of it.
 pub fn fill_hdr_metadata(p: &mut Project, ids: &[String]) {
+    // Their first frames decoded on the GPU the viewer decodes on, on a
+    // decoder of its own, made for the first.
+    let mut decoder = None;
     for m in &mut p.media {
         let Some(v) = m.info.video.as_mut() else {
             continue;
@@ -572,7 +575,12 @@ pub fn fill_hdr_metadata(p: &mut Project, ids: &[String]) {
         if !bare || !ids.contains(&m.id) || m.sequence.is_some() {
             continue;
         }
-        if let Some(probed) = vidcut_av::probe::probe(&m.path).ok().and_then(|i| i.video) {
+        let decoder =
+            decoder.get_or_insert_with(|| crate::preferences::gpu_decoding().own_decoder());
+        if let Some(probed) = vidcut_av::probe::probe(&m.path, decoder.as_ref())
+            .ok()
+            .and_then(|i| i.video)
+        {
             v.mastering = probed.hdr.mastering;
             v.light = probed.hdr.light;
             v.hdr10plus = probed.hdr.hdr10plus;

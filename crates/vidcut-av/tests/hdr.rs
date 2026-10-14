@@ -24,7 +24,7 @@ use vidcut_core::render::{RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
 
 fn piece(path: &Path, source_frame: i64, frames: i64) -> VideoPiece {
-    let origin = vidcut_av::probe::probe(path)
+    let origin = vidcut_av::probe::probe(path, None)
         .unwrap()
         .video
         .and_then(|v| v.first_frame_time)

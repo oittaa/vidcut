@@ -30,7 +30,7 @@ struct Src {
 
 fn src(spec: FixtureSpec) -> Src {
     let path = fixture::ensure(&spec).unwrap();
-    let info = vidcut_av::probe::probe(&path).unwrap();
+    let info = vidcut_av::probe::probe(&path, None).unwrap();
     let origin = info
         .video
         .as_ref()
@@ -467,7 +467,10 @@ fn rotated_sources_export_upright() {
             .rotation(rotation)
             .no_audio();
         let s = src(spec.clone());
-        let info = vidcut_av::probe::probe(&s.path).unwrap().video.unwrap();
+        let info = vidcut_av::probe::probe(&s.path, None)
+            .unwrap()
+            .video
+            .unwrap();
         assert_eq!(info.rotation, rotation, "probed rotation");
         assert_eq!((info.width, info.height), spec.coded_size(), "stored size");
         let from = 10 * i as i64;
@@ -532,7 +535,10 @@ fn interlaced_sources_are_deinterlaced() {
             .interlaced(top)
             .no_audio();
         let s = src(spec);
-        let info = vidcut_av::probe::probe(&s.path).unwrap().video.unwrap();
+        let info = vidcut_av::probe::probe(&s.path, None)
+            .unwrap()
+            .video
+            .unwrap();
         assert_eq!(info.top_field_first, Some(top), "probed field order");
         pieces.push(v(&s, 5, 20));
         want.extend((5..25).map(Some));
@@ -587,7 +593,10 @@ fn hdr_is_tone_mapped_for_sdr_and_kept_for_hdr() {
             .hdr(hdr)
             .no_audio();
         let s = src(spec);
-        let info = vidcut_av::probe::probe(&s.path).unwrap().video.unwrap();
+        let info = vidcut_av::probe::probe(&s.path, None)
+            .unwrap()
+            .video
+            .unwrap();
         let transfer = if hdr == Hdr::Pq {
             "smpte2084"
         } else {
@@ -635,7 +644,7 @@ fn hdr_is_tone_mapped_for_sdr_and_kept_for_hdr() {
     video.hdr = HdrMode::Pq;
     let out = dir.path().join("pq.mkv");
     render(&p, &settings, &out);
-    let info = vidcut_av::probe::probe(&out).unwrap().video.unwrap();
+    let info = vidcut_av::probe::probe(&out, None).unwrap().video.unwrap();
     assert_eq!(info.transfer, "smpte2084");
     assert_eq!(info.pix_fmt, "yuv420p10le");
     let mut r = VideoReader::open(&out).unwrap();
@@ -780,7 +789,7 @@ fn audio_after_a_lost_packet_keeps_its_time() {
             2,
         ),
     );
-    let info = vidcut_av::probe::probe(&s.path).unwrap();
+    let info = vidcut_av::probe::probe(&s.path, None).unwrap();
     let audio = info.audio[0].index;
     // AAC packets are 1024 samples: number 80 starts at 1.7 s.
     let dir = out_dir("lost");
@@ -828,11 +837,11 @@ fn audio_that_starts_late_keeps_its_time() {
             2,
         ),
     );
-    let audio = vidcut_av::probe::probe(&s.path).unwrap().audio[0].index;
+    let audio = vidcut_av::probe::probe(&s.path, None).unwrap().audio[0].index;
     let dir = out_dir("late");
     let lossy = dir.path().join("late.mkv");
     fixture::spoil(&s.path, &lossy, audio, 0, Spoil::Drop).unwrap();
-    let first = vidcut_av::probe::probe(&lossy).unwrap().audio[0]
+    let first = vidcut_av::probe::probe(&lossy, None).unwrap().audio[0]
         .first_secs
         .unwrap();
     assert!(first > 0.01, "starts at {first}");
@@ -879,7 +888,7 @@ fn a_damaged_video_packet_is_skipped() {
         (30, 1),
         30,
     ));
-    let video = vidcut_av::probe::probe(&s.path)
+    let video = vidcut_av::probe::probe(&s.path, None)
         .unwrap()
         .video
         .unwrap()
@@ -909,7 +918,7 @@ fn a_damaged_video_packet_is_skipped() {
         (30, 1),
         90,
     ));
-    let video = vidcut_av::probe::probe(&s.path)
+    let video = vidcut_av::probe::probe(&s.path, None)
         .unwrap()
         .video
         .unwrap()
@@ -1034,7 +1043,8 @@ fn scaling_padding_and_presets() {
             settings.container.extension()
         ));
         let report = render(&p, &settings, &out);
-        let info = vidcut_av::probe::probe(&out).unwrap_or_else(|e| panic!("{}: {e}", preset.name));
+        let info =
+            vidcut_av::probe::probe(&out, None).unwrap_or_else(|e| panic!("{}: {e}", preset.name));
         if let Some(vs) = &settings.video {
             let vi = info
                 .video

@@ -230,8 +230,6 @@ pub struct GpuDecoder {
     vendor: Option<u32>,
     /// Its GPU's name, where it was opened for one (`gpus::list`).
     gpu: Option<String>,
-    /// Codecs left to the CPU, and why ([`without`](Self::without)).
-    left: Vec<(ffmpeg::codec::Id, &'static str)>,
 }
 
 impl GpuDecoder {
@@ -244,7 +242,6 @@ impl GpuDecoder {
             cuda: Some(cuda),
             vendor: None,
             gpu: None,
-            left: Vec::new(),
         }
     }
 
@@ -269,7 +266,6 @@ impl GpuDecoder {
             cuda: None,
             vendor,
             gpu: None,
-            left: Vec::new(),
         })
     }
 
@@ -291,30 +287,16 @@ impl GpuDecoder {
         self.kind
     }
 
-    /// Why it leaves `codec` to the CPU, when it does: left to it
-    /// ([`without`](Self::without)), or not decoded right, as far as known.
-    /// AMD's Direct3D 11 decoder loses its way in H.264 sought into an open
-    /// GOP (a keyframe that isn't IDR): some frames on, it shows one picture
-    /// over and over, where NVIDIA's and VA-API on Intel decode on. The CPU
-    /// decodes H.264 there.
+    /// Why it leaves `codec` to the CPU, when it does: it doesn't decode it
+    /// right, as far as known. AMD's Direct3D 11 decoder loses its way in
+    /// H.264 sought into an open GOP (a keyframe that isn't IDR): some
+    /// frames on, it shows one picture over and over, where NVIDIA's and
+    /// VA-API on Intel decode on. The CPU decodes H.264 there.
     pub fn why_not(&self, codec: ffmpeg::codec::Id) -> Option<&'static str> {
-        if self.kind == Kind::D3d11va
+        (self.kind == Kind::D3d11va
             && self.vendor == Some(crate::gpus::AMD)
-            && codec == ffmpeg::codec::Id::H264
-        {
-            Some("AMD's Direct3D 11 decoder loses its way in H.264 after a seek")
-        } else {
-            self.left
-                .iter()
-                .find(|(c, _)| *c == codec)
-                .map(|(_, why)| *why)
-        }
-    }
-
-    /// The same decoder, leaving `codec` to the CPU for the reason `why`.
-    pub fn without(mut self, codec: ffmpeg::codec::Id, why: &'static str) -> Self {
-        self.left.push((codec, why));
-        self
+            && codec == ffmpeg::codec::Id::H264)
+            .then_some("AMD's Direct3D 11 decoder loses its way in H.264 after a seek")
     }
 
     /// The render node or adapter it is on; empty for the default one.

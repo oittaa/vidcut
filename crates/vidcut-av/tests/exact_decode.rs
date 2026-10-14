@@ -36,7 +36,7 @@ fn fixtures_decode_frame_exact() {
         let path = fixture::ensure(&spec).unwrap_or_else(|e| panic!("{}: {e}", spec.file_name()));
         let name = spec.file_name();
 
-        let info = probe::probe(&path).unwrap();
+        let info = probe::probe(&path, None).unwrap();
         let v = info.video.as_ref().expect("video stream");
         assert_eq!((v.width, v.height), (spec.width, spec.height), "{name}");
         assert_eq!(
@@ -122,7 +122,7 @@ fn fixtures_decode_frame_exact() {
 fn probe_reports_first_frame_and_duration() {
     for spec in matrix() {
         let path = fixture::ensure(&spec).unwrap();
-        let v = probe::probe(&path).unwrap().video.unwrap();
+        let v = probe::probe(&path, None).unwrap().video.unwrap();
         let o = v.first_frame_time.expect("first frame");
         let want_o = f64::from(spec.start_offset_ms) / 1000.0;
         assert!(
@@ -151,7 +151,7 @@ fn probe_finds_where_primed_audio_starts() {
         let spec =
             FixtureSpec::new(VideoCodec::H264, container, 320, 180, (30, 1), 60).audio_only();
         let path = fixture::ensure(&spec).unwrap();
-        let a = probe::probe(&path).unwrap().audio.remove(0);
+        let a = probe::probe(&path, None).unwrap().audio.remove(0);
         let first = a.first_secs.expect("start");
         // Matroska and WebM count milliseconds.
         assert!(
@@ -186,7 +186,7 @@ fn probe_reads_start_timecodes() {
         ),
     ] {
         let path = fixture::ensure(&spec).unwrap();
-        let info = probe::probe(&path).unwrap();
+        let info = probe::probe(&path, None).unwrap();
         assert_eq!(info.timecode.as_deref(), Some(tc), "{}", path.display());
         assert_eq!(probe::clock(&path).unwrap(), (Some(tc.to_string()), None));
         let mut reader = VideoReader::open(&path).unwrap();
@@ -198,5 +198,5 @@ fn probe_reads_start_timecodes() {
         assert_eq!(k, spec.frames, "{}", path.display());
     }
     let plain = fixture::ensure(&FixtureSpec::new(H264, Mp4, 320, 180, (25, 1), 50)).unwrap();
-    assert_eq!(probe::probe(&plain).unwrap().timecode, None);
+    assert_eq!(probe::probe(&plain, None).unwrap().timecode, None);
 }

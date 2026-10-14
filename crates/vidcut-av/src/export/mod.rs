@@ -122,7 +122,7 @@ pub fn probed_metadata<'a>(
     decoder: Option<&'a crate::hw::GpuDecoder>,
     cancel: Option<&'a AtomicBool>,
 ) -> impl FnMut(&VideoPiece) -> PieceMeta + 'a {
-    let mut probe = probed_files();
+    let mut probe = probed_files(decoder);
     move |piece| {
         let mut m = probe(piece);
         m.measured = measured_light(piece, fps, v, &m, true, decoder, cancel);
@@ -181,15 +181,18 @@ pub fn makes_hdr10plus(v: &VideoSettings, m: &PieceMeta) -> bool {
 }
 
 /// What a piece's pictures carry, read from its file: its transfer and HDR
-/// metadata. Each file is probed once.
-pub fn probed_files() -> impl FnMut(&VideoPiece) -> PieceMeta {
+/// metadata. Each file is probed once, its first frame decoded on
+/// `decoder`.
+pub fn probed_files(
+    decoder: Option<&crate::hw::GpuDecoder>,
+) -> impl FnMut(&VideoPiece) -> PieceMeta + '_ {
     let mut known: std::collections::HashMap<PathBuf, PieceMeta> = Default::default();
     move |piece| {
         let VideoPiece::Source { path, .. } = piece else {
             return PieceMeta::default();
         };
         *known.entry(path.clone()).or_insert_with(|| {
-            crate::probe::probe(path)
+            crate::probe::probe(path, decoder)
                 .ok()
                 .and_then(|i| i.video)
                 .map_or(PieceMeta::default(), |v| PieceMeta {
@@ -225,25 +228,28 @@ pub fn choose_metadata(
 }
 
 /// What a piece's pictures are, read from its file: its HDR transfer and
-/// bit depth. Each file is probed once.
-pub fn probed_kinds() -> impl FnMut(&VideoPiece) -> PictureKind {
+/// bit depth. Each file is probed once, its first frame decoded on
+/// `decoder`.
+pub fn probed_kinds(
+    decoder: Option<&crate::hw::GpuDecoder>,
+) -> impl FnMut(&VideoPiece) -> PictureKind + '_ {
     let mut known: std::collections::HashMap<PathBuf, PictureKind> = Default::default();
     move |piece| {
         let VideoPiece::Source { path, .. } = piece else {
             return PictureKind::default();
         };
         *known.entry(path.clone()).or_insert_with(|| {
-            crate::probe::probe(path).ok().and_then(|i| i.video).map_or(
-                PictureKind::default(),
-                |v| PictureKind {
+            crate::probe::probe(path, decoder)
+                .ok()
+                .and_then(|i| i.video)
+                .map_or(PictureKind::default(), |v| PictureKind {
                     hdr: match v.transfer.as_str() {
                         "smpte2084" => Some(vidcut_core::model::Hdr::Pq),
                         "arib-std-b67" => Some(vidcut_core::model::Hdr::Hlg),
                         _ => None,
                     },
                     depth: crate::probe::pixel_depth(&v.pix_fmt),
-                },
-            )
+                })
         })
     }
 }
@@ -365,7 +371,7 @@ pub fn run_decoding_on(
     if let Some(v) = settings.video.as_mut()
         && (v.hdr == HdrMode::Auto || v.bit_depth.is_none())
     {
-        let c = choose_color(plan, &settings, available, probed_kinds())
+        let c = choose_color(plan, &settings, available, probed_kinds(decoder))
             .expect("the settings have video");
         c.apply(settings.video.as_mut().expect("checked"));
         chosen = Some(c);
@@ -459,7 +465,7 @@ fn made_hdr10plus_light(
     if !enc.dynamic.hdr10plus {
         return Ok(out);
     }
-    let mut probe = probed_files();
+    let mut probe = probed_files(decoder);
     for piece in &plan.video {
         let Some(span) = crate::light::Span::of(piece, plan.fps) else {
             continue;
