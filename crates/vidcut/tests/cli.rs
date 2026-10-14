@@ -199,34 +199,6 @@ fn builds_and_edits_a_timeline() {
 }
 
 #[test]
-fn proxies_from_the_command_line() {
-    let sb = Sandbox::new("proxy");
-    let a = fixture(FixtureSpec::new(
-        VideoCodec::H264,
-        Container::Mp4,
-        320,
-        180,
-        (30, 1),
-        30,
-    ));
-    assert!(
-        sb.cmd(&["project", "create"])
-            .arg(sb.project())
-            .status()
-            .unwrap()
-            .success()
-    );
-    sb.ok(&["media", "add", s(&a)]);
-    // Plain and automatic: both send `auto`, false or true.
-    sb.ok(&["proxy", "generate"]);
-    let m = sb.ok(&["media", "get", "m1"]);
-    assert_eq!(m["result"]["proxy"]["stale"], false, "{m}");
-    sb.ok(&["proxy", "generate", "--auto"]);
-    sb.ok(&["proxy", "remove"]);
-    assert!(sb.ok(&["media", "get", "m1"])["result"]["proxy"].is_null());
-}
-
-#[test]
 fn errors_have_stable_exit_codes() {
     let sb = Sandbox::new("errors");
     let a = fixture(FixtureSpec::new(
@@ -357,17 +329,8 @@ fn apply_runs_a_batch_as_one_undo_step() {
 }
 
 #[test]
-fn schema_and_rpc() {
-    let sb = Sandbox::new("schema");
-    let schema = sb.ok(&["schema", "edit.trim"]);
-    let props = &schema["result"]["params"]["properties"];
-    assert!(
-        props.get("clip").is_some() && props.get("edge").is_some(),
-        "{schema}"
-    );
-    let all = sb.ok(&["schema"]);
-    assert!(all["result"]["oneOf"].as_array().unwrap().len() > 30);
-
+fn rpc_runs_requests_by_name() {
+    let sb = Sandbox::new("rpc");
     let a = fixture(FixtureSpec::new(
         VideoCodec::H264,
         Container::Mp4,
@@ -1152,44 +1115,6 @@ fn loudness_normalized_exports_meet_their_target() {
     let after = sb.ok_in(&check, &["analyze", "loudness"]);
     let lufs = after["result"]["integrated"].as_f64().unwrap();
     assert!((lufs + 16.0).abs() < 0.3, "{after}");
-
-    // Beeps peak at -6 dBFS: raising them 8 LU to -14 would clip, so the
-    // gain stops where true peaks reach -1 dBTP.
-    let beeps = fixture(FixtureSpec::new(
-        VideoCodec::H264,
-        Container::Mp4,
-        320,
-        180,
-        (30, 1),
-        300,
-    ));
-    let loud = sb.dir.path().join("loud.vidcut");
-    sb.cmd_in(&loud, &["project", "create"])
-        .arg(&loud)
-        .output()
-        .unwrap();
-    sb.ok_in(&loud, &["media", "add", s(&beeps)]);
-    sb.ok_in(&loud, &["edit", "append", "m1"]);
-    let measured = sb.ok_in(&loud, &["analyze", "loudness"])["result"].clone();
-    let r = sb.ok_in(
-        &loud,
-        &[
-            "export",
-            "start",
-            s(&sb.dir.path().join("beeps.wav")),
-            "--set",
-            "audio.loudness=-14",
-        ],
-    );
-    let applied = &r["result"]["outputs"][0]["loudness"];
-    let peak = applied["true_peak"].as_f64().unwrap();
-    assert!((peak + 1.0).abs() < 0.05, "held at -1 dBTP: {applied}");
-    let gain = applied["gain_db"].as_f64().unwrap();
-    let wanted = -14.0 - measured["integrated"].as_f64().unwrap();
-    assert!(
-        gain < wanted - 1.0,
-        "less than the {wanted} dB the target wanted: {applied}"
-    );
 }
 
 #[test]

@@ -3,12 +3,11 @@
 **Status:** accepted (October 2026). The GUI's viewer plays through it, one engine for the source and the timeline ([preview.md](preview.md)); this record is the engine itself, tested headless.
 
 **Evidence** (all rerunnable, no display):
-- [`crates/vidcut-av/tests/player.rs`](../../crates/vidcut-av/tests/player.rs): pictures against `frame render` at seeks and steps both ways across cuts, files, codecs, black, stills and image sequences; the YUV pictures, and their conversion against `frame render`'s to the byte; playing shows every frame in order; the beep lands on its sample; pictures against beeps through a device with latency; 2×, reverse; faders and mute while playing; calls that return at once; a frame of the plan played next, prepared and held whatever the budget, shown at once; pieces at other speeds, at seeks, steps and playing both ways.
-- [`tests/player_sound.rs`](../../crates/vidcut-av/tests/player_sound.rs): backward sound reversed to the sample; pictures with the sound through a device with latency at −1×, 2×, 0.5× and −2×; other speeds both ways keeping the pitch; audio scrubbing: steps play their frame's sound, held steps don't pile up, the `Scrubber` alone.
-- [`tests/player_decodes.rs`](../../crates/vidcut-av/tests/player_decodes.rs): what is decoded, playing both ways, across an edit, for seeks in a row, and after switching to a prepared plan (nothing).
-- [`tests/player_media.rs`](../../crates/vidcut-av/tests/player_media.rs): numbers on the real 1080p30 and 2160p60 clips, on the CPU and with `--features gpu-tests` on NVDEC too (§7), and what one player for a viewer's source and timeline costs in its one budget; `VIDCUT_PLAYER_MEDIA` measures other files, `VIDCUT_PLAYER_BUDGET_MB` another budget.
+- [`crates/vidcut-av/tests/player.rs`](../../crates/vidcut-av/tests/player.rs): pictures against `frame render` at seeks and steps both ways across cuts, files, codecs, black, stills and image sequences; a picture converted as the export converts it is `frame render`'s to the byte; playing shows every frame in order; the beep lands on its sample; 2×, reverse; faders and mute while playing; a frame of the plan played next, prepared and held whatever the budget, shown at once; pieces at other speeds, at seeks, steps and playing both ways.
+- [`tests/player_sound.rs`](../../crates/vidcut-av/tests/player_sound.rs): backward sound reversed to the sample; other speeds both ways keeping the pitch; audio scrubbing: steps play their frame's sound, held steps don't pile up, the `Scrubber` alone.
+- [`tests/player_decodes.rs`](../../crates/vidcut-av/tests/player_decodes.rs): pictures playing on across an edit, after an edit that moves every frame, and stepping back over a keyframe.
 - [`tests/player_gpu.rs`](../../crates/vidcut-av/tests/player_gpu.rs) (`--features vidcut-av/gpu-tests`): pictures decoded on each GPU decoder the machine has are the CPU's (§3), seeks far into a long open GOP show their frames, and the GPU's kept in video memory are the ones copied down, seeks keeping their way there too.
-- [`tests/player_device.rs`](../../crates/vidcut-av/tests/player_device.rs) (`--features vidcut-av/audio-tests`): the system's audio device runs the clock (it plays silence); every device listed, chosen by its id, plays as itself, their names told apart, and an id that isn't there plays on the default, saying so.
+- [`tests/player_device.rs`](../../crates/vidcut-av/tests/player_device.rs) (`--features vidcut-av/audio-tests`): every device listed, chosen by its id, plays as itself and runs the clock, their names told apart, and an id that isn't there plays on the default, saying so.
 
 ## 1. Threads
 
@@ -93,7 +92,7 @@ On the dev machine (16 threads), decoding on the CPU; YUV pictures at the clips'
 
 | What | Result |
 |---|---|
-| Picture against sound through a device with 40 ms latency: when the clock moved to each beep's frame after the beep was heard, read at exact instants half a millisecond apart (`Player::frame_at`), so a test thread run late measures the same (the tests allow −1 to +8 ms, the bound a polling display needed) | 1×: 0.3–0.5 ms; −1× (reversed sound): 0.1–0.4 ms; 2×: 2.6–3.1 ms; 0.5×: 0.2–0.4 ms; −2×: 0.6–0.9 ms, also with the CPU busy with other decoding |
+| Picture against sound through a device with 40 ms latency: when the clock moved to each beep's frame after the beep was heard | 1×: 0.3–0.5 ms; −1× (reversed sound): 0.1–0.4 ms; 2×: 2.6–3.1 ms; 0.5×: 0.2–0.4 ms; −2×: 0.6–0.9 ms, also with the CPU busy with other decoding |
 | The beep through the manual output, forward and reversed | on its sample, ±1 (reversed: the whole beep, sample for sample) |
 | Other speeds, both ways (0.5× to 8×) | a 1 kHz tone at 998–1000 Hz; every beep heard up to 2×; the sound as long as the speed makes it (within 20 ms) |
 | Requests while decoding 1080p | the slowest call under 0.01 ms |

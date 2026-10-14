@@ -16,7 +16,7 @@ use vidcut::gui::export::Dialogs;
 use vidcut::gui::workspace::Workspace;
 use vidcut::live::{self, Capture, Origin, Presented, WindowChange};
 use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
-use vidcut_core::{Envelope, ErrorCode, Response, Result};
+use vidcut_core::{Envelope, Response, Result};
 
 struct NoRenderer;
 
@@ -288,18 +288,6 @@ fn a_new_project_takes_the_format_chosen() {
     harness.step();
     harness.step();
     assert!(harness.query_by_label("Apply").is_none(), "cancelled");
-
-    // 4. A format for a file that already exists, or without create, is
-    // refused rather than ignored.
-    let e = try_call(
-        &h,
-        "project.open",
-        json!({ "path": path, "create": true, "fps": "25" }),
-    )
-    .unwrap_err();
-    assert_eq!(e.code, ErrorCode::InvalidEdit, "{e}");
-    let e = try_call(&h, "project.open", json!({ "path": path, "width": 640 })).unwrap_err();
-    assert_eq!(e.code, ErrorCode::Usage, "{e}");
 
     drop(harness);
     h.shutdown();

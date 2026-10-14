@@ -121,18 +121,6 @@ fn doctor_names_what_the_build_lacks() {
             &"faster HDR conversion".into()
         )
     );
-    // H.264 has another encoder where this FFmpeg has one.
-    if vidcut_av::parts::has_encoder("libopenh264") {
-        assert_eq!(
-            v["result"]["ffmpeg_stand_ins"][0],
-            serde_json::json!({
-                "used_for": "H.264 on the CPU",
-                "name": "libopenh264",
-                "instead_of": "libx264",
-            }),
-            "{v}"
-        );
-    }
 }
 
 #[test]

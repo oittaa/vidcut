@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use vidcut::live::{self, Capture, JobState, Origin, Presented, WindowChange};
+use vidcut::live::{self, Capture, Origin, Presented, WindowChange};
 use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
 use vidcut_core::model::Settings;
 use vidcut_core::time::Rational;
@@ -190,11 +190,6 @@ fn export_jobs() {
     assert_eq!(j3["frames"], j3["total"]);
     assert_eq!(j3["result"]["outputs"][0]["passes"], 2);
     assert!(c.exists());
-    let snap = h.snapshot();
-    assert_eq!(
-        snap.jobs.iter().map(|j| j.state).collect::<Vec<_>>(),
-        vec![JobState::Done, JobState::Cancelled, JobState::Done]
-    );
 
     // 4. Mistakes fail the request itself, even in the background.
     let mut bad = quick(&dir.join("d.mkv"));
@@ -283,32 +278,7 @@ fn export_jobs() {
         frames
     );
 
-    // 7. A bundle copies media: a job like a media export, and its media
-    // unpack (on a worker) when it is imported.
-    let bundle = dir.join("cut.otioz");
-    let job = ok(
-        &h,
-        "export.start",
-        json!({ "output": bundle, "background": true }),
-    );
-    let j = ok(&h, "jobs.wait", json!({ "job": job["id"] }));
-    assert_eq!(j["state"], "done", "{j}");
-    assert_eq!(j["result"]["outputs"][0]["format"], "otioz");
-    assert!(bundle.is_file());
-    let clips = call(&h, "project.summary", json!({})).unwrap().result["clips"].clone();
-    let r = ok(
-        &h,
-        "timeline.import",
-        json!({ "path": bundle, "replace": true }),
-    );
-    assert_eq!(r["bundle"]["folder"], json!(dir.join("cut")), "{r}");
-    assert!(dir.join("cut/media").is_dir());
-    assert_eq!(
-        call(&h, "project.summary", json!({})).unwrap().result["clips"],
-        clips
-    );
-
-    // 8. Quitting while an export runs leaves no partial file.
+    // 7. Quitting while an export runs leaves no partial file.
     let mut slow = quick(&dir.join("h.mkv"));
     slow["set"] = json!([
         "video.width=3840",

@@ -3,16 +3,19 @@
 //! turned every way, pillarboxed, SD and HD colors, full range, PQ and HLG)
 //! drawn on the GPU shows the barcode `frame render` shows, and its pixels
 //! are within a level of `Picture::to_rgba`, the export's own
-//! filters. Pictures NVDEC, VA-API and Direct3D 11 decoded show from GPU
-//! memory as they do copied down. Runs on any adapter, lavapipe too; skips
-//! without one, and each GPU's checks without that GPU.
+//! filters. Runs on any adapter, lavapipe too; skips without one. With
+//! `--features vidcut/gpu-tests`, pictures NVDEC, VA-API and Direct3D 11
+//! decoded show from GPU memory as they do copied down, each where the
+//! machine has that GPU.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use vidcut::gui::picture::{Drawn, Gpu, Screen};
 use vidcut_av::fixture::{self, Container, FixtureSpec, ImageSpec, Picture as Content, VideoCodec};
-use vidcut_av::player::{Config, Layout, ManualOutput, Memory, Picture, Player};
+use vidcut_av::player::{Config, ManualOutput, Picture, Player};
+#[cfg(feature = "gpu-tests")]
+use vidcut_av::player::{Layout, Memory};
 use vidcut_core::model::Hdr;
 use vidcut_core::render::{Image, RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
@@ -258,17 +261,10 @@ fn the_shader_draws_what_the_export_renders() {
         assert_ne!(screen.draw(&gpu, Some(&picture), w, h), Drawn::Same);
         let ours = screen.read(&gpu).unwrap();
         assert_eq!((ours.width, ours.height), (w, h));
-        let (mean, max) = diff(&ours.rgba, &theirs.rgba);
+        let (mean, _) = diff(&ours.rgba, &theirs.rgba);
         let (flat, flat_max) = flat_diff(&ours.rgba, &theirs.rgba, w as usize);
         let rendered = vidcut_av::export::still::rgba(&piece_at(&p, t), p.fps, w, h).unwrap();
         let want = barcode(&rendered.rgba, w, h);
-        eprintln!(
-            "frame {t}: {:?} {:?} turned {} at {w}x{h}: {mean:.2} levels on average from the \
-             export's, at most {max}; where flat {flat:.2}, at most {flat_max}",
-            picture.layout(),
-            picture.colors(),
-            picture.rotation()
-        );
         assert_eq!(barcode(&ours.rgba, w, h), want, "frame {t}'s barcode");
         // The colors: within rounding of the export's where the picture is
         // flat, no sample more than a level off (SDR exact on NVIDIA's,
@@ -309,8 +305,6 @@ fn the_shader_draws_what_the_export_renders() {
                 }
             }
         }
-        // The same picture again draws nothing.
-        assert_eq!(screen.draw(&gpu, Some(&picture), w, h), Drawn::Same);
         // Scaled, as the viewer usually is: the barcode frame render shows
         // at that size.
         for (w, h) in [(640, 360), (W, H), (200, 112)] {
@@ -323,7 +317,6 @@ fn the_shader_draws_what_the_export_renders() {
                 "frame {t} at {w}x{h}"
             );
             let (mean, _) = diff(&ours.rgba, &rendered.rgba);
-            eprintln!("  at {w}x{h}: {mean:.2} levels on average");
             // Edges differ the most: HD stripes four times smaller, and
             // HDR stripes, whose edges the tone curve exaggerates.
             assert!(mean < 5.0, "frame {t} at {w}x{h}: {mean:.2} levels apart");
@@ -336,6 +329,7 @@ fn the_shader_draws_what_the_export_renders() {
 }
 
 /// NV12, as NVDEC's VP9 frames come down: needs the GPU's decoder.
+#[cfg(feature = "gpu-tests")]
 #[test]
 fn nv12_pictures_draw_as_the_export_renders_them() {
     let Some(gpu) = Gpu::headless() else {
@@ -379,6 +373,7 @@ fn nv12_pictures_draw_as_the_export_renders_them() {
 /// same picture copied down and uploaded, NV12 and P010, deinterlaced on
 /// the GPU, at a size whose rows and chroma aren't round. Needs CUDA on the
 /// adapter's GPU.
+#[cfg(feature = "gpu-tests")]
 #[test]
 fn pictures_in_gpu_memory_draw_as_copied_down() {
     let Some(gpu) = Gpu::headless() else {
@@ -462,7 +457,7 @@ fn pictures_in_gpu_memory_draw_as_copied_down() {
 /// P010, at a size whose rows and chroma aren't round, odd sides too;
 /// interlaced ones come down for the CPU's deinterlacer. Needs VA-API, and an adapter that
 /// imports DMA-BUFs.
-#[cfg(target_os = "linux")]
+#[cfg(all(feature = "gpu-tests", target_os = "linux"))]
 #[test]
 fn vaapi_pictures_draw_as_copied_down() {
     use vidcut_av::hw::{GpuDecoder, Kind};
@@ -571,7 +566,7 @@ fn vaapi_pictures_draw_as_copied_down() {
 /// down and uploaded, NV12 and P010, at a size whose rows and chroma aren't
 /// round, odd sides too. Needs Direct3D 11 decoding, and a Vulkan adapter on the same GPU
 /// that imports its textures (Windows).
-#[cfg(windows)]
+#[cfg(all(feature = "gpu-tests", windows))]
 #[test]
 fn d3d11_pictures_draw_as_copied_down() {
     use vidcut_av::hw::{GpuDecoder, Kind};

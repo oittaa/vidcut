@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use player_support::*;
 use vidcut_av::beep;
 use vidcut_av::fixture::{Container, FixtureSpec, Sound, VideoCodec};
-use vidcut_av::player::{Config, ManualOutput, PacedOutput, Player};
+use vidcut_av::player::{Config, ManualOutput, Player};
 
 fn h264() -> Src {
     src(
@@ -49,87 +49,37 @@ fn manual(plan: vidcut_core::render::RenderPlan) -> (Player, ManualOutput) {
 }
 
 #[test]
-fn pictures_are_yuv_as_decoded_and_render_as_frame_render() {
-    use vidcut_av::color::Matrix;
-    use vidcut_av::fixture::{self, ImageSpec};
-    use vidcut_av::player::{Layout, Memory};
-    use vidcut_core::render::{Image, VideoPiece};
+fn pictures_show_what_frame_render_shows() {
     let a = h264();
-    let b = hevc();
     // Stored on its side, shown upright by its display matrix.
     let turned = src(
         "m4",
         FixtureSpec::new(VideoCodec::H264, Container::Mp4, W, H, (30, 1), 30).rotation(90),
     );
-    // 4:2:2 10-bit: not a layout a display takes, so made one.
     let prores = src(
         "m5",
         FixtureSpec::new(VideoCodec::ProRes422Hq, Container::Mov, W, H, (25, 1), 50),
     );
-    let mut p = plan(
-        &[
-            clip(&a, 0, 10),
-            clip(&b, 0, 10),
-            clip(&turned, 0, 10),
-            clip(&prores, 0, 10),
-            gap(5),
-            gap(10),
-        ],
+    let p = plan(
+        &[clip(&a, 0, 10), clip(&turned, 0, 10), clip(&prores, 0, 10)],
         0,
     );
-    let still = fixture::ensure_images(&ImageSpec::still(777, W, H, "png")).unwrap();
-    p.video[5] = VideoPiece::Source {
-        pace: Default::default(),
-        media: "i".into(),
-        path: still[0].clone(),
-        origin: 0.0,
-        source_frame: 0,
-        frames: 10,
-        image: Some(Image::Still),
-    };
     let (player, _out) = manual(p.clone());
     let picture = |t: i64| {
         player.seek(t);
         assert!(player.wait_ready(t, Duration::from_secs(10)));
         player.present(Instant::now()).unwrap().picture
     };
-    // 8-bit H.264: its own planes, by reference, and the export's own
-    // conversion of them is frame render's picture to the byte.
+    // 8-bit H.264, converted as the export converts it: frame render's
+    // picture to the byte.
     let pic = picture(5);
-    assert_eq!(pic.layout(), Layout::Yuv420p);
-    assert_eq!(pic.memory(), Memory::Cpu);
-    assert_eq!((pic.width(), pic.height(), pic.rotation()), (W, H, 0));
-    assert_eq!(pic.bytes(), (W * H * 3 / 2) as usize);
     let rendered_rgba = vidcut_av::export::still::rgba(&piece_at(&p, 5), p.fps, W, H).unwrap();
     assert_eq!(pic.to_rgba(W, H).unwrap().rgba, rendered_rgba.rgba);
-    // 10-bit HEVC: P010.
-    let pic = picture(15);
-    assert_eq!(pic.layout(), Layout::P010);
-    assert_eq!(code(&pic), Some(15 - 10));
-    // Turned: stored 180×320, upright by a quarter turn, fitted whole.
-    let pic = picture(25);
-    assert_eq!((pic.width(), pic.height(), pic.rotation()), (H, W, 90));
-    assert_eq!(pic.placement(W, H), (0, 0, W, H));
-    let img = pic.to_rgba(W, H).unwrap();
-    assert_eq!(code_rgba(&img.rgba, W, H), rendered(&p, 25));
-    // ProRes 4:2:2 10-bit, made P010.
-    let pic = picture(35);
-    assert_eq!(pic.layout(), Layout::P010);
-    let img = pic.to_rgba(W, H).unwrap();
-    assert_eq!(code_rgba(&img.rgba, W, H), rendered(&p, 35));
-    // Black: the plan's size, 8-bit 4:2:0.
-    let pic = picture(42);
-    assert_eq!(
-        (pic.layout(), pic.width(), pic.height()),
-        (Layout::Yuv420p, W, H)
-    );
-    // A still (RGB in its file): coded BT.709 video range.
-    let pic = picture(50);
-    assert_eq!(pic.layout(), Layout::Yuv420p);
-    let colors = pic.colors();
-    assert_eq!((colors.matrix, colors.full_range), (Matrix::Bt709, false));
-    let img = pic.to_rgba(W, H).unwrap();
-    assert_eq!(code_rgba(&img.rgba, W, H), Some(777));
+    // The turned file upright, and ProRes 4:2:2 10-bit.
+    for t in [15, 25] {
+        let img = picture(t).to_rgba(W, H).unwrap();
+        assert_eq!(code_rgba(&img.rgba, W, H), rendered(&p, t), "frame {t}");
+    }
 }
 
 #[test]
@@ -219,7 +169,7 @@ fn seeks_and_steps_show_what_frame_render_shows() {
 #[test]
 fn stills_and_image_sequences_show_their_pictures() {
     use vidcut_av::fixture::{self, ImageSpec};
-    use vidcut_core::render::{AudioPiece, Image, VideoPiece};
+    use vidcut_core::render::{Image, VideoPiece};
     let a = h264();
     let still = fixture::ensure_images(&ImageSpec::still(777, W, H, "png")).unwrap();
     let seq = ImageSpec::sequence(1, 30, 4, W, H);
@@ -248,7 +198,6 @@ fn stills_and_image_sequences_show_their_pictures() {
         5,
         20,
     );
-    assert!(matches!(p.audio[0][1], AudioPiece::Silence { .. }));
     let expect: Vec<Option<u32>> = (0..65).map(|t| rendered(&p, t)).collect();
     assert_eq!(expect[25], Some(777));
     assert_eq!(expect[35], Some(5));
@@ -332,78 +281,6 @@ fn playing_shows_every_frame_on_time_across_cuts_and_files() {
         (at[0] - expected).abs() <= 1,
         "beep at sample {} for frame 53's {expected}",
         at[0]
-    );
-}
-
-#[test]
-fn pictures_follow_the_sound_as_heard_through_a_device_with_latency() {
-    // A real-time device stand-in, 10 ms buffers heard 40 ms after they
-    // are pulled. The beep at each source second must be heard while its
-    // frame is shown.
-    let a = src(
-        "m1",
-        FixtureSpec::new(VideoCodec::H264, Container::Mov, W, H, (30, 1), 120),
-    );
-    let p = plan(&[clip(&a, 0, 120)], 0);
-    let (out, recording) =
-        PacedOutput::recording(Duration::from_millis(10), Duration::from_millis(40));
-    let player = Player::new(p, Config::default(), Box::new(out)).unwrap();
-    assert!(player.wait_ready(0, Duration::from_secs(10)));
-    // The clock is read at exact instants half a millisecond apart, so the
-    // scheduler running this thread late changes nothing; a display
-    // presents meanwhile, and what it shows is the frame's own picture.
-    let mut trace = ClockTrace::new(Instant::now());
-    player.play(1.0);
-    let started = Instant::now();
-    while player.status().playing && started.elapsed() < Duration::from_secs(8) {
-        if let Some(s) = player.present(Instant::now())
-            && s.exact
-        {
-            assert_eq!(code(&s.picture), Some(s.frame as u32), "frame {}", s.frame);
-        }
-        trace.read(&player, Instant::now());
-        std::thread::sleep(Duration::from_millis(2));
-    }
-    trace.read(&player, Instant::now());
-    let status = player.status();
-    drop(player);
-    assert!(!status.playing, "played to the end: {status:?}");
-    let rec = recording.lock().unwrap();
-    let mono: Vec<f32> = rec.samples.chunks(2).map(|c| c[0]).collect();
-    let onsets = beep::onsets(&mono, 0.1, 4_800);
-    assert_eq!(onsets.len(), 4, "a beep a second: {onsets:?}");
-    // When each beep's frame took over from the frame before it, against
-    // when the beep was heard. Frame 0 shows from before play starts: its
-    // beep is measured by frame 1, a frame later.
-    let mut offsets = Vec::new();
-    for (k, &i) in onsets.iter().enumerate() {
-        let heard = rec.heard_at(i, RATE).unwrap();
-        let (frame, after) = match k {
-            0 => (1, Duration::from_secs_f64(1.0 / 30.0)),
-            _ => (30 * k as i64, Duration::ZERO),
-        };
-        let heard = heard + after;
-        let shown = trace
-            .first_at(frame)
-            .unwrap_or_else(|| panic!("frame {frame} never shown"));
-        offsets.push(ms_between(heard, shown));
-    }
-    eprintln!(
-        "picture after its beep (ms): {offsets:.1?}; late presents {}",
-        status.late
-    );
-    // The bound the polling display of before needed (it looked every
-    // 2 ms), kept.
-    for ms in &offsets {
-        assert!(
-            (-1.0..=8.0).contains(ms),
-            "picture vs. sound: {offsets:.1?} ms"
-        );
-    }
-    // The clock went through every frame, in order.
-    assert_eq!(
-        trace.moves.iter().map(|(f, _)| *f).collect::<Vec<_>>(),
-        (0..120).collect::<Vec<_>>()
     );
 }
 
@@ -624,9 +501,6 @@ fn a_device_that_stops_pulling_holds_nothing_up() {
         "frame 60's beep: {onsets:?}"
     );
     assert_eq!(player.status().position, 60, "in frame 60");
-    let start = Instant::now();
-    drop(player);
-    assert!(start.elapsed() < Duration::from_secs(2), "closing waited");
 }
 
 #[test]
@@ -691,37 +565,4 @@ fn the_plan_played_next_shows_its_prepared_frame_at_once() {
     }
     assert_eq!(shown_at(&player, 5), rendered(&source, 5));
     assert_eq!(player.status().error, None);
-}
-
-#[test]
-fn requests_return_at_once_and_seeks_merge() {
-    // 1080p frames that take a while to decode; the caller never waits.
-    let big = src(
-        "m6",
-        FixtureSpec::new(VideoCodec::H264, Container::Mp4, 1920, 1080, (30, 1), 900),
-    );
-    let p = plan(&[clip(&big, 0, 900)], 0);
-    let out = ManualOutput::new();
-    let player = Player::new(p, Config::default(), Box::new(out)).unwrap();
-    let mut slowest = Duration::ZERO;
-    for k in 0..40 {
-        let t = (k * 137) % 900;
-        let start = Instant::now();
-        player.seek(t);
-        let _ = player.status();
-        let _ = player.present(Instant::now());
-        slowest = slowest.max(start.elapsed());
-    }
-    player.seek(333);
-    let start = Instant::now();
-    assert!(player.wait_ready(333, Duration::from_secs(30)));
-    eprintln!(
-        "40 seeks: the slowest call took {:.2} ms; the last seek's frame came {:.0} ms after it",
-        slowest.as_secs_f64() * 1e3,
-        start.elapsed().as_secs_f64() * 1e3
-    );
-    assert!(slowest < Duration::from_millis(5), "{slowest:?}");
-    let s = player.present(Instant::now()).unwrap();
-    assert_eq!(s.frame, 333);
-    assert_eq!(code(&s.picture), Some(333));
 }

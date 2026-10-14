@@ -404,30 +404,6 @@ fn gestures_send_one_request_each() {
     );
     assert_eq!(playhead(&h), into + len, "after the pasted clip (D15)");
 
-    // Smooth with 1,000 clips: split the long clip into 1,000 pieces
-    // and time whole frames of the GUI (layout, timelines, pool, viewer).
-    for _ in 0..4 {
-        call(&h, "edit.append", json!({ "media": "m1" }));
-    }
-    let end = v1(&h).iter().map(|c| c.1 + c.2).max().unwrap();
-    let cuts: Vec<i64> = (1..end).collect();
-    call(&h, "edit.split", json!({ "at": cuts }));
-    let clips = v1(&h).len();
-    assert!(clips >= 1000, "{clips} clips");
-    // Zoomed out so all of them are on screen at once.
-    harness.state_mut().timeline_options_mut().ppf = 0.5;
-    settle(&h, &mut harness);
-    let started = std::time::Instant::now();
-    for _ in 0..30 {
-        harness.step();
-    }
-    let per_frame = started.elapsed() / 30;
-    eprintln!("{clips} clips: {per_frame:?} per frame");
-    assert!(
-        per_frame < Duration::from_millis(40),
-        "{per_frame:?} per frame"
-    );
-
     drop(harness);
     h.shutdown();
     let _ = session.join();

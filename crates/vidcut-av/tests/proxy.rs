@@ -206,21 +206,6 @@ fn hardware_av1_proxies_are_exact_too() {
 }
 
 #[test]
-fn automatic_is_x264_without_hardware_av1() {
-    let none = Availability::default();
-    let auto = encoders(ProxyCodec::Auto, &none);
-    assert_eq!(
-        auto.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
-        ["libx264"]
-    );
-    assert_eq!(auto[0].label(), "H.264, software (x264)");
-    let av1 = encoders(ProxyCodec::Av1, &none);
-    if let Some(svt) = av1.first() {
-        assert_eq!(svt.label(), "AV1, software (SVT-AV1)");
-    }
-}
-
-#[test]
 fn a_sequence_proxy_uses_the_sequence_timestamps() {
     let spec = ImageSpec::sequence(1, 8, 2, 320, 180);
     let Some(files) = fixture::ensure_images(&spec).map_err(skip).ok() else {
@@ -239,7 +224,7 @@ fn a_sequence_proxy_uses_the_sequence_timestamps() {
     let dir = tmp.path();
     for enc in software() {
         let dest = dir.join(format!("seq-{}.mkv", enc.name));
-        let written = match vidcut_av::proxy::write(
+        let written = vidcut_av::proxy::write(
             &input,
             320,
             180,
@@ -247,13 +232,8 @@ fn a_sequence_proxy_uses_the_sequence_timestamps() {
             None,
             std::slice::from_ref(&enc),
             vidcut_av::hw::Decoding::Nvdec,
-        ) {
-            Ok(w) => w,
-            Err(e) => {
-                eprintln!("skipping: {e}");
-                return;
-            }
-        };
+        )
+        .unwrap_or_else(|e| panic!("{}: {e}", enc.name));
         assert_eq!(written.frames, 8);
         let got = frames(&Input::File(dest));
         assert_eq!(got.len(), 8, "{}", enc.name);

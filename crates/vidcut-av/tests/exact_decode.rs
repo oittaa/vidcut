@@ -77,14 +77,6 @@ fn fixtures_decode_frame_exact() {
         }
         assert_eq!(k, spec.frames, "{name}: frame count");
         let o = first_pts.unwrap();
-        let o_secs = secs(o, tb) - info.start_time.unwrap_or(0.0);
-        eprintln!(
-            "{name}: tb {}/{}, first pts {o} ({:.4} s; {:.4} s after container start)",
-            tb.numerator(),
-            tb.denominator(),
-            secs(o, tb),
-            o_secs
-        );
 
         // Exact seeks, forward and backward, around keyframes and the ends.
         let last = spec.frames - 1;

@@ -3,9 +3,8 @@
 **Status:** accepted (October 2026). The viewer plays through the player engine on wgpu ([preview.md](preview.md)).
 
 **Evidence** (all rerunnable):
-- [`crates/vidcut/tests/live.rs`](../../crates/vidcut/tests/live.rs): the live session with its one player engine, a stand-in renderer and a stand-in audio device, no window. Covers frame-exact seeks at every boundary (also with a late renderer), pictures against the sound, the source viewers and switching between them and the timeline (the frame kept ready, a fader held), the clipboard, edits from other processes, and errors.
-- [`crates/vidcut/tests/gui.rs`](../../crates/vidcut/tests/gui.rs) (`--features vidcut/gui-tests`, needs a display): the real GUI driven through the CLI. Covers edit latency, screenshot vs `vidcut frame render`, a minimized window, playing and the GPU preference.
-- `ipc::tests` in [`crates/vidcut/src/ipc/mod.rs`](../../crates/vidcut/src/ipc/mod.rs): the JSON-RPC wire format.
+- [`crates/vidcut/tests/live.rs`](../../crates/vidcut/tests/live.rs): the live session with its one player engine, a stand-in renderer and a stand-in audio device, no window. Covers frame-exact seeks at every boundary (also with a late renderer), the source viewers and switching between them and the timeline (the frame kept ready), the clipboard, edits from other processes, and errors.
+- [`crates/vidcut/tests/gui.rs`](../../crates/vidcut/tests/gui.rs) (`--features vidcut/gui-tests`, needs a display): the real GUI driven through the CLI. Covers screenshot vs `vidcut frame render`, edits shown in the window, a minimized window and the GPU preference.
 - [`crates/vidcut/tests/jobs.rs`](../../crates/vidcut/tests/jobs.rs) and [`gui_export.rs`](../../crates/vidcut/tests/gui_export.rs): export jobs, and the export windows under simulated input (§9).
 
 ## 1. Threads
@@ -141,7 +140,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 
 **Tests:**
 - `geometry.rs` and `gesture.rs` unit tests cover zones, snapping and every drop rule.
-- `tests/gui_input.rs` (egui_kittest, no window) clicks, drags and types into the real panels against a live session. It checks that each gesture changes the project with exactly one request and that the command log matches the undo history. It also times frames with ~2,000 clips: about 2.5 ms of UI work in a debug build.
+- `tests/gui_input.rs` (egui_kittest, no window) clicks, drags and types into the real panels against a live session. It checks that each gesture changes the project with exactly one request and that the command log matches the undo history.
 
 **The Trim Editor** draws exact frames rendered by the export engine on a background thread (`gui/stills.rs`).
 

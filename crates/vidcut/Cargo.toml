@@ -47,3 +47,6 @@ workspace = true
 # Acceptance tests against the real GUI; need a display and a GPU wgpu
 # draws on (Vulkan on Linux).
 gui-tests = []
+# Tests of the viewer's pictures from a particular GPU (NVDEC, VA-API,
+# Direct3D 11): `--features vidcut/gpu-tests`.
+gpu-tests = []

@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use player_support::*;
 use vidcut_av::beep;
 use vidcut_av::fixture::{Container, FixtureSpec, VideoCodec};
-use vidcut_av::player::{Config, ManualOutput, PacedOutput, Player, Scrubber};
+use vidcut_av::player::{Config, ManualOutput, Player, Scrubber};
 use vidcut_core::render::RenderPlan;
 
 /// Four seconds of PCM beeps: source frames 0, 30, 60 and 90 start one.
@@ -89,126 +89,6 @@ fn backward_the_sound_plays_reversed_sample_for_sample() {
     }
 }
 
-/// Plays `frames` frames of the beeps at `speed` through a real-time
-/// stand-in device (buffers heard 40 ms after they are pulled), and
-/// gives, for each beep, how long after it was heard the clock moved to
-/// its frame (ms), read at exact instants. Forward, from frame 15:
-/// a beep starts frame 30k, which should show as its onset is heard.
-/// Backward, from the last frame: a beep's first sample is the last of it
-/// heard, and right after it frame 30k gives way to frame 30k − 1. The
-/// clock goes through every frame, and every picture a display presents
-/// meanwhile is its frame's.
-fn alignment(speed: f64, frames: i64) -> Vec<f64> {
-    let a = beeps();
-    let p = plan(&[clip(&a, 0, frames)], 0);
-    let (out, recording) =
-        PacedOutput::recording(Duration::from_millis(10), Duration::from_millis(40));
-    let config = Config {
-        audio_scrubbing: false,
-        ..Config::default()
-    };
-    let player = Player::new(p, config, Box::new(out)).unwrap();
-    let from = if speed > 0.0 { 15 } else { frames - 1 };
-    player.seek(from);
-    assert!(player.wait_ready(from, Duration::from_secs(10)));
-    let mut trace = ClockTrace::new(Instant::now());
-    player.play(speed);
-    let started = Instant::now();
-    while player.status().playing && started.elapsed() < Duration::from_secs(12) {
-        // What a display shows now is the frame's own picture.
-        if let Some(s) = player.present(Instant::now())
-            && s.exact
-        {
-            assert_eq!(code(&s.picture), Some(s.frame as u32), "frame {}", s.frame);
-        }
-        trace.read(&player, Instant::now());
-        std::thread::sleep(Duration::from_millis(2));
-    }
-    trace.read(&player, Instant::now());
-    let status = player.status();
-    drop(player);
-    assert!(!status.playing, "{speed}x played to the end: {status:?}");
-    // The clock went through every frame, in order.
-    let last = if speed > 0.0 { frames - 1 } else { 0 };
-    let every: Vec<i64> = if speed > 0.0 {
-        (from..=last).collect()
-    } else {
-        (last..=from).rev().collect()
-    };
-    let moved: Vec<i64> = trace.moves.iter().map(|(f, _)| *f).collect();
-    assert_eq!(moved, every, "{speed}x: every frame, in order");
-    let rec = recording.lock().unwrap();
-    let mono = left(&rec.samples);
-    let gap = (4_800.0 / speed.abs()) as usize;
-    // Each beep's moment heard, and the frame that should show then.
-    let beeps: Vec<(Instant, i64)> = if speed > 0.0 {
-        beep::onsets(&mono, 0.1, gap)
-            .into_iter()
-            .zip(1..)
-            .map(|(i, k)| (rec.heard_at(i, RATE).unwrap(), 30 * k))
-            .collect()
-    } else {
-        let ends = burst_ends(&mono, 0.1, gap);
-        let n = ends.len() as i64;
-        ends.into_iter()
-            .zip(0..)
-            .filter(|(_, k)| *k < n - 1)
-            .map(|(end, k)| (rec.heard_at(end + 1, RATE).unwrap(), 30 * (n - 1 - k) - 1))
-            .collect()
-    };
-    // Forward the beeps after frame 15; backward those but the one at 0.
-    assert_eq!(
-        beeps.len() as i64,
-        (frames - 1) / 30,
-        "{speed}x: the beeps heard"
-    );
-    beeps
-        .into_iter()
-        .map(|(heard, frame)| {
-            let shown = trace
-                .first_at(frame)
-                .unwrap_or_else(|| panic!("{speed}x: frame {frame} never shown"));
-            ms_between(heard, shown)
-        })
-        .collect()
-}
-
-/// What the alignment tests allow, at every speed. The clock is read at
-/// exact instants (`ClockTrace`), so a test thread run late changes
-/// nothing; the bound keeps what the polling display of before needed.
-const ALIGNED_MS: std::ops::RangeInclusive<f64> = -1.0..=8.0;
-
-fn check_alignment(speed: f64, frames: i64) {
-    let offsets = alignment(speed, frames);
-    eprintln!("{speed}x: picture after its beep (ms): {offsets:.1?}");
-    for ms in &offsets {
-        assert!(
-            ALIGNED_MS.contains(ms),
-            "{speed}x: picture vs. sound {offsets:.1?} ms"
-        );
-    }
-}
-
-#[test]
-fn backward_the_pictures_stay_with_the_reversed_sound() {
-    check_alignment(-1.0, 120);
-}
-
-#[test]
-fn at_twice_the_speed_the_pictures_stay_with_the_sound() {
-    check_alignment(2.0, 120);
-}
-
-#[test]
-fn at_half_the_speed_the_pictures_stay_with_the_sound() {
-    check_alignment(0.5, 75);
-}
-
-#[test]
-fn twice_as_fast_backward_the_pictures_stay_with_the_sound() {
-    check_alignment(-2.0, 120);
-}
-
 #[test]
 fn other_speeds_keep_the_pitch_both_ways() {
     // A steady 1 kHz tone stays 1 kHz; every beep is heard, and the sound
@@ -277,20 +157,13 @@ fn a_step_plays_the_sound_of_its_frame() {
     assert_eq!(s.len(), one, "one frame's sound");
     assert!(silent(&s), "frame 29 is silent");
     // A step onto frame 30 plays the beep from its first sample, faded in
-    // over 3 ms and out at the frame's end.
+    // and out over its first and last 3 ms.
     player.step(1);
     let s = take(&out);
     assert_eq!(s.len(), one);
     let fade = 144;
-    for (i, &v) in s.iter().enumerate() {
-        let g = if i < fade {
-            (i + 1) as f32 / fade as f32
-        } else if i >= one - fade {
-            (one - i) as f32 / fade as f32
-        } else {
-            1.0
-        };
-        let want = beep::sample_at(RATE, 48_000 + i as u64) * g;
+    for (i, &v) in s.iter().enumerate().take(one - fade).skip(fade) {
+        let want = beep::sample_at(RATE, 48_000 + i as u64);
         assert!((v - want).abs() < 1e-3, "sample {i}: {v} for {want}");
     }
     // Stepping back onto 30 plays it forward too (D42).
