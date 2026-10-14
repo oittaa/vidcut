@@ -28,7 +28,7 @@ use super::{Busy, Decoder as Decoding, Mode, Shared, Snap};
 use crate::error::{Error, Result};
 use crate::export::is_cancelled;
 use crate::export::renderer::{at, window};
-use crate::export::video::VideoFrames;
+use crate::export::video::{Output, VideoFrames};
 use crate::ffmpeg::format;
 
 /// Frames decoded ahead of a paused viewer, when decoding on is cheap.
@@ -499,14 +499,14 @@ impl Decoder {
 
     /// A reader of `p`'s pictures, decoding as asked last.
     fn new_reader(&mut self, p: &RenderPlan) -> VideoFrames {
-        let mut frames =
-            VideoFrames::new(&[], p.fps, p.width, p.height, format::Pixel::YUV420P, None).decoded();
+        let frames = VideoFrames::new(&[], p.fps, p.width, p.height, format::Pixel::YUV420P, None);
+        let decoded = |keep_on_gpu| Output::Decoded { keep_on_gpu };
         if !self.hardware {
             crate::debug!(
                 "player",
                 "a new reader decodes on the CPU: GPU decoding is off"
             );
-            return frames;
+            return frames.output(decoded(false));
         }
         let gpu = self.gpu.get_or_insert_with(crate::hw::GpuDecoder::best);
         let Some(gpu) = gpu else {
@@ -514,14 +514,13 @@ impl Decoder {
                 "player",
                 "a new reader decodes on the CPU: no GPU decoder here"
             );
-            return frames;
+            return frames.output(decoded(false));
         };
-        frames = frames.decode_on(gpu.clone());
         // The GPU's pictures may stay in video memory, which then has a
         // budget of its own.
         let shows = &self.shared.gpu_pictures;
-        if shows.contains(&gpu.kind()) {
-            frames = frames.keep_on_gpu();
+        let keep = shows.contains(&gpu.kind());
+        if keep {
             crate::debug!(
                 "player",
                 "a new reader decodes on {gpu} where it can; its pictures stay in GPU memory"
@@ -529,14 +528,13 @@ impl Decoder {
         } else {
             crate::debug!(
                 "player",
-                "a new reader decodes on {gpu} where it can; its pictures come down to \
-                 memory: the viewer shows only {shows:?} pictures from GPU memory"
+                "a new reader decodes on {gpu} where it can; its pictures come down to                  memory: the viewer shows only {shows:?} pictures from GPU memory"
             );
         }
         if let Some(cuda) = gpu.cuda() {
             self.shared.gpu_found(cuda);
         }
-        frames
+        frames.output(decoded(keep)).decode_on(gpu.clone())
     }
 
     /// Decodes timeline frame `t`, and on the way what is worth keeping:
