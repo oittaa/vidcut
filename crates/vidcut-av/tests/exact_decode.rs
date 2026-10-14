@@ -230,3 +230,14 @@ fn open_gops_are_told_from_closed_ones() {
     assert!(!open(spec(Container::Mp4).bframes(0)));
     assert!(open(spec(Container::MpegTs)));
 }
+
+/// A recording's timestamps may start hours in: the points looked at count
+/// from there.
+#[test]
+fn open_gops_are_found_in_a_file_that_starts_late() {
+    use vidcut_av::decode::{Input, h264_open_gop};
+    let late = FixtureSpec::new(VideoCodec::H264, Container::MpegTs, 320, 180, (30, 1), 300)
+        .gop(120)
+        .start_offset_ms(100_000);
+    assert!(h264_open_gop(&Input::File(fixture::ensure(&late).unwrap())));
+}

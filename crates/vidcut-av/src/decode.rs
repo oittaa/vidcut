@@ -578,9 +578,16 @@ fn keyframes_not_idr(source: &Input) -> Result<bool> {
             .then(|| usize::from(*p.extradata.add(4) & 3) + 1)
     };
     let duration = input.duration().max(0);
+    // Seeks take times from the file's start, which a recording may have
+    // hours in.
+    // SAFETY: the opened context's own field, read only.
+    let start = match unsafe { (*input.as_ptr()).start_time } {
+        ffmpeg::ffi::AV_NOPTS_VALUE => 0,
+        t => t,
+    };
     for k in 0..5 {
         if k > 0 {
-            let ts = duration * k / 5;
+            let ts = start + duration * k / 5;
             if input.seek(ts, ..ts).is_err() {
                 break;
             }
