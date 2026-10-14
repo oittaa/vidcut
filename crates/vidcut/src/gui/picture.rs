@@ -550,7 +550,8 @@ impl Screen {
             Layout::P010 => return Err("no 16-bit textures for P010".into()),
             Layout::Yuv420p => return Err("planar pictures aren't VA-API's".into()),
         };
-        let drm = vidcut_av::hw::DrmFrame::export(picture.frame()).map_err(|e| e.to_string())?;
+        let drm =
+            vidcut_av::hw::vaapi::DrmFrame::export(picture.frame()).map_err(|e| e.to_string())?;
         let planes = drm.planes();
         let [y, uv, ..] = planes[..] else {
             return Err(format!("a surface exported in {} planes", planes.len()));
