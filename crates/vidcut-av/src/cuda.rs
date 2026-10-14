@@ -503,13 +503,16 @@ enum Layout {
 /// come under a tenth of a second apart.
 const COUNTED: ffi::AVRational = ffi::AVRational { num: 1, den: 1 };
 
-/// The filters from `w`×`h` frames to `width`×`height` NV12 pictures.
+/// The filters from `w`×`h` frames to `width`×`height` NV12 pictures, each
+/// `scale_cuda` given `fixed` ([`scaling`]).
 fn filters(
     (w, h): (u32, u32),
     (fit_w, fit_h): (u32, u32),
     (width, height, out): (u32, u32, &str),
+    fixed: &str,
 ) -> String {
-    let mut steps = scaling((w, h), (fit_w, fit_h), &format!(":format={out}"));
+    let options = format!(":format={out}");
+    let mut steps = scaling_steps((w, h), (fit_w, fit_h), &options, fixed);
     // Centered on black, as the CPU's normalizer pads.
     if (fit_w, fit_h) != (width, height) {
         let (x, y) = centered((fit_w, fit_h), (width, height));
@@ -521,23 +524,46 @@ fn filters(
 }
 
 /// `scale_cuda` steps from `w`×`h` frames to `fit_w`×`fit_h` (with
-/// `options` for the last). `scale_cuda` samples a fixed few pixels around
-/// each output pixel, which aliases when it shrinks a lot (4K to 960 wide):
-/// halvings first, each a bilinear sample between four pixels, so their
-/// average, then one bicubic step to the size.
-pub(crate) fn scaling(
+/// `options` for the last): halvings first, each the rounded average of
+/// four pixels, then one bicubic step to the size. `scale_cuda`'s kernels
+/// sample a fixed few pixels around each output pixel, which aliases when
+/// it shrinks a lot (4K to 960 wide). FFmpeg 9's shrinks with filters
+/// instead (`use_filters`) and truncates twice in each step, its pictures
+/// darker than the CPU's (red and blue 8 levels at 192×108 from 4K): the
+/// kernels are asked for there.
+pub(crate) fn scaling(size: (u32, u32), fit: (u32, u32), options: &str) -> Vec<String> {
+    scaling_steps(size, fit, options, fixed_kernels())
+}
+
+/// What asks this FFmpeg's `scale_cuda` for its kernels ([`scaling`]).
+fn fixed_kernels() -> &'static str {
+    static FIXED: OnceLock<&str> = OnceLock::new();
+    FIXED.get_or_init(|| {
+        if crate::parts::filter_has_option("scale_cuda", "use_filters") {
+            ":use_filters=0"
+        } else {
+            ""
+        }
+    })
+}
+
+/// [`scaling`]'s steps, each given `fixed`.
+fn scaling_steps(
     (w, h): (u32, u32),
     (fit_w, fit_h): (u32, u32),
     options: &str,
+    fixed: &str,
 ) -> Vec<String> {
     let mut steps = Vec::new();
     let (mut w, mut h) = (w, h);
     while w >= 2 * fit_w && h >= 2 * fit_h && w >= 4 && h >= 4 {
         (w, h) = ((w / 2) & !1, (h / 2) & !1);
-        steps.push(format!("scale_cuda=w={w}:h={h}:interp_algo=bilinear"));
+        steps.push(format!(
+            "scale_cuda=w={w}:h={h}:interp_algo=bilinear{fixed}"
+        ));
     }
     steps.push(format!(
-        "scale_cuda=w={fit_w}:h={fit_h}{options}:interp_algo=bicubic"
+        "scale_cuda=w={fit_w}:h={fit_h}{options}:interp_algo=bicubic{fixed}"
     ));
     steps
 }
@@ -808,7 +834,7 @@ impl CudaPictures {
         let (size, spec, sar) = if let Some(Layout::Placed { .. }) = layout {
             ((width, height), "null".to_string(), ffmpeg::Rational(1, 1))
         } else {
-            let spec = filters(size, fitted, (width, height, out));
+            let spec = filters(size, fitted, (width, height, out), fixed_kernels());
             (size, spec, shown_sar)
         };
         let frames = placebo.as_ref().map_or(decoded, |p| p.output.0);
@@ -1246,27 +1272,41 @@ mod tests {
     #[test]
     fn big_shrinks_halve_first() {
         assert_eq!(
-            filters((3840, 2160), (960, 540), (960, 540, "nv12")),
+            filters((3840, 2160), (960, 540), (960, 540, "nv12"), ""),
             "scale_cuda=w=1920:h=1080:interp_algo=bilinear,\
              scale_cuda=w=960:h=540:interp_algo=bilinear,\
              scale_cuda=w=960:h=540:format=nv12:interp_algo=bicubic"
         );
         assert_eq!(
-            filters((1280, 720), (960, 540), (960, 540, "nv12")),
+            filters((1280, 720), (960, 540), (960, 540, "nv12"), ""),
             "scale_cuda=w=960:h=540:format=nv12:interp_algo=bicubic"
         );
         // A 2.4:1 film in 16:9: fitted, then centered on black.
         assert_eq!(
-            filters((1920, 800), (1920, 800), (1920, 1080, "nv12")),
+            filters((1920, 800), (1920, 800), (1920, 1080, "nv12"), ""),
             "scale_cuda=w=1920:h=800:format=nv12:interp_algo=bicubic,\
              pad_cuda=w=1920:h=1080:x=0:y=140:color=black"
         );
         // An odd margin starts a row early, on the chroma grid, as on the
         // CPU.
         assert_eq!(
-            filters((1280, 534), (1280, 534), (1280, 720, "nv12")),
+            filters((1280, 534), (1280, 534), (1280, 720, "nv12"), ""),
             "scale_cuda=w=1280:h=534:format=nv12:interp_algo=bicubic,\
              pad_cuda=w=1280:h=720:x=0:y=92:color=black"
+        );
+    }
+
+    #[test]
+    fn every_step_asks_for_the_fixed_kernels_where_scale_cuda_has_filters() {
+        assert_eq!(
+            filters(
+                (1920, 1080),
+                (960, 540),
+                (960, 540, "nv12"),
+                ":use_filters=0"
+            ),
+            "scale_cuda=w=960:h=540:interp_algo=bilinear:use_filters=0,\
+             scale_cuda=w=960:h=540:format=nv12:interp_algo=bicubic:use_filters=0"
         );
     }
 

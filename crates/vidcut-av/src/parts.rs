@@ -164,6 +164,31 @@ pub fn has_filter(name: &str) -> bool {
     !without().contains(name) && ffmpeg::filter::find(name).is_some()
 }
 
+/// Whether this FFmpeg's filter `name` takes the option `option`: a newer
+/// FFmpeg's filters do more, and say so in their options.
+pub(crate) fn filter_has_option(name: &str, option: &str) -> bool {
+    let Some(filter) = ffmpeg::filter::find(name) else {
+        return false;
+    };
+    let option = std::ffi::CString::new(option).expect("an option's name");
+    // SAFETY: the filter's own class, searched without an object as
+    // FFmpeg's option listing searches it.
+    unsafe {
+        let mut class = (*filter.as_ptr()).priv_class;
+        if class.is_null() {
+            return false;
+        }
+        !ffmpeg::ffi::av_opt_find(
+            (&raw mut class).cast(),
+            option.as_ptr(),
+            std::ptr::null(),
+            0,
+            ffmpeg::ffi::AV_OPT_SEARCH_FAKE_OBJ,
+        )
+        .is_null()
+    }
+}
+
 fn has(kind: Kind, name: &str) -> bool {
     match kind {
         Kind::Encoder => has_encoder(name),
