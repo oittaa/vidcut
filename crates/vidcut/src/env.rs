@@ -43,6 +43,11 @@ type Memo<T> = LazyLock<Mutex<HashMap<PathBuf, Arc<T>>>>;
 static LEVELS: Memo<AudioLevels> = LazyLock::new(Default::default);
 static PICTURES: Memo<PictureStats> = LazyLock::new(Default::default);
 
+/// How each proxy this process encoded was made, by file, until the edit
+/// that records it answers with it: the encode runs on a copy of the
+/// project first, and that edit finds the file written (decision D41).
+static MADE_WITH: LazyLock<Mutex<HashMap<PathBuf, String>>> = LazyLock::new(Default::default);
+
 /// A measurement of a media file: from this process's memory, from the disk
 /// cache, or measured now and kept in both. Measuring decodes the whole
 /// stream, so the live session measures on a worker first (docs/decisions/agents.md §3).
@@ -239,8 +244,11 @@ impl Env for AvEnv {
         let planned = encoders.first().map_or("h264", |e| e.codec);
         let mut path = name(planned);
         let mut codec = planned;
+        let made = || MADE_WITH.lock().unwrap_or_else(PoisonError::into_inner);
         let mut made_with = None;
-        if !dry_run && !path.is_file() {
+        if !dry_run && path.is_file() {
+            made_with = made().remove(&path);
+        } else if !dry_run {
             std::fs::create_dir_all(dir)
                 .map_err(|e| Error::media(format!("{}: {e}", dir.display())))?;
             let total = Some((v.duration * v.fps.as_f64()).round().max(0.0) as u64);
@@ -259,13 +267,13 @@ impl Env for AvEnv {
             let written =
                 vidcut_av::proxy::write(&input_of(media), w, h, &path, total, &encoders, decoding)
                     .map_err(av_error)?;
-            made_with = Some(format!(
+            let how = format!(
                 "decoded on the {}, {}",
                 written
                     .decoder
                     .map_or("CPU".into(), |k| format!("GPU ({})", k.label())),
                 written.encoder.label()
-            ));
+            );
             // A hardware encoder that wouldn't open gave way to another codec.
             codec = written.encoder.codec;
             if codec != planned {
@@ -274,6 +282,8 @@ impl Env for AvEnv {
                     .map_err(|e| Error::media(format!("{}: {e}", actual.display())))?;
                 path = actual;
             }
+            made().insert(path.clone(), how.clone());
+            made_with = Some(how);
         }
         Ok(GeneratedProxy {
             path,

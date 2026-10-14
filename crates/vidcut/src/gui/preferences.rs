@@ -457,6 +457,13 @@ impl Workspace {
                                 "auto" => format!("Automatic: {uses}"),
                                 "av1" => format!("AV1: {}", uses.trim_start_matches("AV1, ")),
                                 "h264" => format!("H.264: {}", uses.trim_start_matches("H.264, ")),
+                                "prores" => format!(
+                                    "ProRes Proxy: {}",
+                                    uses.trim_start_matches("ProRes Proxy, ")
+                                ),
+                                "dnxhr" => {
+                                    format!("DNxHR LB: {}", uses.trim_start_matches("DNxHR LB, "))
+                                }
                                 other => format!("{other}: {uses}"),
                             }
                         };
@@ -484,7 +491,9 @@ impl Workspace {
                                     "Automatic: AV1 on a hardware encoder when there is one, \
                                      else H.264 with x264, which stays quick on old computers. \
                                      AV1 files are smaller; making them in software (SVT-AV1) is \
-                                     slower than x264",
+                                     slower than x264. ProRes Proxy and DNxHR LB make every frame \
+                                     a keyframe: a jump decodes one frame instead of up to 60, \
+                                     but the files are many times larger",
                                 );
                         });
                         ui.end_row();

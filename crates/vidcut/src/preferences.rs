@@ -160,17 +160,23 @@ fn describe(p: &Preferences) -> Value {
     use vidcut_core::preferences::ProxyCodec;
     let (files, bytes) = thumbcache::usage();
     // What each proxy codec choice makes proxies with on this machine.
-    let codecs: Vec<Value> = [ProxyCodec::Auto, ProxyCodec::Av1, ProxyCodec::H264]
-        .into_iter()
-        .map(|c| {
-            let encoders = crate::env::proxy_encoders(c, p.gpu.acceleration);
-            json!({
-                "codec": c,
-                "encoder": encoders.first().map(|e| e.name.clone()),
-                "uses": encoders.first().map(|e| e.label()),
-            })
+    let codecs: Vec<Value> = [
+        ProxyCodec::Auto,
+        ProxyCodec::Av1,
+        ProxyCodec::H264,
+        ProxyCodec::Prores,
+        ProxyCodec::Dnxhr,
+    ]
+    .into_iter()
+    .map(|c| {
+        let encoders = crate::env::proxy_encoders(c, p.gpu.acceleration);
+        json!({
+            "codec": c,
+            "encoder": encoders.first().map(|e| e.name.clone()),
+            "uses": encoders.first().map(|e| e.label()),
         })
-        .collect();
+    })
+    .collect();
     json!({
         "path": path(),
         "preferences": p,

@@ -2386,7 +2386,7 @@ fn proxy_targets(p: &Project, media: Option<&OneOrMany<String>>) -> Result<Vec<S
     Ok(ids)
 }
 
-/// `proxy.generate`: one H.264 file per video or image sequence.
+/// `proxy.generate`: one proxy file per video or image sequence.
 fn proxy_generate(
     p: &mut Project,
     env: &dyn Env,
