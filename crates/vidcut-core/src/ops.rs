@@ -13,7 +13,7 @@
 mod follow;
 mod tracks;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use serde_json::json;
 pub use tracks::{TrackProps, add_track, remove_track, set_track};
@@ -1817,40 +1817,57 @@ pub fn add_marker(
     color: Option<String>,
     note: String,
 ) -> Result<String> {
-    add_marker_as(p, None, at, duration, name, color, note)
-}
-
-/// [`add_marker`] with id `kept` when no marker has it.
-pub fn add_marker_as(
-    p: &mut Project,
-    kept: Option<&str>,
-    at: i64,
-    duration: i64,
-    name: String,
-    color: Option<String>,
-    note: String,
-) -> Result<String> {
-    if at < 0 {
-        return Err(Error::invalid("marker before 0"));
-    }
-    check_duration(duration)?;
-    if let Some(c) = &color {
-        check_color(c)?;
-    }
-    let id = match kept.filter(|k| p.markers.iter().all(|m| m.id != *k)) {
-        Some(k) => k.to_string(),
-        None => p.alloc_marker_id(),
-    };
-    p.markers.push(Marker {
-        id: id.clone(),
+    let k = NewMarker {
+        kept: None,
         at,
         duration,
         name,
-        color: color.unwrap_or_else(|| "blue".into()),
+        color,
         note,
-    });
+    };
+    Ok(add_markers(p, vec![k])?.remove(0))
+}
+
+/// A marker for [`add_markers`]: `kept` is its id from a file, kept when no
+/// marker has it.
+pub struct NewMarker {
+    pub kept: Option<String>,
+    pub at: i64,
+    pub duration: i64,
+    pub name: String,
+    pub color: Option<String>,
+    pub note: String,
+}
+
+/// Adds `markers`, as [`add_marker`] adds one; their ids.
+pub fn add_markers(p: &mut Project, markers: Vec<NewMarker>) -> Result<Vec<String>> {
+    let mut taken: HashSet<String> = p.markers.iter().map(|m| m.id.clone()).collect();
+    let mut ids = Vec::with_capacity(markers.len());
+    for k in markers {
+        if k.at < 0 {
+            return Err(Error::invalid("marker before 0"));
+        }
+        check_duration(k.duration)?;
+        if let Some(c) = &k.color {
+            check_color(c)?;
+        }
+        let id = match k.kept.filter(|id| !taken.contains(id)) {
+            Some(id) => id,
+            None => p.alloc_marker_id(),
+        };
+        taken.insert(id.clone());
+        p.markers.push(Marker {
+            id: id.clone(),
+            at: k.at,
+            duration: k.duration,
+            name: k.name,
+            color: k.color.unwrap_or_else(|| "blue".into()),
+            note: k.note,
+        });
+        ids.push(id);
+    }
     p.markers.sort_by_key(|k| k.at);
-    Ok(id)
+    Ok(ids)
 }
 
 pub fn move_marker(p: &mut Project, id: &str, to: i64) -> Result<()> {

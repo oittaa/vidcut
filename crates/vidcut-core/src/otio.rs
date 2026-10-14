@@ -60,7 +60,7 @@
 //! - Everything else is left out with a warning: nested tracks (gaps
 //!   instead).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
@@ -286,11 +286,11 @@ fn audio_part(c: &crate::model::Clip, a: i64, b: i64) -> Option<(i64, i64)> {
 pub fn used_media(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
     let (a, b) = span.unwrap_or((0, p.end()));
     let mut used: Vec<String> = Vec::new();
+    let mut seen: HashSet<&str> = HashSet::new();
     for t in &p.tracks {
         for c in &t.clips {
             let shows = c.video && c.start.max(a) < c.end().min(b);
-            if (shows || audio_part(c, a, b).is_some()) && !c.is_block() && !used.contains(&c.media)
-            {
+            if (shows || audio_part(c, a, b).is_some()) && !c.is_block() && seen.insert(&c.media) {
                 used.push(c.media.clone());
             }
         }
@@ -461,6 +461,7 @@ pub fn export(
         let (mut tv, mut ta) = (a, a);
         // The channel counts of the audio on this track.
         let mut channels: Vec<u16> = Vec::new();
+        let edits = transitions::Edits::of(t);
         for c in &t.clips {
             let m = media.get(c.media.as_str()).copied();
             if m.is_none() && !c.is_block() {
@@ -484,7 +485,7 @@ pub fn export(
                 if s > tv {
                     video.push(gap(s - tv, rate));
                 }
-                if let Some(x) = transitions::head(p, t, c, false, s, &video, rate) {
+                if let Some(x) = transitions::head(p, &edits, c, false, s, &video, rate) {
                     video.push(x);
                 }
                 let mut meta = json!({ "clip": c.id, "media": c.media, "color": c.color });
@@ -529,7 +530,7 @@ pub fn export(
                     it["color"] = x;
                 }
                 video.push(it);
-                if let Some(x) = transitions::tail(p, t, c, false, e, rate) {
+                if let Some(x) = transitions::tail(p, &edits, c, false, e, rate) {
                     video.push(x);
                 }
                 tv = e;
@@ -538,7 +539,7 @@ pub fn export(
                 if s > ta {
                     audio.push(gap(s - ta, rate));
                 }
-                if let Some(x) = transitions::head(p, t, c, true, s, &audio, rate) {
+                if let Some(x) = transitions::head(p, &edits, c, true, s, &audio, rate) {
                     audio.push(x);
                 }
                 let mut meta = json!({
@@ -580,7 +581,7 @@ pub fn export(
                     it["color"] = x;
                 }
                 audio.push(it);
-                if let Some(x) = transitions::tail(p, t, c, true, e, rate) {
+                if let Some(x) = transitions::tail(p, &edits, c, true, e, rate) {
                     audio.push(x);
                 }
                 ta = e;

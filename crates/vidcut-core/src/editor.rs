@@ -876,13 +876,14 @@ fn mutate(
                 ));
             }
             let mut ids = Vec::new();
+            let mut files = PoolFiles::of(p);
             for path in paths {
                 let probed = match sequence {
                     true => env.probe_sequence(path, fps.unwrap_or(p.settings.fps))?,
                     false => env.probe(path)?,
                 };
                 // Several files of one sequence make one clip.
-                let id = add_media(p, probed);
+                let id = add_media(p, &mut files, probed);
                 if !ids.contains(&id) {
                     ids.push(id);
                 }
@@ -1514,14 +1515,43 @@ fn first_video_sets_format(p: &mut Project, info: &MediaInfo) {
     }
 }
 
-fn add_media(p: &mut Project, probed: ProbedMedia) -> String {
+/// The pool's files by path, found once.
+struct PoolFiles(HashMap<PathBuf, Vec<usize>>);
+
+impl PoolFiles {
+    fn of(p: &Project) -> Self {
+        let mut files = Self(HashMap::new());
+        for i in 0..p.media.len() {
+            files.note(p, i);
+        }
+        files
+    }
+
+    /// The pool item of the file at `path`: the still, or the sequence it
+    /// starts (`sequence`).
+    fn find<'p>(
+        &self,
+        p: &'p Project,
+        path: &Path,
+        sequence: &Option<ImageSequence>,
+    ) -> Option<&'p Media> {
+        self.0
+            .get(path)?
+            .iter()
+            .map(|&i| &p.media[i])
+            .find(|m| &m.sequence == sequence)
+    }
+
+    /// Pool item `i` is there.
+    fn note(&mut self, p: &Project, i: usize) {
+        self.0.entry(p.media[i].path.clone()).or_default().push(i);
+    }
+}
+
+fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia) -> String {
     // The same file is the same media, unless one is a still and the other
     // the sequence it starts.
-    if let Some(existing) = p
-        .media
-        .iter()
-        .find(|m| m.path == probed.path && m.sequence == probed.sequence)
-    {
+    if let Some(existing) = files.find(p, &probed.path, &probed.sequence) {
         return existing.id.clone();
     }
     first_video_sets_format(p, &probed.info);
@@ -1548,6 +1578,7 @@ fn add_media(p: &mut Project, probed: ProbedMedia) -> String {
         color: None,
         fingerprint: probed.fingerprint,
     });
+    files.note(p, p.media.len() - 1);
     id
 }
 
@@ -1815,6 +1846,8 @@ fn find_media<'a>(
 ) -> Result<(MediaIds, Vec<String>)> {
     let mut ids = MediaIds::new();
     let mut media = Vec::new();
+    let mut found: HashSet<String> = HashSet::new();
+    let mut files = PoolFiles::of(p);
     let mut missing: Vec<&str> = Vec::new();
     for c in clips.into_iter().filter(|c| !c.is_block()) {
         let m = &c.media;
@@ -1841,8 +1874,8 @@ fn find_media<'a>(
             });
         match probed {
             Some(probed) => {
-                let id = add_media(p, probed);
-                if !media.contains(&id) {
+                let id = add_media(p, &mut files, probed);
+                if found.insert(id.clone()) {
                     media.push(id.clone());
                 }
                 ids.insert(media_key(m), id);
@@ -1875,6 +1908,7 @@ fn find_media<'a>(
 /// lengths, transitions, markers and marks. Each edge converts on its own,
 /// so clips that meet still meet. Its media are among `ids`.
 fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
+    let pool: HashMap<&str, &Media> = p.media.iter().map(|m| (m.id.as_str(), m)).collect();
     let (from, to) = (t.fps, p.settings.fps);
     let conv = |f: i64| rescale(f, from, to);
     let retime = |list: &mut Vec<Value>| {
@@ -1891,8 +1925,8 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
         // A source range in the media's timecode (no available range said
         // where the media start) counts from the media's first frame here.
         let tc = match (c.is_block(), c.timecoded) {
-            (false, true) => p
-                .media(&ids[&media_key(&c.media)])
+            (false, true) => pool
+                .get(ids[&media_key(&c.media)].as_str())
                 .filter(|m| m.sequence.is_none())
                 .and_then(|m| m.info.timecode)
                 .map_or(0, |tc| tc.frames_at(from).round() as i64),
@@ -1955,6 +1989,13 @@ fn place_imported(
     };
     // Sorted once all are placed.
     let mut placed: HashSet<String> = HashSet::new();
+    // The pool's items by id, found once.
+    let pool: HashMap<String, usize> = p
+        .media
+        .iter()
+        .enumerate()
+        .map(|(i, m)| (m.id.clone(), i))
+        .collect();
     debug_assert_eq!(t.fps, p.settings.fps, "converted first (at_project_rate)");
     let track_of = |id: &str| tracks.get(id).cloned().unwrap_or_else(|| id.to_string());
     // Carried clip effects count from where their picture or sound starts.
@@ -2022,7 +2063,7 @@ fn place_imported(
             placed.insert(track_of(&c.track));
             continue;
         }
-        let m = p.media(&ids[&media_key(&c.media)]).expect("added").clone();
+        let m = p.media[pool[&ids[&media_key(&c.media)]]].clone();
         let frames = p.media_limit(&m);
         let label = if c.name.is_empty() { &m.name } else { &c.name };
         let mut start = offset + c.start;
@@ -2158,18 +2199,19 @@ fn place_imported(
     if dropped > 0 {
         warnings.push(otio::transitions::dropped(dropped));
     }
-    let mut markers = Vec::new();
-    for k in &t.markers {
-        markers.push(ops::add_marker_as(
-            p,
-            k.id.as_deref().filter(|_| keep_ids),
-            offset + k.at,
-            k.duration,
-            k.name.clone(),
-            Some(k.color.clone()),
-            k.note.clone(),
-        )?);
-    }
+    let markers = t
+        .markers
+        .iter()
+        .map(|k| ops::NewMarker {
+            kept: k.id.clone().filter(|_| keep_ids),
+            at: offset + k.at,
+            duration: k.duration,
+            name: k.name.clone(),
+            color: Some(k.color.clone()),
+            note: k.note.clone(),
+        })
+        .collect();
+    let markers = ops::add_markers(p, markers)?;
     Ok((clips, markers))
 }
 
@@ -2216,14 +2258,15 @@ fn compound_contents(
     let (ids, _) = find_media(p, &t.clips, env, dirs, false)?;
     at_project_rate(p, &mut t, &ids);
     let mut inner = Project::new(p.settings.clone());
-    inner.media = p.media.clone();
     let mut needed: Vec<&str> = t.clips.iter().map(|c| c.track.as_str()).collect();
     needed.sort_by_key(|id| (!id.starts_with('V'), id[1..].parse::<usize>().unwrap_or(0)));
     needed.dedup();
     for id in needed {
         ops::ensure_track(&mut inner, id)?;
     }
-    place_imported(
+    // The pool, lent for the placing, which only reads it.
+    inner.media = std::mem::take(&mut p.media);
+    let placed = place_imported(
         &mut inner,
         &t,
         &ids,
@@ -2231,7 +2274,9 @@ fn compound_contents(
         &HashMap::new(),
         &mut Vec::new(),
         false,
-    )?;
+    );
+    p.media = std::mem::take(&mut inner.media);
+    placed?;
     if depth > 0 {
         for ti in 0..inner.tracks.len() {
             for ci in 0..inner.tracks[ti].clips.len() {
@@ -2706,19 +2751,9 @@ fn join_pool(
     bin: &str,
 ) -> Result<HashMap<String, String>> {
     let mut ids = HashMap::new();
-    // The pool's files, by path.
-    let mut pool: HashMap<PathBuf, Vec<usize>> = HashMap::new();
-    for (i, x) in p.media.iter().enumerate() {
-        pool.entry(x.path.clone()).or_default().push(i);
-    }
+    let mut files = PoolFiles::of(p);
     for m in meta.media.iter().filter(|m| wanted.contains(&m.id)) {
-        let found = pool
-            .get(&m.path)
-            .into_iter()
-            .flatten()
-            .map(|&i| &p.media[i])
-            .find(|x| x.sequence == m.sequence);
-        let id = match found {
+        let id = match files.find(p, &m.path, &m.sequence) {
             Some(x) => x.id.clone(),
             None => {
                 let bin = match m.bin.as_str() {
@@ -2728,13 +2763,13 @@ fn join_pool(
                 ops::add_bin(p, &bin)?;
                 first_video_sets_format(p, &m.info);
                 let id = p.alloc_media_id();
-                pool.entry(m.path.clone()).or_default().push(p.media.len());
                 p.media.push(Media {
                     id: id.clone(),
                     bin,
                     proxy: None,
                     ..m.clone()
                 });
+                files.note(p, p.media.len() - 1);
                 id
             }
         };
@@ -3702,11 +3737,12 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
                 v["name"] = json!(n);
             }
             // Carried transitions (deviation X9), at their cuts.
+            let cuts = otio::transitions::Cuts::of(t);
             let transitions: Vec<Value> = t
                 .transitions
                 .iter()
                 .filter_map(|x| {
-                    let at = otio::transitions::place(p, t, x)?;
+                    let at = cuts.place(p, x)?;
                     (at >= a && at <= b).then(|| {
                         json!({ "name": otio::transitions::name(x), "at": at, "before": x.before,
                             "after": x.after, "from": x.from, "to": x.to, "sound": x.sound })
