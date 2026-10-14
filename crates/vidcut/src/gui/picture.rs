@@ -42,6 +42,9 @@ pub struct Gpu {
     /// The device has P010 textures, for Direct3D 11's 10-bit ones.
     #[cfg(windows)]
     p010: bool,
+    /// The device is Metal's, which makes textures of VideoToolbox's
+    /// IOSurfaces (macOS).
+    metal: bool,
     /// CUDA's device on this GPU, once a picture in CUDA memory came.
     cuda: OnceLock<Result<CudaDevice, String>>,
 }
@@ -167,6 +170,11 @@ impl Gpu {
             p010: device
                 .features()
                 .contains(wgpu::Features::TEXTURE_FORMAT_P010),
+            // SAFETY: wgpu's own device, only asked what it is.
+            #[cfg(target_os = "macos")]
+            metal: unsafe { device.as_hal::<wgpu::hal::api::Metal>() }.is_some(),
+            #[cfg(not(target_os = "macos"))]
+            metal: false,
             cuda: OnceLock::new(),
         }
     }
@@ -174,14 +182,16 @@ impl Gpu {
     /// The decoders whose pictures it may show from GPU memory, so a player
     /// can keep them there for it: NVDEC's where it shares memory with
     /// CUDA, VA-API's where it imports DMA-BUFs, Direct3D 11's where it
-    /// imports their textures. Those it can't take after all (on another
-    /// GPU, a surface it won't import) are copied down to be shown.
+    /// imports their textures, VideoToolbox's on Metal. Those it can't take
+    /// after all (on another GPU, a surface it won't import) are copied
+    /// down to be shown.
     pub fn gpu_pictures(&self) -> Vec<vidcut_av::hw::Kind> {
         use vidcut_av::hw::Kind;
         [
             (Kind::Nvdec, self.shares),
             (Kind::Vaapi, self.dma_buf),
             (Kind::D3d11va, self.d3d11),
+            (Kind::VideoToolbox, self.metal),
         ]
         .into_iter()
         .filter_map(|(kind, takes)| takes.then_some(kind))
@@ -235,7 +245,6 @@ impl Gpu {
     /// picture the device won't import comes down instead. Nothing recorded
     /// for the GPU goes in it: a command it refused would fail its whole
     /// submission later.
-    #[cfg(any(target_os = "linux", windows))]
     fn checked<T>(&self, f: impl FnOnce() -> T) -> Result<T, String> {
         let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
         let made = f();
@@ -471,6 +480,8 @@ impl Screen {
                         Kind::Vaapi => self.import_on_gpu(gpu, picture, encoder),
                         #[cfg(windows)]
                         Kind::D3d11va => self.import_d3d11(gpu, picture),
+                        #[cfg(target_os = "macos")]
+                        Kind::VideoToolbox => self.import_videotoolbox(gpu, picture),
                         _ => Err(format!("{} pictures aren't this system's", kind.label())),
                     };
                     match imported {
@@ -776,6 +787,116 @@ impl Screen {
             )?;
         }
         self.views = Some((y, uv, (desc.Width, desc.Height)));
+        self.imported = Some(picture.clone());
+        Ok(())
+    }
+
+    /// Shows a picture in VideoToolbox memory from there (macOS): each plane
+    /// of its pixel buffer's IOSurface made a Metal texture of wgpu's
+    /// device, whose view is drawn from in place of the planes' textures
+    /// (`views`). Nothing is copied. The picture is held until the drawing
+    /// is done (`imported`), so VideoToolbox doesn't reuse its surface.
+    #[cfg(target_os = "macos")]
+    fn import_videotoolbox(&mut self, gpu: &Gpu, picture: &Arc<Picture>) -> Result<(), String> {
+        use objc2_io_surface::IOSurfaceRef;
+        use objc2_metal::{
+            MTLDevice, MTLPixelFormat, MTLTextureDescriptor, MTLTextureType, MTLTextureUsage,
+        };
+        use wgpu::TextureFormat as F;
+        use wgpu::hal::api::Metal;
+        #[link(name = "CoreVideo", kind = "framework")]
+        unsafe extern "C" {
+            /// The IOSurface backing a pixel buffer, or null.
+            fn CVPixelBufferGetIOSurface(buffer: *mut std::ffi::c_void) -> *const IOSurfaceRef;
+        }
+        if !gpu.metal {
+            return Err("the display's device isn't Metal".into());
+        }
+        let formats = match picture.layout() {
+            Layout::Nv12 => [
+                (MTLPixelFormat::R8Unorm, F::R8Unorm),
+                (MTLPixelFormat::RG8Unorm, F::Rg8Unorm),
+            ],
+            Layout::P010 if gpu.wide => [
+                (MTLPixelFormat::R16Unorm, F::R16Unorm),
+                (MTLPixelFormat::RG16Unorm, F::Rg16Unorm),
+            ],
+            Layout::P010 => return Err("no 16-bit textures for P010".into()),
+            Layout::Yuv420p => return Err("planar pictures aren't VideoToolbox's".into()),
+        };
+        // SAFETY: a VideoToolbox frame holds its pixel buffer in `data[3]`,
+        // alive as long as the frame, and the buffer its IOSurface.
+        let surface = unsafe {
+            let buffer = (*picture.frame().as_ptr()).data[3].cast();
+            CVPixelBufferGetIOSurface(buffer).as_ref()
+        }
+        .ok_or("a pixel buffer without an IOSurface")?;
+        if surface.plane_count() != 2 {
+            return Err(format!("an IOSurface of {} planes", surface.plane_count()));
+        }
+        // SAFETY: wgpu's own device, which makes textures here only.
+        let hal = unsafe { gpu.device.as_hal::<Metal>() }.ok_or("not Metal")?;
+        let label = Some("vidcut VideoToolbox picture");
+        let plane = |index: usize| -> Result<(wgpu::TextureView, (u32, u32)), String> {
+            let (mtl, format) = formats[index];
+            let (w, h) = (
+                surface.width_of_plane(index),
+                surface.height_of_plane(index),
+            );
+            // SAFETY: a texture of the plane in its own size and layout;
+            // Metal checks the descriptor against the surface.
+            let raw = unsafe {
+                let desc =
+                    MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+                        mtl, w, h, false,
+                    );
+                desc.setUsage(MTLTextureUsage::ShaderRead);
+                hal.raw_device()
+                    .newTextureWithDescriptor_iosurface_plane(&desc, surface, index)
+            }
+            .ok_or("Metal won't make a texture of the IOSurface")?;
+            let (width, height) = (w as u32, h as u32);
+            let extent = wgpu::hal::CopyExtent {
+                width,
+                height,
+                depth: 1,
+            };
+            // SAFETY: a texture of this device, as described, which only
+            // the shader reads.
+            let texture = unsafe {
+                let raw = wgpu::hal::metal::Device::texture_from_raw(
+                    raw,
+                    format,
+                    MTLTextureType::Type2D,
+                    1,
+                    1,
+                    extent,
+                    None,
+                );
+                gpu.device.create_texture_from_hal::<Metal>(
+                    raw,
+                    &wgpu::TextureDescriptor {
+                        label,
+                        size: wgpu::Extent3d {
+                            width,
+                            height,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
+                    },
+                    wgpu::TextureUses::RESOURCE,
+                )
+            };
+            Ok((texture.create_view(&Default::default()), (width, height)))
+        };
+        let (y, uv) = gpu.checked(|| (plane(0), plane(1)))?;
+        let ((y, size), (uv, _)) = (y?, uv?);
+        self.views = Some((y, uv, size));
         self.imported = Some(picture.clone());
         Ok(())
     }

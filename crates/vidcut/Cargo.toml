@@ -35,6 +35,10 @@ crc32fast.workspace = true
 windows-sys.workspace = true
 windows.workspace = true
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-metal.workspace = true
+objc2-io-surface.workspace = true
+
 [dev-dependencies]
 egui_kittest.workspace = true
 naga.workspace = true

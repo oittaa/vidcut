@@ -667,7 +667,7 @@ unsafe fn intel_va(_: &frame::Video) -> Option<usize> {
 /// Keeps the GPU's frames there without running its decoder out of
 /// surfaces: Direct3D 11's are copied into textures of their own that
 /// another device can open (Windows). FFmpeg copies NVDEC's itself, and
-/// VA-API's pool grows as it needs.
+/// VA-API's and VideoToolbox's pools grow as they need.
 pub(crate) enum Keeper {
     #[cfg(windows)]
     D3d11(d3d11::Keeper),
@@ -696,7 +696,9 @@ impl Keeper {
     /// colors; `keeper` made for frames like it first.
     pub(crate) fn keep(keeper: &mut Option<Keeper>, f: &frame::Video) -> Result<frame::Video> {
         match Kind::of_frame(f) {
-            Some(Kind::Nvdec | Kind::Vaapi) => crate::export::video::frame_ref(f),
+            Some(Kind::Nvdec | Kind::Vaapi | Kind::VideoToolbox) => {
+                crate::export::video::frame_ref(f)
+            }
             #[cfg(windows)]
             Some(Kind::D3d11va) => {
                 let (frames, like) = frames_of(f)?;
