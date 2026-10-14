@@ -166,6 +166,39 @@ impl Default for Config {
     }
 }
 
+/// What a player does, for a person who wants to know (stats for nerds).
+#[derive(Clone)]
+pub struct Stats {
+    /// The frame the viewer is at, and the picture shown last.
+    pub position: i64,
+    pub shown: Option<Shown>,
+    /// Frames shown exactly; while playing, presents late and frames passed
+    /// over ([`Status`]).
+    pub frames: u64,
+    pub late: u64,
+    pub skipped: u64,
+    /// The timeline's picture size and rate.
+    pub size: (u32, u32),
+    pub fps: vidcut_core::time::Rational,
+    /// Pictures kept right after the frame the viewer is at and right
+    /// before it, a minute each way at most, and all of them.
+    pub ahead: usize,
+    pub behind: usize,
+    pub kept: usize,
+    /// Bytes kept in memory and in video memory, each with its budget.
+    pub memory: (usize, usize),
+    pub video: (usize, usize),
+    /// Why the player decodes on the CPU, when it chose so: GPU decoding is
+    /// off, or there is no GPU decoder. (A file a GPU won't decode says why
+    /// in its picture's [`decoding`](Picture::decoding).)
+    pub cpu: Option<&'static str>,
+    /// The sound: the device, its rate and channels, and its latency.
+    pub plays_on: PlaysOn,
+    pub rate: u32,
+    pub channels: u16,
+    pub latency: Option<Duration>,
+}
+
 /// What a player is doing.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Status {
@@ -291,6 +324,8 @@ struct Presenter {
     /// presented.
     shown_landing: u64,
     presented: Option<i64>,
+    /// Frames shown exactly, each counted once in a row.
+    frames: u64,
     /// What decoded the picture of a file shown last.
     decoder: Option<Decoder>,
     late: u64,
@@ -341,6 +376,8 @@ pub(crate) struct Shared {
     /// The picture of the frame the viewer was at that landed last, by
     /// the plan's change: the landings counted, the change, its id.
     landed: Mutex<(u64, u64, Option<plan::Id>)>,
+    /// Why the decode thread's reader decodes on the CPU, when it chose so.
+    cpu: Mutex<Option<&'static str>>,
     on_picture: Option<Arc<dyn Fn() + Send + Sync>>,
     presenter: Mutex<Presenter>,
     /// The audio device's failure.
@@ -541,6 +578,12 @@ impl Shared {
         }
     }
 
+    /// The decode thread's new reader decodes on the CPU for `why` (GPU
+    /// decoding off, no GPU decoder), or where it can on the GPU (`None`).
+    pub(crate) fn decodes_on_cpu(&self, why: Option<&'static str>) {
+        *lock(&self.cpu) = why;
+    }
+
     /// The picture of the frame the viewer is at landed: `id`, of the plan
     /// of change `plan_gen`.
     pub(crate) fn landed(&self, plan_gen: u64, id: plan::Id) {
@@ -635,6 +678,7 @@ impl Player {
             busy: Mutex::new(None),
             failed: Mutex::new(None),
             landed: Mutex::new((0, 0, None)),
+            cpu: Mutex::new(None),
             on_picture: config.on_picture,
             presenter: Mutex::new(Presenter::default()),
             device,
@@ -902,6 +946,9 @@ impl Player {
                         p.skipped += passed as u64;
                     }
                 }
+                if p.presented != Some(pos) {
+                    p.frames += 1;
+                }
                 p.presented = Some(pos);
                 if let Some(d) = picture.decoder() {
                     p.decoder = Some(d);
@@ -937,6 +984,51 @@ impl Player {
                     ..s
                 })
             }
+        }
+    }
+
+    /// What it does, for a person who wants to know ([`Stats`]).
+    pub fn stats(&self) -> Stats {
+        let (plan, position) = {
+            let mut ctl = self.shared.control();
+            let position = self.shared.position(&mut ctl, Instant::now());
+            (ctl.plan.clone(), position)
+        };
+        let store = &self.shared.store;
+        let reach = (plan.fps().as_f64() * 60.0).ceil() as i64;
+        let ahead = (position + 1..=plan.clamp(position + reach)).map(|t| plan.id(t));
+        let behind = (plan.clamp(position - reach)..position)
+            .rev()
+            .map(|t| plan.id(t));
+        let (shown, frames, late, skipped) = {
+            let p = lock(&self.shared.presenter);
+            (p.shown.clone(), p.frames, p.late, p.skipped)
+        };
+        let (rate, channels) = self.shared.format;
+        Stats {
+            position,
+            shown,
+            frames,
+            late,
+            skipped,
+            size: (plan.plan.width, plan.plan.height),
+            fps: plan.fps(),
+            ahead: store.kept_run(ahead),
+            behind: store.kept_run(behind),
+            kept: store.usage().0,
+            memory: (
+                store.bytes(store::Kind::Memory),
+                store.budget(store::Kind::Memory),
+            ),
+            video: (
+                store.bytes(store::Kind::Video),
+                store.budget(store::Kind::Video),
+            ),
+            cpu: *lock(&self.shared.cpu),
+            plays_on: self.plays_on(),
+            rate,
+            channels,
+            latency: self.shared.heard.latency(),
         }
     }
 

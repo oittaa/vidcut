@@ -7,6 +7,7 @@
 //! the neighboring frame.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, codec, filter, format, frame, media, software::scaling};
@@ -267,6 +268,8 @@ pub struct VideoReader {
     interlaced: bool,
     /// The GPU decoding, when one does (a rewind opens it again).
     gpu: Option<crate::hw::GpuDecoder>,
+    /// What the file holds and what decodes it ([`decoding`](Self::decoding)).
+    decoding: Arc<str>,
 }
 
 /// `bwdif` (or `bwdif_cuda`) over a stream's frames in order: one
@@ -520,7 +523,7 @@ impl VideoReader {
     }
 
     pub fn open_input(source: &Input) -> Result<Self> {
-        let reader = Self::open_with(source, None)?;
+        let mut reader = Self::open_with(source, None)?;
         reader.opened(None);
         Ok(reader)
     }
@@ -531,7 +534,7 @@ impl VideoReader {
     /// deinterlaces them: on the GPU for NVDEC's, in memory for the others',
     /// which come down for it. Fails when `gpu` can't decode the stream.
     pub fn open_on(source: &Input, gpu: &crate::hw::GpuDecoder) -> Result<Self> {
-        let reader = Self::open_with(source, Some(gpu))?;
+        let mut reader = Self::open_with(source, Some(gpu))?;
         match reader.pending.as_ref().map(|f| f.format()) {
             Some(p) if p == gpu.kind().pixel() => {
                 reader.opened(None);
@@ -550,20 +553,35 @@ impl VideoReader {
     /// profile the GPU lacks.
     pub fn open_gpu_or_cpu(source: &Input, gpu: &crate::hw::GpuDecoder) -> Result<Self> {
         Self::open_on(source, gpu).or_else(|e| {
-            let reader = Self::open_with(source, None)?;
+            let mut reader = Self::open_with(source, None)?;
             reader.opened(Some(&format!("not on {gpu}: {e}")));
             Ok(reader)
         })
     }
 
-    /// Says under `VIDCUT_DEBUG` what the file holds and what decodes it:
-    /// the codec and profile, the first frame's size, layout and colors,
-    /// FFmpeg's decoder and where it runs, `why` when that is the CPU
-    /// though a GPU was asked, and where the frames are.
-    fn opened(&self, why: Option<&str>) {
-        if !crate::debug() {
-            return;
-        }
+    /// What the file holds and what decodes it, for people: the codec,
+    /// profile and rate, the first frame's size, layout and colors, where
+    /// the frames are, FFmpeg's decoder and where it runs, and why that is
+    /// the CPU when a GPU was asked.
+    pub fn decoding(&self) -> &Arc<str> {
+        &self.decoding
+    }
+
+    /// Notes what the file holds and what decodes it ([`decoding`](Self::decoding)),
+    /// `why` when that is the CPU though a GPU was asked, and says so under
+    /// `VIDCUT_DEBUG`.
+    fn opened(&mut self, why: Option<&str>) {
+        self.decoding = self.describe(why).into();
+        crate::debug!(
+            "decoding",
+            "{}, {}: {}",
+            std::thread::current().name().unwrap_or("a thread"),
+            self.path().display(),
+            self.decoding
+        );
+    }
+
+    fn describe(&self, why: Option<&str>) -> String {
         let name = |p: *const std::ffi::c_char| {
             // SAFETY: FFmpeg's static names, or null.
             (!p.is_null()).then(|| unsafe { std::ffi::CStr::from_ptr(p) }.to_string_lossy())
@@ -575,10 +593,20 @@ impl VideoReader {
         };
         let profile = name(unsafe { ffmpeg::ffi::avcodec_profile_name(id, profile) });
         let codec = codec::Id::from(id).name();
-        let stream = match profile {
+        let mut stream = match profile {
             Some(p) => format!("{codec} {p}"),
             None => codec.to_string(),
         };
+        if let Some(r) = self.frame_rate() {
+            let fps = format!(
+                "{:.3}",
+                f64::from(r.numerator()) / f64::from(r.denominator())
+            );
+            stream += &format!(
+                " at {} fps",
+                fps.trim_end_matches('0').trim_end_matches('.')
+            );
+        }
         let frame = match self.pending.as_ref() {
             Some(f) => {
                 // SAFETY: FFmpeg's names of a frame's own tags.
@@ -627,11 +655,7 @@ impl VideoReader {
         if self.rotation != 0 {
             shape.push_str(&format!(", shown turned {}°", self.rotation));
         }
-        eprintln!(
-            "[decoding] {}, {}: {stream}{shape}, {frame}; FFmpeg's {decoder} on {on}{why}",
-            std::thread::current().name().unwrap_or("a thread"),
-            self.path().display()
-        );
+        format!("{stream}{shape}, {frame}; FFmpeg's {decoder} on {on}{why}")
     }
 
     fn open_with(source: &Input, device: Option<&crate::hw::GpuDecoder>) -> Result<Self> {
@@ -734,6 +758,7 @@ impl VideoReader {
             deinterlacer: None,
             interlaced: false,
             gpu: device.cloned(),
+            decoding: Arc::from(""),
         })
     }
 

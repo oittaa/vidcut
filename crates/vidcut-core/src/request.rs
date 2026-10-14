@@ -849,6 +849,14 @@ pub enum Request {
         #[serde(default)]
         mute: Option<bool>,
     },
+    /// Stats for nerds: a panel over the viewer of what its player does
+    /// (the picture, its decoder, pictures kept, the sound, the renderer).
+    /// Without `show`, toggles. `player.state` has the same as `stats`.
+    #[serde(rename = "player.stats")]
+    PlayerStats {
+        #[serde(default)]
+        show: Option<bool>,
+    },
     /// Audio scrubbing (decision D42): frame steps and moves of a paused
     /// playhead play the sound of the frame arrived at. On by default; not
     /// saved with the project. Without `on`, toggles (Shift+S).
@@ -1272,6 +1280,7 @@ impl Request {
                 | Self::PlayerStep { .. }
                 | Self::PlayerState {}
                 | Self::PlayerMute { .. }
+                | Self::PlayerStats { .. }
                 | Self::PlayerAudioScrubbing { .. }
                 | Self::MixerPreview { .. }
                 | Self::PoolSet { .. }

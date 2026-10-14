@@ -38,18 +38,33 @@ pub struct Picture {
     rotation: u16,
     bytes: usize,
     decoder: Option<super::Decoder>,
+    decoding: Option<std::sync::Arc<str>>,
 }
 
 impl Picture {
-    /// `decoder`: what decoded it (`None` for black).
-    pub(crate) fn new(frame: frame::Video, rotation: u16, decoder: Option<super::Decoder>) -> Self {
+    /// `decoder`: what decoded it (`None` for black); `decoding`, what its
+    /// file holds and what decoded it, for people.
+    pub(crate) fn new(
+        frame: frame::Video,
+        rotation: u16,
+        decoder: Option<super::Decoder>,
+        decoding: Option<std::sync::Arc<str>>,
+    ) -> Self {
         let bytes = bytes_of(&frame);
         Self {
             frame,
             rotation,
             bytes,
             decoder,
+            decoding,
         }
+    }
+
+    /// What its file holds and what decoded it: the codec, profile and
+    /// rate, FFmpeg's decoder and where it ran, and why that was the CPU
+    /// when a GPU was asked (`VideoReader::decoding`). `None` for black.
+    pub fn decoding(&self) -> Option<&str> {
+        self.decoding.as_deref()
     }
 
     /// What decoded it: the CPU or the GPU; `None` for black.
@@ -116,7 +131,12 @@ impl Picture {
             None => crate::export::video::frame_ref(&self.frame)?,
             Some(_) => crate::hw::download(&self.frame)?,
         };
-        Ok(Self::new(frame, self.rotation, self.decoder))
+        Ok(Self::new(
+            frame,
+            self.rotation,
+            self.decoder,
+            self.decoding.clone(),
+        ))
     }
 
     /// The memory it takes.

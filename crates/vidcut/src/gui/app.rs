@@ -58,6 +58,10 @@ impl live::Renderer for Port {
         self.viewer.present(done);
     }
 
+    fn viewer_stats(&self) -> Option<live::stats::ViewerStats> {
+        Some(self.viewer.stats())
+    }
+
     fn capture_viewer(&self, done: Capture) {
         self.viewer.capture(done);
     }
@@ -261,6 +265,11 @@ impl eframe::App for App {
         let (texture, has_frame) = self.viewer.sync(&self.render, self.ws.want);
         self.ws.picture = Picture { texture, has_frame };
         let ctx = ui.ctx().clone();
+        // Stats for nerds, looked at again four times a second while shown.
+        self.ws.stats = self.ws.snap.stats.then(|| self.viewer.stats()).flatten();
+        if self.ws.stats.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
         self.window_screenshots(&ctx);
         self.ws.ui(ui);
     }

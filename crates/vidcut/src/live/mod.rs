@@ -21,6 +21,7 @@ mod missing;
 mod player;
 mod project;
 pub mod snapshot;
+pub mod stats;
 mod workers;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -102,6 +103,10 @@ pub trait Renderer: Send + Sync {
     fn quit(&self);
     /// Open a window for the person at the GUI.
     fn show(&self, _panel: GuiPanel) {}
+    /// What the viewer tells of itself, for stats for nerds.
+    fn viewer_stats(&self) -> Option<stats::ViewerStats> {
+        None
+    }
 }
 
 /// A `gui.window` request.
@@ -410,6 +415,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         waveforms: Arc::new(HashMap::new()),
         jobs: Arc::new(Vec::new()),
         audio_scrubbing: true,
+        stats: false,
         preview_error: config.preview_error.clone(),
     };
     let shared = Arc::new(Mutex::new(Arc::new(empty)));
@@ -458,6 +464,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         job_replies: HashMap::new(),
         next_job: 1,
         audio_scrubbing: true,
+        stats: false,
         audio_noticed: None,
         playing: false,
         waits: Vec::new(),
@@ -659,6 +666,8 @@ struct Live {
     next_job: u64,
     /// Steps and paused seeks play their frame's sound (decision D42).
     audio_scrubbing: bool,
+    /// The viewer shows its stats for nerds.
+    stats: bool,
     /// What was last told about the sound ([`player::Player::audio_notice`]),
     /// so each new reason is told once.
     audio_noticed: Option<String>,
@@ -1093,6 +1102,7 @@ impl Live {
             waveforms: self.waveforms.clone(),
             jobs: self.jobs.clone(),
             audio_scrubbing: self.audio_scrubbing,
+            stats: self.stats,
             preview_error: self.preview_error.clone(),
         };
         *self.shared.lock().unwrap_or_else(|e| e.into_inner()) = Arc::new(snap);
@@ -1885,6 +1895,10 @@ impl Live {
             Request::PlayerAudioScrubbing { on } => {
                 self.audio_scrubbing = on.unwrap_or(!self.audio_scrubbing);
                 self.player.set_scrubbing(self.audio_scrubbing);
+                Step::Now(Ok(self.state_response()))
+            }
+            Request::PlayerStats { show } => {
+                self.stats = show.unwrap_or(!self.stats);
                 Step::Now(Ok(self.state_response()))
             }
             Request::PlayerMute { mute } => {
@@ -2785,6 +2799,10 @@ impl Live {
             "audio_device": self.player.audio_device(),
             "audio_error": self.player.audio_error,
             "audio_scrubbing": self.audio_scrubbing,
+            // What the viewer's player does (stats for nerds), and whether
+            // the viewer shows them.
+            "stats": self.player.stats(self.renderer.viewer_stats()),
+            "stats_shown": self.stats,
             "clipboard": self.clipboard.len(),
             "preview": self.preview_error.as_deref().map_or(json!(true), |e| json!(e)),
         })

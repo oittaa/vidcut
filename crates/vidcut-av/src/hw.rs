@@ -228,6 +228,8 @@ pub struct GpuDecoder {
     cuda: Option<CudaDevice>,
     /// Its GPU's PCI vendor, where known (Direct3D 11's adapter's).
     vendor: Option<u32>,
+    /// Its GPU's name, where it was opened for one (`gpus::list`).
+    gpu: Option<String>,
     /// Codecs left to the CPU, and why ([`without`](Self::without)).
     left: Vec<(ffmpeg::codec::Id, &'static str)>,
 }
@@ -241,6 +243,7 @@ impl GpuDecoder {
             on: String::new(),
             cuda: Some(cuda),
             vendor: None,
+            gpu: None,
             left: Vec::new(),
         }
     }
@@ -265,6 +268,7 @@ impl GpuDecoder {
             on: on.to_string(),
             cuda: None,
             vendor,
+            gpu: None,
             left: Vec::new(),
         })
     }
@@ -344,7 +348,7 @@ impl GpuDecoder {
             Ok(asked) => Self::asked(&asked),
             Err(_) => match &gpu {
                 Some(g) => match Self::on_gpu(g) {
-                    Ok(d) => (Some(d), format!("on {} ({}), the GPU in use", g.name, g.id)),
+                    Ok(d) => (Some(d), format!("{}, the GPU in use", g.id)),
                     Err(e) => (
                         None,
                         format!("{} ({}), the GPU in use, won't decode: {e}", g.name, g.id),
@@ -385,16 +389,20 @@ impl GpuDecoder {
     /// The decoder on `gpu`: NVDEC on NVIDIA's CUDA device, Direct3D 11 on
     /// its adapter (Windows), VA-API on its render node (Linux).
     fn on_gpu(gpu: &crate::gpus::Gpu) -> Result<Self> {
+        let named = |d: Self| Self {
+            gpu: Some(gpu.name.clone()),
+            ..d
+        };
         if let Some(index) = gpu.cuda {
-            return CudaDevice::on(index).map(Self::nvdec);
+            return CudaDevice::on(index).map(Self::nvdec).map(named);
         }
         #[cfg(windows)]
         if let Some(adapter) = gpu.adapter {
-            return Self::open(Kind::D3d11va, &adapter.to_string());
+            return Self::open(Kind::D3d11va, &adapter.to_string()).map(named);
         }
         #[cfg(target_os = "linux")]
         if let Some(node) = &gpu.node {
-            return Self::open(Kind::Vaapi, node);
+            return Self::open(Kind::Vaapi, node).map(named);
         }
         Err(Error::Invalid(format!("{} decodes nothing here", gpu.name)))
     }
@@ -411,15 +419,22 @@ impl GpuDecoder {
     }
 }
 
-/// Its kind and where: `Direct3D 11 on adapter 1`, `VA-API on
-/// /dev/dri/renderD128`, `NVDEC`.
+/// Its kind and where: `NVDEC on NVIDIA GeForce RTX 4080 SUPER`,
+/// `Direct3D 11 on AMD Radeon(TM) Graphics (adapter 1)`, `VA-API on
+/// /dev/dri/renderD128` where its GPU's name isn't known.
 impl std::fmt::Display for GpuDecoder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.kind.label())?;
-        match self.kind {
-            _ if self.on.is_empty() => Ok(()),
-            Kind::D3d11va => write!(f, " on adapter {}", self.on),
-            _ => write!(f, " on {}", self.on),
+        let on = match self.kind {
+            _ if self.on.is_empty() => String::new(),
+            Kind::D3d11va => format!("adapter {}", self.on),
+            _ => self.on.clone(),
+        };
+        match (&self.gpu, on.is_empty()) {
+            (Some(gpu), true) => write!(f, " on {gpu}"),
+            (Some(gpu), false) => write!(f, " on {gpu} ({on})"),
+            (None, true) => Ok(()),
+            (None, false) => write!(f, " on {on}"),
         }
     }
 }

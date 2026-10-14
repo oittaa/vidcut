@@ -189,3 +189,8 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 - **Resolve:** an HDR export carries the metadata of the grading setup: the Mastering Display chosen in Project Settings, HDR10 metadata exported or embedded on the Deliver page (p. 4117), Dolby Vision and HDR10+ from the grade's analysis and trims (pp. 151, 259–260); the Studio version measures MaxCLL and MaxFALL in a Light Level report (p. 282).
 - **vidcut:** there is no grade, so an export carries what its sources say (spec D46): the widest mastering display and the highest light levels of the pictures it shows, and their own HDR10+ and Dolby Vision, frame by frame. Where a source says nothing, light levels are measured from its frames, and frames without HDR10+ get statistics measured from them, without the trims a grade would add. Values can be given (`video.mastering_display`, `video.max_cll`).
 - **Why:** cutting phone, camera and graded HDR footage keeps it looking on TVs as the sources do, without a colorist's setup; where the sources say nothing, the values come from the pictures rather than a guess.
+
+## X20. Stats for nerds
+- **Resolve:** the viewer shows nothing of how it plays.
+- **vidcut:** the viewer's right-click menu opens a panel over the picture: the picture and what decoded it (FFmpeg's decoder and the GPU it ran on, or the CPU and why), frames shown, late and skipped, pictures kept against the memory budgets, the sound device and its latency, and the GPU drawing it. `player.stats` toggles it, and `player.state` has the same as `stats`.
+- **Why:** where the GPU decodes and draws differs from machine to machine. This shows it without a debug log.

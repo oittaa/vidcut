@@ -21,6 +21,7 @@ use vidcut_av::player::Player;
 use vidcut_core::Error;
 
 use super::picture::{Drawn, Gpu, Screen};
+use crate::live::stats::{PlayerStats, ViewerStats};
 use crate::live::{Capture, Presented};
 
 type Engine = Arc<Player>;
@@ -48,6 +49,8 @@ struct State {
     target: Option<Target>,
     /// The target holds a picture (not black for want of one).
     has_frame: bool,
+    /// What the viewer tells of itself, for stats for nerds.
+    stats: ViewerStats,
     woken: bool,
     stop: bool,
 }
@@ -104,16 +107,16 @@ impl Viewer {
         let gpu = Gpu::new(&render.device, &render.queue);
         let gpu_pictures = gpu.gpu_pictures();
         let info = render.adapter.get_info();
+        let renderer = format!(
+            "wgpu on {:?}, {} ({:?}, driver {} {})",
+            info.backend, info.name, info.device_type, info.driver, info.driver_info
+        );
         vidcut_av::debug!(
             "viewer",
-            "draws with wgpu on {:?}, {} ({:?}, driver {} {}); shows {gpu_pictures:?} \
-             pictures from GPU memory, uploads the rest",
-            info.backend,
-            info.name,
-            info.device_type,
-            info.driver,
-            info.driver_info
+            "draws with {renderer}; shows {gpu_pictures:?} pictures from GPU memory, \
+             uploads the rest"
         );
+        shared.lock().stats.renderer = renderer;
         let s = shared.clone();
         let thread = crate::threads::spawn(
             "vidcut-viewer",
@@ -133,6 +136,16 @@ impl Viewer {
     /// may keep them there.
     pub fn gpu_pictures(&self) -> Vec<vidcut_av::hw::Kind> {
         self.gpu_pictures.clone()
+    }
+
+    /// What the engine shown does, with what the viewer tells of itself
+    /// (stats for nerds); `None` while it shows none.
+    pub fn stats(&self) -> Option<PlayerStats> {
+        let (engine, viewer) = {
+            let s = self.shared.lock();
+            (s.engine.clone()?, s.stats.clone())
+        };
+        Some(PlayerStats::of(&engine, Some(viewer)))
     }
 
     pub fn handle(&self) -> ViewerHandle {
@@ -161,6 +174,11 @@ impl ViewerHandle {
     /// Looks again (a picture landed, or the session changed something).
     pub fn wake(&self) {
         self.shared.change(|_| {});
+    }
+
+    /// What the viewer tells of itself, for stats for nerds.
+    pub fn stats(&self) -> ViewerStats {
+        self.shared.lock().stats.clone()
     }
 }
 
@@ -275,6 +293,7 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
             view: view.clone(),
         });
         let has_frame = shown.is_some();
+        let shown_how = how(shown.as_ref(), &screen);
         let presented = shown.filter(|s| s.exact).map(|s| s.frame);
         // Playing: look again when the clock moves to the next frame.
         next = engine
@@ -285,6 +304,8 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
             let mut s = shared.lock();
             s.target = target;
             s.has_frame = has_frame;
+            s.stats.size = [w.max(2) as u32, h.max(2) as u32];
+            s.stats.shown = shown_how.into();
         }
         for task in tasks {
             match task {
@@ -306,6 +327,15 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
     }
 }
 
+/// How the picture shown got on screen.
+fn how(shown: Option<&vidcut_av::player::Shown>, screen: &Screen) -> &'static str {
+    match shown.and_then(|s| s.picture.gpu()) {
+        None => "uploaded",
+        Some(_) if screen.shared() => "shown from GPU memory",
+        Some(_) => "copied down and uploaded",
+    }
+}
+
 /// What the viewer drew, for `VIDCUT_DEBUG`: the frame, the picture's size,
 /// layout and colors, where it was, what decoded it and how it got on
 /// screen.
@@ -314,11 +344,7 @@ fn drew(shown: Option<&vidcut_av::player::Shown>, screen: &Screen) -> String {
         return "nothing".into();
     };
     let p = &s.picture;
-    let how = match p.gpu() {
-        None => "uploaded",
-        Some(_) if screen.shared() => "shown from GPU memory",
-        Some(_) => "copied down and uploaded",
-    };
+    let how = how(Some(s), screen);
     let c = p.colors();
     let hdr = c.hdr.map_or(String::new(), |h| format!(", {h:?}"));
     let range = if c.full_range { "full" } else { "video" };

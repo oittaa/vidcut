@@ -149,6 +149,7 @@ vidcut history undo                         # works across separate runs
 | `vidcut pool set --bin A --sort name --descending true` | the bin the Media Pool shows and its order; Source Tape follows it |
 | `vidcut player mute [true\|false]` | the viewer's monitoring mute (not the export); without a value, toggles |
 | `vidcut player audio-scrubbing [true\|false]` | audio scrubbing (decision D42): steps and paused seeks play their frame's sound; without a value, toggles (Shift+S) |
+| `vidcut player stats [true\|false]` | stats for nerds (deviation X20): a panel over the viewer, also in its right-click menu; without a value, toggles. Prints the facts, which `player state` has as `stats` |
 | `vidcut mixer preview A1 -12` | a track's level heard now, without changing the project (`track set --volume-db` keeps one); `live: false` while the viewer shows the source |
 | `vidcut gui show quick_export\|export\|jobs\|log\|mixer\|preferences` | opens that window for the person at the GUI |
 
