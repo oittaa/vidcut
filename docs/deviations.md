@@ -32,7 +32,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
   - saving the settings as a user preset, optionally added to Quick Export (p. 790)
   - loudness normalization to a target in LUFS (`audio.loudness`; [decisions/agents.md](decisions/agents.md) §5), like the Deliver page's Normalize Audio (p. 4105)
 
-  Every export is a job: a Jobs window lists them with progress, ETA and Cancel, including exports started from the CLI. Quitting while exports run asks first.
+  Every export is a job: a Jobs window lists them with progress, ETA and Cancel, including exports started from the CLI. Jobs run one at a time, in order, like the Deliver page's render queue (p. 4130). Quitting while exports run asks first.
 - **Why:** vidcut has no Deliver page, and the user requires these export options. The plan and the command make every GUI export reproducible from a script. A short row is quicker to choose from. AV1 makes the smallest files at a given quality, YouTube and other sites take it, and current GPUs encode it in hardware as fast as H.264; H.265 has replaced H.264 for masters.
 
 ## X4. Undo history persists across sessions and CLI runs

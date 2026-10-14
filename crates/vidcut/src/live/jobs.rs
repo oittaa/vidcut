@@ -11,6 +11,8 @@ use vidcut_core::Error;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum JobState {
+    /// Planned, waiting for the jobs before it (the render queue).
+    Queued,
     Running,
     Done,
     Failed,
@@ -124,8 +126,16 @@ impl JobInfo {
         }
     }
 
-    pub fn running(&self) -> bool {
-        self.state == JobState::Running
+    /// Queued or running.
+    pub fn unfinished(&self) -> bool {
+        matches!(self.state, JobState::Queued | JobState::Running)
+    }
+
+    /// Its turn came: it runs, and its time counts from now.
+    pub(crate) fn begin(&mut self) {
+        self.state = JobState::Running;
+        self.started = now();
+        self.clock = Instant::now();
     }
 
     /// The files are planned.
@@ -181,7 +191,10 @@ impl JobInfo {
     }
 
     pub(crate) fn ended(&mut self, result: &vidcut_core::Result<vidcut_core::Response>) {
-        self.elapsed = self.clock.elapsed().as_secs_f64();
+        // A job cancelled while it waited never ran.
+        if self.state != JobState::Queued {
+            self.elapsed = self.clock.elapsed().as_secs_f64();
+        }
         self.finished = Some(now());
         self.eta = None;
         match result {
@@ -204,5 +217,74 @@ impl JobInfo {
 
     pub fn to_json(&self) -> Value {
         serde_json::to_value(self).unwrap_or_else(|_| json!({ "id": self.id }))
+    }
+}
+
+/// The render queue (docs/decisions/gui.md §9): one job encodes at a time,
+/// and the others wait their turn in the order they came. Exports go before
+/// the proxy encodes still waiting.
+#[derive(Debug, Default)]
+pub(crate) struct Turns {
+    current: Option<String>,
+    /// The jobs waiting, and whether each is an export.
+    waiting: Vec<(String, bool)>,
+}
+
+impl Turns {
+    /// Job `id` wants its turn. True when it runs at once.
+    pub(crate) fn ask(&mut self, id: &str, export: bool) -> bool {
+        if self.current.is_none() {
+            self.current = Some(id.to_string());
+            return true;
+        }
+        let at = match export {
+            true => self.waiting.iter().position(|(_, e)| !e),
+            false => None,
+        };
+        let at = at.unwrap_or(self.waiting.len());
+        self.waiting.insert(at, (id.to_string(), export));
+        false
+    }
+
+    /// Job `id` ended or left the queue. Returns the job whose turn it is
+    /// now, when that changed.
+    pub(crate) fn ended(&mut self, id: &str) -> Option<String> {
+        self.waiting.retain(|(w, _)| w != id);
+        if self.current.as_deref() != Some(id) {
+            return None;
+        }
+        self.current = (!self.waiting.is_empty()).then(|| self.waiting.remove(0).0);
+        self.current.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_second_export_waits_for_the_first() {
+        let mut t = Turns::default();
+        assert_eq!((t.ask("j1", true), t.ask("j2", true)), (true, false));
+        assert_eq!(t.ended("j1").as_deref(), Some("j2"));
+    }
+
+    #[test]
+    fn an_export_goes_before_a_waiting_proxy() {
+        let mut t = Turns::default();
+        t.ask("j1", false);
+        t.ask("j2", false);
+        t.ask("j3", true);
+        assert_eq!(t.ended("j1").as_deref(), Some("j3"));
+    }
+
+    #[test]
+    fn a_job_cancelled_while_waiting_never_gets_a_turn() {
+        let mut t = Turns::default();
+        t.ask("j1", true);
+        t.ask("j2", true);
+        t.ask("j3", true);
+        t.ended("j2");
+        assert_eq!(t.ended("j1").as_deref(), Some("j3"));
     }
 }
