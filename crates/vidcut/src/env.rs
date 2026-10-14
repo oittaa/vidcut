@@ -118,7 +118,11 @@ impl Env for AvEnv {
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map_or(0, |d| d.as_nanos() as i64);
-        let info = vidcut_av::probe::probe(&canonical).map_err(|e| Error::media(e.to_string()))?;
+        // Its first frame decoded on the GPU the viewer decodes on, on a
+        // decoder of its own.
+        let decoder = crate::preferences::gpu_decoding().own_decoder();
+        let info = vidcut_av::probe::probe(&canonical, decoder.as_ref())
+            .map_err(|e| Error::media(e.to_string()))?;
         Ok(ProbedMedia {
             fingerprint: vidcut_core::fingerprint::file(&canonical).ok(),
             path: canonical,
@@ -193,7 +197,12 @@ impl Env for AvEnv {
         measured(
             &PICTURES,
             paths::media_cache("analysis", media, &key),
-            || vidcut_av::analysis::picture_stats(&input_of(media), pictures),
+            || {
+                // Decoded on the GPU the viewer decodes on, on a decoder of
+                // its own.
+                let decoder = crate::preferences::gpu_decoding().own_decoder();
+                vidcut_av::analysis::picture_stats(&input_of(media), pictures, decoder.as_ref())
+            },
             PictureStats::to_bytes,
             PictureStats::from_bytes,
         )

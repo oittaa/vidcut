@@ -1,40 +1,47 @@
 //! Stats for nerds: what the viewer's player does, gathered from the
 //! engine, the picture shown and the renderer. `player.state` returns them
-//! as `stats`; the viewer's panel shows the same as lines.
+//! as `stats`. The viewer's panel and `player stats` show them in groups,
+//! a fact on each row.
 
 use serde::{Deserialize, Serialize};
-use vidcut_av::player::{self as engine, PlaysOn};
+use vidcut_av::color::Matrix;
+use vidcut_av::player::{self as engine, Layout, PlaysOn};
+use vidcut_core::model::Hdr;
 
-/// What the renderer tells of the viewer.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct ViewerStats {
-    /// The size it draws the picture at, in physical pixels.
-    pub size: [u32; 2],
-    /// How the picture got on screen: `uploaded`, `shown from GPU memory`,
-    /// `copied down and uploaded`.
-    pub shown: String,
-    /// The GPU it draws with: wgpu's backend, the adapter and its driver.
-    pub renderer: String,
-}
+/// A heading and its rows, a label and a fact on each.
+pub type Group = (&'static str, Vec<(&'static str, String)>);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerStats {
+    /// What the file of the picture shown holds and what decoded it.
+    /// `None` before the first picture, and for black.
+    pub decoding: Option<DecodingStats>,
+    /// The picture shown last. `None` before the first.
+    pub picture: Option<PictureStats>,
     /// The viewer, when a renderer tells of it.
     pub viewer: Option<ViewerStats>,
-    /// Frames shown exactly; while playing, presents late and frames
-    /// passed over.
-    pub frames: u64,
-    pub late: u64,
-    pub skipped: u64,
-    /// The picture shown last; `None` before the first.
-    pub picture: Option<PictureStats>,
-    /// What the file of the picture holds and what decoded it.
-    pub decoding: Option<String>,
-    /// Why the player decodes on the CPU, when it chose so.
-    pub cpu: Option<String>,
-    pub timeline: TimelineStats,
+    pub playback: PlaybackStats,
     pub kept: KeptStats,
     pub sound: SoundStats,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DecodingStats {
+    /// FFmpeg's names of the codec and its profile: `h264`, `High`.
+    pub codec: String,
+    pub profile: Option<String>,
+    /// The file's frame rate, when it gives one.
+    pub fps: Option<f64>,
+    pub interlaced: bool,
+    /// The clockwise turn that shows it upright: 0, 90, 180 or 270.
+    pub rotation: u16,
+    /// FFmpeg's decoder: `h264`, `hevc`.
+    pub decoder: String,
+    /// `CPU`, or the GPU decoder: `NVDEC on NVIDIA GeForce RTX 4070`.
+    pub runs_on: String,
+    /// Why it runs on the CPU: GPU decoding is off, there is no GPU
+    /// decoder, or the GPU's decoder wouldn't take the file.
+    pub why_cpu: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,18 +51,39 @@ pub struct PictureStats {
     pub frame: i64,
     pub exact: bool,
     pub size: [u32; 2],
+    /// `YUV420P`, `NV12` or `P010`.
     pub layout: String,
-    pub colors: String,
+    /// `BT.601`, `BT.709` or `BT.2020`.
+    pub matrix: String,
+    /// `video` or `full`.
+    pub range: String,
+    /// `PQ` or `HLG`. `None` for SDR.
+    pub hdr: Option<String>,
     /// Where its pixels are: `memory`, or a GPU's (`NVDEC memory`).
     pub memory: String,
-    /// What decoded it: `cpu`, `nvdec`, …; `None` for black.
-    pub decoder: Option<String>,
+}
+
+/// What the renderer tells of the viewer.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ViewerStats {
+    /// The size it draws the picture at, in physical pixels.
+    pub size: [u32; 2],
+    /// How the picture got on screen: `uploaded`, `shown from GPU memory`,
+    /// `copied down and uploaded`. `None` before the first picture.
+    pub shown: Option<String>,
+    /// What draws it: wgpu's backend (`Vulkan`), the GPU and its driver.
+    pub backend: String,
+    pub gpu: String,
+    pub driver: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TimelineStats {
-    pub size: [u32; 2],
-    pub fps: f64,
+pub struct PlaybackStats {
+    /// Frames shown exactly. While playing, presents late and frames
+    /// passed over.
+    pub frames: u64,
+    pub late: u64,
+    pub skipped: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,42 +111,69 @@ impl PlayerStats {
     pub fn of(engine: &engine::Player, viewer: Option<ViewerStats>) -> Self {
         let s = engine.stats();
         let mb = |(used, budget): (usize, usize)| [used >> 20, budget >> 20];
+        let decoding = s
+            .shown
+            .as_ref()
+            .and_then(|shown| shown.picture.decoding())
+            .map(|d| DecodingStats {
+                codec: d.codec.clone(),
+                profile: d.profile.clone(),
+                fps: d.fps,
+                interlaced: d.interlaced,
+                rotation: d.rotation,
+                decoder: d.decoder.clone(),
+                runs_on: d.gpu.clone().unwrap_or_else(|| "CPU".into()),
+                why_cpu: d
+                    .why
+                    .clone()
+                    .or(s.cpu.map(String::from))
+                    .filter(|_| d.gpu.is_none()),
+            });
         let picture = s.shown.as_ref().map(|shown| {
             let p = &shown.picture;
             let c = p.colors();
-            let range = if c.full_range { "full" } else { "video" };
-            let hdr = c.hdr.map_or(String::new(), |h| format!(", {h:?}"));
+            let layout = match p.layout() {
+                Layout::Yuv420p => "YUV420P",
+                Layout::Nv12 => "NV12",
+                Layout::P010 => "P010",
+            };
+            let matrix = match c.matrix {
+                Matrix::Bt601 => "BT.601",
+                Matrix::Bt709 => "BT.709",
+                Matrix::Bt2020 => "BT.2020",
+            };
             PictureStats {
                 frame: shown.frame,
                 exact: shown.exact,
                 size: [p.width(), p.height()],
-                layout: format!("{:?}", p.layout()),
-                colors: format!("{:?} {range} range{hdr}", c.matrix),
+                layout: layout.into(),
+                matrix: matrix.into(),
+                range: if c.full_range { "full" } else { "video" }.into(),
+                hdr: c.hdr.map(|h| {
+                    match h {
+                        Hdr::Pq => "PQ",
+                        Hdr::Hlg => "HLG",
+                    }
+                    .into()
+                }),
                 memory: p
                     .gpu()
                     .map_or("memory".into(), |k| format!("{} memory", k.label())),
-                decoder: p.decoder().map(|d| d.name().to_string()),
             }
         });
         let device = match &s.plays_on {
-            PlaysOn::Default => "the system's default".into(),
+            PlaysOn::Default => "System default".into(),
             PlaysOn::Chosen(id) => id.clone(),
-            PlaysOn::Missing(id) => format!("the system's default ({id} isn't connected)"),
+            PlaysOn::Missing(id) => format!("System default ({id} isn't connected)"),
         };
         Self {
-            viewer,
-            frames: s.frames,
-            late: s.late,
-            skipped: s.skipped,
-            decoding: s
-                .shown
-                .as_ref()
-                .and_then(|shown| shown.picture.decoding().map(String::from)),
+            decoding,
             picture,
-            cpu: s.cpu.map(String::from),
-            timeline: TimelineStats {
-                size: [s.size.0, s.size.1],
-                fps: s.fps.as_f64(),
+            viewer,
+            playback: PlaybackStats {
+                frames: s.frames,
+                late: s.late,
+                skipped: s.skipped,
             },
             kept: KeptStats {
                 ahead: s.ahead,
@@ -136,79 +191,122 @@ impl PlayerStats {
         }
     }
 
-    /// What the viewer's panel shows: a name and its facts on each line.
-    pub fn lines(&self) -> Vec<(&'static str, String)> {
-        let mut lines = Vec::new();
-        let counts = format!(
-            "{} frames shown, {} late, {} skipped",
-            self.frames, self.late, self.skipped
-        );
-        lines.push((
-            "Viewer",
-            match &self.viewer {
-                Some(v) => format!("{}×{}: {counts}", v.size[0], v.size[1]),
-                None => counts,
-            },
-        ));
-        if let Some(p) = &self.picture {
-            let shown = self
-                .viewer
-                .as_ref()
-                .map_or(String::new(), |v| format!(", {}", v.shown));
-            let late = if p.exact {
-                ""
-            } else {
-                " (the picture before it)"
-            };
-            lines.push((
-                "Picture",
-                format!(
-                    "frame {}{late}: {}×{} {}, {}, in {}{shown}",
-                    p.frame, p.size[0], p.size[1], p.layout, p.colors, p.memory
-                ),
-            ));
-        }
+    /// What the viewer's panel shows: a group for each part of the player,
+    /// in the order the picture goes through them. Facts that don't apply
+    /// are left out.
+    pub fn groups(&self) -> Vec<Group> {
+        let mut groups = Vec::new();
         if let Some(d) = &self.decoding {
-            let why = self
-                .cpu
-                .as_ref()
-                .map_or(String::new(), |w| format!(" ({w})"));
-            lines.push(("Decoding", format!("{d}{why}")));
+            groups.push(("Decoding", d.rows()));
         }
-        let t = &self.timeline;
-        lines.push((
-            "Timeline",
-            format!("{}×{} at {} fps", t.size[0], t.size[1], fps(t.fps)),
-        ));
-        let k = &self.kept;
-        lines.push((
-            "Kept",
-            format!(
-                "{} ahead, {} behind, {} pictures: {} of {} MB of memory, {} of {} MB of video memory",
-                k.ahead,
-                k.behind,
-                k.pictures,
-                k.memory_mb[0],
-                k.memory_mb[1],
-                k.video_mb[0],
-                k.video_mb[1]
-            ),
-        ));
-        let s = &self.sound;
-        let latency = s
-            .latency_ms
-            .map_or(String::new(), |l| format!(", {l:.0} ms latency"));
-        lines.push((
-            "Sound",
-            format!(
-                "{}, {} Hz, {} channels{latency}",
-                s.device, s.rate, s.channels
-            ),
-        ));
+        if let Some(p) = &self.picture {
+            groups.push(("Picture", p.rows()));
+        }
         if let Some(v) = &self.viewer {
-            lines.push(("Renderer", v.renderer.clone()));
+            groups.push(("Viewer", v.rows()));
         }
-        lines
+        groups.push(("Playback", self.playback.rows()));
+        groups.push(("Kept", self.kept.rows()));
+        groups.push(("Sound", self.sound.rows()));
+        groups
+    }
+}
+
+impl DecodingStats {
+    fn rows(&self) -> Vec<(&'static str, String)> {
+        let codec = match &self.profile {
+            Some(p) => format!("{} {p}", self.codec),
+            None => self.codec.clone(),
+        };
+        let mut rows = vec![("Codec", codec)];
+        if let Some(rate) = self.fps {
+            rows.push(("Frame rate", format!("{} fps", fps(rate))));
+        }
+        if self.interlaced {
+            rows.push(("Interlaced", "yes".into()));
+        }
+        if self.rotation != 0 {
+            rows.push(("Turned", format!("{}°", self.rotation)));
+        }
+        rows.push(("Decoder", format!("FFmpeg's {}", self.decoder)));
+        rows.push(("Runs on", self.runs_on.clone()));
+        if let Some(why) = &self.why_cpu {
+            rows.push(("Why the CPU", why.clone()));
+        }
+        rows
+    }
+}
+
+impl PictureStats {
+    fn rows(&self) -> Vec<(&'static str, String)> {
+        let frame = if self.exact {
+            self.frame.to_string()
+        } else {
+            format!("{} (still decoding)", self.frame)
+        };
+        let mut rows = vec![
+            ("Frame", frame),
+            ("Size", format!("{}×{}", self.size[0], self.size[1])),
+            ("Layout", self.layout.clone()),
+            ("Colors", format!("{}, {} range", self.matrix, self.range)),
+        ];
+        if let Some(hdr) = &self.hdr {
+            rows.push(("HDR", hdr.clone()));
+        }
+        rows.push(("Held in", self.memory.clone()));
+        rows
+    }
+}
+
+impl ViewerStats {
+    fn rows(&self) -> Vec<(&'static str, String)> {
+        let mut rows = vec![("Size", format!("{}×{}", self.size[0], self.size[1]))];
+        if let Some(shown) = &self.shown {
+            rows.push(("Picture", shown.clone()));
+        }
+        rows.push(("Renderer", self.backend.clone()));
+        rows.push(("GPU", self.gpu.clone()));
+        if !self.driver.is_empty() {
+            rows.push(("Driver", self.driver.clone()));
+        }
+        rows
+    }
+}
+
+impl PlaybackStats {
+    fn rows(&self) -> Vec<(&'static str, String)> {
+        vec![
+            ("Shown", format!("{} frames", self.frames)),
+            ("Late", self.late.to_string()),
+            ("Skipped", self.skipped.to_string()),
+        ]
+    }
+}
+
+impl KeptStats {
+    fn rows(&self) -> Vec<(&'static str, String)> {
+        let mb = |[used, budget]: [usize; 2]| format!("{used} of {budget} MB");
+        vec![
+            ("Ahead", format!("{} pictures", self.ahead)),
+            ("Behind", format!("{} pictures", self.behind)),
+            ("All", format!("{} pictures", self.pictures)),
+            ("Memory", mb(self.memory_mb)),
+            ("Video memory", mb(self.video_mb)),
+        ]
+    }
+}
+
+impl SoundStats {
+    fn rows(&self) -> Vec<(&'static str, String)> {
+        let mut rows = vec![
+            ("Device", self.device.clone()),
+            ("Rate", format!("{} Hz", self.rate)),
+            ("Channels", self.channels.to_string()),
+        ];
+        if let Some(ms) = self.latency_ms {
+            rows.push(("Latency", format!("{ms:.0} ms")));
+        }
+        rows
     }
 }
 
@@ -216,4 +314,51 @@ impl PlayerStats {
 fn fps(rate: f64) -> String {
     let text = format!("{rate:.3}");
     text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sound_has_a_row_for_each_fact() {
+        let sound = SoundStats {
+            device: "System default".into(),
+            rate: 48000,
+            channels: 2,
+            latency_ms: Some(20.0),
+        };
+        assert_eq!(
+            sound.rows(),
+            [
+                ("Device", "System default".to_string()),
+                ("Rate", "48000 Hz".into()),
+                ("Channels", "2".into()),
+                ("Latency", "20 ms".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn decoding_leaves_out_what_does_not_apply() {
+        let decoding = DecodingStats {
+            codec: "h264".into(),
+            profile: Some("High".into()),
+            fps: Some(30000.0 / 1001.0),
+            interlaced: false,
+            rotation: 0,
+            decoder: "h264".into(),
+            runs_on: "CPU".into(),
+            why_cpu: None,
+        };
+        assert_eq!(
+            decoding.rows(),
+            [
+                ("Codec", "h264 High".to_string()),
+                ("Frame rate", "29.97 fps".into()),
+                ("Decoder", "FFmpeg's h264".into()),
+                ("Runs on", "CPU".into()),
+            ]
+        );
+    }
 }

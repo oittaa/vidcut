@@ -24,7 +24,7 @@ use vidcut_core::render::{RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
 
 fn piece(path: &Path, source_frame: i64, frames: i64) -> VideoPiece {
-    let origin = vidcut_av::probe::probe(path)
+    let origin = vidcut_av::probe::probe(path, None)
         .unwrap()
         .video
         .and_then(|v| v.first_frame_time)
@@ -212,7 +212,7 @@ fn light_is_measured_as_a_pq_export_shows_it() {
             from,
             to,
         };
-        let a = light::analysis(&span(0.0, 2.0), true, None, &mut |_| {})
+        let a = light::analysis(&span(0.0, 2.0), true, None, None, &mut |_| {})
             .unwrap()
             .unwrap();
         assert_eq!(a.frames.len(), 33, "{what}");
@@ -274,7 +274,7 @@ fn a_highlight_of_two_pixels_is_the_peak() {
             from: 0.0,
             to: 0.1,
         };
-        let a = light::analysis(&span, true, None, &mut |_| {})
+        let a = light::analysis(&span, true, None, None, &mut |_| {})
             .unwrap()
             .unwrap();
         assert_eq!(a.frames.len(), 3, "{what}");

@@ -21,7 +21,8 @@ pub struct Image {
 /// `count` pictures at evenly spaced times of `source`'s video (the middle
 /// of each of `count` equal parts), each fitted into `max_w`×`max_h` keeping
 /// the display aspect. Returns the pictures and their times in seconds from
-/// the first frame. A still gives its one picture.
+/// the first frame. A still gives its one picture. The video decodes on
+/// `decoder` where it decodes the stream, else on the CPU.
 ///
 /// An image sequence is read by FFmpeg's image2 demuxer, which continues
 /// while the file numbers do. Pass the sequence's own length to
@@ -31,8 +32,9 @@ pub fn filmstrip(
     count: usize,
     max_w: u32,
     max_h: u32,
+    decoder: Option<&crate::hw::GpuDecoder>,
 ) -> Result<(Vec<Image>, Vec<f64>)> {
-    filmstrip_inner(source, count, max_w, max_h, None)
+    filmstrip_inner(source, count, max_w, max_h, None, decoder)
 }
 
 /// [`filmstrip`] of the first `pictures` frames of `source`.
@@ -48,8 +50,9 @@ pub fn filmstrip_pictures(
     count: usize,
     max_w: u32,
     max_h: u32,
+    decoder: Option<&crate::hw::GpuDecoder>,
 ) -> Result<(Vec<Image>, Vec<f64>)> {
-    filmstrip_inner(source, count, max_w, max_h, Some(pictures))
+    filmstrip_inner(source, count, max_w, max_h, Some(pictures), decoder)
 }
 
 fn filmstrip_inner(
@@ -58,9 +61,31 @@ fn filmstrip_inner(
     max_w: u32,
     max_h: u32,
     pictures: Option<u64>,
+    gpu: Option<&crate::hw::GpuDecoder>,
 ) -> Result<(Vec<Image>, Vec<f64>)> {
+    // Decoded in memory instead, or not at all: the GPU's decoder wouldn't
+    // take the stream (a profile it lacks), so the CPU's does.
+    if gpu.is_some()
+        && let Ok(Some(strip)) = strip_on(source, count, max_w, max_h, pictures, gpu)
+    {
+        return Ok(strip);
+    }
+    strip_on(source, count, max_w, max_h, pictures, None).map(Option::unwrap_or_default)
+}
+
+/// The filmstrip decoded on `gpu`, or on the CPU without it. `None` when
+/// the first picture comes out in memory though `gpu` was given, or none
+/// does.
+fn strip_on(
+    source: &crate::decode::Input,
+    count: usize,
+    max_w: u32,
+    max_h: u32,
+    pictures: Option<u64>,
+    gpu: Option<&crate::hw::GpuDecoder>,
+) -> Result<Option<(Vec<Image>, Vec<f64>)>> {
     if pictures == Some(0) {
-        return Ok((Vec::new(), Vec::new()));
+        return Ok(Some((Vec::new(), Vec::new())));
     }
     let path = source.path();
     let mut input = source.open()?;
@@ -69,6 +94,7 @@ fn filmstrip_inner(
         .best(media::Type::Video)
         .ok_or_else(|| Error::Invalid(format!("{}: no video stream", path.display())))?;
     let index = stream.index();
+    let codec_id = stream.parameters().id();
     let tb = f64::from(stream.time_base());
     let start = Some(stream.start_time())
         .filter(|&t| t != ffmpeg::ffi::AV_NOPTS_VALUE)
@@ -87,10 +113,10 @@ fn filmstrip_inner(
         (*raw).skip_frame = ffmpeg::ffi::AVDiscard::AVDISCARD_NONREF;
         (*raw).skip_loop_filter = ffmpeg::ffi::AVDiscard::AVDISCARD_ALL;
     }
-    let mut decoder = ctx
-        .decoder()
-        .video()
-        .ctx(|| "opening video decoder".into())?;
+    // On the GPU where it decodes the stream (it deblocks all the same).
+    let mut decoder =
+        crate::decode::open_video(ctx, codec_id, gpu, || crate::decode::h264_open_gop(source))
+            .ctx(|| "opening video decoder".into())?;
     crate::export::audio::discard_others(&input, index);
 
     let rotation =
@@ -122,6 +148,16 @@ fn filmstrip_inner(
         };
     }
     let spacing = duration / count.max(1) as f64;
+    // The first picture says where they decode.
+    let told = std::cell::Cell::new(false);
+    let refused = |f: &frame::Video| {
+        if told.replace(true) {
+            return false;
+        }
+        let on = crate::decode::decoded_on(f, gpu);
+        crate::debug!("decoding", "{}: filmstrip on {on}", path.display());
+        gpu.is_some() && !crate::hw::on_gpu(f)
+    };
     let mut images = Vec::with_capacity(count);
     let mut times = Vec::with_capacity(count);
     // Time (from `start`) of the last frame decoded, while decoding forward.
@@ -136,14 +172,19 @@ fn filmstrip_inner(
         {
             let k = ((t * rate).floor().max(0.0) as u64).min(n - 1);
             match one_sequence_picture(&mut input, &mut decoder, index, k) {
-                Some(decoded) => keep(
-                    &mut images,
-                    &mut times,
-                    &mut normalizer,
-                    &decoded,
-                    (rotation, tw, th),
-                    t,
-                )?,
+                Some(decoded) => {
+                    if refused(&decoded) {
+                        return Ok(None);
+                    }
+                    keep(
+                        &mut images,
+                        &mut times,
+                        &mut normalizer,
+                        &decoded,
+                        (rotation, tw, th),
+                        t,
+                    )?
+                }
                 None => {
                     if let Some(prev) = images.last() {
                         images.push(prev.clone());
@@ -177,6 +218,9 @@ fn filmstrip_inner(
             }
         }
         let Some(decoded) = picked else { break };
+        if refused(&decoded) {
+            return Ok(None);
+        }
         keep(
             &mut images,
             &mut times,
@@ -186,7 +230,10 @@ fn filmstrip_inner(
             t,
         )?;
     }
-    Ok((images, times))
+    if gpu.is_some() && images.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some((images, times)))
 }
 
 /// Appends one fitted picture and the sample time it stands for.
@@ -199,6 +246,13 @@ fn keep(
     t: f64,
 ) -> Result<()> {
     let (rotation, tw, th) = place;
+    let down;
+    let decoded = if crate::hw::on_gpu(decoded) {
+        down = crate::hw::download(decoded)?;
+        &down
+    } else {
+        decoded
+    };
     let n = match normalizer {
         Some(n) if n.matches(decoded, rotation) => n,
         _ => normalizer.insert(crate::export::video::Normalizer::new(

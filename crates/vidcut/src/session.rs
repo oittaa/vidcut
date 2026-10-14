@@ -383,11 +383,14 @@ pub fn export_media(
     let clock = std::time::Instant::now();
     let first = prepared.outputs[0].path.clone();
     let progress = &mut *hooks.progress;
+    // Decoded on the GPU the viewer decodes on, on a decoder of its own.
+    let decoder = crate::preferences::gpu_decoding().own_decoder();
     export::choose_colors(
         &mut prepared,
         p,
         &available,
         Some(export::Measuring {
+            decoder: decoder.as_ref(),
             cancel: hooks.cancel,
             progress: &mut |share| {
                 progress(
@@ -399,8 +402,6 @@ pub fn export_media(
             },
         }),
     )?;
-    // Decoded on the GPU the viewer decodes on, on a decoder of its own.
-    let decoder = crate::preferences::gpu_decoding().own_decoder();
     let reports = export::run(
         &prepared,
         &available,

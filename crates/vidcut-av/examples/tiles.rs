@@ -24,7 +24,7 @@ fn main() {
         Some(h) => h.parse().expect("HEIGHT"),
         None => 112,
     };
-    let info = vidcut_av::probe::probe(&path).expect("probe");
+    let info = vidcut_av::probe::probe(&path, gpu.as_ref()).expect("probe");
     let video = info.video.expect("a video stream");
     let duration = video.duration_secs.unwrap_or(0.0);
     let origin = video.first_frame_time.unwrap_or(0.0);

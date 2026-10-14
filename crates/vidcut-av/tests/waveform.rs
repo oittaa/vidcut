@@ -53,7 +53,7 @@ fn a_lost_packet_keeps_the_time() {
         90,
     ))
     .unwrap();
-    let audio = vidcut_av::probe::probe(&path).unwrap().audio[0].index;
+    let audio = vidcut_av::probe::probe(&path, None).unwrap().audio[0].index;
     let tmp = tempfile::Builder::new()
         .prefix("vidcut-waveform-")
         .tempdir()

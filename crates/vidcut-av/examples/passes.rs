@@ -46,7 +46,7 @@ fn main() {
         std::process::exit(2);
     };
     let path = PathBuf::from(file);
-    let info = vidcut_av::probe::probe(&path).expect("probe");
+    let info = vidcut_av::probe::probe(&path, None).expect("probe");
     let v = info.video.expect("video");
     let fps = Rational::new(i64::from(v.avg_frame_rate.0), i64::from(v.avg_frame_rate.1)).unwrap();
     let start = (start.parse::<f64>().unwrap() * fps.as_f64()).round() as i64;

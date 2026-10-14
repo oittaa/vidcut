@@ -29,7 +29,7 @@ fn tiles_show_their_own_frames() {
         .gop(120)
         .bframes(2);
     let path = fixture::ensure(&spec).unwrap();
-    let origin = vidcut_av::probe::probe(&path)
+    let origin = vidcut_av::probe::probe(&path, None)
         .unwrap()
         .video
         .and_then(|v| v.first_frame_time)

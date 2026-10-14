@@ -588,16 +588,22 @@ fn measure_with(
     })
 }
 
-/// Measures the frames of `span`, decoded on the CPU, and the first one
-/// from its end on; and whether the file ended before that. `progress`
-/// hears the share done.
+/// Measures the frames of `span`, decoded on `decoder` where it decodes
+/// the file (copied down whole) or on the CPU, and the first one from its end
+/// on; and whether the file ended before that. `progress` hears the share
+/// decoded. Threads of their own measure the frames while the next ones
+/// decode.
 fn measure(
     span: &Span,
+    decoder: Option<&crate::hw::GpuDecoder>,
     cancel: Option<&AtomicBool>,
     progress: &mut dyn FnMut(f64),
 ) -> Result<(Vec<(f64, FrameLight)>, bool)> {
     crate::init();
-    let mut reader = VideoReader::open_input(&span.input)?;
+    let mut reader = match decoder {
+        Some(gpu) => VideoReader::open_gpu_or_cpu(&span.input, gpu)?,
+        None => VideoReader::open_input(&span.input)?,
+    };
     let tb = reader.time_base();
     let tick = f64::from(tb.numerator()) / f64::from(tb.denominator());
     if span.from.is_finite()
@@ -607,22 +613,53 @@ fn measure(
     {
         reader.seek(((span.from - EPS) / tick).floor() as i64)?;
     }
-    let mut relayout = crate::export::video::Relayout::new();
-    let mut frames = Vec::new();
-    while let Some(f) = reader.next_frame()? {
-        if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
-            return Err(Error::Invalid(crate::export::CANCELLED.into()));
+    let threads = std::thread::available_parallelism().map_or(2, |n| n.get().clamp(2, 4));
+    let (to_measure, inbox) = std::sync::mpsc::sync_channel::<(f64, frame::Video)>(threads);
+    let inbox = Mutex::new(inbox);
+    let (mut frames, ended) = std::thread::scope(|scope| -> Result<_> {
+        let measuring: Vec<_> = (0..threads)
+            .map(|_| {
+                scope.spawn(|| -> Result<Vec<(f64, FrameLight)>> {
+                    let mut relayout = crate::export::video::Relayout::new();
+                    let mut out = Vec::new();
+                    loop {
+                        let next = inbox.lock().unwrap_or_else(|e| e.into_inner()).recv();
+                        let Ok((t, f)) = next else {
+                            return Ok(out);
+                        };
+                        out.push((t, measure_with(&f, &mut relayout)?));
+                    }
+                })
+            })
+            .collect();
+        let decoded = (|| -> Result<bool> {
+            while let Some(f) = reader.next_frame()? {
+                if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
+                    return Err(Error::Invalid(crate::export::CANCELLED.into()));
+                }
+                let t = f.pts().unwrap_or(0) as f64 * tick;
+                // Measuring stopped: its error follows.
+                if to_measure.send((t, crate::decode::in_memory(f)?)).is_err() {
+                    return Ok(false);
+                }
+                if t >= span.to - EPS {
+                    return Ok(false);
+                }
+                if span.to.is_finite() && span.to > span.from {
+                    progress(((t - span.from) / (span.to - span.from)).clamp(0.0, 1.0));
+                }
+            }
+            Ok(true)
+        })();
+        drop(to_measure);
+        let mut frames = Vec::new();
+        for m in measuring {
+            frames.extend(m.join().expect("measuring light")?);
         }
-        let t = f.pts().unwrap_or(0) as f64 * tick;
-        frames.push((t, measure_with(&f, &mut relayout)?));
-        if t >= span.to - EPS {
-            return Ok((frames, false));
-        }
-        if span.to.is_finite() && span.to > span.from {
-            progress(((t - span.from) / (span.to - span.from)).clamp(0.0, 1.0));
-        }
-    }
-    Ok((frames, true))
+        Ok((frames, decoded?))
+    })?;
+    frames.sort_by(|a, b| a.0.total_cmp(&b.0));
+    Ok((frames, ended))
 }
 
 static CACHE: OnceLock<PathBuf> = OnceLock::new();
@@ -709,12 +746,13 @@ fn from_bytes(b: &[u8]) -> Option<LightAnalysis> {
 }
 
 /// The measurement of `span`'s file that covers it: kept in memory, or on
-/// disk, or (with `measure_now`) made now and kept. `None` when it isn't
-/// there and `measure_now` is false. `progress` hears the share of `span`
-/// measured.
+/// disk, or (with `measure_now`) made now on `decoder` and kept. `None`
+/// when it isn't there and `measure_now` is false. `progress` hears the
+/// share of `span` measured.
 pub fn analysis(
     span: &Span,
     measure_now: bool,
+    decoder: Option<&crate::hw::GpuDecoder>,
     cancel: Option<&AtomicBool>,
     progress: &mut dyn FnMut(f64),
 ) -> Result<Option<Arc<LightAnalysis>>> {
@@ -740,7 +778,7 @@ pub fn analysis(
     if !measure_now {
         return Ok(None);
     }
-    let (frames, ended) = measure(span, cancel, progress)?;
+    let (frames, ended) = measure(span, decoder, cancel, progress)?;
     let to = if ended { f64::INFINITY } else { span.to };
     // Added to what is known now: another measurement may have ended
     // meanwhile.
@@ -771,13 +809,15 @@ pub fn piece_level(
     piece: &VideoPiece,
     fps: Rational,
     measure_now: bool,
+    decoder: Option<&crate::hw::GpuDecoder>,
     cancel: Option<&AtomicBool>,
     progress: &mut dyn FnMut(f64),
 ) -> Result<Option<LightLevel>> {
     let Some(span) = Span::of(piece, fps) else {
         return Ok(None);
     };
-    Ok(analysis(&span, measure_now, cancel, progress)?.and_then(|a| a.level(sampled(piece, fps))))
+    let a = analysis(&span, measure_now, decoder, cancel, progress)?;
+    Ok(a.and_then(|a| a.level(sampled(piece, fps))))
 }
 
 /// Measures single frames as they are decoded, on the CPU or copied down

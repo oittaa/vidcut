@@ -81,7 +81,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 
 **Encoding.** PNG encoding runs on a task thread.
 
-**Stats for nerds** (deviation X20) come from the engine (`Player::stats`), the picture shown (what its reader said of its file and decoder) and the viewer thread (its size, how the picture got on screen, wgpu's adapter). `live::stats` makes them both `player.state`'s `stats` and the panel's lines.
+**Stats for nerds** (deviation X20) come from the engine (`Player::stats`), the picture shown (what its reader said of its file and decoder) and the viewer thread (its size, how the picture got on screen, wgpu's adapter). `live::stats` makes them both `player.state`'s `stats` and the panel's groups.
 
 **Aspect.** The viewer shows the timeline's aspect in every mode, and sources are fitted inside it the way export fits them. Render targets are sized to the fitted picture in physical pixels.
 
@@ -202,7 +202,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 
 ## 11. Pool thumbnails and preferences
 
-- **Filmstrips are kept on disk** (`thumbcache.rs`): 24 pictures of a media file, fitted in 192×108 and spread evenly, as one JPEG strip in `~/.cache/vidcut/thumbs` (about 6 KB a picture, where the RGBA in memory takes 83 KB). Each is within half the spacing of its time, so keyframes are enough for long clips; short clips are decoded forward. About 0.1–3 s a clip on workers. The file name holds the media file's path hash, size and modification time, and the strip's layout, so a changed file or another layout never reads a stale strip.
+- **Filmstrips are kept on disk** (`thumbcache.rs`): 24 pictures of a media file, fitted in 192×108 and spread evenly, as one JPEG strip in `~/.cache/vidcut/thumbs` (about 6 KB a picture, where the RGBA in memory takes 83 KB). Each is within half the spacing of its time, so keyframes are enough for long clips; short clips are decoded forward. They decode on the GPU where it decodes the stream (preview.md §3). About 0.1–3 s a clip on workers. The file name holds the media file's path hash, size and modification time, and the strip's layout, so a changed file or another layout never reads a stale strip.
 - **Eviction:** a strip's modification time is its last use. After each new strip, the least recently used go until the rest fit `thumbnails.cache_limit_mb` (512 MB by default, about 3,000 media files).
 - **Why:** decoding 24 pictures takes from a tenth of a second to seconds per clip, much more from a network share, and it ran again for every clip each time a project opened. The project still keeps no pictures (deviation X1).
 - **Preferences** (`preferences.toml`, deviation X12) are read whenever a thumbnail job, an export or a proxy runs, so a change from the CLI applies to a running GUI at once. GPU acceleration, GPU decoding and the audio device also reach the player at once: the session watches the preferences file, and when one changed, whoever changed it (the Preferences window, a CLI run, the file by hand), the engine switches its decoder and decodes its pictures anew, the one shown first (preview.md §3), or opens anew on the audio device chosen, paused where it was (player.md §6). The player's memory (`player.memory_mb`, `player.video_memory_mb`) reaches it the same way: over a smaller limit, the pictures kept least recently go at once. `preferences.set` empties the cache when it is turned off and trims it when the limit drops.

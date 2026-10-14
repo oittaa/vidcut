@@ -133,9 +133,10 @@ pub fn pixel_depth(name: &str) -> u8 {
 }
 
 /// Probes `path`, including the first decodable video frame (one frame is
-/// decoded) and stream durations. An image file is a still.
-pub fn probe(path: &Path) -> Result<MediaInfo> {
-    probe_input(&Input::File(path.to_path_buf()))
+/// decoded, on `decoder` where it decodes the stream) and stream
+/// durations. An image file is a still.
+pub fn probe(path: &Path, decoder: Option<&crate::hw::GpuDecoder>) -> Result<MediaInfo> {
+    probe_input(&Input::File(path.to_path_buf()), decoder)
 }
 
 /// Probes an image sequence: the files `pattern` names from the number
@@ -152,11 +153,13 @@ pub fn probe_sequence(
     count: u64,
     rate: (i32, i32),
 ) -> Result<MediaInfo> {
-    let mut info = probe_input(&Input::Sequence {
+    // Pictures decode on the CPU.
+    let source = Input::Sequence {
         pattern: pattern.to_path_buf(),
         first,
         rate,
-    })?;
+    };
+    let mut info = probe_input(&source, None)?;
     let opened = sequence_frames(&info, rate).ok_or_else(|| {
         Error::Invalid(format!(
             "{}: image2 did not report how many frames it opened from {first}",
@@ -208,7 +211,7 @@ fn sequence_frames(info: &MediaInfo, rate: (i32, i32)) -> Option<u64> {
         .filter(|n| *n >= 1)
 }
 
-fn probe_input(source: &Input) -> Result<MediaInfo> {
+fn probe_input(source: &Input, decoder: Option<&crate::hw::GpuDecoder>) -> Result<MediaInfo> {
     let path = source.path();
     let mut input = source.open()?;
     let skips = start_skips(&mut input);
@@ -238,7 +241,12 @@ fn probe_input(source: &Input) -> Result<MediaInfo> {
                 let secs =
                     |t: i64| t as f64 * f64::from(tb.numerator()) / f64::from(tb.denominator());
                 let start = opt_ts(stream.start_time()).map(secs);
-                let reader = crate::decode::VideoReader::open_input(source).ok();
+                // A still decodes on the CPU.
+                let reader = match decoder.filter(|_| !still) {
+                    Some(gpu) => crate::decode::VideoReader::open_gpu_or_cpu(source, gpu),
+                    None => crate::decode::VideoReader::open_input(source),
+                }
+                .ok();
                 let first_frame_time = reader.as_ref().and_then(|r| r.first_pts()).map(secs);
                 let first = reader.as_ref().and_then(|r| r.first_props());
                 // Field order: the stream's, else the first frame's flags.

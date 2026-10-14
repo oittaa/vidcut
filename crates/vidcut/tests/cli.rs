@@ -538,15 +538,9 @@ fn otio_round_trips_frame_exactly() {
     // Moved media: an error naming the files, unless found by name.
     let fixtures = a.parent().unwrap();
     let moved = sb.dir.path().join("moved.otio");
-    // (Media are named by plain path, as JSON writes it: on Windows with
-    // its backslashes escaped.)
-    let quoted = serde_json::to_string(fixtures).unwrap();
-    let separator = if cfg!(windows) { r"\\" } else { "/" };
-    let text = std::fs::read_to_string(&cut).unwrap().replace(
-        &format!("{}{separator}", &quoted[..quoted.len() - 1]),
-        "\"/nonexistent/footage/",
-    );
-    std::fs::write(&moved, text).unwrap();
+    let mut doc: Value = serde_json::from_str(&std::fs::read_to_string(&cut).unwrap()).unwrap();
+    move_media(&mut doc);
+    std::fs::write(&moved, doc.to_string()).unwrap();
     let third = sb.dir.path().join("r.vidcut");
     sb.ok(&["project", "create", s(&third)]);
     let e = sb.fails_in(&third, 7, &["timeline", "import", s(&moved)]);
@@ -567,6 +561,27 @@ fn otio_round_trips_frame_exactly() {
         timeline_shape(&sb, &third),
         timeline_shape(&sb, &sb.project())
     );
+}
+
+/// Moves every media file an OTIO document names to `/nonexistent/footage/`,
+/// keeping its file name.
+fn move_media(doc: &mut Value) {
+    match doc {
+        Value::Object(fields) => {
+            for (key, value) in fields.iter_mut() {
+                if key == "target_url"
+                    && let Some(path) = value.as_str()
+                {
+                    let name = Path::new(path).file_name().unwrap().to_string_lossy();
+                    *value = format!("/nonexistent/footage/{name}").into();
+                } else {
+                    move_media(value);
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(move_media),
+        _ => {}
+    }
 }
 
 /// The same pictures at `frames` in two projects.
