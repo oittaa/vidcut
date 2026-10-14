@@ -39,6 +39,21 @@ fn main() {
     let path = std::path::PathBuf::from(args.next().expect("FILE"));
     let frames: usize = args.next().map_or(300, |n| n.parse().expect("FRAMES"));
     let input = Input::File(path.clone());
+    if let Some(v) = vidcut_av::probe::probe(&path, None)
+        .ok()
+        .and_then(|i| i.video)
+    {
+        let (num, den) = v.avg_frame_rate;
+        println!(
+            "{}: {} {}x{} {}, {:.2} fps",
+            path.display(),
+            v.codec,
+            v.width,
+            v.height,
+            v.pix_fmt,
+            f64::from(num) / f64::from(den).max(1.0)
+        );
+    }
     let mut decoders: Vec<(String, Option<GpuDecoder>)> = vec![("CPU".into(), None)];
     for gpu in GpuDecoder::all() {
         let on = match gpu.on() {
