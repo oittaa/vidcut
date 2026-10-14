@@ -131,15 +131,15 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
 
 **AMD's and Intel's encoders** take frames from memory, NV12 or P010, each on a device on its GPU: QSV on a device of its own there (a VA-API one beneath it on Linux), AMF on a Direct3D 11 device on its adapter; where a decoder on the same GPU decodes the pieces, VAAPI and AMF take its frames on its device instead (§5). What each makes of the settings:
 - **AMF:** one quantizer for every frame (`rc=cqp`, as VAAPI's; its quality-led `qvbr` counts the other way and stays under a bitrate), or a bitrate with peaks half again as high (`vbr_peak`); preset `quality`; H.264 High (baseline is its `constrained_baseline`), HEVC Main or Main 10. H.264 from the Radeon iGPU below says only its matrix (BT.709) in the bitstream, primaries and transfer unspecified, though FFmpeg hands AMF all three: players take such HD as BT.709.
-- **QSV:** its intelligent constant quality (`global_quality`, 1–51 for every codec), or a bitrate with peaks half again as high; preset `medium`; profiles as AMF's.
-- **AV1's quality** is on the 0–63 scale of SVT-AV1's CRF and NVENC's CQ: VAAPI and AMF take it as a quantizer index (0–255, VAAPI's in `global_quality`: its AV1 has no `qp`), QSV scaled to its 1–51.
+- **QSV:** its intelligent constant quality (`global_quality`, 1–51 for every codec), or a bitrate with peaks half again as high; preset `medium`; profiles as AMF's. VP9 only at a bitrate: Intel's VP9 has no intelligent constant quality, and FFmpeg holds QSV's constant quantizer to 51, where VP9's goes to 255. Asked for a quality, it says so, and `auto` passes it by.
+- **AV1's quality** is on the 0–63 scale of SVT-AV1's CRF and NVENC's CQ: VAAPI and AMF take it as a quantizer index (0–255, VAAPI's in `global_quality`: its AV1 has no `qp`), QSV scaled to its 1–51. VP9's is on libvpx's CRF scale, also 0–63 (default 32), and VAAPI takes it as AV1's.
 - **HDR:** the static values come from each frame (`hdr::attach`), and HEVC's carry them at every keyframe and in the container; HDR10+ goes into their packets as into the others' (§4).
 
 **On the dev machines:**
 - NVENC (RTX 4080 SUPER): H.264, HEVC and AV1, in 8 and 10 bit.
 - AMF (Windows, the Ryzen 7 9800X3D's Radeon iGPU): H.264, and HEVC in 8 and 10 bit; no AV1.
 - VAAPI: H.264 and HEVC on `renderD129` (AMD). Not on `renderD128` (the NVIDIA node), and no VAAPI AV1.
-- VAAPI and QSV on an Intel N150 (Linux): H.264, and HEVC in 8 and 10 bit; no AV1.
+- VAAPI and QSV on an Intel N150 (Linux): H.264, and HEVC and VP9 in 8 and 10 bit; no AV1. VP9 exports frame-exactly on both, PQ too.
 - Every working configuration exports frame-exactly: NVENC's and AMF's on Windows, VAAPI's and QSV's on the N150. hevc_amf, hevc_qsv and hevc_vaapi write HDR10's values on every frame of the HDR test (`hdr.rs`).
 
 **Frames on the GPU (NVENC):** all of it, and the GPU encoders themselves, only while the preferences' `gpu.acceleration` is on (the default). Off, `export.plan` and `export.start` set every video encoder choice to the CPU (`export::as_preferred`), so a preset naming NVENC still exports, in software, and proxies take x264 or SVT-AV1.

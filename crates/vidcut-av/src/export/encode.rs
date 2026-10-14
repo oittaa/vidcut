@@ -277,7 +277,7 @@ pub fn abilities(v: &VideoSettings, available: &Availability) -> Abilities {
     let kinds = kinds(v.encoder);
     let name = |kind: EncoderChoice| match kind {
         EncoderChoice::Cpu => crate::parts::first(cpu_part(v.codec)),
-        k => gpu_name(v.codec, k),
+        k => gpu_encoder(v, k),
     };
     let writes = |kind: EncoderChoice, ten: bool| match (kind, name(kind)) {
         (_, None) => false,
@@ -292,6 +292,19 @@ pub fn abilities(v: &VideoSettings, available: &Availability) -> Abilities {
     }
 }
 
+/// The `kind` encoder for `v`'s codec, when it takes `v`'s rate control
+/// ([`bitrate_only`]).
+fn gpu_encoder(v: &VideoSettings, kind: EncoderChoice) -> Option<&'static str> {
+    gpu_name(v.codec, kind).filter(|_| v.bitrate.is_some() || !bitrate_only(v.codec, kind))
+}
+
+/// Whether the `kind` encoder of `codec` encodes only at a bitrate. Intel's
+/// VP9 has no intelligent constant quality, and FFmpeg holds QSV's constant
+/// quantizer to H.264's 51, where VP9's goes to 255.
+fn bitrate_only(codec: VideoCodec, kind: EncoderChoice) -> bool {
+    codec == VideoCodec::Vp9 && kind == EncoderChoice::Qsv
+}
+
 fn gpu_name(codec: VideoCodec, kind: EncoderChoice) -> Option<&'static str> {
     Some(match (codec, kind) {
         (VideoCodec::H264, EncoderChoice::Nvenc) => "h264_nvenc",
@@ -300,12 +313,14 @@ fn gpu_name(codec: VideoCodec, kind: EncoderChoice) -> Option<&'static str> {
         (VideoCodec::H264, EncoderChoice::Vaapi) => "h264_vaapi",
         (VideoCodec::Hevc, EncoderChoice::Vaapi) => "hevc_vaapi",
         (VideoCodec::Av1, EncoderChoice::Vaapi) => "av1_vaapi",
+        (VideoCodec::Vp9, EncoderChoice::Vaapi) => "vp9_vaapi",
         (VideoCodec::H264, EncoderChoice::Amf) => "h264_amf",
         (VideoCodec::Hevc, EncoderChoice::Amf) => "hevc_amf",
         (VideoCodec::Av1, EncoderChoice::Amf) => "av1_amf",
         (VideoCodec::H264, EncoderChoice::Qsv) => "h264_qsv",
         (VideoCodec::Hevc, EncoderChoice::Qsv) => "hevc_qsv",
         (VideoCodec::Av1, EncoderChoice::Qsv) => "av1_qsv",
+        (VideoCodec::Vp9, EncoderChoice::Qsv) => "vp9_qsv",
         (VideoCodec::H264, EncoderChoice::VideoToolbox) => "h264_videotoolbox",
         (VideoCodec::Hevc, EncoderChoice::VideoToolbox) => "hevc_videotoolbox",
         _ => return None,
@@ -323,9 +338,9 @@ fn gpu_pixel(kind: EncoderChoice, ten: bool) -> format::Pixel {
     }
 }
 
-/// AV1's quantizer index (0–255), which VAAPI's and AMF's constant
-/// quantizer take, for a quality on the 0–63 scale of SVT-AV1's CRF and
-/// NVENC's CQ.
+/// AV1's and VP9's quantizer index (0–255), which VAAPI's and AMF's
+/// constant quantizer take, for a quality on the 0–63 scale of SVT-AV1's
+/// and libvpx's CRF and NVENC's CQ.
 fn av1_qindex(q: u32) -> u32 {
     (q.min(63) * 255 + 31) / 63
 }
@@ -411,10 +426,14 @@ fn video_encoder(
     if kind == EncoderChoice::Cpu {
         return cpu_video(v, ten).map(Some);
     }
-    let Some(name) = gpu_name(v.codec, kind) else {
+    let Some(name) = gpu_encoder(v, kind) else {
         if asked {
-            let (kind, codec) = (kind.title(), v.codec.title());
-            return Err(Error::Invalid(format!("{kind} doesn't support {codec}")));
+            let (title, codec) = (kind.title(), v.codec.title());
+            return Err(Error::Invalid(if bitrate_only(v.codec, kind) {
+                format!("{title} encodes {codec} only at a bitrate: set video.bitrate")
+            } else {
+                format!("{title} doesn't support {codec}")
+            }));
         }
         return Ok(None);
     };
@@ -429,10 +448,12 @@ fn video_encoder(
         }
         return Ok(None);
     };
+    // The CPU encoders' defaults: SVT-AV1's 30, libvpx's 32.
     let q = v
         .quality
         .unwrap_or(match v.codec {
             VideoCodec::Av1 => 30,
+            VideoCodec::Vp9 => 32,
             _ => 20,
         })
         .min(v.codec.worst_quality());
@@ -502,8 +523,9 @@ fn nvenc_options(v: &VideoSettings, q: u32, ten: bool, passes: Passes) -> Vec<(S
 fn vaapi_options(v: &VideoSettings, q: u32) -> Vec<(String, String)> {
     match (v.bitrate, v.codec) {
         (Some(b), _) => vec![opt("rc_mode", "VBR"), opt("b", b)],
-        // AV1's has no `qp`: its quantizer index is the global quality.
-        (None, VideoCodec::Av1) => {
+        // AV1's and VP9's have no `qp`: their quantizer index is the global
+        // quality.
+        (None, VideoCodec::Av1 | VideoCodec::Vp9) => {
             vec![opt("rc_mode", "CQP"), opt("global_quality", av1_qindex(q))]
         }
         (None, _) => vec![opt("rc_mode", "CQP"), opt("qp", q)],
@@ -1301,11 +1323,11 @@ pub fn detect() -> Availability {
             }
         }
         for (kind, on) in kinds {
-            let codecs = match kind {
-                EncoderChoice::Nvenc => ["h264_nvenc", "hevc_nvenc", "av1_nvenc"],
-                EncoderChoice::Amf => ["h264_amf", "hevc_amf", "av1_amf"],
-                EncoderChoice::Qsv => ["h264_qsv", "hevc_qsv", "av1_qsv"],
-                _ => ["h264_vaapi", "hevc_vaapi", "av1_vaapi"],
+            let codecs: &[&str] = match kind {
+                EncoderChoice::Nvenc => &["h264_nvenc", "hevc_nvenc", "av1_nvenc"],
+                EncoderChoice::Amf => &["h264_amf", "hevc_amf", "av1_amf"],
+                EncoderChoice::Qsv => &["h264_qsv", "hevc_qsv", "av1_qsv", "vp9_qsv"],
+                _ => &["h264_vaapi", "hevc_vaapi", "av1_vaapi", "vp9_vaapi"],
             };
             // NVENC takes frames from memory as YUV 4:2:0, the others as
             // NV12; H.264 in 8 bits only.
@@ -1314,7 +1336,7 @@ pub fn detect() -> Availability {
             } else {
                 nv12_p010
             };
-            for codec in codecs {
+            for &codec in codecs {
                 let pixels = if codec.starts_with("h264") {
                     &pixels[..1]
                 } else {
