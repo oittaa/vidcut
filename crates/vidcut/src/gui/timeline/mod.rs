@@ -1482,12 +1482,13 @@ impl Workspace {
         } else {
             (layout.lower_ruler, &layout.lower, layout.lower_scale)
         };
-        // Ctrl+wheel zooms the lower timeline.
+        // Ctrl+wheel zooms the lower timeline. egui gives it as a zoom, not
+        // a scroll, as it gives Cmd+wheel on a Mac and a trackpad's pinch.
         if !upper && resp.hovered() {
-            let (zoom, scroll) = ui.input(|i| (i.modifiers.command, i.smooth_scroll_delta));
-            if zoom && scroll.y != 0.0 {
+            let (zoom, scroll) = ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta));
+            if zoom != 1.0 {
                 let o = &mut self.timeline.options;
-                o.ppf = (o.ppf * f64::from((scroll.y / 200.0).exp())).clamp(0.01, 40.0);
+                o.ppf = (o.ppf * f64::from(zoom)).clamp(0.01, 40.0);
                 o.save();
             } else if !self.timeline.options.fixed_playhead && scroll.x != 0.0 {
                 self.timeline.scroll =

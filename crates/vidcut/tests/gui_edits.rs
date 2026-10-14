@@ -270,6 +270,29 @@ fn a_second_click_keeps_the_target_track() {
     gui.quit();
 }
 
+/// Ctrl+wheel over the lower timeline used to do nothing: egui gives a
+/// wheel turned with Ctrl as a zoom, and the timeline read only its scroll.
+#[test]
+fn ctrl_wheel_zooms_the_lower_timeline() {
+    let mut gui = Gui::new();
+    gui.harness
+        .event(egui::Event::PointerMoved(gui.at("V1", 30, 6.0)));
+    gui.harness.event_modifiers(
+        egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: vec2(0.0, 1.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::COMMAND,
+        },
+        Modifiers::COMMAND,
+    );
+    for _ in 0..30 {
+        gui.harness.step();
+    }
+    assert!(gui.harness.state_mut().timeline_options_mut().ppf > 4.0);
+    gui.quit();
+}
+
 /// A second roll sent before the first one landed used to be lost.
 #[test]
 fn two_quick_rolls_add_up() {
