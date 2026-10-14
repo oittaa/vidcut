@@ -3,11 +3,9 @@
 **Status:** accepted (October 2026). The GUI's viewer plays through it, one engine for the source and the timeline ([preview.md](preview.md)); this record is the engine itself, tested headless.
 
 **Evidence** (all rerunnable, no display):
-- [`crates/vidcut-av/tests/player.rs`](../../crates/vidcut-av/tests/player.rs): pictures against `frame render` at seeks and steps both ways across cuts, files, codecs, black, stills and image sequences; a picture converted as the export converts it is `frame render`'s to the byte; playing shows every frame in order; the beep lands on its sample; 2×, reverse; faders and mute while playing; a frame of the plan played next, prepared and held whatever the budget, shown at once; pieces at other speeds, at seeks, steps and playing both ways.
-- [`tests/player_sound.rs`](../../crates/vidcut-av/tests/player_sound.rs): backward sound reversed to the sample; other speeds both ways keeping the pitch; audio scrubbing: steps play their frame's sound, held steps don't pile up, the `Scrubber` alone.
+- [`crates/vidcut-av/tests/player.rs`](../../crates/vidcut-av/tests/player.rs): pictures against `frame render` at seeks and steps both ways across cuts, files, codecs, black, stills and image sequences; playing shows every frame in order; the beep lands on its sample; 2×, reverse; pieces at other speeds, at seeks, steps and playing both ways.
+- [`tests/player_sound.rs`](../../crates/vidcut-av/tests/player_sound.rs): backward sound reversed to the sample; other speeds both ways keeping the pitch; audio scrubbing: steps play their frame's sound.
 - [`tests/player_decodes.rs`](../../crates/vidcut-av/tests/player_decodes.rs): pictures playing on across an edit, after an edit that moves every frame, and stepping back over a keyframe.
-- [`tests/player_gpu.rs`](../../crates/vidcut-av/tests/player_gpu.rs) (`--features vidcut-av/gpu-tests`): pictures decoded on each GPU decoder the machine has are the CPU's (§3), seeks far into a long open GOP show their frames, and the GPU's kept in video memory are the ones copied down, seeks keeping their way there too.
-- [`tests/player_device.rs`](../../crates/vidcut-av/tests/player_device.rs) (`--features vidcut-av/audio-tests`): every device listed, chosen by its id, plays as itself and runs the clock, their names told apart, and an id that isn't there plays on the default, saying so.
 
 ## 1. Threads
 
@@ -107,7 +105,7 @@ On the dev machine (16 threads), decoding on the CPU; YUV pictures at the clips'
 | 2160p60: 3 s backward, at the default 1 GB | 177–178 of 180–181 shown, none late, 3.9–4.6 cores |
 | 2160p60: 3 s backward at 512 MB | 153–159 of 180 shown, 19–24 presents late, 7.1–7.2 cores |
 | System device (PipeWire) | 37 ms latency; the picture moves 81 ms after play |
-| NVDEC (`--features gpu-tests`): 1080p30 H.264, seek to picture / 5 s forward / 3 s backward | median 296 ms / 150 of 150 shown, 0.0 cores / 90 of 91, 0.1 cores |
+| NVDEC: 1080p30 H.264, seek to picture / 5 s forward / 3 s backward | median 296 ms / 150 of 150 shown, 0.0 cores / 90 of 91, 0.1 cores |
 | NVDEC: 2160p60 H.264 | median 788 ms / 298 of 300, 0.1 cores / 56 of 181 shown, 123 presents late |
 | 2160p60 10-bit HEVC (bbb, NVENC, 24.9 MB P010 pictures), CPU / NVDEC | seeks median 238 / 108 ms; forward 2.0 / 0.1 cores, none late; backward 23 / 84 of 181 shown |
 | 2160p60 10-bit AV1, CPU / NVDEC | seeks median 208 / 115 ms; forward 1.6 / 0.1 cores, none late; backward 55 / 83 of 181 shown |

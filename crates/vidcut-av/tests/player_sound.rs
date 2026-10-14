@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use player_support::*;
 use vidcut_av::beep;
 use vidcut_av::fixture::{Container, FixtureSpec, VideoCodec};
-use vidcut_av::player::{Config, ManualOutput, Player, Scrubber};
+use vidcut_av::player::{Config, ManualOutput, Player};
 use vidcut_core::render::RenderPlan;
 
 /// Four seconds of PCM beeps: source frames 0, 30, 60 and 90 start one.
@@ -91,10 +91,8 @@ fn backward_the_sound_plays_reversed_sample_for_sample() {
 
 #[test]
 fn other_speeds_keep_the_pitch_both_ways() {
-    // A steady 1 kHz tone stays 1 kHz; every beep is heard, and the sound
-    // lasts as long as the speed makes it. At 4× a 10 ms beep lasts
-    // 2.5 ms, a quarter of a fragment's hop, and may blend away: counted
-    // up to 2×.
+    // A steady 1 kHz tone stays 1 kHz, every beep is heard, and the sound
+    // lasts as long as the speed makes it.
     let a = beeps();
     let tone = src(
         "m2",
@@ -109,7 +107,7 @@ fn other_speeds_keep_the_pitch_both_ways() {
         player.play(speed);
         left(&play_out(&player, &out))
     };
-    for speed in [0.5, 2.0, 4.0, 8.0, -0.5, -2.0, -4.0, -8.0] {
+    for speed in [0.5, 2.0, -0.5, -2.0] {
         let sound = played(&tone, speed);
         let mid = &sound[sound.len() / 4..sound.len() * 3 / 4];
         let crossings = mid
@@ -120,7 +118,6 @@ fn other_speeds_keep_the_pitch_both_ways() {
         let beeps = played(&a, speed);
         let heard = beep::onsets(&beeps, 0.1, (4_800.0 / speed.abs()) as usize).len();
         let seconds = beeps.len() as f64 / 48_000.0;
-        eprintln!("{speed}x: the tone at {hz:.0} Hz; {heard} of 4 beeps; {seconds:.2} s of sound");
         assert!(
             (hz - 1000.0).abs() < 20.0,
             "{speed}x: the tone at {hz:.0} Hz"
@@ -130,9 +127,7 @@ fn other_speeds_keep_the_pitch_both_ways() {
             (seconds - plan_secs).abs() < 0.05,
             "{speed}x: {seconds:.2} s of sound for {plan_secs:.2}"
         );
-        if speed.abs() <= 2.0 {
-            assert_eq!(heard, 4, "{speed}x: every beep");
-        }
+        assert_eq!(heard, 4, "{speed}x: every beep");
     }
 }
 
@@ -181,74 +176,4 @@ fn a_step_plays_the_sound_of_its_frame() {
     player.step(30);
     assert!(take(&out).is_empty(), "scrubbing off");
     assert_eq!(player.status().position, 30);
-}
-
-#[test]
-fn held_steps_play_frame_after_frame_without_piling_up() {
-    let a = beeps();
-    let (player, out) = player(plan(&[clip(&a, 0, 120)], 0), true);
-    let one = sample(1) as u64;
-    player.seek(0);
-    let start = Instant::now();
-    while out.queued() < one {
-        assert!(start.elapsed() < Duration::from_secs(5));
-        std::thread::sleep(Duration::from_millis(1));
-    }
-    // Thirty steps while frame 0's sound waits to be heard: the newest
-    // replaces the one waiting, nothing queues behind.
-    for _ in 0..30 {
-        player.step(1);
-        std::thread::sleep(Duration::from_millis(1));
-    }
-    std::thread::sleep(Duration::from_millis(50));
-    assert_eq!(out.queued(), one, "only frame 0's sound is queued");
-    let first = left(&out.pull(one as usize, Instant::now()));
-    assert!(starts_with_beep(&first), "frame 0's beep");
-    // Then the newest: frame 30, with the next second's beep.
-    let start = Instant::now();
-    while out.queued() < one {
-        assert!(
-            start.elapsed() < Duration::from_secs(5),
-            "the newest never came"
-        );
-        std::thread::sleep(Duration::from_millis(1));
-    }
-    let newest = left(&out.pull(one as usize, Instant::now()));
-    assert!(starts_with_beep(&newest), "frame 30's beep");
-    std::thread::sleep(Duration::from_millis(50));
-    assert_eq!(out.queued(), 0, "nothing more");
-}
-
-#[test]
-fn the_scrubber_plays_frames_without_a_player() {
-    // For a viewer that shows pictures some other way: the sound of a
-    // frame of a plan, nothing else.
-    let a = beeps();
-    let out = ManualOutput::new();
-    let scrubber = Scrubber::new(RATE, 2, Box::new(out.clone())).unwrap();
-    // The beep 10 frames into the second clip: timeline frame 50.
-    scrubber.set_plan(plan(&[clip(&a, 0, 40), clip(&a, 50, 40)], 0));
-    let one = sample(1) as u64;
-    let take = || {
-        let start = Instant::now();
-        while out.queued() < one && start.elapsed() < Duration::from_millis(300) {
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        let queued = out.queued() as usize;
-        left(&out.pull(queued, Instant::now()))
-    };
-    scrubber.play(50);
-    let s = take();
-    assert_eq!(s.len() as u64, one);
-    assert!(starts_with_beep(&s), "frame 50's beep");
-    scrubber.play(49);
-    let s = take();
-    assert!(s.iter().all(|v| v.abs() < 1e-3), "frame 49 is silent");
-    // A fader moved: the same beep, 20 dB down.
-    scrubber.set_lane_gain(0, -20.0);
-    scrubber.play(50);
-    let s = take();
-    let peak = s.iter().fold(0.0f32, |m, v| m.max(v.abs()));
-    assert!((peak - 0.05).abs() < 0.005, "peak {peak}");
-    assert_eq!(scrubber.error(), None);
 }

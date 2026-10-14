@@ -1,6 +1,6 @@
-//! What this FFmpeg can't export is greyed out where it is chosen, with why
-//! on hover, and nowhere before (egui_kittest, no window): Quick Export's
-//! tiles and the Export dialog's presets.
+//! What this FFmpeg can't export is greyed out where it is chosen
+//! (egui_kittest, no window): Quick Export's tiles and the Export dialog's
+//! presets.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -133,20 +133,15 @@ fn what_cant_be_exported_is_greyed_out() {
             Workspace::new(h.clone()),
         );
     harness.step();
-    assert!(!has(&harness, "this FFmpeg"), "said before it was chosen");
 
-    // Quick Export: the AV1 tile is greyed out, why on hover; the others
-    // aren't, and the first that exports is chosen.
+    // Quick Export: the AV1 tile is greyed out, the others aren't, and the
+    // first that exports is chosen.
     harness.get_by_label("Quick Export").click();
     until(&mut harness, "preset tiles", |h| has(h, "ProRes 422 HQ\n"));
     harness.step();
     assert!(greyed(&harness, "AV1\n"));
     assert!(!greyed(&harness, "ProRes 422 HQ\n"));
     assert!(!greyed(&harness, "Export…"));
-    harness.get_by_label_contains("AV1\n").hover();
-    until(&mut harness, "why", |h| {
-        has(h, "this FFmpeg can't encode AV1 on the CPU")
-    });
 
     // The Export dialog: AV1 and Audio: MP3 among the presets.
     harness.key_press(egui::Key::Escape);

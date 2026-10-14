@@ -128,7 +128,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
     - **In Resolve** (Studio 21.1.1): an import of vidcut's file rebuilds them as from Resolve's own file. Resolve shows a 200% clip one frame early if the clip starts on an odd frame. Resolve's own exports do the same, so we can't fix it.
   - **Accepts what Resolve writes:** `Clip.1` and `Clip.2`, source ranges in media timecode, float rates (snapped to exact rationals such as 24000/1001), Resolve's effect lists.
   - **Left out, with a warning each:** nested tracks, and clips that would overlap others on their track.
-  - Export → import reproduces a timeline frame for frame, through all three formats and through OpenTimelineIO's own Python library (`tests/cli.rs`, `otio/tests.rs`).
+  - Export → import reproduces a timeline frame for frame, through all three formats (`tests/cli.rs`, `otio/tests.rs`).
 - **Why:**
   - OTIO is the user's choice: an open standard that Resolve and other editors read and write, so a cut can move to a finishing tool and back, and agents can write timelines in a documented format instead of vidcut's own. Resolve's other formats keep less of a cut: its EDL holds one video track and no audio tracks or markers, its FCPXML (1.10) no markers (checked with Studio 21.1.1).
   - Writing Resolve's own conventions (plain paths, timecode source ranges, link groups) is what lets Resolve link media and keep audio with its video; other OTIO tools read them as plain OTIO. OpenTimelineIO's own bundler wants `file:` URLs and takes a Windows drive letter (`C:\…`) for a URL scheme, so its bundles of vidcut's Windows files need the paths made URLs first (`tests/cli.rs`).

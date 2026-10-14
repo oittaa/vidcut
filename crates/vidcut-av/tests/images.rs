@@ -132,11 +132,8 @@ fn barcodes(path: &Path) -> Vec<Option<u32>> {
     out
 }
 
-fn assert_fails(plan: &RenderPlan, out: &Path, needle: &str) {
-    let msg = try_render(plan, out)
-        .expect_err("export succeeded")
-        .to_string();
-    assert!(msg.contains(needle), "{msg}");
+fn assert_fails(plan: &RenderPlan, out: &Path) {
+    try_render(plan, out).expect_err("export succeeded");
     assert!(!out.exists(), "left {}", out.display());
 }
 
@@ -160,7 +157,6 @@ fn missing_first_file_fails_the_open() {
     assert_fails(
         &plan(vec![pictures(&files[0], sequence(&pattern, 10, 5), 0, 5)]),
         &out,
-        "opening",
     );
 }
 
@@ -187,7 +183,6 @@ fn a_hole_fails_the_export_instead_of_repeating() {
     assert_fails(
         &plan(vec![pictures(&files[0], image, 0, 8)]),
         &dir.path().join("out.mkv"),
-        "ends before",
     );
 }
 

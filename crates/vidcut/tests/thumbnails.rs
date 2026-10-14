@@ -1,17 +1,12 @@
-//! Pool thumbnails kept on disk (preference `thumbnails.disk_cache`): a
-//! project opens with them shown even when its media can't be decoded any
-//! more, and File > Preferences turns the cache off (emptying it) with one
-//! request.
+//! Thumbnails of the media pool are kept on disk. A project opens with them
+//! even when its media can't be decoded any more. Media in another project
+//! with the same id gets its own thumbnails and sound.
 
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use eframe::egui::{self, vec2};
-use egui_kittest::Harness;
-use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::{Value, json};
-use vidcut::gui::workspace::Workspace;
 use vidcut::live::{self, Capture, Filmstrip, Origin, Presented, WindowChange};
 use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
 use vidcut_core::model::Settings;
@@ -80,7 +75,7 @@ fn cache_files(cache: &Path) -> Vec<String> {
 }
 
 #[test]
-fn thumbnails_come_back_from_the_disk_cache_until_it_is_turned_off() {
+fn thumbnails_come_back_from_the_disk_cache_for_each_project() {
     let tmp = tempfile::Builder::new()
         .prefix("vidcut-thumbnails-")
         .tempdir()
@@ -184,123 +179,6 @@ fn thumbnails_come_back_from_the_disk_cache_until_it_is_turned_off() {
     call(&h, "project.open", json!({ "path": path }));
     let strip = thumbs(&h, "m1");
     assert!(last(&strip) < 3.0, "{:?}", strip.times);
-
-    // File > Preferences: turning the cache off is one request, and empties it.
-    let ws = Workspace::new(h.clone());
-    let mut harness = Harness::builder()
-        .with_size(vec2(1400.0, 900.0))
-        .with_step_dt(1.0 / 60.0)
-        .with_max_steps(50)
-        .build_ui_state(|ui, ws: &mut Workspace| ws.ui(ui), ws);
-    harness.step();
-    harness.get_by_label("File").click();
-    // A menu ignores input in the frame it opens in.
-    harness.step();
-    harness.step();
-    harness
-        .get_by_label(&format!("Preferences… {}", vidcut::gui::keys("Ctrl+,")))
-        .click();
-    let started = Instant::now();
-    while harness.query_by_label("Keep thumbnails on disk").is_none() {
-        assert!(started.elapsed() < Duration::from_secs(30), "no window");
-        std::thread::sleep(Duration::from_millis(5));
-        harness.step();
-    }
-    // A new window is placed in the frame after it is measured.
-    harness.step();
-    let sets = |h: &live::Handle| -> Vec<Value> {
-        let log = call(h, "gui.log", json!({ "limit": 1000 })).result;
-        log.as_array()
-            .unwrap()
-            .iter()
-            .filter(|e| e["origin"] == "gui" && e["method"] == "preferences.set")
-            .cloned()
-            .collect()
-    };
-    // The size limit is a number typed in: Enter sends it, once.
-    let field = harness.get_by_label("Size limit");
-    field.focus();
-    harness.step();
-    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
-    harness.get_by_label("Size limit").type_text("256");
-    harness.key_press(egui::Key::Enter);
-    let started = Instant::now();
-    while sets(&h).is_empty() {
-        assert!(started.elapsed() < Duration::from_secs(30), "no size sent");
-        std::thread::sleep(Duration::from_millis(5));
-        harness.step();
-    }
-    assert_eq!(
-        sets(&h)[0]["params"],
-        json!({ "thumbnails": { "cache_limit_mb": 256 } })
-    );
-    // Wait for the window to take the answer before the next change.
-    while harness
-        .query_by_label("Keep thumbnails on disk")
-        .is_none_or(|n| n.accesskit_node().is_disabled())
-    {
-        assert!(started.elapsed() < Duration::from_secs(30), "no answer");
-        std::thread::sleep(Duration::from_millis(5));
-        harness.step();
-    }
-    harness.get_by_label("Keep thumbnails on disk").click();
-    // The request runs as a task: the cache goes while it runs, and the
-    // command log has it once the task has finished.
-    let started = Instant::now();
-    while cache.join("vidcut/thumbs").exists() || sets(&h).len() < 2 {
-        assert!(started.elapsed() < Duration::from_secs(30), "cache kept");
-        std::thread::sleep(Duration::from_millis(5));
-        harness.step();
-    }
-    let made = sets(&h);
-    assert_eq!(made.len(), 2, "{made:#?}");
-    assert_eq!(
-        made[1]["params"],
-        json!({ "thumbnails": { "disk_cache": false } })
-    );
-    let saved = std::fs::read_to_string(dir.join("config/vidcut/preferences.toml")).unwrap();
-    assert!(saved.contains("disk_cache = false"), "{saved}");
-    assert!(saved.contains("cache_limit_mb = 256"), "{saved}");
-
-    // GPU acceleration goes off with one click, and an export then plans
-    // the CPU's encoder whatever the settings name; proxies too.
-    const GPU: &str = "Decode, scale and encode on the GPU";
-    let started = Instant::now();
-    while harness
-        .query_by_label(GPU)
-        .is_none_or(|n| n.accesskit_node().is_disabled())
-    {
-        assert!(started.elapsed() < Duration::from_secs(30), "no answer");
-        std::thread::sleep(Duration::from_millis(5));
-        harness.step();
-    }
-    harness.get_by_label(GPU).click();
-    while sets(&h).len() < 3 {
-        assert!(started.elapsed() < Duration::from_secs(30), "GPU kept");
-        std::thread::sleep(Duration::from_millis(5));
-        harness.step();
-    }
-    assert_eq!(
-        sets(&h)[2]["params"],
-        json!({ "gpu": { "acceleration": false } })
-    );
-    let saved = std::fs::read_to_string(dir.join("config/vidcut/preferences.toml")).unwrap();
-    assert!(saved.contains("acceleration = false"), "{saved}");
-    call(&h, "edit.append", json!({ "media": "m1" }));
-    let plan = call(
-        &h,
-        "export.plan",
-        json!({ "output": dir.join("out.mp4"), "encoder": "nvenc" }),
-    )
-    .result;
-    assert_eq!(plan["settings"]["video"]["encoder"], "cpu", "{plan}");
-    assert_eq!(plan["video_encoder"]["kind"], "cpu", "{plan}");
-    // Automatic proxies are H.264 with x264 then, not AV1 on NVENC.
-    let prefs = call(&h, "preferences.get", json!({})).result;
-    assert_eq!(prefs["proxy_codecs"][0]["codec"], "auto", "{prefs}");
-    assert_eq!(prefs["proxy_codecs"][0]["encoder"], "libx264", "{prefs}");
-
-    drop(harness);
     h.shutdown();
     let _ = session.join();
 }

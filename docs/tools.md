@@ -32,6 +32,5 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 
 **Preview debugging:**
 - `VIDCUT_DEBUG_PLAYER=1` traces to stderr what the player engines decode, the session's presents, what the viewer thread draws, key presses and timeline gestures.
-- `tests/gui.rs` sets it for its GUI. A failed run keeps its temp dir, which the failure names: the screenshots and the GUI's stderr.
 - `VIDCUT_HWDEC` picks the GPU decoder the player uses instead of the GPU in use's: `nvdec` (`nvdec:1` for a CUDA device by its index), `vaapi` (`vaapi:/dev/dri/renderD129` for a render node), `d3d11va` (`d3d11va:1` for an adapter by its index) or `none`.
 - `WGPU_BACKEND` (`vulkan`, `metal`, `dx12`) and `WGPU_POWER_PREF` (`low`, `high`) pick wgpu's backend and adapter (eframe reads them); `WGPU_VALIDATION=0` turns the validation layers off in debug builds.

@@ -3,9 +3,8 @@
 **Status:** accepted (October 2026). The viewer plays through the player engine on wgpu ([preview.md](preview.md)).
 
 **Evidence** (all rerunnable):
-- [`crates/vidcut/tests/live.rs`](../../crates/vidcut/tests/live.rs): the live session with its one player engine, a stand-in renderer and a stand-in audio device, no window. Covers frame-exact seeks at every boundary (also with a late renderer), the source viewers and switching between them and the timeline (the frame kept ready), the clipboard, edits from other processes, and errors.
-- [`crates/vidcut/tests/gui.rs`](../../crates/vidcut/tests/gui.rs) (`--features vidcut/gui-tests`, needs a display): the real GUI driven through the CLI. Covers screenshot vs `vidcut frame render`, edits shown in the window, a minimized window and the GPU preference.
-- [`crates/vidcut/tests/jobs.rs`](../../crates/vidcut/tests/jobs.rs) and [`gui_export.rs`](../../crates/vidcut/tests/gui_export.rs): export jobs, and the export windows under simulated input (§9).
+- [`crates/vidcut/tests/live.rs`](../../crates/vidcut/tests/live.rs): the live session with its one player engine, a stand-in renderer and a stand-in audio device, no window. It checks that seeks are frame-exact at every cut, that an edit by another process shows up and undoes, and that proxies show the same frames as the originals.
+- [`crates/vidcut/tests/jobs.rs`](../../crates/vidcut/tests/jobs.rs): export jobs cancelled, run past an edit, and quit during (§9).
 
 ## 1. Threads
 
@@ -53,15 +52,13 @@ Every action is a [`Request`](../../crates/vidcut-core/src/request.rs), the same
 **Write order.** `Store::save` writes the history sidecar before the project file. The new state then shows up with its history; otherwise a headless edit would be mistaken for an "external change" and lose its undo label.
 - If the sidecar can't be written, the edit is saved all the same, and the command's JSON result says so in `warnings` (stderr without `--json`; a GUI also shows a notice), routed into the GUI or not. The old sidecar stays whole, so another run sees the edit as one outside change, or starts with no history if there was none. The GUI that made the edit keeps its undo history in memory.
 
-**Locking.** The lock is retried every 5 ms. An edit made by another process shows up in the GUI within about 6 ms (`tests/live.rs`).
+**Locking.** The lock is retried every 5 ms. An edit made by another process shows up in the GUI within about 6 ms.
 
 ## 4. When a frame is "on screen"
 
 A seek, step, load or an edit's reload is a **motion** of its player, numbered. It is on screen once the renderer presented the player after it and showed the frame it asked for:
 1. **The engine has the picture.** Its decode thread calls back when the picture of the frame the viewer is at lands; the session then asks the renderer (the viewer thread in the GUI) to present. A picture already kept is there at once.
 2. **The renderer presented it.** The renderer presents the engine at that moment (`Player::present`), draws the picture, and answers with the frame it showed exactly. Paused, the motion is on screen when that is the frame asked for; playing, when any frame showed (the clock starts at the frame asked for and moves on). A present that showed an older picture, or went unanswered for 50 ms, is asked again.
-
-`tests/live.rs` ("A late renderer") stalls the render thread for 500 ms when a seek's frame arrives, and the seek still returns with that frame on screen.
 
 **More waiting.** A seek also waits for the player's newest motion: an edit's reload replaces what was asked for, at the same frame. Seek-then-screenshot is therefore exact without sleeps. Over IPC it takes 2–3 ms for a kept picture, a decode's time otherwise. A picture that fails to decode fails the seek with the reason (`MEDIA`), and the viewer shows it.
 
@@ -138,9 +135,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 - The release sends that one request. Scrubs only seek.
 - **Clock.** Gesture timing (the 0.8 s hover, Safe Edit's 0.6 s) uses egui's clock, so tests drive it.
 
-**Tests:**
-- `geometry.rs` and `gesture.rs` unit tests cover zones, snapping and every drop rule.
-- `tests/gui_input.rs` (egui_kittest, no window) clicks, drags and types into the real panels against a live session. It checks that each gesture changes the project with exactly one request and that the command log matches the undo history.
+**Tests:** `geometry.rs` and `gesture.rs` unit tests cover zones, snapping and every drop rule.
 
 **The Trim Editor** draws exact frames rendered by the export engine on a background thread (`gui/stills.rs`).
 
@@ -161,7 +156,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 - **Pool view:** the pool shows the open bin (`pool.set`: bin, sort, direction). That view lives in the session, not the project, so Source Tape and agents see the same order. It follows a renamed bin, and moves to the parent bin when its own is removed.
 - **Drops:** the pool records where bins are drawn each frame (a folder, or a level of the path) and the drag's release checks them. A clip drop sends `media.move`. A bin drop sends one `bins.rename`, from the dragged bin to `<target>/<name>`. Nothing is sent when the target is the bin itself, a bin inside it, or its current parent. If the name is taken, `bins.rename` fails and the status bar shows the error, the same as other pool actions. The open bin follows a renamed bin, as any rename does.
 - **One undo step:** Create Bin With Selected Clips is one `apply` batch (`bins.add` and `media.move`). A bin drag is the one `bins.rename`.
-- **Tests:** `tests/gui_tracks.rs` (egui_kittest) covers the target track, a drag onto a new track, Place On Top, a fader drag, solo, New Bin, a clip dropped into a bin, and a bin dropped into another bin. Each sends exactly one request. Which bin drops move is unit-tested in `gui/pool.rs`.
+- **Tests:** which bin drops move is unit-tested in `gui/pool.rs`.
 
 ## 9. Export windows and jobs (M5)
 
@@ -181,7 +176,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 
 **The windows only send requests:**
 - **Quick Export** (p. 788) lists the presets marked `quick_export`; Export… asks for a file name, then starts a background export and opens its progress window.
-- **The Export dialog** always starts from a preset. What the user changes becomes `--set` overrides of that preset (a JSON diff of the settings), so every GUI export reads as `vidcut export start OUT --preset NAME --set …`. The dialog shows that command; `tests/gui_export.rs` parses it with the real CLI parser and checks it makes the same request as the GUI, and that the plan headless equals the plan in the GUI (M5 acceptance).
+- **The Export dialog** always starts from a preset. What the user changes becomes `--set` overrides of that preset (a JSON diff of the settings), so every GUI export reads as `vidcut export start OUT --preset NAME --set …`. The dialog shows that command.
 - **What this machine can't export** is greyed out where it is chosen, the reason on hover: Quick Export's tiles and the dialog's presets (`presets.list`'s `unavailable`), codecs and encoders (`encoders.list`). Nothing says so before.
 - **The plan** is `export.plan`, asked again whenever the params change (one request in flight). Mistakes the dialog can see itself (codec vs container) don't go to the session. Plans never change anything: per-clip folders are made when the export runs.
 - **Asking the session:** windows that need answers (presets, plans, starting an export, imports) call `Handle::call` on a helper thread and poll the result each frame (`Ask`), so the UI never waits. These lookups are left out of the command log, and their errors show in the window instead of the status bar.
@@ -200,7 +195,6 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
   - W, J/K/L, Space and Up/Down are handled in `dynamic_keys`; the transport keys don't play while it is on.
   - A run counts frames on egui's clock, so tests drive it. Each frame it tries the next count on a copy of the project, and stops where an edit would fail.
   - The viewer shows the two-up from the Trim Editor (`two_up`), rendered from that copy.
-- **Tests:** `tests/gui_tools.rs` (egui_kittest) checks that each tool makes one request. A freshly opened menu ignores input in its first frame, so tests step twice before clicking an item.
 
 ## 11. Pool thumbnails and preferences
 
@@ -208,7 +202,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 - **Eviction:** a strip's modification time is its last use. After each new strip, the least recently used go until the rest fit `thumbnails.cache_limit_mb` (512 MB by default, about 3,000 media files).
 - **Why:** decoding 24 pictures takes from a tenth of a second to seconds per clip, much more from a network share, and it ran again for every clip each time a project opened. The project still keeps no pictures (deviation X1).
 - **Preferences** (`preferences.toml`, deviation X12) are read whenever a thumbnail job, an export or a proxy runs, so a change from the CLI applies to a running GUI at once. GPU acceleration, GPU decoding and the audio device also reach the player at once: the session watches the preferences file, and when one changed, whoever changed it (the Preferences window, a CLI run, the file by hand), the engine switches its decoder and decodes its pictures anew, the one shown first (preview.md §3), or opens anew on the audio device chosen, paused where it was (player.md §6). The player's memory (`player.memory_mb`, `player.video_memory_mb`) reaches it the same way: over a smaller limit, the pictures kept least recently go at once. `preferences.set` empties the cache when it is turned off and trims it when the limit drops.
-- **Tests:** `tests/thumbnails.rs` opens a project whose media moved away and still gets its thumbnails, then turns the cache off in the Preferences window with one request.
+- **Tests:** `tests/thumbnails.rs` opens a project whose media moved away and still gets its thumbnails from the disk cache.
 
 **Timeline filmstrips** (`gui/tiles.rs`): each tile shows the frame under it.
 - **Why not the pool's pictures:** 24 per file is one every 30 s of a 12-minute film. A 5 s clip showed one picture over and over, often from another shot.
@@ -217,7 +211,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 - **Making them:** four worker threads at the lowest CPU priority take the tiles painting asked for, in its order, and replace their queue with each frame's asks, so tiles scrolled away aren't made. A worker goes on along a file while the next tile is asked for within 4 s ahead (decoding on beats a seek), and a fresh pick avoids what another worker is near. Frames come from `vidcut_av::export::renderer::FrameReader`, the export's sampling at the tile's size, from a fresh proxy when there is one. While `gpu.acceleration` and `gpu.decoding` are on (read as each tile is decoded, so a change reaches them at once), HEVC, AV1 and VP9 decode on the GPU the viewer decodes on, on a stream or device of their own, and shrink there to the tile's size (interlaced frames of VA-API and Direct3D 11 come down whole, for the CPU to deinterlace); H.264 stays on the CPU, which decodes it cheaply, where a seek makes NVDEC's H.264 decoder anew (gotchas.md). A far-apart tile of 4K60 10-bit HEVC (the noise clip, preview.md §3) took 72–420 ms on the N150's VA-API against 0.35–2.2 s on its CPU, and 199–278 ms on NVDEC against 248–493 on the 9800X3D's CPU; the 9800X3D's small Radeon took longer than its CPU (492–675 ms).
 - **Disk:** tiles go to the thumbnail cache in blocks of 64 source frames per file (`<media>.t<height>-b<block>.thumbs`), under the same limit and switch as the pool's pictures. A JPEG tile takes 2–4 KB and decodes in 0.03 ms; decoding a far-apart tile takes 40 ms on 1080p H.264 and 105–170 ms on 4K60 H.264 (20–37 ms on their AV1 proxies), so a reopened project fills its tiles from disk.
 - **Until a tile's picture comes:** the nearest kept picture of the same media within two steps, else the pool's picture nearest in time.
-- **Tests:** `tests/gui_tiles.rs` checks that the visible tiles are made and kept on disk, then that a new window finds them there after the media moved away. `vidcut-av/tests/frames.rs` checks the frames by barcode; the grid and the eviction are unit tests.
+- **Tests:** `vidcut-av/tests/frames.rs` checks the frames by barcode. The grid and the eviction are unit tests.
 
 ## 12. Still open
 

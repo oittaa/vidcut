@@ -28,13 +28,7 @@ fn tiles_show_their_own_frames() {
     let spec = FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 300)
         .gop(120)
         .bframes(2);
-    let path = match fixture::ensure(&spec) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("skipping: {e}");
-            return;
-        }
-    };
+    let path = fixture::ensure(&spec).unwrap();
     let origin = vidcut_av::probe::probe(&path)
         .unwrap()
         .video

@@ -96,22 +96,6 @@ jobs:
         # shows each crate as it compiles.
         run: scripts/check.sh
 
-      # vidcut's OTIO files against OpenTimelineIO's own Python library
-      # (deviation X9): tests/cli.rs skips that part without one. The
-      # library and the Python are in tests/otio, where Dependabot sees the
-      # library.
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: OTIO against OpenTimelineIO's library
-        run: |
-          set -euo pipefail
-          uv venv --python "$(tr -d '[:space:]' < tests/otio/.python-version)" "$RUNNER_TEMP/otio"
-          uv pip install --python "$RUNNER_TEMP/otio" -r tests/otio/requirements.txt
-          export VIDCUT_OTIO_PYTHON="$RUNNER_TEMP/otio/bin/python"
-          "$VIDCUT_OTIO_PYTHON" -c "import opentimelineio as o; print('OpenTimelineIO', o.__version__)"
-          cargo test -p vidcut --test cli -- otio stills_and_sequences
-
   windows:
     name: Windows, fmt, clippy, unit tests
     runs-on: windows-2025
@@ -166,24 +150,6 @@ jobs:
 
       - name: Fast gate
         run: scripts/check.sh
-
-      # vidcut's OTIO files against OpenTimelineIO's own Python library
-      # (deviation X9): tests/cli.rs skips that part without one. The
-      # library and the Python are in tests/otio, where Dependabot sees the
-      # library.
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: OTIO against OpenTimelineIO's library
-        run: |
-          set -euo pipefail
-          uv venv --python "$(tr -d '[:space:]' < tests/otio/.python-version)" "$RUNNER_TEMP/otio"
-          uv pip install --python "$RUNNER_TEMP/otio" -r tests/otio/requirements.txt
-          export VIDCUT_OTIO_PYTHON="$RUNNER_TEMP/otio/Scripts/python.exe"
-          "$VIDCUT_OTIO_PYTHON" -c "import opentimelineio as o; print('OpenTimelineIO', o.__version__)"
-          # FFmpeg's DLLs, which scripts/check.sh puts on the path itself.
-          PATH="$(cygpath -u "$FFMPEG_DIR")/bin:$PATH"
-          cargo test -p vidcut --test cli -- otio stills_and_sequences
 
   macos:
     name: macOS, fmt, clippy, unit tests

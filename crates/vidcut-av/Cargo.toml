@@ -25,12 +25,3 @@ tempfile.workspace = true
 
 [lints]
 workspace = true
-
-[features]
-# Tests that need a working GPU encoder (NVENC, VAAPI, VideoToolbox): `cargo test -p vidcut-av --features gpu-tests`.
-gpu-tests = []
-# Tests that play on the system's audio device (silence): `--features audio-tests`.
-audio-tests = []
-# Tests on the real clips of tests/media-manifest.toml, fetched by
-# scripts/fetch-test-media.sh: `--features media-tests`.
-media-tests = []

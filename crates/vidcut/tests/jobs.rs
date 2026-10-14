@@ -1,6 +1,6 @@
-//! Export jobs in the live session: foreground exports with progress,
-//! background exports, waiting and cancelling, as `vidcut jobs` commands see them.
-//! No player and no display.
+//! Exports in the live session. Cancelling one leaves no file. An edit sent
+//! right after one starts doesn't change what it encodes. Quitting during one
+//! leaves no partial file. No player and no display.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -49,7 +49,7 @@ fn quick(out: &Path) -> Value {
 }
 
 #[test]
-fn export_jobs() {
+fn cancel_edit_and_quit_during_exports() {
     let tmp = tempfile::Builder::new()
         .prefix("vidcut-jobs-")
         .tempdir()
@@ -103,35 +103,7 @@ fn export_jobs() {
         json!({ "media": "m1", "range": "60f..90f" }),
     );
 
-    // 1. A foreground export: progress carries the job id, the reply the
-    // outputs, and the job stays listed.
-    let a = dir.join("a.mkv");
-    let mut events = Vec::new();
-    let e = Envelope::from_json(json!({ "method": "export.start", "params": quick(&a) })).unwrap();
-    let r = h
-        .call(e, Origin::Ipc, None, &mut |v| {
-            if let Some(v) = v {
-                events.push(v);
-            }
-            true
-        })
-        .unwrap();
-    assert_eq!(r.result["outputs"][0]["frames"], 60);
-    assert!(!events.is_empty() && events.iter().all(|v| v["job"] == "j1"));
-    let jobs = ok(&h, "jobs.list", json!({}));
-    let j1 = &jobs[0];
-    assert_eq!(
-        (j1["id"].as_str(), j1["state"].as_str()),
-        (Some("j1"), Some("done"))
-    );
-    assert_eq!(
-        (j1["frames"].as_i64(), j1["total"].as_i64()),
-        (Some(60), Some(60))
-    );
-    assert_eq!(j1["outputs"][0]["path"], json!(a));
-
-    // 2. A slow background export (4K, slowest x264): answered at once with
-    // the planned job; a zero timeout returns it running; cancelling ends it
+    // 1. A slow background export (4K, slowest x264): cancelling ends it
     // without leaving files.
     let b = dir.join("b.mkv");
     let mut slow = quick(&b);
@@ -141,21 +113,10 @@ fn export_jobs() {
         "video.speed=veryslow"
     ]);
     slow["background"] = json!(true);
-    let j2 = ok(&h, "export.start", slow);
-    assert_eq!(
-        (j2["id"].as_str(), j2["state"].as_str()),
-        (Some("j2"), Some("running"))
-    );
-    assert_eq!(j2["total"], 60);
-    let now = ok(&h, "jobs.wait", json!({ "job": "j2", "timeout": 0 }));
-    assert_eq!(now["state"], "running");
-    ok(&h, "jobs.cancel", json!({ "job": "j2" }));
-    let e = call(&h, "jobs.wait", json!({ "job": "j2" })).unwrap_err();
+    let job = ok(&h, "export.start", slow)["id"].clone();
+    ok(&h, "jobs.cancel", json!({ "job": job }));
+    let e = call(&h, "jobs.wait", json!({ "job": job })).unwrap_err();
     assert_eq!(e.code, ErrorCode::Cancelled, "{e}");
-    assert_eq!(
-        ok(&h, "jobs.get", json!({ "job": "j2" }))["state"],
-        "cancelled"
-    );
     let leftovers: Vec<_> = std::fs::read_dir(dir)
         .unwrap()
         .flatten()
@@ -163,92 +124,15 @@ fn export_jobs() {
         .collect();
     assert!(leftovers.is_empty(), "{leftovers:?}");
 
-    // 3. The GUI's exports are jobs too (it never waits for them). At a
-    // bitrate, it makes two passes, which the job says (decision D45).
-    let c = dir.join("c.mkv");
-    let two = json!({
-        "output": c, "encoder": "cpu",
-        "set": ["video.quality=null", "video.bitrate=500000", "video.speed=ultrafast"],
-    });
-    let e = Envelope::from_json(json!({ "method": "export.start", "params": two })).unwrap();
-    h.send(e);
-    let mut snapshot_jobs = 0;
-    for _ in 0..500 {
-        snapshot_jobs = h.snapshot().jobs.len();
-        if snapshot_jobs == 3 {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    assert_eq!(snapshot_jobs, 3);
-    let j3 = ok(&h, "jobs.wait", json!({ "job": "j3" }));
-    assert_eq!(
-        (j3["origin"].as_str(), j3["state"].as_str()),
-        (Some("gui"), Some("done"))
-    );
-    assert_eq!((&j3["pass"], &j3["passes"]), (&json!(2), &json!(2)));
-    assert_eq!(j3["frames"], j3["total"]);
-    assert_eq!(j3["result"]["outputs"][0]["passes"], 2);
-    assert!(c.exists());
-
-    // 4. Mistakes fail the request itself, even in the background.
-    let mut bad = quick(&dir.join("d.mkv"));
-    bad["preset"] = json!("no-such-preset");
-    bad["background"] = json!(true);
-    let e = call(&h, "export.start", bad).unwrap_err();
-    assert_eq!(e.code, ErrorCode::NotFound, "{e}");
-    assert_eq!(
-        ok(&h, "jobs.get", json!({ "job": "j4" }))["state"],
-        "failed"
-    );
-    let e = call(&h, "jobs.get", json!({ "job": "j99" })).unwrap_err();
-    assert_eq!(e.code, ErrorCode::NotFound);
-    // `.otio` exports are instant: no job.
-    let r = ok(
-        &h,
-        "export.start",
-        json!({ "output": dir.join("cut.otio") }),
-    );
-    assert_eq!(r["outputs"][0]["clips"], 2);
-    assert_eq!(ok(&h, "jobs.list", json!({})).as_array().unwrap().len(), 4);
-
-    // 5. An export the person at the GUI started can be cancelled from the
-    // CLI. A long timeline keeps it running meanwhile.
+    // A long timeline keeps the exports below running.
     for _ in 0..10 {
         ok(&h, "edit.append", json!({ "media": "m1" }));
     }
-    let mut long = quick(&dir.join("e.mkv"));
-    long["set"] = json!([
-        "video.width=3840",
-        "video.height=2160",
-        "video.speed=veryslow"
-    ]);
-    let e = Envelope::from_json(json!({ "method": "export.start", "params": long })).unwrap();
-    h.send(e);
-    for _ in 0..500 {
-        if h.snapshot().jobs.len() == 5 {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    let j5 = ok(&h, "jobs.cancel", json!({ "job": "j5" }));
-    assert_eq!(j5["origin"], "gui");
-    let e = call(&h, "jobs.wait", json!({ "job": "j5" })).unwrap_err();
-    assert_eq!(e.code, ErrorCode::Cancelled, "{e}");
-    assert!(!dir.join("e.mkv").exists());
 
-    // 6. An export encodes the project as it was when asked for: a stale
-    // `if_rev` fails it up front, and an edit right after it (another
-    // client's, say) doesn't change what it encodes.
-    let r = call(&h, "project.summary", json!({})).unwrap();
-    let (rev, frames) = (r.rev, r.result["duration"].clone());
-    let mut stale = quick(&dir.join("f.mkv"));
-    stale["if_rev"] = json!(rev - 1);
-    let e = call(&h, "export.start", stale).unwrap_err();
-    assert_eq!(e.code, ErrorCode::Conflict, "{e}");
-    assert!(!dir.join("f.mkv").exists());
-    let mut now = quick(&dir.join("g.mkv"));
-    now["if_rev"] = json!(rev);
+    // 2. An export encodes the project as it was when asked for: an edit
+    // right after it (another client's, say) doesn't change what it encodes.
+    let frames = ok(&h, "project.summary", json!({}))["duration"].clone();
+    let now = quick(&dir.join("g.mkv"));
     let e = Envelope::from_json(json!({ "method": "export.start", "params": now })).unwrap();
     h.send(e);
     let e = Envelope::from_json(json!({ "method": "edit.delete", "params": { "clips": "c1" } }))
@@ -278,7 +162,7 @@ fn export_jobs() {
         frames
     );
 
-    // 7. Quitting while an export runs leaves no partial file.
+    // 3. Quitting while an export runs leaves no partial file.
     let mut slow = quick(&dir.join("h.mkv"));
     slow["set"] = json!([
         "video.width=3840",

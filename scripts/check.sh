@@ -3,10 +3,6 @@
 #
 #   scripts/check.sh          fast: fmt + clippy + unit tests (run before every commit)
 #   scripts/check.sh full     fast + integration/e2e + doc tests (after bigger changes, per milestone)
-#   scripts/check.sh full --features gpu-tests
-#                             also the GPU encoder tests (the real-media tests
-#                             run when scripts/fetch-test-media.sh fetched the
-#                             clips)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
