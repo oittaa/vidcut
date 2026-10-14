@@ -956,8 +956,9 @@ impl Workspace {
 
     // ---------------------------------------------------------------- keys
 
-    /// One of the workspace's questions (modal dialogs) is up.
-    fn asking(&self) -> bool {
+    /// One of the workspace's questions (modal dialogs) is up (tests read
+    /// it too).
+    pub fn asking(&self) -> bool {
         self.import.asking() || self.export.asking(&self.snap.jobs)
     }
 

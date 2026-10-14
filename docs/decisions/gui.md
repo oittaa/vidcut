@@ -5,6 +5,7 @@
 **Evidence** (all rerunnable):
 - [`crates/vidcut/tests/live.rs`](../../crates/vidcut/tests/live.rs): the live session with its one player engine, a stand-in renderer and a stand-in audio device, no window. It checks that seeks are frame-exact at every cut, that an edit by another process shows up and undoes, and that proxies show the same frames as the originals.
 - [`crates/vidcut/tests/jobs.rs`](../../crates/vidcut/tests/jobs.rs): export jobs cancelled, run past an edit, and quit during (§9).
+- [`crates/vidcut/tests/gui_edits.rs`](../../crates/vidcut/tests/gui_edits.rs): bugs the GUI had, each checked with one click or key press and the clips it leaves.
 
 ## 1. Threads
 
