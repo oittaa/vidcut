@@ -1,8 +1,8 @@
 #!/bin/bash
 # macOS: makes H.264 and ProRes Proxy proxies, one at a time, and says for
-# each whether its frames left the GPU. macOS's `sample` watches the encode:
-# frames copied down to memory show as av_hwframe_transfer_data, pictures
-# scaled on the CPU as libswscale.
+# each whether its frames left the GPU: whether they came down whole (vidcut
+# says so under VIDCUT_DEBUG), whether libswscale ran, and what was busiest
+# on the CPU (macOS's `sample` watching the encode).
 #   scripts/proxy-gpu-check.sh [FILE...]
 # Without files: 10 s of 4K60 HEVC and of AV1, barcode fixtures made once in
 # $VIDCUT_TEST_DATA.
@@ -33,7 +33,7 @@ for path in "${sources[@]}"; do
         "$bin/vidcut" project create "$dir/p.vidcut" >/dev/null
         "$bin/vidcut" -p "$dir/p.vidcut" media add "$path" >/dev/null
         "$bin/vidcut" preferences set "proxies.codec=$codec" >/dev/null
-        /usr/bin/time -p "$bin/vidcut" -p "$dir/p.vidcut" proxy generate --json \
+        VIDCUT_DEBUG=1 /usr/bin/time -p "$bin/vidcut" -p "$dir/p.vidcut" proxy generate --json \
             >"$dir/out.json" 2>"$dir/time.txt" &
         timer=$!
         pid=""
@@ -55,15 +55,16 @@ for path in "${sources[@]}"; do
         real=$(awk '/^real/ {print $2}' "$dir/time.txt")
         cpu=$(awk '/^(user|sys)/ {s += $2} END {print s}' "$dir/time.txt")
         made=$(grep -o '"made_with": "[^"]*"' "$dir/out.json" | cut -d'"' -f4)
-        down=no
+        whole=no
+        grep -q 'come down whole' "$dir/time.txt" && whole=yes
         scaled=no
+        grep -q '(in libswscale' "$dir/sample.txt" 2>/dev/null && scaled=yes
+        echo "$source -> $codec: $real s, CPU $cpu s, came down whole: $whole, libswscale ran: $scaled ($made)"
+        grep 'come down whole' "$dir/time.txt" | head -1 | sed 's/^/    /' || true
         if [ -f "$dir/sample.txt" ]; then
-            grep -q 'av_hwframe_transfer_data' "$dir/sample.txt" && down=yes
-            grep -q '(in libswscale' "$dir/sample.txt" && scaled=yes
-        else
-            down="not sampled"
-            scaled="not sampled"
+            echo "    busiest on the CPU:"
+            awk '/^Sort by top of stack/ {on = 1; next} on && NF {sub(/^ +/, ""); print "      " $0; if (++n == 5) exit}' \
+                "$dir/sample.txt"
         fi
-        echo "$source -> $codec: $real s, CPU $cpu s, copied down: $down, scaled on the CPU: $scaled ($made)"
     done
 done
