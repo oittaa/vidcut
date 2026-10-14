@@ -545,6 +545,11 @@ impl Source {
         }
     }
 
+    /// An RGB picture (an image), not YUV.
+    pub(crate) fn rgb(self) -> bool {
+        self.rgb
+    }
+
     /// `zscale`'s primaries of the input.
     fn primaries(self) -> &'static str {
         match (self.hdr, self.matrix) {

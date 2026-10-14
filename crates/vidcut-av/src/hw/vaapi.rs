@@ -198,6 +198,13 @@ pub(super) fn shrink_spec((w, h): (u32, u32)) -> String {
     format!("scale_vaapi=w={w}:h={h}")
 }
 
+/// Whether VA-API fits a frame into the output as `ops` says
+/// ([`super::Fitter`]): where its colors stay as they are, since
+/// `scale_vaapi` only resamples them.
+pub(crate) fn can_fit(ops: &crate::route::Ops) -> bool {
+    ops.colors_kept
+}
+
 /// The filters that fit VA-API's frames into a `w` by `h` picture of
 /// `layout` (NV12, P010): turned clockwise by `rotation`, scaled to
 /// `fitted` and centered on black at even offsets where it is smaller.
@@ -336,6 +343,32 @@ impl DrmFrame {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::route::Ops;
+
+    /// An upright frame into NV12 pictures in its own colors.
+    fn kept() -> Ops {
+        Ops {
+            rotation: 0,
+            layout: format::Pixel::NV12,
+            out_layout: format::Pixel::NV12,
+            rgb: false,
+            colors_kept: true,
+            into: false,
+        }
+    }
+
+    #[test]
+    fn frames_in_the_outputs_colors_fit_on_the_gpu() {
+        assert!(can_fit(&kept()));
+    }
+
+    #[test]
+    fn frames_whose_colors_change_dont_fit_on_the_gpu() {
+        assert!(!can_fit(&Ops {
+            colors_kept: false,
+            ..kept()
+        }));
+    }
 
     #[test]
     fn shrinking_scales_to_the_size() {

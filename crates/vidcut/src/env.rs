@@ -281,8 +281,12 @@ impl Env for AvEnv {
                 decoder.as_ref(),
             )
             .map_err(av_error)?;
+            let went = written
+                .went
+                .and_then(vidcut_av::route::Went::label)
+                .map_or(String::new(), |w| format!(", {w}"));
             let how = format!(
-                "decoded on the {}, {}",
+                "decoded on the {}{went}, {}",
                 written
                     .decoder
                     .map_or("CPU".into(), |k| format!("GPU ({})", k.label())),

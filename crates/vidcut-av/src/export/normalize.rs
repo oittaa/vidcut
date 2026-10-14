@@ -63,28 +63,38 @@ pub(crate) fn fit(w: u32, h: u32, sar: (i32, i32), out_w: u32, out_h: u32) -> (u
     }
 }
 
-/// A frame in GPU memory brought down for the CPU to normalize into an
-/// `out_w`×`out_h` picture: scaled on the GPU first to the size it is shown
-/// at there (in the frame's own orientation and layout, its pixels square)
-/// when that is smaller, so a fraction comes down. The CPU does the rest as
-/// for any frame: turning, colors, HDR.
-pub(crate) fn down(
-    shrinker: &mut Option<crate::hw::Shrinker>,
+/// The size `src` is shown at inside an `out_w`×`out_h` picture, as the
+/// normalizer fits it upright (turned by `rotation`), in the frame's own
+/// orientation.
+pub(crate) fn shown_size(
     src: &frame::Video,
     rotation: u16,
     (out_w, out_h): (u32, u32),
-) -> Result<frame::Video> {
+) -> (u32, u32) {
     let (w, h) = (src.width(), src.height());
     let sar = src.aspect_ratio();
     let sar = (sar.numerator(), sar.denominator());
-    // As the normalizer fits it, upright; then in the frame's orientation.
-    let size = if rotation % 180 == 90 {
+    if rotation % 180 == 90 {
         let (sw, sh) = fit(h, w, (sar.1, sar.0), out_w, out_h);
         (sh, sw)
     } else {
         fit(w, h, sar, out_w, out_h)
-    };
-    let shrinks = size.0 < w && size.1 < h;
+    }
+}
+
+/// A frame in GPU memory brought down for the CPU to normalize into an
+/// `out` picture: scaled on the GPU first to the size it is shown at there
+/// ([`shown_size`], its pixels square) when that is smaller, so a fraction
+/// comes down. The CPU does the rest as for any frame: turning, colors,
+/// HDR.
+pub(crate) fn down(
+    shrinker: &mut Option<crate::hw::Shrinker>,
+    src: &frame::Video,
+    rotation: u16,
+    out: (u32, u32),
+) -> Result<frame::Video> {
+    let size = shown_size(src, rotation, out);
+    let shrinks = size.0 < src.width() && size.1 < src.height();
     if !shrinks {
         return crate::hw::download(src);
     }
@@ -388,7 +398,14 @@ impl Relayout {
 
 #[cfg(test)]
 mod tests {
-    use super::fit;
+    use super::{fit, shown_size};
+    use crate::ffmpeg::{format::Pixel, frame};
+
+    #[test]
+    fn a_turned_frame_is_shown_at_a_size_in_its_own_orientation() {
+        let phone = frame::Video::new(Pixel::YUV420P, 3840, 2160);
+        assert_eq!(shown_size(&phone, 90, (540, 960)), (960, 540));
+    }
 
     #[test]
     fn fitting_keeps_display_aspect() {

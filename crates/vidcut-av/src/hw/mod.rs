@@ -21,6 +21,7 @@ use std::sync::{Arc, Mutex};
 use crate::cuda::CudaDevice;
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, ffi, format, frame};
+use crate::route::{Ops, Place};
 
 /// A kind of GPU decoder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -90,6 +91,16 @@ impl Kind {
             Kind::Vaapi => T::AV_HWDEVICE_TYPE_VAAPI,
             Kind::D3d11va => T::AV_HWDEVICE_TYPE_D3D11VA,
             Kind::VideoToolbox => T::AV_HWDEVICE_TYPE_VIDEOTOOLBOX,
+        }
+    }
+
+    /// Where its frames are.
+    pub fn place(self) -> Place {
+        match self {
+            Kind::Nvdec => Place::Cuda,
+            Kind::Vaapi => Place::Vaapi,
+            Kind::D3d11va => Place::D3d11,
+            Kind::VideoToolbox => Place::VideoToolbox,
         }
     }
 
@@ -1026,21 +1037,20 @@ enum Fitting {
     D3d11(d3d11::Scaler),
 }
 
-impl Fitter {
-    /// Whether the GPU fits `f` into `layout` for an encoder on its device:
-    /// VA-API's frames, and Direct3D 11's into the encoder's frames (`into`),
-    /// but not 8-bit ones into 10 (AMD's video processor won't).
-    pub(crate) fn fits(f: &frame::Video, layout: format::Pixel, into: Option<&Frames>) -> bool {
-        match f.format() {
-            format::Pixel::VAAPI => true,
-            format::Pixel::D3D11 => {
-                into.is_some()
-                    && !(sw_format(f) == format::Pixel::NV12 && layout == format::Pixel::P010LE)
-            }
-            _ => false,
-        }
+/// Whether a frame's GPU (`place`) fits it into the output as `ops` says,
+/// for an encoder on its device. Each backend says for its own frames.
+/// Frames in memory, VideoToolbox's and Vulkan's never fit.
+pub(crate) fn can_fit(place: Place, ops: &Ops) -> bool {
+    match place {
+        Place::Cuda => crate::cuda::can_fit(ops),
+        Place::Vaapi => vaapi::can_fit(ops),
+        #[cfg(windows)]
+        Place::D3d11 => d3d11::can_fit(ops),
+        _ => false,
     }
+}
 
+impl Fitter {
     /// `f` turned clockwise by `rotation` (0, 90, 180 or 270), scaled to
     /// `fitted` and placed in an `out` picture of `layout` (NV12, P010), on
     /// the GPU, with its timestamp and colors, its pixels square; `fitter`
