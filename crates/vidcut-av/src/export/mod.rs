@@ -30,7 +30,7 @@ use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, encoder, ffi, format, frame};
 use audio::AudioMix;
 use encode::{AudioEncoder, Availability};
-use video::{EncoderFrames, Output, Up, VideoFrames};
+use video::{Output, VideoFrames};
 
 /// Progress of a running export.
 #[derive(Debug, Clone, Copy)]
@@ -713,6 +713,7 @@ fn encode(
 ) -> Result<Report> {
     let started = Instant::now();
     let fps = ffmpeg::Rational(plan.fps.num() as i32, plan.fps.den() as i32);
+    let times = (fps.invert(), Some(fps));
     let mut octx = format::output_as(part, settings.container.muxer())
         .ctx(|| format!("creating {}", output.display()))?;
     let global_header = octx.format().flags().contains(format::Flags::GLOBAL_HEADER);
@@ -757,7 +758,7 @@ fn encode(
                         &enc,
                         w,
                         h,
-                        fps,
+                        times,
                         global_header,
                         Some(frames.as_ptr()),
                         None,
@@ -772,7 +773,7 @@ fn encode(
                 // decoder's render node, AMF on its Direct3D 11 adapter).
                 let shared =
                     decoder.filter(|d| crate::route::shares(enc.kind, enc.device.as_deref(), d));
-                match encode::open_video(&enc, w, h, fps, global_header, None, shared, pass) {
+                match encode::open_video(&enc, w, h, times, global_header, None, shared, pass) {
                     Ok(o) => {
                         opened = Some((enc, o, None, shared.is_some()));
                         break;
@@ -816,7 +817,7 @@ fn encode(
                         stats: &stats,
                         buffer: buffer.as_deref(),
                     };
-                    encode::open_video(&enc, w, h, fps, global_header, None, None, second)?
+                    encode::open_video(&enc, w, h, times, global_header, None, None, second)?
                 }
                 _ => (encoder, vaapi),
             };
@@ -826,33 +827,12 @@ fn encode(
             ost.set_parameters(&encoder);
             ost.set_time_base(fps.invert());
             ost.set_avg_frame_rate(fps);
-            let (pixel, output) = match (gpu, vaapi) {
-                (Some((device, frames)), _) => {
-                    let to_nvenc = EncoderFrames {
-                        place: Some(crate::route::Place::Cuda),
-                        up: Up::Cuda { device, frames },
-                        into: None,
-                    };
-                    (gpu_pixel(&enc), Output::Encoder(to_nvenc))
-                }
-                (None, Some(up)) => {
+            let (pixel, output) = match gpu {
+                Some((device, frames)) => (gpu_pixel(&enc), Output::nvenc(device, frames)),
+                None => {
                     let place = crate::route::takes(enc.kind).filter(|_| fit_on_gpu);
-                    // The video processor fits frames into the encoder's own
-                    // Direct3D 11 frames, the only ones AMF takes. SAFETY:
-                    // the encoder's live frames.
-                    let into = match place {
-                        Some(crate::route::Place::D3d11) => {
-                            Some(unsafe { crate::hw::Frames::of(up.frames)? })
-                        }
-                        _ => None,
-                    };
-                    let up = Up::Frames(up);
-                    (
-                        enc.pixel,
-                        Output::Encoder(EncoderFrames { place, up, into }),
-                    )
+                    (enc.pixel, Output::encoder(vaapi, place)?)
                 }
-                (None, None) => (enc.pixel, Output::Fitted),
             };
             let mut frames = VideoFrames::new(&plan.video, plan.fps, w, h, pixel, enc.hdr)
                 .output(output)

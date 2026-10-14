@@ -713,6 +713,33 @@ pub(crate) enum Output {
     Encoder(EncoderFrames),
 }
 
+impl Output {
+    /// NVENC's CUDA `frames` on `device`, whose NVDEC decodes the pieces.
+    pub(crate) fn nvenc(device: crate::cuda::CudaDevice, frames: crate::cuda::CudaFrames) -> Self {
+        Self::Encoder(EncoderFrames {
+            place: Some(Place::Cuda),
+            up: Up::Cuda { device, frames },
+            into: None,
+        })
+    }
+
+    /// For an encoder opened with `up`, its own GPU frames (`None`: it takes
+    /// frames from memory), which takes the frames fitted on `place`.
+    pub(crate) fn encoder(up: Option<super::encode::Upload>, place: Option<Place>) -> Result<Self> {
+        let Some(up) = up else {
+            return Ok(Self::Fitted);
+        };
+        // The video processor fits frames into the encoder's own Direct3D 11
+        // frames, the only ones AMF takes. SAFETY: the encoder's live frames.
+        let into = match place {
+            Some(Place::D3d11) => Some(unsafe { crate::hw::Frames::of(up.frames)? }),
+            _ => None,
+        };
+        let up = Up::Frames(up);
+        Ok(Self::Encoder(EncoderFrames { place, up, into }))
+    }
+}
+
 /// An encoder's frames on a GPU ([`Output::Encoder`]).
 pub(crate) struct EncoderFrames {
     /// Where it takes the decoder's frames as they are, when it is on the

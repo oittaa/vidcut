@@ -1062,7 +1062,9 @@ impl Upload {
     }
 }
 
-/// Opens a video encoder for `enc` at `width`×`height` and `fps`.
+/// Opens a video encoder for `enc` at `width`×`height`, timed in
+/// `time_base`, at `rate` frames a second where it is known. Exports and
+/// proxies open theirs here.
 /// Returns the opened encoder and, for VAAPI (and AMF and VideoToolbox on
 /// `shared`'s device), the frames to upload to. With `gpu_frames` (NVENC),
 /// the encoder takes frames in GPU memory of that frames context. VAAPI
@@ -1075,7 +1077,7 @@ pub(crate) fn open_video(
     enc: &VideoEncoder,
     width: u32,
     height: u32,
-    fps: ffmpeg::Rational,
+    (time_base, rate): (ffmpeg::Rational, Option<ffmpeg::Rational>),
     global_header: bool,
     gpu_frames: Option<*mut ffi::AVBufferRef>,
     shared: Option<&crate::hw::GpuDecoder>,
@@ -1096,8 +1098,8 @@ pub(crate) fn open_video(
         .ctx(|| format!("creating {}", enc.name))?;
     ctx.set_width(width);
     ctx.set_height(height);
-    ctx.set_time_base(fps.invert());
-    ctx.set_frame_rate(Some(fps));
+    ctx.set_time_base(time_base);
+    ctx.set_frame_rate(rate);
     crate::color::tag(unsafe { ctx.as_mut_ptr() }, enc.hdr);
     if enc.hdr.is_some() && !enc.metadata.is_empty() {
         unsafe { crate::hdr::set_on_encoder(ctx.as_mut_ptr(), &enc.metadata)? };
@@ -1328,16 +1330,8 @@ fn try_gpu(
 fn test_encode(enc: &VideoEncoder) -> Result<()> {
     let (name, pixel) = (enc.name.as_str(), enc.pixel);
     let (w, h) = (640, 360);
-    let (mut encoder, vaapi) = open_video(
-        enc,
-        w,
-        h,
-        ffmpeg::Rational(30, 1),
-        false,
-        None,
-        None,
-        Pass::Only,
-    )?;
+    let times = (ffmpeg::Rational(1, 30), Some(ffmpeg::Rational(30, 1)));
+    let (mut encoder, vaapi) = open_video(enc, w, h, times, false, None, None, Pass::Only)?;
     let mut sw = frame::Video::new(pixel, w, h);
     crate::export::video::fill_black(&mut sw)?;
     let mut packets = 0;

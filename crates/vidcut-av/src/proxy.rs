@@ -21,9 +21,9 @@ use vidcut_core::preferences::ProxyCodec;
 
 use crate::decode::{Input, VideoReader};
 use crate::error::{Context, Error, Result};
-use crate::export::encode::{Availability, Upload};
+use crate::export::encode::{Availability, Pass, Passes, VideoEncoder, open_video};
 use crate::export::video::{EncoderFrames, Fitting, Maker, Output, Up};
-use crate::ffmpeg::{self, codec, encoder, ffi, format, frame};
+use crate::ffmpeg::{self, encoder, ffi, format, frame};
 use crate::route::{Place, Went};
 
 /// Frames between keyframes.
@@ -100,8 +100,44 @@ impl ProxyEncoder {
         }
     }
 
-    /// Its settings: quality like the x264 proxies' (`crf 20`), a keyframe
-    /// every [`KEYFRAMES`] frames, and nothing coded ahead of where it shows.
+    /// It as an export's encoder, with [`options`](Self::options) and the
+    /// context's settings: a keyframe every [`KEYFRAMES`] frames, nothing
+    /// coded ahead of where it shows, closed GOPs (every keyframe decodes on
+    /// its own, so a seek can start there: SVT-AV1 otherwise makes forward
+    /// keyframes nothing seeks to), and FFmpeg's own ProRes and DNxHR on
+    /// every core (one otherwise).
+    fn video_encoder(&self) -> VideoEncoder {
+        let mut flags = "+cgop".to_string();
+        let mut options = Vec::new();
+        for (k, v) in self.options() {
+            match k {
+                "flags" => flags.push_str(&v),
+                _ => options.push((k.to_string(), v)),
+            }
+        }
+        options.extend([
+            ("g".into(), KEYFRAMES.to_string()),
+            ("bf".into(), "0".into()),
+            ("flags".into(), flags),
+        ]);
+        if matches!(self.name.as_str(), "prores_ks" | "dnxhd") {
+            options.push(("threads".into(), "auto".into()));
+            options.push(("thread_type".into(), "frame".into()));
+        }
+        VideoEncoder {
+            name: self.name.clone(),
+            kind: self.kind,
+            pixel: self.pixel(),
+            device: self.device.clone(),
+            options,
+            hdr: None,
+            passes: Passes::One,
+            metadata: Default::default(),
+            dynamic: Default::default(),
+        }
+    }
+
+    /// Its own settings: quality like the x264 proxies' (`crf 20`).
     fn options(&self) -> Vec<(&'static str, String)> {
         let keys = KEYFRAMES.to_string();
         match self.name.as_str() {
@@ -435,18 +471,19 @@ struct OnGpu<'a> {
     d3d11: Option<&'a crate::hw::GpuDecoder>,
 }
 
-/// Opens `enc` for `width`×`height` frames timed in `enc_tb`, and what it
-/// takes them in: NVENC frames in CUDA memory on `on.cuda`; VAAPI, AMF and
-/// VideoToolbox frames on the decoder's device where it is `on.shared`;
-/// VAAPI and Vulkan frames uploaded to them; the rest frames in memory.
+/// Opens `enc` for `width`×`height` frames timed in `times` (the
+/// encoder's time base and the source's rate) as exports open theirs
+/// (`encode::open_video`), and what it takes them in: NVENC frames in CUDA
+/// memory on `on.cuda`; VAAPI, AMF and VideoToolbox frames on the decoder's
+/// device where it is `on.shared`; Vulkan frames, fitted there where the
+/// decoder's reach them; the rest frames in memory.
 fn open(
     enc: &ProxyEncoder,
     (width, height): (u32, u32),
-    enc_tb: ffmpeg::Rational,
-    rate: Option<ffmpeg::Rational>,
+    times: (ffmpeg::Rational, Option<ffmpeg::Rational>),
     global: bool,
     on: OnGpu<'_>,
-) -> Result<(encoder::Video, ffmpeg::Codec, Output)> {
+) -> Result<(encoder::Video, Output)> {
     // FFmpeg's DNxHR takes nothing smaller ("Input dimensions too small").
     if enc.name == "dnxhd" && (width < 256 || height < 120) {
         return Err(Error::Invalid(format!(
@@ -454,128 +491,42 @@ fn open(
              {width}×{height}: make the proxy size larger or choose another codec"
         )));
     }
-    let codec = encoder::find_by_name(&enc.name)
-        .ok_or_else(|| Error::Invalid(format!("this FFmpeg has no {} encoder", enc.name)))?;
-    let mut ctx = codec::context::Context::new_with_codec(codec)
-        .encoder()
-        .video()
-        .ctx(|| format!("creating {}", enc.name))?;
-    ctx.set_width(width);
-    ctx.set_height(height);
-    ctx.set_time_base(enc_tb);
-    if let Some(r) = rate {
-        ctx.set_frame_rate(Some(r));
-    }
-    ctx.set_gop(KEYFRAMES);
-    // Nothing coded ahead of where it shows.
-    ctx.set_max_b_frames(0);
-    // FFmpeg's own ProRes and DNxHR encoders use one core unless told
-    // otherwise.
-    if matches!(enc.name.as_str(), "prores_ks" | "dnxhd") {
-        ctx.set_threading(codec::threading::Config {
-            kind: codec::threading::Type::Frame,
-            count: 0, // let FFmpeg choose
-        });
-    }
-    // Closed GOPs: every keyframe decodes on its own, so a seek can start
-    // there (SVT-AV1 otherwise makes forward keyframes nothing seeks to).
-    let mut flags = codec::Flags::CLOSED_GOP;
-    if global {
-        flags |= codec::Flags::GLOBAL_HEADER;
-    }
-    ctx.set_flags(flags);
-    crate::color::tag(unsafe { ctx.as_mut_ptr() }, None);
-    let hw_frames = |ctx: &mut encoder::video::Video, frames: *mut ffi::AVBufferRef| {
-        let frames = unsafe { ffi::av_buffer_ref(frames) };
-        if frames.is_null() {
-            return Err(Error::Invalid("no memory for the GPU frames".into()));
-        }
-        unsafe { (*ctx.as_mut_ptr()).hw_frames_ctx = frames };
-        Ok(())
+    let video = enc.video_encoder();
+    let open = |gpu_frames, shared| {
+        let size = (width, height);
+        open_video(
+            &video,
+            size.0,
+            size.1,
+            times,
+            global,
+            gpu_frames,
+            shared,
+            Pass::Only,
+        )
     };
-    let to = |place, up, into| {
-        Output::Encoder(EncoderFrames {
-            place: on.shared.and(place),
-            up,
-            into,
-        })
-    };
-    let output = match (&enc.device, enc.kind, on.cuda) {
-        (_, EncoderChoice::Nvenc, Some(device)) => {
-            let frames = crate::cuda::CudaFrames::new(device, format::Pixel::NV12, width, height)?;
-            ctx.set_format(format::Pixel::CUDA);
-            hw_frames(&mut ctx, frames.as_ptr())?;
-            Output::Encoder(EncoderFrames {
-                place: Some(Place::Cuda),
-                up: Up::Cuda {
-                    device: device.clone(),
-                    frames,
-                },
-                into: None,
-            })
-        }
-        (Some(node), EncoderChoice::Vaapi, _) => {
-            let up = Upload::vaapi(node, enc.pixel(), width, height, on.shared)?;
-            ctx.set_format(format::Pixel::VAAPI);
-            hw_frames(&mut ctx, up.frames)?;
-            to(Some(Place::Vaapi), Up::Frames(up), None)
-        }
-        // AMF on the decoder's Direct3D 11 device, the frames fitted into
-        // its own, the only ones it takes.
-        #[cfg(windows)]
-        (Some(_), EncoderChoice::Amf, _) if on.shared.is_some() => {
-            let decoder = on.shared.expect("checked");
-            let up = Upload::d3d11(decoder, enc.pixel(), width, height)?;
-            ctx.set_format(format::Pixel::D3D11);
-            hw_frames(&mut ctx, up.frames)?;
-            // SAFETY: the encoder's live frames.
-            let into = unsafe { crate::hw::Frames::of(up.frames)? };
-            to(Some(Place::D3d11), Up::Frames(up), Some(into))
-        }
-        // NVDEC's frames reach it through libplacebo on the Vulkan device of
-        // its GPU, where the encoder is on the same one, and Direct3D 11's
-        // opened on the encoder's.
-        (Some(gpu), EncoderChoice::Vulkan, cuda) => {
-            let up = Upload::vulkan(gpu, enc.pixel(), width, height)?;
-            ctx.set_format(format::Pixel::VULKAN);
-            hw_frames(&mut ctx, up.frames)?;
-            let reached =
-                cuda.is_some_and(|d| d.vulkan().is_ok_and(|v| up.is_on(&v))) || on.d3d11.is_some();
-            Output::Encoder(EncoderFrames {
-                place: reached.then_some(Place::Vulkan),
-                up: Up::Frames(up),
-                into: None,
-            })
-        }
-        // VideoToolbox's encoders take each frame's own pixel buffer
-        // (videotoolboxenc.c), in the layout `sw_pix_fmt` says.
-        (_, EncoderChoice::VideoToolbox, _) if on.shared.is_some() => {
-            let decoder = on.shared.expect("checked");
-            let up = Upload::videotoolbox(decoder, enc.pixel(), width, height)?;
-            ctx.set_format(format::Pixel::VIDEOTOOLBOX);
-            // SAFETY: a plain field of the context being set up.
-            unsafe { (*ctx.as_mut_ptr()).sw_pix_fmt = enc.pixel().into() };
-            hw_frames(&mut ctx, up.frames)?;
-            to(Some(Place::VideoToolbox), Up::Frames(up), None)
-        }
-        (Some(adapter), EncoderChoice::Amf | EncoderChoice::Qsv, _) => {
-            crate::export::encode::on_device(&mut ctx, enc.kind, adapter)?;
-            ctx.set_format(enc.pixel());
-            Output::Fitted
-        }
-        _ => {
-            ctx.set_format(enc.pixel());
-            Output::Fitted
-        }
-    };
-    let mut opts = ffmpeg::Dictionary::new();
-    for (k, v) in enc.options() {
-        opts.set(k, &v);
+    if enc.kind == EncoderChoice::Nvenc
+        && let Some(device) = on.cuda
+    {
+        let frames = crate::cuda::CudaFrames::new(device, format::Pixel::NV12, width, height)?;
+        let (encoder, _) = open(Some(frames.as_ptr()), None)?;
+        return Ok((encoder, Output::nvenc(device.clone(), frames)));
     }
-    let opened = ctx
-        .open_as_with(codec, opts)
-        .ctx(|| format!("opening {}", enc.name))?;
-    Ok((opened, codec, output))
+    let (encoder, up) = open(None, on.shared)?;
+    // NVDEC's frames reach Vulkan's encoder through libplacebo on the Vulkan
+    // device of its GPU, where the encoder is on the same one, and Direct3D
+    // 11's opened on the encoder's.
+    let place = match enc.kind {
+        EncoderChoice::Vulkan => {
+            let on_its_gpu = |d: &crate::cuda::CudaDevice| {
+                d.vulkan()
+                    .is_ok_and(|v| up.as_ref().is_some_and(|u| u.is_on(&v)))
+            };
+            (on.cuda.is_some_and(on_its_gpu) || on.d3d11.is_some()).then_some(Place::Vulkan)
+        }
+        kind => on.shared.and(crate::route::takes(kind)),
+    };
+    Ok((encoder, Output::encoder(up, place)?))
 }
 
 /// The proxy file being written: pictures go in in order, each one's
@@ -616,17 +567,18 @@ impl<'a> Writer<'a> {
             shared: None,
             d3d11: None,
         };
-        let opened = match open(enc, size, enc_tb, rate, global, on) {
+        let times = (enc_tb, rate);
+        let opened = match open(enc, size, times, global, on) {
             Err(e) if on.cuda.is_some() || on.shared.is_some() || on.d3d11.is_some() => {
                 crate::debug!("decoding", "{} takes frames from memory: {e}", enc.name);
-                open(enc, size, enc_tb, rate, global, in_memory)
+                open(enc, size, times, global, in_memory)
             }
             opened => opened,
         };
-        let (encoder, codec, output) = opened.map_err(Failed::Opening)?;
+        let (encoder, output) = opened.map_err(Failed::Opening)?;
         let mut header = || -> Result<()> {
             let mut ost = octx
-                .add_stream(Some(codec))
+                .add_stream(encoder::find_by_name(&enc.name))
                 .ctx(|| "adding the proxy stream".into())?;
             ost.set_parameters(&encoder);
             ost.set_time_base(enc_tb);
