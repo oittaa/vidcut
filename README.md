@@ -1,6 +1,6 @@
 # vidcut
 
-A simple, fully scriptable video cutting tool for Linux and Windows. Behavior follows the Cut page ([docs/cut-page-spec.md](docs/cut-page-spec.md)).
+A simple, fully scriptable video cutting tool for Linux, Windows and macOS. Behavior follows the Cut page ([docs/cut-page-spec.md](docs/cut-page-spec.md)).
 
 **Status:** early development. It works, but expect rough edges.
 
@@ -15,7 +15,7 @@ A simple, fully scriptable video cutting tool for Linux and Windows. Behavior fo
   - several tracks: B-roll that follows the main story on Track 1, music on audio tracks
   - a mixer with faders, mute, solo and meters
   - snapping, markers, undo
-- **Export:** Quick Export and an Export dialog (deviation X3), including GPU encoding (NVIDIA, AMD, Intel) and background jobs. Dynamic range, bit depth and HDR metadata follow the footage (spec D44, D46). A loudness target is [docs/decisions/agents.md](docs/decisions/agents.md) §5.
+- **Export:** Quick Export and an Export dialog (deviation X3), including GPU encoding (NVIDIA, AMD, Intel, Apple) and background jobs. Dynamic range, bit depth and HDR metadata follow the footage (spec D44, D46). A loudness target is [docs/decisions/agents.md](docs/decisions/agents.md) §5.
 - **Automatic tools:** Ripple Delete Silence, Detect Scene Cuts and the Boring Detector (spec D29–D31).
 - **Interchange:** OpenTimelineIO, `.otio` and `.otioz` (deviation X9).
 - **Everything scriptable.** Every action in the GUI is also a CLI command and a JSON-RPC call on the running app, so scripts and AI agents can edit with you. `vidcut mcp` offers it all to AI agents over the Model Context Protocol.
@@ -48,7 +48,9 @@ Set `FFMPEG_DIR` to the FFmpeg folder (the one with `bin`, `include` and `lib`) 
 brew install ffmpeg-full rustup
 ```
 
-Nothing else is needed at run time: vidcut plays video with its own player, on the FFmpeg libraries. The player, proxies and exports decode H.264, HEVC, AV1 and VP9 on the GPU where it can: NVDEC on NVIDIA GPUs, and on AMD and Intel GPUs VA-API on Linux (Mesa's driver, Intel's media driver) and Direct3D 11 on Windows.
+The GUI draws with Metal and plays sound through Core Audio.
+
+Nothing else is needed at run time: vidcut plays video with its own player, on the FFmpeg libraries. The player, proxies and exports decode H.264, HEVC, AV1 and VP9 on the GPU where it can: NVDEC on NVIDIA GPUs, on AMD and Intel GPUs VA-API on Linux (Mesa's driver, Intel's media driver) and Direct3D 11 on Windows, and VideoToolbox on a Mac.
 
 vidcut works with FFmpeg 8.0 (Ubuntu 26.04 LTS) up to the newest release, 9.0; both ends are tested.
 
@@ -84,9 +86,9 @@ Media Pool on the left, with the edit buttons below it; the Viewer on the right;
 
 The **Command log** (top right) lists what you, scripts and agents did, in words. Hover an entry for the request; click it to copy a shell command (deviation X5).
 
-**Preferences** (File > Preferences, Ctrl+,) live in `~/.config/vidcut/preferences.toml` (deviation X12). `vidcut preferences` reads and changes them.
+**Preferences** (File > Preferences, Ctrl+, or Cmd+, on a Mac) live in `~/.config/vidcut/preferences.toml` (deviation X12). `vidcut preferences` reads and changes them.
 
-**Keys:** [spec §11](docs/cut-page-spec.md#11-keyboard-shortcuts-linux-and-windows).
+**Keys:** [spec §11](docs/cut-page-spec.md#11-keyboard-shortcuts).
 
 While a GUI has the project open, `vidcut` commands for that project run inside it ([docs/cli.md](docs/cli.md), Live control).
 
