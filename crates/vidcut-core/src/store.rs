@@ -3,7 +3,8 @@
 //!
 //! The project is one pretty-printed JSON file. History lives outside it, in
 //! `$XDG_STATE_HOME/vidcut/history/<hash of the project path>.json`, together
-//! with the project state it was recorded against. If the file on disk differs
+//! with the project state it was recorded against. Each step is what its
+//! edit changed (`crate::change`). If the file on disk differs
 //! from that state, someone edited it externally; the difference becomes one
 //! undoable "external change" step.
 //!

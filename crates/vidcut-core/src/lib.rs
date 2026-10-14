@@ -4,6 +4,7 @@
 //! compiles and tests fast. Media facts come from the caller (see [`editor::Env`]).
 
 pub mod analysis;
+pub mod change;
 pub mod describe;
 pub mod dirs;
 pub mod editor;
@@ -30,6 +31,8 @@ pub use store::Store;
 
 #[cfg(test)]
 mod analysis_tests;
+#[cfg(test)]
+mod history_tests;
 #[cfg(test)]
 mod images_tests;
 #[cfg(test)]

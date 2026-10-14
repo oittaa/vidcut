@@ -9,6 +9,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use crate::analysis::{self, AudioLevels, Loudness, PictureStats, SilenceSettings, Span};
+use crate::change::Change;
 use crate::error::{Error, Result};
 use crate::model::{
     Clip, ClipAudio, Compound, Effects, Generator, ImageSequence, Media, MediaInfo, Project, Proxy,
@@ -218,11 +219,11 @@ pub fn read_timeline_file(path: &Path) -> Result<TimelineFile> {
     })
 }
 
-/// One undo step: the project as it was before a change.
+/// One undo step: what an edit changed, both ways.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Entry {
     pub label: String,
-    pub project: Project,
+    pub change: Change,
 }
 
 /// Undo and redo stacks (most recent last).
@@ -332,13 +333,11 @@ impl Editor {
                 warnings: Vec::new(),
             });
         }
+        let change = changed(&self.project, &working);
         working.rev = self.project.rev + 1;
         working.edited = Some(now_ms());
-        let before = std::mem::replace(&mut self.project, working);
-        self.history.undo.push(Entry {
-            label,
-            project: before,
-        });
+        self.project = working;
+        self.history.undo.push(Entry { label, change });
         if self.history.undo.len() > HISTORY_CAP {
             self.history.undo.remove(0);
         }
@@ -357,15 +356,16 @@ impl Editor {
     /// process) as one undoable step.
     pub fn record_external(&mut self, project: Project) {
         let mut project = project;
+        let change = changed(&self.project, &project);
         project.rev = project.rev.max(self.project.rev + 1);
         // The writer's time, or now for a change made by hand.
         if project.edited == self.project.edited {
             project.edited = Some(now_ms());
         }
-        let before = std::mem::replace(&mut self.project, project);
+        self.project = project;
         self.history.undo.push(Entry {
             label: "external change".into(),
-            project: before,
+            change,
         });
         self.history.redo.clear();
     }
@@ -382,7 +382,7 @@ impl Editor {
                 if undo { "undo" } else { "redo" }
             )));
         }
-        let mut project = self.project.clone();
+        let mut json = to_json(&self.project);
         let mut history = self.history.clone();
         let mut labels = Vec::new();
         for _ in 0..steps {
@@ -392,13 +392,15 @@ impl Editor {
                 (&mut history.redo, &mut history.undo)
             };
             let entry = from.pop().expect("checked");
+            entry
+                .change
+                .apply(&mut json, !undo)
+                .map_err(|e| Error::internal(format!("the undo history doesn't fit: {e}")))?;
             labels.push(entry.label.clone());
-            let current = std::mem::replace(&mut project, entry.project);
-            to.push(Entry {
-                label: entry.label,
-                project: current,
-            });
+            to.push(entry);
         }
+        let mut project: Project = serde_json::from_value(json)
+            .map_err(|e| Error::internal(format!("the undo history doesn't fit: {e}")))?;
         let changes = diff(&self.project, &project);
         let result = json!({ if undo { "undone" } else { "redone" }: labels });
         if dry_run {
@@ -427,7 +429,17 @@ impl Editor {
     }
 }
 
-/// Undo label for a request.
+/// A project as JSON, which every project turns into.
+fn to_json(p: &Project) -> Value {
+    serde_json::to_value(p).expect("a project is JSON")
+}
+
+/// What an edit changed, from `before` to `after`.
+fn changed(before: &Project, after: &Project) -> Change {
+    Change::between(&to_json(before), &to_json(after))
+        .unwrap_or_else(|| Change::Fields(Default::default()))
+}
+
 /// The undo history's name for an edit: the request in words.
 fn label_of(request: &Request, project: &Project) -> String {
     let json = serde_json::to_value(request).unwrap_or_default();
