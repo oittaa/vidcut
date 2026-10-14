@@ -901,26 +901,64 @@ impl Workspace {
     }
 }
 
+/// Stats for nerds over the picture's top left: a group for each part of
+/// the player, a fact on each row. When the picture is too short for all
+/// of them, the groups go on in another column.
+fn stats_panel(painter: &egui::Painter, picture: Rect, stats: &crate::live::stats::PlayerStats) {
+    let groups = stats.groups();
+    let width = groups
+        .iter()
+        .flat_map(|(_, rows)| rows.iter().map(|(label, _)| label.chars().count()))
+        .max()
+        .unwrap_or(0);
+    let font = FontId::monospace(11.0);
+    let text = |color| egui::TextFormat::simple(font.clone(), color);
+    let galleys: Vec<_> = groups
+        .into_iter()
+        .map(|(heading, rows)| {
+            let mut job = egui::text::LayoutJob::default();
+            job.append(heading, 0.0, text(theme::ACCENT));
+            for (label, fact) in rows {
+                job.append(
+                    &format!("\n  {label:<width$}  "),
+                    0.0,
+                    text(theme::TEXT_DIM),
+                );
+                job.append(&fact, 0.0, text(Color32::WHITE));
+            }
+            job.wrap.max_width = (picture.width() - 32.0).max(120.0);
+            painter.layout_job(job)
+        })
+        .collect();
+    let (top, bottom) = (picture.top() + 14.0, picture.bottom() - 14.0);
+    let mut at = pos2(picture.left() + 16.0, top);
+    let mut column = 0.0_f32;
+    let mut area = Rect::NOTHING;
+    let mut placed = Vec::new();
+    for galley in galleys {
+        let size = galley.size();
+        if at.y > top && at.y + size.y > bottom {
+            at = pos2(at.x + column + 24.0, top);
+            column = 0.0;
+        }
+        column = column.max(size.x);
+        area = area.union(Rect::from_min_size(at, size));
+        placed.push((at, galley));
+        at.y += size.y + 8.0;
+    }
+    painter.rect_filled(
+        area.expand2(vec2(8.0, 6.0)),
+        CornerRadius::same(4),
+        Color32::from_black_alpha(200),
+    );
+    for (at, galley) in placed {
+        painter.galley(at, galley, Color32::WHITE);
+    }
+}
+
 /// What was typed into a timecode field, as a TimeSpec: digits fill a
 /// timecode from the right ("100" is 00:00:01:00);
 /// anything else (`5s`, `1m30s`, `450f`, `00:01:00:00`) is used as is.
-/// Stats for nerds over the picture's top left: a line for each part of
-/// what the player does.
-fn stats_panel(painter: &egui::Painter, picture: Rect, stats: &crate::live::stats::PlayerStats) {
-    let text = stats
-        .lines()
-        .iter()
-        .map(|(name, facts)| format!("{name:<9} {facts}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let wrap = (picture.width() - 32.0).max(120.0);
-    let galley = painter.layout(text, FontId::monospace(11.0), Color32::WHITE, wrap);
-    let at = picture.left_top() + vec2(8.0, 8.0);
-    let rect = Rect::from_min_size(at, galley.size() + vec2(16.0, 12.0));
-    painter.rect_filled(rect, CornerRadius::same(4), Color32::from_black_alpha(200));
-    painter.galley(rect.min + vec2(8.0, 6.0), galley, Color32::WHITE);
-}
-
 pub(super) fn timecode_input(text: &str) -> Option<String> {
     let t = text.trim().trim_start_matches(['+', '-', '=']);
     if t.is_empty() {
