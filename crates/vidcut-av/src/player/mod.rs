@@ -166,16 +166,6 @@ impl Default for Config {
     }
 }
 
-/// The peaks of the sound heard now, while playing, linear per channel:
-/// what the meters show of the player.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Levels {
-    /// The mix (silent while the monitoring mute is on).
-    pub mix: Vec<f32>,
-    /// Each of the plan's audio lanes, in order, with its gain on top.
-    pub lanes: Vec<Vec<f32>>,
-}
-
 /// What a player is doing.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Status {
@@ -213,6 +203,16 @@ pub struct Status {
     pub failed: Option<i64>,
     /// The newest decoding or device failure.
     pub error: Option<String>,
+}
+
+/// The peaks of the sound heard now, while playing, linear per channel:
+/// what the meters show of the player.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Levels {
+    /// The mix (silent while the monitoring mute is on).
+    pub mix: Vec<f32>,
+    /// Each of the plan's audio lanes, in order, with its gain on top.
+    pub lanes: Vec<Vec<f32>>,
 }
 
 /// What decodes a player's pictures.
@@ -569,6 +569,19 @@ impl Shared {
         }
     }
 
+    /// The picture of the frame the viewer is at landed: `id`, of the plan
+    /// of change `plan_gen`.
+    pub(crate) fn landed(&self, plan_gen: u64, id: plan::Id) {
+        {
+            let mut landed = lock(&self.landed);
+            *landed = (landed.0 + 1, plan_gen, Some(id));
+        }
+        lock(&self.failed).take();
+        if let Some(f) = &self.on_picture {
+            f();
+        }
+    }
+
     /// The audio thread queued sound with these peaks.
     pub(crate) fn level(&self, level: Level) {
         let mut levels = lock(&self.levels);
@@ -581,19 +594,6 @@ impl Shared {
     /// What was queued won't be heard (a new play request, a pause).
     pub(crate) fn forget_levels(&self) {
         lock(&self.levels).clear();
-    }
-
-    /// The picture of the frame the viewer is at landed: `id`, of the plan
-    /// of change `plan_gen`.
-    pub(crate) fn landed(&self, plan_gen: u64, id: plan::Id) {
-        {
-            let mut landed = lock(&self.landed);
-            *landed = (landed.0 + 1, plan_gen, Some(id));
-        }
-        lock(&self.failed).take();
-        if let Some(f) = &self.on_picture {
-            f();
-        }
     }
 
     /// The decode thread decodes on `device`: an automatic video memory
@@ -983,6 +983,13 @@ impl Player {
         }
     }
 
+    /// The device its sound plays on ([`AudioOutput::plays_on`]).
+    pub fn plays_on(&self) -> PlaysOn {
+        lock(&self.output)
+            .as_ref()
+            .map_or(PlaysOn::Default, |o| o.plays_on())
+    }
+
     /// The peaks of the sound heard at `now`, over the last 50 ms; `None`
     /// while paused, or before any is heard.
     pub fn levels(&self, now: Instant) -> Option<Levels> {
@@ -1015,13 +1022,6 @@ impl Player {
             }
         }
         Some(Levels { mix, lanes })
-    }
-
-    /// The device its sound plays on ([`AudioOutput::plays_on`]).
-    pub fn plays_on(&self) -> PlaysOn {
-        lock(&self.output)
-            .as_ref()
-            .map_or(PlaysOn::Default, |o| o.plays_on())
     }
 
     pub fn status(&self) -> Status {
