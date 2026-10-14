@@ -1051,20 +1051,6 @@ pub(crate) fn can_fit(place: Place, ops: &Ops) -> bool {
 }
 
 impl Fitter {
-    /// Whether the GPU fits `f` into `layout` for an encoder on its device:
-    /// VA-API's frames, and Direct3D 11's into the encoder's frames (`into`),
-    /// but not 8-bit ones into 10 (AMD's video processor won't).
-    pub(crate) fn fits(f: &frame::Video, layout: format::Pixel, into: Option<&Frames>) -> bool {
-        match f.format() {
-            format::Pixel::VAAPI => true,
-            format::Pixel::D3D11 => {
-                into.is_some()
-                    && !(sw_format(f) == format::Pixel::NV12 && layout == format::Pixel::P010LE)
-            }
-            _ => false,
-        }
-    }
-
     /// `f` turned clockwise by `rotation` (0, 90, 180 or 270), scaled to
     /// `fitted` and placed in an `out` picture of `layout` (NV12, P010), on
     /// the GPU, with its timestamp and colors, its pixels square; `fitter`

@@ -766,7 +766,7 @@ fn encode(
                         pass,
                     )
                 {
-                    opened = Some((enc, o, Some((device, frames)), false));
+                    opened = Some((enc, o, Some((device, frames)), None));
                     break;
                 }
                 // VAAPI on the decoder's own device, where the decoder is
@@ -782,13 +782,13 @@ fn encode(
                 });
                 match encode::open_video(&enc, w, h, fps, global_header, None, shared, pass) {
                     Ok(o) => {
-                        opened = Some((enc, o, None, shared.is_some()));
+                        opened = Some((enc, o, None, shared.map(|d| d.kind().place())));
                         break;
                     }
                     Err(e) => failed.push((Some(enc.name.clone()), e)),
                 }
             }
-            let Some((enc, (encoder, vaapi), gpu, fit_on_gpu)) = opened else {
+            let Some((enc, (encoder, vaapi), gpu, fit_on)) = opened else {
                 if failed.len() == 1 {
                     return Err(failed.remove(0).1);
                 }
@@ -834,9 +834,9 @@ fn encode(
             ost.set_parameters(&encoder);
             ost.set_time_base(fps.invert());
             ost.set_avg_frame_rate(fps);
-            let (pixel, output) = match gpu {
-                Some((device, frames)) => (gpu_pixel(&enc), Output::Cuda { device, frames }),
-                None if fit_on_gpu => {
+            let (pixel, output) = match (gpu, fit_on) {
+                (Some((device, frames)), _) => (gpu_pixel(&enc), Output::Cuda { device, frames }),
+                (None, Some(place)) => {
                     let into = match &vaapi {
                         // AMF takes Direct3D 11's frames of its own frames
                         // only. SAFETY: the encoder's live frames.
@@ -845,9 +845,9 @@ fn encode(
                         }
                         _ => None,
                     };
-                    (enc.pixel, Output::FittedOnGpu { into })
+                    (enc.pixel, Output::FittedOnGpu { place, into })
                 }
-                None => (enc.pixel, Output::Fitted),
+                (None, None) => (enc.pixel, Output::Fitted),
             };
             let mut frames = VideoFrames::new(&plan.video, plan.fps, w, h, pixel, enc.hdr)
                 .output(output)
