@@ -288,21 +288,27 @@ impl GpuDecoder {
     }
 
     /// Why it leaves `codec` to the CPU, when it does: it doesn't decode it
-    /// right, as far as known. AMD's Direct3D 11 decoder loses its way in
-    /// H.264 sought into an open GOP (a keyframe that isn't IDR): some
-    /// frames on, it shows one picture over and over, where NVIDIA's and
-    /// VA-API on Intel decode on. The CPU decodes such H.264 there:
-    /// `open_gop` says whether the stream has open GOPs, asked only then.
+    /// right, as far as known. AMD's Direct3D 11 decoder and VideoToolbox
+    /// lose their way in H.264 sought into an open GOP (a keyframe that
+    /// isn't IDR): AMD's shows one picture over and over some frames on,
+    /// VideoToolbox other frames than the file's, where NVIDIA's and VA-API
+    /// on Intel decode on. The CPU decodes such H.264 there: `open_gop`
+    /// says whether the stream has open GOPs, asked only then.
     pub fn why_not(
         &self,
         codec: ffmpeg::codec::Id,
         open_gop: impl FnOnce() -> bool,
     ) -> Option<&'static str> {
-        (self.kind == Kind::D3d11va
-            && self.vendor == Some(crate::gpus::AMD)
-            && codec == ffmpeg::codec::Id::H264
-            && open_gop())
-        .then_some("AMD's Direct3D 11 decoder loses its way after a seek in H.264 with open GOPs")
+        let why = match (self.kind, self.vendor) {
+            (Kind::D3d11va, Some(crate::gpus::AMD)) => {
+                "AMD's Direct3D 11 decoder loses its way after a seek in H.264 with open GOPs"
+            }
+            (Kind::VideoToolbox, _) => {
+                "VideoToolbox shows other frames after a seek in H.264 with open GOPs"
+            }
+            _ => return None,
+        };
+        (codec == ffmpeg::codec::Id::H264 && open_gop()).then_some(why)
     }
 
     /// The render node or adapter it is on; empty for the default one.
