@@ -9,10 +9,11 @@
 //!
 //! **Requests merge.** The threads read the newest wanted state, not a
 //! queue, so seeks that arrive while one decodes collapse into the last.
-//! A decode the newest request no longer needs is cancelled: always while
-//! playing or when it was only decoding ahead, and while paused once it
-//! has run a second (a paused seek otherwise finishes, so a held key moves
-//! the picture at the speed frames decode).
+//! A decode the newest request no longer needs is cancelled: when it was
+//! only decoding ahead or the clock runs, and otherwise once it has run a
+//! second. A seek otherwise finishes, paused or playing before the sound
+//! from there is heard, so a held key or a dragged playhead moves the
+//! picture at the speed frames decode.
 //!
 //! **Pictures** are picked by the export's reader (the sampling rule) and
 //! kept as decoded, in YUV, for a display's shader to fit and convert
@@ -233,8 +234,9 @@ pub(crate) struct Control {
     pub mode: Mode,
     /// Counts every change the decode thread cares about.
     pub version: u64,
-    /// Counts play requests.
+    /// Counts play requests, and when the latest was made.
     epoch: u64,
+    epoch_at: Instant,
     /// Lane gains on top of the plan's (faders being moved), dB.
     pub trims: Vec<f64>,
     pub trims_gen: u64,
@@ -285,6 +287,9 @@ pub(crate) enum Busy {
 #[derive(Default)]
 struct Presenter {
     shown: Option<Shown>,
+    /// The latest landing (`Shared::landed`) when the shown picture was
+    /// presented.
+    shown_landing: u64,
     presented: Option<i64>,
     /// What decoded the picture of a file shown last.
     decoder: Option<Decoder>,
@@ -300,6 +305,9 @@ pub(crate) struct Snap {
     pub version: u64,
     /// The frame the viewer is at.
     pub focus: i64,
+    /// Playing, the sound of the latest play request is heard, and the
+    /// clock moves. Until it is, the clock stands where play starts.
+    pub heard: bool,
     /// Decode on NVDEC where it can.
     pub hardware: bool,
     /// The plan played next and the frame of it to keep ready.
@@ -330,6 +338,9 @@ pub(crate) struct Shared {
     busy: Mutex<Option<(Busy, Instant)>>,
     /// The frame whose picture failed to decode last, until one lands.
     failed: Mutex<Option<i64>>,
+    /// The picture of the frame the viewer was at that landed last, by
+    /// the plan's change: the landings counted, the change, its id.
+    landed: Mutex<(u64, u64, Option<plan::Id>)>,
     on_picture: Option<Arc<dyn Fn() + Send + Sync>>,
     presenter: Mutex<Presenter>,
     /// The audio device's failure.
@@ -342,9 +353,11 @@ pub(crate) struct Shared {
     video_auto: AtomicBool,
     /// The GPU's memory, once the decode thread opened it.
     gpu_memory: std::sync::OnceLock<usize>,
+    /// The latest play request whose sound was heard, for `VIDCUT_DEBUG`.
+    heard_epoch: std::sync::atomic::AtomicU64,
 }
 
-/// A paused seek that has decoded this long holds a newer one up no more.
+/// A seek that has decoded this long holds a newer one up no more.
 const PATIENCE: Duration = Duration::from_secs(1);
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -382,18 +395,37 @@ impl Shared {
             Mode::Playing { from, speed, epoch } => (from, speed, epoch),
         };
         let end = ctl.plan.samples as f64;
-        let s = self
-            .clock_sample(epoch, at)
-            .unwrap_or(from as f64)
-            .clamp(0.0, end);
+        let heard = self.clock_sample(epoch, at);
+        if heard.is_some() && crate::debug() {
+            self.heard_first(ctl, epoch);
+        }
+        let s = heard.unwrap_or(from as f64).clamp(0.0, end);
         let ended = if speed > 0.0 { s >= end } else { s <= 0.0 };
         (ctl.plan.frame_at_sample(s.floor() as i64), ended)
     }
 
+    /// Says once how long the sound of play request `epoch` took to be
+    /// heard, for `VIDCUT_DEBUG`.
+    fn heard_first(&self, ctl: &Control, epoch: u64) {
+        if self
+            .heard_epoch
+            .fetch_max(epoch, std::sync::atomic::Ordering::Relaxed)
+            < epoch
+        {
+            let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+            crate::debug!(
+                "audio",
+                "play request {epoch} heard {:.0} ms after it was made, the output's latency {:.0} ms",
+                ms(ctl.epoch_at.elapsed()),
+                ms(self.heard.latency().unwrap_or_default()),
+            );
+        }
+    }
+
     /// Changes what is wanted; `video` when the decode thread should look
     /// again. What it decodes is cancelled when the viewer's new frame
-    /// isn't decoded and the decode may hold it up: a picture ahead, or
-    /// anything while playing, or a paused seek that has run a second.
+    /// isn't decoded and the decode may hold it up: a picture ahead,
+    /// anything while the clock runs, or a seek that has run a second.
     fn change(&self, video: bool, f: impl FnOnce(&mut Control, i64, Option<f64>)) {
         let mut ctl = self.control();
         let now = Instant::now();
@@ -416,7 +448,7 @@ impl Shared {
                 Some((Busy::Window { from, to, plan_gen }, _)) => {
                     playing || plan_gen != ctl.plan_gen || !(from..=to).contains(&target)
                 }
-                Some((Busy::Focus, since)) => playing || since.elapsed() >= PATIENCE,
+                Some((Busy::Focus, since)) => sample.is_some() || since.elapsed() >= PATIENCE,
                 None => false,
             };
             if cancel && !self.store.contains(&ctl.plan.id(target)) {
@@ -437,13 +469,19 @@ impl Shared {
         }
         self.interrupt
             .store(false, std::sync::atomic::Ordering::Relaxed);
-        let focus = self.position(&mut ctl, Instant::now());
+        let now = Instant::now();
+        let focus = self.position(&mut ctl, now);
+        let heard = match ctl.mode {
+            Mode::Playing { epoch, .. } => self.clock_sample(epoch, now).is_some(),
+            Mode::Paused { .. } => false,
+        };
         Some(Snap {
             plan: ctl.plan.clone(),
             plan_gen: ctl.plan_gen,
             mode: ctl.mode,
             version: ctl.version,
             focus,
+            heard,
             hardware: ctl.hardware,
             prepared: ctl.prepared.clone(),
         })
@@ -503,8 +541,13 @@ impl Shared {
         }
     }
 
-    /// The picture of the frame the viewer is at landed.
-    pub(crate) fn landed(&self) {
+    /// The picture of the frame the viewer is at landed: `id`, of the plan
+    /// of change `plan_gen`.
+    pub(crate) fn landed(&self, plan_gen: u64, id: plan::Id) {
+        {
+            let mut landed = lock(&self.landed);
+            *landed = (landed.0 + 1, plan_gen, Some(id));
+        }
         lock(&self.failed).take();
         if let Some(f) = &self.on_picture {
             f();
@@ -572,6 +615,7 @@ impl Player {
                 mode: Mode::Paused { at },
                 version: 0,
                 epoch: 0,
+                epoch_at: Instant::now(),
                 trims: Vec::new(),
                 trims_gen: 0,
                 muted: false,
@@ -590,6 +634,7 @@ impl Player {
             interrupt: Arc::new(AtomicBool::new(false)),
             busy: Mutex::new(None),
             failed: Mutex::new(None),
+            landed: Mutex::new((0, 0, None)),
             on_picture: config.on_picture,
             presenter: Mutex::new(Presenter::default()),
             device,
@@ -597,6 +642,7 @@ impl Player {
             gpu_pictures: config.gpu_pictures,
             video_auto: AtomicBool::new(config.budget.video.is_none()),
             gpu_memory: std::sync::OnceLock::new(),
+            heard_epoch: std::sync::atomic::AtomicU64::new(0),
         });
         output.start(source)?;
         let mut player = Self {
@@ -766,6 +812,7 @@ impl Player {
                 }
             };
             ctl.epoch += 1;
+            ctl.epoch_at = Instant::now();
             ctl.mode = Mode::Playing {
                 from,
                 speed,
@@ -827,19 +874,22 @@ impl Player {
     }
 
     /// The picture to show at `now`: that of the frame the clock is at, or,
-    /// while it isn't decoded yet, the picture shown before. `None` before
-    /// the first picture is decoded.
+    /// while it isn't decoded yet, the newest picture a seek landed since
+    /// the one shown, else the picture shown before. So a dragged playhead
+    /// shows each frame a seek decodes, though it has moved on by then.
+    /// `None` before the first picture is decoded.
     pub fn present(&self, now: Instant) -> Option<Shown> {
-        let (id, pos, speed) = {
+        let (id, pos, speed, plan_gen) = {
             let mut ctl = self.shared.control();
             let pos = self.shared.position(&mut ctl, now);
             let speed = match ctl.mode {
                 Mode::Playing { speed, .. } => speed,
                 Mode::Paused { .. } => 0.0,
             };
-            (ctl.plan.id(pos), pos, speed)
+            (ctl.plan.id(pos), pos, speed, ctl.plan_gen)
         };
         let picture = self.shared.store.get(&id);
+        let landed = lock(&self.shared.landed).clone();
         let mut p = lock(&self.shared.presenter);
         match picture {
             Some(picture) => {
@@ -862,11 +912,24 @@ impl Player {
                     exact: true,
                 };
                 p.shown = Some(shown.clone());
+                p.shown_landing = landed.0;
                 Some(shown)
             }
             None => {
                 if speed != 0.0 {
                     p.late += 1;
+                }
+                if let (n, g, Some(newer)) = landed
+                    && n > p.shown_landing
+                    && g == plan_gen
+                    && let Some(picture) = self.shared.store.get(&newer)
+                {
+                    p.shown_landing = n;
+                    p.shown = Some(Shown {
+                        frame: pos,
+                        picture,
+                        exact: false,
+                    });
                 }
                 p.shown.clone().map(|s| Shown {
                     frame: pos,
@@ -982,6 +1045,7 @@ fn move_to(ctl: &mut Control, frame: i64, sound: bool) {
         }
         Mode::Playing { speed, .. } => {
             ctl.epoch += 1;
+            ctl.epoch_at = Instant::now();
             Mode::Playing {
                 from: start_sample(&ctl.plan, t, speed),
                 speed,

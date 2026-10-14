@@ -24,7 +24,9 @@ vidcut-av starts them as it starts its other threads (`std::thread::Builder`, na
 
 - **Wanted state.** One mutex holds what is wanted: the plan, the mode (paused at a frame, or playing from a sample at a speed), lane gains, the mute and audio scrubbing. A request changes it and wakes both threads, which read the newest. Requests that arrive while a thread works merge into the last: nothing queues.
 - **Position.** Paused, the frame asked for; playing, the clock (§4). `step` pauses where the viewer is and moves; `play` while playing goes on from the sample heard now at the new speed; `play` forward from the last frame starts over from the first (backward from the first, from the last).
-- **Cancelling** (the decode thread's flag is `vidcut_av::cancel`'s, which the decoders check). When the new frame's picture isn't kept, the decode in progress is cancelled if it was only decoding ahead, if the player is or was playing, or if it is a paused seek that has run for a second. Otherwise the paused seek finishes and the newest runs next, so a held key moves the picture at the speed frames decode and the last request lands exactly (gui.md §4).
+- **Cancelling** (the decode thread's flag is `vidcut_av::cancel`'s, which the decoders check). When the new frame's picture isn't kept, the decode in progress is cancelled if it was only decoding ahead, if the clock runs, or once it has run for a second. Otherwise the seek finishes (paused, or playing before the sound of the play request is heard) and the newest runs next, so a held key or a dragged playhead moves the picture at the speed frames decode and the last request lands exactly (gui.md §4).
+- **Overtaken seeks show.** Until the frame the viewer is at is decoded, `present` shows the newest picture a seek landed since the one shown, else the one shown.
+- **Playing from a seek** decodes the frame play starts at. The clock moves once its sound is heard. A player late while the clock moves seeks ahead to where the clock will be.
 - **After a cancel** the reader forgets where it stands (the next piece of the file seeks), and the file stays open.
 
 ## 3. Pictures: decoded YUV, for a shader

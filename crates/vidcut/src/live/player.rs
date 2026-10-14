@@ -35,6 +35,17 @@ pub type MakeOutput = Arc<dyn Fn() -> Box<dyn AudioOutput> + Send + Sync>;
 /// How long a present asked for may go unanswered before it is asked again.
 const PRESENT_AGAIN: Duration = Duration::from_millis(50);
 
+/// A present asked of the renderer.
+#[derive(Debug, Clone, Copy)]
+struct Presenting {
+    motion: u64,
+    /// When, and the frame the engine was at.
+    at: Instant,
+    position: i64,
+    /// The renderer answered without the motion on screen.
+    answered: bool,
+}
+
 /// The source or the timeline, as the viewer would show it.
 #[derive(Default)]
 struct Content {
@@ -86,8 +97,9 @@ pub struct Player {
     /// The latest motion, and the newest one on screen.
     pub motion: u64,
     pub shown: u64,
-    /// A present asked of the renderer: for which motion, and when.
-    presenting: Option<(u64, Instant)>,
+    presenting: Option<Presenting>,
+    /// A picture landed since the renderer was last asked to present.
+    landed: bool,
     muted: bool,
     scrubbing: bool,
     /// Where it decodes, as the preferences said last.
@@ -127,6 +139,7 @@ impl Player {
             motion: 0,
             shown: 0,
             presenting: None,
+            landed: false,
             muted: false,
             scrubbing: true,
             decoding,
@@ -571,30 +584,50 @@ impl Player {
 
     /// The motion to ask the renderer to present, when the latest one isn't
     /// on screen and the engine has its picture (or plays). Asked again if
-    /// the renderer doesn't answer.
+    /// the renderer doesn't answer. Once it answered without the motion on
+    /// screen, asked again only when there may be another picture to show:
+    /// one landed, or the clock moved to another frame. Asking at once
+    /// would have both threads spin, the renderer answering at once while
+    /// the frame isn't decoded, and keep the engine's locks from the
+    /// decoder decoding it.
     pub fn present_due(&mut self, now: Instant) -> Option<u64> {
         if self.shown >= self.motion {
             return None;
         }
-        if let Some((m, at)) = self.presenting
-            && m == self.motion
-            && now.duration_since(at) < PRESENT_AGAIN
-        {
+        let asked = self.presenting.filter(|p| p.motion == self.motion);
+        if asked.is_some_and(|p| !p.answered && now.duration_since(p.at) < PRESENT_AGAIN) {
             return None;
         }
         let status = self.status()?;
         if !status.ready && !status.playing {
             return None;
         }
-        self.presenting = Some((self.motion, now));
+        if asked.is_some_and(|p| p.answered && p.position == status.position) && !self.landed {
+            return None;
+        }
+        self.landed = false;
+        self.presenting = Some(Presenting {
+            motion: self.motion,
+            at: now,
+            position: status.position,
+            answered: false,
+        });
         Some(self.motion)
+    }
+
+    /// The engine's picture of the frame the viewer is at landed, or the
+    /// one kept ready did: a present may show what it didn't.
+    pub fn picture_landed(&mut self) {
+        self.landed = true;
     }
 
     /// The renderer presented the engine after motion `motion` was asked,
     /// showing `frame` exactly (`None`: the frame's picture wasn't there).
     pub fn presented(&mut self, motion: u64, frame: Option<i64>) {
-        if self.presenting.is_some_and(|(m, _)| m == motion) {
-            self.presenting = None;
+        if let Some(p) = self.presenting.as_mut()
+            && p.motion == motion
+        {
+            p.answered = true;
         }
         let Some(frame) = frame else { return };
         if motion != self.motion {

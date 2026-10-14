@@ -806,6 +806,7 @@ impl Live {
             Msg::Picture => {
                 // Waits look again in `tick`; a present may be due. The
                 // snapshot changes when the picture kept ready landed.
+                self.player.picture_landed();
                 self.present_due();
                 changed = self.ready_changed();
             }
