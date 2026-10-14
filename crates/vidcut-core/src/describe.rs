@@ -43,10 +43,12 @@ pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> Stri
         "bins.add" => format!("New bin {}", d.text("path")),
         "bins.remove" => format!("Remove bin {}", d.text("path")),
         "bins.rename" => format!("Rename bin {} to {}", d.text("path"), d.text("to")),
-        "timeline.import" if d.flag("replace") => {
-            format!("Import timeline {}, replacing the timeline", d.file("path"))
-        }
-        "timeline.import" => format!("Import timeline {}", d.file("path")),
+        "timeline.import" => match d.text("mode").as_str() {
+            "replace" => format!("Import timeline {}, replacing the timeline", d.file("path")),
+            "compound" => format!("Import timeline {} as a compound clip", d.file("path")),
+            "media" => format!("Import the media of {}", d.file("path")),
+            _ => format!("Import timeline {}", d.file("path")),
+        },
         "edit.append" => format!("Append {}", d.source()),
         "edit.smart_insert" => format!("Smart Insert {}", d.source()),
         "edit.insert" => format!("Insert {} at {}", d.source(), d.time("at")),

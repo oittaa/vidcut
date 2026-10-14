@@ -20,7 +20,7 @@ use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
 use crate::render::RenderPlan;
 use crate::request::{
-    Changes, ClipRef, Envelope, OneOrMany, ProjectSet, Request, Response, SourceParams,
+    Changes, ClipRef, Envelope, ImportMode, OneOrMany, ProjectSet, Request, Response, SourceParams,
 };
 use crate::time::{Rational, TimeContext, TimeSpec, format_timecode};
 use crate::validate;
@@ -1433,7 +1433,7 @@ fn mutate(
         Request::TimelineImport {
             path,
             otio,
-            replace,
+            mode,
             search,
             unpack,
             flatten,
@@ -1442,7 +1442,7 @@ fn mutate(
             &Import {
                 path: path.as_deref(),
                 doc: otio.as_ref(),
-                replace: *replace,
+                mode: *mode,
                 search,
                 unpack: unpack.as_deref(),
                 write: !dry_run,
@@ -1498,6 +1498,22 @@ fn mutate(
 }
 
 /// Adds probed media to the pool (or finds it there); returns its id.
+/// While the format isn't chosen, the first video sets it, with no prompt
+/// (D37), drop-frame counting too where its timecode counts so (D47). A
+/// still has no frame rate to give, and its size is a photo's.
+fn first_video_sets_format(p: &mut Project, info: &MediaInfo) {
+    if p.settings.auto_format
+        && let Some(v) = info.video.as_ref().filter(|v| !v.still)
+    {
+        p.settings.set_fps(v.fps);
+        let drop = v.fps.has_drop_frame() && info.timecode.is_some_and(|t| t.drop_frame);
+        p.settings
+            .set_drop_frame(drop)
+            .expect("the rate has drop-frame");
+        adopt_size(p, v);
+    }
+}
+
 fn add_media(p: &mut Project, probed: ProbedMedia) -> String {
     // The same file is the same media, unless one is a still and the other
     // the sequence it starts.
@@ -1508,19 +1524,7 @@ fn add_media(p: &mut Project, probed: ProbedMedia) -> String {
     {
         return existing.id.clone();
     }
-    // A still has no frame rate to give, and its size is a photo's.
-    if p.settings.auto_format
-        && let Some(v) = probed.info.video.as_ref().filter(|v| !v.still)
-    {
-        // The first video sets the project format, with no prompt (D37),
-        // drop-frame counting too where its timecode counts so (D47).
-        p.settings.set_fps(v.fps);
-        let drop = v.fps.has_drop_frame() && probed.info.timecode.is_some_and(|t| t.drop_frame);
-        p.settings
-            .set_drop_frame(drop)
-            .expect("the rate has drop-frame");
-        adopt_size(p, v);
-    }
+    first_video_sets_format(p, &probed.info);
     let id = p.alloc_media_id();
     let name = match &probed.sequence {
         Some(s) => s.display(),
@@ -1777,7 +1781,7 @@ fn rescale(f: i64, from: Rational, to: Rational) -> i64 {
 struct Import<'a> {
     path: Option<&'a Path>,
     doc: Option<&'a Value>,
-    replace: bool,
+    mode: ImportMode,
     search: &'a [PathBuf],
     unpack: Option<&'a Path>,
     /// False in a dry run: a bundle's media aren't unpacked.
@@ -2402,13 +2406,18 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     let Import {
         path,
         doc,
-        replace,
+        mode,
         search,
         unpack,
         write,
         flatten,
         adopt_rate,
     } = *import;
+    if flatten && mode == ImportMode::Compound {
+        return Err(Error::usage(
+            "flatten decomposes compound clips: it can't import as one",
+        ));
+    }
     let (doc, file) = match (path, doc) {
         (Some(path), None) => {
             let file = env.open_timeline(path, unpack, write)?;
@@ -2424,16 +2433,31 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
             ));
         }
     };
-    let mut t = otio::import(&doc, file.as_ref().map(|f| f.base.as_path()))?;
+    let base = file.as_ref().map(|f| f.base.as_path());
+    let mut t = otio::import(&doc, base)?;
     // Some editors write no timeline name: the file's then.
-    let name = match (t.name.as_str(), path) {
-        ("", Some(path)) => path
-            .file_stem()
-            .map_or(String::new(), |s| s.to_string_lossy().into_owned()),
+    let stem = path
+        .and_then(Path::file_stem)
+        .map(|s| s.to_string_lossy().into_owned());
+    let name = match (t.name.as_str(), &stem) {
+        ("", Some(stem)) => stem.clone(),
         (name, _) => name.to_string(),
     };
+    // The project of a file vidcut wrote: its media come as it has them.
+    let meta = t.project.take();
+    let wanted = meta
+        .as_ref()
+        .map(|meta| wanted_media(meta, &t, mode == ImportMode::Media));
+    if mode == ImportMode::Compound {
+        let warnings = std::mem::take(&mut t.warnings);
+        t = otio::import(&otio::as_compound(&doc, &name)?, base)?;
+        t.warnings = warnings;
+    }
     let bundle = file.as_ref().and_then(|f| f.bundle.clone());
-    if t.clips.is_empty() {
+    let pool = meta
+        .as_ref()
+        .is_some_and(|m| mode == ImportMode::Media && !m.media.is_empty());
+    if t.clips.is_empty() && !pool {
         return Err(Error::invalid(format!(
             "nothing to import: the timeline has no clips with media files{}",
             if t.warnings.is_empty() {
@@ -2471,9 +2495,56 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     if let Some(b) = &bundle {
         dirs.push(b.folder.clone());
     }
-    let (ids, media) = find_media(p, &t, env, &dirs, search.is_empty())?;
+    let (ids, media) = match (&meta, &wanted) {
+        (Some(meta), Some(wanted)) => {
+            // In a bin named after the file, as the file's project has them.
+            let bin = stem.as_deref().unwrap_or(&name).trim().replace('/', "-");
+            let bin = if bin.is_empty() {
+                "Imported".into()
+            } else {
+                bin
+            };
+            let kept = join_pool(p, meta, wanted, &bin)?;
+            let mut ids = MediaIds::new();
+            for c in t.clips.iter().filter(|c| !c.is_block()) {
+                if let Some(id) = c.media_id.as_ref().and_then(|id| kept.get(id)) {
+                    ids.insert(media_key(&c.media), id.clone());
+                }
+            }
+            let others = otio::Imported {
+                clips: t
+                    .clips
+                    .iter()
+                    .filter(|c| !c.is_block() && !ids.contains_key(&media_key(&c.media)))
+                    .cloned()
+                    .collect(),
+                ..t.clone()
+            };
+            let (found, mut media) = find_media(p, &others, env, &dirs, search.is_empty())?;
+            ids.extend(found);
+            for id in kept.into_values() {
+                if !media.contains(&id) {
+                    media.push(id);
+                }
+            }
+            (ids, media)
+        }
+        _ => find_media(p, &t, env, &dirs, search.is_empty())?,
+    };
+    if mode == ImportMode::Media {
+        let mut media = media;
+        compound_media(p, &t, env, &dirs, &mut media)?;
+        return Ok(json!({
+            "name": name,
+            "fps": p.settings.fps,
+            "clips": [],
+            "media": media,
+            "markers": [],
+            "warnings": warnings,
+        }));
+    }
 
-    if replace {
+    if mode == ImportMode::Replace {
         for track in &mut p.tracks {
             track.clips.clear();
         }
@@ -2536,7 +2607,8 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         }
         pending = next;
     }
-    if flatten && !clips.iter().any(|id| compound(p, id)) {
+    // Asked for, or none are left.
+    if mode == ImportMode::Compound || flatten && !clips.iter().any(|id| compound(p, id)) {
         warnings.retain(|w| !w.starts_with(otio::COMPOUNDS_KEPT));
     }
     fill_contents(p, &clips, env, &dirs, &mut warnings);
@@ -2561,6 +2633,98 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         result["bundle"] = json!(b);
     }
     Ok(result)
+}
+
+/// Whether the file `r` names is `m`'s.
+fn same_file(r: &otio::MediaRef, m: &Media) -> bool {
+    r.paths.contains(&m.path) && r.sequence.is_some() == m.sequence.is_some()
+}
+
+/// The ids of the media of the vidcut project `meta` to bring with `t`:
+/// those its clips name, and with `all` the rest of the pool too. OTIO's
+/// own items win, so one is left out when a clip's reference names another
+/// file: that file is probed instead.
+fn wanted_media(meta: &otio::ProjectMeta, t: &otio::Imported, all: bool) -> HashSet<String> {
+    let mut agree: HashMap<&str, bool> = HashMap::new();
+    for c in t.clips.iter().filter(|c| !c.is_block()) {
+        let named = c.media_id.as_deref();
+        if let Some(m) = meta.media.iter().find(|m| Some(m.id.as_str()) == named) {
+            let same = same_file(&c.media, m);
+            agree
+                .entry(&m.id)
+                .and_modify(|a| *a &= same)
+                .or_insert(same);
+        }
+    }
+    meta.media
+        .iter()
+        .filter(|m| agree.get(m.id.as_str()).copied().unwrap_or(all))
+        .map(|m| m.id.clone())
+        .collect()
+}
+
+/// The media of the vidcut project `meta` that `wanted` names, in the
+/// pool: in bin `bin`, with their own bins under it. A file the pool has
+/// keeps its pool item. Others come as the project has them, with new ids,
+/// without proxies (they belong to its folder). Their ids here, by the
+/// project's.
+fn join_pool(
+    p: &mut Project,
+    meta: &otio::ProjectMeta,
+    wanted: &HashSet<String>,
+    bin: &str,
+) -> Result<HashMap<String, String>> {
+    let mut ids = HashMap::new();
+    for m in meta.media.iter().filter(|m| wanted.contains(&m.id)) {
+        let id = match p
+            .media
+            .iter()
+            .find(|x| x.path == m.path && x.sequence == m.sequence)
+        {
+            Some(x) => x.id.clone(),
+            None => {
+                let bin = match m.bin.as_str() {
+                    "" => bin.to_string(),
+                    own => format!("{bin}/{own}"),
+                };
+                ops::add_bin(p, &bin)?;
+                first_video_sets_format(p, &m.info);
+                let id = p.alloc_media_id();
+                p.media.push(Media {
+                    id: id.clone(),
+                    bin,
+                    proxy: None,
+                    ..m.clone()
+                });
+                id
+            }
+        };
+        ids.insert(m.id.clone(), id);
+    }
+    Ok(ids)
+}
+
+/// Adds the media the compound clips among `t`'s clips hold to the pool,
+/// and those they hold in turn, onto `media`.
+fn compound_media(
+    p: &mut Project,
+    t: &otio::Imported,
+    env: &dyn Env,
+    dirs: &[PathBuf],
+    media: &mut Vec<String>,
+) -> Result<()> {
+    for c in &t.clips {
+        let Some(k) = &c.compound else { continue };
+        let inner = nested(k, c.video)?;
+        let (_, found) = find_media(p, &inner, env, dirs, false)?;
+        for id in found {
+            if !media.contains(&id) {
+                media.push(id);
+            }
+        }
+        compound_media(p, &inner, env, dirs, media)?;
+    }
+    Ok(())
 }
 
 /// The tracks `t`'s clips go on, made first: making video tracks moves the
@@ -2616,9 +2780,12 @@ pub fn open_otio(
     p.settings.start_tc = t.start_tc;
     let mut warnings = t.warnings.clone();
     let mut ids = MediaIds::new();
+    // OTIO's own items win: a clip whose reference names another file
+    // than its media's is probed.
     for c in t.clips.iter().filter(|c| !c.is_block()) {
-        if let Some(id) = c.media_id.as_ref().filter(|id| p.media(id).is_some()) {
-            ids.insert(media_key(&c.media), id.clone());
+        let named = c.media_id.as_deref().and_then(|id| p.media(id));
+        if let Some(m) = named.filter(|m| same_file(&c.media, m)) {
+            ids.insert(media_key(&c.media), m.id.clone());
         }
     }
     let others = otio::Imported {
@@ -2689,7 +2856,7 @@ pub fn project_from_otio(
     let import = Import {
         path: Some(path),
         doc: None,
-        replace: false,
+        mode: ImportMode::Append,
         search: &[],
         unpack: None,
         write,

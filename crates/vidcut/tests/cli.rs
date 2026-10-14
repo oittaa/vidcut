@@ -670,6 +670,37 @@ fn projects_come_from_otio_files() {
     assert_eq!(clips_in(&sb, &at25), [(0, 50), (50, 25)]);
 }
 
+#[test]
+fn a_timeline_imported_as_a_compound_clip_plays_the_same() {
+    // Deviation X9: one compound clip holds the file's timeline.
+    let sb = Sandbox::new("compound-import");
+    let a = fixture(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (30, 1),
+        90,
+    ));
+    sb.ok(&["project", "create", s(&sb.project())]);
+    sb.ok(&["media", "add", s(&a)]);
+    sb.ok(&["edit", "append", "m1", "--range", "10f..40f"]);
+    sb.ok(&["edit", "append", "m1", "--range", "60f..90f"]);
+    let cut = sb.dir.path().join("cut.otio");
+    sb.ok(&["export", "start", s(&cut)]);
+    let other = sb.dir.path().join("q.vidcut");
+    sb.ok(&["project", "create", s(&other)]);
+    sb.ok_in(
+        &other,
+        &["timeline", "import", s(&cut), "--mode", "compound"],
+    );
+    let t = sb.ok_in(&other, &["timeline", "get"]);
+    let items = t["result"]["tracks"][0]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["duration"], 60);
+    same_frames(&sb, &sb.project(), &other, &["0f", "29f", "30f", "59f"]);
+}
+
 /// Moves every media file an OTIO document names to `/nonexistent/footage/`,
 /// keeping its file name.
 fn move_media(doc: &mut Value) {

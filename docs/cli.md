@@ -118,7 +118,9 @@ vidcut history undo                         # works across separate runs
 
 **Timeline interchange (OpenTimelineIO, deviation X9).** What the file contains is that deviation.
 - `vidcut export start cut.otio` writes the whole timeline, or `--range`. `cut.otioz` bundles the media (a zip; in a GUI it runs as a job), `cut.otiod` the same as a folder. Tracks carry their names (`track set A1 --name Music`).
-- `vidcut timeline import cut.otio` (or `.otioz`, or an `.otiod` folder) adds the file's media to the pool and the file's tracks after the last clip: video tracks onto V1, V2, … with the audio that belongs to their clips, other audio tracks onto A1, A2, …. `--replace` replaces the timeline instead. An empty timeline takes the file's frame rate, start timecode and track settings.
+- `vidcut timeline import cut.otio` (or `.otioz`, or an `.otiod` folder) adds the file's media to the pool and the file's tracks after the last clip: video tracks onto V1, V2, … with the audio that belongs to their clips, other audio tracks onto A1, A2, …. An empty timeline takes the file's frame rate, start timecode and track settings.
+  - `--mode replace` replaces the timeline instead, `--mode compound` adds one compound clip that holds the file's tracks, and `--mode media` adds only the media.
+  - A file vidcut wrote brings its media as its project has them, with their colors and marks, into a bin named after the file. A file the pool has keeps its pool item.
   - `--flatten` decomposes the compound clips it holds into their clips, and `vidcut edit decompose --clips c5` decomposes one later (deviation X9).
   - An `.otioz`'s media unpack next to it, into a folder named after it (`cut/media/…`), or into `--unpack DIR`. A dry run unpacks nothing and says what it would.
   - Media that moved: paths relative to the file and a project folder moved with the file are found by themselves. Otherwise `--search /mnt/footage` looks for them by file name, subfolders too. Missing media fail the import (exit 7) with the list of files.

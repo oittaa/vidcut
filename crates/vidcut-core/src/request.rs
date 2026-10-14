@@ -286,9 +286,10 @@ pub enum Request {
     /// Import an OpenTimelineIO timeline: an `.otio` file, an `.otioz` bundle
     /// (its media are unpacked first) or an `.otiod` bundle folder, as other
     /// editors write them. Its media join the pool, and its tracks go on V1,
-    /// V2, … and A1, A2, … after the last clip (or instead of the timeline,
-    /// with `replace`). An empty timeline takes the file's frame rate and start
-    /// timecode. What can't be imported is listed in `warnings`.
+    /// V2, … and A1, A2, … as `mode` says. An empty timeline takes the file's
+    /// frame rate and start timecode. The media of a project vidcut wrote
+    /// come as it has them, in a bin named after the file. What can't be
+    /// imported is listed in `warnings`.
     #[serde(rename = "timeline.import")]
     TimelineImport {
         /// The `.otio`, `.otioz` or `.otiod` file, read by the process that
@@ -298,9 +299,8 @@ pub enum Request {
         /// The OTIO document itself, instead of `path`.
         #[serde(default)]
         otio: Option<serde_json::Value>,
-        /// Replace the timeline's clips, markers and marks.
         #[serde(default)]
-        replace: bool,
+        mode: ImportMode,
         /// Directories to look in, by file name, for media missing at its path.
         #[serde(default)]
         search: Vec<PathBuf>,
@@ -1019,6 +1019,21 @@ pub struct ExportParams {
     /// see `jobs.*`).
     #[serde(default)]
     pub background: bool,
+}
+
+/// Where `timeline.import` puts the timeline (deviation X9).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportMode {
+    /// Its tracks after the last clip.
+    #[default]
+    Append,
+    /// Its tracks instead of the timeline's clips, markers and marks.
+    Replace,
+    /// One compound clip after the last clip, holding its tracks.
+    Compound,
+    /// Only its media, into the pool.
+    Media,
 }
 
 // Spec §4.1.
