@@ -1029,22 +1029,9 @@ pub(crate) fn open_video(
             unsafe { (*ctx.as_mut_ptr()).hw_frames_ctx = frames };
             Some(up)
         }
-        // Frames from memory, encoded on that GPU: QSV on a device of its
-        // own on top of one there (`hw::Device::qsv`: VA-API's on Linux,
-        // which keeps libva's messages in FFmpeg's log, Direct3D 11's on
-        // Windows), AMF on Direct3D 11's on that adapter.
         Some(on) if matches!(enc.kind, EncoderChoice::Qsv | EncoderChoice::Amf) => {
-            let device = match enc.kind {
-                EncoderChoice::Qsv => crate::hw::Device::qsv(on)?,
-                _ => crate::hw::Device::of_type(ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_D3D11VA, on)?,
-            };
+            on_device(&mut ctx, enc.kind, on)?;
             ctx.set_format(enc.pixel);
-            // SAFETY: the context takes a reference of its own.
-            let device = unsafe { ffi::av_buffer_ref(device.0) };
-            if device.is_null() {
-                return Err(Error::Invalid("no memory for a GPU device".into()));
-            }
-            unsafe { (*ctx.as_mut_ptr()).hw_device_ctx = device };
             None
         }
         _ => {
@@ -1147,6 +1134,28 @@ fn pass_options(enc: &VideoEncoder, pass: Pass<'_>) -> Vec<(String, String)> {
         _ => {}
     }
     options
+}
+
+/// Puts a QSV or AMF encoder on GPU `on`, for frames from memory: QSV on a
+/// device of its own on top of one there (`hw::Device::qsv`: VA-API's on
+/// Linux, which keeps libva's messages in FFmpeg's log, Direct3D 11's on
+/// Windows), AMF on Direct3D 11's on that adapter.
+pub(crate) fn on_device(
+    ctx: &mut encoder::video::Video,
+    kind: EncoderChoice,
+    on: &str,
+) -> Result<()> {
+    let device = match kind {
+        EncoderChoice::Qsv => crate::hw::Device::qsv(on)?,
+        _ => crate::hw::Device::of_type(ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_D3D11VA, on)?,
+    };
+    // SAFETY: the context takes a reference of its own.
+    let device = unsafe { ffi::av_buffer_ref(device.0) };
+    if device.is_null() {
+        return Err(Error::Invalid("no memory for a GPU device".into()));
+    }
+    unsafe { (*ctx.as_mut_ptr()).hw_device_ctx = device };
+    Ok(())
 }
 
 /// Test-encodes a few frames to see whether a GPU encoder works.
