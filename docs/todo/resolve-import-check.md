@@ -19,8 +19,8 @@ Import vidcut's `.otio` and `.otioz` files into the current free and Studio vers
 - Odd: Resolve's API import of its own export of such a timeline failed with `importSourceClips` on, and rebuilt it with it off. The cause wasn't found (not its generators, Text+, compound clips, transitions or speeds).
 
 **Studio 21.1.1, File > Import > Timeline:**
-- `.otio`: as through the API; clips at 200%, 50%, reversed and frozen show vidcut's frames, but for the 200% clip starting at an odd source frame (deviation X9).
-- `.otioz`: the media unpack into a folder named after the bundle, and link.
-- Media elsewhere: found without asking in a renamed folder next to the file; otherwise Resolve asks for a folder, searches its subfolders, and links.
+- `.otio` imports as through the API. Speed clips show the same frames as in vidcut, with one exception (deviation X9).
+- `.otioz` unpacks next to the bundle and links.
+- If the media moved, Resolve asks for a folder and finds them in it. A renamed folder next to the file is found without asking.
 
 **Still open:** the free version.
