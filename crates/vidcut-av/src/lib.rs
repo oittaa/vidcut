@@ -11,6 +11,7 @@ pub mod cuda;
 pub mod decode;
 pub mod error;
 pub mod export;
+pub mod first;
 pub mod fixture;
 pub mod gpus;
 pub mod hdr;

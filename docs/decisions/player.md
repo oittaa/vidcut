@@ -20,6 +20,8 @@
 
 vidcut-av starts them as it starts its other threads (`std::thread::Builder`, named `vidcut-…`). Someone watches what they make, so they keep their priority: the app's own rule (`threads::spawn`, gui.md §9) gives interactive work no other.
 
+**The player comes first** (`vidcut_av::first`). While a player plays, or decodes the picture its viewer waits for, the app's jobs stop decoding between frames: exports, proxies, the filmstrip and analyses. They go on when it stops. They share the GPU's decoder with the player, and no thread priority reaches that.
+
 ## 2. Requests: one wanted state, merged and cancelled
 
 - **Wanted state.** One mutex holds what is wanted: the plan, the mode (paused at a frame, or playing from a sample at a speed), lane gains, the mute and audio scrubbing. A request changes it and wakes both threads, which read the newest. Requests that arrive while a thread works merge into the last: nothing queues.
