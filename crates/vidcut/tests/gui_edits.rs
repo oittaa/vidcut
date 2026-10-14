@@ -162,11 +162,15 @@ impl Gui {
     }
 
     fn click(&mut self, at: Pos2) {
+        self.click_with(at, egui::PointerButton::Primary);
+    }
+
+    fn click_with(&mut self, at: Pos2, button: egui::PointerButton) {
         for pressed in [true, false] {
             self.harness.event(egui::Event::PointerMoved(at));
             self.harness.event(egui::Event::PointerButton {
                 pos: at,
-                button: egui::PointerButton::Primary,
+                button,
                 pressed,
                 modifiers: Modifiers::NONE,
             });
@@ -370,5 +374,17 @@ fn the_numbered_images_question_takes_the_keys() {
         gui.call("media.list", json!({})).as_array().unwrap().len(),
         1
     );
+    gui.quit();
+}
+
+/// A clip's right-click menu used to close the frame after it opened.
+#[test]
+fn a_clips_menu_stays_open() {
+    let mut gui = Gui::new();
+    gui.click_with(gui.at("V1", 90, 6.0), egui::PointerButton::Secondary);
+    for _ in 0..5 {
+        gui.harness.step();
+    }
+    assert!(egui::Popup::is_any_open(&gui.harness.ctx));
     gui.quit();
 }
