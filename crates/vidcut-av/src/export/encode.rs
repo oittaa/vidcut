@@ -1009,7 +1009,29 @@ impl Upload {
     }
 }
 
-/// Opens a video encoder for `enc` at `width`×`height` and `fps`.
+/// Whether an encoder of `kind` on `device` opens on `decoder`'s device,
+/// for the frames fitted there ([`open_video`]'s `shared`): VAAPI on a
+/// VA-API decoder's render node, AMF on a Direct3D 11 decoder's adapter.
+pub(crate) fn shares(
+    kind: EncoderChoice,
+    device: Option<&str>,
+    decoder: &crate::hw::GpuDecoder,
+) -> bool {
+    pairs(kind, decoder.kind()) && device == Some(decoder.on())
+}
+
+/// Whether an encoder of `kind` takes the frames of a `decoder` on its
+/// device.
+fn pairs(kind: EncoderChoice, decoder: crate::hw::Kind) -> bool {
+    matches!(
+        (kind, decoder),
+        (EncoderChoice::Vaapi, crate::hw::Kind::Vaapi)
+            | (EncoderChoice::Amf, crate::hw::Kind::D3d11va)
+    )
+}
+
+/// Opens a video encoder for `enc` at `width`×`height`, its frames timed
+/// in `times`' time base and its frame rate set where `times` gives one.
 /// Returns the opened encoder and, for VAAPI (and AMF on `shared`'s
 /// device), the frames to upload to. With `gpu_frames` (NVENC), the
 /// encoder takes frames in GPU memory of that frames context. VAAPI opens
@@ -1021,7 +1043,7 @@ pub(crate) fn open_video(
     enc: &VideoEncoder,
     width: u32,
     height: u32,
-    fps: ffmpeg::Rational,
+    (time_base, rate): (ffmpeg::Rational, Option<ffmpeg::Rational>),
     global_header: bool,
     gpu_frames: Option<*mut ffi::AVBufferRef>,
     shared: Option<&crate::hw::GpuDecoder>,
@@ -1042,8 +1064,10 @@ pub(crate) fn open_video(
         .ctx(|| format!("creating {}", enc.name))?;
     ctx.set_width(width);
     ctx.set_height(height);
-    ctx.set_time_base(fps.invert());
-    ctx.set_frame_rate(Some(fps));
+    ctx.set_time_base(time_base);
+    if let Some(r) = rate {
+        ctx.set_frame_rate(Some(r));
+    }
     crate::color::tag(unsafe { ctx.as_mut_ptr() }, enc.hdr);
     if enc.hdr.is_some() && !enc.metadata.is_empty() {
         unsafe { crate::hdr::set_on_encoder(ctx.as_mut_ptr(), &enc.metadata)? };
@@ -1261,7 +1285,7 @@ fn test_encode(enc: &VideoEncoder) -> Result<()> {
         enc,
         w,
         h,
-        ffmpeg::Rational(30, 1),
+        (ffmpeg::Rational(1, 30), Some(ffmpeg::Rational(30, 1))),
         false,
         None,
         None,
@@ -1417,4 +1441,31 @@ pub fn detect(vulkan: bool) -> Availability {
         }
     }
     Availability { encoders }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pairs;
+    use crate::hw::Kind;
+    use vidcut_core::export::EncoderChoice;
+
+    #[test]
+    fn vaapi_pairs_with_va_api() {
+        assert!(pairs(EncoderChoice::Vaapi, Kind::Vaapi));
+    }
+
+    #[test]
+    fn amf_pairs_with_direct3d_11() {
+        assert!(pairs(EncoderChoice::Amf, Kind::D3d11va));
+    }
+
+    #[test]
+    fn videotoolbox_doesnt_pair_with_its_decoder() {
+        assert!(!pairs(EncoderChoice::VideoToolbox, Kind::VideoToolbox));
+    }
+
+    #[test]
+    fn nvenc_doesnt_pair_with_nvdec() {
+        assert!(!pairs(EncoderChoice::Nvenc, Kind::Nvdec));
+    }
 }

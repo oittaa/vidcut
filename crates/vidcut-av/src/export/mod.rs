@@ -717,6 +717,8 @@ fn encode(
 ) -> Result<Report> {
     let started = Instant::now();
     let fps = ffmpeg::Rational(plan.fps.num() as i32, plan.fps.den() as i32);
+    // The encoder's time base, one tick a frame, and its frame rate.
+    let times = (fps.invert(), Some(fps));
     let mut octx = format::output_as(part, settings.container.muxer())
         .ctx(|| format!("creating {}", output.display()))?;
     let global_header = octx.format().flags().contains(format::Flags::GLOBAL_HEADER);
@@ -761,7 +763,7 @@ fn encode(
                         &enc,
                         w,
                         h,
-                        fps,
+                        times,
                         global_header,
                         Some(frames.as_ptr()),
                         None,
@@ -774,15 +776,8 @@ fn encode(
                 // VAAPI on the decoder's own device, where the decoder is
                 // VA-API on its render node, and AMF where it is Direct3D 11
                 // on its adapter: frames fitted on the GPU go to it there.
-                let shared = decoder.filter(|d| {
-                    let pair = matches!(
-                        (enc.kind, d.kind()),
-                        (EncoderChoice::Vaapi, crate::hw::Kind::Vaapi)
-                            | (EncoderChoice::Amf, crate::hw::Kind::D3d11va)
-                    );
-                    pair && enc.device.as_deref() == Some(d.on())
-                });
-                match encode::open_video(&enc, w, h, fps, global_header, None, shared, pass) {
+                let shared = decoder.filter(|d| encode::shares(enc.kind, enc.device.as_deref(), d));
+                match encode::open_video(&enc, w, h, times, global_header, None, shared, pass) {
                     Ok(o) => {
                         opened = Some((enc, o, None, shared.map(|d| d.kind().place())));
                         break;
@@ -826,7 +821,7 @@ fn encode(
                         stats: &stats,
                         buffer: buffer.as_deref(),
                     };
-                    encode::open_video(&enc, w, h, fps, global_header, None, None, second)?
+                    encode::open_video(&enc, w, h, times, global_header, None, None, second)?
                 }
                 _ => (encoder, vaapi),
             };
@@ -836,21 +831,11 @@ fn encode(
             ost.set_parameters(&encoder);
             ost.set_time_base(fps.invert());
             ost.set_avg_frame_rate(fps);
-            let (pixel, output) = match (gpu, fit_on) {
-                (Some((device, frames)), _) => (gpu_pixel(&enc), Output::Cuda { device, frames }),
-                (None, Some(place)) => {
-                    let into = match &vaapi {
-                        // AMF takes Direct3D 11's frames of its own frames
-                        // only. SAFETY: the encoder's live frames.
-                        Some(up) if enc.kind == EncoderChoice::Amf => {
-                            Some(unsafe { crate::hw::Frames::of(up.frames)? })
-                        }
-                        _ => None,
-                    };
-                    (enc.pixel, Output::FittedOnGpu { place, into })
-                }
-                (None, None) => (enc.pixel, Output::Fitted),
+            let pixel = match gpu {
+                Some(_) => gpu_pixel(&enc),
+                None => enc.pixel,
             };
+            let output = Output::for_encoder(enc.kind, gpu, fit_on, vaapi.as_ref())?;
             let mut frames = VideoFrames::new(&plan.video, plan.fps, w, h, pixel, enc.hdr)
                 .output(output)
                 .with_dynamic(enc.dynamic)

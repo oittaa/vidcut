@@ -3,6 +3,7 @@
 
 use std::path::Path;
 
+use vidcut_core::export::EncoderChoice;
 use vidcut_core::model::Hdr;
 
 use super::normalize::{Normalizer, Relayout, down, shown_size};
@@ -38,6 +39,34 @@ pub(crate) enum Output {
         device: crate::cuda::CudaDevice,
         frames: crate::cuda::CudaFrames,
     },
+}
+
+impl Output {
+    /// The output for an encoder of `kind` opened on `gpu`, NVENC's CUDA
+    /// device and frames, or on a decoder's device whose frames are on
+    /// `fit_on`, with `upload` its own frames there. `Fitted` otherwise.
+    pub(crate) fn for_encoder(
+        kind: EncoderChoice,
+        gpu: Option<(crate::cuda::CudaDevice, crate::cuda::CudaFrames)>,
+        fit_on: Option<Place>,
+        upload: Option<&super::encode::Upload>,
+    ) -> Result<Output> {
+        Ok(match (gpu, fit_on) {
+            (Some((device, frames)), _) => Output::Cuda { device, frames },
+            (None, Some(place)) => {
+                let into = match upload {
+                    // AMF takes Direct3D 11's frames of its own frames
+                    // only. SAFETY: the encoder's live frames.
+                    Some(up) if kind == EncoderChoice::Amf => {
+                        Some(unsafe { crate::hw::Frames::of(up.frames)? })
+                    }
+                    _ => None,
+                };
+                Output::FittedOnGpu { place, into }
+            }
+            (None, None) => Output::Fitted,
+        })
+    }
 }
 
 /// A source's frames on the GPU: the scaler that fits them there, and how
