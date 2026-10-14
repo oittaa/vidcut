@@ -201,25 +201,25 @@ pub struct GpuDecoder {
     cuda: Option<CudaDevice>,
     /// Its GPU's PCI vendor, where known (Direct3D 11's adapter's).
     vendor: Option<u32>,
-    /// Codecs left to the CPU ([`without`](Self::without)).
-    left: Vec<ffmpeg::codec::Id>,
+    /// Codecs left to the CPU, and why ([`without`](Self::without)).
+    left: Vec<(ffmpeg::codec::Id, &'static str)>,
 }
 
 /// Where a job's pieces decode: an export's or a proxy's.
-#[derive(Clone, Copy)]
-pub enum Decoding<'a> {
+#[derive(Clone)]
+pub enum Decoding {
     /// NVENC's on NVDEC, so their frames stay on the GPU; the rest on the
     /// CPU.
     Nvdec,
     /// On this GPU where it decodes their streams; NVENC's on NVDEC.
-    Gpu(&'a GpuDecoder),
+    Gpu(GpuDecoder),
     /// All on the CPU, NVENC's too.
     Cpu,
 }
 
-impl<'a> Decoding<'a> {
+impl Decoding {
     /// The GPU decoder for pieces that aren't NVENC's, when there is one.
-    pub fn decoder(self) -> Option<&'a GpuDecoder> {
+    pub fn decoder(&self) -> Option<&GpuDecoder> {
         match self {
             Self::Gpu(d) => Some(d),
             _ => None,
@@ -227,7 +227,7 @@ impl<'a> Decoding<'a> {
     }
 
     /// Whether NVENC's pieces decode on NVDEC.
-    pub fn nvdec(self) -> bool {
+    pub fn nvdec(&self) -> bool {
         !matches!(self, Self::Cpu)
     }
 }
@@ -298,22 +298,29 @@ impl GpuDecoder {
         self.kind
     }
 
-    /// Whether it decodes `codec`, unless left to the CPU
-    /// ([`without`](Self::without)) or not decoded right, as far as known.
+    /// Why it leaves `codec` to the CPU, when it does: left to it
+    /// ([`without`](Self::without)), or not decoded right, as far as known.
     /// AMD's Direct3D 11 decoder loses its way in H.264 sought into an open
     /// GOP (a keyframe that isn't IDR): some frames on, it shows one picture
     /// over and over, where NVIDIA's and VA-API on Intel decode on. The CPU
     /// decodes H.264 there.
-    pub fn decodes(&self, codec: ffmpeg::codec::Id) -> bool {
-        !(self.kind == Kind::D3d11va
+    pub fn why_not(&self, codec: ffmpeg::codec::Id) -> Option<&'static str> {
+        if self.kind == Kind::D3d11va
             && self.vendor == Some(crate::gpus::AMD)
-            && codec == ffmpeg::codec::Id::H264)
-            && !self.left.contains(&codec)
+            && codec == ffmpeg::codec::Id::H264
+        {
+            Some("AMD's Direct3D 11 decoder loses its way in H.264 after a seek")
+        } else {
+            self.left
+                .iter()
+                .find(|(c, _)| *c == codec)
+                .map(|(_, why)| *why)
+        }
     }
 
-    /// The same decoder, leaving `codec` to the CPU.
-    pub fn without(mut self, codec: ffmpeg::codec::Id) -> Self {
-        self.left.push(codec);
+    /// The same decoder, leaving `codec` to the CPU for the reason `why`.
+    pub fn without(mut self, codec: ffmpeg::codec::Id, why: &'static str) -> Self {
+        self.left.push((codec, why));
         self
     }
 
@@ -321,7 +328,7 @@ impl GpuDecoder {
     /// driver lists the profiles it decodes (VA-API's; Direct3D 11's video
     /// device's; NVDEC's capabilities in 4:2:0): H.264 High, HEVC Main or
     /// Main 10, VP9 profile 0 or 2, AV1 Main. `None` where the driver
-    /// doesn't say. What [`decodes`](Self::decodes) knows of streams
+    /// doesn't say. What [`why_not`](Self::why_not) knows of streams
     /// decoded wrong is apart from this.
     pub fn hardware_decodes(&self, codec: ffmpeg::codec::Id, bits: u8) -> Option<bool> {
         use ffmpeg::codec::Id;
@@ -402,10 +409,23 @@ impl GpuDecoder {
         {
             return decoder.clone();
         }
-        let decoder = match std::env::var("VIDCUT_HWDEC") {
+        let (decoder, how) = match std::env::var("VIDCUT_HWDEC") {
             Ok(asked) => Self::asked(&asked),
-            Err(_) => gpu.and_then(|g| Self::on_gpu(&g).ok()),
+            Err(_) => match &gpu {
+                Some(g) => match Self::on_gpu(g) {
+                    Ok(d) => (Some(d), format!("on {} ({}), the GPU in use", g.name, g.id)),
+                    Err(e) => (
+                        None,
+                        format!("{} ({}), the GPU in use, won't decode: {e}", g.name, g.id),
+                    ),
+                },
+                None => (None, "no GPU is listed here".into()),
+            },
         };
+        match &decoder {
+            Some(d) => crate::debug!("decoding", "the GPU's decoder is {d}, {how}"),
+            None => crate::debug!("decoding", "no GPU decoder: {how}; the CPU decodes"),
+        }
         *best = Some((id, decoder.clone()));
         decoder
     }
@@ -435,10 +455,28 @@ impl GpuDecoder {
         Err(Error::Invalid(format!("{} decodes nothing here", gpu.name)))
     }
 
-    /// The decoder `VIDCUT_HWDEC` names: `kind[:on]`, or `none`.
-    fn asked(asked: &str) -> Option<Self> {
+    /// The decoder `VIDCUT_HWDEC` names (`kind[:on]`, or `none`), and how
+    /// it came.
+    fn asked(asked: &str) -> (Option<Self>, String) {
         let (kind, on) = asked.split_once(':').unwrap_or((asked, ""));
-        Self::open(Kind::named(kind)?, on).ok()
+        match Kind::named(kind).map(|k| Self::open(k, on)) {
+            Some(Ok(d)) => (Some(d), format!("as VIDCUT_HWDEC={asked} asks")),
+            Some(Err(e)) => (None, format!("VIDCUT_HWDEC={asked} won't open: {e}")),
+            None => (None, format!("VIDCUT_HWDEC={asked} asks for none")),
+        }
+    }
+}
+
+/// Its kind and where: `Direct3D 11 on adapter 1`, `VA-API on
+/// /dev/dri/renderD128`, `NVDEC`.
+impl std::fmt::Display for GpuDecoder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.kind.label())?;
+        match self.kind {
+            _ if self.on.is_empty() => Ok(()),
+            Kind::D3d11va => write!(f, " on adapter {}", self.on),
+            _ => write!(f, " on {}", self.on),
+        }
     }
 }
 
@@ -983,7 +1021,19 @@ impl Shrinker {
         let (frames, of) = frames_of(f)?;
         let input = (of, size);
         if shrinker.as_ref().is_none_or(|s| s.input != input) {
-            let scaling = Scaling::new(f, frames, size).ok();
+            let scaling = Scaling::new(f, frames, size)
+                .inspect_err(|e| {
+                    crate::debug!(
+                        "decoding",
+                        "{:?} frames {}x{} come down whole, not shrunk to {}x{} on the GPU: {e}",
+                        sw_format(f),
+                        f.width(),
+                        f.height(),
+                        size.0,
+                        size.1
+                    )
+                })
+                .ok();
             *shrinker = Some(Self { scaling, input });
         }
         let shrinker = shrinker.as_mut().expect("made above");
@@ -1000,7 +1050,11 @@ impl Shrinker {
                 Ok(small)
             }
             // The GPU failed it after all: these frames come down whole.
-            Err(_) => {
+            Err(e) => {
+                crate::debug!(
+                    "decoding",
+                    "shrinking on the GPU failed, frames come down whole from now on: {e}"
+                );
                 shrinker.scaling = None;
                 download(f)
             }

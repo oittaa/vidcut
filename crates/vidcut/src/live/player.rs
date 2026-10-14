@@ -67,9 +67,9 @@ pub struct Player {
     on_picture: Arc<dyn Fn() + Send + Sync>,
     /// Memory for the engine's pictures.
     budget: engine::Budget,
-    /// The renderer shows pictures NVDEC or VA-API decoded from GPU memory:
-    /// they stay there.
-    gpu_pictures: bool,
+    /// The decoders whose pictures the renderer shows from GPU memory: they
+    /// stay there.
+    gpu_pictures: Vec<vidcut_av::hw::Kind>,
     engine: Option<Arc<engine::Player>>,
     /// Whose plan the engine plays. The renderer shows the engine when
     /// that is the one shown.
@@ -90,13 +90,11 @@ pub struct Player {
     presenting: Option<(u64, Instant)>,
     muted: bool,
     scrubbing: bool,
-    /// Decode on the GPU (the GPU acceleration preference).
-    gpu: bool,
+    /// Where it decodes, as the preferences said last.
+    decoding: crate::preferences::GpuDecoding,
     /// The audio device the preferences name, its output made for it
     /// (`None`: the system's default).
     audio_device: Option<String>,
-    /// The GPU in use when the engine opened, by its id.
-    gpu_in_use: Option<String>,
     /// The device the engine's sound plays on.
     plays_on: PlaysOn,
     /// Why the sound doesn't play on the device chosen: none opened (the
@@ -108,10 +106,12 @@ impl Player {
     pub fn new(
         output: Option<MakeOutput>,
         budget: engine::Budget,
-        gpu_pictures: bool,
+        gpu_pictures: Vec<vidcut_av::hw::Kind>,
         renderer: Arc<dyn Renderer>,
         on_picture: Arc<dyn Fn() + Send + Sync>,
     ) -> Self {
+        let decoding = crate::preferences::gpu_decoding();
+        vidcut_av::debug!("decoding", "the player starts with {decoding}");
         Self {
             output,
             renderer,
@@ -129,9 +129,8 @@ impl Player {
             presenting: None,
             muted: false,
             scrubbing: true,
-            gpu: crate::preferences::gpu_decoding(),
+            decoding,
             audio_device: crate::preferences::audio_device(),
-            gpu_in_use: vidcut_av::gpus::in_use().map(|g| g.id),
             plays_on: PlaysOn::Default,
             audio_error: None,
         }
@@ -297,10 +296,8 @@ impl Player {
             // Moves the session makes by itself play no sound; on after.
             audio_scrubbing: false,
             on_picture: Some(self.on_picture.clone()),
-            hardware: self.gpu,
-            // The best this computer has (`VIDCUT_HWDEC` picks another).
-            gpu: None,
-            gpu_pictures: self.gpu_pictures,
+            hardware: self.decoding.on,
+            gpu_pictures: self.gpu_pictures.clone(),
         };
         self.audio_error = None;
         match engine::Player::new(plan.clone(), config(), make()) {
@@ -477,16 +474,29 @@ impl Player {
         }
     }
 
-    /// Decodes on the GPU or not as the preferences say (`gpu`: GPU
-    /// acceleration and decoding on); whether that changed. The engine
-    /// decodes its pictures anew, the one shown first.
-    pub fn follow_gpu(&mut self, gpu: bool) -> bool {
-        if self.gpu == gpu {
+    /// Decodes as the preferences say (`preferences::gpu_decoding`);
+    /// whether that changed. Turned on or off, the engine decodes its
+    /// pictures anew, the one shown first. Another GPU in use opens it anew
+    /// where it was paused, its decoder on that GPU.
+    pub fn follow_decoding(&mut self, decoding: crate::preferences::GpuDecoding) -> bool {
+        if self.decoding == decoding {
             return false;
         }
-        self.gpu = gpu;
-        if let Some(e) = &self.engine {
-            e.set_hardware(gpu);
+        let other_gpu = self.decoding.gpu != decoding.gpu;
+        vidcut_av::debug!(
+            "decoding",
+            "the preferences changed: {decoding}; the player {}",
+            if other_gpu {
+                "opens anew on the GPU in use"
+            } else {
+                "decodes its pictures anew"
+            }
+        );
+        self.decoding = decoding;
+        if other_gpu {
+            self.reopen();
+        } else if let Some(e) = &self.engine {
+            e.set_hardware(self.decoding.on);
         }
         true
     }
@@ -520,19 +530,6 @@ impl Player {
             return false;
         }
         self.audio_device = device;
-        self.reopen();
-        true
-    }
-
-    /// Decodes on the GPU in use (`gpus::in_use`, as the preferences
-    /// choose it); whether that changed. The engine opens anew, paused
-    /// where it was, its decoders on the new GPU.
-    pub fn follow_gpu_in_use(&mut self) -> bool {
-        let gpu = vidcut_av::gpus::in_use().map(|g| g.id);
-        if self.gpu_in_use == gpu {
-            return false;
-        }
-        self.gpu_in_use = gpu;
         self.reopen();
         true
     }
@@ -686,11 +683,4 @@ fn with_end(plan: &mut RenderPlan) {
     }
     plan.frames += 1;
     plan.range.1 += 1;
-}
-
-/// `VIDCUT_DEBUG_PLAYER=1` traces what the player and the viewer do to
-/// stderr.
-pub fn debug() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("VIDCUT_DEBUG_PLAYER").is_some())
 }

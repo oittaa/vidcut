@@ -132,7 +132,7 @@ impl Stills {
                     while let Ok(p) = ahead.recv() {
                         let started = std::time::Instant::now();
                         let r = p.run();
-                        if crate::live::debug() {
+                        if vidcut_av::debug() {
                             eprintln!(
                                 "[stills] cell {n}: window behind in {:.1} ms{}",
                                 started.elapsed().as_secs_f64() * 1000.0,
@@ -147,13 +147,13 @@ impl Stills {
                 format!("vidcut-stills-{n}"),
                 crate::threads::Work::Interactive,
                 move || {
-                    let mut on_gpu = crate::preferences::decoding_gpu();
-                    let mut renderer = cell_renderer(on_gpu.is_some());
+                    let mut decoding = crate::preferences::gpu_decoding();
+                    let mut renderer = cell_renderer(&decoding);
                     loop {
                         let mut job = match rx.recv_timeout(IDLE) {
                             Ok(job) => job,
                             Err(RecvTimeoutError::Timeout) => {
-                                renderer = cell_renderer(on_gpu.is_some());
+                                renderer = cell_renderer(&decoding);
                                 match rx.recv() {
                                     Ok(job) => job,
                                     Err(_) => return,
@@ -163,10 +163,10 @@ impl Stills {
                         };
                         // The preferences as each frame is asked for: a
                         // change reaches the two-up at once.
-                        let gpu = crate::preferences::decoding_gpu();
-                        if gpu != on_gpu {
-                            renderer = cell_renderer(gpu.is_some());
-                            on_gpu = gpu;
+                        let now = crate::preferences::gpu_decoding();
+                        if now != decoding {
+                            renderer = cell_renderer(&now);
+                            decoding = now;
                         }
                         let mut skipped = 0;
                         for newer in rx.try_iter() {
@@ -181,7 +181,7 @@ impl Stills {
                         let r = renderer
                             .rgba(&s.piece, s.floor, s.fps, s.width, s.height)
                             .map_err(|e| e.to_string());
-                        if crate::live::debug() {
+                        if vidcut_av::debug() {
                             let at = match &s.piece {
                                 VideoPiece::Source { source_frame, .. } => *source_frame,
                                 VideoPiece::Black { .. } => -1,
@@ -260,11 +260,11 @@ impl Stills {
     }
 }
 
-/// A renderer for a cell, decoding on the GPU the viewer decodes on while
-/// `on_gpu` (`gpu.decoding`).
-fn cell_renderer(on_gpu: bool) -> StillRenderer {
+/// A renderer for a cell, decoding as `decoding` says: on the GPU the
+/// viewer decodes on, on a decoder of its own, while the GPU decodes.
+fn cell_renderer(decoding: &crate::preferences::GpuDecoding) -> StillRenderer {
     let renderer = StillRenderer::with_budget(BUDGET);
-    match crate::preferences::timeline_decoder(on_gpu) {
+    match decoding.own_decoder() {
         Some(gpu) => renderer.decoding_on(gpu),
         None => renderer,
     }

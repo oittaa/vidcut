@@ -152,7 +152,7 @@ impl App {
             player: Some(live::PlayerConfig {
                 audio: Arc::new(audio_device),
                 budget: crate::preferences::player_budget(),
-                gpu_pictures: viewer.takes_gpu_pictures(),
+                gpu_pictures: viewer.gpu_pictures(),
             }),
             preview_error: None,
             renderer: port.clone(),

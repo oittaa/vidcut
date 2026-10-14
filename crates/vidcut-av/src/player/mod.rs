@@ -143,16 +143,15 @@ pub struct Config {
     /// is at lands (a display repaints), and when the prepared one does.
     pub on_picture: Option<Arc<dyn Fn() + Send + Sync>>,
     /// Decode on the GPU the streams it decodes (NVDEC, VA-API, Direct3D
-    /// 11: [`crate::hw::GpuDecoder::best`]), the frames copied down to
-    /// memory at their own size ([`set_hardware`](Player::set_hardware)).
+    /// 11, on the GPU in use: [`crate::hw::GpuDecoder::best`]), the frames
+    /// copied down to memory at their own size
+    /// ([`set_hardware`](Player::set_hardware)).
     pub hardware: bool,
-    /// The GPU to decode on when `hardware` is on; `None`: the best there
-    /// is.
-    pub gpu: Option<crate::hw::GpuDecoder>,
-    /// Pictures NVDEC or VA-API decodes stay in GPU memory (NV12, P010), for
-    /// a display that shows them from there ([`Memory::Cuda`],
-    /// [`Memory::Vaapi`]); kept ones take video memory then.
-    pub gpu_pictures: bool,
+    /// The decoders whose pictures stay in GPU memory (NV12, P010), for a
+    /// display that shows them from there ([`Memory::Cuda`],
+    /// [`Memory::Vaapi`], [`Memory::D3d11`]); kept ones take video memory
+    /// then.
+    pub gpu_pictures: Vec<crate::hw::Kind>,
 }
 
 impl Default for Config {
@@ -162,8 +161,7 @@ impl Default for Config {
             audio_scrubbing: true,
             on_picture: None,
             hardware: false,
-            gpu: None,
-            gpu_pictures: false,
+            gpu_pictures: Vec::new(),
         }
     }
 }
@@ -339,10 +337,8 @@ pub(crate) struct Shared {
     device: Arc<Mutex<Option<String>>>,
     /// The sample rate and channels the device was opened for.
     format: (u32, u16),
-    /// Pictures NVDEC decodes stay in GPU memory.
-    pub(crate) gpu_pictures: bool,
-    /// The GPU to decode on (`Config::gpu`).
-    pub(crate) gpu: Option<crate::hw::GpuDecoder>,
+    /// The decoders whose pictures stay in GPU memory.
+    pub(crate) gpu_pictures: Vec<crate::hw::Kind>,
     /// The video memory budget is half the GPU's.
     video_auto: AtomicBool,
     /// The GPU's memory, once the decode thread opened it.
@@ -355,21 +351,6 @@ const PATIENCE: Duration = Duration::from_secs(1);
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
-
-/// `VIDCUT_DEBUG_PLAYER` is set: trace what the engine decodes to stderr.
-pub(crate) fn tracing() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("VIDCUT_DEBUG_PLAYER").is_some())
-}
-
-macro_rules! trace {
-    ($($arg:tt)*) => {
-        if $crate::player::tracing() {
-            eprintln!("[player] {}", format_args!($($arg)*));
-        }
-    };
-}
-pub(crate) use trace;
 
 impl Shared {
     fn control(&self) -> MutexGuard<'_, Control> {
@@ -615,7 +596,6 @@ impl Player {
             device,
             format: (rate, channels),
             gpu_pictures: config.gpu_pictures,
-            gpu: config.gpu.clone(),
             video_auto: AtomicBool::new(config.budget.video.is_none()),
             gpu_memory: std::sync::OnceLock::new(),
         });

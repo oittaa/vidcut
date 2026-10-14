@@ -74,8 +74,8 @@ impl Shared {
 /// The viewer thread, and what the UI shows of it.
 pub struct Viewer {
     shared: Arc<Shared>,
-    /// It shows pictures in GPU memory (CUDA's, VA-API's) from there.
-    gpu_pictures: bool,
+    /// The decoders whose pictures it shows from GPU memory.
+    gpu_pictures: Vec<vidcut_av::hw::Kind>,
     thread: Option<JoinHandle<()>>,
     /// The egui texture of the target, and the target's generation.
     texture: Option<(u64, egui::TextureId)>,
@@ -102,9 +102,18 @@ impl Viewer {
             wake: Condvar::new(),
         });
         let gpu = Gpu::new(&render.device, &render.queue);
-        // Pictures in the memory of the GPU the player decodes on.
-        let gpu_pictures =
-            vidcut_av::hw::GpuDecoder::best().is_some_and(|d| gpu.takes_gpu_pictures(d.kind()));
+        let gpu_pictures = gpu.gpu_pictures();
+        let info = render.adapter.get_info();
+        vidcut_av::debug!(
+            "viewer",
+            "draws with wgpu on {:?}, {} ({:?}, driver {} {}); shows {gpu_pictures:?} \
+             pictures from GPU memory, uploads the rest",
+            info.backend,
+            info.name,
+            info.device_type,
+            info.driver,
+            info.driver_info
+        );
         let s = shared.clone();
         let thread = crate::threads::spawn(
             "vidcut-viewer",
@@ -120,10 +129,10 @@ impl Viewer {
         }
     }
 
-    /// Whether it shows the pictures the player's GPU decodes (NVDEC's,
-    /// VA-API's) from GPU memory, so the player may keep them there.
-    pub fn takes_gpu_pictures(&self) -> bool {
-        self.gpu_pictures
+    /// The decoders whose pictures it shows from GPU memory, so the player
+    /// may keep them there.
+    pub fn gpu_pictures(&self) -> Vec<vidcut_av::hw::Kind> {
+        self.gpu_pictures.clone()
     }
 
     pub fn handle(&self) -> ViewerHandle {
@@ -255,11 +264,8 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
             h.max(2) as u32,
         );
         let changed = drawn != Drawn::Same;
-        if changed && crate::live::debug() {
-            eprintln!(
-                "[viewer] drew {:?} at {w}x{h}",
-                shown.as_ref().map(|s| (s.frame, s.exact))
-            );
+        if changed && vidcut_av::debug() {
+            eprintln!("[viewer] drew {} at {w}x{h}", drew(shown.as_ref(), &screen));
         }
         if drawn == Drawn::Target {
             generation += 1;
@@ -298,4 +304,43 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
             repaint();
         }
     }
+}
+
+/// What the viewer drew, for `VIDCUT_DEBUG`: the frame, the picture's size,
+/// layout and colors, where it was, what decoded it and how it got on
+/// screen.
+fn drew(shown: Option<&vidcut_av::player::Shown>, screen: &Screen) -> String {
+    use vidcut_av::player::Memory;
+    let Some(s) = shown else {
+        return "nothing".into();
+    };
+    let p = &s.picture;
+    let how = match p.memory() {
+        Memory::Cpu => "uploaded",
+        _ if screen.shared() => "shown from GPU memory",
+        _ => "copied down and uploaded",
+    };
+    let c = p.colors();
+    let hdr = c.hdr.map_or(String::new(), |h| format!(", {h:?}"));
+    let range = if c.full_range { "full" } else { "video" };
+    let turned = match p.rotation() {
+        0 => String::new(),
+        r => format!(", turned {r}°"),
+    };
+    let late = if s.exact {
+        ""
+    } else {
+        " (still the picture before it)"
+    };
+    format!(
+        "frame {}{late}: {}x{} {:?}, {:?} {range} range{hdr}{turned}, in {:?} memory, \
+         decoded by {}, {how}",
+        s.frame,
+        p.width(),
+        p.height(),
+        p.layout(),
+        c.matrix,
+        p.memory(),
+        p.decoder().map_or("nothing (black)", |d| d.name()),
+    )
 }

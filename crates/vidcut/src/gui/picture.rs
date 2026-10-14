@@ -173,18 +173,21 @@ impl Gpu {
         }
     }
 
-    /// Whether it may show pictures `kind` decoded from GPU memory, so a
-    /// player can keep them there for it: NVDEC's where it shares memory
-    /// with CUDA, VA-API's where it imports DMA-BUFs, Direct3D 11's where it
+    /// The decoders whose pictures it may show from GPU memory, so a player
+    /// can keep them there for it: NVDEC's where it shares memory with
+    /// CUDA, VA-API's where it imports DMA-BUFs, Direct3D 11's where it
     /// imports their textures. Those it can't take after all (on another
     /// GPU, a surface it won't import) are copied down to be shown.
-    pub fn takes_gpu_pictures(&self, kind: vidcut_av::hw::Kind) -> bool {
+    pub fn gpu_pictures(&self) -> Vec<vidcut_av::hw::Kind> {
         use vidcut_av::hw::Kind;
-        match kind {
-            Kind::Nvdec => self.shares,
-            Kind::Vaapi => self.dma_buf,
-            Kind::D3d11va => self.d3d11,
-        }
+        [
+            (Kind::Nvdec, self.shares),
+            (Kind::Vaapi, self.dma_buf),
+            (Kind::D3d11va, self.d3d11),
+        ]
+        .into_iter()
+        .filter_map(|(kind, takes)| takes.then_some(kind))
+        .collect()
     }
 
     /// Whether it imports VA-API's surfaces (DMA-BUFs) to show pictures in
@@ -281,7 +284,7 @@ impl Gpu {
 
     /// Whether pictures in CUDA memory show from there: it shares memory,
     /// and CUDA's GPU is its own. Opens CUDA, unlike
-    /// [`takes_gpu_pictures`](Self::takes_gpu_pictures).
+    /// [`gpu_pictures`](Self::gpu_pictures).
     pub fn shares_with_cuda(&self) -> bool {
         self.shares && self.cuda().is_ok()
     }

@@ -222,7 +222,7 @@ pub fn write(
     dest: &Path,
     total: Option<u64>,
     encoders: &[ProxyEncoder],
-    decoding: crate::hw::Decoding<'_>,
+    decoding: &crate::hw::Decoding,
 ) -> Result<WrittenProxy> {
     crate::init();
     if width < 2 || height < 2 || !width.is_multiple_of(2) || !height.is_multiple_of(2) {

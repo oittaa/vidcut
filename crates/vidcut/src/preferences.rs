@@ -55,50 +55,72 @@ pub fn audio_device() -> Option<String> {
         .filter(|d| !d.is_empty())
 }
 
-/// Whether the GPU decodes too (`gpu.decoding`, while `gpu.acceleration`
-/// is on): in the viewer, exports, proxies, the timeline's tiles and the
-/// two-up.
-pub fn gpu_decoding() -> bool {
-    load().map_or(true, |p| p.gpu.acceleration && p.gpu.decoding)
+/// Where decoding happens, as the preferences say ([`gpu_decoding`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GpuDecoding {
+    /// The GPU decodes the streams it can (`gpu.acceleration` and
+    /// `gpu.decoding` on), the CPU the rest. Off, the CPU decodes
+    /// everything.
+    pub on: bool,
+    /// The GPU in use (`gpu.device`, else the best this computer has), by
+    /// its id; `None` where no GPU is listed.
+    pub gpu: Option<String>,
 }
 
-/// Where exports and proxies decode, as the preferences say: all on the
-/// CPU while `gpu.decoding` is off; otherwise on `decoder`, the GPU the
-/// viewer takes ([`gpu_decoder`]), and NVENC's pieces on NVDEC (also
-/// without one).
-pub fn decoding(decoder: Option<&vidcut_av::hw::GpuDecoder>) -> vidcut_av::hw::Decoding<'_> {
-    match decoder {
-        _ if !gpu_decoding() => vidcut_av::hw::Decoding::Cpu,
-        Some(d) => vidcut_av::hw::Decoding::Gpu(d),
-        None => vidcut_av::hw::Decoding::Nvdec,
+/// Where decoding happens now, the one place that says so. The viewer's
+/// player decodes on the GPU in use (`GpuDecoder::best`); exports,
+/// proxies, the timeline's tiles and the two-up on a decoder of their own
+/// there ([`GpuDecoding::own_decoder`]). Reading it opens no decoder:
+/// whatever keeps one compares this and makes another when it changes. A
+/// broken preferences file decodes as the defaults do, on the GPU.
+pub fn gpu_decoding() -> GpuDecoding {
+    let on = load().map_or(true, |p| p.gpu.acceleration && p.gpu.decoding);
+    GpuDecoding {
+        on,
+        gpu: vidcut_av::gpus::in_use().map(|g| g.id),
     }
 }
 
-/// The GPU that decodes, by its id, while `gpu.decoding` is on (empty
-/// where no GPU is listed); `None` while the CPU decodes. Workers that keep
-/// a decoder make another when this changes.
-pub fn decoding_gpu() -> Option<String> {
-    gpu_decoding().then(|| vidcut_av::gpus::in_use().map(|g| g.id).unwrap_or_default())
+/// For `VIDCUT_DEBUG`: on or off, and the GPU in use by its name and id.
+impl std::fmt::Display for GpuDecoding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.on {
+            "GPU decoding on"
+        } else {
+            "GPU decoding off, the CPU decodes everything"
+        })?;
+        match &self.gpu {
+            Some(id) => {
+                let name = vidcut_av::gpus::find(vidcut_av::gpus::list(), id)
+                    .map_or("", |g| g.name.as_str());
+                write!(f, "; the GPU in use is {name} ({id})")
+            }
+            None => f.write_str("; no GPU is listed here"),
+        }
+    }
 }
 
-/// The GPU decoder the timeline's pictures (tiles, the two-up) decode on
-/// while `on_gpu`: the viewer's, on a stream or device of their own
-/// (`GpuDecoder::own`), so they don't wait in line with playback; `None`
-/// to decode on the CPU.
-pub fn timeline_decoder(on_gpu: bool) -> Option<vidcut_av::hw::GpuDecoder> {
-    on_gpu
-        .then(gpu_decoder)
-        .flatten()
-        .and_then(|d| d.own().ok())
-}
+impl GpuDecoding {
+    /// A decoder of its own on the GPU in use (`GpuDecoder::own`): on the
+    /// viewer's, work beside playback would wait in line with it. `None`
+    /// while the CPU decodes, or where no GPU decodes.
+    pub fn own_decoder(&self) -> Option<vidcut_av::hw::GpuDecoder> {
+        self.on
+            .then(vidcut_av::hw::GpuDecoder::best)
+            .flatten()
+            .and_then(|d| d.own().ok())
+    }
 
-/// The GPU decoder the viewer takes (`GpuDecoder::best`: on the GPU in
-/// use). Exports, proxies, the timeline's tiles and the two-up decode on
-/// the same GPU, on a stream or device of their own (`GpuDecoder::own`).
-/// `None` without one; callers check [`gpu_decoding`].
-pub fn gpu_decoder() -> Option<vidcut_av::hw::GpuDecoder> {
-    let _ = load();
-    vidcut_av::hw::GpuDecoder::best()
+    /// Where an export's or a proxy's pieces decode: on a decoder of their
+    /// own on the GPU in use, and NVENC's on NVDEC (also without one),
+    /// unless the CPU decodes everything.
+    pub fn for_jobs(&self) -> vidcut_av::hw::Decoding {
+        use vidcut_av::hw::Decoding;
+        if !self.on {
+            return Decoding::Cpu;
+        }
+        self.own_decoder().map_or(Decoding::Nvdec, Decoding::Gpu)
+    }
 }
 
 /// The viewer's memory for pictures: `player.memory_mb` and
