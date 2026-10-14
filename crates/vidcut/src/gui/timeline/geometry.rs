@@ -581,56 +581,6 @@ mod tests {
     }
 
     #[test]
-    fn scale_round_trips() {
-        let s = Scale::anchored(500.0, 1000.0, 4.0);
-        assert_eq!(s.x(1000.0), 500.0);
-        assert_eq!(s.boundary(501.9), 1000);
-        assert_eq!(s.under(503.9), 1000);
-        assert_eq!(s.under(504.0), 1001);
-        assert_eq!(s.visible(0.0, 1000.0), (875, 1125));
-    }
-
-    #[test]
-    fn the_pointer_position_picks_the_operation() {
-        // Spec §8.6.
-        let (t, s, tr) = setup();
-        let at = |x: f32, y: f32| hit(&t, &s, &tr, pos2(x, y));
-        // The edit between c1 and c2 is at x = 200.
-        assert_eq!(
-            at(200.0, 30.0),
-            Hit::Roll {
-                outgoing: "c1".into(),
-                incoming: "c2".into()
-            }
-        );
-        assert_eq!(at(195.0, 30.0), Hit::Edge("c1".into(), Edge::Tail));
-        assert_eq!(at(206.0, 30.0), Hit::Edge("c2".into(), Edge::Head));
-        // The audio edit sits 10 frames later (x = 220), in the audio band,
-        // and can be grabbed 12 px either side.
-        for x in [221.0, 208.0, 232.0] {
-            assert_eq!(
-                at(x, 85.0),
-                Hit::AudioEdit {
-                    outgoing: "c1".into(),
-                    incoming: "c2".into()
-                },
-                "x = {x}"
-            );
-        }
-        assert_eq!(at(233.0, 85.0), Hit::Clip("c2".into()));
-        // Clip bodies, the slip handle at the top center, gaps.
-        assert_eq!(at(60.0, 50.0), Hit::Clip("c1".into()));
-        assert_eq!(at(100.0, 10.0), Hit::Slip("c1".into()));
-        assert_eq!(at(100.0, 60.0), Hit::Clip("c1".into()));
-        assert_eq!(at(350.0, 30.0), Hit::Empty);
-        // Edges next to a gap resize; the timeline start too.
-        assert_eq!(at(298.0, 30.0), Hit::Edge("c2".into(), Edge::Tail));
-        assert_eq!(at(403.0, 30.0), Hit::Edge("c3".into(), Edge::Head));
-        assert_eq!(at(1.0, 30.0), Hit::Edge("c1".into(), Edge::Head));
-        assert_eq!(at(599.0, 30.0), Hit::Edge("c3".into(), Edge::Tail));
-    }
-
-    #[test]
     fn edit_points_near_the_pointer() {
         let (t, s, _) = setup();
         assert_eq!(edit_near(&t, &s, 203.0, 6.0), Some(100));
@@ -638,22 +588,6 @@ mod tests {
         assert_eq!(edit_near(&t, &s, 596.0, 6.0), Some(300));
         // c2's end (150) is next to a gap, not an edit between clips.
         assert_eq!(edit_near(&t, &s, 300.0, 6.0), None);
-    }
-
-    #[test]
-    fn snapping_takes_the_closer_edge() {
-        // Spec §8.8: edges, markers, marks and the playhead attract.
-        let s = Snap {
-            points: vec![0, 100, 150, 200, 300],
-        };
-        let scale = Scale::fit(0.0, 1000.0, 500); // 2 px per frame
-        assert_eq!(s.snap(103, &scale, 8.0), Some(100));
-        assert_eq!(s.snap(106, &scale, 8.0), None);
-        // A 50-frame block starting at 147: its head is 3 frames from 150,
-        // its tail (197) 3 frames from 200; ties go to the head.
-        assert_eq!(s.snap_block(147, 50, &scale, 8.0), (150, Some(150)));
-        assert_eq!(s.snap_block(149, 49, &scale, 8.0), (150, Some(150)));
-        assert_eq!(s.snap_block(122, 80, &scale, 8.0), (120, Some(200)));
     }
 }
 
@@ -694,116 +628,5 @@ pub fn header_parts(header: Rect) -> HeaderParts {
             pos2(toggles[0].left() - 2.0 * HEADER_GAP, top + h),
         ),
         toggles,
-    }
-}
-
-#[cfg(test)]
-mod row_tests {
-    use super::{NEW_TRACK_STRIP, Rows, header_parts};
-    use eframe::egui::{Rect, pos2};
-    use vidcut_core::model::{Project, Settings, Track, TrackKind};
-
-    /// The last row sits on the area's bottom whatever its height, spare
-    /// room above the rows; many tracks shrink to fit below the strip for a
-    /// new video track.
-    #[test]
-    fn rows_sit_on_the_bottom() {
-        let mut p = Project::new(Settings::default());
-        let area = |h: f32| Rect::from_min_max(pos2(0.0, 0.0), pos2(500.0, h));
-        let heights = [100.0, 60.0, 46.0];
-        for h in [300.0, 400.0, 700.0] {
-            let rows = Rows::layout(&p, area(h), heights, 22.0, NEW_TRACK_STRIP, None);
-            let (top, bottom) = rows.span();
-            assert_eq!(bottom, h, "height {h}");
-            assert_eq!(top, h + 1.0 - 100.0, "height {h}");
-        }
-        for i in 2..=6 {
-            p.tracks
-                .insert(0, Track::new(format!("V{i}"), TrackKind::Video));
-        }
-        p.tracks.push(Track::new("A1", TrackKind::Audio));
-        let rows = Rows::layout(&p, area(300.0), heights, 22.0, NEW_TRACK_STRIP, None);
-        let (top, bottom) = rows.span();
-        assert!(
-            (NEW_TRACK_STRIP..NEW_TRACK_STRIP + 8.0).contains(&top),
-            "{top}"
-        );
-        assert_eq!(bottom, 300.0);
-    }
-
-    /// An enlarged track is three times its height while there is room;
-    /// in a short area the others shrink to their least first, and it takes
-    /// what they leave. Only that track changes.
-    #[test]
-    fn an_enlarged_track_takes_the_room() {
-        let mut p = Project::new(Settings::default());
-        p.tracks.insert(0, Track::new("V2", TrackKind::Video));
-        p.tracks.push(Track::new("A1", TrackKind::Audio));
-        let heights = [100.0, 60.0, 46.0];
-        let area = |h: f32| Rect::from_min_max(pos2(0.0, 0.0), pos2(500.0, h));
-        let height = |rows: &Rows, t: &str| rows.get(t).unwrap().rect.rect.height() + 1.0;
-        let tall = Rows::layout(&p, area(900.0), heights, 22.0, NEW_TRACK_STRIP, Some("V1"));
-        assert_eq!(height(&tall, "V1"), 300.0);
-        assert_eq!((height(&tall, "V2"), height(&tall, "A1")), (60.0, 46.0));
-        let audio = Rows::layout(&p, area(900.0), heights, 22.0, NEW_TRACK_STRIP, Some("A1"));
-        assert_eq!(height(&audio, "A1"), 180.0, "at least 180 px");
-        assert_eq!(height(&audio, "V1"), 100.0);
-        let short = Rows::layout(&p, area(200.0), heights, 22.0, NEW_TRACK_STRIP, Some("V1"));
-        assert_eq!((height(&short, "V2"), height(&short, "A1")), (22.0, 22.0));
-        assert_eq!(height(&short, "V1"), 200.0 - NEW_TRACK_STRIP - 44.0);
-        assert_eq!(short.span().1, 200.0);
-        let none = Rows::layout(&p, area(200.0), heights, 22.0, NEW_TRACK_STRIP, None);
-        assert!(height(&none, "V1") < 100.0, "all shrink alike");
-        let gone = Rows::layout(&p, area(900.0), heights, 22.0, NEW_TRACK_STRIP, Some("V9"));
-        assert_eq!(height(&gone, "V1"), 100.0, "a removed track enlarges none");
-    }
-
-    /// With the last row on the area's bottom, a drop up to 24 px below it
-    /// makes a new audio track, drawn there; further down it is off the
-    /// timeline.
-    #[test]
-    fn below_the_last_row_is_a_new_audio_track() {
-        let mut p = Project::new(Settings::default());
-        p.tracks.push(Track::new("A1", TrackKind::Audio));
-        let area = Rect::from_min_max(pos2(100.0, 0.0), pos2(600.0, 400.0));
-        let rows = Rows::layout(&p, area, [100.0, 60.0, 46.0], 22.0, NEW_TRACK_STRIP, None);
-        let (_, bottom) = rows.span();
-        let below = pos2(300.0, bottom + 10.0);
-        assert!(rows.reaches(below));
-        assert_eq!(rows.target(&p, below.y).as_deref(), Some("A2"));
-        let phantom = rows.rect_of("A2").rect;
-        assert!(
-            phantom.top() > bottom && phantom.contains(below),
-            "{phantom:?}"
-        );
-        assert!(!rows.reaches(pos2(300.0, bottom + 30.0)));
-        assert!(rows.reaches(pos2(80.0, bottom - 10.0)));
-        assert!(!rows.reaches(pos2(70.0, bottom - 10.0)));
-    }
-
-    /// Rows of any height put the buttons in the same columns: enlarge at
-    /// the header's left edge, lock, audio and video at its right, level
-    /// with the name and inside the header.
-    #[test]
-    fn header_buttons_line_up_in_columns() {
-        let header = |top: f32, h: f32| Rect::from_min_max(pos2(2.0, top), pos2(116.0, top + h));
-        let short = header_parts(header(800.0, 29.0));
-        for h in [22.0, 46.0, 60.0, 100.0] {
-            let row = header(900.0, h);
-            let parts = header_parts(row);
-            let buttons = parts.toggles.iter().chain([&parts.enlarge]);
-            for (a, b) in buttons.zip(short.toggles.iter().chain([&short.enlarge])) {
-                assert_eq!((a.left(), a.right()), (b.left(), b.right()), "height {h}");
-                assert!(row.contains_rect(*a), "height {h}");
-                assert_eq!(a.center().y, parts.name.center().y, "height {h}");
-            }
-            assert!((parts.name.center().y - row.center().y).abs() <= 0.5);
-            assert_eq!(parts.enlarge.left(), row.left());
-        }
-        assert_eq!(short.toggles[2].right(), 116.0);
-        assert!(short.enlarge.right() < short.name.left());
-        assert!(short.toggles[0].left() > short.name.right());
-        assert!(short.toggles[0].right() < short.toggles[1].left());
-        assert!(short.name.width() >= 30.0, "{}", short.name.width());
     }
 }

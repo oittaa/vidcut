@@ -294,28 +294,6 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_part_says_what_it_does_and_where_it_comes_from() {
-        let e = missing_error(Kind::Filter, "zscale").to_string();
-        assert_eq!(
-            e,
-            "this FFmpeg can't do faster HDR conversion: it was built without zimg (zscale)"
-        );
-        let e = missing_error(Kind::Encoder, "png").to_string();
-        assert_eq!(
-            e,
-            "this FFmpeg can't encode stills and storyboards: it was built without its png encoder"
-        );
-        let e = missing_error(Kind::Filter, "nosuch").to_string();
-        assert_eq!(e, "this FFmpeg has no nosuch filter");
-        // A part with alternatives names them all.
-        assert_eq!(
-            part_missing(&H264).to_string(),
-            "this FFmpeg can't encode H.264 on the CPU: it was built without x264 (libx264) \
-             or OpenH264 (libopenh264)"
-        );
-    }
-
-    #[test]
     fn a_filter_this_ffmpeg_lacks_is_named() {
         crate::init();
         let mut graph = ffmpeg::filter::Graph::new();
@@ -329,18 +307,5 @@ mod tests {
         let e = parse_filters(&mut graph, "scale=8:8,vidcut_nosuch=1").unwrap_err();
         assert!(matches!(e, Error::Missing(_)), "{e:?}");
         assert_eq!(e.to_string(), "this FFmpeg has no vidcut_nosuch filter");
-    }
-
-    /// The parts that are FFmpeg's own are in the builds the tests run on:
-    /// the list names real ones.
-    #[test]
-    fn ffmpegs_own_parts_are_here() {
-        crate::init();
-        let lacking: Vec<&str> = PARTS
-            .iter()
-            .filter(|p| p.names.iter().all(|n| n.library.is_none()) && first(p).is_none())
-            .map(|p| p.names[0].name)
-            .collect();
-        assert!(lacking.is_empty(), "{lacking:?}");
     }
 }

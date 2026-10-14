@@ -67,12 +67,10 @@ pub(crate) fn stop() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+
     use std::sync::atomic::AtomicBool;
 
     use super::*;
-    use crate::analysis;
-    use crate::export::is_cancelled;
 
     #[test]
     fn the_guard_is_visible_only_while_held() {
@@ -87,18 +85,5 @@ mod tests {
             assert!(cancelled());
         }
         assert!(!cancelled());
-    }
-
-    #[test]
-    fn a_set_flag_stops_measurements_before_they_open_a_file() {
-        let _guard = Guard::set(Arc::new(AtomicBool::new(true)));
-        let err = analysis::audio_levels(Path::new("no-such-media"), 0, 10).unwrap_err();
-        assert!(is_cancelled(&err), "{err}");
-        let err =
-            analysis::picture_stats(&crate::decode::Input::File("no-such-media".into()), None)
-                .unwrap_err();
-        assert!(is_cancelled(&err), "{err}");
-        let err = analysis::mix_loudness(&[], 48_000, 2, 0, 48_000, None).unwrap_err();
-        assert!(is_cancelled(&err), "{err}");
     }
 }

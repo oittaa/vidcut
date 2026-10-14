@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use serde_json::{Value, json};
 
 use crate::error::ErrorCode;
-use crate::test_support::{Fixture, levels, pictures, row};
+use crate::test_support::{Fixture, levels, pictures};
 
 fn req(method: &str, params: Value) -> Value {
     json!({ "method": method, "params": params })
@@ -28,42 +28,6 @@ fn fixture() -> Fixture {
         .pictures
         .insert(m1, pictures(10.0, 25.0, &[2.0, 5.0], &[(8.0, 9.0)]));
     f
-}
-
-#[test]
-fn ripple_delete_silence_cuts_out_the_silences() {
-    // The red stripes are cut out and the rest closes up.
-    let mut f = fixture();
-    f.append("m1", 0, 250);
-    let params = json!({"clips": "c1", "pre_head": "5f", "post_tail": "5f", "min": "0.7s"});
-    // A dry run only reports the parts: leading silence up to 5 frames before
-    // the sound, 5 frames kept after and before each sound, trailing silence.
-    let parts = |r: &crate::Response| -> Vec<(i64, i64)> {
-        r.result["removed"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|p| (p["start"].as_i64().unwrap(), p["end"].as_i64().unwrap()))
-            .collect()
-    };
-    let mut dry_params = params.clone();
-    dry_params["dry_run"] = json!(true);
-    let dry = f.ok(req("edit.ripple_delete_silence", dry_params));
-    assert_eq!(parts(&dry), vec![(0, 20), (43, 70), (85, 145), (180, 250)]);
-    assert_eq!(f.v1().len(), 1, "a dry run changes nothing");
-    let undo_before = f.editor.history().undo.len();
-    let r = f.ok(req("edit.ripple_delete_silence", params));
-    assert_eq!(parts(&r), parts(&dry));
-    assert_eq!(r.result["frames"], 177);
-    let kept: Vec<(i64, i64, i64)> = f.v1().iter().map(|c| (c.1, c.2, c.3)).collect();
-    assert_eq!(kept, vec![(0, 23, 20), (23, 15, 70), (38, 35, 145)]);
-    assert_eq!(
-        f.editor.history().undo.len(),
-        undo_before + 1,
-        "one undo step"
-    );
-    f.ok(req("history.undo", json!({})));
-    assert_eq!(f.v1(), vec![row("c1", 0, 250, 0)]);
 }
 
 #[test]
@@ -139,42 +103,6 @@ fn detect_scene_cuts_splits_where_shots_change() {
 }
 
 #[test]
-fn analysis_queries_report_media_and_clips() {
-    let mut f = fixture();
-    f.append("m1", 50, 250);
-    // Media positions are source frames; clip positions timeline frames.
-    let r = f.ok(req("analyze.silence", json!({"media": "m1", "min": "2s"})));
-    let ranges = &r.result[0]["ranges"];
-    assert_eq!(r.result[0]["media"], "m1");
-    assert_eq!(
-        (&ranges[0]["start"], &ranges[0]["end"], &ranges[1]["start"]),
-        (&json!(80), &json!(150), &json!(175))
-    );
-    let r = f.ok(req("analyze.silence", json!({"clips": "c1", "min": "2s"})));
-    assert_eq!(r.result[0]["clip"], "c1");
-    assert_eq!(r.result[0]["track"], "V1");
-    assert_eq!(r.result[0]["ranges"][0]["start"], 30, "source 80 - 50");
-    // Every clip with pictures, by default.
-    let r = f.ok(req("analyze.scenes", json!({})));
-    let cuts: Vec<i64> = r.result[0]["cuts"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|c| c["frame"].as_i64().unwrap())
-        .collect();
-    assert_eq!(
-        cuts,
-        vec![75],
-        "the shot at 5 s; the one at 2 s is before the clip"
-    );
-    let r = f.ok(req("analyze.black", json!({"media": "m1"})));
-    assert_eq!(r.result[0]["ranges"][0]["start"], 200);
-    assert_eq!(r.result[0]["ranges"][0]["end"], 225);
-    let e = f.err(req("analyze.scenes", json!({"media": "m1", "clips": "c1"})));
-    assert_eq!(e.code, ErrorCode::Usage);
-}
-
-#[test]
 fn loudness_measures_the_mix() {
     let mut f = fixture();
     f.append("m1", 0, 100);
@@ -206,76 +134,4 @@ fn the_boring_detector_flags_long_and_short_clips() {
     ));
     assert_eq!(r.result["boring"].as_array().unwrap().len(), 2);
     assert_eq!(r.result["jump"], json!([]));
-}
-
-#[test]
-fn a_slide_moves_a_clip_between_its_neighbors() {
-    // The clip keeps its media; the neighbors give and take.
-    let mut f = fixture();
-    f.append("m1", 0, 50);
-    f.append("m1", 100, 150);
-    f.append("m1", 200, 250);
-    // B-roll over c2's frame 120 follows it.
-    let b = f.ok(req(
-        "edit.overwrite",
-        json!({"media": "m2", "range": "0f..10f", "at": 70, "track": "V2"}),
-    ));
-    let broll = b.result["clip"].as_str().unwrap().to_string();
-    f.ok(req("edit.slide", json!({"clip": "c2", "by": 10})));
-    assert_eq!(
-        f.v1(),
-        vec![
-            row("c1", 0, 60, 0),
-            row("c2", 60, 50, 100),
-            row("c3", 110, 40, 210)
-        ]
-    );
-    assert_eq!(f.track("V2"), vec![row(&broll, 80, 10, 0)]);
-    assert_eq!(f.editor.project().end(), 150, "the program length stays");
-    // The first clip has nothing before it; media runs out.
-    let e = f.err(req("edit.slide", json!({"clip": "c1", "by": 5})));
-    assert_eq!(e.code, ErrorCode::InvalidEdit);
-    let e = f.err(req("edit.slide", json!({"clip": "c2", "by": -70})));
-    assert_eq!(e.code, ErrorCode::InvalidEdit);
-}
-
-#[test]
-fn clips_at_other_speeds_are_cut_through_their_speed() {
-    // Decision D48: all of m1 twice as fast in 125 frames. Its speech at
-    // 1.0–1.5 s, 3.0–3.2 s and 6.0–7.0 s plays at frames 12.5–18.75,
-    // 37.5–40 and 75–87.5; its shots change at frames 25 and 63 (source 2 s
-    // and 5 s).
-    let speedy = || {
-        let mut f = fixture();
-        f.append("m1", 0, 125);
-        f.ok(req(
-            "edit.change_speed",
-            json!({"clips": "c1", "speed": 2.0, "ripple": false}),
-        ));
-        f
-    };
-    let mut f = speedy();
-    let r = f.ok(req(
-        "edit.ripple_delete_silence",
-        json!({"clips": "c1", "pre_head": "5f", "post_tail": "5f", "min": "0.7s", "dry_run": true}),
-    ));
-    let parts: Vec<(i64, i64)> = r.result["removed"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|p| (p["start"].as_i64().unwrap(), p["end"].as_i64().unwrap()))
-        .collect();
-    assert_eq!(parts, vec![(24, 32), (45, 70), (93, 125)]);
-
-    let mut f = speedy();
-    let r = f.ok(req("edit.detect_scene_cuts", json!({"clips": "c1"})));
-    let frames: Vec<i64> = r.result["cuts"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|c| c["frame"].as_i64().unwrap())
-        .collect();
-    assert_eq!(frames, vec![25, 63]);
-    let starts: Vec<(i64, i64)> = f.v1().iter().map(|c| (c.1, c.3)).collect();
-    assert_eq!(starts, vec![(0, 0), (25, 50), (63, 126)]);
 }

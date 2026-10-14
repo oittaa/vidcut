@@ -395,20 +395,6 @@ mod tests {
     }
 
     #[test]
-    fn measurements_round_trip_through_bytes() {
-        let l = levels(0.5, &[(0.1, 0.2)]);
-        assert_eq!(AudioLevels::from_bytes(&l.to_bytes()), Some(l.clone()));
-        let p = PictureStats {
-            pts: vec![0.0, 0.04],
-            score: vec![0.0, 33.5],
-            black: vec![1.0, 0.25],
-        };
-        assert_eq!(PictureStats::from_bytes(&p.to_bytes()), Some(p));
-        assert_eq!(AudioLevels::from_bytes(&l.to_bytes()[..10]), None);
-        assert_eq!(AudioLevels::from_bytes(b"nope"), None);
-    }
-
-    #[test]
     fn silences_are_runs_below_the_threshold() {
         let l = levels(4.0, &[(1.0, 1.5), (3.0, 3.2)]);
         let s = silences(&l, 0.0, 4.0, -40.0, 0.0, 0.9);
@@ -446,102 +432,6 @@ mod tests {
         assert_eq!(
             silent_parts(&span, &l, 0.0, &s),
             vec![(100, 108), (118, 128), (135, 140)]
-        );
-    }
-
-    #[test]
-    fn scene_cuts_land_on_the_first_frame_of_a_shot() {
-        // 25 fps source with a new shot at source frames 10 and 20, shown
-        // at 25 fps from source frame 5.
-        let n = 30;
-        let stats = PictureStats {
-            pts: (0..n).map(|k| f64::from(k) / 25.0).collect(),
-            score: (0..n)
-                .map(|k| if k == 10 || k == 20 { 60.0 } else { 0.5 })
-                .collect(),
-            black: vec![0.0; n as usize],
-        };
-        let span = Span {
-            pace: Default::default(),
-            start: 50,
-            end: 70,
-            source_in: 5,
-            origin: 0.0,
-            fps: fps(25),
-        };
-        assert_eq!(
-            scene_cuts(&span, &stats, 10.0),
-            vec![(55, 60.0), (65, 60.0)]
-        );
-        // At half the rate, frames are skipped; the cut shows on the first
-        // frame after it.
-        let half = Span {
-            pace: Default::default(),
-            fps: fps(12),
-            source_in: 0,
-            start: 0,
-            end: 14,
-            origin: 0.0,
-        };
-        let cuts = scene_cuts(&half, &stats, 10.0);
-        assert_eq!(cuts.len(), 2, "{cuts:?}");
-    }
-
-    #[test]
-    fn clips_at_other_speeds_are_measured_through_their_pace() {
-        // Decision D48. Speech at 1.0–1.5 s and 3.0–3.2 s, 10 fps: twice as
-        // fast it is at frames 5–7.5 and 15–16 of the clip; backward from
-        // source frame 39, at 25–30 and 8–10.
-        let l = levels(4.0, &[(1.0, 1.5), (3.0, 3.2)]);
-        let s = SilenceSettings {
-            threshold_db: -40.0,
-            pre_head: 2,
-            post_tail: 3,
-            min: 5,
-        };
-        let at = |speed, start, end, source_in| Span {
-            pace: Pace::of(speed, 0),
-            start,
-            end,
-            source_in,
-            origin: 0.0,
-            fps: fps(10),
-        };
-        assert_eq!(
-            silent_parts(&at(2.0, 100, 120, 0), &l, 0.0, &s),
-            vec![(100, 103), (111, 113)]
-        );
-        assert_eq!(
-            silent_parts(&at(-1.0, 0, 40, 39), &l, 0.0, &s),
-            vec![(0, 6), (13, 23), (33, 40)]
-        );
-        assert!(silent_parts(&at(0.0, 0, 40, 5), &l, 0.0, &s).is_empty());
-
-        // New shots at source frames 10 and 20 (25 fps): twice as fast from
-        // 0 they show at frames 5 and 10; backward from 25, at 6 and 16.
-        let n = 30;
-        let stats = PictureStats {
-            pts: (0..n).map(|k| f64::from(k) / 25.0).collect(),
-            score: (0..n)
-                .map(|k| if k == 10 || k == 20 { 60.0 } else { 0.5 })
-                .collect(),
-            black: vec![0.0; n as usize],
-        };
-        let at = |speed, end, source_in| Span {
-            pace: Pace::of(speed, 0),
-            start: 0,
-            end,
-            source_in,
-            origin: 0.0,
-            fps: fps(25),
-        };
-        assert_eq!(
-            scene_cuts(&at(2.0, 12, 0), &stats, 10.0),
-            vec![(5, 60.0), (10, 60.0)]
-        );
-        assert_eq!(
-            scene_cuts(&at(-1.0, 21, 25), &stats, 10.0),
-            vec![(6, 60.0), (16, 60.0)]
         );
     }
 

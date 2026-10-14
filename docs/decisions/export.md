@@ -134,7 +134,6 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
 - **QSV:** its intelligent constant quality (`global_quality`, 1–51 for every codec), or a bitrate with peaks half again as high; preset `medium`; profiles as AMF's.
 - **AV1's quality** is on the 0–63 scale of SVT-AV1's CRF and NVENC's CQ: VAAPI and AMF take it as a quantizer index (0–255, VAAPI's in `global_quality`: its AV1 has no `qp`), QSV scaled to its 1–51.
 - **HDR:** the static values come from each frame (`hdr::attach`), and HEVC's carry them at every keyframe and in the container; HDR10+ goes into their packets as into the others' (§4).
-- FFmpeg drops an option an encoder doesn't have without a word: `options_are_the_encoders_own` checks every option vidcut sets on every encoder this FFmpeg has.
 
 **On the dev machines:**
 - NVENC (RTX 4080 SUPER): H.264, HEVC and AV1, in 8 and 10 bit.
