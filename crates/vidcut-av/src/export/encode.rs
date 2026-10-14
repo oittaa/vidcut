@@ -1321,11 +1321,10 @@ pub fn detect() -> Availability {
 }
 
 /// What [`detect`] tests, in a number: a cache of its results from
-/// another is out of date. 5: VideoToolbox's ProRes too. 4: each GPU's
-/// encoders, NVENC on each NVIDIA GPU (3's on the first). 3: QSV opened on
-/// its GPU (`child_device`); 2's results came from QSV on the first Intel
-/// GPU, or the software runtime.
-pub const DETECTS: u32 = 5;
+/// another is out of date. 4: each GPU's encoders, NVENC on each NVIDIA
+/// GPU (3's on the first). 3: QSV opened on its GPU (`child_device`); 2's
+/// results came from QSV on the first Intel GPU, or the software runtime.
+pub const DETECTS: u32 = 4;
 
 /// The options among `keys` that encoder `name` doesn't have: FFmpeg drops
 /// those without a word. `None` when this FFmpeg has no `name`.
