@@ -31,5 +31,5 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 **Debugging:**
 - `VIDCUT_DEBUG=1` prints to stderr what vidcut decodes and draws, and why.
 - `VIDCUT_AV_LOG=error` (or `warning`, `verbose`, `debug`) shows FFmpeg's own messages.
-- `VIDCUT_HWDEC` picks the player's GPU decoder: `nvdec[:CUDA index]`, `vaapi[:render node]`, `d3d11va[:adapter index]` or `none`.
+- `VIDCUT_HWDEC` picks the player's GPU decoder: `nvdec[:CUDA index]`, `vaapi[:render node]`, `d3d11va[:adapter index]`, `videotoolbox` or `none`.
 - `WGPU_BACKEND` (`vulkan`, `metal`, `dx12`) and `WGPU_POWER_PREF` (`low`, `high`) pick wgpu's backend and adapter. `WGPU_VALIDATION=0` turns off the validation layers in debug builds.
