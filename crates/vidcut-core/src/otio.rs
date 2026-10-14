@@ -607,15 +607,20 @@ pub fn export(
     let markers: Vec<Value> = p
         .markers
         .iter()
-        .filter(|k| (a..b).contains(&k.at))
+        // A range takes the markers that start in it, cut at its end; the
+        // whole timeline takes them all, each its length (spec D40).
+        .filter(|k| span.is_none() || (a..b).contains(&k.at))
         .map(|k| {
+            let length = match span {
+                Some(_) => k.duration.min(b - k.at),
+                None => k.duration,
+            };
             json!({
                 "OTIO_SCHEMA": "Marker.2",
                 "name": k.name,
                 "comment": k.note,
                 "color": otio_color(&k.color),
-                // Cut at the end of what is exported.
-                "marked_range": range((k.at - a) as f64, k.duration.min(b - k.at) as f64, rate),
+                "marked_range": range((k.at - a) as f64, length as f64, rate),
                 "metadata": { VIDCUT: { "color": k.color }, EDITOR: { "Note": k.note } },
             })
         })
