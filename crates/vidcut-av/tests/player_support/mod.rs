@@ -29,7 +29,7 @@ pub struct Src {
 
 pub fn src(media: &str, spec: FixtureSpec) -> Src {
     let path = fixture::ensure(&spec).unwrap();
-    let info = vidcut_av::probe::probe(&path).unwrap();
+    let info = vidcut_av::probe::probe(&path, None).unwrap();
     let origin = info
         .video
         .as_ref()

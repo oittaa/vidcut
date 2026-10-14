@@ -112,10 +112,33 @@ const MEASURE: (u32, u32) = (96, 54);
 /// An image sequence is read by image2, which continues while the file
 /// numbers do. Pass that sequence's own length as `pictures`; frames after
 /// it are not measured and not opened. `None` reads the whole source.
-pub fn picture_stats(source: &crate::decode::Input, pictures: Option<u64>) -> Result<PictureStats> {
+/// The video decodes on `gpu` where it decodes the stream, else on the CPU.
+pub fn picture_stats(
+    source: &crate::decode::Input,
+    pictures: Option<u64>,
+    gpu: Option<&crate::hw::GpuDecoder>,
+) -> Result<PictureStats> {
+    // Decoded in memory instead, or not at all: the GPU's decoder wouldn't
+    // take the stream (a profile it lacks), so the CPU's does.
+    if gpu.is_some()
+        && let Ok(Some(stats)) = stats_on(source, pictures, gpu)
+    {
+        return Ok(stats);
+    }
+    stats_on(source, pictures, None).map(Option::unwrap_or_default)
+}
+
+/// [`picture_stats`] decoded on `gpu`, or on the CPU without it. `None`
+/// when the first frame comes out in memory though `gpu` was given, or no
+/// frame does.
+fn stats_on(
+    source: &crate::decode::Input,
+    pictures: Option<u64>,
+    gpu: Option<&crate::hw::GpuDecoder>,
+) -> Result<Option<PictureStats>> {
     crate::cancel::stop()?;
     if pictures == Some(0) {
-        return Ok(PictureStats::default());
+        return Ok(Some(PictureStats::default()));
     }
     let path = source.path();
     let mut input = source.open()?;
@@ -134,18 +157,92 @@ pub fn picture_stats(source: &crate::decode::Input, pictures: Option<u64>) -> Re
         count: 0,
     });
     let id = stream.parameters().id();
-    let mut decoder = crate::parts::decoder_opened(ctx.decoder().video(), id, "video")?;
+    let opened = crate::decode::open_video(ctx, id, gpu);
+    let mut decoder = crate::parts::decoder_opened(opened, id, "video")?;
     discard_others(&input, index);
-    let (w, h) = MEASURE;
-    let count = (w * h) as usize;
-    let mut scaler: Option<scaling::Context> = None;
-    let mut stats = PictureStats::default();
-    let mut prev: Option<Vec<u8>> = None;
-    let mut prev_mafd = 0f64;
-    let handle = |decoded: &frame::Video| -> Result<()> {
-        let scaler = match &mut scaler {
+    // A thread of its own measures each frame (copied down whole, scaled
+    // and scored, in order) while the next ones decode.
+    let (to_measure, inbox) = std::sync::mpsc::sync_channel::<frame::Video>(4);
+    let (mut told, mut refused) = (false, false);
+    let (decoded, stats) = std::thread::scope(|scope| {
+        let measuring = scope.spawn(move || -> Result<PictureStats> {
+            let mut m = Measuring::new(tick, rate);
+            for f in inbox {
+                m.add(&f)?;
+            }
+            Ok(m.stats)
+        });
+        let handle = |decoded: &frame::Video| -> Result<()> {
+            if !std::mem::replace(&mut told, true) {
+                let on = crate::decode::decoded_on(decoded, gpu);
+                crate::debug!("decoding", "{}: scene analysis on {on}", path.display());
+                if gpu.is_some() && !crate::hw::on_gpu(decoded) {
+                    refused = true;
+                    return Err(Error::Invalid("decoded in memory".into()));
+                }
+            }
+            // Measuring stopped: its error follows.
+            to_measure
+                .send(crate::export::video::frame_ref(decoded)?)
+                .map_err(|_| Error::Invalid("measuring stopped".into()))
+        };
+        let decoded = match pictures {
+            Some(n) => decode_pictures(&mut input, index, &mut decoder, n, handle),
+            None => decode_stream(
+                &mut input,
+                index,
+                &mut decoder,
+                &mut frame::Video::empty(),
+                handle,
+            ),
+        };
+        drop(to_measure);
+        (decoded, measuring.join().expect("measuring pictures"))
+    });
+    let stats = stats?;
+    if gpu.is_some() && (refused || stats.pts.is_empty()) {
+        return Ok(None);
+    }
+    decoded?;
+    Ok(Some(stats))
+}
+
+/// Scene scores and black shares, measured a frame at a time in order.
+struct Measuring {
+    tick: f64,
+    rate: f64,
+    scaler: Option<scaling::Context>,
+    prev: Option<Vec<u8>>,
+    prev_mafd: f64,
+    stats: PictureStats,
+}
+
+impl Measuring {
+    fn new(tick: f64, rate: f64) -> Self {
+        Self {
+            tick,
+            rate,
+            scaler: None,
+            prev: None,
+            prev_mafd: 0.0,
+            stats: PictureStats::default(),
+        }
+    }
+
+    fn add(&mut self, decoded: &frame::Video) -> Result<()> {
+        let (w, h) = MEASURE;
+        let count = (w * h) as usize;
+        // Whole, so the measures are the CPU's to the bit.
+        let down;
+        let decoded = if crate::hw::on_gpu(decoded) {
+            down = crate::hw::download(decoded)?;
+            &down
+        } else {
+            decoded
+        };
+        let scaler = match &mut self.scaler {
             Some(s) if s.input().format == decoded.format() => s,
-            _ => scaler.insert(
+            _ => self.scaler.insert(
                 scaling::Context::get(
                     decoded.format(),
                     decoded.width(),
@@ -170,7 +267,7 @@ pub fn picture_stats(source: &crate::decode::Input, pictures: Option<u64>) -> Re
         let full = decoded.color_range() == ffmpeg::color::Range::JPEG;
         let limit = if full { 25 } else { 16 + 22 };
         let black = luma.iter().filter(|&&y| y <= limit).count() as f32 / count as f32;
-        let score = match &prev {
+        let score = match &self.prev {
             Some(p) => {
                 let sad: u64 = luma
                     .iter()
@@ -178,34 +275,24 @@ pub fn picture_stats(source: &crate::decode::Input, pictures: Option<u64>) -> Re
                     .map(|(&a, &b)| u64::from(a.abs_diff(b)))
                     .sum();
                 let mafd = sad as f64 * 100.0 / count as f64 / 256.0;
-                let diff = (mafd - prev_mafd).abs();
-                prev_mafd = mafd;
+                let diff = (mafd - self.prev_mafd).abs();
+                self.prev_mafd = mafd;
                 mafd.min(diff).clamp(0.0, 100.0) as f32
             }
             None => 0.0,
         };
+        let stats = &mut self.stats;
         let pts = decoded
             .timestamp()
-            .map(|t| t as f64 * tick)
-            .or_else(|| stats.pts.last().map(|p| p + 1.0 / rate.max(1.0)))
+            .map(|t| t as f64 * self.tick)
+            .or_else(|| stats.pts.last().map(|p| p + 1.0 / self.rate.max(1.0)))
             .unwrap_or(0.0);
         stats.pts.push(pts);
         stats.score.push(score);
         stats.black.push(black);
-        prev = Some(luma);
+        self.prev = Some(luma);
         Ok(())
-    };
-    match pictures {
-        Some(n) => decode_pictures(&mut input, index, &mut decoder, n, handle)?,
-        None => decode_stream(
-            &mut input,
-            index,
-            &mut decoder,
-            &mut frame::Video::empty(),
-            handle,
-        )?,
     }
-    Ok(stats)
 }
 
 /// Decodes at most `pictures` frames. The packet after the last one is not

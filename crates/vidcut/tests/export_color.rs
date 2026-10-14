@@ -128,7 +128,7 @@ fn auto_color_follows_the_shown_picture() {
         "--set",
         "video.speed=ultrafast",
     ]);
-    let info = vidcut_av::probe::probe(&out).unwrap().video.unwrap();
+    let info = vidcut_av::probe::probe(&out, None).unwrap().video.unwrap();
     assert_eq!(info.transfer, "smpte2084");
     assert_eq!(info.pix_fmt, "yuv420p10le");
 

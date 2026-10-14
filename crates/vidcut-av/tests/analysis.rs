@@ -26,7 +26,7 @@ fn levels_keep_time_across_a_lost_packet() {
         90,
     ))
     .unwrap();
-    let audio = vidcut_av::probe::probe(&path).unwrap().audio[0].index;
+    let audio = vidcut_av::probe::probe(&path, None).unwrap().audio[0].index;
     let tmp = tempfile::Builder::new()
         .prefix("vidcut-levels-")
         .tempdir()
@@ -45,7 +45,7 @@ fn levels_keep_time_across_a_lost_packet() {
 
 /// A plan that plays `path`'s audio from its start, `secs` long.
 fn plan(path: &Path, secs: i64, gain_db: f64) -> RenderPlan {
-    let info = vidcut_av::probe::probe(path).unwrap();
+    let info = vidcut_av::probe::probe(path, None).unwrap();
     let origin = info.video.and_then(|v| v.first_frame_time).unwrap_or(0.0);
     let fps = Rational::new(30, 1).unwrap();
     RenderPlan {

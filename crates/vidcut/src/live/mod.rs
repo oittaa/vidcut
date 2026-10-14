@@ -576,6 +576,10 @@ fn filmstrip(media: &vidcut_core::model::Media) -> std::result::Result<Filmstrip
         Some(strip) => strip,
         None => {
             let input = crate::env::input_of(media);
+            // Decoded on the GPU the viewer decodes on, on a decoder of its
+            // own.
+            let decoder = crate::preferences::gpu_decoding().own_decoder();
+            let decoder = decoder.as_ref();
             // image2 would read every numbered file after the first. A
             // sequence is only its own count, even when more files follow.
             let strip = match media.sequence.as_ref().map(|s| s.count) {
@@ -585,8 +589,15 @@ fn filmstrip(media: &vidcut_core::model::Media) -> std::result::Result<Filmstrip
                     THUMBS,
                     THUMB_SIZE.0,
                     THUMB_SIZE.1,
+                    decoder,
                 ),
-                None => vidcut_av::thumbs::filmstrip(&input, THUMBS, THUMB_SIZE.0, THUMB_SIZE.1),
+                None => vidcut_av::thumbs::filmstrip(
+                    &input,
+                    THUMBS,
+                    THUMB_SIZE.0,
+                    THUMB_SIZE.1,
+                    decoder,
+                ),
             }
             .map_err(|e| e.to_string())?;
             if prefs.disk_cache && !strip.0.is_empty() {

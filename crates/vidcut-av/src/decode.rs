@@ -529,6 +529,51 @@ unsafe extern "C" fn gpu_format(
     }
 }
 
+/// Opens the video decoder of `ctx` for `id` on `gpu`, its frames in GPU
+/// memory: FFmpeg's own decoder that can use it ([`gpu_decoder`]). On the
+/// CPU, FFmpeg's default, where there is no `gpu`, it leaves `id` to the
+/// CPU (`GpuDecoder::why_not`) or FFmpeg has no such decoder. A stream the
+/// GPU won't take decodes on the CPU all the same: `get_format` falls back
+/// to it.
+pub(crate) fn open_video(
+    mut ctx: codec::context::Context,
+    id: codec::Id,
+    gpu: Option<&crate::hw::GpuDecoder>,
+) -> std::result::Result<ffmpeg::decoder::Video, ffmpeg::Error> {
+    let on = gpu.filter(|g| g.why_not(id).is_none());
+    let Some((gpu, codec)) = on.and_then(|g| Some((g, gpu_decoder(id, g.kind())?))) else {
+        return ctx.decoder().video();
+    };
+    // SAFETY: the context isn't opened yet; it takes a reference of its own.
+    unsafe {
+        let raw = ctx.as_mut_ptr();
+        (*raw).hw_device_ctx = ffmpeg::ffi::av_buffer_ref(gpu.as_ptr());
+        (*raw).get_format = Some(gpu_format);
+        // Frames held on their way to be measured.
+        (*raw).extra_hw_frames = 8;
+        // The GPU decodes; frame threads would only add latency.
+        (*raw).thread_count = 1;
+    }
+    ctx.decoder().open_as(codec).and_then(|d| d.video())
+}
+
+/// `f` in memory: copied down when it is in GPU memory.
+pub(crate) fn in_memory(f: frame::Video) -> Result<frame::Video> {
+    if crate::hw::on_gpu(&f) {
+        crate::hw::download(&f)
+    } else {
+        Ok(f)
+    }
+}
+
+/// Where `f` was decoded, for `VIDCUT_DEBUG`: on `gpu`, or the CPU.
+pub(crate) fn decoded_on(f: &frame::Video, gpu: Option<&crate::hw::GpuDecoder>) -> String {
+    match gpu {
+        Some(gpu) if crate::hw::on_gpu(f) => gpu.to_string(),
+        _ => "the CPU".into(),
+    }
+}
+
 /// Facts carried by a decoded frame rather than the stream.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FrameProps {
