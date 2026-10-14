@@ -190,3 +190,8 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 - **Resolve:** the viewer shows nothing of how it plays.
 - **vidcut:** the viewer's right-click menu opens a panel over the picture. It has a group for each part of the player, with one fact on each row: decoding, the picture, the viewer, playback, the pictures kept and the sound. `player.stats` toggles it, and `player.state` has the same facts as `stats`.
 - **Why:** where the GPU decodes and draws differs from machine to machine. This shows it without a debug log.
+
+## X21. Ctrl+wheel zooms the timeline
+- **Resolve:** Option+wheel zooms the timeline, and Command+wheel moves through it (Edit page, p. 853). The Cut page's lower timeline zooms with Option+wheel too.
+- **vidcut:** Ctrl+wheel (Cmd on a Mac) and a trackpad's pinch zoom the lower timeline.
+- **Why:** Ctrl+wheel and Cmd+wheel zoom in browsers and most other programs, and egui gives them and a pinch as the same zoom.
