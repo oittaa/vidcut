@@ -1025,7 +1025,9 @@ impl Drop for Frames {
 /// output's layout, and centered on black where their aspect differs, at
 /// even offsets as the CPU pads. VA-API's with `transpose_vaapi`,
 /// `scale_vaapi` and `pad_vaapi`; Direct3D 11's on the video processor,
-/// into the encoder's own frames (AMF takes those alone).
+/// into the encoder's own frames (AMF takes those alone); VideoToolbox's
+/// with `transpose_vt` and `scale_vt`, which keep their layout and have
+/// nothing to pad with.
 pub(crate) struct Fitter {
     fitting: Fitting,
     /// The frames context, layout and frame size it was made for, the size
@@ -1041,8 +1043,9 @@ enum Fitting {
 
 impl Fitter {
     /// Whether the GPU fits `f` into `layout` for an encoder on its device:
-    /// VA-API's frames, and Direct3D 11's into the encoder's frames (`into`),
-    /// but not 8-bit ones into 10 (AMD's video processor won't).
+    /// VA-API's frames, Direct3D 11's into the encoder's frames (`into`),
+    /// but not 8-bit ones into 10 (AMD's video processor won't), and
+    /// VideoToolbox's in the layout they are in already.
     pub(crate) fn fits(f: &frame::Video, layout: format::Pixel, into: Option<&Frames>) -> bool {
         match f.format() {
             format::Pixel::VAAPI => true,
@@ -1050,6 +1053,7 @@ impl Fitter {
                 into.is_some()
                     && !(sw_format(f) == format::Pixel::NV12 && layout == format::Pixel::P010LE)
             }
+            format::Pixel::VIDEOTOOLBOX => sw_format(f) == layout,
             _ => false,
         }
     }
@@ -1092,6 +1096,22 @@ impl Fitter {
                         spec.push_str(&format!(",pad_vaapi=w={w}:h={h}:x={x}:y={y}:color=black"));
                     }
                     let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VAAPI;
+                    Fitting::Filters(gpu_graph(f, frames, pixel, &spec)?)
+                }
+                format::Pixel::VIDEOTOOLBOX => {
+                    if fitted != (w, h) {
+                        return Err(Error::Invalid(
+                            "VideoToolbox has no filter to center a picture on black".into(),
+                        ));
+                    }
+                    let turn = match rotation {
+                        90 => "transpose_vt=dir=clock,",
+                        180 => "transpose_vt=dir=reversal,",
+                        270 => "transpose_vt=dir=cclock,",
+                        _ => "",
+                    };
+                    let spec = format!("{turn}scale_vt=w={w}:h={h}");
+                    let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
                     Fitting::Filters(gpu_graph(f, frames, pixel, &spec)?)
                 }
                 #[cfg(windows)]

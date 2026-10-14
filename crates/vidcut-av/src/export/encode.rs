@@ -904,6 +904,47 @@ impl Upload {
         }
     }
 
+    /// Pixel buffers on `decoder`'s VideoToolbox device, which frames from
+    /// memory go up into: VideoToolbox's encoder opened on GPU frames takes
+    /// nothing else. Video range, as an export's frames are.
+    pub(crate) fn videotoolbox(
+        decoder: &crate::hw::GpuDecoder,
+        sw: format::Pixel,
+        width: u32,
+        height: u32,
+    ) -> Result<Self> {
+        // SAFETY: the decoder's live device, another reference to it; the
+        // frames context is set up as FFmpeg documents.
+        unsafe {
+            let mut device = ffi::av_buffer_ref(decoder.as_ptr());
+            if device.is_null() {
+                return Err(Error::Invalid("no memory for the device".into()));
+            }
+            let mut frames = ffi::av_hwframe_ctx_alloc(device);
+            if frames.is_null() {
+                ffi::av_buffer_unref(&mut device);
+                return Err(Error::Invalid("cannot allocate VideoToolbox frames".into()));
+            }
+            let fc = &mut *((*frames).data as *mut ffi::AVHWFramesContext);
+            fc.format = ffi::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
+            fc.sw_format = sw.into();
+            fc.width = width as i32;
+            fc.height = height as i32;
+            // `AVVTFramesContext`, whose one field is the range.
+            *fc.hwctx.cast::<ffi::AVColorRange>() = ffi::AVColorRange::AVCOL_RANGE_MPEG;
+            let ret = ffi::av_hwframe_ctx_init(frames);
+            if ret < 0 {
+                ffi::av_buffer_unref(&mut frames);
+                ffi::av_buffer_unref(&mut device);
+                return Err(Error::Ffmpeg {
+                    context: "setting up VideoToolbox frames".into(),
+                    source: ffmpeg::Error::from(ret),
+                });
+            }
+            Ok(Self { device, frames })
+        }
+    }
+
     /// Frames on `decoder`'s Direct3D 11 device, which its frames are drawn
     /// into for AMF, the only frames it takes from the GPU.
     #[cfg(windows)]
@@ -1044,6 +1085,20 @@ pub(crate) fn open_video(
         {
             let up = Upload::d3d11(shared.expect("checked"), enc.pixel, width, height)?;
             ctx.set_format(format::Pixel::D3D11);
+            let frames = unsafe { ffi::av_buffer_ref(up.frames) };
+            if frames.is_null() {
+                return Err(Error::Invalid("no memory for the encoder's frames".into()));
+            }
+            unsafe { (*ctx.as_mut_ptr()).hw_frames_ctx = frames };
+            Some(up)
+        }
+        // VideoToolbox on a VideoToolbox decoder's device, taking its pixel
+        // buffers as they are; frames from memory go up first.
+        _ if enc.kind == EncoderChoice::VideoToolbox
+            && shared.is_some_and(|d| d.kind() == crate::hw::Kind::VideoToolbox) =>
+        {
+            let up = Upload::videotoolbox(shared.expect("checked"), enc.pixel, width, height)?;
+            ctx.set_format(format::Pixel::VIDEOTOOLBOX);
             let frames = unsafe { ffi::av_buffer_ref(up.frames) };
             if frames.is_null() {
                 return Err(Error::Invalid("no memory for the encoder's frames".into()));

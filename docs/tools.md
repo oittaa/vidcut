@@ -26,7 +26,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `filmstrip FILE OUTDIR [N]`: pool thumbnails, timed.
 - `tiles FILE [HEIGHT] [gpu|compare]`: timeline tiles, timed at spacings from 0.25 to 30 s; `gpu` decodes on the GPU in use. `compare` makes twenty both there and on the CPU, and prints how far apart their colors are.
 - `decode_speed FILE [FRAMES]`: decoding speed, cores and seek times on the CPU and on each GPU decoder.
-- `passes FILE START_S SECONDS CODEC ENCODER MBPS [key=value…]` (release build): exports a stretch at a bitrate (`qN`: constant quality) with `video.*` settings (`passes=2`), and prints the bitrate reached, the time and the luma PSNR.
+- `passes FILE START_S SECONDS CODEC ENCODER MBPS [key=value…]` (release build): exports a stretch at a bitrate (`qN`: constant quality) with `video.*` settings (`passes=2`), and prints the bitrate reached, the time and the luma PSNR. `size=WxH` exports at that size; `gpu` decodes on the GPU in use, as the app does, and says how many frames stayed on it.
 
 **Debugging:**
 - `VIDCUT_DEBUG=1` prints to stderr what vidcut decodes and draws, and why.

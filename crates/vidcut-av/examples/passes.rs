@@ -6,7 +6,9 @@
 //! `passes bbb.mp4 60 20 h264 cpu 4 passes=2 first_pass=full`, where the
 //! keys are `video.*` settings (`passes`, `first_pass`, `multipass`,
 //! `lookahead`, `speed`); `q20` in place of MBPS is constant quality 20.
-//! The output is 8-bit at the source's size.
+//! The output is 8-bit at the source's size, or `size=WxH`. `gpu` decodes
+//! on the GPU in use, as the app exports, and says how many frames stayed
+//! on it.
 
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -46,8 +48,25 @@ fn main() {
         std::process::exit(2);
     };
     let path = PathBuf::from(file);
+    let gpu = rest
+        .iter()
+        .any(|s| s == "gpu")
+        .then(|| vidcut_av::hw::GpuDecoder::best().expect("a GPU decoder"));
+    let size = rest.iter().find_map(|s| s.strip_prefix("size=")).map(|s| {
+        let (w, h) = s.split_once('x').expect("size=WxH");
+        (
+            w.parse::<u32>().expect("width"),
+            h.parse::<u32>().expect("height"),
+        )
+    });
+    let rest: Vec<&str> = rest
+        .iter()
+        .map(String::as_str)
+        .filter(|s| *s != "gpu" && !s.starts_with("size="))
+        .collect();
     let info = vidcut_av::probe::probe(&path, None).expect("probe");
     let v = info.video.expect("video");
+    let (width, height) = size.unwrap_or((v.width, v.height));
     let fps = Rational::new(i64::from(v.avg_frame_rate.0), i64::from(v.avg_frame_rate.1)).unwrap();
     let start = (start.parse::<f64>().unwrap() * fps.as_f64()).round() as i64;
     let frames = (secs.parse::<f64>().unwrap() * fps.as_f64()).round() as i64;
@@ -62,8 +81,8 @@ fn main() {
     };
     let plan = RenderPlan {
         fps,
-        width: v.width,
-        height: v.height,
+        width,
+        height,
         sample_rate: 48_000,
         channels: 2,
         frames,
@@ -104,11 +123,12 @@ fn main() {
     let out = dir.join("out.mkv");
     let available = vidcut_av::export::encode::detect();
     let clock = Instant::now();
-    let report = export::run(
+    let report = export::run_decoding_on(
         &plan,
         &settings,
         &out,
         &available,
+        gpu.as_ref(),
         &AtomicBool::new(false),
         &mut |_| {},
     )
@@ -118,7 +138,7 @@ fn main() {
     let got = bytes as f64 * 8.0 / (frames as f64 / fps.as_f64()) / 1e6;
     let target: f64 = mbps.parse().unwrap_or(got);
     // Luma PSNR against the source frames as the export reads them.
-    let mut source = VideoFrames::new(&[piece], fps, v.width, v.height, Pixel::YUV420P, None);
+    let mut source = VideoFrames::new(&[piece], fps, width, height, Pixel::YUV420P, None);
     let mut reader = VideoReader::open(&out).unwrap();
     let (mut sum, mut worst, mut n) = (0.0, f64::MAX, 0);
     while let Some(f) = reader.next_frame().unwrap() {
@@ -137,5 +157,14 @@ fn main() {
         sum / f64::from(n),
         report.passes,
     );
+    if let Some(gpu) = &gpu {
+        println!(
+            "  {} of {} frames decoded on {}, {} of them kept on the GPU to the encoder",
+            report.gpu_decoded,
+            report.frames,
+            gpu.kind().name(),
+            report.gpu_frames
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
