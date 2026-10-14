@@ -1,6 +1,6 @@
 # GPU frames: one pipeline
 
-**When:** before another GPU path is added: VideoToolbox frames kept on the GPU, QSV from GPU memory, Vulkan Video (own-player.md, gpu-decoding.md).
+**When:** before another GPU path is added: VideoToolbox frames kept on the GPU, QSV from GPU memory, Vulkan Video (own-player.md).
 
 **The goal:** a frame stays in GPU memory wherever that is possible, from the decoder to the encoder or the display. That holds even where a fast CPU, such as the M4's, would be a little quicker. A desktop computer is fast enough either way. A laptop must be fast enough too, but it saves its battery when the GPU does the work. Past "fast enough", speed doesn't count: 200 fps or 1,000 doesn't matter. What counts is that frames aren't copied between the GPU and memory, and how much CPU and power a job takes.
 
