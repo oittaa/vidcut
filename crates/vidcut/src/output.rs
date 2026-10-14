@@ -458,6 +458,30 @@ pub fn print(method: &str, r: &Response, json: bool) {
             );
             println!("({})", r.result["path"].as_str().unwrap_or_default());
         }
+        "decoders.list" => {
+            let rows: Vec<[String; 3]> = r.result["decoders"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|d| {
+                    let text = |k: &str| d[k].as_str().unwrap_or_default().to_string();
+                    let ok = if d["ok"] == true {
+                        "ok".to_string()
+                    } else {
+                        format!("no ({})", text("error"))
+                    };
+                    [text("decoder"), text("codec"), ok]
+                })
+                .collect();
+            let width = |c: usize| rows.iter().map(|r| r[c].len()).max().unwrap_or(0);
+            let (w0, w1) = (width(0), width(1));
+            for [decoder, codec, ok] in &rows {
+                println!("{decoder:<w0$}  {codec:<w1$}  {ok}");
+            }
+            if rows.is_empty() {
+                println!("no GPU decoder here");
+            }
+        }
         "encoders.list" => {
             let rows: Vec<[String; 4]> = r.result["encoders"]
                 .as_array()

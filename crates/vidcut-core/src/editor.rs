@@ -2787,7 +2787,8 @@ pub fn query(
         | Request::PresetsGet { .. }
         | Request::PresetsSave { .. }
         | Request::PresetsDelete { .. }
-        | Request::EncodersList { .. } => {
+        | Request::EncodersList { .. }
+        | Request::DecodersList {} => {
             return Err(Error::internal(format!(
                 "{} is answered by the session, not the editor",
                 request.method()

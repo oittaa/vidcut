@@ -99,6 +99,7 @@ const GROUPS: &[(&str, &str)] = &[
     ),
     ("bins", "Media Pool bins"),
     ("clip", "Clip properties"),
+    ("decoders", "Hardware decoders that work here"),
     ("edit", "Edit the timeline"),
     ("encoders", "Hardware encoders that work here"),
     (
