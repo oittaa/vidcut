@@ -20,6 +20,10 @@ vidcut is a video cutting tool modeled on DaVinci Resolve's Cut page, in Rust: t
 8. **A unit test is a unit test:** one behavior, a fixed input, and the output it must give written out, like `assert_eq!(sha("test text"), "abcd")`.
    - It doesn't reimplement the code to work out what to expect, doesn't test a dozen things at once, and isn't 100+ lines stuffed together.
    - Anything that needs more than that is an end-to-end test (`crates/*/tests/`).
+9. **The GPU first, wherever the user lets it work.** With `gpu.acceleration` and `gpu.decoding` on, decoding and encoding run on the GPU wherever it does them right, in every path, H.264 included.
+   - Never move work to the CPU because the CPU is faster. A GPU that is fast enough is what counts, and it saves CPU and battery.
+   - The only exception is a GPU that gives wrong results, such as wrong frames after a seek. Name it in `GpuDecoder::why_not` and gotchas.md.
+10. **The user's settings reach the encoder as they are.** No hidden rescaling, clamping or substitution of quality, speed, codec or any preference. Where an encoder can't take a value, ask before adding a conversion, and show it where the user sets it and in the export's report.
 
 ## Quality gates
 
