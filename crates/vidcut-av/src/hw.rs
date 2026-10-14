@@ -1641,6 +1641,9 @@ pub(crate) mod d3d11 {
     /// textures for an encoder as well, which AMD's driver refuses, and
     /// scales the padding of the decoder's textures in.
     pub(crate) struct Scaler {
+        /// Halvings first, where it shrinks more than twice each way:
+        /// AMD's processor changes the levels of a bigger shrink.
+        halving: Option<Box<Scaler>>,
         /// The frames it draws to: single textures, a pool that grows.
         frames: *mut ffi::AVBufferRef,
         video: ID3D11VideoDevice,
@@ -1677,7 +1680,38 @@ pub(crate) mod d3d11 {
         ) -> Result<Self> {
             // SAFETY: the frame's own frames context.
             let layout = unsafe { (*((*source).data as *const ffi::AVHWFramesContext)).sw_format };
-            Self::checked(f, source, layout, size)
+            let (input, space) = ((f.width(), f.height()), color_space(f));
+            let halving = Self::halved(input, space, source, size)?;
+            let (from, at) = halving
+                .as_ref()
+                .map_or((source, input), |h| (h.frames, h.size));
+            let mut scaler = Self::checked(at, space, from, layout, size)?;
+            scaler.halving = halving;
+            Ok(scaler)
+        }
+
+        /// Halvings of `input` frames of `source` (in `space`) toward
+        /// `size`, while what is left shrinks more than twice each way,
+        /// each checked: the last, whose frames the next pass reads.
+        fn halved(
+            input: (u32, u32),
+            space: DXGI_COLOR_SPACE_TYPE,
+            source: *mut ffi::AVBufferRef,
+            size: (u32, u32),
+        ) -> Result<Option<Box<Self>>> {
+            // SAFETY: a live frames context.
+            let layout = unsafe { (*((*source).data as *const ffi::AVHWFramesContext)).sw_format };
+            let mut last: Option<Box<Self>> = None;
+            let mut at = input;
+            while at.0 > 2 * size.0 && at.1 > 2 * size.1 {
+                let half = ((at.0 / 2) & !1, (at.1 / 2) & !1);
+                let from = last.as_ref().map_or(source, |h| h.frames);
+                let mut pass = Self::checked(at, space, from, layout, half)?;
+                pass.halving = last.take();
+                last = Some(Box::new(pass));
+                at = half;
+            }
+            Ok(last)
         }
 
         /// Turns frames like `f` (of `source`) clockwise by `rotation`,
@@ -1700,8 +1734,19 @@ pub(crate) mod d3d11 {
                 let fc = &*((*frames).data as *const ffi::AVHWFramesContext);
                 (fc.sw_format, (fc.width as u32, fc.height as u32))
             };
+            let (input, space) = ((f.width(), f.height()), color_space(f));
+            // Halved as stored, before it turns them.
+            let toward = if rotation % 180 == 90 {
+                (fitted.1, fitted.0)
+            } else {
+                fitted
+            };
+            let halving = Self::halved(input, space, source, toward)?;
+            let (from, at) = halving
+                .as_ref()
+                .map_or((source, input), |h| (h.frames, h.size));
             // The same processor drawing into textures of its own first.
-            drop(Self::checked(f, source, layout, fitted)?);
+            drop(Self::checked(at, space, from, layout, fitted)?);
             let (fw, fh) = fitted;
             let place = (((size.0 - fw) / 2) & !1, ((size.1 - fh) / 2) & !1, fw, fh);
             // SAFETY: another reference to the encoder's frames.
@@ -1709,8 +1754,8 @@ pub(crate) mod d3d11 {
             if frames.is_null() {
                 return Err(Error::Invalid("no memory for frames".into()));
             }
-            let input = (f.width(), f.height());
-            let mut scaler = Self::made(source, input, frames, size, place, color_space(f))?;
+            let mut scaler = Self::made(from, at, frames, size, place, space)?;
+            scaler.halving = halving;
             scaler.rotation = match rotation {
                 90 => D3D11_VIDEO_PROCESSOR_ROTATION_90,
                 180 => D3D11_VIDEO_PROCESSOR_ROTATION_180,
@@ -1731,15 +1776,16 @@ pub(crate) mod d3d11 {
             Ok(scaler)
         }
 
-        /// A scaler of frames like `f` into textures of its own of `layout`
-        /// at `size`, which passes the test picture.
+        /// A scaler of `input` frames of `source` (in `space`) into
+        /// textures of its own of `layout` at `size`, which passes the test
+        /// picture.
         fn checked(
-            f: &frame::Video,
+            input: (u32, u32),
+            space: DXGI_COLOR_SPACE_TYPE,
             source: *mut ffi::AVBufferRef,
             layout: ffi::AVPixelFormat,
             size: (u32, u32),
         ) -> Result<Self> {
-            let input = (f.width(), f.height());
             let flags = (D3D11_BIND_RENDER_TARGET.0, 0);
             // SAFETY: the device of the frame's own frames context.
             let frames = unsafe {
@@ -1747,11 +1793,11 @@ pub(crate) mod d3d11 {
                 frames_on(device, layout, size, flags, "to scale to")?
             };
             let place = (0, 0, size.0, size.1);
-            let mut scaler = Self::made(source, input, frames, size, place, color_space(f))?;
-            if !scaler.keeps_levels(source, input)? {
-                return Err(Error::Invalid(
-                    "the video processor changes the levels".into(),
-                ));
+            let mut scaler = Self::made(source, input, frames, size, place, space)?;
+            if let Some(changed) = scaler.changed_level(source, input)? {
+                return Err(Error::Invalid(format!(
+                    "the video processor changes the levels: {changed}"
+                )));
             }
             Ok(scaler)
         }
@@ -1827,6 +1873,7 @@ pub(crate) mod d3d11 {
             })();
             match made {
                 Ok((video, context, enumerator, processor)) => Ok(Self {
+                    halving: None,
                     frames,
                     video,
                     context,
@@ -1845,20 +1892,20 @@ pub(crate) mod d3d11 {
             }
         }
 
-        /// Whether a test picture of grays and colors at `input`, in the
-        /// layout of `source`'s frames, comes out of it at the levels it
-        /// went in at.
-        fn keeps_levels(
+        /// A level of a test picture of grays and colors at `input`, in the
+        /// layout of `source`'s frames, that comes out of it changed: what
+        /// went in and what came out. `None`: it keeps them all.
+        fn changed_level(
             &mut self,
             source: *mut ffi::AVBufferRef,
             input: (u32, u32),
-        ) -> Result<bool> {
+        ) -> Result<Option<String>> {
             // Each band's middle, a few samples across in luma and chroma,
             // must be there to read: smaller, the scaler isn't trusted and
             // the frames come down whole.
             let (ow, oh) = (self.size.0 as usize, self.size.1 as usize);
             if ow < 4 * BANDS.len() || oh < 8 {
-                return Ok(false);
+                return Ok(Some(format!("{ow}x{oh} is too small to check")));
             }
             let layout = |frames: *mut ffi::AVBufferRef| {
                 // SAFETY: a live frames context.
@@ -1933,25 +1980,55 @@ pub(crate) mod d3d11 {
             } else {
                 bands - OUTSIDE
             };
-            Ok(BANDS[..checked].iter().enumerate().all(|(k, [y, u, v])| {
-                let middle = (2 * k + 1) * ow / (2 * bands);
-                let luma = (oh / 4..oh * 3 / 4).all(|row| {
-                    (middle - 1..middle + 1).all(|x| read(0, x, row).abs_diff(y * scale) <= near)
+            let changed = BANDS[..checked]
+                .iter()
+                .enumerate()
+                .find_map(|(k, [y, u, v])| {
+                    let middle = (2 * k + 1) * ow / (2 * bands);
+                    let luma = (oh / 4..oh * 3 / 4).find_map(|row| {
+                        (middle - 1..middle + 1)
+                            .map(|x| read(0, x, row))
+                            .find(|got| got.abs_diff(y * scale) > near)
+                            .map(|got| format!("Y {} came out {}", y * scale, got))
+                    });
+                    let chroma = || {
+                        (oh / 8..oh * 3 / 8).find_map(|row| {
+                            (middle / 2 - 1..middle / 2 + 1)
+                                .map(|x| (read(1, 2 * x, row), read(1, 2 * x + 1, row)))
+                                .find(|(gu, gv)| {
+                                    gu.abs_diff(u * scale) > near || gv.abs_diff(v * scale) > near
+                                })
+                                .map(|(gu, gv)| {
+                                    format!(
+                                        "U {} V {} came out U {gu} V {gv}",
+                                        u * scale,
+                                        v * scale
+                                    )
+                                })
+                        })
+                    };
+                    luma.or_else(chroma)
+                        .map(|what| format!("{what}, at {ow}x{oh}"))
                 });
-                let chroma = (oh / 8..oh * 3 / 8).all(|row| {
-                    (middle / 2 - 1..middle / 2 + 1).all(|x| {
-                        read(1, 2 * x, row).abs_diff(u * scale) <= near
-                            && read(1, 2 * x + 1, row).abs_diff(v * scale) <= near
-                    })
-                });
-                luma && chroma
-            }))
+            Ok(changed)
         }
 
-        /// `f` scaled into a texture of its frames, placed. The work is
-        /// queued on the device's immediate context, before what reads it
-        /// next there (the copy down, the encoder).
+        /// `f` scaled into a texture of its frames, placed, halved first
+        /// where it shrinks a lot. The work is queued on the device's
+        /// immediate context, before what reads it next there (the next
+        /// pass, the copy down, the encoder).
         pub(super) fn scale(&mut self, f: &frame::Video) -> Result<frame::Video> {
+            match self.halving.as_mut() {
+                Some(halving) => {
+                    let half = halving.scale(f)?;
+                    self.blit(&half)
+                }
+                None => self.blit(f),
+            }
+        }
+
+        /// `f` drawn into a texture of its frames, placed.
+        fn blit(&mut self, f: &frame::Video) -> Result<frame::Video> {
             let (w, h) = self.size;
             let rect = |x: u32, y: u32, w: u32, h: u32| RECT {
                 left: x as i32,

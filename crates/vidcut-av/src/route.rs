@@ -111,6 +111,34 @@ pub enum Route {
     Kept,
 }
 
+/// How a source's frames went, as they did: what a job says it did. A GPU
+/// that won't shrink them on its route lets them come down whole.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Went {
+    /// Stayed on the GPU that decoded them.
+    Stayed,
+    /// Copied down at `size`, shrunk on the GPU first unless `whole`.
+    Down { size: (u32, u32), whole: bool },
+    /// Decoded on the CPU.
+    Cpu,
+}
+
+impl Went {
+    /// For people, after where they were decoded: `frames came down at
+    /// 960×540`. `None` on the CPU.
+    pub fn label(self) -> Option<String> {
+        match self {
+            Self::Stayed => Some("frames stayed there".into()),
+            Self::Down { whole: true, .. } => Some("frames came down whole".into()),
+            Self::Down {
+                size: (w, h),
+                whole: false,
+            } => Some(format!("frames came down at {w}×{h}")),
+            Self::Cpu => None,
+        }
+    }
+}
+
 /// The route for frames that `facts` describe, to `dest`. A route that works
 /// on the GPU wins: the CPU being faster never takes frames off it.
 pub fn plan(facts: &Facts, dest: Dest) -> Route {
@@ -300,6 +328,15 @@ mod tests {
     fn a_display_keeps_nv12_frames_on_the_gpu() {
         let dest = Dest::Display { keep: true };
         assert_eq!(plan(&decoded(Place::D3d11), dest), Route::Kept);
+    }
+
+    #[test]
+    fn frames_shrunk_on_the_gpu_say_the_size_they_came_down_at() {
+        let went = Went::Down {
+            size: (960, 540),
+            whole: false,
+        };
+        assert_eq!(went.label().as_deref(), Some("frames came down at 960×540"));
     }
 
     #[test]

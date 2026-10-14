@@ -281,13 +281,20 @@ impl Env for AvEnv {
                 decoder.as_ref(),
             )
             .map_err(av_error)?;
-            let how = format!(
-                "decoded on the {}, {}",
-                written
-                    .decoder
-                    .map_or("CPU".into(), |k| format!("GPU ({})", k.label())),
-                written.encoder.label()
-            );
+            let went = written.went.and_then(|w| w.label());
+            let how = match (written.decoder, went) {
+                (Some(k), Some(went)) => format!(
+                    "decoded on the GPU ({}), {went}, {}",
+                    k.label(),
+                    written.encoder.label()
+                ),
+                (Some(k), None) => format!(
+                    "decoded on the GPU ({}), {}",
+                    k.label(),
+                    written.encoder.label()
+                ),
+                (None, _) => format!("decoded on the CPU, {}", written.encoder.label()),
+            };
             // A hardware encoder that wouldn't open gave way to another codec.
             codec = written.encoder.codec;
             if codec != planned {

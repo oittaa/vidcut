@@ -6,7 +6,7 @@
 cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 60 600
 ```
 
-`g=GOP` and `b=BFRAMES` set the keyframe spacing and B-frames (H.264 with B-frames has open GOPs).
+`g=GOP` and `b=BFRAMES` set the keyframe spacing and B-frames (H.264 with B-frames has open GOPs). `r=90` (180, 270) stores the pictures turned, like phone video.
 
 **GPU encoders:** `cargo run -p vidcut-av --example encoders` test-encodes every GPU encoder (NVENC, VAAPI, AMF, QSV) on every GPU, uncached.
 
@@ -28,6 +28,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `filmstrip FILE OUTDIR [N]`: pool thumbnails, timed.
 - `tiles FILE [HEIGHT] [gpu]`: timeline tiles, timed at spacings from 0.25 to 30 s; `gpu` decodes on the GPU in use.
 - `seek_check FILE...`: seeks to every frame of barcode fixtures on the CPU and on each GPU decoder, and lists the seeks that show other frames.
+- `proxy_check [--side N] FILE...` (release build): makes a proxy of each barcode fixture with every proxy encoder here, decoding on the CPU and on each GPU decoder. For each it prints how the frames went, the frames copied down and up, and the frames whose barcode or timestamp isn't the source's.
 - `decode_speed FILE [FRAMES]`: decoding speed, cores and seek times on the CPU and on each GPU decoder.
 - `passes FILE START_S SECONDS CODEC ENCODER MBPS [key=value…]` (release build): exports a stretch at a bitrate (`qN`: constant quality) with `video.*` settings (`passes=2`), and prints the bitrate reached, the time and the luma PSNR.
 
