@@ -275,13 +275,15 @@ impl Decoder {
                 // and kept they are the first steps back. In video memory
                 // all of them (NVDEC's, for a display that shows them from
                 // there: kept, they cost nothing more); in memory the last
-                // half second (`chunk`), as each kept there takes new
-                // memory, and a 10-bit one a conversion, slowing the seek
-                // down. The rest behind comes when nothing else is wanted.
-                // It reaches back no further than the seek's keyframe.
+                // half second, as each kept there takes new memory, and a
+                // 10-bit one a conversion, slowing the seek down. Its own
+                // first picture says which (`decode_from`), not the one
+                // shown before it (black, a still, another clip). The rest
+                // behind comes when nothing else is wanted. It reaches back
+                // no further than the seek's keyframe.
                 Direction::Paused => Reach::Window {
                     min: 1,
-                    max: self.chunk(),
+                    max: self.windows(2).1,
                 },
                 _ => Reach::Forward,
             };
@@ -480,11 +482,17 @@ impl Decoder {
     /// back right after a seek waits for half a second's frames, not the
     /// whole GOP's.
     fn chunk(&self) -> i64 {
-        let (_, max) = self.windows(2);
         match self.picture_kind {
-            Kind::Video => max,
-            Kind::Memory => ((self.plan.fps().as_f64() * 0.5).ceil() as i64).clamp(8, max.max(8)),
+            Kind::Video => self.windows(2).1,
+            Kind::Memory => self.memory_chunk(),
         }
+    }
+
+    /// Half a second of frames, at least 8: what a window keeps in memory
+    /// at once.
+    fn memory_chunk(&self) -> i64 {
+        let (_, max) = self.windows(2);
+        ((self.plan.fps().as_f64() * 0.5).ceil() as i64).clamp(8, max.max(8))
     }
 
     /// Pictures like the latest that fit in `bytes`.
@@ -569,8 +577,9 @@ impl Decoder {
     }
 
     /// Decodes up to timeline frame `t`: from `from` (`None`: on from where
-    /// the reader stands), keeping all on the way when `back`, otherwise
-    /// those from the viewer's on.
+    /// the reader stands), keeping those from the viewer's on, and when
+    /// `back` the window on the way: all of it when its first picture is in
+    /// video memory, its last half second when in memory (`memory_chunk`).
     fn decode_from(&mut self, snap: &Snap, from: Option<i64>, t: i64, back: bool) -> Result<()> {
         let plan = self.plan.clone();
         if let Some(from) = from {
@@ -585,12 +594,16 @@ impl Decoder {
             if back { ", keeping a window" } else { "" }
         );
         let started = Instant::now();
+        let recent = t - self.memory_chunk() + 1;
+        let mut kind = None;
         for i in r..=t {
             // Frames before the one wanted: kept going back (they are the
-            // window) and when they are still ahead of the viewer; passed
+            // window: the first to see where its pictures are, the rest by
+            // that) and when they are still ahead of the viewer; passed
             // over otherwise.
+            let window = back && (i >= recent || kind != Some(Kind::Memory));
             let keep =
-                i == t || back || (i >= snap.focus && !self.shared.store.contains(&plan.id(i)));
+                i == t || window || (i >= snap.focus && !self.shared.store.contains(&plan.id(i)));
             let frames = self.reader();
             if keep {
                 let frame = frames
@@ -600,6 +613,7 @@ impl Decoder {
                 self.next = Some(i + 1);
                 self.picture_bytes = picture.bytes();
                 self.picture_kind = Kind::of(&picture);
+                kind.get_or_insert(self.picture_kind);
                 self.shared.store.put(plan.id(i), Arc::new(picture));
                 if i == snap.focus {
                     self.shared.landed(snap.plan_gen, plan.id(i));
