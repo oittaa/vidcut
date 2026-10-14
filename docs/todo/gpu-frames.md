@@ -2,7 +2,9 @@
 
 **When:** before another GPU path is added: VideoToolbox frames kept on the GPU, QSV from GPU memory, Vulkan Video (own-player.md, gpu-decoding.md).
 
-Frames decoded on a GPU should stay there while every step after the decoder can run there, on every GPU, for every job. Today that holds for NVIDIA alone, and for exports, not proxies, on VA-API and AMF. Each path was added for one GPU and one job.
+**The goal:** a frame stays in GPU memory wherever that is possible, from the decoder to the encoder or the display. That holds even where a fast CPU, such as the M4's, would be a little quicker. A desktop computer is fast enough either way. A laptop must be fast enough too, but it saves its battery when the GPU does the work. Past "fast enough", speed doesn't count: 200 fps or 1,000 doesn't matter. What counts is that frames aren't copied between the GPU and memory, and how much CPU and power a job takes.
+
+Today that holds for NVIDIA alone, and for exports, not proxies, on VA-API and AMF. Each path was added for one GPU and one job.
 
 ## Today
 
@@ -42,6 +44,8 @@ Each GPU's own code stays: `scale_cuda` and libplacebo, the `*_vaapi` filters, D
 2. Fit there what can be fitted, shrinking first, then copy down the small picture, finish on the CPU, and upload only if the encoder needs it.
 3. Everything on the CPU.
 
+It never leaves the GPU because the CPU would be faster. A route that works on the GPU wins.
+
 The route goes into `VIDCUT_DEBUG` and into the result (`made_with`: `stayed on the GPU (VideoToolbox)`, `came down at 960×540`, `came down whole`).
 
 **Capabilities** are tested once for each GPU and FFmpeg, and kept with `encoders.json`:
@@ -55,7 +59,7 @@ What a test can't settle is written as a fact with its source. For example, FFmp
 
 ## Steps
 
-Each step is measured against the step before it on the RTX 4080 SUPER, the Radeon iGPU, the N150 and the M4. The measurement takes the same clips, the same run and a release build, and gives time, CPU time and the frames copied each way.
+Each step is measured against the step before it on the RTX 4080 SUPER, the Radeon iGPU, the N150 and the M4. The measurement takes the same clips, the same run and a release build. It gives the frames copied each way and the CPU time first, then the time, which only has to stay fast enough.
 1. **Count and report:** count the frames copied down and up, and their sizes, for each job, and put the route in `made_with`. Measure the base case on all four machines.
 2. **Planner and backends over today's code:** wrap `CudaPictures`, `Fitter`, `Shrinker`, `Keeper` and the `Normalizer` as backends. The planner reproduces today's routes exactly. No behavior changes, and every test and barcode check passes unchanged.
 3. **Proxies through the export engine:** drop `encode_into`'s own loop. VA-API and AMF proxies then fit on the GPU as exports do.
