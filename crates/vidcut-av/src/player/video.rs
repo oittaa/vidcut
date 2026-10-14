@@ -134,6 +134,7 @@ pub(crate) fn run(shared: Arc<Shared>) {
         back_low: None,
         next_window: None,
     };
+    let mut claim = crate::first::Claim::default();
     while let Some(snap) = shared.snap() {
         if d.plan_gen != Some(snap.plan_gen) {
             d.plan = snap.plan.clone();
@@ -174,6 +175,11 @@ pub(crate) fn run(shared: Arc<Shared>) {
             d.forget_windows();
         }
         d.last_focus = Some(snap.focus);
+        // The player comes first while it plays, and while its viewer
+        // waits for a picture.
+        let waits = !shared.store.contains(&snap.plan.id(snap.focus))
+            && d.failed != Some((snap.version, snap.focus));
+        claim.set(dir != Direction::Paused || waits);
         let result = d.work(&snap, dir);
         shared.set_busy(None);
         match result {

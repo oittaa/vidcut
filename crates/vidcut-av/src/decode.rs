@@ -1092,6 +1092,7 @@ impl VideoReader {
         let mut damaged = 0;
         loop {
             crate::cancel::stop()?;
+            crate::first::wait()?;
             let mut frame = frame::Video::empty();
             match self.decoder.receive_frame(&mut frame) {
                 Ok(()) => {
