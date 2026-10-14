@@ -1,27 +1,32 @@
 #!/bin/bash
-# macOS: makes H.264 and ProRes Proxy proxies of 4K60 HEVC and AV1, one at a
-# time, and says for each whether its frames left the GPU. macOS's `sample`
-# watches the encode: frames copied down to memory show as
-# av_hwframe_transfer_data, pictures scaled on the CPU as libswscale.
-#   scripts/proxy-gpu-check.sh [FRAMES]
-# The 4K sources are barcode fixtures, made once in $VIDCUT_TEST_DATA.
+# macOS: makes H.264 and ProRes Proxy proxies, one at a time, and says for
+# each whether its frames left the GPU. macOS's `sample` watches the encode:
+# frames copied down to memory show as av_hwframe_transfer_data, pictures
+# scaled on the CPU as libswscale.
+#   scripts/proxy-gpu-check.sh [FILE...]
+# Without files: 10 s of 4K60 HEVC and of AV1, barcode fixtures made once in
+# $VIDCUT_TEST_DATA.
 set -euo pipefail
+sources=("$@")
 cd "$(dirname "$0")/.."
-frames=${1:-600}
 
 cargo build -q --release -p vidcut -p vidcut-av --example make_fixture
 bin=target/release
-echo "making the 4K sources (once)..."
-hevc=$("$bin/examples/make_fixture" hevc10 mkv 3840x2160 60 "$frames" no-audio)
-av1=$("$bin/examples/make_fixture" av1 mkv 3840x2160 60 "$frames" no-audio)
+if [ ${#sources[@]} -eq 0 ]; then
+    echo "making the 4K sources (once)..."
+    sources=(
+        "$("$bin/examples/make_fixture" hevc10 mkv 3840x2160 60 600 no-audio)"
+        "$("$bin/examples/make_fixture" av1 mkv 3840x2160 60 600 no-audio)"
+    )
+fi
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 export XDG_CONFIG_HOME="$tmp/config" XDG_CACHE_HOME="$tmp/cache" XDG_STATE_HOME="$tmp/state"
 
-echo "vidcut $(git rev-parse --short HEAD), $(sysctl -n machdep.cpu.brand_string), macOS $(sw_vers -productVersion), $frames frames each"
-for source in hevc av1; do
-    case $source in hevc) path=$hevc ;; av1) path=$av1 ;; esac
+echo "vidcut $(git rev-parse --short HEAD), $(sysctl -n machdep.cpu.brand_string), macOS $(sw_vers -productVersion)"
+for path in "${sources[@]}"; do
+    source=$(basename "$path")
     for codec in h264 prores; do
         dir="$tmp/$source-$codec"
         mkdir -p "$dir"
@@ -59,7 +64,6 @@ for source in hevc av1; do
             down="not sampled"
             scaled="not sampled"
         fi
-        printf '%-5s -> %-6s %6s s, CPU %6s s, copied down: %s, scaled on the CPU: %s (%s)\n' \
-            "$source" "$codec" "$real" "$cpu" "$down" "$scaled" "$made"
+        echo "$source -> $codec: $real s, CPU $cpu s, copied down: $down, scaled on the CPU: $scaled ($made)"
     done
 done
