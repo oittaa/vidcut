@@ -974,8 +974,8 @@ impl VideoReader {
                 // A demuxer that seeks by decode times (MP4) lands on a
                 // keyframe shown after the target when the target lies
                 // just before it: seen in its first packet, the seek goes
-                // on to before that keyframe without decoding (on NVDEC
-                // each decoder flush of H.264 makes the decoder anew).
+                // on to before that keyframe without decoding (FFmpeg 8.0
+                // makes a GPU's H.264 decoder anew at each flush).
                 let packet = self.first_packet()?;
                 if let Some(p) = &packet
                     && p.is_key()
