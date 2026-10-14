@@ -5,6 +5,7 @@
 use std::path::Path;
 
 use serde_json::{Value, json};
+use vidcut_av::export::renderer::FrameReader;
 use vidcut_core::model::{Project, TrackKind};
 use vidcut_core::render::{self, VideoPiece};
 use vidcut_core::time::{RangeSpec, TimeSpec};
@@ -156,9 +157,12 @@ pub fn render(
     }))
 }
 
-/// The cells' pictures, rendered on a few threads (each opens its source).
+/// The cells' pictures, rendered on a few threads. Each reads its cells in
+/// order, the file kept open between them, decoding on the GPU the viewer
+/// decodes on, on a decoder of its own.
 fn pictures(cells: &[Cell], p: &Project, w: usize, h: usize) -> Result<Vec<Vec<u8>>> {
     let fps = p.settings.fps;
+    let decoding = crate::preferences::gpu_decoding();
     let threads = std::thread::available_parallelism().map_or(2, |n| n.get().min(6));
     let chunk = cells.len().div_ceil(threads);
     // The render thread's cancel flag: workers don't inherit the slot.
@@ -168,11 +172,17 @@ fn pictures(cells: &[Cell], p: &Project, w: usize, h: usize) -> Result<Vec<Vec<u
             .chunks(chunk)
             .map(|part| {
                 let cancel = cancel.clone();
+                let decoding = &decoding;
                 s.spawn(move || {
                     let _guard = cancel.map(vidcut_av::cancel::Guard::set);
+                    let mut reader = match decoding.own_decoder() {
+                        Some(gpu) => FrameReader::decoding_on(gpu),
+                        None => FrameReader::default(),
+                    };
                     part.iter()
                         .map(|c| {
-                            vidcut_av::export::still::rgba(&c.piece, fps, w as u32, h as u32)
+                            reader
+                                .rgba(&c.piece, fps, w as u32, h as u32)
                                 .map(|image| image.rgba)
                                 .map_err(from_av)
                         })
