@@ -333,13 +333,21 @@ fn concurrent_cli_runs_never_corrupt_the_project() {
     let children: Vec<_> = (0..16)
         .map(|_| {
             sb.cmd(&["--json", "edit", "append", "m1", "--range", "0f..10f"])
-                .stdout(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
                 .spawn()
                 .unwrap()
         })
         .collect();
-    for mut c in children {
-        assert!(c.wait().unwrap().success());
+    for c in children {
+        let out = c.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}: {}{}",
+            out.status,
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
     let clips = sb.v1();
     assert_eq!(clips.len(), 16);
