@@ -59,16 +59,15 @@ What a test can't settle is written as a fact with its source. For example, FFmp
 
 ## Steps
 
-Each step is measured against the step before it on the RTX 4080 SUPER, the Radeon iGPU, the N150 and the M4. The measurement takes the same clips, the same run and a release build. It gives the frames copied each way and the CPU time first, then the time, which only has to stay fast enough.
-1. **Count and report:** count the frames copied down and up, and their sizes, for each job, and put the route in `made_with`. Measure the base case on all four machines.
-2. **Planner and backends over today's code:** wrap `CudaPictures`, `Fitter`, `Shrinker`, `Keeper` and the `Normalizer` as backends. The planner reproduces today's routes exactly. No behavior changes, and every test and barcode check passes unchanged.
-3. **Proxies through the export engine:** drop `encode_into`'s own loop. VA-API and AMF proxies then fit on the GPU as exports do.
-4. **VideoToolbox backend:** `scale_vt` and `transpose_vt`, with VideoToolbox's encoders taking its frames. Not known yet, and to be tested on the M4: whether the H.264 encoder takes 10-bit frames.
-5. **Thumbnails** shrink on the GPU before they come down, as tiles do.
-6. **Vulkan as a backend** (libplacebo) for colors and HDR where a GPU's own fitting lacks them, as NVIDIA's path already uses it. FFmpeg makes its Vulkan device from VA-API, DRM and CUDA devices only, so VA-API's frames can go to it through FFmpeg. Direct3D 11's need an import of vidcut's own, as the viewer has (gui/picture.rs).
+Each step is measured against the step before it on the RTX 4080 SUPER, the Radeon iGPU, the N150 and the M4. The measurement takes the same clips, the same run and a release build. It gives the frames copied each way, from the result's `copies`, and the CPU time first, then the time, which only has to stay fast enough.
+1. **Planner and backends over today's code:** wrap `CudaPictures`, `Fitter`, `Shrinker`, `Keeper` and the `Normalizer` as backends. The planner reproduces today's routes exactly, and puts the route in `made_with`. No other behavior changes, and every test and barcode check passes unchanged.
+2. **Proxies through the export engine:** drop `encode_into`'s own loop. VA-API and AMF proxies then fit on the GPU as exports do.
+3. **VideoToolbox backend:** `scale_vt` and `transpose_vt`, with VideoToolbox's encoders taking its frames. Not known yet, and to be tested on the M4: whether the H.264 encoder takes 10-bit frames.
+4. **Thumbnails** shrink on the GPU before they come down, as tiles do.
+5. **Vulkan as a backend** (libplacebo) for colors and HDR where a GPU's own fitting lacks them, as NVIDIA's path already uses it. FFmpeg makes its Vulkan device from VA-API, DRM and CUDA devices only, so VA-API's frames can go to it through FFmpeg. Direct3D 11's need an import of vidcut's own, as the viewer has (gui/picture.rs).
 
 ## Tests
 
 - **The planner:** unit tests, each one input and the route it must give.
 - **Backends:** each must give the CPU's pictures, barcode for barcode and within two levels, checked by hand on each machine with the barcode fixtures as GPU decoders are now.
-- **No copies where none are planned:** a script runs the jobs on the GPU in use, compares the frames-copied counters with the route, and prints the base case beside the change.
+- **No copies where none are planned:** a script runs the jobs on the GPU in use, compares the result's `copies` with the route, and prints the base case beside the change.

@@ -289,6 +289,9 @@ pub struct WrittenProxy {
     /// The GPU that decoded it (frames copied down unless `on_gpu`); `None`:
     /// the CPU.
     pub decoder: Option<crate::hw::Kind>,
+    /// The frames copied between GPU memory and memory to make it, its
+    /// failed attempts too.
+    pub copies: vidcut_core::editor::Copied,
 }
 
 /// Encodes `input`'s pictures to `dest` at `width`×`height` (even), with the
@@ -312,6 +315,8 @@ pub fn write(
     decoder: Option<&crate::hw::GpuDecoder>,
 ) -> Result<WrittenProxy> {
     crate::init();
+    let copies = std::sync::Arc::new(crate::copies::Copies::default());
+    let _counting = crate::copies::Guard::set(copies.clone());
     if width < 2 || height < 2 || !width.is_multiple_of(2) || !height.is_multiple_of(2) {
         return Err(Error::Invalid(format!(
             "proxy size {width}x{height} must be even and at least 2"
@@ -343,6 +348,7 @@ pub fn write(
             encoder: enc.clone(),
             on_gpu,
             decoder,
+            copies: copies.counted(),
         })
     };
     let mut errors = Vec::new();
@@ -518,6 +524,8 @@ struct Writer<'a> {
     octx: format::context::Output,
     encoder: encoder::Video,
     upload: Option<Upload>,
+    /// The kind of encoder: a GPU's copies frames from memory up itself.
+    kind: EncoderChoice,
     src_tb: ffmpeg::Rational,
     enc_tb: ffmpeg::Rational,
     durations: HashMap<i64, i64>,
@@ -560,6 +568,7 @@ impl<'a> Writer<'a> {
             octx,
             encoder,
             upload,
+            kind: enc.kind,
             src_tb,
             enc_tb,
             durations: HashMap::new(),
@@ -603,6 +612,7 @@ impl<'a> Writer<'a> {
         };
         picture.set_pts(Some(pts));
         self.durations.insert(pts, dur);
+        crate::copies::to_encoder(&picture, self.kind);
         self.encoder
             .send_frame(&picture)
             .ctx(|| "encoding a proxy frame".into())?;

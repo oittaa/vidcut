@@ -993,6 +993,7 @@ impl Upload {
                 });
             }
         }
+        crate::copies::up(src);
         hw.set_pts(src.pts());
         // SAFETY: both frames are valid; plain fields.
         unsafe {

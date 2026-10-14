@@ -697,6 +697,13 @@ pub(crate) fn sw_format(frame: &frame::Video) -> format::Pixel {
 /// P010) at its own size, keeping its properties: colors, aspect,
 /// timestamp.
 pub fn download(src: &frame::Video) -> Result<frame::Video> {
+    let f = downloaded(src)?;
+    crate::copies::down(&f);
+    Ok(f)
+}
+
+/// [`download`], uncounted.
+fn downloaded(src: &frame::Video) -> Result<frame::Video> {
     // SAFETY: a valid frame.
     let Some(display) = (unsafe { intel_va(src) }) else {
         return fetched(src);
