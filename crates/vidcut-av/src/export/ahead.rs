@@ -67,10 +67,12 @@ impl<T: Send + 'static, K: PartialEq> Ahead<T, K> {
             let (done, results) = mpsc::channel();
             // It waits for players as the thread it opens for does.
             let yields = crate::first::yields();
+            let copies = crate::copies::current();
             let spawned = thread::Builder::new()
                 .name("vidcut-open".into())
                 .spawn(move || {
                     crate::first::set_yields(yields);
+                    let _counting = crate::copies::Guard::maybe(copies);
                     for (id, job) in queue {
                         if done.send((id, job())).is_err() {
                             break;

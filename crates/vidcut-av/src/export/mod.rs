@@ -29,8 +29,8 @@ use vidcut_core::time::Rational;
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, encoder, ffi, format, frame};
 use audio::AudioMix;
-use encode::{AudioEncoder, Availability, Upload};
-use video::{Output, VideoFrames};
+use encode::{AudioEncoder, Availability};
+use video::{EncoderFrames, Output, Up, VideoFrames};
 
 /// Progress of a running export.
 #[derive(Debug, Clone, Copy)]
@@ -99,6 +99,9 @@ pub struct Report {
     /// Direct3D 11): those of `gpu_frames`, and those that came down to be
     /// made on the CPU ([`run_decoding_on`]).
     pub gpu_decoded: i64,
+    /// Frames copied between GPU memory and memory for the export: its
+    /// probes, passes and pieces.
+    pub copies: vidcut_core::editor::Copied,
     pub seconds: f64,
     /// What loudness normalization did (`audio.loudness`).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -365,6 +368,8 @@ pub fn run_decoding_on(
 ) -> Result<Report> {
     crate::init();
     validate(settings).map_err(|e| Error::Invalid(e.message))?;
+    let copies = std::sync::Arc::new(crate::copies::Copies::default());
+    let _counting = crate::copies::Guard::set(copies.clone());
     // Settings left to the export choose from the files (decision D44).
     let mut settings = settings.clone();
     let mut chosen = None;
@@ -401,6 +406,7 @@ pub fn run_decoding_on(
     match result.map(|r| Report {
         color: chosen,
         metadata: metadata_chosen,
+        copies: copies.counted(),
         ..r
     }) {
         Ok(report) => match std::fs::rename(&part, output) {
@@ -516,6 +522,7 @@ fn first_run(
             .ok_or_else(|| Error::Invalid("plan has fewer video frames than expected".into()))?;
         f.set_pts(Some(j));
         f.set_kind(ffmpeg::picture::Type::None);
+        crate::copies::to_encoder(&f, enc.kind);
         encoder
             .send_frame(&f)
             .ctx(|| format!("first pass: frame {j} with {}", enc.name))?;
@@ -569,7 +576,6 @@ pub(crate) fn write_packet(
 
 struct VideoOut {
     encoder: encoder::Video,
-    vaapi: Option<Upload>,
     frames: VideoFrames,
     enc_tb: ffmpeg::Rational,
     stream_tb: ffmpeg::Rational,
@@ -585,6 +591,8 @@ struct VideoOut {
     hdr10plus: Option<(ffmpeg::codec::Id, std::collections::HashMap<i64, Vec<u8>>)>,
     /// The codec, for static values put into keyframes that lack them.
     codec: ffmpeg::codec::Id,
+    /// The kind of encoder: a GPU's copies frames from memory up itself.
+    kind: EncoderChoice,
 }
 
 impl VideoOut {
@@ -759,17 +767,11 @@ fn encode(
                     opened = Some((enc, o, Some((device, frames)), false));
                     break;
                 }
-                // VAAPI on the decoder's own device, where the decoder is
-                // VA-API on its render node, and AMF where it is Direct3D 11
-                // on its adapter: frames fitted on the GPU go to it there.
-                let shared = decoder.filter(|d| {
-                    let pair = matches!(
-                        (enc.kind, d.kind()),
-                        (EncoderChoice::Vaapi, crate::hw::Kind::Vaapi)
-                            | (EncoderChoice::Amf, crate::hw::Kind::D3d11va)
-                    );
-                    pair && enc.device.as_deref() == Some(d.on())
-                });
+                // An encoder that takes the decoder's frames, on its device:
+                // frames fitted on the GPU go to it there (VAAPI on the
+                // decoder's render node, AMF on its Direct3D 11 adapter).
+                let shared =
+                    decoder.filter(|d| crate::route::shares(enc.kind, enc.device.as_deref(), d));
                 match encode::open_video(&enc, w, h, fps, global_header, None, shared, pass) {
                     Ok(o) => {
                         opened = Some((enc, o, None, shared.is_some()));
@@ -824,20 +826,33 @@ fn encode(
             ost.set_parameters(&encoder);
             ost.set_time_base(fps.invert());
             ost.set_avg_frame_rate(fps);
-            let (pixel, output) = match gpu {
-                Some((device, frames)) => (gpu_pixel(&enc), Output::Cuda { device, frames }),
-                None if fit_on_gpu => {
-                    let into = match &vaapi {
-                        // AMF takes Direct3D 11's frames of its own frames
-                        // only. SAFETY: the encoder's live frames.
-                        Some(up) if enc.kind == EncoderChoice::Amf => {
+            let (pixel, output) = match (gpu, vaapi) {
+                (Some((device, frames)), _) => {
+                    let to_nvenc = EncoderFrames {
+                        place: Some(crate::route::Place::Cuda),
+                        up: Up::Cuda { device, frames },
+                        into: None,
+                    };
+                    (gpu_pixel(&enc), Output::Encoder(to_nvenc))
+                }
+                (None, Some(up)) => {
+                    let place = crate::route::takes(enc.kind).filter(|_| fit_on_gpu);
+                    // The video processor fits frames into the encoder's own
+                    // Direct3D 11 frames, the only ones AMF takes. SAFETY:
+                    // the encoder's live frames.
+                    let into = match place {
+                        Some(crate::route::Place::D3d11) => {
                             Some(unsafe { crate::hw::Frames::of(up.frames)? })
                         }
                         _ => None,
                     };
-                    (enc.pixel, Output::FittedOnGpu { into })
+                    let up = Up::Frames(up);
+                    (
+                        enc.pixel,
+                        Output::Encoder(EncoderFrames { place, up, into }),
+                    )
                 }
-                None => (enc.pixel, Output::Fitted),
+                (None, None) => (enc.pixel, Output::Fitted),
             };
             let mut frames = VideoFrames::new(&plan.video, plan.fps, w, h, pixel, enc.hdr)
                 .output(output)
@@ -854,7 +869,6 @@ fn encode(
             .then(|| (id, std::collections::HashMap::new()));
             Some(VideoOut {
                 encoder,
-                vaapi,
                 frames,
                 enc_tb: fps.invert(),
                 stream_tb: fps.invert(),
@@ -864,6 +878,7 @@ fn encode(
                 metadata: enc.metadata,
                 hdr10plus,
                 codec: id,
+                kind: enc.kind,
             })
         }
         None => None,
@@ -996,17 +1011,13 @@ fn encode(
             {
                 waiting.insert(j, t35);
             }
-            // Frames fitted on the GPU are on the encoder's device already.
-            let mut f = match &v.vaapi {
-                Some(hw) if !crate::hw::on_gpu(&f) => hw.upload(&f)?,
-                _ => f,
-            };
             if !v.metadata.is_empty() {
                 crate::hdr::attach(&mut f, &v.metadata)?;
             }
             // Pieces decode and convert on streams of their own (`gpu_reader`):
             // the encoder reads a frame once its stream's work is done.
             crate::cuda::share::wait_for(&f)?;
+            crate::copies::to_encoder(&f, v.kind);
             v.encoder
                 .send_frame(&f)
                 .ctx(|| format!("encoding frame {j} with {}", v.name))?;
@@ -1048,6 +1059,7 @@ fn encode(
         samples: if audio.is_some() { plan.samples() } else { 0 },
         gpu_frames: video.as_ref().map_or(0, |v| v.frames.gpu_frames()),
         gpu_decoded: video.as_ref().map_or(0, |v| v.frames.gpu_decoded()),
+        copies: Default::default(),
         passes: video.as_ref().map(|v| v.passes.count()),
         video_encoder: video.map(|v| v.name),
         audio_encoder: audio.map(|a| a.spec.name),

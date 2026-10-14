@@ -976,6 +976,7 @@ impl Upload {
     /// (AMF reads HDR10's metadata only off frames whose transfer is PQ;
     /// `hdr::insert_static` puts it in the file regardless).
     pub(crate) fn upload(&self, src: &frame::Video) -> Result<frame::Video> {
+        crate::copies::up(src);
         let mut hw = frame::Video::empty();
         unsafe {
             let ret = ffi::av_hwframe_get_buffer(self.frames, hw.as_mut_ptr(), 0);

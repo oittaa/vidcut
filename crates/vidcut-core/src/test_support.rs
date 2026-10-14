@@ -249,6 +249,7 @@ impl Env for FakeEnv {
             height: h,
             codec: "h264".into(),
             made_with: None,
+            copies: None,
         })
     }
 

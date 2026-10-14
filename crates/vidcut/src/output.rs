@@ -534,6 +534,18 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 if let Some(how) = p["made_with"].as_str() {
                     println!("  {how}");
                 }
+                let copies = &p["copies"];
+                if copies["down"].as_u64().unwrap_or(0) + copies["up"].as_u64().unwrap_or(0) > 0 {
+                    let mb =
+                        |key: &str| copies[key].as_u64().unwrap_or(0) as f64 / f64::from(1 << 20);
+                    println!(
+                        "  frames copied down from the GPU: {} ({:.0} MB), up to it: {} ({:.0} MB)",
+                        copies["down"],
+                        mb("down_bytes"),
+                        copies["up"],
+                        mb("up_bytes")
+                    );
+                }
             }
         }
         "proxy.remove" => {

@@ -68,6 +68,17 @@ impl Kind {
         Self::ALL.into_iter().find(|k| k.device_type() == ty)
     }
 
+    /// Where its frames are.
+    pub fn place(self) -> crate::route::Place {
+        use crate::route::Place;
+        match self {
+            Kind::Nvdec => Place::Cuda,
+            Kind::Vaapi => Place::Vaapi,
+            Kind::D3d11va => Place::D3d11,
+            Kind::VideoToolbox => Place::VideoToolbox,
+        }
+    }
+
     /// What it is called, for people: `NVDEC`, `VA-API`, `Direct3D 11`,
     /// `VideoToolbox`.
     pub fn label(self) -> &'static str {
@@ -697,6 +708,13 @@ pub(crate) fn sw_format(frame: &frame::Video) -> format::Pixel {
 /// P010) at its own size, keeping its properties: colors, aspect,
 /// timestamp.
 pub fn download(src: &frame::Video) -> Result<frame::Video> {
+    let f = downloaded(src)?;
+    crate::copies::down(&f);
+    Ok(f)
+}
+
+/// [`download`], uncounted.
+fn downloaded(src: &frame::Video) -> Result<frame::Video> {
     // SAFETY: a valid frame.
     let Some(display) = (unsafe { intel_va(src) }) else {
         return fetched(src);
@@ -1196,20 +1214,6 @@ enum Fitting {
 }
 
 impl Fitter {
-    /// Whether the GPU fits `f` into `layout` for an encoder on its device:
-    /// VA-API's frames, and Direct3D 11's into the encoder's frames (`into`),
-    /// but not 8-bit ones into 10 (AMD's video processor won't).
-    pub(crate) fn fits(f: &frame::Video, layout: format::Pixel, into: Option<&Frames>) -> bool {
-        match f.format() {
-            format::Pixel::VAAPI => true,
-            format::Pixel::D3D11 => {
-                into.is_some()
-                    && !(sw_format(f) == format::Pixel::NV12 && layout == format::Pixel::P010LE)
-            }
-            _ => false,
-        }
-    }
-
     /// `f` turned clockwise by `rotation` (0, 90, 180 or 270), scaled to
     /// `fitted` and placed in an `out` picture of `layout` (NV12, P010), on
     /// the GPU, with its timestamp and colors, its pixels square; `fitter`

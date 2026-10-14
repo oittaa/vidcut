@@ -282,6 +282,7 @@ impl CudaFrames {
     /// `src` (in memory, of this pool's format and size) copied into a GPU
     /// frame, keeping its timestamp.
     pub fn upload(&self, src: &frame::Video) -> Result<frame::Video> {
+        crate::copies::up(src);
         let mut hw = self.0.copy(src, "uploading to the GPU")?;
         hw.set_pts(src.pts());
         Ok(hw)

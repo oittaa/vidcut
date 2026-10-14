@@ -43,10 +43,12 @@ type Memo<T> = LazyLock<Mutex<HashMap<PathBuf, Arc<T>>>>;
 static LEVELS: Memo<AudioLevels> = LazyLock::new(Default::default);
 static PICTURES: Memo<PictureStats> = LazyLock::new(Default::default);
 
-/// How each proxy this process encoded was made, by file, until the edit
+/// How each proxy this process encoded was made, and the frames it copied
+/// between the GPU and memory, by file, until the edit
 /// that records it answers with it: the encode runs on a copy of the
 /// project first, and that edit finds the file written (decision D41).
-static MADE_WITH: LazyLock<Mutex<HashMap<PathBuf, String>>> = LazyLock::new(Default::default);
+static MADE_WITH: LazyLock<Mutex<HashMap<PathBuf, (String, vidcut_core::editor::Copied)>>> =
+    LazyLock::new(Default::default);
 
 /// A measurement of a media file: from this process's memory, from the disk
 /// cache, or measured now and kept in both. Measuring decodes the whole
@@ -259,8 +261,9 @@ impl Env for AvEnv {
         let mut codec = planned;
         let made = || MADE_WITH.lock().unwrap_or_else(PoisonError::into_inner);
         let mut made_with = None;
+        let mut copies = None;
         if !dry_run && path.is_file() {
-            made_with = made().remove(&path);
+            (made_with, copies) = made().remove(&path).unzip();
         } else if !dry_run {
             std::fs::create_dir_all(dir)
                 .map_err(|e| Error::media(format!("{}: {e}", dir.display())))?;
@@ -293,8 +296,9 @@ impl Env for AvEnv {
                     .map_err(|e| Error::media(format!("{}: {e}", actual.display())))?;
                 path = actual;
             }
-            made().insert(path.clone(), how.clone());
+            made().insert(path.clone(), (how.clone(), written.copies));
             made_with = Some(how);
+            copies = Some(written.copies);
         }
         Ok(GeneratedProxy {
             path,
@@ -302,6 +306,7 @@ impl Env for AvEnv {
             height: h,
             codec: codec.into(),
             made_with,
+            copies,
         })
     }
 

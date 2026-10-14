@@ -524,6 +524,11 @@ const HALF_STEP: &str = "vec3 vidcut_half_step(vec3 v)\n\
      }\n";
 
 impl Source {
+    /// RGB pictures (images), not YUV.
+    pub(crate) fn rgb(self) -> bool {
+        self.rgb
+    }
+
     pub(crate) fn of(f: &frame::Video) -> Self {
         use ffi::AVColorSpace as S;
         use format::Pixel as P;
