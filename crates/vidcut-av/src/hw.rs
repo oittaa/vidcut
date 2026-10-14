@@ -291,12 +291,18 @@ impl GpuDecoder {
     /// right, as far as known. AMD's Direct3D 11 decoder loses its way in
     /// H.264 sought into an open GOP (a keyframe that isn't IDR): some
     /// frames on, it shows one picture over and over, where NVIDIA's and
-    /// VA-API on Intel decode on. The CPU decodes H.264 there.
-    pub fn why_not(&self, codec: ffmpeg::codec::Id) -> Option<&'static str> {
+    /// VA-API on Intel decode on. The CPU decodes such H.264 there:
+    /// `open_gop` says whether the stream has open GOPs, asked only then.
+    pub fn why_not(
+        &self,
+        codec: ffmpeg::codec::Id,
+        open_gop: impl FnOnce() -> bool,
+    ) -> Option<&'static str> {
         (self.kind == Kind::D3d11va
             && self.vendor == Some(crate::gpus::AMD)
-            && codec == ffmpeg::codec::Id::H264)
-            .then_some("AMD's Direct3D 11 decoder loses its way in H.264 after a seek")
+            && codec == ffmpeg::codec::Id::H264
+            && open_gop())
+        .then_some("AMD's Direct3D 11 decoder loses its way after a seek in H.264 with open GOPs")
     }
 
     /// The render node or adapter it is on; empty for the default one.
@@ -464,7 +470,12 @@ pub fn decoders(dir: &std::path::Path) -> Vec<DecoderStatus> {
     let mut out = Vec::new();
     for gpu in GpuDecoder::all() {
         for (codec, id, clip) in &clips {
-            let result = match (clip, gpu.why_not(*id)) {
+            let open_gop = || {
+                clip.as_ref().is_ok_and(|p| {
+                    crate::decode::h264_open_gop(&crate::decode::Input::File(p.clone()))
+                })
+            };
+            let result = match (clip, gpu.why_not(*id, open_gop)) {
                 (Err(e), _) => Err(format!("no test clip: {e}")),
                 (Ok(_), Some(why)) => Err(format!("left to the CPU: {why}")),
                 (Ok(path), None) => decodes_all(&gpu, path).map_err(|e| e.to_string()),

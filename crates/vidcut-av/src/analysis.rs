@@ -157,7 +157,7 @@ fn stats_on(
         count: 0,
     });
     let id = stream.parameters().id();
-    let opened = crate::decode::open_video(ctx, id, gpu);
+    let opened = crate::decode::open_video(ctx, id, gpu, || crate::decode::h264_open_gop(source));
     let mut decoder = crate::parts::decoder_opened(opened, id, "video")?;
     discard_others(&input, index);
     // A thread of its own measures each frame (copied down whole, scaled
