@@ -93,6 +93,9 @@ pub struct Facts {
     /// Direct3D 11: the encoder's frames are there to fit into (AMF takes
     /// those alone).
     pub into: bool,
+    /// Direct3D 11: libplacebo can fit them on the GPU's Vulkan device,
+    /// colors and HDR too, where its video processor can't.
+    pub placebo: bool,
     /// Fitting this source's frames on the GPU failed already.
     pub fit_failed: bool,
 }
@@ -168,14 +171,9 @@ fn fits(facts: &Facts, to: Place) -> bool {
         (Place::Cuda, Place::Cuda | Place::Vulkan) => turnable && !facts.rgb,
         // `hw::Fitter`: turned, scaled and padded, colors as they are.
         (Place::Vaapi, Place::Vaapi) => turnable && facts.colors_kept,
-        // The video processor, into the encoder's frames; AMD's makes no
-        // 10-bit pictures of 8-bit ones.
+        // The video processor, or libplacebo on Vulkan where it can't.
         (Place::D3d11, Place::D3d11) => {
-            turnable
-                && facts.colors_kept
-                && facts.into
-                && !(facts.layout == format::Pixel::NV12
-                    && facts.out_layout == format::Pixel::P010LE)
+            processor_fits(facts) || (facts.placebo && facts.into && turnable && !facts.rgb)
         }
         // `transpose_vt` and `scale_vt`: no padding, and the layout stays
         // the frames' (vf_scale_vt.c).
@@ -184,6 +182,16 @@ fn fits(facts: &Facts, to: Place) -> bool {
         }
         _ => false,
     }
+}
+
+/// Whether Direct3D 11's video processor fits `facts`' frames into the
+/// encoder's: turned, scaled and padded, colors as they are; AMD's makes no
+/// 10-bit pictures of 8-bit ones.
+pub(crate) fn processor_fits(facts: &Facts) -> bool {
+    matches!(facts.rotation, 0 | 90 | 180 | 270)
+        && facts.colors_kept
+        && facts.into
+        && !(facts.layout == format::Pixel::NV12 && facts.out_layout == format::Pixel::P010LE)
 }
 
 /// Whether the GPU where frames are shrinks them before they come down
@@ -220,6 +228,7 @@ mod tests {
             pads: false,
             out_layout: NV12,
             into: false,
+            placebo: false,
             fit_failed: false,
         }
     }
@@ -300,6 +309,33 @@ mod tests {
         let facts = Facts {
             into: true,
             out_layout: P010LE,
+            ..decoded(Place::D3d11)
+        };
+        let dest = Dest::Encoder {
+            place: Place::D3d11,
+        };
+        assert_eq!(plan(&facts, dest), Route::Shrunk);
+    }
+
+    #[test]
+    fn direct3d_11s_hdr_frames_fit_into_amfs_frames_through_libplacebo() {
+        let facts = Facts {
+            into: true,
+            placebo: true,
+            colors_kept: false,
+            ..decoded(Place::D3d11)
+        };
+        let dest = Dest::Encoder {
+            place: Place::D3d11,
+        };
+        assert_eq!(plan(&facts, dest), Route::Gpu);
+    }
+
+    #[test]
+    fn direct3d_11s_hdr_frames_come_down_without_libplacebo() {
+        let facts = Facts {
+            into: true,
+            colors_kept: false,
             ..decoded(Place::D3d11)
         };
         let dest = Dest::Encoder {

@@ -761,6 +761,11 @@ pub(crate) struct Maker {
     unkept: bool,
     /// Fits VA-API's and Direct3D 11's frames into the output on their GPU.
     fitter: Option<crate::hw::Fitter>,
+    /// Pictures may come a frame late from libplacebo ([`make`]), which
+    /// halves its work: a proxy takes them so, an export can't.
+    ///
+    /// [`make`]: Self::make
+    pub(crate) late: bool,
 }
 
 /// A source's way into the output ([`Maker`]): its route, planned at its
@@ -876,6 +881,7 @@ impl Maker {
             keeper: None,
             unkept: false,
             fitter: None,
+            late: false,
         }
     }
 
@@ -933,6 +939,9 @@ impl Maker {
             pads: fitted(frame, rotation, out) != out,
             out_layout: self.out.2,
             into: self.into().is_some(),
+            placebo: place == Place::D3d11
+                && cfg!(windows)
+                && matches!(layout, format::Pixel::NV12 | format::Pixel::P010LE),
             fit_failed,
         }
     }
@@ -981,6 +990,31 @@ impl Maker {
                     }
                 },
                 Route::Gpu => {
+                    // Direct3D 11's frames its video processor can't fit go
+                    // through libplacebo, which is made for them here.
+                    #[cfg(windows)]
+                    if fitting.scaler.is_none()
+                        && Place::of(frame) == Place::D3d11
+                        && !crate::route::processor_fits(&self.facts(
+                            frame,
+                            rotation,
+                            fitting.fit_failed,
+                        ))
+                    {
+                        match self.placebo(frame, rotation) {
+                            Ok(scaler) => fitting.scaler = Some(scaler),
+                            Err(e) => {
+                                crate::debug!(
+                                    "decoding",
+                                    "{}: libplacebo won't fit the frames for the encoder, the CPU makes them: {e}",
+                                    path.display()
+                                );
+                                fitting.fit_failed = true;
+                                fitting.route = None;
+                                continue;
+                            }
+                        }
+                    }
                     if let Some(scaler) = fitting.scaler.as_mut() {
                         scaler.push(Some(frame))?;
                         let picture = scaler.pull()?;
@@ -1025,6 +1059,27 @@ impl Maker {
             }
         }
         Ok(rest)
+    }
+
+    /// libplacebo on the Vulkan device of the GPU that decoded `frame` (a
+    /// Direct3D 11 frame shown turned by `rotation`), fitting frames like it
+    /// into the encoder's own (AMF's) there (Windows).
+    #[cfg(windows)]
+    fn placebo(&self, frame: &frame::Video, rotation: u16) -> Result<crate::cuda::CudaPictures> {
+        let into = self
+            .into()
+            .ok_or_else(|| Error::Invalid("no encoder's frames to fit into".into()))?;
+        let gpu = crate::hw::d3d11_gpu(frame)
+            .ok_or_else(|| Error::Invalid("the Direct3D 11 frames' GPU isn't known".into()))?;
+        let vulkan = crate::hw::Device::vulkan_on(gpu)?;
+        let (w, h, layout) = self.out;
+        crate::cuda::CudaPictures::for_d3d11_into(
+            &vulkan,
+            (frame, rotation),
+            ((w, h), layout, self.target),
+            !self.late,
+            into,
+        )
     }
 
     /// `frame` fitted into the output on VA-API's or Direct3D 11's GPU, for

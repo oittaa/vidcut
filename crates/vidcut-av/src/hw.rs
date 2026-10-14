@@ -943,6 +943,32 @@ unsafe fn intel_va(_: &frame::Video) -> Option<usize> {
     None
 }
 
+/// The GPU a Direct3D 11 frame is on (`gpus::list`), by its adapter.
+#[cfg(windows)]
+pub(crate) fn d3d11_gpu(f: &frame::Video) -> Option<&'static crate::gpus::Gpu> {
+    // SAFETY: a Direct3D 11 frame's frames context and device, another
+    // reference to the device taken while it is read.
+    let luid = unsafe {
+        let frames = (*f.as_ptr()).hw_frames_ctx;
+        if frames.is_null() {
+            return None;
+        }
+        let device =
+            ffi::av_buffer_ref((*((*frames).data as *const ffi::AVHWFramesContext)).device_ref);
+        if device.is_null() {
+            return None;
+        }
+        let desc = d3d11::desc(&Device(device))?;
+        let mut bytes = [0u8; 8];
+        bytes[..4].copy_from_slice(&desc.AdapterLuid.LowPart.to_le_bytes());
+        bytes[4..].copy_from_slice(&desc.AdapterLuid.HighPart.to_le_bytes());
+        bytes
+    };
+    crate::gpus::list()
+        .iter()
+        .find(|g| g.adapter.and_then(crate::gpus::adapter_luid) == Some(luid))
+}
+
 /// Keeps the GPU's frames there without running its decoder out of
 /// surfaces: Direct3D 11's are copied into textures of their own that
 /// another device can open (Windows). FFmpeg copies NVDEC's itself, and
@@ -1519,7 +1545,10 @@ pub(crate) mod d3d11 {
         layout: ffi::AVPixelFormat,
         size: (u32, u32),
     ) -> Result<*mut ffi::AVBufferRef> {
-        let flags = (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0, 0);
+        let flags = (
+            D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0,
+            D3D11_RESOURCE_MISC_SHARED.0 | D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0,
+        );
         // SAFETY: as the caller says.
         unsafe { frames_on(device, layout, size, flags, "for the encoder") }
     }

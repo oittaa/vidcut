@@ -761,8 +761,9 @@ fn encode_into(
     };
     let mut maker = Maker::new((width, height, pixel), None);
     maker.output = output;
+    maker.late = true;
     let mut fitting = match (&maker.output, maker.cuda_device()) {
-        (_, Some(_)) => Fitting::for_nvenc(reader, size, pixel, None, false),
+        (_, Some(_)) => Fitting::for_nvenc(reader, size, pixel, None, !maker.late),
         (
             Output::Encoder(EncoderFrames {
                 place: Some(Place::Vulkan),
@@ -770,7 +771,7 @@ fn encode_into(
                 ..
             }),
             None,
-        ) => vulkan_fitting(reader, up, size, pixel),
+        ) => vulkan_fitting(reader, up, size, pixel, !maker.late),
         _ => Fitting::default(),
     };
     let path = reader.path().to_path_buf();
@@ -803,15 +804,16 @@ fn encode_into(
 
 /// How the frames `reader` decodes reach Vulkan's encoder, whose frames go
 /// up through `up`: NVDEC's through libplacebo on its GPU, Direct3D 11's
-/// opened on the encoder's device.
+/// opened on the encoder's device. `at_once` as for `Fitting::for_vulkan`.
 fn vulkan_fitting(
     reader: &VideoReader,
     up: &Up,
     size: (u32, u32),
     pixel: format::Pixel,
+    at_once: bool,
 ) -> Fitting {
     if reader.cuda().is_some() {
-        return Fitting::for_vulkan(reader, size, pixel, false);
+        return Fitting::for_vulkan(reader, size, pixel, at_once);
     }
     #[cfg(windows)]
     if let Up::Frames(up) = up {
