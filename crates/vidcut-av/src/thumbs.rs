@@ -163,6 +163,7 @@ fn strip_on(
     // Time (from `start`) of the last frame decoded, while decoding forward.
     let mut position: Option<f64> = None;
     for i in 0..count {
+        crate::first::wait()?;
         let t = duration * (i as f64 + 0.5) / count as f64;
         // The picture a sequence sample shows. Seeking by a rounded
         // timestamp names the next file, which is not part of the sequence
@@ -514,6 +515,7 @@ fn next_frame(
 ) -> Result<Option<frame::Video>> {
     let mut eof = false;
     loop {
+        crate::first::wait()?;
         let mut f = frame::Video::empty();
         match decoder.receive_frame(&mut f) {
             Ok(()) => return Ok(Some(f)),

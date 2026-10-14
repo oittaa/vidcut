@@ -126,6 +126,7 @@ where
         // The same flag the export frame loop loads, so a client that left
         // stops a measurement between frames.
         crate::cancel::stop()?;
+        crate::first::wait()?;
         match decoder.receive_frame(frame) {
             Ok(()) => {
                 damaged = 0;
