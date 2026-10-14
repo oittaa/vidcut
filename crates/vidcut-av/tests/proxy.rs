@@ -71,12 +71,19 @@ fn skip(e: impl std::fmt::Display) -> bool {
     true
 }
 
-/// The software encoders: x264, and SVT-AV1 when this FFmpeg has it.
+/// The software encoders: x264, SVT-AV1 when this FFmpeg has it, ProRes
+/// and DNxHR.
 fn software() -> Vec<ProxyEncoder> {
     let none = Availability::default();
-    let mut out = encoders(ProxyCodec::H264, &none);
-    out.extend(encoders(ProxyCodec::Av1, &none));
-    out
+    [
+        ProxyCodec::H264,
+        ProxyCodec::Av1,
+        ProxyCodec::Prores,
+        ProxyCodec::Dnxhr,
+    ]
+    .into_iter()
+    .flat_map(|c| encoders(c, &none))
+    .collect()
 }
 
 /// Each frame's barcode and timestamp match the source's.
@@ -131,8 +138,9 @@ fn matches_source(enc: &ProxyEncoder) {
     }
 }
 
-/// Keyframes every 60 frames as it is set up, not where the source's are,
-/// and every frame coded in the order it shows (nothing ahead of a seek).
+/// Keyframes every 60 frames as it is set up, not where the source's are
+/// (ProRes and DNxHR: every frame), and every frame coded in the order it
+/// shows (nothing ahead of a seek).
 fn keyframes_and_order(enc: &ProxyEncoder) {
     // Keyframes every 30 frames, and B-frames.
     let spec = FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 150);
@@ -166,7 +174,11 @@ fn keyframes_and_order(enc: &ProxyEncoder) {
         .map(|(_, p)| (p.is_key(), p.pts().unwrap_or(-1)))
         .collect();
     let keys: Vec<usize> = (0..packets.len()).filter(|&n| packets[n].0).collect();
-    assert_eq!(keys, [0, 60, 120], "{}", enc.name);
+    if matches!(enc.codec, "prores" | "dnxhr") {
+        assert_eq!(keys.len(), 150, "{}", enc.name);
+    } else {
+        assert_eq!(keys, [0, 60, 120], "{}", enc.name);
+    }
     assert!(
         packets.windows(2).all(|w| w[0].1 < w[1].1),
         "{}: frames coded out of order",
@@ -203,6 +215,51 @@ fn hardware_av1_proxies_are_exact_too() {
         matches_source(enc);
         keyframes_and_order(enc);
     }
+}
+
+/// On Apple's ProRes hardware (VideoToolbox), the same: ProRes picks it.
+#[cfg(feature = "gpu-tests")]
+#[test]
+fn videotoolbox_prores_proxies_are_exact_too() {
+    let available = vidcut_av::export::encode::detect();
+    let prores = encoders(ProxyCodec::Prores, &available);
+    let Some(apple) = prores.iter().find(|e| e.name == "prores_videotoolbox") else {
+        eprintln!("skipping: no ProRes hardware here: {prores:?}");
+        return;
+    };
+    assert_eq!(apple.label(), "ProRes Proxy, Apple hardware (VideoToolbox)");
+    matches_source(apple);
+    keyframes_and_order(apple);
+}
+
+/// DNxHR takes nothing smaller than 256×120, and says so.
+#[test]
+fn a_dnxhr_proxy_is_at_least_256_by_120() {
+    let spec = FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 6);
+    let Some(source) = fixture::ensure(&spec).map_err(skip).ok() else {
+        return;
+    };
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-proxy-dnxhr-")
+        .tempdir()
+        .unwrap();
+    let dest = tmp.path().join("small.mkv");
+    let e = vidcut_av::proxy::write(
+        &Input::File(source),
+        240,
+        136,
+        &dest,
+        None,
+        &encoders(ProxyCodec::Dnxhr, &Availability::default()),
+        vidcut_av::hw::Decoding::Cpu,
+    )
+    .unwrap_err();
+    assert_eq!(
+        e.to_string(),
+        "DNxHR proxies are at least 256×120 pixels, and this one would be 240×136: make \
+         the proxy size larger or choose another codec"
+    );
+    assert!(!dest.exists());
 }
 
 #[test]

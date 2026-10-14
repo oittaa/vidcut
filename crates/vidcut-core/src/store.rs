@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::editor::{Editor, Entry, History};
 use crate::error::{Error, Result};
-use crate::model::{FORMAT_VERSION, Project};
+use crate::model::Project;
 
 /// How long to wait for another process to release the project lock.
 const LOCK_TIMEOUT: Duration = Duration::from_secs(30);
@@ -305,13 +305,6 @@ fn parse(path: &Path, dir: &Path, text: &str) -> Result<Project> {
         if !absolute_anywhere(file) {
             *file = dir.join(native(file));
         }
-    }
-    if project.vidcut > FORMAT_VERSION {
-        return Err(Error::invalid(format!(
-            "{} uses project format {}, newer than this vidcut ({FORMAT_VERSION})",
-            path.display(),
-            project.vidcut
-        )));
     }
     let problems = crate::validate::violations(&project);
     if !problems.is_empty() {

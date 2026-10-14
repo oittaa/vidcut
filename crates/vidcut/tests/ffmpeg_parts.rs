@@ -213,6 +213,11 @@ fn proxies_fall_back_to_prores() {
     assert_eq!(code, Some(0), "{v}");
     let (code, v) = sb.run("libx264,libopenh264", &["proxy", "generate"]);
     assert_eq!(code, Some(0), "{v}");
+    // A headless run says what made it too, though it encodes on a copy.
+    let how = v["result"]["proxies"][0]["made_with"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(how.ends_with("ProRes Proxy, software (FFmpeg's)"), "{v}");
     let (_, m) = sb.run("", &["media", "get", "m1"]);
     assert_eq!(m["result"]["proxy"]["codec"], "prores", "{m}");
     assert_eq!(m["result"]["proxy"]["stale"], false, "{m}");

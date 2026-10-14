@@ -4,15 +4,12 @@
 //!
 //! Fixtures are cached in [`testdata::fixtures_dir`](crate::testdata::fixtures_dir)
 //! under a descriptive file name that encodes the whole spec, so tests can share
-//! them across runs. Bump [`GENERATOR_VERSION`] whenever generated output changes.
+//! them across runs. Delete them when generated output changes.
 
 use std::path::{Path, PathBuf};
 
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, codec, encoder, format, frame};
-
-/// Part of every fixture file name; bump to invalidate cached fixtures.
-pub const GENERATOR_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Container {
@@ -519,8 +516,7 @@ impl FixtureSpec {
                 })
                 .unwrap_or_default();
         format!(
-            "{content}{v}_{codec}_{w}x{h}{rot}_{n}-{d}{vfr}_g{g}b{b}_{f}f_{audio}_o{o}.{ext}",
-            v = GENERATOR_VERSION,
+            "{content}_{codec}_{w}x{h}{rot}_{n}-{d}{vfr}_g{g}b{b}_{f}f_{audio}_o{o}.{ext}",
             codec = self.video.tag(),
             w = self.width,
             h = self.height,

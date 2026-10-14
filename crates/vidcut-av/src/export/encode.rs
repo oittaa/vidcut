@@ -1262,6 +1262,13 @@ pub fn detect() -> Availability {
         for &p in nv12_p010 {
             check("hevc_videotoolbox", EncoderChoice::VideoToolbox, p, None);
         }
+        // For proxies: it opens only on Apple's ProRes hardware.
+        check(
+            "prores_videotoolbox",
+            EncoderChoice::VideoToolbox,
+            format::Pixel::NV12,
+            None,
+        );
     }
     // Each GPU's own (`gpus::list`): NVENC on NVIDIA's CUDA devices; AMF
     // on AMD's adapters (Windows: on Linux it takes AMD's closed driver, and
@@ -1312,9 +1319,3 @@ pub fn detect() -> Availability {
     }
     Availability { encoders }
 }
-
-/// What [`detect`] tests, in a number: a cache of its results from
-/// another is out of date. 4: each GPU's encoders, NVENC on each NVIDIA
-/// GPU (3's on the first). 3: QSV opened on its GPU (`child_device`); 2's
-/// results came from QSV on the first Intel GPU, or the software runtime.
-pub const DETECTS: u32 = 4;
