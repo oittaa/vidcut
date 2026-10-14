@@ -137,6 +137,12 @@ pub(crate) fn kept(src: Source, target: Option<Hdr>) -> bool {
         }
 }
 
+/// Whether `src` is HDR in video-range BT.2020 YUV, which VideoToolbox
+/// converts into SDR BT.709 itself.
+pub(crate) fn hdr_yuv(src: Source) -> bool {
+    !src.rgb && !src.full_range && src.hdr.is_some() && src.matrix == Matrix::Bt2020
+}
+
 /// `scaled`, a copy of `f` at another size, tagged with the matrix `f` is
 /// read with: an untagged picture's follows from its size.
 pub(crate) fn keep_matrix(scaled: &mut frame::Video, f: &frame::Video) {

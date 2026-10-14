@@ -657,15 +657,26 @@ fn encode_into(
             let Some(src) = src else {
                 return Ok(());
             };
-            // VideoToolbox's 8-bit frames in the proxy's colors are turned
-            // and scaled on the GPU, and go to its encoder there.
+            // VideoToolbox's frames are turned and scaled on the GPU, and go
+            // to its encoder there: 8-bit ones in the proxy's colors, and for
+            // ProRes 10-bit ones too, HDR made SDR there.
+            let layout = match crate::hw::sw_format(&src) {
+                format::Pixel::P010LE if enc.codec == "prores" => format::Pixel::P010LE,
+                _ => format::Pixel::NV12,
+            };
+            let colors = crate::color::Source::of(&src);
+            let sdr = enc.codec == "prores" && crate::color::hdr_yuv(colors);
             if vt.is_some()
                 && !fit_failed
-                && crate::hw::Fitter::fits(&src, format::Pixel::NV12, None)
-                && crate::color::kept(crate::color::Source::of(&src), None)
+                && crate::hw::Fitter::fits(&src, layout, None)
+                && (sdr || crate::color::kept(colors, None))
             {
-                let nv12 = format::Pixel::NV12;
-                match crate::hw::Fitter::fit(&mut fitter, &src, rotation, size, size, nv12, None) {
+                let fit = if sdr {
+                    crate::hw::Fitter::fit_sdr(&mut fitter, &src, rotation, size)
+                } else {
+                    crate::hw::Fitter::fit(&mut fitter, &src, rotation, size, size, layout, None)
+                };
+                match fit {
                     Ok(picture) => {
                         writer.push(picture, src.pts())?;
                         fitted += 1;

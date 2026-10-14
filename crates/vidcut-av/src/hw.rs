@@ -1039,6 +1039,19 @@ pub(crate) struct Fitter {
     /// The frames context, layout and frame size it was made for, the size
     /// it scales to, and the turn.
     input: (KeptLike, (u32, u32), u16),
+    /// It converts HDR into SDR BT.709 too ([`Fitter::fit_sdr`]).
+    sdr: bool,
+}
+
+/// `transpose_vt`, turning frames clockwise by `rotation` as the CPU's
+/// `transpose` and flips do.
+fn vt_turn(rotation: u16) -> &'static str {
+    match rotation {
+        90 => "transpose_vt=dir=clock,",
+        180 => "transpose_vt=dir=reversal,",
+        270 => "transpose_vt=dir=cclock,",
+        _ => "",
+    }
 }
 
 enum Fitting {
@@ -1080,7 +1093,7 @@ impl Fitter {
     ) -> Result<frame::Video> {
         let (frames, of) = frames_of(f)?;
         let input = (of, fitted, rotation);
-        if fitter.as_ref().is_none_or(|x| x.input != input) {
+        if fitter.as_ref().is_none_or(|x| x.input != input || x.sdr) {
             let fitting = match f.format() {
                 format::Pixel::VAAPI => {
                     let (fw, fh) = fitted;
@@ -1110,13 +1123,7 @@ impl Fitter {
                             "VideoToolbox has no filter to center a picture on black".into(),
                         ));
                     }
-                    let turn = match rotation {
-                        90 => "transpose_vt=dir=clock,",
-                        180 => "transpose_vt=dir=reversal,",
-                        270 => "transpose_vt=dir=cclock,",
-                        _ => "",
-                    };
-                    let spec = format!("{turn}scale_vt=w={w}:h={h}");
+                    let spec = format!("{}scale_vt=w={w}:h={h}", vt_turn(rotation));
                     let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
                     Fitting::Filters(gpu_graph(f, frames, pixel, &spec)?)
                 }
@@ -1132,7 +1139,11 @@ impl Fitter {
                 }
                 other => return Err(Error::Invalid(format!("no fitting {other:?} frames"))),
             };
-            *fitter = Some(Self { fitting, input });
+            *fitter = Some(Self {
+                fitting,
+                input,
+                sdr: false,
+            });
         }
         let _ = into;
         let mut out = match &mut fitter.as_mut().expect("made above").fitting {
@@ -1143,6 +1154,53 @@ impl Fitter {
         same_picture(&mut out, f);
         // SAFETY: a plain field of its own frame.
         unsafe { (*out.as_mut_ptr()).sample_aspect_ratio = ffi::AVRational { num: 1, den: 1 } };
+        Ok(out)
+    }
+
+    /// VideoToolbox's HDR frame `f` turned clockwise by `rotation`, scaled
+    /// to `(w, h)` and converted into SDR BT.709 by VideoToolbox, in its
+    /// own layout, with its timestamp, its pixels square; `fitter` made
+    /// for frames like it first.
+    pub(crate) fn fit_sdr(
+        fitter: &mut Option<Fitter>,
+        f: &frame::Video,
+        rotation: u16,
+        (w, h): (u32, u32),
+    ) -> Result<frame::Video> {
+        if f.format() != format::Pixel::VIDEOTOOLBOX {
+            return Err(Error::Invalid(format!(
+                "no converting {:?} frames on the GPU",
+                f.format()
+            )));
+        }
+        let (frames, of) = frames_of(f)?;
+        let input = (of, (w, h), rotation);
+        if fitter.as_ref().is_none_or(|x| x.input != input || !x.sdr) {
+            let spec = format!(
+                "{}scale_vt=w={w}:h={h}:color_matrix=bt709:color_primaries=bt709:color_transfer=bt709",
+                vt_turn(rotation)
+            );
+            let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
+            *fitter = Some(Self {
+                fitting: Fitting::Filters(gpu_graph(f, frames, pixel, &spec)?),
+                input,
+                sdr: true,
+            });
+        }
+        let mut out = match &mut fitter.as_mut().expect("made above").fitting {
+            Fitting::Filters(graph) => run_graph(graph, f, "converting a frame on the GPU")?,
+            #[cfg(windows)]
+            Fitting::D3d11(_) => unreachable!("made for VideoToolbox"),
+        };
+        same_picture(&mut out, f);
+        // SAFETY: plain fields of its own frame.
+        unsafe {
+            let o = out.as_mut_ptr();
+            (*o).sample_aspect_ratio = ffi::AVRational { num: 1, den: 1 };
+            (*o).color_primaries = ffi::AVColorPrimaries::AVCOL_PRI_BT709;
+            (*o).color_trc = ffi::AVColorTransferCharacteristic::AVCOL_TRC_BT709;
+            (*o).colorspace = ffi::AVColorSpace::AVCOL_SPC_BT709;
+        }
         Ok(out)
     }
 }
