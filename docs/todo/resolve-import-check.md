@@ -18,7 +18,8 @@ Import vidcut's `.otio` and `.otioz` files into the current free and Studio vers
 - EDL and FCPXML keep less than OTIO: the EDL one video track, no markers or audio tracks; the FCPXML (1.10) no markers.
 - Odd: Resolve's API import of its own export of such a timeline failed with `importSourceClips` on, and rebuilt it with it off. The cause wasn't found (not its generators, Text+, compound clips, transitions or speeds).
 
-**Still open:**
-- The free version.
-- A plain `.otio` whose media are elsewhere on that computer: Resolve's folder prompt.
-- The GUI's File > Import > Timeline, against the API's results above.
+**Studio 21.1.1, File > Import > Timeline:**
+- `.otio` and `.otioz` files import fine.
+- If the media has moved, Resolve asks where it is.
+
+**Still open:** the free version.
