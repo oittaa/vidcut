@@ -92,12 +92,12 @@ pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub passes: Option<u8>,
     /// Video frames decoded and scaled on the GPU on their way to its
-    /// encoder (NVENC, VAAPI, AMF, VideoToolbox), never in memory; the rest
-    /// were made on the CPU.
+    /// encoder (NVENC, VAAPI, AMF), never in memory; the rest were made on
+    /// the CPU.
     pub gpu_frames: i64,
     /// Video frames whose source frame a GPU decoded (NVDEC, VA-API,
-    /// Direct3D 11, VideoToolbox): those of `gpu_frames`, and those that
-    /// came down to be made on the CPU ([`run_decoding_on`]).
+    /// Direct3D 11): those of `gpu_frames`, and those that came down to be
+    /// made on the CPU ([`run_decoding_on`]).
     pub gpu_decoded: i64,
     pub seconds: f64,
     /// What loudness normalization did (`audio.loudness`).
@@ -760,16 +760,15 @@ fn encode(
                     break;
                 }
                 // VAAPI on the decoder's own device, where the decoder is
-                // VA-API on its render node, AMF where it is Direct3D 11 on
-                // its adapter, and VideoToolbox on a Mac's one GPU: frames
-                // fitted on the GPU go to it there.
-                let shared = decoder.filter(|d| match (enc.kind, d.kind()) {
-                    (EncoderChoice::Vaapi, crate::hw::Kind::Vaapi)
-                    | (EncoderChoice::Amf, crate::hw::Kind::D3d11va) => {
-                        enc.device.as_deref() == Some(d.on())
-                    }
-                    (EncoderChoice::VideoToolbox, crate::hw::Kind::VideoToolbox) => true,
-                    _ => false,
+                // VA-API on its render node, and AMF where it is Direct3D 11
+                // on its adapter: frames fitted on the GPU go to it there.
+                let shared = decoder.filter(|d| {
+                    let pair = matches!(
+                        (enc.kind, d.kind()),
+                        (EncoderChoice::Vaapi, crate::hw::Kind::Vaapi)
+                            | (EncoderChoice::Amf, crate::hw::Kind::D3d11va)
+                    );
+                    pair && enc.device.as_deref() == Some(d.on())
                 });
                 match encode::open_video(&enc, w, h, fps, global_header, None, shared, pass) {
                     Ok(o) => {
