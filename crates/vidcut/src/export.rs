@@ -942,7 +942,8 @@ fn video_unavailable(
 
 /// What this machine encodes, the GPU's use as `gpu` says: for each video
 /// codec and encoder choice, and each audio codec, why not (`null`: it
-/// does), by their names in the settings.
+/// does), by their names in the settings. An encoder that encodes a codec
+/// only at a bitrate is asked with one.
 pub fn encodable(available: &Availability, gpu: bool) -> Value {
     use vidcut_core::export::{AudioCodec, AudioSettings, VideoCodec, VideoSettings};
     let key = |v: Value| v.as_str().unwrap_or_default().to_string();
@@ -952,7 +953,10 @@ pub fn encodable(available: &Availability, gpu: bool) -> Value {
             let by_encoder: serde_json::Map<String, Value> = EncoderChoice::ALL
                 .iter()
                 .map(|&encoder| {
-                    let v = VideoSettings::new(codec, encoder);
+                    let mut v = VideoSettings::new(codec, encoder);
+                    if vidcut_av::export::encode::bitrate_only(codec, encoder) {
+                        v.bitrate = Some(20_000_000);
+                    }
                     (
                         key(json!(encoder)),
                         json!(video_unavailable(&v, available, gpu)),
@@ -1126,4 +1130,25 @@ pub fn frame(
     vidcut_av::export::still::write_png(&piece, fps, w.max(2), h.max(2), out, decoder.as_ref())
         .map_err(from_av)?;
     Ok(json!({ "path": out, "frame": frame, "width": w, "height": h }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vidcut_av::export::encode::EncoderStatus;
+
+    #[test]
+    fn vp9_on_qsv_is_choosable_where_qsv_encodes_it() {
+        let intel = Availability {
+            encoders: vec![EncoderStatus {
+                encoder: "vp9_qsv".into(),
+                kind: EncoderChoice::Qsv,
+                device: None,
+                pixel: "nv12".into(),
+                ok: true,
+                error: None,
+            }],
+        };
+        assert_eq!(encodable(&intel, true)["video"]["vp9"]["qsv"], Value::Null);
+    }
 }
