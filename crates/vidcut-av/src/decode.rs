@@ -490,6 +490,8 @@ pub(crate) fn open_video(
         let raw = ctx.as_mut_ptr();
         (*raw).hw_device_ctx = ffmpeg::ffi::av_buffer_ref(gpu.as_ptr());
         (*raw).get_format = Some(gpu_format);
+        // Frames held on their way to be measured.
+        (*raw).extra_hw_frames = 8;
         // The GPU decodes; frame threads would only add latency.
         (*raw).thread_count = 1;
     }
