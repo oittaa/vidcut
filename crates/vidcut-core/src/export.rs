@@ -739,7 +739,7 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
                 s.container.extension()
             )));
         }
-        if v.encoder.gpu() && matches!(v.codec, V::Prores | V::Dnxhr | V::Vp9) {
+        if v.encoder.gpu() && matches!(v.codec, V::Prores | V::Dnxhr) {
             return Err(Error::usage(format!(
                 "{:?} has no GPU encoder; use encoder cpu or auto",
                 v.codec
