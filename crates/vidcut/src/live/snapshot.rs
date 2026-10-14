@@ -75,7 +75,7 @@ pub struct PlayerSnap {
 pub struct ProjectSnap {
     pub path: PathBuf,
     pub project: Arc<Project>,
-    /// Undo and redo labels, newest first.
+    /// The next step to undo and to redo, by label.
     pub undo: Vec<String>,
     pub redo: Vec<String>,
 }

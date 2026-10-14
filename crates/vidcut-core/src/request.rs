@@ -756,7 +756,8 @@ pub enum Request {
         #[serde(default = "one")]
         steps: u32,
     },
-    /// Undo and redo labels, newest first.
+    /// How many steps there are to undo and redo (`undo_steps`,
+    /// `redo_steps`), and the newest 100 of each by label, newest first.
     #[serde(rename = "history.get")]
     HistoryGet {},
     /// Apply requests atomically as one undo step.

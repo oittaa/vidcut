@@ -11,6 +11,7 @@ pub mod editor;
 pub mod error;
 pub mod export;
 pub mod fingerprint;
+mod history;
 pub mod model;
 pub mod ops;
 pub mod otio;

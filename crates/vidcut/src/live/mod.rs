@@ -2292,7 +2292,8 @@ impl Live {
                 .map(|m| (m.id.clone(), m.path.clone()))
                 .collect(),
         );
-        let history = open.editor.history();
+        // The Edit menu names the next step to undo and to redo.
+        let history = open.editor.history_view(1).unwrap_or_default();
         self.project_snap = Some(ProjectSnap {
             path: open.store.path().to_path_buf(),
             project: Arc::new(p.clone()),

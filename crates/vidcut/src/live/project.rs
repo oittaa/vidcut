@@ -68,8 +68,8 @@ impl OpenProject {
         // `load_text` takes the history from the sidecar a headless run
         // wrote, or records an "external change" undo step.
         let editor = self.store.load_text(&text)?;
-        let changed =
-            editor.project() != self.editor.project() || editor.history() != self.editor.history();
+        let changed = editor.project() != self.editor.project()
+            || editor.history_counts() != self.editor.history_counts();
         self.editor = editor;
         self.disk = text;
         Ok(changed)
@@ -104,6 +104,16 @@ impl OpenProject {
                 Ok(saved) => {
                     self.disk = saved.text;
                     self.history_error = saved.history_error;
+                    if saved.compact {
+                        // Trimming the history writes it anew: on a thread
+                        // of its own, the lock taken only to swap the files.
+                        let store = self.store.clone();
+                        let _ = crate::threads::spawn(
+                            "vidcut-history",
+                            crate::threads::Work::Job,
+                            move || store.compact(),
+                        );
+                    }
                 }
                 Err(e) => return (Err(e), true),
             }
