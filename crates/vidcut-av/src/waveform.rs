@@ -6,7 +6,7 @@ use std::path::Path;
 use crate::decode::decode_stream;
 use crate::error::{Context, Error, Result};
 use crate::export::audio::{Resampler, discard_others};
-use crate::ffmpeg::{codec, format, frame, media};
+use crate::ffmpeg::{codec, frame, media};
 
 /// Peaks of one audio stream: a mono downmix for drawing, and one envelope
 /// per meter channel (spec D28), the stream mixed to that many channels as
@@ -129,7 +129,7 @@ pub fn waveform(path: &Path, ordinal: u32, per_second: u32, channels: u16) -> Re
     // a stereo meter's left and right as they do in the export.
     let want = channels.clamp(1, 8);
     crate::init();
-    let mut input = format::input(path).ctx(|| format!("opening {}", path.display()))?;
+    let mut input = crate::decode::open_file(path)?;
     let stream = input
         .streams()
         .filter(|s| s.parameters().medium() == media::Type::Audio)

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use vidcut_core::render::AudioPiece;
 
 use super::ahead::Ahead;
-use crate::error::{Context, Error, Result};
+use crate::error::{Error, Result};
 use crate::ffmpeg::{self, codec, ffi, format, frame, media};
 use crate::stretch::Stretch;
 
@@ -150,7 +150,7 @@ const DECODE_AHEAD: i64 = 1;
 impl SourceAudio {
     fn open(path: &Path, ordinal: u32, start: f64, rate: u32, channels: u16) -> Result<Self> {
         crate::init();
-        let input = format::input(path).ctx(|| format!("opening {}", path.display()))?;
+        let input = crate::decode::open_file(path)?;
         let (index, tb, tick, stream_start, params) = {
             let stream = input
                 .streams()
