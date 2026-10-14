@@ -85,6 +85,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
     - the audio of each video track's clips, as an audio track (J/L cuts become audio clips offset from the video edits)
     - each audio track, and markers
     - in `metadata.vidcut`: the In/Out marks, clip gain/mute and track settings (lock, mute, solo, fader, name)
+    - each clip's Clip Color, as OpenTimelineIO's item color, which vidcut's import reads back
     - the clip effects, transitions, generators, compound clips and speed changes carried from another editor's file (below)
 
     A track's video off or audio muted also marks the OTIO track disabled. Unlike media exports it covers the whole timeline unless given a range. An `.otioz` or `.otiod` export (File > Export Timeline with Media) copies the media whole, as Resolve does; it runs as a job.
@@ -92,6 +93,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
     - Paths, timecode source ranges (including drop-frame) and marker notes: spec D40.
     - In `metadata.Resolve_OTIO`: a link group number joins each clip's video and audio, and the audio names the stream and channels it plays.
     - Clip gain is also written as Resolve's clip volume, track lock and solo as Resolve's.
+    - Resolve neither writes nor reads clip colors in OTIO files (checked with Studio 21.1.1).
     - Tracks carry the names given to them (a video track's audio track its video track's), else the ones Resolve gives its own by place: `Video 1`, `Audio 2`.
     - Resolve's files have no place for the In/Out marks or a track's fader, so Resolve gets neither (checked with Studio 21); vidcut's own import reads them back. Resolve drops other programs' metadata, so a timeline that went through Resolve comes back without them (checked with Studio 21.1.1).
     - A still is available for one frame, as Resolve writes it. An image sequence is OTIO's `ImageSequenceReference` (folder, name prefix and suffix, first number, zero padding, rate), whose available range is the picture count at that rate: OTIO counts pictures by truncating the range at the reference's rate, so a project-rate length would be a different number of pictures.

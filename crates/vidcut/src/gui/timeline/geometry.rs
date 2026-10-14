@@ -555,6 +555,7 @@ mod tests {
             generator: None,
             compound: None,
             speed: None,
+            color: None,
         }
     }
 

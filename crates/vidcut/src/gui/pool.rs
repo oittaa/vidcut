@@ -612,6 +612,9 @@ impl Workspace {
                 );
             }
         }
+        if let Some(color) = m.color.as_deref().and_then(theme::clip_color) {
+            painter.circle_filled(picture.right_bottom() + vec2(-9.0, -11.0), 4.5, color);
+        }
         let border = if selected {
             Stroke::new(2.0, theme::ACCENT)
         } else if open {
@@ -689,7 +692,7 @@ impl Workspace {
     fn list(&mut self, ui: &mut egui::Ui, p: &Project, folders: &[String], media: &[Media]) {
         egui::Grid::new("pool-list")
             .striped(true)
-            .num_columns(7)
+            .num_columns(8)
             .spacing(vec2(12.0, 4.0))
             .show(ui, |ui| {
                 for h in [
@@ -700,6 +703,7 @@ impl Workspace {
                     "Codec",
                     "Audio",
                     "Proxy",
+                    "Color",
                 ] {
                     ui.label(dim(h));
                 }
@@ -715,7 +719,7 @@ impl Workspace {
                     self.bin_interaction(&r, b);
                     let count = p.media.iter().filter(|m| within(&m.bin, b)).count();
                     ui.label(dim(format!("{count} clip(s)")));
-                    for _ in 0..5 {
+                    for _ in 0..6 {
                         ui.label("");
                     }
                     ui.end_row();
@@ -768,6 +772,17 @@ impl Workspace {
                         }
                         _ => {
                             ui.label("-");
+                        }
+                    }
+                    match m.color.as_deref().and_then(theme::clip_color) {
+                        Some(color) => {
+                            let (patch, _) =
+                                ui.allocate_exact_size(vec2(14.0, 12.0), Sense::hover());
+                            ui.painter()
+                                .rect_filled(patch, CornerRadius::same(2), color);
+                        }
+                        None => {
+                            ui.label("");
                         }
                     }
                     ui.end_row();
@@ -877,12 +892,18 @@ impl Workspace {
                 ui.close();
             }
             ui.separator();
-            // Bins: the selected clips, or this one.
+            // Bins and colors: the selected clips, or this one.
             let ids = if self.snap.selection.media.contains(&m.id) {
                 self.snap.selection.media.clone()
             } else {
                 vec![m.id.clone()]
             };
+            ui.menu_button("Clip Color", |ui| {
+                if let Some(color) = theme::clip_color_menu(ui) {
+                    self.send("media.set", json!({ "media": ids, "color": color }));
+                    ui.close();
+                }
+            });
             if let Some(p) = self.project().cloned() {
                 ui.menu_button("Move to Bin", |ui| {
                     for (path, depth) in bin_list(&p) {

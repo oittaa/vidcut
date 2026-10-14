@@ -282,6 +282,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         generator: None,
         compound: None,
         speed: None,
+        color: None,
     })
 }
 
@@ -1539,14 +1540,20 @@ pub struct ClipProps {
     pub gain_db: Option<f64>,
     /// `Some(None)` clears the name.
     pub name: Option<Option<String>>,
+    /// `Some(None)` clears the color.
+    pub color: Option<Option<String>>,
 }
 
-/// Sets properties on clips (D = enable, Mute, clip volume, name).
+/// Sets properties on clips (D = enable, Mute, clip volume, name, Clip
+/// Color).
 pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<()> {
     if let Some(g) = props.gain_db
         && !(-60.0..=24.0).contains(&g)
     {
         return Err(Error::invalid(format!("gain {g} dB outside -60..24 dB")));
+    }
+    if let Some(Some(c)) = &props.color {
+        check_clip_color(c)?;
     }
     for id in ids {
         let (ti, ci) = locate(p, id)?;
@@ -1556,6 +1563,9 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
         }
         if let Some(n) = &props.name {
             c.name = n.clone();
+        }
+        if let Some(color) = &props.color {
+            c.color = color.clone();
         }
         if props.muted.is_some() || props.gain_db.is_some() {
             let a = c
@@ -1621,6 +1631,53 @@ pub fn set_marks(
         return Err(Error::invalid("marks must be on the timeline"));
     }
     p.marks = marks;
+    Ok(())
+}
+
+/// Clip Colors (spec §3) and how they look.
+pub const CLIP_COLORS: &[(&str, [u8; 3])] = &[
+    ("orange", [235, 110, 30]),
+    ("apricot", [250, 165, 60]),
+    ("yellow", [225, 190, 40]),
+    ("lime", [160, 200, 30]),
+    ("olive", [100, 150, 40]),
+    ("green", [70, 145, 100]),
+    ("teal", [0, 150, 150]),
+    ("navy", [25, 75, 130]),
+    ("blue", [70, 115, 225]),
+    ("purple", [150, 110, 220]),
+    ("violet", [205, 90, 145]),
+    ("pink", [235, 140, 180]),
+    ("tan", [185, 175, 150]),
+    ("beige", [200, 160, 120]),
+    ("brown", [150, 100, 20]),
+    ("chocolate", [130, 85, 60]),
+];
+
+fn check_clip_color(color: &str) -> Result<()> {
+    if CLIP_COLORS.iter().any(|(c, _)| *c == color) {
+        return Ok(());
+    }
+    let names: Vec<&str> = CLIP_COLORS.iter().map(|(c, _)| *c).collect();
+    Err(Error::invalid(format!(
+        "\"{color}\" isn't a clip color. Use one of these: {}",
+        names.join(", ")
+    )))
+}
+
+/// Sets the Clip Color of media items; `None` clears it.
+pub fn set_media_color(p: &mut Project, ids: &[String], color: Option<String>) -> Result<()> {
+    if let Some(c) = &color {
+        check_clip_color(c)?;
+    }
+    for id in ids {
+        let m = p
+            .media
+            .iter_mut()
+            .find(|m| m.id == *id)
+            .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
+        m.color.clone_from(&color);
+    }
     Ok(())
 }
 

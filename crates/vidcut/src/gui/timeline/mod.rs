@@ -1641,6 +1641,12 @@ impl Workspace {
                 json!({ "clips": clips, "muted": !a.muted }),
             );
         }
+        ui.menu_button("Clip Color", |ui| {
+            if let Some(color) = theme::clip_color_menu(ui) {
+                self.send("clip.set", json!({ "clips": clips, "color": color }));
+                ui.close();
+            }
+        });
         ui.separator();
         item(
             ui,

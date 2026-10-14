@@ -31,6 +31,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("media.remove", &["media"]),
     ("media.relink", &["media", "path"]),
     ("media.rename", &["media", "name"]),
+    ("media.set", &["media"]),
     ("media.marks.set", &["media"]),
     ("media.marks.clear", &["media"]),
     ("proxy.generate", &["media"]),
@@ -168,6 +169,11 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "media.marks.set",
         "vidcut media marks set m1 --in 5s --out 10s",
+    ),
+    ("media.set", "vidcut media set m1 m2 --color teal"),
+    (
+        "clip.set",
+        "vidcut clip set c4 --color pink\n  vidcut clip set c4 --color \"\"",
     ),
     (
         "proxy.generate",

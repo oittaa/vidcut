@@ -136,6 +136,44 @@ fn our_color(c: &str) -> &'static str {
     }
 }
 
+/// Clip Color `name` as OTIO writes an item's color.
+fn otio_clip_color(name: &str) -> Option<Value> {
+    let (n, [r, g, b]) = crate::ops::CLIP_COLORS.iter().find(|(n, _)| *n == name)?;
+    let mut title = n.to_string();
+    title[..1].make_ascii_uppercase();
+    let x = |v: &u8| f64::from(*v) / 255.0;
+    Some(json!({
+        "OTIO_SCHEMA": "Color.1",
+        "name": title,
+        "r": x(r),
+        "g": x(g),
+        "b": x(b),
+        "a": 1.0,
+    }))
+}
+
+/// The Clip Color of an OTIO item: its color's name if it is one of ours,
+/// else ours nearest to it.
+fn clip_color(item: &Value) -> Option<String> {
+    let c = &item["color"];
+    let name = c["name"].as_str().unwrap_or("").to_ascii_lowercase();
+    let colors = crate::ops::CLIP_COLORS;
+    if let Some((n, _)) = colors.iter().find(|(n, _)| *n == name) {
+        return Some(n.to_string());
+    }
+    let rgb = [&c["r"], &c["g"], &c["b"]].map(|v| v.as_f64().map(|v| v * 255.0));
+    let [Some(r), Some(g), Some(b)] = rgb else {
+        return None;
+    };
+    let off = |[x, y, z]: &[u8; 3]| {
+        (f64::from(*x) - r).powi(2) + (f64::from(*y) - g).powi(2) + (f64::from(*z) - b).powi(2)
+    };
+    colors
+        .iter()
+        .min_by(|a, b| off(&a.1).total_cmp(&off(&b.1)))
+        .map(|(n, _)| n.to_string())
+}
+
 /// Where a written timeline says its media are.
 #[derive(Debug, Clone, Copy)]
 pub enum Locations<'a> {
@@ -436,7 +474,7 @@ pub fn export(
                         x.written(c.source_at(s), s > c.start, e < c.end())
                     }),
                 );
-                video.push(match &c.compound {
+                let mut it = match &c.compound {
                     Some(k) => compound_item(c, k, &label, c.source_at(s), e - s, effects, rate),
                     None => item(
                         &label,
@@ -448,7 +486,11 @@ pub fn export(
                         metadata,
                         effects,
                     ),
-                });
+                };
+                if let Some(x) = p.clip_color(c).and_then(otio_clip_color) {
+                    it["color"] = x;
+                }
+                video.push(it);
                 if let Some(x) = transitions::tail(p, t, c, false, e, rate) {
                     video.push(x);
                 }
@@ -483,7 +525,7 @@ pub fn export(
                     c,
                     effects::sound(au, c.source_at(s), s > whole.0, e < whole.1),
                 );
-                audio.push(item(
+                let mut it = item(
                     &label,
                     c,
                     m,
@@ -492,7 +534,11 @@ pub fn export(
                     !au.muted,
                     json!({ VIDCUT: meta, EDITOR: editor }),
                     effects,
-                ));
+                );
+                if let Some(x) = p.clip_color(c).and_then(otio_clip_color) {
+                    it["color"] = x;
+                }
+                audio.push(it);
                 if let Some(x) = transitions::tail(p, t, c, true, e, rate) {
                     audio.push(x);
                 }
@@ -746,6 +792,8 @@ pub struct ImportedClip {
     pub compound: Option<Compound>,
     /// Its speed change: a time effect, as the file has it.
     pub speed: Option<Speed>,
+    /// Its Clip Color.
+    pub color: Option<String>,
 }
 
 impl ImportedClip {
@@ -799,6 +847,7 @@ impl ImportedClip {
             generator: None,
             compound: None,
             speed: None,
+            color: clip_color(item),
         }
     }
 
@@ -1490,6 +1539,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         generator: None,
                         compound: None,
                         speed,
+                        color: clip_color(item),
                     });
                 }
                 Err(e) => warnings.push(format!("{}; left as a gap", e.message)),
@@ -1632,6 +1682,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 generator: None,
                 compound: None,
                 speed,
+                color: clip_color(item),
             });
         }
         transitions_of(between, &keys, true, fps, &mut found);

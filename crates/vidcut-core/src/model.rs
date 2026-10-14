@@ -243,6 +243,10 @@ pub struct Media {
     /// A smaller copy the preview can play. Absent until one is generated.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy: Option<Proxy>,
+    /// Its Clip Color (spec §3), which its clips show unless they have
+    /// their own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
     /// SHA-256 of the file when it was added or relinked
     /// ([`fingerprint`](crate::fingerprint)): of the whole file up to
     /// 10 MiB (its `sha256sum`), else of 1 MiB from its start, middle and
@@ -621,6 +625,9 @@ pub struct Clip {
     /// plays and edits at it (decision D48).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed: Option<Speed>,
+    /// Its own Clip Color (spec §3). Without one it shows its media's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
 }
 
 /// A speed change from another editor's file (deviation X9).
@@ -993,6 +1000,13 @@ impl Project {
 
     pub fn clip(&self, id: &str) -> Option<&Clip> {
         self.find_clip(id).map(|(t, c)| &self.tracks[t].clips[c])
+    }
+
+    /// The Clip Color clip `c` shows: its own, else its media's.
+    pub fn clip_color<'a>(&'a self, c: &'a Clip) -> Option<&'a str> {
+        c.color
+            .as_deref()
+            .or_else(|| self.media(&c.media).and_then(|m| m.color.as_deref()))
     }
 
     /// End of the program: the latest clip end (video or audio) on any track.

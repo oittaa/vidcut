@@ -806,6 +806,11 @@ fn mutate(
             m.name = name.clone();
             Value::Null
         }
+        Request::MediaSet { media, color } => {
+            let color = (!color.is_empty()).then(|| color.clone());
+            ops::set_media_color(p, &media.to_vec(), color)?;
+            Value::Null
+        }
         Request::EditAppend(src) => {
             let sources = resolve_sources(p, src)?;
             clip_ids(&ops::append_block(p, &sources)?)
@@ -1090,13 +1095,17 @@ fn mutate(
             muted,
             gain_db,
             name,
+            color,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let or_none =
+                |v: &Option<String>| v.as_ref().map(|v| (!v.is_empty()).then(|| v.clone()));
             let props = ClipProps {
                 enabled: *enabled,
                 muted: *muted,
                 gain_db: *gain_db,
-                name: name.as_ref().map(|n| (!n.is_empty()).then(|| n.clone())),
+                name: or_none(name),
+                color: or_none(color),
             };
             ops::set_clips(p, &ids, &props)?;
             Value::Null
@@ -1320,6 +1329,7 @@ fn add_media(p: &mut Project, probed: ProbedMedia) -> String {
         bin: String::new(),
         sequence: probed.sequence,
         proxy: None,
+        color: None,
         fingerprint: probed.fingerprint,
     });
     id
@@ -1767,6 +1777,7 @@ fn place_imported(
                 }),
                 compound,
                 speed: c.speed.clone(),
+                color: c.color.clone(),
             });
             track.sort();
             continue;
@@ -1866,6 +1877,7 @@ fn place_imported(
             generator: None,
             compound: None,
             speed: c.speed.clone(),
+            color: c.color.clone(),
         });
         track.sort();
     }
@@ -2983,6 +2995,9 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env) -> Value {
     if !m.bin.is_empty() {
         v["bin"] = json!(m.bin);
     }
+    if let Some(c) = &m.color {
+        v["color"] = json!(c);
+    }
     // A still lasts as long as clips make it; `frames` is the still duration.
     if m.is_still() {
         v["still"] = json!(true);
@@ -3034,6 +3049,10 @@ pub fn clip_json(p: &Project, c: &Clip, track: &str) -> Value {
         "source_in_tc": p.settings.length_timecode(c.source_in),
         "enabled": c.enabled,
     });
+    // The Clip Color it shows, its own or its media's.
+    if let Some(color) = p.clip_color(c) {
+        v["color"] = json!(color);
+    }
     // A block from another editor (deviation X9), by kind.
     if let Some(g) = &c.generator {
         v["generator"] = json!(otio::generator_kind(g));
