@@ -239,7 +239,8 @@ pub struct Status {
 /// what the meters show of the player.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Levels {
-    /// The mix (silent while the monitoring mute is on).
+    /// The mix. The monitoring mute silences only the viewer's meter
+    /// (spec D28), which the GUI does.
     pub mix: Vec<f32>,
     /// Each of the plan's audio lanes, in order, with its gain on top.
     pub lanes: Vec<Vec<f32>>,

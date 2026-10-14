@@ -42,6 +42,9 @@ struct Piece {
     samples: Vec<f32>,
     /// Stream position of the first sample, and stream frames per sample.
     mark: Option<(f64, f64)>,
+    /// Each lane's peaks in the sound these samples are, `channels` a lane,
+    /// for the meters ([`super::Levels`]).
+    lanes: Vec<f32>,
 }
 
 /// What is being played.
@@ -65,9 +68,9 @@ struct Run {
     /// is queued yet, for `VIDCUT_DEBUG`.
     taken: std::time::Instant,
     queued: bool,
-    /// Each lane's peaks in the sound mixed last, `channels` a lane, for
-    /// the meters ([`super::Levels`]).
-    lanes: Vec<f32>,
+    /// Each lane's peaks in the sound mixed lately, by the stream positions
+    /// it covers (from, to), for the stretch's blocks.
+    metered: VecDeque<(f64, f64, Vec<f32>)>,
 }
 
 impl Run {
@@ -201,7 +204,7 @@ impl Producer {
             ended: false,
             taken: std::time::Instant::now(),
             queued: false,
-            lanes: Vec::new(),
+            metered: VecDeque::new(),
         });
         self.restart(from);
     }
@@ -223,6 +226,7 @@ impl Producer {
         run.ended = false;
         run.exhausted = false;
         run.pending.clear();
+        run.metered.clear();
         run.stretch = (run.speed.abs() != 1.0).then(|| {
             Stretch::new(
                 run.speed.abs(),
@@ -304,7 +308,16 @@ impl Producer {
                 run.pending.push_front(Piece {
                     samples: rest,
                     mark: None,
+                    lanes: piece.lanes.clone(),
                 });
+            }
+        }
+        // The mix's meter shows the mix: the monitoring mute silences what
+        // is heard, and the GUI the viewer's meter (spec D28).
+        let mut mix = vec![0.0f32; channels];
+        for frame in piece.samples.chunks(channels) {
+            for (m, s) in mix.iter_mut().zip(frame) {
+                *m = m.max(s.abs());
             }
         }
         if self.muted {
@@ -312,17 +325,11 @@ impl Producer {
         }
         let at = ring.written();
         let pushed = ring.push(&piece.samples) * channels;
-        let mut mix = vec![0.0f32; channels];
-        for frame in piece.samples.chunks(channels) {
-            for (m, s) in mix.iter_mut().zip(frame) {
-                *m = m.max(s.abs());
-            }
-        }
         self.shared.level(super::Level {
             at,
             frames: (pushed / channels.max(1)) as u64,
             mix,
-            lanes: run.lanes.clone(),
+            lanes: std::mem::take(&mut piece.lanes),
         });
         debug_assert_eq!(pushed, piece.samples.len(), "no room for a chunk");
         if !run.queued {
@@ -342,74 +349,120 @@ impl Producer {
 
     /// Mixes more of the run into pieces: forward the next chunk, backward
     /// the next block reversed, through the stretch at other speeds; at the
-    /// end what the stretch still holds. A broken file is silent, the clock
-    /// going on, and its error is given back.
+    /// end what the stretch still holds. Each piece has its lanes' peaks:
+    /// the mix is read a chunk at a time, backward too, and the stretch's
+    /// blocks take those of the sound they came from. A broken file is
+    /// silent, the clock going on, and its error is given back.
     fn refill(&mut self) -> Option<crate::error::Error> {
         let rate = f64::from(self.plan.rate());
         let total = self.plan.samples;
         let run = self.run.as_mut()?;
-        let channels = usize::from(self.mix.channels());
-        let read =
-            |mix: &mut AudioMix, n: usize, failed: &mut Option<_>, lanes: &mut Vec<f32>| match mix
-                .read_metered(n)
-            {
-                Ok((s, peaks)) => {
-                    *lanes = peaks;
-                    s
-                }
-                Err(e) => {
-                    *failed = Some(e);
-                    vec![0.0; n * channels]
-                }
-            };
+        let channels = usize::from(self.mix.channels()).max(1);
+        let chunk = ((CHUNK_SECS * rate).round() as usize).max(1);
         let mut failed = None;
-        let mixed = if run.speed > 0.0 {
+        // `n` samples on from where the mix stands, a chunk at a time, each
+        // with its lanes' peaks.
+        let mut read = |mix: &mut AudioMix, n: usize| -> Vec<(Vec<f32>, Vec<f32>)> {
+            (0..n)
+                .step_by(chunk)
+                .map(|i| {
+                    let m = chunk.min(n - i);
+                    mix.read_metered(m).unwrap_or_else(|e| {
+                        failed = Some(e);
+                        (vec![0.0; m * channels], Vec::new())
+                    })
+                })
+                .collect()
+        };
+        // The chunks in the order they play, each with the stream position
+        // of its first sample.
+        let mut parts = Vec::new();
+        if run.speed > 0.0 {
             let n = ((CHUNK_SECS * rate * run.speed).round() as i64)
                 .max(1)
                 .min(total - run.cursor);
-            if n <= 0 {
-                None
-            } else {
+            if n > 0 {
+                let mut at = (run.cursor - run.origin) as f64;
+                for (s, lanes) in read(&mut self.mix, n as usize) {
+                    let frames = (s.len() / channels) as f64;
+                    parts.push((at, s, lanes));
+                    at += frames;
+                }
                 run.cursor += n;
-                Some(read(&mut self.mix, n as usize, &mut failed, &mut run.lanes))
             }
-        } else if run.cursor < 0 {
-            None
-        } else {
-            // Samples `lo..=cursor`, read forward, reversed.
+        } else if run.cursor >= 0 {
+            // Samples `lo..=cursor`, read forward, each chunk reversed and
+            // the last played first. Sample `lo` plays at stream position
+            // `origin - lo`, the last of the block.
             let n = ((BLOCK_SECS * rate * run.speed.abs()).round() as i64).max(1);
             let lo = (run.cursor + 1 - n).max(0);
             self.mix.seek(lo);
             let n = (run.cursor + 1 - lo) as usize;
-            let mut s = read(&mut self.mix, n, &mut failed, &mut run.lanes);
-            reverse(&mut s, channels);
+            let mut end = (run.origin - lo + 1) as f64;
+            for (mut s, lanes) in read(&mut self.mix, n) {
+                reverse(&mut s, channels);
+                end -= (s.len() / channels) as f64;
+                parts.push((end, s, lanes));
+            }
+            parts.reverse();
             run.cursor = lo - 1;
-            Some(s)
-        };
-        match (mixed, run.stretch.as_mut()) {
-            (Some(s), None) => run.pending.push_back(Piece {
-                samples: s,
-                mark: None,
-            }),
-            (Some(s), Some(stretch)) => {
-                run.pending
-                    .extend(stretch.push(&s).into_iter().map(|b| Piece {
+        }
+        let exhausted = parts.is_empty();
+        match run.stretch.as_mut() {
+            None => run
+                .pending
+                .extend(parts.into_iter().map(|(_, samples, lanes)| Piece {
+                    samples,
+                    mark: None,
+                    lanes,
+                })),
+            Some(stretch) => {
+                let mut blocks = Vec::new();
+                for (at, s, lanes) in parts {
+                    let frames = (s.len() / channels) as f64;
+                    run.metered.push_back((at, at + frames, lanes));
+                    blocks.extend(stretch.push(&s));
+                }
+                if exhausted {
+                    blocks.extend(stretch.finish());
+                }
+                for b in blocks {
+                    let to = b.at + (b.samples.len() / channels) as f64 * b.rate;
+                    let lanes = peaks_over(&run.metered, b.at, to);
+                    // What lies wholly before this block isn't needed again.
+                    while run.metered.front().is_some_and(|m| m.1 <= b.at) {
+                        run.metered.pop_front();
+                    }
+                    run.pending.push_back(Piece {
                         samples: b.samples,
                         mark: Some((b.at, b.rate)),
-                    }))
+                        lanes,
+                    });
+                }
             }
-            (None, Some(stretch)) => {
-                run.pending
-                    .extend(stretch.finish().into_iter().map(|b| Piece {
-                        samples: b.samples,
-                        mark: Some((b.at, b.rate)),
-                    }));
-                run.exhausted = true;
-            }
-            (None, None) => run.exhausted = true,
+        }
+        if exhausted {
+            run.exhausted = true;
         }
         failed
     }
+}
+
+/// Each lane's peaks over the sound at stream positions `from..to`: the
+/// highest of the chunks `metered` holds that overlap it.
+fn peaks_over(metered: &VecDeque<(f64, f64, Vec<f32>)>, from: f64, to: f64) -> Vec<f32> {
+    let mut out: Vec<f32> = Vec::new();
+    for (a, b, peaks) in metered {
+        if *b > from && *a < to {
+            if out.len() < peaks.len() {
+                out.resize(peaks.len(), 0.0);
+            }
+            for (o, p) in out.iter_mut().zip(peaks) {
+                *o = o.max(*p);
+            }
+        }
+    }
+    out
 }
 
 /// Reverses interleaved samples a sample frame at a time: the channels of
@@ -426,12 +479,23 @@ fn reverse(samples: &mut [f32], channels: usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::reverse;
+    use super::{peaks_over, reverse};
 
     #[test]
     fn reversing_keeps_each_frames_channels_in_order() {
         let mut s = vec![1.0, -1.0, 2.0, -2.0, 3.0, -3.0];
         reverse(&mut s, 2);
         assert_eq!(s, vec![3.0, -3.0, 2.0, -2.0, 1.0, -1.0]);
+    }
+
+    #[test]
+    fn a_block_takes_the_peaks_of_the_chunks_it_overlaps() {
+        let metered = [
+            (0.0, 10.0, vec![0.1, 0.2]),
+            (10.0, 20.0, vec![0.5, 0.1]),
+            (20.0, 30.0, vec![0.9, 0.9]),
+        ]
+        .into();
+        assert_eq!(peaks_over(&metered, 5.0, 12.0), vec![0.5, 0.2]);
     }
 }
