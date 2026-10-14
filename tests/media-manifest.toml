@@ -73,3 +73,11 @@ url = "https://repo.jellyfin.org/test-videos/HDR/Dolby%20Vision/Test%20Jellyfin%
 license = "CC BY-SA 4.0, Gnattu (Jellyfin test videos), https://repo.jellyfin.org/test-videos/"
 purpose = "HEVC 10-bit Dolby Vision profile 8.4: an HLG base layer and an RPU on every frame"
 sha256 = "eaf21cc55e31694758c9d5cf2ba9f7b448f8447655907380259d4e42a2ea7276"
+
+[[clip]]
+name = "nasa-speech-1979"
+file = "255-hq-296.mp4"
+url = "https://archive.org/download/255-hq-296/255-hq-296.mp4"
+license = "NASA film from 1979, a US government work. The National Archives warns that parts may be under copyright: https://catalog.archives.gov/id/1262803"
+purpose = "29 min of speech with pauses, some of it clean and some with hiss: silence detection"
+sha256 = "9e48d5d639bb52e1d3ec2e22efd7b3ec5bd99fb3ab167cf0229165fe85dc6d95"

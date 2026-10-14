@@ -195,6 +195,8 @@ pub struct TimelineView {
     pub scroll: f64,
     pub drag: Option<ActiveDrag>,
     pub edit: Option<EditSel>,
+    /// The clip whose menu is open, and whether on the upper timeline.
+    pub clip_menu: Option<(bool, String)>,
     /// The last frame a scrub showed (to send each frame once).
     pub scrub_sent: Option<i64>,
     /// Marker being edited, and its fields.
@@ -232,6 +234,7 @@ impl Default for TimelineView {
             scroll: 0.0,
             drag: None,
             edit: None,
+            clip_menu: None,
             scrub_sent: None,
             marker_dialog: None,
             duration_dialog: None,
@@ -1491,6 +1494,32 @@ impl Workspace {
                     (self.timeline.scroll - f64::from(scroll.x) / scale.ppf).max(0.0);
             }
         }
+        if resp.secondary_clicked()
+            && let Some(pos) = resp.interact_pointer_pos()
+        {
+            let id = match hit_rows(p, rows, &scale, pos).1 {
+                Hit::Clip(id) | Hit::Slip(id) | Hit::Edge(id, _) => Some(id),
+                _ => None,
+            };
+            if let Some(id) = &id
+                && !self.snap.selection.clips.contains(id)
+            {
+                self.send("selection.set", json!({ "clips": [id] }));
+            }
+            self.timeline.clip_menu = id.map(|id| (upper, id));
+        }
+        // Drawn every frame while open: egui closes a menu that isn't.
+        if let Some((on_upper, id)) = self.timeline.clip_menu.clone()
+            && on_upper == upper
+        {
+            let shown = p
+                .clip(&id)
+                .cloned()
+                .and_then(|c| resp.context_menu(|ui| self.clip_menu(ui, &c)));
+            if shown.is_none() {
+                self.timeline.clip_menu = None;
+            }
+        }
         let Some(pos) = resp.interact_pointer_pos() else {
             return;
         };
@@ -1575,19 +1604,6 @@ impl Workspace {
                     }
                 }
             }
-        }
-        if resp.secondary_clicked()
-            && let Hit::Clip(id) | Hit::Slip(id) | Hit::Edge(id, _) = &what
-            && !self.snap.selection.clips.contains(id)
-        {
-            self.send("selection.set", json!({ "clips": [id] }));
-        }
-        let clip = match &what {
-            Hit::Clip(id) | Hit::Slip(id) | Hit::Edge(id, _) => p.clip(id).cloned(),
-            _ => None,
-        };
-        if let Some(c) = clip {
-            resp.context_menu(|ui| self.clip_menu(ui, &c));
         }
     }
 
