@@ -12,22 +12,22 @@ Three mechanisms move frames, each with its own switch on the kind of GPU:
 
 | Mechanism | Does | GPUs | Used by |
 |---|---|---|---|
-| `CudaPictures` (cuda.rs:315) | NVDEC's frames turned and converted (libplacebo on Vulkan), scaled and padded, for NVENC | NVIDIA | exports (export/video.rs:466), proxies (proxy.rs:666) |
-| `Fitter` (hw.rs:1185) | frames turned, scaled and padded on the decoder's device, for an encoder there | VA-API, Direct3D 11 | exports only (export/video.rs:1399) |
-| `Shrinker` (hw.rs:1055) | frames scaled on the GPU, then copied down | VA-API, CUDA, Direct3D 11 | proxies, exports to encoders that take frames from memory, tiles, the two-up (export/video.rs:156) |
+| `cuda::CudaPictures` | NVDEC's frames turned and converted (libplacebo on Vulkan), scaled and padded, for NVENC | NVIDIA | exports, proxies |
+| `hw::Fitter` | frames turned, scaled and padded on the decoder's device, for an encoder there | VA-API, Direct3D 11 | exports only |
+| `hw::Shrinker` | frames scaled on the GPU, then copied down (`export::video::down`) | VA-API, CUDA, Direct3D 11 | proxies, exports to encoders that take frames from memory, tiles, the two-up |
 
 Around them:
-- **The choice is made per job, by encoder name.** Exports take the CUDA path when the encoder is NVENC (export/mod.rs:326). They fit on the GPU only for the pairs VAAPI with VA-API and AMF with Direct3D 11 (export/mod.rs:768). Proxies check NVENC again (proxy.rs:664).
-- **Proxies have an encode loop of their own** (proxy.rs, `encode_into`), beside the export's (`VideoFrames`, export/video.rs), so they don't get the export's GPU fitting.
-- **Whole frames come down** in the light measurements (light.rs:865), thumbnails (thumbs.rs:252), analyses (analysis.rs:238) and the player's pictures for a display that can't take them (player/frame.rs:133).
-- **The player keeps frames on the GPU** (`Keeper`, hw.rs:918), and the GUI imports them for each GPU (gui/shared.rs, gui/picture.rs).
-- **VideoToolbox is in none of the three**, so on a Mac every frame comes down whole and the CPU scales it (hw.rs:1086).
+- **The choice is made per job, by encoder name.** Exports take the CUDA path when the encoder is NVENC (`gpu_output` in export/mod.rs). They fit on the GPU only for the pairs VAAPI with VA-API and AMF with Direct3D 11 (`encode` in export/mod.rs). Proxies check for NVENC again (`proxy::encode_into`).
+- **Proxies have an encode loop of their own** (`proxy::encode_into`), beside the export's (`export::video::VideoFrames`), so they don't get the export's GPU fitting.
+- **Thumbnails come down whole** and are shrunk on the CPU (`thumbs::keep`). Light measurements and analyses also come down whole, on purpose: their values must be the CPU's to the bit (export.md §4).
+- **The player keeps frames on the GPU** (`hw::Keeper`), and the GUI imports them for each GPU (gui/shared.rs, gui/picture.rs). Where a display can't take them, they come down whole (`player::frame`).
+- **VideoToolbox is in none of the three.** On a Mac every frame comes down whole and the CPU scales it: `hw::Shrinker` finds no scaler for VideoToolbox's frames.
 
 ## Design
 
 **Where a frame is:** memory, or a GPU's: CUDA, VA-API, Direct3D 11, VideoToolbox, Vulkan.
 
-**What a job asks of a frame** (`Ops`): deinterlace, turn, scale to a size, convert colors (matrix, range, HDR to SDR), pad, and the layout the next step takes.
+**What a job asks of a frame** (`Ops`): deinterlace, turn, scale to a size, convert colors (matrix, range, HDR to SDR), pad, and the layout the next step takes. Light measurements and analyses ask for whole frames in memory, as now.
 
 **A backend for each place**, one module each, all with the same functions:
 - `fit(frame, ops)`: the ops done there, with `can(ops, frame)` saying which it can do.
@@ -55,7 +55,7 @@ The route goes into `VIDCUT_DEBUG` and into the result (`made_with`: `stayed on 
 
 What a test can't settle is written as a fact with its source. For example, FFmpeg's `scale_vt` keeps the input's layout (vf_scale_vt.c), so 10-bit stays 10-bit on the GPU.
 
-**One engine for every job.** Exports, proxies (an export at a small size), the timeline's tiles, the two-up, `frame render`, storyboards, thumbnails and light measurements all go through `VideoFrames` and the planner. The player's route ends in `keep`. Its import into the viewer (gui/shared.rs, gui/picture.rs) stays per GPU, behind the same place names.
+**One engine for every job.** Exports, proxies (an export at a small size), the timeline's tiles, the two-up, `frame render`, storyboards, thumbnails, light measurements and analyses all go through `VideoFrames` and the planner. The player's route ends in `keep`. Its import into the viewer (gui/shared.rs, gui/picture.rs) stays per GPU, behind the same place names.
 
 ## Steps
 
@@ -64,11 +64,11 @@ Each step is measured against the step before it on the RTX 4080 SUPER, the Rade
 2. **Planner and backends over today's code:** wrap `CudaPictures`, `Fitter`, `Shrinker`, `Keeper` and the `Normalizer` as backends. The planner reproduces today's routes exactly. No behavior changes, and every test and barcode check passes unchanged.
 3. **Proxies through the export engine:** drop `encode_into`'s own loop. VA-API and AMF proxies then fit on the GPU as exports do.
 4. **VideoToolbox backend:** `scale_vt` and `transpose_vt`, with VideoToolbox's encoders taking its frames. Not known yet, and to be tested on the M4: whether the H.264 encoder takes 10-bit frames.
-5. **Whole-frame copies:** light measurements, thumbnails and analyses copy down only what they need, at the size they need.
-6. **Vulkan as a backend** (libplacebo) for ops a GPU's own fitting lacks: colors and HDR on VA-API and Direct3D 11, as NVIDIA's already uses it.
+5. **Thumbnails** shrink on the GPU before they come down, as tiles do.
+6. **Vulkan as a backend** (libplacebo) for colors and HDR where a GPU's own fitting lacks them, as NVIDIA's path already uses it. FFmpeg makes its Vulkan device from VA-API, DRM and CUDA devices only, so VA-API's frames can go to it through FFmpeg. Direct3D 11's need an import of vidcut's own, as the viewer has (gui/picture.rs).
 
 ## Tests
 
 - **The planner:** unit tests, each one input and the route it must give.
 - **Backends:** each must give the CPU's pictures, barcode for barcode and within two levels, checked by hand on each machine with the barcode fixtures as GPU decoders are now.
-- **No copies where none are planned:** a script runs the jobs on the GPU in use, compares the frames-copied counters with the route, and prints the base case beside the change (`scripts/proxy-gpu-check.sh` grows into it).
+- **No copies where none are planned:** a script runs the jobs on the GPU in use, compares the frames-copied counters with the route, and prints the base case beside the change.
