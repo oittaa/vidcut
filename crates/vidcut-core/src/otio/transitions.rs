@@ -11,6 +11,8 @@
 //!   during a transition each clip shows frames past its edge.
 //! - An edit after which one no longer fits drops it, and says so.
 
+use std::collections::{HashMap, HashSet};
+
 use serde_json::Value;
 
 use super::{EDITOR, VIDCUT, gap, rt, schema};
@@ -44,12 +46,44 @@ fn span(c: &Clip, sound: bool) -> Option<(i64, i64)> {
     }
 }
 
-/// The cut transition `t` on `track` is on, if it still fits there.
-pub fn place(p: &Project, track: &Track, t: &Transition) -> Option<i64> {
+/// A track's clips, found once to place its transitions: by id, and the
+/// times where a picture or a sound starts or ends (`true`: a sound).
+pub struct Cuts<'a> {
+    clips: HashMap<&'a str, &'a Clip>,
+    starts: HashSet<(bool, i64)>,
+    ends: HashSet<(bool, i64)>,
+}
+
+impl<'a> Cuts<'a> {
+    pub fn of(track: &'a Track) -> Self {
+        let mut cuts = Self {
+            clips: HashMap::new(),
+            starts: HashSet::new(),
+            ends: HashSet::new(),
+        };
+        for c in &track.clips {
+            cuts.clips.entry(c.id.as_str()).or_insert(c);
+            for sound in [false, true] {
+                if let Some((a, b)) = span(c, sound) {
+                    cuts.starts.insert((sound, a));
+                    cuts.ends.insert((sound, b));
+                }
+            }
+        }
+        cuts
+    }
+
+    /// The cut transition `t` on the track is on, if it still fits there.
+    pub fn place(&self, p: &Project, t: &Transition) -> Option<i64> {
+        place(p, self, t)
+    }
+}
+
+fn place(p: &Project, cuts: &Cuts, t: &Transition) -> Option<i64> {
     let clip = |id: &Option<String>| -> Option<Option<&Clip>> {
         match id {
             None => Some(None),
-            Some(id) => track.clips.iter().find(|c| &c.id == id).map(Some),
+            Some(id) => cuts.clips.get(id.as_str()).copied().map(Some),
         }
     };
     let (from, to) = (clip(&t.from)?, clip(&t.to)?);
@@ -64,10 +98,12 @@ pub fn place(p: &Project, track: &Track, t: &Transition) -> Option<i64> {
     };
     // A gap side: nothing of the track there.
     let meets = |end: bool| {
-        track
-            .clips
-            .iter()
-            .any(|c| span(c, t.sound).is_some_and(|(a, b)| if end { b == cut } else { a == cut }))
+        let at = (t.sound, cut);
+        if end {
+            cuts.ends.contains(&at)
+        } else {
+            cuts.starts.contains(&at)
+        }
     };
     if (from.is_none() && meets(true)) || (to.is_none() && meets(false)) {
         return None;
@@ -91,10 +127,11 @@ pub fn prune(p: &mut Project) -> usize {
     let mut dropped = 0;
     for ti in 0..p.tracks.len() {
         let track = &p.tracks[ti];
+        let cuts = Cuts::of(track);
         let fits: Vec<bool> = track
             .transitions
             .iter()
-            .map(|t| place(p, track, t).is_some())
+            .map(|t| cuts.place(p, t).is_some())
             .collect();
         let mut keep = fits.into_iter();
         let before = p.tracks[ti].transitions.len();
@@ -121,23 +158,51 @@ fn written(t: &Transition, rate: f64) -> Value {
     v
 }
 
+/// A track's transitions found once for an export: by the clip after each
+/// and, for those into a gap, by the clip before (`true`: on the sound).
+/// The first of each.
+pub(super) struct Edits<'a> {
+    cuts: Cuts<'a>,
+    into: HashMap<(bool, &'a str), &'a Transition>,
+    out_of: HashMap<(bool, &'a str), &'a Transition>,
+}
+
+impl<'a> Edits<'a> {
+    pub(super) fn of(track: &'a Track) -> Self {
+        let mut edits = Self {
+            cuts: Cuts::of(track),
+            into: HashMap::new(),
+            out_of: HashMap::new(),
+        };
+        for t in &track.transitions {
+            match (&t.from, &t.to) {
+                (_, Some(to)) => {
+                    edits.into.entry((t.sound, to.as_str())).or_insert(t);
+                }
+                (Some(from), None) => {
+                    edits.out_of.entry((t.sound, from.as_str())).or_insert(t);
+                }
+                (None, None) => {}
+            }
+        }
+        edits
+    }
+}
+
 /// The transition to write before the item of clip `c`'s picture (or
 /// sound), which starts at `s` in the export, after `items`: one at the
 /// clip's first frame, from the clip or gap just written.
 pub(super) fn head(
     p: &Project,
-    track: &Track,
+    edits: &Edits,
     c: &Clip,
     sound: bool,
     s: i64,
     items: &[Value],
     rate: f64,
 ) -> Option<Value> {
-    let t = track
-        .transitions
-        .iter()
-        .find(|t| t.sound == sound && t.to.as_deref() == Some(c.id.as_str()))?;
-    if place(p, track, t)? != s {
+    let t = *edits.into.get(&(sound, c.id.as_str()))?;
+    if edits.cuts.place(p, t)? != s {
         return None;
     }
     let last = items.last()?;
@@ -152,17 +217,14 @@ pub(super) fn head(
 /// sound), which ends at `e` in the export: one into a gap at its end.
 pub(super) fn tail(
     p: &Project,
-    track: &Track,
+    edits: &Edits,
     c: &Clip,
     sound: bool,
     e: i64,
     rate: f64,
 ) -> Option<Value> {
-    let t = track
-        .transitions
-        .iter()
-        .find(|t| t.sound == sound && t.from.as_deref() == Some(c.id.as_str()) && t.to.is_none())?;
-    (place(p, track, t)? == e).then(|| written(t, rate))
+    let t = *edits.out_of.get(&(sound, c.id.as_str()))?;
+    (edits.cuts.place(p, t)? == e).then(|| written(t, rate))
 }
 
 /// Whether OTIO item `item` is one vidcut wrote for clip `id`.

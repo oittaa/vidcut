@@ -511,25 +511,6 @@ pub fn start_timecode(
     }
 }
 
-/// Fills in the start timecodes of the media `ids` that were probed before
-/// vidcut kept them (cheap: the container's tags, no decoding).
-pub fn fill_timecodes(p: &mut vidcut_core::Project, ids: &[String]) {
-    for m in &mut p.media {
-        if !ids.contains(&m.id) || m.info.timecode.is_some() || m.sequence.is_some() || m.is_still()
-        {
-            continue;
-        }
-        if let Ok((tc, reference)) = vidcut_av::probe::clock(&m.path) {
-            m.info.timecode = start_timecode(
-                tc.as_deref(),
-                reference,
-                m.info.video.as_ref(),
-                &m.info.audio,
-            );
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{frame_rate, start_timecode};
