@@ -31,14 +31,6 @@ pub fn state_dir() -> PathBuf {
     crate::dirs::state()
 }
 
-/// FNV-1a: a stable 64-bit hash for history file names (not security
-/// relevant).
-fn fnv1a(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, b| {
-        (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
-    })
-}
-
 /// What [`Store::save`] wrote.
 #[derive(Debug, Clone)]
 pub struct Saved {
@@ -98,7 +90,7 @@ impl Store {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
         let lock_path = path.with_file_name(format!(".{name}.lock"));
-        let hash = fnv1a(path.as_os_str().as_encoded_bytes());
+        let hash = crate::hash64(path.as_os_str().as_encoded_bytes());
         let history_path = state.join("history").join(format!("{hash:016x}.jsonl"));
         Ok(Self {
             path,

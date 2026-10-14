@@ -193,9 +193,7 @@ mod imp {
         }
         let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
         let key = absolute.to_string_lossy().to_lowercase();
-        let hash = key.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
-            (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
-        });
+        let hash = vidcut_core::hash64(key.as_bytes());
         wide(&format!(r"{PREFIX}vidcut-{hash:016x}"))
     }
 

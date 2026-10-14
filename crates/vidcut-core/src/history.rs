@@ -88,12 +88,9 @@ fn bad(what: &str) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::InvalidData, what.to_string())
 }
 
-/// The hash of a project file's text, as the history keeps it: FNV-1a.
+/// The hash of a project file's text, as the history keeps it.
 pub(crate) fn text_hash(text: &str) -> String {
-    let h = text.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
-        (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
-    });
-    format!("{h:016x}")
+    format!("{:016x}", crate::hash64(text.as_bytes()))
 }
 
 /// Whether a file holds more steps than the limit: its oldest then go.

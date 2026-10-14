@@ -133,6 +133,7 @@ crc32fast = "1.5"
 # Media fingerprints (SHA-256), to tell a moved file from another one when
 # relinking. Pure Rust, MIT or Apache-2.0.
 sha2 = "0.11"
+rapidhash = "4.5"
 # The player's audio output (ALSA on Linux, which PipeWire and PulseAudio
 # serve). Apache-2.0; needs libasound2-dev to build.
 cpal = "0.18"
