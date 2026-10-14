@@ -61,6 +61,10 @@ struct Run {
     exhausted: bool,
     /// The end (or the start, backward) was reached and marked.
     ended: bool,
+    /// When the thread took the play request, and whether any of its sound
+    /// is queued yet, for `VIDCUT_DEBUG`.
+    taken: std::time::Instant,
+    queued: bool,
 }
 
 impl Run {
@@ -179,6 +183,10 @@ impl Producer {
 
     /// Starts play request `epoch` from sample `from`.
     fn start(&mut self, from: i64, speed: f64, epoch: u64) {
+        crate::debug!(
+            "audio",
+            "play request {epoch}: from sample {from} at {speed}x"
+        );
         self.run = Some(Run {
             epoch,
             speed,
@@ -188,6 +196,8 @@ impl Producer {
             pending: VecDeque::new(),
             exhausted: false,
             ended: false,
+            taken: std::time::Instant::now(),
+            queued: false,
         });
         self.restart(from);
     }
@@ -296,6 +306,15 @@ impl Producer {
         }
         let pushed = ring.push(&piece.samples) * channels;
         debug_assert_eq!(pushed, piece.samples.len(), "no room for a chunk");
+        if !run.queued {
+            run.queued = true;
+            crate::debug!(
+                "audio",
+                "play request {}: its first sound queued {:.1} ms after the audio thread took it",
+                run.epoch,
+                run.taken.elapsed().as_secs_f64() * 1000.0
+            );
+        }
         match failed {
             Some(e) => Err(e),
             None => Ok(true),

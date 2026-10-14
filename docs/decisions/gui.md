@@ -59,7 +59,7 @@ Every action is a [`Request`](../../crates/vidcut-core/src/request.rs), the same
 
 A seek, step, load or an edit's reload is a **motion** of its player, numbered. It is on screen once the renderer presented the player after it and showed the frame it asked for:
 1. **The engine has the picture.** Its decode thread calls back when the picture of the frame the viewer is at lands; the session then asks the renderer (the viewer thread in the GUI) to present. A picture already kept is there at once.
-2. **The renderer presented it.** The renderer presents the engine at that moment (`Player::present`), draws the picture, and answers with the frame it showed exactly. Paused, the motion is on screen when that is the frame asked for; playing, when any frame showed (the clock starts at the frame asked for and moves on). A present that showed an older picture, or went unanswered for 50 ms, is asked again.
+2. **The renderer presented it.** The renderer presents the engine at that moment (`Player::present`), draws the picture, and answers with the frame it showed exactly. Paused, the motion is on screen when that is the frame asked for; playing, when any frame showed (the clock starts at the frame asked for and moves on). A present that went unanswered for 50 ms is asked again. One that showed an older picture is asked again once another picture lands or the clock moves to another frame.
 
 **More waiting.** A seek also waits for the player's newest motion: an edit's reload replaces what was asked for, at the same frame. Seek-then-screenshot is therefore exact without sleeps. Over IPC it takes 2–3 ms for a kept picture, a decode's time otherwise. A picture that fails to decode fails the seek with the reason (`MEDIA`), and the viewer shows it.
 

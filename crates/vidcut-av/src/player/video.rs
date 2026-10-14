@@ -242,7 +242,10 @@ impl Decoder {
             let reads_on = self.reads_on(focus);
             let target = match dir {
                 // Late: catch up where the clock will be once a seek is done.
-                Direction::Forward(speed) if !reads_on => {
+                // Until the sound of a play request is heard, the clock
+                // stands where play starts (a dragged playhead makes one
+                // request after another): that frame.
+                Direction::Forward(speed) if !reads_on && snap.heard => {
                     let lead = self.seek_cost.as_secs_f64() * plan.fps().as_f64() * speed;
                     plan.clamp(focus + lead.ceil() as i64)
                 }
@@ -528,7 +531,8 @@ impl Decoder {
         } else {
             crate::debug!(
                 "player",
-                "a new reader decodes on {gpu} where it can; its pictures come down to                  memory: the viewer shows only {shows:?} pictures from GPU memory"
+                "a new reader decodes on {gpu} where it can; its pictures come down to \
+                 memory: the viewer shows only {shows:?} pictures from GPU memory"
             );
         }
         if let Some(cuda) = gpu.cuda() {
@@ -589,7 +593,7 @@ impl Decoder {
                 self.picture_kind = Kind::of(&picture);
                 self.shared.store.put(plan.id(i), Arc::new(picture));
                 if i == snap.focus {
-                    self.shared.landed();
+                    self.shared.landed(snap.plan_gen, plan.id(i));
                 }
             } else {
                 frames.skip_frame()?;
