@@ -1508,8 +1508,7 @@ pub struct Response {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub via: String,
     /// Problems that did not fail the request. An undo history that could
-    /// not be written is one: the edit is saved, and the text says what the
-    /// next load can undo.
+    /// not be written is one: the edit is saved, and the text says so.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
 }
