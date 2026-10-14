@@ -886,8 +886,9 @@ fn run_graph(
     Ok(out)
 }
 
-/// Scales frames down on the GPU (VA-API's, Direct3D 11's and CUDA's), so
-/// they come down to memory small, in the frames' own layout (NV12, P010).
+/// Scales frames down on the GPU (VA-API's, Direct3D 11's, CUDA's and
+/// VideoToolbox's), so they come down to memory small, in the frames' own
+/// layout (NV12, P010).
 pub(crate) struct Shrinker {
     /// `None`: the GPU won't scale these frames, so they come down whole.
     scaling: Option<Scaling>,
@@ -897,7 +898,7 @@ pub(crate) struct Shrinker {
 }
 
 enum Scaling {
-    /// `scale_vaapi`, or `scale_cuda` in steps.
+    /// `scale_vaapi`, `scale_cuda` in steps, or `scale_vt`.
     Filters(ffmpeg::filter::Graph),
     /// The GPU's video processor.
     #[cfg(windows)]
@@ -915,6 +916,13 @@ impl Scaling {
             format::Pixel::CUDA => {
                 let pixel = ffi::AVPixelFormat::AV_PIX_FMT_CUDA;
                 let spec = crate::cuda::scaling((f.width(), f.height()), (w, h), "").join(",");
+                Ok(Self::Filters(gpu_graph(f, frames, pixel, &spec)?))
+            }
+            // Into pixel buffers of the decoder's own type, whose range it
+            // keeps: the levels stay as they were.
+            format::Pixel::VIDEOTOOLBOX => {
+                let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
+                let spec = format!("scale_vt=w={w}:h={h}");
                 Ok(Self::Filters(gpu_graph(f, frames, pixel, &spec)?))
             }
             #[cfg(windows)]

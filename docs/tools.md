@@ -24,7 +24,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `read_barcode FILE...`: the barcode index in images or video.
 - `packets FILE [FROM TO]`: video packets in decode order, with pts, dts and keyframe flags.
 - `filmstrip FILE OUTDIR [N]`: pool thumbnails, timed.
-- `tiles FILE [HEIGHT] [gpu]`: timeline tiles, timed at spacings from 0.25 to 30 s; `gpu` decodes on the GPU in use.
+- `tiles FILE [HEIGHT] [gpu|compare]`: timeline tiles, timed at spacings from 0.25 to 30 s; `gpu` decodes on the GPU in use. `compare` makes twenty both there and on the CPU, and prints how far apart their colors are.
 - `decode_speed FILE [FRAMES]`: decoding speed, cores and seek times on the CPU and on each GPU decoder.
 - `passes FILE START_S SECONDS CODEC ENCODER MBPS [key=value…]` (release build): exports a stretch at a bitrate (`qN`: constant quality) with `video.*` settings (`passes=2`), and prints the bitrate reached, the time and the luma PSNR.
 
