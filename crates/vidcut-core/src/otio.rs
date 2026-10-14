@@ -84,6 +84,15 @@ const EDITOR: &str = "Resolve_OTIO";
 pub const COMPOUNDS_KEPT: &str =
     "compound clips and nested timelines kept as blocks, playing their clips";
 
+/// `small`, an object, with `big` moved in: `json!` serializes what it is
+/// given, so a `Value` put in it is copied whole.
+fn with(mut small: Value, big: impl IntoIterator<Item = (&'static str, Value)>) -> Value {
+    for (key, value) in big {
+        small[key] = value;
+    }
+    small
+}
+
 fn rt(value: f64, rate: f64) -> Value {
     json!({ "OTIO_SCHEMA": "RationalTime.1", "rate": rate, "value": value })
 }
@@ -401,32 +410,47 @@ pub fn export(
                     .map_or(Value::Null, |g| g.reference.clone()),
             ),
         };
-        json!({
-            "OTIO_SCHEMA": "Clip.2",
-            "name": label,
-            "source_range": range(start, frames as f64, rate),
-            "media_references": {
-                "DEFAULT_MEDIA": reference,
-            },
-            "active_media_reference_key": "DEFAULT_MEDIA",
-            "effects": effects,
-            "markers": [],
-            "enabled": enabled,
-            "metadata": meta,
-        })
+        with(
+            json!({
+                "OTIO_SCHEMA": "Clip.2",
+                "name": label,
+                "active_media_reference_key": "DEFAULT_MEDIA",
+                "markers": [],
+                "enabled": enabled,
+            }),
+            [
+                ("source_range", range(start, frames as f64, rate)),
+                (
+                    "media_references",
+                    with(json!({}), [("DEFAULT_MEDIA", reference)]),
+                ),
+                ("effects", Value::Array(effects)),
+                ("metadata", meta),
+            ],
+        )
     };
     let track = |name: &str, kind: &str, children: Vec<Value>, enabled: bool, meta: Value| {
-        json!({
-            "OTIO_SCHEMA": "Track.1",
-            "name": name,
-            "kind": kind,
-            "children": children,
-            "source_range": null,
-            "effects": [],
-            "markers": [],
-            "enabled": enabled,
-            "metadata": meta,
-        })
+        with(
+            json!({
+                "OTIO_SCHEMA": "Track.1",
+                "name": name,
+                "kind": kind,
+                "source_range": null,
+                "effects": [],
+                "markers": [],
+                "enabled": enabled,
+            }),
+            [("children", Value::Array(children)), ("metadata", meta)],
+        )
+    };
+    // Each clip's media, found once.
+    let media: HashMap<&str, &Media> = p.media.iter().map(|m| (m.id.as_str(), m)).collect();
+    // The Clip Color clip `c` shows: its own, else its media's.
+    let shown_color = |c: &Clip| {
+        c.color
+            .as_deref()
+            .or_else(|| media.get(c.media.as_str()).and_then(|m| m.color.as_deref()))
+            .and_then(otio_clip_color)
     };
     // A video track for each video track, and an audio track for each track
     // that carries audio; vidcut's track settings go in their metadata.
@@ -438,7 +462,7 @@ pub fn export(
         // The channel counts of the audio on this track.
         let mut channels: Vec<u16> = Vec::new();
         for c in &t.clips {
-            let m = p.media(&c.media);
+            let m = media.get(c.media.as_str()).copied();
             if m.is_none() && !c.is_block() {
                 return Err(Error::internal(format!("no media {}", c.media)));
             }
@@ -473,7 +497,7 @@ pub fn export(
                     meta["source_in"] = json!(c.source_at(s));
                 }
                 own_pace(&mut meta, c, s);
-                let mut metadata = json!({ VIDCUT: meta });
+                let mut metadata = with(json!({}), [(VIDCUT, meta)]);
                 if let Some(g) = group {
                     metadata[EDITOR] = json!({ "Link Group ID": g });
                 }
@@ -501,7 +525,7 @@ pub fn export(
                         effects,
                     ),
                 };
-                if let Some(x) = p.clip_color(c).and_then(otio_clip_color) {
+                if let Some(x) = shown_color(c) {
                     it["color"] = x;
                 }
                 video.push(it);
@@ -549,10 +573,10 @@ pub fn export(
                     written_start(c, s, e - s),
                     e - s,
                     !au.muted,
-                    json!({ VIDCUT: meta, EDITOR: editor }),
+                    with(json!({}), [(VIDCUT, meta), (EDITOR, editor)]),
                     effects,
                 );
-                if let Some(x) = p.clip_color(c).and_then(otio_clip_color) {
+                if let Some(x) = shown_color(c) {
                     it["color"] = x;
                 }
                 audio.push(it);
@@ -675,25 +699,40 @@ pub fn export(
             next_id: p.next_id.clone(),
         });
     }
-    Ok(json!({
-        "OTIO_SCHEMA": "Timeline.1",
-        "name": name,
-        "global_start_time": rt((p.settings.start_tc + a) as f64, rate),
-        "tracks": {
+    let tracks = with(
+        json!({
             "OTIO_SCHEMA": "Stack.1",
             "name": "tracks",
-            "children": video_tracks.into_iter().chain(audio_tracks).collect::<Vec<_>>(),
             "source_range": null,
             "effects": [],
-            "markers": markers,
             "enabled": true,
             "metadata": {},
-        },
-        "metadata": {
-            VIDCUT: ours,
-            EDITOR: { "Resolve OTIO Meta Version": "1.0" },
-        },
-    }))
+        }),
+        [
+            (
+                "children",
+                Value::Array(video_tracks.into_iter().chain(audio_tracks).collect()),
+            ),
+            ("markers", Value::Array(markers)),
+        ],
+    );
+    Ok(with(
+        json!({
+            "OTIO_SCHEMA": "Timeline.1",
+            "name": name,
+            "global_start_time": rt((p.settings.start_tc + a) as f64, rate),
+        }),
+        [
+            ("tracks", tracks),
+            (
+                "metadata",
+                with(
+                    json!({ EDITOR: { "Resolve OTIO Meta Version": "1.0" } }),
+                    [(VIDCUT, ours)],
+                ),
+            ),
+        ],
+    ))
 }
 
 /// Nested `Stack` `item` as a compound clip: the stack without its source
@@ -749,7 +788,7 @@ fn compound_item(
     let mut v = k.stack.clone();
     v["name"] = json!(label);
     v["source_range"] = range(source as f64, frames as f64, rate);
-    v["effects"] = json!(effects);
+    v["effects"] = Value::Array(effects);
     v["markers"] = json!([]);
     v["enabled"] = json!(c.enabled);
     v["metadata"][VIDCUT] = json!({ "clip": c.id, "color": c.color });
@@ -1660,6 +1699,18 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     // track vidcut named, else on any; in its link group if both
     // have one) is that clip's audio. Others are audio-only clips: on the
     // track vidcut named, else on audio tracks A1, A2… in the file's order.
+    // The video clips of each media in order of start, and the longest:
+    // those an audio clip overlaps are the last that start before it ends,
+    // back to where the longest no longer reaches it.
+    let mut pictures: HashMap<String, (Vec<usize>, i64)> = HashMap::new();
+    for (i, c) in clips.iter().enumerate().filter(|(_, c)| c.video) {
+        let (list, longest) = pictures.entry(c.media.url.clone()).or_default();
+        list.push(i);
+        *longest = (*longest).max(c.duration);
+    }
+    for (list, _) in pictures.values_mut() {
+        list.sort_by_key(|&i| clips[i].start);
+    }
     let mut foreign_audio = 0;
     for a in &audio_tracks {
         let hint = a["metadata"][VIDCUT]["track"].as_str().map(String::from);
@@ -1738,12 +1789,23 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         _ => true,
                     }
             };
+            // The first of the file's clips that pairs.
             let owner = match &hint {
                 Some(h) if h.starts_with('A') => None,
-                Some(h) => clips.iter_mut().find(|c| &c.track == h && pairs(c)),
-                None => clips.iter_mut().find(|c| pairs(c)),
+                _ => pictures.get(&media.url).and_then(|(list, longest)| {
+                    let end = list.partition_point(|&i| clips[i].start < span.1);
+                    list[..end]
+                        .iter()
+                        .rev()
+                        .take_while(|&&i| clips[i].start + longest > span.0)
+                        .copied()
+                        .filter(|&i| {
+                            hint.as_ref().is_none_or(|h| &clips[i].track == h) && pairs(&clips[i])
+                        })
+                        .min()
+                }),
             };
-            if let Some(c) = owner {
+            if let Some(c) = owner.map(|i| &mut clips[i]) {
                 c.audio = Some((start - c.start, span.1 - c.end()));
                 c.muted |= muted;
                 if let Some(g) = gain {
@@ -1806,14 +1868,27 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     }
     // Per track: clips that overlap what is already there lose their audio,
     // or go if that is all they have.
+    // In order of track and start, the clips kept on a track are the last
+    // ones kept: those that reach a time are the last that start before it,
+    // back to where the longest kept on the track no longer reaches it.
     clips.sort_by(|x, y| x.track.cmp(&y.track).then(x.start.cmp(&y.start)));
     let (mut dropped, mut gone) = (0, 0);
     let mut kept: Vec<ImportedClip> = Vec::new();
+    let (mut first, mut longest) = (0, 0);
     for mut c in clips {
-        let same: Vec<&ImportedClip> = kept.iter().filter(|k| k.track == c.track).collect();
+        if kept.get(first).is_some_and(|k| k.track != c.track) {
+            (first, longest) = (kept.len(), 0);
+        }
+        let reach = |k: &ImportedClip| k.end().max(k.audio_range().map_or(k.end(), |a| a.1));
+        let near = |r: (i64, i64)| {
+            kept[first..]
+                .iter()
+                .rev()
+                .take_while(move |k| k.start + longest > r.0)
+        };
         let span = (c.start, c.end());
         let busy = |r: (i64, i64)| {
-            same.iter().any(|k| {
+            near(r).any(|k| {
                 (k.video && overlaps((k.start, k.end()), r))
                     || k.audio_range().is_some_and(|a| overlaps(a, r))
                     || (!k.video && overlaps((k.start, k.end()), r))
@@ -1823,23 +1898,18 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             gone += 1;
             continue;
         }
-        if c.video
-            && same
-                .iter()
-                .any(|k| k.video && overlaps((k.start, k.end()), span))
-        {
+        if c.video && near(span).any(|k| k.video && overlaps((k.start, k.end()), span)) {
             gone += 1;
             continue;
         }
         if let Some(r) = c.audio_range()
-            && same
-                .iter()
-                .any(|k| k.audio_range().is_some_and(|a| overlaps(a, r)))
+            && near(r).any(|k| k.audio_range().is_some_and(|a| overlaps(a, r)))
         {
             dropped += 1;
             c.audio = None;
             c.audio_effects.clear();
         }
+        longest = longest.max(reach(&c) - c.start);
         kept.push(c);
     }
     let mut clips = kept;

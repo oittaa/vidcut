@@ -252,14 +252,13 @@ pub fn timeline(
         None => None,
     };
     let (a, b) = span.unwrap_or((0, p.end()));
+    if b <= a {
+        return Err(Error::invalid("nothing to export: the range is empty"));
+    }
     let ids = otio::used_media(p, span);
-    // Source ranges count from each media's timecode, which media probed
-    // before vidcut kept them don't have yet.
-    let mut project = p.clone();
-    crate::env::fill_timecodes(&mut project, &ids);
     let items = match format {
         TimelineFormat::Otio => Vec::new(),
-        TimelineFormat::Bundle(_) => bundle::plan(&project, &ids)?,
+        TimelineFormat::Bundle(_) => bundle::plan(p, &ids)?,
     };
     let names: HashMap<String, String> = items
         .iter()
@@ -269,7 +268,6 @@ pub fn timeline(
         TimelineFormat::Otio => Locations::Absolute,
         TimelineFormat::Bundle(_) => Locations::Bundle(&names),
     };
-    let doc = otio::export(&project, name, span, locations)?;
     let clips = p
         .tracks
         .iter()
@@ -291,6 +289,7 @@ pub fn timeline(
     let Some(writing) = write else {
         return Ok(json!({ "preset": null, "format": format.name(), "outputs": [summary] }));
     };
+    let doc = otio::export(p, name, span, locations)?;
     let text =
         serde_json::to_string_pretty(&doc).map_err(|e| Error::internal(e.to_string()))? + "\n";
     match format {
