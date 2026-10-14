@@ -364,3 +364,30 @@ fn a_clip_relinked_in_the_file_takes_the_files_media() {
         (2, "m2")
     );
 }
+
+#[test]
+fn a_clip_that_overlaps_another_on_its_track_is_left_out() {
+    let t = |v: f64| json!({"OTIO_SCHEMA": "RationalTime.1", "rate": 24.0, "value": v});
+    let r = |s: f64, d: f64| json!({"OTIO_SCHEMA": "TimeRange.1", "start_time": t(s), "duration": t(d)});
+    let music = json!({"OTIO_SCHEMA": "Clip.1", "name": "Music", "source_range": r(0.0, 48.0),
+        "media_reference": {"OTIO_SCHEMA": "ExternalReference.1", "target_url": "file:///media/music.wav"}});
+    // Both tracks are A1 in vidcut: the second's clip starts inside the first's.
+    let a1 = |children: Value| {
+        json!({"OTIO_SCHEMA": "Track.1", "kind": "Audio",
+        "metadata": {"vidcut": {"track": "A1"}}, "children": children})
+    };
+    let doc = json!({
+        "OTIO_SCHEMA": "Timeline.1",
+        "tracks": {"OTIO_SCHEMA": "Stack.1", "children": [
+            a1(json!([music])),
+            a1(json!([{"OTIO_SCHEMA": "Gap.1", "source_range": r(0.0, 24.0)}, music])),
+        ]},
+    });
+    let starts: Vec<i64> = import(&doc, None)
+        .unwrap()
+        .clips
+        .iter()
+        .map(|c| c.start)
+        .collect();
+    assert_eq!(starts, [0]);
+}
