@@ -394,12 +394,11 @@ pub fn export_media(
         }),
     )?;
     // Decoded on the GPU the viewer decodes on, on a decoder of its own.
-    // Where that won't open, NVENC's pieces still decode on NVDEC and the
-    // rest on the CPU.
+    let decoder = crate::preferences::gpu_decoding().own_decoder();
     let reports = export::run(
         &prepared,
         &available,
-        &crate::preferences::gpu_decoding().for_jobs(),
+        decoder.as_ref(),
         hooks.cancel,
         &mut |i, path, pr| (hooks.progress)(i, count, path, pr),
     )?;

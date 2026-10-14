@@ -254,10 +254,17 @@ impl Env for AvEnv {
             let total = Some((v.duration * v.fps.as_f64()).round().max(0.0) as u64);
             // Decoded on the GPU the viewer decodes on (preview.md §6), on a
             // decoder of its own.
-            let decoding = crate::preferences::gpu_decoding().for_jobs();
-            let written =
-                vidcut_av::proxy::write(&input_of(media), w, h, &path, total, &encoders, &decoding)
-                    .map_err(av_error)?;
+            let decoder = crate::preferences::gpu_decoding().own_decoder();
+            let written = vidcut_av::proxy::write(
+                &input_of(media),
+                w,
+                h,
+                &path,
+                total,
+                &encoders,
+                decoder.as_ref(),
+            )
+            .map_err(av_error)?;
             let how = format!(
                 "decoded on the {}, {}",
                 written

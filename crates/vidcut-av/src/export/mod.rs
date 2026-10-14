@@ -326,7 +326,7 @@ fn gpu_output(
     Some((device, frames))
 }
 
-/// Encodes `plan` with `settings` into `output`.
+/// Encodes `plan` with `settings` into `output`, decoding on the CPU.
 ///
 /// The plan's sample rate must equal the audio encoder's (build the plan at the
 /// export's sample rate). `progress` is called after every frame.
@@ -338,28 +338,20 @@ pub fn run(
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<Report> {
-    run_decoding_on(
-        plan,
-        settings,
-        output,
-        available,
-        &crate::hw::Decoding::Nvdec,
-        cancel,
-        progress,
-    )
+    run_decoding_on(plan, settings, output, available, None, cancel, progress)
 }
 
-/// [`run`], the pieces decoding as `decoding` says: on a GPU where it
-/// decodes their streams ([`VideoFrames::decode_on`]), the frames that
-/// don't stay there for an encoder on it coming down to be made on the
-/// CPU, shrunk on the GPU first to the size they are shown at; or all on
-/// the CPU, NVENC's too.
+/// [`run`], the pieces decoding on `decoder`, a GPU's, where it decodes
+/// their streams ([`VideoFrames::decode_on`]). The frames that don't stay
+/// there for an encoder on it come down to be made on the CPU, shrunk on
+/// the GPU first to the size they are shown at. NVENC's pieces decode on
+/// NVDEC. `None`: all on the CPU, NVENC's too.
 pub fn run_decoding_on(
     plan: &RenderPlan,
     settings: &ExportSettings,
     output: &Path,
     available: &Availability,
-    decoding: &crate::hw::Decoding,
+    decoder: Option<&crate::hw::GpuDecoder>,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<Report> {
@@ -396,7 +388,7 @@ pub fn run_decoding_on(
     }
     let part = partial_path(output);
     let result = encode(
-        plan, settings, &part, output, available, decoding, cancel, progress,
+        plan, settings, &part, output, available, decoder, cancel, progress,
     );
     match result.map(|r| Report {
         color: chosen,
@@ -698,11 +690,10 @@ fn encode(
     part: &Path,
     output: &Path,
     available: &Availability,
-    decoding: &crate::hw::Decoding,
+    decoder: Option<&crate::hw::GpuDecoder>,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<Report> {
-    let decoder = decoding.decoder();
     let started = Instant::now();
     let fps = ffmpeg::Rational(plan.fps.num() as i32, plan.fps.den() as i32);
     let mut octx = format::output_as(part, settings.container.muxer())
@@ -743,7 +734,7 @@ fn encode(
                 };
                 // NVENC with SDR output takes frames in GPU memory, so pieces
                 // decoded on NVDEC never leave it; frames in memory if not.
-                if decoding.nvdec()
+                if decoder.is_some()
                     && let Some((device, frames)) = gpu_output(&enc, w, h)
                     && let Ok(o) = encode::open_video(
                         &enc,

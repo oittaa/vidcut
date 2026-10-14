@@ -60,7 +60,7 @@ fn matches_source(enc: &ProxyEncoder) {
             &dest,
             None,
             std::slice::from_ref(enc),
-            &vidcut_av::hw::Decoding::Nvdec,
+            None,
         )
         .unwrap_or_else(|e| panic!("{} with {}: {e}", path.display(), enc.name));
         assert_eq!(written.encoder, *enc);
@@ -118,7 +118,7 @@ fn a_sequence_proxy_uses_the_sequence_timestamps() {
             &dest,
             None,
             std::slice::from_ref(&enc),
-            &vidcut_av::hw::Decoding::Nvdec,
+            None,
         )
         .unwrap_or_else(|e| panic!("{}: {e}", enc.name));
         assert_eq!(written.frames, 8);

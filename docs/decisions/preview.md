@@ -68,7 +68,7 @@ A seek, step, load or edit reload returns once its frame is on screen. The contr
 
 ## 6. Proxies
 
-Rules, where the files live, and what still reads the originals: spec D41 and deviation X18. Jobs: gui.md §9. The GPU encode path, including `open_cuda` and `scale_cuda`: export.md §5.
+Rules, where the files live, and what still reads the originals: spec D41 and deviation X18. Jobs: gui.md §9. The GPU encode path, including `scale_cuda`: export.md §5.
 
 Each proxy frame keeps the source frame's presentation timestamp (the source time base, or microseconds when that base is not a sane clock). The viewer's plan swaps only the video path (`vidcut_core::preview::apply_proxies`). An image sequence's proxy is picture `k` at `k/rate` with origin 0.
 

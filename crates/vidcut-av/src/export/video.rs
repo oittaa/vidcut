@@ -405,22 +405,6 @@ pub(crate) struct GpuSide {
     target: Option<Hdr>,
 }
 
-/// `input` opened on NVDEC, and the scaler to the output, when the scaler
-/// builds (libplacebo needs Vulkan for turned pictures, other matrices than
-/// BT.709, and HDR). The reader deinterlaces interlaced frames on the GPU
-/// in decode order, before the sampling rule picks them, as on the CPU.
-fn gpu_reader(input: &Input, gpu: &GpuSide) -> Option<(VideoReader, crate::cuda::CudaPictures)> {
-    // A stream of its own: the next piece opens, and makes its first
-    // picture, on another thread while this one encodes. Frames go to the
-    // encoder once their stream's work is done (`share::wait_for`).
-    let device = gpu.device.with_own_stream().ok()?;
-    let reader = VideoReader::open_cuda(input, &device).ok()?;
-    let scaler =
-        crate::cuda::CudaPictures::new(&device, &reader, gpu.out, gpu.format, gpu.target, true)
-            .ok()?;
-    Some((reader, scaler))
-}
-
 /// How far past the current frame (seconds) a later piece of the same file
 /// may start for decoding on to it to beat a seek.
 const DECODE_AHEAD: f64 = 1.0;
@@ -464,15 +448,23 @@ impl Source {
         measure: bool,
     ) -> Result<Source> {
         let video = pictures == Pictures::Video;
-        let on_gpu = gpu.filter(|_| video).and_then(|g| gpu_reader(input, g));
-        let (reader, scaler) = match on_gpu {
-            Some((r, s)) => (r, Some(s)),
-            // Frames as decoded: on the GPU when it decodes the stream.
-            None => match decoder.filter(|_| video) {
-                Some(d) => (VideoReader::open_gpu_or_cpu(input, d)?, None),
-                None => (VideoReader::open_input(input)?, None),
-            },
+        // NVENC's pieces decode on NVDEC on a stream of their own: the next
+        // piece opens, and makes its first picture, on another thread while
+        // this one encodes, and frames go to the encoder once their
+        // stream's work is done (`share::wait_for`).
+        let nvdec = gpu.filter(|_| video);
+        let nvdec = nvdec.and_then(|g| g.device.with_own_stream().ok());
+        let nvdec = nvdec.map(crate::hw::GpuDecoder::nvdec);
+        let reader = match nvdec.as_ref().or(decoder).filter(|_| video) {
+            Some(d) => VideoReader::open_gpu_or_cpu(input, d)?,
+            None => VideoReader::open_input(input)?,
         };
+        // NVDEC's frames scaled for NVENC on the GPU, where the scaler
+        // builds (libplacebo needs Vulkan for turned pictures, other
+        // matrices than BT.709, and HDR).
+        let scaler = gpu.zip(reader.cuda()).and_then(|(g, d)| {
+            crate::cuda::CudaPictures::new(d, &reader, g.out, g.format, g.target, true).ok()
+        });
         let on_gpu = scaler.is_some();
         let decoder = reader.gpu();
         let tb = reader.time_base();
