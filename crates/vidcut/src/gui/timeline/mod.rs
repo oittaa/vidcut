@@ -1016,6 +1016,17 @@ impl Workspace {
             );
             ui.close();
         }
+        if ui
+            .button("Join Match Edit Clips")
+            .on_hover_text("Join the parts of a split clip back into one")
+            .clicked()
+        {
+            self.send(
+                "edit.join",
+                json!({ "at": at, "clips": self.snap.selection.clips }),
+            );
+            ui.close();
+        }
         if ui.button("Add Marker  (M)").clicked() {
             self.send("markers.add", json!({ "at": at }));
             ui.close();

@@ -243,6 +243,63 @@ fn splitting_inside_an_l_cut_resets_it() {
     assert!(crate::validate::violations(p).is_empty());
 }
 
+#[test]
+fn joining_at_the_playhead_undoes_a_split() {
+    // Decision D49.
+    let mut f = three_clips();
+    f.ok(req("edit.split", json!({"at": 40})));
+    let r = f.ok(req("edit.join", json!({"at": 40})));
+    assert_eq!(r.result["joined"], json!(["c1"]));
+    assert_eq!(
+        f.v1(),
+        vec![
+            row("c1", 0, 100, 0),
+            row("c2", 100, 50, 10),
+            row("c3", 150, 50, 100)
+        ]
+    );
+}
+
+#[test]
+fn a_cut_that_skips_frames_is_not_joined() {
+    // Decision D49: m1 frames 50..60 are missing between the clips.
+    let mut f = fixture();
+    f.append("m1", 0, 50);
+    f.append("m1", 60, 100);
+    f.err(req("edit.join", json!({"at": 50})));
+}
+
+#[test]
+fn selected_parts_join_into_the_first() {
+    // Decision D49: the cut before c4 stays, as c1 isn't selected.
+    let mut f = three_clips();
+    f.ok(req("edit.split", json!({"at": [20, 40, 60]})));
+    f.ok(req("edit.join", json!({"clips": ["c4", "c5", "c6"]})));
+    assert_eq!(
+        f.v1(),
+        vec![
+            row("c1", 0, 20, 0),
+            row("c4", 20, 80, 20),
+            row("c2", 100, 50, 10),
+            row("c3", 150, 50, 100)
+        ]
+    );
+}
+
+#[test]
+fn parts_with_an_l_cut_between_them_join() {
+    // Decision D49: the sound plays on through the L cut, so they join.
+    let mut f = three_clips();
+    f.ok(req("edit.split", json!({"at": 50})));
+    f.ok(req(
+        "edit.audio_roll",
+        json!({"clip": "c1", "edge": "tail", "by": 10}),
+    ));
+    f.ok(req("edit.join", json!({"at": 50})));
+    let c1 = f.editor.project().clip("c1").unwrap();
+    assert_eq!((c1.duration, c1.audio_range()), (100, Some((0, 100))));
+}
+
 fn tape_order() -> serde_json::Value {
     json!(["m1", "m2", "m3"])
 }

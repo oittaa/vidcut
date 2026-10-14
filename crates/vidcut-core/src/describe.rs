@@ -54,6 +54,8 @@ pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> Stri
         "edit.ripple_overwrite" => format!("Ripple Overwrite {}", d.source()),
         "edit.place_on_top" => format!("Place On Top {} at {}", d.source(), d.time("at")),
         "edit.split" => format!("Split at {}{}", d.time("at"), d.split_clips()),
+        "edit.join" if d.list("clips").len() > 1 => format!("Join {}", d.clips("clips")),
+        "edit.join" => format!("Join the clips at {}", d.time("at")),
         "edit.delete" if d.flag("lift") => format!("Delete {}, leaving a gap", d.clips("clips")),
         "edit.delete" => format!("Delete {}", d.clips("clips")),
         "edit.delete_range" => format!("Delete {}", d.range("range")),
