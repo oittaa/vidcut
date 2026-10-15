@@ -25,7 +25,7 @@ Around them:
 - **Proxies have a loop of their own** (`proxy::encode_into`): it decodes every frame at its own time and gives each its frame's timestamp. They make their pictures with the `Maker` and open their encoders with `encode::open_video`, so VA-API, AMF and VideoToolbox proxies fit on the GPU as exports do.
 - **Light measurements and analyses come down whole**, on purpose: their values must be the CPU's to the bit (export.md §4).
 - **HDR footage's 10-bit proxies keep its colors**, so nothing is converted between the decoder and the encoder: NVDEC's frames go to NVENC, Direct3D 11's to AMF and VideoToolbox's to its encoders on the GPU. Its 8-bit proxies are tone-mapped: by libplacebo on NVIDIA's GPU, elsewhere on the CPU.
-- **The player keeps frames on the GPU** (`hw::Keeper`, the `Kept` route), and the GUI imports them for each GPU (gui/shared.rs, gui/picture.rs). Where a display can't take them, they come down whole (`player::frame`). VideoToolbox's 4:2:2: [viewer-422.md](viewer-422.md).
+- **The player keeps frames on the GPU** (`hw::Keeper`, the `Kept` route), and the GUI imports them for each GPU (gui/shared.rs, gui/picture.rs). Where a display can't take them, they come down whole (`player::frame`).
 - **VideoToolbox's backend is `hw/vt.rs`.** Its frames stay on the GPU for its encoders where they fill the picture in the output's layout and colors. The rest shrink with `scale_vt` before they come down. VideoToolbox's H.264 encoder takes 8-bit frames only (FFmpeg 9.0.2 lists `videotoolbox_vld`, `nv12` and `yuv420p`), so 10-bit pieces for H.264 come down. Its HEVC and ProRes encoders take P010, so 10-bit HEVC exports and the HEVC and ProRes proxies of 10-bit sources stay on the GPU.
 
 ## Design
@@ -69,6 +69,7 @@ What a test can't settle is written as a fact with its source. For example, FFmp
 - Capabilities tested and kept with `encoders.json`.
 - The route in an export's result.
 - One engine for every job.
+- NVDEC's 4:2:2 (NV16, P210) and VideoToolbox's NV16 shown from GPU memory. They come down: no GPU here decodes them to test it.
 
 ## Steps
 
