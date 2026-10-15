@@ -1048,6 +1048,22 @@ mod tests {
     }
 
     #[test]
+    fn automatic_takes_nvidias_av1_where_the_gpu_plays_prores_too() {
+        let nvidia = working(&[
+            ("av1_nvenc", Nvenc, "yuv420p"),
+            ("hevc_nvenc", Nvenc, "yuv420p"),
+            ("h264_nvenc", Nvenc, "yuv420p"),
+            ("prores_ks_vulkan", Vulkan, "yuv422p10le"),
+        ]);
+        let got = names(
+            ProxyCodec::Auto,
+            &nvidia,
+            &["h264", "av1", "hevc", "prores"],
+        );
+        assert_eq!(got[0], "av1_nvenc");
+    }
+
+    #[test]
     fn automatic_takes_what_the_gpu_plays_before_what_it_makes() {
         let gpu = working(&[("av1_nvenc", Nvenc, "yuv420p")]);
         let got = names(ProxyCodec::Auto, &gpu, &["prores"]);

@@ -20,10 +20,10 @@ pub(crate) enum Output {
     Fitted,
     /// Each frame as decoded: its own size and colors, upright only after
     /// [`rotation`](crate::export::video::VideoFrames::rotation), in a
-    /// layout a display takes (see `Relayout`). Black is 8-bit 4:2:0. With
-    /// `keep_on_gpu`, the GPU's frames stay in its memory in NV12 or P010,
-    /// for a display that shows them from there.
-    Decoded { keep_on_gpu: bool },
+    /// layout a display takes (see `Relayout`). Black is 8-bit 4:2:0. The
+    /// frames of the GPU decoders in `keep` stay in their memory, for a
+    /// display that shows them from there. Other GPUs' come down.
+    Decoded { keep: Vec<crate::hw::Kind> },
     /// Fitted for an encoder on the GPU's device, whose frames are on
     /// `place`: the frames the planner leaves there ([`plan`]) are fitted
     /// there, Direct3D 11's into `into`, the encoder's frames. The rest are
@@ -217,11 +217,13 @@ impl Maker {
         self.target
     }
 
-    /// Where the frames' pictures go.
-    fn dest(&self) -> Dest {
+    /// Where `frame`'s picture goes.
+    fn dest(&self, frame: &frame::Video) -> Dest {
         match &self.output {
             Output::Fitted => Dest::Memory,
-            Output::Decoded { keep_on_gpu } => Dest::Display { keep: *keep_on_gpu },
+            Output::Decoded { keep } => Dest::Display {
+                keep: crate::hw::Kind::of_frame(frame).is_some_and(|k| keep.contains(&k)),
+            },
             Output::FittedOnGpu { place, .. } => Dest::Encoder { place: *place },
             Output::Cuda { .. } => Dest::Encoder { place: Place::Cuda },
             Output::Vulkan => Dest::Encoder {
@@ -239,7 +241,7 @@ impl Maker {
         Facts {
             fit_failed: fitting.fit_failed,
             keep_failed: self.unkept,
-            ..Facts::of(frame, &ops, (w, h), self.dest())
+            ..Facts::of(frame, &ops, (w, h), self.dest(frame))
         }
     }
 
@@ -257,7 +259,7 @@ impl Maker {
     ) -> Result<Option<frame::Video>> {
         let (out_w, out_h, out_fmt) = self.out;
         let mut facts = self.facts(fitting, frame, rotation);
-        let dest = self.dest();
+        let dest = self.dest(frame);
         let mut route;
         // The size the frame came down from the GPU at.
         let mut came_down_at = None;

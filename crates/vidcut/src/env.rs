@@ -347,7 +347,8 @@ pub fn proxy_encoders(
     };
     let plays: Vec<&str> = plays
         .iter()
-        .flat_map(|(_, codecs)| codecs.iter().map(String::as_str))
+        .flatten()
+        .map(|(codec, _)| codec.as_str())
         .collect();
     vidcut_av::proxy::encoders(codec, &available, &plays)
 }

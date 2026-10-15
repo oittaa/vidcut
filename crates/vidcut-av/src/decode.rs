@@ -280,8 +280,10 @@ pub struct VideoReader {
     deinterlacer: Option<Deinterlacer>,
     /// The stream's frames are interlaced.
     interlaced: bool,
-    /// The GPU decoding, when one does (a rewind opens it again).
+    /// The GPU decoding, when one does (a rewind opens it again), and the
+    /// kind of its decoders that decodes the stream: its own, or Vulkan's.
     gpu: Option<crate::hw::GpuDecoder>,
+    kind: Option<crate::hw::Kind>,
     /// What the file holds and what decodes it ([`decoding`](Self::decoding)).
     decoding: Arc<Decoding>,
 }
@@ -490,8 +492,10 @@ impl Deinterlacer {
 /// A decoder for `id` that can decode on `kind`'s GPU: FFmpeg's own, whose
 /// frames in GPU memory come through `get_format` like any other (not a
 /// library's such as libdav1d, which decodes on the CPU only, nor a wrapper
-/// of a GPU's own decoder such as `_cuvid` or `_qsv`).
-fn gpu_decoder(id: codec::Id, kind: crate::hw::Kind) -> Option<ffmpeg::Codec> {
+/// of a GPU's own decoder such as `_cuvid` or `_qsv`). FFmpeg's version
+/// isn't asked: a decoder without a configuration for the GPU's device
+/// (ProRes's for Vulkan before FFmpeg 8.1) is none.
+pub(crate) fn gpu_decoder(id: codec::Id, kind: crate::hw::Kind) -> Option<ffmpeg::Codec> {
     use ffmpeg::ffi;
     let id: ffi::AVCodecID = id.into();
     let mut opaque = std::ptr::null_mut();
@@ -636,27 +640,49 @@ fn not_idr(data: &[u8], lengths: Option<usize>) -> bool {
     types.contains(&1) && !types.contains(&5)
 }
 
+/// The kind of `gpu`'s decoders that decodes `id`, its device and FFmpeg's
+/// decoder for it ([`gpu_decoder`]): its own, or Vulkan's on the same GPU
+/// (`GpuDecoder::kind_for`). An error says why the CPU decodes it: `gpu`
+/// leaves it to the CPU (`GpuDecoder::why_not`, told by `open_gop` whether
+/// the stream has open GOPs), or FFmpeg has no such decoder.
+fn on_gpu(
+    id: codec::Id,
+    gpu: &crate::hw::GpuDecoder,
+    open_gop: impl FnOnce() -> bool,
+) -> Result<(crate::hw::Kind, crate::hw::Device, ffmpeg::Codec)> {
+    if let Some(why) = gpu.why_not(id, open_gop) {
+        return Err(Error::Invalid(why.into()));
+    }
+    let found = gpu
+        .kind_for(id)
+        .and_then(|kind| Some((kind, gpu_decoder(id, kind)?)));
+    let Some((kind, codec)) = found else {
+        return Err(Error::Invalid(format!(
+            "FFmpeg has no {} decoder for {}",
+            gpu.kind().label(),
+            id.name()
+        )));
+    };
+    Ok((kind, gpu.device_for(kind)?, codec))
+}
+
 /// Opens the video decoder of `ctx` for `id` on `gpu`, its frames in GPU
-/// memory: FFmpeg's own decoder that can use it ([`gpu_decoder`]). On the
-/// CPU, FFmpeg's default, where there is no `gpu`, it leaves `id` to the
-/// CPU (`GpuDecoder::why_not`, told by `open_gop` whether the stream has
-/// open GOPs) or FFmpeg has no such decoder. A stream the
-/// GPU won't take decodes on the CPU all the same: `get_format` falls back
-/// to it.
+/// memory, with the decoder [`on_gpu`] picks. On the CPU, FFmpeg's default,
+/// where there is no `gpu` or `on_gpu` finds none. A stream the GPU won't
+/// take decodes on the CPU all the same: `get_format` falls back to it.
 pub(crate) fn open_video(
     mut ctx: codec::context::Context,
     id: codec::Id,
     gpu: Option<&crate::hw::GpuDecoder>,
     open_gop: impl FnOnce() -> bool,
 ) -> std::result::Result<ffmpeg::decoder::Video, ffmpeg::Error> {
-    let on = gpu.filter(|g| g.why_not(id, open_gop).is_none());
-    let Some((gpu, codec)) = on.and_then(|g| Some((g, gpu_decoder(id, g.kind())?))) else {
+    let Some((_, device, codec)) = gpu.and_then(|g| on_gpu(id, g, open_gop).ok()) else {
         return ctx.decoder().video();
     };
     // SAFETY: the context isn't opened yet; it takes a reference of its own.
     unsafe {
         let raw = ctx.as_mut_ptr();
-        (*raw).hw_device_ctx = ffmpeg::ffi::av_buffer_ref(gpu.as_ptr());
+        (*raw).hw_device_ctx = ffmpeg::ffi::av_buffer_ref(device.0);
         (*raw).get_format = Some(gpu_format);
         // Frames held on their way to be measured.
         (*raw).extra_hw_frames = 8;
@@ -675,10 +701,11 @@ pub(crate) fn in_memory(f: frame::Video) -> Result<frame::Video> {
     }
 }
 
-/// Where `f` was decoded, for `VIDCUT_DEBUG`: on `gpu`, or the CPU.
+/// Where `f` was decoded, for `VIDCUT_DEBUG`: on `gpu` (its decoder of
+/// `f`'s kind), or the CPU.
 pub(crate) fn decoded_on(f: &frame::Video, gpu: Option<&crate::hw::GpuDecoder>) -> String {
-    match gpu {
-        Some(gpu) if crate::hw::on_gpu(f) => gpu.to_string(),
+    match (gpu, crate::hw::Kind::of_frame(f)) {
+        (Some(gpu), Some(kind)) => gpu.labeled(kind),
         _ => "the CPU".into(),
     }
 }
@@ -742,14 +769,16 @@ impl VideoReader {
     }
 
     /// Decoding on `gpu`: frames stay in its memory (`Pixel::CUDA`, `VAAPI`,
-    /// `D3D11`), the same frames with the same timestamps as decoding on
-    /// the CPU. Interlaced ones are deinterlaced as the CPU reader
-    /// deinterlaces them: on the GPU for NVDEC's, in memory for the others',
-    /// which come down for it. Fails when `gpu` can't decode the stream.
+    /// `D3D11`, `VULKAN` for ProRes beside NVDEC), the same frames with the
+    /// same timestamps as decoding on the CPU. Interlaced ones are
+    /// deinterlaced as the CPU reader deinterlaces them: on the GPU for
+    /// NVDEC's, in memory for the others', which come down for it. Fails
+    /// when `gpu` can't decode the stream.
     pub fn open_on(source: &Input, gpu: &crate::hw::GpuDecoder) -> Result<Self> {
         let mut reader = Self::open_with(source, Some(gpu))?;
+        let pixel = reader.kind.map(crate::hw::Kind::pixel);
         match reader.pending.as_ref().map(|f| f.format()) {
-            Some(p) if p == gpu.kind().pixel() => {
+            Some(p) if Some(p) == pixel => {
                 reader.opened(None);
                 Ok(reader)
             }
@@ -800,7 +829,7 @@ impl VideoReader {
                 .decoder
                 .codec()
                 .map_or("?".into(), |c| c.name().to_string()),
-            gpu: self.gpu.as_ref().map(ToString::to_string),
+            gpu: self.gpu.as_ref().zip(self.kind).map(|(g, k)| g.labeled(k)),
             why: why.map(String::from),
         });
         crate::debug!(
@@ -897,11 +926,19 @@ impl VideoReader {
         // The packet time base lets the decoder keep timestamps right when it
         // drops samples or frames (FFmpeg's CLI sets it too).
         unsafe { (*ctx.as_mut_ptr()).pkt_timebase = time_base.into() };
-        match device {
+        let codec_id = stream.parameters().id();
+        // The GPU's decoder for the stream: its own, or Vulkan's for ProRes
+        // beside NVDEC. FFmpeg's default decoder may decode on the CPU only
+        // (libdav1d for AV1): one that can use the GPU.
+        let on = match device {
+            Some(d) => Some(on_gpu(codec_id, d, || h264_open_gop(source))?),
+            None => None,
+        };
+        match &on {
             // The GPU decodes; frame threads would only add latency.
-            Some(d) => unsafe {
+            Some((_, device, _)) => unsafe {
                 let raw = ctx.as_mut_ptr();
-                (*raw).hw_device_ctx = ffmpeg::ffi::av_buffer_ref(d.as_ptr());
+                (*raw).hw_device_ctx = ffmpeg::ffi::av_buffer_ref(device.0);
                 (*raw).get_format = Some(gpu_format);
                 // Frames a filter graph and the encoder hold on to.
                 (*raw).extra_hw_frames = 8;
@@ -912,23 +949,8 @@ impl VideoReader {
                 count: 0, // let FFmpeg choose
             }),
         }
-        let codec_id = stream.parameters().id();
-        let decoder = match device {
-            Some(d) if let Some(why) = d.why_not(codec_id, || h264_open_gop(source)) => {
-                return Err(Error::Invalid(why.into()));
-            }
-            // FFmpeg's default decoder may decode on the CPU only (libdav1d
-            // for AV1): one that can use the GPU, when there is one.
-            Some(d) => match gpu_decoder(codec_id, d.kind()) {
-                Some(codec) => ctx.decoder().open_as(codec).and_then(|d| d.video()),
-                None => {
-                    return Err(Error::Invalid(format!(
-                        "FFmpeg has no {} decoder for {}",
-                        d.kind().label(),
-                        codec_id.name()
-                    )));
-                }
-            },
+        let decoder = match &on {
+            Some((_, _, codec)) => ctx.decoder().open_as(*codec).and_then(|d| d.video()),
             None => ctx.decoder().video(),
         };
         let decoder = crate::parts::decoder_opened(decoder, codec_id, "video")?;
@@ -950,18 +972,23 @@ impl VideoReader {
             deinterlacer: None,
             interlaced: false,
             gpu: device.cloned(),
+            kind: on.map(|(kind, ..)| kind),
             decoding: Arc::default(),
         })
     }
 
-    /// The GPU decoding, when one does: its frames are in its memory.
+    /// The GPU decoder decoding, when one does: its frames are in its
+    /// memory. Vulkan's for ProRes beside NVDEC.
     pub fn gpu(&self) -> Option<crate::hw::Kind> {
-        self.gpu.as_ref().map(crate::hw::GpuDecoder::kind)
+        self.kind
     }
 
-    /// NVDEC's CUDA device, when it decodes.
+    /// NVDEC's CUDA device, when NVDEC decodes.
     pub(crate) fn cuda(&self) -> Option<&crate::cuda::CudaDevice> {
-        self.gpu.as_ref().and_then(crate::hw::GpuDecoder::cuda)
+        self.gpu
+            .as_ref()
+            .filter(|_| self.kind == Some(crate::hw::Kind::Nvdec))
+            .and_then(crate::hw::GpuDecoder::cuda)
     }
 
     /// The stream's frames are interlaced (and deinterlaced here, on the

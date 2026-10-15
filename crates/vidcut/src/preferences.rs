@@ -180,10 +180,12 @@ fn describe(p: &Preferences) -> Value {
         .map(|c| {
             let encoders = crate::env::proxy_encoders(c, p.gpu.acceleration, decoding);
             let first = encoders.first();
-            let plays_on = played.as_ref().and_then(|(decoder, codecs)| {
-                first
-                    .is_some_and(|e| codecs.iter().any(|played| played == e.codec))
-                    .then(|| decoder.clone())
+            let plays_on = played.as_ref().and_then(|played| {
+                let e = first?;
+                played
+                    .iter()
+                    .find(|(codec, _)| codec == e.codec)
+                    .map(|(_, decoder)| decoder.clone())
             });
             json!({
                 "codec": c,
