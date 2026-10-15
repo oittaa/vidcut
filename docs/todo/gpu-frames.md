@@ -8,7 +8,7 @@ Today that holds for NVIDIA alone, and for exports, not proxies, on VA-API and A
 
 ## Today
 
-**The planner** (`route.rs`) picks each frame's route. A frame is made on the GPU where it is and handed on there (`Gpu`), shrunk there and copied down (`Shrunk`), copied down whole (`Whole`), made on the CPU from memory (`Cpu`), or kept as decoded for the player (`Kept`). `route::plan` is a pure function of facts about the frame (`Facts`) and of where the job's pictures go (`Dest`: memory, an encoder that takes frames on one place, or a display). The facts are where the frame is, whether its GPU fits it for an encoder there, whether the output shows it smaller, whether a display takes its layout, and whether fitting or keeping failed before. `VideoFrames` plans each picture it makes, and `VIDCUT_DEBUG` says each file's route. A proxy's `made_with` says how its frames went (`route::Went`).
+**The planner** (`route.rs`) picks each frame's route. A frame is made on the GPU where it is and handed on there (`Gpu`), shrunk there and copied down (`Shrunk`), copied down whole (`Whole`), made on the CPU from memory (`Cpu`), or kept as decoded for the player (`Kept`). `route::plan` is a pure function of facts about the frame (`Facts`) and of where the job's pictures go (`Dest`: memory, an encoder that takes frames on one place, or a display). The facts are where the frame is, whether its GPU fits it for an encoder there, whether the output shows it smaller, whether a display takes its layout, and whether fitting or keeping failed before. The engine's `export::make::Maker` plans each picture it makes, and `VIDCUT_DEBUG` says each file's route. `VideoFrames` makes its pictures with it. A proxy's `made_with` says how its frames went (`route::Went`).
 
 **The backends** say what they fit (`can_fit`) from `route::Ops`: the turn, the frame's and the output's layouts, RGB or YUV, whether the colors stay, and whether the encoder's own frames are there to fit into. Three mechanisms are their work:
 
@@ -21,8 +21,8 @@ Today that holds for NVIDIA alone, and for exports, not proxies, on VA-API and A
 The CPU's backend is `export::normalize` (`Normalizer`).
 
 Around them:
-- **Where the encoder takes frames is chosen per job, by encoder name** (`encode` in export/mod.rs). NVENC takes CUDA frames when a GPU decodes (`gpu_output`). VAAPI and AMF open on the decoder's device only for the pairs VAAPI with VA-API and AMF with Direct3D 11 (`shared`). The job's `Dest` follows from that. Proxies check for NVENC again (`proxy::encode_into`).
-- **Proxies have an encode loop of their own** (`proxy::encode_into`), beside the export's (`export::video::VideoFrames`), so they don't get the export's GPU fitting.
+- **Where the encoder takes frames is chosen per job, by encoder name** (`encode` in export/mod.rs). NVENC takes CUDA frames when a GPU decodes (`gpu_output`). VAAPI and AMF open on the decoder's device only for the pairs VAAPI with VA-API and AMF with Direct3D 11 (`encode::shares`). The job's `Output` and `Dest` follow from that (`Output::for_encoder`). Proxies check for NVENC again (`proxy::encode_into`).
+- **Proxies have an encode loop and fitting of their own** (`proxy::encode_into`), beside the engine's (`Maker`), so they don't get the export's GPU fitting.
 - **Light measurements and analyses come down whole**, on purpose: their values must be the CPU's to the bit (export.md §4).
 - **The player keeps frames on the GPU** (`hw::Keeper`, the `Kept` route), and the GUI imports them for each GPU (gui/shared.rs, gui/picture.rs). Where a display can't take them, they come down whole (`player::frame`).
 - **VideoToolbox has no backend.** On a Mac every frame comes down whole and the CPU scales it: `hw::can_fit` says no for VideoToolbox's frames, and `hw::Shrinker` finds no scaler for them.

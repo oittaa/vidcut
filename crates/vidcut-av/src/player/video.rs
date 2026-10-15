@@ -27,8 +27,9 @@ use super::store::Kind;
 use super::{Busy, Decoder as Decoding, Mode, Shared, Snap};
 use crate::error::{Error, Result};
 use crate::export::is_cancelled;
+use crate::export::make::Output;
 use crate::export::renderer::{at, window};
-use crate::export::video::{Output, VideoFrames};
+use crate::export::video::VideoFrames;
 use crate::ffmpeg::format;
 
 /// Frames decoded ahead of a paused viewer, when decoding on is cheap.

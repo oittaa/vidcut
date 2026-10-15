@@ -13,11 +13,11 @@ use vidcut_core::render::{Image, VideoPiece};
 use vidcut_core::time::Rational;
 
 use super::ahead::Ahead;
-use super::normalize::{Normalizer, Relayout, down, shown_size};
+use super::make::{Fitting, Maker, Output};
 use crate::decode::{Input, VideoReader};
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, format, frame};
-use crate::route::{Dest, Facts, Ops, Place, Route, plan};
+use crate::route::{Place, Route};
 
 /// The sampling rule's time (seconds) for source position `pos` (project
 /// frames from `origin`) at `fps`: the first source frame from then on is
@@ -98,18 +98,11 @@ struct Source {
     light: Option<crate::light::FrameLight>,
     /// `current`, normalized.
     normalized: Option<frame::Video>,
-    /// Fitting this file's frames on the GPU failed, or it has no scaler
-    /// for them: they are made on the CPU.
-    fit_failed: bool,
     /// A still keeps its one picture and is never sought; a sequence knows
     /// how many pictures it has.
     pictures: Pictures,
-    /// Scales NVDEC's frames for NVENC on the GPU: built at opening where
-    /// the planner leaves the first frame there.
-    scaler: Option<crate::cuda::CudaPictures>,
-    /// The route that made `normalized` ([`plan`]). The scaler takes the
-    /// frame it is given, so `current` can't be planned again.
-    route: Option<Route>,
+    /// Its frames on the GPU, and the route that made `normalized`.
+    fitting: Fitting,
     /// The GPU the reader decodes on: NVDEC for NVENC's frames
     /// ([`Output::Cuda`]), or any for frames as decoded (`decode_on`).
     decoder: Option<crate::hw::Kind>,
@@ -179,30 +172,10 @@ impl Source {
             Some(d) => VideoReader::open_gpu_or_cpu(input, d)?,
             None => VideoReader::open_input(input)?,
         };
-        // NVDEC's frames scaled for NVENC on the GPU, where the planner
-        // leaves the first frame there and the scaler builds (libplacebo
-        // needs Vulkan for turned pictures, other matrices than BT.709, and
-        // HDR).
-        let planned = gpu
-            .zip(reader.cuda())
-            .zip(reader.peek())
-            .filter(|((g, _), first)| {
-                let ops = Ops::of(first, reader.rotation(), g.format, g.target, false);
-                let cuda = Dest::Encoder { place: Place::Cuda };
-                plan(&Facts::of(first, &ops, g.out), cuda) == Route::Gpu
-            });
-        let scaler = planned.and_then(|((g, d), _)| {
-            crate::cuda::CudaPictures::new(d, &reader, g.out, g.format, g.target, true)
-                .inspect_err(|e| {
-                    crate::debug!(
-                        "decoding",
-                        "{}: the GPU won't scale the frames for NVENC, the CPU makes them: {e}",
-                        reader.path().display()
-                    )
-                })
-                .ok()
-        });
-        let fit_failed = planned.is_some() && scaler.is_none();
+        let fitting = match gpu {
+            Some(g) => Fitting::for_nvenc(&reader, g.out, g.format, g.target, true),
+            None => Fitting::none(),
+        };
         let decoder = reader.gpu();
         let tb = reader.time_base();
         let mut source = Source {
@@ -216,10 +189,8 @@ impl Source {
             meter: measure.then(crate::light::Meter::new),
             light: None,
             normalized: None,
-            fit_failed,
             pictures,
-            scaler,
-            route: None,
+            fitting,
             decoder,
         };
         if pictures == Pictures::Still {
@@ -230,21 +201,12 @@ impl Source {
         }
         // The GPU's first picture too: libplacebo compiles its shaders for
         // it, which is better done here, ahead of the piece.
-        if let Some(scaler) = source.scaler.as_mut() {
+        if source.fitting.scaler.is_some() {
             let (frame, _) = source.current.as_ref().expect("have a frame");
-            source.normalized = Some(scaled(scaler, frame)?);
-            source.took(Route::Gpu);
+            source.normalized = Some(source.fitting.scale(frame)?.ok_or_else(no_picture)?);
+            source.fitting.took(Route::Gpu, source.reader.path());
         }
         Ok(source)
-    }
-
-    /// `route` made `normalized`: said under `VIDCUT_DEBUG` where it
-    /// changes.
-    fn took(&mut self, route: Route) {
-        if self.route != Some(route) {
-            crate::debug!("decoding", "{}: {route:?}", self.reader.path().display());
-        }
-        self.route = Some(route);
     }
 
     /// Opens `input` without decoding anything yet: on the GPU (`decoder`)
@@ -273,10 +235,8 @@ impl Source {
             meter: measure.then(crate::light::Meter::new),
             light: None,
             normalized: None,
-            fit_failed: false,
             pictures,
-            scaler: None,
-            route: None,
+            fitting: Fitting::none(),
             decoder,
         })
     }
@@ -407,7 +367,6 @@ impl Source {
 pub struct VideoFrames {
     pieces: Vec<VideoPiece>,
     fps: Rational,
-    out: (u32, u32, format::Pixel),
     piece: usize,
     /// Frame index within the current piece.
     k: i64,
@@ -415,26 +374,11 @@ pub struct VideoFrames {
     /// The next file, opened ahead; named by where it opens.
     ahead: Ahead<Source, (Input, u64, i64)>,
     black: Option<frame::Video>,
-    /// The output's dynamic range (`None`: SDR BT.709).
-    target: Option<Hdr>,
     /// The GPU frames decode on ([`decode_on`](Self::decode_on)).
     decoder: Option<crate::hw::GpuDecoder>,
-    /// What the frames are made into ([`output`](Self::output)).
-    output: Output,
-    /// Fits frames into the output on the CPU, in every output but the
-    /// decoded one.
-    normalizer: Option<Normalizer>,
-    /// Shrinks the frames a GPU decoded on the GPU before they come down to
-    /// be fitted into the output.
-    shrinker: Option<crate::hw::Shrinker>,
-    /// Brings frames as decoded into a layout a display takes.
-    relayout: Relayout,
-    /// Keeps the GPU's frames there ([`crate::hw::Keeper`]); `unkept`: that
-    /// failed, and they come down from then on.
-    keeper: Option<crate::hw::Keeper>,
-    unkept: bool,
-    /// Fits frames into the output on the GPU ([`Output::FittedOnGpu`]).
-    fitter: Option<crate::hw::Fitter>,
+    /// Makes the frames into the output's pictures
+    /// ([`output`](Self::output)).
+    maker: Maker,
     /// Frames given so far that the GPU made, for the encoder there.
     gpu_made: i64,
     /// The clockwise turn that shows the last frame given upright.
@@ -459,34 +403,6 @@ pub struct VideoFrames {
     reversed: Vec<Reversed>,
 }
 
-/// What a caller makes of the frames ([`VideoFrames::output`]).
-pub(crate) enum Output {
-    /// Fitted into the output on the CPU, the default. Frames a GPU decoded
-    /// come down shrunk there first.
-    Fitted,
-    /// Each frame as decoded: its own size and colors, upright only after
-    /// [`rotation`](VideoFrames::rotation), in a layout a display takes (see
-    /// `Relayout`). Black is 8-bit 4:2:0. With `keep_on_gpu`, the GPU's
-    /// frames stay in its memory in NV12 or P010, for a display that shows
-    /// them from there.
-    Decoded { keep_on_gpu: bool },
-    /// Fitted for an encoder on the GPU's device, whose frames are on
-    /// `place`: the frames the planner leaves there ([`plan`]) are fitted
-    /// there, Direct3D 11's into `into`, the encoder's frames. The rest are
-    /// fitted on the CPU.
-    FittedOnGpu {
-        place: Place,
-        into: Option<crate::hw::Frames>,
-    },
-    /// For NVENC, in CUDA memory from `frames`, made for the output's size
-    /// and format (NV12 or P010): pieces decoded on NVDEC are scaled there,
-    /// the rest and black are made on the CPU and go up.
-    Cuda {
-        device: crate::cuda::CudaDevice,
-        frames: crate::cuda::CudaFrames,
-    },
-}
-
 impl VideoFrames {
     /// `target`: the output's dynamic range (`None`: SDR BT.709).
     pub fn new(
@@ -500,21 +416,13 @@ impl VideoFrames {
         Self {
             pieces: pieces.to_vec(),
             fps,
-            out: (width, height, pixel),
             piece: 0,
             k: 0,
             source: None,
             ahead: Ahead::new(),
             black: None,
-            target,
             decoder: None,
-            output: Output::Fitted,
-            normalizer: None,
-            shrinker: None,
-            relayout: Relayout::new(),
-            keeper: None,
-            unkept: false,
-            fitter: None,
+            maker: Maker::new((width, height, pixel), target, Output::Fitted),
             gpu_made: 0,
             rotation: 0,
             last_decoder: None,
@@ -530,10 +438,11 @@ impl VideoFrames {
     /// Makes the frames into `output`. Frames are picked by the sampling
     /// rule whatever the output.
     pub(crate) fn output(mut self, output: Output) -> Self {
+        let mut out = self.maker.out();
         if matches!(output, Output::Decoded { .. }) {
-            self.out.2 = format::Pixel::YUV420P;
+            out.2 = format::Pixel::YUV420P;
         }
-        self.output = output;
+        self.maker = Maker::new(out, self.maker.target(), output);
         self
     }
 
@@ -542,9 +451,9 @@ impl VideoFrames {
     /// timestamps and colors. Frames as decoded ([`Output::Decoded`]) are
     /// copied down to memory at their own size; frames fitted into the
     /// output come down shrunk on the GPU to the size they are shown at,
-    /// where it is smaller ([`down`]). Other streams, stills and image
-    /// sequences decode on the CPU, and pieces NVDEC takes for NVENC
-    /// ([`Output::Cuda`]) stay with it.
+    /// where it is smaller ([`down`](super::normalize::down)). Other
+    /// streams, stills and image sequences decode on the CPU, and pieces
+    /// NVDEC takes for NVENC ([`Output::Cuda`]) stay with it.
     pub fn decode_on(mut self, gpu: crate::hw::GpuDecoder) -> Self {
         self.decoder = Some(gpu);
         self
@@ -596,39 +505,17 @@ impl VideoFrames {
         self.gpu_made
     }
 
-    /// Where the frames' pictures go.
-    fn dest(&self) -> Dest {
-        match &self.output {
-            Output::Fitted => Dest::Memory,
-            Output::Decoded { keep_on_gpu } => Dest::Display { keep: *keep_on_gpu },
-            Output::FittedOnGpu { place, .. } => Dest::Encoder { place: *place },
-            Output::Cuda { .. } => Dest::Encoder { place: Place::Cuda },
-        }
-    }
-
-    /// What the planner knows of `frame`, `src`'s current frame.
-    fn facts(&self, src: &Source, frame: &frame::Video) -> Facts {
-        let (w, h, layout) = self.out;
-        let into = matches!(self.output, Output::FittedOnGpu { into: Some(_), .. });
-        let ops = Ops::of(frame, src.reader.rotation(), layout, self.target, into);
-        Facts {
-            fit_failed: src.fit_failed,
-            keep_failed: self.unkept,
-            ..Facts::of(frame, &ops, (w, h))
-        }
-    }
-
     /// What a source decoding for NVENC needs ([`Output::Cuda`]).
     fn gpu_side(&self) -> Option<GpuSide> {
-        let Output::Cuda { device, .. } = &self.output else {
+        let Output::Cuda { device, .. } = self.maker.output() else {
             return None;
         };
-        let (w, h, format) = self.out;
+        let (w, h, format) = self.maker.out();
         Some(GpuSide {
             device: device.clone(),
             out: (w, h),
             format,
-            target: self.target,
+            target: self.maker.target(),
         })
     }
 
@@ -678,7 +565,7 @@ impl VideoFrames {
                     self.last_decoder = None;
                     self.last_decoding = None;
                     let black = frame_ref(self.black()?)?;
-                    let mut out = match &self.output {
+                    let mut out = match self.maker.output() {
                         Output::Cuda { frames, .. } => frames.upload(&black)?,
                         _ => black,
                     };
@@ -806,7 +693,7 @@ impl VideoFrames {
 
     fn black(&mut self) -> Result<&frame::Video> {
         if self.black.is_none() {
-            let (w, h, pix) = self.out;
+            let (w, h, pix) = self.maker.out();
             let mut f = frame::Video::new(pix, w, h);
             fill_black(&mut f)?;
             self.black = Some(f);
@@ -1002,13 +889,13 @@ impl VideoFrames {
     /// once: what fits in `REVERSED_BYTES`, at 10 bits.
     fn reversed_frames(&self) -> i64 {
         let current = self.source.as_ref().and_then(|s| s.current.as_ref());
-        let (w, h) = match (&self.output, current) {
+        let (w, h) = match (self.maker.output(), current) {
             (Output::Decoded { .. }, Some((f, _))) => (f.width(), f.height()),
-            _ => (self.out.0, self.out.1),
+            _ => (self.maker.out().0, self.maker.out().1),
         };
         let bytes = (w as usize * h as usize * 3).max(1);
         let most = if matches!(
-            self.output,
+            self.maker.output(),
             Output::Cuda { .. } | Output::FittedOnGpu { .. }
         ) {
             REVERSED_ON_GPU
@@ -1018,123 +905,22 @@ impl VideoFrames {
         ((REVERSED_BYTES / bytes) as i64).clamp(1, most)
     }
 
-    /// The open file's current frame made into the output's picture
-    /// (`normalized`) by the route the planner gives it. A route on the GPU
-    /// that fails is planned again knowing that, for this frame and the
-    /// ones after it.
-    fn make_picture(&mut self) -> Result<()> {
-        let (out_w, out_h, out_fmt) = self.out;
-        let src = self.source.as_ref().expect("open");
-        let mut facts = self.facts(src, &src.current.as_ref().expect("have a frame").0);
-        let dest = self.dest();
-        let src = self.source.as_mut().expect("open");
-        let (frame, _) = src.current.as_ref().expect("have a frame");
-        let rotation = src.reader.rotation();
-        let mut route;
-        let picture = loop {
-            route = plan(&facts, dest);
-            // Every other route ends on the CPU, with a frame in memory:
-            // this one, or one come down from the GPU.
-            let came_down = match route {
-                Route::Kept => match crate::hw::Keeper::keep(&mut self.keeper, frame) {
-                    Ok(kept) => break kept,
-                    // Down to memory, as before they were kept: a copy that
-                    // failed or took two seconds would again.
-                    Err(e) => {
-                        eprintln!("vidcut: GPU pictures come down to be shown: {e}");
-                        self.unkept = true;
-                        self.keeper = None;
-                        facts.keep_failed = true;
-                        continue;
-                    }
-                },
-                // NVDEC's frames go to the scaler built when the file
-                // opened. A file opened bare has none.
-                Route::Gpu if facts.place == Place::Cuda => match src.scaler.as_mut() {
-                    Some(scaler) => break scaled(scaler, frame)?,
-                    None => {
-                        src.fit_failed = true;
-                        facts.fit_failed = true;
-                        continue;
-                    }
-                },
-                Route::Gpu => {
-                    let into = match &self.output {
-                        Output::FittedOnGpu { into, .. } => into.as_ref(),
-                        _ => None,
-                    };
-                    // Fitted upright: a quarter turn swaps the sides.
-                    let (w, h) = shown_size(frame, rotation, (out_w, out_h));
-                    let fitted = if rotation % 180 == 90 { (h, w) } else { (w, h) };
-                    let fitting = crate::hw::Fitter::fit(
-                        &mut self.fitter,
-                        frame,
-                        rotation,
-                        fitted,
-                        (out_w, out_h),
-                        out_fmt,
-                        into,
-                    );
-                    match fitting {
-                        Ok(picture) => break picture,
-                        // A GPU that won't fit them (a driver's limits)
-                        // leaves the file's frames to the CPU.
-                        Err(e) => {
-                            crate::debug!(
-                                "decoding",
-                                "{}: the GPU won't fit the frames for the encoder, the CPU makes them: {e}",
-                                src.reader.path().display()
-                            );
-                            src.fit_failed = true;
-                            facts.fit_failed = true;
-                            continue;
-                        }
-                    }
-                }
-                Route::Shrunk | Route::Whole => Some(match self.output {
-                    // Frames as decoded come down at their own size.
-                    Output::Decoded { .. } => crate::hw::download(frame)?,
-                    _ => down(&mut self.shrinker, frame, rotation, (out_w, out_h))?,
-                }),
-                Route::Cpu => None,
-            };
-            let frame = came_down.as_ref().unwrap_or(frame);
-            if let Output::Decoded { .. } = self.output {
-                break self.relayout.run(frame)?;
-            }
-            let rebuild = self
-                .normalizer
-                .as_ref()
-                .is_none_or(|n| !n.matches(frame, rotation));
-            if rebuild {
-                self.normalizer = Some(Normalizer::new(
-                    frame,
-                    rotation,
-                    out_w,
-                    out_h,
-                    out_fmt,
-                    self.target,
-                )?);
-            }
-            break self.normalizer.as_mut().expect("built").run(frame)?;
-        };
-        src.normalized = Some(picture);
-        src.took(route);
-        Ok(())
-    }
-
     /// The output frame of the open file's source frame `pos`.
     fn frame_at(&mut self, pos: i64) -> Result<frame::Video> {
         let fps = self.fps;
         let src = self.source.as_mut().expect("open");
         let changed = src.advance(target(fps, src.origin, pos))?;
         if changed || src.normalized.is_none() {
-            self.make_picture()?;
+            let (frame, _) = src.current.as_ref().expect("have a frame");
+            let rotation = src.reader.rotation();
+            let made = self
+                .maker
+                .make(&mut src.fitting, frame, rotation, src.reader.path())?;
+            src.normalized = Some(made.ok_or_else(no_picture)?);
         }
-        let src = self.source.as_mut().expect("open");
         let picture = frame_ref(src.normalized.as_ref().expect("normalized"))?;
-        self.gpu_made += i64::from(src.route == Some(Route::Gpu));
-        let mut out = match &self.output {
+        self.gpu_made += i64::from(src.fitting.route == Some(Route::Gpu));
+        let mut out = match self.maker.output() {
             // Pictures made in memory go up to NVENC's frames.
             Output::Cuda { frames, .. } if Place::of(&picture) == Place::Memory => {
                 frames.upload(&picture)?
@@ -1172,12 +958,10 @@ impl VideoFrames {
     }
 }
 
-/// `frame`'s picture, made by `scaler` on the GPU.
-fn scaled(scaler: &mut crate::cuda::CudaPictures, frame: &frame::Video) -> Result<frame::Video> {
-    scaler.push(Some(frame))?;
-    scaler
-        .pull()?
-        .ok_or_else(|| Error::Invalid("the GPU scaler gave no picture".into()))
+/// What a scaler that gave no picture for a frame says: an export's gives
+/// each frame's at once.
+fn no_picture() -> Error {
+    Error::Invalid("the GPU scaler gave no picture".into())
 }
 
 /// A frame holding only `f`'s Dolby Vision.
