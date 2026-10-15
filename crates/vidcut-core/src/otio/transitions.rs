@@ -153,13 +153,20 @@ pub fn playing<'a>(
     out
 }
 
-/// Whether clip `c` of `track` is heard at timeline frame `at`, its sound
-/// running on through the cross fades out of it and starting with those
-/// into it, and the share of its gain they give it there (decision D50):
-/// 1 outside them.
-pub fn heard_at(p: &Project, track: &Track, c: &Clip, at: i64) -> Option<f64> {
+/// The cross fades that play on `track`'s sounds ([`playing`]).
+pub fn cross_fades<'a>(p: &'a Project, track: &'a Track) -> Vec<Playing<'a>> {
+    if !track.transitions.iter().any(|t| t.sound) {
+        return Vec::new();
+    }
+    playing(p, track, true, |t| cross_fade(t).is_some())
+}
+
+/// Whether clip `c` is heard at timeline frame `at`, its sound running on
+/// through the cross fades out of it and starting with those into it
+/// (`fades`, its track's [`cross_fades`]), and the share of its gain they
+/// give it there (decision D50): 1 outside them.
+pub fn heard_at(fades: &[Playing], c: &Clip, at: i64) -> Option<f64> {
     let (a, b) = c.audio_range()?;
-    let fades = playing(p, track, true, |t| cross_fade(t).is_some());
     let side = |into: bool| {
         fades.iter().find(|f| {
             let s = if into { f.after } else { f.before };

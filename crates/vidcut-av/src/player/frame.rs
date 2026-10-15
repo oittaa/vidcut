@@ -111,7 +111,6 @@ impl Picture {
 
     /// The picture with `over` on top of it, bottom up.
     pub(crate) fn with_over(mut self, over: Vec<Over>) -> Self {
-        self.bytes += over.iter().map(|o| o.picture.bytes()).sum::<usize>();
         self.over = over;
         self
     }
@@ -211,9 +210,18 @@ impl Picture {
         Ok(Self::new(frame, self.rotation, self.decoder, self.decoding.clone()).with_over(over))
     }
 
-    /// The memory it takes.
+    /// The memory it takes, with the pictures over it.
     pub fn bytes(&self) -> usize {
-        self.bytes
+        self.bytes + self.over.iter().map(|o| o.picture.bytes()).sum::<usize>()
+    }
+
+    /// It and the pictures over it, each with the memory its own frame
+    /// takes, and the GPU decoder in whose memory that is (`None`: in
+    /// memory).
+    pub(crate) fn layers(&self) -> Vec<(usize, Option<crate::hw::Kind>)> {
+        std::iter::once((self.bytes, self.gpu()))
+            .chain(self.over.iter().flat_map(|o| o.picture.layers()))
+            .collect()
     }
 
     /// The picture as export renders it at `width`×`height`: turned

@@ -500,6 +500,9 @@ impl Screen {
         for slot in &mut self.slots[..layers.len()] {
             slot.submitted(gpu);
         }
+        // A dissolve's pictures over the first let go of their planes and
+        // buffers once it is over (wgpu keeps what a draw in flight reads).
+        self.slots.truncate(layers.len().max(1));
         self.drawn = Some(picture.cloned());
         drawn
     }

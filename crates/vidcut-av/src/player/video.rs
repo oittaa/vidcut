@@ -682,6 +682,15 @@ impl Decoder {
         let Some((piece, piece_start)) = plan.piece_at(t) else {
             return Ok(t);
         };
+        // A dissolve's window starts at its first video file's keyframe;
+        // the other files decode on through it.
+        let first = piece
+            .layers()
+            .into_iter()
+            .map(|(l, _)| l)
+            .find(|l| matches!(l, VideoPiece::Source { image: None, .. }))
+            .cloned();
+        let piece = first.unwrap_or(piece);
         let VideoPiece::Source {
             source_frame: pos,
             image: None,

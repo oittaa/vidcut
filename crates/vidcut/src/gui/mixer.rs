@@ -204,12 +204,13 @@ fn track_channels(p: &Project, t: &Track, at: i64, waveforms: &Waves) -> Vec<f32
     let n = project_channels(p);
     let fps = p.settings.fps.as_f64();
     let mut level = vec![0.0; n];
+    // Through a cross fade, both clips' sounds at their shares.
+    let fades = vidcut_core::otio::transitions::cross_fades(p, t);
     for c in &t.clips {
         let Some(audio) = c.audio.as_ref().filter(|a| !a.muted) else {
             continue;
         };
-        // Through a cross fade, both clips' sounds at their shares.
-        let Some(share) = vidcut_core::otio::transitions::heard_at(p, t, c, at) else {
+        let Some(share) = vidcut_core::otio::transitions::heard_at(&fades, c, at) else {
             continue;
         };
         let Some(w) = waveforms.get(&c.media) else {

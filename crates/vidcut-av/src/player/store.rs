@@ -36,6 +36,16 @@ impl Kind {
     }
 }
 
+/// The bytes `picture` takes of each budget: a dissolve's pictures each
+/// count where their own frame is.
+fn charges(picture: &Picture) -> [usize; 2] {
+    let mut bytes = [0; 2];
+    for (n, gpu) in picture.layers() {
+        bytes[Kind::kept_by(gpu).index()] += n;
+    }
+    bytes
+}
+
 pub(crate) struct Store {
     inner: Mutex<Inner>,
     /// A picture landed.
@@ -134,12 +144,18 @@ impl Store {
     pub(crate) fn put(&self, id: Id, picture: Arc<Picture>) {
         let mut inner = self.lock();
         inner.clock += 1;
-        let (kind, size, now) = (Kind::of(&picture), picture.bytes(), inner.clock);
+        let (charged, now) = (charges(&picture), inner.clock);
         if let Some((old, _)) = inner.pictures.insert(id.clone(), (picture, now)) {
-            inner.bytes[Kind::of(&old).index()] -= old.bytes();
+            inner.uncharge(&old);
         }
-        inner.bytes[kind.index()] += size;
-        inner.evict(kind, Some(&id));
+        for kind in [Kind::Memory, Kind::Video] {
+            inner.bytes[kind.index()] += charged[kind.index()];
+        }
+        for kind in [Kind::Memory, Kind::Video] {
+            if charged[kind.index()] > 0 {
+                inner.evict(kind, Some(&id));
+            }
+        }
         drop(inner);
         self.landed.notify_all();
     }
@@ -185,6 +201,14 @@ impl Store {
 }
 
 impl Inner {
+    /// Takes what `old` charged off the budgets.
+    fn uncharge(&mut self, old: &Picture) {
+        let charged = charges(old);
+        for (bytes, c) in self.bytes.iter_mut().zip(charged) {
+            *bytes -= c;
+        }
+    }
+
     /// Lets the pictures of `kind` kept or looked at least recently go
     /// while that kind is over its budget; never `keep` nor the one held.
     fn evict(&mut self, kind: Kind, keep: Option<&Id>) {
@@ -193,12 +217,14 @@ impl Inner {
             let oldest = self
                 .pictures
                 .iter()
-                .filter(|(k, (p, _))| Kind::of(p) == kind && Some(*k) != keep && Some(*k) != held)
+                .filter(|(k, (p, _))| {
+                    charges(p)[kind.index()] > 0 && Some(*k) != keep && Some(*k) != held
+                })
                 .min_by_key(|(_, (_, used))| *used)
                 .map(|(k, _)| k.clone());
             let Some(oldest) = oldest else { break };
             if let Some((old, _)) = self.pictures.remove(&oldest) {
-                self.bytes[kind.index()] -= old.bytes();
+                self.uncharge(&old);
             }
         }
     }

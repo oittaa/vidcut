@@ -1319,7 +1319,8 @@ mod tests {
         let p = cross_fade(&f, Some("c1"), Some("c2"), 2, 2);
         let t = p.track("V1").unwrap();
         // A quarter of the way through +3 dB: the square root of a quarter.
-        assert_eq!(transitions::heard_at(&p, t, &t.clips[1], 49), Some(0.5));
+        let fades = transitions::cross_fades(&p, t);
+        assert_eq!(transitions::heard_at(&fades, &t.clips[1], 49), Some(0.5));
     }
 
     #[test]

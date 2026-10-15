@@ -183,12 +183,13 @@ fn flat_diff(a: &[u8], b: &[u8], w: usize) -> (usize, u8) {
 fn draws_as_converted(codec: VideoCodec, rotation: u16, layout: Layout) {
     let picture = picture(codec, rotation);
     assert_eq!(picture.layout(), layout);
-    draws_as_exported(&picture);
+    draws_as_rgba(&picture);
 }
 
-/// `picture` drawn at its own size: within a level of the export's
-/// conversion (and mix) in each channel wherever it is flat.
-fn draws_as_exported(picture: &Arc<Picture>) {
+/// `picture` drawn at its own size: within a level of `Picture::to_rgba`
+/// (the export's conversion, a dissolve's pictures mixed in its RGB) in
+/// each channel wherever it is flat.
+fn draws_as_rgba(picture: &Arc<Picture>) {
     let Some(gpu) = gpu() else {
         eprintln!("skipping: no GPU adapter, not even a software one");
         return;
@@ -203,20 +204,20 @@ fn draws_as_exported(picture: &Arc<Picture>) {
 }
 
 #[test]
-fn a_fade_from_black_draws_as_the_export_mixes_it() {
+fn a_fade_from_black_draws_as_its_rgba_mix() {
     let stripes = clip(VideoCodec::H264, 0, Content::Colors);
     let picture = played(dissolve(VideoPiece::Black { frames: 10 }, stripes));
     assert_eq!(picture.over().len(), 1);
-    draws_as_exported(&picture);
+    draws_as_rgba(&picture);
 }
 
 #[test]
-fn a_cross_dissolve_of_two_layouts_draws_as_the_export_mixes_it() {
+fn a_cross_dissolve_of_two_layouts_draws_as_its_rgba_mix() {
     let stripes = clip(VideoCodec::H264, 0, Content::Colors);
     let turned = clip(VideoCodec::ProRes422Hq, 90, Content::Colors);
     let picture = played(dissolve(stripes, turned));
     assert_eq!(picture.over().len(), 1);
-    draws_as_exported(&picture);
+    draws_as_rgba(&picture);
 }
 
 #[test]
