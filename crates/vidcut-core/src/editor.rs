@@ -696,7 +696,12 @@ fn project_change(a: &mut Project, b: &mut Project) -> Option<Change> {
         ),
         (
             "markers",
-            Change::of_items(&mut markers.0, &mut markers.1, |k| &k.id, leaf),
+            Change::of_items(
+                &mut markers.0,
+                &mut markers.1,
+                |k| &k.id,
+                |a, b| moved_only(a, b, |k| &mut k.at, "at"),
+            ),
         ),
     ];
     (a.media, b.media) = media;
@@ -732,7 +737,12 @@ fn track_change(a: &mut Track, b: &mut Track) -> Option<Change> {
     let lists = [
         (
             "clips",
-            Change::of_items(&mut clips.0, &mut clips.1, |c| &c.id, leaf),
+            Change::of_items(
+                &mut clips.0,
+                &mut clips.1,
+                |c| &c.id,
+                |a, b| moved_only(a, b, |c| &mut c.start, "start"),
+            ),
         ),
         ("transitions", transitions_change),
     ];
@@ -845,6 +855,31 @@ fn split_fields<'a>(
         }
     }
     (named, rest)
+}
+
+/// [`leaf`] for a thing whose whole-number `field` (`at`) may be all that
+/// changed, as a ripple moves clips and markers: that is found without its
+/// JSON.
+fn moved_only<T: serde::Serialize + PartialEq>(
+    a: &mut T,
+    b: &mut T,
+    at: impl Fn(&mut T) -> &mut i64,
+    field: &str,
+) -> Option<Change> {
+    let (was, is) = (*at(a), *at(b));
+    if was != is {
+        *at(a) = is;
+        let only = a == b;
+        *at(a) = was;
+        if only {
+            let set = Change::Set {
+                before: Some(was.into()),
+                after: Some(is.into()),
+            };
+            return Some(Change::Fields([(field.to_string(), set)].into()));
+        }
+    }
+    leaf(a, b)
 }
 
 /// What changed in a thing in a list, from its JSON.
@@ -4038,10 +4073,28 @@ pub fn rate(num: i64, den: i64) -> Rational {
 
 #[cfg(test)]
 mod tests {
-    use super::over;
+    use super::{moved_only, over};
+    use crate::model::Marker;
 
     #[test]
     fn past_the_limit_all_but_90_percent_of_it_go() {
         assert_eq!(over((1 << 17) + 1), 13108);
+    }
+
+    #[test]
+    fn a_marker_that_only_moved_changes_only_its_time() {
+        let marker = |at| Marker {
+            id: "k1".into(),
+            at,
+            duration: 1,
+            name: "a".into(),
+            color: "blue".into(),
+            note: String::new(),
+        };
+        let change = moved_only(&mut marker(10), &mut marker(25), |k| &mut k.at, "at");
+        assert_eq!(
+            serde_json::to_value(change).unwrap(),
+            serde_json::json!({"fields": {"at": {"set": {"was": 10, "is": 25}}}})
+        );
     }
 }
