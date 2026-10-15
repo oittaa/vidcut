@@ -41,17 +41,19 @@ fn software() -> Vec<ProxyEncoder> {
 }
 
 /// Each frame's barcode and timestamp match the source's in `out` proxies
-/// of `w`×`h` sources, the frames decoded on `decoder` (`None`: the CPU).
+/// of `w`×`h` `codec` sources, the frames decoded on `decoder` (`None`: the
+/// CPU). A 10-bit source's proxies are 10-bit.
 fn matches_source(
     enc: &ProxyEncoder,
     decoder: Option<&GpuDecoder>,
+    codec: VideoCodec,
     (w, h): (u32, u32),
     out: (u32, u32),
 ) {
-    let spec = FixtureSpec::new(VideoCodec::H264, Container::Mp4, w, h, (30, 1), 24);
+    let spec = FixtureSpec::new(codec, Container::Mp4, w, h, (30, 1), 24);
     let source = fixture::ensure(&spec).unwrap();
-    let offset = FixtureSpec::new(VideoCodec::H264, Container::MpegTs, w, h, (30, 1), 12)
-        .start_offset_ms(1400);
+    let offset =
+        FixtureSpec::new(codec, Container::MpegTs, w, h, (30, 1), 12).start_offset_ms(1400);
     let shifted = fixture::ensure(&offset).unwrap();
     let tmp = tempfile::Builder::new()
         .prefix("vidcut-proxy-")
@@ -72,6 +74,11 @@ fn matches_source(
         .unwrap_or_else(|e| panic!("{} with {}: {e}", path.display(), enc.name));
         assert_eq!(written.encoder, *enc);
         assert_eq!((written.width, written.height), out);
+        if codec == VideoCodec::Hevc10 {
+            let probed = vidcut_av::probe::probe(&dest, None).unwrap();
+            let pixel = probed.video.expect("a picture").pix_fmt;
+            assert_eq!(vidcut_av::probe::pixel_depth(&pixel), 10, "{}", enc.name);
+        }
         let src = frames(&Input::File(path.clone()));
         let got = frames(&Input::File(dest));
         assert_eq!(got.len(), src.len(), "{} {}", enc.name, path.display());
@@ -97,16 +104,24 @@ fn matches_source(
 #[test]
 fn a_proxy_matches_source_frames_and_timestamps() {
     for enc in software() {
-        matches_source(&enc, None, (320, 180), (320, 180));
+        matches_source(&enc, None, VideoCodec::H264, (320, 180), (320, 180));
+    }
+    // A 10-bit source, with SVT-AV1 where this FFmpeg has it, and ProRes.
+    let ten_bit = software()
+        .into_iter()
+        .filter(|e| matches!(e.name.as_str(), "libsvtav1" | "prores_ks"));
+    for enc in ten_bit {
+        matches_source(&enc, None, VideoCodec::Hevc10, (320, 180), (320, 180));
     }
 }
 
 /// The frames each GPU decodes, made into an H.264 proxy by its own
 /// encoder: NVENC from NVDEC, AMF from Direct3D 11 and VideoToolbox from
-/// VideoToolbox take them on the GPU, as VAAPI does from VA-API. Untagged
-/// 320×180 is read as BT.601, which only NVIDIA's path converts on the GPU
-/// (libplacebo, a picture a frame late), and untagged 1280×720 as BT.709,
-/// which every GPU fits.
+/// VideoToolbox take them on the GPU, as VAAPI does from VA-API. A 10-bit
+/// source's go into AV1 and ProRes proxies by the encoders there that take
+/// 10 bits. Untagged 320×180 is read as BT.601, which only NVIDIA's path
+/// converts on the GPU (libplacebo, a picture a frame late), and untagged
+/// 1280×720 as BT.709, which every GPU fits.
 #[test]
 fn a_gpu_proxy_matches_source_frames_and_timestamps() {
     let decoders = GpuDecoder::all();
@@ -125,8 +140,19 @@ fn a_gpu_proxy_matches_source_frames_and_timestamps() {
             .into_iter()
             .find(|e| e.kind.gpu());
         if let Some(enc) = hardware {
-            matches_source(&enc, Some(decoder), (320, 180), (320, 180));
-            matches_source(&enc, Some(decoder), (1280, 720), (640, 360));
+            let h264 = VideoCodec::H264;
+            matches_source(&enc, Some(decoder), h264, (320, 180), (320, 180));
+            matches_source(&enc, Some(decoder), h264, (1280, 720), (640, 360));
+        }
+        for codec in [ProxyCodec::Av1, ProxyCodec::Prores] {
+            let ten_bit = encoders(codec, &on_it, &[])
+                .into_iter()
+                .find(|e| e.kind.gpu() && e.ten_bit);
+            if let Some(enc) = ten_bit {
+                let hevc10 = VideoCodec::Hevc10;
+                matches_source(&enc, Some(decoder), hevc10, (320, 180), (320, 180));
+                matches_source(&enc, Some(decoder), hevc10, (1280, 720), (640, 360));
+            }
         }
     }
 }
