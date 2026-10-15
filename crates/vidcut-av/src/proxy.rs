@@ -21,7 +21,7 @@ use vidcut_core::preferences::ProxyCodec;
 
 use crate::decode::{Input, VideoReader};
 use crate::error::{Context, Error, Result};
-use crate::export::encode::{Availability, Upload};
+use crate::export::encode::{Availability, Passes, Upload, VideoEncoder};
 use crate::export::normalize::Normalizer;
 use crate::ffmpeg::{self, codec, encoder, ffi, format, frame};
 use crate::route::{Dest, Facts, Ops, Place, Route, Went, plan};
@@ -161,6 +161,48 @@ impl ProxyEncoder {
             // no `qp`.
             "av1_vaapi" => vec![("rc_mode", "CQP".into()), ("global_quality", "128".into())],
             _ => Vec::new(),
+        }
+    }
+
+    /// The encoder as exports open theirs
+    /// ([`open_video`](crate::export::encode::open_video)): its settings
+    /// ([`options`](Self::options)), a keyframe every [`KEYFRAMES`] frames,
+    /// no B-frames and closed GOPs, one pass, SDR.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "proxies open their encoders with it next")
+    )]
+    fn video_encoder(&self) -> VideoEncoder {
+        let mut options: Vec<(String, String)> = self
+            .options()
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect();
+        options.push(("g".into(), KEYFRAMES.to_string()));
+        // Nothing coded ahead of where it shows.
+        options.push(("bf".into(), "0".into()));
+        // Closed GOPs: every keyframe decodes on its own, so a seek can start
+        // there (SVT-AV1 otherwise makes forward keyframes nothing seeks to).
+        match options.iter_mut().find(|(k, _)| k == "flags") {
+            Some((_, flags)) => *flags = format!("+cgop{flags}"),
+            None => options.push(("flags".into(), "+cgop".into())),
+        }
+        // FFmpeg's own ProRes and DNxHR encoders use one core unless told
+        // otherwise.
+        if matches!(self.name.as_str(), "prores_ks" | "dnxhd") {
+            options.push(("threads".into(), "auto".into()));
+            options.push(("thread_type".into(), "frame".into()));
+        }
+        VideoEncoder {
+            name: self.name.clone(),
+            kind: self.kind,
+            pixel: self.pixel(),
+            device: self.device.clone(),
+            options,
+            hdr: None,
+            passes: Passes::One,
+            metadata: Default::default(),
+            dynamic: Default::default(),
         }
     }
 }
@@ -881,5 +923,57 @@ mod tests {
     fn automatic_without_a_gpu_makes_dnxhr_then_prores() {
         let got = names(ProxyCodec::Auto, &Availability::default(), &[]);
         assert_eq!(got[..2], ["dnxhd", "prores_ks"]);
+    }
+
+    #[test]
+    fn nvenc_opens_with_its_settings_and_the_proxies_keyframes() {
+        let enc = ProxyEncoder {
+            name: "h264_nvenc".into(),
+            codec: "h264",
+            kind: Nvenc,
+            device: Some("0".into()),
+        };
+        let want = [
+            ("preset", "p4"),
+            ("tune", "hq"),
+            ("rc", "vbr"),
+            ("cq", "20"),
+            ("b", "0"),
+            ("g", "60"),
+            ("bf", "0"),
+            ("flags", "+cgop"),
+        ];
+        let want = want.map(|(k, v)| (k.to_string(), v.to_string()));
+        assert_eq!(enc.video_encoder().options, want);
+    }
+
+    #[test]
+    fn videotoolbox_closes_its_gops_in_its_one_flags_option() {
+        let enc = ProxyEncoder {
+            name: "h264_videotoolbox".into(),
+            codec: "h264",
+            kind: VideoToolbox,
+            device: None,
+        };
+        let options = enc.video_encoder().options;
+        let flags: Vec<&str> = options
+            .iter()
+            .filter(|(k, _)| k == "flags")
+            .map(|(_, v)| v.as_str())
+            .collect();
+        assert_eq!(flags, ["+cgop+qscale"]);
+    }
+
+    #[test]
+    fn prores_encodes_frames_on_every_core() {
+        let options = ProxyEncoder::software("prores_ks", "prores")
+            .video_encoder()
+            .options;
+        let threads: Vec<(&str, &str)> = options
+            .iter()
+            .filter(|(k, _)| k.starts_with("thread"))
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        assert_eq!(threads, [("threads", "auto"), ("thread_type", "frame")]);
     }
 }
