@@ -336,9 +336,10 @@ impl Gui {
     }
 
     /// Frames shown exactly since [`clear_log`](Self::clear_log) whose
-    /// picture isn't their frame's, and how many were shown.
+    /// picture isn't their frame's, and how many were shown. The log stays:
+    /// the frame shown when playing stops is logged once, as it played.
     fn wrong_since_cleared(&self) -> (Vec<(i64, Option<u32>)>, usize) {
-        let log = std::mem::take(&mut self.port.screen.lock().unwrap().log);
+        let log = self.port.screen.lock().unwrap().log.clone();
         let wrong = log
             .iter()
             .filter(|(f, c)| *c != Some(self.source_at(*f) as u32))

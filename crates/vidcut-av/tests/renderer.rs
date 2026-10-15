@@ -129,3 +129,61 @@ fn steps_both_ways_show_their_own_frames() {
         assert_eq!(stepped, alone, "project frame {f} of a 24 fps file");
     }
 }
+
+#[test]
+fn forward_keeps_the_frames_on_the_way_and_renders_ahead() {
+    let fps = Rational::new(30, 1).unwrap();
+    let long = src(
+        FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 300)
+            .gop(120)
+            .bframes(2),
+    );
+    let mut r = StillRenderer::default();
+    let kept = r.kept();
+    r.rgba(&v(&long, 10), 0, fps, 320, 180).unwrap();
+    r.rgba(&v(&long, 15), 0, fps, 320, 180).unwrap();
+    for f in 11..15 {
+        let img = kept.get(&v(&long, f), fps, 320, 180);
+        assert_eq!(img.map(|i| code(&i)), Some(Some(f as u32)), "frame {f}");
+    }
+    // Ahead of the position, up to the frame given.
+    assert_eq!(r.ahead(17).unwrap(), Some(16));
+    assert_eq!(r.ahead(17).unwrap(), Some(17));
+    assert_eq!(r.ahead(17).unwrap(), None);
+    let img = kept.get(&v(&long, 17), fps, 320, 180).unwrap();
+    assert_eq!(code(&img), Some(17));
+}
+
+#[test]
+fn a_window_behind_stops_once_the_position_moves_on() {
+    let fps = Rational::new(30, 1).unwrap();
+    let long = src(
+        FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 300)
+            .gop(120)
+            .bframes(2),
+    );
+    let back = |r: &mut StillRenderer| {
+        r.rgba(&v(&long, 299), 0, fps, 320, 180).unwrap();
+        r.rgba(&v(&long, 298), 0, fps, 320, 180).unwrap();
+        r.take_prefetch()
+            .expect("going back plans the window before")
+    };
+
+    // A run forward: it doesn't render, and no other is planned.
+    let mut r = StillRenderer::default();
+    let window = back(&mut r);
+    r.running_forward(true);
+    assert_eq!(window.run().unwrap().rendered, 0);
+    r.rgba(&v(&long, 296), 0, fps, 320, 180).unwrap();
+    assert!(
+        r.take_prefetch().is_none(),
+        "a window planned running forward"
+    );
+
+    // A jump below it. Windows hold 40 frames here: the step back to 298
+    // renders 259..=298 and plans the window up to 258.
+    let mut r = StillRenderer::with_budget(320 * 180 * 4 * 2 * 40);
+    let window = back(&mut r);
+    r.rgba(&v(&long, 100), 0, fps, 320, 180).unwrap();
+    assert_eq!(window.run().unwrap().rendered, 0);
+}

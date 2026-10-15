@@ -5,12 +5,16 @@ use. It opens a window of its own for each codec, plays the timeline
 forward and backward, jumps and plays, steps a frame at a time both ways,
 and runs and steps Dynamic Trim, each once. For each move it prints the
 frames the viewer showed late or skipped, the two-up's frames passed over
-before they rendered, and how long each step took. It fails when any frame
-was late, skipped or passed over.
+before they rendered, and how long each step took; for each Dynamic Trim
+run, the frames a second each two-up cell showed, the longest it showed one
+picture, and every how many frames it was asked for one. It fails when any
+frame was late, skipped or passed over, or in a run at 1x a cell showed
+fewer than 30 frames a second or one picture for more than 100 ms.
 
-    scripts/playback-check.py [CODEC...]
+    scripts/playback-check.py [--log DIR] [CODEC...]
 
-CODEC: av1 hevc10 vp9 (all three). Needs release builds:
+CODEC: av1 hevc10 vp9 (all three). --log keeps each window's debug log
+(`VIDCUT_DEBUG`) as DIR/CODEC.log. Needs release builds:
 `cargo build --release -p vidcut` and
 `cargo build --release -p vidcut-av --example make_fixture`. Everything it
 writes, the preferences too, goes to a temporary folder, but the clips,
@@ -41,10 +45,12 @@ MAKE_FIXTURE = exe(BIN / "examples" / "make_fixture")
 class Gui:
     """A window of its own on `project`, and requests to it."""
 
-    def __init__(self, project):
+    def __init__(self, project, log=None):
         self.project = project
+        env = dict(os.environ, VIDCUT_DEBUG="1") if log else None
+        self.log = open(log, "w") if log else subprocess.DEVNULL
         self.process = subprocess.Popen(
-            [VIDCUT, "-p", project], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            [VIDCUT, "-p", project], stdout=subprocess.DEVNULL, stderr=self.log, env=env
         )
         for _ in range(100):
             out = subprocess.run(
@@ -85,6 +91,8 @@ class Gui:
     def quit(self):
         self.run("gui", "quit")
         self.process.wait()
+        if self.log != subprocess.DEVNULL:
+            self.log.close()
 
 
 def two_up_exact(s):
@@ -118,14 +126,38 @@ def steps(gui, start, n, by):
 
 
 def dynamic_runs(gui):
+    """Each run's speed and how the two-up's cells kept up with it."""
     gui.run("player", "seek", "78f")
     gui.run("gui", "dynamic-trim", "--on", "true")
     gui.wait(two_up_exact)
+    runs = []
     for speed, secs in ((1, 1.0), (-1, 1.0), (2, 0.5), (-2, 0.5)):
         gui.run("gui", "dynamic-trim", f"--run={speed}")
         time.sleep(secs)
         gui.run("gui", "dynamic-trim", "--run=0")
         gui.wait(two_up_exact)
+        runs.append((speed, gui.state()["two_up"]["run"]))
+    return runs
+
+
+# A cell keeps up with a run at 1x when it shows at least this many frames
+# a second, none of them longer than this.
+KEEPS_UP_FPS = 30
+KEEPS_UP_MS = 100
+
+
+def pace(speed, run):
+    """A run's line: each cell's frames a second, longest picture and pace;
+    and whether, at 1x, both cells kept up."""
+    cells = run["cells"]
+    fps = [c["shown"] / run["seconds"] for c in cells]
+    line = (f"    {speed:+d}x: cells show {fps[0]:.0f} and {fps[1]:.0f} frames a second, "
+            f"longest {cells[0]['longest_ms']:.0f} and {cells[1]['longest_ms']:.0f} ms, "
+            f"every {cells[0]['every']} and {cells[1]['every']}")
+    ok = abs(speed) != 1 or all(
+        f >= KEEPS_UP_FPS and c["longest_ms"] <= KEEPS_UP_MS for f, c in zip(fps, cells)
+    )
+    return line, ok
 
 
 def dynamic_steps(gui, by):
@@ -150,8 +182,9 @@ MOVES = [
 ]
 
 
-def check(codec, work):
-    """Runs every move once on `codec`'s clip; whether no frame dropped."""
+def check(codec, work, logs):
+    """Runs every move once on `codec`'s clip; whether no frame dropped.
+    With `logs`, the window's debug log goes there."""
     clip = subprocess.run(
         [MAKE_FIXTURE, codec, "mkv", "3840x2160", "60", "240", "busy", "g=120"],
         check=True,
@@ -169,40 +202,52 @@ def check(codec, work):
     subprocess.run([*headless, "media", "add", clip], check=True, stdout=out)
     for r in ("0f..80f", "100f..180f", "190f..236f"):
         subprocess.run([*headless, "edit", "append", "m1", "--range", r], check=True, stdout=out)
-    gui = Gui(project)
+    gui = Gui(project, logs and Path(logs) / f"{codec}.log")
     gui.run("player", "mute", "true")
     gui.run("viewer", "set", "timeline")
     rows = []
     for name, move in MOVES:
         before = gui.counts()
-        times = move(gui) or []
+        done = move(gui) or []
         after = gui.counts()
-        rows.append((name, {k: after[k] - before[k] for k in after}, times))
+        rows.append((name, {k: after[k] - before[k] for k in after}, done))
     gui.run("gui", "dynamic-trim", "--on", "false")
     gui.quit()
 
     print(f"{codec}:")
     print(f"  {'move':24} {'late':>5} {'skipped':>8} {'passed over':>12}   steps (ms, with the request)")
-    dropped = 0
-    for name, d, times in rows:
+    dropped, slow = 0, False
+    for name, d, done in rows:
         dropped += d["late"] + d["skipped"] + d["passed_over"]
+        runs = [r for r in done if isinstance(r, tuple)]
+        times = [t for t in done if not isinstance(t, tuple)]
         timing = ""
         if times:
             timing = (f"median {statistics.median(times):.0f}, slowest {max(times):.0f}: "
                       + " ".join(f"{t:.0f}" for t in times))
         passed = f"{d['passed_over']} of {d['asked']}" if d["asked"] else "0"
         print(f"  {name:24} {d['late']:>5} {d['skipped']:>8} {passed:>12}   {timing}")
-    return dropped == 0
+        for speed, run in runs:
+            line, ok = pace(speed, run)
+            slow = slow or not ok
+            print(line + ("" if ok else "  <- too slow"))
+    return dropped == 0 and not slow
 
 
 def main():
-    codecs = sys.argv[1:] or ["av1", "hevc10", "vp9"]
+    args = sys.argv[1:]
+    logs = None
+    if args[:1] == ["--log"]:
+        logs = Path(args[1]).resolve()
+        logs.mkdir(parents=True, exist_ok=True)
+        args = args[2:]
+    codecs = args or ["av1", "hevc10", "vp9"]
     with tempfile.TemporaryDirectory() as work:
         for var in ("XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME"):
             os.environ[var] = str(Path(work) / var)
-        ok = [check(codec, work) for codec in codecs]
+        ok = [check(codec, work, logs) for codec in codecs]
     if not all(ok):
-        raise SystemExit("frames were late, skipped or passed over")
+        raise SystemExit("frames were late, skipped or passed over, or the two-up kept up too slowly")
 
 
 main()

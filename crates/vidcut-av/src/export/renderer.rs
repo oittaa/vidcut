@@ -3,18 +3,23 @@
 //! (docs/decisions/preview.md §9).
 //!
 //! Forward, the file and its decoder stay open and the next frame decodes
-//! on from the one before, as every player does. Back, there is nothing to
-//! decode on from: a seek, and decoding from the keyframe before, can't be
-//! avoided. So a window renders at once, from a keyframe up to a frame, and
-//! is kept, on another thread ([`Prefetch`]) ahead of need: wherever the
-//! position is, at least two seconds behind it, and going back, a whole
-//! window more, so stepping and playing back don't wait. A window starts on
-//! a keyframe, so nothing in it decodes twice; it reaches back over more
-//! keyframes to hold at least two seconds where they are close, and a
-//! memory budget caps it. Over the budget, the pictures looked at least
-//! recently go first.
+//! on from the one before, as every player does. Every frame decoded on the
+//! way to the one asked for is kept, so going back over them finds them,
+//! and the frames after the position render ahead of it as the caller asks
+//! ([`StillRenderer::ahead`]). Back, there is nothing to decode on
+//! from: a seek, and decoding from the keyframe before, can't be avoided.
+//! So a window renders at once, from a keyframe up to a frame, and is kept,
+//! on another thread ([`Prefetch`]) ahead of need: wherever the position
+//! is, at least two seconds behind it, and going back, a whole window more,
+//! so stepping and playing back don't wait. None renders while the position
+//! runs forward, and one stops once the position has moved on from it. A
+//! window starts on a keyframe, so nothing in it decodes twice; it reaches
+//! back over more keyframes to hold at least two seconds where they are
+//! close, and a memory budget caps it. Over the budget, the pictures looked
+//! at least recently go first.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use vidcut_core::render::VideoPiece;
@@ -46,9 +51,12 @@ pub struct StillRenderer {
     prefetch: Option<Prefetch>,
     /// Where files decode, when on a GPU ([`decoding_on`](Self::decoding_on)).
     decoder: Option<crate::hw::GpuDecoder>,
+    /// The frame of a video the reader decoded last: the piece, its source
+    /// and the position. The frames after it decode on from there.
+    decoded: Option<(VideoPiece, String, i64)>,
 }
 
-/// Kept pictures, shared with prefetches.
+/// Kept pictures, shared with prefetches and [`Kept`].
 struct Shared {
     store: Mutex<Store>,
     /// A prefetch rendered a frame, or ended.
@@ -62,9 +70,42 @@ struct Store {
     clock: u64,
     bytes: usize,
     budget: usize,
-    /// A prefetch on its way: its source and the frames it renders, first
-    /// to last (the first is the last until its window is known).
+    /// A prefetch planned or rendering: its source and the frames it
+    /// renders, first to last (the first is the last until its window is
+    /// known).
     prefetching: Option<(String, i64, i64)>,
+    /// The source and position asked for last (`None` once the renderer
+    /// is gone), and whether the position runs forward: a window is worth
+    /// rendering while the position is near it and doesn't.
+    at: Option<(String, i64)>,
+    forward: bool,
+    /// While the prefetch renders: what stops its decoding, between frames
+    /// (its cancel flag), and its longest window.
+    stopper: Option<(Arc<AtomicBool>, i64)>,
+}
+
+impl Store {
+    /// Whether frames `first..=last` of `key` are still worth rendering
+    /// behind the position: it is on that source, doesn't run forward, and
+    /// is at or above `first` and less than a window (`max`) past `last`.
+    fn wants(&self, key: &str, first: i64, last: i64, max: i64) -> bool {
+        !self.forward
+            && self
+                .at
+                .as_ref()
+                .is_some_and(|(k, p)| k == key && first <= *p && *p <= last + max)
+    }
+
+    /// Stops the prefetch rendering now once the position has moved on.
+    fn recheck(&self) {
+        if let (Some((key, first, last)), Some((stop, max))) = (&self.prefetching, &self.stopper) {
+            // Its first frame isn't known yet: a window's length at most.
+            let first = if first < last { *first } else { last + 1 - max };
+            if !self.wants(key, first, *last, *max) {
+                stop.store(true, Ordering::Relaxed);
+            }
+        }
+    }
 }
 
 impl Default for StillRenderer {
@@ -85,6 +126,9 @@ impl StillRenderer {
                     bytes: 0,
                     budget,
                     prefetching: None,
+                    at: None,
+                    forward: false,
+                    stopper: None,
                 }),
                 landed: Condvar::new(),
             }),
@@ -92,6 +136,7 @@ impl StillRenderer {
             back: false,
             prefetch: None,
             decoder: None,
+            decoded: None,
         }
     }
 
@@ -137,6 +182,7 @@ impl StillRenderer {
         if !same {
             let frames = frames(fps, (width, height), RGBA, self.decoder.as_ref());
             self.frames = Some((fps, width, height, frames));
+            self.decoded = None;
         }
         let VideoPiece::Source {
             source_frame: pos,
@@ -145,6 +191,7 @@ impl StillRenderer {
         } = piece
         else {
             self.last = None;
+            self.decoded = None;
             return Ok(Arc::new(self.render(piece, 1)?.remove(0)));
         };
         let (pos, video) = (*pos, image.is_none());
@@ -155,6 +202,11 @@ impl StillRenderer {
             _ => false,
         };
         self.last = Some((key.clone(), pos));
+        {
+            let mut store = self.shared.lock();
+            store.at = Some((key.clone(), pos));
+            store.recheck();
+        }
         let floor = floor.min(pos);
         let (min, max) = window_sizes(self.shared.budget(), width, height, fps);
         let img = match self.shared.get_or_wait(&key, pos, max) {
@@ -162,27 +214,48 @@ impl StillRenderer {
             None if self.back && video => {
                 let (.., frames) = self.frames.as_mut().expect("set above");
                 let start = window(frames, piece, pos, floor, fps, min, max, false)?;
-                let n = pos - start + 1;
-                let mut shown = None;
-                for (j, img) in (start..).zip(self.render(&at(piece, start, n), n)?) {
-                    let img = Arc::new(img);
-                    if j == pos {
-                        shown = Some(img.clone());
-                    }
-                    self.shared.put(&key, j, img);
-                }
-                shown.expect("rendered up to the frame asked for")
+                self.render_kept(piece, &key, start, pos)?
             }
             None => {
-                let img = Arc::new(self.render(&at(piece, pos, 1), 1)?.remove(0));
-                self.shared.put(&key, pos, img.clone());
-                img
+                // Forward a little from the frame decoded last, every frame
+                // on the way decodes anyway: each is kept.
+                let from = match &self.decoded {
+                    Some((_, k, d)) if video && *k == key && *d < pos && pos - d <= reach(fps) => {
+                        d + 1
+                    }
+                    _ => pos,
+                };
+                self.render_kept(piece, &key, from, pos)?
             }
         };
         if video {
             self.plan_prefetch(piece, &key, pos, floor, (min, max));
         }
         Ok(img)
+    }
+
+    /// Renders `piece`'s frames `from..=to`, keeps them all and returns the
+    /// last: the reader stands there then.
+    fn render_kept(
+        &mut self,
+        piece: &VideoPiece,
+        key: &str,
+        from: i64,
+        to: i64,
+    ) -> Result<Arc<Image>> {
+        let n = to - from + 1;
+        let mut last = None;
+        let rendered = self.render(&at(piece, from, n), n);
+        self.decoded = None;
+        for (j, img) in (from..).zip(rendered?) {
+            let img = Arc::new(img);
+            self.shared.put(key, j, img.clone());
+            last = Some(img);
+        }
+        if matches!(piece, VideoPiece::Source { image: None, .. }) {
+            self.decoded = Some((piece.clone(), key.to_string(), to));
+        }
+        last.ok_or_else(|| Error::Invalid("no frame to render".into()))
     }
 
     /// The window to render behind the last frame asked for: run it on
@@ -192,10 +265,49 @@ impl StillRenderer {
         self.prefetch.take()
     }
 
+    /// Whether the position runs forward (a run, not steps): no window
+    /// renders behind it then: none is planned, and those planned stop.
+    pub fn running_forward(&mut self, on: bool) {
+        let mut store = self.shared.lock();
+        store.forward = on;
+        store.recheck();
+        drop(store);
+        if on {
+            self.prefetch = None;
+        }
+    }
+
+    /// Renders and keeps the frame after the one the reader decoded last,
+    /// if that is at or before `until` and the reader stands at or past the
+    /// position asked for last, on its source: frames render ahead of the
+    /// position, so a run or a step forward finds them kept, whatever pace
+    /// the decoder keeps from frame to frame. The frame it rendered.
+    pub fn ahead(&mut self, until: i64) -> Result<Option<i64>> {
+        let Some((piece, key, at)) = self.decoded.clone() else {
+            return Ok(None);
+        };
+        let here = self
+            .last
+            .as_ref()
+            .is_some_and(|(k, pos)| *k == key && at >= *pos);
+        if !here || at + 1 > until {
+            return Ok(None);
+        }
+        crate::cancel::stop()?;
+        self.render_kept(&piece, &key, at + 1, at + 1)?;
+        Ok(Some(at + 1))
+    }
+
+    /// Its kept pictures, to look up from another thread.
+    pub fn kept(&self) -> Kept {
+        Kept(self.shared.clone())
+    }
+
     /// Plans the window before the frames kept below `pos` while too few of
     /// them are left: two seconds wherever the position is, and going back
     /// a whole window, so the next one back renders while the position goes
-    /// through this one. Never below `floor`; one prefetch at a time.
+    /// through this one. Never below `floor`, nor while the position runs
+    /// forward; one prefetch at a time.
     fn plan_prefetch(
         &mut self,
         piece: &VideoPiece,
@@ -209,7 +321,7 @@ impl StillRenderer {
         };
         let (fps, width, height) = (*fps, *width, *height);
         let mut store = self.shared.lock();
-        if store.prefetching.is_some() || self.prefetch.is_some() {
+        if store.forward || store.prefetching.is_some() || self.prefetch.is_some() {
             return;
         }
         let mut low = pos;
@@ -359,11 +471,55 @@ pub struct Prefetch {
     decoder: Option<crate::hw::GpuDecoder>,
 }
 
+/// What a [`Prefetch`] rendered: its window's first and last frame, and
+/// how many of them from the first on, all unless the position moved on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ran {
+    pub first: i64,
+    pub last: i64,
+    pub rendered: i64,
+}
+
+impl Ran {
+    /// Whether it rendered its whole window.
+    pub fn whole(&self) -> bool {
+        self.rendered == self.last - self.first + 1
+    }
+}
+
 impl Prefetch {
-    /// Renders the window. The renderer waits for a frame of it it is asked
-    /// for meanwhile, rather than rendering it again.
-    pub fn run(self) -> Result<()> {
+    /// Renders the window. Once it renders, the renderer waits for a frame
+    /// of it it is asked for, rather than rendering it again. Its decoding
+    /// stops, between frames, once the position has moved on: run forward,
+    /// or gone below the window or a whole window past it, or the renderer
+    /// is gone.
+    pub fn run(self) -> Result<Ran> {
         crate::init();
+        let mut ran = Ran {
+            first: self.end,
+            last: self.end,
+            rendered: 0,
+        };
+        let stop = Arc::new(AtomicBool::new(false));
+        {
+            // Its first frame isn't known yet: a window's length at most. A
+            // renderer asked for its last frame meanwhile rendered it.
+            let mut store = self.shared.lock();
+            if !store.wants(&self.key, self.end + 1 - self.max, self.end, self.max)
+                || store.pictures.contains_key(&(self.key.clone(), self.end))
+            {
+                return Ok(ran);
+            }
+            store.stopper = Some((stop.clone(), self.max));
+        }
+        let _stops = crate::cancel::Guard::set(stop.clone());
+        match self.render(&mut ran) {
+            Err(_) if stop.load(Ordering::Relaxed) => Ok(ran),
+            r => r.map(|()| ran),
+        }
+    }
+
+    fn render(&self, ran: &mut Ran) -> Result<()> {
         let mut frames = frames(
             self.fps,
             (self.width, self.height),
@@ -380,7 +536,12 @@ impl Prefetch {
             self.max,
             false,
         )?;
-        self.shared.lock().prefetching = Some((self.key.clone(), start, self.end));
+        ran.first = start;
+        {
+            let mut store = self.shared.lock();
+            store.prefetching = Some((self.key.clone(), start, self.end));
+            store.recheck();
+        }
         let n = self.end - start + 1;
         frames.read_piece(&at(&self.piece, start, n));
         for j in start..=self.end {
@@ -393,9 +554,51 @@ impl Prefetch {
                 j,
                 Arc::new(image(&frame, self.width, self.height)),
             );
+            ran.rendered += 1;
             self.shared.landed.notify_all();
         }
         Ok(())
+    }
+}
+
+/// The pictures a [`StillRenderer`] keeps, looked up from another thread.
+#[derive(Clone)]
+pub struct Kept(Arc<Shared>);
+
+impl Kept {
+    /// The kept picture of `piece`'s first frame at `fps` and
+    /// `width`×`height`, as [`StillRenderer::rgba`] renders it: a source's
+    /// frames are kept, a mix's aren't.
+    pub fn get(
+        &self,
+        piece: &VideoPiece,
+        fps: Rational,
+        width: u32,
+        height: u32,
+    ) -> Option<Arc<Image>> {
+        let VideoPiece::Source { source_frame, .. } = piece else {
+            return None;
+        };
+        let key = source_key(piece, fps, width, height);
+        let mut store = self.0.lock();
+        store.clock += 1;
+        let now = store.clock;
+        let (img, used) = store.pictures.get_mut(&(key, *source_frame))?;
+        *used = now;
+        Some(img.clone())
+    }
+}
+
+impl Drop for StillRenderer {
+    /// Its windows stop, and its pictures go, whoever still looks them up.
+    fn drop(&mut self) {
+        let mut store = self.shared.lock();
+        store.at = None;
+        store.recheck();
+        store.pictures.clear();
+        store.bytes = 0;
+        drop(store);
+        self.shared.landed.notify_all();
     }
 }
 
@@ -409,6 +612,7 @@ impl Drop for Prefetch {
             .is_some_and(|(k, _, e)| *k == self.key && *e == self.end)
         {
             store.prefetching = None;
+            store.stopper = None;
         }
         drop(store);
         self.shared.landed.notify_all();
@@ -435,8 +639,10 @@ impl Shared {
                 *used = now;
                 return Some(img.clone());
             }
+            // One planned and not rendering yet may be waiting for others:
+            // the renderer renders the frame itself.
             match &store.prefetching {
-                Some((k, start, end)) if k == key && pos <= *end => {
+                Some((k, start, end)) if store.stopper.is_some() && k == key && pos <= *end => {
                     let first = if start < end { *start } else { end - max };
                     if pos < first {
                         return None;
@@ -471,6 +677,12 @@ impl Shared {
             }
         }
     }
+}
+
+/// Frames after the one decoded last that decode on from it, rather than
+/// seek: the frames reader's own rule.
+fn reach(fps: Rational) -> i64 {
+    ((fps.as_f64() * super::video::DECODE_AHEAD).round() as i64).max(1)
 }
 
 /// The shortest and longest windows back: two seconds, and half the budget
