@@ -1,7 +1,7 @@
 //! Bugs the GUI had, each checked with one gesture under simulated input
-//! (egui_kittest, no window). The tests click by position and press keys,
-//! and check the project the gesture left. None looks for a button's or a
-//! window's text.
+//! (egui_kittest, no window), and requests that change what only the GUI
+//! keeps. The tests click by position and press keys, and check the
+//! project the gesture left. None looks for a button's or a window's text.
 //!
 //! Every project starts with Track 1 holding c1 at 0..60, c2 at 60..120
 //! and c3 at 120..180, cut from one 300-frame clip (m1) at 30 fps.
@@ -18,15 +18,20 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 use vidcut::gui::export::Dialogs;
 use vidcut::gui::workspace::Workspace;
-use vidcut::live::{self, Capture, Origin, Presented, WindowChange};
+use vidcut::live::{self, Capture, GuiChange, GuiDone, Origin, Presented, WindowChange};
 use vidcut_av::fixture::{self, Container, FixtureSpec, ImageSpec, VideoCodec};
 use vidcut_core::model::Settings;
 use vidcut_core::time::Rational;
 use vidcut_core::{Envelope, Project, Store};
 
-struct NoRenderer;
+/// The changes to the GUI's own state the session asks for, held until
+/// the test makes them on its workspace, as the app's UI thread does.
+#[derive(Default)]
+struct Port {
+    changes: Mutex<Vec<(Vec<GuiChange>, GuiDone)>>,
+}
 
-impl live::Renderer for NoRenderer {
+impl live::Renderer for Port {
     fn present(&self, done: Presented) {
         done(None);
     }
@@ -38,6 +43,9 @@ impl live::Renderer for NoRenderer {
     }
     fn window(&self, _: WindowChange) {}
     fn quit(&self) {}
+    fn gui(&self, changes: Vec<GuiChange>, done: GuiDone) {
+        self.changes.lock().unwrap().push((changes, done));
+    }
 }
 
 /// File dialogs that answer at once with `files`.
@@ -80,6 +88,7 @@ static HOME: LazyLock<TempDir> = LazyLock::new(|| {
 struct Gui {
     h: live::Handle,
     session: std::thread::JoinHandle<()>,
+    port: Arc<Port>,
     harness: Harness<'static, Workspace>,
     dialogs: Arc<FakeDialogs>,
     _dir: TempDir,
@@ -110,12 +119,13 @@ impl Gui {
             }),
         )
         .unwrap();
+        let port = Arc::new(Port::default());
         let (h, session) = live::start(live::Config {
             project: Some(path),
             create: false,
             player: None,
             preview_error: Some("no preview in tests".into()),
-            renderer: Arc::new(NoRenderer),
+            renderer: port.clone(),
             notify: Arc::new(|| {}),
             socket: None,
         });
@@ -137,6 +147,7 @@ impl Gui {
         let mut gui = Self {
             h,
             session,
+            port,
             harness,
             dialogs,
             _dir: dir,
@@ -147,6 +158,31 @@ impl Gui {
 
     fn call(&self, method: &str, params: Value) -> Value {
         call(&self.h, method, params)
+    }
+
+    /// A request that changes what only the GUI keeps: the GUI makes the
+    /// change while the request waits for it.
+    fn ask(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        let e = Envelope::from_json(json!({ "method": method, "params": params })).unwrap();
+        let h = self.h.clone();
+        let asked = std::thread::spawn(move || {
+            h.call(e, Origin::Ipc, None, &mut |_| true)
+                .map(|r| r.result)
+                .map_err(|e| e.message)
+        });
+        let started = Instant::now();
+        while !asked.is_finished() {
+            assert!(started.elapsed() < Duration::from_secs(30), "{method}");
+            let changes: Vec<_> = self.port.changes.lock().unwrap().drain(..).collect();
+            for (changes, done) in changes {
+                let ctx = self.harness.ctx.clone();
+                let made = self.harness.state_mut().gui_change(changes, &ctx);
+                done(made.map(|()| self.harness.state().gui_state()));
+            }
+            self.harness.step();
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        asked.join().unwrap()
     }
 
     /// Lets the session catch up with the GUI's requests, then redraws.
@@ -433,5 +469,134 @@ fn a_clips_menu_stays_open() {
         gui.harness.step();
     }
     assert!(egui::Popup::is_any_open(&gui.harness.ctx));
+    gui.quit();
+}
+
+/// The edit `selection.set` selects is the one `.` rolls.
+#[test]
+fn period_rolls_the_edit_a_request_selected() {
+    let mut gui = Gui::new();
+    gui.ask("selection.set", json!({ "edit": 55 })).unwrap();
+    gui.key(Key::Period);
+    gui.settle();
+    assert_eq!(
+        gui.clips("V1"),
+        [
+            ("c1".into(), 0, 61),
+            ("c2".into(), 61, 59),
+            ("c3".into(), 120, 60)
+        ]
+    );
+    gui.quit();
+}
+
+/// `selection.set` selects the audio edit of a J/L cut, the one the J/L
+/// handle selects: `.` moves the sound, not the picture.
+#[test]
+fn period_moves_the_audio_edit_a_request_selected() {
+    let mut gui = Gui::new();
+    gui.call(
+        "edit.audio_roll",
+        json!({ "clip": "c1", "edge": "tail", "by": 8 }),
+    );
+    gui.settle();
+    gui.ask("selection.set", json!({ "edit": 60, "side": "audio" }))
+        .unwrap();
+    gui.key(Key::Period);
+    gui.settle();
+    let tl = gui.call("timeline.get", json!({}));
+    let tracks = tl["tracks"].as_array().unwrap();
+    let items = &tracks.iter().find(|t| t["id"] == "V1").unwrap()["items"];
+    assert_eq!(
+        (&items[0]["audio"]["tail"], &items[1]["audio"]["head"]),
+        (&json!(9), &json!(9))
+    );
+    assert_eq!(gui.clips("V1"), track_one());
+    gui.quit();
+}
+
+/// A side asked for without an edit changes the selected edit's, as U
+/// does: from the picture cut to its audio edit.
+#[test]
+fn a_side_alone_moves_the_selection_to_the_audio_edit() {
+    let mut gui = Gui::new();
+    gui.call(
+        "edit.audio_roll",
+        json!({ "clip": "c1", "edge": "tail", "by": 8 }),
+    );
+    gui.settle();
+    gui.ask("selection.set", json!({ "edit": 60 })).unwrap();
+    let selected = gui
+        .ask("selection.set", json!({ "side": "audio" }))
+        .unwrap();
+    assert_eq!(
+        selected["edit"],
+        json!({ "at": 68, "track": "V1", "side": "audio" })
+    );
+    gui.quit();
+}
+
+/// F10 overwrites on the track `gui.target` picked.
+#[test]
+fn f10_overwrites_on_the_target_a_request_picked() {
+    let mut gui = Gui::new();
+    gui.call("track.add", json!({ "kind": "video" }));
+    gui.ask("gui.target", json!({ "track": "V2" })).unwrap();
+    gui.call(
+        "media.marks.set",
+        json!({ "media": "m1", "in": 10, "out": 40 }),
+    );
+    gui.call("selection.set", json!({ "media": "m1" }));
+    gui.call("player.seek", json!({ "at": 90, "viewer": "timeline" }));
+    gui.settle();
+    gui.key(Key::F10);
+    gui.settle();
+    assert_eq!(gui.clips("V2"), [("c4".into(), 90, 30)]);
+    gui.quit();
+}
+
+/// `gui.timeline`'s zoom is how many pixels a frame takes in the lower
+/// timeline.
+#[test]
+fn gui_timeline_zooms_the_lower_timeline() {
+    let mut gui = Gui::new();
+    gui.ask("gui.timeline", json!({ "zoom": 8.0 })).unwrap();
+    gui.settle();
+    let l = gui.harness.state().timeline_layout().unwrap();
+    assert_eq!(l.lower_scale.xf(31) - l.lower_scale.xf(30), 8.0);
+    gui.quit();
+}
+
+/// A zoom the timeline can't show is refused, not changed into one it can.
+#[test]
+fn gui_timeline_refuses_a_zoom_out_of_range() {
+    let mut gui = Gui::new();
+    assert!(gui.ask("gui.timeline", json!({ "zoom": 50.0 })).is_err());
+    assert_eq!(gui.harness.state_mut().timeline_options_mut().ppf, 4.0);
+    gui.quit();
+}
+
+/// `gui.close` closes what `gui.show` opened.
+#[test]
+fn gui_close_closes_the_mixer() {
+    let mut gui = Gui::new();
+    gui.ask("gui.show", json!({ "panel": "mixer" })).unwrap();
+    let state = gui.ask("gui.close", json!({ "panel": "mixer" })).unwrap();
+    assert_eq!(state["windows"], json!([]));
+    gui.quit();
+}
+
+/// The pool's search field shows the search `pool.set` sets.
+#[test]
+fn the_pools_search_field_follows_pool_set() {
+    let mut gui = Gui::new();
+    gui.call("pool.set", json!({ "search": "interview" }));
+    gui.settle();
+    let field = gui
+        .harness
+        .query_all_by_role(egui::accesskit::Role::TextInput)
+        .min_by(|a, b| a.rect().min.x.total_cmp(&b.rect().min.x))
+        .expect("the pool's search field");
+    assert_eq!(field.value().as_deref(), Some("interview"));
     gui.quit();
 }

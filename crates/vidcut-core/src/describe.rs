@@ -180,6 +180,15 @@ pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> Stri
             db(&params["volume_db"])
         ),
         "pool.set" => format!("Media Pool: {}", compact(params)),
+        "selection.set" if !params["edit"].is_null() => format!(
+            "Select {} nearest {} on {}",
+            edit_side(&params["side"]),
+            d.time("edit"),
+            params["track"].as_str().unwrap_or("V1")
+        ),
+        "selection.set" if !params["side"].is_null() => {
+            format!("Select {}", edit_side(&params["side"]))
+        }
         "selection.set" => {
             let clips = d.list("clips");
             let media = d.list("media");
@@ -190,6 +199,9 @@ pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> Stri
             }
         }
         "gui.show" => format!("Show {}", d.text("panel")),
+        "gui.close" => format!("Close {}", d.text("panel")),
+        "gui.target" => format!("Target track {}", d.text("track")),
+        "gui.timeline" => format!("Timeline view: {}", compact(params)),
         "gui.screenshot" => "Screenshot".into(),
         "jobs.cancel" => format!("Cancel job {}", d.text("job")),
         _ => {
@@ -200,6 +212,16 @@ pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> Stri
                 format!("{method} {p}")
             }
         }
+    }
+}
+
+/// What of an edit point `side` selects.
+fn edit_side(side: &Value) -> &'static str {
+    match side.as_str() {
+        Some("out") => "the Out of the edit",
+        Some("in") => "the In of the edit",
+        Some("audio") => "the audio edit",
+        _ => "the edit",
     }
 }
 

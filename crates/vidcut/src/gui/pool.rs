@@ -311,12 +311,23 @@ impl Workspace {
         self.bins.targets.clear();
         let snap = self.snap.clone();
         let project = snap.project();
+        // The session's search, as `pool.set` sets it. While the field has
+        // the keyboard, it shows what is typed.
+        let search_id = egui::Id::new("pool-search");
+        if !ui.ctx().memory(|m| m.has_focus(search_id)) && self.search != snap.pool.search {
+            self.search = snap.pool.search.clone();
+        }
+        let live = self.live.clone();
         let search = |ui: &mut egui::Ui, text: &mut String| {
-            ui.add(
+            let r = ui.add(
                 egui::TextEdit::singleline(text)
+                    .id(search_id)
                     .hint_text("Search")
                     .desired_width(f32::INFINITY),
             );
+            if r.changed() {
+                live.request("pool.set", json!({ "search": text }));
+            }
         };
         let mut search_below = false;
         ui.horizontal(|ui| {

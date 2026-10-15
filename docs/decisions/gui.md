@@ -11,7 +11,7 @@ The viewer plays through the player engine on wgpu ([preview.md](preview.md)).
 
 | Thread | Owns | Never does |
 |---|---|---|
-| **UI** (eframe on wgpu) | the egui context and its window; shows the viewer's targets as textures | draw a viewer picture, wait for the session |
+| **UI** (eframe on wgpu) | the egui context and its window; shows the viewer's targets as textures; what only the GUI keeps: the edit point selected, the target track, the Timeline Options, the windows open | draw a viewer picture, wait for the session |
 | **Viewer** (`gui/video.rs`) | presents the player's engine: draws its picture, answers presents and viewer screenshots | wait for the UI |
 | **Session** (`live`) | the open project, the player's engine, viewer/selection/clipboard state, the command log | touch the GPU |
 | **Engine** (player.md §1) | decoding, the mix, the audio device | touch shared state |
@@ -32,7 +32,7 @@ Every action is a [`Request`](../../crates/vidcut-core/src/request.rs), the same
 - **GUI gestures** send one request each, without waiting for an answer. Failures show as notices in the status bar.
 - **Notices** in the status bar fade, an error after 20 s and any other after 6 s. Their × dismisses them, and hovering one keeps it and shows all of it. A failed request stays in the Command log. `tests/gui_notices.rs` checks the fading and the ×.
 - **IPC clients** send a request and wait for its answer.
-- **The command log** shows every request with its origin (`gui`, `ipc`, `session`), so a human can see what an agent did and an agent can read what the human did (`gui.log`). Each entry has a `summary` in words (`vidcut_core::describe`): times as timecodes, media by name, and for an undo or redo the steps it took, which the undo history names the same way. The GUI shows the summary and the request on hover. Fast scrubbing seeks and a fader's drag (`mixer.preview`) are left out, and the GUI asks for the timeline view only when the viewer isn't showing it. An entry's `changed` says whether the request changed the project: its revision moved, even if no media, clip or marker did (track settings, bins, marks).
+- **The command log** shows every request with its origin (`gui`, `ipc`, `session`), so a human can see what an agent did and an agent can read what the human did (`gui.log`). Each entry has a `summary` in words (`vidcut_core::describe`): times as timecodes, media by name, and for an undo or redo the steps it took, which the undo history names the same way. The GUI shows the summary and the request on hover. Fast scrubbing seeks, a fader's drag (`mixer.preview`) and the pool's search as it is typed are left out, and the GUI asks for the timeline view only when the viewer isn't showing it. An entry's `changed` says whether the request changed the project: its revision moved, even if no media, clip or marker did (track settings, bins, marks).
 
 **Kinds of request:**
 - **Project requests** go through the project's `Editor`, exactly as headless.
@@ -43,6 +43,8 @@ Every action is a [`Request`](../../crates/vidcut-core/src/request.rs), the same
 - **`player.seek` and `player.step`** wait until the frame is on screen (§4).
 - **`gui.screenshot`** waits for the picture.
 - **Limit.** Any wait gives up after 10 s.
+
+**What only the GUI keeps** (the edit point selected, the target track, the Timeline Options, the windows open) lives on the UI thread. `gui.show`, `gui.close`, `gui.state`, `gui.target`, `gui.timeline` and `selection.set` with an edit point go there (`Renderer::gui`) and wait for it on a task thread, up to 10 s. They answer what the UI then shows. The UI makes them in eframe's `logic`, which runs while the window is hidden too. `selection.get` reads what the UI published after its last frame.
 
 ## 3. The project file stays the source of truth (deviation X1)
 
@@ -148,7 +150,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 - **Viewer:** a meter beside the viewer shows what it plays, one bar per channel, and its speaker button is `player.mute`. That mute silences the viewer meter. In source modes the meter is the source media at the source playhead.
 
 **Bins.**
-- **Pool view:** the pool shows the open bin (`pool.set`: bin, sort, direction, and thumbnails, filmstrips or a list). That view lives in the session, not the project, so Source Tape and agents see the same order. It follows a renamed bin, and moves to the parent bin when its own is removed.
+- **Pool view:** the pool shows the open bin (`pool.set`: bin, sort, direction, thumbnails, filmstrips or a list, and the search). While the search field has the keyboard, it shows what is typed. That view lives in the session, not the project, so Source Tape and agents see the same order. It follows a renamed bin, and moves to the parent bin when its own is removed.
 - **Drops:** the pool records where bins are drawn each frame (a folder, or a level of the path) and the drag's release checks them. A clip drop sends `media.move`. A bin drop sends one `bins.rename`, from the dragged bin to `<target>/<name>`. Nothing is sent when the target is the bin itself, a bin inside it, or its current parent. If the name is taken, `bins.rename` fails and the status bar shows the error. Which drops move is unit-tested in `gui/pool.rs`.
 - **One undo step:** Create Bin With Selected Clips is one `apply` batch (`bins.add` and `media.move`). A bin drag is the one `bins.rename`.
 
@@ -177,13 +179,13 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 - **Project format** (spec D37): New Project asks whether the first video sets the format or takes a size (a list, or any even width and height) and a frame rate (the common ones, or any typed rate), then the file name, and sends one `project.open` with `create` and them. File > Project Settings sends one `project.set` with what changed. Its rate field is off while the timeline has clips.
 - **Timeline interchange** (deviation X9): File > Import Timeline (`.otio` or `.otioz`; an `.otiod` through its `content.otio`) asks where the timeline goes: Append, Replace (when the timeline has clips), As a Compound Clip (not when decomposing) or Media Only. It asks for a folder when media aren't found (p. 529). Import warnings show in a window. An `.otioz` import unpacks its media on a worker first (`Step::Measure`), so the session keeps answering meanwhile. File > Export Timeline writes `.otio`, and File > Export Timeline with Media writes an `.otioz` as a job (p. 4160).
   - Open Project takes `.otio` and `.otioz` files too. The project file goes next to the file, named alike. When that name is taken, it asks whether to open that file or Save As. Another editor's file then asks for the format, the file's or one chosen. One `project.open` with `save_as` makes the file on a worker (`Step::Make`) and opens it.
-- **`gui.show`** opens any of these windows (or the log, or the Mixer) for the person at the GUI, such as after an agent prepared an export.
+- **`gui.show`** opens any of these windows (or the log, or the Mixer) for the person at the GUI, such as after an agent prepared an export, and `gui.close` closes them.
 
 ## 10. Automatic tools
 
 - **Ripple Delete Silence:** the dialog (`gui/timeline/tools.rs`) dry-runs `edit.ripple_delete_silence` on a helper thread whenever its settings change. It draws the parts as red stripes on both timelines while it is open. Remove sends the request once.
 - **Measuring first:** the session measures media on a worker before such an edit runs (agents.md §3), so the GUI stays live while a long clip decodes.
-- **Boring Detector:** its highlights are computed each frame from the project (`analysis::boring`, cheap). Its settings are Timeline Options, kept between runs.
+- **Boring Detector:** its highlights are computed each frame from the project (`analysis::boring`, cheap). Its settings are Timeline Options, kept between runs (`gui.timeline`).
 - **Dynamic Trim:**
   - J/K/L and Space are handled in `dynamic_keys`, W and Up/Down with the timeline's and the transport's keys. The transport keys don't play while it is on. `gui.dynamic_trim` does what the keys do (`dynamic_trim_request`), and `gui.trim_editor` what the Trim Editor's double-click and buttons do (`trim_editor_request`).
   - A run counts frames on egui's clock, so tests drive it. Each frame it tries the next count on a copy of the project, and stops where an edit would fail.

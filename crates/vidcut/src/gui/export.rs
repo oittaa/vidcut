@@ -209,6 +209,24 @@ pub struct ExportUi {
 }
 
 impl ExportUi {
+    /// Whether Quick Export is open, and the Export dialog (or it opens
+    /// once the presets are known).
+    pub(super) fn windows(&self) -> (bool, bool) {
+        (
+            self.quick.is_some(),
+            self.dialog.is_some() || self.dialog_wanted,
+        )
+    }
+
+    pub(super) fn close_quick(&mut self) {
+        self.quick = None;
+    }
+
+    pub(super) fn close_dialog(&mut self) {
+        self.dialog = None;
+        self.dialog_wanted = false;
+    }
+
     /// A question is up: where an imported timeline goes, where its media
     /// are, or quitting while jobs run.
     pub(super) fn asking(&self, jobs: &[JobInfo]) -> bool {

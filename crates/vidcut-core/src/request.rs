@@ -958,16 +958,40 @@ pub enum Request {
         descending: Option<bool>,
         #[serde(default)]
         view: Option<PoolMode>,
+        /// The search box: only media whose names hold it (any case), from
+        /// the bin and the bins inside it. Empty shows everything.
+        #[serde(default)]
+        search: Option<String>,
     },
+    /// The timeline clips, pool media and edit point selected (`edit`).
     #[serde(rename = "selection.get")]
     SelectionGet {},
-    /// Select timeline clips and/or pool media (omitted parts stay as they are).
+    /// Select timeline clips, pool media or an edit point (omitted parts
+    /// stay as they are). `,` and `.`, Ctrl+T and Dynamic Trim act on the
+    /// edit.
     #[serde(rename = "selection.set")]
     SelectionSet {
         #[serde(default)]
         clips: Option<OneOrMany<ClipRef>>,
         #[serde(default)]
         media: Option<OneOrMany<String>>,
+        /// Select the edit point of `track` nearest this time, as V does
+        /// at the playhead (`playhead`) and a click on an edit does.
+        #[serde(default)]
+        edit: Option<TimeSpec>,
+        /// The track of `edit` (default V1; spec D36).
+        #[serde(default)]
+        track: Option<String>,
+        /// What of the edit is selected: `both` (a roll, the default),
+        /// `out`, `in`, or `audio`, its audio edit (the J/L handle,
+        /// decision D20). Without `edit`, changes the selected edit's, as U
+        /// does.
+        #[serde(default)]
+        side: Option<TrimSide>,
+        /// Deselect the timeline's clips and edit first, as Ctrl+Shift+A
+        /// does.
+        #[serde(default)]
+        clear: bool,
     },
     /// Save a PNG of the viewer (the frame as shown) or of the whole window.
     #[serde(rename = "gui.screenshot")]
@@ -1003,9 +1027,25 @@ pub enum Request {
     GuiQuit {},
     /// Open a window for the person at the GUI: `quick_export`, `export`,
     /// `jobs`, `log`, `mixer`, `preferences` or `help` (the keyboard
-    /// shortcuts).
+    /// shortcuts). Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow { panel: GuiPanel },
+    /// Close a window `gui.show` opens. Answers what `gui.state` does.
+    #[serde(rename = "gui.close")]
+    GuiClose { panel: GuiPanel },
+    /// What only the GUI keeps: the edit point selected, the target track,
+    /// the timeline's zoom and Timeline Options, and the windows open.
+    #[serde(rename = "gui.state")]
+    GuiState {},
+    /// The target track, as a click on a track header's name picks it:
+    /// edit functions put clips there (spec D3). Answers what `gui.state`
+    /// does.
+    #[serde(rename = "gui.target")]
+    GuiTarget { track: String },
+    /// The timeline's zoom and Timeline Options, kept between runs.
+    /// Answers what `gui.state` does.
+    #[serde(rename = "gui.timeline")]
+    GuiTimeline(TimelineOptions),
     /// The Trim Editor (spec §8.6), as a double-click on an edit opens it:
     /// the viewer shows the outgoing clip's last frame beside the incoming
     /// clip's first. It opens on the edit of `track` (default V1) nearest
@@ -1161,6 +1201,48 @@ pub enum TrimSide {
     /// Both: a roll.
     #[default]
     Both,
+    /// Its audio edit: where the outgoing clip's sound ends, the J/L
+    /// handle (decision D20).
+    Audio,
+}
+
+/// What `gui.timeline` changes (omitted: stays as it is).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TimelineOptions {
+    /// The lower timeline's zoom: pixels a frame, 0.01 to 40.
+    #[serde(default)]
+    pub zoom: Option<f64>,
+    /// The lower timeline's playhead stays in the middle (decision D1).
+    #[serde(default)]
+    pub fixed_playhead: Option<bool>,
+    /// Snap (N).
+    #[serde(default)]
+    pub snap: Option<bool>,
+    /// Trim with Safe Edit: a trim stops at the neighboring clip.
+    #[serde(default)]
+    pub safe_edit: Option<bool>,
+    /// Display Clip Names.
+    #[serde(default)]
+    pub names: Option<bool>,
+    /// Display Clip Durations.
+    #[serde(default)]
+    pub durations: Option<bool>,
+    /// Display Clip Status.
+    #[serde(default)]
+    pub status: Option<bool>,
+    #[serde(default)]
+    pub filmstrips: Option<bool>,
+    #[serde(default)]
+    pub waveforms: Option<bool>,
+    /// The Boring Detector (decision D31).
+    #[serde(default)]
+    pub boring: Option<bool>,
+    /// Its Boring Clips: clips longer than this many seconds, 1 to 300.
+    #[serde(default)]
+    pub boring_secs: Option<f64>,
+    /// Its Jump Cuts: clips shorter than this many frames, 1 to 120.
+    #[serde(default)]
+    pub jump_frames: Option<i64>,
 }
 
 /// What Dynamic Trim does with selected clips.
@@ -1461,6 +1543,10 @@ impl Request {
                 | Self::GuiWindow { .. }
                 | Self::GuiQuit {}
                 | Self::GuiShow { .. }
+                | Self::GuiClose { .. }
+                | Self::GuiState {}
+                | Self::GuiTarget { .. }
+                | Self::GuiTimeline(_)
                 | Self::GuiTrimEditor { .. }
                 | Self::GuiDynamicTrim { .. }
                 | Self::JobsList {}

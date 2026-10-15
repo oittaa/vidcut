@@ -90,6 +90,8 @@ pub struct PoolView {
     pub sort: vidcut_core::request::PoolSort,
     pub descending: bool,
     pub view: vidcut_core::request::PoolMode,
+    /// The search typed in the pool.
+    pub search: String,
 }
 
 impl PoolView {

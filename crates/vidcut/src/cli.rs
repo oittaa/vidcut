@@ -89,6 +89,8 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("player.audio_scrubbing", &["on"]),
     ("mixer.preview", &["track", "volume_db"]),
     ("gui.show", &["panel"]),
+    ("gui.close", &["panel"]),
+    ("gui.target", &["track"]),
     ("gui.trim_editor", &["at"]),
 ];
 
@@ -110,7 +112,7 @@ const GROUPS: &[(&str, &str)] = &[
     ("frame", "Single frames as PNG"),
     (
         "gui",
-        "The running GUI: its window, command log, screenshots and panels",
+        "The running GUI: its window, command log, screenshots, panels, target track and timeline view",
     ),
     ("history", "Undo and redo, across runs"),
     ("jobs", "Export and proxy jobs of the running GUI"),
@@ -133,7 +135,7 @@ const GROUPS: &[(&str, &str)] = &[
     ),
     (
         "selection",
-        "The GUI's selection: timeline clips and pool media",
+        "The GUI's selection: timeline clips, pool media and an edit point",
     ),
     ("storyboard", "Storyboards: a labeled picture of every shot"),
     ("tape", "The Source Tape"),
