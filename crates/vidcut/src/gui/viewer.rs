@@ -18,6 +18,42 @@ use super::theme;
 use super::workspace::{Drag, TimecodeEntry, Workspace, dim, fit};
 use crate::live::PlayerId;
 
+/// What the viewer's two-up shows: the Trim Editor's or Dynamic Trim's
+/// two frames.
+#[derive(Clone)]
+pub struct TwoUp {
+    pub mode: TwoUpMode,
+    /// The left cell and the right; `None` where no clip is.
+    pub cells: [Option<TwoUpCell>; 2],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TwoUpMode {
+    TrimEditor,
+    DynamicTrim,
+}
+
+impl std::fmt::Display for TwoUpMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::TrimEditor => "trim_editor",
+            Self::DynamicTrim => "dynamic_trim",
+        })
+    }
+}
+
+#[derive(Clone)]
+pub struct TwoUpCell {
+    /// The timeline frame it shows, and the source frame of its clip there.
+    pub frame: i64,
+    pub source_frame: i64,
+    /// The picture is that frame's: `false` while it renders, the cell
+    /// showing the one before.
+    pub exact: bool,
+    /// The picture shown, as rendered.
+    pub picture: Option<std::sync::Arc<vidcut_av::thumbs::Image>>,
+}
+
 /// In/Out handles on the source scroll bar.
 enum MarkHandles {
     Clip {
@@ -175,12 +211,13 @@ impl Workspace {
             (picture.width() * ppp).round() as i32,
             (picture.height() * ppp).round() as i32,
         ];
+        self.two_up = None;
         if self.timeline.dynamic.is_some() && self.dynamic_target().is_some() {
-            self.dynamic_view(ui, area, aspect);
+            self.dynamic_view(ui, area);
             return;
         }
         if self.trim_editor.is_some() {
-            self.trim_editor_view(ui, area, aspect);
+            self.trim_editor_view(ui, area);
             return;
         }
         let area_resp = ui.allocate_rect(area, Sense::click_and_drag());
@@ -282,7 +319,7 @@ impl Workspace {
     /// The Trim Editor: the outgoing clip's last frame beside the
     /// incoming clip's first frame, with one-frame trims of the Out, the In
     /// and both (a roll). Esc or Close leaves it.
-    fn trim_editor_view(&mut self, ui: &mut egui::Ui, area: Rect, aspect: f32) {
+    fn trim_editor_view(&mut self, ui: &mut egui::Ui, area: Rect) {
         use crate::gui::timeline::Side;
         let (Some(e), Some(p)) = (self.timeline.edit, self.shown_project()) else {
             self.trim_editor = None;
@@ -295,12 +332,12 @@ impl Workspace {
             self.trim_editor = None;
             return;
         }
-        self.two_up(
+        self.draw_two_up(
             ui,
             area,
-            aspect,
             &p,
             &e.track.id(),
+            TwoUpMode::TrimEditor,
             [(e.at - 1, "Out (outgoing)"), (e.at, "In (incoming)")],
         );
         ui.add_space(4.0);
@@ -334,7 +371,7 @@ impl Workspace {
 
     /// Dynamic Trim's two-up: the frames on both sides of the
     /// edit (or of the slipped or sliding clip) as the trim so far leaves them.
-    fn dynamic_view(&mut self, ui: &mut egui::Ui, area: Rect, aspect: f32) {
+    fn dynamic_view(&mut self, ui: &mut egui::Ui, area: Rect) {
         use crate::gui::timeline::tools::{DynamicTarget, dynamic_preview};
         let (Some(target), Some(p)) = (self.dynamic_target(), self.shown_project()) else {
             return;
@@ -360,12 +397,12 @@ impl Workspace {
                 crate::gui::timeline::tools::DynamicMode::Slide => ["Before", "After"],
             },
         };
-        self.two_up(
+        self.draw_two_up(
             ui,
             area,
-            aspect,
             &p,
             &track,
+            TwoUpMode::DynamicTrim,
             [(left, labels[0]), (right, labels[1])],
         );
         ui.add_space(4.0);
@@ -376,10 +413,13 @@ impl Workspace {
                     .color(Color32::from_rgb(240, 200, 40)),
             );
             match self.timeline.dynamic.as_ref().and_then(|d| d.stopped.as_ref()) {
-                Some(why) => ui.label(
-                    RichText::new(format!("Stopped here: {why}. K applies, J goes back"))
-                        .color(theme::colors().error),
-                ),
+                Some(why) => {
+                    let back = if pending > 0 { "J" } else { "L" };
+                    ui.label(
+                        RichText::new(format!("Stopped here: {why}. K applies, {back} goes back"))
+                            .color(theme::colors().error),
+                    )
+                }
                 None => ui.label(dim("L/J trim (repeat for speed), K stops and applies, K+L/J one frame, Space plays around it, W leaves")),
             };
         });
@@ -387,15 +427,16 @@ impl Workspace {
 
     /// Two exact frames of `p` side by side, labeled: timeline frames that
     /// show nothing read "no clip".
-    fn two_up(
+    fn draw_two_up(
         &mut self,
         ui: &mut egui::Ui,
         area: Rect,
-        aspect: f32,
         p: &vidcut_core::model::Project,
         track: &str,
+        mode: TwoUpMode,
         cells: [(i64, &str); 2],
     ) {
+        let aspect = p.settings.width as f32 / p.settings.height.max(1) as f32;
         ui.allocate_rect(area, Sense::hover());
         let painter = ui.painter_at(area);
         painter.rect_filled(area, CornerRadius::ZERO, Color32::from_rgb(12, 12, 13));
@@ -410,6 +451,7 @@ impl Workspace {
             .stills
             .get_or_insert_with(|| crate::gui::stills::Stills::new(ctx.clone()));
         let track = p.track(track);
+        let mut shown = [None, None];
         for (i, (frame, label)) in cells.into_iter().enumerate() {
             let cell = Rect::from_min_size(
                 pos2(area.left() + half * i as f32, area.top()),
@@ -439,14 +481,21 @@ impl Workspace {
                     width: w,
                     height: h,
                 };
-                if let Some(shown) = stills.get(&ctx, i, &still) {
+                let got = stills.get(&ctx, i, &still);
+                if let Some(got) = got {
                     painter.image(
-                        shown.texture(),
+                        got.texture(),
                         picture,
                         Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
                         Color32::WHITE,
                     );
                 }
+                shown[i] = Some(TwoUpCell {
+                    frame,
+                    source_frame: c.source_at(frame),
+                    exact: matches!(got, Some(crate::gui::stills::Shown::Exact(_))),
+                    picture: stills.picture(i),
+                });
             }
             let name = c
                 .name
@@ -461,6 +510,7 @@ impl Workspace {
                 Color32::WHITE,
             );
         }
+        self.two_up = Some(TwoUp { mode, cells: shown });
     }
 
     fn viewer_title(&self) -> String {

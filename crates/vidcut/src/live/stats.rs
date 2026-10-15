@@ -64,6 +64,37 @@ pub struct PictureStats {
     pub memory: String,
 }
 
+/// The viewer's two-up (the Trim Editor's and Dynamic Trim's): what it
+/// shows, and its frames since the GUI started.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TwoUpStats {
+    /// `None` while the viewer shows the player.
+    pub shown: Option<TwoUpShown>,
+    /// Frames its cells were asked for and rendered, and those passed over
+    /// for a newer one before they rendered: too slow to show them all.
+    pub asked: u64,
+    pub rendered: u64,
+    pub passed_over: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TwoUpShown {
+    /// `trim_editor` or `dynamic_trim`.
+    pub mode: String,
+    /// The left cell and the right; `None` where no clip is.
+    pub cells: [Option<TwoUpCell>; 2],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TwoUpCell {
+    /// The timeline frame it shows, and the source frame of its clip there.
+    pub frame: i64,
+    pub source_frame: i64,
+    /// The picture is that frame's: `false` while it renders, the cell
+    /// showing the one before.
+    pub exact: bool,
+}
+
 /// What the renderer tells of the viewer.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ViewerStats {

@@ -456,6 +456,46 @@ impl Workspace {
         self.timeline.dynamic = Some(Dynamic::default());
     }
 
+    /// `gui.dynamic_trim`, as W, its button's menu, U and J/K/L do; `now`
+    /// is the input's time a run starts at.
+    pub fn dynamic_trim_request(&mut self, r: crate::live::DynamicTrim, now: f64) {
+        use vidcut_core::request::DynamicTrimMode;
+        if let Some(mode) = r.mode {
+            self.timeline.options.dynamic_mode = match mode {
+                DynamicTrimMode::Slip => DynamicMode::Slip,
+                DynamicTrimMode::Slide => DynamicMode::Slide,
+            };
+            self.timeline.options.save();
+        }
+        if let Some(on) = r.on
+            && on != self.timeline.dynamic.is_some()
+        {
+            self.toggle_dynamic();
+        }
+        if let (Some(side), Some(e)) = (r.side, &mut self.timeline.edit) {
+            e.side = side.into();
+        }
+        if self.timeline.dynamic.is_none() {
+            return;
+        }
+        if let Some(step) = r.step {
+            if let Some(d) = &mut self.timeline.dynamic {
+                d.pending += step;
+            }
+            self.dynamic_commit();
+        }
+        match r.run {
+            Some(0.0) => self.dynamic_commit(),
+            Some(speed) => {
+                if let Some(d) = &mut self.timeline.dynamic {
+                    d.run = Some((speed, now, d.pending));
+                    d.stopped = None;
+                }
+            }
+            None => {}
+        }
+    }
+
     /// The project as the running Dynamic Trim leaves it, and where its
     /// edit then is; `None` while nothing is trimmed.
     pub(crate) fn dynamic_drawn(&self, p: &Project) -> Option<(Project, Option<i64>)> {
@@ -545,12 +585,13 @@ impl Workspace {
                 d.stopped = None;
             }
         }
+        // K applies a run, also one that stopped where the media ran out.
         if pressed(egui::Key::K)
             && self
                 .timeline
                 .dynamic
                 .as_ref()
-                .is_some_and(|d| d.run.is_some())
+                .is_some_and(|d| d.run.is_some() || d.pending != 0)
         {
             self.dynamic_commit();
         }

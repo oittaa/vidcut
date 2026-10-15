@@ -185,9 +185,9 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 - **Measuring first:** the session measures media on a worker before such an edit runs (agents.md §3), so the GUI stays live while a long clip decodes.
 - **Boring Detector:** its highlights are computed each frame from the project (`analysis::boring`, cheap). Its settings are Timeline Options, kept between runs.
 - **Dynamic Trim:**
-  - W, J/K/L, Space and Up/Down are handled in `dynamic_keys`. The transport keys don't play while it is on.
+  - J/K/L and Space are handled in `dynamic_keys`, W and Up/Down with the timeline's and the transport's keys. The transport keys don't play while it is on. `gui.dynamic_trim` does what the keys do (`dynamic_trim_request`), and `gui.trim_editor` what the Trim Editor's double-click and buttons do (`trim_editor_request`).
   - A run counts frames on egui's clock, so tests drive it. Each frame it tries the next count on a copy of the project, and stops where an edit would fail.
-  - The viewer shows the two-up from the Trim Editor (`two_up`), rendered from that copy.
+  - The viewer shows the two-up from the Trim Editor (`draw_two_up`), rendered from that copy. It records what each cell shows (`Workspace::two_up`), which `player.state` reports as `two_up` with the stills' counts.
 
 ## 11. Pool thumbnails and preferences
 

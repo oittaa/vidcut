@@ -400,6 +400,30 @@ fn the_numbered_images_question_takes_the_keys() {
     gui.quit();
 }
 
+/// A Dynamic Trim run that stopped where the media ran out used to keep its
+/// trim: K, which the viewer said applies it, did nothing.
+#[test]
+fn k_applies_a_dynamic_trim_run_that_stopped() {
+    let mut gui = Gui::new();
+    gui.call("selection.set", json!({ "clips": ["c3"] }));
+    gui.settle();
+    gui.key(Key::W);
+    // L four times: 8× a slip of c3, whose media ends 40 frames after it.
+    for _ in 0..4 {
+        gui.key(Key::L);
+    }
+    for _ in 0..30 {
+        gui.harness.step();
+    }
+    gui.key(Key::K);
+    gui.settle();
+    let tl = gui.call("timeline.get", json!({}));
+    let tracks = tl["tracks"].as_array().unwrap();
+    let items = &tracks.iter().find(|t| t["id"] == "V1").unwrap()["items"];
+    assert_eq!(items[2]["source_in"], json!(240));
+    gui.quit();
+}
+
 /// A clip's right-click menu used to close the frame after it opened.
 #[test]
 fn a_clips_menu_stays_open() {

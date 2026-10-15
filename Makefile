@@ -7,7 +7,7 @@ VIDCUT := $(TARGET_DIR)/release/vidcut
 PREFIX ?= $(HOME)/.local
 
 .DEFAULT_GOAL := build
-.PHONY: help build run check check-full fmt test hooks doctor media install clean
+.PHONY: help build run check check-full fmt test hooks doctor media playback install clean
 
 help: ## List the targets
 	@awk 'BEGIN { FS = ":.*## " } /^[a-z-]+:.*## / { printf "  make %-11s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -42,6 +42,10 @@ doctor: ## Check Rust, pkg-config and FFmpeg, then show the GPUs and encoders
 
 media: ## Download the test clips into $VIDCUT_TEST_DATA (~/Downloads/vidcut-tmp)
 	scripts/fetch-test-media.sh
+
+playback: build ## Slow and dropped frames on heavy 4K60 clips, in a window of its own
+	cargo build --release -p vidcut-av --example make_fixture
+	scripts/playback-check.sh
 
 install: build ## Copy vidcut to ~/.local/bin, or to PREFIX/bin
 	mkdir -p "$(PREFIX)/bin"

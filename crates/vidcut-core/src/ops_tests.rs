@@ -161,6 +161,56 @@ fn trim_without_ripple_overwrites_neighbors() {
 }
 
 #[test]
+fn a_roll_moves_the_cut_and_keeps_the_timeline() {
+    // Spec §8.6: the outgoing clip gets longer by what the incoming one
+    // loses.
+    let mut f = three_clips();
+    f.ok(req(
+        "edit.roll",
+        json!({"clip": "c1", "edge": "tail", "by": 10}),
+    ));
+    assert_eq!(
+        f.v1(),
+        vec![
+            row("c1", 0, 110, 0),
+            row("c2", 110, 40, 20),
+            row("c3", 150, 50, 100)
+        ]
+    );
+}
+
+#[test]
+fn a_slip_shows_other_frames_in_the_same_place() {
+    // Spec §8.6: the clip stays where it is and plays its media later.
+    let mut f = three_clips();
+    f.ok(req("edit.slip", json!({"clip": "c2", "by": 5})));
+    assert_eq!(
+        f.v1(),
+        vec![
+            row("c1", 0, 100, 0),
+            row("c2", 100, 50, 15),
+            row("c3", 150, 50, 100)
+        ]
+    );
+}
+
+#[test]
+fn a_slide_moves_the_clip_between_its_neighbors() {
+    // Spec §8.6: the clip keeps its media and moves; the clip before it
+    // gets longer and the one after it shorter.
+    let mut f = three_clips();
+    f.ok(req("edit.slide", json!({"clip": "c2", "by": 10})));
+    assert_eq!(
+        f.v1(),
+        vec![
+            row("c1", 0, 110, 0),
+            row("c2", 110, 50, 10),
+            row("c3", 160, 40, 110)
+        ]
+    );
+}
+
+#[test]
 fn a_clip_heard_only_past_its_picture_keeps_its_audio() {
     // Decision D14. c1's L cut covers all of c2's picture, and c2 is heard
     // only in its own L cut into c3. Deleting c3 resets that cut, which

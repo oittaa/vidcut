@@ -89,6 +89,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("player.audio_scrubbing", &["on"]),
     ("mixer.preview", &["track", "volume_db"]),
     ("gui.show", &["panel"]),
+    ("gui.trim_editor", &["at"]),
 ];
 
 /// What the command groups are for, in `--help`.

@@ -1006,6 +1006,46 @@ pub enum Request {
     /// shortcuts).
     #[serde(rename = "gui.show")]
     GuiShow { panel: GuiPanel },
+    /// The Trim Editor (spec §8.6), as a double-click on an edit opens it:
+    /// the viewer shows the outgoing clip's last frame beside the incoming
+    /// clip's first. It opens on the edit of `track` (default V1) nearest
+    /// `at`, or, without `at`, stays on the edit it shows (else the one
+    /// nearest the playhead). `by` then trims that edit as the editor's
+    /// buttons do: its Out, its In or both, a roll (`side`). `close`
+    /// closes it. `player.state` says what the two-up shows (`two_up`).
+    #[serde(rename = "gui.trim_editor")]
+    GuiTrimEditor {
+        #[serde(default)]
+        at: Option<TimeSpec>,
+        #[serde(default)]
+        track: Option<String>,
+        #[serde(default)]
+        by: Option<i64>,
+        #[serde(default)]
+        side: TrimSide,
+        #[serde(default)]
+        close: bool,
+    },
+    /// Dynamic Trim (W, spec D32). `on` turns it on, on the selected edit
+    /// or clips (else the edit nearest the playhead), or off, applying what
+    /// it trimmed. `side` is what it trims of an edit, and `mode` what it
+    /// does with selected clips. `run` trims at that speed, as L and J do
+    /// (negative backward, up to 8×), and `0` stops and applies, as K does.
+    /// `step` trims that many frames and applies, as K held with a tap of L
+    /// or J does. `player.state` says what the two-up shows (`two_up`).
+    #[serde(rename = "gui.dynamic_trim")]
+    GuiDynamicTrim {
+        #[serde(default)]
+        on: Option<bool>,
+        #[serde(default)]
+        side: Option<TrimSide>,
+        #[serde(default)]
+        mode: Option<DynamicTrimMode>,
+        #[serde(default)]
+        run: Option<f64>,
+        #[serde(default)]
+        step: Option<i64>,
+    },
     /// The GUI's export jobs, oldest first: state, progress, ETA, result.
     #[serde(rename = "jobs.list")]
     JobsList {},
@@ -1108,6 +1148,29 @@ impl ViewerMode {
     pub fn is_source(self) -> bool {
         self != Self::Timeline
     }
+}
+
+/// What a trim of an edit moves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TrimSide {
+    /// The outgoing clip's Out.
+    Out,
+    /// The incoming clip's In.
+    In,
+    /// Both: a roll.
+    #[default]
+    Both,
+}
+
+/// What Dynamic Trim does with selected clips.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DynamicTrimMode {
+    /// The clip stays and shows other frames of its media.
+    Slip,
+    /// The clip keeps its media and moves between its neighbors.
+    Slide,
 }
 
 /// A window `gui.show` opens.
@@ -1398,6 +1461,8 @@ impl Request {
                 | Self::GuiWindow { .. }
                 | Self::GuiQuit {}
                 | Self::GuiShow { .. }
+                | Self::GuiTrimEditor { .. }
+                | Self::GuiDynamicTrim { .. }
                 | Self::JobsList {}
                 | Self::JobsGet { .. }
                 | Self::JobsCancel { .. }

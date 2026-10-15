@@ -284,6 +284,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - the top handle trims the outgoing Out, the bottom handle the incoming In, and the middle handle rolls
   - ±1-frame buttons
   - vidcut shows the outgoing clip's last frame beside the incoming clip's first frame with the ±1 buttons; the draggable filmstrips are (later).
+  - Esc or Close closes it. `gui.trim_editor` opens it, trims with it and closes it from scripts.
 - **Trim Start/End to Playhead** (Edit Actions, p. 729): moves a clip's head or tail to the playhead.
 - **Change Clip Speed** (R†, D48): a speed in percent, reversed, or a freeze frame, for every selected clip.
 - **Change Clip Duration** (Ctrl+D, p. 693):
@@ -291,7 +292,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - End extends to the end of the media
   - "Extend Beyond Clip Length" pads with black (later)
   - applies to every selected clip
-- **Dynamic Trim** (W, pp. 730–732): W toggles the mode and the playhead turns yellow. J/K/L then trim the selected edit (Out, In or both by U), or slip or slide the selected clips (right-click the Dynamic Trim button to choose), instead of playing. With nothing selected it takes the edit nearest the playhead. Space plays around the selection; Up/Down move to another edit. Details: D32 and deviation X11.
+- **Dynamic Trim** (W, pp. 730–732): W toggles the mode and the playhead turns yellow. J/K/L then trim the selected edit (Out, In or both by U), or slip or slide the selected clips (right-click the Dynamic Trim button to choose), instead of playing. With nothing selected it takes the edit nearest the playhead. Space plays around the selection, and Up/Down move to another edit; both apply what is pending first. Details: D32 and deviation X11.
 - **Slide:** moves a clip keeping its media; the clip before it gets longer and the one after it shorter (Dynamic Trim, p. 731; `edit.slide`).
 
 ### 8.7 J/L cuts (p. 728)
@@ -387,6 +388,7 @@ Shortcuts do nothing while a text field has focus or a question (a modal dialog)
 | R | Change clip speed (D48) | † |
 | N | Snapping on/off | 716 |
 | M / Alt+M | Add-or-edit marker / delete marker at playhead | 718 |
+| Double-click an edit | Trim Editor (Esc closes it) | 729 |
 | W | Dynamic Trim on/off (then J/K/L trim, Space plays around) | 731 |
 | Shift+S | Audio scrubbing on/off | 876 |
 | Ctrl+mouse wheel | Zoom the lower timeline (deviation X21) | 853 |
@@ -474,8 +476,9 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - **Running:** L or J runs the trim at the shuttle speed (repeat for 2×, 4×, 8×), as playback would move. The run stops where the media or a neighbor runs out, and shows it: the selected cut turns red and the viewer says why.
   - **Seeing it:** the viewer shows the two-up: the frames on both sides of the edit, or of the slipped or sliding clip, as the trim leaves them (exact frames, as the Trim Editor shows). The timeline draws the clips as the trim leaves them, so the cut moves while the run goes on.
   - **The selection:** the selected edit follows the trim. An undo, or someone else's edit, that takes the selected cut away clears the selection.
-  - **Applying it:** K stops the run and applies it as one request (`edit.trim`, `edit.roll`, `edit.slip`, `edit.slide`, or `edit.audio_roll` when the selected edit is the J/L handle). K held with a tap of J or L applies one frame. W also applies what is pending before leaving.
-  - **Play around:** Space plays from 2 s before the selection to 2 s after it.
+  - **Applying it:** K stops the run and applies it as one request (`edit.trim`, `edit.roll`, `edit.slip`, `edit.slide`, or `edit.audio_roll` when the selected edit is the J/L handle), also a run that stopped by itself. K held with a tap of J or L applies one frame. W, Space and Up/Down also apply what is pending.
+  - **Play around:** Space plays from 2 s before the selected edit, or the first selected clip's start, to 2 s after it.
+  - **From scripts:** `gui.dynamic_trim` turns it on and off, picks the side or Slip and Slide, runs it and steps it. `player.state`'s `two_up` says what the two-up shows, and how many of the frames asked for rendered and how many were passed over.
 - **D33. Rotation metadata.** The manual doesn't say. Media show as players show them: the rotation in a file's display matrix is applied in the preview, export, frames, thumbnails and storyboards. Phones store portrait video sideways with one. A portrait clip that sets the project format makes a portrait project, and `media.get` reports the size as shown, with the rotation. Mirrored display matrices are taken as rotations only.
 - **D34. Interlaced sources** (Deinterlace Quality, p. 741).
   - **Detection:** a stream is interlaced if its field order says so, or if its first frame is flagged interlaced. `media.get` reports the field shown first as `fields`.
