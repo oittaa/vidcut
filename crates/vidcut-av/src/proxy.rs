@@ -7,8 +7,9 @@
 //! (decision D41). Audio is not copied: preview audio stays on the original.
 //!
 //! The file is Matroska, written to a temporary name and renamed into place.
-//! Pictures are turned upright and scaled to `width`×`height` as 8-bit 4:2:0
-//! (ProRes 10-bit 4:2:2, DNxHR 8-bit 4:2:2). Every encoder makes
+//! Pictures are turned upright and scaled to `width`×`height` as 4:2:0, 10-bit
+//! from a source of more than 8 bits where the encoder takes them, 8-bit
+//! otherwise (ProRes 10-bit 4:2:2, DNxHR 8-bit 4:2:2). Every encoder makes
 //! a keyframe every 60 frames (ProRes and DNxHR every frame) and shows frames
 //! in the order it codes them: a seek decodes at most 60 frames, and the
 //! preview needs no tail patches for a proxy.
@@ -47,6 +48,9 @@ pub struct ProxyEncoder {
     /// The GPU it runs on, as the encoder check names it: a VAAPI render
     /// node, an AMF or QSV adapter or node, Vulkan's GPU by its id.
     pub device: Option<String>,
+    /// It takes 10-bit pictures here: a hardware encoder the encoder check
+    /// found working with P010, SVT-AV1, and ProRes, which is 10-bit.
+    pub ten_bit: bool,
 }
 
 impl ProxyEncoder {
@@ -56,6 +60,7 @@ impl ProxyEncoder {
             codec,
             kind: EncoderChoice::Cpu,
             device: None,
+            ten_bit: matches!(name, "libsvtav1" | "prores_ks"),
         }
     }
 
@@ -86,18 +91,22 @@ impl ProxyEncoder {
         format!("{codec}, {what}")
     }
 
-    fn pixel(&self) -> format::Pixel {
+    /// The layout of its pictures in memory, for a source of more than 8
+    /// bits with `ten`. Where it takes 10 bits ([`ten_bit`](Self::ten_bit)),
+    /// such a source's are P010 for the GPU's video engine and 10-bit 4:2:0
+    /// for SVT-AV1. Otherwise 8-bit 4:2:0, NV12 for AMF, QSV, VAAPI and
+    /// VideoToolbox. ProRes is always 10-bit 4:2:2, DNxHR 8-bit 4:2:2.
+    fn pixel(&self, ten: bool) -> format::Pixel {
+        use EncoderChoice::{Amf, Nvenc, Qsv, Vaapi, VideoToolbox};
+        use format::Pixel::{NV12, P010LE, YUV420P, YUV420P10LE, YUV422P, YUV422P10LE};
+        let ten = ten && self.ten_bit;
         match (self.kind, self.codec) {
-            (
-                EncoderChoice::Amf
-                | EncoderChoice::Qsv
-                | EncoderChoice::Vaapi
-                | EncoderChoice::VideoToolbox,
-                _,
-            ) => format::Pixel::NV12,
-            (_, "prores") => format::Pixel::YUV422P10LE,
-            (_, "dnxhr") => format::Pixel::YUV422P,
-            _ => format::Pixel::YUV420P,
+            (Nvenc | Amf | Qsv | Vaapi | VideoToolbox, _) if ten => P010LE,
+            (Amf | Qsv | Vaapi | VideoToolbox, _) => NV12,
+            (_, "prores") => YUV422P10LE,
+            (_, "dnxhr") => YUV422P,
+            _ if ten => YUV420P10LE,
+            _ => YUV420P,
         }
     }
 
@@ -165,10 +174,11 @@ impl ProxyEncoder {
         }
     }
 
-    /// The encoder as exports open theirs ([`encode::open_video`]): its
-    /// settings ([`options`](Self::options)), a keyframe every
-    /// [`KEYFRAMES`] frames, no B-frames and closed GOPs, one pass, SDR.
-    fn video_encoder(&self) -> VideoEncoder {
+    /// The encoder as exports open theirs ([`encode::open_video`]), for
+    /// pictures of `pixel` in memory: its settings
+    /// ([`options`](Self::options)), a keyframe every [`KEYFRAMES`] frames,
+    /// no B-frames and closed GOPs, one pass, SDR.
+    fn video_encoder(&self, pixel: format::Pixel) -> VideoEncoder {
         let mut options: Vec<(String, String)> = self
             .options()
             .into_iter()
@@ -192,7 +202,7 @@ impl ProxyEncoder {
         VideoEncoder {
             name: self.name.clone(),
             kind: self.kind,
-            pixel: self.pixel(),
+            pixel,
             device: self.device.clone(),
             options,
             hdr: None,
@@ -258,7 +268,7 @@ fn round(e: &ProxyEncoder, plays: &[&str]) -> u8 {
 /// `codec`'s own encoders here, best first ([`encoders`]).
 fn own(codec: ProxyCodec, available: &Availability) -> Vec<ProxyEncoder> {
     use EncoderChoice::{Amf, Nvenc, Qsv, Vaapi, VideoToolbox, Vulkan};
-    use format::Pixel::{NV12, YUV420P, YUV422P10LE};
+    use format::Pixel::{NV12, P010LE, YUV420P, YUV422P10LE};
     let hardware: &[(&str, &'static str, EncoderChoice, format::Pixel)] = match codec {
         ProxyCodec::Av1 => &[
             ("av1_nvenc", "av1", Nvenc, YUV420P),
@@ -285,6 +295,9 @@ fn own(codec: ProxyCodec, available: &Availability) -> Vec<ProxyEncoder> {
                 codec,
                 kind,
                 device: status.device.clone(),
+                // Found working with P010, or 10-bit already (Vulkan's
+                // ProRes).
+                ten_bit: pixel == YUV422P10LE || available.find(name, P010LE).is_some(),
             });
         }
     }
@@ -483,16 +496,17 @@ struct Writer<'a> {
 }
 
 impl<'a> Writer<'a> {
-    /// Creates `tmp` and opens `enc` for pictures timed in `src_tb`, as
-    /// exports open theirs ([`encode::open_video`]), and says what the
-    /// pictures are made into. NVENC takes them in GPU memory on `cuda`'s
-    /// context where it opens so. VAAPI, AMF and VideoToolbox open on
+    /// Creates `tmp` and opens `enc` for `width`×`height` pictures of
+    /// `pixel` timed in `src_tb`, as exports open theirs
+    /// ([`encode::open_video`]), and says what the pictures are made into.
+    /// NVENC takes them in GPU memory on `cuda`'s context where it opens so,
+    /// in [`cuda_layout`]'s layout. VAAPI, AMF and VideoToolbox open on
     /// `decoder`'s device where they share it ([`encode::shares`]), for the
     /// frames fitted there.
     fn new(
         tmp: &Path,
         enc: &ProxyEncoder,
-        (width, height): (u32, u32),
+        (width, height, pixel): (u32, u32, format::Pixel),
         (src_tb, rate): (ffmpeg::Rational, Option<ffmpeg::Rational>),
         cuda: Option<&crate::cuda::CudaDevice>,
         decoder: Option<&crate::hw::GpuDecoder>,
@@ -510,13 +524,13 @@ impl<'a> Writer<'a> {
                  {width}×{height}: make the proxy size larger or choose another codec"
             ))));
         }
-        let video = enc.video_encoder();
+        let video = enc.video_encoder(pixel);
         let times = (enc_tb, rate);
         // On a stream of its own, as an export's: frames from memory if
         // that won't open.
         let on_cuda = cuda.and_then(|cuda| {
             let device = cuda.with_own_stream().ok()?;
-            let frames = CudaFrames::new(&device, format::Pixel::NV12, width, height).ok()?;
+            let frames = CudaFrames::new(&device, cuda_layout(pixel), width, height).ok()?;
             let gpu_frames = Some(frames.as_ptr());
             let (opened, _) = encode::open_video(
                 &video,
@@ -680,22 +694,32 @@ fn encode_into(
     let times = (reader.time_base(), reader.frame_rate());
     let size = (width, height);
     let decoded_on_gpu = reader.gpu().is_some();
+    // A source of more than 8 bits, by its first frame, keeps 10 where the
+    // encoder takes them.
+    let ten = reader.peek().is_some_and(|first| {
+        crate::hw::sw_format(first)
+            .descriptor()
+            // SAFETY: FFmpeg's static descriptor of the format.
+            .is_some_and(|d| unsafe { (*d.as_ptr()).comp[0].depth } > 8)
+    });
+    let pixel = enc.pixel(ten);
     // NVDEC's frames scaled for NVENC on the GPU, where the planner leaves
     // them there and the scaler builds. A picture may come with the next
     // frame, leaving the GPU less to do.
     let scaled = match enc.kind {
-        EncoderChoice::Nvenc => Fitting::for_nvenc(reader, size, format::Pixel::NV12, None, false),
+        EncoderChoice::Nvenc => Fitting::for_nvenc(reader, size, cuda_layout(pixel), None, false),
         _ => Fitting::none(),
     };
     let cuda = scaled.scaler.as_ref().and(reader.cuda());
-    let (mut writer, output) = Writer::new(tmp, enc, size, times, cuda, decoder, shown)?;
+    let out = (width, height, pixel);
+    let (mut writer, output) = Writer::new(tmp, enc, out, times, cuda, decoder, shown)?;
     // NVENC takes the scaler's pictures where it opened for frames in GPU
     // memory.
-    let (pixel, mut fitting) = match output {
-        Output::Cuda { .. } => (format::Pixel::NV12, scaled),
-        _ => (enc.pixel(), Fitting::none()),
+    let (layout, mut fitting) = match output {
+        Output::Cuda { .. } => (cuda_layout(pixel), scaled),
+        _ => (pixel, Fitting::none()),
     };
-    let mut maker = Maker::new((width, height, pixel), None, output);
+    let mut maker = Maker::new((width, height, layout), None, output);
     let mut went = None;
     let mut encoding = || -> Result<()> {
         while let Some(src) = reader.next_frame()? {
@@ -743,6 +767,15 @@ fn encode_into(
     encoding().map_err(Failed::Encoding)?;
     let frames = writer.finish(reader.path()).map_err(Failed::Encoding)?;
     Ok((frames, went))
+}
+
+/// The layout of NVENC's frames in GPU memory for pictures of `pixel`: P010
+/// for 10 bits, NV12 for 8.
+fn cuda_layout(pixel: format::Pixel) -> format::Pixel {
+    match pixel {
+        format::Pixel::P010LE => format::Pixel::P010LE,
+        _ => format::Pixel::NV12,
+    }
 }
 
 fn drain(
@@ -861,6 +894,63 @@ mod tests {
         assert_eq!(got[..2], ["dnxhd", "prores_ks"]);
     }
 
+    /// NVENC's AV1, which the encoder check found working with P010.
+    fn nvencs_av1() -> ProxyEncoder {
+        ProxyEncoder {
+            name: "av1_nvenc".into(),
+            codec: "av1",
+            kind: Nvenc,
+            device: Some("0".into()),
+            ten_bit: true,
+        }
+    }
+
+    #[test]
+    fn an_encoder_working_with_p010_here_takes_ten_bits() {
+        crate::init();
+        let nvidia = working(&[
+            ("av1_nvenc", Nvenc, "yuv420p"),
+            ("av1_nvenc", Nvenc, "p010le"),
+        ]);
+        assert!(own(ProxyCodec::Av1, &nvidia)[0].ten_bit);
+    }
+
+    #[test]
+    fn nvencs_av1_takes_a_ten_bit_sources_pictures_as_p010() {
+        assert_eq!(nvencs_av1().pixel(true), format::Pixel::P010LE);
+    }
+
+    #[test]
+    fn nvencs_av1_takes_an_eight_bit_sources_pictures_in_eight_bits() {
+        assert_eq!(nvencs_av1().pixel(false), format::Pixel::YUV420P);
+    }
+
+    #[test]
+    fn nvencs_h264_takes_a_ten_bit_sources_pictures_in_eight_bits() {
+        crate::init();
+        let nvidia = working(&[("h264_nvenc", Nvenc, "yuv420p")]);
+        let h264 = own(ProxyCodec::H264, &nvidia).remove(0);
+        assert_eq!(h264.pixel(true), format::Pixel::YUV420P);
+    }
+
+    #[test]
+    fn svt_av1_takes_a_ten_bit_sources_pictures_in_ten_bits() {
+        let svt = ProxyEncoder::software("libsvtav1", "av1");
+        assert_eq!(svt.pixel(true), format::Pixel::YUV420P10LE);
+    }
+
+    #[test]
+    fn apples_prores_takes_a_ten_bit_sources_pictures_as_p010() {
+        let apple = ProxyEncoder {
+            name: "prores_videotoolbox".into(),
+            codec: "prores",
+            kind: VideoToolbox,
+            device: None,
+            ten_bit: true,
+        };
+        assert_eq!(apple.pixel(true), format::Pixel::P010LE);
+    }
+
     #[test]
     fn nvenc_opens_with_its_settings_and_the_proxies_keyframes() {
         let enc = ProxyEncoder {
@@ -868,6 +958,7 @@ mod tests {
             codec: "h264",
             kind: Nvenc,
             device: Some("0".into()),
+            ten_bit: false,
         };
         let want = [
             ("preset", "p4"),
@@ -880,7 +971,7 @@ mod tests {
             ("flags", "+cgop"),
         ];
         let want = want.map(|(k, v)| (k.to_string(), v.to_string()));
-        assert_eq!(enc.video_encoder().options, want);
+        assert_eq!(enc.video_encoder(enc.pixel(false)).options, want);
     }
 
     #[test]
@@ -890,8 +981,9 @@ mod tests {
             codec: "h264",
             kind: VideoToolbox,
             device: None,
+            ten_bit: false,
         };
-        let options = enc.video_encoder().options;
+        let options = enc.video_encoder(enc.pixel(false)).options;
         let flags: Vec<&str> = options
             .iter()
             .filter(|(k, _)| k == "flags")
@@ -902,9 +994,8 @@ mod tests {
 
     #[test]
     fn prores_encodes_frames_on_every_core() {
-        let options = ProxyEncoder::software("prores_ks", "prores")
-            .video_encoder()
-            .options;
+        let prores = ProxyEncoder::software("prores_ks", "prores");
+        let options = prores.video_encoder(prores.pixel(false)).options;
         let threads: Vec<(&str, &str)> = options
             .iter()
             .filter(|(k, _)| k.starts_with("thread"))
