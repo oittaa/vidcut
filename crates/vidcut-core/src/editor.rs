@@ -558,7 +558,10 @@ impl Editor {
                 if undo { "undo" } else { "redo" }
             )));
         }
-        let mut json = to_json(&self.project);
+        let mut project = self.project.clone();
+        // Tests check it against the whole JSON's.
+        let mut json = cfg!(debug_assertions).then(|| to_json(&self.project));
+        let fits = |e: String| Error::internal(format!("the undo history doesn't fit: {e}"));
         // Without a file, all of it; with one, the steps to take.
         let mut history = match self.file {
             None => self.history.clone(),
@@ -572,15 +575,17 @@ impl Editor {
                 (&mut history.redo, &mut history.undo)
             };
             let entry = from.pop().expect("checked");
-            entry
-                .change
-                .apply(&mut json, !undo)
-                .map_err(|e| Error::internal(format!("the undo history doesn't fit: {e}")))?;
+            undo_step(&mut project, &entry.change, !undo).map_err(fits)?;
+            if let Some(json) = json.as_mut() {
+                entry.change.apply(json, !undo).map_err(fits)?;
+            }
             labels.push(entry.label.clone());
             to.push(entry);
         }
-        let mut project: Project = serde_json::from_value(json)
-            .map_err(|e| Error::internal(format!("the undo history doesn't fit: {e}")))?;
+        debug_assert!(
+            json.is_none_or(|j| serde_json::from_value::<Project>(j).is_ok_and(|q| q == project)),
+            "the undo step makes another project as JSON"
+        );
         let changes = diff(&self.project, &project);
         let result = json!({ if undo { "undone" } else { "redone" }: labels });
         if dry_run {
@@ -704,6 +709,112 @@ fn track_change(a: &mut Track, b: &mut Track) -> Option<Change> {
     (a.clips, b.clips) = clips;
     (a.transitions, b.transitions) = transitions;
     joined(rest, lists)
+}
+
+/// Makes `change`, a step of the undo history, in `p` (`forward`), or takes
+/// it back: only the things it names become JSON. Its lists of things with
+/// ids are taken out for a moment, as [`changed`] takes them.
+fn undo_step(p: &mut Project, change: &Change, forward: bool) -> std::result::Result<(), String> {
+    use crate::change::{apply_json, shift_json};
+    let Change::Fields(fields) = change else {
+        return apply_json(p, change, forward);
+    };
+    let (lists, rest) = split_fields(fields, &["media", "tracks", "markers"]);
+    if !rest.is_empty() {
+        use std::mem::take;
+        let kept = (
+            take(&mut p.media),
+            take(&mut p.tracks),
+            take(&mut p.markers),
+        );
+        apply_json(p, &Change::Fields(rest), forward)?;
+        (p.media, p.tracks, p.markers) = kept;
+    }
+    for (name, c) in lists {
+        match name {
+            "media" => {
+                c.apply_to_items(&mut p.media, forward, |m| &m.id, apply_json, shift_json)?
+            }
+            "tracks" => {
+                c.apply_to_items(&mut p.tracks, forward, |t| &t.id, track_step, shift_json)?
+            }
+            _ => c.apply_to_items(
+                &mut p.markers,
+                forward,
+                |k| &k.id,
+                apply_json,
+                |k, field, by| {
+                    match field {
+                        "at" => k.at += by,
+                        _ => shift_json(k, field, by)?,
+                    }
+                    Ok(())
+                },
+            )?,
+        }
+    }
+    Ok(())
+}
+
+/// [`undo_step`] in track `t`: its clips and transitions by id.
+fn track_step(t: &mut Track, change: &Change, forward: bool) -> std::result::Result<(), String> {
+    use crate::change::{apply_json, shift_json};
+    let Change::Fields(fields) = change else {
+        return apply_json(t, change, forward);
+    };
+    let (lists, rest) = split_fields(fields, &["clips", "transitions"]);
+    if !rest.is_empty() {
+        use std::mem::take;
+        let kept = (take(&mut t.clips), take(&mut t.transitions));
+        apply_json(t, &Change::Fields(rest), forward)?;
+        (t.clips, t.transitions) = kept;
+    }
+    for (name, c) in lists {
+        match name {
+            "clips" => c.apply_to_items(
+                &mut t.clips,
+                forward,
+                |c| &c.id,
+                apply_json,
+                |c, field, by| {
+                    match field {
+                        "start" => c.start += by,
+                        _ => shift_json(c, field, by)?,
+                    }
+                    Ok(())
+                },
+            )?,
+            _ => c.apply_to_items(
+                &mut t.transitions,
+                forward,
+                |x| &x.id,
+                apply_json,
+                shift_json,
+            )?,
+        }
+    }
+    Ok(())
+}
+
+/// The changes of the fields named in `lists`, and of the others.
+fn split_fields<'a>(
+    fields: &'a std::collections::BTreeMap<String, Change>,
+    lists: &[&'a str],
+) -> (
+    Vec<(&'a str, &'a Change)>,
+    std::collections::BTreeMap<String, Change>,
+) {
+    let mut named = Vec::new();
+    let mut rest = std::collections::BTreeMap::new();
+    for (k, c) in fields {
+        match lists.iter().find(|l| **l == k.as_str()) {
+            Some(l) => named.push((*l, c)),
+            None => {
+                rest.insert(k.clone(), c.clone());
+            }
+        }
+    }
+    (named, rest)
 }
 
 /// What changed in a thing in a list, from its JSON.
