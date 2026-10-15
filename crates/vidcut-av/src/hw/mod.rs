@@ -1,15 +1,13 @@
 //! The GPU's video decoders, whatever the GPU: FFmpeg's hardware devices.
-//! NVIDIA's NVDEC on CUDA ([`crate::cuda`]); on other GPUs VA-API on Linux
+//! NVIDIA's NVDEC on CUDA ([`crate::cuda`]), and ProRes, which NVDEC
+//! doesn't decode, on Vulkan on the same GPU; on other GPUs VA-API on Linux
 //! (AMD, Intel) and Direct3D 11 on Windows (AMD, Intel); VideoToolbox on a
-//! Mac. A reader decoding
-//! on one gives its frames in that device's memory: CUDA's stay there for a
-//! display that shows them from there, every other kind comes down to
-//! memory as it is decoded, its surface going back to the decoder at once.
+//! Mac. A reader decoding on one gives its frames in that device's memory.
 //!
 //! `VIDCUT_HWDEC` picks one for tests and debugging: `nvdec` (`nvdec:1`
 //! for a CUDA device by its index), `vaapi` (`vaapi:/dev/dri/renderD129`
 //! for a render node), `d3d11va` (`d3d11va:1` for an adapter by its
-//! index), `videotoolbox`, or `none`.
+//! index), `videotoolbox`, or `none`. Vulkan comes with `nvdec`.
 
 #[cfg(windows)]
 pub(crate) mod d3d11;
@@ -35,20 +33,31 @@ pub enum Kind {
     D3d11va,
     /// VideoToolbox (macOS).
     VideoToolbox,
+    /// FFmpeg's Vulkan decoders on NVIDIA's GPU, for what NVDEC doesn't
+    /// decode: ProRes.
+    Vulkan,
 }
 
 impl Kind {
-    /// A short name: `nvdec`, `vaapi`, `d3d11va` or `videotoolbox`.
+    /// A short name: `nvdec`, `vaapi`, `d3d11va`, `videotoolbox` or
+    /// `vulkan`.
     pub fn name(self) -> &'static str {
         match self {
             Kind::Nvdec => "nvdec",
             Kind::Vaapi => "vaapi",
             Kind::D3d11va => "d3d11va",
             Kind::VideoToolbox => "videotoolbox",
+            Kind::Vulkan => "vulkan",
         }
     }
 
-    const ALL: [Kind; 4] = [Kind::Nvdec, Kind::Vaapi, Kind::D3d11va, Kind::VideoToolbox];
+    const ALL: [Kind; 5] = [
+        Kind::Nvdec,
+        Kind::Vaapi,
+        Kind::D3d11va,
+        Kind::VideoToolbox,
+        Kind::Vulkan,
+    ];
 
     /// The kind a [`name`](Self::name) names.
     pub fn named(name: &str) -> Option<Self> {
@@ -75,13 +84,14 @@ impl Kind {
     }
 
     /// What it is called, for people: `NVDEC`, `VA-API`, `Direct3D 11`,
-    /// `VideoToolbox`.
+    /// `VideoToolbox`, `Vulkan`.
     pub fn label(self) -> &'static str {
         match self {
             Kind::Nvdec => "NVDEC",
             Kind::Vaapi => "VA-API",
             Kind::D3d11va => "Direct3D 11",
             Kind::VideoToolbox => "VideoToolbox",
+            Kind::Vulkan => "Vulkan",
         }
     }
 
@@ -92,6 +102,7 @@ impl Kind {
             Kind::Vaapi => T::AV_HWDEVICE_TYPE_VAAPI,
             Kind::D3d11va => T::AV_HWDEVICE_TYPE_D3D11VA,
             Kind::VideoToolbox => T::AV_HWDEVICE_TYPE_VIDEOTOOLBOX,
+            Kind::Vulkan => T::AV_HWDEVICE_TYPE_VULKAN,
         }
     }
 
@@ -102,6 +113,7 @@ impl Kind {
             Kind::Vaapi => Place::Vaapi,
             Kind::D3d11va => Place::D3d11,
             Kind::VideoToolbox => Place::VideoToolbox,
+            Kind::Vulkan => Place::Vulkan,
         }
     }
 
@@ -112,9 +124,15 @@ impl Kind {
             Kind::Vaapi => format::Pixel::VAAPI,
             Kind::D3d11va => format::Pixel::D3D11,
             Kind::VideoToolbox => format::Pixel::VIDEOTOOLBOX,
+            Kind::Vulkan => format::Pixel::VULKAN,
         }
     }
 }
+
+/// The codecs a GPU decoder decodes on Vulkan where its own decoder has
+/// none for them, and FFmpeg has a Vulkan decoder (FFmpeg 8.1 and later
+/// have ProRes's).
+const ON_VULKAN: [ffmpeg::codec::Id; 1] = [ffmpeg::codec::Id::PRORES];
 
 /// A reference to one of FFmpeg's hardware device contexts.
 pub(crate) struct Device(pub(crate) *mut ffi::AVBufferRef);
@@ -371,7 +389,8 @@ pub struct GpuDecoder {
     on: String,
     /// NVDEC's CUDA device, with what it does besides decoding.
     cuda: Option<CudaDevice>,
-    /// Its GPU's PCI vendor, where known (Direct3D 11's adapter's).
+    /// Its GPU's PCI vendor, where known: Direct3D 11's adapter's, and
+    /// NVIDIA for NVDEC.
     vendor: Option<u32>,
     /// Its GPU, where it was opened for one (`gpus::list`).
     gpu: Option<crate::gpus::Gpu>,
@@ -385,16 +404,22 @@ impl GpuDecoder {
             device: Arc::new(Device(unsafe { ffi::av_buffer_ref(cuda.as_ptr()) })),
             on: String::new(),
             cuda: Some(cuda),
-            vendor: None,
+            vendor: Some(crate::gpus::NVIDIA),
             gpu: None,
         }
     }
 
     /// `kind` on `on` (a render node for VA-API, an adapter's index for
     /// Direct3D 11, a CUDA device's for NVDEC; the first one when empty).
+    /// Vulkan comes with NVDEC, never alone.
     pub fn open(kind: Kind, on: &str) -> Result<Self> {
         if kind == Kind::Nvdec {
             return CudaDevice::on(on.parse().unwrap_or(0)).map(Self::nvdec);
+        }
+        if kind == Kind::Vulkan {
+            return Err(Error::Invalid(
+                "Vulkan decodes only beside NVDEC, which brings it along".into(),
+            ));
         }
         let device = Device::open(kind, on)?;
         #[cfg(windows)]
@@ -432,28 +457,44 @@ impl GpuDecoder {
         self.kind
     }
 
-    /// Why it leaves `codec` to the CPU, when it does: it doesn't decode it
-    /// right, as far as known. AMD's Direct3D 11 decoder and VideoToolbox
-    /// lose their way in H.264 sought into an open GOP (a keyframe that
-    /// isn't IDR): AMD's shows one picture over and over some frames on,
-    /// VideoToolbox other frames than the file's, where NVIDIA's and VA-API
-    /// on Intel decode on. The CPU decodes such H.264 there: `open_gop`
-    /// says whether the stream has open GOPs, asked only then.
+    /// Why it leaves `codec` to the CPU, when it does ([`why_not`]), on the
+    /// kind of decoder that would decode it ([`kind_for`](Self::kind_for)).
+    /// `open_gop` says whether the stream has open GOPs, asked only for
+    /// H.264.
     pub fn why_not(
         &self,
         codec: ffmpeg::codec::Id,
         open_gop: impl FnOnce() -> bool,
     ) -> Option<&'static str> {
-        let why = match (self.kind, self.vendor) {
-            (Kind::D3d11va, Some(crate::gpus::AMD)) => {
-                "AMD's Direct3D 11 decoder loses its way after a seek in H.264 with open GOPs"
-            }
-            (Kind::VideoToolbox, _) => {
-                "VideoToolbox shows other frames after a seek in H.264 with open GOPs"
-            }
-            _ => return None,
-        };
-        (codec == ffmpeg::codec::Id::H264 && open_gop()).then_some(why)
+        why_not(self.kind_for(codec)?, self.vendor, codec, open_gop)
+    }
+
+    /// The kind of decoder it decodes `codec` with: its own where FFmpeg has
+    /// a decoder for the codec there, else Vulkan for the codecs vidcut
+    /// decodes there ([`ON_VULKAN`]) where FFmpeg has a Vulkan decoder for
+    /// it. `None`: FFmpeg has neither.
+    pub fn kind_for(&self, codec: ffmpeg::codec::Id) -> Option<Kind> {
+        if crate::decode::gpu_decoder(codec, self.kind).is_some() {
+            return Some(self.kind);
+        }
+        let vulkan =
+            ON_VULKAN.contains(&codec) && crate::decode::gpu_decoder(codec, Kind::Vulkan).is_some();
+        vulkan.then_some(Kind::Vulkan)
+    }
+
+    /// The device it decodes on with a decoder of `kind`: its own, or for
+    /// Vulkan the one made from NVIDIA's CUDA device
+    /// ([`CudaDevice::vulkan`]), asked for each time, so one dropped after
+    /// a converter failed isn't used again.
+    pub(crate) fn device_for(&self, kind: Kind) -> Result<Device> {
+        match (kind, &self.cuda) {
+            _ if kind == self.kind => Ok(Device::clone(&self.device)),
+            (Kind::Vulkan, Some(cuda)) => cuda.vulkan(),
+            _ => Err(Error::Invalid(format!(
+                "{self} has no {} device",
+                kind.label()
+            ))),
+        }
     }
 
     /// The render node or adapter it is on; empty for the default one.
@@ -564,33 +605,73 @@ impl GpuDecoder {
     }
 }
 
-/// Its kind and where: `NVDEC on NVIDIA GeForce RTX 4080 SUPER`,
-/// `Direct3D 11 on AMD Radeon(TM) Graphics (adapter 1)`, `VA-API on
-/// /dev/dri/renderD128` where its GPU's name isn't known.
-impl std::fmt::Display for GpuDecoder {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.kind.label())?;
+impl GpuDecoder {
+    /// A decoder of `kind` on its GPU, for people: `Vulkan on NVIDIA
+    /// GeForce RTX 4080 SUPER`.
+    pub fn labeled(&self, kind: Kind) -> String {
         let on = match self.kind {
             _ if self.on.is_empty() => String::new(),
             Kind::D3d11va => format!("adapter {}", self.on),
             _ => self.on.clone(),
         };
+        let label = kind.label();
         match (&self.gpu, on.is_empty()) {
-            (Some(gpu), true) => write!(f, " on {}", gpu.name),
-            (Some(gpu), false) => write!(f, " on {} ({on})", gpu.name),
-            (None, true) => Ok(()),
-            (None, false) => write!(f, " on {on}"),
+            (Some(gpu), true) => format!("{label} on {}", gpu.name),
+            (Some(gpu), false) => format!("{label} on {} ({on})", gpu.name),
+            (None, true) => label.to_string(),
+            (None, false) => format!("{label} on {on}"),
         }
     }
+}
+
+/// Its kind and where: `NVDEC on NVIDIA GeForce RTX 4080 SUPER`,
+/// `Direct3D 11 on AMD Radeon(TM) Graphics (adapter 1)`, `VA-API on
+/// /dev/dri/renderD128` where its GPU's name isn't known.
+impl std::fmt::Display for GpuDecoder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.labeled(self.kind))
+    }
+}
+
+/// Why a GPU of `vendor` (its PCI vendor) leaves `codec` to the CPU on a
+/// decoder of `kind`, when it does: it doesn't decode it right, as far as
+/// known.
+/// - AMD's Direct3D 11 decoder and VideoToolbox lose their way in H.264
+///   sought into an open GOP (a keyframe that isn't IDR): AMD's shows one
+///   picture over and over some frames on, VideoToolbox other frames than
+///   the file's, where NVIDIA's and VA-API on Intel decode on. The CPU
+///   decodes such H.264 there: `open_gop` says whether the stream has open
+///   GOPs, asked only then.
+/// - Vulkan decodes on NVIDIA's GPUs only: FFmpeg's ProRes decoder on Vulkan
+///   crashes on AMD's Windows driver, and it is untested on others.
+fn why_not(
+    kind: Kind,
+    vendor: Option<u32>,
+    codec: ffmpeg::codec::Id,
+    open_gop: impl FnOnce() -> bool,
+) -> Option<&'static str> {
+    let why = match (kind, vendor) {
+        (Kind::Vulkan, Some(crate::gpus::NVIDIA)) => return None,
+        (Kind::Vulkan, _) => return Some("vidcut decodes on Vulkan on NVIDIA's GPUs only"),
+        (Kind::D3d11va, Some(crate::gpus::AMD)) => {
+            "AMD's Direct3D 11 decoder loses its way after a seek in H.264 with open GOPs"
+        }
+        (Kind::VideoToolbox, _) => {
+            "VideoToolbox shows other frames after a seek in H.264 with open GOPs"
+        }
+        _ => return None,
+    };
+    (codec == ffmpeg::codec::Id::H264 && open_gop()).then_some(why)
 }
 
 /// What a GPU decoder does with a test clip of one codec
 /// ([`decoders`]).
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct DecoderStatus {
-    /// The decoder and its GPU: `NVDEC on NVIDIA GeForce RTX 4080 SUPER`.
+    /// The decoder and its GPU: `NVDEC on NVIDIA GeForce RTX 4080 SUPER`,
+    /// `Vulkan on NVIDIA GeForce RTX 4080 SUPER` for ProRes there.
     pub decoder: String,
-    /// Its kind: `nvdec`, `vaapi`, `d3d11va`, `videotoolbox`.
+    /// Its kind: `nvdec`, `vaapi`, `d3d11va`, `videotoolbox`, `vulkan`.
     pub kind: &'static str,
     /// The clip's codec, and its bits where they aren't 8: `h264`,
     /// `hevc 10-bit`.
@@ -637,9 +718,11 @@ pub fn decoders(dir: &std::path::Path) -> Vec<DecoderStatus> {
                 (Ok(_), Some(why)) => Err(format!("left to the CPU: {why}")),
                 (Ok(path), None) => decodes_all(&gpu, path).map_err(|e| e.to_string()),
             };
+            // Its decoder that decodes the codec: its own, or Vulkan.
+            let kind = gpu.kind_for(*id).unwrap_or(gpu.kind());
             out.push(DecoderStatus {
-                decoder: gpu.to_string(),
-                kind: gpu.kind().name(),
+                decoder: gpu.labeled(kind),
+                kind: kind.name(),
                 codec,
                 ok: result.is_ok(),
                 error: result.err(),
@@ -1166,6 +1249,46 @@ impl Fitter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ffmpeg::codec::Id;
+    use crate::gpus::{AMD, INTEL, NVIDIA};
+
+    #[test]
+    fn nvidias_gpu_decodes_prores_on_vulkan() {
+        assert_eq!(
+            why_not(Kind::Vulkan, Some(NVIDIA), Id::PRORES, || false),
+            None
+        );
+    }
+
+    #[test]
+    fn amds_gpu_leaves_prores_on_vulkan_to_the_cpu() {
+        assert!(why_not(Kind::Vulkan, Some(AMD), Id::PRORES, || false).is_some());
+    }
+
+    #[test]
+    fn intels_gpu_leaves_prores_on_vulkan_to_the_cpu() {
+        assert!(why_not(Kind::Vulkan, Some(INTEL), Id::PRORES, || false).is_some());
+    }
+
+    #[test]
+    fn a_gpu_of_unknown_make_leaves_prores_on_vulkan_to_the_cpu() {
+        assert!(why_not(Kind::Vulkan, None, Id::PRORES, || false).is_some());
+    }
+
+    #[test]
+    fn vulkans_frames_are_at_vulkans_place() {
+        assert_eq!(Kind::Vulkan.place(), Place::Vulkan);
+    }
+
+    #[test]
+    fn vulkan_is_named_vulkan() {
+        assert_eq!(Kind::named("vulkan"), Some(Kind::Vulkan));
+    }
+
+    #[test]
+    fn vulkan_is_labeled_vulkan() {
+        assert_eq!(Kind::Vulkan.label(), "Vulkan");
+    }
 
     #[test]
     fn a_vulkan_frame_turned_a_quarter_fits() {

@@ -533,14 +533,14 @@ impl Decoder {
     /// A reader of `p`'s pictures, decoding as asked last.
     fn new_reader(&mut self, p: &RenderPlan) -> VideoFrames {
         let frames = VideoFrames::new(&[], p.fps, p.width, p.height, format::Pixel::YUV420P, None);
-        let decoded = |keep_on_gpu| Output::Decoded { keep_on_gpu };
+        let decoded = |keep| Output::Decoded { keep };
         if !self.hardware {
             crate::debug!(
                 "player",
                 "a new reader decodes on the CPU: GPU decoding is off"
             );
             self.shared.decodes_on_cpu(Some("GPU decoding is off"));
-            return frames.output(decoded(false));
+            return frames.output(decoded(Vec::new()));
         }
         let gpu = self.gpu.get_or_insert_with(crate::hw::GpuDecoder::best);
         let Some(gpu) = gpu else {
@@ -549,29 +549,22 @@ impl Decoder {
                 "a new reader decodes on the CPU: no GPU decoder here"
             );
             self.shared.decodes_on_cpu(Some("no GPU decoder here"));
-            return frames.output(decoded(false));
+            return frames.output(decoded(Vec::new()));
         };
         self.shared.decodes_on_cpu(None);
         // The GPU's pictures may stay in video memory, which then has a
-        // budget of its own.
-        let shows = &self.shared.gpu_pictures;
-        let keep = shows.contains(&gpu.kind());
-        if keep {
-            crate::debug!(
-                "player",
-                "a new reader decodes on {gpu} where it can; its pictures stay in GPU memory"
-            );
-        } else {
-            crate::debug!(
-                "player",
-                "a new reader decodes on {gpu} where it can; its pictures come down to \
-                 memory: the viewer shows only {shows:?} pictures from GPU memory"
-            );
-        }
+        // budget of its own: those of the decoders the viewer shows from
+        // there (NVDEC's, say, while Vulkan's ProRes comes down).
+        let shows = self.shared.gpu_pictures.clone();
+        crate::debug!(
+            "player",
+            "a new reader decodes on {gpu} where it can; the viewer shows {shows:?} pictures \
+             from GPU memory, the rest come down to memory"
+        );
         if let Some(cuda) = gpu.cuda() {
             self.shared.gpu_found(cuda);
         }
-        frames.output(decoded(keep)).decode_on(gpu.clone())
+        frames.output(decoded(shows)).decode_on(gpu.clone())
     }
 
     /// Decodes timeline frame `t`, and on the way what is worth keeping:
