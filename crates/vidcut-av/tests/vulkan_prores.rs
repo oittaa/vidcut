@@ -2,8 +2,9 @@
 //! (NVIDIA's, FFmpeg 8.1 and later): its frames are the CPU decoder's,
 //! barcode and timestamp, read through and after seeks, and each comes
 //! down to memory once. A player keeps each decoder's pictures in GPU
-//! memory only where its display shows that decoder's. Skips where the GPU
-//! in use doesn't decode ProRes on Vulkan.
+//! memory only where its display shows that decoder's, and counts each
+//! picture it brings down: none where its display shows Vulkan's. Skips
+//! where the GPU in use doesn't decode ProRes on Vulkan.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -14,6 +15,7 @@ use vidcut_av::ffmpeg::codec::Id;
 use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
 use vidcut_av::hw::{GpuDecoder, Kind};
 use vidcut_av::player::{Config, Decoder, ManualOutput, Player};
+use vidcut_core::editor::Copied;
 use vidcut_core::render::{RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
 
@@ -125,4 +127,59 @@ fn a_player_keeps_nvdecs_pictures_on_the_gpu_and_brings_vulkans_down() {
     assert_eq!(prores.gpu(), None);
     let h264 = shown(15);
     assert_eq!(h264.gpu(), Some(Kind::Nvdec));
+}
+
+/// A player of the 10 frames of the ProRes fixture whose display shows the
+/// pictures of `shows` from GPU memory, each of its frames decoded: shown
+/// once.
+fn played_through(shows: Vec<Kind>) -> Player {
+    let plan = RenderPlan {
+        fps: Rational::new(30, 1).unwrap(),
+        width: 640,
+        height: 360,
+        sample_rate: 48_000,
+        channels: 2,
+        frames: 10,
+        video: vec![piece(clip(VideoCodec::ProRes422Hq, Container::Mov, 10), 10)],
+        audio: Vec::new(),
+        range: (0, 10),
+        name: "copies".into(),
+    };
+    let config = Config {
+        audio_scrubbing: false,
+        hardware: true,
+        gpu_pictures: shows,
+        ..Config::default()
+    };
+    let player = Player::new(plan, config, Box::new(ManualOutput::new())).unwrap();
+    for frame in 0..10 {
+        player.seek(frame);
+        assert!(player.wait_ready(frame, Duration::from_secs(20)));
+    }
+    player
+}
+
+#[test]
+fn a_player_whose_display_takes_no_vulkan_pictures_copies_each_prores_frame_down_once() {
+    let Some(gpu) = on_vulkan().filter(|g| g.kind() == Kind::Nvdec) else {
+        return;
+    };
+    let player = played_through(vec![gpu.kind()]);
+    // 640×360 at 4:2:2 in 16-bit samples: 921,600 bytes a frame.
+    let want = Copied {
+        down: 10,
+        down_bytes: 9_216_000,
+        up: 0,
+        up_bytes: 0,
+    };
+    assert_eq!(player.stats().copies, want);
+}
+
+#[test]
+fn a_player_whose_display_takes_vulkans_pictures_copies_none_of_them() {
+    let Some(gpu) = on_vulkan().filter(|g| g.kind() == Kind::Nvdec) else {
+        return;
+    };
+    let player = played_through(vec![gpu.kind(), Kind::Vulkan]);
+    assert_eq!(player.stats().copies, Copied::default());
 }

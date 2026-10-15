@@ -37,6 +37,9 @@ pub struct Gpu {
     /// Its CUDA device's index (NVIDIA's).
     #[serde(skip)]
     pub(crate) cuda: Option<i32>,
+    /// Its UUID, as CUDA gives it (NVIDIA's).
+    #[serde(skip)]
+    pub(crate) uuid: Option<[u8; 16]>,
     /// Its Direct3D 11 adapter's index (Windows).
     #[serde(skip)]
     pub(crate) adapter: Option<u32>,
@@ -143,6 +146,12 @@ pub fn in_use() -> Option<Gpu> {
 }
 
 impl Gpu {
+    /// Its UUID, as CUDA gives it: NVIDIA's only. The Vulkan device made
+    /// from its CUDA device has the same.
+    pub fn uuid(&self) -> Option<[u8; 16]> {
+        self.uuid
+    }
+
     /// Whether it has encoders of `kind`: NVENC on NVIDIA's, AMF on AMD's
     /// (Windows), QSV on Intel's, VAAPI on the others' render nodes (Linux),
     /// VideoToolbox on a Mac's; Vulkan on every listed one
@@ -214,6 +223,7 @@ fn listed() -> Vec<Gpu> {
             pci_vendor: desc.VendorId,
             slot,
             cuda: None,
+            uuid: None,
             adapter: Some(i),
             node: None,
         });
@@ -309,6 +319,7 @@ fn listed() -> Vec<Gpu> {
             pci_vendor: vendor,
             slot,
             cuda: None,
+            uuid: None,
             adapter: None,
             node: Some(node),
         });
@@ -367,6 +378,7 @@ fn with_cuda(gpus: &mut Vec<Gpu>, cuda: &[crate::cuda::Listed]) {
         };
         if let Some(c) = found {
             g.cuda = Some(c.index);
+            g.uuid = c.uuid;
             g.name = c.name.clone();
         }
     }
@@ -383,6 +395,7 @@ fn with_cuda(gpus: &mut Vec<Gpu>, cuda: &[crate::cuda::Listed]) {
             pci_vendor: NVIDIA,
             slot: c.slot,
             cuda: Some(c.index),
+            uuid: c.uuid,
             adapter: None,
             node: None,
         });
@@ -411,6 +424,7 @@ mod tests {
             pci_vendor: vendor,
             slot,
             cuda: None,
+            uuid: None,
             adapter: None,
             node: None,
         }

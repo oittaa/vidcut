@@ -129,6 +129,7 @@ struct Decoder {
 
 pub(crate) fn run(shared: Arc<Shared>) {
     let _cancel = crate::cancel::Guard::set(shared.interrupt.clone());
+    let _counting = crate::copies::Guard::set(shared.copies.clone());
     let Some(first) = shared.snap() else { return };
     let p = &first.plan.plan;
     let mut d = Decoder {

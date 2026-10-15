@@ -22,6 +22,8 @@ mod tiles;
 mod timeline;
 mod video;
 mod viewer;
+#[cfg(any(target_os = "linux", windows))]
+mod vulkan;
 pub mod workspace;
 
 use std::path::PathBuf;

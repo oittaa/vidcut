@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 vidcut-core.workspace = true
+ash.workspace = true
 ffmpeg-next.workspace = true
 thiserror.workspace = true
 serde.workspace = true

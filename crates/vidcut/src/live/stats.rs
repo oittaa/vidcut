@@ -85,6 +85,18 @@ pub struct PlaybackStats {
     pub frames: u64,
     pub late: u64,
     pub skipped: u64,
+    /// Frames copied from GPU memory down to memory, and from memory up to
+    /// the GPU, since the player started: by its decoder and the viewer. A
+    /// switch of decoder keeps counting.
+    pub copied_down: CopiedStats,
+    pub copied_up: CopiedStats,
+}
+
+/// Frames copied one way, and their bytes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CopiedStats {
+    pub frames: u64,
+    pub bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -179,6 +191,14 @@ impl PlayerStats {
                 frames: s.frames,
                 late: s.late,
                 skipped: s.skipped,
+                copied_down: CopiedStats {
+                    frames: s.copies.down,
+                    bytes: s.copies.down_bytes,
+                },
+                copied_up: CopiedStats {
+                    frames: s.copies.up,
+                    bytes: s.copies.up_bytes,
+                },
             },
             kept: KeptStats {
                 ahead: s.ahead,
@@ -280,10 +300,13 @@ impl ViewerStats {
 
 impl PlaybackStats {
     fn rows(&self) -> Vec<(&'static str, String)> {
+        let copied = |c: CopiedStats| format!("{} frames, {} MB", c.frames, c.bytes >> 20);
         vec![
             ("Shown", format!("{} frames", self.frames)),
             ("Late", self.late.to_string()),
             ("Skipped", self.skipped.to_string()),
+            ("Copied down", copied(self.copied_down)),
+            ("Copied up", copied(self.copied_up)),
         ]
     }
 }

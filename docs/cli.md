@@ -136,7 +136,7 @@ vidcut history undo                         # works across separate runs
 
 | Command | What |
 |---|---|
-| `vidcut player state` | viewer mode, both playheads and whether each one's picture is decoded (`ready`; the one not shown is kept ready, so switching shows it at once), the source clip, selection, what decodes (`hwdec`); at the top, the audio device (`audio_device`, `audio_error`), the viewer's late presents and skipped frames while playing (`late`, `skipped`) |
+| `vidcut player state` | viewer mode, both playheads and whether each one's picture is decoded (`ready`; the one not shown is kept ready, so switching shows it at once), the source clip, selection, what decodes (`hwdec`); at the top, the audio device (`audio_device`, `audio_error`), the viewer's late presents and skipped frames while playing (`late`, `skipped`); in `stats.playback`, the frames copied down from GPU memory and up to it since the player started, with their bytes (`copied_down`, `copied_up`), which a switch of decoder doesn't reset |
 | `vidcut player seek 10s [--viewer timeline\|source_clip\|source_tape]` | returns once the frame is on screen (`CONFLICT` if someone moved the viewer first); `+10f`/`-2s` are relative |
 | `vidcut player step [-]N`, `player play [--speed -2]`, `player pause`, `player toggle` | negative speeds play backwards, the sound reversed; other speeds keep its pitch |
 | `vidcut viewer set source_clip\|source_tape\|timeline`, `viewer load m1 [--at 5s]` | what the viewer shows |
