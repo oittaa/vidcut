@@ -518,8 +518,15 @@ fn peak(s: &Samples, r: &Reading) -> [f32; 3] {
     if hdr { r.light(most) } else { maxscl }
 }
 
-/// `f`'s samples and how they read, for a picture in a layout a display
-/// takes (`export::normalize::Relayout`).
+/// The layouts [`reading`] reads: 4:2:0 in 8 bits and P010. Pictures in
+/// others are brought to them (`export::normalize::Relayout`).
+fn readable(p: format::Pixel) -> bool {
+    use format::Pixel as P;
+    matches!(p, P::P010LE | P::NV12 | P::YUV420P | P::YUVJ420P)
+}
+
+/// `f`'s samples and how they read, for a picture in a layout it reads
+/// ([`readable`]).
 fn reading(f: &frame::Video) -> Result<(Samples<'_>, Reading)> {
     let (bits, semi) = match f.format() {
         format::Pixel::P010LE => (10, true),
@@ -616,7 +623,7 @@ fn measure(
     let threads = std::thread::available_parallelism().map_or(2, |n| n.get().clamp(2, 4));
     let (mut frames, ended) = on_threads(
         threads,
-        crate::export::normalize::Relayout::new,
+        || crate::export::normalize::Relayout::passing(readable),
         |give| {
             while let Some(f) = reader.next_frame()? {
                 if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
@@ -852,7 +859,7 @@ pub(crate) struct Meter(crate::export::normalize::Relayout);
 
 impl Meter {
     pub(crate) fn new() -> Self {
-        Self(crate::export::normalize::Relayout::new())
+        Self(crate::export::normalize::Relayout::passing(readable))
     }
 
     /// `f` stays as it is: a layout to convert goes through a filter, which
@@ -884,5 +891,13 @@ mod tests {
         let fail =
             |_: &mut (), _: u32| -> Result<u32> { Err(Error::Invalid("unmeasurable".into())) };
         assert!(on_threads(2, || (), feed, fail).is_err());
+    }
+
+    #[test]
+    fn a_4_2_2_picture_is_measured_in_p010() {
+        let prores = frame::Video::new(format::Pixel::YUV422P10LE, 64, 64);
+        let mut relayout = crate::export::normalize::Relayout::passing(readable);
+        let measured = relayout.run(&prores).unwrap();
+        assert_eq!(measured.format(), format::Pixel::P010LE);
     }
 }

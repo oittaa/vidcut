@@ -50,6 +50,8 @@ pub enum VideoCodec {
     Hevc10,
     /// prores_ks HQ, 10-bit 4:2:2, intra-only.
     ProRes422Hq,
+    /// dnxhd as DNxHR HQ, 8-bit 4:2:2, intra-only.
+    DnxHrHq,
     /// libvpx-vp9, 8-bit 4:2:0.
     Vp9,
     /// FFV1, lossless 8-bit 4:2:0, intra-only.
@@ -64,6 +66,7 @@ impl VideoCodec {
             Self::H264 => "h264",
             Self::Hevc10 => "hevc10",
             Self::ProRes422Hq => "prores",
+            Self::DnxHrHq => "dnxhr",
             Self::Vp9 => "vp9",
             Self::Ffv1 => "ffv1",
             Self::Av1 => "av1",
@@ -75,6 +78,7 @@ impl VideoCodec {
             Self::H264 => "libx264",
             Self::Hevc10 => "libx265",
             Self::ProRes422Hq => "prores_ks",
+            Self::DnxHrHq => "dnxhd",
             Self::Vp9 => "libvpx-vp9",
             Self::Ffv1 => "ffv1",
             Self::Av1 => "libsvtav1",
@@ -86,11 +90,12 @@ impl VideoCodec {
             Self::H264 | Self::Vp9 | Self::Ffv1 => format::Pixel::YUV420P,
             Self::Hevc10 | Self::Av1 => format::Pixel::YUV420P10LE,
             Self::ProRes422Hq => format::Pixel::YUV422P10LE,
+            Self::DnxHrHq => format::Pixel::YUV422P,
         }
     }
 
     fn intra_only(self) -> bool {
-        matches!(self, Self::ProRes422Hq | Self::Ffv1)
+        matches!(self, Self::ProRes422Hq | Self::DnxHrHq | Self::Ffv1)
     }
 }
 
@@ -184,17 +189,34 @@ impl Picture {
 }
 
 /// Chroma plane `p` (1: Cb, 2: Cr) of `f` painted with the stripes of
-/// [`Picture::Colors`], each sample written as `bytes` gives it.
-fn paint_chroma<const N: usize>(f: &mut frame::Video, p: usize, bytes: impl Fn(u8) -> [u8; N]) {
+/// [`Picture::Colors`], stored turned against `rotation` as the luma is,
+/// each sample written as `bytes` gives it.
+fn paint_chroma<const N: usize>(
+    f: &mut frame::Video,
+    p: usize,
+    rotation: u16,
+    bytes: impl Fn(u8) -> [u8; N],
+) {
+    let (lw, lh) = (f.width() as usize, f.height() as usize);
     let (w, h, stride) = (
         f.plane_width(p) as usize,
         f.plane_height(p) as usize,
         f.stride(p),
     );
+    // The upright picture's width: a quarter turn swaps the sides.
+    let upright = if rotation % 180 == 90 { lh } else { lw };
     let data = f.data_mut(p);
     for y in 0..h {
         for x in 0..w {
-            let (_, cb, cr) = Picture::COLORS[x * 4 / w];
+            // The first luma sample this one covers, and where it shows.
+            let (sx, sy) = (x * lw.div_ceil(w), y * lh.div_ceil(h));
+            let shown = match rotation {
+                90 => upright - 1 - sy,
+                180 => upright - 1 - sx,
+                270 => sy,
+                _ => sx,
+            };
+            let (_, cb, cr) = Picture::COLORS[shown * 4 / upright];
             let at = y * stride + N * x;
             data[at..at + N].copy_from_slice(&bytes(if p == 1 { cb } else { cr }));
         }
@@ -965,6 +987,7 @@ impl VideoTrack {
                 );
             }
             VideoCodec::ProRes422Hq => opts.set("profile", "3"),
+            VideoCodec::DnxHrHq => opts.set("profile", "dnxhr_hq"),
             VideoCodec::Vp9 => {
                 opts.set("deadline", "realtime");
                 opts.set("cpu-used", "8");
@@ -1128,7 +1151,9 @@ impl VideoTrack {
                     *px = 512u16.to_le_bytes();
                 }
                 if spec.picture == Picture::Colors {
-                    paint_chroma(&mut frame, p, |c| (u16::from(c) << 2).to_le_bytes());
+                    paint_chroma(&mut frame, p, spec.rotation, |c| {
+                        (u16::from(c) << 2).to_le_bytes()
+                    });
                 }
             }
         } else {
@@ -1140,7 +1165,7 @@ impl VideoTrack {
             for p in 1..frame.planes() {
                 frame.data_mut(p).fill(128);
                 if spec.picture == Picture::Colors {
-                    paint_chroma(&mut frame, p, |c| [c]);
+                    paint_chroma(&mut frame, p, spec.rotation, |c| [c]);
                 }
             }
         }

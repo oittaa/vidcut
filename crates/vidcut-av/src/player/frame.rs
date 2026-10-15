@@ -20,6 +20,28 @@ pub enum Layout {
     Nv12,
     /// 10 bits in the high bits of 16, 4:2:0, U and V interleaved.
     P010,
+    /// 10 bits in the low bits of 16, 4:2:0, a plane each.
+    Yuv420p10,
+    /// 8-bit 4:2:2, a plane each.
+    Yuv422p,
+    /// 10 bits in the low bits of 16, 4:2:2, a plane each.
+    Yuv422p10,
+}
+
+impl Layout {
+    /// The layout of pictures in `p`, a format a display takes
+    /// (`normalize::displayable`). 8-bit 4:2:0 for any other.
+    pub(crate) fn of(p: format::Pixel) -> Self {
+        use format::Pixel as P;
+        match p {
+            P::NV12 => Self::Nv12,
+            P::P010LE => Self::P010,
+            P::YUV420P10LE => Self::Yuv420p10,
+            P::YUV422P | P::YUVJ422P => Self::Yuv422p,
+            P::YUV422P10LE => Self::Yuv422p10,
+            _ => Self::Yuv420p,
+        }
+    }
 }
 
 /// A decoded picture, as the export's sampling rule picks it: at its own
@@ -89,11 +111,7 @@ impl Picture {
 
     /// The samples' layout; for a GPU surface, that of its frames context.
     pub fn layout(&self) -> Layout {
-        match crate::hw::sw_format(&self.frame) {
-            format::Pixel::NV12 => Layout::Nv12,
-            format::Pixel::P010LE => Layout::P010,
-            _ => Layout::Yuv420p,
-        }
+        Layout::of(crate::hw::sw_format(&self.frame))
     }
 
     /// How its samples are read to get BT.709 RGB (matrix, range, HDR).
@@ -207,4 +225,30 @@ pub struct Shown {
     /// The picture is that frame's. `false`: the frame isn't decoded yet,
     /// and this is the picture shown before it.
     pub exact: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Layout;
+    use crate::ffmpeg::format::Pixel;
+
+    #[test]
+    fn yuv420p10le_pictures_are_10_bit_planar_4_2_0() {
+        assert_eq!(Layout::of(Pixel::YUV420P10LE), Layout::Yuv420p10);
+    }
+
+    #[test]
+    fn yuv422p_pictures_are_8_bit_planar_4_2_2() {
+        assert_eq!(Layout::of(Pixel::YUV422P), Layout::Yuv422p);
+    }
+
+    #[test]
+    fn full_range_yuvj422p_pictures_are_8_bit_planar_4_2_2() {
+        assert_eq!(Layout::of(Pixel::YUVJ422P), Layout::Yuv422p);
+    }
+
+    #[test]
+    fn yuv422p10le_pictures_are_10_bit_planar_4_2_2() {
+        assert_eq!(Layout::of(Pixel::YUV422P10LE), Layout::Yuv422p10);
+    }
 }

@@ -5,7 +5,7 @@
 //! cargo run -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 60 600
 //! cargo run -p vidcut-av --example make_fixture -- h264 mov 320x180 25 50 tc=10:00:00:00
 //! ```
-//! CODEC: h264 hevc10 prores vp9 ffv1; CONTAINER: mp4 mov mkv ts webm; FPS like 30 or 30000/1001.
+//! CODEC: h264 hevc10 prores dnxhr vp9 ffv1 av1; CONTAINER: mp4 mov mkv ts webm; FPS like 30 or 30000/1001.
 
 use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
 
@@ -19,6 +19,7 @@ fn main() {
         "h264" => VideoCodec::H264,
         "hevc10" => VideoCodec::Hevc10,
         "prores" => VideoCodec::ProRes422Hq,
+        "dnxhr" => VideoCodec::DnxHrHq,
         "vp9" => VideoCodec::Vp9,
         "ffv1" => VideoCodec::Ffv1,
         "av1" => VideoCodec::Av1,
