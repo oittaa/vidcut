@@ -219,8 +219,8 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Dissolve",
         Some(
             "A one-second dissolve on the selected cut, or the one nearest the playhead: one \
-             picture fades out as the next fades in, and the sound cross fades. Next to a gap \
-             it fades from or to black. It is shorter where the clips have fewer frames past \
+             picture fades out as the next fades in. Where the clips' sounds meet at the cut, \
+             they cross fade. Next to a gap it fades from or to black. It is shorter where the clips have fewer frames past \
              the cut. U picks whether it ends on the cut, starts on it or sits across it.",
         ),
     ),
