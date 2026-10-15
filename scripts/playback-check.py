@@ -122,15 +122,17 @@ def steps(gui, start, n, by):
     return times
 
 
-def dynamic_runs(gui):
+def dynamic_on(gui):
     gui.run("player", "seek", "78f")
     gui.run("gui", "dynamic-trim", "--on", "true")
     gui.wait(two_up_exact)
-    for speed, secs in ((1, 1.0), (-1, 1.0), (2, 0.5), (-2, 0.5)):
-        gui.run("gui", "dynamic-trim", f"--run={speed}")
-        time.sleep(secs)
-        gui.run("gui", "dynamic-trim", "--run=0")
-        gui.wait(two_up_exact)
+
+
+def dynamic_run(gui, speed, secs):
+    gui.run("gui", "dynamic-trim", f"--run={speed}")
+    time.sleep(secs)
+    gui.run("gui", "dynamic-trim", "--run=0")
+    gui.wait(two_up_exact)
 
 
 def dynamic_steps(gui, by):
@@ -149,7 +151,11 @@ MOVES = [
     ("jump and play", jumps),
     ("step forward", lambda g: steps(g, 60, 30, 1)),
     ("step backward", lambda g: steps(g, 110, 30, -1)),
-    ("Dynamic Trim runs", dynamic_runs),
+    ("Dynamic Trim on", dynamic_on),
+    ("Dynamic Trim run +1x", lambda g: dynamic_run(g, 1, 1.0)),
+    ("Dynamic Trim run -1x", lambda g: dynamic_run(g, -1, 1.0)),
+    ("Dynamic Trim run +2x", lambda g: dynamic_run(g, 2, 0.5)),
+    ("Dynamic Trim run -2x", lambda g: dynamic_run(g, -2, 0.5)),
     ("Dynamic Trim steps +1", lambda g: dynamic_steps(g, 1)),
     ("Dynamic Trim steps -1", lambda g: dynamic_steps(g, -1)),
 ]

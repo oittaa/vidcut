@@ -574,8 +574,7 @@ impl Shared {
         f(&mut ctl, pos, sample);
         if video {
             ctl.version += 1;
-            let playing =
-                was_playing || matches!(ctl.mode, Mode::Playing { .. }) || ctl.motion != 0.0;
+            let playing = was_playing || matches!(ctl.mode, Mode::Playing { .. });
             let target = match ctl.mode {
                 Mode::Paused { at } => at,
                 Mode::Playing { from, .. } => ctl.plan.frame_at_sample(from),
