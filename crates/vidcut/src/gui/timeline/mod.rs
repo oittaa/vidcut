@@ -10,6 +10,8 @@ pub mod gesture;
 pub mod paint;
 pub mod tools;
 
+use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Align2, Color32, FontId, Key, Pos2, Rect, RichText, Sense, pos2, vec2};
@@ -66,7 +68,7 @@ pub(crate) fn audio_edit_outgoing(t: &Track, at: i64) -> Option<String> {
 pub struct SentTrim {
     /// The revision once all of them have landed: each makes one.
     until: u64,
-    project: Project,
+    project: Arc<Project>,
     since: std::time::Instant,
 }
 
@@ -226,6 +228,8 @@ pub struct TimelineView {
     /// The track shown enlarged in the lower timeline (decision D43), if
     /// any.
     pub enlarged: Option<String>,
+    /// Where the transitions of the project shown sit, found once for it.
+    pub placed: Option<(Arc<Project>, Arc<paint::Placed>)>,
 }
 
 impl Default for TimelineView {
@@ -251,7 +255,22 @@ impl Default for TimelineView {
             tracks: 0,
             rev: 0,
             sent_trim: None,
+            placed: None,
         }
+    }
+}
+
+impl TimelineView {
+    /// [`paint::placed`] of `p`, found again only for another project.
+    fn placed_for(&mut self, p: &Arc<Project>) -> Arc<paint::Placed> {
+        if let Some((q, placed)) = &self.placed
+            && Arc::ptr_eq(q, p)
+        {
+            return placed.clone();
+        }
+        let placed = Arc::new(paint::placed(p));
+        self.placed = Some((p.clone(), placed.clone()));
+        placed
     }
 }
 
@@ -388,15 +407,15 @@ impl Workspace {
     }
 
     /// The project as shown: with the trims on their way.
-    pub(crate) fn shown_project(&mut self) -> Option<Project> {
-        let p = self.project()?;
+    pub(crate) fn shown_project(&mut self) -> Option<Arc<Project>> {
+        let p = self.project_shared()?;
         if let Some(s) = &self.timeline.sent_trim {
             if p.rev < s.until && s.since.elapsed() < std::time::Duration::from_secs(1) {
                 return Some(s.project.clone());
             }
             self.timeline.sent_trim = None;
         }
-        self.project().cloned()
+        Some(p)
     }
 
     /// Records a trim just sent, as `trimmed` leaves the project shown.
@@ -408,7 +427,7 @@ impl Workspace {
         };
         self.timeline.sent_trim = Some(SentTrim {
             until,
-            project: trimmed,
+            project: Arc::new(trimmed),
             since: std::time::Instant::now(),
         });
     }
@@ -490,8 +509,17 @@ impl Workspace {
         let trimmed = self.dynamic_drawn(&p);
         let (drawn, edit_at) = match &trimmed {
             Some((q, at)) => (q, *at),
-            None => (&p, None),
+            None => (&*p, None),
         };
+        // Found again only for another project, or each frame while
+        // Dynamic Trim redraws it.
+        let placed = match &trimmed {
+            Some((q, _)) => Arc::new(paint::placed(q)),
+            None => self.timeline.placed_for(&p),
+        };
+        let none = Vec::new();
+        let placed_on = |t: &Track| placed.get(&t.id).unwrap_or(&none);
+        let pool = drawn.pool();
         let thumbs = std::mem::take(&mut self.thumbs);
         let tiles = self.tiles.take();
         let (waveforms, missing) = (self.snap.waveforms.clone(), self.snap.missing.clone());
@@ -500,10 +528,17 @@ impl Workspace {
             waveforms: &waveforms,
             tiles: tiles.as_ref(),
             missing: &missing,
+            pool: &pool,
         };
         let look = self.look();
         let smart = (end > 0).then(|| ops::nearest_edit(drawn, playhead));
-        let selected = self.snap.selection.clips.clone();
+        let selected: HashSet<&str> = self
+            .snap
+            .selection
+            .clips
+            .iter()
+            .map(String::as_str)
+            .collect();
         {
             let painter = ui.painter_at(upper_rect);
             paint::ruler(&painter, upper_ruler, &upper_scale, drawn, smart, true);
@@ -528,6 +563,7 @@ impl Workspace {
                     &selected,
                     &assets,
                     compact,
+                    placed_on(t),
                 );
             }
             self.paint_boring(&painter, &layout.upper, &upper_scale, drawn);
@@ -590,6 +626,7 @@ impl Workspace {
                     &selected,
                     &assets,
                     look,
+                    placed_on(t),
                 );
             }
             if let Some(e) = self.timeline.edit
@@ -1933,7 +1970,7 @@ impl Workspace {
     /// Edit selection and keyboard trimming (`,`/`.` from the Edit
     /// page nudge the selected edit one frame, Shift for one second).
     pub(crate) fn timeline_keys(&mut self, input: &egui::InputState) {
-        let Some(p) = self.project().cloned() else {
+        let Some(p) = self.project_shared() else {
             return;
         };
         let pressed = |k: Key| input.key_pressed(k);
@@ -2010,7 +2047,7 @@ impl Workspace {
             let Some(id) = audio_edit_outgoing(t, e.at) else {
                 return;
             };
-            let mut q = p.clone();
+            let mut q = Project::clone(&p);
             let tried = ops::audio_roll(&mut q, &id, Edge::Tail, by);
             self.send(
                 "edit.audio_roll",
@@ -2048,7 +2085,7 @@ impl Workspace {
             _ => return,
         };
         let id = params["clip"].as_str().unwrap_or_default().to_string();
-        let mut q = p.clone();
+        let mut q = Project::clone(&p);
         let tried = match (method, &params["edge"]) {
             ("edit.roll", _) => ops::roll(&mut q, &id, Edge::Tail, by),
             (_, edge) if edge == "head" => ops::trim(&mut q, &id, Edge::Head, by, None),

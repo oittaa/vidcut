@@ -261,26 +261,28 @@ impl Workspace {
         let view = &snap.pool;
         let needle = self.search.to_lowercase();
         let searching = !needle.is_empty();
-        let (folders, media): (Vec<String>, Vec<Media>) = match project {
-            Some(p) => (
-                p.bins
-                    .iter()
-                    .filter(|b| !searching && parent(b) == view.bin)
-                    .cloned()
-                    .collect(),
-                view.media(p)
-                    .iter()
-                    .filter_map(|id| p.media(id))
-                    .filter(|m| {
-                        if searching {
-                            m.name.to_lowercase().contains(&needle)
-                        } else {
-                            m.bin == view.bin
-                        }
-                    })
-                    .cloned()
-                    .collect(),
-            ),
+        let (folders, media): (Vec<String>, Vec<&Media>) = match project {
+            Some(p) => {
+                let pool = p.pool();
+                (
+                    p.bins
+                        .iter()
+                        .filter(|b| !searching && parent(b) == view.bin)
+                        .cloned()
+                        .collect(),
+                    view.media(p)
+                        .iter()
+                        .filter_map(|id| pool.get(id.as_str()).copied())
+                        .filter(|m| {
+                            if searching {
+                                m.name.to_lowercase().contains(&needle)
+                            } else {
+                                m.bin == view.bin
+                            }
+                        })
+                        .collect(),
+                )
+            }
             None => Default::default(),
         };
         self.bins.order = media.iter().map(|m| m.id.clone()).collect();
@@ -889,7 +891,7 @@ impl Workspace {
         )
     }
 
-    fn list(&mut self, ui: &mut egui::Ui, p: &Project, folders: &[String], media: &[Media]) {
+    fn list(&mut self, ui: &mut egui::Ui, p: &Project, folders: &[String], media: &[&Media]) {
         egui::Grid::new("pool-list")
             .striped(true)
             .num_columns(8)
@@ -1110,7 +1112,7 @@ impl Workspace {
                     ui.close();
                 }
             });
-            if let Some(p) = self.project().cloned() {
+            if let Some(p) = self.project_shared() {
                 ui.menu_button("Move to Bin", |ui| {
                     for (path, depth) in bin_list(&p) {
                         let text = format!("{}{}", "    ".repeat(depth), bin_name(&path));

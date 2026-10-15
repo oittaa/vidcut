@@ -12,7 +12,6 @@
 //! `origin + (source_frame + j) / fps − ½ frame`, i.e. the nearest source
 //! frame, ties to the later one. Frame-exact for sources at the project rate.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
@@ -302,11 +301,6 @@ fn found<'a>(m: Option<&'a Media>, id: &str) -> Result<&'a Media> {
     m.ok_or_else(|| Error::not_found(format!("no media {id}")))
 }
 
-/// The pool's items by id, found once for a whole plan.
-fn pool_of(p: &Project) -> HashMap<&str, &Media> {
-    p.media.iter().map(|m| (m.id.as_str(), m)).collect()
-}
-
 /// [`Project::media_origin`] of `m`.
 fn origin_of(m: &Media) -> (PathBuf, f64) {
     let origin = m
@@ -466,7 +460,7 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
     }
     let expanded = expanded(p);
     let p = expanded.as_ref().unwrap_or(p);
-    let pool = pool_of(p);
+    let pool = p.pool();
     let s = &p.settings;
     let sample = |t: i64| s.fps.frame_to_sample(t - a, s.sample_rate);
 
@@ -705,7 +699,7 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
     let s = &p.settings;
     let sample = |t: i64| s.fps.frame_to_sample(t, s.sample_rate);
     let (mut video, mut lane, mut entries) = (Vec::new(), Vec::new(), Vec::new());
-    let pool = pool_of(p);
+    let pool = p.pool();
     let mut t = 0;
     for id in media {
         let m = found(pool.get(id.as_str()).copied(), id)?;

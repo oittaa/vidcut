@@ -336,9 +336,10 @@ impl Workspace {
     /// edit (or of the slipped or sliding clip) as the trim so far leaves them.
     fn dynamic_view(&mut self, ui: &mut egui::Ui, area: Rect, aspect: f32) {
         use crate::gui::timeline::tools::{DynamicTarget, dynamic_preview};
-        let (Some(target), Some(mut p)) = (self.dynamic_target(), self.shown_project()) else {
+        let (Some(target), Some(p)) = (self.dynamic_target(), self.shown_project()) else {
             return;
         };
+        let mut p = Project::clone(&p);
         let pending = self.timeline.dynamic.as_ref().map_or(0, |d| d.pending);
         let mode = self.timeline.options.dynamic_mode;
         let Ok((left, right)) = dynamic_preview(&mut p, &target, mode, pending) else {

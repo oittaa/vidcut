@@ -595,7 +595,8 @@ impl Workspace {
             let mut last = d.pending;
             let step = if want > last { 1 } else { -1 };
             while last != want {
-                if let Err(e) = dynamic_preview(&mut p.clone(), &target, mode, last + step) {
+                if let Err(e) = dynamic_preview(&mut Project::clone(&p), &target, mode, last + step)
+                {
                     d.run = None;
                     d.stopped = Some(e.message);
                     break;

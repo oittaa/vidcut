@@ -7,6 +7,7 @@
 //! media's first video frame.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -840,6 +841,13 @@ pub struct ClipAudio {
 }
 
 impl Clip {
+    /// The Clip Color it shows: its own, else that of `media`, its media.
+    pub fn shown_color<'a>(&'a self, media: Option<&'a Media>) -> Option<&'a str> {
+        self.color
+            .as_deref()
+            .or_else(|| media.and_then(|m| m.color.as_deref()))
+    }
+
     /// Whether it is a generator or title from another editor, without
     /// media.
     pub fn is_generator(&self) -> bool {
@@ -1099,6 +1107,11 @@ impl Project {
         self.media.iter().find(|m| m.id == id)
     }
 
+    /// The pool's items by id, for finding many of them.
+    pub fn pool(&self) -> HashMap<&str, &Media> {
+        self.media.iter().map(|m| (m.id.as_str(), m)).collect()
+    }
+
     /// Finds a clip by id: (track index, clip index).
     pub fn find_clip(&self, id: &str) -> Option<(usize, usize)> {
         self.tracks
@@ -1113,9 +1126,7 @@ impl Project {
 
     /// The Clip Color clip `c` shows: its own, else its media's.
     pub fn clip_color<'a>(&'a self, c: &'a Clip) -> Option<&'a str> {
-        c.color
-            .as_deref()
-            .or_else(|| self.media(&c.media).and_then(|m| m.color.as_deref()))
+        c.shown_color(self.media(&c.media))
     }
 
     /// End of the program: the latest clip end (video or audio) on any track.

@@ -63,6 +63,16 @@ impl Scale {
     }
 }
 
+/// Whether something drawn from frame `span.0` to `span.1` needn't be: it
+/// is thinner than a pixel, and so is the `next` one, which starts in the
+/// same pixel column and is drawn over it. The upper timeline shows
+/// thousands of clips and transitions that thin.
+pub fn covered(scale: &Scale, span: (i64, i64), next: Option<(i64, i64)>) -> bool {
+    let thin = |(a, b): (i64, i64)| scale.xf(b) - scale.xf(a) < 1.0;
+    let column = |(a, _): (i64, i64)| scale.xf(a).floor();
+    thin(span) && next.is_some_and(|n| thin(n) && column(n) == column(span))
+}
+
 /// Where a track is drawn: the video band above the audio band.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TrackRect {
@@ -557,6 +567,30 @@ mod tests {
             speed: None,
             color: None,
         }
+    }
+
+    /// A tenth of a pixel per frame from x = 0.
+    const THIN: Scale = Scale {
+        origin: 0.0,
+        ppf: 0.1,
+    };
+
+    #[test]
+    fn a_thin_clip_is_covered_by_the_next_in_its_pixel() {
+        // x 0..0.5, then 0.5..0.9.
+        assert!(covered(&THIN, (0, 5), Some((5, 9))));
+    }
+
+    #[test]
+    fn the_last_thin_clip_in_its_pixel_is_drawn() {
+        // x 0.5..1, then 1..1.5: the next pixel.
+        assert!(!covered(&THIN, (5, 10), Some((10, 15))));
+    }
+
+    #[test]
+    fn a_clip_a_pixel_wide_is_drawn() {
+        // x 0..1, then 1..1.5.
+        assert!(!covered(&THIN, (0, 10), Some((10, 15))));
     }
 
     fn track() -> Track {
