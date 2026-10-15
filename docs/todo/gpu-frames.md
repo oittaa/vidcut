@@ -74,7 +74,7 @@ What a test can't settle is written as a fact with its source. For example, FFmp
 ## Steps
 
 Each step is measured against the step before it on the RTX 4080 SUPER, the Radeon iGPU, the N150 and the M4. The measurement takes the same clips, the same run and a release build. It gives the frames copied each way, from the result's `copies`, and the CPU time first, then the time, which only has to stay fast enough.
-1. **Vulkan as a backend** (libplacebo) for colors and HDR where a GPU's own fitting lacks them, as NVIDIA's path already uses it. FFmpeg makes its Vulkan device from VA-API, DRM and CUDA devices only, so VA-API's frames can go to it through FFmpeg. Direct3D 11's need an import of vidcut's own, as the viewer has (gui/picture.rs).
+1. **Vulkan as a backend** (libplacebo) for colors and HDR where a GPU's own fitting lacks them, as NVIDIA's path already uses it. FFmpeg makes its Vulkan device from VA-API, DRM and CUDA devices only, so VA-API's frames can go to it through FFmpeg. Direct3D 11's need an import of vidcut's own, as the viewer has (gui/picture.rs). Its first piece makes ProRes proxies and decodes ProRes on NVIDIA's Vulkan device: [vulkan-decode.md](vulkan-decode.md).
 
 ## Tests
 
