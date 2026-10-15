@@ -25,17 +25,18 @@ pub struct Preferences {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Appearance {
-    /// The theme, by name: a built-in one (`starship`, the default, `neon`,
-    /// `cybertruck`, `midnight`, `studio`, `native-dark`, `native-light`,
-    /// `classic`) or a theme file's in the themes folder. A path to a
-    /// `.toml` file copies it into that folder and uses it.
+    /// The theme, by name: a built-in one (`native`, the default, light or
+    /// dark as the computer is set, `starship`, `neon`, `cybertruck`,
+    /// `midnight`, `studio`, `native-dark`, `native-light`, `classic`) or a
+    /// theme file's in the themes folder. A path to a `.toml` file copies it
+    /// into that folder and uses it.
     pub theme: String,
 }
 
 impl Default for Appearance {
     fn default() -> Self {
         Self {
-            theme: "starship".into(),
+            theme: "native".into(),
         }
     }
 }

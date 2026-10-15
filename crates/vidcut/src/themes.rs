@@ -3,6 +3,7 @@
 //! (`~/.config/vidcut/themes`) as `NAME.toml`, and one there replaces a
 //! built-in of the same name. A theme file lists what it changes. The rest
 //! comes from the theme it `extends`, Starship unless it names another.
+//! Native is the default.
 //! A color written `system` is the computer's accent color (`look.rs`).
 
 use std::path::{Path, PathBuf};
@@ -15,8 +16,13 @@ use vidcut_core::{Error, Result};
 use crate::look::Look;
 use crate::paths::config_dir;
 
-/// The theme a new install starts with, and the base of the others.
-pub const DEFAULT: &str = "starship";
+/// The theme a new install starts with, and the one shown when the chosen
+/// one doesn't load.
+pub const DEFAULT: &str = "native";
+
+/// The theme the others extend unless they name another. Its file has
+/// every key.
+pub const BASE: &str = "starship";
 
 /// The built-in themes by name, in the order they are listed.
 const BUILT_IN: &[(&str, &str)] = &[
@@ -285,10 +291,11 @@ fn check_name(name: &str) -> Result<()> {
     }
 }
 
-/// The default theme, for whatever can't load the one chosen.
+/// The default theme as it showed first, for what paints before the
+/// session's theme comes.
 pub fn default_theme() -> &'static Theme {
     static THEME: OnceLock<Theme> = OnceLock::new();
-    THEME.get_or_init(|| load(DEFAULT).expect("the default theme loads"))
+    THEME.get_or_init(|| shown(DEFAULT).expect("the default theme loads"))
 }
 
 /// The theme called `name`: the user's file of that name, else the
@@ -327,7 +334,7 @@ fn load_from(name: &str, depth: usize, look: &Look) -> Result<Theme> {
     }
 }
 
-/// The built-in theme called `name`. The default one has every key and
+/// The built-in theme called `name`. The base one has every key and
 /// extends none.
 fn builtin(name: &str, depth: usize, look: &Look) -> Result<Theme> {
     let Some((_, text)) = BUILT_IN.iter().find(|(n, _)| *n == name) else {
@@ -335,7 +342,7 @@ fn builtin(name: &str, depth: usize, look: &Look) -> Result<Theme> {
             "there is no theme called {name:?}. `vidcut preferences get` lists them"
         )));
     };
-    let theme = if name == DEFAULT {
+    let theme = if name == BASE {
         toml::from_str(text).map_err(|e| e.to_string())
     } else {
         parse(text, name, depth, look)
@@ -350,7 +357,7 @@ fn parse(text: &str, name: &str, depth: usize, look: &Look) -> std::result::Resu
     let base = match table.remove("extends") {
         Some(toml::Value::String(base)) => base,
         Some(_) => return Err("`extends` names a theme".into()),
-        None => DEFAULT.to_string(),
+        None => BASE.to_string(),
     };
     let base = if base == name {
         builtin(&base, depth + 1, look)
@@ -538,7 +545,7 @@ mod tests {
     #[test]
     fn a_theme_extends_starship_unless_it_says_otherwise() {
         let t = parse("title = \"Mine\"\n", "mine", 0, &DARK).unwrap();
-        assert_eq!(t.colors, default_theme().colors);
+        assert_eq!(t.colors, builtin(BASE, 0, &DARK).unwrap().colors);
     }
 
     #[test]

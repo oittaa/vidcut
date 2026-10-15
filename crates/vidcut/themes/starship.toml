@@ -1,5 +1,6 @@
-# Starship, the default theme: a bridge display. Blue-black glass, a cyan
-# edge, cut corners and an amber playhead.
+# Starship: a bridge display. Blue-black glass, a cyan edge, cut corners
+# and an amber playhead. Every other theme starts from this one, so it has
+# every key.
 #
 # A theme of your own goes in the themes folder (`vidcut preferences get`
 # says where) as NAME.toml. It lists only what it changes. The rest comes

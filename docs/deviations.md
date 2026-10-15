@@ -204,5 +204,5 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 
 ## X22. Themes
 - **Resolve:** one dark gray look.
-- **vidcut:** nine built-in themes and your own TOML files. Starship, blue-black with cyan edges and cut corners, is the default. Classic is a flat dark gray like the Cut page's. Native follows the computer's light or dark mode and accent color, so it can be light. File > Preferences or `preferences set appearance.theme=…` switches at once.
+- **vidcut:** nine built-in themes and your own TOML files. Native, the default, follows the computer's light or dark mode and accent color, so it can be light. Classic is a flat dark gray like the Cut page's. File > Preferences or `preferences set appearance.theme=…` switches at once.
 - **Why:** a desktop app is expected to offer a few looks, and people spend long sessions in an editor. Every theme keeps the Cut page's layout and what its colors mean.

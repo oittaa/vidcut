@@ -650,7 +650,8 @@ fn chosen_theme() -> (crate::themes::Theme, Option<String>) {
     match crate::themes::shown(&name) {
         Ok(t) => (t, None),
         Err(e) => (
-            crate::themes::default_theme().clone(),
+            crate::themes::shown(crate::themes::DEFAULT)
+                .unwrap_or_else(|_| crate::themes::default_theme().clone()),
             Some(format!(
                 "The theme {name} doesn't load, so the default one shows. {}",
                 e.message

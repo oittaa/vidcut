@@ -88,7 +88,7 @@ The **Command log** (top right) lists what you, scripts and agents did, in words
 
 **Preferences** (File > Preferences, Ctrl+, or Cmd+, on a Mac) live in `~/.config/vidcut/preferences.toml` (deviation X12). `vidcut preferences` reads and changes them.
 
-**Themes:** Starship by default, eight more built in, or your own (File > Preferences: Theme, Import…). A theme is a TOML file. [starship.toml](crates/vidcut/themes/starship.toml) explains every key.
+**Themes:** Native by default, light or dark as your computer is set, eight more built in, or your own (File > Preferences: Theme, Import…). A theme is a TOML file. [starship.toml](crates/vidcut/themes/starship.toml) explains every key.
 
 **Keys:** [spec §11](docs/cut-page-spec.md#11-keyboard-shortcuts).
 

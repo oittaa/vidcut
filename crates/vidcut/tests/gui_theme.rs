@@ -70,8 +70,6 @@ fn a_theme_file_set_in_the_preferences_shows_at_once() {
             Workspace::new(h.clone()),
         );
     harness.step();
-    // The default theme, Starship.
-    assert_eq!(panel(&harness), Color32::from_rgb(0x0A, 0x0F, 0x16));
     call(
         &h,
         "preferences.set",
