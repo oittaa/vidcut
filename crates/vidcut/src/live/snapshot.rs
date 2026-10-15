@@ -80,15 +80,16 @@ pub struct ProjectSnap {
     pub redo: Vec<String>,
 }
 
-/// The Media Pool view: the bin shown and the order of its media. Source
-/// Tape strings together that bin's media, and its bins', in that order
-///.
+/// The Media Pool view: the bin shown, the order of its media and how it
+/// shows them. Source Tape strings together that bin's media, and its
+/// bins', in that order.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct PoolView {
     /// A bin path; empty: the top level (all media).
     pub bin: String,
     pub sort: vidcut_core::request::PoolSort,
     pub descending: bool,
+    pub view: vidcut_core::request::PoolMode,
 }
 
 impl PoolView {

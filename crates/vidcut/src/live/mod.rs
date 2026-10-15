@@ -1984,7 +1984,10 @@ impl Live {
                 bin,
                 sort,
                 descending,
+                view,
             } => {
+                // The bin and the order are Source Tape's too.
+                let tape = bin.is_some() || sort.is_some() || descending.is_some();
                 if let Some(b) = bin {
                     let known = b.is_empty()
                         || self
@@ -2002,7 +2005,12 @@ impl Live {
                 if let Some(d) = descending {
                     self.pool.descending = d;
                 }
-                self.refresh_source();
+                if let Some(v) = view {
+                    self.pool.view = v;
+                }
+                if tape {
+                    self.refresh_source();
+                }
                 Step::Now(Ok(answer(json!(self.pool))))
             }
             Request::SelectionGet {} => Step::Now(Ok(answer(json!(self.selection)))),

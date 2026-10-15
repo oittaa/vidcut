@@ -147,7 +147,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 - **Viewer:** a meter beside the viewer shows what it plays, one bar per channel, and its speaker button is `player.mute`. That mute silences the viewer meter. In source modes the meter is the source media at the source playhead.
 
 **Bins.**
-- **Pool view:** the pool shows the open bin (`pool.set`: bin, sort, direction). That view lives in the session, not the project, so Source Tape and agents see the same order. It follows a renamed bin, and moves to the parent bin when its own is removed.
+- **Pool view:** the pool shows the open bin (`pool.set`: bin, sort, direction, and thumbnails, filmstrips or a list). That view lives in the session, not the project, so Source Tape and agents see the same order. It follows a renamed bin, and moves to the parent bin when its own is removed.
 - **Drops:** the pool records where bins are drawn each frame (a folder, or a level of the path) and the drag's release checks them. A clip drop sends `media.move`. A bin drop sends one `bins.rename`, from the dragged bin to `<target>/<name>`. Nothing is sent when the target is the bin itself, a bin inside it, or its current parent. If the name is taken, `bins.rename` fails and the status bar shows the error. Which drops move is unit-tested in `gui/pool.rs`.
 - **One undo step:** Create Bin With Selected Clips is one `apply` batch (`bins.add` and `media.move`). A bin drag is the one `bins.rename`.
 

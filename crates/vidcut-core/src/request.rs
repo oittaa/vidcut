@@ -897,8 +897,9 @@ pub enum Request {
     /// timeline's mix (muted, left out by solo, or empty) is an error.
     #[serde(rename = "mixer.preview")]
     MixerPreview { track: String, volume_db: f64 },
-    /// The Media Pool view: the bin shown and the sort order. Source Tape
-    /// strings together that bin's media, and its bins', in that order.
+    /// The Media Pool view: the bin shown, the sort order and how it shows
+    /// its items. Source Tape strings together that bin's media, and its
+    /// bins', in that order.
     #[serde(rename = "pool.set")]
     PoolSet {
         #[serde(default)]
@@ -907,6 +908,8 @@ pub enum Request {
         sort: Option<PoolSort>,
         #[serde(default)]
         descending: Option<bool>,
+        #[serde(default)]
+        view: Option<PoolMode>,
     },
     #[serde(rename = "selection.get")]
     SelectionGet {},
@@ -1088,6 +1091,19 @@ pub enum PoolSort {
     Duration,
     /// The file's modification time.
     Date,
+}
+
+/// How the Media Pool shows its items (spec §3).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PoolMode {
+    /// Pictures in a grid (the Grid button).
+    #[default]
+    Thumbnail,
+    /// A strip of each one's pictures, as wide as the pool.
+    Filmstrip,
+    /// A row for each, its details in columns.
+    List,
 }
 
 /// What `gui.screenshot` captures.

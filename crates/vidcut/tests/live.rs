@@ -18,6 +18,7 @@ use vidcut::live::{self, Capture, Image, Origin, Presented, WindowChange};
 use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
 use vidcut_av::player::{PacedOutput, Picture, Player};
 use vidcut_core::model::{Hdr, Settings};
+use vidcut_core::request::PoolMode;
 use vidcut_core::time::Rational;
 use vidcut_core::{Envelope, Project, Response, Store};
 
@@ -374,6 +375,10 @@ fn exact_seeks_external_edit_and_proxies() {
     let made = Store::open(&taken).unwrap().load().unwrap();
     let p = made.project();
     assert_eq!((p.settings.width, p.media.len()), (640, 0));
+
+    // The pool's view is the session's: the GUI draws the one set.
+    h.ok("pool.set", json!({ "view": "list" }));
+    assert_eq!(h.handle.snapshot().pool.view, PoolMode::List);
 
     drop(h);
 }

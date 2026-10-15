@@ -49,13 +49,6 @@ impl Thumbs {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum PoolView {
-    Thumbnails,
-    Filmstrip,
-    List,
-}
-
 /// A drag in progress.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum Drag {
@@ -96,7 +89,6 @@ pub struct Workspace {
     /// The peaks of the sound the viewer plays now, while it plays.
     pub levels: Option<vidcut_av::player::Levels>,
     // View state (not part of the project).
-    pub(super) pool_view: PoolView,
     pub(super) search: String,
     /// Bins in the pool: drop targets, the order shown, renaming.
     pub(super) bins: super::pool::BinsUi,
@@ -240,7 +232,6 @@ impl Workspace {
             want: [640, 360],
             display: None,
             levels: None,
-            pool_view: PoolView::Thumbnails,
             search: String::new(),
             bins: Default::default(),
             timecode: None,

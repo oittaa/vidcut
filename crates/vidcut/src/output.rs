@@ -670,14 +670,15 @@ fn live(method: &str, r: &Response) -> Option<()> {
         ),
         "gui.quit" | "gui.window" | "gui.show" => println!("ok {method}"),
         "pool.set" => println!(
-            "pool: bin {:?}, sorted by {}{}",
+            "pool: bin {:?}, sorted by {}{}, {} view",
             v["bin"].as_str().unwrap_or_default(),
             v["sort"].as_str().unwrap_or_default(),
             if v["descending"] == true {
                 " (descending)"
             } else {
                 ""
-            }
+            },
+            v["view"].as_str().unwrap_or_default(),
         ),
         "jobs.list" => {
             let jobs = v.as_array().cloned().unwrap_or_default();
