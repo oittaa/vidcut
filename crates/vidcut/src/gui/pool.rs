@@ -395,7 +395,14 @@ impl Workspace {
         self.bins.order = media.iter().map(|m| m.id.clone()).collect();
         let buttons = 84.0;
         let height = (ui.available_height() - buttons).max(60.0);
-        egui::ScrollArea::vertical()
+        // The List view's columns scroll sideways. A scroll area that doesn't
+        // grows to fit them, and the pool with it, which then can't be
+        // dragged narrower. The other views fit the pool's width.
+        let scroll = match snap.pool.view {
+            PoolMode::List => egui::ScrollArea::both(),
+            _ => egui::ScrollArea::vertical().horizontal_scroll_offset(0.0),
+        };
+        scroll
             .max_height(height)
             .min_scrolled_height(height)
             .auto_shrink([false, false])

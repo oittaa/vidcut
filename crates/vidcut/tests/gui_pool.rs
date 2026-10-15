@@ -1,10 +1,11 @@
 //! The Media Pool's view under simulated input (egui_kittest, no window):
-//! its buttons set the session's view, the one `pool.set` sets.
+//! its buttons set the session's view, the one `pool.set` sets, and the
+//! pool keeps its width in each.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use eframe::egui::vec2;
+use eframe::egui::{self, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use serde_json::{Value, json};
@@ -104,6 +105,17 @@ fn the_pools_buttons_set_the_sessions_view() {
             Workspace::new(h.clone()),
         );
     harness.step();
+    // Where the pool's search field ends: the pool's width.
+    let pool_width = |harness: &Harness<'_, Workspace>| {
+        harness
+            .query_all_by_role(egui::accesskit::Role::TextInput)
+            .map(|n| n.rect())
+            .min_by(|a, b| a.min.x.total_cmp(&b.min.x))
+            .expect("the pool's search field")
+            .max
+            .x
+    };
+    let width = pool_width(&harness);
 
     for (button, mode) in [
         ("List", PoolMode::List),
@@ -112,6 +124,12 @@ fn the_pools_buttons_set_the_sessions_view() {
     ] {
         harness.get_by_label(button).click();
         until(&mut harness, button, || h.snapshot().pool.view == mode);
+        // The List view's columns, wider than the pool, used to widen it
+        // for good.
+        for _ in 0..5 {
+            harness.step();
+        }
+        assert_eq!(pool_width(&harness), width, "{button}");
     }
 
     drop(harness);
