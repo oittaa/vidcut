@@ -1,10 +1,12 @@
 //! What an edit changed in a project, both ways. Undo steps keep this,
 //! not copies of the project, so a step costs about what it changed.
 //!
-//! It is found by comparing the project's JSON before and after. Lists of
-//! things with ids (media, tracks, clips, markers) are compared by id: an
-//! inserted clip is one entry, and a ripple that moves every later clip by
-//! the same frames is one run.
+//! It is what comparing the project's JSON before and after gives. Lists of
+//! things with ids (media, tracks, clips, markers, transitions) are
+//! compared by id: an inserted clip is one entry, and a ripple that moves
+//! every later clip by the same frames is one run. [`Change::of_items`]
+//! finds the same from the things themselves, turning only those that
+//! differ into JSON.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -107,6 +109,49 @@ impl Change {
         })
     }
 
+    /// [`between`](Self::between) two lists of things with ids as JSON,
+    /// from the things themselves: only those that differ become JSON.
+    /// `each` is what changed in one on both sides, `None` when nothing did;
+    /// it may take the thing apart, if it puts it back.
+    pub fn of_items<T: Serialize + PartialEq>(
+        a: &mut [T],
+        b: &mut [T],
+        id: impl Fn(&T) -> &str,
+        mut each: impl FnMut(&mut T, &mut T) -> Option<Self>,
+    ) -> Option<Self> {
+        if a == b {
+            return None;
+        }
+        let json = |x: &T| serde_json::to_value(x).expect("a project is JSON");
+        let (ia, ib): (Vec<String>, Vec<String>) = (
+            a.iter().map(|x| id(x).to_string()).collect(),
+            b.iter().map(|x| id(x).to_string()).collect(),
+        );
+        let ra: Vec<&str> = ia.iter().map(String::as_str).collect();
+        let rb: Vec<&str> = ib.iter().map(String::as_str).collect();
+        let (in_a, in_b): (HashSet<&str>, HashSet<&str>) =
+            (ra.iter().copied().collect(), rb.iter().copied().collect());
+        if in_a.len() != ra.len() || in_b.len() != rb.len() {
+            let all = |list: &[T]| Value::Array(list.iter().map(json).collect());
+            return Some(Self::replaced(&all(a), &all(b)));
+        }
+        let only = |list: &[T], ids: &[&str], other: &HashSet<&str>| {
+            list.iter()
+                .zip(ids)
+                .enumerate()
+                .filter(|(_, (_, id))| !other.contains(*id))
+                .map(|(i, (x, _))| (i, json(x)))
+                .collect()
+        };
+        let (removed, added) = (only(a, &ra, &in_b), only(b, &rb, &in_a));
+        let at_a: HashMap<&str, usize> = ra.iter().copied().zip(0..).collect();
+        let at_b: HashMap<&str, usize> = rb.iter().copied().zip(0..).collect();
+        let items = Items::build(&ra, &rb, removed, added, |id| {
+            each(&mut a[at_a[id]], &mut b[at_b[id]])
+        });
+        Some(Self::Items(Box::new(items)))
+    }
+
     fn replaced(before: &Value, after: &Value) -> Self {
         Self::Set {
             before: Some(before.clone()),
@@ -170,24 +215,42 @@ impl Items {
                 .map(|(i, (v, _))| (i, v.clone()))
                 .collect()
         };
+        let (removed, added) = (only(a, ia, &in_b), only(b, ib, &in_a));
+        let before: HashMap<&str, &Value> = ia.iter().copied().zip(a).collect();
+        let after: HashMap<&str, &Value> = ib.iter().copied().zip(b).collect();
+        Self::build(ia, ib, removed, added, |id| {
+            Change::between(before[id], after[id])
+        })
+    }
+
+    /// What changed in a list whose things have the ids `ia` before and
+    /// `ib` after: `removed` and `added`, those only before and only after,
+    /// and `change`, what changed in one on both sides.
+    fn build(
+        ia: &[&str],
+        ib: &[&str],
+        removed: Vec<(usize, Value)>,
+        added: Vec<(usize, Value)>,
+        mut change: impl FnMut(&str) -> Option<Change>,
+    ) -> Self {
+        let (in_a, in_b): (HashSet<&str>, HashSet<&str>) =
+            (ia.iter().copied().collect(), ib.iter().copied().collect());
         let kept_a: Vec<&str> = ia.iter().copied().filter(|i| in_b.contains(i)).collect();
         let kept_b: Vec<&str> = ib.iter().copied().filter(|i| in_a.contains(i)).collect();
         let mut items = Self {
-            removed: only(a, ia, &in_b),
-            added: only(b, ib, &in_a),
+            removed,
+            added,
             order: (kept_a != kept_b).then(|| {
                 let owned = |ids: &[&str]| ids.iter().map(|s| s.to_string()).collect();
                 (owned(&kept_a), owned(&kept_b))
             }),
             ..Self::default()
         };
-        let before: HashMap<&str, &Value> = ia.iter().copied().zip(a).collect();
-        let after: HashMap<&str, &Value> = ib.iter().copied().zip(b).collect();
         // Side by side runs only where the order stays.
         let in_order = items.order.is_none();
         let mut run: Option<(Run, Change, usize)> = None;
         for id in kept_b {
-            let Some(change) = Change::between(before[id], after[id]) else {
+            let Some(change) = change(id) else {
                 items.close(run.take());
                 continue;
             };
@@ -340,6 +403,33 @@ mod tests {
         assert_eq!(
             change(a, b),
             json!({"items": {"added": [[1, {"id": "c3"}]]}})
+        );
+    }
+
+    #[test]
+    fn things_as_they_are_change_as_their_json_does() {
+        #[derive(Serialize, PartialEq)]
+        struct Thing {
+            id: &'static str,
+            start: i64,
+        }
+        let thing = |id, start| Thing { id, start };
+        let mut a = [thing("c1", 0), thing("c2", 50), thing("c3", 90)];
+        let mut b = [thing("c1", 0), thing("c3", 80), thing("c4", 0)];
+        let each = |x: &mut Thing, y: &mut Thing| {
+            Change::between(
+                &serde_json::to_value(&*x).unwrap(),
+                &serde_json::to_value(&*y).unwrap(),
+            )
+        };
+        let found = Change::of_items(&mut a, &mut b, |t| t.id, each).unwrap();
+        assert_eq!(
+            serde_json::to_value(found).unwrap(),
+            json!({"items": {
+                "removed": [[1, {"id": "c2", "start": 50}]],
+                "added": [[2, {"id": "c4", "start": 0}]],
+                "changed": {"c3": {"fields": {"start": {"set": {"was": 90, "is": 80}}}}}
+            }})
         );
     }
 

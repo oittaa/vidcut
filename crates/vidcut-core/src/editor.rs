@@ -14,7 +14,7 @@ use crate::error::{Error, Result};
 use crate::history::HistoryFile;
 use crate::model::{
     Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Media, MediaInfo,
-    Project, Proxy, Transition, VideoInfo,
+    Project, Proxy, Track, Transition, VideoInfo,
 };
 use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
@@ -501,7 +501,7 @@ impl Editor {
         // An edit that changes nothing (no shot changes found, a setting set
         // to what it was) is no undo step and no new revision: an undo would
         // undo nothing, and the edit before would take two.
-        if working == self.project {
+        let Some(change) = changed(&mut self.project, &mut working) else {
             return Ok(Response {
                 rev: self.project.rev,
                 changes,
@@ -510,8 +510,7 @@ impl Editor {
                 via: String::new(),
                 warnings: Vec::new(),
             });
-        }
-        let change = changed(&self.project, &working);
+        };
         working.rev = self.project.rev + 1;
         working.edited = Some(now_ms());
         self.project = working;
@@ -530,7 +529,8 @@ impl Editor {
     /// process) as one undoable step.
     pub fn record_external(&mut self, project: Project) {
         let mut project = project;
-        let change = changed(&self.project, &project);
+        let change = changed(&mut self.project, &mut project)
+            .unwrap_or_else(|| Change::Fields(Default::default()));
         project.rev = project.rev.max(self.project.rev + 1);
         // The writer's time, or now for a change made by hand.
         if project.edited == self.project.edited {
@@ -624,10 +624,110 @@ fn to_json(p: &Project) -> Value {
     serde_json::to_value(p).expect("a project is JSON")
 }
 
-/// What an edit changed, from `before` to `after`.
-fn changed(before: &Project, after: &Project) -> Change {
-    Change::between(&to_json(before), &to_json(after))
-        .unwrap_or_else(|| Change::Fields(Default::default()))
+/// What an edit changed, from `before` to `after`, `None` when nothing did:
+/// what [`Change::between`] their JSON gives, without turning what is the
+/// same on both into JSON. Both are as they were after.
+fn changed(before: &mut Project, after: &mut Project) -> Option<Change> {
+    let change = project_change(before, after);
+    // Tests check it against the whole JSON's.
+    debug_assert_eq!(change, Change::between(&to_json(before), &to_json(after)));
+    change
+}
+
+/// [`changed`]. Its lists of things with ids are taken out of both for a
+/// moment: the rest is small enough to compare as JSON.
+fn project_change(a: &mut Project, b: &mut Project) -> Option<Change> {
+    use std::mem::take;
+    let (mut media, mut tracks, mut markers) = (
+        (take(&mut a.media), take(&mut b.media)),
+        (take(&mut a.tracks), take(&mut b.tracks)),
+        (take(&mut a.markers), take(&mut b.markers)),
+    );
+    let rest = Change::between(&to_json(a), &to_json(b));
+    let lists = [
+        (
+            "media",
+            Change::of_items(&mut media.0, &mut media.1, |m| &m.id, leaf),
+        ),
+        (
+            "tracks",
+            Change::of_items(&mut tracks.0, &mut tracks.1, |t| &t.id, track_change),
+        ),
+        (
+            "markers",
+            Change::of_items(&mut markers.0, &mut markers.1, |k| &k.id, leaf),
+        ),
+    ];
+    (a.media, b.media) = media;
+    (a.tracks, b.tracks) = tracks;
+    (a.markers, b.markers) = markers;
+    joined(rest, lists)
+}
+
+/// What changed in track `a`, now `b`: its clips and transitions by id.
+fn track_change(a: &mut Track, b: &mut Track) -> Option<Change> {
+    use std::mem::take;
+    if a == b {
+        return None;
+    }
+    let (mut clips, mut transitions) = (
+        (take(&mut a.clips), take(&mut b.clips)),
+        (take(&mut a.transitions), take(&mut b.transitions)),
+    );
+    let rest = Change::between(&to_value(&*a), &to_value(&*b));
+    // The file leaves out a track's transitions when there are none.
+    let transitions_change = match (transitions.0.is_empty(), transitions.1.is_empty()) {
+        (true, true) => None,
+        (false, true) => Some(Change::Set {
+            before: Some(to_value(&transitions.0)),
+            after: None,
+        }),
+        (true, false) => Some(Change::Set {
+            before: None,
+            after: Some(to_value(&transitions.1)),
+        }),
+        (false, false) => Change::of_items(&mut transitions.0, &mut transitions.1, |x| &x.id, leaf),
+    };
+    let lists = [
+        (
+            "clips",
+            Change::of_items(&mut clips.0, &mut clips.1, |c| &c.id, leaf),
+        ),
+        ("transitions", transitions_change),
+    ];
+    (a.clips, b.clips) = clips;
+    (a.transitions, b.transitions) = transitions;
+    joined(rest, lists)
+}
+
+/// What changed in a thing in a list, from its JSON.
+fn leaf<T: serde::Serialize + PartialEq>(a: &mut T, b: &mut T) -> Option<Change> {
+    if a == b {
+        return None;
+    }
+    Change::between(&to_value(&*a), &to_value(&*b))
+}
+
+/// The change of an object whose fields but the `lists` changed by `rest`.
+fn joined<const N: usize>(
+    rest: Option<Change>,
+    lists: [(&str, Option<Change>); N],
+) -> Option<Change> {
+    let mut fields = match rest {
+        Some(Change::Fields(fields)) => fields,
+        None => Default::default(),
+        Some(_) => unreachable!("an object's change is its fields'"),
+    };
+    for (name, change) in lists {
+        if let Some(c) = change {
+            fields.insert(name.to_string(), c);
+        }
+    }
+    (!fields.is_empty()).then_some(Change::Fields(fields))
+}
+
+fn to_value<T: serde::Serialize + ?Sized>(x: &T) -> Value {
+    serde_json::to_value(x).expect("a project is JSON")
 }
 
 /// The undo history's name for an edit: the request in words.
