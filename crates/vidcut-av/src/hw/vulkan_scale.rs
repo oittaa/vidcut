@@ -16,7 +16,7 @@ pub(super) fn scaler(
     f: &frame::Video,
     frames: *mut ffi::AVBufferRef,
     size: (u32, u32),
-) -> Result<ffmpeg::filter::Graph> {
+) -> Result<GpuGraph> {
     let spec = passes((f.width(), f.height()), size)
         .iter()
         .map(|(w, h)| format!("scale_vulkan=w={w}:h={h}:scaler=bilinear"))

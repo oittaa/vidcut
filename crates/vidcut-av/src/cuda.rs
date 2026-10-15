@@ -34,7 +34,7 @@ use crate::color::{GpuColor, Tags};
 use crate::decode::VideoReader;
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, ffi, filter, format, frame};
-use crate::hw::Device;
+use crate::hw::{Device, GpuGraph};
 use crate::route::Place;
 
 /// A CUDA device: NVDEC, the CUDA filters and NVENC share it.
@@ -319,7 +319,7 @@ fn shader_cache() -> Option<String> {
 /// device libplacebo makes them on. Timestamps stay the source's.
 pub struct CudaPictures {
     /// The CUDA filters, for NVENC's pictures.
-    graph: Option<filter::Graph>,
+    graph: Option<GpuGraph>,
     placebo: Option<Placebo>,
     /// Pictures made on Vulkan, for Vulkan's encoder: libplacebo's.
     ready: VecDeque<frame::Video>,
@@ -331,7 +331,7 @@ pub struct CudaPictures {
 /// to a CUDA frame, never leaving the GPU. Vulkan's frames go in as they
 /// are, on their own device.
 struct Placebo {
-    graph: filter::Graph,
+    graph: GpuGraph,
     /// The Vulkan frames CUDA's are copied into; `None`: the frames are
     /// Vulkan's already.
     input: Option<HwFrames>,
@@ -375,7 +375,7 @@ fn converting() -> std::sync::MutexGuard<'static, ()> {
 impl Drop for Placebo {
     fn drop(&mut self) {
         let _one = converting();
-        drop(std::mem::replace(&mut self.graph, filter::Graph::new()));
+        drop(std::mem::replace(&mut self.graph, GpuGraph::new()));
     }
 }
 
@@ -900,7 +900,7 @@ impl CudaPictures {
             Some(output) => output.0,
             None => decoded,
         };
-        let mut graph = filter::Graph::new();
+        let mut graph = GpuGraph::new();
         add_source(
             &mut graph,
             c"in",
@@ -1053,7 +1053,7 @@ impl Placebo {
                 out_size.1,
             )?),
         };
-        let mut graph = filter::Graph::new();
+        let mut graph = GpuGraph::new();
         // Black in the output's colors: a shader passes it on as black.
         let black_tags = color.output;
         let background = match layout {
