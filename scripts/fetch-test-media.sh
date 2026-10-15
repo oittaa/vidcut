@@ -14,26 +14,28 @@ sha256() {
   if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1
 }
 
-# name<TAB>file<TAB>url<TAB>sha256, read with Python's tomllib (isolated mode).
-# Before Python 3.11 (macOS's python3 is 3.9) there is no tomllib: the
-# manifest's own few lines are read instead, [[clip]] and key = "text".
-python3 -I -c '
-import re, sys
-try:
-    import tomllib
-    clips = tomllib.load(open(sys.argv[1], "rb"))["clip"]
-except ModuleNotFoundError:
-    clips = []
-    for line in open(sys.argv[1], encoding="utf-8"):
-        line = line.strip()
-        if line == "[[clip]]":
-            clips.append({})
-        elif clips and re.fullmatch(r"\w+ = \".*\"", line):
-            key, value = line.split(" = ", 1)
-            clips[-1][key] = value[1:-1]
-for c in clips:
-    print("\t".join([c["name"], c["file"], c["url"], c.get("sha256", "")]))
-' "$repo/tests/media-manifest.toml" | while IFS=$'\t' read -r name file url sha; do
+# The manifest's clips, name<TAB>file<TAB>url<TAB>sha256: each [[clip]] and
+# its key = "text" lines, all the manifest uses.
+clips() {
+  local name="" file="" url="" sha="" line pair='^([a-z0-9_]+) = "(.*)"$'
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    if [[ "$line" == "[[clip]]" ]]; then
+      if [[ -n "$name" ]]; then printf '%s\t%s\t%s\t%s\n' "$name" "$file" "$url" "$sha"; fi
+      name="" file="" url="" sha=""
+    elif [[ "$line" =~ $pair ]]; then
+      case "${BASH_REMATCH[1]}" in
+        name) name="${BASH_REMATCH[2]}" ;;
+        file) file="${BASH_REMATCH[2]}" ;;
+        url) url="${BASH_REMATCH[2]}" ;;
+        sha256) sha="${BASH_REMATCH[2]}" ;;
+      esac
+    fi
+  done <"$repo/tests/media-manifest.toml"
+  if [[ -n "$name" ]]; then printf '%s\t%s\t%s\t%s\n' "$name" "$file" "$url" "$sha"; fi
+}
+
+clips | while IFS=$'\t' read -r name file url sha; do
   dir="$root/$name"
   target="$dir/$file"
   if [[ -f "$target" ]]; then
