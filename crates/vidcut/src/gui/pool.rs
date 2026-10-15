@@ -11,11 +11,11 @@ use eframe::egui::{
 };
 use serde_json::json;
 use vidcut_core::model::{Media, Project};
-use vidcut_core::request::{PoolSort, ViewerMode};
+use vidcut_core::request::{PoolMode, PoolSort, ViewerMode};
 
 use super::theme;
 use super::timeline::gesture::Gesture;
-use super::workspace::{PoolView, Workspace, dim, fit};
+use super::workspace::{Workspace, dim, fit};
 
 const TILE: egui::Vec2 = egui::Vec2::new(176.0, 99.0);
 /// A tile with its name and time below the picture.
@@ -338,12 +338,21 @@ impl Workspace {
             {
                 self.relink_missing(ui.ctx());
             }
-            ui.selectable_value(&mut self.pool_view, PoolView::Thumbnails, "Grid")
-                .on_hover_text("Thumbnail view");
-            ui.selectable_value(&mut self.pool_view, PoolView::Filmstrip, "Filmstrip")
-                .on_hover_text("Each clip as a strip of its pictures");
-            ui.selectable_value(&mut self.pool_view, PoolView::List, "List")
-                .on_hover_text("List view");
+            // The session's, as `pool.set` sets it.
+            for (mode, name, tip) in [
+                (PoolMode::Thumbnail, "Grid", "Thumbnail view"),
+                (
+                    PoolMode::Filmstrip,
+                    "Filmstrip",
+                    "Each clip as a strip of its pictures",
+                ),
+                (PoolMode::List, "List", "List view"),
+            ] {
+                let on = snap.pool.view == mode;
+                if ui.selectable_label(on, name).on_hover_text(tip).clicked() && !on {
+                    self.send("pool.set", json!({ "view": mode }));
+                }
+            }
             ui.add(
                 egui::TextEdit::singleline(&mut self.search)
                     .hint_text("Search")
@@ -428,10 +437,10 @@ impl Workspace {
                     return;
                 }
                 let Some(p) = project else { return };
-                match self.pool_view {
-                    PoolView::Thumbnails => self.grid(ui, viewport, p, &folders, &media),
-                    PoolView::Filmstrip => self.strips(ui, viewport, p, &folders, &media),
-                    PoolView::List => self.list(ui, viewport, p, &folders, &media),
+                match snap.pool.view {
+                    PoolMode::Thumbnail => self.grid(ui, viewport, p, &folders, &media),
+                    PoolMode::Filmstrip => self.strips(ui, viewport, p, &folders, &media),
+                    PoolMode::List => self.list(ui, viewport, p, &folders, &media),
                 }
             });
         ui.separator();

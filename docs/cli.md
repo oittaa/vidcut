@@ -145,7 +145,7 @@ vidcut history undo                         # works across separate runs
 | `vidcut gui log [--since N]` | what everyone (the human too) did: each entry's `summary` in words, and the request as sent |
 | `vidcut gui window --size 1600,1000`, `project open FILE [--create [--fps 25 --width 1920 --height 1080] [--force]]`, `gui quit` | window and project. `--create` opens a file already there, and `--force` replaces it with the new project. `project open cut.otio` opens a project file made next to it, `cut.vidcut` (or `--save-as FILE`), as `project create --from` makes it |
 | `vidcut jobs list`, `jobs get\|wait\|cancel J [--timeout S]` | export and proxy jobs, the GUI's own included. They run one at a time, and the others are `queued`. `wait` fails like the job did |
-| `vidcut pool set --bin A --sort name --descending true` | the bin the Media Pool shows and its order; Source Tape follows it |
+| `vidcut pool set --bin A --sort name --descending true --view list` | the bin the Media Pool shows and its order, which Source Tape follows, and its view: `thumbnail` (Grid), `filmstrip` or `list` |
 | `vidcut player mute [true\|false]` | the viewer's monitoring mute (not the export); without a value, toggles |
 | `vidcut player audio-scrubbing [true\|false]` | audio scrubbing (decision D42): steps and paused seeks play their frame's sound; without a value, toggles (Shift+S) |
 | `vidcut player stats [true\|false]` | stats for nerds (deviation X20): a panel over the viewer, also in its right-click menu; without a value, toggles. Prints the facts, which `player state` has as `stats` |
