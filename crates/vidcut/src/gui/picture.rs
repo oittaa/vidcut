@@ -617,8 +617,14 @@ impl Screen {
                 wgpu::TextureFormat::Rg16Unorm,
             ),
             Layout::P010 => return Err("no 16-bit textures for P010".into()),
-            Layout::P210 => return Err("P210 pictures aren't VA-API's".into()),
-            Layout::Yuv420p | Layout::Yuv420p10 | Layout::Yuv422p | Layout::Yuv422p10 => {
+            layout @ (Layout::P210 | Layout::P416) => {
+                return Err(format!("{layout:?} pictures aren't VA-API's"));
+            }
+            Layout::Yuv420p
+            | Layout::Yuv420p10
+            | Layout::Yuv422p
+            | Layout::Yuv422p10
+            | Layout::Yuv444p12 => {
                 return Err("planar pictures aren't VA-API's".into());
             }
         };
@@ -760,8 +766,14 @@ impl Screen {
                 wgpu::TextureFormat::Rg16Unorm,
             ),
             Layout::P010 => return Err("no P010 or 16-bit textures for P010".into()),
-            Layout::P210 => return Err("P210 pictures aren't Direct3D 11's".into()),
-            Layout::Yuv420p | Layout::Yuv420p10 | Layout::Yuv422p | Layout::Yuv422p10 => {
+            layout @ (Layout::P210 | Layout::P416) => {
+                return Err(format!("{layout:?} pictures aren't Direct3D 11's"));
+            }
+            Layout::Yuv420p
+            | Layout::Yuv420p10
+            | Layout::Yuv422p
+            | Layout::Yuv422p10
+            | Layout::Yuv444p12 => {
                 return Err("planar pictures aren't Direct3D 11's".into());
             }
         };
@@ -884,13 +896,14 @@ impl Screen {
             return Err("the display's device imports no Vulkan memory".into());
         }
         match picture.layout() {
-            Layout::Yuv420p10 | Layout::Yuv422p10 if gpu.wide => {}
-            Layout::Yuv420p10 | Layout::Yuv422p10 => {
-                return Err("no 16-bit textures for 10-bit planes".into());
+            Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12 if gpu.wide => {}
+            Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12 => {
+                return Err("no 16-bit textures for 10- and 12-bit planes".into());
             }
             layout @ (Layout::Nv12
             | Layout::P010
             | Layout::P210
+            | Layout::P416
             | Layout::Yuv420p
             | Layout::Yuv422p) => return Err(format!("{layout:?} pictures aren't Vulkan's")),
         }
@@ -960,13 +973,18 @@ impl Screen {
                 (MTLPixelFormat::R8Unorm, F::R8Unorm),
                 (MTLPixelFormat::RG8Unorm, F::Rg8Unorm),
             ],
-            Layout::P010 | Layout::P210 if gpu.wide => [
+            Layout::P010 | Layout::P210 | Layout::P416 if gpu.wide => [
                 (MTLPixelFormat::R16Unorm, F::R16Unorm),
                 (MTLPixelFormat::RG16Unorm, F::Rg16Unorm),
             ],
-            Layout::P010 => return Err("no 16-bit textures for P010".into()),
-            Layout::P210 => return Err("no 16-bit textures for P210".into()),
-            Layout::Yuv420p | Layout::Yuv420p10 | Layout::Yuv422p | Layout::Yuv422p10 => {
+            layout @ (Layout::P010 | Layout::P210 | Layout::P416) => {
+                return Err(format!("no 16-bit textures for {layout:?}"));
+            }
+            Layout::Yuv420p
+            | Layout::Yuv420p10
+            | Layout::Yuv422p
+            | Layout::Yuv422p10
+            | Layout::Yuv444p12 => {
                 return Err("planar pictures aren't VideoToolbox's".into());
             }
         };
@@ -1065,7 +1083,12 @@ impl Screen {
             Layout::P010 if gpu.wide => 2,
             Layout::P010 => return Err("no 16-bit textures for P010".into()),
             Layout::P210 => return Ok(false),
-            Layout::Yuv420p | Layout::Yuv420p10 | Layout::Yuv422p | Layout::Yuv422p10 => {
+            Layout::P416 => return Err("P416 pictures aren't NVDEC's".into()),
+            Layout::Yuv420p
+            | Layout::Yuv420p10
+            | Layout::Yuv422p
+            | Layout::Yuv422p10
+            | Layout::Yuv444p12 => {
                 return Err("planar pictures aren't NVDEC's".into());
             }
         };
@@ -1167,15 +1190,17 @@ impl Screen {
                 })
             };
             self.planes = Some(match layout {
-                Layout::Yuv420p | Layout::Yuv420p10 | Layout::Yuv422p | Layout::Yuv422p10 => {
-                    Planes {
-                        key,
-                        y: make((w, h), one),
-                        u: make((cw, ch), one),
-                        v: make((cw, ch), one),
-                    }
-                }
-                Layout::Nv12 | Layout::P010 | Layout::P210 => Planes {
+                Layout::Yuv420p
+                | Layout::Yuv420p10
+                | Layout::Yuv422p
+                | Layout::Yuv422p10
+                | Layout::Yuv444p12 => Planes {
+                    key,
+                    y: make((w, h), one),
+                    u: make((cw, ch), one),
+                    v: make((cw, ch), one),
+                },
+                Layout::Nv12 | Layout::P010 | Layout::P210 | Layout::P416 => Planes {
                     key,
                     y: make((w, h), one),
                     u: make((cw, ch), two),
@@ -1206,14 +1231,15 @@ impl Screen {
                 put(&planes.u, 1, (cw, ch), 1);
                 put(&planes.v, 2, (cw, ch), 1);
             }
-            (Layout::Yuv420p10 | Layout::Yuv422p10, true) => {
+            (Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12, true) => {
                 put(&planes.y, 0, (w, h), 2);
                 put(&planes.u, 1, (cw, ch), 2);
                 put(&planes.v, 2, (cw, ch), 2);
             }
-            // Without 16-bit textures: the top 8 of each sample's 10 bits,
-            // which are the low bits of 16.
-            (Layout::Yuv420p10 | Layout::Yuv422p10, false) => {
+            // Without 16-bit textures: the top 8 of each sample's 10 or 12
+            // bits, which are the low bits of 16.
+            (Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12, false) => {
+                let shift = if layout == Layout::Yuv444p12 { 4 } else { 2 };
                 for (texture, plane, size) in [
                     (&planes.y, 0, (w, h)),
                     (&planes.u, 1, (cw, ch)),
@@ -1229,7 +1255,7 @@ impl Screen {
                             line.as_chunks::<2>()
                                 .0
                                 .iter()
-                                .map(|s| (u16::from_le_bytes(*s) >> 2) as u8),
+                                .map(|s| (u16::from_le_bytes(*s) >> shift) as u8),
                         );
                     }
                     write_plane(&gpu.queue, texture, &top, row, size, 1);
@@ -1239,12 +1265,12 @@ impl Screen {
                 put(&planes.y, 0, (w, h), 1);
                 put(&planes.u, 1, (cw, ch), 2);
             }
-            (Layout::P010 | Layout::P210, true) => {
+            (Layout::P010 | Layout::P210 | Layout::P416, true) => {
                 put(&planes.y, 0, (w, h), 2);
                 put(&planes.u, 1, (cw, ch), 4);
             }
             // Without 16-bit textures: the high byte of each sample.
-            (Layout::P010 | Layout::P210, false) => {
+            (Layout::P010 | Layout::P210 | Layout::P416, false) => {
                 for (texture, plane, size, samples) in
                     [(&planes.y, 0, (w, h), 1), (&planes.u, 1, (cw, ch), 2)]
                 {
@@ -1361,7 +1387,9 @@ fn import_vulkan_frame(
 ) -> Result<super::vulkan::Import, String> {
     use wgpu::hal::api::Vulkan;
     let exported = vidcut_av::hw::vulkan::Exported::of(frame).map_err(|e| e.to_string())?;
-    if exported.planes.len() != 3 {
+    // Y, U, V, and alpha, which the shader doesn't read. It is imported to
+    // be acquired with the rest: FFmpeg records one layout for all.
+    if !(3..=4).contains(&exported.planes.len()) {
         return Err(format!("a picture of {} planes", exported.planes.len()));
     }
     let families = exported.planes[0].families.clone();
@@ -1424,7 +1452,7 @@ fn import_vulkan_frame(
     if images.len() != textures.len() {
         return Err("not Vulkan".into());
     }
-    let [y, u, v] = &textures[..] else {
+    let [y, u, v, ..] = &textures[..] else {
         return Err(format!("a picture of {} planes", textures.len()));
     };
     let view = |t: &wgpu::Texture| t.create_view(&Default::default());
@@ -1468,37 +1496,48 @@ fn write_plane(
     );
 }
 
-/// The size of the shader's parameters: nine vectors of four.
-const PARAMS: usize = 9 * 16;
+/// The size of the shader's parameters: ten vectors of four.
+const PARAMS: usize = 10 * 16;
 
 /// Its samples take 16 bits.
 fn sixteen(layout: Layout) -> bool {
     match layout {
         Layout::Yuv420p | Layout::Nv12 | Layout::Yuv422p => false,
-        Layout::P010 | Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::P210 => true,
+        Layout::P010
+        | Layout::Yuv420p10
+        | Layout::Yuv422p10
+        | Layout::P210
+        | Layout::Yuv444p12
+        | Layout::P416 => true,
     }
 }
 
 /// Its U and V are interleaved in one plane.
 fn interleaved(layout: Layout) -> bool {
     match layout {
-        Layout::Nv12 | Layout::P010 | Layout::P210 => true,
-        Layout::Yuv420p | Layout::Yuv420p10 | Layout::Yuv422p | Layout::Yuv422p10 => false,
+        Layout::Nv12 | Layout::P010 | Layout::P210 | Layout::P416 => true,
+        Layout::Yuv420p
+        | Layout::Yuv420p10
+        | Layout::Yuv422p
+        | Layout::Yuv422p10
+        | Layout::Yuv444p12 => false,
     }
 }
 
-/// Luma rows per chroma row: 2 for 4:2:0, 1 for 4:2:2.
-fn rows_per_chroma_row(layout: Layout) -> u32 {
+/// Luma samples per chroma sample, across and down: 2 and 2 for 4:2:0, 2
+/// and 1 for 4:2:2, 1 and 1 for 4:4:4.
+fn per_chroma(layout: Layout) -> (u32, u32) {
     match layout {
-        Layout::Yuv420p | Layout::Nv12 | Layout::P010 | Layout::Yuv420p10 => 2,
-        Layout::Yuv422p | Layout::Yuv422p10 | Layout::P210 => 1,
+        Layout::Yuv420p | Layout::Nv12 | Layout::P010 | Layout::Yuv420p10 => (2, 2),
+        Layout::Yuv422p | Layout::Yuv422p10 | Layout::P210 => (2, 1),
+        Layout::Yuv444p12 | Layout::P416 => (1, 1),
     }
 }
 
-/// The size of its chroma planes in a `w`×`h` picture: half as wide, and
-/// half as tall for 4:2:0.
+/// The size of its chroma planes in a `w`×`h` picture.
 fn chroma_size(layout: Layout, w: u32, h: u32) -> (u32, u32) {
-    (w.div_ceil(2), h.div_ceil(rows_per_chroma_row(layout)))
+    let (across, down) = per_chroma(layout);
+    (w.div_ceil(across), h.div_ceil(down))
 }
 
 /// The shader's parameters for `picture` in a `size` target. `wide`: samples
@@ -1511,13 +1550,16 @@ fn params_of(picture: &Picture, size: (u32, u32), wide: bool, cover: (f64, f64))
     let turns = u32::from(picture.rotation() / 90) % 4;
     let (sw, sh) = (picture.width(), picture.height());
     let upright = if turns % 2 == 1 { (sh, sw) } else { (sw, sh) };
-    // Sample s (0..1) as a code: 8 bits (also the top 8 of 10 without
-    // 16-bit textures), or 10 bits in the high bits of 16 (P010, P210) or
-    // in the low bits (planar).
+    // Sample s (0..1) as a code: 8 bits (also the top 8 of more without
+    // 16-bit textures), 10 bits in the high bits of 16 (P010, P210) or in
+    // the low bits (planar), 12 bits in the low bits (planar), or 16 bits
+    // (P416).
     let layout = picture.layout();
     let (code, max): (f64, f64) = match (layout, wide && sixteen(layout)) {
         (Layout::P010 | Layout::P210, true) => (65535.0 / 64.0, 1023.0),
         (Layout::Yuv420p10 | Layout::Yuv422p10, true) => (65535.0, 1023.0),
+        (Layout::Yuv444p12, true) => (65535.0, 4095.0),
+        (Layout::P416, true) => (65535.0, 65535.0),
         _ => (255.0, 255.0),
     };
     let unit = (max + 1.0) / 256.0;
@@ -1550,7 +1592,8 @@ fn params_of(picture: &Picture, size: (u32, u32), wide: bool, cover: (f64, f64))
         out.extend_from_slice(&(*v as f32).to_le_bytes());
     }
     let uv = u32::from(interleaved(layout));
-    for v in [hdr, turns, uv, rows_per_chroma_row(layout)] {
+    let (across, down) = per_chroma(layout);
+    for v in [hdr, turns, uv, 0, across, down, 0, 0] {
         out.extend_from_slice(&v.to_le_bytes());
     }
     out
