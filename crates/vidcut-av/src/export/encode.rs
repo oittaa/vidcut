@@ -238,7 +238,7 @@ fn cpu_part(codec: VideoCodec) -> &'static crate::parts::Part {
 }
 
 /// Whether this FFmpeg's `name` encoder takes 10-bit pictures.
-fn cpu_ten_bit(name: &str) -> bool {
+pub(crate) fn cpu_ten_bit(name: &str) -> bool {
     use format::Pixel;
     encoder::find_by_name(name)
         .and_then(|c| c.video().ok())

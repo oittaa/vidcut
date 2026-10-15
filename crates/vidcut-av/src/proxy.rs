@@ -1,5 +1,5 @@
 //! Playback proxies: a small, easy-to-decode copy of a source's pictures,
-//! AV1, H.264, ProRes Proxy or DNxHR LB (decision D41).
+//! AV1, HEVC, H.264, ProRes Proxy or DNxHR LB (decision D41).
 //!
 //! Each proxy frame keeps the source frame's presentation timestamp, in the
 //! source time base when that base is ordinary and in microseconds otherwise.
@@ -34,13 +34,14 @@ const KEYFRAMES: u32 = 60;
 /// An encoder proxies can be made with.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProxyEncoder {
-    /// FFmpeg's encoder: `av1_nvenc`, `av1_vaapi`, `h264_nvenc`,
-    /// `h264_amf`, `h264_vaapi`, `h264_qsv`, `h264_videotoolbox`,
-    /// `libsvtav1`, `libx264` (where this FFmpeg has neither of those two
-    /// `libopenh264` or `prores_ks`), `prores_videotoolbox`,
-    /// `prores_ks_vulkan`, `prores_ks` or `dnxhd`.
+    /// FFmpeg's encoder: `av1_nvenc`, `av1_vaapi`, `hevc_nvenc`,
+    /// `hevc_amf`, `hevc_vaapi`, `hevc_qsv`, `hevc_videotoolbox`,
+    /// `h264_nvenc`, `h264_amf`, `h264_vaapi`, `h264_qsv`,
+    /// `h264_videotoolbox`, `libsvtav1`, `libx265`, `libx264` (where this
+    /// FFmpeg has none of those three `libopenh264` or `prores_ks`),
+    /// `prores_videotoolbox`, `prores_ks_vulkan`, `prores_ks` or `dnxhd`.
     pub name: String,
-    /// `av1`, `h264`, `prores` or `dnxhr`.
+    /// `av1`, `hevc`, `h264`, `prores` or `dnxhr`.
     pub codec: &'static str,
     /// Hardware (NVENC, AMF, VAAPI, QSV, VideoToolbox), the GPU through
     /// Vulkan, or software (CPU).
@@ -49,7 +50,8 @@ pub struct ProxyEncoder {
     /// node, an AMF or QSV adapter or node, Vulkan's GPU by its id.
     pub device: Option<String>,
     /// It takes 10-bit pictures here: a hardware encoder the encoder check
-    /// found working with P010, SVT-AV1, and ProRes, which is 10-bit.
+    /// found working with P010, SVT-AV1, x265 where this FFmpeg's takes 10
+    /// bits, and ProRes, which is 10-bit.
     pub ten_bit: bool,
 }
 
@@ -60,7 +62,11 @@ impl ProxyEncoder {
             codec,
             kind: EncoderChoice::Cpu,
             device: None,
-            ten_bit: matches!(name, "libsvtav1" | "prores_ks"),
+            ten_bit: match name {
+                "libsvtav1" | "prores_ks" => true,
+                "libx265" => encode::cpu_ten_bit(name),
+                _ => false,
+            },
         }
     }
 
@@ -68,6 +74,7 @@ impl ProxyEncoder {
     pub fn label(&self) -> String {
         let codec = match self.codec {
             "av1" => "AV1",
+            "hevc" => "HEVC",
             "prores" => "ProRes Proxy",
             "dnxhr" => "DNxHR LB",
             _ => "H.264",
@@ -83,6 +90,7 @@ impl ProxyEncoder {
             (EncoderChoice::VideoToolbox, _) => "Apple hardware (VideoToolbox)".to_string(),
             (EncoderChoice::Vulkan, _) => "GPU (Vulkan)".to_string(),
             (_, "libsvtav1") => "software (SVT-AV1)".to_string(),
+            (_, "libx265") => "software (x265)".to_string(),
             (_, "libx264") => "software (x264)".to_string(),
             (_, "libopenh264") => "software (OpenH264)".to_string(),
             (_, "prores_ks" | "dnxhd") => "software (FFmpeg's)".to_string(),
@@ -94,9 +102,9 @@ impl ProxyEncoder {
     /// The layout of its pictures in memory, for a source of more than 8
     /// bits with `ten`. Where it takes 10 bits ([`ten_bit`](Self::ten_bit)),
     /// such a source's are P010 for the GPU's video engine and 10-bit 4:2:0
-    /// for SVT-AV1. Otherwise 8-bit 4:2:0, NV12 for AMF, QSV, VAAPI and
-    /// VideoToolbox. ProRes is always 10-bit 4:2:2, DNxHR 8-bit 4:2:2, and
-    /// H.264 8-bit.
+    /// for SVT-AV1 and x265. Otherwise 8-bit 4:2:0, NV12 for AMF, QSV,
+    /// VAAPI and VideoToolbox. ProRes is always 10-bit 4:2:2, DNxHR 8-bit
+    /// 4:2:2, and H.264 8-bit.
     fn pixel(&self, ten: bool) -> format::Pixel {
         use EncoderChoice::{Amf, Nvenc, Qsv, Vaapi, VideoToolbox};
         use format::Pixel::{NV12, P010LE, YUV420P, YUV420P10LE, YUV422P, YUV422P10LE};
@@ -113,11 +121,12 @@ impl ProxyEncoder {
         }
     }
 
-    /// Its settings: quality like the x264 proxies' (`crf 20`), a keyframe
-    /// every [`KEYFRAMES`] frames, and nothing coded ahead of where it shows.
-    fn options(&self) -> Vec<(&'static str, String)> {
+    /// Its settings for pictures of more than 8 bits with `ten`: quality like
+    /// the x264 proxies' (`crf 20`), a keyframe every [`KEYFRAMES`] frames,
+    /// and nothing coded ahead of where it shows.
+    fn options(&self, ten: bool) -> Vec<(&'static str, String)> {
         let keys = KEYFRAMES.to_string();
-        match self.name.as_str() {
+        let mut options = match self.name.as_str() {
             "libx264" => vec![
                 ("preset", "veryfast".into()),
                 ("crf", "20".into()),
@@ -126,13 +135,26 @@ impl ProxyEncoder {
                     format!("bframes=0:keyint={keys}:min-keyint={keys}:scenecut=0"),
                 ),
             ],
+            // Keyframes, B-frames and GOPs as x264's, and only errors in its
+            // messages.
+            "libx265" => vec![
+                ("preset", "veryfast".into()),
+                ("crf", "20".into()),
+                (
+                    "x265-params",
+                    format!(
+                        "log-level=error:keyint={keys}:min-keyint={keys}:scenecut=0:bframes=0:\
+                         open-gop=0"
+                    ),
+                ),
+            ],
             // The keyframe interval comes from the context's GOP.
             "libsvtav1" => vec![
                 ("preset", "10".into()),
                 ("crf", "32".into()),
                 ("svtav1-params", "scd=0:pred-struct=1".into()),
             ],
-            "av1_nvenc" | "h264_nvenc" => vec![
+            "av1_nvenc" | "hevc_nvenc" | "h264_nvenc" => vec![
                 ("preset", "p4".into()),
                 ("tune", "hq".into()),
                 ("rc", "vbr".into()),
@@ -140,17 +162,17 @@ impl ProxyEncoder {
                 ("b", "0".into()),
             ],
             // One quantizer for every frame, as x264's CRF 20.
-            "h264_amf" => vec![
+            "h264_amf" | "hevc_amf" => vec![
                 ("rc", "cqp".into()),
                 ("qp_i", "20".into()),
                 ("qp_p", "20".into()),
             ],
-            "h264_vaapi" => vec![("rc_mode", "CQP".into()), ("qp", "20".into())],
+            "h264_vaapi" | "hevc_vaapi" => vec![("rc_mode", "CQP".into()), ("qp", "20".into())],
             // Its intelligent constant quality.
-            "h264_qsv" => vec![("global_quality", "20".into())],
+            "h264_qsv" | "hevc_qsv" => vec![("global_quality", "20".into())],
             // Constant quality on its scale of 0 to 100, the higher the
             // better: 67 is the exports' for x264's CRF 20.
-            "h264_videotoolbox" => vec![
+            "h264_videotoolbox" | "hevc_videotoolbox" => vec![
                 ("flags", "+qscale".into()),
                 ("global_quality", (67 * ffi::FF_QP2LAMBDA).to_string()),
             ],
@@ -174,7 +196,14 @@ impl ProxyEncoder {
             // no `qp`.
             "av1_vaapi" => vec![("rc_mode", "CQP".into()), ("global_quality", "128".into())],
             _ => Vec::new(),
+        };
+        // HEVC's profile on the GPU's video engine, as exports set it (none
+        // for VAAPI): Main 10 for 10-bit pictures.
+        let engine = !matches!(self.kind, EncoderChoice::Cpu | EncoderChoice::Vaapi);
+        if self.codec == "hevc" && engine {
+            options.push(("profile", if ten { "main10" } else { "main" }.into()));
         }
+        options
     }
 
     /// The encoder as exports open theirs ([`encode::open_video`]), for
@@ -183,7 +212,7 @@ impl ProxyEncoder {
     /// no B-frames and closed GOPs, one pass, SDR.
     fn video_encoder(&self, pixel: format::Pixel) -> VideoEncoder {
         let mut options: Vec<(String, String)> = self
-            .options()
+            .options(deep(pixel))
             .into_iter()
             .map(|(k, v)| (k.to_string(), v))
             .collect();
@@ -216,23 +245,28 @@ impl ProxyEncoder {
     }
 }
 
-/// The codecs automatic chooses among, in its order: those that make every
-/// frame a keyframe first.
-pub const AUTOMATIC: [ProxyCodec; 4] = [
+/// The codecs automatic chooses among, in its order. DNxHR LB first, which
+/// makes every frame a keyframe and which no GPU makes or plays. AV1 and
+/// HEVC before ProRes Proxy: they are 4:2:0 and take 10 bits, so the GPU
+/// plays them from its memory, where ProRes's 4:2:2 frames come down to be
+/// shown. H.264 last.
+pub const AUTOMATIC: [ProxyCodec; 5] = [
     ProxyCodec::Dnxhr,
-    ProxyCodec::Prores,
     ProxyCodec::Av1,
+    ProxyCodec::Hevc,
+    ProxyCodec::Prores,
     ProxyCodec::H264,
 ];
 
 /// The encoders `choice` makes proxies with here, best first, where the GPU
-/// in use plays the codecs `plays` names (`av1`, `h264`, `prores`).
+/// in use plays the codecs `plays` names (`av1`, `hevc`, `h264`, `prores`).
 ///
 /// A codec's own: the hardware ones this machine has working (AV1's NVENC,
-/// then VAAPI; H.264's NVENC, AMF, VAAPI, QSV, VideoToolbox; ProRes's
-/// VideoToolbox, then the GPU's through Vulkan), then the first software
-/// one this FFmpeg has: SVT-AV1 for AV1 and x264 for H.264 (without those,
-/// OpenH264, else ProRes Proxy), FFmpeg's own for ProRes and DNxHR.
+/// then VAAPI; HEVC's and H.264's NVENC, AMF, VAAPI, QSV, VideoToolbox;
+/// ProRes's VideoToolbox, then the GPU's through Vulkan), then the first
+/// software one this FFmpeg has: SVT-AV1 for AV1, x265 for HEVC and x264
+/// for H.264 (without those, OpenH264, else ProRes Proxy), FFmpeg's own for
+/// ProRes and DNxHR.
 ///
 /// Automatic takes every codec's ([`AUTOMATIC`]) in four rounds, each in
 /// that order: those the GPU's video engine makes and the GPU plays, those
@@ -277,6 +311,13 @@ fn own(codec: ProxyCodec, available: &Availability) -> Vec<ProxyEncoder> {
             ("av1_nvenc", "av1", Nvenc, YUV420P),
             ("av1_vaapi", "av1", Vaapi, NV12),
         ],
+        ProxyCodec::Hevc => &[
+            ("hevc_nvenc", "hevc", Nvenc, YUV420P),
+            ("hevc_amf", "hevc", Amf, NV12),
+            ("hevc_vaapi", "hevc", Vaapi, NV12),
+            ("hevc_qsv", "hevc", Qsv, NV12),
+            ("hevc_videotoolbox", "hevc", VideoToolbox, NV12),
+        ],
         ProxyCodec::H264 => &[
             ("h264_nvenc", "h264", Nvenc, YUV420P),
             ("h264_amf", "h264", Amf, NV12),
@@ -309,6 +350,12 @@ fn own(codec: ProxyCodec, available: &Availability) -> Vec<ProxyEncoder> {
     let software: &[(&str, &'static str)] = match codec {
         ProxyCodec::Av1 => &[
             ("libsvtav1", "av1"),
+            ("libx264", "h264"),
+            ("libopenh264", "h264"),
+            ("prores_ks", "prores"),
+        ],
+        ProxyCodec::Hevc => &[
+            ("libx265", "hevc"),
             ("libx264", "h264"),
             ("libopenh264", "h264"),
             ("prores_ks", "prores"),
@@ -699,12 +746,9 @@ fn encode_into(
     let decoded_on_gpu = reader.gpu().is_some();
     // A source of more than 8 bits, by its first frame, keeps 10 where the
     // encoder takes them.
-    let ten = reader.peek().is_some_and(|first| {
-        crate::hw::sw_format(first)
-            .descriptor()
-            // SAFETY: FFmpeg's static descriptor of the format.
-            .is_some_and(|d| unsafe { (*d.as_ptr()).comp[0].depth } > 8)
-    });
+    let ten = reader
+        .peek()
+        .is_some_and(|first| deep(crate::hw::sw_format(first)));
     let pixel = enc.pixel(ten);
     // NVDEC's frames scaled for NVENC on the GPU, where the planner leaves
     // them there and the scaler builds. A picture may come with the next
@@ -781,6 +825,14 @@ fn cuda_layout(pixel: format::Pixel) -> format::Pixel {
     }
 }
 
+/// Whether `pixel` has more than 8 bits.
+fn deep(pixel: format::Pixel) -> bool {
+    // SAFETY: FFmpeg's static descriptor of the format.
+    pixel
+        .descriptor()
+        .is_some_and(|d| unsafe { (*d.as_ptr()).comp[0].depth } > 8)
+}
+
 fn drain(
     enc: &mut encoder::Video,
     octx: &mut format::context::Output,
@@ -805,7 +857,7 @@ fn drain(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use EncoderChoice::{Nvenc, Vaapi, VideoToolbox, Vulkan};
+    use EncoderChoice::{Amf, Nvenc, Qsv, Vaapi, VideoToolbox, Vulkan};
 
     /// GPU encoders that work: their names, kinds and pixel formats.
     fn working(list: &[(&str, EncoderChoice, &str)]) -> Availability {
@@ -847,6 +899,26 @@ mod tests {
     }
 
     #[test]
+    fn hevc_takes_the_gpus_video_engines_in_their_order() {
+        let gpus = working(&[
+            ("hevc_videotoolbox", VideoToolbox, "nv12"),
+            ("hevc_qsv", Qsv, "nv12"),
+            ("hevc_vaapi", Vaapi, "nv12"),
+            ("hevc_amf", Amf, "nv12"),
+            ("hevc_nvenc", Nvenc, "yuv420p"),
+        ]);
+        let got = names(ProxyCodec::Hevc, &gpus, &[]);
+        let want = [
+            "hevc_nvenc",
+            "hevc_amf",
+            "hevc_vaapi",
+            "hevc_qsv",
+            "hevc_videotoolbox",
+        ];
+        assert_eq!(got[..5], want);
+    }
+
+    #[test]
     fn automatic_takes_what_the_gpu_both_makes_and_plays() {
         let nvidia = working(&[
             ("av1_nvenc", Nvenc, "yuv420p"),
@@ -858,23 +930,50 @@ mod tests {
     }
 
     #[test]
-    fn automatic_takes_apples_prores_hardware() {
+    fn automatic_takes_nvidias_av1() {
+        let nvidia = working(&[
+            ("h264_nvenc", Nvenc, "yuv420p"),
+            ("hevc_nvenc", Nvenc, "yuv420p"),
+            ("hevc_nvenc", Nvenc, "p010le"),
+            ("av1_nvenc", Nvenc, "yuv420p"),
+            ("av1_nvenc", Nvenc, "p010le"),
+        ]);
+        let got = names(ProxyCodec::Auto, &nvidia, &["h264", "hevc", "av1"]);
+        assert_eq!(got[0], "av1_nvenc");
+    }
+
+    #[test]
+    fn automatic_takes_apples_hevc_hardware() {
         let apple = working(&[
             ("h264_videotoolbox", VideoToolbox, "nv12"),
+            ("hevc_videotoolbox", VideoToolbox, "nv12"),
+            ("hevc_videotoolbox", VideoToolbox, "p010le"),
             ("prores_videotoolbox", VideoToolbox, "nv12"),
+            ("prores_videotoolbox", VideoToolbox, "p010le"),
         ]);
-        let got = names(ProxyCodec::Auto, &apple, &["h264", "prores"]);
-        assert_eq!(got[0], "prores_videotoolbox");
+        let got = names(ProxyCodec::Auto, &apple, &["h264", "hevc", "av1", "prores"]);
+        assert_eq!(got[0], "hevc_videotoolbox");
+    }
+
+    #[test]
+    fn automatic_takes_amds_hevc() {
+        let amd = working(&[
+            ("h264_amf", Amf, "nv12"),
+            ("hevc_amf", Amf, "nv12"),
+            ("hevc_amf", Amf, "p010le"),
+        ]);
+        let got = names(ProxyCodec::Auto, &amd, &["h264", "hevc", "av1"]);
+        assert_eq!(got[0], "hevc_amf");
     }
 
     #[test]
     fn automatic_puts_the_gpus_video_engine_before_vulkan() {
         let nvidia = working(&[
-            ("av1_nvenc", Nvenc, "yuv420p"),
+            ("h264_nvenc", Nvenc, "yuv420p"),
             ("prores_ks_vulkan", Vulkan, "yuv422p10le"),
         ]);
-        let got = names(ProxyCodec::Auto, &nvidia, &["av1", "prores"]);
-        assert_eq!(got[..2], ["av1_nvenc", "prores_ks_vulkan"]);
+        let got = names(ProxyCodec::Auto, &nvidia, &["h264", "prores"]);
+        assert_eq!(got[0], "h264_nvenc");
     }
 
     #[test]
@@ -892,9 +991,9 @@ mod tests {
     }
 
     #[test]
-    fn automatic_without_a_gpu_makes_dnxhr_then_prores() {
+    fn automatic_without_a_gpu_makes_dnxhr() {
         let got = names(ProxyCodec::Auto, &Availability::default(), &[]);
-        assert_eq!(got[..2], ["dnxhd", "prores_ks"]);
+        assert_eq!(got[0], "dnxhd");
     }
 
     /// NVENC's AV1, which the encoder check found working with P010.
@@ -952,6 +1051,36 @@ mod tests {
     fn svt_av1_takes_a_ten_bit_sources_pictures_in_ten_bits() {
         let svt = ProxyEncoder::software("libsvtav1", "av1");
         assert_eq!(svt.pixel(true), format::Pixel::YUV420P10LE);
+    }
+
+    #[test]
+    fn apples_hevc_takes_a_ten_bit_sources_pictures_as_p010() {
+        let apple = ProxyEncoder {
+            name: "hevc_videotoolbox".into(),
+            codec: "hevc",
+            kind: VideoToolbox,
+            device: None,
+            ten_bit: true,
+        };
+        assert_eq!(apple.pixel(true), format::Pixel::P010LE);
+    }
+
+    #[test]
+    fn hevc_on_nvenc_is_main_10_for_ten_bit_pictures() {
+        let nvenc = ProxyEncoder {
+            name: "hevc_nvenc".into(),
+            codec: "hevc",
+            kind: Nvenc,
+            device: Some("0".into()),
+            ten_bit: true,
+        };
+        let options = nvenc.video_encoder(format::Pixel::P010LE).options;
+        let profile: Vec<&str> = options
+            .iter()
+            .filter(|(k, _)| k == "profile")
+            .map(|(_, v)| v.as_str())
+            .collect();
+        assert_eq!(profile, ["main10"]);
     }
 
     #[test]
