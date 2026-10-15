@@ -77,6 +77,20 @@ fn place(line: &str) -> Option<usize> {
     rest[..digits].parse().ok()
 }
 
+/// A step line's label, read without parsing the rest (its change, which
+/// may be long): it comes right after the step's place.
+fn label_of(line: &str) -> std::io::Result<String> {
+    let rest = line
+        .strip_prefix(r#"{"step":{"at":"#)
+        .ok_or_else(|| bad("a step line that isn't one"))?;
+    let rest = rest
+        .trim_start_matches(|c: char| c.is_ascii_digit())
+        .strip_prefix(r#","label":"#)
+        .ok_or_else(|| bad("a step line without its label first"))?;
+    String::deserialize(&mut serde_json::Deserializer::from_str(rest))
+        .map_err(|_| bad("a step's label that isn't text"))
+}
+
 fn entry_of(line: &str) -> std::io::Result<Entry> {
     match serde_json::from_str(line) {
         Ok(Line::Step(s)) => Ok(s.entry),
@@ -117,7 +131,9 @@ fn lines_back(
     let mut pending: Vec<u8> = Vec::new();
     let mut pos = end;
     while pos > 0 {
-        let start = pos.saturating_sub(chunk);
+        // At least as much as is pending: a long line comes in a few
+        // reads that double, not copied again with each chunk.
+        let start = pos.saturating_sub(chunk.max(pending.len() as u64));
         let mut read = vec![0; (pos - start) as usize];
         file.seek(SeekFrom::Start(start))?;
         file.read_exact(&mut read)?;
@@ -204,6 +220,29 @@ impl HistoryFile {
         n: usize,
         m: usize,
     ) -> std::io::Result<(Vec<Entry>, Vec<Entry>)> {
+        self.top_with(tail, end, n, m, entry_of)
+    }
+
+    /// [`top`](Self::top)'s labels, without parsing the steps' changes.
+    pub(crate) fn top_labels(
+        &self,
+        tail: &Tail,
+        end: u64,
+        n: usize,
+        m: usize,
+    ) -> std::io::Result<(Vec<String>, Vec<String>)> {
+        self.top_with(tail, end, n, m, label_of)
+    }
+
+    /// [`top`](Self::top), each step line read by `read`.
+    fn top_with<T>(
+        &self,
+        tail: &Tail,
+        end: u64,
+        n: usize,
+        m: usize,
+        read: impl Fn(&str) -> std::io::Result<T>,
+    ) -> std::io::Result<(Vec<T>, Vec<T>)> {
         let (n, m) = (n.min(tail.undo), m.min(tail.redo));
         let d = tail.undo;
         let mut file = File::open(&self.path)?;
@@ -226,7 +265,7 @@ impl HistoryFile {
                 }
             }
             if undo.len() < n && p == target {
-                undo.push(entry_of(text)?);
+                undo.push(read(text)?);
                 target -= 1;
             }
             Ok(undo.len() < n || (m > 0 && next.is_none()))
@@ -236,14 +275,14 @@ impl HistoryFile {
         }
         let mut redo = Vec::new();
         if let Some((mut since, text)) = next {
-            redo.push(entry_of(&text)?);
+            redo.push(read(&text)?);
             // Each one after the next was made after the one before it.
             for p in d + 2..=d + m {
                 let (at, text) = later
                     .get(&p)
                     .and_then(|ls| ls.iter().filter(|(at, _)| *at > since).max_by_key(|l| l.0))
                     .ok_or_else(|| bad("fewer steps to redo than the file says"))?;
-                redo.push(entry_of(text)?);
+                redo.push(read(text)?);
                 since = *at;
             }
         }
@@ -502,6 +541,37 @@ mod tests {
 
     fn labels(entries: &[Entry]) -> Vec<&str> {
         entries.iter().map(|e| e.label.as_str()).collect()
+    }
+
+    #[test]
+    fn a_line_many_reads_long_comes_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lines");
+        let long = format!(
+            "{}
+",
+            "x".repeat(1000)
+        );
+        std::fs::write(
+            &path,
+            format!(
+                "a
+{long}"
+            ),
+        )
+        .unwrap();
+        let mut got = Vec::new();
+        lines_back(&mut File::open(&path).unwrap(), 1003, 4, |at, text| {
+            got.push((at, text.len()));
+            Ok(true)
+        })
+        .unwrap();
+        assert_eq!(got, [(2, 1001), (0, 2)]);
+    }
+
+    #[test]
+    fn a_steps_label_is_read_without_its_change() {
+        assert_eq!(label_of(&step_line(12, &step(12))).unwrap(), "step 12");
     }
 
     #[test]

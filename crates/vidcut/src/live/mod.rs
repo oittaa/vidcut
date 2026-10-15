@@ -2355,12 +2355,12 @@ impl Live {
                 .collect(),
         );
         // The Edit menu names the next step to undo and to redo.
-        let history = open.editor.history_view(1).unwrap_or_default();
+        let history = open.editor.history_labels(1).unwrap_or_default();
         self.project_snap = Some(ProjectSnap {
             path: open.store.path().to_path_buf(),
             project: Arc::new(p.clone()),
-            undo: history.undo.iter().rev().map(|e| e.label.clone()).collect(),
-            redo: history.redo.iter().rev().map(|e| e.label.clone()).collect(),
+            undo: history.undo.iter().rev().cloned().collect(),
+            redo: history.redo.iter().rev().cloned().collect(),
         });
         // Forget what no longer exists.
         let media: HashSet<String> = p.media.iter().map(|m| m.id.clone()).collect();

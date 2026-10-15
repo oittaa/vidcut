@@ -231,7 +231,7 @@ pub fn track(
             fps,
         );
     }
-    let cuts = transitions::Cuts::of(t);
+    let cuts = transitions::Cuts::of(p, t);
     for x in &t.transitions {
         if let Some(at) = cuts.place(p, x)
             && at + x.after >= a

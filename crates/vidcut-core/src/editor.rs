@@ -257,6 +257,13 @@ pub struct History {
     pub redo: Vec<Entry>,
 }
 
+/// The labels of steps to undo and to redo (most recent last).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Labels {
+    pub undo: Vec<String>,
+    pub redo: Vec<String>,
+}
+
 /// What happened to the history, for its file to add.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -383,12 +390,38 @@ impl Editor {
     /// The newest `n` steps to undo and the next `n` to redo (most recent
     /// last, as in [`History`]).
     pub fn history_view(&self, n: usize) -> Result<History> {
-        let newest = |v: &[Entry]| v[v.len().saturating_sub(n)..].to_vec();
+        let (undo, redo) = self.view(n, HistoryFile::top, Entry::clone)?;
+        Ok(History { undo, redo })
+    }
+
+    /// [`history_view`](Self::history_view)'s labels, without the steps'
+    /// changes, which the file needn't parse then.
+    pub fn history_labels(&self, n: usize) -> Result<Labels> {
+        let (undo, redo) = self.view(n, HistoryFile::top_labels, |e| e.label.clone())?;
+        Ok(Labels { undo, redo })
+    }
+
+    /// The newest `n` steps to undo and to redo, each as `of` gives it, the
+    /// file's read by `top`.
+    fn view<T: Clone>(
+        &self,
+        n: usize,
+        top: impl Fn(
+            &HistoryFile,
+            &crate::history::Tail,
+            u64,
+            usize,
+            usize,
+        ) -> std::io::Result<(Vec<T>, Vec<T>)>,
+        of: impl Fn(&Entry) -> T,
+    ) -> Result<(Vec<T>, Vec<T>)> {
+        let newest = |v: &[T]| v[v.len().saturating_sub(n)..].to_vec();
         let Some((file, _)) = &self.file else {
-            return Ok(History {
-                undo: newest(&self.history.undo),
-                redo: newest(&self.history.redo),
-            });
+            let all = |v: &[Entry]| v.iter().map(&of).collect::<Vec<_>>();
+            return Ok((
+                newest(&all(&self.history.undo)),
+                newest(&all(&self.history.redo)),
+            ));
         };
         let unreadable = |e: std::io::Error| {
             Error::internal(format!(
@@ -398,29 +431,26 @@ impl Editor {
         };
         // Enough from the file for what happened since it was saved.
         let k = n + self.moved.len();
-        let mut h = match file.tail() {
+        let (mut undo, mut redo) = match file.tail() {
             Some((tail, end)) => {
-                let (mut undo, mut redo) = file.top(&tail, end, k, k).map_err(unreadable)?;
+                let (mut undo, mut redo) = top(file, &tail, end, k, k).map_err(unreadable)?;
                 undo.reverse();
                 redo.reverse();
-                History { undo, redo }
+                (undo, redo)
             }
-            None => History::default(),
+            None => (Vec::new(), Vec::new()),
         };
         for m in &self.moved {
             match m {
                 Moved::Step(e) => {
-                    h.undo.push(e.clone());
-                    h.redo.clear();
+                    undo.push(of(e));
+                    redo.clear();
                 }
-                Moved::Undo(n) => shift(*n, &mut h.undo, &mut h.redo),
-                Moved::Redo(n) => shift(*n, &mut h.redo, &mut h.undo),
+                Moved::Undo(n) => shift(*n, &mut undo, &mut redo),
+                Moved::Redo(n) => shift(*n, &mut redo, &mut undo),
             }
         }
-        Ok(History {
-            undo: newest(&h.undo),
-            redo: newest(&h.redo),
-        })
+        Ok((newest(&undo), newest(&redo)))
     }
 
     /// Notes a new step on top.
@@ -447,7 +477,7 @@ impl Editor {
         } = envelope;
         if let Request::HistoryGet {} = request {
             let (undo, redo) = self.history_counts();
-            let view = self.history_view(LABELS)?;
+            let view = self.history_labels(LABELS)?;
             let mut result = query(&self.project, &view, &request, env, playhead)?;
             result["undo_steps"] = undo.into();
             result["redo_steps"] = redo.into();
@@ -461,7 +491,7 @@ impl Editor {
             });
         }
         if !request.is_mutation() {
-            let result = query(&self.project, &History::default(), &request, env, playhead)?;
+            let result = query(&self.project, &Labels::default(), &request, env, playhead)?;
             return Ok(Response {
                 rev: self.project.rev,
                 changes: Changes::default(),
@@ -623,7 +653,7 @@ impl Editor {
 
 /// Moves the newest `n` steps from one stack to the other, as many as there
 /// are.
-fn shift(n: u32, from: &mut Vec<Entry>, to: &mut Vec<Entry>) {
+fn shift<T>(n: u32, from: &mut Vec<T>, to: &mut Vec<T>) {
     for _ in 0..n {
         let Some(e) = from.pop() else { return };
         to.push(e);
@@ -666,7 +696,12 @@ fn project_change(a: &mut Project, b: &mut Project) -> Option<Change> {
         ),
         (
             "markers",
-            Change::of_items(&mut markers.0, &mut markers.1, |k| &k.id, leaf),
+            Change::of_items(
+                &mut markers.0,
+                &mut markers.1,
+                |k| &k.id,
+                |a, b| moved_only(a, b, |k| &mut k.at, "at"),
+            ),
         ),
     ];
     (a.media, b.media) = media;
@@ -702,7 +737,12 @@ fn track_change(a: &mut Track, b: &mut Track) -> Option<Change> {
     let lists = [
         (
             "clips",
-            Change::of_items(&mut clips.0, &mut clips.1, |c| &c.id, leaf),
+            Change::of_items(
+                &mut clips.0,
+                &mut clips.1,
+                |c| &c.id,
+                |a, b| moved_only(a, b, |c| &mut c.start, "start"),
+            ),
         ),
         ("transitions", transitions_change),
     ];
@@ -815,6 +855,31 @@ fn split_fields<'a>(
         }
     }
     (named, rest)
+}
+
+/// [`leaf`] for a thing whose whole-number `field` (`at`) may be all that
+/// changed, as a ripple moves clips and markers: that is found without its
+/// JSON.
+fn moved_only<T: serde::Serialize + PartialEq>(
+    a: &mut T,
+    b: &mut T,
+    at: impl Fn(&mut T) -> &mut i64,
+    field: &str,
+) -> Option<Change> {
+    let (was, is) = (*at(a), *at(b));
+    if was != is {
+        *at(a) = is;
+        let only = a == b;
+        *at(a) = was;
+        if only {
+            let set = Change::Set {
+                before: Some(was.into()),
+                after: Some(is.into()),
+            };
+            return Some(Change::Fields([(field.to_string(), set)].into()));
+        }
+    }
+    leaf(a, b)
 }
 
 /// What changed in a thing in a list, from its JSON.
@@ -1699,7 +1764,7 @@ fn mutate(
                 let r = if cmd.is_mutation() {
                     mutate(p, cmd, env, playhead, dry_run)
                 } else {
-                    query(p, &History::default(), cmd, env, playhead)
+                    query(p, &Labels::default(), cmd, env, playhead)
                 };
                 results.push(r.map_err(|e| {
                     Error::new(
@@ -3411,7 +3476,7 @@ fn proxy_remove(
 /// Answers a query request.
 pub fn query(
     p: &Project,
-    history: &History,
+    history: &Labels,
     request: &Request,
     env: &dyn Env,
     playhead: Option<i64>,
@@ -3530,8 +3595,8 @@ pub fn query(
             json!({ "in": mark(p.marks.mark_in), "out": mark(p.marks.mark_out) })
         }
         Request::HistoryGet {} => json!({
-            "undo": history.undo.iter().rev().map(|e| &e.label).collect::<Vec<_>>(),
-            "redo": history.redo.iter().rev().map(|e| &e.label).collect::<Vec<_>>(),
+            "undo": history.undo.iter().rev().collect::<Vec<_>>(),
+            "redo": history.redo.iter().rev().collect::<Vec<_>>(),
         }),
         Request::EditCopy { clips } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
@@ -3971,7 +4036,7 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
                 v["name"] = json!(n);
             }
             // Carried transitions (deviation X9), at their cuts.
-            let cuts = otio::transitions::Cuts::of(t);
+            let cuts = otio::transitions::Cuts::of(p, t);
             let transitions: Vec<Value> = t
                 .transitions
                 .iter()
@@ -4008,10 +4073,28 @@ pub fn rate(num: i64, den: i64) -> Rational {
 
 #[cfg(test)]
 mod tests {
-    use super::over;
+    use super::{moved_only, over};
+    use crate::model::Marker;
 
     #[test]
     fn past_the_limit_all_but_90_percent_of_it_go() {
         assert_eq!(over((1 << 17) + 1), 13108);
+    }
+
+    #[test]
+    fn a_marker_that_only_moved_changes_only_its_time() {
+        let marker = |at| Marker {
+            id: "k1".into(),
+            at,
+            duration: 1,
+            name: "a".into(),
+            color: "blue".into(),
+            note: String::new(),
+        };
+        let change = moved_only(&mut marker(10), &mut marker(25), |k| &mut k.at, "at");
+        assert_eq!(
+            serde_json::to_value(change).unwrap(),
+            serde_json::json!({"fields": {"at": {"set": {"was": 10, "is": 25}}}})
+        );
     }
 }

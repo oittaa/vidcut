@@ -464,7 +464,7 @@ pub fn export(
         let (mut tv, mut ta) = (a, a);
         // The channel counts of the audio on this track.
         let mut channels: Vec<u16> = Vec::new();
-        let edits = transitions::Edits::of(t);
+        let edits = transitions::Edits::of(p, t);
         for c in &t.clips {
             let m = media.get(c.media.as_str()).copied();
             if m.is_none() && !c.is_block() {

@@ -20,6 +20,8 @@ pub struct OpenProject {
     pub editor: Editor,
     /// The file's text when last read or written.
     disk: String,
+    /// The file's [`Store::stamp`] then.
+    stamp: Option<(u64, std::time::SystemTime)>,
     /// Why the undo history couldn't be saved with the latest edit, until
     /// the session shows it.
     pub history_error: Option<String>,
@@ -35,6 +37,8 @@ impl OpenProject {
             Store::create(path, &Project::new(settings))?;
         }
         let store = Store::open(path)?;
+        // Before the read: a write after it changes the stamp again.
+        let stamp = store.stamp();
         let disk = store.read()?;
         let editor = store.load_text(&disk)?;
         let watcher = watch(store.path(), inbox, || Msg::FileChanged);
@@ -42,6 +46,7 @@ impl OpenProject {
             store,
             editor,
             disk,
+            stamp,
             history_error: None,
             _watcher: watcher,
         })
@@ -53,15 +58,28 @@ impl OpenProject {
 
     /// Re-reads the file under the project lock (so a writer's project file
     /// and history are seen together); returns whether the project changed.
+    /// The watcher said it changed, so it is read whatever its stamp says.
     pub fn reload(&mut self) -> Result<bool> {
         let _lock = self.store.lock()?;
-        self.refresh()
+        self.read_again()
     }
 
-    /// Re-reads the file if it changed; returns whether the project changed.
-    /// Callers that don't hold the lock should use [`reload`](Self::reload).
+    /// Re-reads the file if its stamp changed; returns whether the project
+    /// changed. Callers that don't hold the lock should use
+    /// [`reload`](Self::reload).
     pub fn refresh(&mut self) -> Result<bool> {
+        let stamp = self.store.stamp();
+        if stamp.is_some() && stamp == self.stamp {
+            return Ok(false);
+        }
+        self.read_again()
+    }
+
+    /// Reads the file and takes it in if it changed.
+    fn read_again(&mut self) -> Result<bool> {
+        let stamp = self.store.stamp();
         let text = self.store.read()?;
+        self.stamp = stamp;
         if text == self.disk {
             return Ok(false);
         }
@@ -103,6 +121,7 @@ impl OpenProject {
             match self.store.save(&mut self.editor) {
                 Ok(saved) => {
                     self.disk = saved.text;
+                    self.stamp = self.store.stamp();
                     self.history_error = saved.history_error;
                     if saved.compact {
                         // Trimming the history writes it anew: on a thread

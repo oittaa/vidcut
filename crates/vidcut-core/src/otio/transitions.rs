@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use serde_json::Value;
 
 use super::{EDITOR, VIDCUT, gap, rt, schema};
-use crate::model::{Clip, Project, Track, Transition};
+use crate::model::{Clip, Media, Project, Track, Transition};
 
 /// The name transition `t` goes by: `Cross Dissolve`, `Cross Fade +3 dB`.
 pub fn name(t: &Transition) -> String {
@@ -46,20 +46,23 @@ fn span(c: &Clip, sound: bool) -> Option<(i64, i64)> {
     }
 }
 
-/// A track's clips, found once to place its transitions: by id, and the
-/// times where a picture or a sound starts or ends (`true`: a sound).
+/// A track of `p`, found once to place its transitions: its clips by id,
+/// the times where a picture or a sound starts or ends (`true`: a sound),
+/// and the pool's items by id.
 pub struct Cuts<'a> {
     clips: HashMap<&'a str, &'a Clip>,
     starts: HashSet<(bool, i64)>,
     ends: HashSet<(bool, i64)>,
+    pool: HashMap<&'a str, &'a Media>,
 }
 
 impl<'a> Cuts<'a> {
-    pub fn of(track: &'a Track) -> Self {
+    pub fn of(p: &'a Project, track: &'a Track) -> Self {
         let mut cuts = Self {
             clips: HashMap::new(),
             starts: HashSet::new(),
             ends: HashSet::new(),
+            pool: p.media.iter().map(|m| (m.id.as_str(), m)).collect(),
         };
         for c in &track.clips {
             cuts.clips.entry(c.id.as_str()).or_insert(c);
@@ -76,6 +79,14 @@ impl<'a> Cuts<'a> {
     /// The cut transition `t` on the track is on, if it still fits there.
     pub fn place(&self, p: &Project, t: &Transition) -> Option<i64> {
         place(p, self, t)
+    }
+}
+
+/// [`Project::source_frames`], its media found in `cuts`.
+fn source_frames(p: &Project, cuts: &Cuts, c: &Clip) -> Option<i64> {
+    match (&c.compound, &c.generator) {
+        (None, None) => cuts.pool.get(c.media.as_str()).map(|m| p.media_limit(m)),
+        _ => p.source_frames(c),
     }
 }
 
@@ -115,7 +126,7 @@ fn place(p: &Project, cuts: &Cuts, t: &Transition) -> Option<i64> {
         return None;
     }
     if let Some(f) = from.filter(|f| !f.is_generator())
-        && f.source_at(cut) + t.after > p.source_frames(f)?
+        && f.source_at(cut) + t.after > source_frames(p, cuts, f)?
     {
         return None;
     }
@@ -127,7 +138,7 @@ pub fn prune(p: &mut Project) -> usize {
     let mut dropped = 0;
     for ti in 0..p.tracks.len() {
         let track = &p.tracks[ti];
-        let cuts = Cuts::of(track);
+        let cuts = Cuts::of(p, track);
         let fits: Vec<bool> = track
             .transitions
             .iter()
@@ -169,9 +180,9 @@ pub(super) struct Edits<'a> {
 }
 
 impl<'a> Edits<'a> {
-    pub(super) fn of(track: &'a Track) -> Self {
+    pub(super) fn of(p: &'a Project, track: &'a Track) -> Self {
         let mut edits = Self {
-            cuts: Cuts::of(track),
+            cuts: Cuts::of(p, track),
             into: HashMap::new(),
             out_of: HashMap::new(),
         };
