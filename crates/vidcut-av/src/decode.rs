@@ -1063,6 +1063,18 @@ impl VideoReader {
         self.pending.as_ref()
     }
 
+    /// Whether the frames it gives are where it decodes them, as the first
+    /// one ([`peek`](Self::peek)) is. An interlaced stream's come down to
+    /// be deinterlaced where its deinterlacer doesn't take them there
+    /// ([`Deinterlacer::takes`]): other GPUs', and NVDEC's and Vulkan's
+    /// where their filter doesn't give `bwdif`'s frames.
+    pub(crate) fn frames_stay(&self) -> bool {
+        match (&self.deinterlacer, &self.pending) {
+            (Some(d), Some(first)) => d.takes(first),
+            _ => true,
+        }
+    }
+
     /// Time base of frame timestamps.
     pub fn time_base(&self) -> ffmpeg::Rational {
         self.time_base

@@ -122,11 +122,13 @@ impl Fitting {
         // where the planner leaves the first frame there and the scaler
         // builds (libplacebo needs Vulkan for turned pictures, other
         // matrices than BT.709 and HDR, and makes every picture for Vulkan's
-        // encoder and of Vulkan's frames).
+        // encoder and of Vulkan's frames). Interlaced frames that come down
+        // to be deinterlaced reach the encoder from memory.
         let dest = Dest::Encoder { place };
         let planned = reader
             .decoders_cuda()
             .zip(reader.peek())
+            .filter(|_| reader.frames_stay())
             .filter(|(_, first)| {
                 let ops = Ops::of(first, reader.rotation(), out, format, target, false);
                 plan(&Facts::of(first, &ops, out, dest), dest) == Route::Gpu

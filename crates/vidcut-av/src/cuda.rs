@@ -318,6 +318,8 @@ fn shader_cache() -> Option<String> {
 /// Vulkan's ProRes encoder's are Vulkan frames (`yuv422p10le`) on the
 /// device libplacebo makes them on. Timestamps stay the source's.
 pub struct CudaPictures {
+    /// The frames it takes: NVDEC's (`CUDA`) or Vulkan's.
+    takes: format::Pixel,
     /// The CUDA filters, for NVENC's pictures.
     graph: Option<GpuGraph>,
     placebo: Option<Placebo>,
@@ -882,8 +884,10 @@ impl CudaPictures {
             None => None,
         };
         let ready = VecDeque::new();
+        let takes = first.format();
         if on == Place::Vulkan {
             return Ok(Self {
+                takes,
                 graph: None,
                 placebo,
                 ready,
@@ -914,6 +918,7 @@ impl CudaPictures {
         crate::parts::parse_filters(&mut graph, &spec)?;
         graph.validate().ctx(|| format!("configuring {spec}"))?;
         Ok(Self {
+            takes,
             graph: Some(graph),
             placebo,
             ready,
@@ -925,8 +930,19 @@ impl CudaPictures {
         self.placebo.as_ref().map(|p| &p.vulkan)
     }
 
-    /// Feeds the next decoded frame, or the end of the stream (`None`).
+    /// Feeds the next decoded frame, or the end of the stream (`None`). A
+    /// frame of another kind than it was made for, one in memory too, is
+    /// an error: its filters would read it as their own.
     pub fn push(&mut self, f: Option<&frame::Video>) -> Result<()> {
+        if let Some(f) = f
+            && f.format() != self.takes
+        {
+            return Err(Error::Invalid(format!(
+                "the GPU's scaler takes {:?} frames, not {:?} ones",
+                self.takes,
+                f.format()
+            )));
+        }
         let Some(p) = &mut self.placebo else {
             let mut source = self
                 .graph
