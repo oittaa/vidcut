@@ -328,6 +328,12 @@ impl Editor {
         &self.project
     }
 
+    /// The project, for the store to write: what it changes in it, it puts
+    /// back.
+    pub(crate) fn project_mut(&mut self) -> &mut Project {
+        &mut self.project
+    }
+
     /// The steps it holds: none once they are in a file.
     pub(crate) fn held(&self) -> &History {
         &self.history

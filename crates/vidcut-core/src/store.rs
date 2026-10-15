@@ -64,7 +64,7 @@ impl Store {
             .unwrap_or(Path::new("."));
         std::fs::create_dir_all(parent).map_err(|e| io(path, e))?;
         let dir = crate::dirs::canonical(parent).map_err(|e| io(path, e))?;
-        write_atomic(path, &to_json(project, &dir)?).map_err(|e| io(path, e))?;
+        write_atomic(path, &to_json(&mut project.clone(), &dir)?).map_err(|e| io(path, e))?;
         let store = Self::open(path)?;
         // A fresh project starts with fresh history.
         let _ = std::fs::remove_file(&store.history_path);
@@ -164,9 +164,10 @@ impl Store {
     ) -> Result<(T, Option<String>)> {
         let lock = self.lock()?;
         let mut editor = self.load()?;
-        let before = editor.project().clone();
+        // Every change raises the revision.
+        let rev = editor.project().rev;
         let out = f(&mut editor)?;
-        if editor.project() == &before {
+        if editor.project().rev == rev {
             return Ok((out, None));
         }
         let saved = self.save(&mut editor)?;
@@ -181,7 +182,7 @@ impl Store {
     /// Writes the project and its history. Callers hold the
     /// [`lock`](Self::lock).
     pub fn save(&self, editor: &mut Editor) -> Result<Saved> {
-        let text = to_json(editor.project(), self.dir())?;
+        let text = to_json(editor.project_mut(), self.dir())?;
         // The history goes first: whoever sees the new project file (a file
         // watcher, say) then also finds the history that matches it, instead
         // of mistaking the change for an external edit. Failing to save the
@@ -289,16 +290,22 @@ fn files(project: &mut Project) -> impl Iterator<Item = &mut PathBuf> {
         .flat_map(|m| std::iter::once(&mut m.path).chain(m.proxy.as_mut().map(|p| &mut p.path)))
 }
 
-/// The file's text, with the paths in or under `dir` relative to it.
-fn to_json(project: &Project, dir: &Path) -> Result<String> {
-    let mut project = project.clone();
-    for path in files(&mut project) {
-        if let Ok(relative) = path.strip_prefix(dir) {
-            *path = portable(relative);
+/// The file's text, with the paths in or under `dir` relative to it. They
+/// are relative while it is written, and as they were after.
+fn to_json(project: &mut Project, dir: &Path) -> Result<String> {
+    let absolute: Vec<Option<PathBuf>> = files(project)
+        .map(|path| {
+            let relative = path.strip_prefix(dir).ok().map(portable);
+            relative.map(|r| std::mem::replace(path, r))
+        })
+        .collect();
+    let text = serde_json::to_string_pretty(project);
+    for (path, was) in files(project).zip(absolute) {
+        if let Some(was) = was {
+            *path = was;
         }
     }
-    let mut s =
-        serde_json::to_string_pretty(&project).map_err(|e| Error::internal(e.to_string()))?;
+    let mut s = text.map_err(|e| Error::internal(e.to_string()))?;
     s.push('\n');
     Ok(s)
 }
@@ -424,7 +431,7 @@ mod tests {
             auto_format: false,
             ..Settings::default()
         });
-        std::fs::write(&path, to_json(&project, dir).unwrap()).unwrap();
+        std::fs::write(&path, to_json(&mut project.clone(), dir).unwrap()).unwrap();
         Store::open_in(&path, &dir.join("state")).unwrap()
     }
 
@@ -444,6 +451,22 @@ mod tests {
 
     fn history_text(store: &Store) -> String {
         std::fs::read_to_string(&store.history_path).unwrap()
+    }
+
+    #[test]
+    fn a_saved_project_keeps_its_paths_absolute() {
+        // The file has them relative to its folder.
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = crate::dirs::canonical(tmp.path()).unwrap();
+        let fixture = crate::test_support::Fixture::new(&[(4.0, true)]);
+        let mut project = fixture.editor.project().clone();
+        project.media[0].path = dir.join("1.mp4");
+        let path = dir.join("p.vidcut");
+        std::fs::write(&path, to_json(&mut project, &dir).unwrap()).unwrap();
+        let store = Store::open_in(&path, &dir.join("state")).unwrap();
+        let mut editor = store.load().unwrap();
+        store.save(&mut editor).unwrap();
+        assert_eq!(editor.project().media[0].path, dir.join("1.mp4"));
     }
 
     #[test]
