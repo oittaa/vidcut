@@ -10,6 +10,8 @@ pub const GAIN: std::ops::RangeInclusive<f64> = -60.0..=24.0;
 /// Returns every invariant violation found (empty when the project is valid).
 pub fn violations(p: &Project) -> Vec<String> {
     let mut v = Vec::new();
+    let pool: std::collections::HashMap<&str, &crate::model::Media> =
+        p.media.iter().map(|m| (m.id.as_str(), m)).collect();
     let mut ids = HashSet::new();
     for m in &p.media {
         if !ids.insert(m.id.as_str()) {
@@ -81,7 +83,7 @@ pub fn violations(p: &Project) -> Vec<String> {
                 }
                 continue;
             }
-            match p.media(&c.media) {
+            match pool.get(c.media.as_str()) {
                 None => v.push(format!("{}: unknown media {}", c.id, c.media)),
                 Some(m) => {
                     let frames = p.media_limit(m);

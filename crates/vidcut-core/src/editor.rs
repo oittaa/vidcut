@@ -4036,7 +4036,7 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
                 v["name"] = json!(n);
             }
             // Carried transitions (deviation X9), at their cuts.
-            let cuts = otio::transitions::Cuts::of(t);
+            let cuts = otio::transitions::Cuts::of(p, t);
             let transitions: Vec<Value> = t
                 .transitions
                 .iter()
