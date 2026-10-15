@@ -147,13 +147,22 @@ impl Normalizer {
                 .map(|d| d.name().to_string())
                 .unwrap_or_default()
         };
+        let color = crate::color::Source::of(src);
         let mut graph = filter::Graph::new();
-        let args = format!(
+        let mut args = format!(
             "video_size={w}x{h}:pix_fmt={}:time_base=1/1000000:pixel_aspect={}/{}",
             ffmpeg::ffi::AVPixelFormat::from(fmt) as i32,
             sar.0.max(1),
             sar.1.max(1)
         );
+        // The graph is told the matrix and range the picture is read with,
+        // and so is each frame (`run`). Then a conversion FFmpeg adds by
+        // itself, for a filter that doesn't take the layout (4:2:2 before
+        // `transpose`), keeps them. Told nothing, it converts the picture
+        // to BT.601's matrix.
+        if let Some((matrix, range)) = color.yuv_tags() {
+            args += &format!(":colorspace={}:range={}", matrix as i32, range as i32);
+        }
         graph
             .add(
                 &filter::find("buffer").ok_or_else(|| Error::Invalid("no buffer filter".into()))?,
@@ -169,7 +178,6 @@ impl Normalizer {
                 "",
             )
             .ctx(|| "creating video sink".into())?;
-        let color = crate::color::Source::of(src);
         // Without zimg the CPU does `zscale`'s part, between two graphs.
         let (conv, cpu) = if crate::color::needs_zscale(color, target) && !zscale {
             let split = crate::color::split(color, out_fmt, target);
@@ -237,6 +245,11 @@ impl Normalizer {
     pub(crate) fn run(&mut self, src: &frame::Video) -> Result<frame::Video> {
         let mut input = frame_ref(src)?;
         input.set_pts(Some(0));
+        // The matrix and range the graph was told (`with`).
+        if let Some((matrix, range)) = self.input.5.yuv_tags() {
+            input.set_color_space(matrix.into());
+            input.set_color_range(range.into());
+        }
         self.graph
             .get("in")
             .expect("source")
@@ -423,7 +436,7 @@ impl Relayout {
 
 #[cfg(test)]
 mod tests {
-    use super::{Relayout, displayable, fit, shown_size};
+    use super::{Normalizer, Relayout, displayable, fit, shown_size};
     use crate::ffmpeg::{color, format::Pixel, frame};
 
     #[test]
@@ -501,5 +514,60 @@ mod tests {
             "landscape into vertical"
         );
         assert_eq!(fit(720, 576, (16, 15), 1920, 1080), (1440, 1080), "PAL 4:3");
+    }
+
+    /// A flat orange (Y 100, Cb 90, Cr 170 in 8 bits), 64×64 in `pixel`,
+    /// tagged `matrix` and video range, turned a quarter and converted to
+    /// RGB: each pixel's.
+    fn turned_orange(pixel: Pixel, matrix: color::Space) -> Vec<[u8; 3]> {
+        let mut f = frame::Video::new(pixel, 64, 64);
+        f.set_color_space(matrix);
+        f.set_color_range(color::Range::MPEG);
+        f.set_pts(Some(0));
+        for (plane, v) in [(0, 100u16), (1, 90), (2, 170)] {
+            if pixel == Pixel::YUV422P10LE {
+                for px in f.data_mut(plane).as_chunks_mut::<2>().0 {
+                    *px = (v << 2).to_le_bytes();
+                }
+            } else {
+                f.data_mut(plane).fill(v as u8);
+            }
+        }
+        let out = Normalizer::new(&f, 90, 64, 64, Pixel::RGBA, None)
+            .and_then(|mut n| n.run(&f))
+            .unwrap();
+        let (stride, data) = (out.stride(0), out.data(0));
+        (0..64)
+            .flat_map(|y| (0..64).map(move |x| y * stride + 4 * x))
+            .map(|at| [data[at], data[at + 1], data[at + 2]])
+            .collect()
+    }
+
+    /// How far `rgb`'s pixels are from `want` at most, in levels of a
+    /// channel.
+    fn farthest(rgb: &[[u8; 3]], want: [u8; 3]) -> u8 {
+        rgb.iter()
+            .flat_map(|p| (0..3).map(move |c| p[c].abs_diff(want[c])))
+            .max()
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn an_8_bit_4_2_2_picture_turned_a_quarter_keeps_its_matrix() {
+        let rgb = turned_orange(Pixel::YUV422P, color::Space::BT709);
+        assert!(farthest(&rgb, [173, 84, 18]) <= 1, "{:?}", rgb[0]);
+    }
+
+    #[test]
+    fn a_10_bit_4_2_2_picture_turned_a_quarter_keeps_its_matrix() {
+        let rgb = turned_orange(Pixel::YUV422P10LE, color::Space::BT709);
+        assert!(farthest(&rgb, [173, 84, 18]) <= 1, "{:?}", rgb[0]);
+    }
+
+    #[test]
+    fn a_turned_4_2_2_picture_tagged_smpte_240m_is_read_as_untagged() {
+        // Untagged at this size: BT.601.
+        let rgb = turned_orange(Pixel::YUV422P, color::Space::SMPTE240M);
+        assert!(farthest(&rgb, [165, 79, 21]) <= 1, "{:?}", rgb[0]);
     }
 }
