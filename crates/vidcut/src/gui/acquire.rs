@@ -70,7 +70,7 @@ impl Acquirer {
     /// # Safety
     /// `cmd` is a command buffer of this device being recorded for wgpu's
     /// queue; the images are this device's, on memory `source` wrote, not
-    /// yet used by wgpu.
+    /// used by wgpu or left by it in `layout`.
     pub(super) unsafe fn record(
         &self,
         cmd: vk::CommandBuffer,

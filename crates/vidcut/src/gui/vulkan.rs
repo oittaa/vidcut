@@ -3,10 +3,75 @@
 //! exported by FFmpeg's device ([`vidcut_av::hw::vulkan::Exported`]),
 //! imported by wgpu's device into an image made as FFmpeg made its own.
 //! An opaque handle needs that: the same image, the same allocation, on
-//! the same GPU and driver.
+//! the same GPU and driver. A screen keeps the imports of the frames it
+//! draws ([`Imports`]).
+
+use std::collections::HashMap;
 
 use ash::vk;
-use vidcut_av::hw::vulkan::{HANDLE, Plane};
+use vidcut_av::hw::vulkan::{HANDLE, Identity, Plane};
+
+/// A frame's planes imported into wgpu's device: their images, which each
+/// draw acquires, and the views the shader draws from.
+pub(super) struct Import {
+    pub(super) images: Vec<vk::Image>,
+    /// Views of the Y, U and V planes.
+    pub(super) views: [wgpu::TextureView; 3],
+    /// The luma texture's size.
+    pub(super) size: (u32, u32),
+    /// FFmpeg's queue families share the images (`CONCURRENT`).
+    pub(super) concurrent: bool,
+    /// The textures, which own the images.
+    pub(super) _textures: Vec<wgpu::Texture>,
+}
+
+/// The imports a screen keeps: one for each frame of the frames context of
+/// the picture it drew last. That picture holds the context. While it
+/// lives, FFmpeg's pool hands its frames out again with the same images,
+/// so a frame drawn again is found by its identity. Imports of other
+/// frames contexts are let go: kept, they would hold memory FFmpeg freed.
+#[derive(Default)]
+pub(super) struct Imports {
+    frames: Option<usize>,
+    kept: HashMap<Identity, Import>,
+}
+
+impl Imports {
+    /// The import of the frame `identity` names, made by `import` the first
+    /// time, and whether it was. Those of another frames context are let
+    /// go first.
+    pub(super) fn get_or_import(
+        &mut self,
+        identity: Identity,
+        import: impl FnOnce() -> Result<Import, String>,
+    ) -> Result<(&Import, bool), String> {
+        if self.frames != Some(identity.frames) {
+            self.clear();
+            self.frames = Some(identity.frames);
+        }
+        let new = !self.kept.contains_key(&identity);
+        if new {
+            self.kept.insert(identity.clone(), import()?);
+        }
+        Ok((&self.kept[&identity], new))
+    }
+
+    /// Lets them all go: the next picture isn't of their frames context.
+    /// The driver takes a third of a millisecond to free each plane's
+    /// image and memory, so a thread of its own frees them, not the
+    /// screen's (wgpu frees those the GPU still reads once it is done).
+    pub(super) fn clear(&mut self) {
+        self.frames = None;
+        let old = std::mem::take(&mut self.kept);
+        if old.is_empty() {
+            return;
+        }
+        // Freed here when no thread starts.
+        let _ = std::thread::Builder::new()
+            .name("vidcut frees imports".into())
+            .spawn(move || drop(old));
+    }
+}
 
 /// The UUIDs of `hal`'s GPU and of its driver.
 ///
