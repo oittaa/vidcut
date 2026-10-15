@@ -9,12 +9,12 @@ use eframe::egui::{
     vec2,
 };
 use vidcut_av::waveform::Waveform;
-use vidcut_core::model::{Clip, Effects, Project, Speed, Track, Transition};
+use vidcut_core::model::{Clip, Effects, Media, Project, Speed, Track, Transition};
 use vidcut_core::ops;
 use vidcut_core::otio::transitions;
 use vidcut_core::time::Rational;
 
-use super::geometry::{Rows, Scale, TrackRect, clips_in};
+use super::geometry::{Rows, Scale, TrackRect, clips_in, covered};
 use super::gesture::{Preview, Target};
 use crate::gui::pool::elide;
 use crate::gui::theme;
@@ -41,6 +41,31 @@ pub struct Assets<'a> {
     pub tiles: Option<&'a Tiles>,
     /// Media whose files are missing: their clips are red.
     pub missing: &'a HashSet<String>,
+    /// The pool's items by id.
+    pub pool: &'a HashMap<&'a str, &'a Media>,
+}
+
+/// Each track's transitions that have a place, by track id: their cuts and
+/// indexes, in order of band and cut.
+pub type Placed = HashMap<String, Vec<(i64, usize)>>;
+
+/// [`Placed`] of `p`.
+pub fn placed(p: &Project) -> Placed {
+    p.tracks
+        .iter()
+        .filter(|t| !t.transitions.is_empty())
+        .map(|t| {
+            let cuts = transitions::Cuts::of(p, t);
+            let mut placed: Vec<(i64, usize)> = t
+                .transitions
+                .iter()
+                .enumerate()
+                .filter_map(|(i, x)| Some((cuts.place(p, x)?, i)))
+                .collect();
+            placed.sort_by_key(|&(at, i)| (t.transitions[i].sound, at));
+            (t.id.clone(), placed)
+        })
+        .collect()
 }
 
 pub fn marker_color(name: &str) -> Color32 {
@@ -196,7 +221,7 @@ pub fn ruler(
     }
 }
 
-/// A track's clips.
+/// A track's clips, and its transitions where `placed` puts them.
 #[allow(clippy::too_many_arguments)]
 pub fn track(
     painter: &Painter,
@@ -204,9 +229,10 @@ pub fn track(
     scale: &Scale,
     p: &Project,
     t: &Track,
-    selected: &[String],
+    selected: &HashSet<&str>,
     assets: &Assets,
     look: Look,
+    placed: &[(i64, usize)],
 ) {
     let rect = tr.rect;
     let fill = if look.target {
@@ -217,25 +243,29 @@ pub fn track(
     painter.rect_filled(rect, CornerRadius::ZERO, fill);
     let (a, b) = scale.visible(rect.left(), rect.right());
     let fps = p.settings.fps;
-    for c in &t.clips[clips_in(t, a - 1, b + 1)] {
-        clip(
-            painter,
-            tr,
-            scale,
-            p,
-            t,
-            c,
-            selected.contains(&c.id),
-            assets,
-            look,
-            fps,
-        );
+    let shown = &t.clips[clips_in(t, a - 1, b + 1)];
+    let span = |c: &Clip| (c.start, c.end());
+    let picked = |c: &Clip| selected.contains(c.id.as_str());
+    for (i, c) in shown.iter().enumerate() {
+        // A selected clip is only drawn over by a selected one.
+        let next = shown.get(i + 1);
+        if covered(scale, span(c), next.map(span)) && (!picked(c) || next.is_some_and(picked)) {
+            continue;
+        }
+        clip(painter, tr, scale, p, t, c, picked(c), assets, look, fps);
     }
-    let cuts = transitions::Cuts::of(p, t);
-    for x in &t.transitions {
-        if let Some(at) = cuts.place(p, x)
-            && at + x.after >= a
+    let reach = |&(at, i): &(i64, usize)| {
+        let x = &t.transitions[i];
+        (at - x.before, at + x.after)
+    };
+    for (k, &(at, i)) in placed.iter().enumerate() {
+        let x = &t.transitions[i];
+        let next = placed
+            .get(k + 1)
+            .filter(|&&(_, j)| t.transitions[j].sound == x.sound);
+        if at + x.after >= a
             && at - x.before <= b
+            && !covered(scale, reach(&(at, i)), next.map(reach))
         {
             transition(painter, tr, scale, at, x);
         }
@@ -283,7 +313,8 @@ fn clip(
     // Offline clips are red, as in the Media Pool, with nothing drawn of
     // their file.
     let offline = assets.missing.contains(&c.media);
-    let tint = p.clip_color(c).and_then(theme::clip_color);
+    let media = assets.pool.get(c.media.as_str()).copied();
+    let tint = c.shown_color(media).and_then(theme::clip_color);
     let fill = if offline {
         theme::OFFLINE
     } else if !enabled {
@@ -300,7 +331,7 @@ fn clip(
     // Audio-only clips (and audio tracks) have no picture band.
     let has_picture = c.video && video.height() > 2.0;
     if has_picture {
-        painter.rect_filled(video.shrink2(vec2(0.5, 0.0)), CornerRadius::same(2), fill);
+        painter.rect_filled(parted(video), CornerRadius::same(2), fill);
     } else if video.height() > 2.0 {
         painter.rect_stroke(
             video.shrink(1.0),
@@ -328,22 +359,18 @@ fn clip(
         );
         // Its Clip Color over the pictures.
         if let Some(t) = tint {
-            painter.rect_filled(
-                video.shrink2(vec2(0.5, 0.0)),
-                CornerRadius::same(2),
-                t.gamma_multiply(0.35),
-            );
+            painter.rect_filled(parted(video), CornerRadius::same(2), t.gamma_multiply(0.35));
         }
     }
     // A compound clip's sound: a block on the audio band.
     if c.compound.is_some() && !c.video {
         let band = Rect::from_x_y_ranges(x0..=x1, tr.audio_top..=rect.bottom());
-        painter.rect_filled(band.shrink2(vec2(0.5, 0.0)), CornerRadius::same(2), fill);
+        painter.rect_filled(parted(band), CornerRadius::same(2), fill);
     }
     // Audio, offset by J/L cuts.
     if let Some((ra, rb)) = c.audio_range() {
-        let audio =
-            Rect::from_x_y_ranges(scale.xf(ra)..=scale.xf(rb), tr.audio_top..=rect.bottom());
+        let (a0, a1) = (scale.xf(ra), scale.xf(rb).max(scale.xf(ra) + 1.0));
+        let audio = Rect::from_x_y_ranges(a0..=a1, tr.audio_top..=rect.bottom());
         let muted = c.audio.as_ref().is_some_and(|x| x.muted) || t.muted;
         let color = if offline {
             theme::OFFLINE
@@ -356,7 +383,7 @@ fn clip(
             theme::AUDIO
         };
         let ap = track_painter.with_clip_rect(rect.intersect(audio.expand(1.0)));
-        ap.rect_filled(audio.shrink2(vec2(0.5, 0.0)), CornerRadius::same(2), color);
+        ap.rect_filled(parted(audio), CornerRadius::same(2), color);
         if look.waveforms && !muted && !offline && audio.height() >= 8.0 {
             waveform(&ap, audio, scale, p, c, assets, fps);
         }
@@ -385,7 +412,7 @@ fn clip(
         let name = c
             .name
             .clone()
-            .or_else(|| p.media(&c.media).map(|m| m.name.clone()))
+            .or_else(|| media.map(|m| m.name.clone()))
             .or_else(|| c.generator.as_ref().map(vidcut_core::otio::generator_kind))
             .or_else(|| c.compound.as_ref().map(vidcut_core::otio::compound_kind))
             .unwrap_or_default();
@@ -454,6 +481,17 @@ fn clip(
             Stroke::new(2.0, theme::ACCENT),
             StrokeKind::Inside,
         );
+    }
+}
+
+/// Clip band `r` with half a pixel off each side, which parts it from its
+/// neighbors, if that leaves a pixel: a thinner one is drawn whole, or
+/// nothing would show.
+fn parted(r: Rect) -> Rect {
+    if r.width() >= 2.0 {
+        r.shrink2(vec2(0.5, 0.0))
+    } else {
+        r
     }
 }
 
@@ -546,7 +584,7 @@ fn filmstrip(
     assets: &Assets,
     fps: Rational,
 ) {
-    let Some(m) = p.media(&c.media) else {
+    let Some(m) = assets.pool.get(c.media.as_str()) else {
         return;
     };
     let pool = assets.thumbs.get(&c.media);

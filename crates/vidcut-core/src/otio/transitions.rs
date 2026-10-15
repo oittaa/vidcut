@@ -62,7 +62,7 @@ impl<'a> Cuts<'a> {
             clips: HashMap::new(),
             starts: HashSet::new(),
             ends: HashSet::new(),
-            pool: p.media.iter().map(|m| (m.id.as_str(), m)).collect(),
+            pool: p.pool(),
         };
         for c in &track.clips {
             cuts.clips.entry(c.id.as_str()).or_insert(c);
