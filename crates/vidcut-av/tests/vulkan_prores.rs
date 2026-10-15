@@ -3,8 +3,8 @@
 //! barcode and timestamp, read through and after seeks, and each comes
 //! down to memory once. A player keeps each decoder's pictures in GPU
 //! memory only where its display shows that decoder's, and counts each
-//! picture it brings down. Skips where the GPU in use doesn't decode ProRes
-//! on Vulkan.
+//! picture it brings down: none where its display shows Vulkan's. Skips
+//! where the GPU in use doesn't decode ProRes on Vulkan.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -173,4 +173,13 @@ fn a_player_whose_display_takes_no_vulkan_pictures_copies_each_prores_frame_down
         up_bytes: 0,
     };
     assert_eq!(player.stats().copies, want);
+}
+
+#[test]
+fn a_player_whose_display_takes_vulkans_pictures_copies_none_of_them() {
+    let Some(gpu) = on_vulkan().filter(|g| g.kind() == Kind::Nvdec) else {
+        return;
+    };
+    let player = played_through(vec![gpu.kind(), Kind::Vulkan]);
+    assert_eq!(player.stats().copies, Copied::default());
 }
