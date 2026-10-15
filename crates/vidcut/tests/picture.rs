@@ -4,8 +4,9 @@
 //! flat. Pictures turned a quarter have chroma that changes down the rows
 //! they are stored in. Runs on any adapter, a software one too. Skips
 //! without one. A ProRes picture decoded on Vulkan and kept in GPU memory is
-//! drawn from there, its planes imported, as closely; that test skips where
-//! the GPU in use doesn't decode ProRes on Vulkan.
+//! drawn from there, its planes imported, as closely, and drawn again from
+//! the same import; those tests skip where the GPU in use doesn't decode
+//! ProRes on Vulkan.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -220,9 +221,27 @@ fn a_prores_picture_kept_on_vulkan_draws_from_gpu_memory_again() {
     let Some((gpu, picture)) = kept_on_vulkan() else {
         return;
     };
+    let mut first = Screen::new();
+    first.draw(&gpu, Some(&picture), W, H);
+    // Another screen imports its memory again.
+    let mut second = Screen::new();
+    second.draw(&gpu, Some(&picture), W, H);
+    assert!(second.shared(), "the picture came down when imported again");
+}
+
+#[test]
+fn a_prores_picture_kept_on_vulkan_and_drawn_again_is_imported_once() {
+    let Some((gpu, picture)) = kept_on_vulkan() else {
+        return;
+    };
+    let theirs = picture.to_rgba(W, H).unwrap();
     let mut screen = Screen::new();
-    screen.draw(&gpu, Some(&picture), W, H);
-    // Another size: its memory is imported again.
     screen.draw(&gpu, Some(&picture), W / 2, H / 2);
-    assert!(screen.shared(), "the picture came down when drawn again");
+    // Another size: drawn again from the same import.
+    screen.draw(&gpu, Some(&picture), W, H);
+    assert_eq!(screen.imports(), 1);
+    let ours = screen.read(&gpu).unwrap();
+    let (flat, most) = flat_diff(&ours.rgba, &theirs.rgba, W as usize);
+    assert!(flat > (W * H / 2) as usize, "only {flat} pixels are flat");
+    assert!(most <= 1, "{most} levels apart where the picture is flat");
 }
