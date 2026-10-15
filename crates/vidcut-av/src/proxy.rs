@@ -423,8 +423,9 @@ pub struct WrittenProxy {
 /// The frames decode on `decoder`, a GPU's, where it decodes the stream,
 /// on the CPU otherwise, and their pictures are made as an export makes its
 /// own (`export::make::Maker`). NVENC takes NVDEC's frames deinterlaced,
-/// turned, converted and scaled on the GPU, never copied to memory, where
-/// the planner leaves them there ([`plan`](crate::route::plan),
+/// and Vulkan's (ProRes), turned, converted and scaled on the GPU, never
+/// copied to memory, where the planner leaves them there
+/// ([`plan`](crate::route::plan),
 /// [`CudaPictures`](crate::cuda::CudaPictures)), and so does Vulkan's ProRes
 /// encoder, libplacebo making its pictures on Vulkan. VAAPI, AMF and
 /// VideoToolbox on the decoder's device take its frames fitted there
@@ -784,9 +785,10 @@ impl<'a> Writer<'a> {
 }
 
 /// Encodes what `reader` decodes, its pictures made as an export makes its
-/// own (`Maker`): for NVENC, NVDEC's frames scaled on the GPU and handed to
-/// it there; for Vulkan's ProRes encoder, NVDEC's frames made into its
-/// pictures by libplacebo on its Vulkan device; for VAAPI, AMF and
+/// own (`Maker`): for NVENC, NVDEC's or Vulkan's frames scaled on the GPU
+/// and handed to it there; for Vulkan's ProRes encoder, NVDEC's or Vulkan's
+/// frames made into its pictures by libplacebo on its Vulkan device; for
+/// VAAPI, AMF and
 /// VideoToolbox on `decoder`'s device, its frames fitted there; otherwise
 /// scaled on the CPU, the GPU's frames shrunk there first.
 /// The frames written, and how the first one went.
@@ -805,8 +807,9 @@ fn encode_into(
     // The proxy's pictures and colors, by the source's first frame.
     let video = enc.video_encoder(reader.peek());
     let (pixel, target) = (video.pixel, video.hdr);
-    // NVDEC's frames fitted on the GPU for NVENC, or by libplacebo on Vulkan
-    // for Vulkan's ProRes encoder, where the planner leaves them there and
+    // NVDEC's or Vulkan's frames fitted on the GPU for NVENC, or by
+    // libplacebo on Vulkan for Vulkan's ProRes encoder, where the planner
+    // leaves them there and
     // the scaler builds. A picture may come with the next frame, leaving
     // the GPU less to do.
     let scaled = match enc.kind {
@@ -818,7 +821,7 @@ fn encode_into(
         _ => Fitting::none(),
     };
     let made_on = match (enc.kind, &scaled.scaler) {
-        (EncoderChoice::Nvenc, Some(_)) => reader.cuda().map(MadeOn::Cuda),
+        (EncoderChoice::Nvenc, Some(_)) => reader.decoders_cuda().map(MadeOn::Cuda),
         (EncoderChoice::Vulkan, Some(s)) => s.vulkan().map(MadeOn::Vulkan),
         _ => None,
     };
