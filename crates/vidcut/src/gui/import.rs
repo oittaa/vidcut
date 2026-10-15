@@ -249,7 +249,7 @@ impl Workspace {
             });
             ui.radio_value(&mut choice.sequences, false, "Separate stills");
             if let Some(e) = &choice.error {
-                ui.colored_label(super::theme::ERROR, e);
+                ui.colored_label(super::theme::colors().error, e);
             }
             ui.add_space(6.0);
             ui.horizontal(|ui| {

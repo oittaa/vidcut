@@ -203,3 +203,12 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 - **Until a tile's picture comes:** the nearest kept picture of the same media within two steps, else the pool's picture nearest in time.
 - **The pool** asks for tiles too: the frame under the pointer while hovering a thumbnail or a filmstrip, and in the Filmstrip view the frame at each picture's middle. The hovered frame is on a grid of a power of two frames no wider than a point.
 - **Tests:** `vidcut-av/tests/frames.rs` checks the frames by barcode. The grid and the eviction are unit tests.
+
+## 12. Themes (deviation X22)
+
+- **Files:** a theme is a TOML file: colors, corners and spacing, fonts, and a decoration. The built-in ones are `crates/vidcut/themes/*.toml`, compiled in. A user's go in `~/.config/vidcut/themes`, and one named like a built-in replaces it. A file lists only what it changes. The rest comes from the theme it `extends`, Starship by default.
+- **Switching:** the session loads the theme `appearance.theme` names into the snapshot. It loads it again when the preferences file or a file in the themes folder changes. The GUI applies a new one at the next frame, to both of egui's styles, and rebuilds the fonts only when they differ. A theme that doesn't load shows Starship, and a notice says why.
+- **Fonts** are family names, looked up among the installed fonts with fontdb. `system` stands for the OS's own UI or monospace font (`SYSTEM_UI`, `SYSTEM_MONO` in `gui/theme.rs`). With none found, egui's built-in font shows.
+- **Decorations** (`glow`, `hud`, `steel`) are painted behind each panel's content (`theme::decorated`). A shape is reserved before the content and filled once its size is known. Cut-corner panels paint their own fill, so their frames have none. A theme's `padding` must clear its corners.
+- **Colors:** everything else paints with `theme::colors()`, the theme shown, kept on the GUI thread.
+- **Tests:** `tests/gui_theme.rs` sets a theme file and sees the GUI take it. Parsing and `extends` are unit tests.

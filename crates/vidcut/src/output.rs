@@ -426,6 +426,19 @@ pub fn print(method: &str, r: &Response, json: bool) {
             for line in lines {
                 println!("{line}");
             }
+            // The themes `appearance.theme` can name.
+            for t in r.result["themes"].as_array().into_iter().flatten() {
+                let from = match (t["error"].as_str(), t["path"].as_str()) {
+                    (Some(e), _) => format!(", which doesn't load: {e}"),
+                    (None, Some(path)) => format!(" ({path})"),
+                    (None, None) => String::new(),
+                };
+                println!(
+                    "appearance.theme={} is {}{from}",
+                    t["name"].as_str().unwrap_or_default(),
+                    t["title"].as_str().unwrap_or_default()
+                );
+            }
             for c in r.result["proxy_codecs"].as_array().into_iter().flatten() {
                 let plays = match c["plays_on"].as_str() {
                     Some(decoder) => format!("the GPU ({decoder})"),

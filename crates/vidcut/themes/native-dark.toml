@@ -1,0 +1,62 @@
+# Native Dark: the layered grays, blue accent, corners and font of a desktop
+# app in dark mode.
+
+title = "Native Dark"
+
+[colors]
+background = "#202020"
+panel = "#282828"
+panel_dark = "#1C1C1C"
+track = "#1A1A1A"
+track_target = "#182430"
+panel_target = "#1C3E5C"
+text = "#F3F3F3"
+text_dim = "#A6A6A6"
+accent = "#4CC2FF"
+playhead = "#FF5252"
+clip = "#005FAA"
+clip_disabled = "#383838"
+offline = "#AA3232"
+audio = "#2E7850"
+generator = "#785AB4"
+compound = "#AA6E3C"
+marked = "#5A5A5A46"
+error = "#FF99A4"
+ok = "#6CCB5F"
+selection = "#0067C0"
+selected_text = "#FFFFFF"
+field = "#181818"
+faint = "#2E2E2E"
+line = "#383838"
+button = "#484848"
+button_line = "#4A4A4A"
+button_hovered = "#3C3C3C"
+button_pressed = "#303030"
+shadow = "#0000008C"
+
+[shape]
+corners = 4
+windows = 8
+menus = 8
+panels = 8
+clips = 4
+gap = 2
+padding = 10
+bar_padding = [8, 5]
+spacing = [8, 6]
+button_padding = [11, 5]
+button_height = 26
+buttons = "flat"
+panel_border = true
+shadow = [0, 8, 16]
+
+[fonts]
+ui = ["system"]
+mono = ["system"]
+size = 14
+small = 11
+heading = 20
+mono_size = 13
+
+[decoration]
+style = "none"

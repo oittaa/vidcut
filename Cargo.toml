@@ -20,6 +20,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 schemars = "1"
 toml = "1.1"
+# Installed fonts by family name, for themes.
+fontdb = "0.24"
 ctrlc = "3"
 # Test outputs in temp dirs that remove themselves, also when a test fails.
 tempfile = "3"

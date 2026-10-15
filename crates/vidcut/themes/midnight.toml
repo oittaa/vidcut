@@ -1,0 +1,62 @@
+# Midnight: blue-black panels, an indigo accent and a pink playhead. Buttons
+# show a box only under the pointer.
+
+title = "Midnight"
+
+[colors]
+background = "#08090E"
+panel = "#0D0F16"
+panel_dark = "#06070B"
+track = "#0B0D13"
+track_target = "#15152A"
+panel_target = "#2C2C60"
+text = "#E4E7F2"
+text_dim = "#7A829E"
+accent = "#818CFF"
+playhead = "#FF5292"
+clip = "#3A4698"
+clip_disabled = "#222636"
+offline = "#AA2848"
+audio = "#12808C"
+generator = "#965ADC"
+compound = "#BE6E46"
+marked = "#5A609646"
+error = "#FF6382"
+ok = "#50DCAA"
+selection = "#363A96"
+selected_text = "#FFFFFF"
+field = "#05060A"
+faint = "#11141E"
+line = "#1E2232"
+button = "#262B40"
+button_line = "#3A4060"
+button_hovered = "#2A3048"
+button_pressed = "#363D5C"
+shadow = "#000000BE"
+
+[shape]
+corners = 10
+windows = 16
+menus = 12
+panels = 14
+clips = 6
+gap = 4
+padding = 10
+bar_padding = [8, 5]
+spacing = [10, 7]
+button_padding = [12, 6]
+button_height = 26
+buttons = "flat"
+panel_border = true
+shadow = [0, 16, 48]
+
+[fonts]
+ui = ["system"]
+mono = ["Cascadia Code", "system"]
+size = 14
+small = 10.5
+heading = 18
+mono_size = 12.5
+
+[decoration]
+style = "none"

@@ -201,3 +201,8 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 - **Resolve:** Option+wheel zooms the timeline, and Command+wheel moves through it (Edit page, p. 853). The Cut page's lower timeline zooms with Option+wheel too.
 - **vidcut:** Ctrl+wheel (Cmd on a Mac) and a trackpad's pinch zoom the lower timeline.
 - **Why:** Ctrl+wheel and Cmd+wheel zoom in browsers and most other programs, and egui gives them and a pinch as the same zoom.
+
+## X22. Themes
+- **Resolve:** one dark gray look.
+- **vidcut:** eight built-in themes and your own TOML files. Starship, blue-black with cyan edges and cut corners, is the default. Classic is a flat dark gray like the Cut page's, and Native Light is light. File > Preferences or `preferences set appearance.theme=…` switches at once.
+- **Why:** a desktop app is expected to offer a few looks, and people spend long sessions in an editor. Every theme keeps the Cut page's layout and what its colors mean.

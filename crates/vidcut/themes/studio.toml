@@ -1,0 +1,62 @@
+# Studio: a deep graphite with rounded panels and an amber accent. Calm, for
+# long sessions.
+
+title = "Studio"
+
+[colors]
+background = "#111113"
+panel = "#18181B"
+panel_dark = "#0D0D0F"
+track = "#141417"
+track_target = "#211D17"
+panel_target = "#3E3120"
+text = "#E8E8EC"
+text_dim = "#8A8A94"
+accent = "#FF9F1C"
+playhead = "#FF453A"
+clip = "#3460A8"
+clip_disabled = "#2E323A"
+offline = "#A0302C"
+audio = "#1E805E"
+generator = "#7658AA"
+compound = "#A0643C"
+marked = "#50505846"
+error = "#FF6961"
+ok = "#5AC878"
+selection = "#7A4C0E"
+selected_text = "#FFFFFF"
+field = "#0C0C0E"
+faint = "#1E1E22"
+line = "#26262C"
+button = "#222227"
+button_line = "#3A3A42"
+button_hovered = "#2D2D34"
+button_pressed = "#383841"
+shadow = "#00000096"
+
+[shape]
+corners = 6
+windows = 12
+menus = 8
+panels = 10
+clips = 4
+gap = 3
+padding = 10
+bar_padding = [8, 5]
+spacing = [8, 6]
+button_padding = [10, 5]
+button_height = 24
+buttons = "filled"
+panel_border = false
+shadow = [0, 10, 28]
+
+[fonts]
+ui = ["system"]
+mono = ["system"]
+size = 13.5
+small = 10.5
+heading = 17
+mono_size = 12.5
+
+[decoration]
+style = "none"

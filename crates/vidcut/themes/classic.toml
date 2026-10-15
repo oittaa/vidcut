@@ -1,0 +1,62 @@
+# Classic: flat dark gray panels edge to edge, an orange accent and the
+# built-in font.
+
+title = "Classic"
+
+[colors]
+background = "#1C1C1E"
+panel = "#262629"
+panel_dark = "#18181A"
+track = "#141416"
+track_target = "#26231F"
+panel_target = "#3C352C"
+text = "#CDCDD2"
+text_dim = "#82828A"
+accent = "#E89634"
+playhead = "#E7483A"
+clip = "#3A6096"
+clip_disabled = "#343A44"
+offline = "#962E2A"
+audio = "#347854"
+generator = "#70549C"
+compound = "#925C3A"
+marked = "#46464C46"
+error = "#EB6258"
+ok = "#78BE78"
+selection = "#965C20"
+selected_text = "#CDCDD2"
+field = "#18181A"
+faint = "#2C2C30"
+line = "#343438"
+button = "#343439"
+button_line = "#969696"
+button_hovered = "#424248"
+button_pressed = "#505058"
+shadow = "#00000060"
+
+[shape]
+corners = 3
+windows = 6
+menus = 6
+panels = 0
+clips = 2
+gap = 0
+padding = 6
+bar_padding = [4, 4]
+spacing = [6, 4]
+button_padding = [8, 3]
+button_height = 18
+buttons = "filled"
+panel_border = false
+shadow = [10, 20, 15]
+
+[fonts]
+ui = []
+mono = []
+size = 13
+small = 9
+heading = 18
+mono_size = 13
+
+[decoration]
+style = "none"

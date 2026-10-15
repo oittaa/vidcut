@@ -16,7 +16,7 @@ use vidcut_core::model::Project;
 use vidcut_core::request::ViewerMode;
 use vidcut_core::time::{Rational, format_timecode};
 
-use super::theme;
+use super::theme::{self, Deco};
 use super::timeline::TimelineView;
 use crate::live::{self, Filmstrip, PlayerId, Snapshot};
 
@@ -105,6 +105,10 @@ pub struct Workspace {
     pub(super) flash: Option<(String, std::time::Instant)>,
     /// The window title last set.
     title: String,
+    /// The theme shown, to see when the session's changes.
+    theme: Option<Arc<crate::themes::Theme>>,
+    /// The height of the edit buttons under the pool, as last drawn.
+    pub(super) pool_buttons: f32,
     /// Edits take only the video (the Video Only toggle).
     pub(super) video_only: bool,
     /// Edits take only the audio (Audio Only).
@@ -243,6 +247,8 @@ impl Workspace {
             recent: recent_projects(),
             flash: None,
             title: String::new(),
+            theme: None,
+            pool_buttons: 84.0,
             video_only: false,
             audio_only: false,
             target: None,
@@ -564,7 +570,7 @@ impl Workspace {
     fn notices(&mut self, ui: &mut egui::Ui) {
         if let Some((text, at)) = &self.flash {
             if at.elapsed().as_secs() < 6 {
-                ui.label(RichText::new(text).color(theme::ACCENT));
+                ui.label(RichText::new(text).color(theme::colors().accent));
                 ui.ctx()
                     .request_repaint_after(std::time::Duration::from_secs(1));
                 return;
@@ -573,9 +579,9 @@ impl Workspace {
         }
         if let Some(n) = self.snap.notices.back() {
             let color = if n.error {
-                theme::ERROR
+                theme::colors().error
             } else {
-                theme::TEXT_DIM
+                theme::colors().text_dim
             };
             ui.label(RichText::new(&n.text).color(color));
         }
@@ -742,7 +748,7 @@ impl Workspace {
                 ui.toggle_value(&mut self.export.show_jobs, jobs)
                     .on_hover_text("Exports and proxy encodes, with progress");
                 if let Some(e) = &self.snap.preview_error {
-                    ui.label(RichText::new("no preview").color(theme::ERROR))
+                    ui.label(RichText::new("no preview").color(theme::colors().error))
                         .on_hover_text(e);
                 }
             });
@@ -780,7 +786,7 @@ impl Workspace {
                 // Right to left: the versions, how the viewer decodes, live
                 // control, the project's revision and format, with a line
                 // between them.
-                let dim = |text: String| RichText::new(text).color(theme::TEXT_DIM);
+                let dim = |text: String| RichText::new(text).color(theme::colors().text_dim);
                 ui.label(dim(short.clone())).on_hover_text(long.as_str());
                 if let Some(socket) = &self.snap.socket {
                     ui.separator();
@@ -837,7 +843,7 @@ impl Workspace {
         ui.vertical_centered(|ui| {
             ui.add_space(ui.available_height() * 0.25);
             ui.label(RichText::new("vidcut").size(36.0).strong());
-            ui.label(RichText::new("a scriptable video editor").color(theme::TEXT_DIM));
+            ui.label(RichText::new("a scriptable video editor").color(theme::colors().text_dim));
             ui.add_space(24.0);
             ui.horizontal(|ui| {
                 ui.add_space((ui.available_width() - 260.0).max(0.0) / 2.0);
@@ -850,7 +856,7 @@ impl Workspace {
             });
             if !self.recent.is_empty() {
                 ui.add_space(24.0);
-                ui.label(RichText::new("Recent").color(theme::TEXT_DIM));
+                ui.label(RichText::new("Recent").color(theme::colors().text_dim));
                 for p in self.recent.clone() {
                     if ui.link(p.display().to_string()).clicked() {
                         self.send("project.open", json!({ "path": p }));
@@ -869,7 +875,7 @@ impl Workspace {
             RichText::new(
                 "What you, scripts and agents did. Hover an entry for its request; click to copy it as a command.",
             )
-            .color(theme::TEXT_DIM)
+            .color(theme::colors().text_dim)
             .small(),
         );
         ui.separator();
@@ -882,7 +888,11 @@ impl Workspace {
                     if self.log_edits_only && !e.changed && e.ok {
                         continue;
                     }
-                    let color = if e.ok { theme::TEXT } else { theme::ERROR };
+                    let color = if e.ok {
+                        theme::colors().text
+                    } else {
+                        theme::colors().error
+                    };
                     let params = if e.params.as_object().is_some_and(|o| o.is_empty()) {
                         String::new()
                     } else {
@@ -897,7 +907,9 @@ impl Workspace {
                     let r = ui
                         .horizontal_wrapped(|ui| {
                             if !who.is_empty() {
-                                ui.label(RichText::new(who).small().color(theme::TEXT_DIM));
+                                ui.label(
+                                    RichText::new(who).small().color(theme::colors().text_dim),
+                                );
                             }
                             ui.add(
                                 egui::Label::new(RichText::new(&e.summary).small().color(color))
@@ -1502,6 +1514,14 @@ impl Workspace {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         self.snap = self.live.snapshot();
+        if !self
+            .theme
+            .as_ref()
+            .is_some_and(|t| Arc::ptr_eq(t, &self.snap.theme))
+        {
+            theme::apply(&ctx, &self.snap.theme);
+            self.theme = Some(self.snap.theme.clone());
+        }
         // Removing a track renumbers the ones above it: a selected edit or
         // a Dynamic Trim run may now name another track, so they end.
         let tracks = self.project().map_or(0, |p| p.tracks.len());
@@ -1546,17 +1566,23 @@ impl Workspace {
         self.project_windows(&ctx);
         self.import_window(&ctx);
         self.relink_window(&ctx);
-        egui::Panel::top("top")
-            .frame(egui::Frame::new().fill(theme::BG).inner_margin(4))
-            .show(ui, |ui| self.top_bar(ui));
+        let panel = theme::colors().panel;
+        egui::Panel::top("top").frame(theme::bar()).show(ui, |ui| {
+            theme::decorated(ui, Deco::Bar, |ui| self.top_bar(ui))
+        });
         egui::Panel::bottom("status")
-            .frame(egui::Frame::new().fill(theme::BG).inner_margin(4))
-            .show(ui, |ui| self.status_bar(ui));
+            .frame(theme::bar())
+            .show(ui, |ui| {
+                theme::decorated(ui, Deco::Status, |ui| self.status_bar(ui))
+            });
         if self.show_log {
             egui::Panel::right("log")
                 .resizable(true)
                 .default_size(380.0)
-                .show(ui, |ui| self.log_panel(ui));
+                .frame(theme::card(panel))
+                .show(ui, |ui| {
+                    theme::decorated(ui, Deco::Card, |ui| self.log_panel(ui))
+                });
         }
         if self.snap.project.is_none() {
             egui::CentralPanel::default().show(ui, |ui| self.start_screen(ui));
@@ -1566,27 +1592,36 @@ impl Workspace {
             .resizable(true)
             .default_size(300.0)
             .min_size(140.0)
-            .frame(egui::Frame::new().fill(theme::PANEL).inner_margin(6))
-            .show(ui, |ui| self.timeline_panel(ui));
+            .frame(theme::card(panel))
+            .show(ui, |ui| {
+                theme::decorated(ui, Deco::Card, |ui| self.timeline_panel(ui))
+            });
         if self.show_mixer {
             egui::Panel::right("mixer")
                 .resizable(true)
                 .default_size(320.0)
-                .show(ui, |ui| self.mixer_panel(ui));
+                .frame(theme::card(panel))
+                .show(ui, |ui| {
+                    theme::decorated(ui, Deco::Card, |ui| self.mixer_panel(ui))
+                });
         }
         egui::Panel::left("pool")
             .resizable(true)
             .default_size(430.0)
             .min_size(260.0)
-            .frame(egui::Frame::new().fill(theme::PANEL).inner_margin(6))
-            .show(ui, |ui| self.pool_panel(ui));
+            .frame(theme::card(panel))
+            .show(ui, |ui| {
+                theme::decorated(ui, Deco::Card, |ui| self.pool_panel(ui))
+            });
         // The timeline and the pool have asked for their tiles.
         if let Some(tiles) = &mut self.tiles {
             tiles.end_frame();
         }
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(theme::BG).inner_margin(6))
-            .show(ui, |ui| self.viewer_panel(ui));
+            .frame(theme::card(theme::colors().panel_dark))
+            .show(ui, |ui| {
+                theme::decorated(ui, Deco::Viewer, |ui| self.viewer_panel(ui))
+            });
         self.media_drag_overlay(&ctx);
     }
 }
@@ -1623,7 +1658,7 @@ pub(super) fn fit(avail: egui::Rect, aspect: f32) -> egui::Rect {
 }
 
 pub(super) fn dim(text: impl Into<String>) -> RichText {
-    RichText::new(text.into()).color(theme::TEXT_DIM)
+    RichText::new(text.into()).color(theme::colors().text_dim)
 }
 
 /// Escape on a question with no popup of its own open: it dismisses the
