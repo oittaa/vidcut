@@ -35,12 +35,12 @@ These are mandatory.
 
 | When | Command | Runs |
 |---|---|---|
-| Before **every commit** that changes more than `.md` files (enforced by `.githooks/pre-commit`) | `scripts/check.sh` | no binary files in git, `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, unit tests (`--lib --bins`) |
-| After a **bigger change** | `scripts/check.sh full` | the above plus all integration/e2e tests and doc tests |
+| Before **every commit** that changes more than `.md` files (enforced by `.githooks/pre-commit`) | `make check` (`scripts/check.sh`) | no binary files in git, `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, unit tests (`--lib --bins`) |
+| After a **bigger change** | `make check-full` (`scripts/check.sh full`) | the above plus all integration/e2e tests and doc tests |
 
-**Enable the hook once per clone:** `git config core.hooksPath .githooks`.
+**Enable the hook once per clone:** `make hooks` (`git config core.hooksPath .githooks`).
 
-**On Windows** the scripts run from Git Bash, with `FFMPEG_DIR` set (README.md, Requirements).
+**On Windows**, which has no make, the scripts run from Git Bash, with `FFMPEG_DIR` set (README.md, Requirements).
 
 **CI** (`.github/workflows/check.yml`) runs only the fast gate, on Linux, Windows and macOS, on pull requests and pushes to master. `.github/workflows/ffmpeg.yml` builds against the newest FFmpeg release and master weekly and on demand.
 

@@ -1,4 +1,5 @@
-# The fast gate, scripts/check.sh, on Linux, Windows and macOS.
+# The fast gate on Linux, Windows and macOS: make check, which also checks
+# the Makefile, and scripts/check.sh on Windows, which has no make.
 name: check
 
 on:
@@ -80,7 +81,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Fast gate
-        run: scripts/check.sh
+        run: make doctor check
 
   windows:
     name: Windows, fmt, clippy, unit tests
@@ -171,5 +172,5 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Fast gate
-        run: scripts/check.sh
+        run: make doctor check
 

@@ -58,14 +58,17 @@ Rust comes from [rustup](https://rustup.rs). The repository pins its Rust versio
 
 ## Build and run
 
+On Linux and macOS, `make help` lists the common tasks:
+
 ```bash
-cargo build --release
-./target/release/vidcut                     # the GUI (start screen: new or open a project)
-./target/release/vidcut -p talk.vidcut      # the GUI with a project (created if missing)
-./target/release/vidcut --help              # the CLI
+make doctor                 # what a build still needs, then the GPUs and encoders
+make                        # build
+make run                    # the GUI (start screen: new or open a project)
+make run P=talk.vidcut      # the GUI with a project (created if missing)
+make install                # vidcut into ~/.local/bin
 ```
 
-On Windows the program is `target\release\vidcut.exe`.
+The program is `target/release/vidcut`, and `vidcut --help` shows the CLI. On Windows, without make, `cargo build --release` builds `target\release\vidcut.exe`.
 
 ## Where vidcut keeps its files
 
