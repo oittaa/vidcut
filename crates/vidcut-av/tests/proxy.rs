@@ -25,13 +25,14 @@ fn frames(input: &Input) -> Vec<(Option<u32>, f64)> {
     out
 }
 
-/// The software encoders: x264, SVT-AV1 when this FFmpeg has it, ProRes
-/// and DNxHR.
+/// The software encoders: x264, SVT-AV1 and x265 where this FFmpeg has
+/// them, ProRes and DNxHR.
 fn software() -> Vec<ProxyEncoder> {
     let none = Availability::default();
     [
         ProxyCodec::H264,
         ProxyCodec::Av1,
+        ProxyCodec::Hevc,
         ProxyCodec::Prores,
         ProxyCodec::Dnxhr,
     ]
@@ -106,22 +107,20 @@ fn a_proxy_matches_source_frames_and_timestamps() {
     for enc in software() {
         matches_source(&enc, None, VideoCodec::H264, (320, 180), (320, 180));
     }
-    // A 10-bit source, with SVT-AV1 where this FFmpeg has it, and ProRes.
-    let ten_bit = software()
-        .into_iter()
-        .filter(|e| matches!(e.name.as_str(), "libsvtav1" | "prores_ks"));
-    for enc in ten_bit {
+    // A 10-bit source, with the encoders that take 10 bits: SVT-AV1 and
+    // x265 where this FFmpeg's do, and ProRes.
+    for enc in software().into_iter().filter(|e| e.ten_bit) {
         matches_source(&enc, None, VideoCodec::Hevc10, (320, 180), (320, 180));
     }
 }
 
-/// The frames each GPU decodes, made into an H.264 proxy by its own
-/// encoder: NVENC from NVDEC, AMF from Direct3D 11 and VideoToolbox from
+/// The frames each GPU decodes, made into H.264 and HEVC proxies by its own
+/// encoders: NVENC from NVDEC, AMF from Direct3D 11 and VideoToolbox from
 /// VideoToolbox take them on the GPU, as VAAPI does from VA-API. A 10-bit
-/// source's go into AV1 and ProRes proxies by the encoders there that take
-/// 10 bits. Untagged 320×180 is read as BT.601, which only NVIDIA's path
-/// converts on the GPU (libplacebo, a picture a frame late), and untagged
-/// 1280×720 as BT.709, which every GPU fits.
+/// source's go into AV1, HEVC and ProRes proxies by the encoders there that
+/// take 10 bits. Untagged 320×180 is read as BT.601, which only NVIDIA's
+/// path converts on the GPU (libplacebo, a picture a frame late), and
+/// untagged 1280×720 as BT.709, which every GPU fits.
 #[test]
 fn a_gpu_proxy_matches_source_frames_and_timestamps() {
     let decoders = GpuDecoder::all();
@@ -136,15 +135,17 @@ fn a_gpu_proxy_matches_source_frames_and_timestamps() {
             Some(gpu) => available.on(gpu),
             None => available.clone(),
         };
-        let hardware = encoders(ProxyCodec::H264, &on_it, &[])
-            .into_iter()
-            .find(|e| e.kind.gpu());
-        if let Some(enc) = hardware {
-            let h264 = VideoCodec::H264;
-            matches_source(&enc, Some(decoder), h264, (320, 180), (320, 180));
-            matches_source(&enc, Some(decoder), h264, (1280, 720), (640, 360));
+        for codec in [ProxyCodec::H264, ProxyCodec::Hevc] {
+            let hardware = encoders(codec, &on_it, &[])
+                .into_iter()
+                .find(|e| e.kind.gpu());
+            if let Some(enc) = hardware {
+                let h264 = VideoCodec::H264;
+                matches_source(&enc, Some(decoder), h264, (320, 180), (320, 180));
+                matches_source(&enc, Some(decoder), h264, (1280, 720), (640, 360));
+            }
         }
-        for codec in [ProxyCodec::Av1, ProxyCodec::Prores] {
+        for codec in [ProxyCodec::Av1, ProxyCodec::Hevc, ProxyCodec::Prores] {
             let ten_bit = encoders(codec, &on_it, &[])
                 .into_iter()
                 .find(|e| e.kind.gpu() && e.ten_bit);
