@@ -103,6 +103,11 @@ pub struct Workspace {
     pub(super) recent: Vec<PathBuf>,
     /// A message from the GUI itself (not from the session) and when it came.
     pub(super) flash: Option<(String, std::time::Instant)>,
+    /// The session's notice shown: its number, and when it showed or was
+    /// last hovered (egui's clock).
+    notice_shown: Option<(u64, f64)>,
+    /// Notices up to this number are gone: faded or dismissed.
+    notices_done: u64,
     /// The window title last set.
     title: String,
     /// The theme shown, to see when the session's changes.
@@ -246,6 +251,8 @@ impl Workspace {
             scrub: None,
             recent: recent_projects(),
             flash: None,
+            notice_shown: None,
+            notices_done: 0,
             title: String::new(),
             theme: None,
             pool_buttons: 84.0,
@@ -566,7 +573,9 @@ impl Workspace {
         }
     }
 
-    /// The newest message: the session's latest notice, or one of ours.
+    /// The newest message: one of ours, or the session's latest notice.
+    /// A notice fades after a while, an error later than the rest, and its
+    /// × dismisses it at once. Hovering one keeps it and shows all of it.
     fn notices(&mut self, ui: &mut egui::Ui) {
         if let Some((text, at)) = &self.flash {
             if at.elapsed().as_secs() < 6 {
@@ -577,14 +586,67 @@ impl Workspace {
             }
             self.flash = None;
         }
-        if let Some(n) = self.snap.notices.back() {
-            let color = if n.error {
-                theme::colors().error
-            } else {
-                theme::colors().text_dim
-            };
-            ui.label(RichText::new(&n.text).color(color));
+        let Some(n) = self
+            .snap
+            .notices
+            .back()
+            .filter(|n| n.seq > self.notices_done)
+        else {
+            return;
+        };
+        let now = ui.input(|i| i.time);
+        let shown = match self.notice_shown {
+            Some((seq, at)) if seq == n.seq => at,
+            _ => now,
+        };
+        let hold = if n.error { 20.0 } else { 6.0 };
+        let age = now - shown;
+        if age >= hold + NOTICE_FADE {
+            self.notices_done = n.seq;
+            return;
         }
+        let opacity = (1.0 - (age - hold) / NOTICE_FADE).clamp(0.0, 1.0) as f32;
+        let color = if n.error {
+            theme::colors().error
+        } else {
+            theme::colors().text_dim
+        };
+        let text = ui
+            .scope(|ui| {
+                // A long message is cut short, its × kept.
+                ui.set_max_width((ui.available_width() - 30.0).max(0.0));
+                ui.add(
+                    egui::Label::new(RichText::new(&n.text).color(color.gamma_multiply(opacity)))
+                        .truncate(),
+                )
+            })
+            .inner;
+        let close = ui
+            .add(
+                egui::Button::new(
+                    RichText::new(egui_phosphor::regular::X)
+                        .color(theme::colors().text_dim.gamma_multiply(opacity)),
+                )
+                .frame(false)
+                .small(),
+            )
+            .on_hover_text("Dismiss");
+        close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Dismiss"));
+        if close.clicked() {
+            self.notices_done = n.seq;
+            return;
+        }
+        // Reading it keeps it up.
+        let shown = if text.hovered() || close.hovered() {
+            text.on_hover_text(&n.text);
+            now - age.min(hold)
+        } else {
+            shown
+        };
+        self.notice_shown = Some((n.seq, shown));
+        let wait = if age < hold { hold - age } else { 1.0 / 30.0 };
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs_f64(wait));
     }
 
     // ---------------------------------------------------------------- panels
@@ -757,7 +819,6 @@ impl Workspace {
 
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            self.notices(ui);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // What this is built on, for reports: the full versions on
                 // hover.
@@ -835,6 +896,10 @@ impl Workspace {
                         format.on_hover_text(format!("{fps} fps"));
                     }
                 }
+                // The message gets the room left on the left.
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    self.notices(ui);
+                });
             });
         });
     }
@@ -1625,6 +1690,9 @@ impl Workspace {
         self.media_drag_overlay(&ctx);
     }
 }
+
+/// How long a notice takes to fade, in seconds.
+const NOTICE_FADE: f64 = 1.0;
 
 fn recent_projects() -> Vec<PathBuf> {
     std::fs::read_to_string(crate::paths::state_dir().join("recent.json"))
