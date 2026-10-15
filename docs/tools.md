@@ -10,6 +10,8 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 
 **Project speed:** `scripts/history-speed.sh [EDITS]` (release builds) makes a project of 300 media and 2000 clips in a temporary folder, with `FILL` undo steps (100). It then times EDITS edits, each followed by a command that only reads, and prints the history's size after each.
 
+**Step-back speed:** `scripts/step-back-speed.sh [STEPS] [MB…]` (release builds) opens a window on a 4K 10-bit HEVC clip with keyframes 2 s apart. It times STEPS steps back (100), one request each, with `player.video_memory_mb` at each MB given (1024 8192). `CLIP=FILE` times another clip.
+
 **GPU encoders:** `cargo run -p vidcut-av --example encoders` test-encodes every GPU encoder (NVENC, VAAPI, AMF, QSV) on every GPU, uncached.
 
 **Other FFmpeg versions:** `scripts/ffmpeg-check.sh [TARGET…]` (Docker) runs `scripts/check.sh full` against the checkout in a container per target, and prints a summary.
