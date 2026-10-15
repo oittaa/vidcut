@@ -641,21 +641,25 @@ fn label_of(request: &Request, project: &Project) -> String {
 
 /// Created, modified and deleted ids between two project states.
 fn diff(before: &Project, after: &Project) -> Changes {
-    fn index(p: &Project) -> HashMap<String, Value> {
+    /// What an id names: a pool item, a clip on its track, a marker.
+    #[derive(PartialEq)]
+    enum Named<'a> {
+        Media(&'a Media),
+        Clip(&'a str, &'a Clip),
+        Marker(&'a crate::model::Marker),
+    }
+    fn index(p: &Project) -> HashMap<&str, Named<'_>> {
         let mut m = HashMap::new();
         for media in &p.media {
-            m.insert(
-                media.id.clone(),
-                serde_json::to_value(media).unwrap_or_default(),
-            );
+            m.insert(media.id.as_str(), Named::Media(media));
         }
         for t in &p.tracks {
             for c in &t.clips {
-                m.insert(c.id.clone(), json!([t.id, c]));
+                m.insert(c.id.as_str(), Named::Clip(&t.id, c));
             }
         }
         for k in &p.markers {
-            m.insert(k.id.clone(), serde_json::to_value(k).unwrap_or_default());
+            m.insert(k.id.as_str(), Named::Marker(k));
         }
         m
     }
@@ -663,14 +667,14 @@ fn diff(before: &Project, after: &Project) -> Changes {
     let mut c = Changes::default();
     for (id, v) in &b {
         match a.get(id) {
-            None => c.created.push(id.clone()),
-            Some(old) if old != v => c.modified.push(id.clone()),
+            None => c.created.push(id.to_string()),
+            Some(old) if old != v => c.modified.push(id.to_string()),
             _ => {}
         }
     }
     for id in a.keys() {
         if !b.contains_key(id) {
-            c.deleted.push(id.clone());
+            c.deleted.push(id.to_string());
         }
     }
     let key = |s: &String| (s.chars().next(), s[1..].parse::<u64>().unwrap_or(0));

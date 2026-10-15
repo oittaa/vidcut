@@ -191,6 +191,17 @@ fn a_clip_heard_only_past_its_picture_keeps_its_audio() {
 }
 
 #[test]
+fn a_clip_moved_to_another_track_is_modified() {
+    // c3 is the last clip: the move changes its track only.
+    let mut f = three_clips();
+    let r = f.ok(req(
+        "edit.move",
+        json!({"clips": "c3", "to": "150f", "track": "V2"}),
+    ));
+    assert_eq!(r.changes.modified, vec!["c3"]);
+}
+
+#[test]
 fn dry_run_reports_without_committing() {
     let mut f = three_clips();
     let before = f.editor.project().clone();
