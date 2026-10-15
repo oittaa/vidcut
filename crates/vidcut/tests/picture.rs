@@ -125,9 +125,7 @@ fn a_10_bit_4_2_2_picture_draws_as_the_export_converts_it() {
 
 #[test]
 fn an_8_bit_4_2_2_picture_draws_as_the_export_converts_it() {
-    // Not turned: DNxHR's pictures are tagged BT.709, and the export
-    // converts a tagged 4:2:2 picture turned a quarter in other colors.
-    draws_as_converted(VideoCodec::DnxHrHq, 0, Layout::Yuv422p);
+    draws_as_converted(VideoCodec::DnxHrHq, 90, Layout::Yuv422p);
 }
 
 #[test]

@@ -266,22 +266,9 @@ impl GpuColor {
 /// How the GPU converts YUV picture `f` to an output of `target`'s dynamic
 /// range (`None`: SDR BT.709) as the CPU does. `None` for RGB pictures.
 pub(crate) fn gpu_color(f: &frame::Video, target: Option<Hdr>) -> Option<GpuColor> {
-    use ffi::AVColorSpace as S;
     let src = Source::of(f);
-    if src.rgb {
-        return None;
-    }
+    let (matrix, range) = src.yuv_tags()?;
     let output = Tags::output(target);
-    let matrix = match src.matrix {
-        Matrix::Bt601 => S::AVCOL_SPC_SMPTE170M,
-        Matrix::Bt709 => S::AVCOL_SPC_BT709,
-        Matrix::Bt2020 => S::AVCOL_SPC_BT2020_NCL,
-    };
-    let range = if src.full_range {
-        ffi::AVColorRange::AVCOL_RANGE_JPEG
-    } else {
-        ffi::AVColorRange::AVCOL_RANGE_MPEG
-    };
     Some(match (src.hdr, target) {
         // swscale converts the matrix and range only.
         (None, None) => GpuColor {
@@ -550,6 +537,26 @@ impl Source {
         self.rgb
     }
 
+    /// The matrix and range a YUV picture is read with, as FFmpeg tags
+    /// them. `None` for RGB.
+    pub(crate) fn yuv_tags(self) -> Option<(ffi::AVColorSpace, ffi::AVColorRange)> {
+        use ffi::AVColorSpace as S;
+        if self.rgb {
+            return None;
+        }
+        let matrix = match self.matrix {
+            Matrix::Bt601 => S::AVCOL_SPC_SMPTE170M,
+            Matrix::Bt709 => S::AVCOL_SPC_BT709,
+            Matrix::Bt2020 => S::AVCOL_SPC_BT2020_NCL,
+        };
+        let range = if self.full_range {
+            ffi::AVColorRange::AVCOL_RANGE_JPEG
+        } else {
+            ffi::AVColorRange::AVCOL_RANGE_MPEG
+        };
+        Some((matrix, range))
+    }
+
     /// `zscale`'s primaries of the input.
     fn primaries(self) -> &'static str {
         match (self.hdr, self.matrix) {
@@ -647,8 +654,8 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
         after: String::new(),
     };
     // swscale only scales YUV that `zscale` converts, or that stays as it
-    // is: told nothing, it converts the matrix to BT.601 (the graph's
-    // source carries no colorspace), and BT.2020 colors came out wrong.
+    // is: told the matrix and range on both sides, it keeps them whatever
+    // the graph's links say.
     let keep = if src.rgb {
         String::new()
     } else {
