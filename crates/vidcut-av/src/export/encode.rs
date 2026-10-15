@@ -169,7 +169,8 @@ pub struct EncoderStatus {
     pub kind: EncoderChoice,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device: Option<String>,
-    /// Pixel format tested (8-bit `yuv420p`/`nv12`, 10-bit `p010le`).
+    /// Pixel format tested (8-bit `yuv420p`/`nv12`, 10-bit `p010le`, and
+    /// 4:2:2 `nv16`/`p210le` for Apple's ProRes).
     pub pixel: String,
     pub ok: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1445,8 +1446,10 @@ pub fn detect(vulkan: bool) -> Availability {
         for &p in nv12_p010 {
             check("hevc_videotoolbox", EncoderChoice::VideoToolbox, p, None);
         }
-        // For proxies: it opens only on Apple's ProRes hardware.
-        for &p in nv12_p010 {
+        // For proxies: it opens only on Apple's ProRes hardware. NV16 and
+        // P210 keep a source's 4:2:2 color.
+        let prores = [format::Pixel::NV16, format::Pixel::P210LE];
+        for &p in nv12_p010.iter().chain(&prores) {
             check("prores_videotoolbox", EncoderChoice::VideoToolbox, p, None);
         }
     }

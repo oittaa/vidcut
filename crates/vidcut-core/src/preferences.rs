@@ -153,7 +153,9 @@ pub enum ProxyCodec {
     Dnxhr,
     /// ProRes 422 Proxy: every frame a keyframe, the files many times larger.
     /// On Apple's ProRes hardware (VideoToolbox) when there is one, else on
-    /// the GPU through Vulkan (FFmpeg 8.1 and later).
+    /// the GPU through Vulkan (FFmpeg 8.1 and later). A 4:2:2 source keeps
+    /// its color. Where Apple's hardware takes no 4:2:2, its pictures are
+    /// 4:2:0, and `preferences.get` names it `ProRes Proxy from 4:2:0`.
     Prores,
     /// AV1: on a hardware encoder when there is one, else with SVT-AV1.
     /// 10-bit for a 10-bit source where the encoder takes it.
