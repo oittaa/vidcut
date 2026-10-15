@@ -14,6 +14,7 @@
 #[cfg(windows)]
 pub(crate) mod d3d11;
 pub mod vaapi;
+pub(crate) mod vt;
 
 use std::ptr;
 use std::sync::{Arc, Mutex};
@@ -898,8 +899,9 @@ fn run_graph(
     Ok(out)
 }
 
-/// Scales frames down on the GPU (VA-API's, Direct3D 11's and CUDA's), so
-/// they come down to memory small, in the frames' own layout (NV12, P010).
+/// Scales frames down on the GPU (VA-API's, Direct3D 11's, CUDA's and
+/// VideoToolbox's), so they come down to memory small, in the frames' own
+/// layout (NV12, P010).
 pub(crate) struct Shrinker {
     /// `None`: the GPU won't scale these frames, so they come down whole.
     scaling: Option<Scaling>,
@@ -909,7 +911,7 @@ pub(crate) struct Shrinker {
 }
 
 enum Scaling {
-    /// `scale_vaapi`, or `scale_cuda` in steps.
+    /// `scale_vaapi`, `scale_vt`, or `scale_cuda` in steps.
     Filters(ffmpeg::filter::Graph),
     /// The GPU's video processor.
     #[cfg(windows)]
@@ -927,6 +929,11 @@ impl Scaling {
             format::Pixel::CUDA => {
                 let pixel = ffi::AVPixelFormat::AV_PIX_FMT_CUDA;
                 let spec = crate::cuda::scaling((f.width(), f.height()), (w, h), "").join(",");
+                Ok(Self::Filters(gpu_graph(f, frames, pixel, &spec)?))
+            }
+            format::Pixel::VIDEOTOOLBOX => {
+                let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
+                let spec = vt::shrink_spec((w, h));
                 Ok(Self::Filters(gpu_graph(f, frames, pixel, &spec)?))
             }
             #[cfg(windows)]
@@ -1029,7 +1036,9 @@ impl Drop for Frames {
 /// output's layout, and centered on black where their aspect differs, at
 /// even offsets as the CPU pads. VA-API's with `transpose_vaapi`,
 /// `scale_vaapi` and `pad_vaapi`; Direct3D 11's on the video processor,
-/// into the encoder's own frames (AMF takes those alone).
+/// into the encoder's own frames (AMF takes those alone); VideoToolbox's
+/// with `transpose_vt` and `scale_vt`, which keep their layout and place
+/// nothing on black.
 pub(crate) struct Fitter {
     fitting: Fitting,
     /// The frames context, layout and frame size it was made for, the size
@@ -1045,13 +1054,14 @@ enum Fitting {
 
 /// Whether a frame's GPU (`place`) fits it into the output as `ops` says,
 /// for an encoder on its device. Each backend says for its own frames.
-/// Frames in memory, VideoToolbox's and Vulkan's never fit.
+/// Frames in memory and Vulkan's never fit.
 pub(crate) fn can_fit(place: Place, ops: &Ops) -> bool {
     match place {
         Place::Cuda => crate::cuda::can_fit(ops),
         Place::Vaapi => vaapi::can_fit(ops),
         #[cfg(windows)]
         Place::D3d11 => d3d11::can_fit(ops),
+        Place::VideoToolbox => vt::can_fit(ops),
         _ => false,
     }
 }
@@ -1061,7 +1071,8 @@ impl Fitter {
     /// `fitted` and placed in an `out` picture of `layout` (NV12, P010), on
     /// the GPU, with its timestamp and colors, its pixels square; `fitter`
     /// made for frames like it first. Direct3D 11's go into `into`, the
-    /// encoder's frames.
+    /// encoder's frames. VideoToolbox's fit only where they fill the
+    /// picture in their own layout.
     pub(crate) fn fit(
         fitter: &mut Option<Fitter>,
         f: &frame::Video,
@@ -1078,6 +1089,23 @@ impl Fitter {
                 format::Pixel::VAAPI => {
                     let spec = vaapi::fit_spec(rotation, fitted, (w, h), layout);
                     let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VAAPI;
+                    Fitting::Filters(gpu_graph(f, frames, pixel, &spec)?)
+                }
+                // The planner asks for neither (`vt::can_fit`).
+                format::Pixel::VIDEOTOOLBOX => {
+                    if fitted != (w, h) {
+                        return Err(Error::Invalid(
+                            "VideoToolbox doesn't place pictures on black".into(),
+                        ));
+                    }
+                    let from = sw_format(f);
+                    if from != layout {
+                        return Err(Error::Invalid(format!(
+                            "VideoToolbox doesn't change {from:?} frames into {layout:?}"
+                        )));
+                    }
+                    let spec = vt::fit_spec(rotation, fitted);
+                    let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
                     Fitting::Filters(gpu_graph(f, frames, pixel, &spec)?)
                 }
                 #[cfg(windows)]

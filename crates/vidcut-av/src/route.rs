@@ -2,8 +2,8 @@
 //! [`plan`] decides it for each frame, a pure function of facts about the
 //! frame ([`Facts`]). The backends do the work and say what they can do
 //! (`can_fit`): [`crate::cuda`] for CUDA frames, [`crate::hw::vaapi`] for
-//! VA-API's, `hw::d3d11` for Direct3D 11's and `export::normalize` for the
-//! CPU.
+//! VA-API's, `hw::d3d11` for Direct3D 11's, `hw::vt` for VideoToolbox's
+//! and `export::normalize` for the CPU.
 
 use vidcut_core::model::Hdr;
 
