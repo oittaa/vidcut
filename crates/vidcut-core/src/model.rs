@@ -606,6 +606,8 @@ fn is_zero(v: &f64) -> bool {
 /// places and writes them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Transition {
+    /// `t<N>`, never reused.
+    pub id: String,
     /// Between the clips' sounds (an audio edit), not their pictures.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sound: bool,
@@ -977,6 +979,7 @@ pub struct NextIds {
     pub media: u64,
     pub clip: u64,
     pub marker: u64,
+    pub transition: u64,
 }
 
 impl Project {
@@ -995,6 +998,7 @@ impl Project {
                 media: 1,
                 clip: 1,
                 marker: 1,
+                transition: 1,
             },
             bins: Vec::new(),
         }
@@ -1129,6 +1133,12 @@ impl Project {
     pub fn alloc_marker_id(&mut self) -> String {
         let id = format!("k{}", self.next_id.marker);
         self.next_id.marker += 1;
+        id
+    }
+
+    pub fn alloc_transition_id(&mut self) -> String {
+        let id = format!("t{}", self.next_id.transition);
+        self.next_id.transition += 1;
         id
     }
 }

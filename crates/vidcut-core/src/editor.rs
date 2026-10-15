@@ -1978,7 +1978,10 @@ fn place_imported(
     // The clip's id from the file when `keep_ids` and no clip has it.
     let mut taken: HashSet<String> = HashSet::new();
     if keep_ids {
-        taken.extend(p.tracks.iter().flat_map(|t| &t.clips).map(|c| c.id.clone()));
+        for t in &p.tracks {
+            taken.extend(t.clips.iter().map(|c| c.id.clone()));
+            taken.extend(t.transitions.iter().map(|x| x.id.clone()));
+        }
     }
     let mut clip_id = |p: &mut Project, kept: &Option<String>| match kept
         .as_ref()
@@ -2183,10 +2186,20 @@ fn place_imported(
             (Some(f), None) => &f.1,
             (None, None) => continue,
         };
+        // The file's id when `keep_ids` and no transition has it.
+        let id = match x
+            .id
+            .clone()
+            .filter(|id| keep_ids && taken.insert(id.clone()))
+        {
+            Some(id) => id,
+            None => p.alloc_transition_id(),
+        };
         p.track_mut(track)
             .expect("made above")
             .transitions
             .push(Transition {
+                id,
                 sound: x.sound,
                 from: from.map(|f| f.0.clone()),
                 to: to.map(|g| g.0.clone()),
@@ -3744,7 +3757,7 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
                 .filter_map(|x| {
                     let at = cuts.place(p, x)?;
                     (at >= a && at <= b).then(|| {
-                        json!({ "name": otio::transitions::name(x), "at": at, "before": x.before,
+                        json!({ "id": x.id, "name": otio::transitions::name(x), "at": at, "before": x.before,
                             "after": x.after, "from": x.from, "to": x.to, "sound": x.sound })
                     })
                 })

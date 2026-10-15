@@ -951,6 +951,8 @@ impl ImportedClip {
 /// [`ImportedClip::key`]s (none: a gap). Frames are at [`Imported::fps`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportedTransition {
+    /// Its id in vidcut, when vidcut wrote the file.
+    pub id: Option<String>,
     /// Between sounds, not pictures.
     pub sound: bool,
     pub from: Option<usize>,
@@ -1449,13 +1451,24 @@ fn transitions_of(
             continue;
         }
         let offset = |k: &str| time(&b.item[k]).map_or(0, |(v, r)| frames(v, r, fps));
+        // The id vidcut wrote is kept apart: the rest is as the editor wrote it.
+        let mut otio = b.item.clone();
+        if let Some(metadata) = otio.get_mut("metadata").and_then(Value::as_object_mut)
+            && let Some(ours) = metadata.get_mut(VIDCUT).and_then(Value::as_object_mut)
+        {
+            ours.remove("transition");
+            if ours.is_empty() {
+                metadata.remove(VIDCUT);
+            }
+        }
         out.push(ImportedTransition {
+            id: our_str(b.item, "transition"),
             sound,
             from,
             to,
             before: offset("in_offset"),
             after: offset("out_offset"),
-            otio: b.item.clone(),
+            otio,
         });
     }
 }

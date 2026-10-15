@@ -391,3 +391,43 @@ fn a_clip_that_overlaps_another_on_its_track_is_left_out() {
         .collect();
     assert_eq!(starts, [0]);
 }
+
+/// Two clips of `/media/1.mp4` with a dissolve on the cut, at 25 fps.
+fn dissolve() -> Value {
+    let t = |v: f64| json!({"OTIO_SCHEMA": "RationalTime.1", "rate": 25.0, "value": v});
+    let r = |s: f64, d: f64| json!({"OTIO_SCHEMA": "TimeRange.1", "start_time": t(s), "duration": t(d)});
+    let clip = |s: f64, d: f64| {
+        json!({"OTIO_SCHEMA": "Clip.1", "name": "1", "source_range": r(s, d),
+        "media_reference": {"OTIO_SCHEMA": "ExternalReference.1", "target_url": "/media/1.mp4"}})
+    };
+    json!({"OTIO_SCHEMA": "Timeline.1", "tracks": {"OTIO_SCHEMA": "Stack.1", "children": [
+        {"OTIO_SCHEMA": "Track.1", "kind": "Video", "children": [
+            clip(10.0, 40.0),
+            {"OTIO_SCHEMA": "Transition.1", "name": "Cross Dissolve",
+             "in_offset": t(5.0), "out_offset": t(5.0), "metadata": {}},
+            clip(60.0, 30.0),
+        ]},
+    ]}})
+}
+
+#[test]
+fn a_split_before_a_dissolve_changes_only_the_dissolve() {
+    let mut f = Fixture::new(&[(4.0, true)]);
+    f.ok(req("timeline.import", json!({"otio": dissolve()})));
+    f.ok(req("edit.split", json!({"at": "20f"})));
+    // The part that ends at the cut takes the dissolve: that is all the
+    // step keeps of the transitions.
+    let step = serde_json::to_value(&f.editor.held().undo.last().unwrap().change).unwrap();
+    let track = &step["fields"]["tracks"]["items"]["changed"]["V1"]["fields"];
+    assert_eq!(
+        track["transitions"],
+        json!({"items": {"changed": {"t1": {"fields": {"from": {"set": {"was": "c1", "is": "c3"}}}}}}})
+    );
+}
+
+#[test]
+fn transition_ids_come_back_from_an_otio_file() {
+    let mut f = Fixture::new(&[(4.0, true)]);
+    f.ok(req("timeline.import", json!({"otio": dissolve()})));
+    assert_eq!(as_saved(&reopened(&f)), as_saved(f.editor.project()));
+}
