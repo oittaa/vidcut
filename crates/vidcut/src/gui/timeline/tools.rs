@@ -391,15 +391,17 @@ impl Workspace {
                     .show(ui, |ui| {
                         ui.label("Boring Clips");
                         ui.add(
-                            egui::Slider::new(&mut secs, 1.0..=300.0)
+                            egui::Slider::new(&mut secs, super::BORING_SECS)
                                 .logarithmic(true)
                                 .suffix(" s"),
                         )
                         .on_hover_text("Longer clips show light gray");
                         ui.end_row();
                         ui.label("Jump Cuts");
-                        ui.add(egui::Slider::new(&mut frames, 1..=120).suffix(" frames"))
-                            .on_hover_text("Shorter clips show red; 2 finds flash frames");
+                        ui.add(
+                            egui::Slider::new(&mut frames, super::JUMP_FRAMES).suffix(" frames"),
+                        )
+                        .on_hover_text("Shorter clips show red; 2 finds flash frames");
                         ui.end_row();
                     });
                 ui.horizontal(|ui| {
@@ -472,8 +474,10 @@ impl Workspace {
         {
             self.toggle_dynamic();
         }
-        if let (Some(side), Some(e)) = (r.side, &mut self.timeline.edit) {
-            e.side = side.into();
+        if let Some(side) = r.side
+            && self.timeline.edit.is_some()
+        {
+            let _ = self.set_edit_side(side.into());
         }
         if self.timeline.dynamic.is_none() {
             return;

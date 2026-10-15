@@ -36,7 +36,7 @@ use vidcut_core::editor::{media_context, resolve_clip};
 use vidcut_core::model::{Clip, Format};
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{
-    DynamicTrimMode, GuiPanel, OneOrMany, ScreenshotTarget, TrimSide, ViewerMode,
+    DynamicTrimMode, GuiPanel, OneOrMany, ScreenshotTarget, TimelineOptions, TrimSide, ViewerMode,
 };
 use vidcut_core::time::{Keyword, Rational, TimeContext, TimeSpec, format_timecode};
 use vidcut_core::{Envelope, Error, Project, Request, Response, Result};
@@ -99,6 +99,70 @@ pub enum TrimEditor {
     Close,
 }
 
+/// A change a request makes to what only the GUI keeps.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GuiChange {
+    /// Select the edit of `track` nearest `near` (`selection.set`).
+    SelectEdit {
+        near: i64,
+        track: String,
+        side: TrimSide,
+    },
+    /// Select this part of the selected edit, as U does.
+    EditSide(TrimSide),
+    /// Deselect the edit (Ctrl+Shift+A).
+    Deselect,
+    /// Edit functions put clips on this track (`gui.target`).
+    Target(String),
+    /// The timeline's zoom and options (`gui.timeline`).
+    Timeline(TimelineOptions),
+    /// Open a window (`gui.show`).
+    Show(GuiPanel),
+    /// Close one (`gui.close`).
+    Close(GuiPanel),
+}
+
+/// An edit point selected in the GUI.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct EditPoint {
+    /// Its frame: for `audio`, where the outgoing clip's sound ends.
+    pub at: i64,
+    pub track: String,
+    pub side: TrimSide,
+}
+
+/// The timeline's zoom and Timeline Options, as `gui.timeline` names them.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+pub struct TimelineState {
+    pub zoom: f64,
+    pub fixed_playhead: bool,
+    pub snap: bool,
+    pub safe_edit: bool,
+    pub names: bool,
+    pub durations: bool,
+    pub status: bool,
+    pub filmstrips: bool,
+    pub waveforms: bool,
+    pub boring: bool,
+    pub boring_secs: f64,
+    pub jump_frames: i64,
+}
+
+/// What only the GUI keeps (`gui.state`).
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+pub struct GuiState {
+    pub edit: Option<EditPoint>,
+    /// The target track.
+    pub target: String,
+    pub timeline: TimelineState,
+    /// The windows open, of those `gui.show` opens.
+    pub windows: Vec<GuiPanel>,
+}
+
+/// Called with the GUI's state after [`GuiChange`]s, or why one couldn't
+/// be made.
+pub type GuiDone = Box<dyn FnOnce(std::result::Result<GuiState, String>) + Send>;
+
 /// What `gui.dynamic_trim` asks of the GUI, as its request says.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DynamicTrim {
@@ -128,8 +192,13 @@ pub trait Renderer: Send + Sync {
     fn window(&self, change: WindowChange);
     /// Close the window (and so the session).
     fn quit(&self);
-    /// Open a window for the person at the GUI.
-    fn show(&self, _panel: GuiPanel) {}
+    /// Make `changes` to what only the GUI keeps, in order, then call
+    /// `done`. Without a GUI, `done` is dropped unanswered.
+    fn gui(&self, _changes: Vec<GuiChange>, _done: GuiDone) {}
+    /// What only the GUI keeps, as its last frame left it.
+    fn gui_state(&self) -> Option<GuiState> {
+        None
+    }
     /// Open, trim with or close the Trim Editor.
     fn trim_editor(&self, _: TrimEditor) {}
     /// Drive Dynamic Trim.
@@ -1701,7 +1770,7 @@ impl Live {
         // would drown the log.
         let quiet = matches!(
             job.method.as_str(),
-            "player.state" | "selection.get" | "gui.log"
+            "player.state" | "selection.get" | "gui.log" | "gui.state"
         ) || (matches!(job.origin, Origin::Gui { .. })
             && matches!(
                 job.method.as_str(),
@@ -1715,6 +1784,10 @@ impl Live {
             || (job.method == "player.seek" && job.params["fast"] == json!(true))
             // A fader's drag: the level it ends at is a track.set.
             || (job.method == "mixer.preview" && matches!(job.origin, Origin::Gui { .. }))
+            // The pool's search as it is typed: a request a key.
+            || (job.method == "pool.set"
+                && matches!(job.origin, Origin::Gui { .. })
+                && job.params.get("search").is_some())
             // Previews the GUI asks for (Ripple Delete Silence's stripes).
             || (matches!(job.origin, Origin::Gui { .. }) && job.dry_run);
         if !quiet {
@@ -2078,6 +2151,7 @@ impl Live {
                 sort,
                 descending,
                 view,
+                search,
             } => {
                 // The bin and the order are Source Tape's too.
                 let tape = bin.is_some() || sort.is_some() || descending.is_some();
@@ -2101,16 +2175,77 @@ impl Live {
                 if let Some(v) = view {
                     self.pool.view = v;
                 }
+                if let Some(s) = search {
+                    self.pool.search = s;
+                }
                 if tape {
                     self.refresh_source();
                 }
                 Step::Now(Ok(answer(json!(self.pool))))
             }
-            Request::SelectionGet {} => Step::Now(Ok(answer(json!(self.selection)))),
-            Request::SelectionSet { clips, media } => Step::Now(
-                self.set_selection(clips, media)
-                    .map(|()| answer(json!(self.selection))),
-            ),
+            Request::SelectionGet {} => {
+                let edit = self.renderer.gui_state().and_then(|s| s.edit);
+                Step::Now(Ok(answer(selection_json(&self.selection, edit))))
+            }
+            Request::SelectionSet {
+                clips,
+                media,
+                edit,
+                track,
+                side,
+                clear,
+            } => {
+                let mut changes = Vec::new();
+                if clear {
+                    changes.push(GuiChange::Deselect);
+                }
+                match (edit, track) {
+                    (Some(at), track) => {
+                        let open = match self.project.as_ref() {
+                            Some(o) => o,
+                            None => return Step::Now(Err(no_project())),
+                        };
+                        let p = open.project();
+                        let track = track.unwrap_or_else(|| vidcut_core::ops::MAIN.to_string());
+                        if p.track(&track).is_none() {
+                            return Step::Now(Err(Error::not_found(format!(
+                                "there is no {track}"
+                            ))));
+                        }
+                        let near = match p
+                            .time_context(Some(self.player.position(TIMELINE)))
+                            .resolve(&at)
+                        {
+                            Ok(f) => f,
+                            Err(e) => return Step::Now(Err(e.into())),
+                        };
+                        changes.push(GuiChange::SelectEdit {
+                            near,
+                            track,
+                            side: side.unwrap_or_default(),
+                        });
+                    }
+                    (None, Some(_)) => {
+                        return Step::Now(Err(Error::usage(
+                            "track goes with edit: it names the track of the edit to select",
+                        )));
+                    }
+                    (None, None) => changes.extend(side.map(GuiChange::EditSide)),
+                }
+                let clips = match clips {
+                    None if clear => Some(OneOrMany::Many(Vec::new())),
+                    c => c,
+                };
+                if let Err(e) = self.set_selection(clips, media) {
+                    return Step::Now(Err(e));
+                }
+                if changes.is_empty() {
+                    let edit = self.renderer.gui_state().and_then(|s| s.edit);
+                    return Step::Now(Ok(answer(selection_json(&self.selection, edit))));
+                }
+                let selection = self.selection.clone();
+                self.gui_change(changes, move |s| selection_json(&selection, s.edit))
+            }
             Request::GuiScreenshot { out, target } => match target {
                 // The picture as shown once the player has settled (a seek
                 // already waited for that; a reload may still be on its way).
@@ -2173,9 +2308,23 @@ impl Live {
                 Step::Now(Ok(answer(Value::Null)))
             }
             Request::GuiShow { panel } => {
-                self.renderer.show(panel);
-                Step::Now(Ok(answer(Value::Null)))
+                self.gui_change(vec![GuiChange::Show(panel)], |s| json!(s))
             }
+            Request::GuiClose { panel } => {
+                self.gui_change(vec![GuiChange::Close(panel)], |s| json!(s))
+            }
+            Request::GuiState {} => self.gui_change(Vec::new(), |s| json!(s)),
+            Request::GuiTarget { track } => {
+                let known = self
+                    .project
+                    .as_ref()
+                    .is_some_and(|o| o.project().track(&track).is_some());
+                if !known {
+                    return Step::Now(Err(Error::not_found(format!("there is no {track}"))));
+                }
+                self.gui_change(vec![GuiChange::Target(track)], |s| json!(s))
+            }
+            Request::GuiTimeline(o) => self.gui_change(vec![GuiChange::Timeline(o)], |s| json!(s)),
             Request::GuiTrimEditor {
                 at,
                 track,
@@ -2909,6 +3058,35 @@ impl Live {
         Ok(())
     }
 
+    /// Makes `changes` in the GUI and answers, once it has, with `reply` of
+    /// its state after them: what the answer says is what the GUI shows.
+    fn gui_change(
+        &self,
+        changes: Vec<GuiChange>,
+        reply: impl FnOnce(GuiState) -> Value + Send + 'static,
+    ) -> Step {
+        let (tx, rx) = channel();
+        self.renderer.gui(
+            changes,
+            Box::new(move |r| {
+                let _ = tx.send(r);
+            }),
+        );
+        Step::Task(
+            Work::Interactive,
+            Box::new(move |_| match rx.recv_timeout(WAIT_LIMIT) {
+                Ok(Ok(state)) => Ok(answer(reply(state))),
+                Ok(Err(why)) => Err(Error::usage(why)),
+                Err(RecvTimeoutError::Timeout) => {
+                    Err(Error::internal("timed out waiting for the GUI"))
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    Err(Error::no_instance("this vidcut has no GUI"))
+                }
+            }),
+        )
+    }
+
     // ---------------------------------------------------------------- captures
 
     fn captured(&mut self, id: u64, result: Result<Image>) {
@@ -3158,6 +3336,13 @@ fn to_make(
         settings: format.settings()?,
         replace: force,
     }))
+}
+
+/// The selection, with the edit point the GUI has selected.
+fn selection_json(selection: &Selection, edit: Option<EditPoint>) -> Value {
+    let mut v = json!(selection);
+    v["edit"] = json!(edit);
+    v
 }
 
 fn no_project() -> Error {

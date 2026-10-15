@@ -320,6 +320,78 @@ impl Workspace {
         }
     }
 
+    /// Makes a request's changes to what only the GUI keeps, in order; the
+    /// first that can't be made says why.
+    pub fn gui_change(
+        &mut self,
+        changes: Vec<live::GuiChange>,
+        ctx: &egui::Context,
+    ) -> Result<(), String> {
+        use vidcut_core::request::GuiPanel;
+        for change in changes {
+            match change {
+                live::GuiChange::SelectEdit { near, track, side } => {
+                    self.select_edit(near, &track, side.into())?
+                }
+                live::GuiChange::EditSide(side) => self.set_edit_side(side.into())?,
+                live::GuiChange::Deselect => self.timeline.edit = None,
+                live::GuiChange::Target(t) => {
+                    self.target = (t != vidcut_core::ops::MAIN).then_some(t)
+                }
+                live::GuiChange::Timeline(o) => self.set_timeline_options(&o)?,
+                live::GuiChange::Show(
+                    GuiPanel::QuickExport | GuiPanel::Export | GuiPanel::Mixer,
+                ) if self.project().is_none() => {
+                    return Err("Open a project first".into());
+                }
+                live::GuiChange::Show(panel) => self.show_panel(panel, ctx),
+                live::GuiChange::Close(panel) => self.close_panel(panel),
+            }
+        }
+        Ok(())
+    }
+
+    /// Closes a window `gui.show` opens.
+    pub fn close_panel(&mut self, panel: vidcut_core::request::GuiPanel) {
+        use vidcut_core::request::GuiPanel;
+        match panel {
+            GuiPanel::QuickExport => self.export.close_quick(),
+            GuiPanel::Export => self.export.close_dialog(),
+            GuiPanel::Jobs => self.export.show_jobs = false,
+            GuiPanel::Log => self.show_log = false,
+            GuiPanel::Mixer => self.show_mixer = false,
+            GuiPanel::Preferences => self.preferences.open = false,
+            GuiPanel::Help => self.help.open = false,
+        }
+    }
+
+    /// What only the GUI keeps (`gui.state`).
+    pub fn gui_state(&self) -> live::GuiState {
+        use vidcut_core::request::GuiPanel;
+        let (quick, dialog) = self.export.windows();
+        let open = [
+            (GuiPanel::QuickExport, quick),
+            (GuiPanel::Export, dialog),
+            (GuiPanel::Jobs, self.export.show_jobs),
+            (GuiPanel::Log, self.show_log),
+            (GuiPanel::Mixer, self.show_mixer),
+            (GuiPanel::Preferences, self.preferences.open),
+            (GuiPanel::Help, self.help.open),
+        ];
+        live::GuiState {
+            edit: self.edit_point(),
+            target: self
+                .target
+                .clone()
+                .unwrap_or_else(|| vidcut_core::ops::MAIN.into()),
+            timeline: self.timeline_state(),
+            windows: open
+                .into_iter()
+                .filter_map(|(panel, open)| open.then_some(panel))
+                .collect(),
+        }
+    }
+
     /// Replaces the file dialogs (tests answer them themselves).
     pub fn set_dialogs(&mut self, dialogs: Arc<dyn super::export::Dialogs>) {
         self.dialogs = dialogs;

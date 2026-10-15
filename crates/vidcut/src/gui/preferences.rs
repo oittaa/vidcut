@@ -11,7 +11,7 @@ use super::workspace::Workspace;
 
 #[derive(Default)]
 pub(super) struct PreferencesUi {
-    open: bool,
+    pub(super) open: bool,
     /// The request in flight (`preferences.get` or `preferences.set`).
     ask: Option<Ask>,
     /// The latest answer (`preferences.get`'s result).

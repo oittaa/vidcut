@@ -9,7 +9,6 @@ use std::time::Duration;
 
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
-use vidcut_core::request::GuiPanel;
 
 use super::theme;
 use super::video::{Viewer, ViewerHandle};
@@ -20,7 +19,7 @@ use crate::live::{self, Capture, Image, Presented};
 enum UiTask {
     CaptureWindow(Capture),
     Window(live::WindowChange),
-    Show(GuiPanel),
+    Gui(Vec<live::GuiChange>, live::GuiDone),
     TrimEditor(live::TrimEditor),
     DynamicTrim(live::DynamicTrim),
     Quit,
@@ -37,6 +36,8 @@ pub struct Port {
     session: std::sync::OnceLock<live::Handle>,
     /// What the two-up showed in the frame drawn last.
     two_up: Mutex<live::stats::TwoUpStats>,
+    /// What only the GUI keeps, as the last frame or task left it.
+    gui: Mutex<Option<live::GuiState>>,
 }
 
 impl Port {
@@ -98,8 +99,12 @@ impl live::Renderer for Port {
         }
     }
 
-    fn show(&self, panel: GuiPanel) {
-        self.push(UiTask::Show(panel));
+    fn gui(&self, changes: Vec<live::GuiChange>, done: live::GuiDone) {
+        self.push(UiTask::Gui(changes, done));
+    }
+
+    fn gui_state(&self) -> Option<live::GuiState> {
+        self.gui.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     fn trim_editor(&self, r: live::TrimEditor) {
@@ -159,6 +164,7 @@ impl App {
             tasks: Mutex::new(Vec::new()),
             session: std::sync::OnceLock::new(),
             two_up: Mutex::default(),
+            gui: Mutex::default(),
         });
         let socket = crate::ipc::registry::socket_path(std::process::id());
         let create = project.as_ref().is_some_and(|p| !p.exists());
@@ -210,6 +216,11 @@ impl App {
             window_captures: HashMap::new(),
             next_capture: 1,
         })
+    }
+
+    /// Tells the session what only the GUI keeps.
+    fn publish(&self) {
+        *self.port.gui.lock().unwrap_or_else(|e| e.into_inner()) = Some(self.ws.gui_state());
     }
 
     fn window_screenshots(&mut self, ctx: &egui::Context) {
@@ -272,7 +283,11 @@ impl eframe::App for App {
                         ctx.send_viewport_cmd(C::Minimized(m));
                     }
                 }
-                UiTask::Show(panel) => self.ws.show_panel(panel, ctx),
+                UiTask::Gui(changes, done) => {
+                    let made = self.ws.gui_change(changes, ctx);
+                    self.publish();
+                    done(made.map(|()| self.ws.gui_state()));
+                }
                 UiTask::TrimEditor(r) => self.ws.trim_editor_request(r),
                 UiTask::DynamicTrim(r) => self.ws.dynamic_trim_request(r, ctx.input(|i| i.time)),
                 UiTask::Quit => {
@@ -297,6 +312,7 @@ impl eframe::App for App {
         self.window_screenshots(&ctx);
         self.ws.ui(ui);
         *self.port.two_up.lock().unwrap_or_else(|e| e.into_inner()) = self.ws.two_up_stats();
+        self.publish();
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {

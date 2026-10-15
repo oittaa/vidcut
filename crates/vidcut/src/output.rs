@@ -702,17 +702,63 @@ fn live(method: &str, r: &Response) -> Option<()> {
                     .filter(|s| !s.is_empty())
                     .unwrap_or_else(|| "-".into())
             };
-            println!("clips {}  media {}", ids("clips"), ids("media"));
+            println!(
+                "clips {}  media {}  edit {}",
+                ids("clips"),
+                ids("media"),
+                edit_point(&v["edit"])
+            );
         }
         "edit.copy" => println!(
             "copied {} clip(s); paste with `vidcut edit paste` (GUI) or --clips",
             v["clips"].as_array().map_or(0, Vec::len)
         ),
-        "gui.quit" | "gui.window" | "gui.show" | "gui.trim_editor" | "gui.dynamic_trim" => {
+        "gui.quit" | "gui.window" | "gui.trim_editor" | "gui.dynamic_trim" => {
             println!("ok {method}")
         }
+        "gui.state" | "gui.show" | "gui.close" | "gui.target" | "gui.timeline" => {
+            let t = &v["timeline"];
+            let on = |k: &str| if t[k] == true { "on" } else { "off" };
+            let windows: Vec<&str> = v["windows"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            println!("edit {}", edit_point(&v["edit"]));
+            println!("target {}", v["target"].as_str().unwrap_or("-"));
+            println!(
+                "timeline zoom {} px/frame, fixed playhead {}, snap {}, safe edit {}",
+                t["zoom"],
+                on("fixed_playhead"),
+                on("snap"),
+                on("safe_edit")
+            );
+            println!(
+                "clips show names {}, durations {}, status {}, filmstrips {}, waveforms {}",
+                on("names"),
+                on("durations"),
+                on("status"),
+                on("filmstrips"),
+                on("waveforms")
+            );
+            println!(
+                "boring detector {} (longer than {} s, shorter than {} frames)",
+                on("boring"),
+                t["boring_secs"],
+                t["jump_frames"]
+            );
+            println!(
+                "windows {}",
+                if windows.is_empty() {
+                    "-".to_string()
+                } else {
+                    windows.join(" ")
+                }
+            );
+        }
         "pool.set" => println!(
-            "pool: bin {:?}, sorted by {}{}, {} view",
+            "pool: bin {:?}, sorted by {}{}, {} view{}",
             v["bin"].as_str().unwrap_or_default(),
             v["sort"].as_str().unwrap_or_default(),
             if v["descending"] == true {
@@ -721,6 +767,10 @@ fn live(method: &str, r: &Response) -> Option<()> {
                 ""
             },
             v["view"].as_str().unwrap_or_default(),
+            match v["search"].as_str() {
+                Some(s) if !s.is_empty() => format!(", search {s:?}"),
+                _ => String::new(),
+            },
         ),
         "jobs.list" => {
             let jobs = v.as_array().cloned().unwrap_or_default();
@@ -735,6 +785,19 @@ fn live(method: &str, r: &Response) -> Option<()> {
         _ => return None,
     }
     Some(())
+}
+
+/// `60 V1 both`, or `-` for none.
+fn edit_point(e: &Value) -> String {
+    if e.is_null() {
+        return "-".into();
+    }
+    format!(
+        "{} {} {}",
+        e["at"],
+        e["track"].as_str().unwrap_or_default(),
+        e["side"].as_str().unwrap_or_default()
+    )
 }
 
 fn clock(secs: f64) -> String {

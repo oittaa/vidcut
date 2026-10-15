@@ -97,6 +97,40 @@ pub(crate) fn audio_at_cut(t: &Track, picture: i64) -> i64 {
         .unwrap_or(picture)
 }
 
+/// Each cut of `t` between two clips with sound, and where its audio edit
+/// sits (D20).
+fn audio_edits(t: &Track) -> impl Iterator<Item = (i64, i64)> + '_ {
+    t.clips.windows(2).filter_map(|w| {
+        let (a, b) = (&w[0], &w[1]);
+        let tail = a.audio.as_ref()?.tail;
+        (a.end() == b.start && b.audio.is_some()).then_some((a.end(), a.end() + tail))
+    })
+}
+
+/// The edit of `t` nearest `near` that `side` selects, and where it sits:
+/// a clip's end for the Out, a clip's start for the In, any edit point for
+/// both (as V picks one), and for the audio edit, that of the nearest cut
+/// between two clips with sound. Ties go to the earlier edit.
+pub(crate) fn nearest_edit(t: &Track, near: i64, side: Side) -> Option<i64> {
+    let points: Vec<(i64, i64)> = match side {
+        Side::Out => t.clips.iter().map(|c| (c.end(), c.end())).collect(),
+        Side::In => t.clips.iter().map(|c| (c.start, c.start)).collect(),
+        Side::Both => t.edit_points().into_iter().map(|e| (e, e)).collect(),
+        Side::Audio => audio_edits(t).collect(),
+    };
+    points
+        .into_iter()
+        .min_by_key(|&(cut, _)| ((cut - near).abs(), cut))
+        .map(|(_, at)| at)
+}
+
+/// The lower timeline's zoom, in pixels a frame.
+pub const ZOOM: std::ops::RangeInclusive<f64> = 0.01..=40.0;
+/// The Boring Detector's limits: Boring Clips in seconds, Jump Cuts in
+/// frames.
+pub const BORING_SECS: std::ops::RangeInclusive<f64> = 1.0..=300.0;
+pub const JUMP_FRAMES: std::ops::RangeInclusive<i64> = 1..=120;
+
 /// A track by its id (`V2`, `A1`), small enough to keep selections `Copy`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TrackRef {
@@ -895,11 +929,11 @@ impl Workspace {
                     .on_hover_text(keys("Zoom in (Ctrl+wheel)"))
                     .clicked()
                 {
-                    o.ppf = (o.ppf * 1.5).min(40.0);
+                    o.ppf = (o.ppf * 1.5).min(*ZOOM.end());
                     o.save();
                 }
                 if ui.small_button("−").on_hover_text("Zoom out").clicked() {
-                    o.ppf = (o.ppf / 1.5).max(0.01);
+                    o.ppf = (o.ppf / 1.5).max(*ZOOM.start());
                     o.save();
                 }
                 let marks = match (p.marks.mark_in, p.marks.mark_out) {
@@ -1566,7 +1600,7 @@ impl Workspace {
         let (zoom, scroll) = ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta));
         if !upper && zoom != 1.0 {
             let o = &mut self.timeline.options;
-            o.ppf = (o.ppf * f64::from(zoom)).clamp(0.01, 40.0);
+            o.ppf = (o.ppf * f64::from(zoom)).clamp(*ZOOM.start(), *ZOOM.end());
             o.save();
             return;
         }
@@ -2389,14 +2423,120 @@ impl Workspace {
             self.open_trim_editor(edit, t);
         }
         if let Some(by) = by {
-            let side = Side::from(side);
             self.timeline.edit = Some(EditSel {
                 at: edit,
-                side,
+                side: Side::Both,
                 track: t,
             });
-            self.nudge_edit(side, by);
+            if self.set_edit_side(side.into()).is_ok() {
+                self.nudge_edit(side.into(), by);
+            }
         }
+    }
+
+    /// Selects the edit of `track` nearest `near` that `side` selects
+    /// (`selection.set`).
+    pub fn select_edit(&mut self, near: i64, track: &str, side: Side) -> Result<(), String> {
+        let t = TrackRef::of(track).ok_or_else(|| format!("There is no {track}"))?;
+        let p = self.shown_project().ok_or("No project is open")?;
+        let tr = p
+            .track(track)
+            .ok_or_else(|| format!("There is no {track}"))?;
+        let at = nearest_edit(tr, near, side).ok_or_else(|| match side {
+            Side::Audio => format!("{track} has no cut between two clips with sound"),
+            _ => format!("{track} has no clips"),
+        })?;
+        self.timeline.edit = Some(EditSel { at, side, track: t });
+        Ok(())
+    }
+
+    /// Selects `side` of the selected edit, as U does. Between the picture
+    /// and the audio edit of a cut, the selection moves to the other.
+    pub fn set_edit_side(&mut self, side: Side) -> Result<(), String> {
+        let e = self.timeline.edit.ok_or("No edit is selected")?;
+        let p = self.shown_project().ok_or("No project is open")?;
+        let t = p
+            .track(&e.track.id())
+            .ok_or_else(|| format!("There is no {}", e.track.id()))?;
+        let at = match (e.side, side) {
+            (Side::Audio, Side::Audio) => e.at,
+            (Side::Audio, _) => audio_edits(t)
+                .find(|&(_, at)| at == e.at)
+                .map_or(e.at, |(cut, _)| cut),
+            (_, Side::Audio) => audio_edits(t)
+                .find(|&(cut, _)| cut == e.at)
+                .map(|(_, at)| at)
+                .ok_or("This cut has no audio edit: one of its clips has no sound")?,
+            _ => e.at,
+        };
+        self.timeline.edit = Some(EditSel {
+            at,
+            side,
+            track: e.track,
+        });
+        Ok(())
+    }
+
+    /// `gui.timeline`: the zoom and Timeline Options, kept between runs.
+    pub fn set_timeline_options(
+        &mut self,
+        set: &vidcut_core::request::TimelineOptions,
+    ) -> Result<(), String> {
+        if set.zoom.is_some_and(|z| !ZOOM.contains(&z)) {
+            return Err("The zoom goes from 0.01 to 40 pixels a frame".into());
+        }
+        if set.boring_secs.is_some_and(|s| !BORING_SECS.contains(&s)) {
+            return Err("Boring Clips goes from 1 to 300 seconds".into());
+        }
+        if set.jump_frames.is_some_and(|f| !JUMP_FRAMES.contains(&f)) {
+            return Err("Jump Cuts goes from 1 to 120 frames".into());
+        }
+        let o = &mut self.timeline.options;
+        let before = *o;
+        o.ppf = set.zoom.unwrap_or(o.ppf);
+        o.fixed_playhead = set.fixed_playhead.unwrap_or(o.fixed_playhead);
+        o.snapping = set.snap.unwrap_or(o.snapping);
+        o.safe_edit = set.safe_edit.unwrap_or(o.safe_edit);
+        o.names = set.names.unwrap_or(o.names);
+        o.durations = set.durations.unwrap_or(o.durations);
+        o.status = set.status.unwrap_or(o.status);
+        o.filmstrips = set.filmstrips.unwrap_or(o.filmstrips);
+        o.waveforms = set.waveforms.unwrap_or(o.waveforms);
+        o.boring = set.boring.unwrap_or(o.boring);
+        o.boring_secs = set.boring_secs.unwrap_or(o.boring_secs);
+        o.jump_frames = set.jump_frames.unwrap_or(o.jump_frames);
+        if *o != before {
+            o.save();
+        }
+        Ok(())
+    }
+
+    /// The zoom and Timeline Options, as `gui.timeline` names them.
+    pub(crate) fn timeline_state(&self) -> crate::live::TimelineState {
+        let o = &self.timeline.options;
+        crate::live::TimelineState {
+            zoom: o.ppf,
+            fixed_playhead: o.fixed_playhead,
+            snap: o.snapping,
+            safe_edit: o.safe_edit,
+            names: o.names,
+            durations: o.durations,
+            status: o.status,
+            filmstrips: o.filmstrips,
+            waveforms: o.waveforms,
+            boring: o.boring,
+            boring_secs: o.boring_secs,
+            jump_frames: o.jump_frames,
+        }
+    }
+
+    /// The edit point selected, as `selection.get` gives it.
+    pub(crate) fn edit_point(&self) -> Option<crate::live::EditPoint> {
+        self.timeline.edit.map(|e| crate::live::EditPoint {
+            at: e.at,
+            track: e.track.id(),
+            side: e.side.into(),
+        })
     }
 }
 
@@ -2407,6 +2547,67 @@ impl From<vidcut_core::request::TrimSide> for Side {
             TrimSide::Out => Self::Out,
             TrimSide::In => Self::In,
             TrimSide::Both => Self::Both,
+            TrimSide::Audio => Self::Audio,
         }
+    }
+}
+
+impl From<Side> for vidcut_core::request::TrimSide {
+    fn from(s: Side) -> Self {
+        match s {
+            Side::Out => Self::Out,
+            Side::In => Self::In,
+            Side::Both => Self::Both,
+            Side::Audio => Self::Audio,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use vidcut_core::model::{Clip, ClipAudio, TrackKind};
+
+    use super::*;
+
+    /// A clip of m1 at `start`, its sound running `tail` frames past its
+    /// end, or without sound.
+    fn clip(id: &str, start: i64, duration: i64, tail: Option<i64>) -> Clip {
+        Clip {
+            id: id.into(),
+            media: "m1".into(),
+            start,
+            duration,
+            source_in: 0,
+            video: true,
+            audio: tail.map(|tail| ClipAudio {
+                stream: 0,
+                head: 0,
+                tail,
+                gain_db: 0.0,
+                muted: false,
+                effects: None,
+            }),
+            enabled: true,
+            name: None,
+            effects: None,
+            generator: None,
+            compound: None,
+            speed: None,
+            color: None,
+        }
+    }
+
+    #[test]
+    fn the_nearest_audio_edit_is_that_of_the_nearest_cut_with_sound() {
+        // The cut at 120 is nearer 110, but c3 has no sound.
+        let t = Track {
+            clips: vec![
+                clip("c1", 0, 60, Some(8)),
+                clip("c2", 60, 60, Some(0)),
+                clip("c3", 120, 60, None),
+            ],
+            ..Track::new("V1", TrackKind::Video)
+        };
+        assert_eq!(nearest_edit(&t, 110, Side::Audio), Some(68));
     }
 }
