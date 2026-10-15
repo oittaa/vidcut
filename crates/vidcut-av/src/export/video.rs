@@ -9,7 +9,7 @@
 use std::path::Path;
 
 use vidcut_core::model::Hdr;
-use vidcut_core::render::{Image, VideoPiece};
+use vidcut_core::render::{Image, VideoPiece, WHOLE};
 use vidcut_core::time::Rational;
 
 use super::ahead::Ahead;
@@ -106,6 +106,8 @@ struct Source {
     /// The GPU the reader decodes on: NVDEC for NVENC's frames
     /// ([`Output::Cuda`]), or any for frames as decoded (`decode_on`).
     decoder: Option<crate::hw::Kind>,
+    /// Pictures of a piece walking its source backward, made ahead.
+    reversed: Vec<Reversed>,
 }
 
 /// What a source needs to decode on NVDEC for an export whose frames stay
@@ -192,6 +194,7 @@ impl Source {
             pictures,
             fitting,
             decoder,
+            reversed: Vec::new(),
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
@@ -242,6 +245,7 @@ impl Source {
             pictures,
             fitting: Fitting::none(),
             decoder,
+            reversed: Vec::new(),
         })
     }
 
@@ -340,10 +344,20 @@ impl Source {
     fn reposition(&mut self, origin: f64, source_frame: i64, target: f64) -> Result<()> {
         self.origin = origin;
         self.source_frame = source_frame;
-        if self.pictures == Pictures::Still {
-            return Ok(());
+        if !self.reads_on(target) {
+            self.seek(target)?;
         }
-        let ahead = match &self.current {
+        Ok(())
+    }
+
+    /// Whether a piece starting at `target` decodes on from where the file
+    /// stands, rather than seeking: it starts a little ahead. A still is
+    /// never sought.
+    fn reads_on(&self, target: f64) -> bool {
+        if self.pictures == Pictures::Still {
+            return true;
+        }
+        match &self.current {
             Some((_, t)) => target >= self.target && target - t <= DECODE_AHEAD,
             // Just sought (a keyframe looked for, `VideoFrames::keyframe_time`):
             // the frame it landed on comes next, and decoding on from it
@@ -357,24 +371,70 @@ impl Source {
                     t <= target + 1e-6
                         && (target <= self.target + 1e-6 || target - t <= DECODE_AHEAD)
                 }),
-        };
-        if !ahead {
-            self.seek(target)?;
         }
-        Ok(())
     }
+}
+
+/// A picture of an output frame: the frame's only one, or one of the
+/// layers a dissolve mixes ([`VideoFrames::next_layers`]).
+pub(crate) struct Layer {
+    /// `None`: black under or over the others of a mix.
+    pub(crate) frame: Option<frame::Video>,
+    /// Its weight over the layers under it ([`WHOLE`] is all of it);
+    /// `None` for the bottom one, shown whole.
+    pub(crate) weight: Option<u32>,
+    /// The clockwise turn that shows it upright: its file's display matrix;
+    /// 0 for black.
+    pub(crate) rotation: u16,
+    /// The GPU that decoded it, and what its file holds and what decoded
+    /// it; `None` for black.
+    pub(crate) decoder: Option<crate::hw::Kind>,
+    pub(crate) decoding: Option<std::sync::Arc<crate::decode::Decoding>>,
+    /// The GPU made it, for the encoder there.
+    made_on_gpu: bool,
+}
+
+/// Layers of a mix at most that open files of their own while their files
+/// open ahead ([`Ahead`]'s numbers count pieces this many apart).
+const LAYERS: usize = 16;
+
+/// What [`Ahead`] calls layer `layer` of piece `piece`.
+fn slot(piece: usize, layer: usize) -> usize {
+    piece * LAYERS + layer.min(LAYERS - 1)
+}
+
+/// The layer that shows most of a frame: from the top, each shows its
+/// weight of what the ones over it leave.
+fn heaviest(layers: &[Layer]) -> usize {
+    let mut left = u64::from(WHOLE);
+    let mut best = (0, 0);
+    for (i, l) in layers.iter().enumerate().rev() {
+        let w = u64::from(l.weight.unwrap_or(WHOLE));
+        let shown = left * w;
+        if shown > best.1 {
+            best = (i, shown);
+        }
+        left = left * (u64::from(WHOLE) - w) / u64::from(WHOLE);
+    }
+    best.0
 }
 
 /// Produces the plan's video frames in order. A piece from the same file as
 /// the one before it reads on with the same decoder; a piece from another
-/// file is opened while the piece before it encodes.
+/// file is opened while the piece before it encodes. A dissolve's pictures
+/// are each read from a file of their own and mixed (decision D50).
 pub struct VideoFrames {
     pieces: Vec<VideoPiece>,
     fps: Rational,
     piece: usize,
     /// Frame index within the current piece.
     k: i64,
-    source: Option<Source>,
+    /// The files open: those the current piece's pictures are read from,
+    /// and any the pieces after it may read on.
+    open: Vec<Source>,
+    /// Which of `open` reads each picture of the current piece (`None`:
+    /// black).
+    reading: Vec<Option<usize>>,
     /// The next file, opened ahead; named by where it opens.
     ahead: Ahead<Source, (Input, u64, i64)>,
     black: Option<frame::Video>,
@@ -403,8 +463,9 @@ pub struct VideoFrames {
     /// The Dolby Vision of the last source frame given: black after it
     /// takes it.
     last_dolby_vision: frame::Video,
-    /// Pictures of a piece walking its source backward, made ahead.
-    reversed: Vec<Reversed>,
+    /// Why mixing on NVIDIA's GPU failed: dissolves are mixed on the CPU
+    /// from then on.
+    cuda_mix_failed: Option<String>,
 }
 
 impl VideoFrames {
@@ -422,7 +483,8 @@ impl VideoFrames {
             fps,
             piece: 0,
             k: 0,
-            source: None,
+            open: Vec::new(),
+            reading: Vec::new(),
             ahead: Ahead::new(),
             black: None,
             decoder: None,
@@ -435,8 +497,22 @@ impl VideoFrames {
             dynamic: Default::default(),
             light: Default::default(),
             last_dolby_vision: frame::Video::empty(),
-            reversed: Vec::new(),
+            cuda_mix_failed: None,
         }
+    }
+
+    /// Why NVIDIA's GPU didn't mix the dissolves for NVENC, which the CPU
+    /// mixed then; `None` where it did, or nothing was mixed there.
+    pub fn mix_failed(&self) -> Option<&str> {
+        self.cuda_mix_failed.as_deref()
+    }
+
+    /// Whether a dissolve's pictures are mixed on NVIDIA's GPU, for NVENC
+    /// (`hw::can_mix`), rather than on the CPU.
+    fn gpu_mixes(&self) -> bool {
+        matches!(self.maker.output(), Output::Cuda { .. })
+            && crate::hw::can_mix(Place::Cuda)
+            && self.cuda_mix_failed.is_none()
     }
 
     /// Makes the frames into `output`. Frames are picked by the sampling
@@ -464,7 +540,7 @@ impl VideoFrames {
     }
 
     /// The GPU that decoded the last frame given (`None` for black, and for
-    /// frames decoded on the CPU).
+    /// frames decoded on the CPU); of a mix, its heaviest picture's.
     pub fn decoded_on(&self) -> Option<crate::hw::Kind> {
         self.last_decoder
     }
@@ -534,11 +610,39 @@ impl VideoFrames {
         self.fps
     }
 
-    /// The next output frame (pts unset), or `None` after the last one.
+    /// The next output frame (pts unset), or `None` after the last one. A
+    /// dissolve's pictures are mixed into it; not for frames as decoded
+    /// ([`Output::Decoded`]), whose layers come apart
+    /// ([`next_layers`](Self::next_layers)).
     pub fn next_frame(&mut self) -> Result<Option<frame::Video>> {
-        Ok(self
-            .next(true)?
-            .map(|f| f.expect("a picture was asked for")))
+        let Some(layers) = self.next_layers()? else {
+            return Ok(None);
+        };
+        if layers.len() == 1 {
+            let only = layers.into_iter().next().expect("one");
+            return Ok(Some(only.frame.expect("a frame's only picture")));
+        }
+        self.mix(layers).map(Some)
+    }
+
+    /// The next output frame's pictures, bottom up: its only one, or the
+    /// layers of a dissolve's mix, each made into the output (for frames
+    /// as decoded, each as decoded). `None` after the last frame.
+    pub(crate) fn next_layers(&mut self) -> Result<Option<Vec<Layer>>> {
+        let Some(layers) = self.next(true)? else {
+            return Ok(None);
+        };
+        let layers = layers.expect("a picture was asked for");
+        let shown = &layers[heaviest(&layers)];
+        self.rotation = shown.rotation;
+        self.last_decoder = shown.decoder;
+        self.last_decoding = shown.decoding.clone();
+        self.gpu_decoded += i64::from(shown.decoder.is_some());
+        let made_on_gpu = layers
+            .iter()
+            .all(|l| l.made_on_gpu || (l.frame.is_none() && layers.len() > 1));
+        self.gpu_made += i64::from(made_on_gpu);
+        Ok(Some(layers))
     }
 
     /// Moves past the next output frame without making its picture: it is
@@ -548,93 +652,224 @@ impl VideoFrames {
         Ok(self.next(false)?.is_some())
     }
 
-    /// The next output frame, with its picture when `picture` is set.
-    fn next(&mut self, picture: bool) -> Result<Option<Option<frame::Video>>> {
+    /// The next output frame, with its pictures when `picture` is set.
+    fn next(&mut self, picture: bool) -> Result<Option<Option<Vec<Layer>>>> {
         loop {
             let Some(piece) = self.pieces.get(self.piece) else {
                 return Ok(None);
             };
             if self.k >= piece.frames() {
-                // The file stays open: a later piece may read it too.
+                // The files stay open: a later piece may read them too.
                 self.piece += 1;
                 self.k = 0;
                 continue;
             }
             let k = self.k;
             self.k += 1;
-            return match piece.clone() {
-                VideoPiece::Black { .. } if !picture => Ok(Some(None)),
-                VideoPiece::Black { .. } => {
-                    self.rotation = 0;
-                    self.last_decoder = None;
-                    self.last_decoding = None;
-                    let black = frame_ref(self.black()?)?;
-                    let mut out = match self.maker.output() {
-                        Output::Cuda { frames, .. } => frames.upload(&black)?,
-                        _ => black,
-                    };
-                    if self.dynamic.hdr10plus {
-                        crate::light::FrameLight::default()
-                            .hdr10plus()
-                            .attach(&mut out)?;
-                    }
-                    if self.dynamic.dolby_vision {
-                        let dv = crate::hdr::Dynamic {
-                            hdr10plus: false,
-                            dolby_vision: true,
-                        };
-                        crate::hdr::copy_dynamic(&self.last_dolby_vision, &mut out, dv)?;
-                    }
-                    Ok(Some(Some(out)))
-                }
-                VideoPiece::Source {
-                    path,
-                    origin,
-                    source_frame,
-                    image,
-                    pace,
-                    ..
-                } => {
-                    // A still's one picture serves every frame: it is never
-                    // sought (an image file has nothing past it).
-                    let pictures = Pictures::of(image.as_ref());
-                    let still = pictures == Pictures::Still;
-                    let backward = pace.speed < 0.0 && !still;
-                    if k == 0 {
-                        let from = if still { 0 } else { source_frame };
-                        self.start_piece(&input_of(&path, image.as_ref()), origin, from, pictures)?;
-                        if !backward {
-                            self.reversed.clear();
-                        }
-                    }
-                    let k = if still { 0 } else { k };
+            let piece = piece.clone();
+            let layers = piece.layers();
+            let files = layers
+                .iter()
+                .any(|(l, _)| matches!(l, VideoPiece::Source { .. }));
+            if k == 0 && files {
+                self.start_layers(&piece)?;
+            }
+            let mixed = layers.len() > 1;
+            self.maker.set_mixing(mixed);
+            let mut made = Vec::with_capacity(layers.len());
+            for (i, (layer, ramp)) in layers.into_iter().enumerate() {
+                let weight = ramp.map(|r| r.weight(k));
+                let VideoPiece::Source { image, pace, .. } = layer else {
                     if picture {
-                        self.rotation = self.source.as_ref().map_or(0, |s| s.reader.rotation());
-                        self.last_decoder = self.source.as_ref().and_then(|s| s.decoder);
-                        self.last_decoding =
-                            self.source.as_ref().map(|s| s.reader.decoding().clone());
-                        self.gpu_decoded += i64::from(self.last_decoder.is_some());
-                        if backward {
-                            return self.reversed_frame(k).map(|f| Some(Some(f)));
-                        }
-                        self.source_frame(k).map(|f| Some(Some(f)))
-                    } else if backward {
-                        // Made when one is asked for, from a keyframe.
-                        Ok(Some(None))
-                    } else {
-                        self.pass_source_frame(k).map(|()| Some(None))
+                        // Frames as decoded hand black on as a picture.
+                        let decoded = matches!(self.maker.output(), Output::Decoded { .. });
+                        let frame = if mixed && !decoded {
+                            None
+                        } else {
+                            Some(self.black_frame()?)
+                        };
+                        made.push(Layer {
+                            frame,
+                            weight,
+                            rotation: 0,
+                            decoder: None,
+                            decoding: None,
+                            made_on_gpu: false,
+                        });
                     }
+                    continue;
+                };
+                // A still's one picture serves every frame: it is never
+                // sought (an image file has nothing past it).
+                let still = Pictures::of(image.as_ref()) == Pictures::Still;
+                let backward = pace.speed < 0.0 && !still;
+                let k = if still { 0 } else { k };
+                let s = self.reading[i].expect("a file's picture is read");
+                if !picture {
+                    // Made when one is asked for, from a keyframe.
+                    if !backward {
+                        self.pass_source_frame(s, layer, k)?;
+                    }
+                    continue;
                 }
-            };
+                let (rotation, decoder, decoding) = {
+                    let src = &self.open[s];
+                    (
+                        src.reader.rotation(),
+                        src.decoder,
+                        src.reader.decoding().clone(),
+                    )
+                };
+                let frame = if backward {
+                    self.reversed_frame(i, s, layer, k)?
+                } else {
+                    self.source_frame(i, s, layer, k)?
+                };
+                made.push(Layer {
+                    frame: Some(frame),
+                    weight,
+                    rotation,
+                    decoder,
+                    decoding: Some(decoding),
+                    made_on_gpu: self.open[s].fitting.route == Some(Route::Gpu),
+                });
+            }
+            return Ok(Some(picture.then_some(made)));
         }
     }
 
-    /// Forgets where the open file stands, so the next piece of it seeks
+    /// The output's black, for a frame of black alone: with HDR10+ of no
+    /// light, and the Dolby Vision of the source frame before it.
+    fn black_frame(&mut self) -> Result<frame::Video> {
+        let black = frame_ref(self.black()?)?;
+        let mut out = match self.maker.output() {
+            Output::Cuda { frames, .. } => frames.upload(&black)?,
+            _ => black,
+        };
+        self.black_metadata(&mut out)?;
+        Ok(out)
+    }
+
+    /// Black's dynamic HDR metadata on `out`: HDR10+ of no light, and the
+    /// Dolby Vision of the source frame before it.
+    fn black_metadata(&self, out: &mut frame::Video) -> Result<()> {
+        if self.dynamic.hdr10plus {
+            crate::light::FrameLight::default()
+                .hdr10plus()
+                .attach(out)?;
+        }
+        if self.dynamic.dolby_vision {
+            let dv = crate::hdr::Dynamic {
+                hdr10plus: false,
+                dolby_vision: true,
+            };
+            crate::hdr::copy_dynamic(&self.last_dolby_vision, out, dv)?;
+        }
+        Ok(())
+    }
+
+    /// `layers` mixed into one picture, each over those under it at its
+    /// weight (decision D50): on NVIDIA's GPU for NVENC, else on the CPU.
+    /// The picture keeps the colors and dynamic HDR metadata of the layer
+    /// that shows most of it.
+    fn mix(&mut self, layers: Vec<Layer>) -> Result<frame::Video> {
+        if let Output::Decoded { .. } = self.maker.output() {
+            return Err(Error::Invalid(
+                "pictures as decoded come apart, not mixed".into(),
+            ));
+        }
+        let shown = heaviest(&layers);
+        let on_gpu = match self.maker.output() {
+            Output::Cuda { frames, .. } if self.gpu_mixes() => match cuda_mix(frames, &layers) {
+                Ok(mixed) => Some(mixed),
+                // A GPU that won't mix (its driver won't take the kernel)
+                // leaves the export's dissolves to the CPU.
+                Err(e) => {
+                    crate::debug!(
+                        "decoding",
+                        "the GPU won't mix a dissolve's pictures, the CPU mixes them: {e}"
+                    );
+                    self.cuda_mix_failed = Some(e.to_string());
+                    None
+                }
+            },
+            _ => None,
+        };
+        let mut out = match on_gpu {
+            Some(mixed) => mixed,
+            None => {
+                let black = frame_ref(self.black()?)?;
+                let in_memory = |f: Option<&frame::Video>| -> Result<frame::Video> {
+                    match f {
+                        None => frame_ref(&black),
+                        Some(f) if Place::of(f) == Place::Memory => frame_ref(f),
+                        Some(f) => crate::hw::download(f),
+                    }
+                };
+                let mut mixed = in_memory(layers[0].frame.as_ref())?;
+                for l in &layers[1..] {
+                    let over = in_memory(l.frame.as_ref())?;
+                    mixed = super::mix::mix(&mixed, &over, l.weight.unwrap_or(WHOLE))?;
+                }
+                match self.maker.output() {
+                    // Up to NVENC's frames, mixed.
+                    Output::Cuda { frames, .. } => frames.upload(&mixed)?,
+                    _ => mixed,
+                }
+            }
+        };
+        // The colors of the picture it mostly shows, or of any.
+        let like = layers[shown]
+            .frame
+            .as_ref()
+            .or_else(|| layers.iter().find_map(|l| l.frame.as_ref()));
+        if let Some(like) = like {
+            // SAFETY: both are valid frames.
+            unsafe { ffmpeg::ffi::av_frame_copy_props(out.as_mut_ptr(), like.as_ptr()) };
+        }
+        crate::hdr::strip(&mut out);
+        // Dolby Vision of the picture it shows most of (black's: that of the
+        // frame before it).
+        if self.dynamic.dolby_vision {
+            let dv = crate::hdr::Dynamic {
+                hdr10plus: false,
+                dolby_vision: true,
+            };
+            let from = layers[shown]
+                .frame
+                .as_ref()
+                .unwrap_or(&self.last_dolby_vision);
+            crate::hdr::copy_dynamic(from, &mut out, dv)?;
+        }
+        // HDR10+ never claims less light than it shows: each value the
+        // brightest picture's. Black alone has no light; pictures without
+        // HDR10+ leave the mix without it, as they are outside one.
+        if self.dynamic.hdr10plus {
+            let light = layers
+                .iter()
+                .filter_map(|l| l.frame.as_ref())
+                .filter_map(crate::hdr::Hdr10Plus::of_frame)
+                .reduce(|a, b| a.brightest(&b));
+            let black = layers.iter().all(|l| l.frame.is_none());
+            match light {
+                Some(light) => light.attach(&mut out)?,
+                None if black => crate::light::FrameLight::default()
+                    .hdr10plus()
+                    .attach(&mut out)?,
+                None => {}
+            }
+        }
+        Ok(out)
+    }
+
+    /// Forgets where the open files stand, so the next piece of each seeks
     /// rather than decoding on: after decoding was interrupted (a cancel
-    /// flag), the reader may stand anywhere. A still keeps its picture.
+    /// flag), a reader may stand anywhere. A still keeps its picture.
     pub fn forget_position(&mut self) {
-        if let Some(s) = self.source.as_mut()
-            && s.pictures != Pictures::Still
+        for s in self
+            .open
+            .iter_mut()
+            .filter(|s| s.pictures != Pictures::Still)
         {
             s.current = None;
             s.normalized = None;
@@ -644,7 +879,8 @@ impl VideoFrames {
     /// The time (seconds) of the keyframe decoding starts from for the
     /// first frame of `piece`, a video file's: a seek and one decoded frame.
     /// The reader stays there: frames read from the keyframe on decode on
-    /// without seeking again. `None` for black, stills and image sequences.
+    /// without seeking again. `None` for black, stills, image sequences and
+    /// mixes.
     pub fn keyframe_time(&mut self, piece: &VideoPiece) -> Result<Option<f64>> {
         let VideoPiece::Source {
             path,
@@ -658,22 +894,26 @@ impl VideoFrames {
         };
         let input = input_of(path, None);
         let target = self.target(*origin, *source_frame);
-        let mut source = match self.source.take() {
-            Some(s) if s.reader.input() == &input => s,
-            _ => Source::bare(
-                &input,
-                *origin,
-                Pictures::Video,
-                self.decoder.as_ref(),
-                self.measures(&input),
-            )?,
+        let s = match self.open.iter().position(|s| s.reader.input() == &input) {
+            Some(s) => s,
+            None => {
+                let bare = Source::bare(
+                    &input,
+                    *origin,
+                    Pictures::Video,
+                    self.decoder.as_ref(),
+                    self.measures(&input),
+                )?;
+                self.open.push(bare);
+                self.open.len() - 1
+            }
         };
+        let source = &mut self.open[s];
         // Interrupted, the file stays open, its position unknown.
         let sought = source.seek(target);
         // The window that starts there decodes on from it.
         source.reader.from_keyframe();
         let at = source.reader.pending_pts().map(|p| p as f64 * source.tick);
-        self.source = Some(source);
         sought?;
         Ok(at)
     }
@@ -718,150 +958,213 @@ impl VideoFrames {
         self.dynamic.hdr10plus && !self.light.contains_key(input.path())
     }
 
-    /// Readies the current piece's file: the open one if it is the same
-    /// file, the one opened ahead for this piece, or a new one. Then starts
-    /// opening the next file.
-    fn start_piece(
-        &mut self,
-        input: &Input,
-        origin: f64,
-        source_frame: i64,
-        pictures: Pictures,
-    ) -> Result<()> {
-        let target = self.target(origin, source_frame);
-        let source = match self.source.take() {
-            Some(mut s) if s.reader.input() == input => {
-                if let Err(e) = s.reposition(origin, source_frame, target) {
-                    // Interrupted, say: the file stays open, its position
-                    // unknown.
-                    s.current = None;
-                    s.normalized = None;
-                    self.source = Some(s);
-                    return Err(e);
+    /// Readies the files of the current piece's pictures: for each, an open
+    /// file of it no other picture of the piece reads (the one that reads on
+    /// to it, if one does), the one opened ahead for it, or a new one.
+    /// Files none of them reads close. Then starts opening the next file.
+    fn start_layers(&mut self, piece: &VideoPiece) -> Result<()> {
+        let mut taken = vec![false; self.open.len()];
+        let mut reading = Vec::new();
+        for (i, (layer, _)) in piece.layers().into_iter().enumerate() {
+            let VideoPiece::Source {
+                path,
+                origin,
+                source_frame,
+                image,
+                pace,
+                ..
+            } = layer
+            else {
+                reading.push(None);
+                continue;
+            };
+            let pictures = Pictures::of(image.as_ref());
+            let still = pictures == Pictures::Still;
+            let from = if still { 0 } else { *source_frame };
+            let input = input_of(path, image.as_ref());
+            let target = self.target(*origin, from);
+            let free: Vec<usize> = (0..self.open.len())
+                .filter(|&s| !taken[s] && self.open[s].reader.input() == &input)
+                .collect();
+            let reads_on = free
+                .iter()
+                .copied()
+                .find(|&s| self.open[s].reads_on(target));
+            let s = match reads_on.or(free.first().copied()) {
+                Some(s) => {
+                    if let Err(e) = self.open[s].reposition(*origin, from, target) {
+                        // Interrupted, say: the file stays open, its
+                        // position unknown.
+                        self.open[s].current = None;
+                        self.open[s].normalized = None;
+                        return Err(e);
+                    }
+                    s
                 }
-                s
+                None => {
+                    let opened = match self.ahead.take(slot(self.piece, i)) {
+                        Some(opened) => opened?,
+                        None => Source::open(
+                            &input,
+                            *origin,
+                            from,
+                            target,
+                            pictures,
+                            self.gpu_side().as_ref(),
+                            self.decoder.as_ref(),
+                            self.measures(&input),
+                        )?,
+                    };
+                    self.open.push(opened);
+                    taken.push(false);
+                    self.open.len() - 1
+                }
+            };
+            taken[s] = true;
+            if !(pace.speed < 0.0 && !still) {
+                self.open[s].reversed.clear();
             }
-            _ => match self.ahead.take(self.piece) {
-                Some(opened) => opened?,
-                None => Source::open(
-                    input,
-                    origin,
-                    source_frame,
-                    target,
-                    pictures,
-                    self.gpu_side().as_ref(),
-                    self.decoder.as_ref(),
-                    self.measures(input),
-                )?,
-            },
-        };
-        self.source = Some(source);
-        self.open_next(input);
+            reading.push(Some(s));
+        }
+        let mut moved = Vec::with_capacity(taken.len());
+        let mut kept = Vec::new();
+        for (s, source) in std::mem::take(&mut self.open).into_iter().enumerate() {
+            moved.push(taken[s].then_some(kept.len()));
+            if taken[s] {
+                kept.push(source);
+            }
+        }
+        self.open = kept;
+        self.reading = reading
+            .into_iter()
+            .map(|r| r.and_then(|s| moved[s]))
+            .collect();
+        self.open_next();
         Ok(())
     }
 
-    /// Starts opening the file of the next source piece, unless it is
-    /// `current`, which that piece then reads on with.
-    fn open_next(&mut self, current: &Input) {
+    /// Starts opening the file of the next piece's first picture that no
+    /// open file reads; the next piece reads on with the open ones.
+    fn open_next(&mut self) {
         let next = self
             .pieces
             .iter()
             .enumerate()
             .skip(self.piece + 1)
-            .find_map(|(i, p)| match p {
-                VideoPiece::Source {
-                    path,
-                    origin,
-                    source_frame,
-                    frames,
-                    image,
-                    ..
-                } if *frames > 0 => {
-                    let pictures = Pictures::of(image.as_ref());
-                    let from = if pictures == Pictures::Still {
-                        0
-                    } else {
-                        *source_frame
-                    };
-                    Some((i, input_of(path, image.as_ref()), *origin, from, pictures))
-                }
-                _ => None,
-            });
-        let Some((i, input, origin, source_frame, pictures)) = next else {
+            .find(|(_, p)| {
+                p.layers()
+                    .iter()
+                    .any(|(l, _)| matches!(l, VideoPiece::Source { frames, .. } if *frames > 0))
+            })
+            .map(|(j, p)| (j, p.clone()));
+        let Some((j, piece)) = next else {
             return;
         };
-        if &input == current {
-            return;
-        }
-        let target = self.target(origin, source_frame);
-        let gpu = self.gpu_side();
-        let decoder = self.decoder.clone();
-        let measure = self.measures(&input);
-        let key = (input.clone(), origin.to_bits(), source_frame);
-        self.ahead.start(i, key, move || {
-            Source::open(
-                &input,
+        let mut used = vec![false; self.open.len()];
+        for (i, (layer, _)) in piece.layers().into_iter().enumerate() {
+            let VideoPiece::Source {
+                path,
                 origin,
                 source_frame,
-                target,
-                pictures,
-                gpu.as_ref(),
-                decoder.as_ref(),
-                measure,
-            )
-        });
+                image,
+                ..
+            } = layer
+            else {
+                continue;
+            };
+            let input = input_of(path, image.as_ref());
+            if let Some(s) =
+                (0..self.open.len()).find(|&s| !used[s] && self.open[s].reader.input() == &input)
+            {
+                used[s] = true;
+                continue;
+            }
+            let pictures = Pictures::of(image.as_ref());
+            let from = if pictures == Pictures::Still {
+                0
+            } else {
+                *source_frame
+            };
+            let origin = *origin;
+            let target = self.target(origin, from);
+            let gpu = self.gpu_side();
+            let decoder = self.decoder.clone();
+            let measure = self.measures(&input);
+            let key = (input.clone(), origin.to_bits(), from);
+            self.ahead.start(slot(j, i), key, move || {
+                Source::open(
+                    &input,
+                    origin,
+                    from,
+                    target,
+                    pictures,
+                    gpu.as_ref(),
+                    decoder.as_ref(),
+                    measure,
+                )
+            });
+            return;
+        }
     }
 
-    /// Source frames from the current piece's first to its output frame
-    /// `k`, at its pace.
-    fn step(&self, k: i64) -> i64 {
-        self.pieces
-            .get(self.piece)
-            .map_or(k, |p| p.position(k) - p.position(0))
+    /// Source frames from `layer`'s first to its output frame `k`, at its
+    /// pace.
+    fn step(layer: &VideoPiece, k: i64) -> i64 {
+        layer.position(k) - layer.position(0)
     }
 
-    /// Moves the current source piece's file on to its output frame `k`
-    /// without making the picture.
-    fn pass_source_frame(&mut self, k: i64) -> Result<()> {
-        let step = self.step(k);
-        let first = self.source.as_ref().expect("open").source_frame;
-        self.pass_at(first + step)
+    /// Moves open file `s` on to `layer`'s output frame `k` without making
+    /// the picture.
+    fn pass_source_frame(&mut self, s: usize, layer: &VideoPiece, k: i64) -> Result<()> {
+        let first = self.open[s].source_frame;
+        self.pass_at(s, first + Self::step(layer, k))
     }
 
-    /// Moves the open file on to source frame `pos` without making the
+    /// Moves open file `s` on to source frame `pos` without making the
     /// picture.
-    fn pass_at(&mut self, pos: i64) -> Result<()> {
+    fn pass_at(&mut self, s: usize, pos: i64) -> Result<()> {
         let fps = self.fps;
-        let src = self.source.as_mut().expect("open");
+        let src = &mut self.open[s];
         if src.advance(target(fps, src.origin, pos))? {
             src.normalized = None;
         }
         Ok(())
     }
 
-    /// Output frame `k` of the current source piece.
-    fn source_frame(&mut self, k: i64) -> Result<frame::Video> {
-        let step = self.step(k);
-        let first = self.source.as_ref().expect("open").source_frame;
-        self.frame_at(first + step)
+    /// Output frame `k` of `layer`, picture `i` of the current piece, read
+    /// from open file `s`.
+    fn source_frame(
+        &mut self,
+        i: usize,
+        s: usize,
+        layer: &VideoPiece,
+        k: i64,
+    ) -> Result<frame::Video> {
+        let first = self.open[s].source_frame;
+        self.frame_at(i, s, first + Self::step(layer, k))
     }
 
-    /// Output frame `k` of the current piece, which walks its source
-    /// backward (decision D48): made with those it shows after it, as many
-    /// as fit, from the keyframe before the lowest up, so the file isn't
-    /// sought for each.
-    fn reversed_frame(&mut self, k: i64) -> Result<frame::Video> {
-        let piece = self.pieces[self.piece].clone();
-        let pos = piece.position(k);
-        let input = self.source.as_ref().expect("open").reader.input().clone();
+    /// Output frame `k` of `layer`, picture `i` of the current piece, which
+    /// walks its source backward (decision D48), read from open file `s`:
+    /// made with those it shows after it, as many as fit, from the keyframe
+    /// before the lowest up, so the file isn't sought for each.
+    fn reversed_frame(
+        &mut self,
+        i: usize,
+        s: usize,
+        layer: &VideoPiece,
+        k: i64,
+    ) -> Result<frame::Video> {
+        let pos = layer.position(k);
+        let input = self.open[s].reader.input().clone();
         let made = |r: &Reversed| r.pos == pos && r.input == input;
-        if !self.reversed.iter().any(made) {
-            self.reversed.clear();
-            let most = self.reversed_frames();
+        if !self.open[s].reversed.iter().any(made) {
+            self.open[s].reversed.clear();
+            let most = self.reversed_frames(s);
             // Highest first.
             let mut shown: Vec<i64> = Vec::new();
-            for j in k..piece.frames() {
-                let p = piece.position(j);
+            for j in k..layer.frames() {
+                let p = layer.position(j);
                 if shown.last() != Some(&p) {
                     if shown.len() as i64 == most {
                         break;
@@ -872,27 +1175,32 @@ impl VideoFrames {
             let low = *shown.last().expect("frame k");
             for p in low..=pos {
                 if shown.contains(&p) {
-                    let frame = self.frame_at(p)?;
-                    self.reversed.push(Reversed {
+                    let frame = self.frame_at(i, s, p)?;
+                    let dolby_vision = dolby_vision(&self.last_dolby_vision)?;
+                    self.open[s].reversed.push(Reversed {
                         input: input.clone(),
                         pos: p,
                         frame,
-                        dolby_vision: dolby_vision(&self.last_dolby_vision)?,
+                        dolby_vision,
                     });
                 } else {
-                    self.pass_at(p)?;
+                    self.pass_at(s, p)?;
                 }
             }
         }
-        let r = self.reversed.iter().find(|r| made(r)).expect("just made");
+        let r = self.open[s]
+            .reversed
+            .iter()
+            .find(|r| made(r))
+            .expect("just made");
         self.last_dolby_vision = dolby_vision(&r.dolby_vision)?;
         frame_ref(&r.frame)
     }
 
     /// How many pictures [`reversed_frame`](Self::reversed_frame) makes at
-    /// once: what fits in `REVERSED_BYTES`, at 10 bits.
-    fn reversed_frames(&self) -> i64 {
-        let current = self.source.as_ref().and_then(|s| s.current.as_ref());
+    /// once from open file `s`: what fits in `REVERSED_BYTES`, at 10 bits.
+    fn reversed_frames(&self, s: usize) -> i64 {
+        let current = self.open[s].current.as_ref();
         let (w, h) = match (self.maker.output(), current) {
             (Output::Decoded { .. }, Some((f, _))) => (f.width(), f.height()),
             _ => (self.maker.out().0, self.maker.out().1),
@@ -909,24 +1217,27 @@ impl VideoFrames {
         ((REVERSED_BYTES / bytes) as i64).clamp(1, most)
     }
 
-    /// The output frame of the open file's source frame `pos`.
-    fn frame_at(&mut self, pos: i64) -> Result<frame::Video> {
+    /// The output picture `i` of the current piece shows, of open file
+    /// `s`'s source frame `pos`.
+    fn frame_at(&mut self, i: usize, s: usize, pos: i64) -> Result<frame::Video> {
         let fps = self.fps;
-        let src = self.source.as_mut().expect("open");
+        // Pictures made in memory go up to NVENC's frames, but for a mix
+        // the CPU makes.
+        let up = !self.maker.mixing() || self.gpu_mixes();
+        let src = &mut self.open[s];
         let changed = src.advance(target(fps, src.origin, pos))?;
         if changed || src.normalized.is_none() {
             let (frame, _) = src.current.as_ref().expect("have a frame");
             let rotation = src.reader.rotation();
-            let made = self
-                .maker
-                .make(&mut src.fitting, frame, rotation, src.reader.path())?;
+            let made =
+                self.maker
+                    .make_layer(i, &mut src.fitting, frame, rotation, src.reader.path())?;
             src.normalized = Some(made.ok_or_else(no_picture)?);
         }
         let picture = frame_ref(src.normalized.as_ref().expect("normalized"))?;
-        self.gpu_made += i64::from(src.fitting.route == Some(Route::Gpu));
         let mut out = match self.maker.output() {
             // Pictures made in memory go up to NVENC's frames.
-            Output::Cuda { frames, .. } if Place::of(&picture) == Place::Memory => {
+            Output::Cuda { frames, .. } if up && Place::of(&picture) == Place::Memory => {
                 frames.upload(&picture)?
             }
             _ => picture,
@@ -960,6 +1271,27 @@ impl VideoFrames {
         }
         Ok(out)
     }
+}
+
+/// `layers`, frames of `frames`' size and layout in CUDA memory (`None`:
+/// black), mixed on NVIDIA's GPU: each over those under it at its weight.
+fn cuda_mix(frames: &crate::cuda::CudaFrames, layers: &[Layer]) -> Result<frame::Video> {
+    let mut mixed: Option<frame::Video> = None;
+    for l in layers {
+        match (mixed.take(), l.weight) {
+            (None, None) => mixed = l.frame.as_ref().map(frame_ref).transpose()?,
+            (under, w) => {
+                let w = w.unwrap_or(WHOLE);
+                mixed = Some(crate::cuda::mix::mix(
+                    frames,
+                    under.as_ref(),
+                    l.frame.as_ref(),
+                    w,
+                )?);
+            }
+        }
+    }
+    mixed.ok_or_else(|| Error::Invalid("a mix of black alone".into()))
 }
 
 /// What a scaler that gave no picture for a frame says: an export's gives
@@ -996,6 +1328,8 @@ pub(crate) fn fill_black(f: &mut frame::Video) -> Result<()> {
         )
     };
     let planes = f.planes();
+    // Packed with an alpha component (RGBA): one plane, opaque below.
+    let packed_alpha = alpha && planes == 1;
     for plane in 0..planes {
         let is_alpha = alpha && plane == planes - 1 && planes > 1;
         let v8: u16 = if is_alpha {
@@ -1022,6 +1356,26 @@ pub(crate) fn fill_black(f: &mut frame::Video) -> Result<()> {
             data.fill(v8 as u8);
         }
     }
+    if packed_alpha {
+        // SAFETY: FFmpeg's static descriptor of the format.
+        let (step, offset, a_depth) = unsafe {
+            let d = &*desc.as_ptr();
+            let a = d.comp[usize::from(d.nb_components) - 1];
+            (a.step as usize, a.offset as usize, a.depth)
+        };
+        let (w, h, stride) = (f.width() as usize, f.height() as usize, f.stride(0));
+        let data = f.data_mut(0);
+        for y in 0..h {
+            for x in 0..w {
+                let at = y * stride + x * step + offset;
+                if a_depth > 8 {
+                    data[at..at + 2].copy_from_slice(&u16::MAX.to_le_bytes());
+                } else {
+                    data[at] = 255;
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1029,6 +1383,13 @@ pub(crate) fn fill_black(f: &mut frame::Video) -> Result<()> {
 mod tests {
     use super::fill_black;
     use crate::ffmpeg::{format::Pixel, frame};
+
+    #[test]
+    fn packed_rgba_black_is_opaque() {
+        let mut f = frame::Video::new(Pixel::RGBA, 4, 4);
+        fill_black(&mut f).unwrap();
+        assert_eq!(&f.data(0)[..4], [0, 0, 0, 255]);
+    }
 
     #[test]
     fn black_is_video_range_black_in_every_layout() {

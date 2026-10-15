@@ -55,7 +55,7 @@ use std::time::{Duration, Instant};
 
 use vidcut_core::render::RenderPlan;
 
-pub use frame::{Layout, Picture, Shown};
+pub use frame::{Layout, Over, Picture, Shown};
 pub use output::{
     AudioOutput, AudioSource, CpalOutput, ManualOutput, OutputDevice, PacedOutput, PlaysOn,
     Recording, output_device, output_devices,

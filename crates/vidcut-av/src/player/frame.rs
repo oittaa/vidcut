@@ -67,12 +67,33 @@ impl Layout {
 /// on the GPU for a display that shows it from there, in the GPU's memory
 /// ([`gpu`](Self::gpu)), which the engine passes along without looking at
 /// its pixels.
+///
+/// While a dissolve plays, a frame's picture is the one under the others,
+/// and those over it, each at its level ([`over`](Self::over), decision
+/// D50): a display draws each over the ones before.
 pub struct Picture {
     frame: frame::Video,
     rotation: u16,
     bytes: usize,
     decoder: Option<super::Decoder>,
     decoding: Option<Arc<Decoding>>,
+    over: Vec<Over>,
+}
+
+/// A picture over another while a dissolve plays, at its weight
+/// (`render::Ramp::weight`: [`WHOLE`](vidcut_core::render::WHOLE) shows
+/// all of it).
+#[derive(Clone)]
+pub struct Over {
+    pub picture: Arc<Picture>,
+    pub weight: u32,
+}
+
+impl Over {
+    /// Its level, 0 to 1.
+    pub fn level(&self) -> f32 {
+        (f64::from(self.weight) / f64::from(vidcut_core::render::WHOLE)) as f32
+    }
 }
 
 impl Picture {
@@ -91,7 +112,20 @@ impl Picture {
             bytes,
             decoder,
             decoding,
+            over: Vec::new(),
         }
+    }
+
+    /// The picture with `over` on top of it, bottom up.
+    pub(crate) fn with_over(mut self, over: Vec<Over>) -> Self {
+        self.over = over;
+        self
+    }
+
+    /// The pictures over it while a dissolve plays, bottom up; none
+    /// otherwise.
+    pub fn over(&self) -> &[Over] {
+        &self.over
     }
 
     /// What its file holds and what decoded it: the codec, profile and
@@ -115,9 +149,17 @@ impl Picture {
         self.frame.height()
     }
 
-    /// The GPU decoder in whose memory it is; `None` in memory.
+    /// The GPU decoder in whose memory it is; `None` in memory. The
+    /// pictures over it say where they are.
     pub fn gpu(&self) -> Option<crate::hw::Kind> {
         crate::hw::Kind::of_frame(&self.frame)
+    }
+
+    /// The GPU decoder in whose memory it is, or a picture over it is;
+    /// `None` when all are in memory.
+    pub(crate) fn in_video_memory(&self) -> Option<crate::hw::Kind> {
+        self.gpu()
+            .or_else(|| self.over.iter().find_map(|o| o.picture.in_video_memory()))
     }
 
     /// The samples' layout; for a GPU surface, that of its frames context.
@@ -155,23 +197,38 @@ impl Picture {
     }
 
     /// The picture with its planes in memory: copied down from GPU memory,
-    /// or itself (by reference) when it is in memory already.
+    /// or itself (by reference) when it is in memory already; those over
+    /// it too.
     pub fn copied_down(&self) -> Result<Picture> {
         let frame = match self.gpu() {
             None => crate::export::video::frame_ref(&self.frame)?,
             Some(_) => crate::hw::download(&self.frame)?,
         };
-        Ok(Self::new(
-            frame,
-            self.rotation,
-            self.decoder,
-            self.decoding.clone(),
-        ))
+        let over = self
+            .over
+            .iter()
+            .map(|o| {
+                Ok(Over {
+                    picture: Arc::new(o.picture.copied_down()?),
+                    weight: o.weight,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self::new(frame, self.rotation, self.decoder, self.decoding.clone()).with_over(over))
     }
 
-    /// The memory it takes.
+    /// The memory it takes, with the pictures over it.
     pub fn bytes(&self) -> usize {
-        self.bytes
+        self.bytes + self.over.iter().map(|o| o.picture.bytes()).sum::<usize>()
+    }
+
+    /// It and the pictures over it, each with the memory its own frame
+    /// takes, and the GPU decoder in whose memory that is (`None`: in
+    /// memory).
+    pub(crate) fn layers(&self) -> Vec<(usize, Option<crate::hw::Kind>)> {
+        std::iter::once((self.bytes, self.gpu()))
+            .chain(self.over.iter().flat_map(|o| o.picture.layers()))
+            .collect()
     }
 
     /// The picture as export renders it at `width`×`height`: turned
@@ -180,8 +237,22 @@ impl Picture {
     /// and what a display's shader must match. Pictures in GPU memory are
     /// copied down first.
     pub fn to_rgba(&self, width: u32, height: u32) -> Result<Image> {
-        if self.gpu().is_some() {
+        if self.in_video_memory().is_some() {
             return self.copied_down()?.to_rgba(width, height);
+        }
+        if !self.over.is_empty() {
+            let alone = Self::new(
+                crate::export::video::frame_ref(&self.frame)?,
+                self.rotation,
+                self.decoder,
+                self.decoding.clone(),
+            );
+            let mut mixed = alone.to_rgba(width, height)?;
+            for o in &self.over {
+                let top = o.picture.to_rgba(width, height)?;
+                mixed = crate::export::renderer::mixed_image(&mixed, &top, o.weight);
+            }
+            return Ok(mixed);
         }
         let mut normalizer = Normalizer::new(
             &self.frame,

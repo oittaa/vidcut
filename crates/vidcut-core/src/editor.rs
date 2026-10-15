@@ -1405,6 +1405,41 @@ fn mutate(
             let selected = resolve_clips(p, clips, playhead)?;
             json!({ "joined": ops::join(p, at, &selected)? })
         }
+        Request::EditDissolve {
+            at,
+            track,
+            length,
+            align,
+            picture,
+            sound,
+            all,
+        } => {
+            let at = match at {
+                Some(t) => resolve(p, t, playhead)?,
+                None => playhead.unwrap_or(0),
+            };
+            let frames = match length {
+                Some(l) => ctx(p, playhead).duration(l)?,
+                None => p.settings.fps.as_f64().round() as i64,
+            };
+            let track = track.as_deref().unwrap_or(ops::MAIN);
+            let made = ops::dissolve(p, track, at, frames, *align, *picture, *sound, *all)?;
+            json!({ "transitions": made })
+        }
+        Request::EditRemoveTransition {
+            at,
+            track,
+            picture,
+            sound,
+            all,
+        } => {
+            let at = match at {
+                Some(t) => resolve(p, t, playhead)?,
+                None => playhead.unwrap_or(0),
+            };
+            let track = track.as_deref().unwrap_or(ops::MAIN);
+            json!({ "removed": ops::to_cut(p, track, at, *picture, *sound, *all)? })
+        }
         Request::EditDelete { clips, lift } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             ops::delete(p, &ids, *lift)?;

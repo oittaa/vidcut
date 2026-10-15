@@ -1481,6 +1481,21 @@ impl Workspace {
             {
                 self.edit_function("edit.place_on_top");
             }
+            let at = self.snap.timeline.position;
+            if ui
+                .button("Cut")
+                .on_hover_text("Make the edit nearest the playhead a cut again")
+                .clicked()
+            {
+                self.send("edit.remove_transition", json!({ "at": at }));
+            }
+            if ui
+                .button("Dissolve")
+                .on_hover_text("Ctrl+T: a one-second dissolve on the edit nearest the playhead")
+                .clicked()
+            {
+                self.send("edit.dissolve", json!({ "at": at }));
+            }
             if ui
                 .toggle_value(&mut self.video_only, "Video Only")
                 .on_hover_text("Edits take only the picture")

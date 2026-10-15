@@ -3,11 +3,12 @@
 //! at its own size, is within a level of `Picture::to_rgba` where it is
 //! flat. Pictures turned a quarter have chroma that changes down the rows
 //! they are stored in, upright ones along the rows. A picture with alpha is
-//! drawn without it, as the export converts it. Runs on any adapter, a software one too. Skips
-//! without one. ProRes pictures decoded on Vulkan and kept in GPU memory
-//! are drawn from there, their planes imported, as closely, and drawn
-//! again from the same import; those tests skip where the GPU in use
-//! doesn't decode ProRes on Vulkan.
+//! drawn without it, as the export converts it. A dissolve's pictures are
+//! drawn over each other as `Picture::to_rgba` mixes them. Runs on any
+//! adapter, a software one too. Skips without one. ProRes pictures decoded
+//! on Vulkan and kept in GPU memory are drawn from there, their planes
+//! imported, as closely, and drawn again from the same import; those tests
+//! skip where the GPU in use doesn't decode ProRes on Vulkan.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -17,7 +18,7 @@ use vidcut_av::ffmpeg::codec::Id;
 use vidcut_av::fixture::{self, Container, FixtureSpec, Picture as Content, VideoCodec};
 use vidcut_av::hw::{GpuDecoder, Kind};
 use vidcut_av::player::{Config, Layout, ManualOutput, Picture, Player};
-use vidcut_core::render::{RenderPlan, VideoPiece};
+use vidcut_core::render::{Over, Ramp, RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
 
 /// The upright picture's size.
@@ -83,12 +84,56 @@ fn picture(codec: VideoCodec, rotation: u16) -> Arc<Picture> {
 /// The player's picture of frame 5 of `codec`'s stripes, stored turned
 /// against `rotation`, decoded and kept as `config` says.
 fn picture_with(codec: VideoCodec, rotation: u16, config: Config) -> Arc<Picture> {
+    played_with(clip(codec, rotation, Content::Colors), config)
+}
+
+/// Ten frames of `content` in `codec`, stored turned against `rotation`.
+fn clip(codec: VideoCodec, rotation: u16, content: Content) -> VideoPiece {
     let spec = FixtureSpec::new(codec, Container::Mov, W, H, (30, 1), 10)
         .rotation(rotation)
-        .picture(Content::Colors);
+        .picture(content);
     let path = fixture::ensure(&spec).unwrap();
     let info = vidcut_av::probe::probe(&path, None).unwrap();
     let origin = info.video.and_then(|v| v.first_frame_time).unwrap_or(0.0);
+    VideoPiece::Source {
+        pace: Default::default(),
+        media: "m".into(),
+        path,
+        origin,
+        source_frame: 0,
+        frames: 10,
+        image: None,
+    }
+}
+
+/// `over` rising over `under` through their ten frames.
+fn dissolve(under: VideoPiece, over: VideoPiece) -> VideoPiece {
+    VideoPiece::Mix {
+        under: Box::new(under),
+        over: vec![Over {
+            piece: over,
+            ramp: Ramp {
+                at: 0,
+                of: 10,
+                falling: false,
+            },
+        }],
+    }
+}
+
+/// The player's picture of frame 5 of `piece`, ten frames long, decoded on
+/// the CPU.
+fn played(piece: VideoPiece) -> Arc<Picture> {
+    let config = Config {
+        audio_scrubbing: false,
+        ..Config::default()
+    };
+    played_with(piece, config)
+}
+
+/// The player's picture of frame 5 of `piece`, ten frames long, decoded
+/// and kept as `config` says.
+fn played_with(piece: VideoPiece, config: Config) -> Arc<Picture> {
     let plan = RenderPlan {
         fps: Rational::new(30, 1).unwrap(),
         width: W,
@@ -96,15 +141,7 @@ fn picture_with(codec: VideoCodec, rotation: u16, config: Config) -> Arc<Picture
         sample_rate: 48_000,
         channels: 2,
         frames: 10,
-        video: vec![VideoPiece::Source {
-            pace: Default::default(),
-            media: "m".into(),
-            path,
-            origin,
-            source_frame: 0,
-            frames: 10,
-            image: None,
-        }],
+        video: vec![piece],
         audio: Vec::new(),
         range: (0, 10),
         name: "pictures".into(),
@@ -146,19 +183,43 @@ fn flat_diff(a: &[u8], b: &[u8], w: usize) -> (usize, u8) {
 /// wherever it is flat. At edges the export repeats each chroma sample
 /// where the shader interpolates.
 fn draws_as_converted(codec: VideoCodec, rotation: u16, layout: Layout) {
+    let picture = picture(codec, rotation);
+    assert_eq!(picture.layout(), layout);
+    draws_as_rgba(&picture);
+}
+
+/// `picture` drawn at its own size: within a level of `Picture::to_rgba`
+/// (the export's conversion, a dissolve's pictures mixed in its RGB) in
+/// each channel wherever it is flat.
+fn draws_as_rgba(picture: &Arc<Picture>) {
     let Some(gpu) = gpu() else {
         eprintln!("skipping: no GPU adapter, not even a software one");
         return;
     };
-    let picture = picture(codec, rotation);
-    assert_eq!(picture.layout(), layout);
     let theirs = picture.to_rgba(W, H).unwrap();
     let mut screen = Screen::new();
-    screen.draw(&gpu, Some(&picture), W, H);
+    screen.draw(&gpu, Some(picture), W, H);
     let ours = screen.read(&gpu).unwrap();
     let (flat, most) = flat_diff(&ours.rgba, &theirs.rgba, W as usize);
     assert!(flat > (W * H / 2) as usize, "only {flat} pixels are flat");
     assert!(most <= 1, "{most} levels apart where the picture is flat");
+}
+
+#[test]
+fn a_fade_from_black_draws_as_its_rgba_mix() {
+    let stripes = clip(VideoCodec::H264, 0, Content::Colors);
+    let picture = played(dissolve(VideoPiece::Black { frames: 10 }, stripes));
+    assert_eq!(picture.over().len(), 1);
+    draws_as_rgba(&picture);
+}
+
+#[test]
+fn a_cross_dissolve_of_two_layouts_draws_as_its_rgba_mix() {
+    let stripes = clip(VideoCodec::H264, 0, Content::Colors);
+    let turned = clip(VideoCodec::ProRes422Hq, 90, Content::Colors);
+    let picture = played(dissolve(stripes, turned));
+    assert_eq!(picture.over().len(), 1);
+    draws_as_rgba(&picture);
 }
 
 #[test]

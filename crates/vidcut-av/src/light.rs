@@ -132,7 +132,8 @@ impl LightAnalysis {
     }
 }
 
-/// What a piece shows: its pictures and their source times (seconds).
+/// What a piece shows: its pictures and their source times (seconds). A
+/// mix's pictures each have their own (`VideoPiece::layers`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Span {
     pub input: Input,
@@ -175,7 +176,8 @@ impl Span {
 
 /// When the frames `piece` shows at `fps` are sampled, in order (the
 /// sampling rule, `export::video`): each shows the first source frame from
-/// then on, or the last. A still shows its one picture; black, none.
+/// then on, or the last. A still shows its one picture; black, none; a mix,
+/// none of its own (its layers have theirs).
 pub fn sampled(piece: &VideoPiece, fps: Rational) -> impl Iterator<Item = f64> + use<> {
     let (origin, n) = match piece {
         VideoPiece::Source {
@@ -183,7 +185,7 @@ pub fn sampled(piece: &VideoPiece, fps: Rational) -> impl Iterator<Item = f64> +
             ..
         } => (f64::NEG_INFINITY, 1),
         VideoPiece::Source { origin, frames, .. } => (*origin, *frames),
-        VideoPiece::Black { .. } => (0.0, 0),
+        VideoPiece::Black { .. } | VideoPiece::Mix { .. } => (0.0, 0),
     };
     let still = origin == f64::NEG_INFINITY;
     let piece = piece.clone();

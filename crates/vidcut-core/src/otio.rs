@@ -50,7 +50,8 @@
 //!   markers, keeping their lengths.
 //! - Clip effects in use stay on their clips' pictures and sounds
 //!   ([`effects`]), not shown or played, and are written back. So do
-//!   transitions, on their edit points ([`transitions`]): shown as cuts.
+//!   transitions, on their edit points ([`transitions`]): dissolves and
+//!   cross fades play (decision D50), others as cuts.
 //! - Generators and titles (`GeneratorReference`s) become generator clips,
 //!   which play as gaps, and nested `Stack`s (compound clips, nested
 //!   timelines) compound clips, which play the clips they hold: their
@@ -2006,7 +2007,10 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             .any(|k| have.contains(&k))
     });
     let mut names: Vec<String> = Vec::new();
-    for t in &found {
+    for t in found
+        .iter()
+        .filter(|t| !transitions::plays_in(&t.otio, t.sound))
+    {
         let name = transitions::otio_name(&t.otio);
         if !names.contains(&name) {
             names.push(name);
@@ -2014,7 +2018,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     }
     if !names.is_empty() {
         warnings.push(format!(
-            "transitions kept on their edit points but shown as cuts: {}",
+            "transitions kept on their edit points but played as cuts: {}",
             names.join(", ")
         ));
     }

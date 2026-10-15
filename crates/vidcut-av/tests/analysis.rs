@@ -65,6 +65,7 @@ fn plan(path: &Path, secs: i64, gain_db: f64) -> RenderPlan {
             source_sample: 0,
             samples: secs * 48_000,
             gain_db,
+            fade: None,
         }]],
         range: (0, secs * 30),
         name: "tone".into(),

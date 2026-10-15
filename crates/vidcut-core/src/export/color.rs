@@ -79,13 +79,13 @@ impl PictureShare {
     }
 }
 
-/// Adds up what `video`'s source pieces show.
+/// Adds up what `video`'s source pieces show, a mix's each.
 pub fn picture_share(
     video: &[VideoPiece],
     mut kind: impl FnMut(&VideoPiece) -> PictureKind,
 ) -> PictureShare {
     let mut share = PictureShare::default();
-    for piece in video {
+    for (piece, _) in video.iter().flat_map(VideoPiece::layers) {
         let VideoPiece::Source { frames, .. } = piece else {
             continue;
         };
