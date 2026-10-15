@@ -1129,14 +1129,26 @@ impl Project {
         c.shown_color(self.media(&c.media))
     }
 
-    /// End of the program: the latest clip end (video or audio) on any track.
+    /// End of the program: the latest clip end (video or audio) on any
+    /// track, or the end of a transition into the gap after a clip (a fade
+    /// to black, decision D50).
     pub fn end(&self) -> i64 {
-        self.tracks
+        let clips = self
+            .tracks
             .iter()
             .flat_map(|t| t.clips.iter())
-            .map(|c| c.audio_range().map_or(c.end(), |(_, e)| e.max(c.end())))
-            .max()
-            .unwrap_or(0)
+            .map(|c| c.audio_range().map_or(c.end(), |(_, e)| e.max(c.end())));
+        let fades = self.tracks.iter().flat_map(|t| {
+            t.transitions
+                .iter()
+                .filter(|x| x.to.is_none())
+                .filter_map(|x| {
+                    let c = t.clips.iter().find(|c| Some(&c.id) == x.from.as_ref())?;
+                    let edge = if x.sound { c.audio_range()?.1 } else { c.end() };
+                    Some(edge + x.after)
+                })
+        });
+        clips.chain(fades).max().unwrap_or(0)
     }
 
     /// Frames of `media` available from its first video frame (or first audio

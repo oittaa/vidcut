@@ -465,6 +465,15 @@ mod tests {
     }
 
     #[test]
+    fn a_fade_to_black_past_the_last_clip_ends_the_program() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        req(&mut f, "edit.dissolve", json!({"at": 50, "length": "10f"}));
+        // Centered: 5 frames after the clip's end.
+        assert_eq!(f.editor.project().end(), 55);
+    }
+
+    #[test]
     fn a_dissolve_of_odd_length_has_its_middle_frame_before_the_edit() {
         assert_eq!(super::split(7, super::Align::Center), (4, 3));
     }

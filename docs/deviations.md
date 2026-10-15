@@ -201,3 +201,8 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 - **Resolve:** Option+wheel zooms the timeline, and Command+wheel moves through it (Edit page, p. 853). The Cut page's lower timeline zooms with Option+wheel too.
 - **vidcut:** Ctrl+wheel (Cmd on a Mac) and a trackpad's pinch zoom the lower timeline.
 - **Why:** Ctrl+wheel and Cmd+wheel zoom in browsers and most other programs, and egui gives them and a pinch as the same zoom.
+
+## X22. Cross fades follow their curves exactly
+- **Resolve:** Studio 21.1.1 renders a Cross Fade's curve as straight lines between points of it: the fade's first sample, every 1000 samples from there and from the edit, and its last (measured at 48 kHz). In the first milliseconds of a +3 dB fade its gain is up to 0.06 off the curve.
+- **vidcut:** each sample's gain is the curve's (spec D50).
+- **Why:** the curve is what the transition is named for, and it needs no knowledge of where an editor puts its points. The two differ by more than 1 % only in the 20 ms where each curve leaves or reaches silence.
