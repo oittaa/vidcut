@@ -848,31 +848,8 @@ impl Scaler {
     }
 }
 
-/// The test picture's bands (8-bit levels, Y, Cb, Cr): grays from black
-/// to white, BT.709's red, green and blue, and levels below black and
-/// above white with chroma near its ends, which video keeps and a
-/// scaler mustn't clip.
-const BANDS: [[u16; 3]; 10] = [
-    [16, 128, 128],
-    [64, 128, 128],
-    [128, 128, 128],
-    [192, 128, 128],
-    [235, 128, 128],
-    [63, 102, 240],
-    [173, 42, 26],
-    [32, 240, 118],
-    [4, 8, 128],
-    [250, 128, 248],
-];
-
-/// The last bands, outside video range.
+/// The last of the test picture's bands (`BANDS`), outside video range.
 const OUTSIDE: usize = 2;
-
-/// Whether a test picture scaled to `size` has each band's middle there to
-/// read, a few samples across in luma and chroma.
-fn readable((w, h): (u32, u32)) -> bool {
-    w as usize >= 4 * BANDS.len() && h >= 8
-}
 
 /// The sizes frames of `from` are halved to, in turn, before the last
 /// pass to `to` (even): while what is left shrinks more than twice either

@@ -265,10 +265,11 @@ pub struct FixtureSpec {
     /// pictures are stored turned the other way, so they show upright only
     /// when a player applies it; `width`×`height` is the upright size.
     pub rotation: u16,
-    /// Interlaced H.264 with the top field first (`Some(true)`) or the bottom
-    /// one. Both fields of frame `k` show barcode `k`; in the top eighth,
-    /// which the barcode reader doesn't sample, a white block moves 40 px
-    /// each field, as a camera would see it. Not deinterlaced, it combs.
+    /// Interlaced H.264 or ProRes (coded by field, `+ildct`) with the top
+    /// field first (`Some(true)`) or the bottom one. Both fields of frame
+    /// `k` show barcode `k`; in the top eighth, which the barcode reader
+    /// doesn't sample, a white block moves 40 px each field, as a camera
+    /// would see it. Not deinterlaced, it combs.
     pub top_field_first: Option<bool>,
     /// HDR (10-bit HEVC or AV1 tagged BT.2100 with this transfer): the barcode's
     /// white is SDR reference white (203 nits in PQ, 75% in HLG), which an
@@ -834,8 +835,12 @@ pub fn generate(spec: &FixtureSpec, path: &Path) -> Result<()> {
     if spec.rotation != 0 && !matches!(spec.container, Container::Mp4 | Container::Mov) {
         return Err(Error::Invalid("rotation needs MP4 or MOV".into()));
     }
-    if spec.top_field_first.is_some() && spec.video != VideoCodec::H264 {
-        return Err(Error::Invalid("interlaced fixtures are H.264".into()));
+    if spec.top_field_first.is_some()
+        && !matches!(spec.video, VideoCodec::H264 | VideoCodec::ProRes422Hq)
+    {
+        return Err(Error::Invalid(
+            "interlaced fixtures are H.264 or ProRes".into(),
+        ));
     }
     if spec.hdr.is_some() && !matches!(spec.video, VideoCodec::Hevc10 | VideoCodec::Av1) {
         return Err(Error::Invalid("HDR fixtures are 10-bit HEVC or AV1".into()));
