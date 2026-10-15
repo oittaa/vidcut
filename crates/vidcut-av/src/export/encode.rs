@@ -913,6 +913,13 @@ impl Upload {
         }
     }
 
+    /// Whether its frames are on `device`.
+    pub(crate) fn is_on(&self, device: &crate::hw::Device) -> bool {
+        // SAFETY: references to live device contexts, the same device when
+        // they point to the same data.
+        unsafe { (*self.device).data == (*device.0).data }
+    }
+
     /// Vulkan's frames on the GPU `gpu` names (`gpus::Gpu::id`).
     pub(crate) fn vulkan(gpu: &str, sw: format::Pixel, width: u32, height: u32) -> Result<Self> {
         let found = crate::gpus::list()

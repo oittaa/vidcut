@@ -1,9 +1,10 @@
 //! Where a job's frames go between the decoder and their destination.
 //! [`plan`] decides it for each frame, a pure function of facts about the
 //! frame ([`Facts`]). The backends do the work and say what they can do
-//! (`can_fit`): [`crate::cuda`] for CUDA frames, [`crate::hw::vaapi`] for
-//! VA-API's, `hw::d3d11` for Direct3D 11's, `hw::vt` for VideoToolbox's
-//! and `export::normalize` for the CPU.
+//! (`can_fit`, and `reaches` for an encoder on another place):
+//! [`crate::cuda`] for CUDA frames, [`crate::hw::vaapi`] for VA-API's,
+//! `hw::d3d11` for Direct3D 11's, `hw::vt` for VideoToolbox's and
+//! `export::normalize` for the CPU.
 
 use vidcut_core::model::Hdr;
 
@@ -104,6 +105,9 @@ pub struct Facts {
     /// Its GPU can make the output picture from it for an encoder there
     /// (`hw::can_fit`).
     pub fits: bool,
+    /// Its GPU hands the picture it makes to the encoder's place, another
+    /// than its own (`hw::reaches`): CUDA's frames to Vulkan's encoder.
+    pub reaches: bool,
     /// Fitting its source's frames on its GPU failed before.
     pub fit_failed: bool,
     /// The output is smaller than the frame each way, so its GPU would
@@ -117,13 +121,18 @@ pub struct Facts {
 
 impl Facts {
     /// What the planner knows of `f`, fitted as `ops` says into an `out`
-    /// picture, before anything failed.
-    pub fn of(f: &frame::Video, ops: &Ops, out: (u32, u32)) -> Self {
+    /// picture for `dest`, before anything failed.
+    pub fn of(f: &frame::Video, ops: &Ops, out: (u32, u32), dest: Dest) -> Self {
         let place = Place::of(f);
         let (w, h) = crate::export::normalize::shown_size(f, ops.rotation, out);
+        let reaches = match dest {
+            Dest::Encoder { place: to } => crate::hw::reaches(place, to),
+            _ => false,
+        };
         Self {
             place,
             fits: crate::hw::can_fit(place, ops),
+            reaches,
             fit_failed: false,
             shrinks: w < f.width() && h < f.height(),
             displayable: crate::export::normalize::displayable(ops.layout),
@@ -161,7 +170,9 @@ pub fn plan(facts: &Facts, dest: Dest) -> Route {
                 Route::Whole
             }
         }
-        Dest::Encoder { place } if place == facts.place && facts.fits && !facts.fit_failed => {
+        Dest::Encoder { place }
+            if (place == facts.place || facts.reaches) && facts.fits && !facts.fit_failed =>
+        {
             Route::Gpu
         }
         _ if facts.shrinks => Route::Shrunk,
@@ -203,6 +214,7 @@ mod tests {
         let facts = Facts {
             place: Place::Memory,
             fits: false,
+            reaches: false,
             fit_failed: false,
             shrinks: false,
             displayable: true,
@@ -217,6 +229,7 @@ mod tests {
         let facts = Facts {
             place: Place::Cuda,
             fits: true,
+            reaches: false,
             fit_failed: false,
             shrinks: true,
             displayable: true,
@@ -231,6 +244,7 @@ mod tests {
         let facts = Facts {
             place: Place::Cuda,
             fits: true,
+            reaches: false,
             fit_failed: true,
             shrinks: true,
             displayable: true,
@@ -245,6 +259,7 @@ mod tests {
         let facts = Facts {
             place: Place::Vaapi,
             fits: false,
+            reaches: false,
             fit_failed: false,
             shrinks: false,
             displayable: true,
@@ -261,6 +276,7 @@ mod tests {
         let facts = Facts {
             place: Place::D3d11,
             fits: false,
+            reaches: false,
             fit_failed: false,
             shrinks: true,
             displayable: true,
@@ -274,6 +290,7 @@ mod tests {
         let facts = Facts {
             place: Place::D3d11,
             fits: false,
+            reaches: false,
             fit_failed: false,
             shrinks: false,
             displayable: true,
@@ -285,8 +302,43 @@ mod tests {
     #[test]
     fn an_encoder_on_another_place_never_takes_a_frame_as_it_is() {
         let facts = Facts {
+            place: Place::Vaapi,
+            fits: true,
+            reaches: false,
+            fit_failed: false,
+            shrinks: true,
+            displayable: true,
+            keep_failed: false,
+        };
+        let dest = Dest::Encoder {
+            place: Place::Vulkan,
+        };
+        assert_eq!(plan(&facts, dest), Route::Shrunk);
+    }
+
+    #[test]
+    fn a_frame_that_reaches_the_encoders_place_stays_on_the_gpu() {
+        let facts = Facts {
             place: Place::Cuda,
             fits: true,
+            reaches: true,
+            fit_failed: false,
+            shrinks: true,
+            displayable: true,
+            keep_failed: false,
+        };
+        let dest = Dest::Encoder {
+            place: Place::Vulkan,
+        };
+        assert_eq!(plan(&facts, dest), Route::Gpu);
+    }
+
+    #[test]
+    fn a_frame_that_reaches_the_encoders_place_but_doesnt_fit_comes_down_shrunk() {
+        let facts = Facts {
+            place: Place::Cuda,
+            fits: false,
+            reaches: true,
             fit_failed: false,
             shrinks: true,
             displayable: true,
@@ -303,6 +355,7 @@ mod tests {
         let facts = Facts {
             place: Place::D3d11,
             fits: false,
+            reaches: false,
             fit_failed: false,
             shrinks: true,
             displayable: true,
@@ -316,6 +369,7 @@ mod tests {
         let facts = Facts {
             place: Place::D3d11,
             fits: false,
+            reaches: false,
             fit_failed: false,
             shrinks: true,
             displayable: true,
@@ -329,6 +383,7 @@ mod tests {
         let facts = Facts {
             place: Place::Cuda,
             fits: true,
+            reaches: false,
             fit_failed: false,
             shrinks: true,
             displayable: true,
@@ -342,6 +397,7 @@ mod tests {
         let facts = Facts {
             place: Place::Vaapi,
             fits: false,
+            reaches: false,
             fit_failed: false,
             shrinks: true,
             displayable: false,

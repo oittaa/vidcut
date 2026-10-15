@@ -39,6 +39,11 @@ pub(crate) enum Output {
         device: crate::cuda::CudaDevice,
         frames: crate::cuda::CudaFrames,
     },
+    /// For Vulkan's ProRes encoder, opened on the Vulkan device libplacebo
+    /// works on, made from NVDEC's CUDA device: pieces decoded on NVDEC are
+    /// made into its pictures there ([`Fitting::on_gpu`]), the rest and
+    /// black are made on the CPU and go up into the encoder's frames.
+    Vulkan,
 }
 
 impl Output {
@@ -72,8 +77,8 @@ impl Output {
 /// A source's frames on the GPU: the scaler that fits them there, and how
 /// its latest picture was made.
 pub(crate) struct Fitting {
-    /// Scales NVDEC's frames for NVENC on the GPU: built at opening where
-    /// the planner leaves the first frame there.
+    /// Fits NVDEC's frames for NVENC or Vulkan's ProRes encoder on the GPU:
+    /// built at opening where the planner leaves the first frame there.
     pub(crate) scaler: Option<crate::cuda::CudaPictures>,
     /// Fitting this file's frames on the GPU failed, or it has no scaler
     /// for them: they are made on the CPU.
@@ -96,31 +101,34 @@ impl Fitting {
         }
     }
 
-    /// The fitting of `reader`'s frames into NVENC's `out` pictures in
-    /// `format` and `target`'s dynamic range (`None`: SDR BT.709).
-    /// `at_once` as for [`CudaPictures::new`](crate::cuda::CudaPictures::new).
-    pub(crate) fn for_nvenc(
+    /// The fitting of `reader`'s frames into `out` pictures in `format` and
+    /// `target`'s dynamic range (`None`: SDR BT.709), for an encoder that
+    /// takes frames on `place`: NVENC's CUDA frames, or Vulkan's ProRes
+    /// encoder's. `at_once` as for
+    /// [`CudaPictures::new`](crate::cuda::CudaPictures::new).
+    pub(crate) fn on_gpu(
         reader: &VideoReader,
         out: (u32, u32),
         format: format::Pixel,
         target: Option<Hdr>,
         at_once: bool,
+        place: Place,
     ) -> Self {
-        // NVDEC's frames scaled for NVENC on the GPU, where the planner
-        // leaves the first frame there and the scaler builds (libplacebo
-        // needs Vulkan for turned pictures, other matrices than BT.709, and
-        // HDR).
+        // NVDEC's frames fitted for the encoder on the GPU, where the
+        // planner leaves the first frame there and the scaler builds
+        // (libplacebo needs Vulkan for turned pictures, other matrices than
+        // BT.709 and HDR, and makes every picture for Vulkan's encoder).
+        let dest = Dest::Encoder { place };
         let planned = reader.cuda().zip(reader.peek()).filter(|(_, first)| {
             let ops = Ops::of(first, reader.rotation(), out, format, target, false);
-            let cuda = Dest::Encoder { place: Place::Cuda };
-            plan(&Facts::of(first, &ops, out), cuda) == Route::Gpu
+            plan(&Facts::of(first, &ops, out, dest), dest) == Route::Gpu
         });
         let scaler = planned.and_then(|(d, _)| {
-            crate::cuda::CudaPictures::new(d, reader, out, format, target, at_once)
+            crate::cuda::CudaPictures::new(d, reader, out, format, target, at_once, place)
                 .inspect_err(|e| {
                     crate::debug!(
                         "decoding",
-                        "{}: the GPU won't scale the frames for NVENC, the CPU makes them: {e}",
+                        "{}: the GPU won't make the encoder's pictures, the CPU makes them: {e}",
                         reader.path().display()
                     )
                 })
@@ -216,6 +224,9 @@ impl Maker {
             Output::Decoded { keep_on_gpu } => Dest::Display { keep: *keep_on_gpu },
             Output::FittedOnGpu { place, .. } => Dest::Encoder { place: *place },
             Output::Cuda { .. } => Dest::Encoder { place: Place::Cuda },
+            Output::Vulkan => Dest::Encoder {
+                place: Place::Vulkan,
+            },
         }
     }
 
@@ -228,7 +239,7 @@ impl Maker {
         Facts {
             fit_failed: fitting.fit_failed,
             keep_failed: self.unkept,
-            ..Facts::of(frame, &ops, (w, h))
+            ..Facts::of(frame, &ops, (w, h), self.dest())
         }
     }
 
