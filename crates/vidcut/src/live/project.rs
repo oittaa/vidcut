@@ -28,13 +28,24 @@ pub struct OpenProject {
     _watcher: Option<notify::RecommendedWatcher>,
 }
 
+/// A project to make before opening it.
+pub struct New {
+    pub settings: Settings,
+    /// Over a file already there.
+    pub replace: bool,
+}
+
 impl OpenProject {
-    /// Opens `path` (creating an empty project there if `create` and it is
-    /// missing) and watches it for outside changes.
-    /// Opens `path`, first creating it with `create`'s settings when given.
-    pub fn open(path: &Path, create: Option<Settings>, inbox: Sender<Msg>) -> Result<Self> {
-        if let Some(settings) = create {
-            Store::create(path, &Project::new(settings))?;
+    /// Opens `path`, first making `create` there, and watches it for
+    /// outside changes.
+    pub fn open(path: &Path, create: Option<New>, inbox: Sender<Msg>) -> Result<Self> {
+        if let Some(new) = create {
+            let project = Project::new(new.settings);
+            if new.replace {
+                Store::replace(path, &project)?;
+            } else {
+                Store::create(path, &project)?;
+            }
         }
         let store = Store::open(path)?;
         // Before the read: a write after it changes the stamp again.

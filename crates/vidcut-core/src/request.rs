@@ -785,6 +785,10 @@ pub enum Request {
         path: PathBuf,
         #[serde(default)]
         create: bool,
+        /// With `create`, replace a file already there with the new project
+        /// (and fresh history) instead of opening it.
+        #[serde(default)]
+        force: bool,
         /// For an OpenTimelineIO file: the project file to make (default:
         /// next to it, named alike, like `cut.vidcut` for `cut.otio`).
         #[serde(default, skip_serializing_if = "Option::is_none")]

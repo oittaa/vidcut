@@ -33,7 +33,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::{Value, json};
 use vidcut_core::editor::{media_context, resolve_clip};
-use vidcut_core::model::{Clip, Format, Settings};
+use vidcut_core::model::{Clip, Format};
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{GuiPanel, OneOrMany, ScreenshotTarget, ViewerMode};
 use vidcut_core::time::{Keyword, Rational, TimeContext, TimeSpec, format_timecode};
@@ -485,8 +485,8 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     let create = config.create;
     let thread = crate::threads::spawn("vidcut-session", Work::Interactive, move || {
         if let Some(path) = project
-            && let Err(e) = new_settings(&path, create, &Format::default())
-                .and_then(|settings| live.open_project(&path, settings))
+            && let Err(e) = to_make(&path, create, false, &Format::default())
+                .and_then(|new| live.open_project(&path, new))
         {
             live.notice(
                 format!("can't open {}: {}", path.display(), e.message),
@@ -1835,6 +1835,7 @@ impl Live {
             Request::ProjectOpen {
                 path,
                 create,
+                force,
                 save_as,
                 fps,
                 width,
@@ -1885,8 +1886,8 @@ impl Live {
                 }
                 Step::Now(
                     format
-                        .and_then(|format| new_settings(&path, create, &format))
-                        .and_then(|settings| self.open_project(&path, settings))
+                        .and_then(|format| to_make(&path, create, force, &format))
+                        .and_then(|new| self.open_project(&path, new))
                         .map(|()| self.state_response()),
                 )
             }
@@ -2301,9 +2302,8 @@ impl Live {
 
     // ---------------------------------------------------------------- project
 
-    /// Opens `path`, first creating it with `create`'s settings if it
-    /// doesn't exist.
-    fn open_project(&mut self, path: &Path, create: Option<Settings>) -> Result<()> {
+    /// Opens `path`, first making `create` there.
+    fn open_project(&mut self, path: &Path, create: Option<project::New>) -> Result<()> {
         let open = OpenProject::open(path, create, self.tx.clone())?;
         self.project = Some(open);
         self.selection = Selection::default();
@@ -2954,26 +2954,39 @@ fn job_answer(j: &JobInfo) -> Result<Response> {
     }
 }
 
-/// What `project.open` creates: with `create` and no file at `path`, a
-/// project in `format`; `None` opens an existing file. A format needs
-/// `create`, and a file that isn't there yet.
-fn new_settings(path: &Path, create: bool, format: &Format) -> Result<Option<Settings>> {
+/// What `project.open` makes at `path` before opening it: nothing without
+/// `create`, nor when the file is there (it opens) unless `force` replaces
+/// it. A format needs `create`, and no file there or `force`.
+fn to_make(
+    path: &Path,
+    create: bool,
+    force: bool,
+    format: &Format,
+) -> Result<Option<project::New>> {
     if !format.is_empty() && !create {
         return Err(Error::usage("a frame rate or size needs create"));
+    }
+    if force && !create {
+        return Err(Error::usage(
+            "force replaces a file with a new project, so it needs create",
+        ));
     }
     if !create {
         return Ok(None);
     }
-    if path.exists() {
+    if path.exists() && !force {
         if !format.is_empty() {
             return Err(Error::invalid(format!(
-                "{} already exists: open it, or create another file",
+                "{} already exists: open it, create another file, or replace it with force",
                 path.display()
             )));
         }
         return Ok(None);
     }
-    format.settings().map(Some)
+    Ok(Some(project::New {
+        settings: format.settings()?,
+        replace: force,
+    }))
 }
 
 fn no_project() -> Error {
