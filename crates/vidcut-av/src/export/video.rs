@@ -459,6 +459,9 @@ pub struct VideoFrames {
     /// The Dolby Vision of the last source frame given: black after it
     /// takes it.
     last_dolby_vision: frame::Video,
+    /// Mixing on NVIDIA's GPU failed: dissolves are mixed on the CPU from
+    /// then on.
+    cuda_mix_failed: bool,
 }
 
 impl VideoFrames {
@@ -490,7 +493,16 @@ impl VideoFrames {
             dynamic: Default::default(),
             light: Default::default(),
             last_dolby_vision: frame::Video::empty(),
+            cuda_mix_failed: false,
         }
+    }
+
+    /// Whether a dissolve's pictures are mixed on NVIDIA's GPU, for NVENC
+    /// (`hw::can_mix`), rather than on the CPU.
+    fn gpu_mixes(&self) -> bool {
+        matches!(self.maker.output(), Output::Cuda { .. })
+            && crate::hw::can_mix(Place::Cuda)
+            && !self.cuda_mix_failed
     }
 
     /// Makes the frames into `output`. Frames are picked by the sampling
@@ -751,32 +763,31 @@ impl VideoFrames {
     /// The picture keeps the colors and dynamic HDR metadata of the layer
     /// that shows most of it.
     fn mix(&mut self, layers: Vec<Layer>) -> Result<frame::Video> {
+        if let Output::Decoded { .. } = self.maker.output() {
+            return Err(Error::Invalid(
+                "pictures as decoded come apart, not mixed".into(),
+            ));
+        }
         let shown = heaviest(&layers);
-        let mut out = match self.maker.output() {
-            Output::Decoded { .. } => {
-                return Err(Error::Invalid(
-                    "pictures as decoded come apart, not mixed".into(),
-                ));
-            }
-            Output::Cuda { frames, .. } => {
-                let mut mixed: Option<frame::Video> = None;
-                for l in &layers {
-                    match (mixed.take(), l.weight) {
-                        (None, None) => mixed = l.frame.as_ref().map(frame_ref).transpose()?,
-                        (under, w) => {
-                            let w = w.unwrap_or(WHOLE);
-                            mixed = Some(crate::cuda::mix::mix(
-                                frames,
-                                under.as_ref(),
-                                l.frame.as_ref(),
-                                w,
-                            )?);
-                        }
-                    }
+        let on_gpu = match self.maker.output() {
+            Output::Cuda { frames, .. } if self.gpu_mixes() => match cuda_mix(frames, &layers) {
+                Ok(mixed) => Some(mixed),
+                // A GPU that won't mix (its driver won't take the kernel)
+                // leaves the export's dissolves to the CPU.
+                Err(e) => {
+                    crate::debug!(
+                        "decoding",
+                        "the GPU won't mix a dissolve's pictures, the CPU mixes them: {e}"
+                    );
+                    self.cuda_mix_failed = true;
+                    None
                 }
-                mixed.ok_or_else(|| Error::Invalid("a mix of black alone".into()))?
-            }
-            _ => {
+            },
+            _ => None,
+        };
+        let mut out = match on_gpu {
+            Some(mixed) => mixed,
+            None => {
                 let black = frame_ref(self.black()?)?;
                 let in_memory = |f: Option<&frame::Video>| -> Result<frame::Video> {
                     match f {
@@ -790,7 +801,11 @@ impl VideoFrames {
                     let over = in_memory(l.frame.as_ref())?;
                     mixed = super::mix::mix(&mixed, &over, l.weight.unwrap_or(WHOLE))?;
                 }
-                mixed
+                match self.maker.output() {
+                    // Up to NVENC's frames, mixed.
+                    Output::Cuda { frames, .. } => frames.upload(&mixed)?,
+                    _ => mixed,
+                }
             }
         };
         // The colors of the picture it mostly shows, or of any.
@@ -1172,6 +1187,9 @@ impl VideoFrames {
     /// `s`'s source frame `pos`.
     fn frame_at(&mut self, i: usize, s: usize, pos: i64) -> Result<frame::Video> {
         let fps = self.fps;
+        // Pictures made in memory go up to NVENC's frames, but for a mix
+        // the CPU makes.
+        let up = !self.maker.mixing() || self.gpu_mixes();
         let src = &mut self.open[s];
         let changed = src.advance(target(fps, src.origin, pos))?;
         if changed || src.normalized.is_none() {
@@ -1185,7 +1203,7 @@ impl VideoFrames {
         let picture = frame_ref(src.normalized.as_ref().expect("normalized"))?;
         let mut out = match self.maker.output() {
             // Pictures made in memory go up to NVENC's frames.
-            Output::Cuda { frames, .. } if Place::of(&picture) == Place::Memory => {
+            Output::Cuda { frames, .. } if up && Place::of(&picture) == Place::Memory => {
                 frames.upload(&picture)?
             }
             _ => picture,
@@ -1219,6 +1237,27 @@ impl VideoFrames {
         }
         Ok(out)
     }
+}
+
+/// `layers`, frames of `frames`' size and layout in CUDA memory (`None`:
+/// black), mixed on NVIDIA's GPU: each over those under it at its weight.
+fn cuda_mix(frames: &crate::cuda::CudaFrames, layers: &[Layer]) -> Result<frame::Video> {
+    let mut mixed: Option<frame::Video> = None;
+    for l in layers {
+        match (mixed.take(), l.weight) {
+            (None, None) => mixed = l.frame.as_ref().map(frame_ref).transpose()?,
+            (under, w) => {
+                let w = w.unwrap_or(WHOLE);
+                mixed = Some(crate::cuda::mix::mix(
+                    frames,
+                    under.as_ref(),
+                    l.frame.as_ref(),
+                    w,
+                )?);
+            }
+        }
+    }
+    mixed.ok_or_else(|| Error::Invalid("a mix of black alone".into()))
 }
 
 /// What a scaler that gave no picture for a frame says: an export's gives

@@ -225,6 +225,11 @@ impl Maker {
         self.mixing = mixing;
     }
 
+    /// The pictures being made go into a dissolve's mix.
+    pub(crate) fn mixing(&self) -> bool {
+        self.mixing
+    }
+
     /// What the frames are made into.
     pub(crate) fn output(&self) -> &Output {
         &self.output
