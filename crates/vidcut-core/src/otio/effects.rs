@@ -16,7 +16,7 @@
 use serde_json::{Value, json};
 
 use super::{EDITOR, schema};
-use crate::model::{ClipAudio, Effects};
+use crate::model::{ClipAudio, Effects, Kept};
 
 /// The editor's clip volume (and audio fades), whose level vidcut reads as
 /// the clip gain.
@@ -156,9 +156,9 @@ fn params_of(e: &mut Value) -> Option<&mut Vec<Value>> {
 }
 
 /// The editor's parameters of all of `list`, to change.
-fn params_mut(list: &mut [Value]) -> impl Iterator<Item = &mut Value> {
+fn params_mut(list: &mut [Kept]) -> impl Iterator<Item = &mut Value> {
     list.iter_mut()
-        .flat_map(|e| params_of(e).into_iter().flatten())
+        .flat_map(|e| params_of(e.make_mut()).into_iter().flatten())
 }
 
 /// Whether parameter `p` is a fade length, and whether at the head.
@@ -174,7 +174,7 @@ fn is_fade(p: &Value) -> bool {
 }
 
 /// Moves the keyframe times of `list` through `f`.
-fn move_keys(list: &mut [Value], f: &dyn Fn(f64) -> f64) {
+fn move_keys(list: &mut [Kept], f: &dyn Fn(f64) -> f64) {
     for p in params_mut(list) {
         if let Some(Value::Object(keys)) = p.get_mut("Key Frames") {
             *keys = std::mem::take(keys)
@@ -213,9 +213,12 @@ pub fn cut(effects: &mut Option<Effects>, head: bool, tail: bool) {
 /// differ in more than those fades, or a fade sits where they meet.
 pub fn join(first: &Option<Effects>, second: &Option<Effects>) -> Option<Option<Effects>> {
     let fades = |e: &Option<Effects>, head: bool| {
-        e.iter().flat_map(|e| &e.list).flat_map(params).any(|p| {
-            fade(p) == Some(head) && p["Parameter Value"].as_f64().is_some_and(|v| v > 0.0)
-        })
+        e.iter()
+            .flat_map(|e| &e.list)
+            .flat_map(|k| params(k))
+            .any(|p| {
+                fade(p) == Some(head) && p["Parameter Value"].as_f64().is_some_and(|v| v > 0.0)
+            })
     };
     let without_fades = |e: &Option<Effects>| {
         let mut e = e.clone();
@@ -251,7 +254,7 @@ impl Effects {
     /// Their names, once each: `Transform`, `Cropping`.
     pub fn names(&self) -> Vec<String> {
         let mut names: Vec<String> = Vec::new();
-        for n in self.list.iter().map(name) {
+        for n in self.list.iter().map(|k| name(k)) {
             if !n.is_empty() && !names.contains(&n) {
                 names.push(n);
             }
@@ -265,7 +268,7 @@ impl Effects {
                 p["Parameter Value"] = json!(0.0);
             }
         }
-        self.list.retain(in_use);
+        self.list.retain(|k| in_use(k));
     }
 
     /// Keyframe times and fade lengths through `f`: from another frame
@@ -292,7 +295,7 @@ impl Effects {
         if head || tail {
             e.cut(head, tail);
         }
-        e.list
+        e.list.into_iter().map(Kept::into_value).collect()
     }
 }
 

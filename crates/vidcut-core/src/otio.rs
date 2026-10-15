@@ -300,7 +300,10 @@ pub fn used_media(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
 
 /// A speed change: its time `effect`.
 fn speed_of(effect: Option<Value>) -> Option<Speed> {
-    effect.map(|effect| Speed { effect, skip: 0 })
+    effect.map(|effect| Speed {
+        effect: effect.into(),
+        skip: 0,
+    })
 }
 
 /// How fast a speed change goes (1 without one).
@@ -365,7 +368,7 @@ fn own_pace(meta: &mut Value, c: &Clip, s: i64) {
 /// write the time effect first.
 fn with_speed(c: &Clip, mut effects: Vec<Value>) -> Vec<Value> {
     if let Some(speed) = &c.speed {
-        effects.insert(0, speed.effect.clone());
+        effects.insert(0, (*speed.effect).clone());
     }
     effects
 }
@@ -407,7 +410,7 @@ pub fn export(
                 source as f64,
                 c.generator
                     .as_ref()
-                    .map_or(Value::Null, |g| g.reference.clone()),
+                    .map_or(Value::Null, |g| (*g.reference).clone()),
             ),
         };
         with(
@@ -769,7 +772,7 @@ fn compound_of(item: &Value, fps: Rational) -> Compound {
         m.remove("Link Group ID");
     }
     Compound {
-        stack,
+        stack: stack.into(),
         frames,
         tracks: Vec::new(),
     }
@@ -786,7 +789,7 @@ fn compound_item(
     effects: Vec<Value>,
     rate: f64,
 ) -> Value {
-    let mut v = k.stack.clone();
+    let mut v = (*k.stack).clone();
     v["name"] = json!(label);
     v["source_range"] = range(source as f64, frames as f64, rate);
     v["effects"] = Value::Array(effects);

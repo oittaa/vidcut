@@ -124,10 +124,13 @@ fn faded(fade_in: f64, fade_out: f64) -> Option<Effects> {
     ]);
     Some(Effects {
         from: 0,
-        list: vec![json!({
-            "OTIO_SCHEMA": "Effect.1",
-            "metadata": { EDITOR: { "Effect Name": "Transform", "Enabled": true, "Parameters": fades } },
-        })],
+        list: vec![
+            json!({
+                "OTIO_SCHEMA": "Effect.1",
+                "metadata": { EDITOR: { "Effect Name": "Transform", "Enabled": true, "Parameters": fades } },
+            })
+            .into(),
+        ],
     })
 }
 

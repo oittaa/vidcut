@@ -13,7 +13,7 @@ use crate::change::Change;
 use crate::error::{Error, Result};
 use crate::history::HistoryFile;
 use crate::model::{
-    Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Media, MediaInfo,
+    Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Kept, Media, MediaInfo,
     Project, Proxy, Track, Transition, VideoInfo,
 };
 use crate::ops::{self, ClipProps, Edge, Source};
@@ -2025,10 +2025,10 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
         if from != to && !list.is_empty() {
             let mut e = Effects {
                 from: 0,
-                list: std::mem::take(list),
+                list: std::mem::take(list).into_iter().map(Kept::from).collect(),
             };
             e.retime(|x| (x * to.as_f64() / from.as_f64()).round());
-            *list = e.list;
+            *list = e.list.into_iter().map(Kept::into_value).collect();
         }
     };
     for c in &mut t.clips {
@@ -2115,7 +2115,7 @@ fn place_imported(
     let carry = |list: &[Value], first: i64| {
         (!list.is_empty()).then(|| Effects {
             from: first,
-            list: list.to_vec(),
+            list: list.iter().cloned().map(Kept::from).collect(),
         })
     };
     // Where audio may start on each track without overlapping what is
@@ -2167,7 +2167,7 @@ fn place_imported(
                 name: (!c.name.is_empty()).then(|| c.name.clone()),
                 effects: carry(&c.effects, source_in),
                 generator: c.generator.as_ref().map(|reference| Generator {
-                    reference: reference.clone(),
+                    reference: reference.clone().into(),
                 }),
                 compound,
                 speed: c.speed.clone(),
@@ -2315,7 +2315,7 @@ fn place_imported(
                 to: to.map(|g| g.0.clone()),
                 before: x.before,
                 after: x.after,
-                otio: x.otio.clone(),
+                otio: x.otio.clone().into(),
             });
     }
     let dropped = otio::transitions::prune(p);
