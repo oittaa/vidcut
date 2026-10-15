@@ -2,7 +2,8 @@
 //! picture in each planar layout the CPU's decoders give, drawn on the GPU
 //! at its own size, is within a level of `Picture::to_rgba` where it is
 //! flat. Pictures turned a quarter have chroma that changes down the rows
-//! they are stored in. Runs on any adapter, a software one too. Skips
+//! they are stored in. A dissolve's pictures are drawn over each other as
+//! the export mixes them. Runs on any adapter, a software one too. Skips
 //! without one.
 
 use std::sync::Arc;
@@ -11,7 +12,7 @@ use std::time::{Duration, Instant};
 use vidcut::gui::picture::{Gpu, Screen};
 use vidcut_av::fixture::{self, Container, FixtureSpec, Picture as Content, VideoCodec};
 use vidcut_av::player::{Config, Layout, ManualOutput, Picture, Player};
-use vidcut_core::render::{RenderPlan, VideoPiece};
+use vidcut_core::render::{Over, Ramp, RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
 
 /// The upright picture's size.
@@ -33,15 +34,48 @@ fn gpu() -> Option<Gpu> {
     Some(Gpu::new(&device, &queue))
 }
 
-/// The player's picture of frame 5 of `codec`'s stripes, decoded on the
-/// CPU and stored turned against `rotation`.
-fn picture(codec: VideoCodec, rotation: u16) -> Arc<Picture> {
+/// Ten frames of `content` in `codec`, stored turned against `rotation`.
+fn clip(codec: VideoCodec, rotation: u16, content: Content) -> VideoPiece {
     let spec = FixtureSpec::new(codec, Container::Mov, W, H, (30, 1), 10)
         .rotation(rotation)
-        .picture(Content::Colors);
+        .picture(content);
     let path = fixture::ensure(&spec).unwrap();
     let info = vidcut_av::probe::probe(&path, None).unwrap();
     let origin = info.video.and_then(|v| v.first_frame_time).unwrap_or(0.0);
+    VideoPiece::Source {
+        pace: Default::default(),
+        media: "m".into(),
+        path,
+        origin,
+        source_frame: 0,
+        frames: 10,
+        image: None,
+    }
+}
+
+/// The player's picture of frame 5 of `codec`'s stripes, decoded on the
+/// CPU and stored turned against `rotation`.
+fn picture(codec: VideoCodec, rotation: u16) -> Arc<Picture> {
+    played(clip(codec, rotation, Content::Colors))
+}
+
+/// `over` rising over `under` through their ten frames.
+fn dissolve(under: VideoPiece, over: VideoPiece) -> VideoPiece {
+    VideoPiece::Mix {
+        under: Box::new(under),
+        over: vec![Over {
+            piece: over,
+            ramp: Ramp {
+                at: 0,
+                of: 10,
+                falling: false,
+            },
+        }],
+    }
+}
+
+/// The player's picture of frame 5 of `piece`, ten frames long.
+fn played(piece: VideoPiece) -> Arc<Picture> {
     let plan = RenderPlan {
         fps: Rational::new(30, 1).unwrap(),
         width: W,
@@ -49,15 +83,7 @@ fn picture(codec: VideoCodec, rotation: u16) -> Arc<Picture> {
         sample_rate: 48_000,
         channels: 2,
         frames: 10,
-        video: vec![VideoPiece::Source {
-            pace: Default::default(),
-            media: "m".into(),
-            path,
-            origin,
-            source_frame: 0,
-            frames: 10,
-            image: None,
-        }],
+        video: vec![piece],
         audio: Vec::new(),
         range: (0, 10),
         name: "pictures".into(),
@@ -103,19 +129,42 @@ fn flat_diff(a: &[u8], b: &[u8], w: usize) -> (usize, u8) {
 /// wherever it is flat. At edges the export repeats each chroma sample
 /// where the shader interpolates.
 fn draws_as_converted(codec: VideoCodec, rotation: u16, layout: Layout) {
+    let picture = picture(codec, rotation);
+    assert_eq!(picture.layout(), layout);
+    draws_as_exported(&picture);
+}
+
+/// `picture` drawn at its own size: within a level of the export's
+/// conversion (and mix) in each channel wherever it is flat.
+fn draws_as_exported(picture: &Arc<Picture>) {
     let Some(gpu) = gpu() else {
         eprintln!("skipping: no GPU adapter, not even a software one");
         return;
     };
-    let picture = picture(codec, rotation);
-    assert_eq!(picture.layout(), layout);
     let theirs = picture.to_rgba(W, H).unwrap();
     let mut screen = Screen::new();
-    screen.draw(&gpu, Some(&picture), W, H);
+    screen.draw(&gpu, Some(picture), W, H);
     let ours = screen.read(&gpu).unwrap();
     let (flat, most) = flat_diff(&ours.rgba, &theirs.rgba, W as usize);
     assert!(flat > (W * H / 2) as usize, "only {flat} pixels are flat");
     assert!(most <= 1, "{most} levels apart where the picture is flat");
+}
+
+#[test]
+fn a_fade_from_black_draws_as_the_export_mixes_it() {
+    let stripes = clip(VideoCodec::H264, 0, Content::Colors);
+    let picture = played(dissolve(VideoPiece::Black { frames: 10 }, stripes));
+    assert_eq!(picture.over().len(), 1);
+    draws_as_exported(&picture);
+}
+
+#[test]
+fn a_cross_dissolve_of_two_layouts_draws_as_the_export_mixes_it() {
+    let stripes = clip(VideoCodec::H264, 0, Content::Colors);
+    let turned = clip(VideoCodec::ProRes422Hq, 90, Content::Colors);
+    let picture = played(dissolve(stripes, turned));
+    assert_eq!(picture.over().len(), 1);
+    draws_as_exported(&picture);
 }
 
 #[test]

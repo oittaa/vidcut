@@ -169,6 +169,15 @@ pub(crate) struct Maker {
     target: Option<Hdr>,
     /// What the frames are made into ([`output`](Self::output)).
     output: Output,
+    /// What makes the pictures of each layer of a dissolve's mix: the
+    /// first a frame's only one.
+    stages: Vec<Stage>,
+    /// The pictures being made go into a dissolve's mix.
+    mixing: bool,
+}
+
+/// What makes one layer's pictures, kept from frame to frame.
+struct Stage {
     /// Fits frames into the output on the CPU, in every output but the
     /// decoded one.
     normalizer: Option<Normalizer>,
@@ -185,6 +194,19 @@ pub(crate) struct Maker {
     fitter: Option<crate::hw::Fitter>,
 }
 
+impl Default for Stage {
+    fn default() -> Self {
+        Self {
+            normalizer: None,
+            shrinker: None,
+            relayout: Relayout::new(),
+            keeper: None,
+            unkept: false,
+            fitter: None,
+        }
+    }
+}
+
 impl Maker {
     /// Makes frames into `output`'s pictures of `out` (width, height and
     /// layout) in `target`'s dynamic range (`None`: SDR BT.709).
@@ -193,13 +215,14 @@ impl Maker {
             out,
             target,
             output,
-            normalizer: None,
-            shrinker: None,
-            relayout: Relayout::new(),
-            keeper: None,
-            unkept: false,
-            fitter: None,
+            stages: Vec::new(),
+            mixing: false,
         }
+    }
+
+    /// The pictures made from now on go into a dissolve's mix, or don't.
+    pub(crate) fn set_mixing(&mut self, mixing: bool) {
+        self.mixing = mixing;
     }
 
     /// What the frames are made into.
@@ -233,14 +256,21 @@ impl Maker {
     }
 
     /// What the planner knows of `frame`, shown turned by `rotation`, of a
-    /// source whose fitting is `fitting`.
-    fn facts(&self, fitting: &Fitting, frame: &frame::Video, rotation: u16) -> Facts {
+    /// source whose fitting is `fitting`, made by `stage`.
+    fn facts(
+        &self,
+        stage: &Stage,
+        fitting: &Fitting,
+        frame: &frame::Video,
+        rotation: u16,
+    ) -> Facts {
         let (w, h, layout) = self.out;
         let into = matches!(self.output, Output::FittedOnGpu { into: Some(_), .. });
         let ops = Ops::of(frame, rotation, (w, h), layout, self.target, into);
         Facts {
             fit_failed: fitting.fit_failed,
-            keep_failed: self.unkept,
+            keep_failed: stage.unkept,
+            mixed: self.mixing,
             ..Facts::of(frame, &ops, (w, h), self.dest(frame))
         }
     }
@@ -257,8 +287,38 @@ impl Maker {
         rotation: u16,
         path: &Path,
     ) -> Result<Option<frame::Video>> {
+        self.make_layer(0, fitting, frame, rotation, path)
+    }
+
+    /// [`make`](Self::make) for layer `layer` of a dissolve's mix, whose
+    /// pictures are made apart from the other layers'.
+    pub(crate) fn make_layer(
+        &mut self,
+        layer: usize,
+        fitting: &mut Fitting,
+        frame: &frame::Video,
+        rotation: u16,
+        path: &Path,
+    ) -> Result<Option<frame::Video>> {
+        if self.stages.len() <= layer {
+            self.stages.resize_with(layer + 1, Stage::default);
+        }
+        let mut stage = std::mem::take(&mut self.stages[layer]);
+        let made = self.make_with(&mut stage, fitting, frame, rotation, path);
+        self.stages[layer] = stage;
+        made
+    }
+
+    fn make_with(
+        &mut self,
+        stage: &mut Stage,
+        fitting: &mut Fitting,
+        frame: &frame::Video,
+        rotation: u16,
+        path: &Path,
+    ) -> Result<Option<frame::Video>> {
         let (out_w, out_h, out_fmt) = self.out;
-        let mut facts = self.facts(fitting, frame, rotation);
+        let mut facts = self.facts(stage, fitting, frame, rotation);
         let dest = self.dest(frame);
         let mut route;
         // The size the frame came down from the GPU at.
@@ -268,14 +328,14 @@ impl Maker {
             // Every other route ends on the CPU, with a frame in memory:
             // this one, or one come down from the GPU.
             let came_down = match route {
-                Route::Kept => match crate::hw::Keeper::keep(&mut self.keeper, frame) {
+                Route::Kept => match crate::hw::Keeper::keep(&mut stage.keeper, frame) {
                     Ok(kept) => break kept,
                     // Down to memory, as before they were kept: a copy that
                     // failed or took two seconds would again.
                     Err(e) => {
                         eprintln!("vidcut: GPU pictures come down to be shown: {e}");
-                        self.unkept = true;
-                        self.keeper = None;
+                        stage.unkept = true;
+                        stage.keeper = None;
                         facts.keep_failed = true;
                         continue;
                     }
@@ -302,7 +362,7 @@ impl Maker {
                     let (w, h) = shown_size(frame, rotation, (out_w, out_h));
                     let fitted = if rotation % 180 == 90 { (h, w) } else { (w, h) };
                     let fit = crate::hw::Fitter::fit(
-                        &mut self.fitter,
+                        &mut stage.fitter,
                         frame,
                         rotation,
                         fitted,
@@ -329,21 +389,21 @@ impl Maker {
                 Route::Shrunk | Route::Whole => Some(match self.output {
                     // Frames as decoded come down at their own size.
                     Output::Decoded { .. } => crate::hw::download(frame)?,
-                    _ => down(&mut self.shrinker, frame, rotation, (out_w, out_h))?,
+                    _ => down(&mut stage.shrinker, frame, rotation, (out_w, out_h))?,
                 }),
                 Route::Cpu => None,
             };
             came_down_at = came_down.as_ref().map(|f| (f.width(), f.height()));
             let frame = came_down.as_ref().unwrap_or(frame);
             if let Output::Decoded { .. } = self.output {
-                break self.relayout.run(frame)?;
+                break stage.relayout.run(frame)?;
             }
-            let rebuild = self
+            let rebuild = stage
                 .normalizer
                 .as_ref()
                 .is_none_or(|n| !n.matches(frame, rotation));
             if rebuild {
-                self.normalizer = Some(Normalizer::new(
+                stage.normalizer = Some(Normalizer::new(
                     frame,
                     rotation,
                     out_w,
@@ -352,7 +412,7 @@ impl Maker {
                     self.target,
                 )?);
             }
-            break self.normalizer.as_mut().expect("built").run(frame)?;
+            break stage.normalizer.as_mut().expect("built").run(frame)?;
         };
         fitting.went = Some(match came_down_at {
             Some(size) => Went::Down {

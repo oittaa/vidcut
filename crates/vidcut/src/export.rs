@@ -670,7 +670,7 @@ fn choose_once(
         let Some(v) = o.settings.video.as_ref() else {
             continue;
         };
-        for piece in &o.plan.video {
+        for (piece, _) in o.plan.video.iter().flat_map(render::VideoPiece::layers) {
             if !engine::makes_hdr10plus(v, &piece_meta(&filled, piece)) {
                 continue;
             }

@@ -20,9 +20,10 @@ pub(crate) enum Kind {
 
 impl Kind {
     pub(crate) fn of(picture: &Picture) -> Self {
-        match picture.gpu() {
-            None => Self::Memory,
-            Some(_) => Self::Video,
+        if picture.takes_video_memory() {
+            Self::Video
+        } else {
+            Self::Memory
         }
     }
 

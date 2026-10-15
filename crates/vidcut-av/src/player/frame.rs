@@ -60,12 +60,33 @@ impl Layout {
 /// on the GPU for a display that shows it from there, in the GPU's memory
 /// ([`gpu`](Self::gpu)), which the engine passes along without looking at
 /// its pixels.
+///
+/// While a dissolve plays, a frame's picture is the one under the others,
+/// and those over it, each at its level ([`over`](Self::over), decision
+/// D50): a display draws each over the ones before.
 pub struct Picture {
     frame: frame::Video,
     rotation: u16,
     bytes: usize,
     decoder: Option<super::Decoder>,
     decoding: Option<Arc<Decoding>>,
+    over: Vec<Over>,
+}
+
+/// A picture over another while a dissolve plays, at its weight
+/// (`render::Ramp::weight`: [`WHOLE`](vidcut_core::render::WHOLE) shows
+/// all of it).
+#[derive(Clone)]
+pub struct Over {
+    pub picture: Arc<Picture>,
+    pub weight: u32,
+}
+
+impl Over {
+    /// Its level, 0 to 1.
+    pub fn level(&self) -> f32 {
+        (f64::from(self.weight) / f64::from(vidcut_core::render::WHOLE)) as f32
+    }
 }
 
 impl Picture {
@@ -84,7 +105,21 @@ impl Picture {
             bytes,
             decoder,
             decoding,
+            over: Vec::new(),
         }
+    }
+
+    /// The picture with `over` on top of it, bottom up.
+    pub(crate) fn with_over(mut self, over: Vec<Over>) -> Self {
+        self.bytes += over.iter().map(|o| o.picture.bytes()).sum::<usize>();
+        self.over = over;
+        self
+    }
+
+    /// The pictures over it while a dissolve plays, bottom up; none
+    /// otherwise.
+    pub fn over(&self) -> &[Over] {
+        &self.over
     }
 
     /// What its file holds and what decoded it: the codec, profile and
@@ -108,9 +143,15 @@ impl Picture {
         self.frame.height()
     }
 
-    /// The GPU decoder in whose memory it is; `None` in memory.
+    /// The GPU decoder in whose memory it is; `None` in memory. The
+    /// pictures over it say where they are.
     pub fn gpu(&self) -> Option<crate::hw::Kind> {
         crate::hw::Kind::of_frame(&self.frame)
+    }
+
+    /// It, or a picture over it, is in GPU memory.
+    pub(crate) fn takes_video_memory(&self) -> bool {
+        self.gpu().is_some() || self.over.iter().any(|o| o.picture.takes_video_memory())
     }
 
     /// The samples' layout; for a GPU surface, that of its frames context.
@@ -148,18 +189,24 @@ impl Picture {
     }
 
     /// The picture with its planes in memory: copied down from GPU memory,
-    /// or itself (by reference) when it is in memory already.
+    /// or itself (by reference) when it is in memory already; those over
+    /// it too.
     pub fn copied_down(&self) -> Result<Picture> {
         let frame = match self.gpu() {
             None => crate::export::video::frame_ref(&self.frame)?,
             Some(_) => crate::hw::download(&self.frame)?,
         };
-        Ok(Self::new(
-            frame,
-            self.rotation,
-            self.decoder,
-            self.decoding.clone(),
-        ))
+        let over = self
+            .over
+            .iter()
+            .map(|o| {
+                Ok(Over {
+                    picture: Arc::new(o.picture.copied_down()?),
+                    weight: o.weight,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self::new(frame, self.rotation, self.decoder, self.decoding.clone()).with_over(over))
     }
 
     /// The memory it takes.
@@ -173,8 +220,22 @@ impl Picture {
     /// and what a display's shader must match. Pictures in GPU memory are
     /// copied down first.
     pub fn to_rgba(&self, width: u32, height: u32) -> Result<Image> {
-        if self.gpu().is_some() {
+        if self.takes_video_memory() {
             return self.copied_down()?.to_rgba(width, height);
+        }
+        if !self.over.is_empty() {
+            let alone = Self::new(
+                crate::export::video::frame_ref(&self.frame)?,
+                self.rotation,
+                self.decoder,
+                self.decoding.clone(),
+            );
+            let mut mixed = alone.to_rgba(width, height)?;
+            for o in &self.over {
+                let top = o.picture.to_rgba(width, height)?;
+                mixed = crate::export::renderer::mixed_image(&mixed, &top, o.weight);
+            }
+            return Ok(mixed);
         }
         let mut normalizer = Normalizer::new(
             &self.frame,

@@ -184,7 +184,7 @@ impl Stills {
                         if vidcut_av::debug() {
                             let at = match &s.piece {
                                 VideoPiece::Source { source_frame, .. } => *source_frame,
-                                VideoPiece::Black { .. } => -1,
+                                _ => -1,
                             };
                             eprintln!(
                                 "[stills] cell {n}: source frame {at} in {:.1} ms ({skipped} skipped){}",

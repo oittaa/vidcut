@@ -17,7 +17,7 @@ pub fn apply_proxies(plan: &mut RenderPlan, project: &Project, exists: impl Fn(&
     if !project.settings.use_proxies {
         return;
     }
-    for piece in &mut plan.video {
+    for piece in plan.video.iter_mut().flat_map(VideoPiece::layers_mut) {
         let VideoPiece::Source {
             media, path, image, ..
         } = piece

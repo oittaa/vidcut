@@ -9,6 +9,7 @@ mod ahead;
 pub mod audio;
 pub mod encode;
 pub(crate) mod make;
+pub(crate) mod mix;
 pub(crate) mod normalize;
 pub mod renderer;
 pub mod still;
@@ -475,7 +476,7 @@ fn made_hdr10plus_light(
         return Ok(out);
     }
     let mut probe = probed_files(decoder);
-    for piece in &plan.video {
+    for (piece, _) in plan.video.iter().flat_map(VideoPiece::layers) {
         let Some(span) = crate::light::Span::of(piece, plan.fps) else {
             continue;
         };

@@ -27,8 +27,8 @@ pub type Exported = std::os::windows::io::OwnedHandle;
 
 type CuResult = i32;
 type CuDevicePtr = u64;
-type CuContext = *mut c_void;
-type CuStream = *mut c_void;
+pub(super) type CuContext = *mut c_void;
+pub(super) type CuStream = *mut c_void;
 type CuExternalMemory = *mut c_void;
 
 /// `CUDA_EXTERNAL_MEMORY_HANDLE_DESC`.
@@ -82,8 +82,8 @@ const MEMORY_TYPE_DEVICE: u32 = 2;
 /// `CU_STREAM_NON_BLOCKING`: no implicit waits for the default stream.
 const STREAM_NON_BLOCKING: u32 = 1;
 
-/// The driver's calls used here.
-struct Cuda {
+/// The driver's calls used here and by `cuda::mix`.
+pub(super) struct Cuda {
     _lib: libloading::Library,
     init: unsafe extern "C" fn(u32) -> CuResult,
     device_get_count: unsafe extern "C" fn(*mut i32) -> CuResult,
@@ -104,10 +104,27 @@ struct Cuda {
     synchronize: unsafe extern "C" fn(CuStream) -> CuResult,
     stream_create: unsafe extern "C" fn(*mut CuStream, u32) -> CuResult,
     stream_destroy: unsafe extern "C" fn(CuStream) -> CuResult,
+    pub(super) module_load_data: unsafe extern "C" fn(*mut *mut c_void, *const c_void) -> CuResult,
+    pub(super) module_get_function:
+        unsafe extern "C" fn(*mut *mut c_void, *mut c_void, *const std::ffi::c_char) -> CuResult,
+    #[allow(clippy::type_complexity)]
+    pub(super) launch_kernel: unsafe extern "C" fn(
+        *mut c_void,
+        u32,
+        u32,
+        u32,
+        u32,
+        u32,
+        u32,
+        u32,
+        CuStream,
+        *mut *mut c_void,
+        *mut *mut c_void,
+    ) -> CuResult,
 }
 
 impl Cuda {
-    fn get() -> Result<&'static Cuda> {
+    pub(super) fn get() -> Result<&'static Cuda> {
         static CUDA: OnceLock<std::result::Result<Cuda, String>> = OnceLock::new();
         CUDA.get_or_init(|| unsafe { Self::load() }.map_err(|e| format!("CUDA's driver: {e}")))
             .as_ref()
@@ -147,13 +164,16 @@ impl Cuda {
                 synchronize: call!("cuStreamSynchronize"),
                 stream_create: call!("cuStreamCreate"),
                 stream_destroy: call!("cuStreamDestroy_v2"),
+                module_load_data: call!("cuModuleLoadData"),
+                module_get_function: call!("cuModuleGetFunction"),
+                launch_kernel: call!("cuLaunchKernel"),
                 _lib: lib,
             })
         }
     }
 }
 
-fn check(what: &str, result: CuResult) -> Result<()> {
+pub(super) fn check(what: &str, result: CuResult) -> Result<()> {
     if result == 0 {
         Ok(())
     } else {
@@ -167,7 +187,7 @@ fn check(what: &str, result: CuResult) -> Result<()> {
 ///
 /// # Safety
 /// `device` is a reference to a CUDA hardware device context.
-unsafe fn cuda_context(device: *mut ffi::AVBufferRef) -> (CuContext, CuStream) {
+pub(super) unsafe fn cuda_context(device: *mut ffi::AVBufferRef) -> (CuContext, CuStream) {
     unsafe {
         let ctx = (*device).data as *const ffi::AVHWDeviceContext;
         let hw = (*ctx).hwctx as *const ffi::AVCUDADeviceContext;
@@ -176,7 +196,11 @@ unsafe fn cuda_context(device: *mut ffi::AVBufferRef) -> (CuContext, CuStream) {
 }
 
 /// Runs `f` with `ctx` current on this thread.
-fn in_context<T>(cuda: &Cuda, ctx: CuContext, f: impl FnOnce() -> Result<T>) -> Result<T> {
+pub(super) fn in_context<T>(
+    cuda: &Cuda,
+    ctx: CuContext,
+    f: impl FnOnce() -> Result<T>,
+) -> Result<T> {
     check("making the context current", unsafe {
         (cuda.ctx_push)(ctx)
     })?;

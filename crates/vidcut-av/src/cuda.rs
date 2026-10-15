@@ -8,6 +8,7 @@
 //! Vulkan device. Proxies (decision D41) and exports use it: the CPU only
 //! reads the file and writes the result.
 
+pub(crate) mod mix;
 pub mod share;
 
 pub(crate) use share::{Listed, listed};

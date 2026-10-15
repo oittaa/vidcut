@@ -331,7 +331,8 @@ pub fn choose(
     };
     let shown: Vec<(i64, PieceMeta)> = video
         .iter()
-        .filter_map(|p| match p {
+        .flat_map(VideoPiece::layers)
+        .filter_map(|(p, _)| match p {
             VideoPiece::Source { frames, .. } if *frames > 0 => Some((*frames, meta(p))),
             _ => None,
         })
@@ -352,7 +353,7 @@ pub fn choose(
     let leading_black = black_in(
         &mut video
             .iter()
-            .take_while(|p| !matches!(p, VideoPiece::Source { frames, .. } if *frames > 0)),
+            .take_while(|p| matches!(p, VideoPiece::Black { .. })),
     );
 
     // The static values, PQ only.

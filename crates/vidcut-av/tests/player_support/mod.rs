@@ -123,22 +123,7 @@ pub fn piece_at(plan: &RenderPlan, t: i64) -> VideoPiece {
     let mut k = t - plan.range.0;
     for p in &plan.video {
         if k < p.frames() {
-            let mut one = p.clone();
-            let pos = p.position(k);
-            match &mut one {
-                VideoPiece::Source {
-                    source_frame,
-                    frames,
-                    pace,
-                    ..
-                } => {
-                    *source_frame = pos;
-                    *frames = 1;
-                    *pace = Default::default();
-                }
-                VideoPiece::Black { frames } => *frames = 1,
-            }
-            return one;
+            return p.part(k, 1);
         }
         k -= p.frames();
     }

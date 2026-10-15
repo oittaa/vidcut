@@ -1169,6 +1169,12 @@ pub(crate) fn can_fit(place: Place, ops: &Ops) -> bool {
     }
 }
 
+/// Whether pictures on `place` are mixed there for a dissolve (decision
+/// D50): CUDA's ([`crate::cuda::mix`]). Others come down to be mixed.
+pub(crate) fn can_mix(place: Place) -> bool {
+    place == Place::Cuda
+}
+
 /// Whether a frame's GPU (`from`) hands the picture it fits to an encoder
 /// that takes frames on another place, `to`: CUDA's to Vulkan's encoder
 /// ([`crate::cuda::reaches`]). No other GPU's frames leave their place.

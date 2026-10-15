@@ -18,10 +18,10 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use vidcut_core::render::{RenderPlan, VideoPiece};
+use vidcut_core::render::{RenderPlan, VideoPiece, WHOLE};
 use vidcut_core::time::Rational;
 
-use super::frame::Picture;
+use super::frame::{Over, Picture};
 use super::plan::Plan;
 use super::store::Kind;
 use super::{Busy, Decoder as Decoding, Mode, Shared, Snap};
@@ -29,7 +29,7 @@ use crate::error::{Error, Result};
 use crate::export::is_cancelled;
 use crate::export::make::Output;
 use crate::export::renderer::{at, window};
-use crate::export::video::VideoFrames;
+use crate::export::video::{Layer, VideoFrames};
 use crate::ffmpeg::format;
 
 /// Frames decoded ahead of a paused viewer, when decoding on is cheap.
@@ -455,10 +455,10 @@ impl Decoder {
         let picture = (|| {
             let mut frames = self.new_reader(&plan.plan);
             frames.read_pieces(&plan.pieces_from(*t));
-            let frame = frames
-                .next_frame()?
+            let layers = frames
+                .next_layers()?
                 .ok_or_else(|| Error::Invalid(format!("no frame {t} to prepare")))?;
-            Ok(picture(&frames, plan, *t, frame))
+            Ok(picture(layers))
         })();
         match picture {
             Ok(p) => {
@@ -628,10 +628,10 @@ impl Decoder {
                 i == t || window || (i >= snap.focus && !self.shared.store.contains(&plan.id(i)));
             let frames = self.reader();
             if kept {
-                let frame = frames
-                    .next_frame()?
+                let layers = frames
+                    .next_layers()?
                     .ok_or_else(|| Error::Invalid(format!("no frame {i} to play")))?;
-                let picture = picture(frames, &plan, i, frame);
+                let picture = picture(layers);
                 self.next = Some(i + 1);
                 self.picture_bytes = picture.bytes();
                 self.picture_kind = Kind::of(&picture);
@@ -722,15 +722,28 @@ impl Decoder {
     }
 }
 
-/// The picture of timeline frame `t` of `plan`, decoded by `frames`.
-fn picture(
-    frames: &VideoFrames,
-    plan: &Plan,
-    t: i64,
-    frame: crate::ffmpeg::frame::Video,
-) -> Picture {
-    let file = plan.shows_a_file(t);
-    let decoder = file.then(|| frames.decoded_on().map_or(Decoding::Cpu, Decoding::Gpu));
-    let decoding = frames.decoding().filter(|_| file);
-    Picture::new(frame, frames.rotation(), decoder, decoding)
+/// The picture of a frame whose pictures as decoded are `layers`: the
+/// first, and while a dissolve plays, those over it.
+fn picture(layers: Vec<Layer>) -> Picture {
+    let made = |l: Layer| {
+        // What decoded a file's picture; none for black.
+        let decoder = l
+            .decoding
+            .is_some()
+            .then(|| l.decoder.map_or(Decoding::Cpu, Decoding::Gpu));
+        let frame = l.frame.expect("frames as decoded, black too");
+        Picture::new(frame, l.rotation, decoder, l.decoding)
+    };
+    let mut layers = layers.into_iter();
+    let under = made(layers.next().expect("a frame's picture"));
+    let over = layers
+        .map(|l| {
+            let weight = l.weight.unwrap_or(WHOLE);
+            Over {
+                picture: Arc::new(made(l)),
+                weight,
+            }
+        })
+        .collect();
+    under.with_over(over)
 }

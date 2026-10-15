@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::model::{Clip, Media, Project, TrackKind};
+use crate::otio::transitions;
 use crate::time::Rational;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -60,6 +61,71 @@ pub enum VideoPiece {
     Black {
         frames: i64,
     },
+    /// Pictures over each other while a dissolve plays (decision D50):
+    /// `under`, then each of `over` on top of it at its level. Each is a
+    /// source or black, as long as the piece.
+    Mix {
+        under: Box<VideoPiece>,
+        over: Vec<Over>,
+    },
+}
+
+/// A picture over the others of a [`VideoPiece::Mix`], at a level its
+/// ramp gives each frame.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Over {
+    pub piece: VideoPiece,
+    pub ramp: Ramp,
+}
+
+/// How a dissolve's level goes over its frames (decision D50): straight
+/// from 0 to 1, or from 1 to 0 when `falling`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Ramp {
+    /// Frames of the dissolve before the piece's first.
+    pub at: i64,
+    /// The dissolve's length in frames.
+    pub of: i64,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub falling: bool,
+}
+
+/// The weight [`Ramp::weight`] gives a picture shown whole.
+pub const WHOLE: u32 = 1 << 16;
+
+impl Ramp {
+    /// The level at the piece's frame `k`, a fraction: its numerator and
+    /// denominator.
+    pub fn fraction(&self, k: i64) -> (i64, i64) {
+        let rising = (2 * (self.at + k) + 1, 2 * self.of);
+        if self.falling {
+            (rising.1 - rising.0, rising.1)
+        } else {
+            rising
+        }
+    }
+
+    /// The level at the piece's frame `k`, from 0 to 1.
+    pub fn level(&self, k: i64) -> f64 {
+        let (n, d) = self.fraction(k);
+        n as f64 / d as f64
+    }
+
+    /// The level at the piece's frame `k` in sixty-five-thousandths
+    /// ([`WHOLE`] is 1), rounded: what pictures are mixed with.
+    pub fn weight(&self, k: i64) -> u32 {
+        let (n, d) = self.fraction(k);
+        let w = (i128::from(n) * i128::from(WHOLE) * 2 + i128::from(d)) / (2 * i128::from(d));
+        w.clamp(0, i128::from(WHOLE)) as u32
+    }
+
+    /// The ramp `k` frames on.
+    pub fn after(&self, k: i64) -> Self {
+        Self {
+            at: self.at + k,
+            ..*self
+        }
+    }
 }
 
 /// What a source piece shows when it isn't a video file.
@@ -107,6 +173,118 @@ impl VideoPiece {
     pub fn frames(&self) -> i64 {
         match self {
             Self::Source { frames, .. } | Self::Black { frames } => *frames,
+            Self::Mix { under, .. } => under.frames(),
+        }
+    }
+
+    /// The pieces it shows, bottom up, each with the ramp of its level:
+    /// itself, or a mix's `under` and `over`.
+    pub fn layers(&self) -> Vec<(&VideoPiece, Option<Ramp>)> {
+        match self {
+            Self::Mix { under, over } => std::iter::once((under.as_ref(), None))
+                .chain(over.iter().map(|o| (&o.piece, Some(o.ramp))))
+                .collect(),
+            _ => vec![(self, None)],
+        }
+    }
+
+    /// [`layers`](Self::layers), to change.
+    pub fn layers_mut(&mut self) -> Vec<&mut VideoPiece> {
+        match self {
+            Self::Mix { under, over } => std::iter::once(under.as_mut())
+                .chain(over.iter_mut().map(|o| &mut o.piece))
+                .collect(),
+            _ => vec![self],
+        }
+    }
+
+    /// The piece from its frame `k` on, `frames` long.
+    pub fn part(&self, k: i64, frames: i64) -> VideoPiece {
+        match self {
+            Self::Source {
+                media,
+                path,
+                origin,
+                image,
+                pace,
+                ..
+            } => {
+                // A still's piece always reads its one picture from the start.
+                let still = matches!(image, Some(Image::Still));
+                Self::Source {
+                    media: media.clone(),
+                    path: path.clone(),
+                    origin: *origin,
+                    source_frame: self.position(if still { 0 } else { k }),
+                    frames,
+                    image: image.clone(),
+                    pace: if still { *pace } else { pace.after(k) },
+                }
+            }
+            Self::Black { .. } => Self::Black { frames },
+            Self::Mix { under, over } => Self::Mix {
+                under: Box::new(under.part(k, frames)),
+                over: over
+                    .iter()
+                    .map(|o| Over {
+                        piece: o.piece.part(k, frames),
+                        ramp: o.ramp.after(k),
+                    })
+                    .collect(),
+            },
+        }
+    }
+
+    /// Whether `next` shows what comes after it, so the two are one piece.
+    fn goes_on_as(&self, next: &VideoPiece) -> bool {
+        match (self, next) {
+            (Self::Black { .. }, Self::Black { .. }) => true,
+            (
+                Self::Source {
+                    media,
+                    source_frame,
+                    frames,
+                    pace,
+                    ..
+                },
+                Self::Source {
+                    media: m2,
+                    source_frame: s2,
+                    pace: p2,
+                    ..
+                },
+            ) => {
+                media == m2 && pace.is_normal() && p2.is_normal() && *source_frame + *frames == *s2
+            }
+            (
+                Self::Mix { under, over },
+                Self::Mix {
+                    under: u2,
+                    over: o2,
+                },
+            ) => {
+                let k = self.frames();
+                under.goes_on_as(u2)
+                    && over.len() == o2.len()
+                    && over
+                        .iter()
+                        .zip(o2)
+                        .all(|(a, b)| a.ramp.after(k) == b.ramp && a.piece.goes_on_as(&b.piece))
+            }
+            _ => false,
+        }
+    }
+
+    /// Makes it `more` frames longer.
+    fn lengthen(&mut self, more: i64) {
+        match self {
+            Self::Source { frames, .. } | Self::Black { frames } => *frames += more,
+            Self::Mix { under, over } => {
+                under.lengthen(more);
+                for o in over {
+                    o.piece.lengthen(more);
+                }
+            }
         }
     }
 }
@@ -202,13 +380,15 @@ impl Pace {
 }
 
 impl VideoPiece {
-    /// The source frame frame `k` of the piece shows (0 for black).
+    /// The source frame frame `k` of the piece shows (0 for black; a
+    /// mix's, that of the picture under the others).
     pub fn position(&self, k: i64) -> i64 {
         match self {
             VideoPiece::Source {
                 source_frame, pace, ..
             } => source_frame + pace.offset(k),
             VideoPiece::Black { .. } => 0,
+            VideoPiece::Mix { under, .. } => under.position(k),
         }
     }
 }
@@ -217,30 +397,8 @@ fn push_video(out: &mut Vec<VideoPiece>, piece: VideoPiece) {
     if piece.frames() <= 0 {
         return;
     }
-    match (out.last_mut(), &piece) {
-        (Some(VideoPiece::Black { frames }), VideoPiece::Black { frames: more }) => *frames += more,
-        (
-            Some(VideoPiece::Source {
-                media,
-                source_frame,
-                frames,
-                pace,
-                ..
-            }),
-            VideoPiece::Source {
-                media: m2,
-                source_frame: s2,
-                frames: f2,
-                pace: p2,
-                ..
-            },
-        ) if media == m2
-            && pace.is_normal()
-            && p2.is_normal()
-            && *source_frame + *frames == *s2 =>
-        {
-            *frames += f2
-        }
+    match out.last_mut() {
+        Some(last) if last.goes_on_as(&piece) => last.lengthen(piece.frames()),
         _ => out.push(piece),
     }
 }
@@ -468,6 +626,8 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
     // there shows; clips above cover the ones below.
     // A block from another editor plays as a gap (deviation X9); a compound
     // clip whose clips were found plays them instead (`expanded`).
+    // A dissolve mixes the clips on each side of its cut; one into or out
+    // of a gap shows what is under it there (decision D50).
     let visible = |t: &crate::model::Track, c: &Clip| {
         t.video_enabled && c.enabled && c.video && !c.is_block()
     };
@@ -476,8 +636,12 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
         .iter()
         .filter(|t| t.kind == TrackKind::Video)
         .collect();
+    let dissolves: Vec<_> = tracks
+        .iter()
+        .map(|t| transitions::playing(p, t, false, transitions::dissolves))
+        .collect();
     let mut cuts = vec![a, b];
-    for t in &tracks {
+    for (t, played) in tracks.iter().zip(&dissolves) {
         for c in t
             .clips
             .iter()
@@ -486,36 +650,86 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
             cuts.push(c.start.max(a));
             cuts.push(c.end().min(b));
         }
+        for d in played {
+            cuts.extend([d.frames.0, d.frames.1].map(|f| f.clamp(a, b)));
+        }
     }
     cuts.sort_unstable();
     cuts.dedup();
+    // Clip `c`'s picture over `[x, y)`.
+    let picture = |c: &Clip, x: i64, y: i64| -> Result<VideoPiece> {
+        let m = found(pool.get(c.media.as_str()).copied(), &c.media)?;
+        let (path, origin) = origin_of(m);
+        Ok(VideoPiece::Source {
+            media: c.media.clone(),
+            path,
+            origin,
+            source_frame: c.source_at(x),
+            frames: y - x,
+            image: image_of(m),
+            pace: c.pace().after(x - c.start),
+        })
+    };
     let mut video = Vec::new();
     for w in cuts.windows(2) {
         let (x, y) = (w[0], w[1]);
-        let top = tracks.iter().rev().find_map(|t| {
-            t.clip_covering(x)
-                .map(|ci| &t.clips[ci])
-                .filter(|c| visible(t, c))
-        });
-        match top {
-            Some(c) => {
-                let m = found(pool.get(c.media.as_str()).copied(), &c.media)?;
-                let (path, origin) = origin_of(m);
-                push_video(
-                    &mut video,
-                    VideoPiece::Source {
-                        media: c.media.clone(),
-                        path,
-                        origin,
-                        source_frame: c.source_at(x),
-                        frames: y - x,
-                        image: image_of(m),
-                        pace: c.pace().after(x - c.start),
-                    },
-                );
+        // Bottom up: the first is shown whole, the others over it.
+        let mut stack: Vec<(VideoPiece, Option<Ramp>)> = Vec::new();
+        for (t, played) in tracks.iter().zip(&dissolves) {
+            let shows = |c: &&Clip| visible(t, c);
+            match played.iter().find(|d| d.frames.0 <= x && x < d.frames.1) {
+                Some(d) => {
+                    let ramp = |falling| Ramp {
+                        at: x - d.frames.0,
+                        of: d.frames.1 - d.frames.0,
+                        falling,
+                    };
+                    match (d.before.filter(shows), d.after.filter(shows)) {
+                        (Some(f), Some(g)) => {
+                            stack = vec![(picture(f, x, y)?, None)];
+                            stack.push((picture(g, x, y)?, Some(ramp(false))));
+                        }
+                        (Some(f), None) => stack.push((picture(f, x, y)?, Some(ramp(true)))),
+                        (None, Some(g)) => stack.push((picture(g, x, y)?, Some(ramp(false)))),
+                        (None, None) => {}
+                    }
+                }
+                None => {
+                    if let Some(c) = t.clip_covering(x).map(|ci| &t.clips[ci]).filter(shows) {
+                        stack = vec![(picture(c, x, y)?, None)];
+                    }
+                }
             }
-            None => push_video(&mut video, VideoPiece::Black { frames: y - x }),
         }
+        let mut layers = stack.into_iter();
+        let under = match layers.next() {
+            Some((piece, None)) => piece,
+            first => {
+                layers = first
+                    .into_iter()
+                    .chain(layers)
+                    .collect::<Vec<_>>()
+                    .into_iter();
+                VideoPiece::Black { frames: y - x }
+            }
+        };
+        let over: Vec<Over> = layers
+            .map(|(piece, ramp)| Over {
+                piece,
+                ramp: ramp.expect("only the first is shown whole"),
+            })
+            .collect();
+        push_video(
+            &mut video,
+            if over.is_empty() {
+                under
+            } else {
+                VideoPiece::Mix {
+                    under: Box::new(under),
+                    over,
+                }
+            },
+        );
     }
 
     // Audio: one lane per heard track (mute, solo), with its fader.
@@ -650,11 +864,13 @@ pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
 }
 
 /// Timeline frame `at` of clip `clip` alone, as export samples it, whatever
-/// covers it on the tracks above (the Trim Editor shows the clip it names).
+/// covers it on the tracks above and without its dissolves (the Trim Editor
+/// shows the clip it names).
 pub fn clip_frame(p: &Project, clip: &str, at: i64) -> Result<VideoPiece> {
     let mut alone = p.clone();
     for t in &mut alone.tracks {
         t.clips.retain(|x| x.id == clip);
+        t.transitions.clear();
     }
     flatten(&alone, at, at + 1)?
         .video
@@ -854,6 +1070,165 @@ mod tests {
         f.ok(json!({"method": method, "params": params}));
     }
 
+    /// A dissolve on V1's pictures from clip `from` to clip `to` (`None`:
+    /// a gap), `before` frames before the cut and `after` after it.
+    fn dissolve(
+        f: &Fixture,
+        from: Option<&str>,
+        to: Option<&str>,
+        before: i64,
+        after: i64,
+    ) -> Project {
+        let mut p = f.editor.project().clone();
+        p.track_mut("V1")
+            .unwrap()
+            .transitions
+            .push(crate::model::Transition {
+                id: "t1".into(),
+                sound: false,
+                from: from.map(Into::into),
+                to: to.map(Into::into),
+                before,
+                after,
+                otio: json!({"OTIO_SCHEMA": "Transition.1", "transition_type": "SMPTE_Dissolve"})
+                    .into(),
+            });
+        p
+    }
+
+    /// The plan's pictures in short: `m1@45+10` (media, first source
+    /// frame, frames), `black+10`, a mix as its pictures over the one under.
+    fn shown(plan: &RenderPlan) -> Vec<String> {
+        fn one(p: &VideoPiece) -> String {
+            match p {
+                VideoPiece::Source {
+                    media,
+                    source_frame,
+                    frames,
+                    ..
+                } => format!("{media}@{source_frame}+{frames}"),
+                VideoPiece::Black { frames } => format!("black+{frames}"),
+                VideoPiece::Mix { under, over } => {
+                    let over: Vec<String> = over
+                        .iter()
+                        .map(|o| {
+                            let fall = if o.ramp.falling { " falling" } else { "" };
+                            format!("{} at {}/{}{fall}", one(&o.piece), o.ramp.at, o.ramp.of)
+                        })
+                        .collect();
+                    format!("{} over {}", over.join(", "), one(under))
+                }
+            }
+        }
+        plan.video.iter().map(one).collect()
+    }
+
+    #[test]
+    fn a_dissolve_shows_each_frame_at_the_level_of_its_middle() {
+        let ramp = Ramp {
+            at: 0,
+            of: 4,
+            falling: false,
+        };
+        let levels: Vec<(i64, i64)> = (0..4).map(|k| ramp.fraction(k)).collect();
+        assert_eq!(levels, [(1, 8), (3, 8), (5, 8), (7, 8)]);
+    }
+
+    #[test]
+    fn a_falling_level_starts_where_a_rising_one_ends() {
+        let ramp = Ramp {
+            at: 0,
+            of: 4,
+            falling: true,
+        };
+        assert_eq!(ramp.fraction(0), (7, 8));
+    }
+
+    #[test]
+    fn a_weight_is_the_level_in_sixty_five_thousandths_rounded() {
+        let ramp = Ramp {
+            at: 0,
+            of: 3,
+            falling: false,
+        };
+        // 65536 / 6 = 10922.67.
+        assert_eq!(ramp.weight(0), 10923);
+    }
+
+    #[test]
+    fn a_fade_from_black_shows_the_clip_over_black() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m1", 50, 100);
+        req(&mut f, "edit.delete", json!({"clips": "c1", "lift": true}));
+        let p = dissolve(&f, None, Some("c2"), 5, 5);
+        let plan = flatten(&p, 0, 100).unwrap();
+        assert_eq!(
+            shown(&plan),
+            ["black+45", "m1@45+10 at 0/10 over black+10", "m1@55+45"]
+        );
+    }
+
+    #[test]
+    fn a_fade_to_black_shows_the_clip_falling_over_black() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m1", 50, 100);
+        req(&mut f, "edit.delete", json!({"clips": "c2", "lift": true}));
+        let p = dissolve(&f, Some("c1"), None, 0, 10);
+        let plan = flatten(&p, 0, 60).unwrap();
+        assert_eq!(
+            shown(&plan),
+            ["m1@0+50", "m1@50+10 at 0/10 falling over black+10"]
+        );
+    }
+
+    #[test]
+    fn a_cross_dissolve_shows_the_clip_after_the_cut_over_the_one_before() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m2", 10, 60);
+        let p = dissolve(&f, Some("c1"), Some("c2"), 5, 5);
+        let plan = flatten(&p, 0, 100).unwrap();
+        assert_eq!(
+            shown(&plan),
+            ["m1@0+45", "m2@5+10 at 0/10 over m1@45+10", "m2@15+45"]
+        );
+    }
+
+    #[test]
+    fn a_plan_starting_inside_a_dissolve_starts_its_ramp_there() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m2", 10, 60);
+        let p = dissolve(&f, Some("c1"), Some("c2"), 5, 5);
+        let plan = flatten(&p, 48, 52).unwrap();
+        assert_eq!(shown(&plan), ["m2@8+4 at 3/10 over m1@48+4"]);
+    }
+
+    #[test]
+    fn a_dissolve_whose_frames_hold_another_clip_plays_as_a_cut() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m2", 10, 13);
+        f.append("m1", 60, 100);
+        let p = dissolve(&f, Some("c1"), Some("c2"), 5, 5);
+        let plan = flatten(&p, 0, 93).unwrap();
+        assert_eq!(shown(&plan), ["m1@0+50", "m2@10+3", "m1@60+40"]);
+    }
+
+    #[test]
+    fn a_wipe_plays_as_a_cut() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m2", 10, 60);
+        let mut p = dissolve(&f, Some("c1"), Some("c2"), 5, 5);
+        p.track_mut("V1").unwrap().transitions[0].otio =
+            json!({"OTIO_SCHEMA": "Transition.1", "transition_type": "SMPTE_Wipe"}).into();
+        let plan = flatten(&p, 0, 100).unwrap();
+        assert_eq!(shown(&plan), ["m1@0+50", "m2@10+50"]);
+    }
+
     #[test]
     fn video_pieces_follow_clips_gaps_and_disabled_clips() {
         let mut f = fixture();
@@ -874,6 +1249,7 @@ mod tests {
                     ..
                 } => (format!("{media}@{source_frame}"), *frames),
                 VideoPiece::Black { frames } => ("black".into(), *frames),
+                VideoPiece::Mix { .. } => ("mix".into(), v.frames()),
             })
             .collect();
         // c1 = m1 0..100; the lifted gap and disabled c3 merge into one black piece.

@@ -104,7 +104,9 @@ impl StillRenderer {
 
     /// Renders `piece`'s first frame at `width`×`height`. `floor` is the
     /// first source position worth keeping frames behind it for: where the
-    /// shown stretch of the file starts (0: the whole file).
+    /// shown stretch of the file starts (0: the whole file). A dissolve's
+    /// pictures are each rendered, and kept, as a piece of their own, then
+    /// mixed (decision D50).
     pub fn rgba(
         &mut self,
         piece: &VideoPiece,
@@ -113,6 +115,19 @@ impl StillRenderer {
         width: u32,
         height: u32,
     ) -> Result<Arc<Image>> {
+        if let VideoPiece::Mix { .. } = piece {
+            let mut mixed: Option<Arc<Image>> = None;
+            for (layer, ramp) in piece.layers() {
+                let img = self.rgba(&layer.part(0, 1), 0, fps, width, height)?;
+                mixed = Some(match (mixed, ramp) {
+                    (Some(under), Some(ramp)) => {
+                        Arc::new(mixed_image(&under, &img, ramp.weight(0)))
+                    }
+                    _ => img,
+                });
+            }
+            return mixed.ok_or_else(|| Error::Invalid("a mix of nothing".into()));
+        }
         crate::cancel::stop()?;
         crate::init();
         // A prefetch nobody took isn't coming: nothing waits for it.
@@ -284,7 +299,7 @@ impl FrameReader {
             self.frames = Some((fps, width, height, frames));
         }
         let (.., frames) = self.frames.as_mut().expect("set above");
-        frames.read_piece(&at(piece, first_frame(piece), 1));
+        frames.read_piece(&piece.part(0, 1));
         let frame = frames
             .next_frame()?
             .ok_or_else(|| Error::Invalid("no frame to render".into()))?;
@@ -310,11 +325,19 @@ pub(crate) fn frames(
     }
 }
 
-/// The source position a piece starts at (0 for black).
-fn first_frame(piece: &VideoPiece) -> i64 {
-    match piece {
-        VideoPiece::Source { source_frame, .. } => *source_frame,
-        VideoPiece::Black { .. } => 0,
+/// `over` at `weight` over `under`, packed RGBA pictures of one size
+/// ([`super::mix::mixed`]).
+pub(crate) fn mixed_image(under: &Image, over: &Image, weight: u32) -> Image {
+    let rgba = under
+        .rgba
+        .iter()
+        .zip(&over.rgba)
+        .map(|(&a, &b)| super::mix::mixed(u32::from(a), u32::from(b), weight) as u8)
+        .collect();
+    Image {
+        width: under.width,
+        height: under.height,
+        rgba,
     }
 }
 
@@ -504,10 +527,11 @@ pub(crate) fn window(
 }
 
 /// `piece` from source position `pos`, `frames` long, walking its source
-/// frame by frame.
+/// frame by frame; a mix's first `frames`.
 pub(crate) fn at(piece: &VideoPiece, pos: i64, frames: i64) -> VideoPiece {
     let mut p = piece.clone();
     match &mut p {
+        VideoPiece::Mix { .. } => return piece.part(0, frames),
         VideoPiece::Source {
             source_frame,
             frames: n,
@@ -538,6 +562,7 @@ fn source_key(piece: &VideoPiece, fps: Rational, width: u32, height: u32) -> Str
             origin.to_bits()
         ),
         VideoPiece::Black { .. } => format!("black|{fps}|{width}x{height}"),
+        VideoPiece::Mix { .. } => format!("mix|{piece:?}|{fps}|{width}x{height}"),
     }
 }
 

@@ -46,24 +46,7 @@ pub fn render(
         return Err(Error::invalid("the storyboard's range is empty"));
     }
     let plan = render::flatten(p, a, b)?;
-    let at = |piece: &VideoPiece, k: i64| match piece {
-        VideoPiece::Source {
-            media,
-            path,
-            origin,
-            image,
-            ..
-        } => VideoPiece::Source {
-            pace: Default::default(),
-            media: media.clone(),
-            path: path.clone(),
-            origin: *origin,
-            source_frame: piece.position(k),
-            frames: 1,
-            image: image.clone(),
-        },
-        VideoPiece::Black { .. } => VideoPiece::Black { frames: 1 },
-    };
+    let at = |piece: &VideoPiece, k: i64| piece.part(k, 1);
     let mut cells = Vec::new();
     match every {
         None => {

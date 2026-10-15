@@ -7,21 +7,30 @@ use vidcut_core::render::{Image, RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
 
 /// What a picture shows, wherever it is on a timeline: the same source
-/// position of the same file at one rate, or black of one size. Pictures
-/// with equal ids are equal, so kept pictures survive edits that move them.
+/// position of the same file at one rate, or black of one size; while a
+/// dissolve plays, with the same pictures over it at the same weights.
+/// Pictures with equal ids are equal, so kept pictures survive edits that
+/// move them.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct Id {
     source: Arc<str>,
     pos: i64,
+    /// A mix's pictures over the first: what each shows, where, and its
+    /// weight.
+    over: Option<Arc<[Layer]>>,
 }
+
+/// What a picture over another shows, where, and its weight.
+type Layer = (Arc<str>, i64, u32);
 
 /// A plan, indexed.
 pub(crate) struct Plan {
     pub(crate) plan: RenderPlan,
     /// The first frame of each video piece, counted from the plan's start.
     starts: Vec<i64>,
-    /// What each video piece shows, apart from where in it.
-    sources: Vec<Arc<str>>,
+    /// What each video piece shows, apart from where in it: each of a
+    /// mix's pictures.
+    sources: Vec<Vec<Arc<str>>>,
     /// Samples (per channel) the plan lasts.
     pub(crate) samples: i64,
 }
@@ -36,7 +45,11 @@ impl Plan {
             .map(|piece| {
                 starts.push(t);
                 t += piece.frames();
-                source_key(piece, &plan)
+                piece
+                    .layers()
+                    .into_iter()
+                    .map(|(l, _)| source_key(l, &plan))
+                    .collect()
             })
             .collect();
         let samples = plan.samples();
@@ -81,23 +94,32 @@ impl Plan {
     /// The picture timeline frame `t` shows.
     pub(crate) fn id(&self, t: i64) -> Id {
         let (i, k) = self.locate(t);
-        let pos = match self.plan.video.get(i) {
-            Some(piece @ VideoPiece::Source { image, .. })
-                if !matches!(image, Some(Image::Still)) =>
-            {
-                piece.position(k)
+        let Some(piece) = self.plan.video.get(i) else {
+            return Id {
+                source: "".into(),
+                pos: 0,
+                over: None,
+            };
+        };
+        let pos = |l: &VideoPiece| match l {
+            VideoPiece::Source { image, .. } if !matches!(image, Some(Image::Still)) => {
+                l.position(k)
             }
             // Every frame of black, or of a still, is one picture.
             _ => 0,
         };
-        let source = self.sources.get(i).cloned().unwrap_or_else(|| "".into());
-        Id { source, pos }
-    }
-
-    /// Timeline frame `t` shows a picture of a file (not black).
-    pub(crate) fn shows_a_file(&self, t: i64) -> bool {
-        let (i, _) = self.locate(t);
-        matches!(self.plan.video.get(i), Some(VideoPiece::Source { .. }))
+        let keys = &self.sources[i];
+        let layers = piece.layers();
+        let over: Vec<Layer> = layers[1..]
+            .iter()
+            .zip(&keys[1..])
+            .map(|((l, ramp), key)| (key.clone(), pos(l), ramp.map_or(0, |r| r.weight(k))))
+            .collect();
+        Id {
+            source: keys[0].clone(),
+            pos: pos(layers[0].0),
+            over: (!over.is_empty()).then(|| over.into()),
+        }
     }
 
     /// The plan's video from timeline frame `t` on.
@@ -133,25 +155,7 @@ impl Plan {
 
 /// `piece` from its frame `k` on.
 fn cut(piece: &VideoPiece, k: i64) -> VideoPiece {
-    let mut p = piece.clone();
-    match &mut p {
-        VideoPiece::Source {
-            source_frame,
-            frames,
-            image,
-            pace,
-            ..
-        } => {
-            // A still's piece always reads its one picture from the start.
-            if !matches!(image, Some(Image::Still)) {
-                *source_frame = piece.position(k);
-                *pace = pace.after(k);
-            }
-            *frames -= k;
-        }
-        VideoPiece::Black { frames } => *frames -= k,
-    }
-    p
+    piece.part(k, piece.frames() - k)
 }
 
 /// What a piece shows, apart from where in it: a file at the plan's rate,
@@ -170,7 +174,9 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
             plan.fps
         )
         .into(),
-        VideoPiece::Black { .. } => format!("black|{}x{}", plan.width, plan.height).into(),
+        VideoPiece::Black { .. } | VideoPiece::Mix { .. } => {
+            format!("black|{}x{}", plan.width, plan.height).into()
+        }
     }
 }
 

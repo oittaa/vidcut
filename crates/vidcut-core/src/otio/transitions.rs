@@ -37,6 +37,79 @@ pub(super) fn otio_name(o: &Value) -> String {
     .to_string()
 }
 
+/// Whether transition `t` plays as a dissolve (decision D50): OTIO's
+/// `SMPTE_Dissolve`, but for another of Resolve's dissolves by its effect's
+/// name. Any other plays as a cut.
+pub fn dissolves(t: &Transition) -> bool {
+    let effect = &t.otio["metadata"][EDITOR]["Effects"]["Effect Name"];
+    t.otio["transition_type"] == "SMPTE_Dissolve"
+        && effect.as_str().is_none_or(|n| n == "Cross Dissolve")
+}
+
+/// A transition that plays on a track ([`playing`]).
+#[derive(Debug, Clone, Copy)]
+pub struct Playing<'a> {
+    pub transition: &'a Transition,
+    /// Its frames on the timeline, `[from, to)`.
+    pub frames: (i64, i64),
+    /// The clip before its cut and the clip after it; none for a gap.
+    pub before: Option<&'a Clip>,
+    pub after: Option<&'a Clip>,
+}
+
+/// The transitions of `track` that play on its pictures (or its sounds,
+/// `sound`), in order (decision D50): those that fit and that
+/// `plays` takes, whose frames hold nothing of the track but the clip
+/// before the cut until it and the clip after it from it, and that start
+/// after the one before ends.
+pub fn playing<'a>(
+    p: &'a Project,
+    track: &'a Track,
+    sound: bool,
+    plays: impl Fn(&Transition) -> bool,
+) -> Vec<Playing<'a>> {
+    let cuts = Cuts::of(p, track);
+    let find = |id: &Option<String>| {
+        id.as_ref()
+            .and_then(|id| cuts.clips.get(id.as_str()).copied())
+    };
+    let mut found: Vec<Playing<'a>> = Vec::new();
+    for t in track
+        .transitions
+        .iter()
+        .filter(|t| t.sound == sound && plays(t))
+    {
+        let Some(cut) = cuts.place(p, t) else {
+            continue;
+        };
+        let (a, b) = (cut - t.before, cut + t.after);
+        let (before, after) = (find(&t.from), find(&t.to));
+        let covers = |c: Option<&Clip>, x: i64, y: i64| {
+            c.is_none_or(|c| span(c, sound).is_some_and(|(s, e)| s <= x && e >= y))
+        };
+        let others_clear = track.clips.iter().all(|c| {
+            let side = |o: Option<&Clip>| o.is_some_and(|o| std::ptr::eq(o, c));
+            side(before) || side(after) || span(c, sound).is_none_or(|(s, e)| e <= a || s >= b)
+        });
+        if b > a && covers(before, a, cut) && covers(after, cut, b) && others_clear {
+            found.push(Playing {
+                transition: t,
+                frames: (a, b),
+                before,
+                after,
+            });
+        }
+    }
+    found.sort_by_key(|x| x.frames.0);
+    let mut out: Vec<Playing<'a>> = Vec::new();
+    for x in found {
+        if out.last().is_none_or(|l| l.frames.1 <= x.frames.0) {
+            out.push(x);
+        }
+    }
+    out
+}
+
 /// The span of `c`'s picture (or sound) on the timeline.
 fn span(c: &Clip, sound: bool) -> Option<(i64, i64)> {
     if sound {

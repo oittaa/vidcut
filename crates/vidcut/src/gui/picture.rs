@@ -27,6 +27,9 @@ pub struct Gpu {
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::RenderPipeline,
+    /// The pass for a picture over others while a dissolve plays: drawn at
+    /// its level, the blend constant, over what the target holds.
+    blended: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     /// 16-bit textures, for samples of more than 8 bits as they are.
@@ -115,31 +118,44 @@ impl Gpu {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("vidcut picture"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: TARGET,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let pipeline_with = |blend| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("vidcut picture"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: TARGET,
+                        blend,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let pipeline = pipeline_with(None);
+        // The picture at the constant's level, what is under it at the rest.
+        let over = wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::Constant,
+            dst_factor: wgpu::BlendFactor::OneMinusConstant,
+            operation: wgpu::BlendOperation::Add,
+        };
+        let blended = pipeline_with(Some(wgpu::BlendState {
+            color: over,
+            alpha: over,
+        }));
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("vidcut picture"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -154,6 +170,7 @@ impl Gpu {
             device: device.clone(),
             queue: queue.clone(),
             pipeline,
+            blended,
             layout,
             sampler,
             wide: device
@@ -278,15 +295,23 @@ struct Target {
     size: (u32, u32),
 }
 
-/// One viewer's picture on the GPU: its planes, the target it is drawn
-/// into, and what that target shows now.
+/// One viewer's picture on the GPU: the target it is drawn into, what that
+/// target shows now, and the planes of each picture drawn into it (while a
+/// dissolve plays, each of its pictures has its own).
 #[derive(Default)]
 pub struct Screen {
-    planes: Option<Planes>,
     target: Option<Target>,
-    params: Option<wgpu::Buffer>,
     /// The picture in the target (`None` inside: black).
     drawn: Option<Option<Arc<Picture>>>,
+    /// Each layer's: the first the picture's own, then those over it.
+    slots: Vec<Slot>,
+}
+
+/// One picture's planes on the GPU and how they got there.
+#[derive(Default)]
+struct Slot {
+    planes: Option<Planes>,
+    params: Option<wgpu::Buffer>,
     /// Memory CUDA copies pictures into, for the planes: a few, so one is
     /// free while copies out of the others are in flight.
     shared: Vec<super::shared::Shared>,
@@ -333,7 +358,7 @@ impl Screen {
     /// The last picture in GPU memory went into the planes on the GPU, not
     /// copied down.
     pub fn shared(&self) -> bool {
-        self.last_shared
+        self.slots.first().is_some_and(|s| s.last_shared)
     }
 
     /// Draws `picture` (`None`: black) into a `width`×`height` target, as
@@ -364,67 +389,34 @@ impl Screen {
         // A picture larger than the device's textures can't go up (wgpu
         // would panic): black.
         let limit = gpu.device.limits().max_texture_dimension_2d;
-        let picture = picture.filter(|p| p.width() <= limit && p.height() <= limit);
+        let fits = |p: &Arc<Picture>| p.width() <= limit && p.height() <= limit;
+        let picture = picture.filter(|p| fits(p));
+        // Bottom up, each with its level over those before (`None`: whole).
+        let layers: Vec<(&Arc<Picture>, Option<f64>)> = picture
+            .into_iter()
+            .map(|p| (p, None))
+            .chain(picture.into_iter().flat_map(|p| {
+                p.over()
+                    .iter()
+                    .filter(|o| fits(&o.picture))
+                    .map(|o| (&o.picture, Some(f64::from(o.level()))))
+            }))
+            .collect();
+        if self.slots.len() < layers.len() {
+            self.slots.resize_with(layers.len(), Slot::default);
+        }
         let mut encoder = gpu
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("vidcut picture"),
             });
-        self.filled = None;
-        let bind = picture.map(|picture| {
-            self.upload(gpu, picture, &mut encoder);
-            let params = self.params.get_or_insert_with(|| {
-                gpu.device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("vidcut picture"),
-                    size: PARAMS as u64,
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                })
-            });
-            // How much of an imported texture the picture covers.
-            let cover = self.views.as_ref().map_or((1.0, 1.0), |&(_, _, (w, h))| {
-                (
-                    f64::from(picture.width()) / f64::from(w),
-                    f64::from(picture.height()) / f64::from(h),
-                )
-            });
-            gpu.queue
-                .write_buffer(params, 0, &params_of(picture, size, gpu.wide, cover));
-            let planes = self.planes.as_ref().expect("uploaded");
-            let view = |t: &wgpu::Texture| t.create_view(&Default::default());
-            let (y, u) = self
-                .views
-                .take()
-                .map(|(y, u, _)| (y, u))
-                .unwrap_or_else(|| (view(&planes.y), view(&planes.u)));
-            let v = view(&planes.v);
-            gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("vidcut picture"),
-                layout: &gpu.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: params.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(&y),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::TextureView(&u),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::TextureView(&v),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::Sampler(&gpu.sampler),
-                    },
-                ],
+        let binds: Vec<(wgpu::BindGroup, Option<f64>)> = layers
+            .iter()
+            .zip(&mut self.slots)
+            .map(|(&(picture, level), slot)| {
+                (slot.prepare(gpu, picture, size, &mut encoder), level)
             })
-        });
+            .collect();
         let target = self.target.as_ref().expect("made above");
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -443,21 +435,107 @@ impl Screen {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            if let Some(bind) = &bind {
-                pass.set_pipeline(&gpu.pipeline);
+            for (bind, level) in &binds {
+                match level {
+                    None => pass.set_pipeline(&gpu.pipeline),
+                    Some(l) => {
+                        pass.set_pipeline(&gpu.blended);
+                        pass.set_blend_constant(wgpu::Color {
+                            r: *l,
+                            g: *l,
+                            b: *l,
+                            a: *l,
+                        });
+                    }
+                }
                 pass.set_bind_group(0, bind, &[]);
                 pass.draw(0..3, 0..1);
             }
         }
         gpu.queue.submit([encoder.finish()]);
+        for slot in &mut self.slots[..layers.len()] {
+            slot.submitted(gpu);
+        }
+        self.drawn = Some(picture.cloned());
+        drawn
+    }
+}
+
+impl Slot {
+    /// Puts `picture` into its planes (`upload`) and its parameters for a
+    /// `size` target into its buffer: the bind group that draws it.
+    fn prepare(
+        &mut self,
+        gpu: &Gpu,
+        picture: &Arc<Picture>,
+        size: (u32, u32),
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> wgpu::BindGroup {
+        self.filled = None;
+        self.upload(gpu, picture, encoder);
+        let params = self.params.get_or_insert_with(|| {
+            gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("vidcut picture"),
+                size: PARAMS as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        });
+        // How much of an imported texture the picture covers.
+        let cover = self.views.as_ref().map_or((1.0, 1.0), |&(_, _, (w, h))| {
+            (
+                f64::from(picture.width()) / f64::from(w),
+                f64::from(picture.height()) / f64::from(h),
+            )
+        });
+        gpu.queue
+            .write_buffer(params, 0, &params_of(picture, size, gpu.wide, cover));
+        let planes = self.planes.as_ref().expect("uploaded");
+        let view = |t: &wgpu::Texture| t.create_view(&Default::default());
+        let (y, u) = self
+            .views
+            .take()
+            .map(|(y, u, _)| (y, u))
+            .unwrap_or_else(|| (view(&planes.y), view(&planes.u)));
+        let v = view(&planes.v);
+        gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("vidcut picture"),
+            layout: &gpu.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&y),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&u),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&v),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&gpu.sampler),
+                },
+            ],
+        })
+    }
+
+    /// The drawing went to the GPU: the shared buffer it was copied out of
+    /// is in use until the GPU is done, and an imported picture is held
+    /// until then, so its surface isn't reused under it.
+    fn submitted(&mut self, gpu: &Gpu) {
         if let Some(i) = self.filled.take() {
             self.shared[i].used(&gpu.queue);
         }
         if let Some(held) = self.imported.take() {
             gpu.queue.on_submitted_work_done(move || drop(held));
         }
-        self.drawn = Some(picture.cloned());
-        drawn
     }
 
     /// Puts `picture`'s planes into its textures, making them for its size
@@ -1123,7 +1201,9 @@ impl Screen {
             }
         }
     }
+}
 
+impl Screen {
     /// The target's pixels as RGBA rows, top first: what the viewer shows.
     pub fn read(&self, gpu: &Gpu) -> Option<Image> {
         let target = self.target.as_ref()?;
