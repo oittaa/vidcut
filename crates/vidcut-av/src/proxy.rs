@@ -139,7 +139,7 @@ impl ProxyEncoder {
             // messages.
             "libx265" => vec![
                 ("preset", "veryfast".into()),
-                ("crf", "22".into()),
+                ("crf", "20".into()),
                 (
                     "x265-params",
                     format!(
