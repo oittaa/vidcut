@@ -25,13 +25,13 @@ The threads are in gui.md §1. The viewer has a thread of its own because on GNO
 
 ## 4. The picture on screen
 
-- **One pass** (`gui/picture.rs`, `picture.wgsl`). A picture's planes go into textures at its own size, uploaded from memory or copied on the GPU from video memory (§3): Y, then U and V (8-bit planar) or UV interleaved (NV12, and P010 in 16-bit textures where the adapter has `TEXTURE_FORMAT_16BIT_NORM`; without them P010 goes up as its high bytes). One draw into an RGBA8 target the size of the viewer's picture in physical pixels:
+- **One pass** (`gui/picture.rs`, `picture.wgsl`). A picture's planes go into textures at its own size, uploaded from memory or copied on the GPU from video memory (§3): Y, then U and V (planar) or UV interleaved (NV12, P010), half as wide as Y, and half as tall for 4:2:0. Samples of more than 8 bits go in 16-bit textures where the adapter has `TEXTURE_FORMAT_16BIT_NORM`, else as their top 8 bits. One draw into an RGBA8 target the size of the viewer's picture in physical pixels:
   - **placed** as export fits it (`Picture::placement`), black around it;
   - **turned** upright by the display matrix (`Picture::rotation`);
   - **scaled in YUV**, as export scales before converting: going down, the average of up to 8×8 bilinear taps over the samples a pixel covers; going up, bilinear;
   - **converted** with the export's math (`vidcut_av::color::shader_colors`): the picture's matrix and range to BT.709 RGB; HDR (PQ, HLG) to linear light with the reference white at 1.0, BT.2020 to BT.709, the mobius curve on the brightest channel and BT.709's transfer as a 2.4 power: the GPU export shader's math (export.md §5), in 32-bit floats throughout.
 - **Shown one to one.** egui shows the target as a native texture, nearest-sampled, in a rectangle rounded to physical pixels. A target is drawn again only when the engine's picture or the size changes.
-- **Against the export:** at a picture's own size, flat areas are within a level of `Picture::to_rgba` (the export's filters), PQ and HLG too. Edges differ: at its own size the export repeats each chroma sample where the shader interpolates, and scaled, swscale's bicubic is sharper than the box. Barcodes read the same at every size.
+- **Against the export:** at a picture's own size, flat areas are within a level of `Picture::to_rgba` (the export's filters), PQ and HLG too. `crates/vidcut/tests/picture.rs` checks it for the planar layouts. Edges differ: at its own size the export repeats each chroma sample where the shader interpolates, and scaled, swscale's bicubic is sharper than the box. Barcodes read the same at every size.
 - **Present mode:** Mailbox (Immediate where there is one), so a new picture shows at the next refresh and no frames queue.
 
 ## 5. When a frame is on screen
