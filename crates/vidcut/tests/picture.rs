@@ -2,11 +2,12 @@
 //! picture in each planar layout the CPU's decoders give, drawn on the GPU
 //! at its own size, is within a level of `Picture::to_rgba` where it is
 //! flat. Pictures turned a quarter have chroma that changes down the rows
-//! they are stored in. Runs on any adapter, a software one too. Skips
-//! without one. A ProRes picture decoded on Vulkan and kept in GPU memory is
-//! drawn from there, its planes imported, as closely, and drawn again from
-//! the same import; those tests skip where the GPU in use doesn't decode
-//! ProRes on Vulkan.
+//! they are stored in, upright ones along the rows. A picture with alpha is
+//! drawn without it, as the export converts it. Runs on any adapter, a software one too. Skips
+//! without one. ProRes pictures decoded on Vulkan and kept in GPU memory
+//! are drawn from there, their planes imported, as closely, and drawn
+//! again from the same import; those tests skip where the GPU in use
+//! doesn't decode ProRes on Vulkan.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -175,10 +176,21 @@ fn a_10_bit_planar_4_2_0_picture_draws_as_the_export_converts_it() {
     draws_as_converted(VideoCodec::Hevc10, 90, Layout::Yuv420p10);
 }
 
-/// A display device on NVIDIA's GPU in use, and the player's ProRes picture
-/// decoded on Vulkan and kept in GPU memory for it; `None` where the GPU in
-/// use doesn't decode ProRes on Vulkan.
-fn kept_on_vulkan() -> Option<(Gpu, Arc<Picture>)> {
+#[test]
+fn a_12_bit_4_4_4_picture_draws_as_the_export_converts_it() {
+    draws_as_converted(VideoCodec::ProRes4444, 0, Layout::Yuv444p12);
+}
+
+#[test]
+fn a_12_bit_4_4_4_picture_with_alpha_draws_as_the_export_converts_it() {
+    draws_as_converted(VideoCodec::ProRes4444Alpha, 90, Layout::Yuv444p12);
+}
+
+/// A display device on NVIDIA's GPU in use, and the player's picture of
+/// `codec`, a ProRes stored turned against `rotation`, decoded on Vulkan
+/// and kept in GPU memory for it; `None` where the GPU in use doesn't
+/// decode ProRes on Vulkan.
+fn kept_on_vulkan(codec: VideoCodec, rotation: u16) -> Option<(Gpu, Arc<Picture>)> {
     let on_vulkan = GpuDecoder::best().is_some_and(|g| {
         g.kind_for(Id::PRORES) == Some(Kind::Vulkan) && g.why_not(Id::PRORES, || false).is_none()
     });
@@ -194,17 +206,19 @@ fn kept_on_vulkan() -> Option<(Gpu, Arc<Picture>)> {
         gpu_pictures: gpu.gpu_pictures(),
         ..Config::default()
     };
-    let picture = picture_with(VideoCodec::ProRes422Hq, 90, config);
+    let picture = picture_with(codec, rotation, config);
     assert_eq!(picture.gpu(), Some(Kind::Vulkan));
     Some((gpu, picture))
 }
 
-#[test]
-fn a_prores_picture_kept_on_vulkan_draws_from_gpu_memory_as_the_export_converts_it() {
-    let Some((gpu, picture)) = kept_on_vulkan() else {
+/// `codec`'s picture, turned by `rotation` and in `layout`, kept on Vulkan
+/// and drawn from GPU memory: within a level of the export's conversion
+/// wherever it is flat.
+fn draws_from_vulkan_as_converted(codec: VideoCodec, rotation: u16, layout: Layout) {
+    let Some((gpu, picture)) = kept_on_vulkan(codec, rotation) else {
         return;
     };
-    assert_eq!(picture.layout(), Layout::Yuv422p10);
+    assert_eq!(picture.layout(), layout);
     // The same picture, come down and converted by the export's filters.
     let theirs = picture.to_rgba(W, H).unwrap();
     let mut screen = Screen::new();
@@ -217,8 +231,23 @@ fn a_prores_picture_kept_on_vulkan_draws_from_gpu_memory_as_the_export_converts_
 }
 
 #[test]
+fn a_prores_picture_kept_on_vulkan_draws_from_gpu_memory_as_the_export_converts_it() {
+    draws_from_vulkan_as_converted(VideoCodec::ProRes422Hq, 90, Layout::Yuv422p10);
+}
+
+#[test]
+fn a_prores_4444_picture_kept_on_vulkan_draws_from_gpu_memory_as_the_export_converts_it() {
+    draws_from_vulkan_as_converted(VideoCodec::ProRes4444, 0, Layout::Yuv444p12);
+}
+
+#[test]
+fn a_prores_4444_picture_with_alpha_kept_on_vulkan_draws_from_gpu_memory_without_it() {
+    draws_from_vulkan_as_converted(VideoCodec::ProRes4444Alpha, 90, Layout::Yuv444p12);
+}
+
+#[test]
 fn a_prores_picture_kept_on_vulkan_draws_from_gpu_memory_again() {
-    let Some((gpu, picture)) = kept_on_vulkan() else {
+    let Some((gpu, picture)) = kept_on_vulkan(VideoCodec::ProRes422Hq, 90) else {
         return;
     };
     let mut first = Screen::new();
@@ -231,7 +260,7 @@ fn a_prores_picture_kept_on_vulkan_draws_from_gpu_memory_again() {
 
 #[test]
 fn a_prores_picture_kept_on_vulkan_and_drawn_again_is_imported_once() {
-    let Some((gpu, picture)) = kept_on_vulkan() else {
+    let Some((gpu, picture)) = kept_on_vulkan(VideoCodec::ProRes422Hq, 90) else {
         return;
     };
     let theirs = picture.to_rgba(W, H).unwrap();

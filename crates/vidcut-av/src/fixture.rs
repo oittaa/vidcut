@@ -50,6 +50,10 @@ pub enum VideoCodec {
     Hevc10,
     /// prores_ks HQ, 10-bit 4:2:2, intra-only.
     ProRes422Hq,
+    /// prores_ks 4444 from 10-bit 4:4:4, intra-only: decoded as 12 bits.
+    ProRes4444,
+    /// [`VideoCodec::ProRes4444`] with an alpha of a half everywhere.
+    ProRes4444Alpha,
     /// dnxhd as DNxHR HQ, 8-bit 4:2:2, intra-only.
     DnxHrHq,
     /// libvpx-vp9, 8-bit 4:2:0.
@@ -66,6 +70,8 @@ impl VideoCodec {
             Self::H264 => "h264",
             Self::Hevc10 => "hevc10",
             Self::ProRes422Hq => "prores",
+            Self::ProRes4444 => "prores4444",
+            Self::ProRes4444Alpha => "prores4444a",
             Self::DnxHrHq => "dnxhr",
             Self::Vp9 => "vp9",
             Self::Ffv1 => "ffv1",
@@ -77,7 +83,7 @@ impl VideoCodec {
         match self {
             Self::H264 => "libx264",
             Self::Hevc10 => "libx265",
-            Self::ProRes422Hq => "prores_ks",
+            Self::ProRes422Hq | Self::ProRes4444 | Self::ProRes4444Alpha => "prores_ks",
             Self::DnxHrHq => "dnxhd",
             Self::Vp9 => "libvpx-vp9",
             Self::Ffv1 => "ffv1",
@@ -90,12 +96,21 @@ impl VideoCodec {
             Self::H264 | Self::Vp9 | Self::Ffv1 => format::Pixel::YUV420P,
             Self::Hevc10 | Self::Av1 => format::Pixel::YUV420P10LE,
             Self::ProRes422Hq => format::Pixel::YUV422P10LE,
+            Self::ProRes4444 => format::Pixel::YUV444P10LE,
+            Self::ProRes4444Alpha => format::Pixel::YUVA444P10LE,
             Self::DnxHrHq => format::Pixel::YUV422P,
         }
     }
 
     fn intra_only(self) -> bool {
-        matches!(self, Self::ProRes422Hq | Self::DnxHrHq | Self::Ffv1)
+        matches!(
+            self,
+            Self::ProRes422Hq
+                | Self::ProRes4444
+                | Self::ProRes4444Alpha
+                | Self::DnxHrHq
+                | Self::Ffv1
+        )
     }
 }
 
@@ -992,6 +1007,7 @@ impl VideoTrack {
                 );
             }
             VideoCodec::ProRes422Hq => opts.set("profile", "3"),
+            VideoCodec::ProRes4444 | VideoCodec::ProRes4444Alpha => opts.set("profile", "4"),
             VideoCodec::DnxHrHq => opts.set("profile", "dnxhr_hq"),
             VideoCodec::Vp9 => {
                 opts.set("deadline", "realtime");
@@ -1131,7 +1147,10 @@ impl VideoTrack {
         let (w, h) = (cw, ch);
         let ten_bit = matches!(
             pixel,
-            format::Pixel::YUV420P10LE | format::Pixel::YUV422P10LE
+            format::Pixel::YUV420P10LE
+                | format::Pixel::YUV422P10LE
+                | format::Pixel::YUV444P10LE
+                | format::Pixel::YUVA444P10LE
         );
         if ten_bit {
             let stride = frame.stride(0);
@@ -1152,10 +1171,11 @@ impl VideoTrack {
                 }
             }
             for p in 1..frame.planes() {
+                // Chroma at its middle, and alpha, the fourth plane, at a half.
                 for px in frame.data_mut(p).as_chunks_mut::<2>().0 {
                     *px = 512u16.to_le_bytes();
                 }
-                if spec.picture == Picture::Colors {
+                if spec.picture == Picture::Colors && p < 3 {
                     paint_chroma(&mut frame, p, spec.rotation, |c| {
                         (u16::from(c) << 2).to_le_bytes()
                     });

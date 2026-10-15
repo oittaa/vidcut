@@ -19,6 +19,8 @@ fn main() {
         "h264" => VideoCodec::H264,
         "hevc10" => VideoCodec::Hevc10,
         "prores" => VideoCodec::ProRes422Hq,
+        "prores4444" => VideoCodec::ProRes4444,
+        "prores4444a" => VideoCodec::ProRes4444Alpha,
         "dnxhr" => VideoCodec::DnxHrHq,
         "vp9" => VideoCodec::Vp9,
         "ffv1" => VideoCodec::Ffv1,
