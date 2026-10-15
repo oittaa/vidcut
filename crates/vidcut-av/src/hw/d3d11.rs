@@ -15,13 +15,13 @@ use ::windows::Win32::Graphics::Direct3D11::{
     D3D11_VIDEO_PROCESSOR_FEATURE_CAPS_ROTATION, D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT,
     D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT, D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC,
     D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC_0, D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC,
-    D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0, D3D11_VIDEO_PROCESSOR_ROTATION,
-    D3D11_VIDEO_PROCESSOR_ROTATION_90, D3D11_VIDEO_PROCESSOR_ROTATION_180,
-    D3D11_VIDEO_PROCESSOR_ROTATION_270, D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY,
-    D3D11_VIDEO_PROCESSOR_STREAM, D3D11_VIDEO_USAGE_PLAYBACK_NORMAL,
-    D3D11_VPIV_DIMENSION_TEXTURE2D, D3D11_VPOV_DIMENSION_TEXTURE2D, ID3D11Device,
-    ID3D11DeviceContext, ID3D11Query, ID3D11Texture2D, ID3D11VideoContext1, ID3D11VideoDevice,
-    ID3D11VideoProcessor, ID3D11VideoProcessorEnumerator,
+    D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0, D3D11_VIDEO_PROCESSOR_ROTATION_90,
+    D3D11_VIDEO_PROCESSOR_ROTATION_180, D3D11_VIDEO_PROCESSOR_ROTATION_270,
+    D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY, D3D11_VIDEO_PROCESSOR_STREAM,
+    D3D11_VIDEO_USAGE_PLAYBACK_NORMAL, D3D11_VPIV_DIMENSION_TEXTURE2D,
+    D3D11_VPOV_DIMENSION_TEXTURE2D, ID3D11Device, ID3D11DeviceContext, ID3D11Query,
+    ID3D11Texture2D, ID3D11VideoContext1, ID3D11VideoDevice, ID3D11VideoProcessor,
+    ID3D11VideoProcessorEnumerator,
 };
 use ::windows::Win32::Graphics::Dxgi::Common::{
     DXGI_COLOR_SPACE_TYPE, DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P601,
@@ -381,8 +381,8 @@ pub(crate) struct Scaler {
     /// them (x, y, width, height); the rest is black.
     size: (u32, u32),
     place: (u32, u32, u32, u32),
-    /// The clockwise turn it gives them.
-    rotation: D3D11_VIDEO_PROCESSOR_ROTATION,
+    /// The clockwise turn it gives them, in degrees: 0, 90, 180 or 270.
+    rotation: u16,
     /// The color space the processor is told the frames come in and go
     /// out in: their own, so they're only scaled.
     space: DXGI_COLOR_SPACE_TYPE,
@@ -408,7 +408,7 @@ impl Scaler {
     ) -> Result<Self> {
         // SAFETY: the frame's own frames context.
         let layout = unsafe { (*((*source).data as *const ffi::AVHWFramesContext)).sw_format };
-        let (halvings, mut scaler) = Self::passes(f, source, layout, size, size)?;
+        let (halvings, mut scaler) = Self::passes(f, source, layout, size, 0)?;
         scaler.halvings = halvings;
         Ok(scaler)
     }
@@ -417,7 +417,7 @@ impl Scaler {
     /// scales them to `fitted` and places them in the middle of
     /// `frames`' (an encoder's), at even offsets as the CPU pads, on
     /// black, in their layout (10 bits into 8 too); checked as
-    /// [`new`](Self::new) checks.
+    /// [`new`](Self::new) checks, turned as it turns them.
     ///
     /// # Safety
     /// `frames` is a live D3D11 frames context on `source`'s device.
@@ -433,14 +433,8 @@ impl Scaler {
             let fc = &*((*frames).data as *const ffi::AVHWFramesContext);
             (fc.sw_format, (fc.width as u32, fc.height as u32))
         };
-        // The same processor drawing into textures of its own first. Any
-        // halvings are of the frames as they are stored, before the turn.
-        let stored = if rotation % 180 == 90 {
-            (fitted.1, fitted.0)
-        } else {
-            fitted
-        };
-        let (halvings, check) = Self::passes(f, source, layout, fitted, stored)?;
+        // The same passes into textures of its own first.
+        let (halvings, check) = Self::passes(f, source, layout, fitted, rotation)?;
         drop(check);
         let (fw, fh) = fitted;
         let place = (((size.0 - fw) / 2) & !1, ((size.1 - fh) / 2) & !1, fw, fh);
@@ -455,47 +449,34 @@ impl Scaler {
             .map_or((source, (f.width(), f.height())), |h| (h.frames, h.size));
         let mut scaler = Self::made(from, input, frames, size, place, color_space(f))?;
         scaler.halvings = halvings;
-        scaler.rotation = match rotation {
-            90 => D3D11_VIDEO_PROCESSOR_ROTATION_90,
-            180 => D3D11_VIDEO_PROCESSOR_ROTATION_180,
-            270 => D3D11_VIDEO_PROCESSOR_ROTATION_270,
-            _ => D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY,
-        };
-        if scaler.rotation != D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY {
-            let mut caps = D3D11_VIDEO_PROCESSOR_CAPS::default();
-            // SAFETY: the processor's enumerator fills the caps.
-            let turns = unsafe { scaler.enumerator.GetVideoProcessorCaps(&mut caps) }.is_ok()
-                && caps.FeatureCaps & D3D11_VIDEO_PROCESSOR_FEATURE_CAPS_ROTATION.0 as u32 != 0;
-            if !turns {
-                return Err(Error::Invalid(
-                    "the video processor doesn't turn pictures".into(),
-                ));
-            }
-        }
+        scaler.turn(rotation)?;
         Ok(scaler)
     }
 
-    /// The passes that scale frames like `f` (of `source`) into textures
-    /// of its own of `layout` at `size`, each passing the test picture:
-    /// halvings, then the last. A single pass that passes needs none.
-    /// Where it fails and the frames shrink more than twice either way
-    /// toward `toward` (`size` as they are stored), they are halved first,
-    /// in their own layout ([`halving_sizes`]).
+    /// The passes that scale frames like `f` (of `source`) to `fitted`,
+    /// turned clockwise by `rotation`, into textures of its own of
+    /// `layout`, each passing the test picture: halvings, then the last.
+    /// A single pass that passes needs none. Where it fails and the frames
+    /// shrink more than twice either way, they are halved first, unturned,
+    /// in their own layout, toward `fitted` as they are stored
+    /// ([`halving_sizes`], [`stored`]). The single pass and the last are
+    /// checked turned, as they are drawn: a driver may keep the levels of a
+    /// turned pass but not of the same shrink unturned (gotchas.md).
     fn passes(
         f: &frame::Video,
         source: *mut ffi::AVBufferRef,
         layout: ffi::AVPixelFormat,
-        size: (u32, u32),
-        toward: (u32, u32),
+        fitted: (u32, u32),
+        rotation: u16,
     ) -> Result<(Vec<Self>, Self)> {
         let (input, space) = ((f.width(), f.height()), color_space(f));
-        if let Some(one) = Self::tested(input, space, source, layout, size)? {
+        if let Some(one) = Self::tested(input, space, source, layout, fitted, rotation)? {
             return Ok((Vec::new(), one));
         }
-        let sizes = halving_sizes(input, toward);
+        let sizes = halving_sizes(input, stored(fitted, rotation));
         // No halvings for a shrink of at most twice, or a size too small to
         // test.
-        if sizes.is_empty() || !readable(size) {
+        if sizes.is_empty() || !readable(fitted) {
             return Err(Error::Invalid(
                 "the video processor changes the levels".into(),
             ));
@@ -508,31 +489,33 @@ impl Scaler {
         let mut at = input;
         for half in sizes {
             let from = halvings.last().map_or(source, |h| h.frames);
-            halvings.push(Self::tested(at, space, from, own, half)?.ok_or_else(changed)?);
+            halvings.push(Self::tested(at, space, from, own, half, 0)?.ok_or_else(changed)?);
             at = half;
         }
         let from = halvings.last().map_or(source, |h| h.frames);
-        let last = Self::tested(at, space, from, layout, size)?.ok_or_else(changed)?;
+        let last = Self::tested(at, space, from, layout, fitted, rotation)?.ok_or_else(changed)?;
         crate::debug!(
             "decoding",
             "{}x{} frames shrink to {}x{} in {} passes on the video processor, as one pass changes their levels",
             input.0,
             input.1,
-            size.0,
-            size.1,
+            fitted.0,
+            fitted.1,
             halvings.len() + 1
         );
         Ok((halvings, last))
     }
 
     /// A scaler of `input` frames of `source` (in `space`) into textures
-    /// of its own of `layout` at `size`, if it passes the test picture.
+    /// of its own of `layout` at `size`, turning them clockwise by
+    /// `rotation`, if it passes the test picture.
     fn tested(
         input: (u32, u32),
         space: DXGI_COLOR_SPACE_TYPE,
         source: *mut ffi::AVBufferRef,
         layout: ffi::AVPixelFormat,
         size: (u32, u32),
+        rotation: u16,
     ) -> Result<Option<Self>> {
         let flags = (D3D11_BIND_RENDER_TARGET.0, 0);
         // SAFETY: the device of a live frames context.
@@ -542,8 +525,27 @@ impl Scaler {
         };
         let place = (0, 0, size.0, size.1);
         let mut scaler = Self::made(source, input, frames, size, place, space)?;
+        scaler.turn(rotation)?;
         let keeps = scaler.keeps_levels(source, input)?;
         Ok(keeps.then_some(scaler))
+    }
+
+    /// Turns its pictures clockwise by `rotation` (0, 90, 180 or 270) from
+    /// now on; an error where the video processor doesn't turn pictures.
+    fn turn(&mut self, rotation: u16) -> Result<()> {
+        if rotation != 0 {
+            let mut caps = D3D11_VIDEO_PROCESSOR_CAPS::default();
+            // SAFETY: the processor's enumerator fills the caps.
+            let turns = unsafe { self.enumerator.GetVideoProcessorCaps(&mut caps) }.is_ok()
+                && caps.FeatureCaps & D3D11_VIDEO_PROCESSOR_FEATURE_CAPS_ROTATION.0 as u32 != 0;
+            if !turns {
+                return Err(Error::Invalid(
+                    "the video processor doesn't turn pictures".into(),
+                ));
+            }
+        }
+        self.rotation = rotation;
+        Ok(())
     }
 
     /// A processor of frames of `source`'s layout at `input` into
@@ -625,7 +627,7 @@ impl Scaler {
                 processor,
                 size,
                 place,
-                rotation: D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY,
+                rotation: 0,
                 space,
             }),
             Err(e) => {
@@ -638,7 +640,7 @@ impl Scaler {
 
     /// Whether a test picture of grays and colors at `input`, in the
     /// layout of `source`'s frames, comes out of it at the levels it
-    /// went in at.
+    /// went in at, turned as it turns its pictures ([`test_picture`]).
     fn keeps_levels(&mut self, source: *mut ffi::AVBufferRef, input: (u32, u32)) -> Result<bool> {
         // Too small to read, the scaler isn't trusted and the frames come
         // down whole.
@@ -652,37 +654,10 @@ impl Scaler {
                 (*((*frames).data as *const ffi::AVHWFramesContext)).sw_format
             })
         };
-        let pixel = layout(source);
-        let wide = pixel == format::Pixel::P010LE;
-        // 10-bit levels in a 16-bit word's top bits.
-        let shift = if wide { 8 } else { 0 };
         // Textures of 4:2:0 frames have even sides.
         let size = (input.0.next_multiple_of(2), input.1.next_multiple_of(2));
-        let (w, h) = (size.0 as usize, size.1 as usize);
+        let picture = test_picture(layout(source), size, self.rotation);
         let bands = BANDS.len();
-        let mut picture = frame::Video::new(pixel, size.0, size.1);
-        let mut put = |plane: usize, x: usize, y: usize, value: u16| {
-            let stride = picture.stride(plane);
-            let data = picture.data_mut(plane);
-            let value = value << shift;
-            if wide {
-                data[y * stride + 2 * x..][..2].copy_from_slice(&value.to_le_bytes());
-            } else {
-                data[y * stride + x] = value as u8;
-            }
-        };
-        for y in 0..h {
-            for x in 0..w {
-                put(0, x, y, BANDS[x * bands / w][0]);
-            }
-        }
-        for y in 0..h / 2 {
-            for x in 0..w / 2 {
-                let [_, u, v] = BANDS[2 * x * bands / w];
-                put(1, 2 * x, y, u);
-                put(1, 2 * x + 1, y, v);
-            }
-        }
         // SAFETY: frames made for the test, their reference let go once
         // the frame holds its own; a fresh frame uploaded into.
         let uploaded = unsafe {
@@ -700,7 +675,8 @@ impl Scaler {
             }
             frame
         };
-        let got = download(&self.scale(&uploaded)?)?;
+        // Uncounted: the test picture is none of the job's frames.
+        let got = downloaded(&self.scale(&uploaded)?)?;
         let wide_out = layout(self.frames) == format::Pixel::P010LE;
         let read = |plane: usize, x: usize, y: usize| {
             let (stride, data) = (got.stride(plane), got.data(plane));
@@ -802,8 +778,13 @@ impl Scaler {
                 c.VideoProcessorSetOutputColorSpace1(p, self.space);
                 // None of the driver's own enhancing.
                 c.VideoProcessorSetStreamAutoProcessingMode(p, 0, false);
-                let turned = self.rotation != D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY;
-                c.VideoProcessorSetStreamRotation(p, 0, turned, self.rotation);
+                let rotation = match self.rotation {
+                    90 => D3D11_VIDEO_PROCESSOR_ROTATION_90,
+                    180 => D3D11_VIDEO_PROCESSOR_ROTATION_180,
+                    270 => D3D11_VIDEO_PROCESSOR_ROTATION_270,
+                    _ => D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY,
+                };
+                c.VideoProcessorSetStreamRotation(p, 0, self.rotation != 0, rotation);
                 // The picture alone: the decoder's textures are padded.
                 c.VideoProcessorSetStreamSourceRect(
                     p,
@@ -850,6 +831,56 @@ impl Scaler {
 
 /// The last of the test picture's bands (`BANDS`), outside video range.
 const OUTSIDE: usize = 2;
+
+/// The test picture in `pixel` (NV12, P010) at `size` (even): [`BANDS`]
+/// side by side, painted turned back against `rotation` (clockwise, in
+/// degrees), so that once turned they stand left to right, where
+/// [`Scaler::keeps_levels`] reads them.
+fn test_picture(pixel: format::Pixel, size: (u32, u32), rotation: u16) -> frame::Video {
+    let wide = pixel == format::Pixel::P010LE;
+    // 10-bit levels in a 16-bit word's top bits.
+    let shift = if wide { 8 } else { 0 };
+    let (w, h) = (size.0 as usize, size.1 as usize);
+    let bands = BANDS.len();
+    // The band of (x, y): where it lands across the turned picture.
+    let band = |x: usize, y: usize| match rotation {
+        90 => (h - 1 - y) * bands / h,
+        180 => (w - 1 - x) * bands / w,
+        270 => y * bands / h,
+        _ => x * bands / w,
+    };
+    let mut picture = frame::Video::new(pixel, size.0, size.1);
+    let mut put = |plane: usize, x: usize, y: usize, value: u16| {
+        let stride = picture.stride(plane);
+        let data = picture.data_mut(plane);
+        let value = value << shift;
+        if wide {
+            data[y * stride + 2 * x..][..2].copy_from_slice(&value.to_le_bytes());
+        } else {
+            data[y * stride + x] = value as u8;
+        }
+    };
+    for y in 0..h {
+        for x in 0..w {
+            put(0, x, y, BANDS[band(x, y)][0]);
+        }
+    }
+    for y in 0..h / 2 {
+        for x in 0..w / 2 {
+            let [_, u, v] = BANDS[band(2 * x, 2 * y)];
+            put(1, 2 * x, y, u);
+            put(1, 2 * x + 1, y, v);
+        }
+    }
+    picture
+}
+
+/// `fitted`, the size of a picture turned clockwise by `rotation`, as its
+/// frames are stored, before the turn: its sides swapped for a quarter
+/// turn.
+fn stored((w, h): (u32, u32), rotation: u16) -> (u32, u32) {
+    if rotation % 180 == 90 { (h, w) } else { (w, h) }
+}
 
 /// The sizes frames of `from` are halved to, in turn, before the last
 /// pass to `to` (even): while what is left shrinks more than twice either
@@ -955,5 +986,75 @@ mod tests {
     #[test]
     fn a_side_that_shrinks_at_most_twice_isnt_halved() {
         assert_eq!(halving_sizes((2880, 2160), (1920, 720)), [(2880, 1080)]);
+    }
+
+    #[test]
+    fn a_4k_picture_turned_into_720x1280_halves_once() {
+        let toward = stored((720, 1280), 90);
+        assert_eq!(halving_sizes((3840, 2160), toward), [(1920, 1080)]);
+    }
+
+    #[test]
+    fn a_4k_picture_turned_into_1080x1920_doesnt_halve() {
+        let toward = stored((1080, 1920), 90);
+        assert!(halving_sizes((3840, 2160), toward).is_empty());
+    }
+
+    /// Plane `p` of `picture`'s first `n` bytes of each row, top down.
+    fn rows(picture: &frame::Video, p: usize, n: usize) -> Vec<Vec<u8>> {
+        let stride = picture.stride(p);
+        let data = picture.data(p);
+        (0..picture.plane_height(p) as usize)
+            .map(|y| data[y * stride..][..n].to_vec())
+            .collect()
+    }
+
+    #[test]
+    fn a_test_picture_turned_clockwise_has_its_first_band_at_the_bottom() {
+        // Turned clockwise, its bottom row lands on the left.
+        let picture = test_picture(format::Pixel::NV12, (20, 20), 90);
+        let luma: Vec<u8> = rows(&picture, 0, 1).concat();
+        assert_eq!(
+            luma,
+            [
+                250, 250, 4, 4, 32, 32, 173, 173, 63, 63, 235, 235, 192, 192, 128, 128, 64, 64, 16,
+                16
+            ]
+        );
+    }
+
+    #[test]
+    fn a_test_picture_turned_counterclockwise_has_its_first_band_at_the_top() {
+        // Turned counterclockwise, its top row lands on the left.
+        let picture = test_picture(format::Pixel::NV12, (20, 20), 270);
+        let luma: Vec<u8> = rows(&picture, 0, 1).concat();
+        assert_eq!(
+            luma,
+            [
+                16, 16, 64, 64, 128, 128, 192, 192, 235, 235, 63, 63, 173, 173, 32, 32, 4, 4, 250,
+                250
+            ]
+        );
+    }
+
+    #[test]
+    fn a_test_picture_turned_clockwise_has_its_colors_turned_too() {
+        let picture = test_picture(format::Pixel::NV12, (20, 20), 90);
+        // Cb and Cr of the first chroma sample of each row.
+        assert_eq!(
+            rows(&picture, 1, 2),
+            [
+                [128, 248],
+                [8, 128],
+                [240, 118],
+                [42, 26],
+                [102, 240],
+                [128, 128],
+                [128, 128],
+                [128, 128],
+                [128, 128],
+                [128, 128]
+            ]
+        );
     }
 }
