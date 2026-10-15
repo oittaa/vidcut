@@ -1227,12 +1227,30 @@ impl Workspace {
                 "edit.place_on_top"
             });
         }
-        // A dissolve on the edit nearest the playhead (the Dissolve button).
+        // A dissolve on the selected edit (V), placed by the side selected
+        // (U): ending on it from the outgoing clip's Out, starting on it
+        // from the incoming clip's In, centered on both; on the audio edit,
+        // the sound's alone. Without one, on the edit nearest the playhead
+        // (the Dissolve button).
         if pressed(Key::T) && m.command && !m.shift && !m.alt {
-            self.send(
-                "edit.dissolve",
-                json!({ "at": self.snap.timeline.position }),
-            );
+            use super::timeline::Side;
+            let params = match self.timeline.edit {
+                Some(e) => {
+                    let align = match e.side {
+                        Side::Out => "end",
+                        Side::In => "start",
+                        Side::Both | Side::Audio => "center",
+                    };
+                    json!({
+                        "at": e.at,
+                        "track": e.track.id(),
+                        "align": align,
+                        "picture": e.side != Side::Audio,
+                    })
+                }
+                None => json!({ "at": self.snap.timeline.position }),
+            };
+            self.send("edit.dissolve", params);
         }
         // Ctrl+\ splits; Ctrl+B too, which every keyboard layout
         // types without AltGr.
