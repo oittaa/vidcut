@@ -12,13 +12,14 @@
 //! `origin + (source_frame + j) / fps − ½ frame`, i.e. the nearest source
 //! frame, ties to the later one. Frame-exact for sources at the project rate.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, Project, TrackKind};
+use crate::model::{Clip, Media, Project, TrackKind};
 use crate::time::Rational;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -287,33 +288,49 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
 
 impl Project {
     pub(crate) fn media_origin(&self, media: &str) -> Result<(PathBuf, f64)> {
-        let m = self
-            .media(media)
-            .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
-        let origin = m
-            .info
-            .video
-            .as_ref()
-            .map(|v| v.first_pts)
-            .or_else(|| m.info.audio.first().map(|a| a.first_pts))
-            .unwrap_or(0.0);
-        Ok((m.path.clone(), origin))
+        Ok(origin_of(found(self.media(media), media)?))
     }
 
     /// How `media`'s pictures are read, if not as a video file's frames.
     pub fn media_image(&self, media: &str) -> Option<Image> {
-        let m = self.media(media)?;
-        let v = m.info.video.as_ref()?;
-        match &m.sequence {
-            Some(s) => Some(Image::Sequence {
-                pattern: m.path.parent().unwrap_or(Path::new("")).join(&s.pattern),
-                first: s.first,
-                count: s.count,
-                rate: v.fps,
-            }),
-            None if v.still => Some(Image::Still),
-            None => None,
-        }
+        image_of(self.media(media)?)
+    }
+}
+
+/// Pool item `id`, or that there is none.
+fn found<'a>(m: Option<&'a Media>, id: &str) -> Result<&'a Media> {
+    m.ok_or_else(|| Error::not_found(format!("no media {id}")))
+}
+
+/// The pool's items by id, found once for a whole plan.
+fn pool_of(p: &Project) -> HashMap<&str, &Media> {
+    p.media.iter().map(|m| (m.id.as_str(), m)).collect()
+}
+
+/// [`Project::media_origin`] of `m`.
+fn origin_of(m: &Media) -> (PathBuf, f64) {
+    let origin = m
+        .info
+        .video
+        .as_ref()
+        .map(|v| v.first_pts)
+        .or_else(|| m.info.audio.first().map(|a| a.first_pts))
+        .unwrap_or(0.0);
+    (m.path.clone(), origin)
+}
+
+/// [`Project::media_image`] of `m`.
+fn image_of(m: &Media) -> Option<Image> {
+    let v = m.info.video.as_ref()?;
+    match &m.sequence {
+        Some(s) => Some(Image::Sequence {
+            pattern: m.path.parent().unwrap_or(Path::new("")).join(&s.pattern),
+            first: s.first,
+            count: s.count,
+            rate: v.fps,
+        }),
+        None if v.still => Some(Image::Still),
+        None => None,
     }
 }
 
@@ -449,6 +466,7 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
     }
     let expanded = expanded(p);
     let p = expanded.as_ref().unwrap_or(p);
+    let pool = pool_of(p);
     let s = &p.settings;
     let sample = |t: i64| s.fps.frame_to_sample(t - a, s.sample_rate);
 
@@ -487,7 +505,8 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
         });
         match top {
             Some(c) => {
-                let (path, origin) = p.media_origin(&c.media)?;
+                let m = found(pool.get(c.media.as_str()).copied(), &c.media)?;
+                let (path, origin) = origin_of(m);
                 push_video(
                     &mut video,
                     VideoPiece::Source {
@@ -496,7 +515,7 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                         origin,
                         source_frame: c.source_at(x),
                         frames: y - x,
-                        image: p.media_image(&c.media),
+                        image: image_of(m),
                         pace: c.pace().after(x - c.start),
                     },
                 );
@@ -538,7 +557,8 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                     },
                 );
             } else {
-                let mut piece = source_audio(p, c, x, sample(y) - sample(x))?;
+                let m = found(pool.get(c.media.as_str()).copied(), &c.media)?;
+                let mut piece = source_audio(p, c, m, x, sample(y) - sample(x));
                 if let AudioPiece::Source { gain_db, .. } = &mut piece {
                     *gain_db += track.volume_db;
                 }
@@ -582,22 +602,22 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
 /// Audio of clip `c` from timeline frame `x`, `samples` long. At its speed
 /// (decision D48) the sound of the frames it shows, held frames silent;
 /// backward from the top of the first frame's stretch.
-fn source_audio(p: &Project, c: &Clip, x: i64, samples: i64) -> Result<AudioPiece> {
+fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> AudioPiece {
     let audio = c.audio.as_ref().expect("has audio");
-    let (path, origin) = p.media_origin(&c.media)?;
+    let (path, origin) = origin_of(m);
     let (fps, rate) = (p.settings.fps, p.settings.sample_rate);
     let speed = c.speed();
     let source_sample = if speed == 1.0 {
         fps.frame_to_sample(c.source_at(x), rate)
     } else if speed == 0.0 {
-        return Ok(AudioPiece::Silence { samples });
+        return AudioPiece::Silence { samples };
     } else {
         let per_frame = f64::from(rate) / fps.as_f64();
         let since = fps.frame_to_sample(x, rate) - fps.frame_to_sample(c.start, rate);
         fps.frame_to_sample(c.source_in, rate)
             + (c.pace().sound(0.0) * per_frame + since as f64 * speed).round() as i64
     };
-    Ok(AudioPiece::Source {
+    AudioPiece::Source {
         media: c.media.clone(),
         path,
         stream: audio.stream,
@@ -606,7 +626,7 @@ fn source_audio(p: &Project, c: &Clip, x: i64, samples: i64) -> Result<AudioPiec
         samples,
         gain_db: audio.gain_db,
         speed,
-    })
+    }
 }
 
 /// Plans one clip on its own: its video extent with its own audio (J/L
@@ -685,16 +705,15 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
     let s = &p.settings;
     let sample = |t: i64| s.fps.frame_to_sample(t, s.sample_rate);
     let (mut video, mut lane, mut entries) = (Vec::new(), Vec::new(), Vec::new());
+    let pool = pool_of(p);
     let mut t = 0;
     for id in media {
-        let m = p
-            .media(id)
-            .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
+        let m = found(pool.get(id.as_str()).copied(), id)?;
         let frames = p.media_frames(m);
         if frames <= 0 {
             continue;
         }
-        let (path, origin) = p.media_origin(id)?;
+        let (path, origin) = origin_of(m);
         if m.info.video.is_some() {
             push_video(
                 &mut video,
@@ -705,7 +724,7 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
                     origin,
                     source_frame: 0,
                     frames,
-                    image: p.media_image(id),
+                    image: image_of(m),
                 },
             );
         } else {
