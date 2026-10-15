@@ -106,9 +106,12 @@ pub struct KeptStats {
     pub ahead: usize,
     pub behind: usize,
     pub pictures: usize,
-    /// MB kept in memory and in video memory, each with its budget.
+    /// MB kept in memory and in video memory, each with the budget it
+    /// counts in.
     pub memory_mb: [usize; 2],
     pub video_mb: [usize; 2],
+    /// Both count in the memory budget: the GPU's memory is the computer's.
+    pub shared: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -208,6 +211,7 @@ impl PlayerStats {
                 pictures: s.kept,
                 memory_mb: mb(s.memory),
                 video_mb: mb(s.video),
+                shared: s.shared,
             },
             sound: SoundStats {
                 device,
@@ -316,12 +320,21 @@ impl PlaybackStats {
 impl KeptStats {
     fn rows(&self) -> Vec<(&'static str, String)> {
         let mb = |[used, budget]: [usize; 2]| format!("{used} of {budget} MB");
+        let (memory, video) = if self.shared {
+            let [[memory, budget], [video, _]] = [self.memory_mb, self.video_mb];
+            (
+                format!("{} of {budget} MB, video memory included", memory + video),
+                format!("{video} MB"),
+            )
+        } else {
+            (mb(self.memory_mb), mb(self.video_mb))
+        };
         vec![
             ("Ahead", format!("{} pictures", self.ahead)),
             ("Behind", format!("{} pictures", self.behind)),
             ("All", format!("{} pictures", self.pictures)),
-            ("Memory", mb(self.memory_mb)),
-            ("Video memory", mb(self.video_mb)),
+            ("Memory", memory),
+            ("Video memory", video),
         ]
     }
 }

@@ -1,8 +1,9 @@
 //! Decoded pictures, kept by what they show within memory budgets, one for
 //! memory and one for video memory (pictures a GPU decoded, for a display
-//! that shows them from there): those ahead of the clock, those just shown,
-//! windows decoded for going back and those around the playhead; and one
-//! held whatever the budget, the frame of the plan played next.
+//! that shows them from there), or one for both where they share it: those
+//! ahead of the clock, those just shown, windows decoded for going back and
+//! those around the playhead; and one held whatever the budget, the frame
+//! of the plan played next.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -59,6 +60,8 @@ struct Inner {
     /// Bytes kept and the budget, by [`Kind`].
     bytes: [usize; 2],
     budget: [usize; 2],
+    /// Pictures in video memory count in the memory budget ([`Store::share`]).
+    shared: bool,
     /// Never let go for the budget.
     held: Option<Id>,
 }
@@ -73,6 +76,7 @@ impl Store {
                 clock: 0,
                 bytes: [0; 2],
                 budget: [memory, video],
+                shared: false,
                 held: None,
             }),
             landed: Condvar::new(),
@@ -83,9 +87,25 @@ impl Store {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// The budget for pictures of `kind`.
+    /// The budget pictures of `kind` count in.
     pub(crate) fn budget(&self, kind: Kind) -> usize {
-        self.lock().budget[kind.index()]
+        let inner = self.lock();
+        inner.budget[inner.pool(kind).index()]
+    }
+
+    /// Whether pictures in video memory count in the memory budget.
+    pub(crate) fn shared(&self) -> bool {
+        self.lock().shared
+    }
+
+    /// Pictures in video memory count in the memory budget from now on
+    /// (`true`), where video memory is the computer's, or in their own.
+    /// Over a budget, those kept or looked at least recently go at once.
+    pub(crate) fn share(&self, shared: bool) {
+        let mut inner = self.lock();
+        inner.shared = shared;
+        inner.evict(Kind::Memory, None);
+        inner.evict(Kind::Video, None);
     }
 
     /// Another budget for pictures of `kind`: over it, those kept or
@@ -138,9 +158,9 @@ impl Store {
         self.lock().held = id;
     }
 
-    /// Keeps `picture` as `id`'s. Over its kind's budget, the pictures of
-    /// that kind kept or looked at least recently go first, never the one
-    /// just kept nor the one held.
+    /// Keeps `picture` as `id`'s. Over the budget it counts in, the
+    /// pictures counted there kept or looked at least recently go first,
+    /// never the one just kept nor the one held.
     pub(crate) fn put(&self, id: Id, picture: Arc<Picture>) {
         let mut inner = self.lock();
         inner.clock += 1;
@@ -209,16 +229,40 @@ impl Inner {
         }
     }
 
-    /// Lets the pictures of `kind` kept or looked at least recently go
-    /// while that kind is over its budget; never `keep` nor the one held.
+    /// The kind whose budget pictures of `kind` count in.
+    fn pool(&self, kind: Kind) -> Kind {
+        if self.shared { Kind::Memory } else { kind }
+    }
+
+    /// The bytes counted in `pool`'s budget.
+    fn counted(&self, pool: Kind) -> usize {
+        [Kind::Memory, Kind::Video]
+            .into_iter()
+            .filter(|k| self.pool(*k) == pool)
+            .map(|k| self.bytes[k.index()])
+            .sum()
+    }
+
+    /// `picture` takes some of `pool`'s budget.
+    fn charges_in(&self, picture: &Picture, pool: Kind) -> bool {
+        let charged = charges(picture);
+        [Kind::Memory, Kind::Video]
+            .into_iter()
+            .any(|k| self.pool(k) == pool && charged[k.index()] > 0)
+    }
+
+    /// Lets the pictures counted in `kind`'s budget, those kept or looked
+    /// at least recently, go while it is over; never `keep` nor the one
+    /// held.
     fn evict(&mut self, kind: Kind, keep: Option<&Id>) {
-        while self.bytes[kind.index()] > self.budget[kind.index()] {
+        let pool = self.pool(kind);
+        while self.counted(pool) > self.budget[pool.index()] {
             let held = self.held.as_ref();
             let oldest = self
                 .pictures
                 .iter()
                 .filter(|(k, (p, _))| {
-                    charges(p)[kind.index()] > 0 && Some(*k) != keep && Some(*k) != held
+                    self.charges_in(p, pool) && Some(*k) != keep && Some(*k) != held
                 })
                 .min_by_key(|(_, (_, used))| *used)
                 .map(|(k, _)| k.clone());
@@ -232,10 +276,40 @@ impl Inner {
 
 #[cfg(test)]
 mod tests {
-    use super::Kind;
+    use std::sync::Arc;
+
+    use super::{Kind, Store};
+    use crate::ffmpeg::{format::Pixel, frame};
+    use crate::player::frame::Picture;
+    use crate::player::plan::Id;
+
+    /// A 2×2 picture, 6 bytes: in memory, or on a GPU.
+    fn picture(gpu: bool) -> Arc<Picture> {
+        let frame = if gpu {
+            let mut f = frame::Video::empty();
+            f.set_format(crate::hw::Kind::VideoToolbox.pixel());
+            f.set_width(2);
+            f.set_height(2);
+            f
+        } else {
+            frame::Video::new(Pixel::YUV420P, 2, 2)
+        };
+        Arc::new(Picture::new(frame, 0, None, None))
+    }
 
     #[test]
     fn a_picture_kept_on_vulkan_counts_in_video_memory() {
         assert_eq!(Kind::kept_by(Some(crate::hw::Kind::Vulkan)), Kind::Video);
+    }
+
+    #[test]
+    fn a_shared_budget_lets_the_oldest_picture_of_either_kind_go() {
+        let store = Store::new(18, 0);
+        store.share(true);
+        for (pos, gpu) in [(0, false), (1, true), (2, false), (3, true)] {
+            store.put(Id::at("clip", pos), picture(gpu));
+        }
+        let kept = [0, 1, 2, 3].map(|pos| store.contains(&Id::at("clip", pos)));
+        assert_eq!(kept, [false, true, true, true]);
     }
 }

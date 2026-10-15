@@ -53,7 +53,8 @@ pub struct Player {
     pub memory_mb: u64,
     /// Video memory for pictures the GPU decoded and keeps there, in MB.
     /// `0` (the default): half the memory of the NVIDIA GPU that decodes
-    /// them, else 1 GB.
+    /// them, else 1 GB. On Apple silicon, where the GPU's memory is the
+    /// computer's, `0` counts them in `memory_mb` instead.
     pub video_memory_mb: u64,
     /// The audio device the player plays on, by its id (`vidcut doctor`
     /// lists them as `audio_outputs`). Empty (the default): the system's
