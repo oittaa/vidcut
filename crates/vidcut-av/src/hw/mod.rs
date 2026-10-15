@@ -1360,11 +1360,12 @@ pub(crate) fn reaches(from: Place, to: Place) -> bool {
 
 impl Fitter {
     /// `f` turned clockwise by `rotation` (0, 90, 180 or 270), scaled to
-    /// `fitted` and placed in an `out` picture of `layout` (NV12, P010), on
-    /// the GPU, with its timestamp and colors, its pixels square; `fitter`
-    /// made for frames like it first. Direct3D 11's go into `into`, the
-    /// encoder's frames. VideoToolbox's fit only where they fill the
-    /// picture in their own layout.
+    /// `fitted` and placed in an `out` picture of `layout` (NV12, P010; P210
+    /// and NV16 for Apple's ProRes encoder), on the GPU, with its timestamp
+    /// and colors, its pixels square; `fitter` made for frames like it
+    /// first. Direct3D 11's go into `into`, the encoder's frames.
+    /// VideoToolbox's fit only where they fill the picture in their own
+    /// layout.
     pub(crate) fn fit(
         fitter: &mut Option<Fitter>,
         f: &frame::Video,

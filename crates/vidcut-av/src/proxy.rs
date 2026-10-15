@@ -9,11 +9,12 @@
 //! The file is Matroska, written to a temporary name and renamed into place.
 //! Pictures are turned upright and scaled to `width`×`height` as 4:2:0, 10-bit
 //! from a source of more than 8 bits where the encoder takes them, 8-bit
-//! otherwise (ProRes 10-bit 4:2:2, DNxHR 8-bit 4:2:2). A 10-bit proxy keeps an
-//! HDR source's colors, an 8-bit one is SDR. Every encoder makes
-//! a keyframe every 60 frames (ProRes and DNxHR every frame) and shows frames
-//! in the order it codes them: a seek decodes at most 60 frames, and the
-//! preview needs no tail patches for a proxy.
+//! otherwise (ProRes 10-bit 4:2:2, DNxHR 8-bit 4:2:2, Apple's ProRes hardware
+//! 4:2:2 for a source with that much color: [`ProxyEncoder::pixel`]). A
+//! 10-bit proxy keeps an HDR source's colors, an 8-bit one is SDR. Every
+//! encoder makes a keyframe every 60 frames (ProRes and DNxHR every frame)
+//! and shows frames in the order it codes them: a seek decodes at most 60
+//! frames, and the preview needs no tail patches for a proxy.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -56,6 +57,11 @@ pub struct ProxyEncoder {
     /// found working with P010, SVT-AV1, x265 where this FFmpeg's takes 10
     /// bits, and ProRes, which is 10-bit.
     pub ten_bit: bool,
+    /// It takes 4:2:2 pictures here, so a source with that much color keeps
+    /// it: FFmpeg's ProRes and DNxHR, Vulkan's ProRes, and Apple's ProRes
+    /// hardware where the encoder check found it working with NV16 and
+    /// P210. AV1, HEVC and H.264 proxies are 4:2:0.
+    pub chroma_422: bool,
 }
 
 impl ProxyEncoder {
@@ -70,14 +76,19 @@ impl ProxyEncoder {
                 "libx265" => encode::cpu_ten_bit(name),
                 _ => false,
             },
+            chroma_422: matches!(name, "prores_ks" | "dnxhd"),
         }
     }
 
-    /// What it is, for people: `AV1, NVIDIA hardware (NVENC)`.
+    /// What it is, for people: `AV1, NVIDIA hardware (NVENC)`. ProRes made
+    /// from 4:2:0 pictures says so: `ProRes Proxy from 4:2:0, Apple hardware
+    /// (VideoToolbox)`.
     pub fn label(&self) -> String {
         let codec = match self.codec {
             "av1" => "AV1",
             "hevc" => "HEVC",
+            // Apple's ProRes hardware where the encoder check found no 4:2:2.
+            "prores" if !self.chroma_422 => "ProRes Proxy from 4:2:0",
             "prores" => "ProRes Proxy",
             "dnxhr" => "DNxHR LB",
             _ => "H.264",
@@ -102,19 +113,29 @@ impl ProxyEncoder {
         format!("{codec}, {what}")
     }
 
-    /// The layout of its pictures in memory, for a source of more than 8
-    /// bits with `ten`. Where it takes 10 bits ([`ten_bit`](Self::ten_bit)),
-    /// such a source's are P010 for the GPU's video engine and 10-bit 4:2:0
-    /// for SVT-AV1 and x265. Otherwise 8-bit 4:2:0, NV12 for AMF, QSV,
-    /// VAAPI and VideoToolbox. ProRes is always 10-bit 4:2:2, DNxHR 8-bit
-    /// 4:2:2, and H.264 8-bit.
-    fn pixel(&self, ten: bool) -> format::Pixel {
+    /// The layout of its pictures in memory, for a source whose frames are
+    /// in `source` (`hw::sw_format` of a GPU's). Where it takes 10 bits
+    /// ([`ten_bit`](Self::ten_bit)), a source of more than 8 bits gets P010
+    /// for the GPU's video engine and 10-bit 4:2:0 for SVT-AV1 and x265.
+    /// Otherwise 8-bit 4:2:0, NV12 for AMF, QSV, VAAPI and VideoToolbox.
+    /// ProRes is always 10-bit 4:2:2, DNxHR 8-bit 4:2:2, and H.264 8-bit.
+    /// Apple's ProRes hardware, where it takes 4:2:2
+    /// ([`chroma_422`](Self::chroma_422)), takes a source with 4:2:2 color
+    /// or more in 4:2:2: P210, or NV16 from 8 bits. A 4:2:0 source's
+    /// pictures stay 4:2:0 there, which keeps all its color and its frames
+    /// on the GPU: VideoToolbox doesn't change a frame's layout (`hw::vt`).
+    fn pixel(&self, source: format::Pixel) -> format::Pixel {
         use EncoderChoice::{Amf, Nvenc, Qsv, Vaapi, VideoToolbox};
-        use format::Pixel::{NV12, P010LE, YUV420P, YUV420P10LE, YUV422P, YUV422P10LE};
+        use format::Pixel::{
+            NV12, NV16, P010LE, P210LE, YUV420P, YUV420P10LE, YUV422P, YUV422P10LE,
+        };
         // H.264 and DNxHR LB stay 8-bit whatever the encoder check says:
         // GPUs don't decode 10-bit H.264, and DNxHR LB is 8-bit.
-        let ten = ten && self.ten_bit && !matches!(self.codec, "h264" | "dnxhr");
+        let ten = deep(source) && self.ten_bit && !matches!(self.codec, "h264" | "dnxhr");
+        let keeps_422 = self.chroma_422 && at_least_422(source);
         match (self.kind, self.codec) {
+            (VideoToolbox, "prores") if keeps_422 && deep(source) => P210LE,
+            (VideoToolbox, "prores") if keeps_422 => NV16,
             (Nvenc | Amf | Qsv | Vaapi | VideoToolbox, _) if ten => P010LE,
             (Amf | Qsv | Vaapi | VideoToolbox, _) => NV12,
             (_, "prores") => YUV422P10LE,
@@ -212,14 +233,14 @@ impl ProxyEncoder {
     /// The encoder as exports open theirs ([`encode::open_video`]), for a
     /// source whose first frame is `first`: its settings
     /// ([`options`](Self::options)), a keyframe every [`KEYFRAMES`] frames,
-    /// no B-frames and closed GOPs, one pass. Its pictures are 10-bit for a
-    /// source of more than 8 bits where it takes them
-    /// ([`pixel`](Self::pixel)). A 10-bit proxy keeps an HDR source's PQ or
-    /// HLG in BT.2020, with a PQ source's static HDR metadata as exports
-    /// write theirs (`encode::hdr_metadata`). An 8-bit one is SDR BT.709,
-    /// HDR tone-mapped.
+    /// no B-frames and closed GOPs, one pass. Its pictures are in the layout
+    /// [`pixel`](Self::pixel) gives the first frame's: 10-bit for a source
+    /// of more than 8 bits where it takes them. A 10-bit proxy keeps an HDR
+    /// source's PQ or HLG in BT.2020, with a PQ source's static HDR metadata
+    /// as exports write theirs (`encode::hdr_metadata`). An 8-bit one is SDR
+    /// BT.709, HDR tone-mapped.
     fn video_encoder(&self, first: Option<&frame::Video>) -> VideoEncoder {
-        let pixel = self.pixel(first.is_some_and(|f| deep(crate::hw::sw_format(f))));
+        let pixel = self.pixel(first.map_or(format::Pixel::YUV420P, crate::hw::sw_format));
         let hdr = first.and_then(crate::color::hdr_of).filter(|_| deep(pixel));
         let metadata = match (hdr, first) {
             (Some(Hdr::Pq), Some(f)) => {
@@ -332,7 +353,7 @@ fn round(e: &ProxyEncoder, plays: &[(&str, crate::hw::Kind)]) -> u8 {
 /// `codec`'s own encoders here, best first ([`encoders`]).
 fn own(codec: ProxyCodec, available: &Availability) -> Vec<ProxyEncoder> {
     use EncoderChoice::{Amf, Nvenc, Qsv, Vaapi, VideoToolbox, Vulkan};
-    use format::Pixel::{NV12, P010LE, YUV420P, YUV422P10LE};
+    use format::Pixel::{NV12, NV16, P010LE, P210LE, YUV420P, YUV422P10LE};
     let hardware: &[(&str, &'static str, EncoderChoice, format::Pixel)] = match codec {
         ProxyCodec::Av1 => &[
             ("av1_nvenc", "av1", Nvenc, YUV420P),
@@ -361,6 +382,7 @@ fn own(codec: ProxyCodec, available: &Availability) -> Vec<ProxyEncoder> {
     let mut out = Vec::new();
     for &(name, codec, kind, pixel) in hardware {
         if let Some(status) = available.find(name, pixel) {
+            let works = |p| available.find(name, p).is_some();
             out.push(ProxyEncoder {
                 name: name.into(),
                 codec,
@@ -368,7 +390,11 @@ fn own(codec: ProxyCodec, available: &Availability) -> Vec<ProxyEncoder> {
                 device: status.device.clone(),
                 // Found working with P010, or 10-bit already (Vulkan's
                 // ProRes).
-                ten_bit: pixel == YUV422P10LE || available.find(name, P010LE).is_some(),
+                ten_bit: pixel == YUV422P10LE || works(P010LE),
+                // 4:2:2 already (Vulkan's ProRes), or Apple's ProRes found
+                // working with 4:2:2 in 8 and 10 bits.
+                chroma_422: pixel == YUV422P10LE
+                    || (codec == "prores" && works(NV16) && works(P210LE)),
             });
         }
     }
@@ -958,6 +984,12 @@ fn deep(pixel: format::Pixel) -> bool {
         .is_some_and(|d| unsafe { (*d.as_ptr()).comp[0].depth } > 8)
 }
 
+/// Whether `pixel` has 4:2:2 color or more: color on every row (4:2:2,
+/// 4:4:4, RGB).
+fn at_least_422(pixel: format::Pixel) -> bool {
+    pixel.descriptor().is_some_and(|d| d.log2_chroma_h() == 0)
+}
+
 /// Writes the packets `enc` has ready, with their durations, and an HDR
 /// proxy's static metadata in each HEVC and AV1 keyframe that lacks it
 /// (`hdr`: the codec and the values), as exports put it there.
@@ -1175,6 +1207,7 @@ mod tests {
             kind: Nvenc,
             device: Some("0".into()),
             ten_bit: true,
+            chroma_422: false,
         }
     }
 
@@ -1190,12 +1223,14 @@ mod tests {
 
     #[test]
     fn nvencs_av1_takes_a_ten_bit_sources_pictures_as_p010() {
-        assert_eq!(nvencs_av1().pixel(true), format::Pixel::P010LE);
+        let got = nvencs_av1().pixel(format::Pixel::YUV420P10LE);
+        assert_eq!(got, format::Pixel::P010LE);
     }
 
     #[test]
     fn nvencs_av1_takes_an_eight_bit_sources_pictures_in_eight_bits() {
-        assert_eq!(nvencs_av1().pixel(false), format::Pixel::YUV420P);
+        let got = nvencs_av1().pixel(format::Pixel::YUV420P);
+        assert_eq!(got, format::Pixel::YUV420P);
     }
 
     #[test]
@@ -1203,7 +1238,10 @@ mod tests {
         crate::init();
         let nvidia = working(&[("h264_nvenc", Nvenc, "yuv420p")]);
         let h264 = own(ProxyCodec::H264, &nvidia).remove(0);
-        assert_eq!(h264.pixel(true), format::Pixel::YUV420P);
+        assert_eq!(
+            h264.pixel(format::Pixel::YUV420P10LE),
+            format::Pixel::YUV420P
+        );
     }
 
     #[test]
@@ -1214,14 +1252,16 @@ mod tests {
             kind: Vaapi,
             device: Some("/dev/dri/renderD128".into()),
             ten_bit: true,
+            chroma_422: false,
         };
-        assert_eq!(vaapi.pixel(true), format::Pixel::NV12);
+        assert_eq!(vaapi.pixel(format::Pixel::YUV420P10LE), format::Pixel::NV12);
     }
 
     #[test]
     fn svt_av1_takes_a_ten_bit_sources_pictures_in_ten_bits() {
         let svt = ProxyEncoder::software("libsvtav1", "av1");
-        assert_eq!(svt.pixel(true), format::Pixel::YUV420P10LE);
+        let got = svt.pixel(format::Pixel::YUV420P10LE);
+        assert_eq!(got, format::Pixel::YUV420P10LE);
     }
 
     #[test]
@@ -1232,8 +1272,9 @@ mod tests {
             kind: VideoToolbox,
             device: None,
             ten_bit: true,
+            chroma_422: false,
         };
-        assert_eq!(apple.pixel(true), format::Pixel::P010LE);
+        assert_eq!(apple.pixel(format::Pixel::P010LE), format::Pixel::P010LE);
     }
 
     #[test]
@@ -1244,6 +1285,7 @@ mod tests {
             kind: Nvenc,
             device: Some("0".into()),
             ten_bit: true,
+            chroma_422: false,
         };
         let source = first(format::Pixel::YUV420P10LE, None);
         let options = nvenc.video_encoder(Some(&source)).options;
@@ -1255,16 +1297,74 @@ mod tests {
         assert_eq!(profile, ["main10"]);
     }
 
-    #[test]
-    fn apples_prores_takes_a_ten_bit_sources_pictures_as_p010() {
-        let apple = ProxyEncoder {
+    /// Apple's ProRes hardware, which the encoder check found working with
+    /// P010, and with NV16 and P210 where `chroma_422`.
+    fn apples_prores(chroma_422: bool) -> ProxyEncoder {
+        ProxyEncoder {
             name: "prores_videotoolbox".into(),
             codec: "prores",
             kind: VideoToolbox,
             device: None,
             ten_bit: true,
-        };
-        assert_eq!(apple.pixel(true), format::Pixel::P010LE);
+            chroma_422,
+        }
+    }
+
+    #[test]
+    fn apples_prores_takes_a_prores_sources_frames_as_p210() {
+        let got = apples_prores(true).pixel(format::Pixel::P210LE);
+        assert_eq!(got, format::Pixel::P210LE);
+    }
+
+    #[test]
+    fn apples_prores_takes_an_eight_bit_4_2_2_sources_pictures_as_nv16() {
+        let got = apples_prores(true).pixel(format::Pixel::YUV422P);
+        assert_eq!(got, format::Pixel::NV16);
+    }
+
+    #[test]
+    fn apples_prores_takes_a_ten_bit_4_2_0_sources_frames_as_p010() {
+        let got = apples_prores(true).pixel(format::Pixel::P010LE);
+        assert_eq!(got, format::Pixel::P010LE);
+    }
+
+    #[test]
+    fn apples_prores_without_4_2_2_takes_a_prores_sources_frames_as_p010() {
+        let got = apples_prores(false).pixel(format::Pixel::P210LE);
+        assert_eq!(got, format::Pixel::P010LE);
+    }
+
+    #[test]
+    fn apples_prores_found_working_with_nv16_and_p210_takes_4_2_2() {
+        crate::init();
+        let apple = working(&[
+            ("prores_videotoolbox", VideoToolbox, "nv12"),
+            ("prores_videotoolbox", VideoToolbox, "nv16"),
+            ("prores_videotoolbox", VideoToolbox, "p210le"),
+        ]);
+        assert!(own(ProxyCodec::Prores, &apple)[0].chroma_422);
+    }
+
+    #[test]
+    fn apples_prores_found_working_with_nv12_alone_takes_no_4_2_2() {
+        crate::init();
+        let apple = working(&[("prores_videotoolbox", VideoToolbox, "nv12")]);
+        assert!(!own(ProxyCodec::Prores, &apple)[0].chroma_422);
+    }
+
+    #[test]
+    fn apples_prores_without_4_2_2_says_its_pictures_are_4_2_0() {
+        let label = apples_prores(false).label();
+        assert_eq!(
+            label,
+            "ProRes Proxy from 4:2:0, Apple hardware (VideoToolbox)"
+        );
+    }
+
+    #[test]
+    fn apples_prores_with_4_2_2_is_called_prores_proxy() {
+        let label = apples_prores(true).label();
+        assert_eq!(label, "ProRes Proxy, Apple hardware (VideoToolbox)");
     }
 
     #[test]
@@ -1275,6 +1375,7 @@ mod tests {
             kind: Nvenc,
             device: Some("0".into()),
             ten_bit: false,
+            chroma_422: false,
         };
         let want = [
             ("preset", "p4"),
@@ -1298,6 +1399,7 @@ mod tests {
             kind: VideoToolbox,
             device: None,
             ten_bit: false,
+            chroma_422: false,
         };
         let options = enc.video_encoder(None).options;
         let flags: Vec<&str> = options
