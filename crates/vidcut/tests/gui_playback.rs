@@ -5,7 +5,7 @@
 //! in the viewer, the Trim Editor and Dynamic Trim. Every picture the
 //! viewer shows as its frame's, and every picture a two-up cell shows as
 //! its frame's, must show that frame: each barcode is read. Nothing here is
-//! timed; `scripts/playback-check.sh` counts late and passed-over frames.
+//! timed; `scripts/playback-check.py` counts late and passed-over frames.
 //!
 //! Track 1 holds c1 = m1 0..80 at 0, c2 = m1 100..180 at 80 and c3 = m1
 //! 190..236 at 160, cut from one 240-frame clip at 60 fps.

@@ -45,7 +45,7 @@ media: ## Download the test clips into $VIDCUT_TEST_DATA (~/Downloads/vidcut-tmp
 
 playback: build ## Slow and dropped frames on heavy 4K60 clips, in a window of its own
 	cargo build --release -p vidcut-av --example make_fixture
-	scripts/playback-check.sh
+	scripts/playback-check.py
 
 install: build ## Copy vidcut to ~/.local/bin, or to PREFIX/bin
 	mkdir -p "$(PREFIX)/bin"
