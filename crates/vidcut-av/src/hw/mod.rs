@@ -1173,11 +1173,12 @@ pub(crate) fn can_fit(place: Place, ops: &Ops) -> bool {
 }
 
 /// Whether a frame's GPU (`from`) hands the picture it fits to an encoder
-/// that takes frames on another place, `to`: CUDA's to Vulkan's encoder
-/// ([`crate::cuda::reaches`]). No other GPU's frames leave their place.
+/// that takes frames on another place, `to`: CUDA's to Vulkan's encoder,
+/// Vulkan's to NVENC's CUDA frames ([`crate::cuda::reaches`]). No other
+/// GPU's frames leave their place.
 pub(crate) fn reaches(from: Place, to: Place) -> bool {
     match from {
-        Place::Cuda => crate::cuda::reaches(to),
+        Place::Cuda | Place::Vulkan => crate::cuda::reaches(from, to),
         _ => false,
     }
 }
@@ -1322,6 +1323,18 @@ mod tests {
     }
 
     #[test]
+    fn vulkans_frames_reach_nvencs_cuda_frames() {
+        assert!(reaches(Place::Vulkan, Place::Cuda));
+    }
+
+    #[test]
+    fn vulkans_frames_reach_no_other_gpus_encoder() {
+        for to in [Place::Vaapi, Place::D3d11, Place::VideoToolbox] {
+            assert!(!reaches(Place::Vulkan, to), "{to:?}");
+        }
+    }
+
+    #[test]
     fn other_gpus_frames_reach_no_other_place() {
         let gpus = [
             Place::Cuda,
@@ -1330,7 +1343,8 @@ mod tests {
             Place::VideoToolbox,
             Place::Vulkan,
         ];
-        for from in gpus.into_iter().filter(|&from| from != Place::Cuda) {
+        let others = [Place::Vaapi, Place::D3d11, Place::VideoToolbox];
+        for from in others {
             for to in gpus.into_iter().filter(|&to| to != from) {
                 assert!(!reaches(from, to), "{from:?} to {to:?}");
             }

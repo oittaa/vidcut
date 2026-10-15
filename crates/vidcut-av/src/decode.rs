@@ -983,11 +983,14 @@ impl VideoReader {
         self.kind
     }
 
-    /// NVDEC's CUDA device, when NVDEC decodes.
-    pub(crate) fn cuda(&self) -> Option<&crate::cuda::CudaDevice> {
+    /// The CUDA device of the GPU decoder it decodes with, whichever of its
+    /// kinds decodes the stream: NVDEC's, and for ProRes on Vulkan, the one
+    /// Vulkan's device was made from. Pictures made of its frames for NVENC
+    /// go there.
+    pub(crate) fn decoders_cuda(&self) -> Option<&crate::cuda::CudaDevice> {
         self.gpu
             .as_ref()
-            .filter(|_| self.kind == Some(crate::hw::Kind::Nvdec))
+            .filter(|_| self.kind.is_some())
             .and_then(crate::hw::GpuDecoder::cuda)
     }
 
