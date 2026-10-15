@@ -6,5 +6,3 @@ The frames a dissolve mixes come down from these GPUs to be mixed on the CPU, an
 - **VA-API:** FFmpeg's `overlay_vaapi` takes a global `alpha`.
 - **Direct3D 11:** the video processor blends a stream at an alpha (`VideoProcessorSetStreamAlpha`) over a background color.
 - **Vulkan** (Vulkan's ProRes encoder): FFmpeg 9.0.1 has `xfade_vulkan` and `blend_vulkan`. `blend_vulkan` takes its opacity only when it is set up, not per frame.
-
-The viewer and picture renders mix after converting each picture to RGB, so an HDR export's dissolve (mixed in PQ or HLG code values) shows otherwise there. Where every picture of a mix has the same colors (the usual HDR project), mixing their code values before the conversion would make them match.

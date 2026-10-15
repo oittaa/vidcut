@@ -838,15 +838,22 @@ impl VideoFrames {
             crate::hdr::copy_dynamic(from, &mut out, dv)?;
         }
         // HDR10+ never claims less light than it shows: each value the
-        // brightest picture's.
+        // brightest picture's. Black alone has no light; pictures without
+        // HDR10+ leave the mix without it, as they are outside one.
         if self.dynamic.hdr10plus {
             let light = layers
                 .iter()
                 .filter_map(|l| l.frame.as_ref())
                 .filter_map(crate::hdr::Hdr10Plus::of_frame)
-                .reduce(|a, b| a.brightest(&b))
-                .unwrap_or_else(|| crate::light::FrameLight::default().hdr10plus());
-            light.attach(&mut out)?;
+                .reduce(|a, b| a.brightest(&b));
+            let black = layers.iter().all(|l| l.frame.is_none());
+            match light {
+                Some(light) => light.attach(&mut out)?,
+                None if black => crate::light::FrameLight::default()
+                    .hdr10plus()
+                    .attach(&mut out)?,
+                None => {}
+            }
         }
         Ok(out)
     }
