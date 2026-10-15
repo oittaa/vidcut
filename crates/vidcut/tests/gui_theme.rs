@@ -51,8 +51,12 @@ fn a_theme_file_set_in_the_preferences_shows_at_once() {
         std::env::set_var("XDG_RUNTIME_DIR", dir.join("run"));
         std::env::set_var("XDG_CACHE_HOME", dir.join("cache"));
     }
+    // Neon with panels of another color.
+    let neon = include_str!("../themes/neon.toml");
+    let mine = neon.replace("panel = \"#130C22\"", "panel = \"#123456\"");
+    assert_ne!(mine, neon);
     let file = dir.join("mine.toml");
-    std::fs::write(&file, "extends = \"neon\"\n[colors]\npanel = \"#123456\"\n").unwrap();
+    std::fs::write(&file, mine).unwrap();
     let (h, session) = live::start(live::Config {
         project: None,
         create: false,

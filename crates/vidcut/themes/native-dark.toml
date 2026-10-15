@@ -1,7 +1,7 @@
-# Native Dark: the layered grays, corners and font of a desktop app in dark
-# mode, in the computer's accent color.
+# Native Dark: Native in dark mode, whatever the computer is set to.
 
 title = "Native Dark"
+light = false
 
 [colors]
 background = "#202020"

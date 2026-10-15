@@ -2,6 +2,7 @@
 # long sessions.
 
 title = "Studio"
+light = false
 
 [colors]
 background = "#111113"

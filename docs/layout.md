@@ -15,7 +15,7 @@ Inside `crates/vidcut`:
 | `storyboard.rs` | `storyboard.render`: a labeled PNG grid of the program's shots |
 | `env.rs` | `AvEnv`: probing and the measurements behind the automatic tools, cached |
 | `session.rs` | runs requests headless against a project file |
-| `themes.rs`, `themes/` | the GUI's themes: the built-in TOML files, the user's, `extends` |
+| `themes.rs`, `themes/` | the GUI's themes: the built-in TOML files and the user's |
 | `look.rs` | the computer's light or dark mode and accent color, which native themes follow |
 | `preferences.rs`, `thumbcache.rs` | `~/.config/vidcut/preferences.toml` and the pool thumbnails kept in `~/.cache/vidcut/thumbs` |
 | `threads.rs` | the one way the app starts threads: `threads::spawn(name, Work::Job \| Work::Interactive, f)`; media work runs at the lowest CPU priority |

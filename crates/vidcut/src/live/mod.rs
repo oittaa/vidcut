@@ -647,10 +647,10 @@ fn chosen_theme() -> (crate::themes::Theme, Option<String>) {
     let name = crate::preferences::load()
         .map(|p| p.appearance.theme)
         .unwrap_or_else(|_| crate::themes::DEFAULT.into());
-    match crate::themes::shown(&name) {
+    match crate::themes::load(&name) {
         Ok(t) => (t, None),
         Err(e) => (
-            crate::themes::shown(crate::themes::DEFAULT)
+            crate::themes::load(crate::themes::DEFAULT)
                 .unwrap_or_else(|_| crate::themes::default_theme().clone()),
             Some(format!(
                 "The theme {name} doesn't load, so the default one shows. {}",

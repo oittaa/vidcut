@@ -2,6 +2,7 @@
 # show a box only under the pointer.
 
 title = "Midnight"
+light = false
 
 [colors]
 background = "#08090E"

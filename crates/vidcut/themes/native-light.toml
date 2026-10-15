@@ -1,7 +1,7 @@
-# Native Light: Native Dark for bright rooms (deviation X22).
+# Native Light: Native in light mode, whatever the computer is set to
+# (deviation X22).
 
 title = "Native Light"
-extends = "native-dark"
 light = true
 
 [colors]
@@ -34,3 +34,30 @@ button_line = "#D0D0D0"
 button_hovered = "#EAEAEA"
 button_pressed = "#E0E0E0"
 shadow = "#0000003C"
+
+[shape]
+corners = 4
+windows = 8
+menus = 8
+panels = 8
+clips = 4
+gap = 2
+padding = 10
+bar_padding = [8, 5]
+spacing = [8, 6]
+button_padding = [11, 5]
+button_height = 26
+buttons = "flat"
+panel_border = true
+shadow = [0, 8, 16]
+
+[fonts]
+ui = ["system"]
+mono = ["system"]
+size = 14
+small = 11
+heading = 20
+mono_size = 13
+
+[decoration]
+style = "none"

@@ -2,6 +2,7 @@
 # light bar and a red playhead.
 
 title = "Cybertruck"
+light = false
 
 [colors]
 background = "#0A0A0B"
@@ -49,6 +50,14 @@ button_height = 25
 buttons = "filled"
 panel_border = false
 shadow = [0, 10, 24]
+
+[fonts]
+ui = ["Space Grotesk"]
+mono = ["Geist Mono"]
+size = 14.5
+small = 11
+heading = 19
+mono_size = 12.5
 
 [decoration]
 style = "steel"

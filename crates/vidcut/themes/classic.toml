@@ -2,6 +2,7 @@
 # built-in font.
 
 title = "Classic"
+light = false
 
 [colors]
 background = "#1C1C1E"

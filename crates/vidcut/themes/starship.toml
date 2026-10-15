@@ -1,10 +1,9 @@
 # Starship: a bridge display. Blue-black glass, a cyan edge, cut corners
-# and an amber playhead. Every other theme starts from this one, so it has
-# every key.
+# and an amber playhead. This file explains every key.
 #
 # A theme of your own goes in the themes folder (`vidcut preferences get`
-# says where) as NAME.toml. It lists only what it changes. The rest comes
-# from the theme it extends, this one unless it says `extends = "neon"`.
+# says where) as NAME.toml. A theme file has every key and needs no other
+# file, so start from a copy of a built-in one.
 # Colors are "#RRGGBB", or "#RRGGBBAA" with opacity. "system",
 # "system-light" and "system-dark" are the computer's accent color and a
 # lighter and a darker shade of it.
@@ -12,8 +11,8 @@
 title = "Starship"
 # Light themes start from light widgets.
 light = false
-# A theme to show instead while the computer is in light mode, like
-# `light_mode = "native-light"`.
+# A [light_mode] table at the end holds keys that replace the ones above
+# while the computer is in light mode, as in native.toml.
 
 [colors]
 # Behind the panels, the top bar and the status bar.
@@ -106,10 +105,8 @@ style = "hud"
 cut = 16
 # hud: the edges and brackets, then the viewer's cut corners.
 # glow: the panels' glow, then the viewer's.
-# steel: the light bar.
+# steel: the light bar, and with `top`, `bottom` and `edge` the slabs'
+# shading from top to bottom and their edge.
+# A style leaves out the keys it doesn't use.
 color = "#00D4FF"
 color2 = "#FFB020"
-# steel: the slabs' shading from top to bottom, and their edge.
-top = "#0A0F16"
-bottom = "#0A0F16"
-edge = "#162C3A"

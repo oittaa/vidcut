@@ -2,6 +2,7 @@
 # a retro grid in the viewer.
 
 title = "Neon"
+light = false
 
 [colors]
 background = "#090512"
