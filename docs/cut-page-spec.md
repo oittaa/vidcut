@@ -13,11 +13,12 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 **In scope:**
 - media pool, viewer, dual timeline
 - editing and trimming, constant speed changes (D48)
+- dissolves: cross dissolves, fades to and from black, audio cross fades (§8.11)
 - clip/track audio levels and waveforms
 - Quick Export, plus our Export dialog
 
 **Out of scope (out):**
-- effects, transitions, titles, generators, keyframes
+- effects, other transitions, titles, generators, keyframes
 - color, Fusion, Smart Reframe, Close Up
 - Sync Bin, Multi Source, Source Overwrite, Live Overwrite
 - Replay, voiceover, subtitles
@@ -29,7 +30,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 
 - **Main areas:** Media Pool on the left, a single Viewer on the right, and the timeline area across the bottom. The pool/viewer seam and the timeline height can be resized.
 - **Top bar:** Media Pool tab, Mixer tab, Quick Export, Full Screen viewer. (Sync Bin, Transitions, Titles and Effects tabs and the Inspector: out.)
-- **Below the Media Pool:** the edit-function buttons (§7).
+- **Below the Media Pool:** the edit-function buttons (§7), and Cut and Dissolve (§8.11).
 - **Viewer chrome:**
   - mode buttons in the top-left
   - Duration field in the top-right
@@ -311,6 +312,14 @@ Hover the lower audio part of a clip at an edit until the cursor shows a note, t
 - A History list shows recent steps and can jump back to one.
 - A new change discards the redo steps.
 
+### 8.11 Dissolves (pp. 645, 747, 758–761, 1114, 1159, 1173)
+- **Dissolve and Ctrl+T** (p. 758): a one-second Cross Dissolve on the edit nearest the playhead, centered on it. Ctrl+T puts it on the selected edit (V) instead, and U picks where: ending on the edit (the outgoing side selected), starting on it (the incoming side) or centered (both). Where the clips' sounds meet at that edit, a Cross Fade goes on the sound too (p. 1114). Details: D50.
+- **Cut** (p. 759): the edit nearest the playhead becomes a cut again.
+- **Timeline Actions** (p. 645): Add Dissolve to All Edits, Clear Transition from All Edits.
+- **Handles** (pp. 760, 1159): through a dissolve each clip shows its media past its edge, so a dissolve is as long as the clips have frames there.
+- **How it plays** (pp. 747, 1173): the outgoing picture fades out as the incoming one fades in, in a straight line. At an edge with a gap, the clip fades from or to black. A Cross Fade turns one sound down while the next comes up, at +3, 0 or −3 dB at its middle.
+- **Out:** other transitions (wipes, Smooth Cut, the Transitions browser), the Transition Inspector's settings (style, ease, ratios, curves), dragging a transition's edges or moving it, Set Default Transition.
+
 ## 9. Audio (pp. 642, 649–650, 743, 771, 773)
 
 - **Meter:** green is safe, yellow is near the limit, red risks clipping.
@@ -364,6 +373,7 @@ Shortcuts do nothing while a text field has focus or a question (a modal dialog)
 | F12 | Place On Top | 890† |
 | Shift+F12 | Append | 890† |
 | Ctrl+\ | Split at playhead | 723 |
+| Ctrl+T | Dissolve on the selected edit, or the one nearest the playhead (§8.11) | 758 |
 | Ctrl+B | Split at the playhead; same as the row above, without AltGr | 723 |
 | Delete / Backspace | Delete selection (ripples on Track 1) | 725 |
 | Alt+Delete | Lift the selection (leave the gap; D9) | 725 |
@@ -561,3 +571,13 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - Two clips join when the second plays on from where the first stops, so joining changes nothing you see or hear. They sit side by side on one track, with the same media, speed and settings and no frames missing between them. A fade or a carried transition where they meet keeps them apart.
   - With two or more clips selected, the ones that meet join. Otherwise the clips that meet at the playhead join: the selected ones there, or else those on every unlocked track, as with Split (D2).
   - A run of parts becomes its first part, which keeps its id.
+- **D50. Dissolves** (§8.11; deviation X9). The manual says only that the outgoing picture fades as the incoming one comes in. How each frame looks and sounds was measured on Resolve Studio 21.1.1's renders.
+  - **Levels:** frame i of an n-frame dissolve shows the incoming picture at (i + ½)/n of its level and the outgoing one at the rest (0.05, 0.15 … 0.95 for 10 frames). They are mixed in the output's code values (YUV, or RGB for a picture render), not in linear light, as Resolve's measure.
+  - **Gaps:** a dissolve into or out of a gap mixes the clip with what is under the track there: black on V1, a lower track's picture elsewhere.
+  - **What plays:** OTIO's `SMPTE_Dissolve`, unless the editor metadata names another kind of dissolve, and a sound's Cross Fade, by its effect type (41 +3 dB, 40 0 dB, 26 −3 dB, which Resolve's import goes by) or name. Another editor's `SMPTE_Dissolve` on sound plays at 0 dB. A transition plays only where its frames hold nothing of the track but its two clips, and not over another's frames. Any other transition plays as a cut (deviation X9).
+  - **Cross fade curves:** at x of the way, the incoming sound's gain is √x (+3 dB), x (0 dB) or x^1.5 (−3 dB), and the outgoing one's the same of 1 − x. It starts from silence at the fade's first sample and covers the transition's frames exactly. Resolve draws the curve as straight lines between points 1000 samples apart. vidcut plays the curve itself, which differs by up to 0.06 in the first 1000 samples of a +3 dB fade.
+  - **De-click:** a cross fade's own edges get none, as in Resolve.
+  - **Made here:** a second, centered with an odd length's middle frame before the edit, as Resolve centers one. Each side is shortened to the frames its clip's media and the track leave, and with none on either side it is an error. A new one replaces the transition on its edit. The sound gets a Cross Fade +3 dB where the two clips' sounds meet at one frame (no J/L offset between them), or a fade at a gap. A J/L cut's sound gets its own with Ctrl+T on its audio edit. They are written as Resolve writes its own.
+  - **Viewer:** each picture is drawn over the ones before at its level, after its conversion to the viewer's RGB: within a level of the export's mix in SDR. An HDR export mixes in its PQ or HLG code values, and the viewer shows that picture tone-mapped, so mid-dissolve it is not the export's mix tone-mapped.
+  - **On the GPU:** NVIDIA's GPU mixes NVENC's pictures with the CPU's sums. Frames for Direct3D 11's, VA-API's and VideoToolbox's encoders come down to be mixed on the CPU ([todo](todo/gpu-dissolves.md)).
+  - **The two-up** shows the clips without their dissolves.

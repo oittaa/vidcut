@@ -9,12 +9,12 @@
 - The work is planned by `vidcut_core::render::flatten`, a pure function, then encoded by the engine.
 
 **Plan:**
-- Video is a list of pieces: source ranges or black.
-- Audio is one or more lanes of pieces: source ranges or silence.
+- Video is a list of pieces: source ranges, black, or a dissolve's mix of them, each over the ones before at its level (spec D50).
+- Audio is one or more lanes of pieces: source ranges, a cross fade's with its gain curve, or silence. On a track with cross fades the sound after each one's cut goes on the track's other lane, so both play through it.
 - Every boundary is computed with exact integer math. Audio boundaries use `Rational::frame_to_sample` (i128, rounded), so lengths never drift. For example, 29.97 fps at 48 kHz alternates 1601 and 1602 samples per frame.
 
 **Engine:**
-- For each output frame, it pulls the next video frame from the current piece's decoder, then exactly the audio samples that frame spans from each lane, and encodes them.
+- For each output frame, it pulls the next video frame from the current piece's decoder (one for each picture of a mix), then exactly the audio samples that frame spans from each lane, and encodes them.
 - Memory stays flat with the segment count: each reader (video, and each audio lane) has its current file open, plus the next one while it opens. A test with 400 segments checks this, in a process of its own.
 - A two-pass export (§5, Passes) runs the video through the encoder twice: the first time to measure, muxing nothing, then as above.
 
@@ -60,7 +60,7 @@ Output frame `k` of a source piece shows the **first source frame whose timestam
 - libswresample converts to interleaved `f32` at the export rate and layout: mono is upmixed, 5.1 is downmixed. vidcut sizes the output buffers itself, as ffmpeg-next's wrapper can truncate when upsampling.
 - **Loudness normalization** (`audio.loudness`): [agents.md](agents.md) §5.
 - Lanes are summed in Rust, with clip gain applied.
-- **De-click:** 3 ms linear fades at every cut inside a lane (on by default; `declick=false` turns them off).
+- **De-click:** 3 ms linear fades at every cut inside a lane, but none at a cross fade's own edges (on by default; `declick=false` turns them off).
 - **Speed changes** (spec D48): a piece at another speed reads its source forward, or backward half a second at a time with each read reversed, through the WSOLA stretch (`stretch.rs`, the player's), keeping the pitch. Starting inside it, the stretch starts 20 ms before and drops that, as its first fragment fades in.
 
 Beeps land within 1 ms of where they should across codec boundaries, and output sample counts are exact.
@@ -68,6 +68,7 @@ Beeps land within 1 ms of where they should across codec boundaries, and output 
 ## 4. Video normalization
 
 - Each source frame goes through a libavfilter graph: `scale` (fit inside the output keeping the display aspect, honoring the sample aspect ratio), `pad` (black, centered), `setsar=1`, `format=<encoder pixel format>`. The fit is computed in Rust (`export::normalize::fit`).
+- **Dissolves** (spec D50): each picture of a mix is made into the output by a stage of its own (its own normalizer), then they are mixed sample by sample: `(under × (65536 − w) + over × w + 32768) >> 16`, w the level in 65536ths. For NVENC on NVIDIA's GPU (`cuda/mix.rs`, a PTX kernel the driver compiles), else on the CPU (`export/mix.rs`). The planner brings mixed frames down from other GPUs (`route::Facts::mixed`). The mix keeps the colors and dynamic HDR metadata of the picture it shows most of.
 - **Rotation** (spec D33): a stream's display matrix turns the picture upright first: `transpose=clock` or `cclock`, or `hflip,vflip` for 180°. The fit then uses the shown aspect. Thumbnails turn their pictures the same way.
 - **Interlaced sources** (spec D34): `VideoReader` deinterlaces streams flagged interlaced, in decode order and before the sampling rule picks frames, so `bwdif` sees each frame's real neighbors.
   - It runs `bwdif=mode=send_frame:deint=interlaced`: one frame per frame, the first field kept, progressive frames passing through. Frames NVDEC decodes go through `bwdif_cuda` with the same options (§5).
