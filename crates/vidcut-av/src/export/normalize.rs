@@ -302,7 +302,8 @@ fn simple_graph(args: &str, spec: &str) -> Result<filter::Graph> {
 
 /// The layouts a display takes: 4:2:0 in 8 bits (planar, or NV12 as
 /// hardware decoders give it) and in 10 (P010, or planar as the CPU's
-/// decoders give it), and planar 4:2:2 in 8 and 10 bits.
+/// decoders give it), and 4:2:2 in 8 and 10 bits planar, and in 10
+/// interleaved (P210, as VideoToolbox gives ProRes).
 pub(crate) fn displayable(p: format::Pixel) -> bool {
     use format::Pixel as P;
     matches!(
@@ -315,6 +316,7 @@ pub(crate) fn displayable(p: format::Pixel) -> bool {
             | P::YUV422P
             | P::YUVJ422P
             | P::YUV422P10LE
+            | P::P210LE
     )
 }
 
@@ -442,6 +444,11 @@ mod tests {
     #[test]
     fn a_display_takes_10_bit_planar_4_2_2() {
         assert!(displayable(Pixel::YUV422P10LE));
+    }
+
+    #[test]
+    fn a_display_takes_10_bit_interleaved_4_2_2() {
+        assert!(displayable(Pixel::P210LE));
     }
 
     #[test]
