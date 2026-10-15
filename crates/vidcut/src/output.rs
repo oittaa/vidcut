@@ -420,6 +420,30 @@ pub fn print(method: &str, r: &Response, json: bool) {
             "deleted preset {}",
             r.result["deleted"].as_str().unwrap_or_default()
         ),
+        "keys.list" => {
+            let mut group = "";
+            for s in r.result["shortcuts"].as_array().into_iter().flatten() {
+                let title = s["group_title"].as_str().unwrap_or_default();
+                if title != group {
+                    if !group.is_empty() {
+                        println!();
+                    }
+                    println!("{title}");
+                    group = title;
+                }
+                let keys: Vec<&str> = s["keys"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .collect();
+                println!(
+                    "  {:<18} {}",
+                    keys.join("+"),
+                    s["action"].as_str().unwrap_or_default()
+                );
+            }
+        }
         "preferences.get" | "preferences.set" => {
             let mut lines = Vec::new();
             flatten("", &r.result["preferences"], &mut lines);

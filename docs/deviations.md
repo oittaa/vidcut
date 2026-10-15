@@ -206,3 +206,8 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 - **Resolve:** one dark gray look.
 - **vidcut:** nine built-in themes and your own TOML files. Native, the default, follows the computer's light or dark mode and accent color, so it can be light. Classic is a flat dark gray like the Cut page's. File > Preferences or `preferences set appearance.theme=…` switches at once.
 - **Why:** a desktop app is expected to offer a few looks, and people spend long sessions in an editor. Every theme keeps the Cut page's layout and what its colors mean.
+
+## X23. A Keyboard Shortcuts window
+- **Resolve:** the keys are listed and changed in its Keyboard Customization window, without explanations.
+- **vidcut:** F1, or Help in the top bar, opens a list of every shortcut, one action a row. A ? beside an action that isn't obvious, like Dynamic Trim or Ripple Overwrite, opens a few plain words on what it does and why. Keys can't be changed.
+- **Why:** newcomers learn the keys and what the editing ideas are for in one place, without leaving the app.

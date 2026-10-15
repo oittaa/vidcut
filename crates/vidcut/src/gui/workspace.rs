@@ -137,6 +137,8 @@ pub struct Workspace {
     pub(super) mixer: super::mixer::Mixer,
     /// File > Preferences.
     pub(super) preferences: super::preferences::PreferencesUi,
+    /// The Keyboard Shortcuts window.
+    pub(super) help: super::help::HelpUi,
     pub(super) project_ui: super::project::ProjectUi,
     pub(super) import: super::import::ImportUi,
     pub(super) relink: super::relink::RelinkUi,
@@ -270,6 +272,7 @@ impl Workspace {
             show_mixer: false,
             mixer: Default::default(),
             preferences: Default::default(),
+            help: Default::default(),
             project_ui: Default::default(),
             import: Default::default(),
             relink: Default::default(),
@@ -308,6 +311,7 @@ impl Workspace {
             GuiPanel::Log => self.show_log = true,
             GuiPanel::Mixer => self.show_mixer = true,
             GuiPanel::Preferences => self.open_preferences(ctx),
+            GuiPanel::Help => self.help.open = true,
         }
     }
 
@@ -796,6 +800,8 @@ impl Workspace {
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.toggle_value(&mut self.help.open, "Help")
+                    .on_hover_text("Keyboard shortcuts, with what the less obvious ones do (F1)");
                 ui.toggle_value(&mut self.show_log, "Command log");
                 if self.project().is_some() {
                     ui.toggle_value(&mut self.show_mixer, "Mixer")
@@ -1126,6 +1132,13 @@ impl Workspace {
                 });
             });
             return;
+        }
+        // The shortcuts window, with or without a project.
+        if ctx.input(|i| i.key_pressed(Key::F1)) {
+            self.help.open = !self.help.open;
+        }
+        if self.help.open && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape)) {
+            self.help.open = false;
         }
         if ctx.input(|i| i.modifiers.command && i.key_pressed(Key::Comma)) {
             self.open_preferences(ctx);
@@ -1628,6 +1641,7 @@ impl Workspace {
         self.keys(&ctx);
         self.export_windows(&ctx);
         self.preferences_window(&ctx);
+        self.help_window(&ctx);
         self.project_windows(&ctx);
         self.import_window(&ctx);
         self.relink_window(&ctx);

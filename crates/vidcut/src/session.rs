@@ -11,6 +11,25 @@ use vidcut_core::store::{Store, state_dir};
 use vidcut_core::{Editor, Envelope, Error, ErrorCode, Project, Request, Response, Result};
 
 use crate::env::AvEnv;
+
+/// `keys.list`: the shortcuts, their keys named as on this system.
+fn shortcuts() -> Value {
+    use vidcut_core::shortcuts::{SHORTCUTS, key_name};
+    let mac = cfg!(target_os = "macos");
+    let list: Vec<Value> = SHORTCUTS
+        .iter()
+        .map(|s| {
+            json!({
+                "group": s.group,
+                "group_title": s.group.title(),
+                "action": s.action,
+                "keys": s.keys.iter().map(|k| key_name(k, mac)).collect::<Vec<_>>(),
+                "explanation": s.explanation.map(crate::gui::keys),
+            })
+        })
+        .collect();
+    json!({ "shortcuts": list })
+}
 use crate::export;
 
 /// Cancellation and progress for long-running requests (exports).
@@ -157,6 +176,7 @@ pub fn run_with(
             answer(json!({ "decoders": vidcut_av::hw::decoders(&clips) }))
         }
         Request::PreferencesGet {} => answer(crate::preferences::get()?),
+        Request::KeysList {} => answer(shortcuts()),
         Request::PreferencesSet(patch) => answer(crate::preferences::set(patch, envelope.dry_run)?),
         Request::ExportStart(params) if params.background => {
             return Err(Error::no_instance(

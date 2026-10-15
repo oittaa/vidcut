@@ -8,6 +8,7 @@ mod app;
 pub mod export;
 mod file_manager;
 mod folders;
+mod help;
 mod import;
 mod mixer;
 pub mod picture;
