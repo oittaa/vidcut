@@ -675,7 +675,8 @@ impl Scaler {
             }
             frame
         };
-        let got = download(&self.scale(&uploaded)?)?;
+        // Uncounted: the test picture is none of the job's frames.
+        let got = downloaded(&self.scale(&uploaded)?)?;
         let wide_out = layout(self.frames) == format::Pixel::P010LE;
         let read = |plane: usize, x: usize, y: usize| {
             let (stride, data) = (got.stride(plane), got.data(plane));
