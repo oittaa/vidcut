@@ -367,6 +367,10 @@ pub(crate) fn can_fit(ops: &crate::route::Ops) -> bool {
 /// textures for an encoder as well, which AMD's driver refuses, and
 /// scales the padding of the decoder's textures in.
 pub(crate) struct Scaler {
+    /// Passes that halve the frames first, in turn, where one pass
+    /// changes their levels ([`Scaler::passes`]). Empty where one pass
+    /// keeps them.
+    halvings: Vec<Scaler>,
     /// The frames it draws to: single textures, a pool that grows.
     frames: *mut ffi::AVBufferRef,
     video: ID3D11VideoDevice,
@@ -395,7 +399,8 @@ impl Scaler {
     /// Scales frames like `f` (of `source`) to `size` (even), keeping
     /// their levels and colors; an error where the video processor
     /// doesn't take their layout, or changes a test picture of grays and
-    /// colors (a driver's own processing).
+    /// colors (a driver's own processing) in one pass and in halvings
+    /// ([`passes`](Self::passes)).
     pub(super) fn new(
         f: &frame::Video,
         source: *mut ffi::AVBufferRef,
@@ -403,7 +408,9 @@ impl Scaler {
     ) -> Result<Self> {
         // SAFETY: the frame's own frames context.
         let layout = unsafe { (*((*source).data as *const ffi::AVHWFramesContext)).sw_format };
-        Self::checked(f, source, layout, size)
+        let (halvings, mut scaler) = Self::passes(f, source, layout, size, size)?;
+        scaler.halvings = halvings;
+        Ok(scaler)
     }
 
     /// Turns frames like `f` (of `source`) clockwise by `rotation`,
@@ -426,8 +433,15 @@ impl Scaler {
             let fc = &*((*frames).data as *const ffi::AVHWFramesContext);
             (fc.sw_format, (fc.width as u32, fc.height as u32))
         };
-        // The same processor drawing into textures of its own first.
-        drop(Self::checked(f, source, layout, fitted)?);
+        // The same processor drawing into textures of its own first. Any
+        // halvings are of the frames as they are stored, before the turn.
+        let stored = if rotation % 180 == 90 {
+            (fitted.1, fitted.0)
+        } else {
+            fitted
+        };
+        let (halvings, check) = Self::passes(f, source, layout, fitted, stored)?;
+        drop(check);
         let (fw, fh) = fitted;
         let place = (((size.0 - fw) / 2) & !1, ((size.1 - fh) / 2) & !1, fw, fh);
         // SAFETY: another reference to the encoder's frames.
@@ -435,8 +449,12 @@ impl Scaler {
         if frames.is_null() {
             return Err(Error::Invalid("no memory for frames".into()));
         }
-        let input = (f.width(), f.height());
-        let mut scaler = Self::made(source, input, frames, size, place, color_space(f))?;
+        // From the last halving's frames, where it halves them.
+        let (from, input) = halvings
+            .last()
+            .map_or((source, (f.width(), f.height())), |h| (h.frames, h.size));
+        let mut scaler = Self::made(from, input, frames, size, place, color_space(f))?;
+        scaler.halvings = halvings;
         scaler.rotation = match rotation {
             90 => D3D11_VIDEO_PROCESSOR_ROTATION_90,
             180 => D3D11_VIDEO_PROCESSOR_ROTATION_180,
@@ -457,29 +475,75 @@ impl Scaler {
         Ok(scaler)
     }
 
-    /// A scaler of frames like `f` into textures of its own of `layout`
-    /// at `size`, which passes the test picture.
-    fn checked(
+    /// The passes that scale frames like `f` (of `source`) into textures
+    /// of its own of `layout` at `size`, each passing the test picture:
+    /// halvings, then the last. A single pass that passes needs none.
+    /// Where it fails and the frames shrink more than twice either way
+    /// toward `toward` (`size` as they are stored), they are halved first,
+    /// in their own layout ([`halving_sizes`]).
+    fn passes(
         f: &frame::Video,
         source: *mut ffi::AVBufferRef,
         layout: ffi::AVPixelFormat,
         size: (u32, u32),
-    ) -> Result<Self> {
-        let input = (f.width(), f.height());
+        toward: (u32, u32),
+    ) -> Result<(Vec<Self>, Self)> {
+        let (input, space) = ((f.width(), f.height()), color_space(f));
+        if let Some(one) = Self::tested(input, space, source, layout, size)? {
+            return Ok((Vec::new(), one));
+        }
+        let sizes = halving_sizes(input, toward);
+        // No halvings for a shrink of at most twice, or a size too small to
+        // test.
+        if sizes.is_empty() || !readable(size) {
+            return Err(Error::Invalid(
+                "the video processor changes the levels".into(),
+            ));
+        }
+        let changed =
+            || Error::Invalid("the video processor changes the levels in halvings too".into());
+        // SAFETY: the frame's own frames context.
+        let own = unsafe { (*((*source).data as *const ffi::AVHWFramesContext)).sw_format };
+        let mut halvings: Vec<Self> = Vec::new();
+        let mut at = input;
+        for half in sizes {
+            let from = halvings.last().map_or(source, |h| h.frames);
+            halvings.push(Self::tested(at, space, from, own, half)?.ok_or_else(changed)?);
+            at = half;
+        }
+        let from = halvings.last().map_or(source, |h| h.frames);
+        let last = Self::tested(at, space, from, layout, size)?.ok_or_else(changed)?;
+        crate::debug!(
+            "decoding",
+            "{}x{} frames shrink to {}x{} in {} passes on the video processor, as one pass changes their levels",
+            input.0,
+            input.1,
+            size.0,
+            size.1,
+            halvings.len() + 1
+        );
+        Ok((halvings, last))
+    }
+
+    /// A scaler of `input` frames of `source` (in `space`) into textures
+    /// of its own of `layout` at `size`, if it passes the test picture.
+    fn tested(
+        input: (u32, u32),
+        space: DXGI_COLOR_SPACE_TYPE,
+        source: *mut ffi::AVBufferRef,
+        layout: ffi::AVPixelFormat,
+        size: (u32, u32),
+    ) -> Result<Option<Self>> {
         let flags = (D3D11_BIND_RENDER_TARGET.0, 0);
-        // SAFETY: the device of the frame's own frames context.
+        // SAFETY: the device of a live frames context.
         let frames = unsafe {
             let device = (*((*source).data as *const ffi::AVHWFramesContext)).device_ref;
             frames_on(device, layout, size, flags, "to scale to")?
         };
         let place = (0, 0, size.0, size.1);
-        let mut scaler = Self::made(source, input, frames, size, place, color_space(f))?;
-        if !scaler.keeps_levels(source, input)? {
-            return Err(Error::Invalid(
-                "the video processor changes the levels".into(),
-            ));
-        }
-        Ok(scaler)
+        let mut scaler = Self::made(source, input, frames, size, place, space)?;
+        let keeps = scaler.keeps_levels(source, input)?;
+        Ok(keeps.then_some(scaler))
     }
 
     /// A processor of frames of `source`'s layout at `input` into
@@ -553,6 +617,7 @@ impl Scaler {
         })();
         match made {
             Ok((video, context, enumerator, processor)) => Ok(Self {
+                halvings: Vec::new(),
                 frames,
                 video,
                 context,
@@ -575,13 +640,12 @@ impl Scaler {
     /// layout of `source`'s frames, comes out of it at the levels it
     /// went in at.
     fn keeps_levels(&mut self, source: *mut ffi::AVBufferRef, input: (u32, u32)) -> Result<bool> {
-        // Each band's middle, a few samples across in luma and chroma,
-        // must be there to read: smaller, the scaler isn't trusted and
-        // the frames come down whole.
-        let (ow, oh) = (self.size.0 as usize, self.size.1 as usize);
-        if ow < 4 * BANDS.len() || oh < 8 {
+        // Too small to read, the scaler isn't trusted and the frames come
+        // down whole.
+        if !readable(self.size) {
             return Ok(false);
         }
+        let (ow, oh) = (self.size.0 as usize, self.size.1 as usize);
         let layout = |frames: *mut ffi::AVBufferRef| {
             // SAFETY: a live frames context.
             format::Pixel::from(unsafe {
@@ -669,10 +733,20 @@ impl Scaler {
         }))
     }
 
-    /// `f` scaled into a texture of its frames, placed. The work is
-    /// queued on the device's immediate context, before what reads it
-    /// next there (the copy down, the encoder).
+    /// `f` scaled into a texture of its frames, placed, through its
+    /// halvings first. The work is queued on the device's immediate
+    /// context, before what reads it next there (the next pass, the copy
+    /// down, the encoder).
     pub(super) fn scale(&mut self, f: &frame::Video) -> Result<frame::Video> {
+        let mut halved = None;
+        for pass in &mut self.halvings {
+            halved = Some(pass.draw(halved.as_ref().unwrap_or(f))?);
+        }
+        self.draw(halved.as_ref().unwrap_or(f))
+    }
+
+    /// `f` drawn into a texture of its frames, placed: one pass.
+    fn draw(&mut self, f: &frame::Video) -> Result<frame::Video> {
         let (w, h) = self.size;
         let rect = |x: u32, y: u32, w: u32, h: u32| RECT {
             left: x as i32,
@@ -794,6 +868,26 @@ const BANDS: [[u16; 3]; 10] = [
 /// The last bands, outside video range.
 const OUTSIDE: usize = 2;
 
+/// Whether a test picture scaled to `size` has each band's middle there to
+/// read, a few samples across in luma and chroma.
+fn readable((w, h): (u32, u32)) -> bool {
+    w as usize >= 4 * BANDS.len() && h >= 8
+}
+
+/// The sizes frames of `from` are halved to, in turn, before the last
+/// pass to `to` (even): while what is left shrinks more than twice either
+/// way, each side that does is halved, to even.
+fn halving_sizes(from: (u32, u32), to: (u32, u32)) -> Vec<(u32, u32)> {
+    let half = |side: u32, to: u32| if side > 2 * to { (side / 2) & !1 } else { side };
+    let mut at = from;
+    let mut sizes = Vec::new();
+    while at.0 > 2 * to.0 || at.1 > 2 * to.1 {
+        at = (half(at.0, to.0), half(at.1, to.1));
+        sizes.push(at);
+    }
+    sizes
+}
+
 /// The color space the video processor is told `f`'s values are in, and
 /// go out in: its matrix (untagged, as its size implies), in full range
 /// where DXGI has one, as nothing is converted. Told studio range, AMD's
@@ -856,5 +950,33 @@ mod tests {
             out_layout: format::Pixel::P010LE,
             ..into_frames()
         }));
+    }
+
+    #[test]
+    fn a_shrink_to_a_quarter_halves_once() {
+        assert_eq!(halving_sizes((3840, 2160), (960, 540)), [(1920, 1080)]);
+    }
+
+    #[test]
+    fn a_shrink_to_an_eighth_halves_twice() {
+        assert_eq!(
+            halving_sizes((3840, 2160), (480, 270)),
+            [(1920, 1080), (960, 540)]
+        );
+    }
+
+    #[test]
+    fn a_4k_shrink_to_half_doesnt_halve() {
+        assert!(halving_sizes((3840, 2160), (1920, 1080)).is_empty());
+    }
+
+    #[test]
+    fn a_1080p_shrink_to_half_doesnt_halve() {
+        assert!(halving_sizes((1920, 1080), (960, 540)).is_empty());
+    }
+
+    #[test]
+    fn a_side_that_shrinks_at_most_twice_isnt_halved() {
+        assert_eq!(halving_sizes((2880, 2160), (1920, 720)), [(2880, 1080)]);
     }
 }
