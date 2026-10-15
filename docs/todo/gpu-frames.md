@@ -16,7 +16,7 @@ Today that holds for NVIDIA, and for VA-API, AMF and VideoToolbox where the enco
 |---|---|---|---|---|
 | `cuda::CudaPictures` | NVDEC's and Vulkan's frames turned and converted (libplacebo on Vulkan), scaled and padded, for NVENC; made into Vulkan's ProRes encoder's pictures by libplacebo | NVIDIA | YUV without alpha, turned by quarter turns | exports, proxies |
 | `hw::Fitter` | frames turned, scaled and padded on the decoder's device, for an encoder there (VideoToolbox's not padded) | VA-API, Direct3D 11, VideoToolbox | frames in the output's colors; Direct3D 11's into the encoder's frames and not 8-bit into 10; VideoToolbox's in the output's layout, not placed on black | exports, proxies |
-| `hw::Shrinker` | frames scaled on the GPU, then copied down (`export::normalize::down`) | VA-API, CUDA, Direct3D 11, VideoToolbox, Vulkan | | proxies, exports to encoders that take frames from memory, tiles, the two-up, thumbnails |
+| `hw::Shrinker` | frames scaled on the GPU, then copied down (`export::normalize::down`) | VA-API, CUDA, Direct3D 11, VideoToolbox, Vulkan | | proxies, exports to encoders that take frames from memory, tiles, thumbnails |
 
 The CPU's backend is `export::normalize` (`Normalizer`).
 
@@ -60,7 +60,7 @@ The route goes into `VIDCUT_DEBUG` and into the result (`made_with`: `frames sta
 
 What a test can't settle is written as a fact with its source. For example, FFmpeg's `scale_vt` keeps the input's layout (vf_scale_vt.c), so 10-bit stays 10-bit on the GPU.
 
-**One engine for every job.** Exports, proxies (an export at a small size), the timeline's tiles, the two-up, `frame render`, storyboards, thumbnails, light measurements and analyses all go through the engine's `Maker` and the planner. Exports and proxies do already, proxies in a loop of their own. The player's route ends in `keep`. Its import into the viewer (gui/shared.rs, gui/picture.rs) stays per GPU, behind the same place names.
+**One engine for every job.** Exports, proxies (an export at a small size), the timeline's tiles, `frame render`, storyboards, thumbnails, light measurements and analyses all go through the engine's `Maker` and the planner. Exports and proxies do already, proxies in a loop of their own. The player's route ends in `keep`. Its import into the viewer (gui/shared.rs, gui/picture.rs) stays per GPU, behind the same place names.
 
 **Open:**
 - `Ops` with deinterlacing and the size to scale to.
