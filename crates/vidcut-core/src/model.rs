@@ -6,7 +6,9 @@
 //! frames at the project frame rate; `source_in` counts project frames from the
 //! media's first video frame.
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -606,6 +608,8 @@ fn is_zero(v: &f64) -> bool {
 /// places and writes them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Transition {
+    /// `t<N>`, never reused.
+    pub id: String,
     /// Between the clips' sounds (an audio edit), not their pictures.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sound: bool,
@@ -620,7 +624,7 @@ pub struct Transition {
     pub before: i64,
     pub after: i64,
     /// The OTIO `Transition` as read.
-    pub otio: serde_json::Value,
+    pub otio: Kept,
 }
 
 /// A clip on the timeline.
@@ -669,12 +673,76 @@ pub struct Clip {
     pub color: Option<String>,
 }
 
+/// OTIO data kept as another editor wrote it (deviation X9). Copies of a
+/// project share it, so a copy costs nothing, and copies that weren't
+/// changed compare equal at once. It is written as the JSON it holds.
+#[derive(Debug, Clone, Default)]
+pub struct Kept(Arc<serde_json::Value>);
+
+impl Kept {
+    /// The data to change: a copy of its own when others share it.
+    pub fn make_mut(&mut self) -> &mut serde_json::Value {
+        Arc::make_mut(&mut self.0)
+    }
+
+    /// The data, copied only when others share it.
+    pub fn into_value(self) -> serde_json::Value {
+        Arc::try_unwrap(self.0).unwrap_or_else(|shared| (*shared).clone())
+    }
+}
+
+impl std::ops::Deref for Kept {
+    type Target = serde_json::Value;
+    fn deref(&self) -> &serde_json::Value {
+        &self.0
+    }
+}
+
+impl From<serde_json::Value> for Kept {
+    fn from(v: serde_json::Value) -> Self {
+        Self(Arc::new(v))
+    }
+}
+
+impl PartialEq for Kept {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0) || self.0 == other.0
+    }
+}
+
+impl Serialize for Kept {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for Kept {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        serde_json::Value::deserialize(d).map(Self::from)
+    }
+}
+
+impl JsonSchema for Kept {
+    fn inline_schema() -> bool {
+        serde_json::Value::inline_schema()
+    }
+    fn schema_name() -> Cow<'static, str> {
+        serde_json::Value::schema_name()
+    }
+    fn schema_id() -> Cow<'static, str> {
+        serde_json::Value::schema_id()
+    }
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        serde_json::Value::json_schema(generator)
+    }
+}
+
 /// A speed change from another editor's file (deviation X9).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Speed {
     /// The OTIO time effect as read: a `LinearTimeWarp` (`time_scalar` 2.0
     /// for twice the speed, -1.0 reversed) or a `FreezeFrame`.
-    pub effect: serde_json::Value,
+    pub effect: Kept,
     /// Frames of its pace before its first frame (decision D48): the parts
     /// a split or trim leaves show the frames they showed.
     #[serde(default, skip_serializing_if = "is_zero_frames")]
@@ -710,7 +778,7 @@ impl Speed {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Generator {
     /// The OTIO media reference as read: a `GeneratorReference`.
-    pub reference: serde_json::Value,
+    pub reference: Kept,
 }
 
 /// A compound clip or nested timeline from another editor's file
@@ -719,7 +787,7 @@ pub struct Generator {
 pub struct Compound {
     /// The nested OTIO `Stack` as read, without its source range and clip
     /// effects (the clip's own).
-    pub stack: serde_json::Value,
+    pub stack: Kept,
     /// Its length in project frames: the clip's source range stays within.
     pub frames: i64,
     /// The clips it holds as vidcut plays them, on tracks of their own,
@@ -741,7 +809,7 @@ pub struct Effects {
     pub from: i64,
     /// OTIO `Effect`s as read, keyframe times and fade lengths in project
     /// frames.
-    pub list: Vec<serde_json::Value>,
+    pub list: Vec<Kept>,
 }
 
 /// A clip with the track it is on: what `edit.copy` returns and `edit.paste`
@@ -977,6 +1045,7 @@ pub struct NextIds {
     pub media: u64,
     pub clip: u64,
     pub marker: u64,
+    pub transition: u64,
 }
 
 impl Project {
@@ -995,6 +1064,7 @@ impl Project {
                 media: 1,
                 clip: 1,
                 marker: 1,
+                transition: 1,
             },
             bins: Vec::new(),
         }
@@ -1131,6 +1201,12 @@ impl Project {
         self.next_id.marker += 1;
         id
     }
+
+    pub fn alloc_transition_id(&mut self) -> String {
+        let id = format!("t{}", self.next_id.transition);
+        self.next_id.transition += 1;
+        id
+    }
 }
 
 impl Track {
@@ -1189,8 +1265,17 @@ impl Track {
 
 #[cfg(test)]
 mod tests {
-    use super::Settings;
+    use super::{Kept, Settings};
     use crate::time::TimeSpec;
+
+    #[test]
+    fn kept_data_is_written_as_the_json_it_holds() {
+        let kept = Kept::from(serde_json::json!({"OTIO_SCHEMA": "Transition.1"}));
+        assert_eq!(
+            serde_json::to_string(&kept).unwrap(),
+            r#"{"OTIO_SCHEMA":"Transition.1"}"#
+        );
+    }
 
     #[test]
     fn turning_drop_frame_off_keeps_the_start_label() {

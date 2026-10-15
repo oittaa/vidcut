@@ -419,7 +419,7 @@ pub(crate) fn paced(
 ) -> Option<crate::model::Speed> {
     let speed = c.speed() * own.and_then(crate::model::Speed::scalar).unwrap_or(1.0);
     (speed != 1.0).then(|| crate::model::Speed {
-        effect: crate::ops::time_effect(own.or(c.speed.as_ref()), speed),
+        effect: crate::ops::time_effect(own.or(c.speed.as_ref()), speed).into(),
         skip: if own.is_none() {
             c.pace().after(k).skip
         } else {

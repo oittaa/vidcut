@@ -13,8 +13,8 @@ use crate::change::Change;
 use crate::error::{Error, Result};
 use crate::history::HistoryFile;
 use crate::model::{
-    Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Media, MediaInfo,
-    Project, Proxy, Transition, VideoInfo,
+    Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Kept, Media, MediaInfo,
+    Project, Proxy, Track, Transition, VideoInfo,
 };
 use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
@@ -328,6 +328,12 @@ impl Editor {
         &self.project
     }
 
+    /// The project, for the store to write: what it changes in it, it puts
+    /// back.
+    pub(crate) fn project_mut(&mut self) -> &mut Project {
+        &mut self.project
+    }
+
     /// The steps it holds: none once they are in a file.
     pub(crate) fn held(&self) -> &History {
         &self.history
@@ -501,7 +507,7 @@ impl Editor {
         // An edit that changes nothing (no shot changes found, a setting set
         // to what it was) is no undo step and no new revision: an undo would
         // undo nothing, and the edit before would take two.
-        if working == self.project {
+        let Some(change) = changed(&mut self.project, &mut working) else {
             return Ok(Response {
                 rev: self.project.rev,
                 changes,
@@ -510,8 +516,7 @@ impl Editor {
                 via: String::new(),
                 warnings: Vec::new(),
             });
-        }
-        let change = changed(&self.project, &working);
+        };
         working.rev = self.project.rev + 1;
         working.edited = Some(now_ms());
         self.project = working;
@@ -530,7 +535,8 @@ impl Editor {
     /// process) as one undoable step.
     pub fn record_external(&mut self, project: Project) {
         let mut project = project;
-        let change = changed(&self.project, &project);
+        let change = changed(&mut self.project, &mut project)
+            .unwrap_or_else(|| Change::Fields(Default::default()));
         project.rev = project.rev.max(self.project.rev + 1);
         // The writer's time, or now for a change made by hand.
         if project.edited == self.project.edited {
@@ -552,7 +558,10 @@ impl Editor {
                 if undo { "undo" } else { "redo" }
             )));
         }
-        let mut json = to_json(&self.project);
+        let mut project = self.project.clone();
+        // Tests check it against the whole JSON's.
+        let mut json = cfg!(debug_assertions).then(|| to_json(&self.project));
+        let fits = |e: String| Error::internal(format!("the undo history doesn't fit: {e}"));
         // Without a file, all of it; with one, the steps to take.
         let mut history = match self.file {
             None => self.history.clone(),
@@ -566,15 +575,17 @@ impl Editor {
                 (&mut history.redo, &mut history.undo)
             };
             let entry = from.pop().expect("checked");
-            entry
-                .change
-                .apply(&mut json, !undo)
-                .map_err(|e| Error::internal(format!("the undo history doesn't fit: {e}")))?;
+            undo_step(&mut project, &entry.change, !undo).map_err(fits)?;
+            if let Some(json) = json.as_mut() {
+                entry.change.apply(json, !undo).map_err(fits)?;
+            }
             labels.push(entry.label.clone());
             to.push(entry);
         }
-        let mut project: Project = serde_json::from_value(json)
-            .map_err(|e| Error::internal(format!("the undo history doesn't fit: {e}")))?;
+        debug_assert!(
+            json.is_none_or(|j| serde_json::from_value::<Project>(j).is_ok_and(|q| q == project)),
+            "the undo step makes another project as JSON"
+        );
         let changes = diff(&self.project, &project);
         let result = json!({ if undo { "undone" } else { "redone" }: labels });
         if dry_run {
@@ -624,10 +635,216 @@ fn to_json(p: &Project) -> Value {
     serde_json::to_value(p).expect("a project is JSON")
 }
 
-/// What an edit changed, from `before` to `after`.
-fn changed(before: &Project, after: &Project) -> Change {
-    Change::between(&to_json(before), &to_json(after))
-        .unwrap_or_else(|| Change::Fields(Default::default()))
+/// What an edit changed, from `before` to `after`, `None` when nothing did:
+/// what [`Change::between`] their JSON gives, without turning what is the
+/// same on both into JSON. Both are as they were after.
+fn changed(before: &mut Project, after: &mut Project) -> Option<Change> {
+    let change = project_change(before, after);
+    // Tests check it against the whole JSON's.
+    debug_assert_eq!(change, Change::between(&to_json(before), &to_json(after)));
+    change
+}
+
+/// [`changed`]. Its lists of things with ids are taken out of both for a
+/// moment: the rest is small enough to compare as JSON.
+fn project_change(a: &mut Project, b: &mut Project) -> Option<Change> {
+    use std::mem::take;
+    let (mut media, mut tracks, mut markers) = (
+        (take(&mut a.media), take(&mut b.media)),
+        (take(&mut a.tracks), take(&mut b.tracks)),
+        (take(&mut a.markers), take(&mut b.markers)),
+    );
+    let rest = Change::between(&to_json(a), &to_json(b));
+    let lists = [
+        (
+            "media",
+            Change::of_items(&mut media.0, &mut media.1, |m| &m.id, leaf),
+        ),
+        (
+            "tracks",
+            Change::of_items(&mut tracks.0, &mut tracks.1, |t| &t.id, track_change),
+        ),
+        (
+            "markers",
+            Change::of_items(&mut markers.0, &mut markers.1, |k| &k.id, leaf),
+        ),
+    ];
+    (a.media, b.media) = media;
+    (a.tracks, b.tracks) = tracks;
+    (a.markers, b.markers) = markers;
+    joined(rest, lists)
+}
+
+/// What changed in track `a`, now `b`: its clips and transitions by id.
+fn track_change(a: &mut Track, b: &mut Track) -> Option<Change> {
+    use std::mem::take;
+    if a == b {
+        return None;
+    }
+    let (mut clips, mut transitions) = (
+        (take(&mut a.clips), take(&mut b.clips)),
+        (take(&mut a.transitions), take(&mut b.transitions)),
+    );
+    let rest = Change::between(&to_value(&*a), &to_value(&*b));
+    // The file leaves out a track's transitions when there are none.
+    let transitions_change = match (transitions.0.is_empty(), transitions.1.is_empty()) {
+        (true, true) => None,
+        (false, true) => Some(Change::Set {
+            before: Some(to_value(&transitions.0)),
+            after: None,
+        }),
+        (true, false) => Some(Change::Set {
+            before: None,
+            after: Some(to_value(&transitions.1)),
+        }),
+        (false, false) => Change::of_items(&mut transitions.0, &mut transitions.1, |x| &x.id, leaf),
+    };
+    let lists = [
+        (
+            "clips",
+            Change::of_items(&mut clips.0, &mut clips.1, |c| &c.id, leaf),
+        ),
+        ("transitions", transitions_change),
+    ];
+    (a.clips, b.clips) = clips;
+    (a.transitions, b.transitions) = transitions;
+    joined(rest, lists)
+}
+
+/// Makes `change`, a step of the undo history, in `p` (`forward`), or takes
+/// it back: only the things it names become JSON. Its lists of things with
+/// ids are taken out for a moment, as [`changed`] takes them.
+fn undo_step(p: &mut Project, change: &Change, forward: bool) -> std::result::Result<(), String> {
+    use crate::change::{apply_json, shift_json};
+    let Change::Fields(fields) = change else {
+        return apply_json(p, change, forward);
+    };
+    let (lists, rest) = split_fields(fields, &["media", "tracks", "markers"]);
+    if !rest.is_empty() {
+        use std::mem::take;
+        let kept = (
+            take(&mut p.media),
+            take(&mut p.tracks),
+            take(&mut p.markers),
+        );
+        apply_json(p, &Change::Fields(rest), forward)?;
+        (p.media, p.tracks, p.markers) = kept;
+    }
+    for (name, c) in lists {
+        match name {
+            "media" => {
+                c.apply_to_items(&mut p.media, forward, |m| &m.id, apply_json, shift_json)?
+            }
+            "tracks" => {
+                c.apply_to_items(&mut p.tracks, forward, |t| &t.id, track_step, shift_json)?
+            }
+            _ => c.apply_to_items(
+                &mut p.markers,
+                forward,
+                |k| &k.id,
+                apply_json,
+                |k, field, by| {
+                    match field {
+                        "at" => k.at += by,
+                        _ => shift_json(k, field, by)?,
+                    }
+                    Ok(())
+                },
+            )?,
+        }
+    }
+    Ok(())
+}
+
+/// [`undo_step`] in track `t`: its clips and transitions by id.
+fn track_step(t: &mut Track, change: &Change, forward: bool) -> std::result::Result<(), String> {
+    use crate::change::{apply_json, shift_json};
+    let Change::Fields(fields) = change else {
+        return apply_json(t, change, forward);
+    };
+    let (lists, rest) = split_fields(fields, &["clips", "transitions"]);
+    if !rest.is_empty() {
+        use std::mem::take;
+        let kept = (take(&mut t.clips), take(&mut t.transitions));
+        apply_json(t, &Change::Fields(rest), forward)?;
+        (t.clips, t.transitions) = kept;
+    }
+    for (name, c) in lists {
+        match name {
+            "clips" => c.apply_to_items(
+                &mut t.clips,
+                forward,
+                |c| &c.id,
+                apply_json,
+                |c, field, by| {
+                    match field {
+                        "start" => c.start += by,
+                        _ => shift_json(c, field, by)?,
+                    }
+                    Ok(())
+                },
+            )?,
+            _ => c.apply_to_items(
+                &mut t.transitions,
+                forward,
+                |x| &x.id,
+                apply_json,
+                shift_json,
+            )?,
+        }
+    }
+    Ok(())
+}
+
+/// The changes of the fields named in `lists`, and of the others.
+fn split_fields<'a>(
+    fields: &'a std::collections::BTreeMap<String, Change>,
+    lists: &[&'a str],
+) -> (
+    Vec<(&'a str, &'a Change)>,
+    std::collections::BTreeMap<String, Change>,
+) {
+    let mut named = Vec::new();
+    let mut rest = std::collections::BTreeMap::new();
+    for (k, c) in fields {
+        match lists.iter().find(|l| **l == k.as_str()) {
+            Some(l) => named.push((*l, c)),
+            None => {
+                rest.insert(k.clone(), c.clone());
+            }
+        }
+    }
+    (named, rest)
+}
+
+/// What changed in a thing in a list, from its JSON.
+fn leaf<T: serde::Serialize + PartialEq>(a: &mut T, b: &mut T) -> Option<Change> {
+    if a == b {
+        return None;
+    }
+    Change::between(&to_value(&*a), &to_value(&*b))
+}
+
+/// The change of an object whose fields but the `lists` changed by `rest`.
+fn joined<const N: usize>(
+    rest: Option<Change>,
+    lists: [(&str, Option<Change>); N],
+) -> Option<Change> {
+    let mut fields = match rest {
+        Some(Change::Fields(fields)) => fields,
+        None => Default::default(),
+        Some(_) => unreachable!("an object's change is its fields'"),
+    };
+    for (name, change) in lists {
+        if let Some(c) = change {
+            fields.insert(name.to_string(), c);
+        }
+    }
+    (!fields.is_empty()).then_some(Change::Fields(fields))
+}
+
+fn to_value<T: serde::Serialize + ?Sized>(x: &T) -> Value {
+    serde_json::to_value(x).expect("a project is JSON")
 }
 
 /// The undo history's name for an edit: the request in words.
@@ -641,21 +858,25 @@ fn label_of(request: &Request, project: &Project) -> String {
 
 /// Created, modified and deleted ids between two project states.
 fn diff(before: &Project, after: &Project) -> Changes {
-    fn index(p: &Project) -> HashMap<String, Value> {
+    /// What an id names: a pool item, a clip on its track, a marker.
+    #[derive(PartialEq)]
+    enum Named<'a> {
+        Media(&'a Media),
+        Clip(&'a str, &'a Clip),
+        Marker(&'a crate::model::Marker),
+    }
+    fn index(p: &Project) -> HashMap<&str, Named<'_>> {
         let mut m = HashMap::new();
         for media in &p.media {
-            m.insert(
-                media.id.clone(),
-                serde_json::to_value(media).unwrap_or_default(),
-            );
+            m.insert(media.id.as_str(), Named::Media(media));
         }
         for t in &p.tracks {
             for c in &t.clips {
-                m.insert(c.id.clone(), json!([t.id, c]));
+                m.insert(c.id.as_str(), Named::Clip(&t.id, c));
             }
         }
         for k in &p.markers {
-            m.insert(k.id.clone(), serde_json::to_value(k).unwrap_or_default());
+            m.insert(k.id.as_str(), Named::Marker(k));
         }
         m
     }
@@ -663,14 +884,14 @@ fn diff(before: &Project, after: &Project) -> Changes {
     let mut c = Changes::default();
     for (id, v) in &b {
         match a.get(id) {
-            None => c.created.push(id.clone()),
-            Some(old) if old != v => c.modified.push(id.clone()),
+            None => c.created.push(id.to_string()),
+            Some(old) if old != v => c.modified.push(id.to_string()),
             _ => {}
         }
     }
     for id in a.keys() {
         if !b.contains_key(id) {
-            c.deleted.push(id.clone());
+            c.deleted.push(id.to_string());
         }
     }
     let key = |s: &String| (s.chars().next(), s[1..].parse::<u64>().unwrap_or(0));
@@ -1915,10 +2136,10 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
         if from != to && !list.is_empty() {
             let mut e = Effects {
                 from: 0,
-                list: std::mem::take(list),
+                list: std::mem::take(list).into_iter().map(Kept::from).collect(),
             };
             e.retime(|x| (x * to.as_f64() / from.as_f64()).round());
-            *list = e.list;
+            *list = e.list.into_iter().map(Kept::into_value).collect();
         }
     };
     for c in &mut t.clips {
@@ -1978,7 +2199,10 @@ fn place_imported(
     // The clip's id from the file when `keep_ids` and no clip has it.
     let mut taken: HashSet<String> = HashSet::new();
     if keep_ids {
-        taken.extend(p.tracks.iter().flat_map(|t| &t.clips).map(|c| c.id.clone()));
+        for t in &p.tracks {
+            taken.extend(t.clips.iter().map(|c| c.id.clone()));
+            taken.extend(t.transitions.iter().map(|x| x.id.clone()));
+        }
     }
     let mut clip_id = |p: &mut Project, kept: &Option<String>| match kept
         .as_ref()
@@ -2002,7 +2226,7 @@ fn place_imported(
     let carry = |list: &[Value], first: i64| {
         (!list.is_empty()).then(|| Effects {
             from: first,
-            list: list.to_vec(),
+            list: list.iter().cloned().map(Kept::from).collect(),
         })
     };
     // Where audio may start on each track without overlapping what is
@@ -2054,7 +2278,7 @@ fn place_imported(
                 name: (!c.name.is_empty()).then(|| c.name.clone()),
                 effects: carry(&c.effects, source_in),
                 generator: c.generator.as_ref().map(|reference| Generator {
-                    reference: reference.clone(),
+                    reference: reference.clone().into(),
                 }),
                 compound,
                 speed: c.speed.clone(),
@@ -2183,16 +2407,26 @@ fn place_imported(
             (Some(f), None) => &f.1,
             (None, None) => continue,
         };
+        // The file's id when `keep_ids` and no transition has it.
+        let id = match x
+            .id
+            .clone()
+            .filter(|id| keep_ids && taken.insert(id.clone()))
+        {
+            Some(id) => id,
+            None => p.alloc_transition_id(),
+        };
         p.track_mut(track)
             .expect("made above")
             .transitions
             .push(Transition {
+                id,
                 sound: x.sound,
                 from: from.map(|f| f.0.clone()),
                 to: to.map(|g| g.0.clone()),
                 before: x.before,
                 after: x.after,
-                otio: x.otio.clone(),
+                otio: x.otio.clone().into(),
             });
     }
     let dropped = otio::transitions::prune(p);
@@ -3744,7 +3978,7 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
                 .filter_map(|x| {
                     let at = cuts.place(p, x)?;
                     (at >= a && at <= b).then(|| {
-                        json!({ "name": otio::transitions::name(x), "at": at, "before": x.before,
+                        json!({ "id": x.id, "name": otio::transitions::name(x), "at": at, "before": x.before,
                             "after": x.after, "from": x.from, "to": x.to, "sound": x.sound })
                     })
                 })

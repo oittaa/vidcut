@@ -152,9 +152,10 @@ pub fn dropped(n: usize) -> String {
 
 /// Transition `t` as written at `rate`.
 fn written(t: &Transition, rate: f64) -> Value {
-    let mut v = t.otio.clone();
+    let mut v = (*t.otio).clone();
     v["in_offset"] = rt(t.before as f64, rate);
     v["out_offset"] = rt(t.after as f64, rate);
+    v["metadata"][VIDCUT]["transition"] = Value::String(t.id.clone());
     v
 }
 

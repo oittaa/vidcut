@@ -1,13 +1,16 @@
 //! What an edit changed in a project, both ways. Undo steps keep this,
 //! not copies of the project, so a step costs about what it changed.
 //!
-//! It is found by comparing the project's JSON before and after. Lists of
-//! things with ids (media, tracks, clips, markers) are compared by id: an
-//! inserted clip is one entry, and a ripple that moves every later clip by
-//! the same frames is one run.
+//! It is what comparing the project's JSON before and after gives. Lists of
+//! things with ids (media, tracks, clips, markers, transitions) are
+//! compared by id: an inserted clip is one entry, and a ripple that moves
+//! every later clip by the same frames is one run. [`Change::of_items`]
+//! finds the same from the things themselves, turning only those that
+//! differ into JSON.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
@@ -107,6 +110,120 @@ impl Change {
         })
     }
 
+    /// [`between`](Self::between) two lists of things with ids as JSON,
+    /// from the things themselves: only those that differ become JSON.
+    /// `each` is what changed in one on both sides, `None` when nothing did;
+    /// it may take the thing apart, if it puts it back.
+    pub fn of_items<T: Serialize + PartialEq>(
+        a: &mut [T],
+        b: &mut [T],
+        id: impl Fn(&T) -> &str,
+        mut each: impl FnMut(&mut T, &mut T) -> Option<Self>,
+    ) -> Option<Self> {
+        if a == b {
+            return None;
+        }
+        let json = |x: &T| serde_json::to_value(x).expect("a project is JSON");
+        let (ia, ib): (Vec<String>, Vec<String>) = (
+            a.iter().map(|x| id(x).to_string()).collect(),
+            b.iter().map(|x| id(x).to_string()).collect(),
+        );
+        let ra: Vec<&str> = ia.iter().map(String::as_str).collect();
+        let rb: Vec<&str> = ib.iter().map(String::as_str).collect();
+        let (in_a, in_b): (HashSet<&str>, HashSet<&str>) =
+            (ra.iter().copied().collect(), rb.iter().copied().collect());
+        if in_a.len() != ra.len() || in_b.len() != rb.len() {
+            let all = |list: &[T]| Value::Array(list.iter().map(json).collect());
+            return Some(Self::replaced(&all(a), &all(b)));
+        }
+        let only = |list: &[T], ids: &[&str], other: &HashSet<&str>| {
+            list.iter()
+                .zip(ids)
+                .enumerate()
+                .filter(|(_, (_, id))| !other.contains(*id))
+                .map(|(i, (x, _))| (i, json(x)))
+                .collect()
+        };
+        let (removed, added) = (only(a, &ra, &in_b), only(b, &rb, &in_a));
+        let at_a: HashMap<&str, usize> = ra.iter().copied().zip(0..).collect();
+        let at_b: HashMap<&str, usize> = rb.iter().copied().zip(0..).collect();
+        let items = Items::build(&ra, &rb, removed, added, |id| {
+            each(&mut a[at_a[id]], &mut b[at_b[id]])
+        });
+        Some(Self::Items(Box::new(items)))
+    }
+
+    /// [`apply`](Self::apply) to a list of things with ids as they are:
+    /// only those the change names become JSON. `each` makes a change in
+    /// one thing; `shift` moves a whole-number field of one, as a run does
+    /// ([`shift_json`] does it through its JSON).
+    pub fn apply_to_items<T: Serialize + DeserializeOwned>(
+        &self,
+        list: &mut Vec<T>,
+        forward: bool,
+        id: impl Fn(&T) -> &str,
+        mut each: impl FnMut(&mut T, &Change, bool) -> Result<(), String>,
+        mut shift: impl FnMut(&mut T, &str, i64) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let items = match self {
+            Self::Items(items) => items,
+            // The whole list, or none when it is left out.
+            Self::Set { before, after } => {
+                *list = match if forward { after } else { before } {
+                    Some(v) => from_json(v.clone())?,
+                    None => Vec::new(),
+                };
+                return Ok(());
+            }
+            Self::Fields(_) => return Err("not a list".into()),
+        };
+        let (gone, come) = if forward {
+            (&items.removed, &items.added)
+        } else {
+            (&items.added, &items.removed)
+        };
+        let order = items
+            .order
+            .as_ref()
+            .map(|(a, b)| if forward { b } else { a });
+        let at: HashMap<String, usize> = list
+            .iter()
+            .enumerate()
+            .map(|(i, x)| (id(x).to_string(), i))
+            .collect();
+        let place = |k: &str| at.get(k).copied().ok_or(format!("no {k}"));
+        // The others first: those that come and go don't move with them.
+        for (k, change) in &items.changed {
+            each(&mut list[place(k)?], change, forward)?;
+        }
+        let moving: HashSet<&str> = gone.iter().chain(come).map(|(_, v)| self::id(v)).collect();
+        for run in &items.runs {
+            let (first, last) = (place(&run.first)?, place(&run.last)?);
+            let by = if forward { run.by } else { -run.by };
+            for x in &mut list[first..=last] {
+                if !moving.contains(id(x)) {
+                    shift(x, &run.field, by)?;
+                }
+            }
+        }
+        let going: HashSet<&str> = gone.iter().map(|(_, v)| self::id(v)).collect();
+        list.retain(|x| !going.contains(id(x)));
+        if let Some(order) = order {
+            let mut by_id: HashMap<String, T> =
+                list.drain(..).map(|x| (id(&x).to_string(), x)).collect();
+            for i in order {
+                list.push(by_id.remove(i).ok_or(format!("no {i}"))?);
+            }
+        }
+        for (i, v) in come {
+            if *i > list.len() {
+                return Err(format!("no place {i} for {}", self::id(v)));
+            }
+            list.insert(*i, from_json(v.clone())?);
+        }
+        Ok(())
+    }
+
     fn replaced(before: &Value, after: &Value) -> Self {
         Self::Set {
             before: Some(before.clone()),
@@ -170,24 +287,42 @@ impl Items {
                 .map(|(i, (v, _))| (i, v.clone()))
                 .collect()
         };
+        let (removed, added) = (only(a, ia, &in_b), only(b, ib, &in_a));
+        let before: HashMap<&str, &Value> = ia.iter().copied().zip(a).collect();
+        let after: HashMap<&str, &Value> = ib.iter().copied().zip(b).collect();
+        Self::build(ia, ib, removed, added, |id| {
+            Change::between(before[id], after[id])
+        })
+    }
+
+    /// What changed in a list whose things have the ids `ia` before and
+    /// `ib` after: `removed` and `added`, those only before and only after,
+    /// and `change`, what changed in one on both sides.
+    fn build(
+        ia: &[&str],
+        ib: &[&str],
+        removed: Vec<(usize, Value)>,
+        added: Vec<(usize, Value)>,
+        mut change: impl FnMut(&str) -> Option<Change>,
+    ) -> Self {
+        let (in_a, in_b): (HashSet<&str>, HashSet<&str>) =
+            (ia.iter().copied().collect(), ib.iter().copied().collect());
         let kept_a: Vec<&str> = ia.iter().copied().filter(|i| in_b.contains(i)).collect();
         let kept_b: Vec<&str> = ib.iter().copied().filter(|i| in_a.contains(i)).collect();
         let mut items = Self {
-            removed: only(a, ia, &in_b),
-            added: only(b, ib, &in_a),
+            removed,
+            added,
             order: (kept_a != kept_b).then(|| {
                 let owned = |ids: &[&str]| ids.iter().map(|s| s.to_string()).collect();
                 (owned(&kept_a), owned(&kept_b))
             }),
             ..Self::default()
         };
-        let before: HashMap<&str, &Value> = ia.iter().copied().zip(a).collect();
-        let after: HashMap<&str, &Value> = ib.iter().copied().zip(b).collect();
         // Side by side runs only where the order stays.
         let in_order = items.order.is_none();
         let mut run: Option<(Run, Change, usize)> = None;
         for id in kept_b {
-            let Some(change) = Change::between(before[id], after[id]) else {
+            let Some(change) = change(id) else {
                 items.close(run.take());
                 continue;
             };
@@ -242,12 +377,14 @@ impl Items {
             .as_ref()
             .map(|(a, b)| if forward { b } else { a });
         // The others first: those that come and go don't move with them.
+        let at: HashMap<String, usize> = list
+            .iter()
+            .enumerate()
+            .map(|(i, v)| (id(v).to_string(), i))
+            .collect();
         for (id, change) in &self.changed {
-            let v = list
-                .iter_mut()
-                .find(|v| self::id(v) == id)
-                .ok_or(format!("no {id}"))?;
-            change.apply(v, forward)?;
+            let i = at.get(id).ok_or(format!("no {id}"))?;
+            change.apply(&mut list[*i], forward)?;
         }
         let moving: HashSet<&str> = gone.iter().chain(come).map(|(_, v)| id(v)).collect();
         for run in &self.runs {
@@ -270,6 +407,38 @@ impl Items {
         }
         Ok(())
     }
+}
+
+/// [`Change::apply`] to `x` through its JSON.
+pub fn apply_json<T: Serialize + DeserializeOwned>(
+    x: &mut T,
+    change: &Change,
+    forward: bool,
+) -> Result<(), String> {
+    let mut v = serde_json::to_value(&*x).map_err(|e| e.to_string())?;
+    change.apply(&mut v, forward)?;
+    *x = from_json(v)?;
+    Ok(())
+}
+
+/// Moves whole-number field `field` of `x` by `by`, through its JSON.
+pub fn shift_json<T: Serialize + DeserializeOwned>(
+    x: &mut T,
+    field: &str,
+    by: i64,
+) -> Result<(), String> {
+    let mut v = serde_json::to_value(&*x).map_err(|e| e.to_string())?;
+    let n = v
+        .get(field)
+        .and_then(Value::as_i64)
+        .ok_or(format!("no whole number {field} in {}", id(&v)))?;
+    v[field] = (n + by).into();
+    *x = from_json(v)?;
+    Ok(())
+}
+
+fn from_json<T: DeserializeOwned>(v: Value) -> Result<T, String> {
+    serde_json::from_value(v).map_err(|e| e.to_string())
 }
 
 /// The one whole-number field a change moved, and by how much.
@@ -341,6 +510,55 @@ mod tests {
             change(a, b),
             json!({"items": {"added": [[1, {"id": "c3"}]]}})
         );
+    }
+
+    #[test]
+    fn things_as_they_are_change_as_their_json_does() {
+        #[derive(Serialize, PartialEq)]
+        struct Thing {
+            id: &'static str,
+            start: i64,
+        }
+        let thing = |id, start| Thing { id, start };
+        let mut a = [thing("c1", 0), thing("c2", 50), thing("c3", 90)];
+        let mut b = [thing("c1", 0), thing("c3", 80), thing("c4", 0)];
+        let each = |x: &mut Thing, y: &mut Thing| {
+            Change::between(
+                &serde_json::to_value(&*x).unwrap(),
+                &serde_json::to_value(&*y).unwrap(),
+            )
+        };
+        let found = Change::of_items(&mut a, &mut b, |t| t.id, each).unwrap();
+        assert_eq!(
+            serde_json::to_value(found).unwrap(),
+            json!({"items": {
+                "removed": [[1, {"id": "c2", "start": 50}]],
+                "added": [[2, {"id": "c4", "start": 0}]],
+                "changed": {"c3": {"fields": {"start": {"set": {"was": 90, "is": 80}}}}}
+            }})
+        );
+    }
+
+    #[test]
+    fn a_change_is_made_in_things_as_they_are() {
+        #[derive(Debug, Serialize, Deserialize, PartialEq)]
+        struct Thing {
+            id: String,
+            start: i64,
+        }
+        let thing = |id: &str, start| Thing {
+            id: id.into(),
+            start,
+        };
+        let a =
+            json!([{"id": "c1", "start": 0}, {"id": "c2", "start": 50}, {"id": "c3", "start": 90}]);
+        let b = json!([{"id": "c2", "start": 40}, {"id": "c3", "start": 80}]);
+        let ripple = Change::between(&a, &b).unwrap();
+        let mut list = vec![thing("c1", 0), thing("c2", 50), thing("c3", 90)];
+        ripple
+            .apply_to_items(&mut list, true, |t| t.id.as_str(), apply_json, shift_json)
+            .unwrap();
+        assert_eq!(list, [thing("c2", 40), thing("c3", 80)]);
     }
 
     #[test]

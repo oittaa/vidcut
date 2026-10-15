@@ -1574,7 +1574,7 @@ pub fn change_speed(
             first
         };
         n.speed = (speed != 1.0).then(|| Speed {
-            effect: time_effect(c.speed.as_ref(), speed),
+            effect: time_effect(c.speed.as_ref(), speed).into(),
             skip: 0,
         });
         let want = if ripple && speed != 0.0 && old != 0.0 {
@@ -1620,7 +1620,7 @@ pub(crate) fn time_effect(old: Option<&Speed>, speed: f64) -> serde_json::Value 
     } else {
         "LinearTimeWarp.1"
     };
-    match old.map(|s| s.effect.clone()) {
+    match old.map(|s| (*s.effect).clone()) {
         Some(mut e) if e["OTIO_SCHEMA"] == schema => {
             e["time_scalar"] = json!(speed);
             e

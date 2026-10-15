@@ -37,6 +37,11 @@ pub fn violations(p: &Project) -> Vec<String> {
                 t.id, t.volume_db
             ));
         }
+        for x in &t.transitions {
+            if !ids.insert(x.id.as_str()) {
+                v.push(format!("duplicate id {}", x.id));
+            }
+        }
         let mut prev_end: Option<i64> = None;
         let mut prev_audio_end: Option<i64> = None;
         for c in &t.clips {
