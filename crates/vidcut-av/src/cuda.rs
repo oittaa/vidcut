@@ -407,7 +407,7 @@ fn wait_done(f: &frame::Video, what: &str) -> Result<()> {
 ///
 /// # Safety
 /// The frames are `dev`'s, alive.
-unsafe fn wait_signalled(
+pub(crate) unsafe fn wait_signalled(
     dev: &ffi::AVVulkanDeviceContext,
     frames: &[*const ffi::AVVkFrame],
     timeout: std::time::Duration,

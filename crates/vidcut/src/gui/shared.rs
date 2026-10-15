@@ -33,30 +33,34 @@ pub fn possible(device: &wgpu::Device) -> bool {
     }
 }
 
+/// The UUID of `device`'s GPU, as Vulkan gives it; `None` off Vulkan.
+pub fn uuid(device: &wgpu::Device) -> Option<[u8; 16]> {
+    #[cfg(any(target_os = "linux", windows))]
+    {
+        // SAFETY: wgpu's own device; reads its physical device's properties.
+        unsafe {
+            let hal = device.as_hal::<wgpu::hal::api::Vulkan>()?;
+            Some(super::vulkan::uuids(&hal).0)
+        }
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        let _ = device;
+        None
+    }
+}
+
 /// CUDA's device (the one NVDEC decodes on), when it is on `device`'s GPU:
 /// the same UUID as Vulkan's physical device.
 pub fn cuda_on(device: &wgpu::Device) -> Result<CudaDevice, String> {
     #[cfg(any(target_os = "linux", windows))]
     {
-        use ash::vk;
         if !possible(device) {
             return Err("the display's device can't share memory".into());
         }
         let cuda = CudaDevice::open().map_err(|e| e.to_string())?;
-        let uuid = cuda.uuid().map_err(|e| e.to_string())?;
-        // SAFETY: reads the physical device's properties.
-        let ours = unsafe {
-            let hal = device
-                .as_hal::<wgpu::hal::api::Vulkan>()
-                .ok_or("not Vulkan")?;
-            let mut id = vk::PhysicalDeviceIDProperties::default();
-            let mut props = vk::PhysicalDeviceProperties2::default().push_next(&mut id);
-            hal.shared_instance()
-                .raw_instance()
-                .get_physical_device_properties2(hal.raw_physical_device(), &mut props);
-            id.device_uuid
-        };
-        if ours == uuid {
+        let cudas = cuda.uuid().map_err(|e| e.to_string())?;
+        if uuid(device) == Some(cudas) {
             Ok(cuda)
         } else {
             Err("CUDA's GPU isn't the display's".into())

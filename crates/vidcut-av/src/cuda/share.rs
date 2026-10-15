@@ -223,12 +223,13 @@ impl CudaDevice {
     }
 }
 
-/// A CUDA device: its index, which FFmpeg opens it by, its name, and its
-/// PCI slot.
+/// A CUDA device: its index, which FFmpeg opens it by, its name, its PCI
+/// slot and its UUID.
 pub(crate) struct Listed {
     pub index: i32,
     pub name: String,
     pub slot: Option<crate::gpus::Slot>,
+    pub uuid: Option<[u8; 16]>,
 }
 
 /// The CUDA devices, in CUDA's order; none without NVIDIA's driver.
@@ -262,10 +263,13 @@ pub(crate) fn listed() -> Vec<Listed> {
                 let slot = ((cuda.device_get_pci_bus_id)(bus.as_mut_ptr(), 63, device) == 0)
                     .then(|| crate::gpus::parse_slot(&text(&bus)))
                     .flatten();
+                let mut uuid = [0u8; 16];
+                let uuid = ((cuda.device_get_uuid)(&mut uuid, device) == 0).then_some(uuid);
                 Some(Listed {
                     index,
                     name: text(&name),
                     slot,
+                    uuid,
                 })
             })
             .collect()

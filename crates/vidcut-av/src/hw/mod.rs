@@ -13,6 +13,7 @@
 pub(crate) mod d3d11;
 pub mod vaapi;
 pub(crate) mod vt;
+pub mod vulkan;
 
 use std::ptr;
 use std::sync::{Arc, Mutex};
@@ -865,7 +866,8 @@ fn props(dst: &mut frame::Video, src: &frame::Video) -> Result<()> {
 /// Keeps the GPU's frames there without running its decoder out of
 /// surfaces: Direct3D 11's are copied into textures of their own that
 /// another device can open (Windows). FFmpeg copies NVDEC's itself, and
-/// VA-API's and VideoToolbox's pools grow as they need.
+/// VA-API's, VideoToolbox's and Vulkan's pools grow as they need. Vulkan's
+/// are kept once decoded ([`vulkan::keep`]).
 pub(crate) enum Keeper {
     #[cfg(windows)]
     D3d11(d3d11::Keeper),
@@ -897,6 +899,7 @@ impl Keeper {
             Some(Kind::Nvdec | Kind::Vaapi | Kind::VideoToolbox) => {
                 crate::export::video::frame_ref(f)
             }
+            Some(Kind::Vulkan) => vulkan::keep(f),
             #[cfg(windows)]
             Some(Kind::D3d11va) => {
                 let (frames, like) = frames_of(f)?;
