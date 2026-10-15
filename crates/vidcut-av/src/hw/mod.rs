@@ -65,6 +65,11 @@ impl Kind {
         Self::ALL.into_iter().find(|k| k.name() == name)
     }
 
+    /// The kind a [`label`](Self::label) names.
+    pub fn with_label(label: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|k| k.label() == label)
+    }
+
     /// The kind whose GPU memory `f` is in; `None` for a frame in memory.
     pub fn of_frame(f: &frame::Video) -> Option<Self> {
         Self::ALL.into_iter().find(|k| k.pixel() == f.format())
@@ -1289,6 +1294,11 @@ mod tests {
     #[test]
     fn vulkan_is_named_vulkan() {
         assert_eq!(Kind::named("vulkan"), Some(Kind::Vulkan));
+    }
+
+    #[test]
+    fn the_label_vulkan_is_vulkans() {
+        assert_eq!(Kind::with_label("Vulkan"), Some(Kind::Vulkan));
     }
 
     #[test]
