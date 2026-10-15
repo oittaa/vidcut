@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 use vidcut::live::{self, Capture, Image, Origin, Presented, WindowChange};
 use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
 use vidcut_av::player::{PacedOutput, Picture, Player};
-use vidcut_core::model::Settings;
+use vidcut_core::model::{Hdr, Settings};
 use vidcut_core::time::Rational;
 use vidcut_core::{Envelope, Project, Response, Store};
 
@@ -317,6 +317,37 @@ fn exact_seeks_external_edit_and_proxies() {
         let state = h.ok("player.state", json!({})).result;
         assert_eq!(state["timeline"]["error"], Value::Null, "{state}");
         assert_eq!(h.shown(dir), want, "proxy, timeline frame {t}");
+    }
+
+    // A PQ source's 10-bit AV1 proxy keeps its HDR, and the viewer
+    // tone-maps it as it does the original: it shows the frames `frame
+    // render` shows.
+    let pq = fixture::ensure(
+        &FixtureSpec::new(
+            VideoCodec::Hevc10,
+            Container::Mkv,
+            W as u32,
+            H as u32,
+            (30, 1),
+            30,
+        )
+        .hdr(Hdr::Pq)
+        .no_audio(),
+    )
+    .unwrap();
+    h.ok("media.add", json!({ "paths": [pq] }));
+    h.ok("edit.append", json!({ "media": "m3", "range": "0f..30f" }));
+    h.ok("preferences.set", json!({ "proxies": { "codec": "av1" } }));
+    h.ok("proxy.generate", json!({ "media": "m3" }));
+    let m3 = h.ok("media.get", json!({ "media": "m3" })).result;
+    let proxy = m3["proxy"]["path"].as_str().expect("a proxy");
+    let probed = vidcut_av::probe::probe(Path::new(proxy), None).unwrap();
+    assert_eq!(probed.video.unwrap().transfer, "smpte2084", "{m3}");
+    for t in [150, 159, 160, 179] {
+        let want = rendered(t);
+        assert!(want.is_some(), "frame {t} shows m3");
+        h.ok("player.seek", json!({ "at": t, "viewer": "timeline" }));
+        assert_eq!(h.shown(dir), want, "HDR proxy, timeline frame {t}");
     }
 
     // An OTIO file opens as a project file made next to it (deviation X9).
