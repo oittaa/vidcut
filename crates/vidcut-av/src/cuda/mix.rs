@@ -162,7 +162,17 @@ pub(crate) fn mix(
         let fc = &*((*frames.as_ptr()).data as *const ffi::AVHWFramesContext);
         (fc, cuda_context(fc.device_ref))
     };
-    let samples = Samples::of(fc.sw_format.into())?;
+    let sw: crate::ffmpeg::format::Pixel = fc.sw_format.into();
+    // Two planes, the chroma half as tall: anything else the CPU mixes.
+    if !matches!(
+        sw,
+        crate::ffmpeg::format::Pixel::NV12 | crate::ffmpeg::format::Pixel::P010LE
+    ) {
+        return Err(Error::Invalid(format!(
+            "the GPU mixes NV12 and P010 pictures, not {sw:?}"
+        )));
+    }
+    let samples = Samples::of(sw)?;
     let mut out = frame::Video::empty();
     // SAFETY: a frame of the pool, its planes in CUDA memory.
     let ret = unsafe { ffi::av_hwframe_get_buffer(frames.as_ptr(), out.as_mut_ptr(), 0) };

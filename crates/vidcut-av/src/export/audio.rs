@@ -749,7 +749,7 @@ impl Lane {
 
 /// Whether `next`'s sound goes on from `piece`'s where a cross fade
 /// starts or ends between them: one clip's sound split at its fade, the
-/// source read on (decision D50).
+/// source read on at its pace, within a sample of rounding (decision D50).
 fn plays_on(piece: &AudioPiece, next: &AudioPiece) -> bool {
     match (piece, next) {
         (
@@ -771,12 +771,12 @@ fn plays_on(piece: &AudioPiece, next: &AudioPiece) -> bool {
                 ..
             },
         ) => {
+            let read = (*samples as f64 * speed).round() as i64;
             (fade.is_some() || f2.is_some())
                 && path == p2
                 && stream == s2
-                && *speed == 1.0
-                && *sp2 == 1.0
-                && source_sample + samples == *n2
+                && speed == sp2
+                && (source_sample + read - n2).abs() <= 1
         }
         _ => false,
     }

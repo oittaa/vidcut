@@ -451,6 +451,71 @@ pub struct Hdr10Plus {
 }
 
 impl Hdr10Plus {
+    /// `f`'s HDR10+: its first window's light and the display it was graded
+    /// for, read from its T.35 payload ([`hdr10plus_t35`]). `None` without
+    /// any, or one that doesn't read.
+    pub fn of_frame(f: &frame::Video) -> Option<Self> {
+        let t35 = hdr10plus_t35(f)?;
+        let mut bits = BitReader {
+            data: t35.get(HDR10PLUS_T35.len()..)?,
+            at: 0,
+        };
+        let _version = bits.take(8)?;
+        let windows = bits.take(2)?;
+        // The other windows' places, which the first window's light follows.
+        for _ in 1..windows {
+            bits.take(16 * 4 + 16 * 2 + 8 + 16 * 3 + 1)?;
+        }
+        let targeted_max_luminance = bits.take(27)?;
+        if bits.take(1)? == 1 {
+            let (rows, columns) = (bits.take(5)?, bits.take(5)?);
+            bits.take(rows * columns * 4)?;
+        }
+        let mut light = || bits.take(17).map(|v| f64::from(v) / 10.0);
+        let maxscl = [light()?, light()?, light()?];
+        let average_maxrgb = light()?;
+        let n = bits.take(4)?;
+        let mut percentiles = Vec::new();
+        for _ in 0..n {
+            let percentage = bits.take(7)? as u8;
+            let nits = f64::from(bits.take(17)?) / 10.0;
+            percentiles.push((percentage, nits));
+        }
+        Some(Self {
+            targeted_max_luminance,
+            maxscl,
+            average_maxrgb,
+            percentiles,
+        })
+    }
+
+    /// The light `self` and `other` claim, each value the higher; the
+    /// percentiles too where both give the same ones, else those of the
+    /// brighter on average.
+    pub fn brightest(mut self, other: &Self) -> Self {
+        self.targeted_max_luminance = self
+            .targeted_max_luminance
+            .max(other.targeted_max_luminance);
+        for (a, b) in self.maxscl.iter_mut().zip(other.maxscl) {
+            *a = a.max(b);
+        }
+        let same = self.percentiles.len() == other.percentiles.len()
+            && self
+                .percentiles
+                .iter()
+                .zip(&other.percentiles)
+                .all(|(a, b)| a.0 == b.0);
+        if same {
+            for (a, b) in self.percentiles.iter_mut().zip(&other.percentiles) {
+                a.1 = a.1.max(b.1);
+            }
+        } else if other.average_maxrgb > self.average_maxrgb {
+            self.percentiles = other.percentiles.clone();
+        }
+        self.average_maxrgb = self.average_maxrgb.max(other.average_maxrgb);
+        self
+    }
+
     /// As an ITU-T T.35 payload, header included ([`hdr10plus_t35`]).
     pub fn t35(&self) -> Vec<u8> {
         struct Bits(Vec<u8>, u32);
@@ -505,6 +570,27 @@ impl Hdr10Plus {
             }
         }
         Ok(())
+    }
+}
+
+/// Reads a bit string, the first bit the highest of the first byte.
+struct BitReader<'a> {
+    data: &'a [u8],
+    at: usize,
+}
+
+impl BitReader<'_> {
+    /// The next `n` bits as a number, the first the highest (at most 32);
+    /// more than 32 are passed over. `None` past the end.
+    fn take(&mut self, n: u32) -> Option<u32> {
+        let mut value = 0u32;
+        for _ in 0..n {
+            let byte = *self.data.get(self.at / 8)?;
+            let bit = (byte >> (7 - self.at % 8)) & 1;
+            value = value.wrapping_shl(1) | u32::from(bit);
+            self.at += 1;
+        }
+        Some(value)
     }
 }
 
@@ -891,4 +977,37 @@ fn av1_with_metadata(data: &[u8], t35: &[u8]) -> Option<Vec<u8>> {
     out.extend_from_slice(&obu);
     out.extend_from_slice(&data[first..]);
     Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Hdr10Plus;
+    use crate::ffmpeg::{format::Pixel, frame};
+
+    fn light(maxscl: [f64; 3], average: f64, percentiles: &[(u8, f64)]) -> Hdr10Plus {
+        Hdr10Plus {
+            targeted_max_luminance: 0,
+            maxscl,
+            average_maxrgb: average,
+            percentiles: percentiles.to_vec(),
+        }
+    }
+
+    #[test]
+    fn hdr10plus_on_a_frame_reads_back_as_written() {
+        let written = light([100.0, 200.5, 50.0], 30.2, &[(50, 20.0), (99, 150.0)]);
+        let mut f = frame::Video::new(Pixel::YUV420P10LE, 16, 16);
+        written.attach(&mut f).unwrap();
+        assert_eq!(Hdr10Plus::of_frame(&f), Some(written));
+    }
+
+    #[test]
+    fn the_brightest_of_two_takes_each_values_higher() {
+        let a = light([100.0, 20.0, 50.0], 30.0, &[(50, 20.0), (99, 150.0)]);
+        let b = light([10.0, 200.0, 5.0], 40.0, &[(50, 25.0), (99, 90.0)]);
+        assert_eq!(
+            a.brightest(&b),
+            light([100.0, 200.0, 50.0], 40.0, &[(50, 25.0), (99, 150.0)])
+        );
+    }
 }

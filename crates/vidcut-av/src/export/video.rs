@@ -824,12 +824,29 @@ impl VideoFrames {
             unsafe { ffmpeg::ffi::av_frame_copy_props(out.as_mut_ptr(), like.as_ptr()) };
         }
         crate::hdr::strip(&mut out);
-        match layers[shown].frame.as_ref() {
-            Some(f) if self.dynamic != crate::hdr::Dynamic::default() => {
-                crate::hdr::copy_dynamic(f, &mut out, self.dynamic)?
-            }
-            Some(_) => {}
-            None => self.black_metadata(&mut out)?,
+        // Dolby Vision of the picture it shows most of (black's: that of the
+        // frame before it).
+        if self.dynamic.dolby_vision {
+            let dv = crate::hdr::Dynamic {
+                hdr10plus: false,
+                dolby_vision: true,
+            };
+            let from = layers[shown]
+                .frame
+                .as_ref()
+                .unwrap_or(&self.last_dolby_vision);
+            crate::hdr::copy_dynamic(from, &mut out, dv)?;
+        }
+        // HDR10+ never claims less light than it shows: each value the
+        // brightest picture's.
+        if self.dynamic.hdr10plus {
+            let light = layers
+                .iter()
+                .filter_map(|l| l.frame.as_ref())
+                .filter_map(crate::hdr::Hdr10Plus::of_frame)
+                .reduce(|a, b| a.brightest(&b))
+                .unwrap_or_else(|| crate::light::FrameLight::default().hdr10plus());
+            light.attach(&mut out)?;
         }
         Ok(out)
     }
@@ -1300,6 +1317,8 @@ pub(crate) fn fill_black(f: &mut frame::Video) -> Result<()> {
         )
     };
     let planes = f.planes();
+    // Packed with an alpha component (RGBA): one plane, opaque below.
+    let packed_alpha = alpha && planes == 1;
     for plane in 0..planes {
         let is_alpha = alpha && plane == planes - 1 && planes > 1;
         let v8: u16 = if is_alpha {
@@ -1326,6 +1345,26 @@ pub(crate) fn fill_black(f: &mut frame::Video) -> Result<()> {
             data.fill(v8 as u8);
         }
     }
+    if packed_alpha {
+        // SAFETY: FFmpeg's static descriptor of the format.
+        let (step, offset, a_depth) = unsafe {
+            let d = &*desc.as_ptr();
+            let a = d.comp[usize::from(d.nb_components) - 1];
+            (a.step as usize, a.offset as usize, a.depth)
+        };
+        let (w, h, stride) = (f.width() as usize, f.height() as usize, f.stride(0));
+        let data = f.data_mut(0);
+        for y in 0..h {
+            for x in 0..w {
+                let at = y * stride + x * step + offset;
+                if a_depth > 8 {
+                    data[at..at + 2].copy_from_slice(&u16::MAX.to_le_bytes());
+                } else {
+                    data[at] = 255;
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1333,6 +1372,13 @@ pub(crate) fn fill_black(f: &mut frame::Video) -> Result<()> {
 mod tests {
     use super::fill_black;
     use crate::ffmpeg::{format::Pixel, frame};
+
+    #[test]
+    fn packed_rgba_black_is_opaque() {
+        let mut f = frame::Video::new(Pixel::RGBA, 4, 4);
+        fill_black(&mut f).unwrap();
+        assert_eq!(&f.data(0)[..4], [0, 0, 0, 255]);
+    }
 
     #[test]
     fn black_is_video_range_black_in_every_layout() {
