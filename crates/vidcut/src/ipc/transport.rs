@@ -193,8 +193,8 @@ mod imp {
         }
         let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
         let key = absolute.to_string_lossy().to_lowercase();
-        let hash = vidcut_core::hash64(key.as_bytes());
-        wide(&format!(r"{PREFIX}vidcut-{hash:016x}"))
+        let name = vidcut_core::fingerprint::short_digest(key.as_bytes());
+        wide(&format!(r"{PREFIX}vidcut-{name}"))
     }
 
     /// A manual-reset event, for overlapped calls.

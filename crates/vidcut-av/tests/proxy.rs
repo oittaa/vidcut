@@ -243,6 +243,7 @@ fn matches_source(
             None,
             std::slice::from_ref(enc),
             decoder,
+            "",
         )
         .unwrap_or_else(|e| panic!("{} with {}: {e}", path.display(), enc.name));
         assert_eq!(written.encoder, *enc);
@@ -471,6 +472,7 @@ fn a_sequence_proxy_uses_the_sequence_timestamps() {
             None,
             std::slice::from_ref(&enc),
             None,
+            "",
         )
         .unwrap_or_else(|e| panic!("{}: {e}", enc.name));
         assert_eq!(written.frames, 8);

@@ -2483,11 +2483,13 @@ impl Live {
                 }
                 let (tx, id, path) = (self.tx.clone(), m.id.clone(), m.path.clone());
                 let wanted = sound;
-                let cache = paths::media_cache("waveforms", &m, &format!("peaks-{channels}ch"));
+                let origin = paths::media_origin(&m);
+                let cache =
+                    paths::media_cache("waveforms", &origin, &format!("peaks-{channels}ch"));
                 self.workers.run(move || {
                     let cached = std::fs::read(&cache)
                         .ok()
-                        .and_then(|b| vidcut_av::waveform::Waveform::from_bytes(&b));
+                        .and_then(|b| vidcut_av::waveform::Waveform::from_bytes(origin.check(&b)?));
                     let result = match cached {
                         Some(w) => Ok(w),
                         None => vidcut_av::waveform::waveform(&path, 0, WAVEFORM_RATE, channels)
@@ -2496,7 +2498,7 @@ impl Live {
                                 if let Some(dir) = cache.parent()
                                     && std::fs::create_dir_all(dir).is_ok()
                                 {
-                                    let _ = std::fs::write(&cache, w.to_bytes());
+                                    let _ = std::fs::write(&cache, origin.stamp(&w.to_bytes()));
                                 }
                             }),
                     };

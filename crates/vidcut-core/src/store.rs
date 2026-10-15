@@ -3,8 +3,8 @@
 //! X4, `crate::history`).
 //!
 //! The project is one pretty-printed JSON file. Its history is a file of
-//! its own, `$XDG_STATE_HOME/vidcut/history/<hash of the project
-//! path>.jsonl`. If the project file's hash isn't the one the history's
+//! its own, `$XDG_STATE_HOME/vidcut/history/<short digest of the project
+//! path>.jsonl`. If the project file's digest isn't the one the history's
 //! last save wrote, someone edited it outside: the difference becomes one
 //! undoable "external change" step.
 //!
@@ -95,8 +95,8 @@ impl Store {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
         let lock_path = path.with_file_name(format!(".{name}.lock"));
-        let hash = crate::hash64(path.as_os_str().as_encoded_bytes());
-        let history_path = state.join("history").join(format!("{hash:016x}.jsonl"));
+        let name = crate::fingerprint::short_digest(path.as_os_str().as_encoded_bytes());
+        let history_path = state.join("history").join(format!("{name}.jsonl"));
         Ok(Self {
             path,
             lock_path,

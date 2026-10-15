@@ -318,6 +318,7 @@ fn proxy(
         None,
         std::slice::from_ref(enc),
         gpu,
+        "",
     )
     .unwrap_or_else(|e| panic!("{} of {}: {e}", enc.name, path.display()));
     decoded(&dest)

@@ -7,6 +7,7 @@
 //! (decision D41). Audio is not copied: preview audio stays on the original.
 //!
 //! The file is Matroska, written to a temporary name and renamed into place.
+//! Its tag `VIDCUT_ORIGIN` says what it was made from ([`origin`]).
 //! Pictures are turned upright and scaled to `width`×`height` as 4:2:0, 10-bit
 //! from a source of more than 8 bits where the encoder takes them, 8-bit
 //! otherwise (ProRes 10-bit 4:2:2, DNxHR 8-bit 4:2:2, Apple's ProRes hardware
@@ -34,6 +35,9 @@ use crate::route::{Place, Went};
 
 /// Frames between keyframes.
 const KEYFRAMES: u32 = 60;
+
+/// The tag that says what a proxy was made from.
+const ORIGIN: &std::ffi::CStr = c"VIDCUT_ORIGIN";
 
 /// An encoder proxies can be made with.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -450,9 +454,11 @@ pub struct WrittenProxy {
 }
 
 /// Encodes `input`'s pictures to `dest` at `width`×`height` (even), with the
-/// first of `encoders` that opens. Each frame is reported to this thread's
-/// [`crate::progress`] guard, out of `total` (the source's frame count, when
-/// known); this thread's [`crate::cancel`] flag stops it, leaving no file.
+/// first of `encoders` that opens, tagged with what it is made from:
+/// `origin`, which [`origin`] reads back. Each frame is reported to this
+/// thread's [`crate::progress`] guard, out of `total` (the source's frame
+/// count, when known); this thread's [`crate::cancel`] flag stops it,
+/// leaving no file.
 ///
 /// The frames decode on `decoder`, a GPU's, where it decodes the stream,
 /// on the CPU otherwise, and their pictures are made as an export makes its
@@ -465,6 +471,7 @@ pub struct WrittenProxy {
 /// VideoToolbox on the decoder's device take its frames fitted there
 /// (`hw::Fitter`). For every other encoder the CPU scales, the GPU's
 /// frames shrunk there before they come down (`hw::Shrinker`).
+#[allow(clippy::too_many_arguments)]
 pub fn write(
     input: &Input,
     width: u32,
@@ -473,6 +480,7 @@ pub fn write(
     total: Option<u64>,
     encoders: &[ProxyEncoder],
     decoder: Option<&crate::hw::GpuDecoder>,
+    origin: &str,
 ) -> Result<WrittenProxy> {
     crate::init();
     let copies = std::sync::Arc::new(crate::copies::Copies::default());
@@ -518,7 +526,14 @@ pub fn write(
             Some(d) => VideoReader::open_gpu_or_cpu(input, d)?,
             None => VideoReader::open_input(input)?,
         };
-        match encode_into(&mut reader, enc, (width, height), &tmp, &shown, decoder) {
+        match encode_into(
+            &mut reader,
+            enc,
+            (width, height),
+            (&tmp, origin),
+            &shown,
+            decoder,
+        ) {
             Ok((frames, went)) => return done(frames, enc, went, reader.gpu()),
             Err(Failed::Encoding(e)) => {
                 let _ = std::fs::remove_file(&tmp);
@@ -532,6 +547,36 @@ pub fn write(
         }
     }
     Err(errors.remove(0))
+}
+
+/// What the proxy at `path` says it was made from ([`write`]'s `origin`),
+/// read from its header alone; `None` when it says nothing or can't be
+/// read.
+pub fn origin(path: &Path) -> Option<String> {
+    crate::init();
+    let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).ok()?;
+    // SAFETY: a NUL-terminated name in. The tag's value is copied out
+    // before the context closes.
+    unsafe {
+        let mut ctx = std::ptr::null_mut();
+        let opened = ffi::avformat_open_input(
+            &mut ctx,
+            path.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null_mut(),
+        );
+        if opened < 0 {
+            return None;
+        }
+        let tag = ffi::av_dict_get((*ctx).metadata, ORIGIN.as_ptr(), std::ptr::null(), 0);
+        let origin = (!tag.is_null()).then(|| {
+            std::ffi::CStr::from_ptr((*tag).value)
+                .to_string_lossy()
+                .into_owned()
+        });
+        ffi::avformat_close_input(&mut ctx);
+        origin
+    }
 }
 
 /// The encoder's time base: the source's, when its denominator is a sane
@@ -669,16 +714,16 @@ impl Encoding {
 }
 
 impl<'a> Writer<'a> {
-    /// Creates `tmp` and opens `video` for `width`×`height` pictures timed
-    /// in `src_tb`, as exports open theirs ([`encode::open_video`]), and
-    /// says what the pictures are made into. NVENC takes them in GPU memory
-    /// on the CUDA context they are `made_on` where it opens so, in
-    /// [`cuda_layout`]'s layout. Vulkan's ProRes encoder takes them where it
-    /// opens on the Vulkan device they are made on. VAAPI, AMF and
-    /// VideoToolbox open on `decoder`'s device where they share it
-    /// ([`encode::shares`]), for the frames fitted there.
+    /// Creates `tmp`, tagged with its `origin`, and opens `video` for
+    /// `width`×`height` pictures timed in `src_tb`, as exports open theirs
+    /// ([`encode::open_video`]), and says what the pictures are made into.
+    /// NVENC takes them in GPU memory on the CUDA context they are `made_on`
+    /// where it opens so, in [`cuda_layout`]'s layout. Vulkan's ProRes
+    /// encoder takes them where it opens on the Vulkan device they are made
+    /// on. VAAPI, AMF and VideoToolbox open on `decoder`'s device where they
+    /// share it ([`encode::shares`]), for the frames fitted there.
     fn new(
-        tmp: &Path,
+        (tmp, origin): (&Path, &str),
         video: &VideoEncoder,
         (width, height): (u32, u32),
         (src_tb, rate): (ffmpeg::Rational, Option<ffmpeg::Rational>),
@@ -690,6 +735,9 @@ impl<'a> Writer<'a> {
         let mut octx = format::output_as(tmp, "matroska")
             .ctx(|| format!("creating {}", tmp.display()))
             .map_err(Failed::Encoding)?;
+        let mut tags = ffmpeg::Dictionary::new();
+        tags.set(ORIGIN.to_str().expect("an ASCII name"), origin);
+        octx.set_metadata(tags);
         let global = octx.format().flags().contains(format::Flags::GLOBAL_HEADER);
         // FFmpeg's DNxHR takes nothing smaller ("Input dimensions too small").
         if video.name == "dnxhd" && (width < 256 || height < 120) {
@@ -872,13 +920,14 @@ impl<'a> Writer<'a> {
 /// frames made into its pictures by libplacebo on its Vulkan device; for
 /// VAAPI, AMF and
 /// VideoToolbox on `decoder`'s device, its frames fitted there; otherwise
-/// scaled on the CPU, the GPU's frames shrunk there first.
+/// scaled on the CPU, the GPU's frames shrunk there first. Into `tmp`,
+/// tagged with its `origin`.
 /// The frames written, and how the first one went.
 fn encode_into(
     reader: &mut VideoReader,
     enc: &ProxyEncoder,
     (width, height): (u32, u32),
-    tmp: &Path,
+    (tmp, origin): (&Path, &str),
     shown: &Shown<'_>,
     decoder: Option<&crate::hw::GpuDecoder>,
 ) -> std::result::Result<(u64, Option<Went>), Failed> {
@@ -907,7 +956,8 @@ fn encode_into(
         (EncoderChoice::Vulkan, Some(s)) => s.vulkan().map(MadeOn::Vulkan),
         _ => None,
     };
-    let (mut writer, output) = Writer::new(tmp, &video, size, times, made_on, decoder, shown)?;
+    let (mut writer, output) =
+        Writer::new((tmp, origin), &video, size, times, made_on, decoder, shown)?;
     // NVENC and Vulkan's encoder take the scaler's pictures where they
     // opened for frames in GPU memory.
     let (layout, mut fitting) = match output {

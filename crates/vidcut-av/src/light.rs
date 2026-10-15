@@ -3,7 +3,9 @@
 //! channel (maxRGB), in cd/m². For MaxCLL and MaxFALL where the sources say
 //! none, and for HDR10+ made for frames without it (decision D46). What a
 //! piece shows is measured once, every frame, and the result kept with the
-//! rest of its file's (`cache_in`).
+//! rest of its file's (`cache_in`), with the file's origin: the
+//! measurement of another file, or of this one before it changed, is never
+//! read for it.
 //!
 //! Each pixel is read as the export converts it (`color::pq_light`): PQ's
 //! EOTF, HLG's inverse OETF and 1.2 system gamma on a 1000-nit display, SDR
@@ -17,6 +19,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
+use vidcut_core::fingerprint::Origin;
 use vidcut_core::model::{Hdr, LightLevel};
 use vidcut_core::render::{Image, VideoPiece};
 use vidcut_core::time::Rational;
@@ -708,17 +711,28 @@ pub fn cache_in(dir: PathBuf) {
     let _ = CACHE.set(dir);
 }
 
-/// What names `input` as it is now: its path(s), size and time.
-fn key(input: &Input) -> String {
+/// `input` as it is now, as its measurement is kept: its file's (or
+/// sequence pattern's) origin, with a sequence's first number and rate.
+fn origin(input: &Input) -> Origin {
     let path = input.path();
     let meta = std::fs::metadata(path).ok();
     let size = meta.as_ref().map_or(0, std::fs::Metadata::len);
     let mtime = meta
         .and_then(|m| m.modified().ok())
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map_or(0, |d| d.as_nanos());
-    let text = format!("{input:?}|{size}|{mtime}");
-    format!("{:016x}", vidcut_core::hash64(text.as_bytes()))
+        .map_or(0, |d| d.as_nanos() as i64);
+    let origin = vidcut_core::fingerprint::origin(path, size, mtime);
+    match input {
+        Input::File(_) => origin,
+        Input::Sequence {
+            first,
+            rate: (num, den),
+            ..
+        } => Origin {
+            name: format!("{}-{first}-{num}-{den}", origin.name).into(),
+            text: format!("{} {first} {num}/{den}", origin.text).into(),
+        },
+    }
 }
 
 fn to_bytes(a: &LightAnalysis) -> Vec<u8> {
@@ -791,21 +805,23 @@ pub fn analysis(
     cancel: Option<&AtomicBool>,
     progress: &mut dyn FnMut(f64),
 ) -> Result<Option<Arc<LightAnalysis>>> {
-    static MEMORY: OnceLock<Mutex<HashMap<String, Arc<LightAnalysis>>>> = OnceLock::new();
-    let k = key(&span.input);
+    static MEMORY: OnceLock<Mutex<HashMap<Origin, Arc<LightAnalysis>>>> = OnceLock::new();
+    let origin = origin(&span.input);
     let memory = MEMORY.get_or_init(Default::default);
-    let file = CACHE.get().map(|d| d.join(format!("light-{k}")));
+    let file = CACHE
+        .get()
+        .map(|d| d.join(format!("light-{}", origin.name)));
     let known = {
         let mut m = memory.lock().unwrap();
-        if !m.contains_key(&k)
+        if !m.contains_key(&origin)
             && let Some(a) = file
                 .as_ref()
                 .and_then(|f| std::fs::read(f).ok())
-                .and_then(|b| from_bytes(&b))
+                .and_then(|b| from_bytes(origin.check(&b)?))
         {
-            m.insert(k.clone(), Arc::new(a));
+            m.insert(origin.clone(), Arc::new(a));
         }
-        m.get(&k).cloned()
+        m.get(&origin).cloned()
     };
     if let Some(a) = known.filter(|a| a.covers(span.from, span.to)) {
         return Ok(Some(a));
@@ -819,10 +835,10 @@ pub fn analysis(
     // meanwhile.
     let a = {
         let mut m = memory.lock().unwrap();
-        let mut a = m.get(&k).map(|a| (**a).clone()).unwrap_or_default();
+        let mut a = m.get(&origin).map(|a| (**a).clone()).unwrap_or_default();
         a.add(span.from, to, frames);
         let a = Arc::new(a);
-        m.insert(k, a.clone());
+        m.insert(origin.clone(), a.clone());
         a
     };
     if let Some(f) = &file {
@@ -830,7 +846,7 @@ pub fn analysis(
             let _ = std::fs::create_dir_all(dir);
         }
         let part = f.with_extension(format!("part{}", std::process::id()));
-        if std::fs::write(&part, to_bytes(&a)).is_ok() {
+        if std::fs::write(&part, origin.stamp(&to_bytes(&a))).is_ok() {
             let _ = std::fs::rename(&part, f);
         }
     }
@@ -879,6 +895,17 @@ impl Meter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sequences_measurement_is_kept_by_its_first_picture_and_rate() {
+        let o = origin(&Input::Sequence {
+            pattern: PathBuf::from("/media/f_%04d.exr"),
+            first: 1,
+            rate: (24, 1),
+        });
+        assert_eq!(&*o.name, "b4484e138e19524d2c01555ddf04af59-0-0-1-24-1");
+        assert_eq!(&*o.text, "0 0 /media/f_%04d.exr 1 24/1");
+    }
 
     #[test]
     fn a_failing_thread_ends_the_work() {

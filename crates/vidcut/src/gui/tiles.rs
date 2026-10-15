@@ -23,11 +23,13 @@ use std::time::{Duration, Instant};
 use eframe::egui;
 use vidcut_av::export::renderer::FrameReader;
 use vidcut_av::thumbs::Image;
+use vidcut_core::fingerprint::Origin;
 use vidcut_core::model::{Media, Project};
 use vidcut_core::preferences::Thumbnails;
 use vidcut_core::render::VideoPiece;
 use vidcut_core::time::Rational;
 
+use crate::paths;
 use crate::preferences::GpuDecoding;
 use crate::thumbcache::{self, TILE_BLOCK};
 
@@ -55,7 +57,42 @@ pub struct Job {
     pieces: Vec<VideoPiece>,
     /// The tile's block file and the disk cache's limit in bytes, while the
     /// disk cache is on.
-    disk: Option<(PathBuf, u64)>,
+    disk: Option<(BlockFile, u64)>,
+}
+
+/// A block file of tiles, and the origin of the tiles it is for: a file
+/// holding another's is made again.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct BlockFile {
+    path: PathBuf,
+    origin: Origin,
+}
+
+/// A media's file as last seen (path, size and modification time), and the
+/// origin of its tiles.
+struct Seen {
+    path: PathBuf,
+    size: u64,
+    mtime_ns: i64,
+    origin: Origin,
+}
+
+impl Seen {
+    fn of(m: &Media) -> Self {
+        Self {
+            path: m.path.clone(),
+            size: m.size,
+            mtime_ns: m.mtime_ns,
+            origin: paths::media_origin(m),
+        }
+    }
+
+    /// Whether `m`'s file is the one seen.
+    fn is(&self, m: &Media) -> bool {
+        self.path.as_os_str() == m.path.as_os_str()
+            && self.size == m.size
+            && self.mtime_ns == m.mtime_ns
+    }
 }
 
 struct Kept {
@@ -86,7 +123,7 @@ struct Queue {
 pub struct Tiles {
     kept: HashMap<(String, u32), BTreeMap<i64, Kept>>,
     /// Each media's file as last seen: another file drops its pictures.
-    versions: HashMap<String, String>,
+    versions: HashMap<String, Seen>,
     clock: u64,
     bytes: usize,
     budget: usize,
@@ -151,10 +188,13 @@ impl Tiles {
         }
         if let Some(p) = p {
             for m in &p.media {
-                let v = version(m);
-                if self.versions.get(&m.id) != Some(&v)
-                    && self.versions.insert(m.id.clone(), v).is_some()
-                {
+                let seen = self.versions.get(&m.id);
+                if seen.is_some_and(|s| s.is(m)) {
+                    continue;
+                }
+                let changed = seen.is_some();
+                self.versions.insert(m.id.clone(), Seen::of(m));
+                if changed {
                     self.forget(&m.id);
                 }
             }
@@ -257,7 +297,14 @@ impl Tiles {
             pieces,
             disk: self.disk.map(|limit| {
                 let block = key.frame.div_euclid(TILE_BLOCK);
-                (thumbcache::tile_block(m, key.height, block), limit)
+                // Its origin as kept when the frame began: painting digests
+                // nothing.
+                let origin = match self.versions.get(&key.media) {
+                    Some(seen) if seen.is(m) => seen.origin.clone(),
+                    _ => paths::media_origin(m),
+                };
+                let path = thumbcache::tile_block(&origin, key.height, block);
+                (BlockFile { path, origin }, limit)
             }),
         })
     }
@@ -364,12 +411,6 @@ impl Drop for Tiles {
     }
 }
 
-/// A media's file as the disk cache names it: path, size and modification
-/// time.
-fn version(m: &Media) -> String {
-    format!("{}|{}|{}", m.path.display(), m.size, m.mtime_ns)
-}
-
 /// The frame step between tiles `frames_per_tile` frames wide: the largest
 /// power of two not above it. Each tile then holds a frame of the grid, and
 /// zooming in or out by two keeps half of the frames.
@@ -424,8 +465,8 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Co
     let mut reader = reader_for(&decoding);
     // Blocks read or written lately (a missing file is an empty block),
     // and tiles made but not yet on disk.
-    let mut blocks: Vec<(PathBuf, Block)> = Vec::new();
-    let mut unwritten: HashMap<PathBuf, (Block, u64)> = HashMap::new();
+    let mut blocks: Vec<(BlockFile, Block)> = Vec::new();
+    let mut unwritten: HashMap<BlockFile, (Block, u64)> = HashMap::new();
     loop {
         let job = {
             let mut w = queue.waiting.lock().unwrap_or_else(|e| e.into_inner());
@@ -458,9 +499,9 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Co
                 .pieces
                 .iter()
                 .find_map(|piece| reader.rgba(piece, job.fps, job.width, job.key.height).ok())?;
-            if let Some((path, limit)) = &job.disk {
+            if let Some((file, limit)) = &job.disk {
                 let pending = unwritten
-                    .entry(path.clone())
+                    .entry(file.clone())
                     .or_insert((Vec::new(), *limit));
                 pending.0.push((job.key.frame, made.clone()));
             }
@@ -526,25 +567,25 @@ fn next(w: &mut Waiting, n: usize) -> Option<Job> {
 /// written.
 fn from_disk(
     job: &Job,
-    blocks: &mut Vec<(PathBuf, Block)>,
-    unwritten: &HashMap<PathBuf, (Block, u64)>,
+    blocks: &mut Vec<(BlockFile, Block)>,
+    unwritten: &HashMap<BlockFile, (Block, u64)>,
 ) -> Option<Image> {
-    let (path, _) = job.disk.as_ref()?;
+    let (file, _) = job.disk.as_ref()?;
     let pick = |tiles: &Block| {
         tiles
             .iter()
             .find(|(f, i)| *f == job.key.frame && i.width == job.width)
             .map(|(_, i)| i.clone())
     };
-    if let Some(found) = unwritten.get(path).and_then(|(tiles, _)| pick(tiles)) {
+    if let Some(found) = unwritten.get(file).and_then(|(tiles, _)| pick(tiles)) {
         return Some(found);
     }
-    let i = match blocks.iter().position(|(p, _)| p == path) {
+    let i = match blocks.iter().position(|(f, _)| f == file) {
         Some(i) => i,
         None => {
             blocks.push((
-                path.clone(),
-                thumbcache::load_tiles(path).unwrap_or_default(),
+                file.clone(),
+                thumbcache::load_tiles(&file.path, &file.origin).unwrap_or_default(),
             ));
             // A few blocks per worker: a clip's tiles share one at a time.
             if blocks.len() > 8 {
@@ -559,15 +600,15 @@ fn from_disk(
 /// Writes the tiles made to their block files, and now and then trims the
 /// disk cache to its limit.
 fn write(
-    unwritten: &mut HashMap<PathBuf, (Block, u64)>,
-    blocks: &mut Vec<(PathBuf, Block)>,
+    unwritten: &mut HashMap<BlockFile, (Block, u64)>,
+    blocks: &mut Vec<(BlockFile, Block)>,
     trimmed: &Mutex<Option<Instant>>,
 ) {
     let mut limit = None;
-    for (path, (tiles, l)) in unwritten.drain() {
-        thumbcache::store_tiles(&path, &tiles);
+    for (file, (tiles, l)) in unwritten.drain() {
+        thumbcache::store_tiles(&file.path, &file.origin, &tiles);
         // What the worker remembers of the block is what is there now.
-        blocks.retain(|(p, _)| p != &path);
+        blocks.retain(|(f, _)| f != &file);
         limit = Some(l);
     }
     let Some(limit) = limit else { return };
