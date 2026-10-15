@@ -352,7 +352,7 @@ fn c_name(p: *const std::ffi::c_char) -> Option<String> {
 /// fields with the frames around it (send_frame); progressive frames pass
 /// through. Holds one frame back.
 struct Deinterlacer {
-    graph: Option<filter::Graph>,
+    graph: Option<crate::hw::GpuGraph>,
     /// The stream's time base, and the parameters the graph was built for.
     time_base: ffmpeg::Rational,
     input: (u32, u32, format::Pixel),
@@ -395,7 +395,7 @@ impl Deinterlacer {
     /// levels differ at the edges (gotchas.md).
     fn build(&mut self, f: &frame::Video) -> Result<()> {
         let sar = f.aspect_ratio();
-        let mut graph = filter::Graph::new();
+        let mut graph = crate::hw::GpuGraph::new();
         let find = |name: &str| {
             filter::find(name).ok_or_else(|| Error::Invalid(format!("no {name} filter")))
         };
