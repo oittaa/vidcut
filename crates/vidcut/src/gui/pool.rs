@@ -3,9 +3,11 @@
 //! below it (spec §2, §7).
 
 use std::ops::Range;
+use std::sync::Arc;
 
 use eframe::egui::{
-    self, Color32, CornerRadius, Pos2, Rangef, Rect, RichText, Sense, Stroke, Vec2, vec2,
+    self, Color32, CornerRadius, Pos2, Rangef, Rect, RichText, Sense, Stroke, UiBuilder, Vec2,
+    pos2, vec2,
 };
 use serde_json::json;
 use vidcut_core::model::{Media, Project};
@@ -20,6 +22,19 @@ const TILE: egui::Vec2 = egui::Vec2::new(176.0, 99.0);
 const TILE_FULL: egui::Vec2 = egui::Vec2::new(TILE.x, TILE.y + 30.0);
 /// Between tiles, across and down.
 const TILE_GAP: f32 = 8.0;
+/// The List view's columns.
+const LIST_COLUMNS: [&str; 8] = [
+    "Name",
+    "Duration",
+    "Resolution",
+    "FPS",
+    "Codec",
+    "Audio",
+    "Proxy",
+    "Color",
+];
+/// Between the List view's columns, and between its rows.
+const LIST_GAP: Vec2 = Vec2::new(12.0, 4.0);
 /// The Filmstrip view's pictures, and the name line above them.
 const STRIP_HEIGHT: f32 = 54.0;
 const HEADER: f32 = 20.0;
@@ -33,6 +48,65 @@ pub(super) struct BinsUi {
     /// The media shown, in order (Shift-click selects ranges of it).
     order: Vec<String>,
     rename: Option<Rename>,
+    /// The List view's sizes, last measured.
+    list: Option<ListLayout>,
+}
+
+/// A row of the List view.
+#[derive(Clone, Copy)]
+enum ListRow<'a> {
+    Header,
+    Bin(&'a str),
+    Media(&'a Media),
+}
+
+impl<'a> ListRow<'a> {
+    /// Which of [`ListSizes::rows`] it takes.
+    fn kind(self) -> usize {
+        match self {
+            Self::Header => 0,
+            Self::Bin(_) => 1,
+            Self::Media(_) => 2,
+        }
+    }
+
+    /// What its cells' ids are made of.
+    fn id(self) -> (&'static str, &'a str) {
+        match self {
+            Self::Header => ("header", ""),
+            Self::Bin(b) => ("bin", b),
+            Self::Media(m) => ("media", &m.id),
+        }
+    }
+}
+
+/// The List view's sizes, measured over all its rows: each column as wide
+/// as its widest cell, and the header's, a bin's and a media's height.
+#[derive(Clone, Copy, PartialEq)]
+struct ListSizes {
+    columns: [f32; 8],
+    rows: [f32; 3],
+}
+
+impl ListSizes {
+    /// A cell's least size, as a grid has it.
+    fn least(ui: &egui::Ui) -> Self {
+        let size = ui.spacing().interact_size;
+        Self {
+            columns: [size.x; 8],
+            rows: [size.y; 3],
+        }
+    }
+}
+
+/// The List view's sizes, and what they were measured for: the project,
+/// the bin and the search, and the screen's scale.
+struct ListLayout {
+    project: Arc<Project>,
+    bin: String,
+    search: String,
+    scale: f32,
+    sizes: ListSizes,
 }
 
 /// The window naming a bin: the bin and the name typed so far. `new`: the
@@ -357,7 +431,7 @@ impl Workspace {
                 match self.pool_view {
                     PoolView::Thumbnails => self.grid(ui, viewport, p, &folders, &media),
                     PoolView::Filmstrip => self.strips(ui, viewport, p, &folders, &media),
-                    PoolView::List => self.list(ui, p, &folders, &media),
+                    PoolView::List => self.list(ui, viewport, p, &folders, &media),
                 }
             });
         ui.separator();
@@ -961,26 +1035,125 @@ impl Workspace {
         )
     }
 
-    fn list(&mut self, ui: &mut egui::Ui, p: &Project, folders: &[String], media: &[&Media]) {
-        egui::Grid::new("pool-list")
-            .striped(true)
-            .num_columns(8)
-            .spacing(vec2(12.0, 4.0))
-            .show(ui, |ui| {
-                for h in [
-                    "Name",
-                    "Duration",
-                    "Resolution",
-                    "FPS",
-                    "Codec",
-                    "Audio",
-                    "Proxy",
-                    "Color",
-                ] {
-                    ui.label(dim(h));
-                }
-                ui.end_row();
-                for b in folders {
+    /// The List view: a header, a row for each bin, then one for each
+    /// media, in columns as wide as their widest cell, as a striped grid
+    /// lays them out. Only the rows in `viewport` are laid out. The sizes
+    /// are measured over every row when what the list shows changes.
+    fn list(
+        &mut self,
+        ui: &mut egui::Ui,
+        viewport: Rect,
+        p: &Project,
+        folders: &[String],
+        media: &[&Media],
+    ) {
+        let Some(project) = self.project_shared() else {
+            return;
+        };
+        let (bin, search) = (self.snap.pool.bin.clone(), self.search.clone());
+        let scale = ui.ctx().pixels_per_point();
+        let measured_for = |l: &&ListLayout| {
+            Arc::ptr_eq(&l.project, &project)
+                && l.bin == bin
+                && l.search == search
+                && l.scale == scale
+        };
+        let fresh = self
+            .bins
+            .list
+            .as_ref()
+            .filter(measured_for)
+            .map(|l| l.sizes);
+        // Until measured, as last measured (as a grid shows its last sizes).
+        let sizes = fresh
+            .or_else(|| self.bins.list.as_ref().map(|l| l.sizes))
+            .unwrap_or_else(|| ListSizes::least(ui));
+        let origin = ui.cursor().min;
+        let top = origin.y - ui.max_rect().top();
+        let [header, bin_height, media_height] = sizes.rows;
+        let bins_top = header + LIST_GAP.y;
+        let media_top = bins_top + folders.len() as f32 * (bin_height + LIST_GAP.y);
+        let (headers, bins, medias) = match fresh {
+            Some(_) => {
+                let view = viewport.y_range();
+                (
+                    shown(view, top, header + LIST_GAP.y, 1),
+                    shown(view, top + bins_top, bin_height + LIST_GAP.y, folders.len()),
+                    shown(
+                        view,
+                        top + media_top,
+                        media_height + LIST_GAP.y,
+                        media.len(),
+                    ),
+                )
+            }
+            None => (0..1, 0..folders.len(), 0..media.len()),
+        };
+        let rows = headers
+            .map(|_| (0, 0.0, ListRow::Header))
+            .chain(bins.map(|i| {
+                let y = bins_top + i as f32 * (bin_height + LIST_GAP.y);
+                (1 + i, y, ListRow::Bin(&folders[i]))
+            }))
+            .chain(medias.map(|i| {
+                let y = media_top + i as f32 * (media_height + LIST_GAP.y);
+                (1 + folders.len() + i, y, ListRow::Media(media[i]))
+            }));
+        let width = sizes.columns.iter().sum::<f32>() + 7.0 * LIST_GAP.x;
+        let mut measured = ListSizes::least(ui);
+        for (r, y, row) in rows {
+            let kind = row.kind();
+            let height = sizes.rows[kind];
+            let at = origin + vec2(0.0, y);
+            if r % 2 == 1 {
+                let stripe = Rect::from_min_size(at, vec2(width, height));
+                let stripe = stripe.expand2(vec2(2.0, LIST_GAP.y / 2.0));
+                ui.painter()
+                    .rect_filled(stripe, 2.0, ui.visuals().faint_bg_color);
+            }
+            let mut x = at.x;
+            for (c, column) in sizes.columns.iter().enumerate() {
+                let cell = Rect::from_min_size(pos2(x, at.y), vec2(*column, height));
+                let builder = UiBuilder::new()
+                    .id_salt((row.id(), c))
+                    .max_rect(cell)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center));
+                let rect = ui
+                    .scope_builder(builder, |ui| self.list_cell(ui, p, row, c))
+                    .response
+                    .rect;
+                measured.columns[c] = measured.columns[c].max(rect.width());
+                measured.rows[kind] = measured.rows[kind].max(rect.height());
+                x += column + LIST_GAP.x;
+            }
+        }
+        if fresh.is_none() {
+            if measured != sizes {
+                ui.ctx().request_discard("the List view's sizes changed");
+            }
+            self.bins.list = Some(ListLayout {
+                project,
+                bin,
+                search,
+                scale,
+                sizes: measured,
+            });
+        }
+        let height = match media.len() {
+            0 => media_top - LIST_GAP.y,
+            n => media_top + n as f32 * (media_height + LIST_GAP.y) - LIST_GAP.y,
+        };
+        ui.expand_to_include_rect(Rect::from_min_size(origin, vec2(width, height)));
+    }
+
+    /// Column `c` of `row` in the List view.
+    fn list_cell(&mut self, ui: &mut egui::Ui, p: &Project, row: ListRow, c: usize) {
+        match row {
+            ListRow::Header => {
+                ui.label(dim(LIST_COLUMNS[c]));
+            }
+            ListRow::Bin(b) => match c {
+                0 => {
                     let r = ui
                         .selectable_label(false, format!("📁 {}", elide(leaf(b), 38)))
                         .interact(Sense::drag())
@@ -989,77 +1162,96 @@ impl Workspace {
                         ));
                     self.drop_highlight(ui, r.rect, b);
                     self.bin_interaction(&r, b);
+                }
+                1 => {
                     let count = p.media.iter().filter(|m| within(&m.bin, b)).count();
                     ui.label(dim(format!("{count} clip(s)")));
-                    for _ in 0..6 {
-                        ui.label("");
-                    }
-                    ui.end_row();
                 }
-                for m in media {
-                    let selected = self.snap.selection.media.contains(&m.id);
-                    let mut name = RichText::new(elide(&m.name, 40));
-                    if self.snap.missing.contains(&m.id) {
-                        name = name.color(theme::ERROR);
+                _ => {
+                    ui.label("");
+                }
+            },
+            ListRow::Media(m) => self.media_cell(ui, m, c),
+        }
+    }
+
+    /// Column `c` of media `m`'s row in the List view.
+    fn media_cell(&mut self, ui: &mut egui::Ui, m: &Media, c: usize) {
+        let video = m.info.video.as_ref();
+        match c {
+            0 => {
+                let selected = self.snap.selection.media.contains(&m.id);
+                let mut name = RichText::new(elide(&m.name, 40));
+                if self.snap.missing.contains(&m.id) {
+                    name = name.color(theme::ERROR);
+                }
+                let resp = ui.selectable_label(selected, name).interact(Sense::drag());
+                let resp = if self.snap.missing.contains(&m.id) {
+                    resp.on_hover_text(format!("Missing: {}", m.path.display()))
+                } else {
+                    resp
+                };
+                self.media_interaction(&resp, m);
+            }
+            1 => {
+                let frames = self.project().map_or(0, |p| p.media_frames(m));
+                ui.label(self.src_tc(frames));
+            }
+            2 => {
+                ui.label(video.map_or_else(
+                    || "-".to_string(),
+                    |v| {
+                        let (w, h) = v.display_size();
+                        format!("{w}x{h}")
+                    },
+                ));
+            }
+            // 23.976 shown, 24000/1001 on hover.
+            3 => match video {
+                Some(v) => {
+                    let rate = ui.label(v.fps.decimal());
+                    if !v.fps.is_whole() {
+                        rate.on_hover_text(format!("{} fps", v.fps));
                     }
-                    let resp = ui.selectable_label(selected, name).interact(Sense::drag());
-                    let resp = if self.snap.missing.contains(&m.id) {
-                        resp.on_hover_text(format!("Missing: {}", m.path.display()))
+                }
+                None => {
+                    ui.label("-");
+                }
+            },
+            4 => {
+                ui.label(video.map_or("-", |v| v.codec.as_str()));
+            }
+            5 => {
+                ui.label(match m.info.audio.first() {
+                    Some(a) => format!("{} {} ch", a.codec, a.channels),
+                    None => "none".into(),
+                });
+            }
+            6 => match (proxy_state(m), &m.proxy) {
+                (Some((_, color, tip)), Some(p)) => {
+                    let text = if m.fresh_proxy().is_some() {
+                        format!("{}x{}", p.width, p.height)
                     } else {
-                        resp
+                        "out of date".into()
                     };
-                    self.media_interaction(&resp, m);
-                    let frames = self.project().map_or(0, |p| p.media_frames(m));
-                    ui.label(self.src_tc(frames));
-                    match &m.info.video {
-                        Some(v) => {
-                            let (w, h) = v.display_size();
-                            ui.label(format!("{w}x{h}"));
-                            // 23.976 shown, 24000/1001 on hover.
-                            let rate = ui.label(v.fps.decimal());
-                            if !v.fps.is_whole() {
-                                rate.on_hover_text(format!("{} fps", v.fps));
-                            }
-                            ui.label(&v.codec);
-                        }
-                        None => {
-                            ui.label("-");
-                            ui.label("-");
-                            ui.label("-");
-                        }
-                    }
-                    ui.label(match m.info.audio.first() {
-                        Some(a) => format!("{} {} ch", a.codec, a.channels),
-                        None => "none".into(),
-                    });
-                    match (proxy_state(m), &m.proxy) {
-                        (Some((_, color, tip)), Some(p)) => {
-                            let text = if m.fresh_proxy().is_some() {
-                                format!("{}x{}", p.width, p.height)
-                            } else {
-                                "out of date".into()
-                            };
-                            ui.label(RichText::new(text).color(color))
-                                .on_hover_text(tip);
-                        }
-                        _ => {
-                            ui.label("-");
-                        }
-                    }
-                    match m.color.as_deref().and_then(theme::clip_color) {
-                        Some(color) => {
-                            let (patch, _) =
-                                ui.allocate_exact_size(vec2(14.0, 12.0), Sense::hover());
-                            ui.painter()
-                                .rect_filled(patch, CornerRadius::same(2), color);
-                        }
-                        None => {
-                            ui.label("");
-                        }
-                    }
-                    ui.end_row();
+                    ui.label(RichText::new(text).color(color))
+                        .on_hover_text(tip);
                 }
-            });
+                _ => {
+                    ui.label("-");
+                }
+            },
+            _ => match m.color.as_deref().and_then(theme::clip_color) {
+                Some(color) => {
+                    let (patch, _) = ui.allocate_exact_size(vec2(14.0, 12.0), Sense::hover());
+                    ui.painter()
+                        .rect_filled(patch, CornerRadius::same(2), color);
+                }
+                None => {
+                    ui.label("");
+                }
+            },
+        }
     }
 
     /// Click selects (and shows the clip in a source viewer), double-click
