@@ -4023,7 +4023,9 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
                 }
                 at = c.end();
             }
-            let mut v = json!({ "id": t.id, "kind": t.kind, "locked": t.locked, "muted": t.muted, "items": items });
+            let mut v = json!({ "id": t.id, "kind": t.kind, "locked": t.locked, "muted": t.muted });
+            // Moved in: `json!` would copy them all.
+            v["items"] = Value::Array(items);
             if t.solo {
                 v["solo"] = json!(true);
             }
@@ -4050,21 +4052,22 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
                 })
                 .collect();
             if !transitions.is_empty() {
-                v["transitions"] = json!(transitions);
+                v["transitions"] = Value::Array(transitions);
             }
             v
         })
         .collect();
-    json!({
+    let mut v = json!({
         "fps": fps.to_string(),
         "start": a,
         "end": b,
         "duration": p.end(),
         "duration_tc": p.settings.timecode(p.end()),
-        "tracks": tracks,
         "marks": p.marks,
         "markers": p.markers,
-    })
+    });
+    v["tracks"] = Value::Array(tracks);
+    v
 }
 
 /// A fixed rate for tests and tools that need one.
