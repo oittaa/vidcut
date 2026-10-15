@@ -137,7 +137,10 @@ impl Format {
                         )
                     });
                     if self.start().is_none() {
-                        ui.label(RichText::new("a timecode, like 01:00:00:00").color(theme::ERROR));
+                        ui.label(
+                            RichText::new("a timecode, like 01:00:00:00")
+                                .color(theme::colors().error),
+                        );
                     }
                 });
                 ui.end_row();
@@ -225,7 +228,7 @@ impl Format {
                         if current.is_none() {
                             ui.label(
                                 RichText::new("a rate above 0, like 25 or 30000/1001")
-                                    .color(theme::ERROR),
+                                    .color(theme::colors().error),
                             );
                         }
                     });
@@ -517,7 +520,7 @@ impl Workspace {
                         "The size can change later; the frame rate only while the timeline is empty.",
                     )
                     .small()
-                    .color(theme::TEXT_DIM),
+                    .color(theme::colors().text_dim),
                 );
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
@@ -594,7 +597,7 @@ impl Workspace {
                             "The frame rate can change only while the timeline is empty.",
                         )
                         .small()
-                        .color(theme::TEXT_DIM),
+                        .color(theme::colors().text_dim),
                     );
                 }
                 ui.add_space(4.0);

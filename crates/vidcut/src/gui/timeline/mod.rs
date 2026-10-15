@@ -315,6 +315,10 @@ const LOWER_RULER: f32 = 22.0;
 /// The track header column: wide enough for a track's name with its four
 /// buttons on one line, which must not reach into the timeline.
 const HEADER: f32 = 120.0;
+/// The height of the header column's controls by the overview and the
+/// lower ruler. Their boxes are as tall as those, whatever height a theme
+/// gives buttons.
+const BOX_CONTROL: f32 = 18.0;
 
 /// The icons of the timeline's controls.
 mod icon {
@@ -453,9 +457,12 @@ impl Workspace {
         ui.painter().rect_filled(
             Rect::from_min_max(full.min, pos2(upper_rect.left() - 1.0, upper_rect.bottom())),
             0.0,
-            theme::PANEL_DARK,
+            theme::colors().panel_dark,
         );
         let upper_resp = ui.allocate_rect(upper_rect, Sense::click_and_drag());
+        upper_resp.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Timeline overview")
+        });
         let lower_resp = ui.allocate_rect(lower_rect, Sense::click_and_drag());
 
         // Scales.
@@ -584,7 +591,7 @@ impl Workspace {
                     pos2(content.left() - 1.0, lower_rect.bottom()),
                 ),
                 0.0,
-                theme::PANEL_DARK,
+                theme::colors().panel_dark,
             );
             // Each track's header is a band beside its row, with the rows'
             // gaps between them, so a header reads as its track's.
@@ -595,14 +602,14 @@ impl Workspace {
                     pos2(content.left() - 2.0, row.rect.rect.bottom()),
                 );
                 if self.is_target(&row.track) {
-                    painter.rect_filled(band, 2.0, theme::PANEL_TARGET);
+                    painter.rect_filled(band, 2.0, theme::colors().panel_target);
                     painter.rect_filled(
                         Rect::from_min_size(band.min, vec2(3.0, band.height())),
                         2.0,
-                        theme::ACCENT,
+                        theme::colors().accent,
                     );
                 } else {
-                    painter.rect_filled(band, 2.0, theme::PANEL);
+                    painter.rect_filled(band, 2.0, theme::colors().panel);
                 }
             }
             paint::ruler(&painter, lower_ruler, &lower_scale, drawn, smart, false);
@@ -654,7 +661,7 @@ impl Workspace {
                     Rect::from_x_y_ranges(a..=b, y),
                     0.0,
                     if stopped {
-                        theme::ERROR
+                        theme::colors().error
                     } else {
                         Color32::from_rgb(90, 200, 90)
                     },
@@ -849,7 +856,7 @@ impl Workspace {
         if self.timeline.dynamic.is_some() {
             Color32::from_rgb(240, 200, 40)
         } else {
-            theme::PLAYHEAD
+            theme::colors().playhead
         }
     }
 
@@ -918,6 +925,7 @@ impl Workspace {
         child.set_clip_rect(upper.intersect(child.clip_rect()));
         child.spacing_mut().item_spacing = vec2(2.0, 2.0);
         child.spacing_mut().button_padding = vec2(4.0, 1.0);
+        child.spacing_mut().interact_size.y = BOX_CONTROL;
         child.horizontal(|ui| {
             icon_menu(ui, icon::OPTIONS, "Timeline Options", |ui| {
                 self.options_menu(ui, p)
@@ -949,6 +957,7 @@ impl Workspace {
         child.set_clip_rect(lower.intersect(child.clip_rect()));
         child.spacing_mut().item_spacing = vec2(1.0, 0.0);
         child.spacing_mut().button_padding = vec2(2.0, 0.0);
+        child.spacing_mut().interact_size.y = BOX_CONTROL;
         child.horizontal_centered(|ui| self.timeline_tools(ui, p));
     }
 
@@ -1169,8 +1178,16 @@ impl Workspace {
             );
             let r = name
                 .add(
-                    egui::Button::selectable(is_target, RichText::new(&label).strong().small())
-                        .truncate(),
+                    // Selected, the name takes the selection's text color.
+                    egui::Button::selectable(
+                        is_target,
+                        if is_target {
+                            RichText::new(&label).small()
+                        } else {
+                            RichText::new(&label).strong().small()
+                        },
+                    )
+                    .truncate(),
                 )
                 .on_hover_text("The target track for edit functions");
             // A click makes the track the target, however often it comes;
@@ -1921,7 +1938,7 @@ impl Workspace {
             painter.rect_filled(
                 Rect::from_min_size(at - vec2(4.0, 2.0), galley.size() + vec2(8.0, 4.0)),
                 3.0,
-                theme::CLIP,
+                theme::colors().clip,
             );
             painter.galley(at, galley, Color32::WHITE);
             return;
@@ -1951,7 +1968,7 @@ impl Workspace {
         painter.rect_filled(
             Rect::from_min_size(at - vec2(4.0, 2.0), galley.size() + vec2(8.0, 4.0)),
             3.0,
-            theme::CLIP,
+            theme::colors().clip,
         );
         painter.galley(at, galley, Color32::WHITE);
         if d.preview.request.is_none() {
@@ -1960,7 +1977,7 @@ impl Workspace {
                 Align2::LEFT_TOP,
                 "drop on the timeline",
                 FontId::proportional(10.0),
-                theme::TEXT_DIM,
+                theme::colors().text_dim,
             );
         }
     }

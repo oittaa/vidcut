@@ -285,7 +285,7 @@ impl Workspace {
                     });
                 ui.separator();
                 let status = match (&d.error, d.current(), d.asked.is_some()) {
-                    (Some(e), _, _) => RichText::new(e).color(theme::ERROR),
+                    (Some(e), _, _) => RichText::new(e).color(theme::colors().error),
                     (None, _, true) | (None, false, _) => dim("Finding silence…"),
                     (None, true, false) if d.parts.is_empty() => dim("No silence to remove."),
                     (None, true, false) => RichText::new(format!(

@@ -152,6 +152,31 @@ impl OpenProject {
     }
 }
 
+/// Watches the folder `dir` and reports changes to the TOML files in it
+/// with the message `changed` makes.
+pub(super) fn watch_dir(
+    dir: &Path,
+    inbox: Sender<Msg>,
+    changed: fn() -> Msg,
+) -> Option<notify::RecommendedWatcher> {
+    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+        if let Ok(event) = event
+            && !matches!(event.kind, notify::EventKind::Access(_))
+            && event
+                .paths
+                .iter()
+                .any(|p| p.extension().is_some_and(|e| e == "toml"))
+        {
+            let _ = inbox.send(changed());
+        }
+    })
+    .ok()?;
+    watcher
+        .watch(dir, notify::RecursiveMode::NonRecursive)
+        .ok()?;
+    Some(watcher)
+}
+
 /// Watches the directory of the file at `path` and reports changes to the
 /// file with the message `changed` makes.
 pub(super) fn watch(

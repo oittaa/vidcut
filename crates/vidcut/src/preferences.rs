@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use vidcut_core::preferences::{Preferences, PreferencesPatch};
 use vidcut_core::{Error, Result};
 
-use crate::{paths, thumbcache};
+use crate::{paths, themes, thumbcache};
 
 pub fn path() -> PathBuf {
     paths::config_dir().join("preferences.toml")
@@ -134,13 +134,22 @@ pub fn get() -> Result<Value> {
 }
 
 /// `preferences.set`: applies `patch`, saves, and brings the thumbnail
-/// cache in line (emptied when turned off, trimmed to the limit). A dry run
-/// only checks and describes the result.
+/// cache in line (emptied when turned off, trimmed to the limit). A theme
+/// given as a file is imported into the themes folder. A dry run only
+/// checks and describes the result.
 pub fn set(patch: &PreferencesPatch, dry_run: bool) -> Result<Value> {
     // One change at a time: each reads the file the one before wrote.
     static SETTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _one = SETTING.lock().unwrap_or_else(|e| e.into_inner());
-    let p = load()?.patched(patch)?;
+    let mut patch = patch.clone();
+    if let Some(theme) = patch.appearance.as_mut().and_then(|a| a.theme.as_mut()) {
+        if themes::is_file(theme) {
+            *theme = themes::import(std::path::Path::new(theme), dry_run)?;
+        } else {
+            themes::load(theme)?;
+        }
+    }
+    let p = load()?.patched(&patch)?;
     if dry_run {
         return Ok(describe(&p));
     }
@@ -166,6 +175,16 @@ pub fn set(patch: &PreferencesPatch, dry_run: bool) -> Result<Value> {
             .map_err(|e| Error::internal(format!("{}: {e}", thumbcache::dir().display())))?;
     }
     Ok(describe(&p))
+}
+
+/// The computer's light or dark mode and accent color (`look.rs`).
+fn system_look() -> Value {
+    let look = crate::look::current();
+    let [r, g, b, _] = look.accent.base.to_array();
+    json!({
+        "light": look.light,
+        "accent": format!("#{r:02X}{g:02X}{b:02X}"),
+    })
 }
 
 fn describe(p: &Preferences) -> Value {
@@ -198,6 +217,10 @@ fn describe(p: &Preferences) -> Value {
     json!({
         "path": path(),
         "preferences": p,
+        "themes": themes::list(),
+        "themes_folder": themes::dir(),
+        // What native themes follow.
+        "system_look": system_look(),
         "thumbnail_cache": {
             "path": thumbcache::dir(),
             "files": files,

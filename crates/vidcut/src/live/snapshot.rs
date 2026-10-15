@@ -197,6 +197,9 @@ pub struct Snapshot {
     pub stats: bool,
     /// Why there is no preview, if so.
     pub preview_error: Option<String>,
+    /// The GUI's theme (`appearance.theme`), loaded again when the
+    /// preferences or a theme file change.
+    pub theme: Arc<crate::themes::Theme>,
 }
 
 impl Snapshot {

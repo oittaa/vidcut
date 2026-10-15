@@ -1,0 +1,68 @@
+# Cybertruck: stainless and angular. Brushed steel slabs with cut corners, a
+# light bar and a red playhead.
+
+title = "Cybertruck"
+light = false
+
+[colors]
+background = "#0A0A0B"
+panel = "#242527"
+panel_dark = "#0E0E0F"
+track = "#161719"
+track_target = "#2C2D30"
+panel_target = "#484A4E"
+text = "#EEEFF1"
+text_dim = "#8E9196"
+accent = "#F0F1F3"
+playhead = "#FF2828"
+clip = "#5C6066"
+clip_disabled = "#2E2F32"
+offline = "#AA2828"
+audio = "#4C525A"
+generator = "#6E6E82"
+compound = "#82786E"
+marked = "#78787E46"
+error = "#FF4646"
+ok = "#B4E6B4"
+selection = "#E2E4E8"
+selected_text = "#101011"
+field = "#0C0C0D"
+faint = "#2A2B2E"
+line = "#46484C"
+button = "#18191B"
+button_line = "#5A5C60"
+button_hovered = "#2A2B2E"
+button_pressed = "#3A3C3F"
+shadow = "#000000C8"
+
+[shape]
+corners = 0
+windows = 0
+menus = 0
+panels = 0
+clips = 0
+gap = 5
+padding = 15
+bar_padding = [8, 5]
+spacing = [9, 6]
+button_padding = [12, 5]
+button_height = 25
+buttons = "filled"
+panel_border = false
+shadow = [0, 10, 24]
+
+[fonts]
+ui = ["Space Grotesk"]
+mono = ["Geist Mono"]
+size = 14.5
+small = 11
+heading = 19
+mono_size = 12.5
+
+[decoration]
+style = "steel"
+cut = 22
+color = "#FFFFFF"
+top = "#3A3C3F"
+bottom = "#1C1D1F"
+edge = "#606368"

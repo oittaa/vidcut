@@ -229,7 +229,7 @@ impl Workspace {
                         Align2::CENTER_CENTER,
                         text,
                         FontId::proportional(14.0),
-                        theme::TEXT_DIM,
+                        theme::colors().text_dim,
                     );
                 }
             }
@@ -240,7 +240,7 @@ impl Workspace {
                 .map(|m| m.name.clone())
         });
         if let Some(name) = offline {
-            painter.rect_filled(picture, CornerRadius::ZERO, theme::OFFLINE);
+            painter.rect_filled(picture, CornerRadius::ZERO, theme::colors().offline);
             let text = RichText::new(format!("Media Offline\n{name}"))
                 .size(18.0)
                 .color(Color32::WHITE);
@@ -256,7 +256,7 @@ impl Workspace {
                 Align2::LEFT_TOP,
                 e,
                 FontId::proportional(12.0),
-                theme::ERROR,
+                theme::colors().error,
             );
         }
         area_resp.context_menu(|ui| {
@@ -378,7 +378,7 @@ impl Workspace {
             match self.timeline.dynamic.as_ref().and_then(|d| d.stopped.as_ref()) {
                 Some(why) => ui.label(
                     RichText::new(format!("Stopped here: {why}. K applies, J goes back"))
-                        .color(theme::ERROR),
+                        .color(theme::colors().error),
                 ),
                 None => ui.label(dim("L/J trim (repeat for speed), K stops and applies, K+L/J one frame, Space plays around it, W leaves")),
             };
@@ -425,7 +425,7 @@ impl Workspace {
                     Align2::CENTER_CENTER,
                     "no clip",
                     FontId::proportional(12.0),
-                    theme::TEXT_DIM,
+                    theme::colors().text_dim,
                 );
                 continue;
             };
@@ -484,7 +484,7 @@ impl Workspace {
         let (rect, resp) =
             ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::click_and_drag());
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, CornerRadius::same(2), theme::TRACK);
+        painter.rect_filled(rect, CornerRadius::same(2), theme::colors().track);
         let frames = self.snap.source.frames.max(1);
         let x = |f: i64| rect.left() + rect.width() * (f as f32 / frames as f32);
         let frame_at = |px: f32| {
@@ -496,7 +496,7 @@ impl Workspace {
                 let x0 = x(e.start);
                 painter.line_segment(
                     [Pos2::new(x0, rect.top()), Pos2::new(x0, rect.bottom())],
-                    Stroke::new(1.0, theme::TEXT_DIM),
+                    Stroke::new(1.0, theme::colors().text_dim),
                 );
                 let name = self
                     .project()
@@ -509,7 +509,7 @@ impl Workspace {
                         Align2::LEFT_TOP,
                         elide(&name, (room / 7.0) as usize),
                         FontId::proportional(10.0),
-                        theme::TEXT_DIM,
+                        theme::colors().text_dim,
                     );
                 }
             }
@@ -530,7 +530,7 @@ impl Workspace {
             painter.rect_filled(
                 Rect::from_min_max(Pos2::new(x(a), rect.top()), Pos2::new(x(b), rect.bottom())),
                 CornerRadius::ZERO,
-                theme::MARKED,
+                theme::colors().marked,
             );
             self.mark_handles(&painter, rect, x(a), x(b));
             handles = Some(MarkHandles::Tape {
@@ -576,7 +576,7 @@ impl Workspace {
                         Pos2::new(x(base + b), rect.bottom()),
                     ),
                     CornerRadius::ZERO,
-                    theme::MARKED,
+                    theme::colors().marked,
                 );
             }
             self.mark_handles(&painter, rect, x(base + a), x(base + b));
@@ -593,7 +593,7 @@ impl Workspace {
         let px = x(self.snap.source.position);
         painter.line_segment(
             [Pos2::new(px, rect.top()), Pos2::new(px, rect.bottom())],
-            Stroke::new(2.0, theme::PLAYHEAD),
+            Stroke::new(2.0, theme::colors().playhead),
         );
 
         // Press near a handle drags the mark, elsewhere scrubs.
@@ -749,9 +749,13 @@ impl Workspace {
                 self.clear_marks();
             }
             if player.speed != 0.0 && player.speed != 1.0 {
-                ui.label(RichText::new(format!("{:+}×", player.speed)).color(theme::ACCENT));
+                ui.label(
+                    RichText::new(format!("{:+}×", player.speed)).color(theme::colors().accent),
+                );
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // Clear of the panel's corner.
+                ui.add_space(12.0);
                 self.timecode_field(ui, id);
             });
         });
@@ -918,12 +922,12 @@ fn stats_panel(painter: &egui::Painter, picture: Rect, stats: &crate::live::stat
         .into_iter()
         .map(|(heading, rows)| {
             let mut job = egui::text::LayoutJob::default();
-            job.append(heading, 0.0, text(theme::ACCENT));
+            job.append(heading, 0.0, text(theme::colors().accent));
             for (label, fact) in rows {
                 job.append(
                     &format!("\n  {label:<width$}  "),
                     0.0,
-                    text(theme::TEXT_DIM),
+                    text(theme::colors().text_dim),
                 );
                 job.append(&fact, 0.0, text(Color32::WHITE));
             }

@@ -73,7 +73,7 @@ The docs name the Linux places; Windows and macOS have their own:
 
 | Linux | Windows | macOS | Holds |
 |---|---|---|---|
-| `~/.config/vidcut` | `%APPDATA%\vidcut` | `~/Library/Application Support/vidcut` | preferences, user presets |
+| `~/.config/vidcut` | `%APPDATA%\vidcut` | `~/Library/Application Support/vidcut` | preferences, user presets and themes |
 | `~/.cache/vidcut` | `%LOCALAPPDATA%\vidcut\cache` | `~/Library/Caches/vidcut` | thumbnails, waveforms, measurements, encoder detection, shaders |
 | `~/.local/state/vidcut` | `%LOCALAPPDATA%\vidcut\state` | `~/Library/Application Support/vidcut/state` | undo history, recent projects |
 | `$XDG_RUNTIME_DIR/vidcut` | `%TEMP%\vidcut` | `$TMPDIR/vidcut-UID` | running GUIs (live control) |
@@ -87,6 +87,8 @@ Media Pool on the left, with the edit buttons below it; the Viewer on the right;
 The **Command log** (top right) lists what you, scripts and agents did, in words. Hover an entry for the request; click it to copy a shell command (deviation X5).
 
 **Preferences** (File > Preferences, Ctrl+, or Cmd+, on a Mac) live in `~/.config/vidcut/preferences.toml` (deviation X12). `vidcut preferences` reads and changes them.
+
+**Themes:** Native by default, light or dark as your computer is set, eight more built in, or your own (File > Preferences: Theme, Import…). A theme is a TOML file. [starship.toml](crates/vidcut/themes/starship.toml) explains every key.
 
 **Keys:** [spec §11](docs/cut-page-spec.md#11-keyboard-shortcuts).
 
@@ -122,5 +124,7 @@ Read [AGENTS.md](AGENTS.md) first; it's written for AI agents but applies to hum
 ## License
 
 vidcut's source code is released under the [MIT License](LICENSE).
+
+The fonts vidcut carries, Geist, Geist Mono and Space Grotesk, are under the SIL Open Font License 1.1.
 
 vidcut links the FFmpeg libraries, which are LGPL or GPL depending on how they were built; Ubuntu's builds are GPL. Binaries you distribute together with them must comply with their licenses.

@@ -14,10 +14,31 @@ use crate::model::{Media, PROXY_LONGEST};
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Preferences {
+    pub appearance: Appearance,
     pub gpu: Gpu,
     pub player: Player,
     pub thumbnails: Thumbnails,
     pub proxies: Proxies,
+}
+
+/// How the GUI looks.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct Appearance {
+    /// The theme, by name: a built-in one (`native`, the default, light or
+    /// dark as the computer is set, `starship`, `neon`, `cybertruck`,
+    /// `midnight`, `studio`, `native-dark`, `native-light`, `classic`) or a
+    /// theme file's in the themes folder. A path to a `.toml` file copies it
+    /// into that folder and uses it.
+    pub theme: String,
+}
+
+impl Default for Appearance {
+    fn default() -> Self {
+        Self {
+            theme: "native".into(),
+        }
+    }
 }
 
 /// The viewer's player: memory for the decoded pictures it keeps around
@@ -187,6 +208,8 @@ impl Proxies {
 #[serde(deny_unknown_fields)]
 pub struct PreferencesPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub appearance: Option<AppearancePatch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gpu: Option<GpuPatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub player: Option<PlayerPatch>,
@@ -194,6 +217,14 @@ pub struct PreferencesPatch {
     pub thumbnails: Option<ThumbnailsPatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxies: Option<ProxiesPatch>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AppearancePatch {
+    /// A theme's name, or a path to a theme file to import.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -288,6 +319,9 @@ impl Preferences {
     /// These preferences with `patch` applied.
     pub fn patched(&self, patch: &PreferencesPatch) -> Result<Self> {
         let mut p = self.clone();
+        if let Some(t) = patch.appearance.as_ref().and_then(|a| a.theme.as_ref()) {
+            p.appearance.theme = t.clone();
+        }
         if let Some(g) = &patch.gpu {
             p.gpu.acceleration = g.acceleration.unwrap_or(p.gpu.acceleration);
             p.gpu.decoding = g.decoding.unwrap_or(p.gpu.decoding);

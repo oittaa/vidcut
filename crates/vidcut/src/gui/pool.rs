@@ -243,7 +243,7 @@ fn no_pictures(painter: &egui::Painter, rect: Rect, m: &Media) {
         egui::Align2::CENTER_CENTER,
         text,
         egui::FontId::proportional(16.0),
-        theme::TEXT_DIM,
+        theme::colors().text_dim,
     );
 }
 
@@ -269,7 +269,7 @@ fn marks(painter: &egui::Painter, rect: Rect, m: &Media, frames: i64, hovered: O
     if let Some(f) = hovered {
         painter.line_segment(
             [Pos2::new(x(f), rect.top()), Pos2::new(x(f), rect.bottom())],
-            Stroke::new(1.0, theme::PLAYHEAD),
+            Stroke::new(1.0, theme::colors().playhead),
         );
     }
 }
@@ -291,13 +291,13 @@ fn proxy_state(m: &Media) -> Option<(&'static str, Color32, String)> {
     Some(if m.fresh_proxy().is_some() {
         (
             "PROXY",
-            theme::OK,
+            theme::colors().ok,
             format!("Proxy: {}x{} (plays when Proxies is on)", p.width, p.height),
         )
     } else {
         (
             "OLD PROXY",
-            theme::ERROR,
+            theme::colors().error,
             "The proxy is out of date: the file changed after it was made, so \
              the original plays. Generate Proxy makes a new one."
                 .to_string(),
@@ -311,6 +311,14 @@ impl Workspace {
         self.bins.targets.clear();
         let snap = self.snap.clone();
         let project = snap.project();
+        let search = |ui: &mut egui::Ui, text: &mut String| {
+            ui.add(
+                egui::TextEdit::singleline(text)
+                    .hint_text("Search")
+                    .desired_width(f32::INFINITY),
+            );
+        };
+        let mut search_below = false;
         ui.horizontal(|ui| {
             ui.label(RichText::new("Media Pool").strong());
             if let Some(p) = project {
@@ -328,7 +336,7 @@ impl Workspace {
             let missing = snap.missing.len();
             if missing > 0
                 && ui
-                    .button(RichText::new(format!("Relink Media ({missing})")).color(theme::ERROR))
+                    .button(RichText::new(format!("Relink Media ({missing})")).color(theme::colors().error))
                     .on_hover_text(format!(
                         "{missing} file(s) missing. Choose a folder: they are looked for by \
                          name there and in its subfolders, and each one found is relinked if \
@@ -353,12 +361,16 @@ impl Workspace {
                     self.send("pool.set", json!({ "view": mode }));
                 }
             }
-            ui.add(
-                egui::TextEdit::singleline(&mut self.search)
-                    .hint_text("Search")
-                    .desired_width(f32::INFINITY),
-            );
+            // Too narrow a field goes on a row of its own.
+            if ui.available_width() >= 120.0 {
+                search(ui, &mut self.search);
+            } else {
+                search_below = true;
+            }
         });
+        if search_below {
+            search(ui, &mut self.search);
+        }
         if let Some(p) = project {
             self.bin_bar(ui, p);
         }
@@ -393,8 +405,7 @@ impl Workspace {
             None => Default::default(),
         };
         self.bins.order = media.iter().map(|m| m.id.clone()).collect();
-        let buttons = 84.0;
-        let height = (ui.available_height() - buttons).max(60.0);
+        let height = (ui.available_height() - self.pool_buttons).max(60.0);
         // The List view's columns scroll sideways. A scroll area that doesn't
         // grows to fit them, and the pool with it, which then can't be
         // dragged narrower. The other views fit the pool's width.
@@ -450,8 +461,15 @@ impl Workspace {
                     PoolMode::List => self.list(ui, viewport, p, &folders, &media),
                 }
             });
+        // The buttons' height, for the next frame's list above them.
+        let top = ui.cursor().top();
         ui.separator();
         self.edit_buttons(ui);
+        let buttons = ui.cursor().top() - top;
+        if (buttons - self.pool_buttons).abs() > 0.5 {
+            self.pool_buttons = buttons;
+            ui.ctx().request_repaint();
+        }
         self.rename_bin_window(ui.ctx());
     }
 
@@ -576,7 +594,7 @@ impl Workspace {
             ui.painter().rect_stroke(
                 rect.expand(1.0),
                 CornerRadius::same(3),
-                Stroke::new(2.0, theme::ACCENT),
+                Stroke::new(2.0, theme::colors().accent),
                 egui::StrokeKind::Inside,
             );
         }
@@ -646,7 +664,7 @@ impl Workspace {
         let resp = ui.interact(rect, ui.id().with(("bin", path)), Sense::click_and_drag());
         let picture = Rect::from_min_size(rect.min, TILE);
         let painter = ui.painter_at(rect);
-        painter.rect_filled(picture, CornerRadius::same(3), theme::TRACK);
+        painter.rect_filled(picture, CornerRadius::same(3), theme::colors().track);
         let color = Color32::from_rgb(150, 132, 92);
         let body = Rect::from_center_size(picture.center() + vec2(0.0, 4.0), vec2(64.0, 42.0));
         let tab = Rect::from_min_size(body.min - vec2(0.0, 7.0), vec2(26.0, 9.0));
@@ -654,8 +672,8 @@ impl Workspace {
         painter.rect_filled(body, CornerRadius::same(3), color);
         let count = p.media.iter().filter(|m| within(&m.bin, path)).count();
         for (y, text, color) in [
-            (2.0, elide(leaf(path), 28), theme::TEXT),
-            (16.0, format!("{count} clip(s)"), theme::TEXT_DIM),
+            (2.0, elide(leaf(path), 28), theme::colors().text),
+            (16.0, format!("{count} clip(s)"), theme::colors().text_dim),
         ] {
             painter.text(
                 Pos2::new(picture.left(), picture.bottom() + y),
@@ -803,7 +821,7 @@ impl Workspace {
         );
         let picture = Rect::from_min_size(rect.min, TILE);
         let painter = ui.painter_at(rect);
-        painter.rect_filled(picture, CornerRadius::same(3), theme::TRACK);
+        painter.rect_filled(picture, CornerRadius::same(3), theme::colors().track);
         let frames = self.project().map_or(0, |p| p.media_frames(m));
         let hovered_frame = resp.hover_pos().map(|pos| frame_at(picture, pos.x, frames));
         if let Some(f) = hovered_frame {
@@ -845,12 +863,12 @@ impl Workspace {
         label(
             Pos2::new(picture.left(), picture.bottom() + 2.0),
             elide(&m.name, 28),
-            theme::TEXT,
+            theme::colors().text,
         );
         label(
             Pos2::new(picture.left(), picture.bottom() + 16.0),
             self.src_tc(hovered_frame.unwrap_or(frames)),
-            theme::TEXT_DIM,
+            theme::colors().text_dim,
         );
         let resp = resp.on_hover_text(tip);
         self.media_interaction(&resp, m);
@@ -879,14 +897,14 @@ impl Workspace {
         }
         let font = egui::FontId::proportional(12.0);
         let time = self.src_tc(hovered_frame.unwrap_or(frames));
-        let time = painter.layout_no_wrap(time, font.clone(), theme::TEXT_DIM);
+        let time = painter.layout_no_wrap(time, font.clone(), theme::colors().text_dim);
         let room = ((width - time.size().x - 16.0) / 6.5).max(3.0) as usize;
-        let name = painter.layout_no_wrap(elide(&m.name, room), font, theme::TEXT);
+        let name = painter.layout_no_wrap(elide(&m.name, room), font, theme::colors().text);
         let y = header.center().y;
         painter.galley(
             Pos2::new(header.left() + 4.0, y - name.size().y / 2.0),
             name,
-            theme::TEXT,
+            theme::colors().text,
         );
         painter.galley(
             Pos2::new(
@@ -894,9 +912,9 @@ impl Workspace {
                 y - time.size().y / 2.0,
             ),
             time,
-            theme::TEXT_DIM,
+            theme::colors().text_dim,
         );
-        painter.rect_filled(film, CornerRadius::same(3), theme::TRACK);
+        painter.rect_filled(film, CornerRadius::same(3), theme::colors().track);
         match self.thumbs.get(&m.id) {
             _ if !ui.is_rect_visible(rect) => {}
             Some(t) if !t.textures.is_empty() => {
@@ -972,7 +990,7 @@ impl Workspace {
         let origin = m.info.audio.first().map_or(0.0, |a| a.first_pts);
         let per_px = secs / f64::from(rect.width().max(1.0));
         let (mid, half) = (rect.center().y, rect.height() / 2.0 - 1.0);
-        painter.rect_filled(rect, CornerRadius::same(3), theme::AUDIO);
+        painter.rect_filled(rect, CornerRadius::same(3), theme::colors().audio);
         let mut x = rect.left().floor();
         while x < rect.right() {
             let t = origin + f64::from(x - rect.left()) * per_px;
@@ -995,9 +1013,9 @@ impl Workspace {
         let selected = self.snap.selection.media.contains(&m.id);
         let open = self.snap.source_at().map(|(id, _)| id) == Some(m.id.as_str());
         let border = if selected {
-            Stroke::new(2.0, theme::ACCENT)
+            Stroke::new(2.0, theme::colors().accent)
         } else if open {
-            Stroke::new(1.0, theme::TEXT_DIM)
+            Stroke::new(1.0, theme::colors().text_dim)
         } else {
             Stroke::NONE
         };
@@ -1024,12 +1042,12 @@ impl Workspace {
                 Pos2::new(x, rect.top() + 3.0),
                 galley.size() + vec2(6.0, 2.0),
             );
-            painter.rect_filled(r, CornerRadius::same(2), theme::PANEL_DARK);
+            painter.rect_filled(r, CornerRadius::same(2), theme::colors().panel_dark);
             painter.galley(r.min + vec2(3.0, 1.0), galley, color);
         };
         let missing = self.snap.missing.contains(&m.id);
         if missing {
-            badge("MISSING", theme::ERROR, false);
+            badge("MISSING", theme::colors().error, false);
         }
         let proxy = proxy_state(m);
         if let Some((text, color, _)) = &proxy {
@@ -1199,7 +1217,7 @@ impl Workspace {
                 let selected = self.snap.selection.media.contains(&m.id);
                 let mut name = RichText::new(elide(&m.name, 40));
                 if self.snap.missing.contains(&m.id) {
-                    name = name.color(theme::ERROR);
+                    name = name.color(theme::colors().error);
                 }
                 let resp = ui.selectable_label(selected, name).interact(Sense::drag());
                 let resp = if self.snap.missing.contains(&m.id) {
