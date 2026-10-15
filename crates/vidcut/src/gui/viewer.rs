@@ -212,7 +212,21 @@ impl Workspace {
             (picture.height() * ppp).round() as i32,
         ];
         self.two_up = None;
-        if self.timeline.dynamic.is_some() && self.dynamic_target().is_some() {
+        let dynamic = self.timeline.dynamic.is_some() && self.dynamic_target().is_some();
+        // The two-up's run: its frames a second, forward above 0.
+        let run = if dynamic {
+            let speed = self.timeline.dynamic.as_ref().map_or(0.0, |d| d.speed());
+            Some(speed * self.fps().as_f64())
+        } else {
+            self.trim_editor.is_some().then_some(0.0)
+        };
+        if run.is_some() || self.stills.is_some() {
+            let ctx = ui.ctx().clone();
+            self.stills
+                .get_or_insert_with(|| crate::gui::stills::Stills::new(ctx))
+                .begin(run);
+        }
+        if dynamic {
             self.dynamic_view(ui, area);
             return;
         }
@@ -449,7 +463,7 @@ impl Workspace {
         let ctx = ui.ctx().clone();
         let stills = self
             .stills
-            .get_or_insert_with(|| crate::gui::stills::Stills::new(ctx.clone()));
+            .get_or_insert_with(|| crate::gui::stills::Stills::new(ctx));
         let track = p.track(track);
         let mut shown = [None, None];
         for (i, (frame, label)) in cells.into_iter().enumerate() {
@@ -481,7 +495,7 @@ impl Workspace {
                     width: w,
                     height: h,
                 };
-                let got = stills.get(&ctx, i, &still);
+                let got = stills.get(i, &still);
                 if let Some(got) = got {
                     painter.image(
                         got.texture(),

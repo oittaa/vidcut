@@ -433,8 +433,9 @@ impl Workspace {
 
     /// The two-up for `player.state`: what it shows, and its frames so far.
     pub fn two_up_stats(&self) -> crate::live::stats::TwoUpStats {
-        use crate::live::stats::{TwoUpCell, TwoUpShown, TwoUpStats};
+        use crate::live::stats::{TwoUpCell, TwoUpRun, TwoUpRunCell, TwoUpShown, TwoUpStats};
         let counts = self.stills.as_ref().map(|s| s.counts()).unwrap_or_default();
+        let run = self.stills.as_ref().and_then(|s| s.run());
         TwoUpStats {
             shown: self.two_up.as_ref().map(|t| TwoUpShown {
                 mode: t.mode.to_string(),
@@ -449,6 +450,15 @@ impl Workspace {
             asked: counts.asked,
             rendered: counts.rendered,
             passed_over: counts.passed_over,
+            run: run.map(|r| TwoUpRun {
+                rate: r.rate,
+                seconds: r.seconds,
+                cells: r.cells.map(|c| TwoUpRunCell {
+                    shown: c.shown,
+                    longest_ms: c.longest * 1000.0,
+                    every: c.every,
+                }),
+            }),
         }
     }
 

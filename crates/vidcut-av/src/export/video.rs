@@ -122,7 +122,7 @@ pub(crate) struct GpuSide {
 
 /// How far past the current frame (seconds) a later piece of the same file
 /// may start for decoding on to it to beat a seek.
-const DECODE_AHEAD: f64 = 1.0;
+pub(crate) const DECODE_AHEAD: f64 = 1.0;
 
 /// Memory for the pictures of a piece walking its source backward made at
 /// once ([`VideoFrames::reversed_frame`]), at most `REVERSED_MOST` of them;

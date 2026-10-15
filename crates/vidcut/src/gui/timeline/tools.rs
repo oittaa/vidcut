@@ -96,6 +96,14 @@ pub struct Dynamic {
     pub stopped: Option<String>,
 }
 
+impl Dynamic {
+    /// The running trim's speed (× real time; negative backward), 0 while
+    /// it doesn't run.
+    pub fn speed(&self) -> f64 {
+        self.run.map_or(0.0, |(speed, ..)| speed)
+    }
+}
+
 /// What Dynamic Trim works on.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DynamicTarget {

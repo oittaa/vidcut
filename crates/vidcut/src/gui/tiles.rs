@@ -106,6 +106,8 @@ struct Kept {
 #[derive(Default)]
 struct Waiting {
     jobs: Vec<Job>,
+    /// Every tile the last frame asked for, those being made too.
+    wanted: HashSet<TileKey>,
     busy: HashSet<TileKey>,
     /// Tiles that couldn't be made: not asked for again.
     failed: HashSet<TileKey>,
@@ -325,6 +327,7 @@ impl Tiles {
         }
         let asked = std::mem::take(self.asked.get_mut());
         let mut w = self.queue.waiting.lock().unwrap_or_else(|e| e.into_inner());
+        w.wanted = asked.iter().map(|j| j.key.clone()).collect();
         self.missing = asked
             .iter()
             .map(|j| j.key.clone())
@@ -457,10 +460,6 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Co
     static TRIMMED: Mutex<Option<Instant>> = Mutex::new(None);
     // Decoded on the GPU the viewer decodes on while the preferences say
     // so, read as a tile is decoded: a change reaches the tiles at once.
-    let reader_for = |d: &GpuDecoding| match d.own_decoder() {
-        Some(gpu) => FrameReader::decoding_on(gpu),
-        None => FrameReader::default(),
-    };
     let mut decoding = crate::preferences::gpu_decoding();
     let mut reader = reader_for(&decoding);
     // Blocks read or written lately (a missing file is an empty block),
@@ -489,24 +488,19 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Co
                 w = queue.ready.wait(w).unwrap_or_else(|e| e.into_inner());
             }
         };
-        let picture = from_disk(&job, &mut blocks, &unwritten).or_else(|| {
-            let now = crate::preferences::gpu_decoding();
-            if now != decoding {
-                reader = reader_for(&now);
-                decoding = now;
-            }
-            let made = job
-                .pieces
-                .iter()
-                .find_map(|piece| reader.rgba(piece, job.fps, job.width, job.key.height).ok())?;
-            if let Some((file, limit)) = &job.disk {
-                let pending = unwritten
-                    .entry(file.clone())
-                    .or_insert((Vec::new(), *limit));
-                pending.0.push((job.key.frame, made.clone()));
-            }
-            Some(made)
-        });
+        let mut picture = from_disk(&job, &mut blocks, &unwritten);
+        // While what people watch comes first (a playing viewer, a running
+        // two-up), no tile decodes; one no longer asked for by then isn't
+        // made.
+        let mut gone = false;
+        if picture.is_none() && vidcut_av::first::waits() {
+            let _ = vidcut_av::first::wait();
+            let w = queue.waiting.lock().unwrap_or_else(|e| e.into_inner());
+            gone = !w.wanted.contains(&job.key);
+        }
+        if !gone && picture.is_none() {
+            picture = decode(&job, n, &mut reader, &mut decoding, &mut unwritten);
+        }
         let mut w = queue.waiting.lock().unwrap_or_else(|e| e.into_inner());
         w.busy.remove(&job.key);
         match picture {
@@ -517,6 +511,7 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Co
                 }
                 ctx.request_repaint();
             }
+            None if gone => {}
             None => {
                 w.failed.insert(job.key);
             }
@@ -531,6 +526,53 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Co
         {
             write(&mut unwritten, &mut blocks, &TRIMMED);
         }
+    }
+}
+
+/// `job`'s tile decoded by worker `n` on `reader`, decoding as the
+/// preferences say now (a change reaches the tiles at once), and kept to go
+/// to disk.
+fn decode(
+    job: &Job,
+    n: usize,
+    reader: &mut FrameReader,
+    decoding: &mut GpuDecoding,
+    unwritten: &mut HashMap<BlockFile, (Block, u64)>,
+) -> Option<Image> {
+    let now = crate::preferences::gpu_decoding();
+    if now != *decoding {
+        *reader = reader_for(&now);
+        *decoding = now;
+    }
+    let started = Instant::now();
+    let made = job
+        .pieces
+        .iter()
+        .find_map(|piece| reader.rgba(piece, job.fps, job.width, job.key.height).ok())?;
+    if vidcut_av::debug() {
+        eprintln!(
+            "[tiles] {:.3} s: worker {n}: {} frame {} in {:.1} ms",
+            vidcut_av::debug_clock(),
+            job.key.media,
+            job.key.frame,
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+    if let Some((file, limit)) = &job.disk {
+        let pending = unwritten
+            .entry(file.clone())
+            .or_insert((Vec::new(), *limit));
+        pending.0.push((job.key.frame, made.clone()));
+    }
+    Some(made)
+}
+
+/// A reader decoding on the GPU the viewer decodes on while `decoding`
+/// says so.
+fn reader_for(decoding: &GpuDecoding) -> FrameReader {
+    match decoding.own_decoder() {
+        Some(gpu) => FrameReader::decoding_on(gpu),
+        None => FrameReader::default(),
     }
 }
 

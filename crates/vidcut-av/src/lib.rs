@@ -62,6 +62,16 @@ pub fn debug() -> bool {
     *ON.get_or_init(|| std::env::var_os("VIDCUT_DEBUG").is_some())
 }
 
+/// Seconds since the first call, for [`debug`] lines that say when they
+/// happened, so lines of several threads line up.
+pub fn debug_clock() -> f64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_secs_f64()
+}
+
 /// Says a line on stderr under `[area]` while `VIDCUT_DEBUG` is set
 /// ([`debug`]): `debug!("decoding", "{path}: on NVDEC")`.
 #[macro_export]
