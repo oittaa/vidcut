@@ -276,7 +276,8 @@ pub struct VideoReader {
     /// What the first decodable frame says about fields and color.
     first_props: Option<FrameProps>,
     /// For interlaced streams: every decoded frame goes through it, before
-    /// anyone picks frames (on the GPU for frames NVDEC and Vulkan decode).
+    /// anyone picks frames (on the GPU for frames NVDEC and Vulkan decode,
+    /// where its filter gives `bwdif`'s).
     deinterlacer: Option<Deinterlacer>,
     /// The stream's frames are interlaced.
     interlaced: bool,
@@ -347,6 +348,70 @@ fn c_name(p: *const std::ffi::c_char) -> Option<String> {
     })
 }
 
+/// FFmpeg's deinterlacer for frames of `pixel`: `bwdif_cuda` for NVDEC's,
+/// `bwdif_vulkan` for Vulkan's, `bwdif` for frames in memory.
+pub(crate) fn deinterlacer(pixel: format::Pixel) -> &'static str {
+    match pixel {
+        format::Pixel::CUDA => "bwdif_cuda",
+        format::Pixel::VULKAN => "bwdif_vulkan",
+        _ => "bwdif",
+    }
+}
+
+/// The graph that deinterlaces frames like `f`, timed in `time_base`, with
+/// its [`deinterlacer`]: on the GPU the same options as `bwdif`'s, and so
+/// the same frames at the same times. Not always the same levels: the GPU's
+/// are trusted only where they give `bwdif`'s ([`crate::hw::deinterlace`]).
+pub(crate) fn deinterlacing(
+    f: &frame::Video,
+    time_base: ffmpeg::Rational,
+) -> Result<crate::hw::GpuGraph> {
+    let sar = f.aspect_ratio();
+    let mut graph = crate::hw::GpuGraph::new();
+    let find =
+        |name: &str| filter::find(name).ok_or_else(|| Error::Invalid(format!("no {name} filter")));
+    if crate::hw::on_gpu(f) {
+        // SAFETY: reads the frame's own field.
+        let frames = unsafe { (*f.as_ptr()).hw_frames_ctx };
+        if frames.is_null() {
+            return Err(Error::Invalid("GPU frames without a frames context".into()));
+        }
+        crate::cuda::add_source(
+            &mut graph,
+            c"in",
+            ffmpeg::ffi::AVPixelFormat::from(f.format()),
+            (f.width(), f.height()),
+            (time_base.into(), sar),
+            frames,
+            None,
+        )?;
+    } else {
+        let args = format!(
+            "video_size={}x{}:pix_fmt={}:time_base={}/{}:pixel_aspect={}/{}",
+            f.width(),
+            f.height(),
+            ffmpeg::ffi::AVPixelFormat::from(f.format()) as i32,
+            time_base.numerator(),
+            time_base.denominator(),
+            sar.numerator().max(1),
+            sar.denominator().max(1)
+        );
+        graph
+            .add(&find("buffer")?, "in", &args)
+            .ctx(|| "creating deinterlacer source".into())?;
+    }
+    graph
+        .add(&find("buffersink")?, "out", "")
+        .ctx(|| "creating deinterlacer sink".into())?;
+    let spec = format!(
+        "{}=mode=send_frame:parity=auto:deint=interlaced",
+        deinterlacer(f.format())
+    );
+    crate::parts::parse_filters(&mut graph, &spec)?;
+    graph.validate().ctx(|| format!("configuring {spec}"))?;
+    Ok(graph)
+}
+
 /// `bwdif` (or `bwdif_cuda`, `bwdif_vulkan`) over a stream's frames in
 /// order: one progressive frame for each interlaced one, made from both its
 /// fields with the frames around it (send_frame); progressive frames pass
@@ -356,8 +421,9 @@ struct Deinterlacer {
     /// The stream's time base, and the parameters the graph was built for.
     time_base: ffmpeg::Rational,
     input: (u32, u32, format::Pixel),
-    /// `bwdif_vulkan` wouldn't build: Vulkan's frames come down for `bwdif`.
-    vulkan_failed: bool,
+    /// The GPU's deinterlacer wouldn't build: its frames come down for
+    /// `bwdif`.
+    gpu_failed: bool,
     /// The end was sent to the graph.
     flushed: bool,
     /// The graph has given its last frame.
@@ -370,76 +436,29 @@ impl Deinterlacer {
             graph: None,
             time_base,
             input: (0, 0, format::Pixel::None),
-            vulkan_failed: false,
+            gpu_failed: false,
             flushed: false,
             done: false,
         }
     }
 
     /// Whether `f` is deinterlaced where it is: in memory, or on the GPU as
-    /// NVDEC's (`bwdif_cuda`) and Vulkan's (`bwdif_vulkan`, where this
-    /// FFmpeg has it) are. Other GPUs' frames come down for `bwdif`.
+    /// NVDEC's (`bwdif_cuda`) and Vulkan's (`bwdif_vulkan`) are where that
+    /// filter gives `bwdif`'s frames of their layout
+    /// ([`crate::hw::deinterlace`]). Other frames on the GPU come down for
+    /// `bwdif`.
     fn takes(&self, f: &frame::Video) -> bool {
         match f.format() {
-            format::Pixel::CUDA => true,
-            format::Pixel::VULKAN => {
-                !self.vulkan_failed && crate::parts::has_filter("bwdif_vulkan")
+            format::Pixel::CUDA | format::Pixel::VULKAN => {
+                !self.gpu_failed && crate::hw::deinterlace::gives_bwdifs(f)
             }
             _ => !crate::hw::on_gpu(f),
         }
     }
 
-    /// The graph for frames like `f`: `bwdif`, or on the GPU for frames
-    /// NVDEC decoded, `bwdif_cuda`, and for Vulkan's, `bwdif_vulkan`, with
-    /// the same options and so the same frames at the same times. Their
-    /// levels differ at the edges (gotchas.md).
+    /// The graph for frames like `f` ([`deinterlacing`]).
     fn build(&mut self, f: &frame::Video) -> Result<()> {
-        let sar = f.aspect_ratio();
-        let mut graph = crate::hw::GpuGraph::new();
-        let find = |name: &str| {
-            filter::find(name).ok_or_else(|| Error::Invalid(format!("no {name} filter")))
-        };
-        let filter = match f.format() {
-            format::Pixel::CUDA => "bwdif_cuda",
-            format::Pixel::VULKAN => "bwdif_vulkan",
-            _ => "bwdif",
-        };
-        if crate::hw::on_gpu(f) {
-            let frames = unsafe { (*f.as_ptr()).hw_frames_ctx };
-            if frames.is_null() {
-                return Err(Error::Invalid("GPU frames without a frames context".into()));
-            }
-            crate::cuda::add_source(
-                &mut graph,
-                c"in",
-                ffmpeg::ffi::AVPixelFormat::from(f.format()),
-                (f.width(), f.height()),
-                (self.time_base.into(), sar),
-                frames,
-                None,
-            )?;
-        } else {
-            let args = format!(
-                "video_size={}x{}:pix_fmt={}:time_base={}/{}:pixel_aspect={}/{}",
-                f.width(),
-                f.height(),
-                ffmpeg::ffi::AVPixelFormat::from(f.format()) as i32,
-                self.time_base.numerator(),
-                self.time_base.denominator(),
-                sar.numerator().max(1),
-                sar.denominator().max(1)
-            );
-            graph
-                .add(&find("buffer")?, "in", &args)
-                .ctx(|| "creating deinterlacer source".into())?;
-        }
-        graph
-            .add(&find("buffersink")?, "out", "")
-            .ctx(|| "creating deinterlacer sink".into())?;
-        let spec = format!("{filter}=mode=send_frame:parity=auto:deint=interlaced");
-        crate::parts::parse_filters(&mut graph, &spec)?;
-        graph.validate().ctx(|| format!("configuring {spec}"))?;
-        self.graph = Some(graph);
+        self.graph = Some(deinterlacing(f, self.time_base)?);
         self.input = (f.width(), f.height(), f.format());
         Ok(())
     }
@@ -470,12 +489,14 @@ impl Deinterlacer {
         if self.graph.is_none() || self.input != (f.width(), f.height(), f.format()) {
             // A new size or format starts over (losing one frame of context).
             match self.build(f) {
-                Err(e) if f.format() == format::Pixel::VULKAN => {
+                Err(e) if crate::hw::on_gpu(f) => {
                     crate::debug!(
                         "decoding",
-                        "Vulkan's frames come down to be deinterlaced: bwdif_vulkan won't build: {e}"
+                        "{:?} frames come down to be deinterlaced: {} won't build: {e}",
+                        f.format(),
+                        deinterlacer(f.format())
                     );
-                    self.vulkan_failed = true;
+                    self.gpu_failed = true;
                     return self.push(Some(f));
                 }
                 built => built?,
@@ -807,8 +828,9 @@ impl VideoReader {
     /// `D3D11`, `VULKAN` for ProRes beside NVDEC), the same frames with the
     /// same timestamps as decoding on the CPU. Interlaced ones are
     /// deinterlaced as the CPU reader deinterlaces them: on the GPU for
-    /// NVDEC's and Vulkan's, in memory for the others', which come down for
-    /// it. Fails when `gpu` can't decode the stream.
+    /// NVDEC's and Vulkan's where its filter gives `bwdif`'s frames, in
+    /// memory for the others, which come down for it. Fails when `gpu`
+    /// can't decode the stream.
     pub fn open_on(source: &Input, gpu: &crate::hw::GpuDecoder) -> Result<Self> {
         let mut reader = Self::open_with(source, Some(gpu))?;
         let pixel = reader.kind.map(crate::hw::Kind::pixel);
@@ -1039,6 +1061,18 @@ impl VideoReader {
     /// opening: the first one.
     pub fn peek(&self) -> Option<&frame::Video> {
         self.pending.as_ref()
+    }
+
+    /// Whether the frames it gives are where it decodes them, as the first
+    /// one ([`peek`](Self::peek)) is. An interlaced stream's come down to
+    /// be deinterlaced where its deinterlacer doesn't take them there
+    /// ([`Deinterlacer::takes`]): other GPUs', and NVDEC's and Vulkan's
+    /// where their filter doesn't give `bwdif`'s frames.
+    pub(crate) fn frames_stay(&self) -> bool {
+        match (&self.deinterlacer, &self.pending) {
+            (Some(d), Some(first)) => d.takes(first),
+            _ => true,
+        }
     }
 
     /// Time base of frame timestamps.

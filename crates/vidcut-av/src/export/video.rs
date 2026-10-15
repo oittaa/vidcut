@@ -200,9 +200,13 @@ impl Source {
             source.advance(target)?;
         }
         // The GPU's first picture too: libplacebo compiles its shaders for
-        // it, which is better done here, ahead of the piece.
-        if source.fitting.scaler.is_some() {
-            let (frame, _) = source.current.as_ref().expect("have a frame");
+        // it, which is better done here, ahead of the piece. A frame that
+        // came down after all (its deinterlacer wouldn't build) is planned
+        // as it comes.
+        if source.fitting.scaler.is_some()
+            && let Some((frame, _)) = source.current.as_ref()
+            && crate::hw::on_gpu(frame)
+        {
             source.normalized = Some(source.fitting.scale(frame)?.ok_or_else(no_picture)?);
             source.fitting.took(Route::Gpu, source.reader.path());
         }

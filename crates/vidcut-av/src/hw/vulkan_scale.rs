@@ -93,33 +93,14 @@ fn keeps_levels(
 /// samples under 8 bits, floats, a palette or a mosaic.
 fn test_picture(layout: format::Pixel, size: (u32, u32)) -> Option<frame::Video> {
     let desc = described(layout)?;
-    let mut picture = frame::Video::new(layout, size.0, size.1);
-    // FFmpeg writes each component's bits into what is there.
-    for p in 0..picture.planes() {
-        picture.data_mut(p).fill(0);
-    }
+    let mut picture = blank(layout, size);
     for c in 0..i32::from(desc.nb_components) {
         let (w, h) = component_size(desc, c, size);
         let line: Vec<u16> = (0..w)
             .map(|x| level(desc, c, BANDS[x * BANDS.len() / w]))
             .collect();
-        // SAFETY: the picture's own planes, `w` samples of component `c` on
-        // each of its `h` rows, from a line of `w` 16-bit values.
-        unsafe {
-            let raw = picture.as_mut_ptr();
-            for y in 0..h {
-                ffi::av_write_image_line2(
-                    line.as_ptr().cast(),
-                    (*raw).data.as_mut_ptr(),
-                    (*raw).linesize.as_ptr(),
-                    desc,
-                    0,
-                    y as i32,
-                    c,
-                    w as i32,
-                    2,
-                );
-            }
+        for y in 0..h {
+            write_line(&mut picture, c, y, &line);
         }
     }
     Some(picture)
@@ -162,45 +143,6 @@ fn bands_kept(got: &frame::Video) -> bool {
             })
         })
     })
-}
-
-/// FFmpeg's description of `layout`, where it is one the test picture
-/// comes in: every sample 8 bits or more, no floats, palette or mosaic.
-fn described(layout: format::Pixel) -> Option<&'static ffi::AVPixFmtDescriptor> {
-    // SAFETY: FFmpeg's static description, or null.
-    let desc = unsafe { ffi::av_pix_fmt_desc_get(layout.into()).as_ref()? };
-    let odd = ffi::AV_PIX_FMT_FLAG_FLOAT
-        | ffi::AV_PIX_FMT_FLAG_PAL
-        | ffi::AV_PIX_FMT_FLAG_BAYER
-        | ffi::AV_PIX_FMT_FLAG_BITSTREAM
-        | ffi::AV_PIX_FMT_FLAG_HWACCEL;
-    let samples = &desc.comp[..usize::from(desc.nb_components)];
-    (desc.flags & odd as u64 == 0 && samples.iter().all(|s| s.depth >= 8)).then_some(desc)
-}
-
-/// The samples across and down of component `c` in a picture of `size`:
-/// chroma's are subsampled.
-fn component_size(desc: &ffi::AVPixFmtDescriptor, c: i32, (w, h): (u32, u32)) -> (usize, usize) {
-    let rgb = desc.flags & ffi::AV_PIX_FMT_FLAG_RGB as u64 != 0;
-    let chroma = !rgb && desc.nb_components >= 3 && matches!(c, 1 | 2);
-    let (sw, sh) = if chroma {
-        (desc.log2_chroma_w, desc.log2_chroma_h)
-    } else {
-        (0, 0)
-    };
-    // As FFmpeg rounds: up.
-    (w.div_ceil(1 << sw) as usize, h.div_ceil(1 << sh) as usize)
-}
-
-/// Component `c`'s level of `band` (8-bit levels: Y, Cb, Cr), in its own
-/// bits.
-fn level(desc: &ffi::AVPixFmtDescriptor, c: i32, band: [u16; 3]) -> u16 {
-    let column = if desc.nb_components >= 3 && c < 3 {
-        c as usize
-    } else {
-        0
-    };
-    band[column] << (desc.comp[c as usize].depth - 8)
 }
 
 #[cfg(test)]

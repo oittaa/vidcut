@@ -1,14 +1,15 @@
 //! ProRes decoded on the GPU in use through FFmpeg's Vulkan decoder
 //! (NVIDIA's, FFmpeg 8.1 and later): its frames are the CPU decoder's,
 //! barcode and timestamp, read through and after seeks, and each comes
-//! down to memory once. Interlaced, it is deinterlaced there, its frames
-//! the CPU's but at the edges. An NVENC export of it makes every frame on
-//! the GPU, nothing copied, and a CPU encoder's export at a smaller size
-//! gets each frame shrunk there before it comes down. A player keeps each
-//! decoder's pictures in GPU memory only where its display shows that
-//! decoder's, and counts each picture it brings down: none where its
-//! display shows Vulkan's. Skips where the GPU in use doesn't decode ProRes
-//! on Vulkan.
+//! down to memory once. Interlaced, its frames are the CPU's deinterlaced
+//! ones within a level, deinterlaced on the GPU where `bwdif_vulkan` gives
+//! `bwdif`'s frames and in memory where it doesn't. An NVENC export of it
+//! makes every frame on the GPU, nothing copied, and a CPU encoder's export
+//! at a smaller size gets each frame shrunk there before it comes down. A
+//! player keeps each decoder's pictures in GPU memory only where its
+//! display shows that decoder's, and counts each picture it brings down:
+//! none where its display shows Vulkan's. Skips where the GPU in use
+//! doesn't decode ProRes on Vulkan.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -93,21 +94,23 @@ fn pictures(reader: &mut VideoReader, n: usize) -> Vec<Picture> {
     out
 }
 
-/// Whether every sample of `got`, a 10-bit picture, is within a code of
-/// `cpu`'s but in the four rows nearest the top and bottom of each plane,
-/// taken no higher than 10 bits hold. There the CPU's `bwdif` filters its
-/// own way, and it clips: `bwdif_vulkan` reads black past the edges and
-/// leaves values above 10 bits (gotchas.md).
-fn the_same_inside(cpu: &frame::Video, got: &frame::Video) -> bool {
-    (0..cpu.planes()).all(|p| {
+/// The rows of `got`, a 10-bit 4:2:2 picture, with a sample more than a
+/// level of 8 bits (4 codes) from `cpu`'s, as (plane, row).
+fn rows_off(cpu: &frame::Video, got: &frame::Video) -> Vec<(usize, usize)> {
+    let mut off = Vec::new();
+    for p in 0..cpu.planes() {
         let (w, h) = (cpu.plane_width(p) as usize, cpu.plane_height(p) as usize);
         let sample = |f: &frame::Video, x: usize, y: usize| {
             let i = y * f.stride(p) + 2 * x;
             u16::from_le_bytes([f.data(p)[i], f.data(p)[i + 1]])
         };
-        (4..h - 4)
-            .all(|y| (0..w).all(|x| sample(got, x, y).min(1023).abs_diff(sample(cpu, x, y)) <= 1))
-    })
+        for y in 0..h {
+            if (0..w).any(|x| sample(got, x, y).abs_diff(sample(cpu, x, y)) > 4) {
+                off.push((p, y));
+            }
+        }
+    }
+    off
 }
 
 #[test]
@@ -134,10 +137,11 @@ fn interlaced_prores_deinterlaced_on_vulkan_is_the_cpus() {
         assert_eq!(got.len(), truth.len(), "top field first: {top}");
         for (k, (g, t)) in got.iter().zip(&truth).enumerate() {
             let what = format!("top field first: {top}, frame {k}");
-            // Deinterlaced where it was decoded.
-            assert_eq!(g.kind, Some(Kind::Vulkan), "{what}");
+            // Deinterlaced on the GPU, or in memory where bwdif_vulkan
+            // doesn't give bwdif's frames.
+            assert!(matches!(g.kind, Some(Kind::Vulkan) | None), "{what}");
             assert_eq!((g.pts, g.code), (t.pts, t.code), "{what}");
-            assert!(the_same_inside(&t.picture, &g.picture), "{what}");
+            assert_eq!(rows_off(&t.picture, &g.picture), [], "{what}");
         }
         let coded = |frames: &[Picture]| -> Vec<(i64, Option<u32>)> {
             frames.iter().map(|f| (f.pts, f.code)).collect()
