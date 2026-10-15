@@ -122,12 +122,11 @@ pub struct Proxies {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ProxyCodec {
-    /// The first of DNxHR LB, AV1, HEVC, ProRes Proxy and H.264 that the
-    /// GPU's video engine makes and the GPU plays. Else the first the GPU
-    /// plays, else the first it makes, else DNxHR LB in software. AV1 and
-    /// HEVC come before ProRes Proxy: they are 4:2:0 and take 10 bits, so
-    /// the GPU plays them from its memory. ProRes's 4:2:2 frames come down
-    /// to be shown.
+    /// The first of DNxHR LB, ProRes Proxy, AV1, HEVC and H.264 that the
+    /// GPU makes and plays. Else the first the GPU plays, else the first it
+    /// makes, else DNxHR LB in software. ProRes Proxy comes before AV1 and
+    /// HEVC: every frame is a keyframe, and a Mac's GPU and NVIDIA's make it
+    /// and show its frames from GPU memory.
     #[default]
     Auto,
     /// DNxHR LB: every frame a keyframe, the files many times larger. At

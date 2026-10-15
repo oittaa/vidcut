@@ -265,20 +265,20 @@ impl ProxyEncoder {
 }
 
 /// The codecs automatic chooses among, in its order. DNxHR LB first, which
-/// makes every frame a keyframe and which no GPU makes or plays. AV1 and
-/// HEVC before ProRes Proxy: they are 4:2:0 and take 10 bits, so the GPU
-/// plays them from its memory, where ProRes's 4:2:2 frames come down to be
-/// shown. H.264 last.
+/// makes every frame a keyframe and which no GPU makes or plays. ProRes
+/// Proxy next, every frame a keyframe too: a Mac's GPU and NVIDIA's make it
+/// and show its frames from GPU memory. Then AV1 and HEVC, and H.264 last.
 pub const AUTOMATIC: [ProxyCodec; 5] = [
     ProxyCodec::Dnxhr,
+    ProxyCodec::Prores,
     ProxyCodec::Av1,
     ProxyCodec::Hevc,
-    ProxyCodec::Prores,
     ProxyCodec::H264,
 ];
 
 /// The encoders `choice` makes proxies with here, best first, where the GPU
-/// in use plays the codecs `plays` names (`av1`, `hevc`, `h264`, `prores`).
+/// in use plays the codecs `plays` names (`av1`, `hevc`, `h264`, `prores`),
+/// each with the kind of its decoders that plays it.
 ///
 /// A codec's own: the hardware ones this machine has working (AV1's NVENC,
 /// then VAAPI; HEVC's and H.264's NVENC, AMF, VAAPI, QSV, VideoToolbox;
@@ -288,11 +288,15 @@ pub const AUTOMATIC: [ProxyCodec; 5] = [
 /// ProRes and DNxHR.
 ///
 /// Automatic takes every codec's ([`AUTOMATIC`]) in four rounds, each in
-/// that order: those the GPU's video engine makes and the GPU plays, those
-/// it plays, those the GPU makes (through Vulkan too), the rest. A proxy
-/// takes the first that opens: NVENC allows a few sessions at a time, and
-/// DNxHR's are at least 256×120.
-pub fn encoders(choice: ProxyCodec, available: &Availability, plays: &[&str]) -> Vec<ProxyEncoder> {
+/// that order: those the GPU makes and plays, those it plays, those the GPU
+/// makes (through Vulkan too), the rest. A proxy takes the first that
+/// opens: NVENC allows a few sessions at a time, and DNxHR's are at least
+/// 256×120.
+pub fn encoders(
+    choice: ProxyCodec,
+    available: &Availability,
+    plays: &[(&str, crate::hw::Kind)],
+) -> Vec<ProxyEncoder> {
     if choice != ProxyCodec::Auto {
         return own(choice, available);
     }
@@ -308,16 +312,19 @@ pub fn encoders(choice: ProxyCodec, available: &Availability, plays: &[&str]) ->
     all
 }
 
-/// Automatic's round for `e`, the first 0: made by the GPU's video engine
-/// and played on the GPU; played on it (made in software or through
-/// Vulkan); made on it; neither.
-fn round(e: &ProxyEncoder, plays: &[&str]) -> u8 {
-    let played = plays.contains(&e.codec);
-    match e.kind {
-        EncoderChoice::Cpu | EncoderChoice::Vulkan if played => 1,
-        EncoderChoice::Cpu => 3,
-        _ if played => 0,
-        _ => 2,
+/// Automatic's round for `e`, the first 0: made on the GPU and played
+/// there, by its video engine, or through Vulkan where the GPU plays the
+/// codec on Vulkan (NVIDIA's ProRes: the decoder's frames go to the encoder
+/// on the GPU); played on it (made in software, or through Vulkan where
+/// another decoder plays the codec); made on it; neither.
+fn round(e: &ProxyEncoder, plays: &[(&str, crate::hw::Kind)]) -> u8 {
+    let player = plays.iter().find(|(codec, _)| *codec == e.codec);
+    match (e.kind, player.map(|&(_, kind)| kind)) {
+        (EncoderChoice::Vulkan, Some(crate::hw::Kind::Vulkan)) => 0,
+        (EncoderChoice::Cpu | EncoderChoice::Vulkan, Some(_)) => 1,
+        (EncoderChoice::Cpu, None) => 3,
+        (_, Some(_)) => 0,
+        (_, None) => 2,
     }
 }
 
@@ -934,6 +941,14 @@ mod tests {
     use EncoderChoice::{Amf, Nvenc, Qsv, Vaapi, VideoToolbox, Vulkan};
 
     /// GPU encoders that work: their names, kinds and pixel formats.
+    use crate::hw::Kind;
+
+    /// The decoders that play what the tests' GPUs play: NVIDIA's NVDEC,
+    /// AMD's Direct3D 11, a Mac's VideoToolbox.
+    const NVDEC: Kind = Kind::Nvdec;
+    const AMDS: Kind = Kind::D3d11va;
+    const APPLES: Kind = Kind::VideoToolbox;
+
     fn working(list: &[(&str, EncoderChoice, &str)]) -> Availability {
         let status = |&(encoder, kind, pixel): &(&str, EncoderChoice, &str)| {
             crate::export::encode::EncoderStatus {
@@ -950,7 +965,7 @@ mod tests {
         }
     }
 
-    fn names(choice: ProxyCodec, available: &Availability, plays: &[&str]) -> Vec<String> {
+    fn names(choice: ProxyCodec, available: &Availability, plays: &[(&str, Kind)]) -> Vec<String> {
         crate::init();
         encoders(choice, available, plays)
             .into_iter()
@@ -999,7 +1014,11 @@ mod tests {
             ("h264_nvenc", Nvenc, "yuv420p"),
             ("prores_ks_vulkan", Vulkan, "yuv422p10le"),
         ]);
-        let got = names(ProxyCodec::Auto, &nvidia, &["av1", "h264"]);
+        let got = names(
+            ProxyCodec::Auto,
+            &nvidia,
+            &[("av1", NVDEC), ("h264", NVDEC)],
+        );
         assert_eq!(got[..2], ["av1_nvenc", "h264_nvenc"]);
     }
 
@@ -1012,12 +1031,13 @@ mod tests {
             ("av1_nvenc", Nvenc, "yuv420p"),
             ("av1_nvenc", Nvenc, "p010le"),
         ]);
-        let got = names(ProxyCodec::Auto, &nvidia, &["h264", "hevc", "av1"]);
+        let plays = [("h264", NVDEC), ("hevc", NVDEC), ("av1", NVDEC)];
+        let got = names(ProxyCodec::Auto, &nvidia, &plays);
         assert_eq!(got[0], "av1_nvenc");
     }
 
     #[test]
-    fn automatic_takes_apples_hevc_hardware() {
+    fn automatic_takes_apples_prores_hardware() {
         let apple = working(&[
             ("h264_videotoolbox", VideoToolbox, "nv12"),
             ("hevc_videotoolbox", VideoToolbox, "nv12"),
@@ -1025,8 +1045,14 @@ mod tests {
             ("prores_videotoolbox", VideoToolbox, "nv12"),
             ("prores_videotoolbox", VideoToolbox, "p010le"),
         ]);
-        let got = names(ProxyCodec::Auto, &apple, &["h264", "hevc", "av1", "prores"]);
-        assert_eq!(got[0], "hevc_videotoolbox");
+        let plays = [
+            ("h264", APPLES),
+            ("hevc", APPLES),
+            ("av1", APPLES),
+            ("prores", APPLES),
+        ];
+        let got = names(ProxyCodec::Auto, &apple, &plays);
+        assert_eq!(got[0], "prores_videotoolbox");
     }
 
     #[test]
@@ -1036,40 +1062,44 @@ mod tests {
             ("hevc_amf", Amf, "nv12"),
             ("hevc_amf", Amf, "p010le"),
         ]);
-        let got = names(ProxyCodec::Auto, &amd, &["h264", "hevc", "av1"]);
+        let plays = [("h264", AMDS), ("hevc", AMDS), ("av1", AMDS)];
+        let got = names(ProxyCodec::Auto, &amd, &plays);
         assert_eq!(got[0], "hevc_amf");
     }
 
     #[test]
-    fn automatic_puts_the_gpus_video_engine_before_vulkan() {
-        let nvidia = working(&[
-            ("h264_nvenc", Nvenc, "yuv420p"),
+    fn automatic_puts_the_gpus_video_engine_before_vulkan_where_prores_plays_another_way() {
+        let apple = working(&[
+            ("h264_videotoolbox", VideoToolbox, "nv12"),
             ("prores_ks_vulkan", Vulkan, "yuv422p10le"),
         ]);
-        let got = names(ProxyCodec::Auto, &nvidia, &["h264", "prores"]);
-        assert_eq!(got[0], "h264_nvenc");
+        let plays = [("h264", APPLES), ("prores", APPLES)];
+        let got = names(ProxyCodec::Auto, &apple, &plays);
+        assert_eq!(got[0], "h264_videotoolbox");
     }
 
     #[test]
-    fn automatic_takes_nvidias_av1_where_the_gpu_plays_prores_too() {
+    fn automatic_takes_vulkans_prores_where_the_gpu_plays_prores_on_vulkan() {
         let nvidia = working(&[
             ("av1_nvenc", Nvenc, "yuv420p"),
             ("hevc_nvenc", Nvenc, "yuv420p"),
             ("h264_nvenc", Nvenc, "yuv420p"),
             ("prores_ks_vulkan", Vulkan, "yuv422p10le"),
         ]);
-        let got = names(
-            ProxyCodec::Auto,
-            &nvidia,
-            &["h264", "av1", "hevc", "prores"],
-        );
-        assert_eq!(got[0], "av1_nvenc");
+        let plays = [
+            ("h264", NVDEC),
+            ("av1", NVDEC),
+            ("hevc", NVDEC),
+            ("prores", Kind::Vulkan),
+        ];
+        let got = names(ProxyCodec::Auto, &nvidia, &plays);
+        assert_eq!(got[0], "prores_ks_vulkan");
     }
 
     #[test]
     fn automatic_takes_what_the_gpu_plays_before_what_it_makes() {
         let gpu = working(&[("av1_nvenc", Nvenc, "yuv420p")]);
-        let got = names(ProxyCodec::Auto, &gpu, &["prores"]);
+        let got = names(ProxyCodec::Auto, &gpu, &[("prores", Kind::Vulkan)]);
         assert_eq!(got[..2], ["prores_ks", "av1_nvenc"]);
     }
 

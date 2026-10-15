@@ -345,10 +345,12 @@ pub fn proxy_encoders(
         vidcut_core::preferences::ProxyCodec::Auto => crate::export::plays(decoding),
         _ => None,
     };
-    let plays: Vec<&str> = plays
+    let plays: Vec<(&str, vidcut_av::hw::Kind)> = plays
         .iter()
         .flatten()
-        .map(|(codec, _)| codec.as_str())
+        .filter_map(|(codec, decoder)| {
+            Some((codec.as_str(), vidcut_av::hw::Kind::with_label(decoder)?))
+        })
         .collect();
     vidcut_av::proxy::encoders(codec, &available, &plays)
 }
