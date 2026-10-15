@@ -506,7 +506,8 @@ impl Screen {
                     self.last_shared = true;
                     return;
                 }
-                // Every shared buffer in flight: this one comes down.
+                // Every shared buffer in flight, or P210: this one comes
+                // down.
                 Ok(false) => {}
                 Err(e) => {
                     eprintln!("vidcut: pictures come down from the GPU to be shown: {e}");
@@ -548,6 +549,7 @@ impl Screen {
                 wgpu::TextureFormat::Rg16Unorm,
             ),
             Layout::P010 => return Err("no 16-bit textures for P010".into()),
+            Layout::P210 => return Err("P210 pictures aren't VA-API's".into()),
             Layout::Yuv420p | Layout::Yuv420p10 | Layout::Yuv422p | Layout::Yuv422p10 => {
                 return Err("planar pictures aren't VA-API's".into());
             }
@@ -688,6 +690,7 @@ impl Screen {
                 wgpu::TextureFormat::Rg16Unorm,
             ),
             Layout::P010 => return Err("no P010 or 16-bit textures for P010".into()),
+            Layout::P210 => return Err("P210 pictures aren't Direct3D 11's".into()),
             Layout::Yuv420p | Layout::Yuv420p10 | Layout::Yuv422p | Layout::Yuv422p10 => {
                 return Err("planar pictures aren't Direct3D 11's".into());
             }
@@ -822,11 +825,12 @@ impl Screen {
                 (MTLPixelFormat::R8Unorm, F::R8Unorm),
                 (MTLPixelFormat::RG8Unorm, F::Rg8Unorm),
             ],
-            Layout::P010 if gpu.wide => [
+            Layout::P010 | Layout::P210 if gpu.wide => [
                 (MTLPixelFormat::R16Unorm, F::R16Unorm),
                 (MTLPixelFormat::RG16Unorm, F::Rg16Unorm),
             ],
             Layout::P010 => return Err("no 16-bit textures for P010".into()),
+            Layout::P210 => return Err("no 16-bit textures for P210".into()),
             Layout::Yuv420p | Layout::Yuv420p10 | Layout::Yuv422p | Layout::Yuv422p10 => {
                 return Err("planar pictures aren't VideoToolbox's".into());
             }
@@ -910,7 +914,8 @@ impl Screen {
 
     /// Copies a picture in CUDA memory into the planes on the GPU: CUDA
     /// into a free shared buffer, then `encoder` into the textures. False
-    /// when none is free (copies out of all are in flight).
+    /// when none is free (copies out of all are in flight), and for P210
+    /// (NVDEC's 4:2:2), which no GPU here decodes to test a copy of.
     fn copy_on_gpu(
         &mut self,
         gpu: &Gpu,
@@ -923,6 +928,7 @@ impl Screen {
             Layout::Nv12 => 1,
             Layout::P010 if gpu.wide => 2,
             Layout::P010 => return Err("no 16-bit textures for P010".into()),
+            Layout::P210 => return Ok(false),
             Layout::Yuv420p | Layout::Yuv420p10 | Layout::Yuv422p | Layout::Yuv422p10 => {
                 return Err("planar pictures aren't NVDEC's".into());
             }
@@ -1033,7 +1039,7 @@ impl Screen {
                         v: make((cw, ch), one),
                     }
                 }
-                Layout::Nv12 | Layout::P010 => Planes {
+                Layout::Nv12 | Layout::P010 | Layout::P210 => Planes {
                     key,
                     y: make((w, h), one),
                     u: make((cw, ch), two),
@@ -1095,12 +1101,12 @@ impl Screen {
                 put(&planes.y, 0, (w, h), 1);
                 put(&planes.u, 1, (cw, ch), 2);
             }
-            (Layout::P010, true) => {
+            (Layout::P010 | Layout::P210, true) => {
                 put(&planes.y, 0, (w, h), 2);
                 put(&planes.u, 1, (cw, ch), 4);
             }
             // Without 16-bit textures: the high byte of each sample.
-            (Layout::P010, false) => {
+            (Layout::P010 | Layout::P210, false) => {
                 for (texture, plane, size, samples) in
                     [(&planes.y, 0, (w, h), 1), (&planes.u, 1, (cw, ch), 2)]
                 {
@@ -1244,14 +1250,14 @@ const PARAMS: usize = 9 * 16;
 fn sixteen(layout: Layout) -> bool {
     match layout {
         Layout::Yuv420p | Layout::Nv12 | Layout::Yuv422p => false,
-        Layout::P010 | Layout::Yuv420p10 | Layout::Yuv422p10 => true,
+        Layout::P010 | Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::P210 => true,
     }
 }
 
 /// Its U and V are interleaved in one plane.
 fn interleaved(layout: Layout) -> bool {
     match layout {
-        Layout::Nv12 | Layout::P010 => true,
+        Layout::Nv12 | Layout::P010 | Layout::P210 => true,
         Layout::Yuv420p | Layout::Yuv420p10 | Layout::Yuv422p | Layout::Yuv422p10 => false,
     }
 }
@@ -1260,7 +1266,7 @@ fn interleaved(layout: Layout) -> bool {
 fn rows_per_chroma_row(layout: Layout) -> u32 {
     match layout {
         Layout::Yuv420p | Layout::Nv12 | Layout::P010 | Layout::Yuv420p10 => 2,
-        Layout::Yuv422p | Layout::Yuv422p10 => 1,
+        Layout::Yuv422p | Layout::Yuv422p10 | Layout::P210 => 1,
     }
 }
 
@@ -1281,11 +1287,11 @@ fn params_of(picture: &Picture, size: (u32, u32), wide: bool, cover: (f64, f64))
     let (sw, sh) = (picture.width(), picture.height());
     let upright = if turns % 2 == 1 { (sh, sw) } else { (sw, sh) };
     // Sample s (0..1) as a code: 8 bits (also the top 8 of 10 without
-    // 16-bit textures), or 10 bits in the high bits of 16 (P010) or in the
-    // low bits (planar).
+    // 16-bit textures), or 10 bits in the high bits of 16 (P010, P210) or
+    // in the low bits (planar).
     let layout = picture.layout();
     let (code, max): (f64, f64) = match (layout, wide && sixteen(layout)) {
-        (Layout::P010, true) => (65535.0 / 64.0, 1023.0),
+        (Layout::P010 | Layout::P210, true) => (65535.0 / 64.0, 1023.0),
         (Layout::Yuv420p10 | Layout::Yuv422p10, true) => (65535.0, 1023.0),
         _ => (255.0, 255.0),
     };

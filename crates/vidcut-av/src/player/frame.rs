@@ -26,6 +26,9 @@ pub enum Layout {
     Yuv422p,
     /// 10 bits in the low bits of 16, 4:2:2, a plane each.
     Yuv422p10,
+    /// 10 bits in the high bits of 16, 4:2:2, U and V interleaved
+    /// (VideoToolbox's ProRes).
+    P210,
 }
 
 impl Layout {
@@ -39,6 +42,7 @@ impl Layout {
             P::YUV420P10LE => Self::Yuv420p10,
             P::YUV422P | P::YUVJ422P => Self::Yuv422p,
             P::YUV422P10LE => Self::Yuv422p10,
+            P::P210LE => Self::P210,
             _ => Self::Yuv420p,
         }
     }
@@ -250,5 +254,10 @@ mod tests {
     #[test]
     fn yuv422p10le_pictures_are_10_bit_planar_4_2_2() {
         assert_eq!(Layout::of(Pixel::YUV422P10LE), Layout::Yuv422p10);
+    }
+
+    #[test]
+    fn p210le_pictures_are_10_bit_interleaved_4_2_2() {
+        assert_eq!(Layout::of(Pixel::P210LE), Layout::P210);
     }
 }

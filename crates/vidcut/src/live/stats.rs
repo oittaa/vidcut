@@ -51,7 +51,8 @@ pub struct PictureStats {
     pub frame: i64,
     pub exact: bool,
     pub size: [u32; 2],
-    /// `YUV420P`, `NV12`, `P010`, `YUV420P10`, `YUV422P` or `YUV422P10`.
+    /// `YUV420P`, `NV12`, `P010`, `YUV420P10`, `YUV422P`, `YUV422P10` or
+    /// `P210`.
     pub layout: String,
     /// `BT.601`, `BT.709` or `BT.2020`.
     pub matrix: String,
@@ -139,6 +140,7 @@ impl PlayerStats {
                 Layout::Yuv420p10 => "YUV420P10",
                 Layout::Yuv422p => "YUV422P",
                 Layout::Yuv422p10 => "YUV422P10",
+                Layout::P210 => "P210",
             };
             let matrix = match c.matrix {
                 Matrix::Bt601 => "BT.601",
