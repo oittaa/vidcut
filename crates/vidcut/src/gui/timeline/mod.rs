@@ -315,6 +315,10 @@ const LOWER_RULER: f32 = 22.0;
 /// The track header column: wide enough for a track's name with its four
 /// buttons on one line, which must not reach into the timeline.
 const HEADER: f32 = 120.0;
+/// The height of the header column's controls by the overview and the
+/// lower ruler. Their boxes are as tall as those, whatever height a theme
+/// gives buttons.
+const BOX_CONTROL: f32 = 18.0;
 
 /// The icons of the timeline's controls.
 mod icon {
@@ -456,6 +460,9 @@ impl Workspace {
             theme::colors().panel_dark,
         );
         let upper_resp = ui.allocate_rect(upper_rect, Sense::click_and_drag());
+        upper_resp.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Timeline overview")
+        });
         let lower_resp = ui.allocate_rect(lower_rect, Sense::click_and_drag());
 
         // Scales.
@@ -918,6 +925,7 @@ impl Workspace {
         child.set_clip_rect(upper.intersect(child.clip_rect()));
         child.spacing_mut().item_spacing = vec2(2.0, 2.0);
         child.spacing_mut().button_padding = vec2(4.0, 1.0);
+        child.spacing_mut().interact_size.y = BOX_CONTROL;
         child.horizontal(|ui| {
             icon_menu(ui, icon::OPTIONS, "Timeline Options", |ui| {
                 self.options_menu(ui, p)
@@ -949,6 +957,7 @@ impl Workspace {
         child.set_clip_rect(lower.intersect(child.clip_rect()));
         child.spacing_mut().item_spacing = vec2(1.0, 0.0);
         child.spacing_mut().button_padding = vec2(2.0, 0.0);
+        child.spacing_mut().interact_size.y = BOX_CONTROL;
         child.horizontal_centered(|ui| self.timeline_tools(ui, p));
     }
 
