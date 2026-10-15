@@ -373,8 +373,8 @@ Shortcuts do nothing while a text field has focus or a question (a modal dialog)
 | F12 | Place On Top | 890† |
 | Shift+F12 | Append | 890† |
 | Ctrl+\ | Split at playhead | 723 |
-| Ctrl+T | Dissolve on the selected edit, or the one nearest the playhead (§8.11) | 758 |
 | Ctrl+B | Split at the playhead; same as the row above, without AltGr | 723 |
+| Ctrl+T | Dissolve on the selected edit, or the one nearest the playhead (§8.11) | 758 |
 | Delete / Backspace | Delete selection (ripples on Track 1) | 725 |
 | Alt+Delete | Lift the selection (leave the gap; D9) | 725 |
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut (ripple) / paste at playhead | 723 |
@@ -580,5 +580,5 @@ Each decision applies until the manual or testing shows Resolve behaves otherwis
   - **Program length:** a fade to black past the last clip lengthens the program to its end, as Resolve's timeline is.
   - **Made here:** a second, centered with an odd length's middle frame before the edit, as Resolve centers one. Each side is shortened to the frames its clip's media and the track leave, and with none on either side it is an error. A new one replaces the transition on its edit. The sound gets a Cross Fade +3 dB where the two clips' sounds meet at one frame (no J/L offset between them), or a fade at a gap. A J/L cut's sound gets its own with Ctrl+T on its audio edit. They are written as Resolve writes its own, and Studio 21.1.1 rebuilds them: the same types, lengths and places, and its render of them within 10-bit rounding of vidcut's.
   - **Viewer:** each picture is drawn over the ones before at its level, after its conversion to the viewer's RGB: within a level of the export's mix in SDR. An HDR export mixes in its PQ or HLG code values, and the viewer shows that picture tone-mapped, so mid-dissolve it is not the export's mix tone-mapped.
-  - **On the GPU:** NVIDIA's GPU mixes NVENC's pictures with the CPU's sums. Frames for Direct3D 11's, VA-API's and VideoToolbox's encoders come down to be mixed on the CPU ([todo](todo/gpu-dissolves.md)).
+  - **On the GPU:** NVIDIA's GPU mixes NVENC's pictures with the CPU's sums. Where its driver won't take the kernel, the CPU mixes them and the export's report says so. Frames for Direct3D 11's, VA-API's and VideoToolbox's encoders come down to be mixed on the CPU ([todo](todo/gpu-dissolves.md)).
   - **The two-up** shows the clips without their dissolves.

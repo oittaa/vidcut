@@ -459,9 +459,9 @@ pub struct VideoFrames {
     /// The Dolby Vision of the last source frame given: black after it
     /// takes it.
     last_dolby_vision: frame::Video,
-    /// Mixing on NVIDIA's GPU failed: dissolves are mixed on the CPU from
-    /// then on.
-    cuda_mix_failed: bool,
+    /// Why mixing on NVIDIA's GPU failed: dissolves are mixed on the CPU
+    /// from then on.
+    cuda_mix_failed: Option<String>,
 }
 
 impl VideoFrames {
@@ -493,8 +493,14 @@ impl VideoFrames {
             dynamic: Default::default(),
             light: Default::default(),
             last_dolby_vision: frame::Video::empty(),
-            cuda_mix_failed: false,
+            cuda_mix_failed: None,
         }
+    }
+
+    /// Why NVIDIA's GPU didn't mix the dissolves for NVENC, which the CPU
+    /// mixed then; `None` where it did, or nothing was mixed there.
+    pub fn mix_failed(&self) -> Option<&str> {
+        self.cuda_mix_failed.as_deref()
     }
 
     /// Whether a dissolve's pictures are mixed on NVIDIA's GPU, for NVENC
@@ -502,7 +508,7 @@ impl VideoFrames {
     fn gpu_mixes(&self) -> bool {
         matches!(self.maker.output(), Output::Cuda { .. })
             && crate::hw::can_mix(Place::Cuda)
-            && !self.cuda_mix_failed
+            && self.cuda_mix_failed.is_none()
     }
 
     /// Makes the frames into `output`. Frames are picked by the sampling
@@ -779,7 +785,7 @@ impl VideoFrames {
                         "decoding",
                         "the GPU won't mix a dissolve's pictures, the CPU mixes them: {e}"
                     );
-                    self.cuda_mix_failed = true;
+                    self.cuda_mix_failed = Some(e.to_string());
                     None
                 }
             },

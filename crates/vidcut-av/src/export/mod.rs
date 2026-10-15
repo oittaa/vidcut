@@ -118,6 +118,10 @@ pub struct Report {
     /// Frames copied between GPU memory and memory for the export: its
     /// probes, passes and pieces.
     pub copies: vidcut_core::editor::Copied,
+    /// Why NVIDIA's GPU didn't mix the dissolves for NVENC, which the CPU
+    /// mixed then (decision D50).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mix_failed: Option<String>,
 }
 
 /// What a piece's pictures carry, read from its file: its transfer and HDR
@@ -1049,6 +1053,9 @@ fn encode(
         samples: if audio.is_some() { plan.samples() } else { 0 },
         gpu_frames: video.as_ref().map_or(0, |v| v.frames.gpu_frames()),
         gpu_decoded: video.as_ref().map_or(0, |v| v.frames.gpu_decoded()),
+        mix_failed: video
+            .as_ref()
+            .and_then(|v| v.frames.mix_failed().map(String::from)),
         passes: video.as_ref().map(|v| v.passes.count()),
         video_encoder: video.map(|v| v.name),
         audio_encoder: audio.map(|a| a.spec.name),
