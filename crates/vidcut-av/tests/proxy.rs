@@ -6,7 +6,7 @@ use vidcut_av::decode::{Input, VideoReader, read_barcode};
 use vidcut_av::export::encode::{Availability, detect};
 use vidcut_av::ffmpeg;
 use vidcut_av::fixture::{self, Container, FixtureSpec, HdrMeta, ImageSpec, VideoCodec};
-use vidcut_av::hw::GpuDecoder;
+use vidcut_av::hw::{GpuDecoder, Kind};
 use vidcut_av::proxy::{ProxyEncoder, WrittenProxy, encoders};
 use vidcut_av::route::Went;
 use vidcut_core::export::EncoderChoice;
@@ -26,14 +26,15 @@ const HDR10: HdrMeta = HdrMeta {
     hdr10plus_frames: None,
 };
 
-/// A source: 8-bit H.264, 10-bit HEVC, 10-bit AV1, or 10-bit HEVC in PQ
-/// with HDR10's static values.
+/// A source: 8-bit H.264, 10-bit HEVC, 10-bit AV1, 10-bit HEVC in PQ with
+/// HDR10's static values, or ProRes 422 HQ.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Source {
     H264,
     Hevc10,
     Av1,
     Pq,
+    Prores,
 }
 
 impl Source {
@@ -43,11 +44,23 @@ impl Source {
             Source::H264 => VideoCodec::H264,
             Source::Hevc10 | Source::Pq => VideoCodec::Hevc10,
             Source::Av1 => VideoCodec::Av1,
+            Source::Prores => VideoCodec::ProRes422Hq,
         };
         let spec = FixtureSpec::new(codec, container, w, h, (30, 1), frames);
         match self {
             Source::Pq => spec.hdr(Hdr::Pq).hdr_meta(HDR10),
             _ => spec,
+        }
+    }
+
+    /// The containers of its fixture and of its copy that starts late:
+    /// FFmpeg finds no video stream in an MPEG-TS file of AV1, and ProRes
+    /// goes in MOV and Matroska.
+    fn containers(self) -> (Container, Container) {
+        match self {
+            Source::Av1 => (Container::Mp4, Container::Mkv),
+            Source::Prores => (Container::Mov, Container::Mkv),
+            _ => (Container::Mp4, Container::MpegTs),
         }
     }
 }
@@ -210,12 +223,8 @@ fn matches_source(
     out: (u32, u32),
     pictures: Pictures,
 ) -> Vec<WrittenProxy> {
-    let original = fixture::ensure(&source.spec(Container::Mp4, size, 24)).unwrap();
-    // FFmpeg finds no video stream in an MPEG-TS file of AV1.
-    let late = match source {
-        Source::Av1 => Container::Mkv,
-        _ => Container::MpegTs,
-    };
+    let (first, late) = source.containers();
+    let original = fixture::ensure(&source.spec(first, size, 24)).unwrap();
     let offset = source.spec(late, size, 12).start_offset_ms(1400);
     let shifted = fixture::ensure(&offset).unwrap();
     let tmp = tempfile::Builder::new()
@@ -386,6 +395,51 @@ fn a_prores_proxy_made_on_nvidias_gpu_copies_nothing() {
     for (source, pictures) in sources {
         for written in on_the_gpu(&enc, &decoder, source, pictures) {
             let what = format!("{source:?} at {}x{}", written.width, written.height);
+            assert_eq!(written.went, Some(Went::Stayed), "{what}");
+            assert_eq!((written.copies.down, written.copies.up), (0, 0), "{what}");
+        }
+    }
+}
+
+/// A ProRes source decoded on Vulkan (NVIDIA's GPU) goes into NVENC's and
+/// Vulkan's ProRes encoder's proxies there: nothing comes down or goes up,
+/// and each frame keeps its barcode and timestamp. Skips where the GPU in
+/// use doesn't decode ProRes on Vulkan.
+#[test]
+fn a_prores_sources_proxies_made_on_nvidias_gpu_copy_nothing() {
+    let prores = ffmpeg::codec::Id::PRORES;
+    let on_vulkan = |d: &GpuDecoder| {
+        d.kind_for(prores) == Some(Kind::Vulkan) && d.why_not(prores, || false).is_none()
+    };
+    let Some(decoder) = GpuDecoder::best().filter(on_vulkan) else {
+        return;
+    };
+    let Some(gpu) = decoder.gpu() else {
+        return;
+    };
+    let on_it = detect(true).on(gpu);
+    let codecs = [
+        ProxyCodec::H264,
+        ProxyCodec::Hevc,
+        ProxyCodec::Av1,
+        ProxyCodec::Prores,
+    ];
+    let encs: Vec<ProxyEncoder> = codecs
+        .into_iter()
+        .flat_map(|c| encoders(c, &on_it, &[]))
+        .filter(|e| matches!(e.kind, EncoderChoice::Nvenc | EncoderChoice::Vulkan))
+        .collect();
+    assert!(
+        encs.iter().any(|e| e.kind == EncoderChoice::Nvenc),
+        "no NVENC on NVIDIA's GPU"
+    );
+    for enc in &encs {
+        let pictures = match enc.kind {
+            EncoderChoice::Vulkan => Pictures::TenBit422,
+            _ => Pictures::Any,
+        };
+        for written in on_the_gpu(enc, &decoder, Source::Prores, pictures) {
+            let what = format!("{} at {}x{}", enc.name, written.width, written.height);
             assert_eq!(written.went, Some(Went::Stayed), "{what}");
             assert_eq!((written.copies.down, written.copies.up), (0, 0), "{what}");
         }
