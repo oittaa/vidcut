@@ -986,10 +986,13 @@ impl Workspace {
                 } else if let Some(mut path) = path {
                     let mut params = json!({ "path": path });
                     if let Some(format) = new {
+                        // The save dialog asked before replacing the file it
+                        // names, but not one named by an extension added here.
+                        let force = path.extension().is_some();
                         if path.extension().is_none() {
                             path.set_extension("vidcut");
                         }
-                        params = json!({ "path": path, "create": true });
+                        params = json!({ "path": path, "create": true, "force": force });
                         if let (Some(p), Some(f)) = (params.as_object_mut(), format.as_object()) {
                             p.extend(f.clone());
                         }

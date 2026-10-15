@@ -331,5 +331,18 @@ fn exact_seeks_external_edit_and_proxies() {
     // The name is taken now.
     assert!(h.call("project.open", json!({ "path": cut })).is_err());
 
+    // A new project over a file already there: without force the file
+    // opens, and this one isn't a project; with force it is replaced.
+    let taken = dir.join("taken.vidcut");
+    std::fs::write(&taken, "not a project").unwrap();
+    let create = json!({ "path": taken, "create": true, "fps": "25", "width": 640, "height": 360 });
+    assert!(h.call("project.open", create.clone()).is_err());
+    let mut force = create;
+    force["force"] = json!(true);
+    h.ok("project.open", force);
+    let made = Store::open(&taken).unwrap().load().unwrap();
+    let p = made.project();
+    assert_eq!((p.settings.width, p.media.len()), (640, 0));
+
     drop(h);
 }

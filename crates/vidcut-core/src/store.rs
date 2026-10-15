@@ -58,6 +58,11 @@ impl Store {
         if path.exists() {
             return Err(Error::invalid(format!("{} already exists", path.display())));
         }
+        Self::replace(path, project)
+    }
+
+    /// Creates a new project file over whatever is at `path`.
+    pub fn replace(path: &Path, project: &Project) -> Result<Self> {
         let parent = path
             .parent()
             .filter(|p| !p.as_os_str().is_empty())

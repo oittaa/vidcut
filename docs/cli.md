@@ -143,7 +143,7 @@ vidcut history undo                         # works across separate runs
 | `vidcut selection set --clips c1,c2 --media m3`, `selection get` | the selection |
 | `vidcut gui screenshot --out v.png [--target window]` | the viewer picture as shown (works while minimized), or the whole window |
 | `vidcut gui log [--since N]` | what everyone (the human too) did: each entry's `summary` in words, and the request as sent |
-| `vidcut gui window --size 1600,1000`, `project open FILE [--create [--fps 25 --width 1920 --height 1080]]`, `gui quit` | window and project. `project open cut.otio` opens a project file made next to it, `cut.vidcut` (or `--save-as FILE`), as `project create --from` makes it |
+| `vidcut gui window --size 1600,1000`, `project open FILE [--create [--fps 25 --width 1920 --height 1080] [--force]]`, `gui quit` | window and project. `--create` opens a file already there, and `--force` replaces it with the new project. `project open cut.otio` opens a project file made next to it, `cut.vidcut` (or `--save-as FILE`), as `project create --from` makes it |
 | `vidcut jobs list`, `jobs get\|wait\|cancel J [--timeout S]` | export and proxy jobs, the GUI's own included. They run one at a time, and the others are `queued`. `wait` fails like the job did |
 | `vidcut pool set --bin A --sort name --descending true` | the bin the Media Pool shows and its order; Source Tape follows it |
 | `vidcut player mute [true\|false]` | the viewer's monitoring mute (not the export); without a value, toggles |

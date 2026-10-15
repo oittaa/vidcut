@@ -173,6 +173,22 @@ fn another_editors_file_opens_after_its_questions() {
     let p = &snap.project.as_ref().unwrap().project;
     assert_eq!(p.tracks[0].clips.len(), 2);
 
+    // New Project onto that file replaces it: the save dialog asked first.
+    harness.get_by_label("File").click();
+    click_new(&mut harness, "New Project…");
+    until(&mut harness, "the format question", |h| {
+        has(h, "Choose it now")
+    });
+    click_new(&mut harness, "Create…");
+    until(&mut harness, "the new project", |_| {
+        h.snapshot()
+            .project
+            .as_ref()
+            .is_some_and(|p| p.project.tracks[0].clips.is_empty())
+    });
+    let file = Store::open(&other).unwrap().load().unwrap();
+    assert_eq!(file.project().tracks[0].clips.len(), 0);
+
     drop(harness);
     h.shutdown();
     let _ = session.join();
