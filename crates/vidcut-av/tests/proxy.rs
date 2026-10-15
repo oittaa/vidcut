@@ -2,9 +2,10 @@
 //! with each encoder proxies can be made with (decision D41).
 
 use vidcut_av::decode::{Input, VideoReader, read_barcode};
-use vidcut_av::export::encode::Availability;
+use vidcut_av::export::encode::{Availability, detect};
 use vidcut_av::ffmpeg;
 use vidcut_av::fixture::{self, Container, FixtureSpec, ImageSpec, VideoCodec};
+use vidcut_av::hw::GpuDecoder;
 use vidcut_av::proxy::{ProxyEncoder, encoders};
 use vidcut_core::preferences::ProxyCodec;
 
@@ -39,11 +40,17 @@ fn software() -> Vec<ProxyEncoder> {
     .collect()
 }
 
-/// Each frame's barcode and timestamp match the source's.
-fn matches_source(enc: &ProxyEncoder) {
-    let spec = FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 24);
+/// Each frame's barcode and timestamp match the source's in `out` proxies
+/// of `w`×`h` sources, the frames decoded on `decoder` (`None`: the CPU).
+fn matches_source(
+    enc: &ProxyEncoder,
+    decoder: Option<&GpuDecoder>,
+    (w, h): (u32, u32),
+    out: (u32, u32),
+) {
+    let spec = FixtureSpec::new(VideoCodec::H264, Container::Mp4, w, h, (30, 1), 24);
     let source = fixture::ensure(&spec).unwrap();
-    let offset = FixtureSpec::new(VideoCodec::H264, Container::MpegTs, 320, 180, (30, 1), 12)
+    let offset = FixtureSpec::new(VideoCodec::H264, Container::MpegTs, w, h, (30, 1), 12)
         .start_offset_ms(1400);
     let shifted = fixture::ensure(&offset).unwrap();
     let tmp = tempfile::Builder::new()
@@ -55,16 +62,16 @@ fn matches_source(enc: &ProxyEncoder) {
         let dest = dir.join(format!("proxy-{i}.mkv"));
         let written = vidcut_av::proxy::write(
             &Input::File(path.clone()),
-            320,
-            180,
+            out.0,
+            out.1,
             &dest,
             None,
             std::slice::from_ref(enc),
-            None,
+            decoder,
         )
         .unwrap_or_else(|e| panic!("{} with {}: {e}", path.display(), enc.name));
         assert_eq!(written.encoder, *enc);
-        assert_eq!((written.width, written.height), (320, 180));
+        assert_eq!((written.width, written.height), out);
         let src = frames(&Input::File(path.clone()));
         let got = frames(&Input::File(dest));
         assert_eq!(got.len(), src.len(), "{} {}", enc.name, path.display());
@@ -90,7 +97,36 @@ fn matches_source(enc: &ProxyEncoder) {
 #[test]
 fn a_proxy_matches_source_frames_and_timestamps() {
     for enc in software() {
-        matches_source(&enc);
+        matches_source(&enc, None, (320, 180), (320, 180));
+    }
+}
+
+/// The frames each GPU decodes, made into an H.264 proxy by its own
+/// encoder: NVENC from NVDEC and AMF from Direct3D 11 take them on the GPU,
+/// as VAAPI does from VA-API. Untagged 320×180 is read as BT.601, which
+/// only NVIDIA's path converts on the GPU (libplacebo, a picture a frame
+/// late), and untagged 1280×720 as BT.709, which every GPU fits.
+#[test]
+fn a_gpu_proxy_matches_source_frames_and_timestamps() {
+    let decoders = GpuDecoder::all();
+    if decoders.is_empty() {
+        return;
+    }
+    let available = detect(false);
+    for decoder in &decoders {
+        // The encoders on its GPU: every one where no GPU is listed (a
+        // Mac's).
+        let on_it = match decoder.gpu() {
+            Some(gpu) => available.on(gpu),
+            None => available.clone(),
+        };
+        let hardware = encoders(ProxyCodec::H264, &on_it, &[])
+            .into_iter()
+            .find(|e| e.kind.gpu());
+        if let Some(enc) = hardware {
+            matches_source(&enc, Some(decoder), (320, 180), (320, 180));
+            matches_source(&enc, Some(decoder), (1280, 720), (640, 360));
+        }
     }
 }
 
