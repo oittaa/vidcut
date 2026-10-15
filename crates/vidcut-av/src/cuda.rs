@@ -1269,6 +1269,7 @@ mod tests {
             out_layout: Pixel::NV12,
             rgb: false,
             colors_kept: true,
+            pads: false,
             into: false,
         }
     }
