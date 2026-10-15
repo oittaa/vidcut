@@ -23,8 +23,11 @@ struct Params {
     gamut2: vec4<f32>,
     // x: 0 SDR, 1 PQ, 2 HLG; y: quarter turns clockwise that show it
     // upright; z: the layout, 0 planar (Y, U, V), 1 interleaved chroma
-    // (Y, UV); w: luma rows per chroma row, 2 for 4:2:0 and 1 for 4:2:2.
+    // (Y, UV); w unused.
     flags: vec4<u32>,
+    // Luma samples per chroma sample across (x) and down (y): 2 and 2 for
+    // 4:2:0, 2 and 1 for 4:2:2, 1 and 1 for 4:4:4 (zw unused).
+    per: vec4<u32>,
 };
 
 @group(0) @binding(0) var<uniform> p: Params;
@@ -61,11 +64,10 @@ fn stored(u: vec2<f32>) -> vec2<f32> {
 fn yuv(u: vec2<f32>) -> vec3<f32> {
     let s = stored(u) * p.upright.zw;
     let y = textureSampleLevel(luma, bilinear, s, 0.0).r;
-    // The same place in the chroma plane, whose samples each cover two of
-    // luma's across, and two or one down: where a side is odd, the plane
+    // The same place in the chroma plane, whose samples each cover one or
+    // two of luma's each way: where a side is odd, a subsampled plane
     // reaches half a sample past the picture.
-    let per = vec2<u32>(2u, p.flags.w);
-    let c = s * vec2<f32>(textureDimensions(luma)) / vec2<f32>(per * textureDimensions(chroma_u));
+    let c = s * vec2<f32>(textureDimensions(luma)) / vec2<f32>(p.per.xy * textureDimensions(chroma_u));
     if p.flags.z == 1u {
         let uv = textureSampleLevel(chroma_u, bilinear, c, 0.0).rg;
         return vec3<f32>(y, uv.x, uv.y);
