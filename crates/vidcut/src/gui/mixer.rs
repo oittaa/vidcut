@@ -205,12 +205,13 @@ fn track_channels(p: &Project, t: &Track, at: i64, waveforms: &Waves) -> Vec<f32
     let fps = p.settings.fps.as_f64();
     let mut level = vec![0.0; n];
     for c in &t.clips {
-        let (Some((a, b)), Some(audio)) = (c.audio_range(), &c.audio) else {
+        let Some(audio) = c.audio.as_ref().filter(|a| !a.muted) else {
             continue;
         };
-        if at < a || at >= b || audio.muted {
+        // Through a cross fade, both clips' sounds at their shares.
+        let Some(share) = vidcut_core::otio::transitions::heard_at(p, t, c, at) else {
             continue;
-        }
+        };
         let Some(w) = waveforms.get(&c.media) else {
             continue;
         };
@@ -224,7 +225,7 @@ fn track_channels(p: &Project, t: &Track, at: i64, waveforms: &Waves) -> Vec<f32
         });
         let s = c.source_at(at) as f64 / fps + origin;
         let gained = map_channels(&source_peaks(w, s, s + 1.0 / fps), n);
-        let g = linear(audio.gain_db + t.volume_db);
+        let g = linear(audio.gain_db + t.volume_db) * share as f32;
         for (dst, src) in level.iter_mut().zip(gained) {
             *dst = f32::max(*dst, src * g);
         }

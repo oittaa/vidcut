@@ -153,6 +153,39 @@ pub fn playing<'a>(
     out
 }
 
+/// Whether clip `c` of `track` is heard at timeline frame `at`, its sound
+/// running on through the cross fades out of it and starting with those
+/// into it, and the share of its gain they give it there (decision D50):
+/// 1 outside them.
+pub fn heard_at(p: &Project, track: &Track, c: &Clip, at: i64) -> Option<f64> {
+    let (a, b) = c.audio_range()?;
+    let fades = playing(p, track, true, |t| cross_fade(t).is_some());
+    let side = |into: bool| {
+        fades.iter().find(|f| {
+            let s = if into { f.after } else { f.before };
+            s.is_some_and(|x| std::ptr::eq(x, c))
+        })
+    };
+    let (into, out_of) = (side(true), side(false));
+    let (start, end) = (
+        into.map_or(a, |f| f.frames.0),
+        out_of.map_or(b, |f| f.frames.1),
+    );
+    if at < start || at >= end {
+        return None;
+    }
+    let share = |f: &Playing, falling: bool| {
+        let x = (at - f.frames.0) as f64 / (f.frames.1 - f.frames.0) as f64;
+        let curve = cross_fade(f.transition).expect("plays");
+        curve.gain(if falling { 1.0 - x } else { x })
+    };
+    Some(match (into, out_of) {
+        (Some(f), _) if at < f.frames.1 => share(f, false),
+        (_, Some(f)) if at >= f.frames.0 => share(f, true),
+        _ => 1.0,
+    })
+}
+
 /// The span of `c`'s picture (or sound) on the timeline.
 fn span(c: &Clip, sound: bool) -> Option<(i64, i64)> {
     if sound {

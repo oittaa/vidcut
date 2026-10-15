@@ -943,7 +943,7 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
 }
 
 /// Plans one clip on its own: its video extent with its own audio (J/L
-/// offsets and neighbors are left out), for per-clip export.
+/// offsets, neighbors and dissolves are left out), for per-clip export.
 pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
     let c = p
         .clip(clip)
@@ -952,6 +952,7 @@ pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
     let mut alone = p.clone();
     for t in &mut alone.tracks {
         t.clips.retain(|x| x.id == c.id);
+        t.transitions.clear();
         for x in &mut t.clips {
             if let Some(a) = x.audio.as_mut() {
                 a.head = 0;
@@ -1305,6 +1306,17 @@ mod tests {
                 "m1@115200+76800".into(),
             ]]
         );
+    }
+
+    #[test]
+    fn a_clip_after_a_cross_fades_cut_is_heard_at_its_share_through_it() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m2", 10, 60);
+        let p = cross_fade(&f, Some("c1"), Some("c2"), 2, 2);
+        let t = p.track("V1").unwrap();
+        // A quarter of the way through +3 dB: the square root of a quarter.
+        assert_eq!(transitions::heard_at(&p, t, &t.clips[1], 49), Some(0.5));
     }
 
     #[test]
