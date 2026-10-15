@@ -82,7 +82,7 @@ pub(crate) struct Fitting {
     /// the frame it is given, so that frame can't be planned again.
     pub(crate) route: Option<Route>,
     /// How the latest picture's frame went, for people.
-    went: Option<Went>,
+    pub(crate) went: Option<Went>,
 }
 
 impl Fitting {
@@ -355,7 +355,6 @@ impl Maker {
 
     /// The pictures `fitting`'s scaler still holds once its last frame went
     /// in. Empty without a scaler.
-    #[expect(dead_code, reason = "exports' scalers give each picture at once")]
     pub(crate) fn rest(&mut self, fitting: &mut Fitting) -> Result<Vec<frame::Video>> {
         let mut rest = Vec::new();
         if let Some(scaler) = fitting.scaler.as_mut() {

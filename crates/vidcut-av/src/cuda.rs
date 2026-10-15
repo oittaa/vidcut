@@ -860,13 +860,6 @@ impl CudaPictures {
         Ok(Self { graph, placebo })
     }
 
-    /// The frames context of the pictures: what NVENC is opened with.
-    pub fn frames_ctx(&mut self) -> *mut ffi::AVBufferRef {
-        unsafe {
-            ffi::av_buffersink_get_hw_frames_ctx(self.graph.get("out").expect("sink").as_mut_ptr())
-        }
-    }
-
     /// Feeds the next decoded frame, or the end of the stream (`None`).
     pub fn push(&mut self, f: Option<&frame::Video>) -> Result<()> {
         let mut source = self.graph.get("in").expect("source");

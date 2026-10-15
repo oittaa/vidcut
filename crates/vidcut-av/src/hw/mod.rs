@@ -372,8 +372,8 @@ pub struct GpuDecoder {
     cuda: Option<CudaDevice>,
     /// Its GPU's PCI vendor, where known (Direct3D 11's adapter's).
     vendor: Option<u32>,
-    /// Its GPU's name, where it was opened for one (`gpus::list`).
-    gpu: Option<String>,
+    /// Its GPU, where it was opened for one (`gpus::list`).
+    gpu: Option<crate::gpus::Gpu>,
 }
 
 impl GpuDecoder {
@@ -465,6 +465,12 @@ impl GpuDecoder {
         self.cuda.as_ref()
     }
 
+    /// The GPU it was opened for (`gpus::list`); `None` for a Mac's, and
+    /// for one opened by its kind and place, such as [`own`](Self::own)'s.
+    pub fn gpu(&self) -> Option<&crate::gpus::Gpu> {
+        self.gpu.as_ref()
+    }
+
     pub(crate) fn as_ptr(&self) -> *mut ffi::AVBufferRef {
         self.device.0
     }
@@ -528,7 +534,7 @@ impl GpuDecoder {
     /// its adapter (Windows), VA-API on its render node (Linux).
     fn on_gpu(gpu: &crate::gpus::Gpu) -> Result<Self> {
         let named = |d: Self| Self {
-            gpu: Some(gpu.name.clone()),
+            gpu: Some(gpu.clone()),
             ..d
         };
         if let Some(index) = gpu.cuda {
@@ -569,8 +575,8 @@ impl std::fmt::Display for GpuDecoder {
             _ => self.on.clone(),
         };
         match (&self.gpu, on.is_empty()) {
-            (Some(gpu), true) => write!(f, " on {gpu}"),
-            (Some(gpu), false) => write!(f, " on {gpu} ({on})"),
+            (Some(gpu), true) => write!(f, " on {}", gpu.name),
+            (Some(gpu), false) => write!(f, " on {} ({on})", gpu.name),
             (None, true) => Ok(()),
             (None, false) => write!(f, " on {on}"),
         }
