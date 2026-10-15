@@ -111,7 +111,7 @@ impl Fitting {
         // needs Vulkan for turned pictures, other matrices than BT.709, and
         // HDR).
         let planned = reader.cuda().zip(reader.peek()).filter(|(_, first)| {
-            let ops = Ops::of(first, reader.rotation(), format, target, false);
+            let ops = Ops::of(first, reader.rotation(), out, format, target, false);
             let cuda = Dest::Encoder { place: Place::Cuda };
             plan(&Facts::of(first, &ops, out), cuda) == Route::Gpu
         });
@@ -224,7 +224,7 @@ impl Maker {
     fn facts(&self, fitting: &Fitting, frame: &frame::Video, rotation: u16) -> Facts {
         let (w, h, layout) = self.out;
         let into = matches!(self.output, Output::FittedOnGpu { into: Some(_), .. });
-        let ops = Ops::of(frame, rotation, layout, self.target, into);
+        let ops = Ops::of(frame, rotation, (w, h), layout, self.target, into);
         Facts {
             fit_failed: fitting.fit_failed,
             keep_failed: self.unkept,

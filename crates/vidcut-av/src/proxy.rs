@@ -343,10 +343,10 @@ pub struct WrittenProxy {
 /// own (`export::make::Maker`). NVENC takes NVDEC's frames deinterlaced,
 /// turned, converted and scaled on the GPU, never copied to memory, where
 /// the planner leaves them there ([`plan`](crate::route::plan),
-/// [`CudaPictures`](crate::cuda::CudaPictures)). VAAPI and AMF on the
-/// decoder's device take its frames fitted there (`hw::Fitter`). For every
-/// other encoder the CPU scales, the GPU's frames shrunk there before they
-/// come down (`hw::Shrinker`).
+/// [`CudaPictures`](crate::cuda::CudaPictures)). VAAPI, AMF and
+/// VideoToolbox on the decoder's device take its frames fitted there
+/// (`hw::Fitter`). For every other encoder the CPU scales, the GPU's
+/// frames shrunk there before they come down (`hw::Shrinker`).
 pub fn write(
     input: &Input,
     width: u32,
@@ -486,9 +486,9 @@ impl<'a> Writer<'a> {
     /// Creates `tmp` and opens `enc` for pictures timed in `src_tb`, as
     /// exports open theirs ([`encode::open_video`]), and says what the
     /// pictures are made into. NVENC takes them in GPU memory on `cuda`'s
-    /// context where it opens so. VAAPI and AMF open on `decoder`'s device
-    /// where they share it ([`encode::shares`]), for the frames fitted
-    /// there.
+    /// context where it opens so. VAAPI, AMF and VideoToolbox open on
+    /// `decoder`'s device where they share it ([`encode::shares`]), for the
+    /// frames fitted there.
     fn new(
         tmp: &Path,
         enc: &ProxyEncoder,
@@ -664,8 +664,9 @@ impl<'a> Writer<'a> {
 
 /// Encodes what `reader` decodes, its pictures made as an export makes its
 /// own (`Maker`): for NVENC, NVDEC's frames scaled on the GPU and handed to
-/// it there; for VAAPI and AMF on `decoder`'s device, its frames fitted
-/// there; otherwise scaled on the CPU, the GPU's frames shrunk there first.
+/// it there; for VAAPI, AMF and VideoToolbox on `decoder`'s device, its
+/// frames fitted there; otherwise scaled on the CPU, the GPU's frames
+/// shrunk there first.
 /// The frames written, and how the first one went.
 fn encode_into(
     reader: &mut VideoReader,

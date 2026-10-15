@@ -2,8 +2,8 @@
 //! [`plan`] decides it for each frame, a pure function of facts about the
 //! frame ([`Facts`]). The backends do the work and say what they can do
 //! (`can_fit`): [`crate::cuda`] for CUDA frames, [`crate::hw::vaapi`] for
-//! VA-API's, `hw::d3d11` for Direct3D 11's and `export::normalize` for the
-//! CPU.
+//! VA-API's, `hw::d3d11` for Direct3D 11's, `hw::vt` for VideoToolbox's
+//! and `export::normalize` for the CPU.
 
 use vidcut_core::model::Hdr;
 
@@ -60,30 +60,38 @@ pub struct Ops {
     /// The output keeps the frame's colors: no matrix, range or transfer
     /// to change (`color::kept`).
     pub colors_kept: bool,
+    /// The frame's picture is placed on black in the output: its aspect
+    /// differs.
+    pub pads: bool,
     /// The encoder's own frames are there to fit into. AMF takes
     /// Direct3D 11's frames of those alone.
     pub into: bool,
 }
 
 impl Ops {
-    /// What fitting `f`, shown turned by `rotation`, into pictures of
-    /// `out_layout` in `target`'s dynamic range takes (`None`: SDR
+    /// What fitting `f`, shown turned by `rotation`, into `out` pictures
+    /// of `out_layout` in `target`'s dynamic range takes (`None`: SDR
     /// BT.709). With `into`, the encoder's own frames are there to fit
     /// into.
     pub fn of(
         f: &frame::Video,
         rotation: u16,
+        out: (u32, u32),
         out_layout: format::Pixel,
         target: Option<Hdr>,
         into: bool,
     ) -> Self {
         let colors = crate::color::Source::of(f);
+        // Fitted upright: a quarter turn swaps the sides.
+        let (w, h) = crate::export::normalize::shown_size(f, rotation, out);
+        let fitted = if rotation % 180 == 90 { (h, w) } else { (w, h) };
         Self {
             rotation,
             layout: crate::hw::sw_format(f),
             out_layout,
             rgb: colors.rgb(),
             colors_kept: crate::color::kept(colors, target),
+            pads: fitted != out,
             into,
         }
     }
@@ -340,5 +348,26 @@ mod tests {
             keep_failed: false,
         };
         assert_eq!(plan(&facts, Dest::Display { keep: true }), Route::Whole);
+    }
+
+    #[test]
+    fn a_picture_of_another_aspect_is_placed_on_black() {
+        let f = frame::Video::new(format::Pixel::YUV420P, 1920, 800);
+        let ops = Ops::of(&f, 0, (1920, 1080), format::Pixel::NV12, None, false);
+        assert!(ops.pads);
+    }
+
+    #[test]
+    fn a_picture_of_the_outputs_aspect_isnt_placed_on_black() {
+        let f = frame::Video::new(format::Pixel::YUV420P, 1920, 1080);
+        let ops = Ops::of(&f, 0, (1920, 1080), format::Pixel::NV12, None, false);
+        assert!(!ops.pads);
+    }
+
+    #[test]
+    fn a_portrait_picture_turned_a_quarter_fills_a_landscape_output() {
+        let f = frame::Video::new(format::Pixel::YUV420P, 1080, 1920);
+        let ops = Ops::of(&f, 90, (1920, 1080), format::Pixel::NV12, None, false);
+        assert!(!ops.pads);
     }
 }

@@ -102,10 +102,11 @@ fn a_proxy_matches_source_frames_and_timestamps() {
 }
 
 /// The frames each GPU decodes, made into an H.264 proxy by its own
-/// encoder: NVENC from NVDEC and AMF from Direct3D 11 take them on the GPU,
-/// as VAAPI does from VA-API. Untagged 320×180 is read as BT.601, which
-/// only NVIDIA's path converts on the GPU (libplacebo, a picture a frame
-/// late), and untagged 1280×720 as BT.709, which every GPU fits.
+/// encoder: NVENC from NVDEC, AMF from Direct3D 11 and VideoToolbox from
+/// VideoToolbox take them on the GPU, as VAAPI does from VA-API. Untagged
+/// 320×180 is read as BT.601, which only NVIDIA's path converts on the GPU
+/// (libplacebo, a picture a frame late), and untagged 1280×720 as BT.709,
+/// which every GPU fits.
 #[test]
 fn a_gpu_proxy_matches_source_frames_and_timestamps() {
     let decoders = GpuDecoder::all();

@@ -832,6 +832,7 @@ mod tests {
             out_layout: format::Pixel::NV12,
             rgb: false,
             colors_kept: true,
+            pads: false,
             into: true,
         }
     }
