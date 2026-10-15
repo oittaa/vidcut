@@ -274,6 +274,29 @@ fn matches_source(
 }
 
 #[test]
+fn a_proxy_says_what_it_was_made_from() {
+    let source = fixture::ensure(&Source::H264.spec(Container::Mp4, (320, 180), 24)).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-proxy-origin-")
+        .tempdir()
+        .unwrap();
+    let dest = tmp.path().join("proxy.mkv");
+    let origin = "123 1700000000000000000 /media/a.mp4";
+    vidcut_av::proxy::write(
+        &Input::File(source),
+        320,
+        180,
+        &dest,
+        None,
+        &software()[..1],
+        None,
+        origin,
+    )
+    .unwrap();
+    assert_eq!(vidcut_av::proxy::origin(&dest).as_deref(), Some(origin));
+}
+
+#[test]
 fn a_proxy_matches_source_frames_and_timestamps() {
     let small = (320, 180);
     for enc in software() {
