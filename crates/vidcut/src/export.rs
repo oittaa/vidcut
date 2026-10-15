@@ -900,12 +900,14 @@ pub fn detected(refresh: bool) -> Availability {
     a
 }
 
-/// The GPU decoder the player uses here, by its name (`NVDEC`), and the
-/// proxy codecs it plays (`hw::plays`), while `decoding` (GPU decoding on);
-/// `None` where the CPU plays them all. Tested once on each GPU, then kept
-/// as the encoders are, with the codecs tested: a codec an entry doesn't
-/// name is tested then.
-pub fn plays(decoding: bool) -> Option<(String, Vec<String>)> {
+/// The proxy codecs the GPU decoder the player uses here plays
+/// (`hw::plays`), each with the decoder that plays it by its name (`NVDEC`,
+/// `Vulkan` for ProRes on NVIDIA's GPU), while `decoding` (GPU decoding
+/// on); `None` where the CPU plays them all. Tested once on each GPU, then
+/// kept as the encoders are, with the codecs tested: a codec an entry
+/// doesn't name is tested then, and so is an entry that doesn't read as
+/// codecs with their decoders.
+pub fn plays(decoding: bool) -> Option<Vec<(String, String)>> {
     if !decoding {
         return None;
     }
@@ -930,11 +932,10 @@ pub fn plays(decoding: bool) -> Option<(String, Vec<String>)> {
     }
     let found = vidcut_av::hw::GpuDecoder::best().map(|d| {
         let clips = vidcut_core::dirs::cache().join("decoder-tests");
-        let codecs = vidcut_av::hw::plays(&d, &clips);
-        (
-            d.kind().label().to_string(),
-            codecs.into_iter().map(String::from).collect::<Vec<_>>(),
-        )
+        vidcut_av::hw::plays(&d, &clips)
+            .into_iter()
+            .map(|(codec, kind)| (codec.to_string(), kind.label().to_string()))
+            .collect::<Vec<_>>()
     });
     // Each GPU's, on this FFmpeg, system and drivers.
     cached.retain(|k, _| k.starts_with(&tested));

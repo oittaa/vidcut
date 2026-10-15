@@ -760,9 +760,11 @@ pub fn plays_tests() -> Vec<&'static str> {
     PROXY_CLIPS.iter().map(|&(codec, ..)| codec).collect()
 }
 
-/// The proxy codecs `gpu` decodes, of those [`plays_tests`] names: a short
-/// clip of each, made in `dir` once and kept, decoded through on it.
-pub fn plays(gpu: &GpuDecoder, dir: &std::path::Path) -> Vec<&'static str> {
+/// The proxy codecs `gpu` decodes, of those [`plays_tests`] names, each with
+/// the kind of its decoders that decodes it ([`GpuDecoder::kind_for`]:
+/// Vulkan for ProRes on NVIDIA's GPU): a short clip of each, made in `dir`
+/// once and kept, decoded through on it.
+pub fn plays(gpu: &GpuDecoder, dir: &std::path::Path) -> Vec<(&'static str, Kind)> {
     use crate::fixture::FixtureSpec;
     crate::init();
     PROXY_CLIPS
@@ -774,7 +776,7 @@ pub fn plays(gpu: &GpuDecoder, dir: &std::path::Path) -> Vec<&'static str> {
                 gpu.why_not(id, || false).is_none() && decodes_all(gpu, &clip).is_ok()
             })
         })
-        .map(|(codec, ..)| codec)
+        .map(|(codec, .., id)| (codec, gpu.kind_for(id).unwrap_or(gpu.kind())))
         .collect()
 }
 
