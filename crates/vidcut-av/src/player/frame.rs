@@ -149,9 +149,11 @@ impl Picture {
         crate::hw::Kind::of_frame(&self.frame)
     }
 
-    /// It, or a picture over it, is in GPU memory.
-    pub(crate) fn takes_video_memory(&self) -> bool {
-        self.gpu().is_some() || self.over.iter().any(|o| o.picture.takes_video_memory())
+    /// The GPU decoder in whose memory it is, or a picture over it is;
+    /// `None` when all are in memory.
+    pub(crate) fn in_video_memory(&self) -> Option<crate::hw::Kind> {
+        self.gpu()
+            .or_else(|| self.over.iter().find_map(|o| o.picture.in_video_memory()))
     }
 
     /// The samples' layout; for a GPU surface, that of its frames context.
@@ -220,7 +222,7 @@ impl Picture {
     /// and what a display's shader must match. Pictures in GPU memory are
     /// copied down first.
     pub fn to_rgba(&self, width: u32, height: u32) -> Result<Image> {
-        if self.takes_video_memory() {
+        if self.in_video_memory().is_some() {
             return self.copied_down()?.to_rgba(width, height);
         }
         if !self.over.is_empty() {

@@ -1,5 +1,5 @@
 //! Decoded pictures, kept by what they show within memory budgets, one for
-//! memory and one for video memory (pictures NVDEC decoded for a display
+//! memory and one for video memory (pictures a GPU decoded, for a display
 //! that shows them from there): those ahead of the clock, those just shown,
 //! windows decoded for going back and those around the playhead; and one
 //! held whatever the budget, the frame of the plan played next.
@@ -20,10 +20,14 @@ pub(crate) enum Kind {
 
 impl Kind {
     pub(crate) fn of(picture: &Picture) -> Self {
-        if picture.takes_video_memory() {
-            Self::Video
-        } else {
-            Self::Memory
+        Self::kept_by(picture.in_video_memory())
+    }
+
+    /// Where a picture `gpu` decoded and kept counts (`None`: in memory).
+    fn kept_by(gpu: Option<crate::hw::Kind>) -> Self {
+        match gpu {
+            None => Self::Memory,
+            Some(_) => Self::Video,
         }
     }
 
@@ -197,5 +201,15 @@ impl Inner {
                 self.bytes[kind.index()] -= old.bytes();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Kind;
+
+    #[test]
+    fn a_picture_kept_on_vulkan_counts_in_video_memory() {
+        assert_eq!(Kind::kept_by(Some(crate::hw::Kind::Vulkan)), Kind::Video);
     }
 }

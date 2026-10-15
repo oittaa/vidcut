@@ -290,12 +290,17 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
         let now = Instant::now();
         let shown = engine.as_ref().and_then(|e| e.present(now));
         let [w, h] = want;
+        // A picture copied down or uploaded counts for the engine shown.
+        let counting = engine
+            .as_ref()
+            .map(|e| vidcut_av::copies::Guard::set(e.copies()));
         let drawn = screen.draw(
             gpu,
             shown.as_ref().map(|s| &s.picture),
             w.max(2) as u32,
             h.max(2) as u32,
         );
+        drop(counting);
         let changed = drawn != Drawn::Same;
         if changed && vidcut_av::debug() {
             eprintln!("[viewer] drew {} at {w}x{h}", drew(shown.as_ref(), &screen));

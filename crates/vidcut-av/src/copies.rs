@@ -1,10 +1,10 @@
 //! Frames copied between GPU memory and memory, counted for the job this
-//! thread works for (an export, a proxy): how many went down and up, and
-//! their bytes. Every copy down goes through `hw::download` and every copy
-//! up through the encoders' uploads, and those count here; a GPU encoder
-//! given a frame in memory copies it up itself ([`to_encoder`]). A worker
-//! thread does not inherit the slot: it installs a [`Guard`] with a clone of
-//! [`current`].
+//! thread works for (an export, a proxy, a player): how many went down and
+//! up, and their bytes. Every copy down goes through `hw::download` and
+//! every copy up through the encoders' uploads and the viewer's, and those
+//! count here; a GPU encoder given a frame in memory copies it up itself
+//! ([`to_encoder`]). A worker thread does not inherit the slot: it installs
+//! a [`Guard`] with a clone of [`current`].
 
 use std::cell::RefCell;
 use std::marker::PhantomData;
@@ -81,8 +81,9 @@ pub(crate) fn down(f: &frame::Video) {
     count(f, |c| (&c.down, &c.down_bytes));
 }
 
-/// `f`, just copied up into GPU memory.
-pub(crate) fn up(f: &frame::Video) {
+/// `f`, just copied up into GPU memory: by an encoder's upload, or by a
+/// viewer drawing a picture in memory.
+pub fn up(f: &frame::Video) {
     count(f, |c| (&c.up, &c.up_bytes));
 }
 

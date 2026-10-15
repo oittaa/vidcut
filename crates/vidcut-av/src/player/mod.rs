@@ -194,6 +194,10 @@ pub struct Stats {
     pub rate: u32,
     pub channels: u16,
     pub latency: Option<Duration>,
+    /// Frames copied between GPU memory and memory since it started: down
+    /// by its decoder and by a viewer showing it, up by the viewer
+    /// ([`Player::copies`]). A switch of decoder keeps counting.
+    pub copies: vidcut_core::editor::Copied,
 }
 
 /// What a player is doing.
@@ -429,6 +433,9 @@ pub(crate) struct Shared {
     format: (u32, u16),
     /// The decoders whose pictures stay in GPU memory.
     pub(crate) gpu_pictures: Vec<crate::hw::Kind>,
+    /// The frames copied between GPU memory and memory since it started
+    /// (`Stats::copies`): the decode thread counts here.
+    copies: Arc<crate::copies::Copies>,
     /// The video memory budget is half the GPU's.
     video_auto: AtomicBool,
     /// The GPU's memory, once the decode thread opened it.
@@ -759,6 +766,7 @@ impl Player {
             device,
             format: (rate, channels),
             gpu_pictures: config.gpu_pictures,
+            copies: Arc::default(),
             video_auto: AtomicBool::new(config.budget.video.is_none()),
             gpu_memory: std::sync::OnceLock::new(),
             heard_epoch: std::sync::atomic::AtomicU64::new(0),
@@ -1092,7 +1100,15 @@ impl Player {
             rate,
             channels,
             latency: self.shared.heard.latency(),
+            copies: self.shared.copies.counted(),
         }
+    }
+
+    /// Where the frames it copies between GPU memory and memory count: a
+    /// viewer showing it installs it on its thread
+    /// ([`copies::Guard`](crate::copies::Guard)) while it draws.
+    pub fn copies(&self) -> Arc<crate::copies::Copies> {
+        self.shared.copies.clone()
     }
 
     /// The device its sound plays on ([`AudioOutput::plays_on`]).
@@ -1275,7 +1291,43 @@ impl Drop for Player {
 
 #[cfg(test)]
 mod tests {
-    use super::Presenter;
+    use super::{Config, ManualOutput, Player, Presenter};
+    use crate::ffmpeg::{format::Pixel, frame};
+    use vidcut_core::editor::Copied;
+    use vidcut_core::render::{RenderPlan, VideoPiece};
+    use vidcut_core::time::Rational;
+
+    #[test]
+    fn a_frame_copied_down_for_a_player_shows_in_its_stats() {
+        let plan = RenderPlan {
+            fps: Rational::new(30, 1).unwrap(),
+            width: 64,
+            height: 36,
+            sample_rate: 48_000,
+            channels: 2,
+            frames: 1,
+            video: vec![VideoPiece::Black { frames: 1 }],
+            audio: Vec::new(),
+            range: (0, 1),
+            name: "copies".into(),
+        };
+        let config = Config {
+            audio_scrubbing: false,
+            ..Config::default()
+        };
+        let player = Player::new(plan, config, Box::new(ManualOutput::new())).unwrap();
+        {
+            let _counting = crate::copies::Guard::set(player.copies());
+            crate::copies::down(&frame::Video::new(Pixel::YUV422P10LE, 3840, 2160));
+        }
+        let want = Copied {
+            down: 1,
+            down_bytes: 33_177_600,
+            up: 0,
+            up_bytes: 0,
+        };
+        assert_eq!(player.stats().copies, want);
+    }
 
     #[test]
     fn a_late_frame_counts_once() {

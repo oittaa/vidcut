@@ -13,6 +13,7 @@
 pub(crate) mod d3d11;
 pub mod vaapi;
 pub(crate) mod vt;
+pub mod vulkan;
 
 use std::ptr;
 use std::sync::{Arc, Mutex};
@@ -62,6 +63,11 @@ impl Kind {
     /// The kind a [`name`](Self::name) names.
     pub fn named(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|k| k.name() == name)
+    }
+
+    /// The kind a [`label`](Self::label) names.
+    pub fn with_label(label: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|k| k.label() == label)
     }
 
     /// The kind whose GPU memory `f` is in; `None` for a frame in memory.
@@ -865,7 +871,8 @@ fn props(dst: &mut frame::Video, src: &frame::Video) -> Result<()> {
 /// Keeps the GPU's frames there without running its decoder out of
 /// surfaces: Direct3D 11's are copied into textures of their own that
 /// another device can open (Windows). FFmpeg copies NVDEC's itself, and
-/// VA-API's and VideoToolbox's pools grow as they need.
+/// VA-API's, VideoToolbox's and Vulkan's pools grow as they need. Vulkan's
+/// are kept once decoded ([`vulkan::keep`]).
 pub(crate) enum Keeper {
     #[cfg(windows)]
     D3d11(d3d11::Keeper),
@@ -897,6 +904,7 @@ impl Keeper {
             Some(Kind::Nvdec | Kind::Vaapi | Kind::VideoToolbox) => {
                 crate::export::video::frame_ref(f)
             }
+            Some(Kind::Vulkan) => vulkan::keep(f),
             #[cfg(windows)]
             Some(Kind::D3d11va) => {
                 let (frames, like) = frames_of(f)?;
@@ -1176,11 +1184,12 @@ pub(crate) fn can_mix(place: Place) -> bool {
 }
 
 /// Whether a frame's GPU (`from`) hands the picture it fits to an encoder
-/// that takes frames on another place, `to`: CUDA's to Vulkan's encoder
-/// ([`crate::cuda::reaches`]). No other GPU's frames leave their place.
+/// that takes frames on another place, `to`: CUDA's to Vulkan's encoder,
+/// Vulkan's to NVENC's CUDA frames ([`crate::cuda::reaches`]). No other
+/// GPU's frames leave their place.
 pub(crate) fn reaches(from: Place, to: Place) -> bool {
     match from {
-        Place::Cuda => crate::cuda::reaches(to),
+        Place::Cuda | Place::Vulkan => crate::cuda::reaches(from, to),
         _ => false,
     }
 }
@@ -1294,6 +1303,11 @@ mod tests {
     }
 
     #[test]
+    fn the_label_vulkan_is_vulkans() {
+        assert_eq!(Kind::with_label("Vulkan"), Some(Kind::Vulkan));
+    }
+
+    #[test]
     fn vulkan_is_labeled_vulkan() {
         assert_eq!(Kind::Vulkan.label(), "Vulkan");
     }
@@ -1325,6 +1339,18 @@ mod tests {
     }
 
     #[test]
+    fn vulkans_frames_reach_nvencs_cuda_frames() {
+        assert!(reaches(Place::Vulkan, Place::Cuda));
+    }
+
+    #[test]
+    fn vulkans_frames_reach_no_other_gpus_encoder() {
+        for to in [Place::Vaapi, Place::D3d11, Place::VideoToolbox] {
+            assert!(!reaches(Place::Vulkan, to), "{to:?}");
+        }
+    }
+
+    #[test]
     fn other_gpus_frames_reach_no_other_place() {
         let gpus = [
             Place::Cuda,
@@ -1333,7 +1359,8 @@ mod tests {
             Place::VideoToolbox,
             Place::Vulkan,
         ];
-        for from in gpus.into_iter().filter(|&from| from != Place::Cuda) {
+        let others = [Place::Vaapi, Place::D3d11, Place::VideoToolbox];
+        for from in others {
             for to in gpus.into_iter().filter(|&to| to != from) {
                 assert!(!reaches(from, to), "{from:?} to {to:?}");
             }

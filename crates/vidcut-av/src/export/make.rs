@@ -33,16 +33,18 @@ pub(crate) enum Output {
         into: Option<crate::hw::Frames>,
     },
     /// For NVENC, in CUDA memory from `frames`, made for the output's size
-    /// and format (NV12 or P010): pieces decoded on NVDEC are scaled there,
-    /// the rest and black are made on the CPU and go up.
+    /// and format (NV12 or P010): pieces decoded on NVDEC, or on Vulkan
+    /// beside it, are scaled there, the rest and black are made on the CPU
+    /// and go up.
     Cuda {
         device: crate::cuda::CudaDevice,
         frames: crate::cuda::CudaFrames,
     },
     /// For Vulkan's ProRes encoder, opened on the Vulkan device libplacebo
-    /// works on, made from NVDEC's CUDA device: pieces decoded on NVDEC are
-    /// made into its pictures there ([`Fitting::on_gpu`]), the rest and
-    /// black are made on the CPU and go up into the encoder's frames.
+    /// works on, made from NVDEC's CUDA device: pieces decoded on NVDEC or
+    /// on Vulkan are made into its pictures there ([`Fitting::on_gpu`]), the
+    /// rest and black are made on the CPU and go up into the encoder's
+    /// frames.
     Vulkan,
 }
 
@@ -77,8 +79,9 @@ impl Output {
 /// A source's frames on the GPU: the scaler that fits them there, and how
 /// its latest picture was made.
 pub(crate) struct Fitting {
-    /// Fits NVDEC's frames for NVENC or Vulkan's ProRes encoder on the GPU:
-    /// built at opening where the planner leaves the first frame there.
+    /// Fits NVDEC's or Vulkan's frames for NVENC or Vulkan's ProRes encoder
+    /// on the GPU: built at opening where the planner leaves the first frame
+    /// there.
     pub(crate) scaler: Option<crate::cuda::CudaPictures>,
     /// Fitting this file's frames on the GPU failed, or it has no scaler
     /// for them: they are made on the CPU.
@@ -91,7 +94,8 @@ pub(crate) struct Fitting {
 }
 
 impl Fitting {
-    /// No scaler: NVDEC's frames for NVENC come down to the CPU.
+    /// No scaler: NVDEC's and Vulkan's frames for NVENC come down to the
+    /// CPU.
     pub(crate) fn none() -> Self {
         Self {
             scaler: None,
@@ -114,15 +118,19 @@ impl Fitting {
         at_once: bool,
         place: Place,
     ) -> Self {
-        // NVDEC's frames fitted for the encoder on the GPU, where the
-        // planner leaves the first frame there and the scaler builds
-        // (libplacebo needs Vulkan for turned pictures, other matrices than
-        // BT.709 and HDR, and makes every picture for Vulkan's encoder).
+        // NVDEC's or Vulkan's frames fitted for the encoder on the GPU,
+        // where the planner leaves the first frame there and the scaler
+        // builds (libplacebo needs Vulkan for turned pictures, other
+        // matrices than BT.709 and HDR, and makes every picture for Vulkan's
+        // encoder and of Vulkan's frames).
         let dest = Dest::Encoder { place };
-        let planned = reader.cuda().zip(reader.peek()).filter(|(_, first)| {
-            let ops = Ops::of(first, reader.rotation(), out, format, target, false);
-            plan(&Facts::of(first, &ops, out, dest), dest) == Route::Gpu
-        });
+        let planned = reader
+            .decoders_cuda()
+            .zip(reader.peek())
+            .filter(|(_, first)| {
+                let ops = Ops::of(first, reader.rotation(), out, format, target, false);
+                plan(&Facts::of(first, &ops, out, dest), dest) == Route::Gpu
+            });
         let scaler = planned.and_then(|(d, _)| {
             crate::cuda::CudaPictures::new(d, reader, out, format, target, at_once, place)
                 .inspect_err(|e| {
@@ -345,19 +353,21 @@ impl Maker {
                         continue;
                     }
                 },
-                // NVDEC's frames go to the scaler built when the file
-                // opened. A file opened bare has none.
-                Route::Gpu if facts.place == Place::Cuda => match fitting.scaler {
-                    Some(_) => match fitting.scale(frame)? {
-                        Some(picture) => break picture,
-                        None => return Ok(None),
-                    },
-                    None => {
-                        fitting.fit_failed = true;
-                        facts.fit_failed = true;
-                        continue;
+                // NVDEC's and Vulkan's frames go to the scaler built when
+                // the file opened. A file opened bare has none.
+                Route::Gpu if matches!(facts.place, Place::Cuda | Place::Vulkan) => {
+                    match fitting.scaler {
+                        Some(_) => match fitting.scale(frame)? {
+                            Some(picture) => break picture,
+                            None => return Ok(None),
+                        },
+                        None => {
+                            fitting.fit_failed = true;
+                            facts.fit_failed = true;
+                            continue;
+                        }
                     }
-                },
+                }
                 Route::Gpu => {
                     let into = match &self.output {
                         Output::FittedOnGpu { into, .. } => into.as_ref(),
