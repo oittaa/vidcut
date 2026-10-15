@@ -4,7 +4,7 @@
 use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
 
-use super::export::{Ask, near_center};
+use super::export::{Ask, Picked, near_center};
 use super::theme;
 use super::workspace::Workspace;
 
@@ -33,6 +33,8 @@ pub(super) struct PreferencesUi {
     audio_outputs: Option<Result<Vec<vidcut_av::player::OutputDevice>, String>>,
     listing:
         Option<std::sync::mpsc::Receiver<Result<Vec<vidcut_av::player::OutputDevice>, String>>>,
+    /// Import Theme's file dialog, while it is open.
+    importing: Option<Picked>,
 }
 
 /// A number typed into a field: digits only, sent on Enter or when the
@@ -137,6 +139,14 @@ impl Workspace {
         }
         let mut open = true;
         let mut patch = None;
+        // A theme file picked: imported, and shown.
+        if let Some(picked) = ui_state.importing.as_ref().and_then(Picked::take) {
+            ui_state.importing = None;
+            if let Some(path) = picked {
+                patch = Some(json!({ "appearance": { "theme": path } }));
+            }
+        }
+        let dialogs = self.dialogs.clone();
         egui::Window::new("Preferences")
             .collapsible(false)
             .resizable(false)
@@ -145,7 +155,7 @@ impl Workspace {
             .show(ctx, |ui| {
                 let Some(state) = &ui_state.state else {
                     match &ui_state.error {
-                        Some(e) => ui.label(RichText::new(e).color(theme::ERROR)),
+                        Some(e) => ui.label(RichText::new(e).color(theme::colors().error)),
                         None => ui.spinner(),
                     };
                     return;
@@ -154,6 +164,75 @@ impl Workspace {
                 let proxies = &state["preferences"]["proxies"];
                 let cache = &state["thumbnail_cache"];
                 let busy = ui_state.ask.is_some();
+                ui.label(RichText::new("Appearance").strong());
+                egui::Grid::new("preferences-appearance")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        let chosen = state["preferences"]["appearance"]["theme"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_string();
+                        let themes = state["themes"].as_array().cloned().unwrap_or_default();
+                        let title = |name: &str| {
+                            themes
+                                .iter()
+                                .find(|t| t["name"] == name)
+                                .and_then(|t| t["title"].as_str())
+                                .unwrap_or(name)
+                                .to_string()
+                        };
+                        let mut pick = chosen.clone();
+                        ui.label("Theme");
+                        ui.horizontal(|ui| {
+                            ui.add_enabled_ui(!busy, |ui| {
+                                egui::ComboBox::from_id_salt("preferences-theme")
+                                    .selected_text(title(&chosen))
+                                    .show_ui(ui, |ui| {
+                                        for t in &themes {
+                                            let name = t["name"].as_str().unwrap_or_default();
+                                            let r = ui.add_enabled(
+                                                t["error"].is_null(),
+                                                egui::Button::selectable(
+                                                    pick == name,
+                                                    title(name),
+                                                ),
+                                            );
+                                            if r.clicked() {
+                                                pick = name.to_string();
+                                            }
+                                            if let Some(e) = t["error"].as_str() {
+                                                r.on_disabled_hover_text(e);
+                                            } else if let Some(p) = t["path"].as_str() {
+                                                r.on_hover_text(p);
+                                            }
+                                        }
+                                    });
+                            });
+                            if ui
+                                .add_enabled(
+                                    !busy && ui_state.importing.is_none(),
+                                    egui::Button::new("Import…"),
+                                )
+                                .on_hover_text(
+                                    "Choose a theme file (.toml). It is copied into the                                      themes folder and shown",
+                                )
+                                .clicked()
+                            {
+                                let dialogs = dialogs.clone();
+                                ui_state.importing = Some(Picked::ask(ui.ctx(), move || {
+                                    dialogs.pick_file(
+                                        "Import Theme",
+                                        &std::path::PathBuf::new(),
+                                        &["toml"],
+                                    )
+                                }));
+                            }
+                        });
+                        if pick != chosen {
+                            patch = Some(json!({ "appearance": { "theme": pick } }));
+                        }
+                        ui.end_row();
+                    });
                 ui.label(RichText::new("GPU").strong());
                 egui::Grid::new("preferences-gpu")
                     .num_columns(2)
@@ -307,7 +386,7 @@ impl Workspace {
                                 ui.spinner();
                             }
                             Some(Err(e)) => {
-                                ui.label(RichText::new(e).color(theme::ERROR));
+                                ui.label(RichText::new(e).color(theme::colors().error));
                             }
                             Some(Ok(devices)) => {
                                 let default = devices
@@ -397,7 +476,7 @@ impl Workspace {
                                 "Holds {} MB in {} files",
                                 cache["mb"], cache["files"]
                             ))
-                            .color(theme::TEXT_DIM),
+                            .color(theme::colors().text_dim),
                         );
                         ui.end_row();
                         let label = ui.label("Timeline memory");
@@ -582,12 +661,12 @@ impl Workspace {
                         ui.end_row();
                     });
                 if let Some(e) = &ui_state.error {
-                    ui.label(RichText::new(e).color(theme::ERROR));
+                    ui.label(RichText::new(e).color(theme::colors().error));
                 }
                 ui.label(
                     RichText::new(state["path"].as_str().unwrap_or_default())
                         .small()
-                        .color(theme::TEXT_DIM),
+                        .color(theme::colors().text_dim),
                 );
             });
         ui_state.open = open;

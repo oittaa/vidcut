@@ -399,6 +399,9 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         project: None,
         version: env!("CARGO_PKG_VERSION").into(),
     });
+    // Loaded before the first frame, so it doesn't start in another.
+    let (theme, theme_error) = chosen_theme();
+    let theme = Arc::new(theme);
     let empty = Snapshot {
         seq: 0,
         pid,
@@ -422,6 +425,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         audio_scrubbing: true,
         stats: false,
         preview_error: config.preview_error.clone(),
+        theme: theme.clone(),
     };
     let shared = Arc::new(Mutex::new(Arc::new(empty)));
     // The folder must be there to be watched.
@@ -429,8 +433,18 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     if let Some(dir) = preferences.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
+    let themes = crate::themes::dir();
+    let _ = std::fs::create_dir_all(&themes);
+    // Native themes follow the computer's light or dark mode and accent.
+    let look_changed = tx.clone();
+    crate::look::watch(std::sync::Arc::new(move || {
+        let _ = look_changed.send(Msg::PreferencesChanged);
+    }));
     let mut live = Live {
         _preferences: project::watch(&preferences, tx.clone(), || Msg::PreferencesChanged),
+        _themes: project::watch_dir(&themes, tx.clone(), || Msg::PreferencesChanged),
+        theme,
+        theme_error: theme_error.clone(),
         tx: tx.clone(),
         rx,
         shared: shared.clone(),
@@ -484,6 +498,9 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     let project = config.project;
     let create = config.create;
     let thread = crate::threads::spawn("vidcut-session", Work::Interactive, move || {
+        if let Some(e) = theme_error {
+            live.notice(e, true);
+        }
         if let Some(path) = project
             && let Err(e) = to_make(&path, create, false, &Format::default())
                 .and_then(|new| live.open_project(&path, new))
@@ -625,6 +642,24 @@ fn filmstrip(media: &vidcut_core::model::Media) -> std::result::Result<Filmstrip
     })
 }
 
+/// The theme the preferences choose, or the default one and why not.
+fn chosen_theme() -> (crate::themes::Theme, Option<String>) {
+    let name = crate::preferences::load()
+        .map(|p| p.appearance.theme)
+        .unwrap_or_else(|_| crate::themes::DEFAULT.into());
+    match crate::themes::load(&name) {
+        Ok(t) => (t, None),
+        Err(e) => (
+            crate::themes::load(crate::themes::DEFAULT)
+                .unwrap_or_else(|_| crate::themes::default_theme().clone()),
+            Some(format!(
+                "The theme {name} doesn't load, so the default one shows. {}",
+                e.message
+            )),
+        ),
+    }
+}
+
 /// Minimum time between timeline reloads while edits keep coming.
 const RELOAD_EVERY: Duration = Duration::from_millis(100);
 
@@ -634,6 +669,11 @@ struct Live {
     /// Watches the preferences file: GPU acceleration reaches the player
     /// at once, whoever changes it.
     _preferences: Option<notify::RecommendedWatcher>,
+    /// Watches the themes folder: an edited theme shows at once.
+    _themes: Option<notify::RecommendedWatcher>,
+    theme: Arc<crate::themes::Theme>,
+    /// Why the chosen theme doesn't load, said once.
+    theme_error: Option<String>,
     shared: Arc<Mutex<Arc<Snapshot>>>,
     notify: Arc<dyn Fn() + Send + Sync>,
     renderer: Arc<dyn Renderer>,
@@ -878,6 +918,7 @@ impl Live {
                     .follow_decoding(crate::preferences::gpu_decoding());
                 changed |= self.player.follow_audio(crate::preferences::audio_device());
                 self.player.set_budget(crate::preferences::player_budget());
+                self.follow_theme();
             }
             Msg::FileChanged => {
                 let refreshed = match self.project.as_mut().map(OpenProject::reload) {
@@ -1129,9 +1170,26 @@ impl Live {
             audio_scrubbing: self.audio_scrubbing,
             stats: self.stats,
             preview_error: self.preview_error.clone(),
+            theme: self.theme.clone(),
         };
         *self.shared.lock().unwrap_or_else(|e| e.into_inner()) = Arc::new(snap);
         (self.notify)();
+    }
+
+    /// Loads the theme the preferences choose again. One that doesn't load
+    /// shows the default one, and a notice says why.
+    fn follow_theme(&mut self) {
+        let (theme, error) = chosen_theme();
+        if *self.theme != theme {
+            self.theme = Arc::new(theme);
+            self.dirty = true;
+        }
+        if error != self.theme_error {
+            self.theme_error = error.clone();
+            if let Some(e) = error {
+                self.notice(e, true);
+            }
+        }
     }
 
     fn notice(&mut self, text: String, error: bool) {

@@ -202,7 +202,17 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 - **vidcut:** Ctrl+wheel (Cmd on a Mac) and a trackpad's pinch zoom the lower timeline.
 - **Why:** Ctrl+wheel and Cmd+wheel zoom in browsers and most other programs, and egui gives them and a pinch as the same zoom.
 
-## X22. Cross fades follow their curves exactly
+## X22. Themes
+- **Resolve:** one dark gray look.
+- **vidcut:** nine built-in themes and your own TOML files. Native, the default, follows the computer's light or dark mode and accent color, so it can be light. Classic is a flat dark gray like the Cut page's. File > Preferences or `preferences set appearance.theme=…` switches at once.
+- **Why:** a desktop app is expected to offer a few looks, and people spend long sessions in an editor. Every theme keeps the Cut page's layout and what its colors mean.
+
+## X23. A Keyboard Shortcuts window
+- **Resolve:** the keys are listed and changed in its Keyboard Customization window, without explanations.
+- **vidcut:** F1, or Help in the top bar, opens a list of every shortcut, one action a row. A ? beside an action that isn't obvious, like Dynamic Trim or Ripple Overwrite, opens a few plain words on what it does and why. Keys can't be changed.
+- **Why:** newcomers learn the keys and what the editing ideas are for in one place, without leaving the app.
+
+## X24. Cross fades follow their curves exactly
 - **Resolve:** Studio 21.1.1 renders a Cross Fade's curve as straight lines between points of it: the fade's first sample, every 1000 samples from there and from the edit, and its last (measured at 48 kHz). In the first milliseconds of a +3 dB fade its gain is up to 0.06 off the curve.
 - **vidcut:** each sample's gain is the curve's (spec D50).
 - **Why:** the curve is what the transition is named for, and it needs no knowledge of where an editor puts its points. The two differ by more than 1 % only in the 20 ms where each curve leaves or reaches silence.

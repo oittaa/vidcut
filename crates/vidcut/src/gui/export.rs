@@ -734,7 +734,7 @@ impl Workspace {
                 }
                 ui.label(dim(&range));
                 if let Some(e) = &q.error {
-                    ui.label(RichText::new(e).color(theme::ERROR));
+                    ui.label(RichText::new(e).color(theme::colors().error));
                 }
                 let busy = self.export.starting.is_some();
                 if ui
@@ -1029,7 +1029,7 @@ impl Workspace {
                 // The actions stay in view below the scrolling settings.
                 ui.separator();
                 if let Some(e) = &d.error {
-                    ui.label(RichText::new(e).color(theme::ERROR));
+                    ui.label(RichText::new(e).color(theme::colors().error));
                 }
                 ui.horizontal(|ui| {
                     let ready = matches!(d.plan_result, Some(Ok(_)))
@@ -1162,7 +1162,7 @@ impl Workspace {
                 ui.checkbox(&mut s.overwrite, "Replace a preset of that name");
             });
             if let Some(e) = &s.error {
-                ui.label(RichText::new(e).color(theme::ERROR));
+                ui.label(RichText::new(e).color(theme::colors().error));
             }
             ui.horizontal(|ui| {
                 let ok = !s.name.trim().is_empty() && s.ask.is_none();
@@ -1613,7 +1613,9 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, closable: bool, send: impl Fn(&str, 
             }
         }
         JobState::Done => {
-            ui.label(RichText::new(format!("Done in {}", clock(j.elapsed))).color(theme::OK));
+            ui.label(
+                RichText::new(format!("Done in {}", clock(j.elapsed))).color(theme::colors().ok),
+            );
             ui.horizontal(|ui| {
                 if let Some(path) = job_paths(j) {
                     ui.label(dim(path.display().to_string()));
@@ -1634,7 +1636,7 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, closable: bool, send: impl Fn(&str, 
         }
         JobState::Failed => {
             let e = j.error.as_ref().map_or("", |e| e.message.as_str());
-            ui.label(RichText::new(format!("Failed: {e}")).color(theme::ERROR));
+            ui.label(RichText::new(format!("Failed: {e}")).color(theme::colors().error));
             closed = closable && ui.button("Close").clicked();
         }
     }
@@ -1651,7 +1653,7 @@ fn plan_view(ui: &mut egui::Ui, d: &Dialog) -> Option<Vec<String>> {
             ui.label(dim("planning…"));
         }
         Some(Err(e)) => {
-            ui.label(RichText::new(e).color(theme::ERROR));
+            ui.label(RichText::new(e).color(theme::colors().error));
         }
         Some(Ok(plan)) => {
             match &plan["video_encoder"] {
@@ -1662,7 +1664,7 @@ fn plan_view(ui: &mut egui::Ui, d: &Dialog) -> Option<Vec<String>> {
                             "video encoder unavailable: {}",
                             v["error"].as_str().unwrap_or_default()
                         ))
-                        .color(theme::ERROR),
+                        .color(theme::colors().error),
                     );
                 }
                 v => {

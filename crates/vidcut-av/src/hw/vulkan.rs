@@ -6,8 +6,9 @@
 //! memory allocated the same way, on the same GPU and driver, so the
 //! viewer's device repeats what this gives. FFmpeg's frames say where their
 //! images are (`AVVkFrame`: layout, queue family, "updated after every
-//! barrier"): the viewer acquires them from there and says where it left
-//! them ([`acquired_outside`]).
+//! barrier"): the viewer acquires them from there ([`layout`]) and says
+//! where it left them ([`acquired_outside`]). It keeps its imports of a
+//! frame's images by their [`Identity`].
 //!
 //! Each memory object is exported once, and its handle kept until FFmpeg
 //! frees the frames context, after the memory (`SHARED`); each import gets
@@ -155,6 +156,46 @@ unsafe extern "C" fn close_shared(fc: *mut ffi::AVHWFramesContext) {
     shared.retain(|s| s.frames != frames);
 }
 
+/// Which images a Vulkan frame has: its frames context and each image's
+/// memory object. FFmpeg's pool hands the same frames out again while the
+/// frames context lives, and frees them only with it, so while it lives
+/// the same identity names the same images.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Identity {
+    /// The frames context, by its address.
+    pub frames: usize,
+    pub memory: Vec<u64>,
+}
+
+impl Identity {
+    /// `f`'s, a Vulkan frame.
+    pub fn of(f: &frame::Video) -> Result<Self> {
+        // SAFETY: the frame's own frames context and AVVkFrame, alive as
+        // long as it; set when FFmpeg made the frame.
+        unsafe {
+            let (_, fc, vkf) = parts(f)?;
+            let vkf = &*vkf;
+            let images = vkf.img.iter().take_while(|&&i| i != 0).count();
+            Ok(Self {
+                frames: fc as usize,
+                memory: vkf.mem[..images].to_vec(),
+            })
+        }
+    }
+}
+
+/// The layout FFmpeg's last barrier left `f`'s images in, a Vulkan frame's
+/// (its barriers take the first image's for all).
+pub fn layout(f: &frame::Video) -> Result<vk::ImageLayout> {
+    // SAFETY: the frame's own frames context and AVVkFrame, alive as long
+    // as it, read while locked as FFmpeg changes them.
+    unsafe {
+        let (_, fc, vkf) = parts(f)?;
+        let _locked = Locked::new(fc, vkf);
+        Ok(vk::ImageLayout::from_raw((*vkf).layout[0]))
+    }
+}
+
 /// One plane of a Vulkan frame, for another device on the same GPU to
 /// import: its memory, exported, how FFmpeg allocated it, and how FFmpeg
 /// made the image bound to it (`VkImageCreateInfo`), which the importer
@@ -180,13 +221,10 @@ pub struct Plane {
     pub families: Vec<u32>,
 }
 
-/// A Vulkan frame's planes, their memory exported, the layout FFmpeg's last
-/// barrier left them in (its barriers take the first image's for all), and
-/// the GPU and driver they are on, which an opaque handle is imported on
-/// only.
+/// A Vulkan frame's planes, their memory exported, and the GPU and driver
+/// they are on, which an opaque handle is imported on only.
 pub struct Exported {
     pub planes: Vec<Plane>,
-    pub layout: vk::ImageLayout,
     pub device_uuid: [u8; 16],
     pub driver_uuid: [u8; 16],
 }
@@ -202,11 +240,6 @@ impl Exported {
         // device's objects.
         unsafe {
             let (dev, fc, vkf) = parts(f)?;
-            // FFmpeg changes where the images are while it holds the lock.
-            let layout = {
-                let _locked = Locked::new(fc, vkf);
-                vk::ImageLayout::from_raw((*vkf).layout[0])
-            };
             // Set when FFmpeg made the frame.
             let vkf = &*vkf;
             let vkfc = &*((*fc).hwctx as *const ffi::AVVulkanFramesContext);
@@ -260,7 +293,6 @@ impl Exported {
             let (device_uuid, driver_uuid) = fns.uuids();
             Ok(Self {
                 planes: out,
-                layout,
                 device_uuid,
                 driver_uuid,
             })

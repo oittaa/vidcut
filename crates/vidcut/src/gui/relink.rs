@@ -166,7 +166,7 @@ impl Workspace {
                     report.folder.display()
                 )));
                 if let Some(e) = &report.error {
-                    ui.colored_label(theme::ERROR, e);
+                    ui.colored_label(theme::colors().error, e);
                 }
                 ui.label(format!("{} relinked", report.relinked));
                 if !report.not_found.is_empty() {

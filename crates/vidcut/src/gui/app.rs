@@ -126,7 +126,6 @@ impl App {
         cc: &eframe::CreationContext<'_>,
         project: Option<PathBuf>,
     ) -> std::result::Result<Self, String> {
-        theme::apply(&cc.egui_ctx);
         let render = cc
             .wgpu_render_state
             .clone()
@@ -276,7 +275,7 @@ impl eframe::App for App {
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        let [r, g, b, a] = theme::BG.to_normalized_gamma_f32();
+        let [r, g, b, a] = theme::colors().background.to_normalized_gamma_f32();
         [r, g, b, a]
     }
 

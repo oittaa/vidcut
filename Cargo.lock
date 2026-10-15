@@ -1376,6 +1376,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "fontconfig-parser"
+version = "0.5.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbc773e24e02d4ddd8395fd30dc147524273a83e54e0f312d986ea30de5f5646"
+dependencies = [
+ "roxmltree",
+]
+
+[[package]]
+name = "fontdb"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2660c5e9157bf76d2db1294e4a9feba604ef610819a3b591088d0d8392a3290f"
+dependencies = [
+ "fontconfig-parser",
+ "log",
+ "memmap2",
+ "slotmap",
+ "tinyvec",
+]
+
+[[package]]
 name = "foreign-types"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3094,6 +3116,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "roxmltree"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
+
+[[package]]
 name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3300,6 +3328,39 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+]
+
+[[package]]
+name = "shadcn-egui-core"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f4d68b8efe681274b8b349b211d17a6b8b40f480bbe48915d0478703aea5f5b"
+
+[[package]]
+name = "shadcn-egui-font-geist"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f3af1f3344acd8fd322a43cad886bf9c42653258056bf003795d01aec38f221"
+dependencies = [
+ "shadcn-egui-core",
+]
+
+[[package]]
+name = "shadcn-egui-font-geist-mono"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "856c45ecca41f11d523e726c314b4439bf90a3e86f2d41608cb606df78cc936e"
+dependencies = [
+ "shadcn-egui-core",
+]
+
+[[package]]
+name = "shadcn-egui-font-space-grotesk"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "709d8d85ff72bbe42bbda6b9ecacbc5d8f56ad293bfbc5ebe48059fed1f967c5"
+dependencies = [
+ "shadcn-egui-core",
 ]
 
 [[package]]
@@ -3609,6 +3670,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "tinyvec"
+version = "1.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
+
+[[package]]
 name = "tokio"
 version = "1.53.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3866,9 +3933,12 @@ dependencies = [
  "eframe",
  "egui-phosphor",
  "egui_kittest",
+ "fontdb",
  "libc",
  "naga",
  "notify",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
  "objc2-io-surface",
  "objc2-metal 0.3.2",
  "pollster 1.0.1",
@@ -3876,7 +3946,11 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "shadcn-egui-font-geist",
+ "shadcn-egui-font-geist-mono",
+ "shadcn-egui-font-space-grotesk",
  "shlex",
+ "skrifa",
  "tempfile",
  "toml",
  "tracing",
@@ -3887,6 +3961,7 @@ dependencies = [
  "windows",
  "windows-sys 0.61.2",
  "winit",
+ "zbus",
  "zip",
 ]
 

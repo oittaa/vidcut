@@ -315,8 +315,10 @@ fn simple_graph(args: &str, spec: &str) -> Result<filter::Graph> {
 
 /// The layouts a display takes: 4:2:0 in 8 bits (planar, or NV12 as
 /// hardware decoders give it) and in 10 (P010, or planar as the CPU's
-/// decoders give it), and 4:2:2 in 8 and 10 bits planar, and in 10
-/// interleaved (P210, as VideoToolbox gives ProRes).
+/// decoders give it), 4:2:2 in 8 and 10 bits planar, and in 10
+/// interleaved (P210, as VideoToolbox gives ProRes), and 4:4:4 in 12 bits
+/// planar (ProRes 4444, its alpha left out) and in 16 interleaved (P416,
+/// as VideoToolbox gives ProRes 4444).
 pub(crate) fn displayable(p: format::Pixel) -> bool {
     use format::Pixel as P;
     matches!(
@@ -330,14 +332,18 @@ pub(crate) fn displayable(p: format::Pixel) -> bool {
             | P::YUVJ422P
             | P::YUV422P10LE
             | P::P210LE
+            | P::YUV444P12LE
+            | P::YUVA444P12LE
+            | P::P416LE
     )
 }
 
 /// Brings decoded pictures into a layout a display takes, at their own size
-/// and in their own colors. Pictures in other layouts (4:4:4, more than 10
-/// bits) are resampled to 4:2:0 (8 bits, or P010 for more), keeping their
-/// matrix and range. RGB pictures (images) are coded as BT.709 video range.
-/// Pictures already in such a layout pass as they are, by reference.
+/// and in their own colors. Pictures in other layouts, such as 4:4:4 in 8
+/// or 10 bits, are resampled to 4:2:0 (8 bits, or P010 for more), keeping
+/// their matrix and range. RGB pictures (images) are coded as BT.709 video
+/// range. Pictures already in such a layout pass as they are, by
+/// reference.
 pub(crate) struct Relayout {
     /// The layouts that pass.
     passes: fn(format::Pixel) -> bool,
@@ -462,6 +468,26 @@ mod tests {
     #[test]
     fn a_display_takes_10_bit_interleaved_4_2_2() {
         assert!(displayable(Pixel::P210LE));
+    }
+
+    #[test]
+    fn a_display_takes_12_bit_planar_4_4_4() {
+        assert!(displayable(Pixel::YUV444P12LE));
+    }
+
+    #[test]
+    fn a_display_takes_12_bit_planar_4_4_4_with_alpha() {
+        assert!(displayable(Pixel::YUVA444P12LE));
+    }
+
+    #[test]
+    fn a_display_takes_16_bit_interleaved_4_4_4() {
+        assert!(displayable(Pixel::P416LE));
+    }
+
+    #[test]
+    fn a_display_doesnt_take_8_bit_4_4_4() {
+        assert!(!displayable(Pixel::YUV444P));
     }
 
     #[test]

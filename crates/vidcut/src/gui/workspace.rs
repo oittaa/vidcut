@@ -16,7 +16,7 @@ use vidcut_core::model::Project;
 use vidcut_core::request::ViewerMode;
 use vidcut_core::time::{Rational, format_timecode};
 
-use super::theme;
+use super::theme::{self, Deco};
 use super::timeline::TimelineView;
 use crate::live::{self, Filmstrip, PlayerId, Snapshot};
 
@@ -103,8 +103,17 @@ pub struct Workspace {
     pub(super) recent: Vec<PathBuf>,
     /// A message from the GUI itself (not from the session) and when it came.
     pub(super) flash: Option<(String, std::time::Instant)>,
+    /// The session's notice shown: its number, and when it showed or was
+    /// last hovered (egui's clock).
+    notice_shown: Option<(u64, f64)>,
+    /// Notices up to this number are gone: faded or dismissed.
+    notices_done: u64,
     /// The window title last set.
     title: String,
+    /// The theme shown, to see when the session's changes.
+    theme: Option<Arc<crate::themes::Theme>>,
+    /// The height of the edit buttons under the pool, as last drawn.
+    pub(super) pool_buttons: f32,
     /// Edits take only the video (the Video Only toggle).
     pub(super) video_only: bool,
     /// Edits take only the audio (Audio Only).
@@ -128,6 +137,8 @@ pub struct Workspace {
     pub(super) mixer: super::mixer::Mixer,
     /// File > Preferences.
     pub(super) preferences: super::preferences::PreferencesUi,
+    /// The Keyboard Shortcuts window.
+    pub(super) help: super::help::HelpUi,
     pub(super) project_ui: super::project::ProjectUi,
     pub(super) import: super::import::ImportUi,
     pub(super) relink: super::relink::RelinkUi,
@@ -242,7 +253,11 @@ impl Workspace {
             scrub: None,
             recent: recent_projects(),
             flash: None,
+            notice_shown: None,
+            notices_done: 0,
             title: String::new(),
+            theme: None,
+            pool_buttons: 84.0,
             video_only: false,
             audio_only: false,
             target: None,
@@ -257,6 +272,7 @@ impl Workspace {
             show_mixer: false,
             mixer: Default::default(),
             preferences: Default::default(),
+            help: Default::default(),
             project_ui: Default::default(),
             import: Default::default(),
             relink: Default::default(),
@@ -295,6 +311,7 @@ impl Workspace {
             GuiPanel::Log => self.show_log = true,
             GuiPanel::Mixer => self.show_mixer = true,
             GuiPanel::Preferences => self.open_preferences(ctx),
+            GuiPanel::Help => self.help.open = true,
         }
     }
 
@@ -560,25 +577,80 @@ impl Workspace {
         }
     }
 
-    /// The newest message: the session's latest notice, or one of ours.
+    /// The newest message: one of ours, or the session's latest notice.
+    /// A notice fades after a while, an error later than the rest, and its
+    /// × dismisses it at once. Hovering one keeps it and shows all of it.
     fn notices(&mut self, ui: &mut egui::Ui) {
         if let Some((text, at)) = &self.flash {
             if at.elapsed().as_secs() < 6 {
-                ui.label(RichText::new(text).color(theme::ACCENT));
+                ui.label(RichText::new(text).color(theme::colors().accent));
                 ui.ctx()
                     .request_repaint_after(std::time::Duration::from_secs(1));
                 return;
             }
             self.flash = None;
         }
-        if let Some(n) = self.snap.notices.back() {
-            let color = if n.error {
-                theme::ERROR
-            } else {
-                theme::TEXT_DIM
-            };
-            ui.label(RichText::new(&n.text).color(color));
+        let Some(n) = self
+            .snap
+            .notices
+            .back()
+            .filter(|n| n.seq > self.notices_done)
+        else {
+            return;
+        };
+        let now = ui.input(|i| i.time);
+        let shown = match self.notice_shown {
+            Some((seq, at)) if seq == n.seq => at,
+            _ => now,
+        };
+        let hold = if n.error { 20.0 } else { 6.0 };
+        let age = now - shown;
+        if age >= hold + NOTICE_FADE {
+            self.notices_done = n.seq;
+            return;
         }
+        let opacity = (1.0 - (age - hold) / NOTICE_FADE).clamp(0.0, 1.0) as f32;
+        let color = if n.error {
+            theme::colors().error
+        } else {
+            theme::colors().text_dim
+        };
+        let text = ui
+            .scope(|ui| {
+                // A long message is cut short, its × kept.
+                ui.set_max_width((ui.available_width() - 30.0).max(0.0));
+                ui.add(
+                    egui::Label::new(RichText::new(&n.text).color(color.gamma_multiply(opacity)))
+                        .truncate(),
+                )
+            })
+            .inner;
+        let close = ui
+            .add(
+                egui::Button::new(
+                    RichText::new(egui_phosphor::regular::X)
+                        .color(theme::colors().text_dim.gamma_multiply(opacity)),
+                )
+                .frame(false)
+                .small(),
+            )
+            .on_hover_text("Dismiss");
+        close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Dismiss"));
+        if close.clicked() {
+            self.notices_done = n.seq;
+            return;
+        }
+        // Reading it keeps it up.
+        let shown = if text.hovered() || close.hovered() {
+            text.on_hover_text(&n.text);
+            now - age.min(hold)
+        } else {
+            shown
+        };
+        self.notice_shown = Some((n.seq, shown));
+        let wait = if age < hold { hold - age } else { 1.0 / 30.0 };
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs_f64(wait));
     }
 
     // ---------------------------------------------------------------- panels
@@ -728,6 +800,8 @@ impl Workspace {
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.toggle_value(&mut self.help.open, "Help")
+                    .on_hover_text("Keyboard shortcuts, with what the less obvious ones do (F1)");
                 ui.toggle_value(&mut self.show_log, "Command log");
                 if self.project().is_some() {
                     ui.toggle_value(&mut self.show_mixer, "Mixer")
@@ -742,7 +816,7 @@ impl Workspace {
                 ui.toggle_value(&mut self.export.show_jobs, jobs)
                     .on_hover_text("Exports and proxy encodes, with progress");
                 if let Some(e) = &self.snap.preview_error {
-                    ui.label(RichText::new("no preview").color(theme::ERROR))
+                    ui.label(RichText::new("no preview").color(theme::colors().error))
                         .on_hover_text(e);
                 }
             });
@@ -751,7 +825,6 @@ impl Workspace {
 
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            self.notices(ui);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // What this is built on, for reports: the full versions on
                 // hover.
@@ -780,7 +853,7 @@ impl Workspace {
                 // Right to left: the versions, how the viewer decodes, live
                 // control, the project's revision and format, with a line
                 // between them.
-                let dim = |text: String| RichText::new(text).color(theme::TEXT_DIM);
+                let dim = |text: String| RichText::new(text).color(theme::colors().text_dim);
                 ui.label(dim(short.clone())).on_hover_text(long.as_str());
                 if let Some(socket) = &self.snap.socket {
                     ui.separator();
@@ -829,6 +902,10 @@ impl Workspace {
                         format.on_hover_text(format!("{fps} fps"));
                     }
                 }
+                // The message gets the room left on the left.
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    self.notices(ui);
+                });
             });
         });
     }
@@ -837,7 +914,7 @@ impl Workspace {
         ui.vertical_centered(|ui| {
             ui.add_space(ui.available_height() * 0.25);
             ui.label(RichText::new("vidcut").size(36.0).strong());
-            ui.label(RichText::new("a scriptable video editor").color(theme::TEXT_DIM));
+            ui.label(RichText::new("a scriptable video editor").color(theme::colors().text_dim));
             ui.add_space(24.0);
             ui.horizontal(|ui| {
                 ui.add_space((ui.available_width() - 260.0).max(0.0) / 2.0);
@@ -850,7 +927,7 @@ impl Workspace {
             });
             if !self.recent.is_empty() {
                 ui.add_space(24.0);
-                ui.label(RichText::new("Recent").color(theme::TEXT_DIM));
+                ui.label(RichText::new("Recent").color(theme::colors().text_dim));
                 for p in self.recent.clone() {
                     if ui.link(p.display().to_string()).clicked() {
                         self.send("project.open", json!({ "path": p }));
@@ -869,7 +946,7 @@ impl Workspace {
             RichText::new(
                 "What you, scripts and agents did. Hover an entry for its request; click to copy it as a command.",
             )
-            .color(theme::TEXT_DIM)
+            .color(theme::colors().text_dim)
             .small(),
         );
         ui.separator();
@@ -882,7 +959,11 @@ impl Workspace {
                     if self.log_edits_only && !e.changed && e.ok {
                         continue;
                     }
-                    let color = if e.ok { theme::TEXT } else { theme::ERROR };
+                    let color = if e.ok {
+                        theme::colors().text
+                    } else {
+                        theme::colors().error
+                    };
                     let params = if e.params.as_object().is_some_and(|o| o.is_empty()) {
                         String::new()
                     } else {
@@ -897,7 +978,9 @@ impl Workspace {
                     let r = ui
                         .horizontal_wrapped(|ui| {
                             if !who.is_empty() {
-                                ui.label(RichText::new(who).small().color(theme::TEXT_DIM));
+                                ui.label(
+                                    RichText::new(who).small().color(theme::colors().text_dim),
+                                );
                             }
                             ui.add(
                                 egui::Label::new(RichText::new(&e.summary).small().color(color))
@@ -1049,6 +1132,13 @@ impl Workspace {
                 });
             });
             return;
+        }
+        // The shortcuts window, with or without a project.
+        if ctx.input(|i| i.key_pressed(Key::F1)) {
+            self.help.open = !self.help.open;
+        }
+        if self.help.open && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape)) {
+            self.help.open = false;
         }
         if ctx.input(|i| i.modifiers.command && i.key_pressed(Key::Comma)) {
             self.open_preferences(ctx);
@@ -1527,6 +1617,14 @@ impl Workspace {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         self.snap = self.live.snapshot();
+        if !self
+            .theme
+            .as_ref()
+            .is_some_and(|t| Arc::ptr_eq(t, &self.snap.theme))
+        {
+            theme::apply(&ctx, &self.snap.theme);
+            self.theme = Some(self.snap.theme.clone());
+        }
         // Removing a track renumbers the ones above it: a selected edit or
         // a Dynamic Trim run may now name another track, so they end.
         let tracks = self.project().map_or(0, |p| p.tracks.len());
@@ -1568,20 +1666,27 @@ impl Workspace {
         self.keys(&ctx);
         self.export_windows(&ctx);
         self.preferences_window(&ctx);
+        self.help_window(&ctx);
         self.project_windows(&ctx);
         self.import_window(&ctx);
         self.relink_window(&ctx);
-        egui::Panel::top("top")
-            .frame(egui::Frame::new().fill(theme::BG).inner_margin(4))
-            .show(ui, |ui| self.top_bar(ui));
+        let panel = theme::colors().panel;
+        egui::Panel::top("top").frame(theme::bar()).show(ui, |ui| {
+            theme::decorated(ui, Deco::Bar, |ui| self.top_bar(ui))
+        });
         egui::Panel::bottom("status")
-            .frame(egui::Frame::new().fill(theme::BG).inner_margin(4))
-            .show(ui, |ui| self.status_bar(ui));
+            .frame(theme::bar())
+            .show(ui, |ui| {
+                theme::decorated(ui, Deco::Status, |ui| self.status_bar(ui))
+            });
         if self.show_log {
             egui::Panel::right("log")
                 .resizable(true)
                 .default_size(380.0)
-                .show(ui, |ui| self.log_panel(ui));
+                .frame(theme::card(panel))
+                .show(ui, |ui| {
+                    theme::decorated(ui, Deco::Card, |ui| self.log_panel(ui))
+                });
         }
         if self.snap.project.is_none() {
             egui::CentralPanel::default().show(ui, |ui| self.start_screen(ui));
@@ -1591,30 +1696,42 @@ impl Workspace {
             .resizable(true)
             .default_size(300.0)
             .min_size(140.0)
-            .frame(egui::Frame::new().fill(theme::PANEL).inner_margin(6))
-            .show(ui, |ui| self.timeline_panel(ui));
+            .frame(theme::card(panel))
+            .show(ui, |ui| {
+                theme::decorated(ui, Deco::Card, |ui| self.timeline_panel(ui))
+            });
         if self.show_mixer {
             egui::Panel::right("mixer")
                 .resizable(true)
                 .default_size(320.0)
-                .show(ui, |ui| self.mixer_panel(ui));
+                .frame(theme::card(panel))
+                .show(ui, |ui| {
+                    theme::decorated(ui, Deco::Card, |ui| self.mixer_panel(ui))
+                });
         }
         egui::Panel::left("pool")
             .resizable(true)
             .default_size(430.0)
             .min_size(260.0)
-            .frame(egui::Frame::new().fill(theme::PANEL).inner_margin(6))
-            .show(ui, |ui| self.pool_panel(ui));
+            .frame(theme::card(panel))
+            .show(ui, |ui| {
+                theme::decorated(ui, Deco::Card, |ui| self.pool_panel(ui))
+            });
         // The timeline and the pool have asked for their tiles.
         if let Some(tiles) = &mut self.tiles {
             tiles.end_frame();
         }
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(theme::BG).inner_margin(6))
-            .show(ui, |ui| self.viewer_panel(ui));
+            .frame(theme::card(theme::colors().panel_dark))
+            .show(ui, |ui| {
+                theme::decorated(ui, Deco::Viewer, |ui| self.viewer_panel(ui))
+            });
         self.media_drag_overlay(&ctx);
     }
 }
+
+/// How long a notice takes to fade, in seconds.
+const NOTICE_FADE: f64 = 1.0;
 
 fn recent_projects() -> Vec<PathBuf> {
     std::fs::read_to_string(crate::paths::state_dir().join("recent.json"))
@@ -1648,7 +1765,7 @@ pub(super) fn fit(avail: egui::Rect, aspect: f32) -> egui::Rect {
 }
 
 pub(super) fn dim(text: impl Into<String>) -> RichText {
-    RichText::new(text.into()).color(theme::TEXT_DIM)
+    RichText::new(text.into()).color(theme::colors().text_dim)
 }
 
 /// Escape on a question with no popup of its own open: it dismisses the

@@ -1,0 +1,65 @@
+# Neon: synthwave at night. Deep purple, a magenta glow, a cyan playhead and
+# a retro grid in the viewer.
+
+title = "Neon"
+light = false
+
+[colors]
+background = "#090512"
+panel = "#130C22"
+panel_dark = "#07040E"
+track = "#0E091A"
+track_target = "#2A1038"
+panel_target = "#561A68"
+text = "#F2EAFF"
+text_dim = "#9C86BC"
+accent = "#FF2EC4"
+playhead = "#00E5FF"
+clip = "#7626AA"
+clip_disabled = "#322446"
+offline = "#C81E3C"
+audio = "#008CA8"
+generator = "#FF783C"
+compound = "#FFAA00"
+marked = "#6E3C9650"
+error = "#FF466E"
+ok = "#3CFFB4"
+selection = "#B01496"
+selected_text = "#FFFFFF"
+field = "#06030C"
+faint = "#180F2A"
+line = "#38225A"
+button = "#301E54"
+button_line = "#5A2E8C"
+button_hovered = "#46287A"
+button_pressed = "#5C3496"
+shadow = "#78007878"
+
+[shape]
+corners = 8
+windows = 16
+menus = 12
+panels = 14
+clips = 6
+gap = 6
+padding = 12
+bar_padding = [8, 5]
+spacing = [10, 7]
+button_padding = [12, 6]
+button_height = 26
+buttons = "flat"
+panel_border = false
+shadow = [0, 14, 40]
+
+[fonts]
+ui = ["Geist"]
+mono = ["Geist Mono"]
+size = 14
+small = 10.5
+heading = 18
+mono_size = 12.5
+
+[decoration]
+style = "glow"
+color = "#FF2EC4"
+color2 = "#00E5FF"

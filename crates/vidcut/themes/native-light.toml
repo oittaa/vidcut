@@ -1,0 +1,63 @@
+# Native Light: Native in light mode, whatever the computer is set to
+# (deviation X22).
+
+title = "Native Light"
+light = true
+
+[colors]
+background = "#F3F3F3"
+panel = "#FAFAFA"
+panel_dark = "#ECECEC"
+track = "#E6E6E6"
+track_target = "#D6E8F8"
+panel_target = "#CCE2F6"
+text = "#1B1B1B"
+text_dim = "#606060"
+accent = "system-dark"
+playhead = "#D62828"
+clip = "system-light"
+clip_disabled = "#BEBEBE"
+offline = "#D65050"
+audio = "#46A86E"
+generator = "#9678D2"
+compound = "#D28C50"
+marked = "#0000001E"
+error = "#C42B1C"
+ok = "#0F7B0F"
+selection = "system"
+selected_text = "#FFFFFF"
+field = "#FFFFFF"
+faint = "#F0F0F0"
+line = "#DEDEDE"
+button = "#D6D6D6"
+button_line = "#D0D0D0"
+button_hovered = "#EAEAEA"
+button_pressed = "#E0E0E0"
+shadow = "#0000003C"
+
+[shape]
+corners = 4
+windows = 8
+menus = 8
+panels = 8
+clips = 4
+gap = 2
+padding = 10
+bar_padding = [8, 5]
+spacing = [8, 6]
+button_padding = [11, 5]
+button_height = 26
+buttons = "flat"
+panel_border = true
+shadow = [0, 8, 16]
+
+[fonts]
+ui = ["system"]
+mono = ["system"]
+size = 14
+small = 11
+heading = 20
+mono_size = 13
+
+[decoration]
+style = "none"

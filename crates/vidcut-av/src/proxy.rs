@@ -27,6 +27,7 @@ use crate::decode::{Input, VideoReader};
 use crate::error::{Context, Error, Result};
 use crate::export::encode::{self, Availability, Pass, Passes, Upload, VideoEncoder};
 use crate::export::make::{Fitting, Maker, Output};
+use crate::export::worker::{self, Inbox, Worker};
 use crate::ffmpeg::{self, encoder, ffi, format, frame};
 use crate::route::{Place, Went};
 
@@ -565,23 +566,80 @@ enum MadeOn<'a> {
 }
 
 /// The proxy file being written: pictures go in in order, each one's
-/// duration known once the next arrives.
+/// duration known once the next arrives. Its encoder encodes them on a
+/// thread of its own ([`Encoding`]), a few pictures behind.
 struct Writer<'a> {
-    octx: format::context::Output,
-    encoder: encoder::Video,
+    writing: Worker<Timed, u64>,
     upload: Option<Upload>,
-    /// The kind of encoder: a GPU's copies frames from memory up itself.
-    kind: EncoderChoice,
     src_tb: ffmpeg::Rational,
     enc_tb: ffmpeg::Rational,
-    durations: HashMap<i64, i64>,
     pending: Option<(frame::Video, i64)>,
     last_dur: i64,
+    /// Pictures handed to the encoder.
     frames: u64,
     shown: &'a Shown<'a>,
     /// HDR kept from the source: the codec and the static metadata, which
     /// go on each frame and into each keyframe as an export puts them.
     hdr: Option<(ffmpeg::codec::Id, crate::hdr::Static)>,
+}
+
+/// A picture on its way to the encoder, with its timestamp and duration in
+/// the encoder's time base.
+struct Timed {
+    picture: frame::Video,
+    pts: i64,
+    dur: i64,
+}
+
+/// The proxy's encoder and file, on a thread of their own.
+struct Encoding {
+    octx: format::context::Output,
+    encoder: encoder::Video,
+    /// The kind of encoder: a GPU's copies frames from memory up itself.
+    kind: EncoderChoice,
+    enc_tb: ffmpeg::Rational,
+    durations: HashMap<i64, i64>,
+    /// The codec and an HDR proxy's static metadata, for its keyframes.
+    hdr: Option<(ffmpeg::codec::Id, crate::hdr::Static)>,
+}
+
+impl Encoding {
+    /// Encodes and writes the pictures handed over, in order, then flushes
+    /// the encoder and finishes the file after the last. Returns the
+    /// pictures encoded.
+    fn run(mut self, mut pictures: Inbox<Timed>) -> Result<u64> {
+        let mut frames = 0;
+        while let Some(Timed { picture, pts, dur }) = pictures.recv()? {
+            self.durations.insert(pts, dur);
+            // The GPU's scaler makes its pictures on the decoder's stream:
+            // the encoder reads one once that work is done.
+            crate::cuda::share::wait_for(&picture)?;
+            crate::copies::to_encoder(&picture, self.kind);
+            self.encoder
+                .send_frame(&picture)
+                .ctx(|| "encoding a proxy frame".into())?;
+            self.drain()?;
+            frames += 1;
+        }
+        self.encoder
+            .send_eof()
+            .ctx(|| "flushing the proxy encoder".into())?;
+        self.drain()?;
+        self.octx
+            .write_trailer()
+            .ctx(|| "finishing the proxy".into())?;
+        Ok(frames)
+    }
+
+    fn drain(&mut self) -> Result<()> {
+        drain(
+            &mut self.encoder,
+            &mut self.octx,
+            self.enc_tb,
+            &mut self.durations,
+            self.hdr.as_ref(),
+        )
+    }
 }
 
 impl<'a> Writer<'a> {
@@ -684,14 +742,21 @@ impl<'a> Writer<'a> {
         };
         header().map_err(Failed::Encoding)?;
         let hdr = video.hdr.map(|_| (encoder.id(), video.metadata));
-        let writer = Self {
+        let encoding = Encoding {
             octx,
             encoder,
-            upload,
             kind: video.kind,
-            src_tb,
             enc_tb,
             durations: HashMap::new(),
+            hdr,
+        };
+        let writing = Worker::spawn(worker::AHEAD, move |pictures| encoding.run(pictures))
+            .map_err(Failed::Encoding)?;
+        let writer = Self {
+            writing,
+            upload,
+            src_tb,
+            enc_tb,
             pending: None,
             last_dur: 1,
             frames: 0,
@@ -734,7 +799,6 @@ impl<'a> Writer<'a> {
             _ => picture,
         };
         picture.set_pts(Some(pts));
-        self.durations.insert(pts, dur);
         // An HDR proxy's frames carry its static metadata alone, as an
         // export's do: the source's HDR10+ and Dolby Vision stay behind.
         if let Some((_, metadata)) = &self.hdr {
@@ -743,27 +807,14 @@ impl<'a> Writer<'a> {
                 crate::hdr::attach(&mut picture, metadata)?;
             }
         }
-        // The GPU's scaler makes its pictures on the decoder's stream: the
-        // encoder reads one once that work is done.
-        crate::cuda::share::wait_for(&picture)?;
-        crate::copies::to_encoder(&picture, self.kind);
-        self.encoder
-            .send_frame(&picture)
-            .ctx(|| "encoding a proxy frame".into())?;
-        drain(
-            &mut self.encoder,
-            &mut self.octx,
-            self.enc_tb,
-            &mut self.durations,
-            self.hdr.as_ref(),
-        )?;
+        self.writing.send(Timed { picture, pts, dur })?;
         self.frames += 1;
         self.shown.frame(self.frames);
         Ok(())
     }
 
-    /// The last picture, then the end; returns the frames written.
-    fn finish(mut self, source: &Path) -> Result<u64> {
+    /// The last picture: its duration is the one before's.
+    fn last(&mut self, source: &Path) -> Result<()> {
         if let Some((prev, prev_pts)) = self.pending.take() {
             let dur = self.last_dur;
             self.encode(prev, prev_pts, dur)?;
@@ -774,20 +825,18 @@ impl<'a> Writer<'a> {
                 source.display()
             )));
         }
-        self.encoder
-            .send_eof()
-            .ctx(|| "flushing the proxy encoder".into())?;
-        drain(
-            &mut self.encoder,
-            &mut self.octx,
-            self.enc_tb,
-            &mut self.durations,
-            self.hdr.as_ref(),
-        )?;
-        self.octx
-            .write_trailer()
-            .ctx(|| "finishing the proxy".into())?;
-        Ok(self.frames)
+        Ok(())
+    }
+
+    /// The end, after the last picture; returns the frames written.
+    fn finish(self) -> Result<u64> {
+        self.writing.finish()
+    }
+
+    /// The proxy failed with `why`: its encoder stops, and the error is the
+    /// first in the order of the pictures ([`Worker::abandon`]).
+    fn abandon(self, why: Error) -> Error {
+        self.writing.abandon(why)
     }
 }
 
@@ -885,8 +934,10 @@ fn encode_into(
         }
         Ok(())
     };
-    encoding().map_err(Failed::Encoding)?;
-    let frames = writer.finish(reader.path()).map_err(Failed::Encoding)?;
+    if let Err(e) = encoding().and_then(|()| writer.last(reader.path())) {
+        return Err(Failed::Encoding(writer.abandon(e)));
+    }
+    let frames = writer.finish().map_err(Failed::Encoding)?;
     Ok((frames, went))
 }
 

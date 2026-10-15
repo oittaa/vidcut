@@ -14,6 +14,7 @@ pub(crate) mod d3d11;
 pub mod vaapi;
 pub(crate) mod vt;
 pub mod vulkan;
+mod vulkan_scale;
 
 use std::ptr;
 use std::sync::{Arc, Mutex};
@@ -1009,9 +1010,9 @@ fn run_graph(
     Ok(out)
 }
 
-/// Scales frames down on the GPU (VA-API's, Direct3D 11's, CUDA's and
-/// VideoToolbox's), so they come down to memory small, in the frames' own
-/// layout (NV12, P010).
+/// Scales frames down on the GPU (VA-API's, Direct3D 11's, CUDA's,
+/// VideoToolbox's and Vulkan's), so they come down to memory small, in the
+/// frames' own layout (NV12, P010, Vulkan's 10-bit 4:2:2).
 pub(crate) struct Shrinker {
     /// `None`: the GPU won't scale these frames, so they come down whole.
     scaling: Option<Scaling>,
@@ -1021,7 +1022,8 @@ pub(crate) struct Shrinker {
 }
 
 enum Scaling {
-    /// `scale_vaapi`, `scale_vt`, or `scale_cuda` in steps.
+    /// `scale_vaapi`, `scale_vt`, or `scale_cuda` or `scale_vulkan` in
+    /// steps.
     Filters(ffmpeg::filter::Graph),
     /// The GPU's video processor.
     #[cfg(windows)]
@@ -1046,11 +1048,35 @@ impl Scaling {
                 let spec = vt::shrink_spec((w, h));
                 Ok(Self::Filters(gpu_graph(f, frames, pixel, &spec)?))
             }
+            format::Pixel::VULKAN => Ok(Self::Filters(vulkan_scale::scaler(f, frames, (w, h))?)),
             #[cfg(windows)]
             format::Pixel::D3D11 => Ok(Self::D3d11(d3d11::Scaler::new(f, frames, (w, h))?)),
             other => Err(Error::Invalid(format!("no scaling {other:?} frames"))),
         }
     }
+}
+
+/// The test picture's bands, which GPU scalers are checked with (8-bit
+/// levels, Y, Cb, Cr): grays from black to white, BT.709's red, green and
+/// blue, and levels below black and above white with chroma near its ends,
+/// which video keeps and a scaler mustn't clip.
+const BANDS: [[u16; 3]; 10] = [
+    [16, 128, 128],
+    [64, 128, 128],
+    [128, 128, 128],
+    [192, 128, 128],
+    [235, 128, 128],
+    [63, 102, 240],
+    [173, 42, 26],
+    [32, 240, 118],
+    [4, 8, 128],
+    [250, 128, 248],
+];
+
+/// Whether a test picture scaled to `size` has each band's middle there to
+/// read, a few samples across in luma and chroma.
+fn readable((w, h): (u32, u32)) -> bool {
+    w as usize >= 4 * BANDS.len() && h >= 8
 }
 
 impl Shrinker {

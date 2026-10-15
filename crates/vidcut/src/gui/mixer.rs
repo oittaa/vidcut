@@ -114,9 +114,9 @@ fn fader_ticks(slider: Rect, marks: &[(f32, f32)]) -> egui::Shape {
         .iter()
         .map(|&(db, y)| {
             let (reach, stroke) = if db == 0.0 {
-                (3.0, Stroke::new(2.0, theme::ACCENT))
+                (3.0, Stroke::new(2.0, theme::colors().accent))
             } else {
-                (-2.0, Stroke::new(1.0, theme::TEXT_DIM))
+                (-2.0, Stroke::new(1.0, theme::colors().text_dim))
             };
             egui::Shape::line_segment(
                 [
@@ -135,9 +135,9 @@ fn fader_ticks(slider: Rect, marks: &[(f32, f32)]) -> egui::Shape {
 fn fader_numbers(painter: &egui::Painter, column: Rect, marks: &[(f32, f32)]) {
     for &(db, y) in marks {
         let color = if db == 0.0 {
-            theme::ACCENT
+            theme::colors().accent
         } else {
-            theme::TEXT_DIM
+            theme::colors().text_dim
         };
         // The ends' numbers stay whole inside the column.
         let y = y.clamp(column.top() + 5.0, column.bottom() - 5.0);
@@ -626,7 +626,7 @@ impl Workspace {
 /// A vertical meter: green, yellow from −12 dBFS, red from −3 dBFS,
 /// with a peak-hold line.
 fn meter(painter: &egui::Painter, rect: Rect, level: f32, hold: f32) {
-    painter.rect_filled(rect, CornerRadius::same(2), theme::PANEL_DARK);
+    painter.rect_filled(rect, CornerRadius::same(2), theme::colors().panel_dark);
     let h = rect.height();
     let y = |pos: f32| rect.bottom() - pos * h;
     let top = y(position(level));

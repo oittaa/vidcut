@@ -59,14 +59,17 @@ Rust comes from [rustup](https://rustup.rs). The repository pins its Rust versio
 
 ## Build and run
 
+On Linux and macOS, `make help` lists the common tasks:
+
 ```bash
-cargo build --release
-./target/release/vidcut                     # the GUI (start screen: new or open a project)
-./target/release/vidcut -p talk.vidcut      # the GUI with a project (created if missing)
-./target/release/vidcut --help              # the CLI
+make doctor                 # what a build still needs, then the GPUs and encoders
+make                        # build
+make run                    # the GUI (start screen: new or open a project)
+make run P=talk.vidcut      # the GUI with a project (created if missing)
+make install                # vidcut into ~/.local/bin
 ```
 
-On Windows the program is `target\release\vidcut.exe`.
+The program is `target/release/vidcut`, and `vidcut --help` shows the CLI. On Windows, without make, `cargo build --release` builds `target\release\vidcut.exe`.
 
 ## Where vidcut keeps its files
 
@@ -74,7 +77,7 @@ The docs name the Linux places; Windows and macOS have their own:
 
 | Linux | Windows | macOS | Holds |
 |---|---|---|---|
-| `~/.config/vidcut` | `%APPDATA%\vidcut` | `~/Library/Application Support/vidcut` | preferences, user presets |
+| `~/.config/vidcut` | `%APPDATA%\vidcut` | `~/Library/Application Support/vidcut` | preferences, user presets and themes |
 | `~/.cache/vidcut` | `%LOCALAPPDATA%\vidcut\cache` | `~/Library/Caches/vidcut` | thumbnails, waveforms, measurements, encoder detection, shaders |
 | `~/.local/state/vidcut` | `%LOCALAPPDATA%\vidcut\state` | `~/Library/Application Support/vidcut/state` | undo history, recent projects |
 | `$XDG_RUNTIME_DIR/vidcut` | `%TEMP%\vidcut` | `$TMPDIR/vidcut-UID` | running GUIs (live control) |
@@ -89,7 +92,9 @@ The **Command log** (top right) lists what you, scripts and agents did, in words
 
 **Preferences** (File > Preferences, Ctrl+, or Cmd+, on a Mac) live in `~/.config/vidcut/preferences.toml` (deviation X12). `vidcut preferences` reads and changes them.
 
-**Keys:** [spec §11](docs/cut-page-spec.md#11-keyboard-shortcuts).
+**Themes:** Native by default, light or dark as your computer is set, eight more built in, or your own (File > Preferences: Theme, Import…). A theme is a TOML file. [starship.toml](crates/vidcut/themes/starship.toml) explains every key.
+
+**Keys:** F1 or Help lists them, with a few words on what the less obvious ones do. They're in [spec §11](docs/cut-page-spec.md#11-keyboard-shortcuts) too.
 
 While a GUI has the project open, `vidcut` commands for that project run inside it ([docs/cli.md](docs/cli.md), Live control).
 
@@ -123,5 +128,7 @@ Read [AGENTS.md](AGENTS.md) first; it's written for AI agents but applies to hum
 ## License
 
 vidcut's source code is released under the [MIT License](LICENSE).
+
+The fonts vidcut carries, Geist, Geist Mono and Space Grotesk, are under the SIL Open Font License 1.1.
 
 vidcut links the FFmpeg libraries, which are LGPL or GPL depending on how they were built; Ubuntu's builds are GPL. Binaries you distribute together with them must comply with their licenses.

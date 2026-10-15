@@ -1,0 +1,112 @@
+# Starship: a bridge display. Blue-black glass, a cyan edge, cut corners
+# and an amber playhead. This file explains every key.
+#
+# A theme of your own goes in the themes folder (`vidcut preferences get`
+# says where) as NAME.toml. A theme file has every key and needs no other
+# file, so start from a copy of a built-in one.
+# Colors are "#RRGGBB", or "#RRGGBBAA" with opacity. "system",
+# "system-light" and "system-dark" are the computer's accent color and a
+# lighter and a darker shade of it.
+
+title = "Starship"
+# Light themes start from light widgets.
+light = false
+# A [light_mode] table at the end holds keys that replace the ones above
+# while the computer is in light mode, as in native.toml.
+
+[colors]
+# Behind the panels, the top bar and the status bar.
+background = "#04070B"
+panel = "#0A0F16"
+# The viewer and the timeline's well.
+panel_dark = "#04060A"
+track = "#080C12"
+# The target track's row and its header.
+track_target = "#081E28"
+panel_target = "#0A3644"
+text = "#D0ECF6"
+text_dim = "#6C8C9C"
+# Highlights and links.
+accent = "#00D4FF"
+playhead = "#FFB020"
+clip = "#124260"
+clip_disabled = "#1E2830"
+# A clip whose file is missing.
+offline = "#BE3228"
+audio = "#0E5C58"
+generator = "#785AC8"
+compound = "#C88228"
+# Over the marked range.
+marked = "#0078963C"
+error = "#FF5A46"
+ok = "#3CE6A0"
+# Selected buttons and text.
+selection = "#004660"
+selected_text = "#00D4FF"
+# Text fields.
+field = "#030508"
+# Every other row of a list.
+faint = "#0D141D"
+# Separators and window edges.
+line = "#162C3A"
+# Buttons and check boxes.
+button = "#0A1018"
+# The edge of outlined buttons.
+button_line = "#007896"
+button_hovered = "#10222E"
+button_pressed = "#143040"
+shadow = "#000000C8"
+
+[shape]
+# Corner radii in points: buttons and fields, windows, menus, panels, the
+# timeline's clips.
+corners = 2
+windows = 3
+menus = 3
+panels = 0
+clips = 1
+# Between panels, and inside them.
+gap = 5
+padding = 12
+# Inside the top bar and the status bar: across, down.
+bar_padding = [8, 5]
+# Between controls: across, down.
+spacing = [9, 6]
+# Inside buttons: across, down.
+button_padding = [12, 5]
+# The height of buttons and fields.
+button_height = 25
+# "filled", "outlined" or "flat" (a box only under the pointer).
+buttons = "outlined"
+# A line around each panel.
+panel_border = false
+# Window shadows: across, down, blur.
+shadow = [0, 10, 30]
+
+[fonts]
+# Fonts by family name, the first one there wins. vidcut carries Geist,
+# Geist Mono and Space Grotesk, so those are there on every computer.
+# Others must be installed. "system" is the computer's own UI or monospace
+# font. With none of them there: Geist or Geist Mono. An empty list keeps
+# the plain font Classic shows.
+ui = ["Space Grotesk"]
+mono = ["Geist Mono"]
+size = 14.5
+small = 11
+heading = 19
+mono_size = 12.5
+
+[decoration]
+# What is painted behind the panels: "none", "glow" (a glow around each
+# panel), "hud" (cut corners and brackets), "steel" (brushed steel slabs
+# with cut corners, and a light bar under the top bar).
+style = "hud"
+# How deep the cut corners are, in points.
+cut = 16
+# hud: the edges and brackets, then the viewer's cut corners.
+# glow: the panels' glow, then the viewer's.
+# steel: the light bar, and with `top`, `bottom` and `edge` the slabs'
+# shading from top to bottom and their edge.
+# A style leaves out the keys it doesn't use.
+color = "#00D4FF"
+color2 = "#FFB020"

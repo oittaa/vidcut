@@ -779,6 +779,59 @@ fn cancelling_either_pass_leaves_nothing() {
     }
 }
 
+/// An encoder that fails partway through stops the export with its error
+/// and leaves no file: x264's second pass, whose frame-by-frame statistics
+/// (its MB-tree file) are cut in half as it starts.
+#[test]
+fn an_encoder_failing_partway_leaves_nothing() {
+    let fps = Rational::new(30, 1).unwrap();
+    let a =
+        src(FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 90).no_audio());
+    let p = plan(fps, 320, 180, vec![v(&a, 0, 90)], vec![]);
+    let dir = out_dir("encoder-fails");
+    let out = dir.path().join("out.mkv");
+    let mut cut = false;
+    let err = export::run(
+        &p,
+        &at_bitrate(VCodec::H264, 200_000, 2),
+        &out,
+        &Availability::default(),
+        &AtomicBool::new(false),
+        &mut |pr| {
+            if pr.pass == 2 && pr.frames == 1 {
+                let stats = std::fs::read_dir(export::passes_path(&out)).unwrap();
+                let mbtree = stats
+                    .map(|e| e.unwrap().path())
+                    .find(|f| f.extension().is_some_and(|x| x == "mbtree"))
+                    .expect("x264's MB-tree statistics");
+                let file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(mbtree)
+                    .unwrap();
+                file.set_len(file.metadata().unwrap().len() / 2).unwrap();
+                cut = true;
+            }
+        },
+    )
+    .unwrap_err();
+    assert!(cut, "the second pass started");
+    assert!(
+        matches!(
+            err,
+            vidcut_av::Error::Ffmpeg {
+                source: vidcut_av::ffmpeg::Error::External,
+                ..
+            }
+        ),
+        "x264's own error: {err}"
+    );
+    assert_eq!(
+        std::fs::read_dir(dir.path()).unwrap().count(),
+        0,
+        "something left"
+    );
+}
+
 #[test]
 fn audio_after_a_lost_packet_keeps_its_time() {
     // An AAC packet before the 2 s beep is gone (damaged files lose some,

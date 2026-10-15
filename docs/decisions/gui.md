@@ -30,6 +30,7 @@ The viewer plays through the player engine on wgpu ([preview.md](preview.md)).
 
 Every action is a [`Request`](../../crates/vidcut-core/src/request.rs), the same type the headless CLI runs:
 - **GUI gestures** send one request each, without waiting for an answer. Failures show as notices in the status bar.
+- **Notices** in the status bar fade, an error after 20 s and any other after 6 s. Their × dismisses them, and hovering one keeps it and shows all of it. A failed request stays in the Command log. `tests/gui_notices.rs` checks the fading and the ×.
 - **IPC clients** send a request and wait for its answer.
 - **The command log** shows every request with its origin (`gui`, `ipc`, `session`), so a human can see what an agent did and an agent can read what the human did (`gui.log`). Each entry has a `summary` in words (`vidcut_core::describe`): times as timecodes, media by name, and for an undo or redo the steps it took, which the undo history names the same way. The GUI shows the summary and the request on hover. Fast scrubbing seeks and a fader's drag (`mixer.preview`) are left out, and the GUI asks for the timeline view only when the viewer isn't showing it. An entry's `changed` says whether the request changed the project: its revision moved, even if no media, clip or marker did (track settings, bins, marks).
 
@@ -203,3 +204,19 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 - **Until a tile's picture comes:** the nearest kept picture of the same media within two steps, else the pool's picture nearest in time.
 - **The pool** asks for tiles too: the frame under the pointer while hovering a thumbnail or a filmstrip, and in the Filmstrip view the frame at each picture's middle. The hovered frame is on a grid of a power of two frames no wider than a point.
 - **Tests:** `vidcut-av/tests/frames.rs` checks the frames by barcode. The grid and the eviction are unit tests.
+
+## 12. Themes (deviation X22)
+
+- **Files:** a theme is a TOML file: colors, corners and spacing, fonts, and a decoration. The built-in ones are `crates/vidcut/themes/*.toml`, compiled in. A user's go in `~/.config/vidcut/themes`, and one named like a built-in replaces it. A theme file has every key and needs no other file. Its `[light_mode]` table holds the keys that change while the OS is in light mode.
+- **Switching:** the session loads the theme `appearance.theme` names into the snapshot. It loads it again when the preferences file or a file in the themes folder changes. The GUI applies a new one at the next frame, to both of egui's styles, and rebuilds the fonts only when they differ. A theme that doesn't load shows Native, the default, and a notice says why.
+- **Fonts** are family names. vidcut carries Geist, Geist Mono and Space Grotesk (the `shadcn-egui-font-*` crates). Other names are looked up among the installed fonts with fontdb, and `system` stands for the OS's own UI or monospace font (`SYSTEM_UI`, `SYSTEM_MONO` in `gui/theme.rs`). With none found: Geist or Geist Mono. An empty list keeps egui's font. Each font's text moves so its capitals sit in the middle of the line (`centering`), where check boxes and buttons center: fonts place their capitals differently.
+- **Native** (`look.rs`) has a `[light_mode]` table, and a color `system`, `system-light` or `system-dark` is the OS's accent color or a shade of it. Windows: `AppsUseLightTheme` and `AccentPalette` in the registry, watched with `RegNotifyChangeKeyValue`. macOS: `AppleInterfaceStyle` and `NSColor.controlAccentColor`, read every 2 s. Linux: the desktop portal's `color-scheme` and `accent-color`, watched through its `SettingChanged` signal. A change reloads the theme, like a preferences change. `preferences get` says what it reads (`system_look`).
+- **Decorations** (`glow`, `hud`, `steel`) are painted behind each panel's content (`theme::decorated`). A shape is reserved before the content and filled once its size is known. Cut-corner panels paint their own fill, so their frames have none. A theme's `padding` must clear its corners.
+- **Colors:** everything else paints with `theme::colors()`, the theme shown, kept on the GUI thread.
+- **Tests:** `tests/gui_theme.rs` sets a theme file and sees the GUI take it. `tests/gui_theme_layout.rs` checks that the target track button fits beside the overview in every built-in theme. Parsing, light mode and `system` colors are unit tests.
+
+## 13. Keyboard Shortcuts window (deviation X23)
+
+- **The list** is `vidcut_core::shortcuts`: spec §11, one action a row, and plain words for the actions whose names don't say what they do. The window (`gui/help.rs`) and `keys.list` both read it, so a key that changes changes there too.
+- **The window** opens with F1, Help in the top bar or `gui.show help`, and closes with F1, Esc or its ×. It works with or without a project. Its search finds actions and words, and a single character finds keys. Closed, it forgets the search.
+- **Tests:** `tests/gui_help.rs` opens it each way, opens a row's explanation, searches and closes it.

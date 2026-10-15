@@ -18,6 +18,11 @@ ctrlc.workspace = true
 clap.workspace = true
 eframe.workspace = true
 egui-phosphor.workspace = true
+fontdb.workspace = true
+shadcn-egui-font-geist.workspace = true
+shadcn-egui-font-geist-mono.workspace = true
+shadcn-egui-font-space-grotesk.workspace = true
+skrifa.workspace = true
 winit.workspace = true
 wgpu.workspace = true
 ash.workspace = true
@@ -38,6 +43,11 @@ windows.workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-metal.workspace = true
 objc2-io-surface.workspace = true
+objc2-app-kit.workspace = true
+objc2-foundation.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus.workspace = true
 
 [dev-dependencies]
 egui_kittest.workspace = true

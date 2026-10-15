@@ -29,6 +29,11 @@ pub enum Layout {
     /// 10 bits in the high bits of 16, 4:2:2, U and V interleaved
     /// (VideoToolbox's ProRes).
     P210,
+    /// 12 bits in the low bits of 16, 4:4:4, a plane each (ProRes 4444).
+    /// An alpha plane after them is left out.
+    Yuv444p12,
+    /// 16 bits, 4:4:4, U and V interleaved (VideoToolbox's ProRes 4444).
+    P416,
 }
 
 impl Layout {
@@ -43,6 +48,8 @@ impl Layout {
             P::YUV422P | P::YUVJ422P => Self::Yuv422p,
             P::YUV422P10LE => Self::Yuv422p10,
             P::P210LE => Self::P210,
+            P::YUV444P12LE | P::YUVA444P12LE => Self::Yuv444p12,
+            P::P416LE => Self::P416,
             _ => Self::Yuv420p,
         }
     }
@@ -330,5 +337,20 @@ mod tests {
     #[test]
     fn p210le_pictures_are_10_bit_interleaved_4_2_2() {
         assert_eq!(Layout::of(Pixel::P210LE), Layout::P210);
+    }
+
+    #[test]
+    fn yuv444p12le_pictures_are_12_bit_planar_4_4_4() {
+        assert_eq!(Layout::of(Pixel::YUV444P12LE), Layout::Yuv444p12);
+    }
+
+    #[test]
+    fn yuva444p12le_pictures_are_12_bit_planar_4_4_4_without_their_alpha() {
+        assert_eq!(Layout::of(Pixel::YUVA444P12LE), Layout::Yuv444p12);
+    }
+
+    #[test]
+    fn p416le_pictures_are_16_bit_interleaved_4_4_4() {
+        assert_eq!(Layout::of(Pixel::P416LE), Layout::P416);
     }
 }

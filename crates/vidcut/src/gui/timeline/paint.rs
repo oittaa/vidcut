@@ -129,7 +129,7 @@ pub fn ruler(
     smart: Option<i64>,
     compact: bool,
 ) {
-    painter.rect_filled(rect, CornerRadius::ZERO, theme::PANEL_DARK);
+    painter.rect_filled(rect, CornerRadius::ZERO, theme::colors().panel_dark);
     let fps = p.settings.fps;
     let f = fps.as_f64();
     let s = step(scale, f, if compact { 110.0 } else { 90.0 });
@@ -142,14 +142,14 @@ pub fn ruler(
         if x >= rect.left() - 1.0 {
             painter.line_segment(
                 [pos2(x, rect.bottom() - 5.0), pos2(x, rect.bottom())],
-                Stroke::new(1.0, theme::TEXT_DIM),
+                Stroke::new(1.0, theme::colors().text_dim),
             );
             painter.text(
                 pos2(x + 3.0, rect.top() + 1.0),
                 Align2::LEFT_TOP,
                 p.settings.timecode(frame),
                 FontId::monospace(if compact { 9.0 } else { 10.0 }),
-                theme::TEXT_DIM,
+                theme::colors().text_dim,
             );
         }
         t += s;
@@ -205,9 +205,9 @@ pub fn ruler(
         // the edit. It holds still (deviation X15).
         let x = scale.xf(e);
         let color = if ops::edit_has_handles(p, e) {
-            theme::OK
+            theme::colors().ok
         } else {
-            theme::ERROR
+            theme::colors().error
         };
         painter.add(egui::Shape::convex_polygon(
             vec![
@@ -236,9 +236,9 @@ pub fn track(
 ) {
     let rect = tr.rect;
     let fill = if look.target {
-        theme::TRACK_TARGET
+        theme::colors().track_target
     } else {
-        theme::TRACK
+        theme::colors().track
     };
     painter.rect_filled(rect, CornerRadius::ZERO, fill);
     let (a, b) = scale.visible(rect.left(), rect.right());
@@ -316,27 +316,28 @@ fn clip(
     let media = assets.pool.get(c.media.as_str()).copied();
     let tint = c.shown_color(media).and_then(theme::clip_color);
     let fill = if offline {
-        theme::OFFLINE
+        theme::colors().offline
     } else if !enabled {
-        theme::CLIP_DISABLED
+        theme::colors().clip_disabled
     } else if let Some(t) = tint {
         t
     } else if c.is_generator() {
-        theme::GENERATOR
+        theme::colors().generator
     } else if c.compound.is_some() {
-        theme::COMPOUND
+        theme::colors().compound
     } else {
-        theme::CLIP
+        theme::colors().clip
     };
     // Audio-only clips (and audio tracks) have no picture band.
     let has_picture = c.video && video.height() > 2.0;
+    let corners = theme::clip_corners();
     if has_picture {
-        painter.rect_filled(parted(video), CornerRadius::same(2), fill);
+        painter.rect_filled(parted(video), corners, fill);
     } else if video.height() > 2.0 {
         painter.rect_stroke(
             video.shrink(1.0),
-            CornerRadius::same(2),
-            Stroke::new(1.0, theme::CLIP_DISABLED),
+            corners,
+            Stroke::new(1.0, theme::colors().clip_disabled),
             StrokeKind::Inside,
         );
     }
@@ -359,13 +360,13 @@ fn clip(
         );
         // Its Clip Color over the pictures.
         if let Some(t) = tint {
-            painter.rect_filled(parted(video), CornerRadius::same(2), t.gamma_multiply(0.35));
+            painter.rect_filled(parted(video), corners, t.gamma_multiply(0.35));
         }
     }
     // A compound clip's sound: a block on the audio band.
     if c.compound.is_some() && !c.video {
         let band = Rect::from_x_y_ranges(x0..=x1, tr.audio_top..=rect.bottom());
-        painter.rect_filled(parted(band), CornerRadius::same(2), fill);
+        painter.rect_filled(parted(band), corners, fill);
     }
     // Audio, offset by J/L cuts.
     if let Some((ra, rb)) = c.audio_range() {
@@ -373,17 +374,17 @@ fn clip(
         let audio = Rect::from_x_y_ranges(a0..=a1, tr.audio_top..=rect.bottom());
         let muted = c.audio.as_ref().is_some_and(|x| x.muted) || t.muted;
         let color = if offline {
-            theme::OFFLINE
+            theme::colors().offline
         } else if muted {
-            theme::CLIP_DISABLED
+            theme::colors().clip_disabled
         } else if let Some(t) = tint {
             let dim = |v: u8| (f32::from(v) * 0.8) as u8;
             Color32::from_rgb(dim(t.r()), dim(t.g()), dim(t.b()))
         } else {
-            theme::AUDIO
+            theme::colors().audio
         };
         let ap = track_painter.with_clip_rect(rect.intersect(audio.expand(1.0)));
-        ap.rect_filled(parted(audio), CornerRadius::same(2), color);
+        ap.rect_filled(parted(audio), corners, color);
         if look.waveforms && !muted && !offline && audio.height() >= 8.0 {
             waveform(&ap, audio, scale, p, c, assets, fps);
         }
@@ -393,7 +394,7 @@ fn clip(
                 Align2::LEFT_CENTER,
                 "muted",
                 FontId::proportional(9.0),
-                theme::TEXT_DIM,
+                theme::colors().text_dim,
             );
         }
         if look.status
@@ -461,7 +462,7 @@ fn clip(
         let status = if offline {
             Some(("offline", Color32::WHITE))
         } else {
-            (!c.enabled).then_some(("disabled", theme::TEXT_DIM))
+            (!c.enabled).then_some(("disabled", theme::colors().text_dim))
         };
         let band = if has_picture { Some(video) } else { None };
         if let (Some((text, color)), Some(band)) = (status, band) {
@@ -478,7 +479,7 @@ fn clip(
         painter.rect_stroke(
             Rect::from_x_y_ranges(x0..=x1, rect.y_range()),
             CornerRadius::same(2),
-            Stroke::new(2.0, theme::ACCENT),
+            Stroke::new(2.0, theme::colors().accent),
             StrokeKind::Inside,
         );
     }
@@ -564,14 +565,14 @@ fn speed_badge(painter: &Painter, band: Rect, speed: &Speed) {
 
 /// `text` small on a dark tag, where `at` puts it for its size.
 fn tag(painter: &Painter, text: String, at: impl FnOnce(egui::Vec2) -> Pos2) {
-    let galley = painter.layout_no_wrap(text, FontId::proportional(9.0), theme::ACCENT);
+    let galley = painter.layout_no_wrap(text, FontId::proportional(9.0), theme::colors().accent);
     let pos = at(galley.size());
     painter.rect_filled(
         Rect::from_min_size(pos - vec2(2.0, 0.0), galley.size() + vec2(4.0, 1.0)),
         CornerRadius::same(2),
         Color32::from_black_alpha(140),
     );
-    painter.galley(pos, galley, theme::ACCENT);
+    painter.galley(pos, galley, theme::colors().accent);
 }
 
 /// Pool thumbnails tiled along a clip, each from the source time at its place.
@@ -704,6 +705,7 @@ fn waveform(
 
 /// The playhead line (and its handle on the ruler).
 pub fn playhead(painter: &Painter, x: f32, ruler: Rect, bottom: f32, color: Color32) {
+    theme::playhead_glow(painter, [pos2(x, ruler.top()), pos2(x, bottom)], color);
     painter.line_segment(
         [pos2(x, ruler.top()), pos2(x, bottom)],
         Stroke::new(1.5, color),
@@ -739,7 +741,7 @@ pub fn preview(painter: &Painter, rows: &Rows, scale: &Scale, p: &Project, pv: &
             Align2::LEFT_CENTER,
             format!("new track {track}"),
             FontId::proportional(10.0),
-            theme::TEXT_DIM,
+            theme::colors().text_dim,
         );
     }
     let span = |a: i64, b: i64| Rect::from_x_y_ranges(scale.xf(a)..=scale.xf(b), rect.y_range());

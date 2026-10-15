@@ -214,13 +214,15 @@ impl Gpu {
         })
     }
 
-    /// Takes `images` (just imported, not yet used by wgpu) over from the API
-    /// or device that wrote them (`source`), into `layout` for `access` at
-    /// `stage`, in a command buffer of its own submitted on wgpu's queue:
-    /// work submitted after it finds them so ([`super::acquire::Acquirer`]).
+    /// Takes `images` over from the API or device that wrote them
+    /// (`source`), into `layout` for `access` at `stage`, in a command
+    /// buffer of its own for wgpu's queue: work submitted after it finds
+    /// them so ([`super::acquire::Acquirer`]). The draw submits it ahead of
+    /// its own.
     ///
     /// # Safety
-    /// The images are this device's, on memory another API wrote.
+    /// The images are this device's, on memory another API wrote. wgpu
+    /// hasn't used them, or left them in `layout`.
     #[cfg(any(target_os = "linux", windows))]
     unsafe fn acquire(
         &self,
@@ -229,7 +231,7 @@ impl Gpu {
         stage: ash::vk::PipelineStageFlags,
         access: ash::vk::AccessFlags,
         source: super::acquire::Source,
-    ) -> Result<(), String> {
+    ) -> Result<wgpu::CommandBuffer, String> {
         let acquirer = self
             .acquirer
             .get_or_init(|| {
@@ -255,8 +257,7 @@ impl Gpu {
             })
         };
         recorded.ok_or("not Vulkan")?;
-        self.queue.submit([encoder.finish()]);
-        Ok(())
+        Ok(encoder.finish())
     }
 
     /// Runs `f`, which makes textures or views, the device's validation
@@ -346,6 +347,8 @@ pub struct Screen {
     drawn: Option<Option<Arc<Picture>>>,
     /// Each layer's: the first the picture's own, then those over it.
     slots: Vec<Slot>,
+    /// Pictures the slots let go of had imported.
+    imports_before: u64,
 }
 
 /// One picture's planes on the GPU and how they got there.
@@ -374,6 +377,14 @@ struct Slot {
     views: Option<(wgpu::TextureView, wgpu::TextureView, (u32, u32))>,
     /// The V plane of the picture being drawn, imported (Vulkan's).
     v_view: Option<wgpu::TextureView>,
+    /// The acquire of the picture being drawn, imported: submitted ahead of
+    /// the draw.
+    acquired: Option<wgpu::CommandBuffer>,
+    /// The imports of Vulkan's frames it keeps.
+    #[cfg(any(target_os = "linux", windows))]
+    kept: super::vulkan::Imports,
+    /// Pictures imported from GPU memory so far.
+    imports: u64,
     /// The last picture in GPU memory was copied on the GPU, not down.
     last_shared: bool,
 }
@@ -403,6 +414,13 @@ impl Screen {
     /// copied down.
     pub fn shared(&self) -> bool {
         self.slots.first().is_some_and(|s| s.last_shared)
+    }
+
+    /// How many pictures it has imported from GPU memory: each picture of
+    /// VA-API's, Direct3D 11's or VideoToolbox's drawn, and each frame of
+    /// Vulkan's the first time it is drawn.
+    pub fn imports(&self) -> u64 {
+        self.imports_before + self.slots.iter().map(|s| s.imports).sum::<u64>()
     }
 
     /// Draws `picture` (`None`: black) into a `width`×`height` target, as
@@ -448,6 +466,17 @@ impl Screen {
             .collect();
         if self.slots.len() < layers.len() {
             self.slots.resize_with(layers.len(), Slot::default);
+        }
+        // Vulkan's frames are kept imported while their pictures are drawn:
+        // by each slot, while its picture is Vulkan's.
+        #[cfg(any(target_os = "linux", windows))]
+        for (i, slot) in self.slots.iter_mut().enumerate() {
+            if layers
+                .get(i)
+                .is_none_or(|(p, _)| p.gpu() != Some(Kind::Vulkan))
+            {
+                slot.kept.clear();
+            }
         }
         let mut encoder = gpu
             .device
@@ -496,13 +525,21 @@ impl Screen {
                 pass.draw(0..3, 0..1);
             }
         }
-        gpu.queue.submit([encoder.finish()]);
+        // The acquires of the pictures imported go ahead of the draw.
+        let acquired: Vec<wgpu::CommandBuffer> = self.slots[..layers.len()]
+            .iter_mut()
+            .filter_map(|s| s.acquired.take())
+            .collect();
+        gpu.queue
+            .submit(acquired.into_iter().chain([encoder.finish()]));
         for slot in &mut self.slots[..layers.len()] {
             slot.submitted(gpu);
         }
         // A dissolve's pictures over the first let go of their planes and
         // buffers once it is over (wgpu keeps what a draw in flight reads).
-        self.slots.truncate(layers.len().max(1));
+        let keep = layers.len().max(1);
+        self.imports_before += self.slots.iter().skip(keep).map(|s| s.imports).sum::<u64>();
+        self.slots.truncate(keep);
         self.drawn = Some(picture.cloned());
         drawn
     }
@@ -676,8 +713,14 @@ impl Slot {
                 wgpu::TextureFormat::Rg16Unorm,
             ),
             Layout::P010 => return Err("no 16-bit textures for P010".into()),
-            Layout::P210 => return Err("P210 pictures aren't VA-API's".into()),
-            Layout::Yuv420p | Layout::Yuv420p10 | Layout::Yuv422p | Layout::Yuv422p10 => {
+            layout @ (Layout::P210 | Layout::P416) => {
+                return Err(format!("{layout:?} pictures aren't VA-API's"));
+            }
+            Layout::Yuv420p
+            | Layout::Yuv420p10
+            | Layout::Yuv422p
+            | Layout::Yuv422p10
+            | Layout::Yuv444p12 => {
                 return Err("planar pictures aren't VA-API's".into());
             }
         };
@@ -771,13 +814,13 @@ impl Slot {
             if images.len() != textures.len() {
                 return Err("not Vulkan".into());
             }
-            gpu.acquire(
+            self.acquired = Some(gpu.acquire(
                 &images,
                 ash::vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
                 ash::vk::PipelineStageFlags::TRANSFER,
                 ash::vk::AccessFlags::TRANSFER_READ,
                 super::acquire::Source::Api,
-            )?;
+            )?);
         }
         for (imported, size, texture) in textures {
             // wgpu keeps the texture until the copy is done.
@@ -788,6 +831,7 @@ impl Slot {
             );
         }
         self.imported = Some(picture.clone());
+        self.imports += 1;
         Ok(())
     }
 
@@ -818,8 +862,14 @@ impl Slot {
                 wgpu::TextureFormat::Rg16Unorm,
             ),
             Layout::P010 => return Err("no P010 or 16-bit textures for P010".into()),
-            Layout::P210 => return Err("P210 pictures aren't Direct3D 11's".into()),
-            Layout::Yuv420p | Layout::Yuv420p10 | Layout::Yuv422p | Layout::Yuv422p10 => {
+            layout @ (Layout::P210 | Layout::P416) => {
+                return Err(format!("{layout:?} pictures aren't Direct3D 11's"));
+            }
+            Layout::Yuv420p
+            | Layout::Yuv420p10
+            | Layout::Yuv422p
+            | Layout::Yuv422p10
+            | Layout::Yuv444p12 => {
                 return Err("planar pictures aren't Direct3D 11's".into());
             }
         };
@@ -915,136 +965,81 @@ impl Slot {
         // SAFETY: the image of a texture just made on wgpu's device, which
         // hasn't used it.
         unsafe {
-            gpu.acquire(
+            self.acquired = Some(gpu.acquire(
                 &[image.ok_or("not Vulkan")?],
                 ash::vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 ash::vk::PipelineStageFlags::FRAGMENT_SHADER,
                 ash::vk::AccessFlags::SHADER_READ,
                 super::acquire::Source::Api,
-            )?;
+            )?);
         }
         self.views = Some((y, uv, (desc.Width, desc.Height)));
         self.imported = Some(picture.clone());
+        self.imports += 1;
         Ok(())
     }
 
     /// Shows a picture in Vulkan memory (ProRes FFmpeg decoded on NVIDIA's
-    /// GPU) from there: each plane's memory, exported by FFmpeg's Vulkan
-    /// device, imported by wgpu's into an image made as FFmpeg made its own
-    /// ([`super::vulkan`]), acquired from the layout FFmpeg left the images
-    /// in, and drawn from in place of the planes' textures (`views`,
-    /// `v_view`). Each picture drawn is imported anew. The picture is held
+    /// GPU) from there: its frame's planes imported by wgpu's device the
+    /// first time it is drawn ([`import_vulkan_frame`]) and kept (`kept`),
+    /// acquired from the layout FFmpeg left the images in, and drawn from in
+    /// place of the planes' textures (`views`, `v_view`). The picture is held
     /// until the drawing is done (`imported`), so FFmpeg doesn't decode into
     /// its images under it.
     #[cfg(any(target_os = "linux", windows))]
     fn import_vulkan(&mut self, gpu: &Gpu, picture: &Arc<Picture>) -> Result<(), String> {
-        use wgpu::hal::api::Vulkan;
         if !gpu.shares {
             return Err("the display's device imports no Vulkan memory".into());
         }
         match picture.layout() {
-            Layout::Yuv420p10 | Layout::Yuv422p10 if gpu.wide => {}
-            Layout::Yuv420p10 | Layout::Yuv422p10 => {
-                return Err("no 16-bit textures for 10-bit planes".into());
+            Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12 if gpu.wide => {}
+            Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12 => {
+                return Err("no 16-bit textures for 10- and 12-bit planes".into());
             }
             layout @ (Layout::Nv12
             | Layout::P010
             | Layout::P210
+            | Layout::P416
             | Layout::Yuv420p
             | Layout::Yuv422p) => return Err(format!("{layout:?} pictures aren't Vulkan's")),
         }
-        let exported =
-            vidcut_av::hw::vulkan::Exported::of(picture.frame()).map_err(|e| e.to_string())?;
-        if exported.planes.len() != 3 {
-            return Err(format!("a picture of {} planes", exported.planes.len()));
-        }
-        let left_in = exported.layout;
-        let families = exported.planes[0].families.clone();
-        let concurrent = families.len() > 1;
-        let label = Some("vidcut Vulkan plane");
-        // SAFETY: wgpu's own device, on the GPU and driver FFmpeg's is on
-        // (checked first); each plane imported into an image made as
-        // FFmpeg made its own, which wgpu then owns.
-        let raws = unsafe {
-            let hal = gpu.device.as_hal::<Vulkan>().ok_or("not Vulkan")?;
-            if super::vulkan::uuids(&hal) != (exported.device_uuid, exported.driver_uuid) {
-                return Err("FFmpeg's Vulkan device isn't on the display's GPU".into());
-            }
-            if concurrent && !families.contains(&hal.queue_family_index()) {
-                return Err("FFmpeg's planes aren't shared with the display's queue".into());
-            }
-            let imported = exported
-                .planes
-                .into_iter()
-                .map(|plane| super::vulkan::import(&hal, plane))
-                .collect::<Result<Vec<_>, _>>()?;
-            imported
-                .into_iter()
-                .map(|plane| plane.into_hal(&hal, label))
-                .collect::<Vec<_>>()
-        };
-        // wgpu's textures first, as for VA-API's.
-        let textures = gpu.checked(|| {
-            raws.into_iter()
-                .map(|(raw, size, format)| {
-                    // SAFETY: made on this device, as described, and in the
-                    // layout shaders sample before wgpu reads it (acquired
-                    // below).
-                    unsafe {
-                        gpu.device.create_texture_from_hal::<Vulkan>(
-                            raw,
-                            &wgpu::TextureDescriptor {
-                                label,
-                                size,
-                                mip_level_count: 1,
-                                sample_count: 1,
-                                dimension: wgpu::TextureDimension::D2,
-                                format,
-                                usage: wgpu::TextureUsages::TEXTURE_BINDING,
-                                view_formats: &[],
-                            },
-                            wgpu::TextureUses::RESOURCE,
-                        )
-                    }
-                })
-                .collect::<Vec<_>>()
-        })?;
+        let frame = picture.frame();
+        let identity = vidcut_av::hw::vulkan::Identity::of(frame).map_err(|e| e.to_string())?;
+        let (import, new) = self
+            .kept
+            .get_or_import(identity, || import_vulkan_frame(gpu, frame))?;
+        let left_in = vidcut_av::hw::vulkan::layout(frame).map_err(|e| e.to_string())?;
         // Taken over from FFmpeg's device with the picture they hold, ready
         // to sample.
-        // SAFETY: the images of textures just made on wgpu's device, which
-        // hasn't used them; only their handles are read.
-        unsafe {
-            let images: Vec<_> = textures
-                .iter()
-                .filter_map(|t| t.as_hal::<Vulkan>().map(|t| t.raw_handle()))
-                .collect();
-            if images.len() != textures.len() {
-                return Err("not Vulkan".into());
-            }
+        // SAFETY: the images of textures of wgpu's device, on the memory
+        // FFmpeg's device decoded into. wgpu left them as shaders sample
+        // them, if it used them.
+        let acquired = unsafe {
             gpu.acquire(
-                &images,
+                &import.images,
                 ash::vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 ash::vk::PipelineStageFlags::FRAGMENT_SHADER,
                 ash::vk::AccessFlags::SHADER_READ,
                 super::acquire::Source::Vulkan {
-                    concurrent,
+                    concurrent: import.concurrent,
                     layout: left_in,
                 },
-            )?;
-        }
+            )?
+        };
         // FFmpeg finds them where wgpu left them, as long as it holds them.
         vidcut_av::hw::vulkan::acquired_outside(
-            picture.frame(),
+            frame,
             ash::vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
         )
         .map_err(|e| e.to_string())?;
-        let [y, u, v] = &textures[..] else {
-            return Err(format!("a picture of {} planes", textures.len()));
-        };
-        let view = |t: &wgpu::Texture| t.create_view(&Default::default());
-        self.views = Some((view(y), view(u), (y.width(), y.height())));
-        self.v_view = Some(view(v));
+        let [y, u, v] = &import.views;
+        self.views = Some((y.clone(), u.clone(), import.size));
+        self.v_view = Some(v.clone());
+        self.acquired = Some(acquired);
         self.imported = Some(picture.clone());
+        if new {
+            self.imports += 1;
+        }
         Ok(())
     }
 
@@ -1074,13 +1069,18 @@ impl Slot {
                 (MTLPixelFormat::R8Unorm, F::R8Unorm),
                 (MTLPixelFormat::RG8Unorm, F::Rg8Unorm),
             ],
-            Layout::P010 | Layout::P210 if gpu.wide => [
+            Layout::P010 | Layout::P210 | Layout::P416 if gpu.wide => [
                 (MTLPixelFormat::R16Unorm, F::R16Unorm),
                 (MTLPixelFormat::RG16Unorm, F::Rg16Unorm),
             ],
-            Layout::P010 => return Err("no 16-bit textures for P010".into()),
-            Layout::P210 => return Err("no 16-bit textures for P210".into()),
-            Layout::Yuv420p | Layout::Yuv420p10 | Layout::Yuv422p | Layout::Yuv422p10 => {
+            layout @ (Layout::P010 | Layout::P210 | Layout::P416) => {
+                return Err(format!("no 16-bit textures for {layout:?}"));
+            }
+            Layout::Yuv420p
+            | Layout::Yuv420p10
+            | Layout::Yuv422p
+            | Layout::Yuv422p10
+            | Layout::Yuv444p12 => {
                 return Err("planar pictures aren't VideoToolbox's".into());
             }
         };
@@ -1158,6 +1158,7 @@ impl Slot {
         let ((y, size), (uv, _)) = (y?, uv?);
         self.views = Some((y, uv, size));
         self.imported = Some(picture.clone());
+        self.imports += 1;
         Ok(())
     }
 
@@ -1178,7 +1179,12 @@ impl Slot {
             Layout::P010 if gpu.wide => 2,
             Layout::P010 => return Err("no 16-bit textures for P010".into()),
             Layout::P210 => return Ok(false),
-            Layout::Yuv420p | Layout::Yuv420p10 | Layout::Yuv422p | Layout::Yuv422p10 => {
+            Layout::P416 => return Err("P416 pictures aren't NVDEC's".into()),
+            Layout::Yuv420p
+            | Layout::Yuv420p10
+            | Layout::Yuv422p
+            | Layout::Yuv422p10
+            | Layout::Yuv444p12 => {
                 return Err("planar pictures aren't NVDEC's".into());
             }
         };
@@ -1280,15 +1286,17 @@ impl Slot {
                 })
             };
             self.planes = Some(match layout {
-                Layout::Yuv420p | Layout::Yuv420p10 | Layout::Yuv422p | Layout::Yuv422p10 => {
-                    Planes {
-                        key,
-                        y: make((w, h), one),
-                        u: make((cw, ch), one),
-                        v: make((cw, ch), one),
-                    }
-                }
-                Layout::Nv12 | Layout::P010 | Layout::P210 => Planes {
+                Layout::Yuv420p
+                | Layout::Yuv420p10
+                | Layout::Yuv422p
+                | Layout::Yuv422p10
+                | Layout::Yuv444p12 => Planes {
+                    key,
+                    y: make((w, h), one),
+                    u: make((cw, ch), one),
+                    v: make((cw, ch), one),
+                },
+                Layout::Nv12 | Layout::P010 | Layout::P210 | Layout::P416 => Planes {
                     key,
                     y: make((w, h), one),
                     u: make((cw, ch), two),
@@ -1319,14 +1327,15 @@ impl Slot {
                 put(&planes.u, 1, (cw, ch), 1);
                 put(&planes.v, 2, (cw, ch), 1);
             }
-            (Layout::Yuv420p10 | Layout::Yuv422p10, true) => {
+            (Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12, true) => {
                 put(&planes.y, 0, (w, h), 2);
                 put(&planes.u, 1, (cw, ch), 2);
                 put(&planes.v, 2, (cw, ch), 2);
             }
-            // Without 16-bit textures: the top 8 of each sample's 10 bits,
-            // which are the low bits of 16.
-            (Layout::Yuv420p10 | Layout::Yuv422p10, false) => {
+            // Without 16-bit textures: the top 8 of each sample's 10 or 12
+            // bits, which are the low bits of 16.
+            (Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12, false) => {
+                let shift = if layout == Layout::Yuv444p12 { 4 } else { 2 };
                 for (texture, plane, size) in [
                     (&planes.y, 0, (w, h)),
                     (&planes.u, 1, (cw, ch)),
@@ -1342,7 +1351,7 @@ impl Slot {
                             line.as_chunks::<2>()
                                 .0
                                 .iter()
-                                .map(|s| (u16::from_le_bytes(*s) >> 2) as u8),
+                                .map(|s| (u16::from_le_bytes(*s) >> shift) as u8),
                         );
                     }
                     write_plane(&gpu.queue, texture, &top, row, size, 1);
@@ -1352,12 +1361,12 @@ impl Slot {
                 put(&planes.y, 0, (w, h), 1);
                 put(&planes.u, 1, (cw, ch), 2);
             }
-            (Layout::P010 | Layout::P210, true) => {
+            (Layout::P010 | Layout::P210 | Layout::P416, true) => {
                 put(&planes.y, 0, (w, h), 2);
                 put(&planes.u, 1, (cw, ch), 4);
             }
             // Without 16-bit textures: the high byte of each sample.
-            (Layout::P010 | Layout::P210, false) => {
+            (Layout::P010 | Layout::P210 | Layout::P416, false) => {
                 for (texture, plane, size, samples) in
                     [(&planes.y, 0, (w, h), 1), (&planes.u, 1, (cw, ch), 2)]
                 {
@@ -1465,6 +1474,95 @@ fn make_target(device: &wgpu::Device, size: (u32, u32)) -> Target {
     }
 }
 
+/// `frame`, in Vulkan memory, imported by wgpu's device: each plane's
+/// memory, exported by FFmpeg's Vulkan device, imported into an image made
+/// as FFmpeg made its own ([`super::vulkan`]), which a texture of wgpu's
+/// then owns.
+#[cfg(any(target_os = "linux", windows))]
+fn import_vulkan_frame(
+    gpu: &Gpu,
+    frame: &vidcut_av::ffmpeg::frame::Video,
+) -> Result<super::vulkan::Import, String> {
+    use wgpu::hal::api::Vulkan;
+    let exported = vidcut_av::hw::vulkan::Exported::of(frame).map_err(|e| e.to_string())?;
+    // Y, U, V, and alpha, which the shader doesn't read. It is imported to
+    // be acquired with the rest: FFmpeg records one layout for all.
+    if !(3..=4).contains(&exported.planes.len()) {
+        return Err(format!("a picture of {} planes", exported.planes.len()));
+    }
+    let families = exported.planes[0].families.clone();
+    let concurrent = families.len() > 1;
+    let label = Some("vidcut Vulkan plane");
+    // SAFETY: wgpu's own device, on the GPU and driver FFmpeg's is on
+    // (checked first); each plane imported into an image made as FFmpeg
+    // made its own, which wgpu then owns.
+    let raws = unsafe {
+        let hal = gpu.device.as_hal::<Vulkan>().ok_or("not Vulkan")?;
+        if super::vulkan::uuids(&hal) != (exported.device_uuid, exported.driver_uuid) {
+            return Err("FFmpeg's Vulkan device isn't on the display's GPU".into());
+        }
+        if concurrent && !families.contains(&hal.queue_family_index()) {
+            return Err("FFmpeg's planes aren't shared with the display's queue".into());
+        }
+        let imported = exported
+            .planes
+            .into_iter()
+            .map(|plane| super::vulkan::import(&hal, plane))
+            .collect::<Result<Vec<_>, _>>()?;
+        imported
+            .into_iter()
+            .map(|plane| plane.into_hal(&hal, label))
+            .collect::<Vec<_>>()
+    };
+    // wgpu's textures first, as for VA-API's.
+    let textures = gpu.checked(|| {
+        raws.into_iter()
+            .map(|(raw, size, format)| {
+                // SAFETY: made on this device, as described, and in the
+                // layout shaders sample before wgpu reads it (acquired by
+                // each draw).
+                unsafe {
+                    gpu.device.create_texture_from_hal::<Vulkan>(
+                        raw,
+                        &wgpu::TextureDescriptor {
+                            label,
+                            size,
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: wgpu::TextureDimension::D2,
+                            format,
+                            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                            view_formats: &[],
+                        },
+                        wgpu::TextureUses::RESOURCE,
+                    )
+                }
+            })
+            .collect::<Vec<_>>()
+    })?;
+    // SAFETY: wgpu's own textures; only their handles are read.
+    let images: Vec<_> = unsafe {
+        textures
+            .iter()
+            .filter_map(|t| t.as_hal::<Vulkan>().map(|t| t.raw_handle()))
+            .collect()
+    };
+    if images.len() != textures.len() {
+        return Err("not Vulkan".into());
+    }
+    let [y, u, v, ..] = &textures[..] else {
+        return Err(format!("a picture of {} planes", textures.len()));
+    };
+    let view = |t: &wgpu::Texture| t.create_view(&Default::default());
+    Ok(super::vulkan::Import {
+        images,
+        views: [view(y), view(u), view(v)],
+        size: (y.width(), y.height()),
+        concurrent,
+        _textures: textures,
+    })
+}
+
 /// Copies a plane's rows (`stride` bytes apart, `bytes` per sample) into
 /// `texture`.
 fn write_plane(
@@ -1496,37 +1594,48 @@ fn write_plane(
     );
 }
 
-/// The size of the shader's parameters: nine vectors of four.
-const PARAMS: usize = 9 * 16;
+/// The size of the shader's parameters: ten vectors of four.
+const PARAMS: usize = 10 * 16;
 
 /// Its samples take 16 bits.
 fn sixteen(layout: Layout) -> bool {
     match layout {
         Layout::Yuv420p | Layout::Nv12 | Layout::Yuv422p => false,
-        Layout::P010 | Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::P210 => true,
+        Layout::P010
+        | Layout::Yuv420p10
+        | Layout::Yuv422p10
+        | Layout::P210
+        | Layout::Yuv444p12
+        | Layout::P416 => true,
     }
 }
 
 /// Its U and V are interleaved in one plane.
 fn interleaved(layout: Layout) -> bool {
     match layout {
-        Layout::Nv12 | Layout::P010 | Layout::P210 => true,
-        Layout::Yuv420p | Layout::Yuv420p10 | Layout::Yuv422p | Layout::Yuv422p10 => false,
+        Layout::Nv12 | Layout::P010 | Layout::P210 | Layout::P416 => true,
+        Layout::Yuv420p
+        | Layout::Yuv420p10
+        | Layout::Yuv422p
+        | Layout::Yuv422p10
+        | Layout::Yuv444p12 => false,
     }
 }
 
-/// Luma rows per chroma row: 2 for 4:2:0, 1 for 4:2:2.
-fn rows_per_chroma_row(layout: Layout) -> u32 {
+/// Luma samples per chroma sample, across and down: 2 and 2 for 4:2:0, 2
+/// and 1 for 4:2:2, 1 and 1 for 4:4:4.
+fn per_chroma(layout: Layout) -> (u32, u32) {
     match layout {
-        Layout::Yuv420p | Layout::Nv12 | Layout::P010 | Layout::Yuv420p10 => 2,
-        Layout::Yuv422p | Layout::Yuv422p10 | Layout::P210 => 1,
+        Layout::Yuv420p | Layout::Nv12 | Layout::P010 | Layout::Yuv420p10 => (2, 2),
+        Layout::Yuv422p | Layout::Yuv422p10 | Layout::P210 => (2, 1),
+        Layout::Yuv444p12 | Layout::P416 => (1, 1),
     }
 }
 
-/// The size of its chroma planes in a `w`×`h` picture: half as wide, and
-/// half as tall for 4:2:0.
+/// The size of its chroma planes in a `w`×`h` picture.
 fn chroma_size(layout: Layout, w: u32, h: u32) -> (u32, u32) {
-    (w.div_ceil(2), h.div_ceil(rows_per_chroma_row(layout)))
+    let (across, down) = per_chroma(layout);
+    (w.div_ceil(across), h.div_ceil(down))
 }
 
 /// The shader's parameters for `picture` in a `size` target. `wide`: samples
@@ -1539,13 +1648,16 @@ fn params_of(picture: &Picture, size: (u32, u32), wide: bool, cover: (f64, f64))
     let turns = u32::from(picture.rotation() / 90) % 4;
     let (sw, sh) = (picture.width(), picture.height());
     let upright = if turns % 2 == 1 { (sh, sw) } else { (sw, sh) };
-    // Sample s (0..1) as a code: 8 bits (also the top 8 of 10 without
-    // 16-bit textures), or 10 bits in the high bits of 16 (P010, P210) or
-    // in the low bits (planar).
+    // Sample s (0..1) as a code: 8 bits (also the top 8 of more without
+    // 16-bit textures), 10 bits in the high bits of 16 (P010, P210) or in
+    // the low bits (planar), 12 bits in the low bits (planar), or 16 bits
+    // (P416).
     let layout = picture.layout();
     let (code, max): (f64, f64) = match (layout, wide && sixteen(layout)) {
         (Layout::P010 | Layout::P210, true) => (65535.0 / 64.0, 1023.0),
         (Layout::Yuv420p10 | Layout::Yuv422p10, true) => (65535.0, 1023.0),
+        (Layout::Yuv444p12, true) => (65535.0, 4095.0),
+        (Layout::P416, true) => (65535.0, 65535.0),
         _ => (255.0, 255.0),
     };
     let unit = (max + 1.0) / 256.0;
@@ -1578,7 +1690,8 @@ fn params_of(picture: &Picture, size: (u32, u32), wide: bool, cover: (f64, f64))
         out.extend_from_slice(&(*v as f32).to_le_bytes());
     }
     let uv = u32::from(interleaved(layout));
-    for v in [hdr, turns, uv, rows_per_chroma_row(layout)] {
+    let (across, down) = per_chroma(layout);
+    for v in [hdr, turns, uv, 0, across, down, 0, 0] {
         out.extend_from_slice(&v.to_le_bytes());
     }
     out
