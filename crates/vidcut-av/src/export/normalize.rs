@@ -300,30 +300,53 @@ fn simple_graph(args: &str, spec: &str) -> Result<filter::Graph> {
     Ok(graph)
 }
 
-/// The layouts a display takes: 8-bit 4:2:0 (planar, or NV12 as hardware
-/// decoders give it) and P010 for more bits.
+/// The layouts a display takes: 4:2:0 in 8 bits (planar, or NV12 as
+/// hardware decoders give it) and in 10 (P010, or planar as the CPU's
+/// decoders give it), and planar 4:2:2 in 8 and 10 bits.
 pub(crate) fn displayable(p: format::Pixel) -> bool {
     use format::Pixel as P;
-    matches!(p, P::YUV420P | P::YUVJ420P | P::NV12 | P::P010LE)
+    matches!(
+        p,
+        P::YUV420P
+            | P::YUVJ420P
+            | P::NV12
+            | P::P010LE
+            | P::YUV420P10LE
+            | P::YUV422P
+            | P::YUVJ422P
+            | P::YUV422P10LE
+    )
 }
 
 /// Brings decoded pictures into a layout a display takes, at their own size
-/// and in their own colors: 4:2:2, 4:4:4 and 10-bit planar pictures are
-/// resampled to 4:2:0 (8 bits, or P010 for more), keeping their matrix and
-/// range; RGB pictures (images) are coded as BT.709 video range. Pictures
-/// already in such a layout pass as they are, by reference.
+/// and in their own colors. Pictures in other layouts (4:4:4, more than 10
+/// bits) are resampled to 4:2:0 (8 bits, or P010 for more), keeping their
+/// matrix and range. RGB pictures (images) are coded as BT.709 video range.
+/// Pictures already in such a layout pass as they are, by reference.
 pub(crate) struct Relayout {
+    /// The layouts that pass.
+    passes: fn(format::Pixel) -> bool,
     graph: Option<(filter::Graph, (u32, u32, format::Pixel))>,
 }
 
 impl Relayout {
+    /// Into a layout a display takes ([`displayable`]).
     pub(crate) fn new() -> Self {
-        Self { graph: None }
+        Self::passing(displayable)
+    }
+
+    /// Into a layout `passes` takes, which must take 8-bit 4:2:0 and P010:
+    /// what the pictures in other layouts become.
+    pub(crate) fn passing(passes: fn(format::Pixel) -> bool) -> Self {
+        Self {
+            passes,
+            graph: None,
+        }
     }
 
     pub(crate) fn run(&mut self, src: &frame::Video) -> Result<frame::Video> {
         let fmt = src.format();
-        if displayable(fmt) {
+        if (self.passes)(fmt) {
             return frame_ref(src);
         }
         let key = (src.width(), src.height(), fmt);
@@ -398,8 +421,52 @@ impl Relayout {
 
 #[cfg(test)]
 mod tests {
-    use super::{fit, shown_size};
-    use crate::ffmpeg::{format::Pixel, frame};
+    use super::{Relayout, displayable, fit, shown_size};
+    use crate::ffmpeg::{color, format::Pixel, frame};
+
+    #[test]
+    fn a_display_takes_10_bit_planar_4_2_0() {
+        assert!(displayable(Pixel::YUV420P10LE));
+    }
+
+    #[test]
+    fn a_display_takes_8_bit_planar_4_2_2() {
+        assert!(displayable(Pixel::YUV422P));
+    }
+
+    #[test]
+    fn a_display_takes_full_range_8_bit_planar_4_2_2() {
+        assert!(displayable(Pixel::YUVJ422P));
+    }
+
+    #[test]
+    fn a_display_takes_10_bit_planar_4_2_2() {
+        assert!(displayable(Pixel::YUV422P10LE));
+    }
+
+    #[test]
+    fn a_picture_brought_to_4_2_0_keeps_its_matrix_and_range() {
+        // An orange in BT.709 video range, 4:4:4. Told nothing, swscale
+        // would convert it to BT.601's numbers.
+        let mut f = frame::Video::new(Pixel::YUV444P, 64, 64);
+        f.set_color_space(color::Space::BT709);
+        f.set_color_range(color::Range::MPEG);
+        f.set_pts(Some(0));
+        for (plane, v) in [(0, 100), (1, 90), (2, 170)] {
+            f.data_mut(plane).fill(v);
+        }
+        let out = Relayout::new().run(&f).unwrap();
+        let samples = |plane: usize, side: usize| -> Vec<u8> {
+            let stride = out.stride(plane);
+            (0..side)
+                .flat_map(|y| out.data(plane)[y * stride..y * stride + side].to_vec())
+                .collect()
+        };
+        assert_eq!(out.format(), Pixel::YUV420P);
+        assert_eq!(samples(0, 64), vec![100; 64 * 64]);
+        assert_eq!(samples(1, 32), vec![90; 32 * 32]);
+        assert_eq!(samples(2, 32), vec![170; 32 * 32]);
+    }
 
     #[test]
     fn a_turned_frame_is_shown_at_a_size_in_its_own_orientation() {

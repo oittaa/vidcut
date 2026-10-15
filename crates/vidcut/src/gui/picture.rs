@@ -29,8 +29,8 @@ pub struct Gpu {
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    /// 16-bit textures (P010 as it is); without them P010 goes up as 8
-    /// bits.
+    /// 16-bit textures, for samples of more than 8 bits as they are.
+    /// Without them those go up as their top 8 bits.
     wide: bool,
     /// The device can share memory with CUDA ([`super::shared`]).
     shares: bool,
@@ -548,7 +548,9 @@ impl Screen {
                 wgpu::TextureFormat::Rg16Unorm,
             ),
             Layout::P010 => return Err("no 16-bit textures for P010".into()),
-            Layout::Yuv420p => return Err("planar pictures aren't VA-API's".into()),
+            Layout::Yuv420p | Layout::Yuv420p10 | Layout::Yuv422p | Layout::Yuv422p10 => {
+                return Err("planar pictures aren't VA-API's".into());
+            }
         };
         let drm =
             vidcut_av::hw::vaapi::DrmFrame::export(picture.frame()).map_err(|e| e.to_string())?;
@@ -686,7 +688,9 @@ impl Screen {
                 wgpu::TextureFormat::Rg16Unorm,
             ),
             Layout::P010 => return Err("no P010 or 16-bit textures for P010".into()),
-            Layout::Yuv420p => return Err("planar pictures aren't Direct3D 11's".into()),
+            Layout::Yuv420p | Layout::Yuv420p10 | Layout::Yuv422p | Layout::Yuv422p10 => {
+                return Err("planar pictures aren't Direct3D 11's".into());
+            }
         };
         // SAFETY: a Direct3D 11 frame holds its texture and its index in it.
         let (texture, index) = unsafe {
@@ -823,7 +827,9 @@ impl Screen {
                 (MTLPixelFormat::RG16Unorm, F::Rg16Unorm),
             ],
             Layout::P010 => return Err("no 16-bit textures for P010".into()),
-            Layout::Yuv420p => return Err("planar pictures aren't VideoToolbox's".into()),
+            Layout::Yuv420p | Layout::Yuv420p10 | Layout::Yuv422p | Layout::Yuv422p10 => {
+                return Err("planar pictures aren't VideoToolbox's".into());
+            }
         };
         // SAFETY: a VideoToolbox frame holds its pixel buffer in `data[3]`,
         // alive as long as the frame, and the buffer its IOSurface.
@@ -917,7 +923,9 @@ impl Screen {
             Layout::Nv12 => 1,
             Layout::P010 if gpu.wide => 2,
             Layout::P010 => return Err("no 16-bit textures for P010".into()),
-            Layout::Yuv420p => return Err("planar pictures aren't NVDEC's".into()),
+            Layout::Yuv420p | Layout::Yuv420p10 | Layout::Yuv422p | Layout::Yuv422p10 => {
+                return Err("planar pictures aren't NVDEC's".into());
+            }
         };
         let (w, h) = (u64::from(picture.width()), u64::from(picture.height()));
         let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
@@ -987,9 +995,9 @@ impl Screen {
     /// they changed.
     fn make_planes(&mut self, gpu: &Gpu, picture: &Picture) {
         let (w, h) = (picture.width(), picture.height());
-        let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
         let layout = picture.layout();
-        let wide = gpu.wide && layout == Layout::P010;
+        let (cw, ch) = chroma_size(layout, w, h);
+        let wide = gpu.wide && sixteen(layout);
         let key = (layout, w, h, wide);
         if self.planes.as_ref().is_none_or(|p| p.key != key) {
             let (one, two) = if wide {
@@ -1017,12 +1025,14 @@ impl Screen {
                 })
             };
             self.planes = Some(match layout {
-                Layout::Yuv420p => Planes {
-                    key,
-                    y: make((w, h), one),
-                    u: make((cw, ch), one),
-                    v: make((cw, ch), one),
-                },
+                Layout::Yuv420p | Layout::Yuv420p10 | Layout::Yuv422p | Layout::Yuv422p10 => {
+                    Planes {
+                        key,
+                        y: make((w, h), one),
+                        u: make((cw, ch), one),
+                        v: make((cw, ch), one),
+                    }
+                }
                 Layout::Nv12 | Layout::P010 => Planes {
                     key,
                     y: make((w, h), one),
@@ -1036,9 +1046,9 @@ impl Screen {
     /// Uploads `picture`'s planes from memory into the planes made for it.
     fn write_planes(&self, gpu: &Gpu, picture: &Picture) {
         let (w, h) = (picture.width(), picture.height());
-        let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
         let layout = picture.layout();
-        let wide = gpu.wide && layout == Layout::P010;
+        let (cw, ch) = chroma_size(layout, w, h);
+        let wide = gpu.wide && sixteen(layout);
         let planes = self.planes.as_ref().expect("made for it");
         let frame = picture.frame();
         let put = |texture: &wgpu::Texture, plane: usize, size: (u32, u32), bytes: u32| {
@@ -1047,10 +1057,39 @@ impl Screen {
             write_plane(&gpu.queue, texture, data, stride, size, bytes);
         };
         match (layout, wide) {
-            (Layout::Yuv420p, _) => {
+            (Layout::Yuv420p | Layout::Yuv422p, _) => {
                 put(&planes.y, 0, (w, h), 1);
                 put(&planes.u, 1, (cw, ch), 1);
                 put(&planes.v, 2, (cw, ch), 1);
+            }
+            (Layout::Yuv420p10 | Layout::Yuv422p10, true) => {
+                put(&planes.y, 0, (w, h), 2);
+                put(&planes.u, 1, (cw, ch), 2);
+                put(&planes.v, 2, (cw, ch), 2);
+            }
+            // Without 16-bit textures: the top 8 of each sample's 10 bits,
+            // which are the low bits of 16.
+            (Layout::Yuv420p10 | Layout::Yuv422p10, false) => {
+                for (texture, plane, size) in [
+                    (&planes.y, 0, (w, h)),
+                    (&planes.u, 1, (cw, ch)),
+                    (&planes.v, 2, (cw, ch)),
+                ] {
+                    let stride = frame.stride(plane);
+                    let data = frame.data(plane);
+                    let row = size.0 as usize;
+                    let mut top = Vec::with_capacity(row * size.1 as usize);
+                    for y in 0..size.1 as usize {
+                        let line = &data[y * stride..y * stride + row * 2];
+                        top.extend(
+                            line.as_chunks::<2>()
+                                .0
+                                .iter()
+                                .map(|s| (u16::from_le_bytes(*s) >> 2) as u8),
+                        );
+                    }
+                    write_plane(&gpu.queue, texture, &top, row, size, 1);
+                }
             }
             (Layout::Nv12, _) => {
                 put(&planes.y, 0, (w, h), 1);
@@ -1201,24 +1240,54 @@ fn write_plane(
 /// The size of the shader's parameters: nine vectors of four.
 const PARAMS: usize = 9 * 16;
 
-/// The shader's parameters for `picture` in a `size` target; `wide`: P010
-/// goes up in 16 bits.
-/// The shader's parameters for `picture` in a `size` target; `cover`: how
-/// much of its texture's width and height the stored picture covers (1 but
-/// for a texture rounded up to even sides).
+/// Its samples take 16 bits.
+fn sixteen(layout: Layout) -> bool {
+    match layout {
+        Layout::Yuv420p | Layout::Nv12 | Layout::Yuv422p => false,
+        Layout::P010 | Layout::Yuv420p10 | Layout::Yuv422p10 => true,
+    }
+}
+
+/// Its U and V are interleaved in one plane.
+fn interleaved(layout: Layout) -> bool {
+    match layout {
+        Layout::Nv12 | Layout::P010 => true,
+        Layout::Yuv420p | Layout::Yuv420p10 | Layout::Yuv422p | Layout::Yuv422p10 => false,
+    }
+}
+
+/// Luma rows per chroma row: 2 for 4:2:0, 1 for 4:2:2.
+fn rows_per_chroma_row(layout: Layout) -> u32 {
+    match layout {
+        Layout::Yuv420p | Layout::Nv12 | Layout::P010 | Layout::Yuv420p10 => 2,
+        Layout::Yuv422p | Layout::Yuv422p10 => 1,
+    }
+}
+
+/// The size of its chroma planes in a `w`×`h` picture: half as wide, and
+/// half as tall for 4:2:0.
+fn chroma_size(layout: Layout, w: u32, h: u32) -> (u32, u32) {
+    (w.div_ceil(2), h.div_ceil(rows_per_chroma_row(layout)))
+}
+
+/// The shader's parameters for `picture` in a `size` target. `wide`: samples
+/// of more than 8 bits go up in 16. `cover`: how much of its texture's width
+/// and height the stored picture covers (1 but for a texture rounded up to
+/// even sides).
 fn params_of(picture: &Picture, size: (u32, u32), wide: bool, cover: (f64, f64)) -> Vec<u8> {
     let colors = shader_colors(picture.colors());
     let (x, y, w, h) = picture.placement(size.0, size.1);
     let turns = u32::from(picture.rotation() / 90) % 4;
     let (sw, sh) = (picture.width(), picture.height());
     let upright = if turns % 2 == 1 { (sh, sw) } else { (sw, sh) };
-    // Sample s (0..1) as a code: 8 bits (also P010's high byte), or P010's
-    // 10 bits in the high bits of 16.
-    let ten = wide && picture.layout() == Layout::P010;
-    let (code, max): (f64, f64) = if ten {
-        (65535.0 / 64.0, 1023.0)
-    } else {
-        (255.0, 255.0)
+    // Sample s (0..1) as a code: 8 bits (also the top 8 of 10 without
+    // 16-bit textures), or 10 bits in the high bits of 16 (P010) or in the
+    // low bits (planar).
+    let layout = picture.layout();
+    let (code, max): (f64, f64) = match (layout, wide && sixteen(layout)) {
+        (Layout::P010, true) => (65535.0 / 64.0, 1023.0),
+        (Layout::Yuv420p10 | Layout::Yuv422p10, true) => (65535.0, 1023.0),
+        _ => (255.0, 255.0),
     };
     let unit = (max + 1.0) / 256.0;
     let (y_off, y_span, c_span) = if colors.full_range {
@@ -1234,7 +1303,6 @@ fn params_of(picture: &Picture, size: (u32, u32), wide: bool, cover: (f64, f64))
         Some(Hdr::Pq) => 1,
         Some(Hdr::Hlg) => 2,
     };
-    let layout = u32::from(picture.layout() != Layout::Yuv420p);
     let g = colors.gamut;
     let floats: [[f64; 4]; 8] = [
         [f64::from(x), f64::from(y), f64::from(w), f64::from(h)],
@@ -1250,7 +1318,8 @@ fn params_of(picture: &Picture, size: (u32, u32), wide: bool, cover: (f64, f64))
     for v in floats.iter().flatten() {
         out.extend_from_slice(&(*v as f32).to_le_bytes());
     }
-    for v in [hdr, turns, layout, 0] {
+    let uv = u32::from(interleaved(layout));
+    for v in [hdr, turns, uv, rows_per_chroma_row(layout)] {
         out.extend_from_slice(&v.to_le_bytes());
     }
     out
