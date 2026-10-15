@@ -14,7 +14,8 @@
 - Every boundary is computed with exact integer math. Audio boundaries use `Rational::frame_to_sample` (i128, rounded), so lengths never drift. For example, 29.97 fps at 48 kHz alternates 1601 and 1602 samples per frame.
 
 **Engine:**
-- For each output frame, it pulls the next video frame from the current piece's decoder, then exactly the audio samples that frame spans from each lane, and encodes them.
+- For each output frame, it pulls the next video frame from the current piece's decoder and makes its picture, then exactly the audio samples that frame spans from each lane.
+- The encoders and the muxer work on a thread of their own (`export/worker.rs`), fed in order through a channel that holds three frames, so decoding and making the next pictures go on while an encoder waits for the GPU. Proxies encode the same way. An error on either thread stops the export with the error a single thread would have met first: after a decoding error the encoders still take the frames handed over before it. A cancel stops them at once.
 - Memory stays flat with the segment count: each reader (video, and each audio lane) has its current file open, plus the next one while it opens. A test with 400 segments checks this, in a process of its own.
 - A two-pass export (§5, Passes) runs the video through the encoder twice: the first time to measure, muxing nothing, then as above.
 
