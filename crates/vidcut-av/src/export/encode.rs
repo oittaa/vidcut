@@ -1439,12 +1439,9 @@ pub fn detect(vulkan: bool) -> Availability {
             check("hevc_videotoolbox", EncoderChoice::VideoToolbox, p, None);
         }
         // For proxies: it opens only on Apple's ProRes hardware.
-        check(
-            "prores_videotoolbox",
-            EncoderChoice::VideoToolbox,
-            format::Pixel::NV12,
-            None,
-        );
+        for &p in nv12_p010 {
+            check("prores_videotoolbox", EncoderChoice::VideoToolbox, p, None);
+        }
     }
     // Each GPU's own (`gpus::list`): NVENC on NVIDIA's CUDA devices; AMF
     // on AMD's adapters (Windows: on Linux it takes AMD's closed driver, and
