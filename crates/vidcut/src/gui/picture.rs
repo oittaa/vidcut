@@ -1049,7 +1049,8 @@ impl Screen {
         }
     }
 
-    /// Uploads `picture`'s planes from memory into the planes made for it.
+    /// Uploads `picture`'s planes from memory into the planes made for it,
+    /// counted as a frame copied up (`vidcut_av::copies`).
     fn write_planes(&self, gpu: &Gpu, picture: &Picture) {
         let (w, h) = (picture.width(), picture.height());
         let layout = picture.layout();
@@ -1057,6 +1058,7 @@ impl Screen {
         let wide = gpu.wide && sixteen(layout);
         let planes = self.planes.as_ref().expect("made for it");
         let frame = picture.frame();
+        vidcut_av::copies::up(frame);
         let put = |texture: &wgpu::Texture, plane: usize, size: (u32, u32), bytes: u32| {
             let stride = frame.stride(plane);
             let data = frame.data(plane);
