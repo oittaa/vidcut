@@ -344,14 +344,17 @@ impl Decoder {
         if dir != Direction::Paused {
             return Ok(false);
         }
-        // Paused, whichever way it last went: at least two seconds behind
-        // the playhead (half the budget at most), so the first steps back
+        // Paused, whichever way it last went: at least two seconds up to
+        // the playhead (half the budget at most, as a seek keeps), so the
+        // first steps back
         // wait for nothing. Nearest first: each window from the keyframe
         // of the latest frame missing up to it, a GOP at a time, so the
         // frames right behind come soonest. Stepping back, that first;
         // otherwise the frame the other plan shows (a switch) first.
         let (min, max) = self.windows(2);
-        let behind = (plan.clamp(focus - min)..focus).rev().find(|&t| missing(t));
+        let behind = (plan.clamp(focus - min + 1)..focus)
+            .rev()
+            .find(|&t| missing(t));
         if !self.back && self.prepare(snap)? {
             return Ok(true);
         }
