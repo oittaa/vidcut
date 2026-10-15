@@ -835,7 +835,8 @@ pub fn resolve_audio(a: &AudioSettings, rate: u32, channels: u16) -> Result<Audi
 }
 
 /// A GPU encoder's own frames, on a device, which frames from memory go up
-/// into: VAAPI's, Vulkan's, and AMF's on a Direct3D 11 decoder's device.
+/// into: VAAPI's, Vulkan's, AMF's on a Direct3D 11 decoder's device, and
+/// VideoToolbox's on a VideoToolbox decoder's.
 pub(crate) struct Upload {
     device: *mut ffi::AVBufferRef,
     pub(crate) frames: *mut ffi::AVBufferRef,
@@ -971,6 +972,44 @@ impl Upload {
         }
     }
 
+    /// Frames on `decoder`'s VideoToolbox device, for its encoders, which
+    /// take the decoder's frames as they are.
+    pub(crate) fn videotoolbox(
+        decoder: &crate::hw::GpuDecoder,
+        sw: format::Pixel,
+        width: u32,
+        height: u32,
+    ) -> Result<Self> {
+        // SAFETY: another reference to the decoder's live device, and
+        // frames FFmpeg allocates on it; both ours to free on failure.
+        unsafe {
+            let mut device = ffi::av_buffer_ref(decoder.as_ptr());
+            if device.is_null() {
+                return Err(Error::Invalid("no memory for the device".into()));
+            }
+            let mut frames = ffi::av_hwframe_ctx_alloc(device);
+            if frames.is_null() {
+                ffi::av_buffer_unref(&mut device);
+                return Err(Error::Invalid("cannot allocate VideoToolbox frames".into()));
+            }
+            let fc = &mut *((*frames).data as *mut ffi::AVHWFramesContext);
+            fc.format = ffi::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
+            fc.sw_format = sw.into();
+            fc.width = width as i32;
+            fc.height = height as i32;
+            let ret = ffi::av_hwframe_ctx_init(frames);
+            if ret < 0 {
+                ffi::av_buffer_unref(&mut frames);
+                ffi::av_buffer_unref(&mut device);
+                return Err(Error::Ffmpeg {
+                    context: "setting up VideoToolbox frames".into(),
+                    source: ffmpeg::Error::from(ret),
+                });
+            }
+            Ok(Self { device, frames })
+        }
+    }
+
     /// Copies a frame in memory into one of these, keeping its timestamp
     /// and colors, as an encoder given the frame in memory would see them
     /// (AMF reads HDR10's metadata only off frames whose transfer is PQ;
@@ -1011,13 +1050,16 @@ impl Upload {
 
 /// Whether an encoder of `kind` on `device` opens on `decoder`'s device,
 /// for the frames fitted there ([`open_video`]'s `shared`): VAAPI on a
-/// VA-API decoder's render node, AMF on a Direct3D 11 decoder's adapter.
+/// VA-API decoder's render node, AMF on a Direct3D 11 decoder's adapter,
+/// VideoToolbox on a VideoToolbox decoder's. A Mac has one VideoToolbox,
+/// and its encoders name no device.
 pub(crate) fn shares(
     kind: EncoderChoice,
     device: Option<&str>,
     decoder: &crate::hw::GpuDecoder,
 ) -> bool {
-    pairs(kind, decoder.kind()) && device == Some(decoder.on())
+    pairs(kind, decoder.kind())
+        && (kind == EncoderChoice::VideoToolbox || device == Some(decoder.on()))
 }
 
 /// Whether an encoder of `kind` takes the frames of a `decoder` on its
@@ -1027,17 +1069,19 @@ fn pairs(kind: EncoderChoice, decoder: crate::hw::Kind) -> bool {
         (kind, decoder),
         (EncoderChoice::Vaapi, crate::hw::Kind::Vaapi)
             | (EncoderChoice::Amf, crate::hw::Kind::D3d11va)
+            | (EncoderChoice::VideoToolbox, crate::hw::Kind::VideoToolbox)
     )
 }
 
 /// Opens a video encoder for `enc` at `width`×`height`, its frames timed
 /// in `times`' time base and its frame rate set where `times` gives one.
-/// Returns the opened encoder and, for VAAPI (and AMF on `shared`'s
-/// device), the frames to upload to. With `gpu_frames` (NVENC), the
-/// encoder takes frames in GPU memory of that frames context. VAAPI opens
-/// on `shared`'s device when given (a VA-API decoder on its render node),
-/// and AMF on a Direct3D 11 decoder's on its adapter, so that decoder's
-/// frames can go to it without leaving the GPU.
+/// Returns the opened encoder and, for VAAPI (and AMF and VideoToolbox on
+/// `shared`'s device), the frames to upload to. With `gpu_frames`
+/// (NVENC), the encoder takes frames in GPU memory of that frames context.
+/// VAAPI opens on `shared`'s device when given (a VA-API decoder on its
+/// render node), AMF on a Direct3D 11 decoder's on its adapter, and
+/// VideoToolbox on a VideoToolbox decoder's, so that decoder's frames can
+/// go to it without leaving the GPU.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn open_video(
     enc: &VideoEncoder,
@@ -1126,6 +1170,24 @@ pub(crate) fn open_video(
                 return Err(Error::Invalid("no memory for the encoder's frames".into()));
             }
             unsafe { (*ctx.as_mut_ptr()).hw_frames_ctx = frames };
+            Some(up)
+        }
+        // VideoToolbox on a VideoToolbox decoder's device. The encoder
+        // takes each frame's own pixel buffer (videotoolboxenc.c), in the
+        // layout `sw_pix_fmt` says.
+        _ if enc.kind == EncoderChoice::VideoToolbox
+            && shared.is_some_and(|d| d.kind() == crate::hw::Kind::VideoToolbox) =>
+        {
+            let up = Upload::videotoolbox(shared.expect("checked"), enc.pixel, width, height)?;
+            ctx.set_format(format::Pixel::VIDEOTOOLBOX);
+            let frames = unsafe { ffi::av_buffer_ref(up.frames) };
+            if frames.is_null() {
+                return Err(Error::Invalid("no memory for the encoder's frames".into()));
+            }
+            unsafe {
+                (*ctx.as_mut_ptr()).sw_pix_fmt = enc.pixel.into();
+                (*ctx.as_mut_ptr()).hw_frames_ctx = frames;
+            }
             Some(up)
         }
         Some(on) if matches!(enc.kind, EncoderChoice::Qsv | EncoderChoice::Amf) => {
@@ -1460,8 +1522,8 @@ mod tests {
     }
 
     #[test]
-    fn videotoolbox_doesnt_pair_with_its_decoder() {
-        assert!(!pairs(EncoderChoice::VideoToolbox, Kind::VideoToolbox));
+    fn videotoolbox_pairs_with_its_decoder() {
+        assert!(pairs(EncoderChoice::VideoToolbox, Kind::VideoToolbox));
     }
 
     #[test]
