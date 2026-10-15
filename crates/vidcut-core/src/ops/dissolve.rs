@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 use crate::model::{Clip, Project, TrackKind, Transition};
-use crate::otio::transitions::Cuts;
+use crate::otio::transitions::{self, Cuts};
 
 /// Where a dissolve goes about its edit (decision D50).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
@@ -133,8 +133,9 @@ fn sides(p: &Project, ti: usize, sound: bool, e: i64) -> (Option<String>, Option
 
 /// Frames a dissolve at edit `e` between clips `from` and `to` (`None`: a
 /// gap) may take before the edit and after it: as far as each clip's
-/// picture (or sound) or the gap goes, and as far as each clip's media
-/// goes past its edge.
+/// picture (or sound) or the gap goes, as far as each clip's media goes
+/// past its edge, and up to the frames of the track's transitions on other
+/// edits.
 fn room(
     p: &Project,
     ti: usize,
@@ -175,6 +176,19 @@ fn room(
         None => free_after,
     }
     .min(f.map_or(i64::MAX / 4, |f| media(f, true)));
+    let (mut before, mut after) = (before, after);
+    for t in transitions::playing(p, &p.tracks[ti], sound, |_| true) {
+        let (w0, w1) = t.frames;
+        if w0 + t.transition.before == e {
+            // On this edit: it goes.
+        } else if w1 <= e {
+            before = before.min(e - w1);
+        } else if w0 >= e {
+            after = after.min(w0 - e);
+        } else {
+            (before, after) = (0, 0);
+        }
+    }
     (before.max(0), after.max(0))
 }
 
@@ -471,6 +485,21 @@ mod tests {
         req(&mut f, "edit.dissolve", json!({"at": 50, "length": "10f"}));
         // Centered: 5 frames after the clip's end.
         assert_eq!(f.editor.project().end(), 55);
+    }
+
+    #[test]
+    fn dissolves_on_all_edits_stop_where_the_one_before_ends() {
+        let mut f = fixture();
+        f.append("m1", 0, 20);
+        f.append("m1", 100, 120);
+        f.append("m1", 200, 220);
+        let r = req(
+            &mut f,
+            "edit.dissolve",
+            json!({"all": true, "sound": false}),
+        );
+        // The first ends at 32: 8 frames before the second's edit at 40.
+        assert_eq!(made(&r), [(false, 20, 13, 12), (false, 40, 8, 12)]);
     }
 
     #[test]
