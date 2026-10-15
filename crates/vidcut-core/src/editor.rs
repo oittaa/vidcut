@@ -3541,7 +3541,7 @@ pub fn query(
                 .iter()
                 .filter_map(|t| t.clip_at(at).map(|ci| (t, &t.clips[ci])))
                 .map(|(t, c)| {
-                    let mut v = clip_json(p, c, &t.id);
+                    let mut v = clip_json(p, c, p.media(&c.media), &t.id);
                     v["source_frame"] = json!(c.source_at(at));
                     v
                 })
@@ -3953,14 +3953,14 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env) -> Value {
     v
 }
 
-/// A clip as reported by timeline queries.
-pub fn clip_json(p: &Project, c: &Clip, track: &str) -> Value {
+/// A clip as reported by timeline queries; `media` is its media.
+pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> Value {
     let mut v = json!({
         "type": "clip",
         "id": c.id,
         "track": track,
         "media": c.media,
-        "name": c.name.clone().or_else(|| p.media(&c.media).map(|m| m.name.clone())),
+        "name": c.name.clone().or_else(|| media.map(|m| m.name.clone())),
         "start": c.start,
         "end": c.end(),
         "duration": c.duration,
@@ -3973,7 +3973,7 @@ pub fn clip_json(p: &Project, c: &Clip, track: &str) -> Value {
         "enabled": c.enabled,
     });
     // The Clip Color it shows, its own or its media's.
-    if let Some(color) = p.clip_color(c) {
+    if let Some(color) = c.shown_color(media) {
         v["color"] = json!(color);
     }
     // A block from another editor (deviation X9), by kind.
@@ -4005,6 +4005,7 @@ pub fn clip_json(p: &Project, c: &Clip, track: &str) -> Value {
 
 fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
     let fps = p.settings.fps;
+    let pool = p.pool();
     let tracks: Vec<Value> = p
         .tracks
         .iter()
@@ -4018,11 +4019,13 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
                         "start_tc": p.settings.timecode(gs), "end_tc": p.settings.timecode(ge) }));
                 }
                 if c.end() > a && c.start < b {
-                    items.push(clip_json(p, c, &t.id));
+                    items.push(clip_json(p, c, pool.get(c.media.as_str()).copied(), &t.id));
                 }
                 at = c.end();
             }
-            let mut v = json!({ "id": t.id, "kind": t.kind, "locked": t.locked, "muted": t.muted, "items": items });
+            let mut v = json!({ "id": t.id, "kind": t.kind, "locked": t.locked, "muted": t.muted });
+            // Moved in: `json!` would copy them all.
+            v["items"] = Value::Array(items);
             if t.solo {
                 v["solo"] = json!(true);
             }
@@ -4049,21 +4052,22 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
                 })
                 .collect();
             if !transitions.is_empty() {
-                v["transitions"] = json!(transitions);
+                v["transitions"] = Value::Array(transitions);
             }
             v
         })
         .collect();
-    json!({
+    let mut v = json!({
         "fps": fps.to_string(),
         "start": a,
         "end": b,
         "duration": p.end(),
         "duration_tc": p.settings.timecode(p.end()),
-        "tracks": tracks,
         "marks": p.marks,
         "markers": p.markers,
-    })
+    });
+    v["tracks"] = Value::Array(tracks);
+    v
 }
 
 /// A fixed rate for tests and tools that need one.
