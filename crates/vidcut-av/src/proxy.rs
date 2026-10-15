@@ -9,7 +9,8 @@
 //! The file is Matroska, written to a temporary name and renamed into place.
 //! Pictures are turned upright and scaled to `width`×`height` as 4:2:0, 10-bit
 //! from a source of more than 8 bits where the encoder takes them, 8-bit
-//! otherwise (ProRes 10-bit 4:2:2, DNxHR 8-bit 4:2:2). Every encoder makes
+//! otherwise (ProRes 10-bit 4:2:2, DNxHR 8-bit 4:2:2). A 10-bit proxy keeps an
+//! HDR source's colors, an 8-bit one is SDR. Every encoder makes
 //! a keyframe every 60 frames (ProRes and DNxHR every frame) and shows frames
 //! in the order it codes them: a seek decodes at most 60 frames, and the
 //! preview needs no tail patches for a proxy.
@@ -18,6 +19,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use vidcut_core::export::EncoderChoice;
+use vidcut_core::model::Hdr;
 use vidcut_core::preferences::ProxyCodec;
 
 use crate::cuda::CudaFrames;
@@ -206,11 +208,28 @@ impl ProxyEncoder {
         options
     }
 
-    /// The encoder as exports open theirs ([`encode::open_video`]), for
-    /// pictures of `pixel` in memory: its settings
+    /// The encoder as exports open theirs ([`encode::open_video`]), for a
+    /// source whose first frame is `first`: its settings
     /// ([`options`](Self::options)), a keyframe every [`KEYFRAMES`] frames,
-    /// no B-frames and closed GOPs, one pass, SDR.
-    fn video_encoder(&self, pixel: format::Pixel) -> VideoEncoder {
+    /// no B-frames and closed GOPs, one pass. Its pictures are 10-bit for a
+    /// source of more than 8 bits where it takes them
+    /// ([`pixel`](Self::pixel)). A 10-bit proxy keeps an HDR source's PQ or
+    /// HLG in BT.2020, with a PQ source's static HDR metadata as exports
+    /// write theirs (`encode::hdr_metadata`). An 8-bit one is SDR BT.709,
+    /// HDR tone-mapped.
+    fn video_encoder(&self, first: Option<&frame::Video>) -> VideoEncoder {
+        let pixel = self.pixel(first.is_some_and(|f| deep(crate::hw::sw_format(f))));
+        let hdr = first.and_then(crate::color::hdr_of).filter(|_| deep(pixel));
+        let metadata = match (hdr, first) {
+            (Some(Hdr::Pq), Some(f)) => {
+                let m = crate::hdr::of_frame(f);
+                crate::hdr::Static {
+                    mastering: m.mastering,
+                    light: m.light,
+                }
+            }
+            _ => Default::default(),
+        };
         let mut options: Vec<(String, String)> = self
             .options(deep(pixel))
             .into_iter()
@@ -237,9 +256,9 @@ impl ProxyEncoder {
             pixel,
             device: self.device.clone(),
             options,
-            hdr: None,
+            hdr,
             passes: Passes::One,
-            metadata: Default::default(),
+            metadata,
             dynamic: Default::default(),
         }
     }
@@ -543,20 +562,22 @@ struct Writer<'a> {
     last_dur: i64,
     frames: u64,
     shown: &'a Shown<'a>,
+    /// HDR kept from the source: the codec and the static metadata, which
+    /// go on each frame and into each keyframe as an export puts them.
+    hdr: Option<(ffmpeg::codec::Id, crate::hdr::Static)>,
 }
 
 impl<'a> Writer<'a> {
-    /// Creates `tmp` and opens `enc` for `width`×`height` pictures of
-    /// `pixel` timed in `src_tb`, as exports open theirs
-    /// ([`encode::open_video`]), and says what the pictures are made into.
-    /// NVENC takes them in GPU memory on `cuda`'s context where it opens so,
-    /// in [`cuda_layout`]'s layout. VAAPI, AMF and VideoToolbox open on
-    /// `decoder`'s device where they share it ([`encode::shares`]), for the
-    /// frames fitted there.
+    /// Creates `tmp` and opens `video` for `width`×`height` pictures timed
+    /// in `src_tb`, as exports open theirs ([`encode::open_video`]), and
+    /// says what the pictures are made into. NVENC takes them in GPU memory
+    /// on `cuda`'s context where it opens so, in [`cuda_layout`]'s layout.
+    /// VAAPI, AMF and VideoToolbox open on `decoder`'s device where they
+    /// share it ([`encode::shares`]), for the frames fitted there.
     fn new(
         tmp: &Path,
-        enc: &ProxyEncoder,
-        (width, height, pixel): (u32, u32, format::Pixel),
+        video: &VideoEncoder,
+        (width, height): (u32, u32),
         (src_tb, rate): (ffmpeg::Rational, Option<ffmpeg::Rational>),
         cuda: Option<&crate::cuda::CudaDevice>,
         decoder: Option<&crate::hw::GpuDecoder>,
@@ -568,22 +589,21 @@ impl<'a> Writer<'a> {
             .map_err(Failed::Encoding)?;
         let global = octx.format().flags().contains(format::Flags::GLOBAL_HEADER);
         // FFmpeg's DNxHR takes nothing smaller ("Input dimensions too small").
-        if enc.name == "dnxhd" && (width < 256 || height < 120) {
+        if video.name == "dnxhd" && (width < 256 || height < 120) {
             return Err(Failed::Opening(Error::Invalid(format!(
                 "DNxHR proxies are at least 256×120 pixels, and this one would be \
                  {width}×{height}: make the proxy size larger or choose another codec"
             ))));
         }
-        let video = enc.video_encoder(pixel);
         let times = (enc_tb, rate);
         // On a stream of its own, as an export's: frames from memory if
         // that won't open.
         let on_cuda = cuda.and_then(|cuda| {
             let device = cuda.with_own_stream().ok()?;
-            let frames = CudaFrames::new(&device, cuda_layout(pixel), width, height).ok()?;
+            let frames = CudaFrames::new(&device, cuda_layout(video.pixel), width, height).ok()?;
             let gpu_frames = Some(frames.as_ptr());
             let (opened, _) = encode::open_video(
-                &video,
+                video,
                 width,
                 height,
                 times,
@@ -597,13 +617,14 @@ impl<'a> Writer<'a> {
         });
         let (encoder, upload, output) = match on_cuda {
             Some((opened, gpu)) => {
-                let output = Output::for_encoder(enc.kind, Some(gpu), None, None);
+                let output = Output::for_encoder(video.kind, Some(gpu), None, None);
                 (opened, None, output)
             }
             None => {
-                let shared = decoder.filter(|d| encode::shares(enc.kind, enc.device.as_deref(), d));
+                let device = video.device.as_deref();
+                let shared = decoder.filter(|d| encode::shares(video.kind, device, d));
                 let (opened, upload) = encode::open_video(
-                    &video,
+                    video,
                     width,
                     height,
                     times,
@@ -614,14 +635,14 @@ impl<'a> Writer<'a> {
                 )
                 .map_err(Failed::Opening)?;
                 let fit_on = shared.map(|d| d.kind().place());
-                let output = Output::for_encoder(enc.kind, None, fit_on, upload.as_ref());
+                let output = Output::for_encoder(video.kind, None, fit_on, upload.as_ref());
                 (opened, upload, output)
             }
         };
         let output = output.map_err(Failed::Opening)?;
         let mut header = || -> Result<()> {
             let mut ost = octx
-                .add_stream(encoder::find_by_name(&enc.name))
+                .add_stream(encoder::find_by_name(&video.name))
                 .ctx(|| "adding the proxy stream".into())?;
             ost.set_parameters(&encoder);
             ost.set_time_base(enc_tb);
@@ -630,11 +651,12 @@ impl<'a> Writer<'a> {
             Ok(())
         };
         header().map_err(Failed::Encoding)?;
+        let hdr = video.hdr.map(|_| (encoder.id(), video.metadata));
         let writer = Self {
             octx,
             encoder,
             upload,
-            kind: enc.kind,
+            kind: video.kind,
             src_tb,
             enc_tb,
             durations: HashMap::new(),
@@ -642,6 +664,7 @@ impl<'a> Writer<'a> {
             last_dur: 1,
             frames: 0,
             shown,
+            hdr,
         };
         Ok((writer, output))
     }
@@ -680,6 +703,14 @@ impl<'a> Writer<'a> {
         };
         picture.set_pts(Some(pts));
         self.durations.insert(pts, dur);
+        // An HDR proxy's frames carry its static metadata alone, as an
+        // export's do: the source's HDR10+ and Dolby Vision stay behind.
+        if let Some((_, metadata)) = &self.hdr {
+            crate::hdr::strip(&mut picture);
+            if !metadata.is_empty() {
+                crate::hdr::attach(&mut picture, metadata)?;
+            }
+        }
         // The GPU's scaler makes its pictures on the decoder's stream: the
         // encoder reads one once that work is done.
         crate::cuda::share::wait_for(&picture)?;
@@ -692,6 +723,7 @@ impl<'a> Writer<'a> {
             &mut self.octx,
             self.enc_tb,
             &mut self.durations,
+            self.hdr.as_ref(),
         )?;
         self.frames += 1;
         self.shown.frame(self.frames);
@@ -718,6 +750,7 @@ impl<'a> Writer<'a> {
             &mut self.octx,
             self.enc_tb,
             &mut self.durations,
+            self.hdr.as_ref(),
         )?;
         self.octx
             .write_trailer()
@@ -744,29 +777,25 @@ fn encode_into(
     let times = (reader.time_base(), reader.frame_rate());
     let size = (width, height);
     let decoded_on_gpu = reader.gpu().is_some();
-    // A source of more than 8 bits, by its first frame, keeps 10 where the
-    // encoder takes them.
-    let ten = reader
-        .peek()
-        .is_some_and(|first| deep(crate::hw::sw_format(first)));
-    let pixel = enc.pixel(ten);
+    // The proxy's pictures and colors, by the source's first frame.
+    let video = enc.video_encoder(reader.peek());
+    let (pixel, target) = (video.pixel, video.hdr);
     // NVDEC's frames scaled for NVENC on the GPU, where the planner leaves
     // them there and the scaler builds. A picture may come with the next
     // frame, leaving the GPU less to do.
     let scaled = match enc.kind {
-        EncoderChoice::Nvenc => Fitting::for_nvenc(reader, size, cuda_layout(pixel), None, false),
+        EncoderChoice::Nvenc => Fitting::for_nvenc(reader, size, cuda_layout(pixel), target, false),
         _ => Fitting::none(),
     };
     let cuda = scaled.scaler.as_ref().and(reader.cuda());
-    let out = (width, height, pixel);
-    let (mut writer, output) = Writer::new(tmp, enc, out, times, cuda, decoder, shown)?;
+    let (mut writer, output) = Writer::new(tmp, &video, size, times, cuda, decoder, shown)?;
     // NVENC takes the scaler's pictures where it opened for frames in GPU
     // memory.
     let (layout, mut fitting) = match output {
         Output::Cuda { .. } => (cuda_layout(pixel), scaled),
         _ => (pixel, Fitting::none()),
     };
-    let mut maker = Maker::new((width, height, layout), None, output);
+    let mut maker = Maker::new((width, height, layout), target, output);
     let mut went = None;
     let mut encoding = || -> Result<()> {
         while let Some(src) = reader.next_frame()? {
@@ -833,17 +862,24 @@ fn deep(pixel: format::Pixel) -> bool {
         .is_some_and(|d| unsafe { (*d.as_ptr()).comp[0].depth } > 8)
 }
 
+/// Writes the packets `enc` has ready, with their durations, and an HDR
+/// proxy's static metadata in each HEVC and AV1 keyframe that lacks it
+/// (`hdr`: the codec and the values), as exports put it there.
 fn drain(
     enc: &mut encoder::Video,
     octx: &mut format::context::Output,
     enc_tb: ffmpeg::Rational,
     durations: &mut HashMap<i64, i64>,
+    hdr: Option<&(ffmpeg::codec::Id, crate::hdr::Static)>,
 ) -> Result<()> {
     let stream_tb = octx.stream(0).expect("proxy stream").time_base();
     let mut packet = ffmpeg::Packet::empty();
     while enc.receive_packet(&mut packet).is_ok() {
         if let Some(d) = packet.pts().and_then(|pts| durations.remove(&pts)) {
             packet.set_duration(d);
+        }
+        if let Some((id, metadata)) = hdr {
+            crate::hdr::insert_static(&mut packet, *id, metadata)?;
         }
         packet.set_stream(0);
         packet.rescale_ts(enc_tb, stream_tb);
@@ -1074,7 +1110,8 @@ mod tests {
             device: Some("0".into()),
             ten_bit: true,
         };
-        let options = nvenc.video_encoder(format::Pixel::P010LE).options;
+        let source = first(format::Pixel::YUV420P10LE, None);
+        let options = nvenc.video_encoder(Some(&source)).options;
         let profile: Vec<&str> = options
             .iter()
             .filter(|(k, _)| k == "profile")
@@ -1115,7 +1152,7 @@ mod tests {
             ("flags", "+cgop"),
         ];
         let want = want.map(|(k, v)| (k.to_string(), v.to_string()));
-        assert_eq!(enc.video_encoder(enc.pixel(false)).options, want);
+        assert_eq!(enc.video_encoder(None).options, want);
     }
 
     #[test]
@@ -1127,7 +1164,7 @@ mod tests {
             device: None,
             ten_bit: false,
         };
-        let options = enc.video_encoder(enc.pixel(false)).options;
+        let options = enc.video_encoder(None).options;
         let flags: Vec<&str> = options
             .iter()
             .filter(|(k, _)| k == "flags")
@@ -1139,12 +1176,81 @@ mod tests {
     #[test]
     fn prores_encodes_frames_on_every_core() {
         let prores = ProxyEncoder::software("prores_ks", "prores");
-        let options = prores.video_encoder(prores.pixel(false)).options;
+        let options = prores.video_encoder(None).options;
         let threads: Vec<(&str, &str)> = options
             .iter()
             .filter(|(k, _)| k.starts_with("thread"))
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();
         assert_eq!(threads, [("threads", "auto"), ("thread_type", "frame")]);
+    }
+
+    /// A source's first frame of `pixel` in `hdr`'s transfer (`None`: SDR,
+    /// untagged).
+    fn first(pixel: format::Pixel, hdr: Option<Hdr>) -> frame::Video {
+        use ffi::AVColorTransferCharacteristic as T;
+        let mut f = frame::Video::new(pixel, 64, 36);
+        let transfer = match hdr {
+            Some(Hdr::Pq) => T::AVCOL_TRC_SMPTE2084,
+            Some(Hdr::Hlg) => T::AVCOL_TRC_ARIB_STD_B67,
+            None => T::AVCOL_TRC_UNSPECIFIED,
+        };
+        // SAFETY: a plain field of its own frame.
+        unsafe { (*f.as_mut_ptr()).color_trc = transfer };
+        f
+    }
+
+    /// HDR10's static values: a 1000-nit P3 mastering display, MaxCLL 1000
+    /// and MaxFALL 400.
+    fn hdr10() -> crate::hdr::Static {
+        crate::hdr::Static {
+            mastering: Some(crate::fixture::mastering(1000)),
+            light: Some(vidcut_core::model::LightLevel {
+                max_cll: 1000,
+                max_fall: 400,
+            }),
+        }
+    }
+
+    #[test]
+    fn a_ten_bit_proxy_of_a_pq_source_stays_pq() {
+        let source = first(format::Pixel::YUV420P10LE, Some(Hdr::Pq));
+        assert_eq!(nvencs_av1().video_encoder(Some(&source)).hdr, Some(Hdr::Pq));
+    }
+
+    #[test]
+    fn a_ten_bit_proxy_of_an_hlg_source_stays_hlg() {
+        let source = first(format::Pixel::YUV420P10LE, Some(Hdr::Hlg));
+        let encoder = nvencs_av1().video_encoder(Some(&source));
+        assert_eq!(encoder.hdr, Some(Hdr::Hlg));
+    }
+
+    #[test]
+    fn an_eight_bit_proxy_of_a_pq_source_is_sdr() {
+        let h264 = ProxyEncoder::software("libx264", "h264");
+        let source = first(format::Pixel::YUV420P10LE, Some(Hdr::Pq));
+        assert_eq!(h264.video_encoder(Some(&source)).hdr, None);
+    }
+
+    #[test]
+    fn a_ten_bit_proxy_of_an_sdr_source_is_sdr() {
+        let source = first(format::Pixel::YUV420P10LE, None);
+        assert_eq!(nvencs_av1().video_encoder(Some(&source)).hdr, None);
+    }
+
+    #[test]
+    fn a_pq_proxy_writes_the_sources_static_metadata() {
+        let mut source = first(format::Pixel::YUV420P10LE, Some(Hdr::Pq));
+        crate::hdr::attach(&mut source, &hdr10()).unwrap();
+        let encoder = nvencs_av1().video_encoder(Some(&source));
+        assert_eq!(encoder.metadata, hdr10());
+    }
+
+    #[test]
+    fn an_hlg_proxy_writes_no_static_metadata() {
+        let mut source = first(format::Pixel::YUV420P10LE, Some(Hdr::Hlg));
+        crate::hdr::attach(&mut source, &hdr10()).unwrap();
+        let encoder = nvencs_av1().video_encoder(Some(&source));
+        assert_eq!(encoder.metadata, crate::hdr::Static::default());
     }
 }
