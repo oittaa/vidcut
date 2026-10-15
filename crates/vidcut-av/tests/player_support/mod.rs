@@ -95,6 +95,7 @@ pub fn plan(clips: &[Clip], start: i64) -> RenderPlan {
                     source_sample: sample(c.from),
                     samples,
                     gain_db: 0.0,
+                    fade: None,
                 });
             }
             None => {

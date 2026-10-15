@@ -95,7 +95,7 @@ pub const WHOLE: u32 = 1 << 16;
 
 impl Ramp {
     /// The level at the piece's frame `k`, a fraction: its numerator and
-    /// denominator.
+    /// denominator. Frame `i` of `n` is at `(i + 1/2) / n`.
     pub fn fraction(&self, k: i64) -> (i64, i64) {
         let rising = (2 * (self.at + k) + 1, 2 * self.of);
         if self.falling {
@@ -163,10 +163,72 @@ pub enum AudioPiece {
         /// below 0 the source plays backward from `source_sample`.
         #[serde(default = "normal_speed", skip_serializing_if = "is_normal_speed")]
         speed: f64,
+        /// A cross fade over it (decision D50): its gain on top of
+        /// `gain_db`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fade: Option<Fade>,
     },
     Silence {
         samples: i64,
     },
+}
+
+/// A sound's gain through a cross fade (decision D50): rising from silence
+/// to all of it along its curve, or falling when `falling`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Fade {
+    /// Samples of the fade before the piece's first.
+    pub at: i64,
+    /// The fade's length in samples.
+    pub of: i64,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub falling: bool,
+    pub curve: Curve,
+}
+
+/// How a cross fade's gain goes with its share `x` of the way (0 to 1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub enum Curve {
+    /// Cross Fade +3 dB: the square root of `x`, so the two sounds keep
+    /// their power together.
+    #[serde(rename = "+3 dB")]
+    Plus3Db,
+    /// Cross Fade 0 dB: `x`.
+    #[serde(rename = "0 dB")]
+    ZeroDb,
+    /// Cross Fade -3 dB: `x` to the power of 1.5.
+    #[serde(rename = "-3 dB")]
+    Minus3Db,
+}
+
+impl Curve {
+    /// The gain at share `x` of the way.
+    pub fn gain(self, x: f64) -> f64 {
+        match self {
+            Self::Plus3Db => x.sqrt(),
+            Self::ZeroDb => x,
+            Self::Minus3Db => x * x.sqrt(),
+        }
+    }
+}
+
+impl Fade {
+    /// The gain at the piece's sample `s`, 0 to 1: a rising one is silent
+    /// at the fade's first sample, a falling one whole.
+    pub fn gain(&self, s: i64) -> f64 {
+        let x = ((self.at + s) as f64 / self.of as f64).clamp(0.0, 1.0);
+        self.curve.gain(if self.falling { 1.0 - x } else { x })
+    }
+
+    /// It starts silent: rising from its first sample.
+    pub fn starts_silent(&self) -> bool {
+        !self.falling && self.at == 0
+    }
+
+    /// A piece of `samples` it is on ends silent: falling to its last.
+    pub fn ends_silent(&self, samples: i64) -> bool {
+        self.falling && self.at + samples >= self.of
+    }
 }
 
 impl VideoPiece {
@@ -419,6 +481,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
                 samples,
                 gain_db,
                 speed,
+                fade,
                 ..
             }),
             AudioPiece::Source {
@@ -428,6 +491,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
                 samples: n2,
                 gain_db: g2,
                 speed: sp2,
+                fade: f2,
                 ..
             },
         ) if media == m2
@@ -435,6 +499,8 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
             && gain_db == g2
             && *speed == 1.0
             && *sp2 == 1.0
+            && fade.is_none()
+            && f2.is_none()
             && *source_sample + *samples == *s2 =>
         {
             *samples += n2
@@ -732,7 +798,9 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
         );
     }
 
-    // Audio: one lane per heard track (mute, solo), with its fader.
+    // Audio: lanes per heard track (mute, solo), with its fader. A cross
+    // fade plays both clips' sounds through its frames, the one after the
+    // cut on the track's other lane from then on (decision D50).
     let any_solo = p.any_solo();
     let mut audio = Vec::new();
     let mut lanes = Vec::new();
@@ -740,55 +808,91 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
         if !track.audible(any_solo) || track.clips.iter().all(|c| c.audio.is_none()) {
             continue;
         }
-        let mut lane = Vec::new();
-        let mut t = a;
+        let fades = transitions::playing(p, track, true, |t| transitions::cross_fade(t).is_some());
+        let fade_of = |c: &Clip, into: bool| {
+            fades.iter().find(|f| {
+                let side = if into { f.after } else { f.before };
+                side.is_some_and(|x| std::ptr::eq(x, c))
+            })
+        };
+        let mut two: [(Vec<AudioPiece>, i64); 2] = [(Vec::new(), a), (Vec::new(), a)];
+        let mut on = 0;
         for c in &track.clips {
             let Some((ra, rb)) = c.audio_range() else {
                 continue;
             };
-            let (x, y) = (ra.max(a), rb.min(b));
-            if y <= x {
-                continue;
+            let (into, out_of) = (fade_of(c, true), fade_of(c, false));
+            if into.is_some_and(|f| f.before.is_some()) {
+                on = 1 - on;
             }
+            let start = into.map_or(ra, |f| f.frames.0);
+            let end = out_of.map_or(rb, |f| f.frames.1);
+            let head = into.map_or(start, |f| f.frames.1).min(end);
+            let tail = out_of.map_or(end, |f| f.frames.0).max(head);
+            let fade = |f: Option<&transitions::Playing>, x: i64, falling: bool| {
+                f.map(|f| Fade {
+                    at: sample(x) - sample(f.frames.0),
+                    of: sample(f.frames.1) - sample(f.frames.0),
+                    falling,
+                    curve: transitions::cross_fade(f.transition).expect("plays"),
+                })
+            };
+            let (lane, t) = &mut two[on];
+            for (x, y, f, falling) in [
+                (start, head, into, false),
+                (head, tail, None, false),
+                (tail, end, out_of, true),
+            ] {
+                let (x, y) = (x.max(a), y.min(b));
+                if y <= x {
+                    continue;
+                }
+                push_audio(
+                    lane,
+                    AudioPiece::Silence {
+                        samples: sample(x) - sample(*t),
+                    },
+                );
+                let audio = c.audio.as_ref().expect("has audio");
+                if audio.muted {
+                    push_audio(
+                        lane,
+                        AudioPiece::Silence {
+                            samples: sample(y) - sample(x),
+                        },
+                    );
+                } else {
+                    let m = found(pool.get(c.media.as_str()).copied(), &c.media)?;
+                    let mut piece = source_audio(p, c, m, x, sample(y) - sample(x));
+                    if let AudioPiece::Source {
+                        gain_db, fade: f2, ..
+                    } = &mut piece
+                    {
+                        *gain_db += track.volume_db;
+                        *f2 = fade(f, x, falling);
+                    }
+                    push_audio(lane, piece);
+                }
+                *t = y;
+            }
+        }
+        for (mut lane, t) in two {
             push_audio(
                 &mut lane,
                 AudioPiece::Silence {
-                    samples: sample(x) - sample(t),
+                    samples: sample(b) - sample(t),
                 },
             );
-            let audio = c.audio.as_ref().expect("has audio");
-            if audio.muted {
-                push_audio(
-                    &mut lane,
-                    AudioPiece::Silence {
-                        samples: sample(y) - sample(x),
-                    },
-                );
-            } else {
-                let m = found(pool.get(c.media.as_str()).copied(), &c.media)?;
-                let mut piece = source_audio(p, c, m, x, sample(y) - sample(x));
-                if let AudioPiece::Source { gain_db, .. } = &mut piece {
-                    *gain_db += track.volume_db;
-                }
-                push_audio(&mut lane, piece);
+            if lane
+                .iter()
+                .any(|piece| matches!(piece, AudioPiece::Source { .. }))
+            {
+                audio.push(lane);
+                lanes.push(LaneTrack {
+                    track: track.id.clone(),
+                    volume_db: track.volume_db,
+                });
             }
-            t = y;
-        }
-        push_audio(
-            &mut lane,
-            AudioPiece::Silence {
-                samples: sample(b) - sample(t),
-            },
-        );
-        if lane
-            .iter()
-            .any(|piece| matches!(piece, AudioPiece::Source { .. }))
-        {
-            audio.push(lane);
-            lanes.push(LaneTrack {
-                track: track.id.clone(),
-                volume_db: track.volume_db,
-            });
         }
     }
 
@@ -834,6 +938,7 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
         samples,
         gain_db: audio.gain_db,
         speed,
+        fade: None,
     }
 }
 
@@ -955,6 +1060,7 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
                     source_sample: 0,
                     samples,
                     gain_db: 0.0,
+                    fade: None,
                 },
             );
         }
@@ -1094,6 +1200,143 @@ mod tests {
                     .into(),
             });
         p
+    }
+
+    /// A cross fade on V1's sounds from clip `from` to clip `to` (`None`: a
+    /// gap), as Resolve writes a Cross Fade +3 dB.
+    fn cross_fade(
+        f: &Fixture,
+        from: Option<&str>,
+        to: Option<&str>,
+        before: i64,
+        after: i64,
+    ) -> Project {
+        let mut p = f.editor.project().clone();
+        p.track_mut("V1")
+            .unwrap()
+            .transitions
+            .push(crate::model::Transition {
+                id: "t1".into(),
+                sound: true,
+                from: from.map(Into::into),
+                to: to.map(Into::into),
+                before,
+                after,
+                otio: json!({
+                    "OTIO_SCHEMA": "Transition.1",
+                    "transition_type": "Custom_Transition",
+                    "metadata": {"Resolve_OTIO": {"Effects": {"Type": 41}}}
+                })
+                .into(),
+            });
+        p
+    }
+
+    /// The plan's sounds in short, lane by lane: `m1@0+86400` (media, first
+    /// source sample, samples), `silence+86400`, a cross fade's piece with
+    /// its curve and where in the fade it starts.
+    fn heard(plan: &RenderPlan) -> Vec<Vec<String>> {
+        plan.audio
+            .iter()
+            .map(|lane| {
+                lane.iter()
+                    .map(|p| match p {
+                        AudioPiece::Source {
+                            media,
+                            source_sample,
+                            samples,
+                            fade,
+                            ..
+                        } => match fade {
+                            None => format!("{media}@{source_sample}+{samples}"),
+                            Some(f) => format!(
+                                "{media}@{source_sample}+{samples} {} {:?} at {}/{}",
+                                if f.falling { "falling" } else { "rising" },
+                                f.curve,
+                                f.at,
+                                f.of
+                            ),
+                        },
+                        AudioPiece::Silence { samples } => format!("silence+{samples}"),
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_cross_fade_plays_the_sound_after_the_cut_on_another_lane() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m2", 10, 60);
+        let p = cross_fade(&f, Some("c1"), Some("c2"), 5, 5);
+        let plan = flatten(&p, 0, 100).unwrap();
+        // 1920 samples a frame.
+        assert_eq!(
+            heard(&plan),
+            [
+                vec![
+                    "m1@0+86400".to_string(),
+                    "m1@86400+19200 falling Plus3Db at 0/19200".into(),
+                    "silence+86400".into(),
+                ],
+                vec![
+                    "silence+86400".to_string(),
+                    "m2@9600+19200 rising Plus3Db at 0/19200".into(),
+                    "m2@28800+86400".into(),
+                ],
+            ]
+        );
+    }
+
+    #[test]
+    fn a_fade_in_from_silence_stays_on_its_lane() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m1", 50, 100);
+        req(&mut f, "edit.delete", json!({"clips": "c1", "lift": true}));
+        let p = cross_fade(&f, None, Some("c2"), 0, 10);
+        let plan = flatten(&p, 0, 100).unwrap();
+        assert_eq!(
+            heard(&plan),
+            [vec![
+                "silence+96000".to_string(),
+                "m1@96000+19200 rising Plus3Db at 0/19200".into(),
+                "m1@115200+76800".into(),
+            ]]
+        );
+    }
+
+    #[test]
+    fn a_cross_fade_of_plus_3_db_is_half_way_up_a_quarter_in() {
+        assert_eq!(Curve::Plus3Db.gain(0.25), 0.5);
+    }
+
+    #[test]
+    fn a_cross_fade_of_minus_3_db_is_an_eighth_up_a_quarter_in() {
+        assert_eq!(Curve::Minus3Db.gain(0.25), 0.125);
+    }
+
+    #[test]
+    fn a_falling_fade_is_whole_at_its_first_sample() {
+        let fade = Fade {
+            at: 0,
+            of: 100,
+            falling: true,
+            curve: Curve::ZeroDb,
+        };
+        assert_eq!(fade.gain(0), 1.0);
+    }
+
+    #[test]
+    fn a_rising_fade_is_a_quarter_up_a_quarter_in() {
+        let fade = Fade {
+            at: 20,
+            of: 100,
+            falling: false,
+            curve: Curve::ZeroDb,
+        };
+        assert_eq!(fade.gain(5), 0.25);
     }
 
     /// The plan's pictures in short: `m1@45+10` (media, first source

@@ -61,6 +61,7 @@ fn a(s: &Src, fps: Rational, rate: u32, source_frame: i64, frames: i64) -> Audio
         source_sample: fps.frame_to_sample(source_frame, rate),
         samples: fps.frame_to_sample(frames, rate),
         gain_db: 0.0,
+        fade: None,
     }
 }
 
@@ -332,6 +333,7 @@ fn sound_at_other_speeds_keeps_its_time_and_pitch() {
         source_sample: (from * RATE).round() as i64,
         samples: (secs * RATE) as i64,
         gain_db: 0.0,
+        fade: None,
         speed,
     };
     let left = |lane: Vec<AudioPiece>| -> Vec<f32> {

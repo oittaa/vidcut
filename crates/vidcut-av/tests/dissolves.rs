@@ -1,18 +1,18 @@
 //! Dissolves (decision D50): each frame of a fade from black and of a cross
 //! dissolve at its level, exported on the CPU and on NVIDIA's GPU for
-//! NVENC.
+//! NVENC; a sound's cross fade along its curve.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
 use vidcut_av::decode::{VideoReader, read_barcode};
 use vidcut_av::export::{self, encode};
-use vidcut_av::fixture::{self, Container, FixtureSpec, Picture, VideoCodec};
+use vidcut_av::fixture::{self, AudioCodec, Container, FixtureSpec, Picture, Sound, VideoCodec};
 use vidcut_core::export::{
-    Container as OutContainer, EncoderChoice, ExportSettings, HdrMode, VideoCodec as VCodec,
-    VideoSettings,
+    AudioCodec as ACodec, AudioSettings, Container as OutContainer, EncoderChoice, ExportSettings,
+    HdrMode, VideoCodec as VCodec, VideoSettings,
 };
-use vidcut_core::render::{Over, Ramp, RenderPlan, VideoPiece};
+use vidcut_core::render::{AudioPiece, Curve, Fade, Over, Ramp, RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
 
 fn fps() -> Rational {
@@ -264,6 +264,101 @@ fn a_dissolve_inside_one_file_reads_it_twice_and_reads_on() {
     let plain: Vec<Option<u32>> = shown[..5].iter().chain(&shown[9..]).copied().collect();
     let want: Vec<Option<u32>> = (0..5).chain(24..29).map(Some).collect();
     assert_eq!(plain, want);
+}
+
+/// The largest sample in each 1 ms (a period of the fixture's 1 kHz tone)
+/// of the first channel of `path`'s 16-bit sound.
+fn envelope(path: &Path) -> Vec<f32> {
+    use vidcut_av::ffmpeg::{codec, format, frame, media};
+    vidcut_av::init();
+    let mut input = format::input(path).unwrap();
+    let stream = input.streams().best(media::Type::Audio).unwrap();
+    let index = stream.index();
+    let mut dec = codec::context::Context::from_parameters(stream.parameters())
+        .unwrap()
+        .decoder()
+        .audio()
+        .unwrap();
+    let mut mono = Vec::new();
+    let mut take = |dec: &mut vidcut_av::ffmpeg::decoder::Audio| {
+        let mut f = frame::Audio::empty();
+        while dec.receive_frame(&mut f).is_ok() {
+            let (ch, d) = (f.channels() as usize, f.data(0));
+            for i in 0..f.samples() {
+                let v = i16::from_le_bytes([d[i * ch * 2], d[i * ch * 2 + 1]]);
+                mono.push(f32::from(v) / 32768.0);
+            }
+        }
+    };
+    for (s, p) in input.packets() {
+        if s.index() == index {
+            dec.send_packet(&p).unwrap();
+            take(&mut dec);
+        }
+    }
+    dec.send_eof().unwrap();
+    take(&mut dec);
+    mono.chunks(48)
+        .map(|w| w.iter().fold(0f32, |m, v| m.max(v.abs())))
+        .collect()
+}
+
+#[test]
+fn a_cross_fade_to_silence_follows_its_curve() {
+    let spec = FixtureSpec::new(VideoCodec::H264, Container::Mkv, 320, 180, (25, 1), 40)
+        .with_audio(AudioCodec::PcmS16, 48_000, 2)
+        .sound(Sound::Tone);
+    let tone = fixture::ensure(&spec).unwrap();
+    let origin = vidcut_av::probe::probe(&tone, None)
+        .unwrap()
+        .video
+        .and_then(|v| v.first_frame_time)
+        .unwrap_or(0.0);
+    let sound = |source_sample, samples, fade| AudioPiece::Source {
+        media: "m".into(),
+        path: tone.clone(),
+        stream: 0,
+        origin,
+        source_sample,
+        samples,
+        gain_db: 0.0,
+        speed: 1.0,
+        fade,
+    };
+    let fade = Fade {
+        at: 0,
+        of: 19_200,
+        falling: true,
+        curve: Curve::ZeroDb,
+    };
+    let mut p = plan(vec![VideoPiece::Black { frames: 20 }]);
+    p.audio = vec![vec![
+        sound(0, 9_600, None),
+        sound(9_600, 19_200, Some(fade)),
+        AudioPiece::Silence { samples: 9_600 },
+    ]];
+    let mut settings = settings(EncoderChoice::Cpu);
+    settings.audio = Some(AudioSettings {
+        codec: ACodec::PcmS16,
+        bitrate: None,
+        sample_rate: None,
+        channels: None,
+        loudness: None,
+    });
+    settings.declick = true;
+    let dir = out_dir("sound");
+    let out = dir.path().join("fade.mkv");
+    export_on(&p, &settings, &Default::default(), None, &out);
+    let peaks = envelope(&out);
+    let whole = vidcut_av::fixture::TONE_AMPLITUDE;
+    // No de-click dip where the fade starts: 200 ms in.
+    assert!(peaks[199] > whole * 0.98, "before the fade: {}", peaks[199]);
+    assert!(peaks[200] > whole * 0.98, "as it starts: {}", peaks[200]);
+    // 0 dB: straight down over its 400 ms.
+    for (ms, gain) in [(300, 0.75), (400, 0.5), (500, 0.25)] {
+        let got = peaks[ms] / whole;
+        assert!((got - gain).abs() < 0.01, "{ms} ms: {got}, want {gain}");
+    }
 }
 
 /// NVENC's pictures come from NVDEC's frames mixed on the GPU, and match

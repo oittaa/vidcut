@@ -676,6 +676,7 @@ impl Lane {
                 source_sample,
                 gain_db,
                 speed,
+                fade: cross,
                 ..
             } = &piece
             {
@@ -706,13 +707,23 @@ impl Lane {
                     None => source.read(take, &mut self.scratch)?,
                 }
                 let gain = 10f32.powf(*gain_db as f32 / 20.0) * self.trim;
-                // De-click fades at cuts inside the lane (not at the plan's ends).
+                // De-click fades at cuts inside the lane (not at the plan's
+                // ends): none where the sound plays on into the next piece
+                // or out of the one before, nor where a cross fade is
+                // silent already (decision D50).
                 let fade = self.declick.min(len / 2).max(1);
-                let fade_in = self.piece > 0;
-                let fade_out = self.piece + 1 < self.pieces.len();
+                let before = self.piece.checked_sub(1).map(|i| &self.pieces[i]);
+                let after = self.pieces.get(self.piece + 1);
+                let fade_in = before.is_some_and(|b| !plays_on(b, &piece))
+                    && !cross.is_some_and(|f| f.starts_silent());
+                let fade_out = after.is_some_and(|n| !plays_on(&piece, n))
+                    && !cross.is_some_and(|f| f.ends_silent(len));
                 for i in 0..take {
                     let p = self.pos + i as i64;
                     let mut g = gain;
+                    if let Some(f) = cross {
+                        g *= f.gain(p) as f32;
+                    }
                     if fade_in && p < fade {
                         g *= (p + 1) as f32 / fade as f32;
                     }
@@ -733,6 +744,41 @@ impl Lane {
             }
         }
         Ok(())
+    }
+}
+
+/// Whether `next`'s sound goes on from `piece`'s where a cross fade
+/// starts or ends between them: one clip's sound split at its fade, the
+/// source read on (decision D50).
+fn plays_on(piece: &AudioPiece, next: &AudioPiece) -> bool {
+    match (piece, next) {
+        (
+            AudioPiece::Source {
+                path,
+                stream,
+                source_sample,
+                samples,
+                speed,
+                fade,
+                ..
+            },
+            AudioPiece::Source {
+                path: p2,
+                stream: s2,
+                source_sample: n2,
+                speed: sp2,
+                fade: f2,
+                ..
+            },
+        ) => {
+            (fade.is_some() || f2.is_some())
+                && path == p2
+                && stream == s2
+                && *speed == 1.0
+                && *sp2 == 1.0
+                && source_sample + samples == *n2
+        }
+        _ => false,
     }
 }
 

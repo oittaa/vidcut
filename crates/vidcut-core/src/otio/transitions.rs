@@ -17,6 +17,7 @@ use serde_json::Value;
 
 use super::{EDITOR, VIDCUT, gap, rt, schema};
 use crate::model::{Clip, Media, Project, Track, Transition};
+use crate::render::Curve;
 
 /// The name transition `t` goes by: `Cross Dissolve`, `Cross Fade +3 dB`.
 pub fn name(t: &Transition) -> String {
@@ -44,6 +45,27 @@ pub fn dissolves(t: &Transition) -> bool {
     let effect = &t.otio["metadata"][EDITOR]["Effects"]["Effect Name"];
     t.otio["transition_type"] == "SMPTE_Dissolve"
         && effect.as_str().is_none_or(|n| n == "Cross Dissolve")
+}
+
+/// The curve transition `t` cross fades sounds with (decision D50):
+/// Resolve's Cross Fades by their effect's type (41 +3 dB, 40 0 dB, 26
+/// -3 dB, the one its import goes by) or name, another editor's
+/// `SMPTE_Dissolve` at 0 dB. `None`: it plays as a cut.
+pub fn cross_fade(t: &Transition) -> Option<Curve> {
+    let resolve = &t.otio["metadata"][EDITOR];
+    match resolve["Effects"]["Type"].as_i64() {
+        Some(41) => return Some(Curve::Plus3Db),
+        Some(40) => return Some(Curve::ZeroDb),
+        Some(26) => return Some(Curve::Minus3Db),
+        _ => {}
+    }
+    match resolve["Transition Type"].as_str() {
+        Some("Cross Fade +3DB") => Some(Curve::Plus3Db),
+        Some("Cross Fade 0DB") => Some(Curve::ZeroDb),
+        Some("Cross Fade -3DB") => Some(Curve::Minus3Db),
+        Some(_) => None,
+        None => (t.otio["transition_type"] == "SMPTE_Dissolve").then_some(Curve::ZeroDb),
+    }
 }
 
 /// A transition that plays on a track ([`playing`]).
