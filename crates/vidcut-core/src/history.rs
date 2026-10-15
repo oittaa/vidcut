@@ -1,11 +1,12 @@
-//! The undo history file, `$XDG_STATE_HOME/vidcut/history/<hash of the
-//! project path>.jsonl`, a JSON line each ([`Line`]):
+//! The undo history file, `$XDG_STATE_HOME/vidcut/history/<short digest of
+//! the project path>.jsonl`, a JSON line each ([`Line`]):
 //!
 //! 1. the project file it is of,
 //! 2. the project before its oldest step,
 //! 3. then the steps, undos and redos as they happened. Each step has its
 //!    place on the undo stack (`at`, from 1), and each save ends with a
-//!    [`Tail`]: the hash of the project text it wrote and the stacks' sizes.
+//!    [`Tail`]: the digest of the project text it wrote and the stacks'
+//!    sizes.
 //!
 //! A save adds lines at the end. Loading reads only the last [`Tail`].
 //! Undo reads back from the end as far as it needs: the step at place `d`
@@ -28,7 +29,7 @@ use crate::editor::{Entry, HISTORY_CAP, History, Moved};
 /// The last line of a save.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Tail {
-    /// The hash of the project text the save wrote ([`text_hash`]).
+    /// The digest of the project text the save wrote ([`text_hash`]).
     pub hash: String,
     /// The steps there are to undo and to redo.
     pub undo: usize,
@@ -102,9 +103,9 @@ fn bad(what: &str) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::InvalidData, what.to_string())
 }
 
-/// The hash of a project file's text, as the history keeps it.
+/// The digest of a project file's text, as the history keeps it.
 pub(crate) fn text_hash(text: &str) -> String {
-    format!("{:016x}", crate::hash64(text.as_bytes()))
+    crate::fingerprint::digest(text.as_bytes())
 }
 
 /// Whether a file holds more steps than the limit: its oldest then go.

@@ -37,7 +37,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 
 ## X4. Undo history persists across sessions and CLI runs
 - **Resolve:** undo is unlimited within a session and cleared when the project closes (p. 651).
-- **vidcut:** the history is kept in a file under `~/.local/state/vidcut/history/`, so it survives restarts and separate CLI runs. It holds up to 131,072 steps, each only what its edit changed (`vidcut_core::change`). Past that, the oldest 10% go. A save adds lines at the end of the file, and commands that only read don't open it.
+- **vidcut:** the history is kept in a file under `~/.local/state/vidcut/history/`, named by the first 128 bits of the SHA-256 of the project's path, so it survives restarts and separate CLI runs. It holds up to 131,072 steps, each only what its edit changed (`vidcut_core::change`). Past that, the oldest 10% go. A save adds lines at the end of the file, and commands that only read don't open it.
 - **Why:** an agent can undo its own edits from a later CLI call, and a human can undo an agent's batch from the GUI.
 
 ## X5. Scripting additions (no Cut-page behavior changes)

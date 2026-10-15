@@ -1,9 +1,19 @@
-//! Media fingerprints: a SHA-256 that tells a moved file from another one
-//! with the same name, size and streams, without reading all of a big file.
+//! SHA-256 for media files and for vidcut's own.
+//!
+//! - A media fingerprint tells a moved file from another one with the same
+//!   name, size and streams, without reading all of a big file.
+//! - [`digest`] checks a text, and [`short_digest`] names files and pipes.
+//!   Both stay the same from release to release, and nobody can make two
+//!   inputs that share one.
+//! - An [`Origin`] goes in each file made from a media file, so a file made
+//!   from another one never passes for it.
 
+use std::collections::HashMap;
+use std::ffi::OsString;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use sha2::{Digest, Sha256};
 
@@ -45,6 +55,134 @@ pub fn pictures(first: &Path, middle: &Path, last: &Path) -> std::io::Result<Str
     Ok(hex(&hash.finalize()))
 }
 
+/// The SHA-256 of `bytes` in lowercase hex, 64 digits: a check that a text
+/// is the same.
+pub fn digest(bytes: &[u8]) -> String {
+    hex(&Sha256::digest(bytes))
+}
+
+/// The first 128 bits of [`digest`], 32 hex digits: a name for a file or a
+/// pipe.
+pub fn short_digest(bytes: &[u8]) -> String {
+    hex(&Sha256::digest(bytes)[..16])
+}
+
+/// What a file made from a media file (its thumbnails, waveform,
+/// measurements or proxy) says it was made from: the media file's path,
+/// size and modification time.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Origin {
+    /// How its name starts: the path's [`short_digest`], the size and the
+    /// time.
+    pub name: Arc<str>,
+    /// What it keeps inside: the size, the time and the path.
+    pub text: Arc<str>,
+}
+
+impl Origin {
+    /// A file of `bytes` made from this origin: the origin's text first,
+    /// after its length.
+    pub fn stamp(&self, bytes: &[u8]) -> Vec<u8> {
+        let mut file = Vec::with_capacity(4 + self.text.len() + bytes.len());
+        file.extend_from_slice(&(self.text.len() as u32).to_le_bytes());
+        file.extend_from_slice(self.text.as_bytes());
+        file.extend_from_slice(bytes);
+        file
+    }
+
+    /// The bytes [`stamp`](Self::stamp) put in `file`, if it was made from
+    /// this origin. `None` for a file made from another, or without one.
+    pub fn check<'a>(&self, file: &'a [u8]) -> Option<&'a [u8]> {
+        let (len, rest) = file.split_first_chunk::<4>()?;
+        let (text, bytes) = rest.split_at_checked(u32::from_le_bytes(*len) as usize)?;
+        (text == self.text.as_bytes()).then_some(bytes)
+    }
+}
+
+/// The origin of files made from the file at `path` as it is now: `size`
+/// bytes, changed at `mtime_ns`. Each is made once and kept, so asking
+/// again digests nothing.
+pub fn origin(path: &Path, size: u64, mtime_ns: i64) -> Origin {
+    type Kept = HashMap<OsString, Vec<(u64, i64, Origin)>>;
+    static KEPT: Mutex<Option<Kept>> = Mutex::new(None);
+    let mut kept = KEPT.lock().unwrap_or_else(PoisonError::into_inner);
+    let kept = kept.get_or_insert_with(HashMap::new);
+    let path = path.as_os_str();
+    let known = kept.get(path).and_then(|versions| {
+        versions
+            .iter()
+            .find(|(s, t, _)| (*s, *t) == (size, mtime_ns))
+    });
+    if let Some((.., o)) = known {
+        return o.clone();
+    }
+    let o = Origin {
+        name: format!(
+            "{}-{size}-{mtime_ns}",
+            short_digest(path.as_encoded_bytes())
+        )
+        .into(),
+        text: format!("{size} {mtime_ns} {}", path.to_string_lossy()).into(),
+    };
+    kept.entry(path.to_os_string())
+        .or_default()
+        .push((size, mtime_ns, o.clone()));
+    o
+}
+
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        s.push(char::from(DIGITS[usize::from(b >> 4)]));
+        s.push(char::from(DIGITS[usize::from(b & 15)]));
+    }
+    s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_digest_is_the_sha256_of_the_bytes() {
+        assert_eq!(
+            digest(b"vidcut"),
+            "0af8ae7dbfee97fdeea3674c384c91590fa5b19f0156445533f4a166fa5308e0"
+        );
+    }
+
+    #[test]
+    fn a_short_digest_is_the_first_128_bits() {
+        assert_eq!(short_digest(b"vidcut"), "0af8ae7dbfee97fdeea3674c384c9159");
+    }
+
+    #[test]
+    fn an_origin_holds_the_path_size_and_time() {
+        let o = origin(Path::new("/media/a.mov"), 1000, 1_700_000_000_000_000_000);
+        assert_eq!(
+            &*o.name,
+            "e0d49d7e2c09594b794f649dea1dcd1e-1000-1700000000000000000"
+        );
+        assert_eq!(&*o.text, "1000 1700000000000000000 /media/a.mov");
+    }
+
+    #[test]
+    fn a_stamped_file_gives_its_bytes_back() {
+        let o = origin(Path::new("/media/a.mov"), 1000, 1);
+        assert_eq!(o.check(&o.stamp(b"pictures")), Some(&b"pictures"[..]));
+    }
+
+    #[test]
+    fn a_file_made_from_another_origin_gives_nothing() {
+        let older = origin(Path::new("/media/a.mov"), 1000, 1);
+        let newer = origin(Path::new("/media/a.mov"), 1000, 2);
+        assert_eq!(newer.check(&older.stamp(b"pictures")), None);
+    }
+
+    #[test]
+    fn a_file_without_an_origin_gives_nothing() {
+        let o = origin(Path::new("/media/a.mov"), 1000, 1);
+        assert_eq!(o.check(b"vct2 pictures"), None);
+    }
 }

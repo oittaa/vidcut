@@ -1,13 +1,15 @@
 //! Pool thumbnails kept on disk (preference `thumbnails.disk_cache`), so a
 //! project opens with its thumbnails shown instead of decoding every clip
 //! again. One file per version of a media file (path, size and modification
-//! time); above `thumbnails.cache_limit_mb` the least recently used go first.
+//! time), which holds that version's origin ([`Origin`]); above
+//! `thumbnails.cache_limit_mb` the least recently used go first.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::SystemTime;
 
 use vidcut_av::thumbs::Image;
+use vidcut_core::fingerprint::Origin;
 use vidcut_core::model::Media;
 
 use crate::paths;
@@ -18,8 +20,9 @@ pub fn dir() -> PathBuf {
 }
 
 /// The cache file of `media`'s filmstrip of `count` pictures fitted in
-/// `size`: the layout is part of the name, so another layout never reads it.
-fn file(media: &Media, count: usize, size: (u32, u32)) -> PathBuf {
+/// `size`, made from the file of `origin`: the layout is part of the name,
+/// so another layout never reads it.
+fn file(media: &Media, origin: &Origin, count: usize, size: (u32, u32)) -> PathBuf {
     // A sequence's length is part of the name: the same first file with a
     // shorter count is a different strip (image2 would otherwise read on).
     let pictures = media
@@ -29,15 +32,16 @@ fn file(media: &Media, count: usize, size: (u32, u32)) -> PathBuf {
         .unwrap_or_default();
     paths::media_cache(
         "thumbs",
-        media,
+        origin,
         &format!("{count}-{}x{}{pictures}.thumbs", size.0, size.1),
     )
 }
 
 /// The cached filmstrip of `media`, if there is one; marks it as used.
 pub fn load(media: &Media, count: usize, size: (u32, u32)) -> Option<(Vec<Image>, Vec<f64>)> {
-    let path = file(media, count, size);
-    let strip = vidcut_av::thumbs::from_bytes(&std::fs::read(&path).ok()?)?;
+    let origin = paths::media_origin(media);
+    let path = file(media, &origin, count, size);
+    let strip = vidcut_av::thumbs::from_bytes(origin.check(&std::fs::read(&path).ok()?)?)?;
     // The modification time is the last use (opening for writing is the
     // portable way to set it).
     if let Ok(f) = std::fs::File::options().write(true).open(&path) {
@@ -49,30 +53,32 @@ pub fn load(media: &Media, count: usize, size: (u32, u32)) -> Option<(Vec<Image>
 /// Source frames per file of timeline tiles.
 pub const TILE_BLOCK: i64 = 64;
 
-/// The cache file of `media`'s timeline tiles `height` pixels tall for the
-/// source frames from `block * TILE_BLOCK` to the next block.
-pub fn tile_block(media: &Media, height: u32, block: i64) -> PathBuf {
-    paths::media_cache("thumbs", media, &format!("t{height}-b{block}.thumbs"))
+/// The cache file of the timeline tiles `height` pixels tall of the file of
+/// `origin`, for the source frames from `block * TILE_BLOCK` to the next
+/// block.
+pub fn tile_block(origin: &Origin, height: u32, block: i64) -> PathBuf {
+    paths::media_cache("thumbs", origin, &format!("t{height}-b{block}.thumbs"))
 }
 
-/// The tiles kept in the block file `path`, by source frame; marks it as
-/// used.
-pub fn load_tiles(path: &Path) -> Option<Vec<(i64, Image)>> {
-    let (images, frames) = vidcut_av::thumbs::from_bytes(&std::fs::read(path).ok()?)?;
+/// The tiles kept in the block file `path` of the file of `origin`, by
+/// source frame; marks it as used.
+pub fn load_tiles(path: &Path, origin: &Origin) -> Option<Vec<(i64, Image)>> {
+    let (images, frames) =
+        vidcut_av::thumbs::from_bytes(origin.check(&std::fs::read(path).ok()?)?)?;
     if let Ok(f) = std::fs::File::options().write(true).open(path) {
         let _ = f.set_modified(SystemTime::now());
     }
     Some(frames.into_iter().map(|f| f as i64).zip(images).collect())
 }
 
-/// Adds `tiles` to the block file `path`, with what it holds. Failing only
-/// costs decoding them again.
-pub fn store_tiles(path: &Path, tiles: &[(i64, Image)]) {
+/// Adds `tiles` of the file of `origin` to the block file `path`, with what
+/// it holds of that file. Failing only costs decoding them again.
+pub fn store_tiles(path: &Path, origin: &Origin, tiles: &[(i64, Image)]) {
     // Workers write blocks one at a time: two reading the same block before
     // either renames would each write it without the other's tiles.
     static WRITING: Mutex<()> = Mutex::new(());
     let _writing = WRITING.lock().unwrap_or_else(|e| e.into_inner());
-    let mut all = load_tiles(path).unwrap_or_default();
+    let mut all = load_tiles(path, origin).unwrap_or_default();
     for (frame, image) in tiles {
         if !all.iter().any(|(f, _)| f == frame) {
             all.push((*frame, image.clone()));
@@ -93,7 +99,7 @@ pub fn store_tiles(path: &Path, tiles: &[(i64, Image)]) {
     let written = path
         .parent()
         .map_or(Ok(()), std::fs::create_dir_all)
-        .and_then(|()| std::fs::write(&part, &bytes))
+        .and_then(|()| std::fs::write(&part, origin.stamp(&bytes)))
         .and_then(|()| std::fs::rename(&part, path));
     if written.is_err() {
         let _ = std::fs::remove_file(&part);
@@ -112,10 +118,11 @@ pub fn store(
     let Ok(bytes) = vidcut_av::thumbs::to_bytes(strip.0, strip.1) else {
         return;
     };
-    let path = file(media, count, size);
+    let origin = paths::media_origin(media);
+    let path = file(media, &origin, count, size);
     let part = path.with_extension("part");
     let written = std::fs::create_dir_all(dir())
-        .and_then(|()| std::fs::write(&part, &bytes))
+        .and_then(|()| std::fs::write(&part, origin.stamp(&bytes)))
         .and_then(|()| std::fs::rename(&part, &path));
     if written.is_err() {
         let _ = std::fs::remove_file(&part);
@@ -179,6 +186,25 @@ fn cached(dir: &Path) -> Vec<(SystemTime, u64, PathBuf)> {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn tiles_are_read_only_for_the_file_they_were_made_from() {
+        let tmp = tempfile::Builder::new()
+            .prefix("vidcut-thumbcache-")
+            .tempdir()
+            .unwrap();
+        let path = tmp.path().join("block.thumbs");
+        let gray = Image {
+            width: 16,
+            height: 16,
+            rgba: vec![128; 16 * 16 * 4],
+        };
+        let a = vidcut_core::fingerprint::origin(Path::new("/media/a.mov"), 1000, 1);
+        let b = vidcut_core::fingerprint::origin(Path::new("/media/b.mov"), 1000, 1);
+        store_tiles(&path, &a, &[(0, gray)]);
+        assert_eq!(load_tiles(&path, &a).map(|tiles| tiles.len()), Some(1));
+        assert!(load_tiles(&path, &b).is_none());
+    }
 
     #[test]
     fn eviction_drops_the_least_recently_used_first() {

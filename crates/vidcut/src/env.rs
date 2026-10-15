@@ -6,6 +6,7 @@ use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use vidcut_core::analysis::{AudioLevels, Loudness, PictureStats};
 use vidcut_core::editor::GeneratedProxy;
+use vidcut_core::fingerprint::Origin;
 use vidcut_core::model::{
     AudioInfo, FieldOrder, Hdr, Media, MediaInfo, StartTimecode, VideoInfo, proxy_size,
 };
@@ -38,8 +39,9 @@ impl AvEnv {
 /// Audio levels are measured in 10 ms buckets.
 const LEVELS_PER_SECOND: u32 = 100;
 
-/// Measurements made in this process, by cache file.
-type Memo<T> = LazyLock<Mutex<HashMap<PathBuf, Arc<T>>>>;
+/// Measurements made in this process, by cache file and the origin of what
+/// it measured.
+type Memo<T> = LazyLock<Mutex<HashMap<(PathBuf, Origin), Arc<T>>>>;
 static LEVELS: Memo<AudioLevels> = LazyLock::new(Default::default);
 static PICTURES: Memo<PictureStats> = LazyLock::new(Default::default);
 
@@ -55,16 +57,19 @@ static MADE_WITH: LazyLock<Mutex<HashMap<PathBuf, (String, vidcut_core::editor::
 /// stream, so the live session measures on a worker first (docs/decisions/agents.md §3).
 fn measured<T>(
     memo: &Memo<T>,
-    file: PathBuf,
+    (file, origin): (PathBuf, Origin),
     measure: impl FnOnce() -> vidcut_av::error::Result<T>,
     to_bytes: impl Fn(&T) -> Vec<u8>,
     from_bytes: impl Fn(&[u8]) -> Option<T>,
 ) -> Result<Arc<T>> {
     let lock = || memo.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Some(v) = lock().get(&file) {
+    let key = (file, origin);
+    if let Some(v) = lock().get(&key) {
         return Ok(v.clone());
     }
-    let value = match std::fs::read(&file).ok().and_then(|b| from_bytes(&b)) {
+    let (file, origin) = &key;
+    let read = std::fs::read(file).ok();
+    let value = match read.as_deref().and_then(|b| from_bytes(origin.check(b)?)) {
         Some(v) => v,
         None => {
             let v = measure().map_err(av_error)?;
@@ -72,16 +77,23 @@ fn measured<T>(
                 && std::fs::create_dir_all(dir).is_ok()
             {
                 let part = file.with_extension("part");
-                if std::fs::write(&part, to_bytes(&v)).is_ok() {
-                    let _ = std::fs::rename(&part, &file);
+                if std::fs::write(&part, origin.stamp(&to_bytes(&v))).is_ok() {
+                    let _ = std::fs::rename(&part, file);
                 }
             }
             v
         }
     };
     let value = Arc::new(value);
-    lock().insert(file, value.clone());
+    lock().insert(key, value.clone());
     Ok(value)
+}
+
+/// The cache file in `analysis` of `media`'s measurement `what`, and the
+/// origin it holds.
+fn analysis_file(media: &Media, what: &str) -> (PathBuf, Origin) {
+    let origin = paths::media_origin(media);
+    (paths::media_cache("analysis", &origin, what), origin)
 }
 
 /// How `m`'s pictures are read: its file, or its image sequence.
@@ -181,7 +193,7 @@ impl Env for AvEnv {
     fn audio_levels(&self, media: &Media, stream: u32) -> Result<Arc<AudioLevels>> {
         measured(
             &LEVELS,
-            paths::media_cache("analysis", media, &format!("levels{stream}")),
+            analysis_file(media, &format!("levels{stream}")),
             || vidcut_av::analysis::audio_levels(&media.path, stream, LEVELS_PER_SECOND),
             AudioLevels::to_bytes,
             AudioLevels::from_bytes,
@@ -198,7 +210,7 @@ impl Env for AvEnv {
         };
         measured(
             &PICTURES,
-            paths::media_cache("analysis", media, &key),
+            analysis_file(media, &key),
             || {
                 // Decoded on the GPU the viewer decodes on, on a decoder of
                 // its own.
@@ -241,15 +253,9 @@ impl Env for AvEnv {
         })?;
         let (w, h) = v.display_size();
         let (w, h) = proxy_size(w, h, longest);
+        let origin = paths::media_origin(media);
         // The codec is in the name: changing the preference makes a new file.
-        let name = |codec: &str| {
-            dir.join(format!(
-                "{:016x}-{}-{}-{w}x{h}-{codec}.mkv",
-                vidcut_core::hash64(media.path.as_os_str().as_encoded_bytes()),
-                media.size,
-                media.mtime_ns,
-            ))
-        };
+        let name = |codec: &str| dir.join(format!("{}-{w}x{h}-{codec}.mkv", origin.name));
         let prefs = crate::preferences::load().unwrap_or_default();
         let encoders = proxy_encoders(
             prefs.proxies.codec,
@@ -262,7 +268,12 @@ impl Env for AvEnv {
         let made = || MADE_WITH.lock().unwrap_or_else(PoisonError::into_inner);
         let mut made_with = None;
         let mut copies = None;
-        if !dry_run && path.is_file() {
+        // A file there made from another file (or another version of this
+        // one) is made again.
+        if !dry_run
+            && path.is_file()
+            && vidcut_av::proxy::origin(&path).as_deref() == Some(&*origin.text)
+        {
             (made_with, copies) = made().remove(&path).unzip();
         } else if !dry_run {
             std::fs::create_dir_all(dir)
@@ -279,6 +290,7 @@ impl Env for AvEnv {
                 total,
                 &encoders,
                 decoder.as_ref(),
+                &origin.text,
             )
             .map_err(av_error)?;
             let went = written

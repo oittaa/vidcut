@@ -371,6 +371,39 @@ fn barcodes(path: &Path) -> Vec<Option<u32>> {
     out
 }
 
+/// A file with a media's proxy name that was made from another file is
+/// made again from the media (decision D41).
+#[test]
+fn a_proxy_made_from_another_file_is_made_again() {
+    let sb = Sandbox::new("proxy-origin");
+    let spec = FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 30);
+    let numbered = fixture(spec.clone());
+    let black = fixture(spec.picture(Picture::Black));
+    let out = sb
+        .cmd(&["project", "create"])
+        .arg(sb.project())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    sb.ok(&["media", "add", s(&numbered), s(&black)]);
+    let proxy = |media: &str| {
+        let r = sb.ok(&["proxy", "generate", media]);
+        PathBuf::from(r["result"]["proxies"][0]["path"].as_str().unwrap())
+    };
+    let numbered_proxy = proxy("m1");
+    // m1's proxy by name, of the black file.
+    std::fs::copy(proxy("m2"), &numbered_proxy).unwrap();
+    assert_eq!(proxy("m1"), numbered_proxy);
+    assert_eq!(
+        barcodes(&numbered_proxy),
+        (0..30).map(Some).collect::<Vec<_>>()
+    );
+}
+
 #[test]
 fn exports_frames_ranges_and_clips() {
     let sb = Sandbox::new("export");

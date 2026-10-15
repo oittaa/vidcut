@@ -243,6 +243,7 @@ fn matches_source(
             None,
             std::slice::from_ref(enc),
             decoder,
+            "",
         )
         .unwrap_or_else(|e| panic!("{} with {}: {e}", path.display(), enc.name));
         assert_eq!(written.encoder, *enc);
@@ -270,6 +271,29 @@ fn matches_source(
         written_all.push(written);
     }
     written_all
+}
+
+#[test]
+fn a_proxy_says_what_it_was_made_from() {
+    let source = fixture::ensure(&Source::H264.spec(Container::Mp4, (320, 180), 24)).unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-proxy-origin-")
+        .tempdir()
+        .unwrap();
+    let dest = tmp.path().join("proxy.mkv");
+    let origin = "123 1700000000000000000 /media/a.mp4";
+    vidcut_av::proxy::write(
+        &Input::File(source),
+        320,
+        180,
+        &dest,
+        None,
+        &software()[..1],
+        None,
+        origin,
+    )
+    .unwrap();
+    assert_eq!(vidcut_av::proxy::origin(&dest).as_deref(), Some(origin));
 }
 
 #[test]
@@ -471,6 +495,7 @@ fn a_sequence_proxy_uses_the_sequence_timestamps() {
             None,
             std::slice::from_ref(&enc),
             None,
+            "",
         )
         .unwrap_or_else(|e| panic!("{}: {e}", enc.name));
         assert_eq!(written.frames, 8);
