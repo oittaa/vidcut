@@ -230,6 +230,8 @@ pub(crate) struct Listed {
     pub name: String,
     pub slot: Option<crate::gpus::Slot>,
     pub uuid: Option<[u8; 16]>,
+    /// Its memory in bytes.
+    pub memory: Option<usize>,
 }
 
 /// The CUDA devices, in CUDA's order; none without NVIDIA's driver.
@@ -265,11 +267,14 @@ pub(crate) fn listed() -> Vec<Listed> {
                     .flatten();
                 let mut uuid = [0u8; 16];
                 let uuid = ((cuda.device_get_uuid)(&mut uuid, device) == 0).then_some(uuid);
+                let mut bytes = 0;
+                let memory = ((cuda.device_total_mem)(&mut bytes, device) == 0).then_some(bytes);
                 Some(Listed {
                     index,
                     name: text(&name),
                     slot,
                     uuid,
+                    memory,
                 })
             })
             .collect()

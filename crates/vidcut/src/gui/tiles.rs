@@ -3,9 +3,9 @@
 //!
 //! Painting asks for every visible tile by key: the media, the source frame
 //! (project frames from the media's first frame) and the picture's height
-//! in pixels. Kept pictures are textures; above the memory budget
-//! (preference `thumbnails.timeline_memory_mb`) those shown least recently
-//! go first. A tile not kept goes to worker threads, which take tiles in
+//! in pixels. Kept pictures are textures. Above [`MEMORY`] those shown
+//! least recently go first: a tile comes back from the disk cache in a
+//! fraction of a millisecond. A tile not kept goes to worker threads, which take tiles in
 //! the order painting asked for them and go on along a file while it has
 //! more: each from the thumbnail cache on disk, where tiles are kept in
 //! blocks of [`TILE_BLOCK`] frames, or decoded with the export's frame
@@ -33,6 +33,9 @@ use crate::thumbcache::{self, TILE_BLOCK};
 
 /// Decoding threads.
 const WORKERS: usize = 4;
+
+/// Memory for kept pictures: about 12,000 tiles 56 px tall.
+const MEMORY: usize = 256 << 20;
 
 /// A tile's picture: `frame` of `media`, `height` pixels tall.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -108,7 +111,7 @@ impl Tiles {
             versions: HashMap::new(),
             clock: 0,
             bytes: 0,
-            budget: 0,
+            budget: MEMORY,
             disk: None,
             asked: RefCell::default(),
             shown: RefCell::default(),
@@ -125,10 +128,8 @@ impl Tiles {
         tiles
     }
 
-    /// The memory budget and the disk cache, as the preferences say.
+    /// The disk cache, as the preferences say.
     pub fn set_prefs(&mut self, prefs: &Thumbnails) {
-        self.budget =
-            usize::try_from(prefs.timeline_memory_mb.saturating_mul(1 << 20)).unwrap_or(usize::MAX);
         self.disk = prefs
             .disk_cache
             .then(|| prefs.cache_limit_mb.saturating_mul(1 << 20));

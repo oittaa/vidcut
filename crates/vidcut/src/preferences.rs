@@ -187,6 +187,15 @@ fn system_look() -> Value {
     })
 }
 
+/// What an automatic `player.video_memory_mb` comes to: half the memory of
+/// the GPU in use where its driver says (NVIDIA's) and it decodes, else 1 GB.
+fn video_memory_auto_mb(p: &Preferences) -> u64 {
+    vidcut_av::gpus::in_use()
+        .filter(|_| p.gpu.acceleration && p.gpu.decoding)
+        .and_then(|g| g.memory_mb)
+        .map_or(1024, |mb| mb / 2)
+}
+
 fn describe(p: &Preferences) -> Value {
     use vidcut_core::preferences::ProxyCodec;
     let (files, bytes) = thumbcache::usage();
@@ -232,7 +241,11 @@ fn describe(p: &Preferences) -> Value {
         "gpus": vidcut_av::gpus::list(),
         "gpu_chosen": vidcut_av::gpus::find(vidcut_av::gpus::list(), &p.gpu.device),
         "gpu_automatic": vidcut_av::gpus::automatic(),
-        // What `player.memory_mb` 0 means here.
+        // What `player.memory_mb` and `player.video_memory_mb` 0 mean here:
+        // half the computer's memory, at least 1 GB, and half the memory of
+        // the NVIDIA GPU that decodes, else 1 GB.
         "player_memory_auto_mb": vidcut_av::player::Budget::automatic().memory >> 20,
+        "player_video_memory_auto_mb": video_memory_auto_mb(p),
+        "system_memory_mb": vidcut_av::player::system_memory().map(|b| b >> 20),
     })
 }

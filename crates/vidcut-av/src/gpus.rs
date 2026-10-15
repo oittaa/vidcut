@@ -30,6 +30,9 @@ pub struct Gpu {
     pub name: String,
     /// Its maker: `NVIDIA`, `AMD`, `Intel`, or the PCI vendor id.
     pub vendor: String,
+    /// Its memory in MB, where its driver says (NVIDIA's, through CUDA).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_mb: Option<u64>,
     #[serde(skip)]
     pub(crate) pci_vendor: u32,
     #[serde(skip)]
@@ -220,6 +223,7 @@ fn listed() -> Vec<Gpu> {
             id: id(desc.VendorId, desc.DeviceId, slot),
             name,
             vendor: maker(desc.VendorId),
+            memory_mb: None,
             pci_vendor: desc.VendorId,
             slot,
             cuda: None,
@@ -316,6 +320,7 @@ fn listed() -> Vec<Gpu> {
             id: id(vendor, device, slot),
             name: named,
             vendor: maker(vendor),
+            memory_mb: None,
             pci_vendor: vendor,
             slot,
             cuda: None,
@@ -380,6 +385,7 @@ fn with_cuda(gpus: &mut Vec<Gpu>, cuda: &[crate::cuda::Listed]) {
             g.cuda = Some(c.index);
             g.uuid = c.uuid;
             g.name = c.name.clone();
+            g.memory_mb = c.memory.map(|b| b as u64 >> 20);
         }
     }
     // CUDA's GPUs no system lists (compute-only cards).
@@ -392,6 +398,7 @@ fn with_cuda(gpus: &mut Vec<Gpu>, cuda: &[crate::cuda::Listed]) {
             id: id(NVIDIA, device, c.slot),
             name: c.name.clone(),
             vendor: maker(NVIDIA),
+            memory_mb: c.memory.map(|b| b as u64 >> 20),
             pci_vendor: NVIDIA,
             slot: c.slot,
             cuda: Some(c.index),
@@ -421,6 +428,7 @@ mod tests {
             id: id(vendor, device, slot),
             name: String::new(),
             vendor: String::new(),
+            memory_mb: None,
             pci_vendor: vendor,
             slot,
             cuda: None,
