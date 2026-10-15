@@ -73,14 +73,14 @@ pub fn cross_fade(t: &Transition) -> Option<Curve> {
 
 /// [`cross_fade`] of OTIO transition `o`.
 fn cross_fade_in(o: &Value) -> Option<Curve> {
-    let resolve = &o["metadata"][EDITOR];
-    match resolve["Effects"]["Type"].as_i64() {
+    let meta = &o["metadata"][EDITOR];
+    match meta["Effects"]["Type"].as_i64() {
         Some(41) => return Some(Curve::Plus3Db),
         Some(40) => return Some(Curve::ZeroDb),
         Some(26) => return Some(Curve::Minus3Db),
         _ => {}
     }
-    match resolve["Transition Type"].as_str() {
+    match meta["Transition Type"].as_str() {
         Some("Cross Fade +3DB") => Some(Curve::Plus3Db),
         Some("Cross Fade 0DB") => Some(Curve::ZeroDb),
         Some("Cross Fade -3DB") => Some(Curve::Minus3Db),
@@ -268,18 +268,29 @@ fn place(p: &Project, cuts: &Cuts, t: &Transition) -> Option<i64> {
     if (from.is_none() && meets(true)) || (to.is_none() && meets(false)) {
         return None;
     }
-    // Media past the edges (a generator has any).
+    // Media past the edges (a generator has any), at each clip's speed and
+    // either way.
     if let Some(g) = to.filter(|g| !g.is_generator())
-        && g.source_at(cut) < t.before
+        && t.before > 0
+        && !shows_media(g, source_frames(p, cuts, g)?, cut - t.before, cut)
     {
         return None;
     }
     if let Some(f) = from.filter(|f| !f.is_generator())
-        && f.source_at(cut) + t.after > source_frames(p, cuts, f)?
+        && t.after > 0
+        && !shows_media(f, source_frames(p, cuts, f)?, cut, cut + t.after)
     {
         return None;
     }
     Some(cut)
+}
+
+/// Whether clip `c` shows its media in timeline frames `[a, b)`: the source
+/// frames there, at its speed and either way, inside `0..frames`.
+fn shows_media(c: &Clip, frames: i64, a: i64, b: i64) -> bool {
+    [a, b - 1]
+        .into_iter()
+        .all(|t| (0..frames).contains(&c.source_at(t)))
 }
 
 /// Drops the transitions that no longer fit their edit points; how many.
@@ -305,9 +316,7 @@ pub fn prune(p: &mut Project) -> usize {
 
 /// What an edit that dropped `n` transitions says.
 pub fn dropped(n: usize) -> String {
-    format!(
-        "{n} transition(s) from another editor no longer fit their edit points and were dropped"
-    )
+    format!("{n} transition(s) no longer fit their edit points and were dropped")
 }
 
 /// Transition `t` as written at `rate`.
@@ -405,5 +414,37 @@ pub(super) fn close(items: &mut Vec<Value>, rate: f64) {
         if after > 0.0 {
             items.push(gap(after.round() as i64, rate));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::prune;
+    use crate::model::Transition;
+    use crate::test_support::Fixture;
+
+    #[test]
+    fn a_dissolve_needing_media_past_a_fast_clips_end_is_dropped() {
+        // m1 is 115 frames.
+        let mut f = Fixture::new(&[(4.6, true), (4.0, true)]);
+        f.append("m1", 0, 100);
+        f.ok(json!({"method": "edit.change_speed", "params": {"clips": "c1", "speed": 2.0}}));
+        f.append("m2", 10, 60);
+        let mut p = f.editor.project().clone();
+        p.track_mut("V1").unwrap().transitions.push(Transition {
+            id: "t1".into(),
+            sound: false,
+            from: Some("c1".into()),
+            to: Some("c2".into()),
+            before: 0,
+            after: 12,
+            otio: json!({"OTIO_SCHEMA": "Transition.1", "transition_type": "SMPTE_Dissolve"})
+                .into(),
+        });
+        // At twice the speed, 12 frames past c1's end show source frames
+        // 100 to 123.
+        assert_eq!(prune(&mut p), 1);
     }
 }

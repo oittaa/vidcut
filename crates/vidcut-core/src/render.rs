@@ -553,7 +553,7 @@ fn image_of(m: &Media) -> Option<Image> {
 }
 
 /// Whether `c` is a compound clip from another editor whose clips play.
-fn plays_inside(c: &Clip) -> bool {
+pub(crate) fn plays_inside(c: &Clip) -> bool {
     c.compound.as_ref().is_some_and(|k| !k.tracks.is_empty())
 }
 
@@ -829,10 +829,13 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
             let end = out_of.map_or(rb, |f| f.frames.1);
             let head = into.map_or(start, |f| f.frames.1).min(end);
             let tail = out_of.map_or(end, |f| f.frames.0).max(head);
+            // Counted from the timeline's start, so a plan starting inside
+            // a fade gives each sample the gain the whole timeline's does.
+            let abs = |t: i64| s.fps.frame_to_sample(t, s.sample_rate);
             let fade = |f: Option<&transitions::Playing>, x: i64, falling: bool| {
                 f.map(|f| Fade {
-                    at: sample(x) - sample(f.frames.0),
-                    of: sample(f.frames.1) - sample(f.frames.0),
+                    at: abs(a) + sample(x) - abs(f.frames.0),
+                    of: abs(f.frames.1) - abs(f.frames.0),
                     falling,
                     curve: transitions::cross_fade(f.transition).expect("plays"),
                 })

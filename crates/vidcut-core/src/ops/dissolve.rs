@@ -131,6 +131,19 @@ fn sides(p: &Project, ti: usize, sound: bool, e: i64) -> (Option<String>, Option
     (find(true), find(false))
 }
 
+/// The compound clip that plays the clips it holds on either side of edit
+/// `e` of track `ti`: its edges take no dissolve, which its clips would
+/// play over.
+fn compound_at(p: &Project, ti: usize, sound: bool, e: i64) -> Option<String> {
+    let (from, to) = sides(p, ti, sound, e);
+    [from, to].into_iter().flatten().find(|id| {
+        p.tracks[ti]
+            .clips
+            .iter()
+            .any(|c| &c.id == id && crate::render::plays_inside(c))
+    })
+}
+
 /// Frames a dissolve at edit `e` between clips `from` and `to` (`None`: a
 /// gap) may take before the edit and after it: as far as each clip's
 /// picture (or sound) or the gap goes, as far as each clip's media goes
@@ -210,7 +223,7 @@ pub struct Made {
 /// edit go.
 fn put(p: &mut Project, ti: usize, sound: bool, e: i64, frames: i64, align: Align) -> Option<Made> {
     let (from, to) = sides(p, ti, sound, e);
-    if from.is_none() && to.is_none() {
+    if from.is_none() && to.is_none() || compound_at(p, ti, sound, e).is_some() {
         return None;
     }
     let (want_before, want_after) = split(frames, align);
@@ -298,6 +311,11 @@ pub fn dissolve(
     if pictures {
         let e = nearest(p, ti, false, at)
             .ok_or_else(|| Error::invalid(format!("{track} has no edit to dissolve")))?;
+        if let Some(c) = compound_at(p, ti, false, e) {
+            return Err(Error::invalid(format!(
+                "{c} is a compound clip, and its edges take no dissolve: decompose it first"
+            )));
+        }
         clips = Some(sides(p, ti, false, e));
         made.extend(put(p, ti, false, e, frames, align));
     }
@@ -354,18 +372,25 @@ pub fn to_cut(
     let gone: Vec<bool> = if all {
         p.tracks[ti].transitions.iter().map(|t| !keeps(t)).collect()
     } else {
-        let video = p.tracks[ti].kind == TrackKind::Video;
+        // As the Dissolve button finds them: the picture's edit nearest
+        // `at`, and the sounds of its clips where they meet; or the nearest
+        // sound edit when the picture is left alone.
+        let video = p.tracks[ti].kind == TrackKind::Video && picture;
         let e = nearest(p, ti, !video, at)
             .ok_or_else(|| Error::invalid(format!("{track} has no edit")))?;
         let (from, to) = sides(p, ti, !video, e);
         let cuts = Cuts::of(p, &p.tracks[ti]);
-        let sound_e = sound_edit(p, ti, from.as_deref(), to.as_deref());
+        let sound_e = if video {
+            sound_edit(p, ti, from.as_deref(), to.as_deref())
+        } else {
+            Some(e)
+        };
         p.tracks[ti]
             .transitions
             .iter()
             .map(|t| {
                 let at = cuts.place(p, t);
-                let here = if t.sound && video {
+                let here = if t.sound {
                     at.is_some() && at == sound_e
                 } else {
                     at == Some(e)
@@ -500,6 +525,46 @@ mod tests {
         );
         // The first ends at 32: 8 frames before the second's edit at 40.
         assert_eq!(made(&r), [(false, 20, 13, 12), (false, 40, 8, 12)]);
+    }
+
+    #[test]
+    fn the_cut_button_takes_a_sound_fade_with_the_picture_left_alone() {
+        let mut f = Fixture::new(&[(10.0, true), (4.0, true), (8.0, false)]);
+        f.append("m1", 0, 50);
+        // Silent: c1's sound fades out into silence at 50.
+        f.append("m3", 0, 50);
+        req(&mut f, "edit.dissolve", json!({"at": 50, "picture": false}));
+        let r = req(
+            &mut f,
+            "edit.remove_transition",
+            json!({"at": 50, "picture": false}),
+        );
+        assert_eq!(r["removed"], json!(["t1"]));
+    }
+
+    #[test]
+    fn a_compound_clips_edge_takes_no_dissolve() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m2", 10, 60);
+        let mut p = f.editor.project().clone();
+        let inner = p.tracks[0].clone();
+        p.tracks[0].clips[1].compound = Some(crate::model::Compound {
+            stack: Default::default(),
+            frames: 100,
+            tracks: vec![inner],
+        });
+        let made = super::dissolve(
+            &mut p,
+            "V1",
+            50,
+            25,
+            super::Align::Center,
+            true,
+            false,
+            false,
+        );
+        assert!(made.is_err());
     }
 
     #[test]
