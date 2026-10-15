@@ -604,29 +604,53 @@ unsafe extern "C" fn gpu_format(
 }
 
 /// Whether the H.264 video of `source` has open GOPs: a keyframe that isn't
-/// IDR, so decoding from it leans on the GOP before. Reads the first
-/// keyframe and those at a few points through the file, not the whole
-/// file. Kept for each file (by path, size and time).
+/// IDR, so decoding from it leans on the GOP before. Reads keyframes at a
+/// few points through the file, not the whole file (`keyframes_not_idr`).
+/// Open when they don't tell: the CPU decodes either right. An answer they
+/// give is kept for each file (by path, size and time).
 pub fn h264_open_gop(source: &Input) -> bool {
+    remembered(source, |s| keyframes_not_idr(s).ok().flatten())
+}
+
+/// The answer `scan` gives for `source`, kept for each file (by path, size
+/// and time). Without one it says open and scans again the next time. The
+/// scan runs outside the lock, so one file's doesn't hold up another's. Two
+/// threads that scan the same file both answer with the one stored first.
+fn remembered(source: &Input, scan: impl FnOnce(&Input) -> Option<bool>) -> bool {
     use std::collections::HashMap;
     use std::sync::Mutex;
     static KNOWN: Mutex<Option<HashMap<String, bool>>> = Mutex::new(None);
+    let known = || KNOWN.lock().unwrap_or_else(|e| e.into_inner());
     let meta = std::fs::metadata(source.path()).ok();
     let mtime = meta.as_ref().and_then(|m| m.modified().ok());
     let key = format!("{source:?}|{:?}|{mtime:?}", meta.map(|m| m.len()));
-    let mut known = KNOWN.lock().unwrap_or_else(|e| e.into_inner());
-    *known
+    let kept = known().as_ref().and_then(|k| k.get(&key).copied());
+    if let Some(open) = kept {
+        return open;
+    }
+    let Some(open) = scan(source) else {
+        return true;
+    };
+    *known()
         .get_or_insert_with(HashMap::new)
         .entry(key)
-        .or_insert_with(|| keyframes_not_idr(source).unwrap_or(false))
+        .or_insert(open)
 }
 
-/// [`h264_open_gop`] read from the file: the first keyframe, then the one
-/// at or before each fifth of the way.
-fn keyframes_not_idr(source: &Input) -> Result<bool> {
+/// What [`h264_open_gop`] reads from the file. Open when a keyframe isn't
+/// IDR. Closed when the keyframes it reads are IDR and one of them comes
+/// after the first, or when the first is the file's only one. `None` when
+/// they don't tell: a seek or a read fails, or no keyframe after the first
+/// turns up.
+///
+/// It reads the first keyframe and the next one, then the first keyframe
+/// from each fifth of the way: by time, or by bytes in a file without a
+/// duration (raw H.264). A seek that lands on the first keyframe again
+/// tells nothing.
+fn keyframes_not_idr(source: &Input) -> Result<Option<bool>> {
     let mut input = source.open()?;
     let Some(stream) = input.streams().best(media::Type::Video) else {
-        return Ok(false);
+        return Ok(None);
     };
     let index = stream.index();
     // MP4's and Matroska's NAL units come after their lengths (avcC's
@@ -637,7 +661,24 @@ fn keyframes_not_idr(source: &Input) -> Result<bool> {
         (p.extradata_size > 4 && *p.extradata == 1)
             .then(|| usize::from(*p.extradata.add(4) & 3) + 1)
     };
-    let duration = input.duration().max(0);
+    let open = |p: &ffmpeg::Packet| not_idr(p.data().unwrap_or_default(), lengths);
+    // The demuxer skips the other streams' packets.
+    crate::export::audio::discard_others(&input, index);
+    let mut packet = ffmpeg::Packet::empty();
+    if !matches!(next_keyframe(&mut input, index, &mut packet)?, Next::Key) {
+        return Ok(None);
+    }
+    if open(&packet) {
+        return Ok(Some(true));
+    }
+    let first = packet.position();
+    let mut told = match next_keyframe(&mut input, index, &mut packet)? {
+        Next::Key if open(&packet) => return Ok(Some(true)),
+        Next::Key => true,
+        Next::End => return Ok(Some(false)),
+        Next::Far => false,
+    };
+    let duration = input.duration();
     // Seeks take times from the file's start, which a recording may have
     // hours in.
     // SAFETY: the opened context's own field, read only.
@@ -645,28 +686,69 @@ fn keyframes_not_idr(source: &Input) -> Result<bool> {
         ffmpeg::ffi::AV_NOPTS_VALUE => 0,
         t => t,
     };
-    for k in 0..5 {
-        if k > 0 {
+    let size = input.io_size().filter(|&s| s > 0);
+    for k in 1..5 {
+        let sought = if duration > 0 {
             let ts = start + duration * k / 5;
-            if input.seek(ts, ..ts).is_err() {
-                break;
+            input.seek(ts, ..ts).is_ok()
+        } else if let Some(size) = size {
+            // SAFETY: the opened context. FFmpeg keeps the position within
+            // the file.
+            unsafe {
+                ffmpeg::ffi::av_seek_frame(
+                    input.as_mut_ptr(),
+                    -1,
+                    size * k / 5,
+                    ffmpeg::ffi::AVSEEK_FLAG_BYTE,
+                ) >= 0
             }
+        } else {
+            false
+        };
+        if !sought {
+            return Ok(None);
         }
-        let mut packet = ffmpeg::Packet::empty();
-        // The first keyframe from there.
-        for _ in 0..1000 {
-            if packet.read(&mut input).is_err() {
-                break;
+        if let Next::Key = next_keyframe(&mut input, index, &mut packet)? {
+            if open(&packet) {
+                return Ok(Some(true));
             }
-            if packet.stream() == index && packet.is_key() {
-                if not_idr(packet.data().unwrap_or_default(), lengths) {
-                    return Ok(true);
-                }
-                break;
+            told |= packet.position() > first;
+        }
+    }
+    Ok(told.then_some(false))
+}
+
+/// What [`next_keyframe`] finds.
+enum Next {
+    /// A keyframe, in the packet.
+    Key,
+    /// The end of the file.
+    End,
+    /// Neither, in 1000 packets.
+    Far,
+}
+
+/// Reads `input` on to the next keyframe of stream `index`, into `packet`
+/// ([`Next`]).
+fn next_keyframe(
+    input: &mut format::context::Input,
+    index: usize,
+    packet: &mut ffmpeg::Packet,
+) -> Result<Next> {
+    for _ in 0..1000 {
+        match packet.read(input) {
+            Ok(()) if packet.stream() == index && packet.is_key() => return Ok(Next::Key),
+            Ok(()) => {}
+            Err(ffmpeg::Error::Eof) => return Ok(Next::End),
+            Err(e) => {
+                return Err(Error::Ffmpeg {
+                    context: "reading packets".into(),
+                    source: e,
+                });
             }
         }
     }
-    Ok(false)
+    Ok(Next::Far)
 }
 
 /// Whether the H.264 picture `data` is one that isn't IDR: it has a slice
@@ -1391,7 +1473,53 @@ pub fn read_barcode(frame: &frame::Video) -> Result<Option<u32>> {
 
 #[cfg(test)]
 mod tests {
-    use super::not_idr;
+    use super::{Input, not_idr, remembered};
+    use std::sync::{Arc, Barrier, mpsc};
+
+    /// [`remembered`] of the file `name` on a thread of its own, its scan
+    /// held: the barrier is passed once the scan has started, and again to
+    /// let it answer `open`.
+    fn held(name: &str, open: bool) -> (std::thread::JoinHandle<bool>, Arc<Barrier>) {
+        let barrier = Arc::new(Barrier::new(2));
+        let at = barrier.clone();
+        let source = Input::File(name.into());
+        let thread = std::thread::spawn(move || {
+            remembered(&source, |_| {
+                at.wait();
+                at.wait();
+                Some(open)
+            })
+        });
+        barrier.wait();
+        (thread, barrier)
+    }
+
+    /// What [`remembered`] of the file `name`, scanned as `open`, says on
+    /// another thread within 30 s.
+    fn meanwhile(name: &str, open: bool) -> Result<bool, mpsc::RecvTimeoutError> {
+        let (tx, rx) = mpsc::channel();
+        let source = Input::File(name.into());
+        std::thread::spawn(move || tx.send(remembered(&source, |_| Some(open))));
+        rx.recv_timeout(std::time::Duration::from_secs(30))
+    }
+
+    #[test]
+    fn one_files_scan_does_not_hold_up_anothers() {
+        let (first, go) = held("held.mp4", false);
+        let second = meanwhile("free.mp4", true);
+        go.wait();
+        first.join().unwrap();
+        assert_eq!(second, Ok(true));
+    }
+
+    #[test]
+    fn the_answer_stored_first_stays() {
+        let (late, go) = held("twice.mp4", false);
+        let stored = meanwhile("twice.mp4", true);
+        go.wait();
+        assert_eq!(stored, Ok(true));
+        assert!(late.join().unwrap());
+    }
 
     #[test]
     fn a_slice_of_a_picture_not_idr_makes_it_not_idr() {

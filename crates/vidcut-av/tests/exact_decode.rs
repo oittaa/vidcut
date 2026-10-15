@@ -241,3 +241,69 @@ fn open_gops_are_found_in_a_file_that_starts_late() {
         .start_offset_ms(100_000);
     assert!(h264_open_gop(&Input::File(fixture::ensure(&late).unwrap())));
 }
+
+/// The video of `src` as a raw H.264 stream at `out`: it has no
+/// timestamps, and FFmpeg finds no duration in it.
+fn raw_h264(src: &std::path::Path, out: &std::path::Path) {
+    use vidcut_av::ffmpeg::{codec, encoder, format, media};
+    vidcut_av::init();
+    let mut input = format::input(src).unwrap();
+    let video = input.streams().best(media::Type::Video).unwrap();
+    let (index, parameters) = (video.index(), video.parameters());
+    let mut output = format::output(out).unwrap();
+    output
+        .add_stream(encoder::find(codec::Id::None))
+        .unwrap()
+        .set_parameters(parameters);
+    output.write_header().unwrap();
+    for (s, mut packet) in input.packets() {
+        if s.index() == index {
+            packet.set_stream(0);
+            packet.write(&mut output).unwrap();
+        }
+    }
+    output.write_trailer().unwrap();
+}
+
+/// The open GOPs of the MPEG-TS fixture are found in its raw H.264 stream,
+/// which has no duration: the first keyframe is IDR, the next ones aren't.
+#[test]
+fn open_gops_are_found_in_raw_h264() {
+    use vidcut_av::decode::{Input, h264_open_gop};
+    let spec =
+        FixtureSpec::new(VideoCodec::H264, Container::MpegTs, 320, 180, (30, 1), 300).gop(120);
+    let dir = tempfile::Builder::new()
+        .prefix("vidcut-raw-h264-")
+        .tempdir()
+        .unwrap();
+    let raw = dir.path().join("open.h264");
+    raw_h264(&fixture::ensure(&spec).unwrap(), &raw);
+    let duration = vidcut_av::ffmpeg::format::input(&raw).unwrap().duration();
+    assert_eq!(duration, vidcut_av::ffmpeg::ffi::AV_NOPTS_VALUE);
+    assert!(h264_open_gop(&Input::File(raw)));
+}
+
+/// A raw H.264 stream is looked at by bytes: its closed GOPs stay closed,
+/// and open GOPs after them are found.
+#[test]
+fn raw_h264_is_looked_at_by_bytes() {
+    use vidcut_av::decode::{Input, h264_open_gop};
+    let spec =
+        FixtureSpec::new(VideoCodec::H264, Container::MpegTs, 320, 180, (30, 1), 300).gop(120);
+    let dir = tempfile::Builder::new()
+        .prefix("vidcut-raw-h264-")
+        .tempdir()
+        .unwrap();
+    let [closed, open, both] =
+        ["closed", "open", "both"].map(|n| dir.path().join(format!("{n}.h264")));
+    raw_h264(&fixture::ensure(&spec.clone().bframes(0)).unwrap(), &closed);
+    raw_h264(&fixture::ensure(&spec).unwrap(), &open);
+    let bytes = [
+        std::fs::read(&closed).unwrap(),
+        std::fs::read(&open).unwrap(),
+    ]
+    .concat();
+    std::fs::write(&both, bytes).unwrap();
+    assert!(!h264_open_gop(&Input::File(closed)));
+    assert!(h264_open_gop(&Input::File(both)));
+}
