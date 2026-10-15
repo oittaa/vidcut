@@ -21,9 +21,18 @@ vidcut edit append m1 --range 10s..2m
 vidcut edit split --at 1m,1m30s
 vidcut edit join --at 1m30s                 # joins the parts again (spec D49)
 vidcut edit dissolve --at 1m                # a one-second dissolve there (spec D50)
+vidcut edit remove-transition --at 1m       # a cut there again
 vidcut edit delete V1@1m10s                 # the clip under 1m10s; ripples Track 1
+vidcut edit delete-range 20s..+5s --lift    # that range on every unlocked track, leaving a gap
+vidcut edit close-gap --at 22s              # closes the gap there
 vidcut timeline get --json                  # clips and gaps with frames and timecodes
+vidcut timeline at 30s                      # what each track has at 30s, with the source frame
+vidcut timeline edit-points                 # the edges of the clips on V1, with timecodes
+vidcut project summary                      # settings, counts, duration and marks
+vidcut project get                          # the whole project as JSON
 vidcut history undo                         # works across separate runs
+vidcut history redo                         # the step undone again
+vidcut history get                          # the steps to undo and redo, by name
 ```
 
 **Times:**
@@ -31,7 +40,24 @@ vidcut history undo                         # works across separate runs
 - In JSON params, a bare integer is a frame number.
 - Ranges are half-open: `A..B` excludes B, and `A..+D` is D long.
 
-**Clips:** refer to them by id (`c17`) or by position (`V1@<time>`, `V2@1m`). `vidcut edit slide c3 --by 5f` moves a clip keeping its media, and its neighbors give and take. `vidcut edit change-speed c3 --speed 0.5` plays a clip at half speed (`--speed=-1` backward, `0` a freeze frame at the playhead or `--at`), and `--ripple false` keeps its length instead of its source (spec D48).
+**Clips (spec §8.6):** refer to them by id (`c17`) or by position (`V1@<time>`, `V2@1m`).
+- `vidcut edit trim c3 --edge tail --by -12f` moves a clip's edge, or `--to 1m`. `--ripple false` overrides Ripple On for that trim, and `project set --ripple-on false` turns it off.
+- `vidcut edit roll c3 --edge tail --by 5f` rolls the edit at that edge. `vidcut edit audio-roll c3 --edge tail --by 10f` rolls only the sound, a J or L cut (spec §8.7).
+- `vidcut edit slip c3 --by 10f` slips a clip's content. `vidcut edit slide c3 --by 5f` moves a clip keeping its media, and its neighbors give and take.
+- `vidcut edit trim-to-playhead --edge tail --at 1m` trims the Track 1 clip under 1m to end there, or the clips given with `--clips` (spec D4).
+- `vidcut edit change-duration c3 --duration 5s` gives clips that length (Ctrl+D). `--duration end` runs each one to the end of its media.
+- `vidcut edit change-speed c3 --speed 0.5` plays a clip at half speed (`--speed=-1` backward, `0` a freeze frame at the playhead or `--at`), and `--ripple false` keeps its length instead of its source (spec D48).
+- `vidcut edit replace c5 --onto c2` moves c5 onto c2 on Track 1, replacing it, and ripples the difference.
+
+**Edit functions (spec §7):** they take a media id and `--range`, or `--tape`, like `edit append`.
+- `vidcut edit insert m2 --at 1m` inserts at that frame, splitting the clip there. `vidcut edit smart-insert m2 --playhead 1m` inserts at the edit nearest the playhead (F9).
+- `vidcut edit overwrite m2 --at 1m` writes over what is there (F10). With timeline marks set, it goes at the In or ends at a lone Out, and `--use-marks false` ignores them.
+- `vidcut edit ripple-overwrite m2 --at 1m` replaces the clip at 1m, or the In–Out range when both marks are set, and what follows moves by the difference (Shift+F10).
+
+**Timeline marks and markers (spec §4.4, §8.9):**
+- `vidcut marks set --in 1m --out 2m` sets the timeline In and Out. The Out is the first frame after the range. `vidcut marks get` shows them, and `vidcut marks clear` clears both (Alt+X).
+- `vidcut markers add --at 1m --name Intro --color blue` adds a marker and returns its id (`k1`). `--note` adds a note and `--duration 2s` a length. `vidcut markers list` lists them.
+- `vidcut markers set k1 --name Outro --color red` changes a marker, `vidcut markers move k1 --to 2m` moves it and `vidcut markers remove k1` removes it.
 
 **Tracks:**
 - `vidcut track list` lists them. `track add video|audio [--count N]`, `track remove V3 [--force]` (`--force` also deletes its clips), and `track set A1 --volume-db -6 --name Music` with `--locked`, `--muted`, `--solo` and `--video-enabled`, each `true` or `false`.
@@ -56,6 +82,8 @@ vidcut history undo                         # works across separate runs
 - The result lists `relinked`, `different` (found by name, but another file, with `why`) and `not_found`. `vidcut media relink m1 new.mp4` uses that file either way, saying how it differs if it does.
 
 **Clip Color (spec §3):** `vidcut media set m1 --color teal` colors a pool item, and its clips show it. `vidcut clip set c4 --color pink` gives a clip its own. `--color ""` clears either.
+
+**Pool items:** `vidcut media rename m1 "Interview A"` renames one. `vidcut media remove m1` takes it out of the pool, and `--force` also deletes the clips that use it.
 
 **Bins:** `vidcut bins list` lists them. `bins add "Interviews/Day 1"` (parents too), `bins rename A B`, `bins remove A` (its media move up a level, deviation X6), `media add FILE --bin A`, `media move m1 m2 --bin A` (`""` is the top level). `media list` shows each item's bin.
 
@@ -160,7 +188,8 @@ vidcut history undo                         # works across separate runs
 - **Looking at the result:** `vidcut player seek 1m && vidcut gui screenshot --out shot.png` shows exactly what `vidcut frame render --at 1m --out f.png` renders. Both are frame-exact.
 - **Exporting alongside the human:** `vidcut export start out.mp4 --background` returns at once. The export shows in the GUI's Jobs window, and `vidcut jobs wait j1` blocks until it's done. An export the human starts from Quick Export is a job too, so `vidcut jobs list` sees it.
 - **Source marks and clipboard work headless too:**
-  - `vidcut media marks set m1 --in 5s --out 10s`: edits without `--range` then use these marks.
+  - `vidcut media marks set m1 --in 5s --out 10s`: edits without `--range` then use these marks. `vidcut media marks clear m1` clears them.
   - Source Tape marks can span clips (spec D17): `vidcut tape marks set --in 200f --out 300f --order m1,m2` (tape frames of those media end to end), then edits with `--tape` instead of a media id, such as `vidcut edit append --tape`, place the span as one block.
-  - `vidcut edit copy c3 --json`, then `vidcut edit paste --clips @clips.json --at 1m`.
+  - `vidcut tape marks clear` clears them (Alt+X in Source Tape). `--media m1` also clears m1's source marks when the span doesn't cross clips.
+  - `vidcut edit copy c3 --json`, then `vidcut edit paste --clips @clips.json --at 1m`. `vidcut edit cut c3 --json` copies the same way, then deletes the clips, rippling Track 1.
 - **Paths:** the CLI makes paths absolute before routing, those in `apply` batches too, since a GUI may run in another directory. In raw `rpc` requests, use absolute paths.
