@@ -366,7 +366,7 @@ impl Gui {
         let t = self.two_up().unwrap();
         let read = t
             .cells
-            .map(|c| c.and_then(|c| c.picture).and_then(|p| code(&p)));
+            .map(|c| c.and_then(|c| c.picture).and_then(|p| picture_code(&p)));
         assert_eq!(read, want.map(|w| Some(w as u32)), "the two-up's pictures");
     }
 
@@ -380,7 +380,7 @@ impl Gui {
             .flatten()
             .filter(|c| c.exact)
             .filter_map(|c| {
-                let read = c.picture.as_deref().and_then(code);
+                let read = c.picture.as_deref().and_then(picture_code);
                 (read != Some(c.source_frame as u32)).then_some((c.source_frame, read))
             })
             .collect()

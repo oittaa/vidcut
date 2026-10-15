@@ -68,8 +68,8 @@ pub struct GpuDecoding {
 }
 
 /// Where decoding happens now, the one place that says so. The viewer's
-/// player decodes on the GPU in use (`GpuDecoder::best`); exports,
-/// proxies, the timeline's tiles, the two-up, frame renders, storyboards,
+/// and the two-up's players decode on the GPU in use (`GpuDecoder::best`);
+/// exports, proxies, the timeline's tiles, frame renders, storyboards,
 /// the pool's pictures, measurements and probes on a decoder of their own
 /// there ([`GpuDecoding::own_decoder`]). Reading it opens no decoder:
 /// whatever keeps one compares this and makes another when it changes. A

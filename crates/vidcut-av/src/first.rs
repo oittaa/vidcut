@@ -3,8 +3,7 @@
 //! between frames on threads of work nobody watches frame by frame: those
 //! that [`yield_to_players`], and the threads vidcut-av starts for them.
 //! They share the GPU's decoder with the player, and no thread priority
-//! reaches that. Other pictures people watch, such as the GUI's two-up,
-//! come first the same way, by a [`Claim`].
+//! reaches that.
 
 use std::cell::Cell;
 use std::sync::{Condvar, Mutex, MutexGuard};
@@ -65,7 +64,7 @@ pub fn wait() -> Result<()> {
     Ok(())
 }
 
-/// A claim to come first, while it is set: a player's, or the two-up's.
+/// A claim to come first, while it is set: a player's.
 #[derive(Default)]
 pub struct Claim(bool);
 

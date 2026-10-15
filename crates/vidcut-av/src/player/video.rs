@@ -4,8 +4,7 @@
 //! Forward, the export's reader decodes on from frame to frame, a piece of
 //! another file opening ahead on its helper thread. Going back there is
 //! nothing to decode on from, so a window renders at once, from a keyframe
-//! up to the frame wanted, and is kept (as the two-up's renderer does,
-//! preview.md §9). Playing backwards, two windows wait behind the one
+//! up to the frame wanted, and is kept. Playing backwards, two windows wait behind the one
 //! shown where they fit: once one is left, the one before it decodes.
 //!
 //! Paused, frames stay around the playhead. A seek keeps what it decodes
@@ -174,6 +173,9 @@ pub(crate) fn run(shared: Arc<Shared>) {
             d.failed = None;
         }
         let dir = match snap.mode {
+            // Followed, as if playing that way.
+            Mode::Paused { .. } if snap.motion > 0.0 => Direction::Forward(snap.motion),
+            Mode::Paused { .. } if snap.motion < 0.0 => Direction::Back,
             Mode::Paused { .. } => Direction::Paused,
             Mode::Playing { speed, .. } if speed > 0.0 => Direction::Forward(speed),
             Mode::Playing { .. } => Direction::Back,
@@ -204,8 +206,8 @@ pub(crate) fn run(shared: Arc<Shared>) {
             Ok(true) => {}
             Ok(false) => {
                 // Playing, the clock moves on by itself: look again soon.
-                let wait = match dir {
-                    Direction::Paused => Duration::from_secs(1),
+                let wait = match snap.mode {
+                    Mode::Paused { .. } => Duration::from_secs(1),
                     _ => Duration::from_secs_f64(0.5 / snap.plan.fps().as_f64())
                         .min(Duration::from_millis(10)),
                 };
