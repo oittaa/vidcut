@@ -194,6 +194,14 @@ const EXAMPLES: &[(&str, &str)] = &[
   vidcut edit join --clips c3,c4,c5",
     ),
     (
+        "edit.dissolve",
+        "vidcut edit dissolve\n  vidcut edit dissolve --at 1m --length 12f --align start\n  vidcut edit dissolve --all",
+    ),
+    (
+        "edit.remove_transition",
+        "vidcut edit remove-transition --at 1m\n  vidcut edit remove-transition --all",
+    ),
+    (
         "edit.trim",
         "vidcut edit trim c3 --edge tail --by -12f\n  vidcut edit trim c3 --edge head --to 1m --ripple false",
     ),

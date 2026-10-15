@@ -1203,7 +1203,7 @@ mod tests {
     }
 
     /// A cross fade on V1's sounds from clip `from` to clip `to` (`None`: a
-    /// gap), as Resolve writes a Cross Fade +3 dB.
+    /// gap): a Cross Fade +3 dB in the editor metadata.
     fn cross_fade(
         f: &Fixture,
         from: Option<&str>,

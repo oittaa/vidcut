@@ -58,6 +58,12 @@ pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> Stri
         "edit.split" => format!("Split at {}{}", d.time("at"), d.split_clips()),
         "edit.join" if d.list("clips").len() > 1 => format!("Join {}", d.clips("clips")),
         "edit.join" => format!("Join the clips at {}", d.time("at")),
+        "edit.dissolve" if d.flag("all") => "Add dissolves to all edits".to_string(),
+        "edit.dissolve" => format!("Add a dissolve at {}", d.time("at")),
+        "edit.remove_transition" if d.flag("all") => {
+            "Clear the transitions from all edits".to_string()
+        }
+        "edit.remove_transition" => format!("Make the edit at {} a cut", d.time("at")),
         "edit.delete" if d.flag("lift") => format!("Delete {}, leaving a gap", d.clips("clips")),
         "edit.delete" => format!("Delete {}", d.clips("clips")),
         "edit.delete_range" => format!("Delete {}", d.range("range")),

@@ -395,6 +395,49 @@ pub enum Request {
         #[serde(default)]
         clips: Vec<ClipRef>,
     },
+    /// The Dissolve button and Ctrl+T (decision D50): a Cross Dissolve on
+    /// the edit of `track` (default V1) nearest `at` (default: the
+    /// playhead), and a Cross Fade +3 dB where its clips' sounds meet
+    /// there. `length` (default 1 s) is shortened to the frames its clips'
+    /// media and the track leave. `align`: centered on the edit, starting
+    /// on it or ending on it. `picture` or `sound` false leaves that one
+    /// out. `all`: on every edit between two clips of the track (Add
+    /// Dissolve to All Edits). Transitions on those edits go.
+    #[serde(rename = "edit.dissolve")]
+    EditDissolve {
+        #[serde(default)]
+        at: Option<TimeSpec>,
+        #[serde(default)]
+        track: Option<String>,
+        #[serde(default)]
+        length: Option<TimeSpec>,
+        #[serde(default)]
+        align: crate::ops::Align,
+        #[serde(default = "yes")]
+        picture: bool,
+        #[serde(default = "yes")]
+        sound: bool,
+        #[serde(default)]
+        all: bool,
+    },
+    /// The Cut button (decision D50): the edit of `track` (default V1)
+    /// nearest `at` (default: the playhead) becomes a cut again, its
+    /// transitions gone, those of its clips' sounds too. `picture` or
+    /// `sound` false keeps those. `all`: every transition of the track
+    /// (Clear Transition from All Edits).
+    #[serde(rename = "edit.remove_transition")]
+    EditRemoveTransition {
+        #[serde(default)]
+        at: Option<TimeSpec>,
+        #[serde(default)]
+        track: Option<String>,
+        #[serde(default = "yes")]
+        picture: bool,
+        #[serde(default = "yes")]
+        sound: bool,
+        #[serde(default)]
+        all: bool,
+    },
     /// Delete clips. On V1 it ripples unless `lift`, and the other tracks
     /// follow; elsewhere gaps close only where V1 has nothing.
     #[serde(rename = "edit.delete")]

@@ -1227,6 +1227,13 @@ impl Workspace {
                 "edit.place_on_top"
             });
         }
+        // A dissolve on the edit nearest the playhead (the Dissolve button).
+        if pressed(Key::T) && m.command && !m.shift && !m.alt {
+            self.send(
+                "edit.dissolve",
+                json!({ "at": self.snap.timeline.position }),
+            );
+        }
         // Ctrl+\ splits; Ctrl+B too, which every keyboard layout
         // types without AltGr.
         if (pressed(Key::Backslash) || pressed(Key::B)) && m.command {

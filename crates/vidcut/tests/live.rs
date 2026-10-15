@@ -3,8 +3,8 @@
 //! into RGBA. Its sound goes to a stand-in device. Requests go through
 //! `Handle::call` as IPC clients' do.
 //! Checks that viewer seeks are frame-exact at every cut, that an edit by
-//! another process shows up and undoes, and that proxies show the same
-//! frames as the originals.
+//! another process shows up and undoes, that proxies show the same frames
+//! as the originals, and that a fade shows as `frame render` renders it.
 //!
 //! No display, GPU or audio device.
 
@@ -350,6 +350,33 @@ fn exact_seeks_external_edit_and_proxies() {
         h.ok("player.seek", json!({ "at": t, "viewer": "timeline" }));
         assert_eq!(h.shown(dir), want, "HDR proxy, timeline frame {t}");
     }
+
+    // A fade from black on the first clip (decision D50), a second starting
+    // on its edit: the viewer and `frame render` show frame 12 of its 30
+    // with the barcode's white at 12.5/30 of 255.
+    h.ok("project.set", json!({ "use_proxies": false }));
+    h.ok("edit.dissolve", json!({ "at": 0, "align": "start" }));
+    let white = |png: &Path| -> u8 {
+        let mut r = vidcut_av::decode::VideoReader::open(png).unwrap();
+        let f = r.next_frame().unwrap().unwrap();
+        let step = if f.format() == vidcut_av::ffmpeg::format::Pixel::RGBA {
+            4
+        } else {
+            3
+        };
+        let (w, stride, data) = (f.width() as usize, f.stride(0), f.data(0));
+        (0..f.height() as usize)
+            .flat_map(|y| (0..w).map(move |x| data[y * stride + x * step]))
+            .max()
+            .unwrap()
+    };
+    let out = dir.join("fade.png");
+    h.ok("frame.render", json!({ "at": 12, "out": out }));
+    assert_eq!(white(&out), 106, "frame render");
+    h.ok("player.seek", json!({ "at": 12, "viewer": "timeline" }));
+    let shot = dir.join("fade-shot.png");
+    h.ok("gui.screenshot", json!({ "out": shot }));
+    assert_eq!(white(&shot), 106, "the viewer");
 
     // An OTIO file opens as a project file made next to it (deviation X9).
     let cut = dir.join("cut.otio");

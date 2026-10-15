@@ -1,5 +1,6 @@
-//! Transitions other editors put on edit points (deviation X9): kept while
-//! they fit, shown and played as cuts, written back.
+//! Transitions on edit points, from other editors (deviation X9) or made
+//! here (decision D50): kept while they fit, written back. Dissolves and
+//! cross fades play; any other plays as a cut.
 //!
 //! - A transition sits on a cut between two clips' pictures, or their
 //!   sounds, or between a clip and a gap (a fade from or to black). It
@@ -39,20 +40,40 @@ pub(super) fn otio_name(o: &Value) -> String {
 }
 
 /// Whether transition `t` plays as a dissolve (decision D50): OTIO's
-/// `SMPTE_Dissolve`, but for another of Resolve's dissolves by its effect's
-/// name. Any other plays as a cut.
+/// `SMPTE_Dissolve`, but not one whose effect the editor metadata names
+/// otherwise (another kind of dissolve). Any other plays as a cut.
 pub fn dissolves(t: &Transition) -> bool {
-    let effect = &t.otio["metadata"][EDITOR]["Effects"]["Effect Name"];
-    t.otio["transition_type"] == "SMPTE_Dissolve"
+    dissolves_in(&t.otio)
+}
+
+/// [`dissolves`] of OTIO transition `o`.
+fn dissolves_in(o: &Value) -> bool {
+    let effect = &o["metadata"][EDITOR]["Effects"]["Effect Name"];
+    o["transition_type"] == "SMPTE_Dissolve"
         && effect.as_str().is_none_or(|n| n == "Cross Dissolve")
 }
 
-/// The curve transition `t` cross fades sounds with (decision D50):
-/// Resolve's Cross Fades by their effect's type (41 +3 dB, 40 0 dB, 26
-/// -3 dB, the one its import goes by) or name, another editor's
+/// Whether OTIO transition `o`, on sounds or not, plays: as a dissolve, or
+/// a cross fade ([`dissolves`], [`cross_fade`]).
+pub(super) fn plays_in(o: &Value, sound: bool) -> bool {
+    if sound {
+        cross_fade_in(o).is_some()
+    } else {
+        dissolves_in(o)
+    }
+}
+
+/// The curve transition `t` cross fades sounds with (decision D50): a
+/// Cross Fade by its effect's type in the editor metadata (41 +3 dB, 40
+/// 0 dB, 26 -3 dB, the one that editor's import goes by) or name, else an
 /// `SMPTE_Dissolve` at 0 dB. `None`: it plays as a cut.
 pub fn cross_fade(t: &Transition) -> Option<Curve> {
-    let resolve = &t.otio["metadata"][EDITOR];
+    cross_fade_in(&t.otio)
+}
+
+/// [`cross_fade`] of OTIO transition `o`.
+fn cross_fade_in(o: &Value) -> Option<Curve> {
+    let resolve = &o["metadata"][EDITOR];
     match resolve["Effects"]["Type"].as_i64() {
         Some(41) => return Some(Curve::Plus3Db),
         Some(40) => return Some(Curve::ZeroDb),
@@ -64,7 +85,7 @@ pub fn cross_fade(t: &Transition) -> Option<Curve> {
         Some("Cross Fade 0DB") => Some(Curve::ZeroDb),
         Some("Cross Fade -3DB") => Some(Curve::Minus3Db),
         Some(_) => None,
-        None => (t.otio["transition_type"] == "SMPTE_Dissolve").then_some(Curve::ZeroDb),
+        None => (o["transition_type"] == "SMPTE_Dissolve").then_some(Curve::ZeroDb),
     }
 }
 
@@ -298,7 +319,8 @@ impl<'a> Edits<'a> {
 
 /// The transition to write before the item of clip `c`'s picture (or
 /// sound), which starts at `s` in the export, after `items`: one at the
-/// clip's first frame, from the clip or gap just written.
+/// clip's first frame, from the clip or gap just written, or from nothing
+/// at the track's start.
 pub(super) fn head(
     p: &Project,
     edits: &Edits,
@@ -312,10 +334,11 @@ pub(super) fn head(
     if edits.cuts.place(p, t)? != s {
         return None;
     }
-    let last = items.last()?;
-    let follows = match &t.from {
-        Some(f) => is_clip_of(last, f),
-        None => schema(last).starts_with("Gap"),
+    let follows = match (&t.from, items.last()) {
+        (Some(f), Some(last)) => is_clip_of(last, f),
+        (None, Some(last)) => schema(last).starts_with("Gap"),
+        (None, None) => true,
+        (Some(_), None) => false,
     };
     follows.then(|| written(t, rate))
 }
@@ -339,12 +362,15 @@ fn is_clip_of(item: &Value, id: &str) -> bool {
     item["metadata"][VIDCUT]["clip"] == id
 }
 
-/// Ends a written track: a transition into a gap needs one after it.
+/// Ends a written track: a transition into a gap with frames after its cut
+/// needs the gap after it; one ending on its cut ends the track.
 pub(super) fn close(items: &mut Vec<Value>, rate: f64) {
     if let Some(last) = items.last()
         && schema(last).starts_with("Transition")
     {
-        let after = last["out_offset"]["value"].as_f64().unwrap_or(0.0).max(1.0);
-        items.push(gap(after as i64, rate));
+        let after = last["out_offset"]["value"].as_f64().unwrap_or(0.0);
+        if after > 0.0 {
+            items.push(gap(after.round() as i64, rate));
+        }
     }
 }

@@ -1078,6 +1078,23 @@ impl Workspace {
             ui.close();
         }
         ui.separator();
+        if ui
+            .button("Clear Transition from All Edits")
+            .on_hover_text("Make every edit of V1 a cut again")
+            .clicked()
+        {
+            self.send("edit.remove_transition", json!({ "all": true }));
+            ui.close();
+        }
+        if ui
+            .button("Add Dissolve to All Edits")
+            .on_hover_text("A one-second dissolve on every edit between two clips of V1")
+            .clicked()
+        {
+            self.send("edit.dissolve", json!({ "all": true }));
+            ui.close();
+        }
+        ui.separator();
         let selected = self.snap.selection.clips.clone();
         let with = |want: fn(&vidcut_core::model::Clip) -> bool| {
             selected.iter().any(|id| p.clip(id).is_some_and(want))
