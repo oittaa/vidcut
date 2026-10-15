@@ -425,7 +425,8 @@ pub struct WrittenProxy {
 /// own (`export::make::Maker`). NVENC takes NVDEC's frames deinterlaced,
 /// turned, converted and scaled on the GPU, never copied to memory, where
 /// the planner leaves them there ([`plan`](crate::route::plan),
-/// [`CudaPictures`](crate::cuda::CudaPictures)). VAAPI, AMF and
+/// [`CudaPictures`](crate::cuda::CudaPictures)), and so does Vulkan's ProRes
+/// encoder, libplacebo making its pictures on Vulkan. VAAPI, AMF and
 /// VideoToolbox on the decoder's device take its frames fitted there
 /// (`hw::Fitter`). For every other encoder the CPU scales, the GPU's
 /// frames shrunk there before they come down (`hw::Shrinker`).
@@ -547,6 +548,14 @@ enum Failed {
     Encoding(Error),
 }
 
+/// Where the GPU's scaler makes a proxy's pictures, so its encoder opens for
+/// them there: NVDEC's CUDA context for NVENC, libplacebo's Vulkan device
+/// for Vulkan's ProRes encoder.
+enum MadeOn<'a> {
+    Cuda(&'a crate::cuda::CudaDevice),
+    Vulkan(&'a crate::hw::Device),
+}
+
 /// The proxy file being written: pictures go in in order, each one's
 /// duration known once the next arrives.
 struct Writer<'a> {
@@ -571,15 +580,17 @@ impl<'a> Writer<'a> {
     /// Creates `tmp` and opens `video` for `width`×`height` pictures timed
     /// in `src_tb`, as exports open theirs ([`encode::open_video`]), and
     /// says what the pictures are made into. NVENC takes them in GPU memory
-    /// on `cuda`'s context where it opens so, in [`cuda_layout`]'s layout.
-    /// VAAPI, AMF and VideoToolbox open on `decoder`'s device where they
-    /// share it ([`encode::shares`]), for the frames fitted there.
+    /// on the CUDA context they are `made_on` where it opens so, in
+    /// [`cuda_layout`]'s layout. Vulkan's ProRes encoder takes them where it
+    /// opens on the Vulkan device they are made on. VAAPI, AMF and
+    /// VideoToolbox open on `decoder`'s device where they share it
+    /// ([`encode::shares`]), for the frames fitted there.
     fn new(
         tmp: &Path,
         video: &VideoEncoder,
         (width, height): (u32, u32),
         (src_tb, rate): (ffmpeg::Rational, Option<ffmpeg::Rational>),
-        cuda: Option<&crate::cuda::CudaDevice>,
+        made_on: Option<MadeOn<'_>>,
         decoder: Option<&crate::hw::GpuDecoder>,
         shown: &'a Shown<'a>,
     ) -> std::result::Result<(Self, Output), Failed> {
@@ -598,6 +609,10 @@ impl<'a> Writer<'a> {
         let times = (enc_tb, rate);
         // On a stream of its own, as an export's: frames from memory if
         // that won't open.
+        let cuda = match made_on {
+            Some(MadeOn::Cuda(cuda)) => Some(cuda),
+            _ => None,
+        };
         let on_cuda = cuda.and_then(|cuda| {
             let device = cuda.with_own_stream().ok()?;
             let frames = CudaFrames::new(&device, cuda_layout(video.pixel), width, height).ok()?;
@@ -635,7 +650,16 @@ impl<'a> Writer<'a> {
                 )
                 .map_err(Failed::Opening)?;
                 let fit_on = shared.map(|d| d.kind().place());
-                let output = Output::for_encoder(video.kind, None, fit_on, upload.as_ref());
+                let output = match (&made_on, &upload) {
+                    // Its own frames are on the device libplacebo makes the
+                    // pictures on, so it takes them as they are: FFmpeg's
+                    // Vulkan encoders read each frame through the frame's
+                    // own frames context.
+                    (Some(MadeOn::Vulkan(device)), Some(up)) if up.is_on(device) => {
+                        Ok(Output::Vulkan)
+                    }
+                    _ => Output::for_encoder(video.kind, None, fit_on, upload.as_ref()),
+                };
                 (opened, upload, output)
             }
         };
@@ -761,9 +785,10 @@ impl<'a> Writer<'a> {
 
 /// Encodes what `reader` decodes, its pictures made as an export makes its
 /// own (`Maker`): for NVENC, NVDEC's frames scaled on the GPU and handed to
-/// it there; for VAAPI, AMF and VideoToolbox on `decoder`'s device, its
-/// frames fitted there; otherwise scaled on the CPU, the GPU's frames
-/// shrunk there first.
+/// it there; for Vulkan's ProRes encoder, NVDEC's frames made into its
+/// pictures by libplacebo on its Vulkan device; for VAAPI, AMF and
+/// VideoToolbox on `decoder`'s device, its frames fitted there; otherwise
+/// scaled on the CPU, the GPU's frames shrunk there first.
 /// The frames written, and how the first one went.
 fn encode_into(
     reader: &mut VideoReader,
@@ -780,19 +805,29 @@ fn encode_into(
     // The proxy's pictures and colors, by the source's first frame.
     let video = enc.video_encoder(reader.peek());
     let (pixel, target) = (video.pixel, video.hdr);
-    // NVDEC's frames scaled for NVENC on the GPU, where the planner leaves
-    // them there and the scaler builds. A picture may come with the next
-    // frame, leaving the GPU less to do.
+    // NVDEC's frames fitted on the GPU for NVENC, or by libplacebo on Vulkan
+    // for Vulkan's ProRes encoder, where the planner leaves them there and
+    // the scaler builds. A picture may come with the next frame, leaving
+    // the GPU less to do.
     let scaled = match enc.kind {
-        EncoderChoice::Nvenc => Fitting::for_nvenc(reader, size, cuda_layout(pixel), target, false),
+        EncoderChoice::Nvenc => {
+            let layout = cuda_layout(pixel);
+            Fitting::on_gpu(reader, size, layout, target, false, Place::Cuda)
+        }
+        EncoderChoice::Vulkan => Fitting::on_gpu(reader, size, pixel, target, false, Place::Vulkan),
         _ => Fitting::none(),
     };
-    let cuda = scaled.scaler.as_ref().and(reader.cuda());
-    let (mut writer, output) = Writer::new(tmp, &video, size, times, cuda, decoder, shown)?;
-    // NVENC takes the scaler's pictures where it opened for frames in GPU
-    // memory.
+    let made_on = match (enc.kind, &scaled.scaler) {
+        (EncoderChoice::Nvenc, Some(_)) => reader.cuda().map(MadeOn::Cuda),
+        (EncoderChoice::Vulkan, Some(s)) => s.vulkan().map(MadeOn::Vulkan),
+        _ => None,
+    };
+    let (mut writer, output) = Writer::new(tmp, &video, size, times, made_on, decoder, shown)?;
+    // NVENC and Vulkan's encoder take the scaler's pictures where they
+    // opened for frames in GPU memory.
     let (layout, mut fitting) = match output {
         Output::Cuda { .. } => (cuda_layout(pixel), scaled),
+        Output::Vulkan => (pixel, scaled),
         _ => (pixel, Fitting::none()),
     };
     let mut maker = Maker::new((width, height, layout), target, output);
@@ -819,7 +854,7 @@ fn encode_into(
             // The scaler's pictures keep their frames' timestamps: this one
             // may be the frame before's.
             let pts = match Place::of(&picture) {
-                Place::Cuda => picture.pts(),
+                Place::Cuda | Place::Vulkan => picture.pts(),
                 _ => pts,
             };
             // Pictures made in memory go up to NVENC's frames.

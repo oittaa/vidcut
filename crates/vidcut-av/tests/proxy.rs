@@ -7,7 +7,9 @@ use vidcut_av::export::encode::{Availability, detect};
 use vidcut_av::ffmpeg;
 use vidcut_av::fixture::{self, Container, FixtureSpec, HdrMeta, ImageSpec, VideoCodec};
 use vidcut_av::hw::GpuDecoder;
-use vidcut_av::proxy::{ProxyEncoder, encoders};
+use vidcut_av::proxy::{ProxyEncoder, WrittenProxy, encoders};
+use vidcut_av::route::Went;
+use vidcut_core::export::EncoderChoice;
 use vidcut_core::model::Hdr;
 use vidcut_core::preferences::ProxyCodec;
 
@@ -24,12 +26,13 @@ const HDR10: HdrMeta = HdrMeta {
     hdr10plus_frames: None,
 };
 
-/// A source: 8-bit H.264, 10-bit HEVC, or 10-bit HEVC in PQ with HDR10's
-/// static values.
+/// A source: 8-bit H.264, 10-bit HEVC, 10-bit AV1, or 10-bit HEVC in PQ
+/// with HDR10's static values.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Source {
     H264,
     Hevc10,
+    Av1,
     Pq,
 }
 
@@ -39,6 +42,7 @@ impl Source {
         let codec = match self {
             Source::H264 => VideoCodec::H264,
             Source::Hevc10 | Source::Pq => VideoCodec::Hevc10,
+            Source::Av1 => VideoCodec::Av1,
         };
         let spec = FixtureSpec::new(codec, container, w, h, (30, 1), frames);
         match self {
@@ -55,6 +59,8 @@ enum Pictures {
     Any,
     /// 10-bit.
     TenBit,
+    /// 10-bit 4:2:2, as ProRes is.
+    TenBit422,
     /// 10-bit PQ in BT.2020: the barcode's white at the source's level,
     /// with its static HDR metadata.
     Pq,
@@ -112,6 +118,7 @@ fn check_pictures(path: &std::path::Path, enc: &ProxyEncoder, pictures: Pictures
     match pictures {
         Pictures::Any => {}
         Pictures::TenBit => assert_eq!(depth, 10, "{what}"),
+        Pictures::TenBit422 => assert_eq!(video.pix_fmt, "yuv422p10le", "{what}"),
         Pictures::Pq => {
             assert_eq!(depth, 10, "{what}");
             assert_eq!(video.transfer, "smpte2084", "{what}");
@@ -194,7 +201,7 @@ fn software() -> Vec<ProxyEncoder> {
 
 /// Each frame's barcode and timestamp match the source's in `out` proxies
 /// of `w`×`h` `source`s, the frames decoded on `decoder` (`None`: the CPU),
-/// and the proxies have `pictures`.
+/// and the proxies have `pictures`. What was written for each.
 fn matches_source(
     enc: &ProxyEncoder,
     decoder: Option<&GpuDecoder>,
@@ -202,17 +209,21 @@ fn matches_source(
     size: (u32, u32),
     out: (u32, u32),
     pictures: Pictures,
-) {
+) -> Vec<WrittenProxy> {
     let original = fixture::ensure(&source.spec(Container::Mp4, size, 24)).unwrap();
-    let offset = source
-        .spec(Container::MpegTs, size, 12)
-        .start_offset_ms(1400);
+    // FFmpeg finds no video stream in an MPEG-TS file of AV1.
+    let late = match source {
+        Source::Av1 => Container::Mkv,
+        _ => Container::MpegTs,
+    };
+    let offset = source.spec(late, size, 12).start_offset_ms(1400);
     let shifted = fixture::ensure(&offset).unwrap();
     let tmp = tempfile::Builder::new()
         .prefix("vidcut-proxy-")
         .tempdir()
         .unwrap();
     let dir = tmp.path();
+    let mut written_all = Vec::new();
     for (i, path) in [original, shifted].iter().enumerate() {
         let dest = dir.join(format!("proxy-{i}.mkv"));
         let written = vidcut_av::proxy::write(
@@ -247,7 +258,9 @@ fn matches_source(
                 path.display()
             );
         }
+        written_all.push(written);
     }
+    written_all
 }
 
 #[test]
@@ -278,18 +291,24 @@ fn a_ten_bit_proxy_keeps_an_hdr_sources_colors() {
 }
 
 /// `source`'s frames on `decoder` into `enc`'s proxies at their own size
-/// and at half of 1280×720 ([`matches_source`]).
-fn on_the_gpu(enc: &ProxyEncoder, decoder: &GpuDecoder, source: Source, pictures: Pictures) {
+/// and at half of 1280×720 ([`matches_source`]). What was written.
+fn on_the_gpu(
+    enc: &ProxyEncoder,
+    decoder: &GpuDecoder,
+    source: Source,
+    pictures: Pictures,
+) -> Vec<WrittenProxy> {
     let small = (320, 180);
-    matches_source(enc, Some(decoder), source, small, small, pictures);
-    matches_source(
+    let mut written = matches_source(enc, Some(decoder), source, small, small, pictures);
+    written.extend(matches_source(
         enc,
         Some(decoder),
         source,
         (1280, 720),
         (640, 360),
         pictures,
-    );
+    ));
+    written
 }
 
 /// The frames each GPU decodes, made into H.264 and HEVC proxies by its own
@@ -333,6 +352,42 @@ fn a_gpu_proxy_matches_source_frames_and_timestamps() {
                 on_the_gpu(&enc, decoder, Source::Hevc10, Pictures::TenBit);
                 on_the_gpu(&enc, decoder, Source::Pq, Pictures::Pq);
             }
+        }
+    }
+}
+
+/// A ProRes proxy made on NVIDIA's GPU: NVDEC's frames of H.264, 10-bit
+/// HEVC and 10-bit AV1 made into its pictures by libplacebo on Vulkan, and
+/// encoded there by Vulkan's ProRes encoder. Nothing comes down or goes up,
+/// and the proxy is 10-bit 4:2:2 with the source's barcodes and
+/// timestamps, a PQ source's in its colors. Skips without an NVIDIA GPU or
+/// Vulkan's ProRes encoder on it.
+#[test]
+fn a_prores_proxy_made_on_nvidias_gpu_copies_nothing() {
+    let Some(decoder) = GpuDecoder::all().into_iter().find(|d| d.cuda().is_some()) else {
+        return;
+    };
+    let Some(gpu) = decoder.gpu() else {
+        return;
+    };
+    let on_it = detect(true).on(gpu);
+    let vulkan = encoders(ProxyCodec::Prores, &on_it, &[])
+        .into_iter()
+        .find(|e| e.kind == EncoderChoice::Vulkan);
+    let Some(enc) = vulkan else {
+        return;
+    };
+    let sources = [
+        (Source::H264, Pictures::TenBit422),
+        (Source::Hevc10, Pictures::TenBit422),
+        (Source::Av1, Pictures::TenBit422),
+        (Source::Pq, Pictures::Pq),
+    ];
+    for (source, pictures) in sources {
+        for written in on_the_gpu(&enc, &decoder, source, pictures) {
+            let what = format!("{source:?} at {}x{}", written.width, written.height);
+            assert_eq!(written.went, Some(Went::Stayed), "{what}");
+            assert_eq!((written.copies.down, written.copies.up), (0, 0), "{what}");
         }
     }
 }

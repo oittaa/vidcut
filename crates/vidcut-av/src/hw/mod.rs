@@ -1071,14 +1071,25 @@ enum Fitting {
 
 /// Whether a frame's GPU (`place`) fits it into the output as `ops` says,
 /// for an encoder on its device. Each backend says for its own frames.
-/// Frames in memory and Vulkan's never fit.
+/// Vulkan's fit as libplacebo fits them, as CUDA's do. Frames in memory
+/// never fit.
 pub(crate) fn can_fit(place: Place, ops: &Ops) -> bool {
     match place {
-        Place::Cuda => crate::cuda::can_fit(ops),
+        Place::Cuda | Place::Vulkan => crate::cuda::can_fit(ops),
         Place::Vaapi => vaapi::can_fit(ops),
         #[cfg(windows)]
         Place::D3d11 => d3d11::can_fit(ops),
         Place::VideoToolbox => vt::can_fit(ops),
+        _ => false,
+    }
+}
+
+/// Whether a frame's GPU (`from`) hands the picture it fits to an encoder
+/// that takes frames on another place, `to`: CUDA's to Vulkan's encoder
+/// ([`crate::cuda::reaches`]). No other GPU's frames leave their place.
+pub(crate) fn reaches(from: Place, to: Place) -> bool {
+    match from {
+        Place::Cuda => crate::cuda::reaches(to),
         _ => false,
     }
 }
@@ -1149,5 +1160,52 @@ impl Fitter {
         // SAFETY: a plain field of its own frame.
         unsafe { (*out.as_mut_ptr()).sample_aspect_ratio = ffi::AVRational { num: 1, den: 1 } };
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_vulkan_frame_turned_a_quarter_fits() {
+        let ops = Ops {
+            rotation: 90,
+            layout: format::Pixel::YUV422P10LE,
+            out_layout: format::Pixel::YUV422P10LE,
+            rgb: false,
+            colors_kept: true,
+            pads: false,
+            into: false,
+        };
+        assert!(can_fit(Place::Vulkan, &ops));
+    }
+
+    #[test]
+    fn cudas_frames_reach_vulkans_encoder() {
+        assert!(reaches(Place::Cuda, Place::Vulkan));
+    }
+
+    #[test]
+    fn cudas_frames_reach_no_other_gpus_encoder() {
+        for to in [Place::Vaapi, Place::D3d11, Place::VideoToolbox] {
+            assert!(!reaches(Place::Cuda, to), "{to:?}");
+        }
+    }
+
+    #[test]
+    fn other_gpus_frames_reach_no_other_place() {
+        let gpus = [
+            Place::Cuda,
+            Place::Vaapi,
+            Place::D3d11,
+            Place::VideoToolbox,
+            Place::Vulkan,
+        ];
+        for from in gpus.into_iter().filter(|&from| from != Place::Cuda) {
+            for to in gpus.into_iter().filter(|&to| to != from) {
+                assert!(!reaches(from, to), "{from:?} to {to:?}");
+            }
+        }
     }
 }

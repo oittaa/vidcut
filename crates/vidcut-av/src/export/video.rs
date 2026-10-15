@@ -173,7 +173,7 @@ impl Source {
             None => VideoReader::open_input(input)?,
         };
         let fitting = match gpu {
-            Some(g) => Fitting::for_nvenc(&reader, g.out, g.format, g.target, true),
+            Some(g) => Fitting::on_gpu(&reader, g.out, g.format, g.target, true, Place::Cuda),
             None => Fitting::none(),
         };
         let decoder = reader.gpu();
