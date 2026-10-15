@@ -171,15 +171,26 @@ const SYSTEM_MONO: &[&str] = if cfg!(windows) {
 };
 
 /// egui's fonts with the theme's in front, and Phosphor's icons mixed into
-/// ordinary text.
+/// ordinary text. A theme that names fonts gets Geist or Geist Mono where
+/// none of them is there. One that names none keeps egui's.
 fn font_definitions(f: &Fonts) -> egui::FontDefinitions {
     let mut defs = egui::FontDefinitions::default();
     egui_phosphor::add_to_fonts(&mut defs, egui_phosphor::Variant::Regular);
-    for (family, wanted, system) in [
-        (FontFamily::Proportional, &f.ui, SYSTEM_UI),
-        (FontFamily::Monospace, &f.mono, SYSTEM_MONO),
+    for (family, wanted, system, fallback) in [
+        (FontFamily::Proportional, &f.ui, SYSTEM_UI, "Geist"),
+        (FontFamily::Monospace, &f.mono, SYSTEM_MONO, "Geist Mono"),
     ] {
-        if let Some((name, data)) = installed(wanted, system) {
+        if wanted.is_empty() {
+            continue;
+        }
+        let names = wanted.iter().flat_map(|w| match w.as_str() {
+            "system" => system.to_vec(),
+            name => vec![name],
+        });
+        if let Some((name, data)) = names
+            .chain([fallback])
+            .find_map(|name| font(name).map(|data| (name, data)))
+        {
             let key = format!("theme {name}");
             defs.font_data.insert(key.clone(), Arc::new(data));
             defs.families.entry(family).or_default().insert(0, key);
@@ -188,33 +199,83 @@ fn font_definitions(f: &Fonts) -> egui::FontDefinitions {
     defs
 }
 
-/// The first of the font families `wanted` that is installed, `system`
-/// standing for the computer's own.
-fn installed(wanted: &[String], system: &[&str]) -> Option<(String, egui::FontData)> {
+/// The font family `name`: one built into vidcut, else an installed one.
+/// Its capitals sit in the middle of its lines, and a variable font shows
+/// its regular weight.
+fn font(name: &str) -> Option<egui::FontData> {
+    let (data, index) = match built_in_font(name) {
+        Some(data) => (Cow::Borrowed(data), 0),
+        None => installed_font(name)?,
+    };
+    let tweak = egui::FontTweak {
+        y_offset_factor: centering(&data, index),
+        coords: egui::epaint::text::VariationCoords::new([(b"wght", 400.0)]),
+        ..Default::default()
+    };
+    Some(egui::FontData {
+        font: data,
+        index,
+        tweak,
+    })
+}
+
+/// The fonts vidcut carries (OFL-1.1): the same on every computer.
+fn built_in_font(name: &str) -> Option<&'static [u8]> {
+    let files = match name {
+        "Geist" => &shadcn_egui_font_geist::FONT,
+        "Geist Mono" => &shadcn_egui_font_geist_mono::FONT,
+        "Space Grotesk" => &shadcn_egui_font_space_grotesk::FONT,
+        _ => return None,
+    };
+    Some(files.face(400).data)
+}
+
+/// An installed font family's file and the face's index in it.
+fn installed_font(name: &str) -> Option<(Cow<'static, [u8]>, u32)> {
     static DATABASE: OnceLock<fontdb::Database> = OnceLock::new();
     let db = DATABASE.get_or_init(|| {
         let mut db = fontdb::Database::new();
         db.load_system_fonts();
         db
     });
-    wanted
-        .iter()
-        .flat_map(|w| match w.as_str() {
-            "system" => system.to_vec(),
-            name => vec![name],
-        })
-        .find_map(|name| {
-            let id = db.query(&fontdb::Query {
-                families: &[fontdb::Family::Name(name)],
-                ..Default::default()
-            })?;
-            db.with_face_data(id, |data, index| egui::FontData {
-                font: Cow::Owned(data.to_vec()),
-                index,
-                tweak: Default::default(),
-            })
-            .map(|data| (name.to_string(), data))
-        })
+    let id = db.query(&fontdb::Query {
+        families: &[fontdb::Family::Name(name)],
+        ..Default::default()
+    })?;
+    db.with_face_data(id, |data, index| (Cow::Owned(data.to_vec()), index))
+}
+
+/// How far down, in ems, a font's text moves for its capitals to sit in
+/// the middle of its line: check boxes and buttons center the line, and
+/// fonts place their capitals in it differently. Zero for a font that
+/// doesn't say how tall its capitals are.
+fn centering(data: &[u8], index: u32) -> f32 {
+    use skrifa::MetadataProvider;
+    let Ok(font) = skrifa::FontRef::from_index(data, index) else {
+        return 0.0;
+    };
+    let m = font.metrics(
+        skrifa::instance::Size::unscaled(),
+        skrifa::instance::LocationRef::default(),
+    );
+    match m.cap_height {
+        Some(cap) => capitals_down(
+            m.ascent,
+            m.descent,
+            m.leading,
+            cap,
+            f32::from(m.units_per_em),
+        ),
+        None => 0.0,
+    }
+}
+
+/// The line holds `ascent` above the baseline, `descent` (negative) and the
+/// gap below it. Capitals stand `cap` tall on the baseline.
+fn capitals_down(ascent: f32, descent: f32, gap: f32, cap: f32, em: f32) -> f32 {
+    let line_middle = (ascent - descent + gap) / 2.0;
+    let capitals_middle = ascent - cap / 2.0;
+    (line_middle - capitals_middle) / em
 }
 
 /// The top and status bars' frame.
@@ -663,6 +724,13 @@ mod tests {
     #[test]
     fn clips_of_mixed_colors_show_none_in_the_menu() {
         assert_eq!(same_color([Some("teal"), None].into_iter()), None);
+    }
+
+    #[test]
+    fn capitals_low_in_their_line_move_up() {
+        // A line 2500 tall with its baseline 2000 down: capitals 1400 tall
+        // have their middle at 1300, 50 below the line's.
+        assert_eq!(capitals_down(2000.0, -500.0, 0.0, 1400.0, 1000.0), -0.05);
     }
 
     #[test]

@@ -3331,6 +3331,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "shadcn-egui-core"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f4d68b8efe681274b8b349b211d17a6b8b40f480bbe48915d0478703aea5f5b"
+
+[[package]]
+name = "shadcn-egui-font-geist"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f3af1f3344acd8fd322a43cad886bf9c42653258056bf003795d01aec38f221"
+dependencies = [
+ "shadcn-egui-core",
+]
+
+[[package]]
+name = "shadcn-egui-font-geist-mono"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "856c45ecca41f11d523e726c314b4439bf90a3e86f2d41608cb606df78cc936e"
+dependencies = [
+ "shadcn-egui-core",
+]
+
+[[package]]
+name = "shadcn-egui-font-space-grotesk"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "709d8d85ff72bbe42bbda6b9ecacbc5d8f56ad293bfbc5ebe48059fed1f967c5"
+dependencies = [
+ "shadcn-egui-core",
+]
+
+[[package]]
 name = "sharded-slab"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3904,6 +3937,8 @@ dependencies = [
  "libc",
  "naga",
  "notify",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
  "objc2-io-surface",
  "objc2-metal 0.3.2",
  "pollster 1.0.1",
@@ -3911,7 +3946,11 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "shadcn-egui-font-geist",
+ "shadcn-egui-font-geist-mono",
+ "shadcn-egui-font-space-grotesk",
  "shlex",
+ "skrifa",
  "tempfile",
  "toml",
  "tracing",
@@ -3922,6 +3961,7 @@ dependencies = [
  "windows",
  "windows-sys 0.61.2",
  "winit",
+ "zbus",
  "zip",
 ]
 

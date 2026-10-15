@@ -3,6 +3,7 @@
 //! (`~/.config/vidcut/themes`) as `NAME.toml`, and one there replaces a
 //! built-in of the same name. A theme file lists what it changes. The rest
 //! comes from the theme it `extends`, Starship unless it names another.
+//! A color written `system` is the computer's accent color (`look.rs`).
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -11,6 +12,7 @@ use eframe::egui::Color32;
 use serde::{Deserialize, Serialize};
 use vidcut_core::{Error, Result};
 
+use crate::look::Look;
 use crate::paths::config_dir;
 
 /// The theme a new install starts with, and the base of the others.
@@ -23,6 +25,7 @@ const BUILT_IN: &[(&str, &str)] = &[
     ("cybertruck", include_str!("../themes/cybertruck.toml")),
     ("midnight", include_str!("../themes/midnight.toml")),
     ("studio", include_str!("../themes/studio.toml")),
+    ("native", include_str!("../themes/native.toml")),
     ("native-dark", include_str!("../themes/native-dark.toml")),
     ("native-light", include_str!("../themes/native-light.toml")),
     ("classic", include_str!("../themes/classic.toml")),
@@ -39,9 +42,14 @@ pub struct Theme {
     pub shape: Shape,
     pub fonts: Fonts,
     pub decoration: Decoration,
+    /// The theme shown instead while the computer is in light mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub light_mode: Option<String>,
 }
 
-/// A theme's colors, written `#RRGGBB` or `#RRGGBBAA`.
+/// A theme's colors, written `#RRGGBB` or `#RRGGBBAA`, or `system`,
+/// `system-light` and `system-dark` for the computer's accent color and its
+/// lighter and darker shades.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Colors {
@@ -214,12 +222,7 @@ mod hex {
     use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S: Serializer>(c: &Color32, s: S) -> Result<S::Ok, S::Error> {
-        let [r, g, b, a] = c.to_srgba_unmultiplied();
-        s.serialize_str(&if a == 255 {
-            format!("#{r:02X}{g:02X}{b:02X}")
-        } else {
-            format!("#{r:02X}{g:02X}{b:02X}{a:02X}")
-        })
+        s.serialize_str(&super::to_hex(*c))
     }
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Color32, D::Error> {
@@ -229,6 +232,15 @@ mod hex {
                 "{text:?} is no color: write it as #RRGGBB or #RRGGBBAA"
             ))
         })
+    }
+}
+
+fn to_hex(c: Color32) -> String {
+    let [r, g, b, a] = c.to_srgba_unmultiplied();
+    if a == 255 {
+        format!("#{r:02X}{g:02X}{b:02X}")
+    } else {
+        format!("#{r:02X}{g:02X}{b:02X}{a:02X}")
     }
 }
 
@@ -282,10 +294,24 @@ pub fn default_theme() -> &'static Theme {
 /// The theme called `name`: the user's file of that name, else the
 /// built-in one.
 pub fn load(name: &str) -> Result<Theme> {
-    load_from(name, 0)
+    load_from(name, 0, &crate::look::current())
 }
 
-fn load_from(name: &str, depth: usize) -> Result<Theme> {
+/// The theme `name` as it shows now: its `light_mode` theme while the
+/// computer is in light mode.
+pub fn shown(name: &str) -> Result<Theme> {
+    shown_with(name, &crate::look::current())
+}
+
+fn shown_with(name: &str, look: &Look) -> Result<Theme> {
+    let theme = load_from(name, 0, look)?;
+    match &theme.light_mode {
+        Some(light) if look.light => load_from(light, 1, look),
+        _ => Ok(theme),
+    }
+}
+
+fn load_from(name: &str, depth: usize, look: &Look) -> Result<Theme> {
     if depth > 8 {
         return Err(Error::usage(format!(
             "theme {name:?}: its themes extend each other in a circle"
@@ -294,17 +320,16 @@ fn load_from(name: &str, depth: usize) -> Result<Theme> {
     check_name(name)?;
     let path = user_path(name);
     match std::fs::read_to_string(&path) {
-        Ok(text) => {
-            parse(&text, name, depth).map_err(|e| Error::usage(format!("{}: {e}", path.display())))
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => builtin(name, depth),
+        Ok(text) => parse(&text, name, depth, look)
+            .map_err(|e| Error::usage(format!("{}: {e}", path.display()))),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => builtin(name, depth, look),
         Err(e) => Err(Error::usage(format!("{}: {e}", path.display()))),
     }
 }
 
 /// The built-in theme called `name`. The default one has every key and
 /// extends none.
-fn builtin(name: &str, depth: usize) -> Result<Theme> {
+fn builtin(name: &str, depth: usize, look: &Look) -> Result<Theme> {
     let Some((_, text)) = BUILT_IN.iter().find(|(n, _)| *n == name) else {
         return Err(Error::usage(format!(
             "there is no theme called {name:?}. `vidcut preferences get` lists them"
@@ -313,14 +338,14 @@ fn builtin(name: &str, depth: usize) -> Result<Theme> {
     let theme = if name == DEFAULT {
         toml::from_str(text).map_err(|e| e.to_string())
     } else {
-        parse(text, name, depth)
+        parse(text, name, depth, look)
     };
     theme.map_err(|e| Error::internal(format!("theme {name}: {e}")))
 }
 
 /// A theme file's text, filled in from the theme it extends. A file
 /// extending its own name extends the built-in theme of that name.
-fn parse(text: &str, name: &str, depth: usize) -> std::result::Result<Theme, String> {
+fn parse(text: &str, name: &str, depth: usize, look: &Look) -> std::result::Result<Theme, String> {
     let mut table: toml::Table = toml::from_str(text).map_err(|e| e.to_string())?;
     let base = match table.remove("extends") {
         Some(toml::Value::String(base)) => base,
@@ -328,9 +353,9 @@ fn parse(text: &str, name: &str, depth: usize) -> std::result::Result<Theme, Str
         None => DEFAULT.to_string(),
     };
     let base = if base == name {
-        builtin(&base, depth + 1)
+        builtin(&base, depth + 1, look)
     } else {
-        load_from(&base, depth + 1)
+        load_from(&base, depth + 1, look)
     }
     .map_err(|e| e.message)?;
     table
@@ -341,9 +366,29 @@ fn parse(text: &str, name: &str, depth: usize) -> std::result::Result<Theme, Str
         unreachable!("a theme is a table");
     };
     merge(&mut full, table);
+    system_colors(&mut full, look);
     toml::Value::Table(full)
         .try_into()
         .map_err(|e: toml::de::Error| e.to_string())
+}
+
+/// The colors written `system`, `system-light` and `system-dark` in
+/// `look`'s accent color and its shades.
+fn system_colors(theme: &mut toml::Table, look: &Look) {
+    for group in ["colors", "decoration"] {
+        let Some(toml::Value::Table(colors)) = theme.get_mut(group) else {
+            continue;
+        };
+        for (_, value) in colors.iter_mut() {
+            let color = match value.as_str() {
+                Some("system") => look.accent.base,
+                Some("system-light") => look.accent.light,
+                Some("system-dark") => look.accent.dark,
+                _ => continue,
+            };
+            *value = toml::Value::String(to_hex(color));
+        }
+    }
 }
 
 /// `over`'s keys replace `base`'s, group by group.
@@ -371,6 +416,7 @@ pub struct Listed {
 
 /// The built-in themes, then the user's, each name once.
 pub fn list() -> Vec<Listed> {
+    let look = crate::look::current();
     let mut names: Vec<String> = BUILT_IN.iter().map(|(n, _)| n.to_string()).collect();
     let mut user: Vec<String> = std::fs::read_dir(dir())
         .into_iter()
@@ -388,7 +434,7 @@ pub fn list() -> Vec<Listed> {
         .map(|name| {
             let path = user_path(&name);
             let path = path.exists().then_some(path);
-            match load(&name) {
+            match load_from(&name, 0, &look) {
                 Ok(t) => Listed {
                     name,
                     title: t.title,
@@ -423,7 +469,8 @@ pub fn import(path: &Path, dry_run: bool) -> Result<String> {
     check_name(&name)?;
     let text = std::fs::read_to_string(path)
         .map_err(|e| Error::usage(format!("{}: {e}", path.display())))?;
-    parse(&text, &name, 0).map_err(|e| Error::usage(format!("{}: {e}", path.display())))?;
+    parse(&text, &name, 0, &crate::look::current())
+        .map_err(|e| Error::usage(format!("{}: {e}", path.display())))?;
     let to = user_path(&name);
     if !dry_run && std::fs::canonicalize(path).ok() != std::fs::canonicalize(&to).ok() {
         std::fs::create_dir_all(dir())
@@ -436,6 +483,8 @@ pub fn import(path: &Path, dry_run: bool) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const DARK: Look = crate::look::DEFAULT;
 
     #[test]
     fn colors_are_written_in_hex() {
@@ -462,7 +511,7 @@ mod tests {
     fn every_built_in_theme_loads() {
         let failed: Vec<String> = BUILT_IN
             .iter()
-            .filter_map(|(name, _)| builtin(name, 0).err().map(|e| e.message))
+            .filter_map(|(name, _)| builtin(name, 0, &DARK).err().map(|e| e.message))
             .collect();
         assert_eq!(failed, Vec::<String>::new());
     }
@@ -473,6 +522,7 @@ mod tests {
             "extends = \"neon\"\n[colors]\naccent = \"#123456\"\n",
             "mine",
             0,
+            &DARK,
         )
         .unwrap();
         assert_eq!(
@@ -487,12 +537,36 @@ mod tests {
 
     #[test]
     fn a_theme_extends_starship_unless_it_says_otherwise() {
-        let t = parse("title = \"Mine\"\n", "mine", 0).unwrap();
+        let t = parse("title = \"Mine\"\n", "mine", 0, &DARK).unwrap();
         assert_eq!(t.colors, default_theme().colors);
     }
 
     #[test]
     fn a_misspelled_key_fails() {
-        assert!(parse("[colors]\naccnet = \"#123456\"\n", "mine", 0).is_err());
+        assert!(parse("[colors]\naccnet = \"#123456\"\n", "mine", 0, &DARK).is_err());
+    }
+
+    #[test]
+    fn a_system_color_is_the_computers_accent() {
+        let look = Look {
+            accent: crate::look::Accent::from_base(Color32::from_rgb(200, 30, 90)),
+            ..DARK
+        };
+        let t = parse("[colors]\naccent = \"system\"\n", "mine", 0, &look).unwrap();
+        assert_eq!(t.colors.accent, Color32::from_rgb(200, 30, 90));
+    }
+
+    #[test]
+    fn native_shows_its_light_theme_in_light_mode() {
+        let light = Look {
+            light: true,
+            ..DARK
+        };
+        assert_eq!(shown_with("native", &light).unwrap().title, "Native Light");
+    }
+
+    #[test]
+    fn native_shows_its_dark_theme_in_dark_mode() {
+        assert_eq!(shown_with("native", &DARK).unwrap().title, "Native");
     }
 }

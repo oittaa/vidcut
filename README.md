@@ -88,7 +88,7 @@ The **Command log** (top right) lists what you, scripts and agents did, in words
 
 **Preferences** (File > Preferences, Ctrl+, or Cmd+, on a Mac) live in `~/.config/vidcut/preferences.toml` (deviation X12). `vidcut preferences` reads and changes them.
 
-**Themes:** Starship by default, seven more built in, or your own (File > Preferences: Theme, Import…). A theme is a TOML file. [starship.toml](crates/vidcut/themes/starship.toml) explains every key.
+**Themes:** Starship by default, eight more built in, or your own (File > Preferences: Theme, Import…). A theme is a TOML file. [starship.toml](crates/vidcut/themes/starship.toml) explains every key.
 
 **Keys:** [spec §11](docs/cut-page-spec.md#11-keyboard-shortcuts).
 
@@ -124,5 +124,7 @@ Read [AGENTS.md](AGENTS.md) first; it's written for AI agents but applies to hum
 ## License
 
 vidcut's source code is released under the [MIT License](LICENSE).
+
+The fonts vidcut carries, Geist, Geist Mono and Space Grotesk, are under the SIL Open Font License 1.1.
 
 vidcut links the FFmpeg libraries, which are LGPL or GPL depending on how they were built; Ubuntu's builds are GPL. Binaries you distribute together with them must comply with their licenses.

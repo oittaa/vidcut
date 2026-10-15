@@ -22,6 +22,18 @@ schemars = "1"
 toml = "1.1"
 # Installed fonts by family name, for themes.
 fontdb = "0.24"
+# Fonts built into the app for themes, the same on every computer: Geist,
+# Geist Mono, Space Grotesk. OFL-1.1, the crates' code MIT. Exact versions:
+# the crates are new.
+shadcn-egui-font-geist = "=0.4.0"
+shadcn-egui-font-geist-mono = "=0.4.0"
+shadcn-egui-font-space-grotesk = "=0.4.0"
+# A font's metrics, to center its capitals in a line (the version epaint
+# lays text out with).
+skrifa = "0.44"
+# The desktop portal's light or dark setting and accent color on Linux.
+# MIT.
+zbus = "5"
 ctrlc = "3"
 # Test outputs in temp dirs that remove themselves, also when a test fails.
 tempfile = "3"
@@ -79,6 +91,18 @@ objc2-metal = { version = "0.3", default-features = false, features = [
 objc2-io-surface = { version = "0.3", default-features = false, features = [
     "std",
     "IOSurfaceRef",
+] }
+# macOS's appearance and accent color, for native themes.
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSColor",
+    "NSColorSpace",
+    "objc2-core-foundation",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSString",
+    "NSUserDefaults",
 ] }
 # Loads CUDA's driver library for the calls FFmpeg doesn't make (memory a
 # display shares). ISC.

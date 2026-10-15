@@ -4,11 +4,15 @@
 # A theme of your own goes in the themes folder (`vidcut preferences get`
 # says where) as NAME.toml. It lists only what it changes. The rest comes
 # from the theme it extends, this one unless it says `extends = "neon"`.
-# Colors are "#RRGGBB", or "#RRGGBBAA" with opacity.
+# Colors are "#RRGGBB", or "#RRGGBBAA" with opacity. "system",
+# "system-light" and "system-dark" are the computer's accent color and a
+# lighter and a darker shade of it.
 
 title = "Starship"
 # Light themes start from light widgets.
 light = false
+# A theme to show instead while the computer is in light mode, like
+# `light_mode = "native-light"`.
 
 [colors]
 # Behind the panels, the top bar and the status bar.
@@ -80,10 +84,13 @@ panel_border = false
 shadow = [0, 10, 30]
 
 [fonts]
-# Fonts by family name, the first one installed wins. "system" is the
-# computer's own UI or monospace font. None installed: the built-in font.
-ui = ["Bahnschrift", "system"]
-mono = ["Cascadia Mono", "system"]
+# Fonts by family name, the first one there wins. vidcut carries Geist,
+# Geist Mono and Space Grotesk, so those are there on every computer.
+# Others must be installed. "system" is the computer's own UI or monospace
+# font. With none of them there: Geist or Geist Mono. An empty list keeps
+# the plain font Classic shows.
+ui = ["Space Grotesk"]
+mono = ["Geist Mono"]
 size = 14.5
 small = 11
 heading = 19

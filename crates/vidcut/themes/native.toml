@@ -1,0 +1,6 @@
+# Native: Native Dark or Native Light as the computer is set, in its accent
+# color, with its own UI font. Both change with the computer's settings.
+
+title = "Native"
+extends = "native-dark"
+light_mode = "native-light"

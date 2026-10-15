@@ -7,6 +7,7 @@ pub mod export;
 pub mod gui;
 pub mod ipc;
 pub mod live;
+pub mod look;
 pub mod mcp;
 pub mod output;
 pub mod paths;

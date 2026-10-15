@@ -51,8 +51,8 @@ panel_border = true
 shadow = [0, 16, 48]
 
 [fonts]
-ui = ["system"]
-mono = ["Cascadia Code", "system"]
+ui = ["Geist"]
+mono = ["Geist Mono"]
 size = 14
 small = 10.5
 heading = 18

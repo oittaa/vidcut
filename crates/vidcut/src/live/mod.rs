@@ -435,6 +435,11 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     }
     let themes = crate::themes::dir();
     let _ = std::fs::create_dir_all(&themes);
+    // Native themes follow the computer's light or dark mode and accent.
+    let look_changed = tx.clone();
+    crate::look::watch(std::sync::Arc::new(move || {
+        let _ = look_changed.send(Msg::PreferencesChanged);
+    }));
     let mut live = Live {
         _preferences: project::watch(&preferences, tx.clone(), || Msg::PreferencesChanged),
         _themes: project::watch_dir(&themes, tx.clone(), || Msg::PreferencesChanged),
@@ -642,7 +647,7 @@ fn chosen_theme() -> (crate::themes::Theme, Option<String>) {
     let name = crate::preferences::load()
         .map(|p| p.appearance.theme)
         .unwrap_or_else(|_| crate::themes::DEFAULT.into());
-    match crate::themes::load(&name) {
+    match crate::themes::shown(&name) {
         Ok(t) => (t, None),
         Err(e) => (
             crate::themes::default_theme().clone(),

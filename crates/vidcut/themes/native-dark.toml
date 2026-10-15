@@ -1,5 +1,5 @@
-# Native Dark: the layered grays, blue accent, corners and font of a desktop
-# app in dark mode.
+# Native Dark: the layered grays, corners and font of a desktop app in dark
+# mode, in the computer's accent color.
 
 title = "Native Dark"
 
@@ -12,9 +12,9 @@ track_target = "#182430"
 panel_target = "#1C3E5C"
 text = "#F3F3F3"
 text_dim = "#A6A6A6"
-accent = "#4CC2FF"
+accent = "system-light"
 playhead = "#FF5252"
-clip = "#005FAA"
+clip = "system-dark"
 clip_disabled = "#383838"
 offline = "#AA3232"
 audio = "#2E7850"
@@ -23,7 +23,7 @@ compound = "#AA6E3C"
 marked = "#5A5A5A46"
 error = "#FF99A4"
 ok = "#6CCB5F"
-selection = "#0067C0"
+selection = "system-dark"
 selected_text = "#FFFFFF"
 field = "#181818"
 faint = "#2E2E2E"

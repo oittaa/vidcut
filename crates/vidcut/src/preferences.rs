@@ -177,6 +177,16 @@ pub fn set(patch: &PreferencesPatch, dry_run: bool) -> Result<Value> {
     Ok(describe(&p))
 }
 
+/// The computer's light or dark mode and accent color (`look.rs`).
+fn system_look() -> Value {
+    let look = crate::look::current();
+    let [r, g, b, _] = look.accent.base.to_array();
+    json!({
+        "light": look.light,
+        "accent": format!("#{r:02X}{g:02X}{b:02X}"),
+    })
+}
+
 fn describe(p: &Preferences) -> Value {
     use vidcut_core::preferences::ProxyCodec;
     let (files, bytes) = thumbcache::usage();
@@ -209,6 +219,8 @@ fn describe(p: &Preferences) -> Value {
         "preferences": p,
         "themes": themes::list(),
         "themes_folder": themes::dir(),
+        // What native themes follow.
+        "system_look": system_look(),
         "thumbnail_cache": {
             "path": thumbcache::dir(),
             "files": files,
