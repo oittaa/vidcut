@@ -19,11 +19,13 @@ use std::path::Path;
 use vidcut_core::export::EncoderChoice;
 use vidcut_core::preferences::ProxyCodec;
 
+use crate::cuda::CudaFrames;
 use crate::decode::{Input, VideoReader};
 use crate::error::{Context, Error, Result};
-use crate::export::encode::{Availability, Passes, Upload, VideoEncoder};
+use crate::export::encode::{self, Availability, Pass, Passes, Upload, VideoEncoder};
+use crate::export::make::Output;
 use crate::export::normalize::Normalizer;
-use crate::ffmpeg::{self, codec, encoder, ffi, format, frame};
+use crate::ffmpeg::{self, encoder, ffi, format, frame};
 use crate::route::{Dest, Facts, Ops, Place, Route, Went, plan};
 
 /// Frames between keyframes.
@@ -164,14 +166,9 @@ impl ProxyEncoder {
         }
     }
 
-    /// The encoder as exports open theirs
-    /// ([`open_video`](crate::export::encode::open_video)): its settings
-    /// ([`options`](Self::options)), a keyframe every [`KEYFRAMES`] frames,
-    /// no B-frames and closed GOPs, one pass, SDR.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "proxies open their encoders with it next")
-    )]
+    /// The encoder as exports open theirs ([`encode::open_video`]): its
+    /// settings ([`options`](Self::options)), a keyframe every
+    /// [`KEYFRAMES`] frames, no B-frames and closed GOPs, one pass, SDR.
     fn video_encoder(&self) -> VideoEncoder {
         let mut options: Vec<(String, String)> = self
             .options()
@@ -402,7 +399,7 @@ pub fn write(
             Some(d) => VideoReader::open_gpu_or_cpu(input, d)?,
             None => VideoReader::open_input(input)?,
         };
-        match encode_into(&mut reader, enc, (width, height), &tmp, &shown) {
+        match encode_into(&mut reader, enc, (width, height), &tmp, &shown, decoder) {
             Ok((frames, went)) => return done(frames, enc, went, reader.gpu()),
             Err(Failed::Encoding(e)) => {
                 let _ = std::fs::remove_file(&tmp);
@@ -467,101 +464,6 @@ enum Failed {
     Encoding(Error),
 }
 
-/// Opens `enc` for `width`×`height` frames timed in `enc_tb`: for VAAPI
-/// and Vulkan, with the context that uploads them; with `gpu_frames`, for
-/// frames in GPU memory of that frames context.
-fn open(
-    enc: &ProxyEncoder,
-    (width, height): (u32, u32),
-    enc_tb: ffmpeg::Rational,
-    rate: Option<ffmpeg::Rational>,
-    global: bool,
-    gpu_frames: Option<*mut ffi::AVBufferRef>,
-) -> Result<(encoder::Video, ffmpeg::Codec, Option<Upload>)> {
-    // FFmpeg's DNxHR takes nothing smaller ("Input dimensions too small").
-    if enc.name == "dnxhd" && (width < 256 || height < 120) {
-        return Err(Error::Invalid(format!(
-            "DNxHR proxies are at least 256×120 pixels, and this one would be \
-             {width}×{height}: make the proxy size larger or choose another codec"
-        )));
-    }
-    let codec = encoder::find_by_name(&enc.name)
-        .ok_or_else(|| Error::Invalid(format!("this FFmpeg has no {} encoder", enc.name)))?;
-    let mut ctx = codec::context::Context::new_with_codec(codec)
-        .encoder()
-        .video()
-        .ctx(|| format!("creating {}", enc.name))?;
-    ctx.set_width(width);
-    ctx.set_height(height);
-    ctx.set_time_base(enc_tb);
-    if let Some(r) = rate {
-        ctx.set_frame_rate(Some(r));
-    }
-    ctx.set_gop(KEYFRAMES);
-    // Nothing coded ahead of where it shows.
-    ctx.set_max_b_frames(0);
-    // FFmpeg's own ProRes and DNxHR encoders use one core unless told
-    // otherwise.
-    if matches!(enc.name.as_str(), "prores_ks" | "dnxhd") {
-        ctx.set_threading(codec::threading::Config {
-            kind: codec::threading::Type::Frame,
-            count: 0, // let FFmpeg choose
-        });
-    }
-    // Closed GOPs: every keyframe decodes on its own, so a seek can start
-    // there (SVT-AV1 otherwise makes forward keyframes nothing seeks to).
-    let mut flags = codec::Flags::CLOSED_GOP;
-    if global {
-        flags |= codec::Flags::GLOBAL_HEADER;
-    }
-    ctx.set_flags(flags);
-    crate::color::tag(unsafe { ctx.as_mut_ptr() }, None);
-    let hw_frames = |ctx: &mut encoder::video::Video, frames: *mut ffi::AVBufferRef| {
-        let frames = unsafe { ffi::av_buffer_ref(frames) };
-        if frames.is_null() {
-            return Err(Error::Invalid("no memory for the GPU frames".into()));
-        }
-        unsafe { (*ctx.as_mut_ptr()).hw_frames_ctx = frames };
-        Ok(())
-    };
-    let upload = match (&enc.device, enc.kind, gpu_frames) {
-        (_, EncoderChoice::Nvenc, Some(frames)) => {
-            ctx.set_format(format::Pixel::CUDA);
-            hw_frames(&mut ctx, frames)?;
-            None
-        }
-        (Some(node), EncoderChoice::Vaapi, _) => {
-            let v = Upload::vaapi(node, enc.pixel(), width, height, None)?;
-            ctx.set_format(format::Pixel::VAAPI);
-            hw_frames(&mut ctx, v.frames)?;
-            Some(v)
-        }
-        (Some(gpu), EncoderChoice::Vulkan, _) => {
-            let up = Upload::vulkan(gpu, enc.pixel(), width, height)?;
-            ctx.set_format(format::Pixel::VULKAN);
-            hw_frames(&mut ctx, up.frames)?;
-            Some(up)
-        }
-        (Some(on), EncoderChoice::Amf | EncoderChoice::Qsv, _) => {
-            crate::export::encode::on_device(&mut ctx, enc.kind, on)?;
-            ctx.set_format(enc.pixel());
-            None
-        }
-        _ => {
-            ctx.set_format(enc.pixel());
-            None
-        }
-    };
-    let mut opts = ffmpeg::Dictionary::new();
-    for (k, v) in enc.options() {
-        opts.set(k, &v);
-    }
-    let opened = ctx
-        .open_as_with(codec, opts)
-        .ctx(|| format!("opening {}", enc.name))?;
-    Ok((opened, codec, upload))
-}
-
 /// The proxy file being written: pictures go in in order, each one's
 /// duration known once the next arrives.
 struct Writer<'a> {
@@ -580,26 +482,81 @@ struct Writer<'a> {
 }
 
 impl<'a> Writer<'a> {
-    /// Creates `tmp` and opens `enc` for pictures timed in `src_tb` (with
-    /// `gpu_frames`, pictures in GPU memory).
+    /// Creates `tmp` and opens `enc` for pictures timed in `src_tb`, as
+    /// exports open theirs ([`encode::open_video`]), and says what the
+    /// pictures are made into. NVENC takes them in GPU memory on `cuda`'s
+    /// context where it opens so. VAAPI and AMF open on `decoder`'s device
+    /// where they share it ([`encode::shares`]), for the frames fitted
+    /// there.
     fn new(
         tmp: &Path,
         enc: &ProxyEncoder,
-        size: (u32, u32),
+        (width, height): (u32, u32),
         (src_tb, rate): (ffmpeg::Rational, Option<ffmpeg::Rational>),
-        gpu_frames: Option<*mut ffi::AVBufferRef>,
+        cuda: Option<&crate::cuda::CudaDevice>,
+        decoder: Option<&crate::hw::GpuDecoder>,
         shown: &'a Shown<'a>,
-    ) -> std::result::Result<Self, Failed> {
+    ) -> std::result::Result<(Self, Output), Failed> {
         let enc_tb = encode_time_base(src_tb);
         let mut octx = format::output_as(tmp, "matroska")
             .ctx(|| format!("creating {}", tmp.display()))
             .map_err(Failed::Encoding)?;
         let global = octx.format().flags().contains(format::Flags::GLOBAL_HEADER);
-        let (encoder, codec, upload) =
-            open(enc, size, enc_tb, rate, global, gpu_frames).map_err(Failed::Opening)?;
+        // FFmpeg's DNxHR takes nothing smaller ("Input dimensions too small").
+        if enc.name == "dnxhd" && (width < 256 || height < 120) {
+            return Err(Failed::Opening(Error::Invalid(format!(
+                "DNxHR proxies are at least 256×120 pixels, and this one would be \
+                 {width}×{height}: make the proxy size larger or choose another codec"
+            ))));
+        }
+        let video = enc.video_encoder();
+        let times = (enc_tb, rate);
+        // On a stream of its own, as an export's: frames from memory if
+        // that won't open.
+        let on_cuda = cuda.and_then(|cuda| {
+            let device = cuda.with_own_stream().ok()?;
+            let frames = CudaFrames::new(&device, format::Pixel::NV12, width, height).ok()?;
+            let gpu_frames = Some(frames.as_ptr());
+            let (opened, _) = encode::open_video(
+                &video,
+                width,
+                height,
+                times,
+                global,
+                gpu_frames,
+                None,
+                Pass::Only,
+            )
+            .ok()?;
+            Some((opened, (device, frames)))
+        });
+        let (encoder, upload, output) = match on_cuda {
+            Some((opened, gpu)) => {
+                let output = Output::for_encoder(enc.kind, Some(gpu), None, None);
+                (opened, None, output)
+            }
+            None => {
+                let shared = decoder.filter(|d| encode::shares(enc.kind, enc.device.as_deref(), d));
+                let (opened, upload) = encode::open_video(
+                    &video,
+                    width,
+                    height,
+                    times,
+                    global,
+                    None,
+                    shared,
+                    Pass::Only,
+                )
+                .map_err(Failed::Opening)?;
+                let fit_on = shared.map(|d| d.kind().place());
+                let output = Output::for_encoder(enc.kind, None, fit_on, upload.as_ref());
+                (opened, upload, output)
+            }
+        };
+        let output = output.map_err(Failed::Opening)?;
         let mut header = || -> Result<()> {
             let mut ost = octx
-                .add_stream(Some(codec))
+                .add_stream(encoder::find_by_name(&enc.name))
                 .ctx(|| "adding the proxy stream".into())?;
             ost.set_parameters(&encoder);
             ost.set_time_base(enc_tb);
@@ -608,7 +565,7 @@ impl<'a> Writer<'a> {
             Ok(())
         };
         header().map_err(Failed::Encoding)?;
-        Ok(Self {
+        let writer = Self {
             octx,
             encoder,
             upload,
@@ -620,7 +577,8 @@ impl<'a> Writer<'a> {
             last_dur: 1,
             frames: 0,
             shown,
-        })
+        };
+        Ok((writer, output))
     }
 
     /// The next picture, `pts` in the source's time base.
@@ -650,12 +608,16 @@ impl<'a> Writer<'a> {
         // The source's picture type would force it on the encoder.
         picture.set_kind(ffmpeg::picture::Type::None);
         unsafe { (*picture.as_mut_ptr()).duration = dur };
+        // Pictures made on the GPU are on the encoder's device already.
         let mut picture = match &self.upload {
-            Some(up) => up.upload(&picture)?,
-            None => picture,
+            Some(up) if Place::of(&picture) == Place::Memory => up.upload(&picture)?,
+            _ => picture,
         };
         picture.set_pts(Some(pts));
         self.durations.insert(pts, dur);
+        // The GPU's scaler makes its pictures on the decoder's stream: the
+        // encoder reads one once that work is done.
+        crate::cuda::share::wait_for(&picture)?;
         crate::copies::to_encoder(&picture, self.kind);
         self.encoder
             .send_frame(&picture)
@@ -709,6 +671,7 @@ fn encode_into(
     (width, height): (u32, u32),
     tmp: &Path,
     shown: &Shown<'_>,
+    decoder: Option<&crate::hw::GpuDecoder>,
 ) -> std::result::Result<(u64, Option<Went>), Failed> {
     let rotation = reader.rotation();
     let times = (reader.time_base(), reader.frame_rate());
@@ -733,14 +696,13 @@ fn encode_into(
                 })
                 .ok()
         });
-    let gpu_frames = pictures
-        .as_mut()
-        .map(|p| p.frames_ctx())
-        .filter(|f| !f.is_null());
-    if gpu_frames.is_none() {
+    let cuda = pictures.as_ref().and(reader.cuda());
+    let (mut writer, output) = Writer::new(tmp, enc, size, times, cuda, decoder, shown)?;
+    // NVENC takes the scaler's pictures where it opened for frames in GPU
+    // memory.
+    if !matches!(output, Output::Cuda { .. }) {
         pictures = None;
     }
-    let mut writer = Writer::new(tmp, enc, size, times, gpu_frames, shown)?;
     let mut normalizer: Option<Normalizer> = None;
     let mut shrinker = None;
     let mut went = None;
