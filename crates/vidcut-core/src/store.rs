@@ -108,6 +108,12 @@ impl Store {
         self.path.parent().unwrap_or(Path::new("/"))
     }
 
+    /// The project file's size and time of change: a write changes them.
+    pub fn stamp(&self) -> Option<(u64, std::time::SystemTime)> {
+        let meta = std::fs::metadata(&self.path).ok()?;
+        Some((meta.len(), meta.modified().ok()?))
+    }
+
     /// The project file's current text.
     pub fn read(&self) -> Result<String> {
         std::fs::read_to_string(&self.path).map_err(|e| io(&self.path, e))
