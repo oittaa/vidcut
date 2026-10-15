@@ -187,9 +187,21 @@ fn system_look() -> Value {
     })
 }
 
+/// What an automatic `player.memory_mb` comes to.
+fn memory_auto_mb() -> u64 {
+    (vidcut_av::player::Budget::automatic().memory >> 20) as u64
+}
+
 /// What an automatic `player.video_memory_mb` comes to: half the memory of
 /// the GPU in use where its driver says (NVIDIA's) and it decodes, else 1 GB.
+/// Where the GPU's memory is the computer's, the memory budget, shared.
 fn video_memory_auto_mb(p: &Preferences) -> u64 {
+    if vidcut_av::player::SHARED_MEMORY {
+        return match p.player.memory_mb {
+            0 => memory_auto_mb(),
+            mb => mb,
+        };
+    }
     vidcut_av::gpus::in_use()
         .filter(|_| p.gpu.acceleration && p.gpu.decoding)
         .and_then(|g| g.memory_mb)
@@ -243,9 +255,11 @@ fn describe(p: &Preferences) -> Value {
         "gpu_automatic": vidcut_av::gpus::automatic(),
         // What `player.memory_mb` and `player.video_memory_mb` 0 mean here:
         // half the computer's memory, at least 1 GB, and half the memory of
-        // the NVIDIA GPU that decodes, else 1 GB.
-        "player_memory_auto_mb": vidcut_av::player::Budget::automatic().memory >> 20,
+        // the NVIDIA GPU that decodes, else 1 GB. Where the GPU's memory is
+        // the computer's, the second shares the first's budget.
+        "player_memory_auto_mb": memory_auto_mb(),
         "player_video_memory_auto_mb": video_memory_auto_mb(p),
+        "player_video_memory_shared": vidcut_av::player::SHARED_MEMORY,
         "system_memory_mb": vidcut_av::player::system_memory().map(|b| b >> 20),
     })
 }

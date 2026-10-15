@@ -68,15 +68,20 @@ use plan::Plan;
 use ring::Ring;
 use store::Store;
 
-/// Memory for kept pictures: in memory, and in video memory (pictures NVDEC
+/// Memory for kept pictures: in memory, and in video memory (pictures a GPU
 /// decoded for a display that shows them from there).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Budget {
     pub memory: usize,
     /// `None`: half the memory of the GPU that decodes them (1 GB until it
-    /// is known).
+    /// is known). Where the GPU's memory is the computer's
+    /// ([`SHARED_MEMORY`]), they count in `memory` instead.
     pub video: Option<usize>,
 }
+
+/// The GPU's memory is the computer's (Apple silicon): an automatic video
+/// budget is the memory budget, both kinds of pictures counted in it.
+pub const SHARED_MEMORY: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
 
 /// 1 GB of each, for players that don't ask for more (tests, tools).
 pub const DEFAULT_BUDGET: Budget = Budget::both(GB);
@@ -182,9 +187,12 @@ pub struct Stats {
     pub ahead: usize,
     pub behind: usize,
     pub kept: usize,
-    /// Bytes kept in memory and in video memory, each with its budget.
+    /// Bytes kept in memory and in video memory, each with the budget it
+    /// counts in.
     pub memory: (usize, usize),
     pub video: (usize, usize),
+    /// Both count in the memory budget ([`SHARED_MEMORY`]).
+    pub shared: bool,
     /// Why the player decodes on the CPU, when it chose so: GPU decoding is
     /// off, or there is no GPU decoder. (A file a GPU won't decode says why
     /// in its picture's [`decoding`](Picture::decoding).)
@@ -680,7 +688,7 @@ impl Shared {
     }
 
     /// The decode thread decodes on `device`: an automatic video memory
-    /// budget is half its memory from now on.
+    /// budget of its own is half its memory from now on.
     pub(crate) fn gpu_found(&self, device: &crate::cuda::CudaDevice) {
         if self.gpu_memory.get().is_none()
             && let Ok(bytes) = device.memory()
@@ -691,7 +699,12 @@ impl Shared {
     }
 
     fn apply_video_budget(&self) {
-        if self.video_auto.load(std::sync::atomic::Ordering::Relaxed) {
+        if !self.video_auto.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        if SHARED_MEMORY {
+            self.store.share(true);
+        } else {
             let bytes = self.gpu_memory.get().map_or(GB, |m| m / 2);
             self.store.set_budget(store::Kind::Video, bytes);
         }
@@ -772,6 +785,7 @@ impl Player {
             heard_epoch: std::sync::atomic::AtomicU64::new(0),
             levels: Mutex::new(std::collections::VecDeque::new()),
         });
+        shared.apply_video_budget();
         output.start(source)?;
         let mut player = Self {
             shared: shared.clone(),
@@ -988,7 +1002,10 @@ impl Player {
             .video_auto
             .store(budget.video.is_none(), std::sync::atomic::Ordering::Relaxed);
         match budget.video {
-            Some(bytes) => store.set_budget(store::Kind::Video, bytes),
+            Some(bytes) => {
+                store.set_budget(store::Kind::Video, bytes);
+                store.share(false);
+            }
             None => self.shared.apply_video_budget(),
         }
     }
@@ -1095,6 +1112,7 @@ impl Player {
                 store.bytes(store::Kind::Video),
                 store.budget(store::Kind::Video),
             ),
+            shared: store.shared(),
             cpu: *lock(&self.shared.cpu),
             plays_on: self.plays_on(),
             rate,

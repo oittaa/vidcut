@@ -516,8 +516,12 @@ fn memory(
                 let gpu = &state["preferences"]["gpu"];
                 let gpu_decodes = gpu["acceleration"] != false && gpu["decoding"] != false;
                 // Half the GPU's where its memory is known, as
-                // `preferences.get` works it out.
+                // `preferences.get` works it out, or the viewer's where the
+                // GPU's memory is the computer's.
                 let video = match in_use["memory_mb"].as_u64() {
+                    _ if state["player_video_memory_shared"] == true => {
+                        format!("Shares the {} GB above", about_gb(video_auto))
+                    }
                     Some(m) if gpu_decodes => {
                         format!(
                             "{} GB, half of the GPU's {} GB",

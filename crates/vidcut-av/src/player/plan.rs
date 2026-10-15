@@ -23,6 +23,18 @@ pub(crate) struct Id {
 /// What a picture over another shows, where, and its weight.
 type Layer = (Arc<str>, i64, u32);
 
+#[cfg(test)]
+impl Id {
+    /// Frame `pos` of the file `source`.
+    pub(crate) fn at(source: &str, pos: i64) -> Self {
+        Self {
+            source: source.into(),
+            pos,
+            over: None,
+        }
+    }
+}
+
 /// A plan, indexed.
 pub(crate) struct Plan {
     pub(crate) plan: RenderPlan,
