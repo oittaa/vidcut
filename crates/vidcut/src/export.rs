@@ -903,7 +903,8 @@ pub fn detected(refresh: bool) -> Availability {
 /// The GPU decoder the player uses here, by its name (`NVDEC`), and the
 /// proxy codecs it plays (`hw::plays`), while `decoding` (GPU decoding on);
 /// `None` where the CPU plays them all. Tested once on each GPU, then kept
-/// as the encoders are.
+/// as the encoders are, with the codecs tested: a codec an entry doesn't
+/// name is tested then.
 pub fn plays(decoding: bool) -> Option<(String, Vec<String>)> {
     if !decoding {
         return None;
@@ -916,8 +917,14 @@ pub fn plays(decoding: bool) -> Option<(String, Vec<String>)> {
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default();
+    let codecs = vidcut_av::hw::plays_tests();
     if let Some(entry) = cached.get(&key)
-        && let Ok(found) = serde_json::from_value(entry.clone())
+        && let Some(named) = entry["codecs"].as_array()
+        && codecs
+            .iter()
+            .all(|&c| named.iter().any(|n| n.as_str() == Some(c)))
+        && let Some(found) = entry.get("found")
+        && let Ok(found) = serde_json::from_value(found.clone())
     {
         return found;
     }
@@ -931,7 +938,7 @@ pub fn plays(decoding: bool) -> Option<(String, Vec<String>)> {
     });
     // Each GPU's, on this FFmpeg, system and drivers.
     cached.retain(|k, _| k.starts_with(&tested));
-    cached.insert(key, json!(found));
+    cached.insert(key, json!({ "found": found, "codecs": codecs }));
     if std::fs::create_dir_all(cache_dir()).is_ok() {
         let _ = std::fs::write(&path, Value::Object(cached).to_string());
     }

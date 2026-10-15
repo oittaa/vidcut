@@ -649,16 +649,20 @@ pub fn decoders(dir: &std::path::Path) -> Vec<DecoderStatus> {
     out
 }
 
-/// The proxy codecs `gpu` decodes, by their names in the preferences
-/// (`h264`, `av1`, `prores`): a short clip of each, made in `dir` once and
-/// kept ([`decoders`]' clips), decoded through on it. No GPU decodes DNxHR.
-pub fn plays(gpu: &GpuDecoder, dir: &std::path::Path) -> Vec<&'static str> {
-    use crate::fixture::{Container, FixtureSpec, VideoCodec};
+/// The clips [`plays`] decodes, one for each proxy codec by its name in the
+/// preferences: [`decoders`]' clips. No GPU decodes DNxHR.
+const PROXY_CLIPS: [(
+    &str,
+    crate::fixture::VideoCodec,
+    crate::fixture::Container,
+    ffmpeg::codec::Id,
+); 4] = {
+    use crate::fixture::{Container, VideoCodec};
     use ffmpeg::codec::Id;
-    crate::init();
     [
         ("h264", VideoCodec::H264, Container::Mp4, Id::H264),
         ("av1", VideoCodec::Av1, Container::Mp4, Id::AV1),
+        ("hevc", VideoCodec::Hevc10, Container::Mp4, Id::HEVC),
         (
             "prores",
             VideoCodec::ProRes422Hq,
@@ -666,16 +670,29 @@ pub fn plays(gpu: &GpuDecoder, dir: &std::path::Path) -> Vec<&'static str> {
             Id::PRORES,
         ),
     ]
-    .into_iter()
-    .filter(|&(_, video, container, id)| {
-        let spec = FixtureSpec::new(video, container, 640, 360, (30, 1), 8).no_audio();
-        // Proxies close their GOPs.
-        crate::fixture::ensure_in(dir, &spec).is_ok_and(|clip| {
-            gpu.why_not(id, || false).is_none() && decodes_all(gpu, &clip).is_ok()
+};
+
+/// The proxy codecs [`plays`] tests: `h264`, `av1`, `hevc`, `prores`.
+pub fn plays_tests() -> Vec<&'static str> {
+    PROXY_CLIPS.iter().map(|&(codec, ..)| codec).collect()
+}
+
+/// The proxy codecs `gpu` decodes, of those [`plays_tests`] names: a short
+/// clip of each, made in `dir` once and kept, decoded through on it.
+pub fn plays(gpu: &GpuDecoder, dir: &std::path::Path) -> Vec<&'static str> {
+    use crate::fixture::FixtureSpec;
+    crate::init();
+    PROXY_CLIPS
+        .into_iter()
+        .filter(|&(_, video, container, id)| {
+            let spec = FixtureSpec::new(video, container, 640, 360, (30, 1), 8).no_audio();
+            // Proxies close their GOPs.
+            crate::fixture::ensure_in(dir, &spec).is_ok_and(|clip| {
+                gpu.why_not(id, || false).is_none() && decodes_all(gpu, &clip).is_ok()
+            })
         })
-    })
-    .map(|(codec, ..)| codec)
-    .collect()
+        .map(|(codec, ..)| codec)
+        .collect()
 }
 
 /// Decodes all 8 frames of the clip at `path` on `gpu`.
