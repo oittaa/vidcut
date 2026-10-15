@@ -197,13 +197,15 @@ impl Gpu {
         })
     }
 
-    /// Takes `images` (just imported, not yet used by wgpu) over from the API
-    /// or device that wrote them (`source`), into `layout` for `access` at
-    /// `stage`, in a command buffer of its own submitted on wgpu's queue:
-    /// work submitted after it finds them so ([`super::acquire::Acquirer`]).
+    /// Takes `images` over from the API or device that wrote them
+    /// (`source`), into `layout` for `access` at `stage`, in a command
+    /// buffer of its own for wgpu's queue: work submitted after it finds
+    /// them so ([`super::acquire::Acquirer`]). The draw submits it ahead of
+    /// its own.
     ///
     /// # Safety
-    /// The images are this device's, on memory another API wrote.
+    /// The images are this device's, on memory another API wrote. wgpu
+    /// hasn't used them, or left them in `layout`.
     #[cfg(any(target_os = "linux", windows))]
     unsafe fn acquire(
         &self,
@@ -212,7 +214,7 @@ impl Gpu {
         stage: ash::vk::PipelineStageFlags,
         access: ash::vk::AccessFlags,
         source: super::acquire::Source,
-    ) -> Result<(), String> {
+    ) -> Result<wgpu::CommandBuffer, String> {
         let acquirer = self
             .acquirer
             .get_or_init(|| {
@@ -238,8 +240,7 @@ impl Gpu {
             })
         };
         recorded.ok_or("not Vulkan")?;
-        self.queue.submit([encoder.finish()]);
-        Ok(())
+        Ok(encoder.finish())
     }
 
     /// Runs `f`, which makes textures or views, the device's validation
@@ -349,6 +350,14 @@ pub struct Screen {
     views: Option<(wgpu::TextureView, wgpu::TextureView, (u32, u32))>,
     /// The V plane of the picture being drawn, imported (Vulkan's).
     v_view: Option<wgpu::TextureView>,
+    /// The acquire of the picture being drawn, imported: submitted ahead of
+    /// the draw.
+    acquired: Option<wgpu::CommandBuffer>,
+    /// The imports of Vulkan's frames it keeps.
+    #[cfg(any(target_os = "linux", windows))]
+    kept: super::vulkan::Imports,
+    /// Pictures imported from GPU memory so far.
+    imports: u64,
     /// The last picture in GPU memory was copied on the GPU, not down.
     last_shared: bool,
 }
@@ -380,6 +389,13 @@ impl Screen {
         self.last_shared
     }
 
+    /// How many pictures it has imported from GPU memory: each picture of
+    /// VA-API's, Direct3D 11's or VideoToolbox's drawn, and each frame of
+    /// Vulkan's the first time it is drawn.
+    pub fn imports(&self) -> u64 {
+        self.imports
+    }
+
     /// Draws `picture` (`None`: black) into a `width`×`height` target, as
     /// the viewer shows it.
     pub fn draw(
@@ -409,6 +425,11 @@ impl Screen {
         // would panic): black.
         let limit = gpu.device.limits().max_texture_dimension_2d;
         let picture = picture.filter(|p| p.width() <= limit && p.height() <= limit);
+        // Vulkan's frames are kept imported while their pictures are drawn.
+        #[cfg(any(target_os = "linux", windows))]
+        if picture.is_none_or(|p| p.gpu() != Some(Kind::Vulkan)) {
+            self.kept.clear();
+        }
         let mut encoder = gpu
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -493,7 +514,8 @@ impl Screen {
                 pass.draw(0..3, 0..1);
             }
         }
-        gpu.queue.submit([encoder.finish()]);
+        gpu.queue
+            .submit(self.acquired.take().into_iter().chain([encoder.finish()]));
         if let Some(i) = self.filled.take() {
             self.shared[i].used(&gpu.queue);
         }
@@ -690,13 +712,13 @@ impl Screen {
             if images.len() != textures.len() {
                 return Err("not Vulkan".into());
             }
-            gpu.acquire(
+            self.acquired = Some(gpu.acquire(
                 &images,
                 ash::vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
                 ash::vk::PipelineStageFlags::TRANSFER,
                 ash::vk::AccessFlags::TRANSFER_READ,
                 super::acquire::Source::Api,
-            )?;
+            )?);
         }
         for (imported, size, texture) in textures {
             // wgpu keeps the texture until the copy is done.
@@ -707,6 +729,7 @@ impl Screen {
             );
         }
         self.imported = Some(picture.clone());
+        self.imports += 1;
         Ok(())
     }
 
@@ -834,30 +857,29 @@ impl Screen {
         // SAFETY: the image of a texture just made on wgpu's device, which
         // hasn't used it.
         unsafe {
-            gpu.acquire(
+            self.acquired = Some(gpu.acquire(
                 &[image.ok_or("not Vulkan")?],
                 ash::vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 ash::vk::PipelineStageFlags::FRAGMENT_SHADER,
                 ash::vk::AccessFlags::SHADER_READ,
                 super::acquire::Source::Api,
-            )?;
+            )?);
         }
         self.views = Some((y, uv, (desc.Width, desc.Height)));
         self.imported = Some(picture.clone());
+        self.imports += 1;
         Ok(())
     }
 
     /// Shows a picture in Vulkan memory (ProRes FFmpeg decoded on NVIDIA's
-    /// GPU) from there: each plane's memory, exported by FFmpeg's Vulkan
-    /// device, imported by wgpu's into an image made as FFmpeg made its own
-    /// ([`super::vulkan`]), acquired from the layout FFmpeg left the images
-    /// in, and drawn from in place of the planes' textures (`views`,
-    /// `v_view`). Each picture drawn is imported anew. The picture is held
+    /// GPU) from there: its frame's planes imported by wgpu's device the
+    /// first time it is drawn ([`import_vulkan_frame`]) and kept (`kept`),
+    /// acquired from the layout FFmpeg left the images in, and drawn from in
+    /// place of the planes' textures (`views`, `v_view`). The picture is held
     /// until the drawing is done (`imported`), so FFmpeg doesn't decode into
     /// its images under it.
     #[cfg(any(target_os = "linux", windows))]
     fn import_vulkan(&mut self, gpu: &Gpu, picture: &Arc<Picture>) -> Result<(), String> {
-        use wgpu::hal::api::Vulkan;
         if !gpu.shares {
             return Err("the display's device imports no Vulkan memory".into());
         }
@@ -872,98 +894,43 @@ impl Screen {
             | Layout::Yuv420p
             | Layout::Yuv422p) => return Err(format!("{layout:?} pictures aren't Vulkan's")),
         }
-        let exported =
-            vidcut_av::hw::vulkan::Exported::of(picture.frame()).map_err(|e| e.to_string())?;
-        if exported.planes.len() != 3 {
-            return Err(format!("a picture of {} planes", exported.planes.len()));
-        }
-        let left_in = exported.layout;
-        let families = exported.planes[0].families.clone();
-        let concurrent = families.len() > 1;
-        let label = Some("vidcut Vulkan plane");
-        // SAFETY: wgpu's own device, on the GPU and driver FFmpeg's is on
-        // (checked first); each plane imported into an image made as
-        // FFmpeg made its own, which wgpu then owns.
-        let raws = unsafe {
-            let hal = gpu.device.as_hal::<Vulkan>().ok_or("not Vulkan")?;
-            if super::vulkan::uuids(&hal) != (exported.device_uuid, exported.driver_uuid) {
-                return Err("FFmpeg's Vulkan device isn't on the display's GPU".into());
-            }
-            if concurrent && !families.contains(&hal.queue_family_index()) {
-                return Err("FFmpeg's planes aren't shared with the display's queue".into());
-            }
-            let imported = exported
-                .planes
-                .into_iter()
-                .map(|plane| super::vulkan::import(&hal, plane))
-                .collect::<Result<Vec<_>, _>>()?;
-            imported
-                .into_iter()
-                .map(|plane| plane.into_hal(&hal, label))
-                .collect::<Vec<_>>()
-        };
-        // wgpu's textures first, as for VA-API's.
-        let textures = gpu.checked(|| {
-            raws.into_iter()
-                .map(|(raw, size, format)| {
-                    // SAFETY: made on this device, as described, and in the
-                    // layout shaders sample before wgpu reads it (acquired
-                    // below).
-                    unsafe {
-                        gpu.device.create_texture_from_hal::<Vulkan>(
-                            raw,
-                            &wgpu::TextureDescriptor {
-                                label,
-                                size,
-                                mip_level_count: 1,
-                                sample_count: 1,
-                                dimension: wgpu::TextureDimension::D2,
-                                format,
-                                usage: wgpu::TextureUsages::TEXTURE_BINDING,
-                                view_formats: &[],
-                            },
-                            wgpu::TextureUses::RESOURCE,
-                        )
-                    }
-                })
-                .collect::<Vec<_>>()
-        })?;
+        let frame = picture.frame();
+        let identity = vidcut_av::hw::vulkan::Identity::of(frame).map_err(|e| e.to_string())?;
+        let (import, new) = self
+            .kept
+            .get_or_import(identity, || import_vulkan_frame(gpu, frame))?;
+        let left_in = vidcut_av::hw::vulkan::layout(frame).map_err(|e| e.to_string())?;
         // Taken over from FFmpeg's device with the picture they hold, ready
         // to sample.
-        // SAFETY: the images of textures just made on wgpu's device, which
-        // hasn't used them; only their handles are read.
-        unsafe {
-            let images: Vec<_> = textures
-                .iter()
-                .filter_map(|t| t.as_hal::<Vulkan>().map(|t| t.raw_handle()))
-                .collect();
-            if images.len() != textures.len() {
-                return Err("not Vulkan".into());
-            }
+        // SAFETY: the images of textures of wgpu's device, on the memory
+        // FFmpeg's device decoded into. wgpu left them as shaders sample
+        // them, if it used them.
+        let acquired = unsafe {
             gpu.acquire(
-                &images,
+                &import.images,
                 ash::vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 ash::vk::PipelineStageFlags::FRAGMENT_SHADER,
                 ash::vk::AccessFlags::SHADER_READ,
                 super::acquire::Source::Vulkan {
-                    concurrent,
+                    concurrent: import.concurrent,
                     layout: left_in,
                 },
-            )?;
-        }
+            )?
+        };
         // FFmpeg finds them where wgpu left them, as long as it holds them.
         vidcut_av::hw::vulkan::acquired_outside(
-            picture.frame(),
+            frame,
             ash::vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
         )
         .map_err(|e| e.to_string())?;
-        let [y, u, v] = &textures[..] else {
-            return Err(format!("a picture of {} planes", textures.len()));
-        };
-        let view = |t: &wgpu::Texture| t.create_view(&Default::default());
-        self.views = Some((view(y), view(u), (y.width(), y.height())));
-        self.v_view = Some(view(v));
+        let [y, u, v] = &import.views;
+        self.views = Some((y.clone(), u.clone(), import.size));
+        self.v_view = Some(v.clone());
+        self.acquired = Some(acquired);
         self.imported = Some(picture.clone());
+        if new {
+            self.imports += 1;
+        }
         Ok(())
     }
 
@@ -1077,6 +1044,7 @@ impl Screen {
         let ((y, size), (uv, _)) = (y?, uv?);
         self.views = Some((y, uv, size));
         self.imported = Some(picture.clone());
+        self.imports += 1;
         Ok(())
     }
 
@@ -1380,6 +1348,93 @@ fn make_target(device: &wgpu::Device, size: (u32, u32)) -> Target {
         view,
         size,
     }
+}
+
+/// `frame`, in Vulkan memory, imported by wgpu's device: each plane's
+/// memory, exported by FFmpeg's Vulkan device, imported into an image made
+/// as FFmpeg made its own ([`super::vulkan`]), which a texture of wgpu's
+/// then owns.
+#[cfg(any(target_os = "linux", windows))]
+fn import_vulkan_frame(
+    gpu: &Gpu,
+    frame: &vidcut_av::ffmpeg::frame::Video,
+) -> Result<super::vulkan::Import, String> {
+    use wgpu::hal::api::Vulkan;
+    let exported = vidcut_av::hw::vulkan::Exported::of(frame).map_err(|e| e.to_string())?;
+    if exported.planes.len() != 3 {
+        return Err(format!("a picture of {} planes", exported.planes.len()));
+    }
+    let families = exported.planes[0].families.clone();
+    let concurrent = families.len() > 1;
+    let label = Some("vidcut Vulkan plane");
+    // SAFETY: wgpu's own device, on the GPU and driver FFmpeg's is on
+    // (checked first); each plane imported into an image made as FFmpeg
+    // made its own, which wgpu then owns.
+    let raws = unsafe {
+        let hal = gpu.device.as_hal::<Vulkan>().ok_or("not Vulkan")?;
+        if super::vulkan::uuids(&hal) != (exported.device_uuid, exported.driver_uuid) {
+            return Err("FFmpeg's Vulkan device isn't on the display's GPU".into());
+        }
+        if concurrent && !families.contains(&hal.queue_family_index()) {
+            return Err("FFmpeg's planes aren't shared with the display's queue".into());
+        }
+        let imported = exported
+            .planes
+            .into_iter()
+            .map(|plane| super::vulkan::import(&hal, plane))
+            .collect::<Result<Vec<_>, _>>()?;
+        imported
+            .into_iter()
+            .map(|plane| plane.into_hal(&hal, label))
+            .collect::<Vec<_>>()
+    };
+    // wgpu's textures first, as for VA-API's.
+    let textures = gpu.checked(|| {
+        raws.into_iter()
+            .map(|(raw, size, format)| {
+                // SAFETY: made on this device, as described, and in the
+                // layout shaders sample before wgpu reads it (acquired by
+                // each draw).
+                unsafe {
+                    gpu.device.create_texture_from_hal::<Vulkan>(
+                        raw,
+                        &wgpu::TextureDescriptor {
+                            label,
+                            size,
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: wgpu::TextureDimension::D2,
+                            format,
+                            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                            view_formats: &[],
+                        },
+                        wgpu::TextureUses::RESOURCE,
+                    )
+                }
+            })
+            .collect::<Vec<_>>()
+    })?;
+    // SAFETY: wgpu's own textures; only their handles are read.
+    let images: Vec<_> = unsafe {
+        textures
+            .iter()
+            .filter_map(|t| t.as_hal::<Vulkan>().map(|t| t.raw_handle()))
+            .collect()
+    };
+    if images.len() != textures.len() {
+        return Err("not Vulkan".into());
+    }
+    let [y, u, v] = &textures[..] else {
+        return Err(format!("a picture of {} planes", textures.len()));
+    };
+    let view = |t: &wgpu::Texture| t.create_view(&Default::default());
+    Ok(super::vulkan::Import {
+        images,
+        views: [view(y), view(u), view(v)],
+        size: (y.width(), y.height()),
+        concurrent,
+        _textures: textures,
+    })
 }
 
 /// Copies a plane's rows (`stride` bytes apart, `bytes` per sample) into

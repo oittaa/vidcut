@@ -7,7 +7,6 @@
 ## Open
 
 - The encoder on a thread of its own. An export or a proxy decodes, makes each picture and encodes it on one thread, and the encoder holds that thread while the GPU encodes. A ProRes proxy of 10 s of 4K60 ProRes HQ takes 8.1 s on the RTX 4080 SUPER. `prores_ks_vulkan`'s `send_frame` takes 5.9 s of that, decoding 1.4 s, and libplacebo 0.8 s, of which its waits (`cuda::wait_done`) are 0.1 s. NVENC's `send_frame` takes 5.3 s of the clip's 9 s NVENC export at 4K. With the proxy's encoder on a thread of its own, fed through a channel of three pictures, the proxy took 6.8 s.
-- Keeping the viewer's imports of Vulkan's frames across pictures. Each picture drawn is imported anew, which takes 2.4 ms of the viewer thread for a 4K picture on the RTX 4080 SUPER: 1.3 ms for the three planes' memory and 1 ms for the acquire's submission of its own, against 2 ms for uploading the picture. The exported handles already live as long as FFmpeg's frames context (`hw::vulkan`).
 - Shrinking on Vulkan (`scale_vulkan`), and `bwdif_vulkan` for interlaced ProRes, which comes down before `bwdif` now.
 - A 4:4:4 12-bit viewer layout (ProRes 4444).
 - FFv1 on Vulkan: it has a barcode fixture (`VideoCodec::Ffv1`). FFmpeg 9.0.1 also decodes ProRes RAW, DPX and APV with compute shaders, and AV1, H.264, HEVC and VP9 with the GPU's video engine (Vulkan Video, [own-player.md](own-player.md)).
