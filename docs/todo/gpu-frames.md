@@ -14,7 +14,7 @@ Today that holds for NVIDIA, and for VA-API, AMF and VideoToolbox where the enco
 
 | Mechanism | Does | GPUs | Fits (`can_fit`) | Used by |
 |---|---|---|---|---|
-| `cuda::CudaPictures` | NVDEC's frames turned and converted (libplacebo on Vulkan), scaled and padded, for NVENC; made into Vulkan's ProRes encoder's pictures by libplacebo | NVIDIA | YUV turned by quarter turns | exports, proxies |
+| `cuda::CudaPictures` | NVDEC's and Vulkan's frames turned and converted (libplacebo on Vulkan), scaled and padded, for NVENC; made into Vulkan's ProRes encoder's pictures by libplacebo | NVIDIA | YUV without alpha, turned by quarter turns | exports, proxies |
 | `hw::Fitter` | frames turned, scaled and padded on the decoder's device, for an encoder there (VideoToolbox's not padded) | VA-API, Direct3D 11, VideoToolbox | frames in the output's colors; Direct3D 11's into the encoder's frames and not 8-bit into 10; VideoToolbox's in the output's layout, not placed on black | exports, proxies |
 | `hw::Shrinker` | frames scaled on the GPU, then copied down (`export::normalize::down`) | VA-API, CUDA, Direct3D 11, VideoToolbox | | proxies, exports to encoders that take frames from memory, tiles, the two-up, thumbnails |
 
