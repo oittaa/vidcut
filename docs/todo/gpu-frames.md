@@ -4,25 +4,25 @@
 
 **The goal:** a frame stays in GPU memory wherever that is possible, from the decoder to the encoder or the display. That holds even where a fast CPU, such as the M4's, would be a little quicker. A desktop computer is fast enough either way. A laptop must be fast enough too, but it saves its battery when the GPU does the work. Past "fast enough", speed doesn't count: 200 fps or 1,000 doesn't matter. What counts is that frames aren't copied between the GPU and memory, and how much CPU and power a job takes.
 
-Today that holds for NVIDIA alone, and for exports, not proxies, on VA-API and AMF. Each path was added for one GPU and one job.
+Today that holds for NVIDIA, and for VA-API and AMF where the encoder is on the decoder's device. Each path was added for one GPU and one job.
 
 ## Today
 
-**The planner** (`route.rs`) picks each frame's route. A frame is made on the GPU where it is and handed on there (`Gpu`), shrunk there and copied down (`Shrunk`), copied down whole (`Whole`), made on the CPU from memory (`Cpu`), or kept as decoded for the player (`Kept`). `route::plan` is a pure function of facts about the frame (`Facts`) and of where the job's pictures go (`Dest`: memory, an encoder that takes frames on one place, or a display). The facts are where the frame is, whether its GPU fits it for an encoder there, whether the output shows it smaller, whether a display takes its layout, and whether fitting or keeping failed before. The engine's `export::make::Maker` plans each picture it makes, and `VIDCUT_DEBUG` says each file's route. `VideoFrames` makes its pictures with it. A proxy's `made_with` says how its frames went (`route::Went`).
+**The planner** (`route.rs`) picks each frame's route. A frame is made on the GPU where it is and handed on there (`Gpu`), shrunk there and copied down (`Shrunk`), copied down whole (`Whole`), made on the CPU from memory (`Cpu`), or kept as decoded for the player (`Kept`). `route::plan` is a pure function of facts about the frame (`Facts`) and of where the job's pictures go (`Dest`: memory, an encoder that takes frames on one place, or a display). The facts are where the frame is, whether its GPU fits it for an encoder there, whether the output shows it smaller, whether a display takes its layout, and whether fitting or keeping failed before. The engine's `export::make::Maker` plans each picture it makes, and `VIDCUT_DEBUG` says each file's route. `VideoFrames` and proxies make their pictures with it. A proxy's `made_with` says how its frames went (`route::Went`).
 
 **The backends** say what they fit (`can_fit`) from `route::Ops`: the turn, the frame's and the output's layouts, RGB or YUV, whether the colors stay, and whether the encoder's own frames are there to fit into. Three mechanisms are their work:
 
 | Mechanism | Does | GPUs | Fits (`can_fit`) | Used by |
 |---|---|---|---|---|
 | `cuda::CudaPictures` | NVDEC's frames turned and converted (libplacebo on Vulkan), scaled and padded, for NVENC | NVIDIA | YUV turned by quarter turns | exports, proxies |
-| `hw::Fitter` | frames turned, scaled and padded on the decoder's device, for an encoder there | VA-API, Direct3D 11 | frames in the output's colors, Direct3D 11's into the encoder's frames and not 8-bit into 10 | exports only |
+| `hw::Fitter` | frames turned, scaled and padded on the decoder's device, for an encoder there | VA-API, Direct3D 11 | frames in the output's colors, Direct3D 11's into the encoder's frames and not 8-bit into 10 | exports, proxies |
 | `hw::Shrinker` | frames scaled on the GPU, then copied down (`export::normalize::down`) | VA-API, CUDA, Direct3D 11 | | proxies, exports to encoders that take frames from memory, tiles, the two-up, thumbnails |
 
 The CPU's backend is `export::normalize` (`Normalizer`).
 
 Around them:
-- **Where the encoder takes frames is chosen per job, by encoder name** (`encode` in export/mod.rs). NVENC takes CUDA frames when a GPU decodes (`gpu_output`). VAAPI and AMF open on the decoder's device only for the pairs VAAPI with VA-API and AMF with Direct3D 11 (`encode::shares`). The job's `Output` and `Dest` follow from that (`Output::for_encoder`). Proxies check for NVENC again (`proxy::encode_into`).
-- **Proxies have an encode loop and fitting of their own** (`proxy::encode_into`), beside the engine's (`Maker`), so they don't get the export's GPU fitting.
+- **Where the encoder takes frames is chosen per job, by encoder name** (`encode` in export/mod.rs, `Writer::new` in proxy.rs). NVENC takes CUDA frames when a GPU decodes (`gpu_output`), a proxy's where the GPU's scaler builds for its file. VAAPI and AMF open on the decoder's device only for the pairs VAAPI with VA-API and AMF with Direct3D 11 (`encode::shares`). The job's `Output` and `Dest` follow from that (`Output::for_encoder`).
+- **Proxies have a loop of their own** (`proxy::encode_into`): it decodes every frame at its own time and gives each its frame's timestamp. They make their pictures with the `Maker` and open their encoders with `encode::open_video`, so VA-API and AMF proxies fit on the GPU as exports do.
 - **Light measurements and analyses come down whole**, on purpose: their values must be the CPU's to the bit (export.md §4).
 - **The player keeps frames on the GPU** (`hw::Keeper`, the `Kept` route), and the GUI imports them for each GPU (gui/shared.rs, gui/picture.rs). Where a display can't take them, they come down whole (`player::frame`).
 - **VideoToolbox has no backend.** On a Mac every frame comes down whole and the CPU scales it: `hw::can_fit` says no for VideoToolbox's frames, and `hw::Shrinker` finds no scaler for them.
@@ -59,7 +59,7 @@ The route goes into `VIDCUT_DEBUG` and into the result (`made_with`: `frames sta
 
 What a test can't settle is written as a fact with its source. For example, FFmpeg's `scale_vt` keeps the input's layout (vf_scale_vt.c), so 10-bit stays 10-bit on the GPU.
 
-**One engine for every job.** Exports, proxies (an export at a small size), the timeline's tiles, the two-up, `frame render`, storyboards, thumbnails, light measurements and analyses all go through `VideoFrames` and the planner. The player's route ends in `keep`. Its import into the viewer (gui/shared.rs, gui/picture.rs) stays per GPU, behind the same place names.
+**One engine for every job.** Exports, proxies (an export at a small size), the timeline's tiles, the two-up, `frame render`, storyboards, thumbnails, light measurements and analyses all go through the engine's `Maker` and the planner. Exports and proxies do already, proxies in a loop of their own. The player's route ends in `keep`. Its import into the viewer (gui/shared.rs, gui/picture.rs) stays per GPU, behind the same place names.
 
 **Open:**
 - `Ops` with deinterlacing and the size to scale to.
@@ -72,9 +72,8 @@ What a test can't settle is written as a fact with its source. For example, FFmp
 ## Steps
 
 Each step is measured against the step before it on the RTX 4080 SUPER, the Radeon iGPU, the N150 and the M4. The measurement takes the same clips, the same run and a release build. It gives the frames copied each way, from the result's `copies`, and the CPU time first, then the time, which only has to stay fast enough.
-1. **Proxies through the export engine:** drop `encode_into`'s own loop. VA-API and AMF proxies then fit on the GPU as exports do.
-2. **VideoToolbox backend:** `scale_vt` and `transpose_vt`, with VideoToolbox's encoders taking its frames. Not known yet, and to be tested on the M4: whether the H.264 encoder takes 10-bit frames.
-3. **Vulkan as a backend** (libplacebo) for colors and HDR where a GPU's own fitting lacks them, as NVIDIA's path already uses it. FFmpeg makes its Vulkan device from VA-API, DRM and CUDA devices only, so VA-API's frames can go to it through FFmpeg. Direct3D 11's need an import of vidcut's own, as the viewer has (gui/picture.rs).
+1. **VideoToolbox backend:** `scale_vt` and `transpose_vt`, with VideoToolbox's encoders taking its frames. Not known yet, and to be tested on the M4: whether the H.264 encoder takes 10-bit frames.
+2. **Vulkan as a backend** (libplacebo) for colors and HDR where a GPU's own fitting lacks them, as NVIDIA's path already uses it. FFmpeg makes its Vulkan device from VA-API, DRM and CUDA devices only, so VA-API's frames can go to it through FFmpeg. Direct3D 11's need an import of vidcut's own, as the viewer has (gui/picture.rs).
 
 ## Tests
 
