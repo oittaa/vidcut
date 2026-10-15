@@ -27,7 +27,7 @@
   - `loudness`: of a render plan's mix (FFmpeg's `ebur128` filter)
 - Everything else is plain arithmetic in vidcut-core and tested without media: silences, cut frames, black stretches, the Boring Detector, the parts to cut, and the frame mapping (export's sampling rule).
 
-**Measurements are kept** in the process and on disk (`~/.cache/vidcut/analysis/`, keyed by path, size and modification time). They don't depend on thresholds, so an agent can try settings quickly: decoding a whole stream is the slow part.
+**Measurements are kept** in the process and on disk (`~/.cache/vidcut/analysis/`), named and checked by the file's origin as the thumbnails are (gui.md §11). They don't depend on thresholds, so an agent can try settings quickly: decoding a whole stream is the slow part.
 
 **Pictures are measured small** (96×54 luma), enough to tell shots apart. They decode on the GPU where it decodes the stream (preview.md §3) and come down whole, so the scores are the CPU's to the bit.
 
