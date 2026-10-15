@@ -95,11 +95,14 @@ impl ProxyEncoder {
     /// bits with `ten`. Where it takes 10 bits ([`ten_bit`](Self::ten_bit)),
     /// such a source's are P010 for the GPU's video engine and 10-bit 4:2:0
     /// for SVT-AV1. Otherwise 8-bit 4:2:0, NV12 for AMF, QSV, VAAPI and
-    /// VideoToolbox. ProRes is always 10-bit 4:2:2, DNxHR 8-bit 4:2:2.
+    /// VideoToolbox. ProRes is always 10-bit 4:2:2, DNxHR 8-bit 4:2:2, and
+    /// H.264 8-bit.
     fn pixel(&self, ten: bool) -> format::Pixel {
         use EncoderChoice::{Amf, Nvenc, Qsv, Vaapi, VideoToolbox};
         use format::Pixel::{NV12, P010LE, YUV420P, YUV420P10LE, YUV422P, YUV422P10LE};
-        let ten = ten && self.ten_bit;
+        // H.264 and DNxHR LB stay 8-bit whatever the encoder check says:
+        // GPUs don't decode 10-bit H.264, and DNxHR LB is 8-bit.
+        let ten = ten && self.ten_bit && !matches!(self.codec, "h264" | "dnxhr");
         match (self.kind, self.codec) {
             (Nvenc | Amf | Qsv | Vaapi | VideoToolbox, _) if ten => P010LE,
             (Amf | Qsv | Vaapi | VideoToolbox, _) => NV12,
@@ -802,7 +805,7 @@ fn drain(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use EncoderChoice::{Nvenc, VideoToolbox, Vulkan};
+    use EncoderChoice::{Nvenc, Vaapi, VideoToolbox, Vulkan};
 
     /// GPU encoders that work: their names, kinds and pixel formats.
     fn working(list: &[(&str, EncoderChoice, &str)]) -> Availability {
@@ -931,6 +934,18 @@ mod tests {
         let nvidia = working(&[("h264_nvenc", Nvenc, "yuv420p")]);
         let h264 = own(ProxyCodec::H264, &nvidia).remove(0);
         assert_eq!(h264.pixel(true), format::Pixel::YUV420P);
+    }
+
+    #[test]
+    fn h264_stays_eight_bit_where_its_encoder_takes_ten_bits() {
+        let vaapi = ProxyEncoder {
+            name: "h264_vaapi".into(),
+            codec: "h264",
+            kind: Vaapi,
+            device: Some("/dev/dri/renderD128".into()),
+            ten_bit: true,
+        };
+        assert_eq!(vaapi.pixel(true), format::Pixel::NV12);
     }
 
     #[test]
