@@ -461,6 +461,7 @@ impl Workspace {
                             let made = match c["codec"].as_str().unwrap_or_default() {
                                 "auto" => format!("Automatic: {uses}"),
                                 "av1" => format!("AV1: {}", uses.trim_start_matches("AV1, ")),
+                                "hevc" => format!("HEVC: {}", uses.trim_start_matches("HEVC, ")),
                                 "h264" => format!("H.264: {}", uses.trim_start_matches("H.264, ")),
                                 "prores" => format!(
                                     "ProRes Proxy: {}",
@@ -497,14 +498,15 @@ impl Workspace {
                                 })
                                 .response
                                 .on_hover_text(
-                                    "Automatic: the first of DNxHR LB, ProRes Proxy, AV1 and \
-                                     H.264 that the GPU's video engine makes and the GPU plays. \
-                                     Else the first the GPU plays, else the first it makes, else \
-                                     DNxHR LB in software. ProRes Proxy and DNxHR LB make every \
-                                     frame a keyframe: a jump decodes one frame instead of up to \
-                                     60, but the files are many times larger. AV1 files are the \
-                                     smallest. Made in software (SVT-AV1), they take longer than \
-                                     H.264 with x264",
+                                    "Automatic: the first of DNxHR LB, AV1, HEVC, ProRes Proxy \
+                                     and H.264 that the GPU's video engine makes and the GPU \
+                                     plays. Else the first the GPU plays, else the first it \
+                                     makes, else DNxHR LB in software. The GPU plays AV1 and HEVC \
+                                     from its memory, 10-bit too. ProRes Proxy and DNxHR LB make \
+                                     every frame a keyframe: a jump decodes one frame instead of \
+                                     up to 60, but the files are many times larger. AV1 files are \
+                                     the smallest. Made in software (SVT-AV1), they take longer \
+                                     than H.264 with x264",
                                 );
                         });
                         ui.end_row();
