@@ -980,7 +980,7 @@ impl Workspace {
             icon::DYNAMIC_TRIM,
             "Dynamic Trim",
             self.timeline.dynamic.is_some(),
-            "Dynamic Trim (W): J/K/L trim the selected edit, or slip or slide the selected clips, as it plays. Right-click for Slip or Slide",
+            "Dynamic Trim (W): J/K/L trim the selected edit, or slip or slide the selected clips. Right-click for Slip or Slide",
         );
         if r.clicked() {
             self.toggle_dynamic();
@@ -2347,5 +2347,66 @@ impl Workspace {
         });
         self.trim_editor = Some(at);
         self.show_timeline();
+    }
+
+    /// `gui.trim_editor`: opens the Trim Editor on the edit of its track
+    /// nearest `at` (else the edit it shows, else the one nearest the
+    /// playhead) and trims that edit by `by` as its buttons do, or closes
+    /// it.
+    pub fn trim_editor_request(&mut self, r: crate::live::TrimEditor) {
+        let crate::live::TrimEditor::Open {
+            at,
+            track,
+            by,
+            side,
+        } = r
+        else {
+            self.trim_editor = None;
+            return;
+        };
+        let (Some(t), Some(p)) = (TrackRef::of(&track), self.shown_project()) else {
+            return;
+        };
+        let nearest = |at: i64| {
+            p.track(&track).and_then(|tr| {
+                tr.clips
+                    .iter()
+                    .map(|c| c.end())
+                    .min_by_key(|&e| ((e - at).abs(), e))
+            })
+        };
+        let shown = self
+            .timeline
+            .edit
+            .filter(|e| self.trim_editor.is_some() && e.track == t);
+        let edit = match (at, shown) {
+            (Some(at), _) => nearest(at),
+            (None, Some(e)) => Some(e.at),
+            (None, None) => nearest(self.snap.timeline.position),
+        };
+        let Some(edit) = edit else { return };
+        if shown.map(|e| e.at) != Some(edit) {
+            self.open_trim_editor(edit, t);
+        }
+        if let Some(by) = by {
+            let side = Side::from(side);
+            self.timeline.edit = Some(EditSel {
+                at: edit,
+                side,
+                track: t,
+            });
+            self.nudge_edit(side, by);
+        }
+    }
+}
+
+impl From<vidcut_core::request::TrimSide> for Side {
+    fn from(s: vidcut_core::request::TrimSide) -> Self {
+        use vidcut_core::request::TrimSide;
+        match s {
+            TrimSide::Out => Self::Out,
+            TrimSide::In => Self::In,
+            TrimSide::Both => Self::Both,
+        }
     }
 }

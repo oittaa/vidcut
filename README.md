@@ -10,7 +10,7 @@ A simple, fully scriptable video cutting tool for Linux, Windows and macOS. Beha
   - a media pool with bins, and a source/timeline viewer (Source Clip, Source Tape, Timeline)
   - a dual timeline: an overview of the whole program plus a detail view
   - Smart Insert, Append, Ripple Overwrite, Overwrite, Place On Top
-  - split, ripple delete, trimming (resize, roll, slip, J/L cuts)
+  - split, ripple delete, trimming (resize, roll, slip, slide, J/L cuts), the Trim Editor and Dynamic Trim
   - Change Clip Speed: slow, fast, reversed or frozen, the pitch kept (spec D48)
   - dissolves: cross dissolves, fades to and from black and audio cross fades (spec D50)
   - several tracks: B-roll that follows the main story on Track 1, music on audio tracks

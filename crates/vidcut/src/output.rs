@@ -708,7 +708,9 @@ fn live(method: &str, r: &Response) -> Option<()> {
             "copied {} clip(s); paste with `vidcut edit paste` (GUI) or --clips",
             v["clips"].as_array().map_or(0, Vec::len)
         ),
-        "gui.quit" | "gui.window" | "gui.show" => println!("ok {method}"),
+        "gui.quit" | "gui.window" | "gui.show" | "gui.trim_editor" | "gui.dynamic_trim" => {
+            println!("ok {method}")
+        }
         "pool.set" => println!(
             "pool: bin {:?}, sorted by {}{}, {} view",
             v["bin"].as_str().unwrap_or_default(),

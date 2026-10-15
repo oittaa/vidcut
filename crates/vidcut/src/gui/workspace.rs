@@ -16,6 +16,8 @@ use vidcut_core::model::Project;
 use vidcut_core::request::ViewerMode;
 use vidcut_core::time::{Rational, format_timecode};
 
+pub use super::viewer::{TwoUp, TwoUpCell, TwoUpMode};
+
 use super::theme::{self, Deco};
 use super::timeline::TimelineView;
 use crate::live::{self, Filmstrip, PlayerId, Snapshot};
@@ -130,6 +132,8 @@ pub struct Workspace {
     /// Exact frames for the Trim Editor and Dynamic Trim (created on first
     /// use).
     pub(super) stills: Option<super::stills::Stills>,
+    /// What the two-up showed in the frame drawn last.
+    pub(super) two_up: Option<TwoUp>,
     /// Quick Export, the Export dialog, jobs and timeline interchange.
     pub(super) export: super::export::ExportUi,
     /// The Mixer panel is open, and its meters' state.
@@ -268,6 +272,7 @@ impl Workspace {
             },
             trim_editor: None,
             stills: None,
+            two_up: None,
             export: Default::default(),
             show_mixer: false,
             mixer: Default::default(),
@@ -347,6 +352,32 @@ impl Workspace {
     /// Timeline Options (for tests and settings).
     pub fn timeline_options_mut(&mut self) -> &mut super::timeline::Options {
         &mut self.timeline.options
+    }
+
+    /// What the viewer's two-up shows, if it does.
+    pub fn two_up(&self) -> Option<&TwoUp> {
+        self.two_up.as_ref()
+    }
+
+    /// The two-up for `player.state`: what it shows, and its frames so far.
+    pub fn two_up_stats(&self) -> crate::live::stats::TwoUpStats {
+        use crate::live::stats::{TwoUpCell, TwoUpShown, TwoUpStats};
+        let counts = self.stills.as_ref().map(|s| s.counts()).unwrap_or_default();
+        TwoUpStats {
+            shown: self.two_up.as_ref().map(|t| TwoUpShown {
+                mode: t.mode.to_string(),
+                cells: t.cells.each_ref().map(|c| {
+                    c.as_ref().map(|c| TwoUpCell {
+                        frame: c.frame,
+                        source_frame: c.source_frame,
+                        exact: c.exact,
+                    })
+                }),
+            }),
+            asked: counts.asked,
+            rendered: counts.rendered,
+            passed_over: counts.passed_over,
+        }
     }
 
     // ---------------------------------------------------------------- helpers

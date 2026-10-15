@@ -76,7 +76,12 @@ const fn key(
 use Group::{App, Clips, Edit, Mark, Play, Trim};
 
 pub const SHORTCUTS: &[Shortcut] = &[
-    key(Play, &["Space"], "Play or stop", None),
+    key(
+        Play,
+        &["Space"],
+        "Play or stop",
+        Some("In Dynamic Trim, it applies the trim and plays from 2 seconds before the cut."),
+    ),
     key(
         Play,
         &["J"],
@@ -102,8 +107,18 @@ pub const SHORTCUTS: &[Shortcut] = &[
     key(Play, &["Right"], "One frame forward", None),
     key(Play, &["Shift", "Left"], "One second back", None),
     key(Play, &["Shift", "Right"], "One second forward", None),
-    key(Play, &["Up"], "Previous cut", None),
-    key(Play, &["Down"], "Next cut", None),
+    key(
+        Play,
+        &["Up"],
+        "Previous cut",
+        Some("In Dynamic Trim, it applies the trim and trims that cut next."),
+    ),
+    key(
+        Play,
+        &["Down"],
+        "Next cut",
+        Some("In Dynamic Trim, it applies the trim and trims that cut next."),
+    ),
     key(Play, &["Shift", "Up"], "Previous marker", None),
     key(Play, &["Shift", "Down"], "Next marker", None),
     key(Play, &["Home"], "Start of the timeline", None),
@@ -285,8 +300,8 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Switch the side of the cut",
         Some(
             "A cut has two sides: the end of the clip going out and the start of the one \
-             coming in. U switches between trimming one side and rolling both, which moves \
-             the cut and keeps the length.",
+             coming in. U goes from rolling both, which moves the cut and keeps the length, \
+             to the clip going out, to the clip coming in. In Dynamic Trim too.",
         ),
     ),
     key(
@@ -303,15 +318,47 @@ pub const SHORTCUTS: &[Shortcut] = &[
     ),
     key(
         Trim,
+        &["Double-click"],
+        "Trim Editor",
+        Some(
+            "Double-click a cut: the viewer shows the last frame going out beside the first \
+             frame coming in. Its -1 and +1 buttons trim the clip going out, the one coming \
+             in, or both, a frame at a time. Esc closes it.",
+        ),
+    ),
+    key(
+        Trim,
         &["W"],
         "Dynamic Trim",
         Some(
-            "Trims while the video plays. Select a cut and press W: the playhead turns yellow, \
-             and J, K and L now move the cut instead of the playhead. You feel the timing in \
-             motion and stop where it looks right. Right-click its button to slip or slide \
-             clips instead. Press W again to finish.",
+            "Trims with J, K and L. Press W on a selected cut, or on the cut nearest the \
+             playhead: the playhead turns yellow, and the viewer shows the frames on both \
+             sides of the cut. J and L now move the cut instead of the playhead, so you see \
+             the timing as it changes and stop where it looks right. With clips selected \
+             instead, it slips or slides them: right-click its button to choose. Press W \
+             again to apply and finish.",
         ),
     ),
+    key(
+        Trim,
+        &["L"],
+        "Dynamic Trim forward",
+        Some("Press L again to trim faster: 2, 4 and 8 times."),
+    ),
+    key(
+        Trim,
+        &["J"],
+        "Dynamic Trim backward",
+        Some("Press J again to trim faster."),
+    ),
+    key(
+        Trim,
+        &["K"],
+        "Dynamic Trim: apply",
+        Some("Stops the trim and applies it, also one that stopped where a clip ran out."),
+    ),
+    key(Trim, &["K", "L"], "Dynamic Trim one frame forward", None),
+    key(Trim, &["K", "J"], "Dynamic Trim one frame backward", None),
     key(
         Trim,
         &["N"],

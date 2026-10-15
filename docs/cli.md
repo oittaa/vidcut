@@ -110,7 +110,7 @@ vidcut history undo                         # works across separate runs
   - `player.audio_device=<id>` (File > Preferences: Player, Sound) plays the preview's sound on that device, an id `vidcut doctor` lists under `audio_outputs`. Empty is the system's default. A device that isn't connected plays on the default: `player state`'s `audio_device` says which device plays (null: the system's default), and `audio_error` why it isn't the one chosen.
 - `vidcut frame render --at 1m --out f.png [--width 640]` renders what the timeline shows at a frame. `--media m1` renders a media frame instead. Use it to look at cuts.
 
-**Automatic tools (spec D29–D32):**
+**Automatic tools (spec D29–D31):**
 - `vidcut edit ripple-delete-silence c1 [c2…] [--min 0.5s --threshold-db -40 --pre-head 0.15s --post-tail 0.15s]` (the defaults shown) cuts silent parts out of clips and closes the gaps, as one undo step. `--dry-run` lists the parts.
 - `vidcut edit detect-scene-cuts c1` splits a clip where its shots change (`--threshold`, scene score 0–100, default 10).
 - `vidcut analyze silence|scenes|black [--media m1 | --clips c1,c2]` and `vidcut analyze loudness [--range a..b]` measure without changing anything. Media positions are source frames, and clip positions are timeline frames.
@@ -139,7 +139,7 @@ vidcut history undo                         # works across separate runs
 
 | Command | What |
 |---|---|
-| `vidcut player state` | viewer mode, both playheads and whether each one's picture is decoded (`ready`; the one not shown is kept ready, so switching shows it at once), the source clip, selection, what decodes (`hwdec`); at the top, the audio device (`audio_device`, `audio_error`), the viewer's late presents and skipped frames while playing (`late`, `skipped`); in `stats.playback`, the frames copied down from GPU memory and up to it since the player started, with their bytes (`copied_down`, `copied_up`), which a switch of decoder doesn't reset |
+| `vidcut player state` | viewer mode, both playheads and whether each one's picture is decoded (`ready`; the one not shown is kept ready, so switching shows it at once), the source clip, selection, what decodes (`hwdec`); at the top, the audio device (`audio_device`, `audio_error`), the viewer's late presents and skipped frames while playing (`late`, `skipped`); what the Trim Editor's or Dynamic Trim's two-up shows, and its frames asked for, rendered and passed over for a newer one since the GUI started (`two_up`); in `stats.playback`, the frames copied down from GPU memory and up to it since the player started, with their bytes (`copied_down`, `copied_up`), which a switch of decoder doesn't reset |
 | `vidcut player seek 10s [--viewer timeline\|source_clip\|source_tape]` | returns once the frame is on screen (`CONFLICT` if someone moved the viewer first); `+10f`/`-2s` are relative |
 | `vidcut player step [-]N`, `player play [--speed -2]`, `player pause`, `player toggle` | negative speeds play backwards, the sound reversed; other speeds keep its pitch |
 | `vidcut viewer set source_clip\|source_tape\|timeline`, `viewer load m1 [--at 5s]` | what the viewer shows |
@@ -154,6 +154,8 @@ vidcut history undo                         # works across separate runs
 | `vidcut player stats [true\|false]` | stats for nerds (deviation X20): a panel over the viewer, also in its right-click menu; without a value, toggles. Prints the facts, which `player state` has as `stats` |
 | `vidcut mixer preview A1 -12` | a track's level heard now, without changing the project (`track set --volume-db` keeps one); `live: false` while the viewer shows the source |
 | `vidcut gui show quick_export\|export\|jobs\|log\|mixer\|preferences\|help` | opens that window for the person at the GUI (`help`: the keyboard shortcuts) |
+| `vidcut gui trim-editor [AT] [--track V2] [--by 1 --side out\|in\|both]`, `gui trim-editor --close` | the Trim Editor, as a double-click opens it, on the edit nearest `AT` (without it, the edit it shows, else the one nearest the playhead). `--by` trims that edit as its ±1 buttons do |
+| `vidcut gui dynamic-trim --on true [--mode slip\|slide] [--side out\|in\|both]`, `--run 2`, `--run 0`, `--step=-1`, `--on false` | Dynamic Trim (W): `--run` trims at that speed as L and J do (`--run=-1` backward), `0` stops and applies as K does, `--step` applies frames as K with L or J does, `--on false` applies and leaves |
 
 - **Looking at the result:** `vidcut player seek 1m && vidcut gui screenshot --out shot.png` shows exactly what `vidcut frame render --at 1m --out f.png` renders. Both are frame-exact.
 - **Exporting alongside the human:** `vidcut export start out.mp4 --background` returns at once. The export shows in the GUI's Jobs window, and `vidcut jobs wait j1` blocks until it's done. An export the human starts from Quick Export is a job too, so `vidcut jobs list` sees it.

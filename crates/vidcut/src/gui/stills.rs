@@ -17,6 +17,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::time::Duration;
 
 use vidcut_av::export::renderer::{Prefetch, StillRenderer};
+use vidcut_av::thumbs::Image;
 
 use eframe::egui;
 use vidcut_core::render::VideoPiece;
@@ -52,12 +53,12 @@ impl Still {
 
 enum State {
     Pending,
-    Ready(egui::TextureHandle),
+    Ready(egui::TextureHandle, Arc<Image>),
     Failed,
 }
 
 enum Outcome {
-    Rendered(Result<Arc<vidcut_av::thumbs::Image>, String>),
+    Rendered(Result<Arc<Image>, String>),
     /// Its cell asked for a newer frame first.
     Skipped,
 }
@@ -93,7 +94,16 @@ impl Shown {
 /// A cell's renderer thread, and the picture it showed last.
 struct Cell {
     jobs: Sender<(Key, Still)>,
-    shown: Option<egui::TextureHandle>,
+    shown: Option<(egui::TextureHandle, Arc<Image>)>,
+}
+
+/// Frames the cells were asked for, rendered, and passed over for a newer
+/// one before they rendered: too slow to show them all.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Counts {
+    pub asked: u64,
+    pub rendered: u64,
+    pub passed_over: u64,
 }
 
 pub struct Stills {
@@ -102,6 +112,7 @@ pub struct Stills {
     finished: Sender<(Key, usize, Outcome)>,
     done: Receiver<(Key, usize, Outcome)>,
     cache: HashMap<Key, State>,
+    counts: Counts,
 }
 
 impl Stills {
@@ -113,7 +124,18 @@ impl Stills {
             finished,
             done,
             cache: HashMap::new(),
+            counts: Counts::default(),
         }
+    }
+
+    pub fn counts(&self) -> Counts {
+        self.counts
+    }
+
+    /// The picture cell `cell` shows: the frame [`get`](Self::get) last
+    /// asked for, or the one before while it renders.
+    pub fn picture(&self, cell: usize) -> Option<Arc<Image>> {
+        self.cells.get(cell)?.shown.as_ref().map(|(_, p)| p.clone())
     }
 
     /// Cell `i`, starting its thread the first time.
@@ -214,6 +236,7 @@ impl Stills {
         while let Ok((key, done_cell, outcome)) = self.done.try_recv() {
             let state = match outcome {
                 Outcome::Rendered(Ok(img)) => {
+                    self.counts.rendered += 1;
                     let texture = ctx.load_texture(
                         format!("still-{}", self.cache.len()),
                         egui::ColorImage::from_rgba_unmultiplied(
@@ -223,12 +246,13 @@ impl Stills {
                         egui::TextureOptions::LINEAR,
                     );
                     // A cell renders frames in the order it asked for them.
-                    self.cell(done_cell).shown = Some(texture.clone());
-                    State::Ready(texture)
+                    self.cell(done_cell).shown = Some((texture.clone(), img.clone()));
+                    State::Ready(texture, img)
                 }
                 Outcome::Rendered(Err(_)) => State::Failed,
                 // Asked for again, it renders then.
                 Outcome::Skipped => {
+                    self.counts.passed_over += 1;
                     self.cache.remove(&key);
                     continue;
                 }
@@ -237,10 +261,10 @@ impl Stills {
         }
         let key = still.key();
         match self.cache.get(&key) {
-            Some(State::Ready(t)) => {
-                let t = t.clone();
+            Some(State::Ready(t, img)) => {
+                let (t, img) = (t.clone(), img.clone());
                 let id = t.id();
-                self.cell(cell).shown = Some(t);
+                self.cell(cell).shown = Some((t, img));
                 return Some(Shown::Exact(id));
             }
             Some(State::Failed) => return None,
@@ -250,13 +274,14 @@ impl Stills {
                     self.cache.retain(|_, s| matches!(s, State::Pending));
                 }
                 self.cache.insert(key.clone(), State::Pending);
+                self.counts.asked += 1;
                 let _ = self.cell(cell).jobs.send((key, still.clone()));
             }
         }
         self.cell(cell)
             .shown
             .as_ref()
-            .map(|t| Shown::Previous(t.id()))
+            .map(|(t, _)| Shown::Previous(t.id()))
     }
 }
 

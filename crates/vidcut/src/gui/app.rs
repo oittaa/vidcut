@@ -21,6 +21,8 @@ enum UiTask {
     CaptureWindow(Capture),
     Window(live::WindowChange),
     Show(GuiPanel),
+    TrimEditor(live::TrimEditor),
+    DynamicTrim(live::DynamicTrim),
     Quit,
 }
 
@@ -33,6 +35,8 @@ pub struct Port {
     /// The session, once started (for `gui.quit` when the window can't
     /// close).
     session: std::sync::OnceLock<live::Handle>,
+    /// What the two-up showed in the frame drawn last.
+    two_up: Mutex<live::stats::TwoUpStats>,
 }
 
 impl Port {
@@ -97,6 +101,23 @@ impl live::Renderer for Port {
     fn show(&self, panel: GuiPanel) {
         self.push(UiTask::Show(panel));
     }
+
+    fn trim_editor(&self, r: live::TrimEditor) {
+        self.push(UiTask::TrimEditor(r));
+    }
+
+    fn dynamic_trim(&self, r: live::DynamicTrim) {
+        self.push(UiTask::DynamicTrim(r));
+    }
+
+    fn two_up(&self) -> Option<live::stats::TwoUpStats> {
+        Some(
+            self.two_up
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone(),
+        )
+    }
 }
 
 pub struct App {
@@ -137,6 +158,7 @@ impl App {
             viewer: viewer.handle(),
             tasks: Mutex::new(Vec::new()),
             session: std::sync::OnceLock::new(),
+            two_up: Mutex::default(),
         });
         let socket = crate::ipc::registry::socket_path(std::process::id());
         let create = project.as_ref().is_some_and(|p| !p.exists());
@@ -251,6 +273,8 @@ impl eframe::App for App {
                     }
                 }
                 UiTask::Show(panel) => self.ws.show_panel(panel, ctx),
+                UiTask::TrimEditor(r) => self.ws.trim_editor_request(r),
+                UiTask::DynamicTrim(r) => self.ws.dynamic_trim_request(r, ctx.input(|i| i.time)),
                 UiTask::Quit => {
                     // `gui.quit` doesn't ask about running exports.
                     self.ws.export.quit_confirmed = true;
@@ -272,6 +296,7 @@ impl eframe::App for App {
         }
         self.window_screenshots(&ctx);
         self.ws.ui(ui);
+        *self.port.two_up.lock().unwrap_or_else(|e| e.into_inner()) = self.ws.two_up_stats();
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {

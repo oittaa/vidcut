@@ -35,7 +35,9 @@ use serde_json::{Value, json};
 use vidcut_core::editor::{media_context, resolve_clip};
 use vidcut_core::model::{Clip, Format};
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
-use vidcut_core::request::{GuiPanel, OneOrMany, ScreenshotTarget, ViewerMode};
+use vidcut_core::request::{
+    DynamicTrimMode, GuiPanel, OneOrMany, ScreenshotTarget, TrimSide, ViewerMode,
+};
 use vidcut_core::time::{Keyword, Rational, TimeContext, TimeSpec, format_timecode};
 use vidcut_core::{Envelope, Error, Project, Request, Response, Result};
 
@@ -82,6 +84,31 @@ pub type Capture = Box<dyn FnOnce(Result<Image>) + Send>;
 /// (`None`: the frame's picture wasn't decoded yet).
 pub type Presented = Box<dyn FnOnce(Option<i64>) + Send>;
 
+/// What `gui.trim_editor` asks of the GUI.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TrimEditor {
+    /// Open it on the edit of `track` nearest `at` (`None`: the edit it
+    /// shows, else the one nearest the playhead), then trim that edit by
+    /// `by` as its buttons do.
+    Open {
+        at: Option<i64>,
+        track: String,
+        by: Option<i64>,
+        side: TrimSide,
+    },
+    Close,
+}
+
+/// What `gui.dynamic_trim` asks of the GUI, as its request says.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DynamicTrim {
+    pub on: Option<bool>,
+    pub side: Option<TrimSide>,
+    pub mode: Option<DynamicTrimMode>,
+    pub run: Option<f64>,
+    pub step: Option<i64>,
+}
+
 /// What the session needs from whoever renders the viewer: the GUI, or a
 /// test harness.
 pub trait Renderer: Send + Sync {
@@ -103,6 +130,14 @@ pub trait Renderer: Send + Sync {
     fn quit(&self);
     /// Open a window for the person at the GUI.
     fn show(&self, _panel: GuiPanel) {}
+    /// Open, trim with or close the Trim Editor.
+    fn trim_editor(&self, _: TrimEditor) {}
+    /// Drive Dynamic Trim.
+    fn dynamic_trim(&self, _: DynamicTrim) {}
+    /// What the two-up shows, for `player.state`.
+    fn two_up(&self) -> Option<stats::TwoUpStats> {
+        None
+    }
     /// What the viewer tells of itself, for stats for nerds.
     fn viewer_stats(&self) -> Option<stats::ViewerStats> {
         None
@@ -2141,6 +2176,71 @@ impl Live {
                 self.renderer.show(panel);
                 Step::Now(Ok(answer(Value::Null)))
             }
+            Request::GuiTrimEditor {
+                at,
+                track,
+                by,
+                side,
+                close,
+            } => {
+                if close {
+                    self.renderer.trim_editor(TrimEditor::Close);
+                    return Step::Now(Ok(answer(Value::Null)));
+                }
+                let open = match self.project.as_ref() {
+                    Some(o) => o,
+                    None => return Step::Now(Err(no_project())),
+                };
+                let p = open.project();
+                let track = track.unwrap_or_else(|| vidcut_core::ops::MAIN.to_string());
+                match p.track(&track) {
+                    Some(t) if !t.clips.is_empty() => {}
+                    Some(_) => {
+                        return Step::Now(Err(Error::usage(format!("{track} has no clips"))));
+                    }
+                    None => return Step::Now(Err(Error::usage(format!("there is no {track}")))),
+                }
+                let at = match at {
+                    Some(t) => match p
+                        .time_context(Some(self.player.position(TIMELINE)))
+                        .resolve(&t)
+                    {
+                        Ok(f) => Some(f),
+                        Err(e) => return Step::Now(Err(e.into())),
+                    },
+                    None => None,
+                };
+                self.renderer.trim_editor(TrimEditor::Open {
+                    at,
+                    track,
+                    by,
+                    side,
+                });
+                Step::Now(Ok(answer(Value::Null)))
+            }
+            Request::GuiDynamicTrim {
+                on,
+                side,
+                mode,
+                run,
+                step,
+            } => {
+                if let Some(r) = run
+                    && !(-8.0..=8.0).contains(&r)
+                {
+                    return Step::Now(Err(Error::usage(
+                        "Dynamic Trim runs at up to 8 times normal speed, either way",
+                    )));
+                }
+                self.renderer.dynamic_trim(DynamicTrim {
+                    on,
+                    side,
+                    mode,
+                    run,
+                    step,
+                });
+                Step::Now(Ok(answer(Value::Null)))
+            }
             Request::JobsList {} => Step::Now(Ok(answer(json!(
                 self.jobs.iter().map(JobInfo::to_json).collect::<Vec<_>>()
             )))),
@@ -2945,6 +3045,9 @@ impl Live {
             // the viewer shows them.
             "stats": self.player.stats(self.renderer.viewer_stats()),
             "stats_shown": self.stats,
+            // The Trim Editor's or Dynamic Trim's two-up (null without a
+            // GUI).
+            "two_up": self.renderer.two_up(),
             "clipboard": self.clipboard.len(),
             "preview": self.preview_error.as_deref().map_or(json!(true), |e| json!(e)),
         })

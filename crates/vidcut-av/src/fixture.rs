@@ -174,6 +174,11 @@ pub enum Picture {
     /// Luma noise, new in every frame: as hard to compress as a picture
     /// gets (for rate control tests).
     Noise,
+    /// The barcode where the reader samples it, and luma noise, new in
+    /// every frame, in the bands it doesn't: the top and bottom eighths and
+    /// the middle quarter. Heavy to decode, as camera footage is, and each
+    /// frame still tells which it is.
+    Busy,
     /// Black but for a highlight of two white pixels side by side (SDR
     /// white in HDR), at [`Picture::highlight`]: between the points of any
     /// grid of every other pixel or fewer (for measured light).
@@ -519,6 +524,7 @@ impl FixtureSpec {
             (true, Picture::Shots { frames }) => format!("shots{frames}-"),
             (true, Picture::Colors) => "colors".to_string(),
             (true, Picture::Noise) => "noise".to_string(),
+            (true, Picture::Busy) => "busy".to_string(),
             (true, Picture::Highlight) => "hl".to_string(),
         };
         let rot = match self.rotation {
@@ -991,6 +997,10 @@ impl VideoTrack {
             }
             VideoCodec::Hevc10 => {
                 opts.set("preset", "ultrafast");
+                if spec.picture == Picture::Busy {
+                    // Keeps the grain, as a camera's high bitrate does.
+                    opts.set("crf", "14");
+                }
                 opts.set(
                     "x265-params",
                     &format!(
@@ -1102,16 +1112,8 @@ impl VideoTrack {
                 let i = y as usize * w + x as usize;
                 self.luma8[i..i + 2].fill(235);
             }
-            Picture::Noise => {
-                // xorshift, seeded by the frame: the same file every time.
-                let mut x = 0x9E37_79B9_7F4A_7C15u64 ^ u64::from(k).wrapping_mul(0x2545_F491);
-                for px in self.luma8.iter_mut() {
-                    x ^= x << 13;
-                    x ^= x >> 7;
-                    x ^= x << 17;
-                    *px = 16 + (x % 220) as u8;
-                }
-            }
+            Picture::Noise => noise(k, &mut self.luma8),
+            Picture::Busy => paint_busy(k, &mut self.luma8, w, h),
             Picture::Colors => {
                 for (i, px) in self.luma8.iter_mut().enumerate() {
                     *px = Picture::COLORS[(i % w) * 4 / w].0;
@@ -1395,5 +1397,51 @@ impl AudioTrack {
             .send_eof()
             .ctx(|| "flushing audio encoder".into())?;
         self.drain(octx)
+    }
+}
+
+/// Luma noise for frame `k`: xorshift, seeded by the frame, so the same
+/// file every time.
+fn noise(k: u32, luma: &mut [u8]) {
+    let mut x = 0x9E37_79B9_7F4A_7C15u64 ^ u64::from(k).wrapping_mul(0x2545_F491);
+    for px in luma.iter_mut() {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        *px = 16 + (x % 220) as u8;
+    }
+}
+
+/// [`Picture::Busy`] for frame `k` in a `width`×`height` luma plane: a
+/// textured picture panning 8 pixels a frame, with faint noise, new in
+/// every frame, on it, about what a camera's 4K60 takes.
+fn paint_busy(k: u32, luma: &mut [u8], width: usize, height: usize) {
+    crate::barcode::paint(k, luma, width, height, width);
+    let mut texture = vec![0; 2 * width];
+    let mut grain = vec![0; width];
+    for (from, to) in [
+        (0, height / 8),
+        (height * 3 / 8, height * 5 / 8),
+        (height * 7 / 8, height),
+    ] {
+        for y in from..to {
+            noise((y as u32) << 12, &mut texture);
+            noise(k ^ (y as u32) << 12, &mut grain);
+            let pan = 8 * k as usize;
+            for (x, px) in luma[y * width..(y + 1) * width].iter_mut().enumerate() {
+                let t = texture[(x + pan) / 4 % texture.len()];
+                *px = t.saturating_add(grain[x] % 16).min(235);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_busy_picture_reads_as_its_frame() {
+        let mut luma = vec![0; 160 * 90];
+        super::paint_busy(7, &mut luma, 160, 90);
+        assert_eq!(crate::barcode::read(&luma, 160, 90, 160), Some(7));
     }
 }
