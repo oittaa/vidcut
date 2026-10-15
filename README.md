@@ -90,7 +90,7 @@ The **Command log** (top right) lists what you, scripts and agents did, in words
 
 **Themes:** Native by default, light or dark as your computer is set, eight more built in, or your own (File > Preferences: Theme, Import…). A theme is a TOML file. [starship.toml](crates/vidcut/themes/starship.toml) explains every key.
 
-**Keys:** [spec §11](docs/cut-page-spec.md#11-keyboard-shortcuts).
+**Keys:** F1 or Help lists them, with a few words on what the less obvious ones do. They're in [spec §11](docs/cut-page-spec.md#11-keyboard-shortcuts) too.
 
 While a GUI has the project open, `vidcut` commands for that project run inside it ([docs/cli.md](docs/cli.md), Live control).
 

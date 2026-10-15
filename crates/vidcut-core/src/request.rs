@@ -752,6 +752,11 @@ pub enum Request {
     /// thumbnail cache off empties it, and a lower limit evicts at once.
     #[serde(rename = "preferences.set")]
     PreferencesSet(crate::preferences::PreferencesPatch),
+    /// The keyboard shortcuts, one action each, with a few plain words
+    /// where the action's name doesn't say what it does (spec §11). Ctrl
+    /// and Alt are Cmd and Option on macOS.
+    #[serde(rename = "keys.list")]
+    KeysList {},
 
     // ---------------------------------------------------------------- history and batches
     #[serde(rename = "history.undo")]
@@ -954,7 +959,8 @@ pub enum Request {
     #[serde(rename = "gui.quit")]
     GuiQuit {},
     /// Open a window for the person at the GUI: `quick_export`, `export`,
-    /// `jobs` or `log`.
+    /// `jobs`, `log`, `mixer`, `preferences` or `help` (the keyboard
+    /// shortcuts).
     #[serde(rename = "gui.show")]
     GuiShow { panel: GuiPanel },
     /// The GUI's export jobs, oldest first: state, progress, ETA, result.
@@ -1078,6 +1084,8 @@ pub enum GuiPanel {
     Mixer,
     /// Application preferences.
     Preferences,
+    /// The keyboard shortcuts.
+    Help,
 }
 
 /// Media Pool sort orders.
@@ -1370,6 +1378,7 @@ impl Request {
                 | Self::DecodersList {}
                 | Self::PreferencesGet {}
                 | Self::PreferencesSet(_)
+                | Self::KeysList {}
         )
     }
 
@@ -1411,6 +1420,7 @@ impl Request {
                     | Self::DecodersList {}
                     | Self::PreferencesGet {}
                     | Self::PreferencesSet(_)
+                    | Self::KeysList {}
                     | Self::EditCopy { .. }
             )
     }

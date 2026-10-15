@@ -214,3 +214,9 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 - **Decorations** (`glow`, `hud`, `steel`) are painted behind each panel's content (`theme::decorated`). A shape is reserved before the content and filled once its size is known. Cut-corner panels paint their own fill, so their frames have none. A theme's `padding` must clear its corners.
 - **Colors:** everything else paints with `theme::colors()`, the theme shown, kept on the GUI thread.
 - **Tests:** `tests/gui_theme.rs` sets a theme file and sees the GUI take it. `tests/gui_theme_layout.rs` checks that the target track button fits beside the overview in every built-in theme. Parsing, light mode and `system` colors are unit tests.
+
+## 13. Keyboard Shortcuts window (deviation X23)
+
+- **The list** is `vidcut_core::shortcuts`: spec §11, one action a row, and plain words for the actions whose names don't say what they do. The window (`gui/help.rs`) and `keys.list` both read it, so a key that changes changes there too.
+- **The window** opens with F1, Help in the top bar or `gui.show help`, and closes with F1, Esc or its ×. It works with or without a project. Its search finds actions and words, and a single character finds keys. Closed, it forgets the search.
+- **Tests:** `tests/gui_help.rs` opens it each way, opens a row's explanation, searches and closes it.

@@ -20,6 +20,7 @@ pub mod preview;
 pub mod render;
 pub mod request;
 pub mod sequence;
+pub mod shortcuts;
 pub mod store;
 pub mod time;
 pub mod validate;
