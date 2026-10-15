@@ -21,8 +21,9 @@ fn decode(reader: &mut VideoReader, frames: usize, down: bool) -> (usize, f64, f
         let Some(f) = reader.next_frame().unwrap() else {
             break;
         };
-        // Interlaced frames of VA-API and Direct3D 11 came down already,
-        // for the CPU to deinterlace.
+        // Interlaced frames of VA-API, Direct3D 11 and VideoToolbox came
+        // down already, for the CPU to deinterlace, and NVDEC's and
+        // Vulkan's where their filter fails its check.
         if down && vidcut_av::hw::on_gpu(&f) {
             vidcut_av::hw::download(&f).unwrap();
         }

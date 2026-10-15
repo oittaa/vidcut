@@ -11,6 +11,7 @@
 
 #[cfg(windows)]
 pub(crate) mod d3d11;
+pub(crate) mod deinterlace;
 pub mod vaapi;
 pub(crate) mod vt;
 pub mod vulkan;
@@ -1140,6 +1141,86 @@ const BANDS: [[u16; 3]; 10] = [
 /// read, a few samples across in luma and chroma.
 fn readable((w, h): (u32, u32)) -> bool {
     w as usize >= 4 * BANDS.len() && h >= 8
+}
+
+/// FFmpeg's description of `layout`, where it is one a test picture comes
+/// in: every sample 8 bits or more, no floats, palette or mosaic.
+fn described(layout: format::Pixel) -> Option<&'static ffi::AVPixFmtDescriptor> {
+    // SAFETY: FFmpeg's static description, or null.
+    let desc = unsafe { ffi::av_pix_fmt_desc_get(layout.into()).as_ref()? };
+    let odd = ffi::AV_PIX_FMT_FLAG_FLOAT
+        | ffi::AV_PIX_FMT_FLAG_PAL
+        | ffi::AV_PIX_FMT_FLAG_BAYER
+        | ffi::AV_PIX_FMT_FLAG_BITSTREAM
+        | ffi::AV_PIX_FMT_FLAG_HWACCEL;
+    let samples = &desc.comp[..usize::from(desc.nb_components)];
+    (desc.flags & odd as u64 == 0 && samples.iter().all(|s| s.depth >= 8)).then_some(desc)
+}
+
+/// The samples across and down of component `c` in a picture of `size`:
+/// chroma's are subsampled.
+fn component_size(desc: &ffi::AVPixFmtDescriptor, c: i32, (w, h): (u32, u32)) -> (usize, usize) {
+    let rgb = desc.flags & ffi::AV_PIX_FMT_FLAG_RGB as u64 != 0;
+    let chroma = !rgb && desc.nb_components >= 3 && matches!(c, 1 | 2);
+    let (sw, sh) = if chroma {
+        (desc.log2_chroma_w, desc.log2_chroma_h)
+    } else {
+        (0, 0)
+    };
+    // As FFmpeg rounds: up.
+    (w.div_ceil(1 << sw) as usize, h.div_ceil(1 << sh) as usize)
+}
+
+/// Component `c`'s level of `color` (8-bit levels: Y, Cb, Cr), in its own
+/// bits. Alpha takes luma's.
+fn level(desc: &ffi::AVPixFmtDescriptor, c: i32, color: [u16; 3]) -> u16 {
+    let column = if desc.nb_components >= 3 && c < 3 {
+        c as usize
+    } else {
+        0
+    };
+    color[column] << (desc.comp[c as usize].depth - 8)
+}
+
+/// A picture of `layout` at `size` to write a test picture into, its planes
+/// cleared: FFmpeg writes each component's bits into what is there.
+fn blank(layout: format::Pixel, (w, h): (u32, u32)) -> frame::Video {
+    let mut picture = frame::Video::new(layout, w, h);
+    for p in 0..picture.planes() {
+        picture.data_mut(p).fill(0);
+    }
+    picture
+}
+
+/// Writes `line`, samples of component `c` in its own bits, into row `y` of
+/// `picture` (in a layout test pictures come in) from its left edge.
+///
+/// # Panics
+/// Where the picture has no such component or row, or the line is wider.
+fn write_line(picture: &mut frame::Video, c: i32, y: usize, line: &[u16]) {
+    let desc = described(picture.format()).expect("a layout test pictures come in");
+    let (w, h) = component_size(desc, c, (picture.width(), picture.height()));
+    assert!(
+        (0..i32::from(desc.nb_components)).contains(&c) && y < h && line.len() <= w,
+        "the picture has no row {y} of {} samples in component {c}",
+        line.len()
+    );
+    // SAFETY: the picture's own planes, `line.len()` samples of component
+    // `c` on row `y`, both there, from a line of that many 16-bit values.
+    unsafe {
+        let raw = picture.as_mut_ptr();
+        ffi::av_write_image_line2(
+            line.as_ptr().cast(),
+            (*raw).data.as_mut_ptr(),
+            (*raw).linesize.as_ptr(),
+            desc,
+            0,
+            y as i32,
+            c,
+            line.len() as i32,
+            2,
+        );
+    }
 }
 
 impl Shrinker {

@@ -1,12 +1,12 @@
 //! The NVIDIA GPU as one pipeline: frames NVDEC decodes stay in GPU memory,
-//! are deinterlaced there by the reader (`bwdif_cuda`), scaled (`scale_cuda`,
-//! then `pad_cuda`) and go to NVENC as they are. Pictures stored
-//! turned (spec D33), in another matrix than BT.709 (BT.601 SD, VP8), in
-//! full range, or in HDR or for HDR output (spec D35) are turned upright and
-//! converted first by libplacebo on Vulkan, on the same GPU. libplacebo
-//! makes every picture of Vulkan's ProRes encoder, which takes them on that
-//! Vulkan device. Proxies (decision D41) and exports use it: the CPU only
-//! reads the file and writes the result.
+//! are deinterlaced there by the reader (`bwdif_cuda`, where it gives
+//! `bwdif`'s frames), scaled (`scale_cuda`, then `pad_cuda`) and go to NVENC
+//! as they are. Pictures stored turned (spec D33), in another matrix than
+//! BT.709 (BT.601 SD, VP8), in full range, or in HDR or for HDR output (spec
+//! D35) are turned upright and converted first by libplacebo on Vulkan, on
+//! the same GPU. libplacebo makes every picture of Vulkan's ProRes encoder,
+//! which takes them on that Vulkan device. Proxies (decision D41) and
+//! exports use it: the CPU only reads the file and writes the result.
 
 pub mod share;
 
