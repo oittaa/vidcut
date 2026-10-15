@@ -408,7 +408,7 @@ impl Workspace {
 
     /// The project as shown: with the trims on their way.
     pub(crate) fn shown_project(&mut self) -> Option<Arc<Project>> {
-        let p = self.snap.project.as_ref()?.project.clone();
+        let p = self.project_shared()?;
         if let Some(s) = &self.timeline.sent_trim {
             if p.rev < s.until && s.since.elapsed() < std::time::Duration::from_secs(1) {
                 return Some(s.project.clone());
@@ -1970,7 +1970,7 @@ impl Workspace {
     /// Edit selection and keyboard trimming (`,`/`.` from the Edit
     /// page nudge the selected edit one frame, Shift for one second).
     pub(crate) fn timeline_keys(&mut self, input: &egui::InputState) {
-        let Some(p) = self.project().cloned() else {
+        let Some(p) = self.project_shared() else {
             return;
         };
         let pressed = |k: Key| input.key_pressed(k);

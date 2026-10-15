@@ -425,7 +425,7 @@ impl Workspace {
 
     /// The Mixer panel: a strip per track and the mix.
     pub(super) fn mixer_panel(&mut self, ui: &mut egui::Ui) {
-        let Some(p) = self.project().cloned() else {
+        let Some(p) = self.project_shared() else {
             return;
         };
         ui.horizontal(|ui| {

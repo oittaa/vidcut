@@ -367,6 +367,12 @@ impl Workspace {
         self.snap.project()
     }
 
+    /// The project, shared rather than copied: a copy each frame costs
+    /// milliseconds on a big one.
+    pub(super) fn project_shared(&self) -> Option<Arc<Project>> {
+        self.snap.project.as_ref().map(|s| s.project.clone())
+    }
+
     pub(super) fn fps(&self) -> Rational {
         self.project()
             .map_or(Rational::new(30, 1).expect("valid"), |p| p.settings.fps)
@@ -1270,7 +1276,7 @@ impl Workspace {
                     .project()
                     .and_then(|p| p.markers.iter().find(|k| k.at == at))
                     .map(|k| k.id.clone());
-                match (existing, self.project().cloned()) {
+                match (existing, self.project_shared()) {
                     (Some(id), Some(p)) => self.open_marker(id, &p),
                     _ => self.send("markers.add", json!({ "at": at })),
                 }
