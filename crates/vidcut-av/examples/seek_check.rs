@@ -57,6 +57,12 @@ fn check(input: &Input) {
                 continue;
             }
         };
+        // The decoder that decodes the file: the GPU's own, or Vulkan's
+        // beside NVDEC.
+        let name = match (gpu, reader.gpu()) {
+            (Some(g), Some(kind)) => g.labeled(kind),
+            _ => name.clone(),
+        };
         let through = read_on(&mut reader, usize::MAX);
         let mut wrong = Vec::new();
         for (k, (pts, _)) in truth.iter().enumerate() {

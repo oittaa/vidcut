@@ -1,5 +1,6 @@
 //! How fast a file's video decodes on the CPU and on each GPU decoder there
-//! is (NVDEC, VA-API, Direct3D 11): frames a second decoding on from the
+//! is (NVDEC, Vulkan beside it for ProRes, VA-API, Direct3D 11,
+//! VideoToolbox): frames a second decoding on from the
 //! start, the frames left on the GPU and again copied down to memory (as the
 //! player takes VA-API's and Direct3D 11's), with the CPU it took; and the
 //! time a seek takes to a frame in the middle of a GOP.
@@ -61,6 +62,12 @@ fn main() {
             }
         };
         let opened = started.elapsed();
+        // The decoder that decodes the file: the GPU's own, or Vulkan's
+        // beside NVDEC.
+        let name = match (gpu, reader.gpu()) {
+            (Some(g), Some(kind)) => name.replacen(g.kind().name(), kind.name(), 1),
+            _ => name.clone(),
+        };
         let (n, secs, cpu) = decode(&mut reader, frames, false);
         let mut line = format!(
             "{name}: opened in {:.0} ms; {n} frames in {secs:.2} s ({:.0} fps, {:.1} cores)",
