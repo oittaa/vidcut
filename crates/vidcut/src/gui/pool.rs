@@ -2,7 +2,11 @@
 //! scrubbing, a list view, search and sort, and the edit-function buttons
 //! below it (spec §2, §7).
 
-use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, RichText, Sense, Stroke, vec2};
+use std::ops::Range;
+
+use eframe::egui::{
+    self, Color32, CornerRadius, Pos2, Rangef, Rect, RichText, Sense, Stroke, Vec2, vec2,
+};
 use serde_json::json;
 use vidcut_core::model::{Media, Project};
 use vidcut_core::request::{PoolSort, ViewerMode};
@@ -12,6 +16,10 @@ use super::timeline::gesture::Gesture;
 use super::workspace::{PoolView, Workspace, dim, fit};
 
 const TILE: egui::Vec2 = egui::Vec2::new(176.0, 99.0);
+/// A tile with its name and time below the picture.
+const TILE_FULL: egui::Vec2 = egui::Vec2::new(TILE.x, TILE.y + 30.0);
+/// Between tiles, across and down.
+const TILE_GAP: f32 = 8.0;
 /// The Filmstrip view's pictures, and the name line above them.
 const STRIP_HEIGHT: f32 = 54.0;
 const HEADER: f32 = 20.0;
@@ -34,6 +42,22 @@ struct Rename {
     name: String,
     focus: bool,
     new: bool,
+}
+
+/// How many tiles fit in a row `width` points wide, one at least.
+fn per_row(width: f32) -> usize {
+    if width < TILE_FULL.x {
+        1
+    } else {
+        ((width - TILE_FULL.x) / (TILE_FULL.x + TILE_GAP)) as usize + 1
+    }
+}
+
+/// Which of `n` rows, the first at `top` and each `step` below the last,
+/// a scroll area shows in `view`: only those are laid out.
+fn shown(view: Rangef, top: f32, step: f32, n: usize) -> Range<usize> {
+    let row = |y: f32| ((y - top) / step).max(0.0);
+    (row(view.min).floor() as usize).min(n)..(row(view.max).ceil() as usize).min(n)
 }
 
 /// The last name in a bin path.
@@ -292,7 +316,7 @@ impl Workspace {
             .max_height(height)
             .min_scrolled_height(height)
             .auto_shrink([false, false])
-            .show(ui, |ui| {
+            .show_viewport(ui, |ui, viewport| {
                 // Right-click on empty space: New Bin, Import.
                 let background =
                     ui.interact(ui.max_rect(), ui.id().with("background"), Sense::click());
@@ -331,25 +355,8 @@ impl Workspace {
                 }
                 let Some(p) = project else { return };
                 match self.pool_view {
-                    PoolView::Thumbnails => {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-                            for b in &folders {
-                                self.folder_tile(ui, p, b);
-                            }
-                            for m in &media {
-                                self.tile(ui, m);
-                            }
-                        });
-                    }
-                    PoolView::Filmstrip => {
-                        for b in &folders {
-                            self.folder_row(ui, p, b);
-                        }
-                        for m in &media {
-                            self.filmstrip(ui, m);
-                        }
-                    }
+                    PoolView::Thumbnails => self.grid(ui, viewport, p, &folders, &media),
+                    PoolView::Filmstrip => self.strips(ui, viewport, p, &folders, &media),
                     PoolView::List => self.list(ui, p, &folders, &media),
                 }
             });
@@ -485,11 +492,68 @@ impl Workspace {
         }
     }
 
+    /// The Grid view: the bins, then the media, in rows of tiles. Only the
+    /// rows in `viewport` are laid out, so a pool of thousands costs what
+    /// a screenful does.
+    fn grid(
+        &mut self,
+        ui: &mut egui::Ui,
+        viewport: Rect,
+        p: &Project,
+        folders: &[String],
+        media: &[&Media],
+    ) {
+        let origin = ui.cursor().min;
+        let per_row = per_row(ui.available_width());
+        let count = folders.len() + media.len();
+        let rows = count.div_ceil(per_row);
+        let step = TILE_FULL + Vec2::splat(TILE_GAP);
+        let top = origin.y - ui.max_rect().top();
+        for row in shown(viewport.y_range(), top, step.y, rows) {
+            for k in row * per_row..((row + 1) * per_row).min(count) {
+                let at = origin + vec2((k % per_row) as f32 * step.x, row as f32 * step.y);
+                let rect = Rect::from_min_size(at, TILE_FULL);
+                match k.checked_sub(folders.len()) {
+                    None => self.folder_tile(ui, rect, p, &folders[k]),
+                    Some(i) => self.tile(ui, rect, media[i]),
+                }
+            }
+        }
+        let size = vec2(per_row.min(count) as f32, rows as f32) * step - Vec2::splat(TILE_GAP);
+        ui.expand_to_include_rect(Rect::from_min_size(origin, size));
+    }
+
+    /// The Filmstrip view: a row for each bin, then a strip for each media.
+    /// Only the strips in `viewport` are laid out.
+    fn strips(
+        &mut self,
+        ui: &mut egui::Ui,
+        viewport: Rect,
+        p: &Project,
+        folders: &[String],
+        media: &[&Media],
+    ) {
+        for b in folders {
+            self.folder_row(ui, p, b);
+        }
+        let origin = ui.cursor().min;
+        let size = vec2(ui.available_width(), STRIP_HEIGHT + HEADER);
+        let gap = ui.spacing().item_spacing.y;
+        let top = origin.y - ui.max_rect().top();
+        for i in shown(viewport.y_range(), top, size.y + gap, media.len()) {
+            let rect = Rect::from_min_size(origin + vec2(0.0, i as f32 * (size.y + gap)), size);
+            self.filmstrip(ui, rect, media[i]);
+        }
+        if !media.is_empty() {
+            let height = media.len() as f32 * (size.y + gap) - gap;
+            ui.expand_to_include_rect(Rect::from_min_size(origin, vec2(size.x, height)));
+        }
+    }
+
     /// A bin in the pool: double-click opens it, dragging it onto another
     /// bin moves it, and clips dropped on it move into it.
-    fn folder_tile(&mut self, ui: &mut egui::Ui, p: &Project, path: &str) {
-        let (rect, resp) =
-            ui.allocate_exact_size(vec2(TILE.x, TILE.y + 30.0), Sense::click_and_drag());
+    fn folder_tile(&mut self, ui: &mut egui::Ui, rect: Rect, p: &Project, path: &str) {
+        let resp = ui.interact(rect, ui.id().with(("bin", path)), Sense::click_and_drag());
         let picture = Rect::from_min_size(rect.min, TILE);
         let painter = ui.painter_at(rect);
         painter.rect_filled(picture, CornerRadius::same(3), theme::TRACK);
@@ -641,9 +705,12 @@ impl Workspace {
     }
 
     /// One thumbnail with hover scrubbing and source marks.
-    fn tile(&mut self, ui: &mut egui::Ui, m: &Media) {
-        let (rect, resp) =
-            ui.allocate_exact_size(vec2(TILE.x, TILE.y + 30.0), Sense::click_and_drag());
+    fn tile(&mut self, ui: &mut egui::Ui, rect: Rect, m: &Media) {
+        let resp = ui.interact(
+            rect,
+            ui.id().with(("media", &m.id)),
+            Sense::click_and_drag(),
+        );
         let picture = Rect::from_min_size(rect.min, TILE);
         let painter = ui.painter_at(rect);
         painter.rect_filled(picture, CornerRadius::same(3), theme::TRACK);
@@ -702,10 +769,13 @@ impl Workspace {
     /// A clip in the Filmstrip view (spec §3): its name over a strip of its
     /// pictures as wide as the pool. Hovering scrubs it, and I/O mark the
     /// clip there.
-    fn filmstrip(&mut self, ui: &mut egui::Ui, m: &Media) {
-        let width = ui.available_width();
-        let (rect, resp) =
-            ui.allocate_exact_size(vec2(width, STRIP_HEIGHT + HEADER), Sense::click_and_drag());
+    fn filmstrip(&mut self, ui: &mut egui::Ui, rect: Rect, m: &Media) {
+        let width = rect.width();
+        let resp = ui.interact(
+            rect,
+            ui.id().with(("media", &m.id)),
+            Sense::click_and_drag(),
+        );
         let header = Rect::from_min_size(rect.min, vec2(width, HEADER - 2.0));
         let film = Rect::from_min_max(Pos2::new(rect.left(), header.bottom() + 2.0), rect.max);
         let painter = ui.painter_at(rect);
@@ -1247,6 +1317,27 @@ mod tests {
     #[test]
     fn each_place_on_a_filmstrip_shows_the_frame_at_its_middle() {
         assert_eq!(strip_frames(4, 100), vec![12, 37, 62, 87]);
+    }
+
+    #[test]
+    fn the_pools_usual_width_fits_two_tiles_a_row() {
+        assert_eq!(per_row(418.0), 2);
+    }
+
+    #[test]
+    fn a_pool_narrower_than_a_tile_still_shows_one_a_row() {
+        assert_eq!(per_row(100.0), 1);
+    }
+
+    #[test]
+    fn only_the_rows_in_view_are_laid_out() {
+        // Rows every 137 points: 300 to 700 shows rows 2 to 5.
+        assert_eq!(shown(Rangef::new(300.0, 700.0), 0.0, 137.0, 100), 2..6);
+    }
+
+    #[test]
+    fn the_rows_laid_out_end_at_the_last() {
+        assert_eq!(shown(Rangef::new(300.0, 700.0), 0.0, 137.0, 4), 2..4);
     }
 
     #[test]
