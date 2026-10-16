@@ -456,6 +456,11 @@ pub(crate) struct Shared {
     /// The decode thread's cancel flag (`crate::cancel`).
     pub(crate) interrupt: Arc<AtomicBool>,
     busy: Mutex<Option<(Busy, Instant)>>,
+    /// A followed player's windows thread, once started, its cancel flag
+    /// and what it is busy with.
+    pub(crate) windows: Mutex<Option<JoinHandle<()>>>,
+    pub(crate) window_interrupt: Arc<AtomicBool>,
+    window_busy: Mutex<Option<(Busy, Instant)>>,
     /// The frame whose picture failed to decode last, until one lands.
     failed: Mutex<Option<i64>>,
     /// The picture of the frame the viewer was at that landed last, by
@@ -597,11 +602,18 @@ impl Shared {
                 Some((Busy::Focus, since)) => sample.is_some() || since.elapsed() >= PATIENCE,
                 None => false,
             };
-            // A window stops once the viewer moves the position forward
-            // itself: it would hold the frames ahead up.
-            let stops = matches!(busy, Some((Busy::Window { .. }, _))) && ctl.motion > 0.0;
-            if stops || (cancel && !self.store.contains(&ctl.plan.id(target))) {
+            let kept = self.store.contains(&ctl.plan.id(target));
+            if cancel && !kept {
                 self.interrupt
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            // A followed player's window stops once the position moves
+            // forward, or away from it to a frame not kept.
+            if let Some((Busy::Window { from, to, plan_gen }, _)) = *lock(&self.window_busy)
+                && (ctl.motion > 0.0
+                    || (!kept && (plan_gen != ctl.plan_gen || !(from..=to).contains(&target))))
+            {
+                self.window_interrupt
                     .store(true, std::sync::atomic::Ordering::Relaxed);
             }
         }
@@ -612,12 +624,20 @@ impl Shared {
     /// The decode thread's view; `None` once the player closes. Clears the
     /// cancel flag: whatever it was raised for is in this view.
     pub(crate) fn snap(&self) -> Option<Snap> {
+        self.snap_clearing(&self.interrupt)
+    }
+
+    /// The windows thread's view, clearing its cancel flag.
+    pub(crate) fn snap_windows(&self) -> Option<Snap> {
+        self.snap_clearing(&self.window_interrupt)
+    }
+
+    fn snap_clearing(&self, interrupt: &AtomicBool) -> Option<Snap> {
         let mut ctl = self.control();
         if ctl.closed {
             return None;
         }
-        self.interrupt
-            .store(false, std::sync::atomic::Ordering::Relaxed);
+        interrupt.store(false, std::sync::atomic::Ordering::Relaxed);
         let now = Instant::now();
         let focus = self.position(&mut ctl, now);
         let heard = match ctl.mode {
@@ -673,7 +693,15 @@ impl Shared {
     }
 
     pub(crate) fn set_busy(&self, busy: Option<Busy>) {
-        let mut b = lock(&self.busy);
+        Self::busy_as(&self.busy, busy);
+    }
+
+    pub(crate) fn set_window_busy(&self, busy: Option<Busy>) {
+        Self::busy_as(&self.window_busy, busy);
+    }
+
+    fn busy_as(b: &Mutex<Option<(Busy, Instant)>>, busy: Option<Busy>) {
+        let mut b = lock(b);
         *b = match (busy, *b) {
             (Some(kind), Some((was, since))) if kind == was => Some((kind, since)),
             (Some(kind), _) => Some((kind, Instant::now())),
@@ -813,6 +841,9 @@ impl Player {
             markers: Markers::default(),
             interrupt: Arc::new(AtomicBool::new(false)),
             busy: Mutex::new(None),
+            windows: Mutex::new(None),
+            window_interrupt: Arc::new(AtomicBool::new(false)),
+            window_busy: Mutex::new(None),
             failed: Mutex::new(None),
             landed: Mutex::new((0, 0, None)),
             cpu: Mutex::new(None),
@@ -1382,12 +1413,15 @@ impl Drop for Player {
             ctl.closed = true;
             ctl.version += 1;
         }
-        self.shared
-            .interrupt
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+        for flag in [&self.shared.interrupt, &self.shared.window_interrupt] {
+            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
         self.shared.changed.notify_all();
         self.shared.store.wake();
         for t in self.threads.drain(..) {
+            let _ = t.join();
+        }
+        if let Some(t) = lock(&self.shared.windows).take() {
             let _ = t.join();
         }
         lock(&self.output).take();
