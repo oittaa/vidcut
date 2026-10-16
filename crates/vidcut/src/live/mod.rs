@@ -1511,6 +1511,8 @@ impl Live {
         }
         let tx = self.tx.clone();
         let _ = crate::threads::spawn(format!("vidcut-{id}"), Work::Job, move || {
+            // Someone waits for an export: its decoders take every core.
+            vidcut_av::threads::set(vidcut_av::threads::Threads::Auto);
             let mut last = Instant::now() - Duration::from_secs(1);
             let mut report = |i: usize, n: usize, out: &Path, p: vidcut_av::export::Progress| {
                 if p.frames != p.total && last.elapsed() < Duration::from_millis(100) {

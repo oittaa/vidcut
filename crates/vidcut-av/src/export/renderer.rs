@@ -49,6 +49,7 @@ impl FrameReader {
     ) -> Result<Image> {
         crate::cancel::stop()?;
         crate::init();
+        let _one = crate::threads::Guard::set(crate::threads::Threads::One);
         let same =
             matches!(&self.frames, Some((f, w, h, _)) if (*f, *w, *h) == (fps, width, height));
         if !same {

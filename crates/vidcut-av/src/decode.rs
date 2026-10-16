@@ -1085,7 +1085,7 @@ impl VideoReader {
             },
             None => ctx.set_threading(codec::threading::Config {
                 kind: codec::threading::Type::Frame,
-                count: 0, // let FFmpeg choose
+                count: crate::threads::current().count(),
             }),
         }
         let decoder = match &on {

@@ -21,6 +21,7 @@ pub fn png(
 ) -> Result<Vec<u8>> {
     crate::cancel::stop()?;
     crate::init();
+    let _one = crate::threads::Guard::set(crate::threads::Threads::One);
     let pixel = format::Pixel::RGB24;
     let mut frames = super::renderer::frames(fps, (width, height), pixel, decoder);
     frames.read_piece(piece);

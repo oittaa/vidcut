@@ -26,6 +26,7 @@ pub mod proxy;
 pub mod route;
 pub(crate) mod stretch;
 pub mod testdata;
+pub mod threads;
 pub mod thumbs;
 pub mod waveform;
 

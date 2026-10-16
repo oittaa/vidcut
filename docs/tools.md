@@ -34,6 +34,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `filmstrip FILE OUTDIR [N]`: pool thumbnails, timed.
 - `tiles FILE [HEIGHT] [gpu]`: timeline tiles, timed at spacings from 0.25 to 30 s; `gpu` decodes on the GPU in use.
 - `seek_check FILE...`: seeks to every frame of barcode fixtures on the CPU and on each GPU decoder, and lists the seeks that show other frames.
+- `player_load PROJECT [FRAMES]` (release build): the player's reading of the timeline, alone and beside four filmstrip workers and a job at the lowest priority, in milliseconds a frame, with the tiles and the job's frames a second.
 - `decode_speed FILE [FRAMES]`: decoding speed, cores and seek times on the CPU and on each GPU decoder.
 - `passes FILE START_S SECONDS CODEC ENCODER MBPS [key=value…]` (release build): exports a stretch at a bitrate (`qN`: constant quality) with `video.*` settings (`passes=2`), and prints the bitrate reached, the time and the luma PSNR.
 
