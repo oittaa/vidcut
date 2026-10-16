@@ -537,6 +537,13 @@ impl VideoFrames {
         }
     }
 
+    /// Lets the maker's stages go, the GPU's converters among them: what
+    /// shrinks the frames a GPU decoded ([`shrink_to`](Self::shrink_to))
+    /// and what keeps them there. They are made anew as frames come.
+    pub(crate) fn clear_stages(&mut self) {
+        self.maker.clear_stages();
+    }
+
     /// Frames decode on `gpu` where it decodes the stream
     /// ([`VideoReader::open_gpu_or_cpu`]): the same frames, with the same
     /// timestamps and colors. Frames as decoded ([`Output::Decoded`]) are

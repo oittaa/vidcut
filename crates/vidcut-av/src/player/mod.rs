@@ -48,7 +48,7 @@ mod scrub;
 mod store;
 mod video;
 
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -446,6 +446,8 @@ pub(crate) struct AudioSnap {
 }
 
 pub(crate) struct Shared {
+    /// Counted from 1 in this process: names the player in debug lines.
+    pub(crate) id: u64,
     control: Mutex<Control>,
     /// Something wanted changed.
     changed: Condvar,
@@ -508,8 +510,16 @@ const LEVELS_SECS: f64 = 0.05;
 /// A seek that has decoded this long holds a newer one up no more.
 const PATIENCE: Duration = Duration::from_secs(1);
 
+/// Players made in this process, for [`Shared::id`].
+static PLAYERS: AtomicU64 = AtomicU64::new(0);
+
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// `d` in milliseconds, for debug lines.
+pub(crate) fn ms(d: Duration) -> f64 {
+    d.as_secs_f64() * 1000.0
 }
 
 impl Shared {
@@ -560,7 +570,6 @@ impl Shared {
             .fetch_max(epoch, std::sync::atomic::Ordering::Relaxed)
             < epoch
         {
-            let ms = |d: Duration| d.as_secs_f64() * 1000.0;
             crate::debug!(
                 "audio",
                 "play request {epoch} heard {:.0} ms after it was made, the output's latency {:.0} ms",
@@ -814,6 +823,7 @@ impl Player {
         let device = source.failure.clone();
         let at = plan.range.0;
         let shared = Arc::new(Shared {
+            id: PLAYERS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1,
             control: Mutex::new(Control {
                 plan: Arc::new(Plan::new(plan)),
                 plan_gen: 0,
@@ -1407,7 +1417,13 @@ fn start_sample(plan: &Plan, t: i64, speed: f64) -> i64 {
 }
 
 impl Drop for Player {
+    /// Ends it: the decode and audio threads are joined, the kept pictures
+    /// freed and the audio output stopped. Under `VIDCUT_DEBUG` it says
+    /// how long each took, and each thread says the same of its reader's
+    /// parts: freeing GPU memory waits its turn on the GPU behind other
+    /// players ending or decoding, and the lines say which part waited.
     fn drop(&mut self) {
+        let started = Instant::now();
         {
             let mut ctl = self.shared.control();
             ctl.closed = true;
@@ -1418,15 +1434,41 @@ impl Drop for Player {
         }
         self.shared.changed.notify_all();
         self.shared.store.wake();
-        for t in self.threads.drain(..) {
+        // The decode thread, then the audio thread.
+        let mut joins = [Duration::ZERO; 2];
+        for (i, t) in self.threads.drain(..).enumerate() {
+            let at = Instant::now();
             let _ = t.join();
+            if let Some(j) = joins.get_mut(i) {
+                *j = at.elapsed();
+            }
         }
         // The windows thread isn't waited for: it may be opening a file,
         // which no cancel flag reaches, or waiting its turn behind another
         // player's window. Its flag is raised; it holds the shared state
         // itself and ends when it next looks.
         drop(lock(&self.shared.windows).take());
+        // The kept pictures go now, not once the windows thread lets the
+        // shared state go.
+        let (pictures, bytes) = self.shared.store.usage();
+        let at = Instant::now();
+        self.shared.store.clear();
+        let freed = at.elapsed();
+        let at = Instant::now();
         lock(&self.output).take();
+        crate::debug!(
+            "player",
+            "player {} ended in {:.0} ms: the decode thread joined in {:.0} ms, the audio thread \
+             in {:.0} ms, {pictures} kept pictures ({} MB) freed in {:.0} ms, the audio output \
+             stopped in {:.0} ms",
+            self.shared.id,
+            ms(started.elapsed()),
+            ms(joins[0]),
+            ms(joins[1]),
+            bytes >> 20,
+            ms(freed),
+            ms(at.elapsed())
+        );
     }
 }
 

@@ -12,7 +12,7 @@ The GUI previews through the player engine ([player.md](player.md)) and draws wi
 
 ## 2. Threads
 
-The threads are in gui.md §1. The viewer has a thread of its own because on GNOME Wayland with NVIDIA's driver, presenting a hidden (minimized) window blocks the thread until the window shows again, with Mailbox and FIFO alike. Submissions to the same device from another thread go on meanwhile, so presents, seeks and screenshots don't depend on the UI. Wayland can't show a minimized window again by request, so `gui.quit` ends the process without the window when the window hasn't closed in 5 s.
+The threads are in gui.md §1. The viewer has a thread of its own because on GNOME Wayland with NVIDIA's driver, presenting a hidden (minimized) window blocks the thread until the window shows again, with Mailbox and FIFO alike. Submissions to the same device from another thread go on meanwhile, so presents, seeks and screenshots don't depend on the UI. Wayland can't show a minimized window again by request, so `gui.quit` ends the process without the window when the window hasn't closed in 5 s. When the window closes, the viewer's player ends on a thread of its own (`vidcut-viewer-close`), as the two-up's do (§9): its decoder and pictures free GPU memory, which waits its turn behind theirs, and the window doesn't wait for that.
 
 ## 3. Decoding: on the GPU when there is one
 

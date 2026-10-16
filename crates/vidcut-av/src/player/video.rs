@@ -24,7 +24,7 @@ use vidcut_core::time::Rational;
 use super::frame::{Over, Picture};
 use super::plan::Plan;
 use super::store::Kind;
-use super::{Busy, Decoder as Decoding, Mode, Shared, Snap, lock};
+use super::{Busy, Decoder as Decoding, Mode, Shared, Snap, lock, ms};
 use crate::error::{Error, Result};
 use crate::export::is_cancelled;
 use crate::export::make::Output;
@@ -216,6 +216,10 @@ pub(crate) fn run(shared: Arc<Shared>) {
             }
         }
     }
+    // Jobs decode again while the reader goes.
+    drop(forward);
+    drop(claim);
+    d.end("decode thread");
 }
 
 /// Starts `shared`'s windows thread, once.
@@ -274,6 +278,41 @@ fn run_windows(shared: Arc<Shared>) {
                 shared.wait_change(snap.version, Duration::from_millis(50));
             }
         }
+    }
+    d.end("windows thread");
+}
+
+impl Decoder {
+    /// Ends it, letting its reader go, and says under `VIDCUT_DEBUG` how
+    /// long each part took: the GPU's converters, which shrink the
+    /// pictures, go first, before the frames they took; then the open
+    /// files with their decoders; then the GPU's decoder. Each frees GPU
+    /// memory, which waits its turn on the GPU behind other players ending
+    /// or decoding. `thread` names the thread it ran on.
+    fn end(mut self, thread: &str) {
+        let started = Instant::now();
+        let mut converters = Duration::ZERO;
+        let mut reader = Duration::ZERO;
+        if let Some((_, mut frames)) = self.frames.take() {
+            let at = Instant::now();
+            frames.clear_stages();
+            converters = at.elapsed();
+            let at = Instant::now();
+            drop(frames);
+            reader = at.elapsed();
+        }
+        let at = Instant::now();
+        drop(self.gpu.take());
+        crate::debug!(
+            "player",
+            "player {}'s {thread} ended; its reader went in {:.0} ms: the converters in {:.0} ms, \
+             the open files and their decoders in {:.0} ms, the GPU's decoder in {:.0} ms",
+            self.shared.id,
+            ms(started.elapsed()),
+            ms(converters),
+            ms(reader),
+            ms(at.elapsed())
+        );
     }
 }
 
