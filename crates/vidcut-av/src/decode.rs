@@ -583,7 +583,8 @@ pub(crate) fn gpu_decoder(id: codec::Id, kind: crate::hw::Kind) -> Option<ffmpeg
 
 /// Picks the frames of the decoder's GPU (its device's kind) when the
 /// decoder offers them, else FFmpeg's choice (decoding on the CPU), which
-/// `open_on` refuses.
+/// `open_on` refuses. VA-API's decoders share their frames
+/// (`hw::vaapi::share_frames`).
 unsafe extern "C" fn gpu_format(
     ctx: *mut ffmpeg::ffi::AVCodecContext,
     formats: *const ffmpeg::ffi::AVPixelFormat,
@@ -595,6 +596,10 @@ unsafe extern "C" fn gpu_format(
         let mut p = formats;
         while *p != ffmpeg::ffi::AVPixelFormat::AV_PIX_FMT_NONE {
             if Some(*p) == wanted {
+                #[cfg(target_os = "linux")]
+                if *p == ffmpeg::ffi::AVPixelFormat::AV_PIX_FMT_VAAPI {
+                    crate::hw::vaapi::share_frames(ctx);
+                }
                 return *p;
             }
             p = p.add(1);

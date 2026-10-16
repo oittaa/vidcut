@@ -193,6 +193,94 @@ unsafe fn intel_va(_: &frame::Video) -> Option<usize> {
     None
 }
 
+/// Gives a VA-API decoder, in its `get_format`, the frames every decoder on
+/// its device shares for its codec, layout and size. A decoder's frames come
+/// from a pool that frees nothing while any of its frames is kept
+/// (gotchas.md): a decoder made anew (proxies switched, a cut to another
+/// file and back, FFmpeg 8.0's H.264 decoder at every seek) would start a
+/// pool beside the one the kept pictures hold. Sharing it, the new decoder
+/// takes the surfaces those pictures gave back. Where the decoder's pool
+/// has a fixed size (VA-API before 1.0) or anything fails, it makes its own.
+///
+/// # Safety
+/// `ctx` is a decoder on a VA-API device, in its `get_format`.
+#[cfg(target_os = "linux")]
+pub(crate) unsafe fn share_frames(ctx: *mut ffi::AVCodecContext) {
+    /// A shared pool: what it is for, and the frames.
+    struct Shared {
+        device: usize,
+        codec: ffi::AVCodecID,
+        layout: ffi::AVPixelFormat,
+        size: (i32, i32),
+        frames: *mut ffi::AVBufferRef,
+    }
+    // SAFETY: frames contexts are reference-counted and may be used on any
+    // thread.
+    unsafe impl Send for Shared {}
+    static SHARED: Mutex<Vec<Shared>> = Mutex::new(Vec::new());
+    // SAFETY: the decoder's own device; the frames FFmpeg describes for it
+    // are ours until set up or let go, and a shared one is given by a
+    // reference of its own.
+    unsafe {
+        let mut frames = ptr::null_mut();
+        let ret = ffi::avcodec_get_hw_frames_parameters(
+            ctx,
+            (*ctx).hw_device_ctx,
+            ffi::AVPixelFormat::AV_PIX_FMT_VAAPI,
+            &mut frames,
+        );
+        if ret < 0 || frames.is_null() {
+            return;
+        }
+        let fc = (*frames).data as *const ffi::AVHWFramesContext;
+        if (*fc).initial_pool_size != 0 {
+            ffi::av_buffer_unref(&mut frames);
+            return;
+        }
+        let device = (*(*ctx).hw_device_ctx).data as usize;
+        let (codec, layout, size) = (
+            (*ctx).codec_id,
+            (*fc).sw_format,
+            ((*fc).width, (*fc).height),
+        );
+        let mut shared = SHARED.lock().unwrap_or_else(|e| e.into_inner());
+        // Pools nothing else holds go: no decoder takes from them, and no
+        // frame of theirs is left.
+        shared.retain_mut(|s| {
+            let unused = ffi::av_buffer_get_ref_count(s.frames) == 1;
+            if unused {
+                ffi::av_buffer_unref(&mut s.frames);
+            }
+            !unused
+        });
+        let found = shared.iter().find(|s| {
+            s.device == device && s.codec == codec && s.layout == layout && s.size == size
+        });
+        let pool = match found {
+            Some(s) => {
+                ffi::av_buffer_unref(&mut frames);
+                s.frames
+            }
+            None => {
+                if ffi::av_hwframe_ctx_init(frames) < 0 {
+                    ffi::av_buffer_unref(&mut frames);
+                    return;
+                }
+                shared.push(Shared {
+                    device,
+                    codec,
+                    layout,
+                    size,
+                    frames,
+                });
+                frames
+            }
+        };
+        ffi::av_buffer_unref(&mut (*ctx).hw_frames_ctx);
+        (*ctx).hw_frames_ctx = ffi::av_buffer_ref(pool);
+    }
+}
+
 /// The filter that shrinks VA-API's frames to `w` by `h`.
 pub(super) fn shrink_spec((w, h): (u32, u32)) -> String {
     format!("scale_vaapi=w={w}:h={h}")
