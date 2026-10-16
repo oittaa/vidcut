@@ -17,7 +17,7 @@ The viewer plays through the player engine on wgpu ([preview.md](preview.md)).
 | **Engine** (player.md §1) | decoding, the mix, the audio device; the viewer's, and one for each cell of the two-up | touch shared state |
 | **IPC** | one listener plus one thread per connection | anything but forward requests and wait for answers |
 | **Workers** (2) | thumbnails and waveforms | touch shared state (they report back by message) |
-| **Tasks** | one thread per export job, frame render, screenshot encode or project-less request | touch the session's state |
+| **Tasks** | one thread per export job, frame render, screenshot encode or project-less request, and one that ends the two-up's players when it closes | touch the session's state |
 
 **How they talk:**
 - **One inbox.** Everyone talks to the session through one `mpsc` inbox (`Handle`).

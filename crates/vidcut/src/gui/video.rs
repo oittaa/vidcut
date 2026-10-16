@@ -250,6 +250,7 @@ impl Viewer {
 
 impl Drop for Viewer {
     fn drop(&mut self) {
+        let started = Instant::now();
         self.shared.change(|s| {
             s.stop = true;
             s.engine = None;
@@ -257,6 +258,11 @@ impl Drop for Viewer {
         if let Some(t) = self.thread.take() {
             let _ = t.join();
         }
+        vidcut_av::debug!(
+            "viewer",
+            "stopped in {:.0} ms",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
     }
 }
 

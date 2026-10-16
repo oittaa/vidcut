@@ -57,9 +57,30 @@ impl Cells {
         self.counts
     }
 
-    /// The two-up closed: the players, their decoders and pictures go.
+    /// The two-up closed: the players, their decoders and pictures go, on
+    /// a thread of their own. A player ends once its decoding stops and
+    /// its reader is torn down, with the GPU's decoder and, for a 10-bit
+    /// source, the converter that shrinks its pictures, which takes its
+    /// turn behind the window the other cell is still decoding. The UI
+    /// doesn't wait for that.
     pub fn close(&mut self) {
-        self.cells = [None, None];
+        if self.cells.iter().all(Option::is_none) {
+            return;
+        }
+        let cells = std::mem::take(&mut self.cells);
+        let _ = crate::threads::spawn(
+            "vidcut-two-up-close",
+            crate::threads::Work::Interactive,
+            move || {
+                let started = Instant::now();
+                drop(cells);
+                vidcut_av::debug!(
+                    "gui",
+                    "the two-up's players ended in {:.0} ms",
+                    started.elapsed().as_secs_f64() * 1000.0
+                );
+            },
+        );
     }
 
     /// Cell `i` shows `piece`, a frame of a clip of `p` alone, at `size`
@@ -128,6 +149,13 @@ impl Cells {
         let shown = c.player.present(Instant::now());
         c.shown |= shown.as_ref().is_some_and(|s| s.exact);
         shown
+    }
+}
+
+impl Drop for Cells {
+    /// Quitting with the two-up open: its players go the same way.
+    fn drop(&mut self) {
+        self.close();
     }
 }
 
