@@ -813,12 +813,14 @@ fn on_gpu(
 /// memory, with the decoder [`on_gpu`] picks. On the CPU, FFmpeg's default,
 /// where there is no `gpu` or `on_gpu` finds none. A stream the GPU won't
 /// take decodes on the CPU all the same: `get_format` falls back to it.
+/// Frames in memory get buffers of their own (`buffers::own`).
 pub(crate) fn open_video(
     mut ctx: codec::context::Context,
     id: codec::Id,
     gpu: Option<&crate::hw::GpuDecoder>,
     open_gop: impl FnOnce() -> bool,
 ) -> Result<ffmpeg::decoder::Video> {
+    crate::buffers::own(&mut ctx);
     let Some((_, device, codec)) = gpu.and_then(|g| on_gpu(id, g, open_gop).ok()) else {
         return ctx.decoder().video().ctx(|| "opening video decoder".into());
     };
@@ -1077,6 +1079,8 @@ impl VideoReader {
         // The packet time base lets the decoder keep timestamps right when it
         // drops samples or frames (FFmpeg's CLI sets it too).
         unsafe { (*ctx.as_mut_ptr()).pkt_timebase = time_base.into() };
+        // A kept picture holds its own memory, not its decoder's pool.
+        crate::buffers::own(&mut ctx);
         let codec_id = stream.parameters().id();
         // The GPU's decoder for the stream: its own, or Vulkan's for ProRes
         // beside NVDEC. FFmpeg's default decoder may decode on the CPU only
