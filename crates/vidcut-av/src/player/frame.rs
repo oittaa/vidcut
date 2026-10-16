@@ -279,8 +279,17 @@ impl Picture {
 }
 
 /// The bytes a frame's pixels take, in memory or in GPU memory (its
-/// frames' layout).
+/// frames' layout). A CUDA frame's buffer is all of its memory, rows padded
+/// to CUDA's alignment.
 fn bytes_of(frame: &frame::Video) -> usize {
+    // SAFETY: reads the frame's own buffer reference.
+    let held = unsafe {
+        let buf = (*frame.as_ptr()).buf[0];
+        if buf.is_null() { 0 } else { (*buf).size }
+    };
+    if frame.format() == format::Pixel::CUDA && held > 0 {
+        return held;
+    }
     let (w, h) = (frame.width() as i32, frame.height() as i32);
     // SAFETY: a size computation on plain numbers.
     let n = unsafe {
@@ -311,8 +320,19 @@ pub struct Shown {
 
 #[cfg(test)]
 mod tests {
-    use super::Layout;
-    use crate::ffmpeg::format::Pixel;
+    use super::{Layout, Picture};
+    use crate::ffmpeg::{ffi, format::Pixel, frame};
+
+    #[test]
+    fn a_picture_in_cuda_memory_takes_what_its_buffer_holds() {
+        let mut f = frame::Video::empty();
+        f.set_format(Pixel::CUDA);
+        f.set_width(960);
+        f.set_height(540);
+        // SAFETY: a fresh frame given a buffer of its own.
+        unsafe { (*f.as_mut_ptr()).buf[0] = ffi::av_buffer_alloc(1_658_880) };
+        assert_eq!(Picture::new(f, 0, None, None).bytes(), 1_658_880);
+    }
 
     #[test]
     fn yuv420p10le_pictures_are_10_bit_planar_4_2_0() {

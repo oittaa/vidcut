@@ -8,7 +8,9 @@
 //! adapter, a software one too. Skips without one. ProRes pictures decoded
 //! on Vulkan and kept in GPU memory are drawn from there, their planes
 //! imported, as closely, and drawn again from the same import; those tests
-//! skip where the GPU in use doesn't decode ProRes on Vulkan.
+//! skip where the GPU in use doesn't decode ProRes on Vulkan. AV1 and H.264
+//! pictures decoded on NVDEC and kept in memory of their own are drawn
+//! from there as closely; those skip without NVDEC.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -40,10 +42,10 @@ fn gpu() -> Option<Gpu> {
     Some(Gpu::new(&device, &queue))
 }
 
-/// A device of its own on the first Vulkan adapter that shows Vulkan's
+/// A device of its own on the first Vulkan adapter that shows `kind`'s
 /// pictures from GPU memory: one on the GPU that decodes them. Otherwise
 /// what each adapter said.
-fn vulkan_gpu() -> Result<Gpu, String> {
+fn gpu_showing(kind: Kind) -> Result<Gpu, String> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::VULKAN,
         ..wgpu::InstanceDescriptor::new_without_display_handle()
@@ -60,7 +62,7 @@ fn vulkan_gpu() -> Result<Gpu, String> {
             Ok((device, queue)) => {
                 let gpu = Gpu::new(&device, &queue);
                 let shows = gpu.gpu_pictures();
-                if shows.contains(&Kind::Vulkan) {
+                if shows.contains(&kind) {
                     return Ok(gpu);
                 }
                 why.push(format!("{name} shows {shows:?}"));
@@ -89,7 +91,12 @@ fn picture_with(codec: VideoCodec, rotation: u16, config: Config) -> Arc<Picture
 
 /// Ten frames of `content` in `codec`, stored turned against `rotation`.
 fn clip(codec: VideoCodec, rotation: u16, content: Content) -> VideoPiece {
-    let spec = FixtureSpec::new(codec, Container::Mov, W, H, (30, 1), 10)
+    clip_in(Container::Mov, codec, rotation, content)
+}
+
+/// [`clip`] in `container`.
+fn clip_in(container: Container, codec: VideoCodec, rotation: u16, content: Content) -> VideoPiece {
+    let spec = FixtureSpec::new(codec, container, W, H, (30, 1), 10)
         .rotation(rotation)
         .picture(content);
     let path = fixture::ensure(&spec).unwrap();
@@ -259,7 +266,7 @@ fn kept_on_vulkan(codec: VideoCodec, rotation: u16) -> Option<(Gpu, Arc<Picture>
         eprintln!("skipping: the GPU in use doesn't decode ProRes on Vulkan");
         return None;
     }
-    let gpu = vulkan_gpu()
+    let gpu = gpu_showing(Kind::Vulkan)
         .unwrap_or_else(|why| panic!("no display device on the GPU that decodes on Vulkan: {why}"));
     let config = Config {
         audio_scrubbing: false,
@@ -279,13 +286,19 @@ fn draws_from_vulkan_as_converted(codec: VideoCodec, rotation: u16, layout: Layo
     let Some((gpu, picture)) = kept_on_vulkan(codec, rotation) else {
         return;
     };
+    draws_from_gpu_as_converted(&gpu, &picture, layout);
+}
+
+/// `picture`, in `layout` and kept in GPU memory, drawn from there: within
+/// a level of the export's conversion wherever it is flat.
+fn draws_from_gpu_as_converted(gpu: &Gpu, picture: &Arc<Picture>, layout: Layout) {
     assert_eq!(picture.layout(), layout);
     // The same picture, come down and converted by the export's filters.
     let theirs = picture.to_rgba(W, H).unwrap();
     let mut screen = Screen::new();
-    screen.draw(&gpu, Some(&picture), W, H);
+    screen.draw(gpu, Some(picture), W, H);
     assert!(screen.shared(), "the picture came down to be drawn");
-    let ours = screen.read(&gpu).unwrap();
+    let ours = screen.read(gpu).unwrap();
     let (flat, most) = flat_diff(&ours.rgba, &theirs.rgba, W as usize);
     assert!(flat > (W * H / 2) as usize, "only {flat} pixels are flat");
     assert!(most <= 1, "{most} levels apart where the picture is flat");
@@ -334,4 +347,52 @@ fn a_prores_picture_kept_on_vulkan_and_drawn_again_is_imported_once() {
     let (flat, most) = flat_diff(&ours.rgba, &theirs.rgba, W as usize);
     assert!(flat > (W * H / 2) as usize, "only {flat} pixels are flat");
     assert!(most <= 1, "{most} levels apart where the picture is flat");
+}
+
+/// A display device on NVIDIA's GPU in use, and the player's picture of
+/// `codec` (`id`) in Matroska, decoded on NVDEC and kept in GPU memory for
+/// it; `None` where the GPU in use doesn't decode `id` on NVDEC.
+fn kept_on_nvdec(codec: VideoCodec, id: Id) -> Option<(Gpu, Arc<Picture>)> {
+    let on_nvdec = GpuDecoder::best()
+        .is_some_and(|g| g.kind_for(id) == Some(Kind::Nvdec) && g.why_not(id, || false).is_none());
+    if !on_nvdec {
+        eprintln!("skipping: the GPU in use doesn't decode {id:?} on NVDEC");
+        return None;
+    }
+    let gpu = gpu_showing(Kind::Nvdec)
+        .unwrap_or_else(|why| panic!("no display device on the GPU NVDEC decodes on: {why}"));
+    let config = Config {
+        audio_scrubbing: false,
+        hardware: true,
+        gpu_pictures: gpu.gpu_pictures(),
+        ..Config::default()
+    };
+    let picture = played_with(clip_in(Container::Mkv, codec, 0, Content::Colors), config);
+    assert_eq!(picture.gpu(), Some(Kind::Nvdec));
+    Some((gpu, picture))
+}
+
+#[test]
+fn an_av1_picture_kept_on_nvdec_draws_from_gpu_memory_as_the_export_converts_it() {
+    let Some((gpu, picture)) = kept_on_nvdec(VideoCodec::Av1, Id::AV1) else {
+        return;
+    };
+    draws_from_gpu_as_converted(&gpu, &picture, Layout::P010);
+}
+
+#[test]
+fn an_h264_picture_kept_on_nvdec_draws_from_gpu_memory_as_the_export_converts_it() {
+    let Some((gpu, picture)) = kept_on_nvdec(VideoCodec::H264, Id::H264) else {
+        return;
+    };
+    draws_from_gpu_as_converted(&gpu, &picture, Layout::Nv12);
+}
+
+#[test]
+fn an_av1_picture_kept_on_nvdec_takes_its_rows_padded_to_cudas_alignment() {
+    let Some((_, picture)) = kept_on_nvdec(VideoCodec::Av1, Id::AV1) else {
+        return;
+    };
+    // 640 samples of 2 bytes in rows of 1536, 360 rows and 180 of chroma.
+    assert_eq!(picture.bytes(), 1536 * 540);
 }
