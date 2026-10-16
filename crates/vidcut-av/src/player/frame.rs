@@ -306,7 +306,7 @@ impl Picture {
 
 /// The bytes a frame's pixels take, in memory or in GPU memory (its
 /// frames' layout). A CUDA frame's buffer is all of its memory, rows padded
-/// to CUDA's alignment.
+/// to CUDA's alignment; a VA-API surface takes what its DRM export says.
 fn bytes_of(frame: &frame::Video) -> usize {
     // SAFETY: reads the frame's own buffer reference.
     let held = unsafe {
@@ -315,6 +315,9 @@ fn bytes_of(frame: &frame::Video) -> usize {
     };
     if frame.format() == format::Pixel::CUDA && held > 0 {
         return held;
+    }
+    if let Some(n) = crate::hw::surface_bytes(frame) {
+        return n;
     }
     let (w, h) = (frame.width() as i32, frame.height() as i32);
     // SAFETY: a size computation on plain numbers.

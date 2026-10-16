@@ -303,6 +303,7 @@ impl Decoder {
         }
         let at = Instant::now();
         drop(self.gpu.take());
+        crate::buffers::give_back();
         crate::debug!(
             "player",
             "player {}'s {thread} ended; its reader went in {:.0} ms: the converters in {:.0} ms, \
@@ -714,8 +715,10 @@ impl Decoder {
                     p
                 };
                 self.shared.store.put(id, Arc::new(p));
-                // Its reader is gone: so is the pool it alone decoded into.
+                // Its reader is gone: so is the pool it alone decoded into,
+                // and the memory of its decoder.
                 crate::hw::let_unused_frames_go();
+                crate::buffers::give_back();
                 self.shared.prepared();
             }
             // Something new is wanted: the reader played with didn't move.
@@ -780,7 +783,9 @@ impl Decoder {
         let key = (p.fps, p.width, p.height, self.hardware);
         if self.frames.as_ref().is_none_or(|(k, _)| *k != key) {
             let frames = self.new_reader(p);
-            self.frames = Some((key, frames));
+            if self.frames.replace((key, frames)).is_some() {
+                crate::buffers::give_back();
+            }
             self.next = None;
         }
         &mut self.frames.as_mut().expect("just made").1

@@ -139,3 +139,14 @@ fn a_prepared_picture_holds_no_pool_the_decoders_share() {
         };
     assert!(own, "the prepared picture is a shared pool's surface");
 }
+
+#[test]
+fn a_picture_kept_on_va_api_counts_at_least_its_samples() {
+    if vaapi().is_none() {
+        return;
+    }
+    let kept = picture(vec![Kind::Vaapi]);
+    // P010: two bytes a sample, chroma half of luma.
+    let samples = (W * H * 3) as usize;
+    assert!(kept.bytes() > samples, "{} bytes", kept.bytes());
+}

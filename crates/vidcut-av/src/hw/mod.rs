@@ -843,6 +843,17 @@ pub(crate) fn pooled(frame: &frame::Video) -> Option<usize> {
     None
 }
 
+/// The bytes `frame`'s surface takes where its driver says (VA-API's, by
+/// its DRM export: [`vaapi::surface_bytes`]); `None` otherwise.
+pub(crate) fn surface_bytes(frame: &frame::Video) -> Option<usize> {
+    #[cfg(target_os = "linux")]
+    if Kind::of_frame(frame) == Some(Kind::Vaapi) {
+        return vaapi::surface_bytes(frame);
+    }
+    let _ = frame;
+    None
+}
+
 /// Lets the pools of frames go that decoders shared and nothing uses any
 /// more (VA-API's, [`vaapi::share_frames`]).
 pub(crate) fn let_unused_frames_go() {

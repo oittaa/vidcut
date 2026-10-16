@@ -11,12 +11,18 @@
 //! for each frame costs a fifth more CPU to decode, its pages faulted in,
 //! so the planes let go last, up to [`SPARE`] bytes, are kept for the next
 //! frames of their size, whichever decoder asks.
+//!
+//! Frames that come from pools all the same (libdav1d's, which takes no
+//! buffers but its own; a filter graph's, the deinterlacer's and the
+//! relayout's) are copied into such buffers when the player keeps them
+//! ([`owned`]).
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::ffi::{c_int, c_void};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use crate::ffmpeg::{codec, ffi};
+use crate::error::{Error, Result};
+use crate::ffmpeg::{self, codec, ffi, frame};
 
 /// Bytes of planes let go kept for the next frames: a decoder lets its
 /// frames go about as fast as it takes new ones. A 4K 10-bit frame's
@@ -80,6 +86,124 @@ unsafe extern "C" fn get_buffer(
         }
         (*frame).extended_data = (*frame).data.as_mut_ptr();
         0
+    }
+}
+
+/// `f`, a frame in memory, in buffers that are freed with it: itself, by
+/// reference, where they are ([`plane`]'s, or plain memory of FFmpeg's,
+/// which keeps no pool behind them), else a copy into buffers of its own,
+/// with its properties. A buffer from a pool (a decoder's of its own, a
+/// filter graph's) would keep that pool whole.
+pub(crate) fn owned(f: &frame::Video) -> Result<frame::Video> {
+    if freed_with(f) {
+        return crate::export::video::frame_ref(f);
+    }
+    let failed = |what: &str, ret: c_int| Error::Ffmpeg {
+        context: what.into(),
+        source: ffmpeg::Error::from(ret),
+    };
+    let mut out = frame::Video::empty();
+    // SAFETY: a fresh frame given planes of its own, laid out as
+    // `av_frame_get_buffer` lays them out (rows 64-byte aligned), then the
+    // picture and properties of `f`, a frame in memory of that layout.
+    unsafe {
+        let (src, dst) = (f.as_ptr(), out.as_mut_ptr());
+        let format = std::mem::transmute::<c_int, ffi::AVPixelFormat>((*src).format);
+        let mut linesize = [0; 4];
+        let ret = ffi::av_image_fill_linesizes(linesize.as_mut_ptr(), format, (*src).width);
+        if ret < 0 {
+            return Err(failed("laying out a kept picture", ret));
+        }
+        let linesize = linesize.map(|l| (l + 63) & !63);
+        let rows = linesize.map(|l| l as isize);
+        let mut size = [0usize; 4];
+        let ret =
+            ffi::av_image_fill_plane_sizes(size.as_mut_ptr(), format, (*src).height, rows.as_ptr());
+        if ret < 0 {
+            return Err(failed("laying out a kept picture", ret));
+        }
+        (*dst).format = (*src).format;
+        (*dst).width = (*src).width;
+        (*dst).height = (*src).height;
+        for i in 0..size.iter().take_while(|&&s| s > 0).count() {
+            let buf = plane(size[i] + 64);
+            if buf.is_null() {
+                return Err(Error::Invalid("no memory for a kept picture".into()));
+            }
+            (*dst).buf[i] = buf;
+            (*dst).data[i] = (*buf).data;
+            (*dst).linesize[i] = linesize[i];
+        }
+        (*dst).extended_data = (*dst).data.as_mut_ptr();
+        let ret = ffi::av_frame_copy(dst, src);
+        if ret < 0 {
+            return Err(failed("copying a kept picture", ret));
+        }
+        let ret = ffi::av_frame_copy_props(dst, src);
+        if ret < 0 {
+            return Err(failed("copying a kept picture's properties", ret));
+        }
+    }
+    Ok(out)
+}
+
+/// Gives what glibc keeps of the memory freed back to the system, on a
+/// thread of its own, at most once a second. A closed decoder's own pools
+/// (libdav1d's) and its threads' memory come from glibc's heaps, which
+/// keep what is freed (gotchas.md): two AV1 clips swapped under a 500 MB
+/// budget grew 300 MB in 8 swaps without it, 110 MB with it.
+pub(crate) fn give_back() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    trim::ask();
+}
+
+/// glibc's `malloc_trim`, on a thread of its own.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+mod trim {
+    use std::sync::{Condvar, Mutex, OnceLock, PoisonError};
+    use std::time::Duration;
+
+    /// A trim is asked for.
+    static ASKED: Mutex<bool> = Mutex::new(false);
+    static WAKE: Condvar = Condvar::new();
+    static THREAD: OnceLock<()> = OnceLock::new();
+
+    pub(super) fn ask() {
+        THREAD.get_or_init(|| {
+            let _ = std::thread::Builder::new()
+                .name("vidcut-give-back".into())
+                .spawn(run);
+        });
+        *ASKED.lock().unwrap_or_else(PoisonError::into_inner) = true;
+        WAKE.notify_one();
+    }
+
+    fn run() {
+        loop {
+            let mut asked = ASKED.lock().unwrap_or_else(PoisonError::into_inner);
+            while !*asked {
+                asked = WAKE.wait(asked).unwrap_or_else(PoisonError::into_inner);
+            }
+            *asked = false;
+            drop(asked);
+            // SAFETY: glibc's call, which takes its own locks.
+            unsafe { libc::malloc_trim(0) };
+            std::thread::sleep(Duration::from_secs(1));
+        }
+    }
+}
+
+/// Whether every buffer of `f` is freed with its last frame: [`plane`]'s,
+/// or plain memory of FFmpeg's (`av_buffer_alloc`, with no opaque). A
+/// pool's buffer has the pool's entry for its opaque.
+fn freed_with(f: &frame::Video) -> bool {
+    // SAFETY: reads the frame's own buffer references.
+    unsafe {
+        let raw = &*f.as_ptr();
+        let mut spares = spares();
+        raw.buf.iter().filter(|b| !b.is_null()).all(|&b| {
+            ffi::av_buffer_get_opaque(b).is_null() || spares.live().contains(&((*b).data as usize))
+        }) && raw.extended_buf.is_null()
     }
 }
 
@@ -148,6 +272,8 @@ fn plane(size: usize) -> *mut ffi::AVBufferRef {
     if buf.is_null() {
         // SAFETY: memory nothing refers to.
         unsafe { free(data, size) };
+    } else {
+        spares().live().insert(data as usize);
     }
     buf
 }
@@ -156,7 +282,11 @@ fn plane(size: usize) -> *mut ffi::AVBufferRef {
 /// the oldest spares past [`SPARE`] bytes are freed.
 unsafe extern "C" fn let_go(size: *mut c_void, data: *mut u8) {
     let size = size as usize;
-    let gone = spares().give(size, data as usize, SPARE);
+    let gone = {
+        let mut spares = spares();
+        spares.live().remove(&(data as usize));
+        spares.give(size, data as usize, SPARE)
+    };
     for (size, p) in gone {
         // SAFETY: a plane's memory, its buffer gone and no spare any more.
         unsafe { free(p as *mut u8, size) };
@@ -216,6 +346,8 @@ unsafe fn free(p: *mut u8, size: usize) {
 struct Spares {
     bytes: usize,
     planes: VecDeque<(usize, usize)>,
+    /// The planes given out and not let go, by address.
+    live: Option<HashSet<usize>>,
 }
 
 impl Spares {
@@ -223,7 +355,12 @@ impl Spares {
         Self {
             bytes: 0,
             planes: VecDeque::new(),
+            live: None,
         }
+    }
+
+    fn live(&mut self) -> &mut HashSet<usize> {
+        self.live.get_or_insert_with(HashSet::new)
     }
 
     /// The spare of `size` bytes let go last.
@@ -257,8 +394,72 @@ impl Spares {
 
 #[cfg(test)]
 mod tests {
-    use super::{Spares, layout};
-    use crate::ffmpeg::{codec, decoder, ffi};
+    use super::{Spares, layout, owned};
+    use crate::ffmpeg::{codec, decoder, ffi, format::Pixel, frame};
+
+    /// A 4×4 8-bit 4:2:0 frame whose planes are in one buffer of a pool,
+    /// luma 1 to 16 row by row, chroma 128.
+    fn pooled() -> frame::Video {
+        let mut f = frame::Video::empty();
+        // SAFETY: a fresh frame given one buffer of a pool of its size; the
+        // pool goes once that buffer does.
+        unsafe {
+            let raw = f.as_mut_ptr();
+            let pix = ffi::AVPixelFormat::AV_PIX_FMT_YUV420P;
+            let size = ffi::av_image_get_buffer_size(pix, 4, 4, 1) as usize;
+            let mut pool = ffi::av_buffer_pool_init(size, None);
+            let buf = ffi::av_buffer_pool_get(pool);
+            ffi::av_buffer_pool_uninit(&mut pool);
+            (*raw).format = pix as i32;
+            (*raw).width = 4;
+            (*raw).height = 4;
+            (*raw).buf[0] = buf;
+            ffi::av_image_fill_arrays(
+                (*raw).data.as_mut_ptr(),
+                (*raw).linesize.as_mut_ptr(),
+                (*buf).data,
+                pix,
+                4,
+                4,
+                1,
+            );
+            let data = std::slice::from_raw_parts_mut((*buf).data, size);
+            for (i, b) in data.iter_mut().enumerate() {
+                *b = if i < 16 { i as u8 + 1 } else { 128 };
+            }
+        }
+        f
+    }
+
+    #[test]
+    fn a_frame_in_plain_memory_is_kept_as_it_is() {
+        let f = frame::Video::new(Pixel::YUV420P, 4, 4);
+        assert_eq!(owned(&f).unwrap().data(0).as_ptr(), f.data(0).as_ptr());
+    }
+
+    #[test]
+    fn a_frame_from_a_pool_is_copied_into_memory_of_its_own() {
+        let f = pooled();
+        let kept = owned(&f).unwrap();
+        assert_ne!(kept.data(0).as_ptr(), f.data(0).as_ptr());
+    }
+
+    #[test]
+    fn a_frame_copied_from_a_pool_has_its_samples() {
+        let kept = owned(&pooled()).unwrap();
+        let rows: Vec<&[u8]> = (0..4)
+            .map(|y| &kept.data(0)[y * kept.stride(0)..][..4])
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                [1, 2, 3, 4],
+                [5, 6, 7, 8],
+                [9, 10, 11, 12],
+                [13, 14, 15, 16]
+            ]
+        );
+    }
 
     #[test]
     fn h264s_1080p_planes_take_the_rows_it_reads_past_the_picture() {
