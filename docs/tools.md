@@ -21,7 +21,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 **Other FFmpeg versions:** `scripts/ffmpeg-check.sh [TARGET…]` (Docker) runs `scripts/check.sh full` against the checkout in a container per target, and prints a summary.
 - Targets: `lts` (Ubuntu 26.04's FFmpeg 8.0), `release` (the newest release) and `master` (FFmpeg's git master, allowed to fail). Default: `lts release`.
 - `--fast` runs `scripts/check.sh`; `-- CMD` runs any command, `-- bash` a shell.
-- The containers have no GPU, display or audio device.
+- The containers have no GPU, display or audio device. `scripts/ffmpeg-host.sh [release|master] [-- CMD]` runs a command on this computer, with its GPU, against the target's FFmpeg: copied out of the image to `target/ffmpeg/TARGET/prefix` (once for each image), with `FFMPEG_DIR`, `LD_LIBRARY_PATH` and a cargo target directory of its own (`target/ffmpeg/TARGET/cargo`) set, and a linker wrapper that searches FFmpeg's directory first (alsa-sys puts the system's ahead of it). Its FFmpeg runs with this computer's libraries, Ubuntu 26.04's as in the image. `scripts/ffmpeg-host.sh -- cargo test -p vidcut-av --test vulkan_prores` tests ProRes decoded on Vulkan, which Ubuntu's FFmpeg 8.0 doesn't decode.
 - FFmpeg's build (`scripts/ffmpeg/build-ffmpeg.sh`) is a cached image layer. `VIDCUT_FFMPEG_MASTER=COMMIT` pins master.
 - Each target's build takes about 5.5 GB, the images about 3 GB. To free them: `docker volume rm $(docker volume ls -q -f name=vidcut-ffmpeg)` and `docker image rm vidcut-ffmpeg:lts vidcut-ffmpeg:release vidcut-ffmpeg:master`.
 - A newer release: put its version and tarball sha256 in `scripts/ffmpeg/release.env` (the steps are there).

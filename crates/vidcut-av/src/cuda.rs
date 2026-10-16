@@ -42,7 +42,6 @@ use crate::hw::{Device, GpuGraph};
 use crate::route::Place;
 
 /// A CUDA device: NVDEC, the CUDA filters and NVENC share it.
-#[derive(Clone)]
 pub struct CudaDevice {
     cuda: Device,
     /// The process's one device ([`CudaDevice::open`]): this one, or the
@@ -54,6 +53,12 @@ pub struct CudaDevice {
     /// takes a quarter of a second), then shared by every clone, until a
     /// converter on it fails ([`CudaDevice::forget_vulkan`]).
     vulkan: Arc<Mutex<Option<std::result::Result<Device, String>>>>,
+}
+
+impl Clone for CudaDevice {
+    fn clone(&self) -> Self {
+        self.try_clone().unwrap_or_else(|e| panic!("{e}"))
+    }
 }
 
 impl CudaDevice {
@@ -74,7 +79,10 @@ impl CudaDevice {
             Mutex::new(Vec::new());
         let mut shared = SHARED.lock().unwrap_or_else(|e| e.into_inner());
         if let Some((_, opened)) = shared.iter().find(|(i, _)| *i == index) {
-            return opened.clone().map_err(Error::Invalid);
+            return match opened {
+                Ok(device) => device.try_clone(),
+                Err(e) => Err(Error::Invalid(e.clone())),
+            };
         }
         crate::init();
         let mut device = ptr::null_mut();
@@ -89,18 +97,31 @@ impl CudaDevice {
                 0,
             )
         };
-        let opened = if ret < 0 || device.is_null() {
-            Err(format!("no CUDA device: {}", ffmpeg::Error::from(ret)))
-        } else {
-            let cuda = Device(device);
-            Ok(Self {
-                base: cuda.clone(),
-                cuda,
-                vulkan: Arc::default(),
-            })
+        if ret < 0 || device.is_null() {
+            let err = format!("no CUDA device: {}", ffmpeg::Error::from(ret));
+            shared.push((index, Err(err.clone())));
+            return Err(Error::Invalid(err));
+        }
+        // SAFETY: the device FFmpeg just made, ours alone.
+        let cuda = unsafe { Device::from_raw(device) };
+        let base = cuda.clone()?;
+        let opened = Self {
+            base,
+            cuda,
+            vulkan: Arc::default(),
         };
-        shared.push((index, opened.clone()));
-        opened.map_err(Error::Invalid)
+        let stored = opened.try_clone()?;
+        shared.push((index, Ok(stored)));
+        Ok(opened)
+    }
+
+    /// Another of this device, its own references to the same contexts.
+    pub(crate) fn try_clone(&self) -> Result<Self> {
+        Ok(Self {
+            cuda: self.cuda.clone()?,
+            base: self.base.clone()?,
+            vulkan: Arc::clone(&self.vulkan),
+        })
     }
 
     /// A device of its own on the same context: its work goes on a stream of
@@ -114,7 +135,8 @@ impl CudaDevice {
         let stream = share::Stream::new(self)?;
         // SAFETY: a CUDA device context FFmpeg allocates, given this
         // device's context (which the base keeps) and the new stream, which
-        // its `free` destroys once FFmpeg is done with it.
+        // its `free` destroys once FFmpeg is done with it. The new device
+        // owns it.
         unsafe {
             let mut device = ffi::av_hwdevice_ctx_alloc(ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA);
             if device.is_null() {
@@ -137,22 +159,22 @@ impl CudaDevice {
                 });
             }
             Ok(Self {
-                cuda: Device(device),
-                base: self.base.clone(),
-                vulkan: self.vulkan.clone(),
+                cuda: Device::from_raw(device),
+                base: self.base.clone()?,
+                vulkan: Arc::clone(&self.vulkan),
             })
         }
     }
 
     pub(crate) fn as_ptr(&self) -> *mut ffi::AVBufferRef {
-        self.cuda.0
+        self.cuda.as_ptr()
     }
 
     /// The Vulkan device, made if there is none: libplacebo's, and Vulkan's
     /// encoders' on this GPU.
     pub(crate) fn vulkan(&self) -> Result<Device> {
         let mut slot = self.vulkan.lock().unwrap_or_else(|e| e.into_inner());
-        slot.get_or_insert_with(|| {
+        match slot.get_or_insert_with(|| {
             let _one = crate::hw::making_vulkan();
             let mut vulkan = ptr::null_mut();
             // SAFETY: FFmpeg makes the device from this live one.
@@ -160,7 +182,7 @@ impl CudaDevice {
                 ffi::av_hwdevice_ctx_create_derived(
                     &mut vulkan,
                     ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VULKAN,
-                    self.base.0,
+                    self.base.as_ptr(),
                     0,
                 )
             };
@@ -170,11 +192,13 @@ impl CudaDevice {
                     ffmpeg::Error::from(ret)
                 ))
             } else {
-                Ok(Device(vulkan))
+                // SAFETY: the device FFmpeg just derived, ours alone.
+                Ok(unsafe { Device::from_raw(vulkan) })
             }
-        })
-        .clone()
-        .map_err(Error::Invalid)
+        }) {
+            Ok(device) => device.clone(),
+            Err(e) => Err(Error::Invalid(e.clone())),
+        }
     }
 
     /// Drops `used`, the Vulkan device a converter failed on, if it is
@@ -184,12 +208,23 @@ impl CudaDevice {
         let mut slot = self.vulkan.lock().unwrap_or_else(|e| e.into_inner());
         // SAFETY: references to device contexts, the same device when they
         // point to the same data.
-        let same = |d: &Device| unsafe { (*d.0).data == (*used.0).data };
+        let same = |d: &Device| unsafe { (*d.as_ptr()).data == (*used.as_ptr()).data };
         if let Some(Ok(d)) = slot.as_ref()
             && same(d)
         {
             *slot = None;
         }
+    }
+}
+
+/// `width`×`height` as FFmpeg stores a frame's sides. A side past `i32`
+/// would become negative, so it is rejected.
+pub(crate) fn frame_sides(width: u32, height: u32) -> Result<(i32, i32)> {
+    match (i32::try_from(width), i32::try_from(height)) {
+        (Ok(width), Ok(height)) => Ok((width, height)),
+        _ => Err(Error::Invalid(format!(
+            "{width}×{height} doesn't fit a frame"
+        ))),
     }
 }
 
@@ -209,17 +244,18 @@ impl HwFrames {
         width: u32,
         height: u32,
     ) -> Result<Self> {
+        let (width, height) = frame_sides(width, height)?;
         // SAFETY: a frames context FFmpeg allocates on this live device.
         unsafe {
-            let mut frames = ffi::av_hwframe_ctx_alloc(device.0);
+            let mut frames = ffi::av_hwframe_ctx_alloc(device.as_ptr());
             if frames.is_null() {
                 return Err(Error::Invalid("no memory for GPU frames".into()));
             }
             let fc = &mut *((*frames).data as *mut ffi::AVHWFramesContext);
             fc.format = hw;
             fc.sw_format = sw;
-            fc.width = width as i32;
-            fc.height = height as i32;
+            fc.width = width;
+            fc.height = height;
             let ret = ffi::av_hwframe_ctx_init(frames);
             if ret < 0 {
                 ffi::av_buffer_unref(&mut frames);
@@ -703,7 +739,7 @@ fn placebo_options(
 /// aspect `sar`. It needs to know where they are before it starts, so it is
 /// made by hand.
 pub(crate) fn add_source(
-    graph: &mut filter::Graph,
+    graph: &mut GpuGraph,
     name: &std::ffi::CStr,
     pixel: ffi::AVPixelFormat,
     (width, height): (u32, u32),
@@ -711,6 +747,7 @@ pub(crate) fn add_source(
     frames: *mut ffi::AVBufferRef,
     color: Option<(ffi::AVColorSpace, ffi::AVColorRange)>,
 ) -> Result<()> {
+    let (width, height) = frame_sides(width, height)?;
     // SAFETY: a buffer source FFmpeg allocates on this graph. `frames` is
     // the frames context of a frame or a pool the caller holds.
     unsafe {
@@ -727,8 +764,8 @@ pub(crate) fn add_source(
             return Err(Error::Invalid("no memory for the GPU source".into()));
         }
         (*par).format = pixel as i32;
-        (*par).width = width as i32;
-        (*par).height = height as i32;
+        (*par).width = width;
+        (*par).height = height;
         (*par).time_base = time_base;
         (*par).sample_aspect_ratio = ffi::AVRational {
             num: sar.numerator().max(1),
@@ -758,7 +795,7 @@ pub(crate) fn add_source(
 }
 
 /// The buffer sink `out` of `graph`.
-fn add_sink(graph: &mut filter::Graph) -> Result<()> {
+fn add_sink(graph: &mut GpuGraph) -> Result<()> {
     let sink = filter::find("buffersink").ok_or_else(|| Error::Invalid("no buffersink".into()))?;
     graph
         .add(&sink, "out", "")
@@ -767,7 +804,7 @@ fn add_sink(graph: &mut filter::Graph) -> Result<()> {
 }
 
 /// The next frame out of `graph`'s sink, if one is ready.
-fn take(graph: &mut filter::Graph, what: &str) -> Result<Option<(frame::Video, ffmpeg::Rational)>> {
+fn take(graph: &mut GpuGraph, what: &str) -> Result<Option<(frame::Video, ffmpeg::Rational)>> {
     let mut sink = graph.get("out").expect("sink");
     let mut out = frame::Video::empty();
     match sink.sink().frame(&mut out) {
@@ -932,7 +969,7 @@ impl CudaPictures {
             None,
         )?;
         add_sink(&mut graph)?;
-        crate::parts::parse_filters(&mut graph, &spec)?;
+        graph.parse_filters(&spec)?;
         graph.validate().ctx(|| format!("configuring {spec}"))?;
         Ok(Self {
             takes,
@@ -1045,7 +1082,8 @@ impl Placebo {
             if own.is_null() {
                 return Err(Error::Invalid("no memory for a Vulkan device".into()));
             }
-            Device(own)
+            // SAFETY: the reference just taken, ours alone.
+            unsafe { Device::from_raw(own) }
         } else {
             device.vulkan()?
         };
@@ -1137,7 +1175,7 @@ impl Placebo {
             }
             // libplacebo needs the Vulkan device before it starts; given
             // none, FFmpeg would convert on the CPU in front of it.
-            (*ctx).hw_device_ctx = ffi::av_buffer_ref(vulkan.0);
+            (*ctx).hw_device_ctx = ffi::av_buffer_ref(vulkan.as_ptr());
             if (*ctx).hw_device_ctx.is_null() {
                 return Err(Error::Invalid("no memory for libplacebo's device".into()));
             }
@@ -1203,7 +1241,7 @@ impl Placebo {
                 num: out_sar.0,
                 den: out_sar.1,
             },
-            device: device.clone(),
+            device: device.try_clone()?,
             vulkan,
             held: VecDeque::new(),
         })
@@ -1430,7 +1468,7 @@ fn tag(f: &mut frame::Video, tags: Tags) {
 mod tests {
     use super::{Layout, can_fit, filters, placebo_options};
     use crate::color::{GpuColor, gpu_color};
-    use crate::ffmpeg::{format::Pixel, frame};
+    use crate::ffmpeg::{self, ffi, format::Pixel, frame};
     use crate::route::Ops;
 
     /// Untagged SD: BT.601, into SDR.
@@ -1539,6 +1577,64 @@ mod tests {
         let options = placebo_options((1920, 1080), 180, "nv12", Layout::Upright, &sd());
         let get = |k| option(&options, k);
         assert_eq!((get("w"), get("h")), (Some("1920"), Some("1080")));
+    }
+
+    #[test]
+    fn a_frame_wider_than_i32_doesnt_fit() {
+        let err = super::frame_sides(2_147_483_648, 1080).unwrap_err();
+        assert_eq!(err.to_string(), "2147483648×1080 doesn't fit a frame");
+    }
+
+    #[test]
+    fn a_frame_taller_than_i32_doesnt_fit() {
+        let err = super::frame_sides(1920, 2_147_483_648).unwrap_err();
+        assert_eq!(err.to_string(), "1920×2147483648 doesn't fit a frame");
+    }
+
+    #[test]
+    fn the_largest_i32_frame_fits() {
+        assert_eq!(
+            super::frame_sides(2_147_483_647, 2_147_483_647).unwrap(),
+            (2_147_483_647, 2_147_483_647)
+        );
+    }
+
+    #[test]
+    fn gpu_frames_reject_a_side_past_i32() {
+        // SAFETY: null, and only dropped: the side is rejected before the
+        // device is read.
+        let none = unsafe { super::Device::from_raw(std::ptr::null_mut()) };
+        let err = match super::HwFrames::new(
+            &none,
+            ffi::AVPixelFormat::AV_PIX_FMT_NONE,
+            ffi::AVPixelFormat::AV_PIX_FMT_NV12,
+            2_147_483_648,
+            1,
+        ) {
+            Err(err) => err,
+            Ok(_) => panic!("a side past i32 was accepted"),
+        };
+        assert_eq!(err.to_string(), "2147483648×1 doesn't fit a frame");
+    }
+
+    #[test]
+    fn a_gpu_source_rejects_a_side_past_i32() {
+        crate::init();
+        let mut graph = super::GpuGraph::new();
+        let err = super::add_source(
+            &mut graph,
+            c"in",
+            ffi::AVPixelFormat::AV_PIX_FMT_CUDA,
+            (1920, 2_147_483_648),
+            (
+                ffi::AVRational { num: 1, den: 1 },
+                ffmpeg::Rational::new(1, 1),
+            ),
+            std::ptr::null_mut(),
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(err.to_string(), "1920×2147483648 doesn't fit a frame");
     }
 
     #[test]

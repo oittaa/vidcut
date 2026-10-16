@@ -459,7 +459,9 @@ impl Maker {
             came_down_at = came_down.as_ref().map(|f| (f.width(), f.height()));
             let frame = came_down.as_ref().unwrap_or(frame);
             if let Output::Decoded { .. } = self.output {
-                break stage.relayout.run(frame, self.reading)?;
+                // Kept by the player: in memory freed with the picture,
+                // not a pool's (a filter graph's, libdav1d's).
+                break crate::buffers::owned(&stage.relayout.run(frame, self.reading)?)?;
             }
             let rebuild = stage
                 .normalizer

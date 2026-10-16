@@ -12,10 +12,13 @@
 #[cfg(windows)]
 pub(crate) mod d3d11;
 pub(crate) mod deinterlace;
+mod gpu_graph;
 pub mod vaapi;
 pub(crate) mod vt;
 pub mod vulkan;
 mod vulkan_scale;
+
+pub(crate) use gpu_graph::GpuGraph;
 
 use std::ptr;
 use std::sync::{Arc, Mutex};
@@ -143,18 +146,14 @@ impl Kind {
 const ON_VULKAN: [ffmpeg::codec::Id; 1] = [ffmpeg::codec::Id::PRORES];
 
 /// A reference to one of FFmpeg's hardware device contexts.
-pub(crate) struct Device(pub(crate) *mut ffi::AVBufferRef);
+pub(crate) struct Device(*mut ffi::AVBufferRef);
 
-// SAFETY: a reference to a hardware device context may be used, and
-// dropped, on any thread.
+// SAFETY: FFmpeg counts these references. This owner may move to any
+// thread and be dropped there, and a shared reference may be cloned and
+// used on any thread. `as_ptr` lends the same pointer while this device
+// keeps the reference.
 unsafe impl Send for Device {}
 unsafe impl Sync for Device {}
-
-impl Clone for Device {
-    fn clone(&self) -> Self {
-        Self(unsafe { ffi::av_buffer_ref(self.0) })
-    }
-}
 
 impl Drop for Device {
     fn drop(&mut self) {
@@ -163,6 +162,30 @@ impl Drop for Device {
 }
 
 impl Device {
+    /// The device that owns `ptr`, and releases it when dropped.
+    ///
+    /// # Safety
+    /// `ptr` is a reference to a hardware device context that the caller
+    /// hands over, which nothing else releases; or null, for a device that
+    /// is only dropped.
+    pub(crate) unsafe fn from_raw(ptr: *mut ffi::AVBufferRef) -> Self {
+        Self(ptr)
+    }
+
+    /// This device's buffer reference, valid while the device is.
+    pub(crate) fn as_ptr(&self) -> *mut ffi::AVBufferRef {
+        self.0
+    }
+
+    /// Another reference to this device.
+    pub(crate) fn clone(&self) -> Result<Self> {
+        let buf = unsafe { ffi::av_buffer_ref(self.0) };
+        if buf.is_null() {
+            return Err(Error::Invalid("no memory for a GPU device".into()));
+        }
+        Ok(Self(buf))
+    }
+
     /// FFmpeg's device of `kind` on `on`: a render node, an adapter's
     /// index; the default one when empty.
     fn open(kind: Kind, on: &str) -> Result<Self> {
@@ -406,15 +429,19 @@ pub struct GpuDecoder {
 
 impl GpuDecoder {
     /// NVDEC, on `cuda`.
-    pub fn nvdec(cuda: CudaDevice) -> Self {
-        Self {
+    pub fn nvdec(cuda: CudaDevice) -> Result<Self> {
+        let device = unsafe { ffi::av_buffer_ref(cuda.as_ptr()) };
+        if device.is_null() {
+            return Err(Error::Invalid("no memory for a GPU device".into()));
+        }
+        Ok(Self {
             kind: Kind::Nvdec,
-            device: Arc::new(Device(unsafe { ffi::av_buffer_ref(cuda.as_ptr()) })),
+            device: Arc::new(Device(device)),
             on: String::new(),
             cuda: Some(cuda),
             vendor: Some(crate::gpus::NVIDIA),
             gpu: None,
-        }
+        })
     }
 
     /// `kind` on `on` (a render node for VA-API, an adapter's index for
@@ -422,7 +449,7 @@ impl GpuDecoder {
     /// Vulkan comes with NVDEC, never alone.
     pub fn open(kind: Kind, on: &str) -> Result<Self> {
         if kind == Kind::Nvdec {
-            return CudaDevice::on(on.parse().unwrap_or(0)).map(Self::nvdec);
+            return CudaDevice::on(on.parse().unwrap_or(0)).and_then(Self::nvdec);
         }
         if kind == Kind::Vulkan {
             return Err(Error::Invalid(
@@ -456,7 +483,7 @@ impl GpuDecoder {
     /// user's work in turn, and a Direct3D 11 device's context is one lock.
     pub fn own(&self) -> Result<Self> {
         match &self.cuda {
-            Some(cuda) => Ok(Self::nvdec(cuda.with_own_stream()?)),
+            Some(cuda) => Self::nvdec(cuda.with_own_stream()?),
             None => Self::open(self.kind, &self.on),
         }
     }
@@ -496,7 +523,7 @@ impl GpuDecoder {
     /// a converter failed isn't used again.
     pub(crate) fn device_for(&self, kind: Kind) -> Result<Device> {
         match (kind, &self.cuda) {
-            _ if kind == self.kind => Ok(Device::clone(&self.device)),
+            _ if kind == self.kind => self.device.as_ref().clone(),
             (Kind::Vulkan, Some(cuda)) => cuda.vulkan(),
             _ => Err(Error::Invalid(format!(
                 "{self} has no {} device",
@@ -588,7 +615,7 @@ impl GpuDecoder {
             ..d
         };
         if let Some(index) = gpu.cuda {
-            return CudaDevice::on(index).map(Self::nvdec).map(named);
+            return CudaDevice::on(index).and_then(Self::nvdec).map(named);
         }
         #[cfg(windows)]
         if let Some(adapter) = gpu.adapter {
@@ -803,6 +830,43 @@ fn decodes_all(gpu: &GpuDecoder, path: &std::path::Path) -> Result<()> {
     }
 }
 
+/// The pool whose surface `frame` is, where its memory is a pool's that
+/// other frames share: VA-API's decoders' ([`vaapi::share_frames`]), and
+/// each Vulkan decoder's own, from which its frames are the images
+/// themselves. Letting such a frame go frees nothing until all of that
+/// pool's frames go. `None` where letting a frame go frees its memory.
+pub(crate) fn pooled(frame: &frame::Video) -> Option<usize> {
+    match Kind::of_frame(frame) {
+        #[cfg(target_os = "linux")]
+        Some(Kind::Vaapi) => vaapi::pooled(frame),
+        // SAFETY: reads the frame's own field, a live buffer reference.
+        Some(Kind::Vulkan) => unsafe {
+            let frames = (*frame.as_ptr()).hw_frames_ctx;
+            (!frames.is_null()).then(|| (*frames).data as usize)
+        },
+        _ => None,
+    }
+}
+
+/// The bytes `frame`'s surface takes where its driver says: VA-API's by its
+/// DRM export ([`vaapi::surface_bytes`]), Vulkan's by FFmpeg's allocation
+/// of its images ([`vulkan::image_bytes`]); `None` otherwise.
+pub(crate) fn surface_bytes(frame: &frame::Video) -> Option<usize> {
+    match Kind::of_frame(frame) {
+        #[cfg(target_os = "linux")]
+        Some(Kind::Vaapi) => vaapi::surface_bytes(frame),
+        Some(Kind::Vulkan) => vulkan::image_bytes(frame),
+        _ => None,
+    }
+}
+
+/// Lets the pools of frames go that decoders shared and nothing uses any
+/// more (VA-API's, [`vaapi::share_frames`]).
+pub(crate) fn let_unused_frames_go() {
+    #[cfg(target_os = "linux")]
+    vaapi::let_unused_frames_go();
+}
+
 /// Whether `frame` is in GPU memory: a hardware frame of any kind.
 pub fn on_gpu(frame: &frame::Video) -> bool {
     // SAFETY: reads the frame's own field.
@@ -874,13 +938,18 @@ fn props(dst: &mut frame::Video, src: &frame::Video) -> Result<()> {
 /// surfaces: Direct3D 11's are copied into textures of their own that
 /// another device can open (Windows). NVDEC's, which FFmpeg copies out of
 /// its surfaces into the decoder's pool, are copied on into memory of
-/// their own, so kept pictures don't hold that pool (`cuda::keep`).
-/// VA-API's, VideoToolbox's and Vulkan's pools grow as they need. Vulkan's
-/// are kept once decoded ([`vulkan::keep`]).
+/// their own, so kept pictures don't hold that pool (`cuda::keep`), and
+/// VA-API's into surfaces of their own by the driver's `vaCopy` where it
+/// has one ([`vaapi::Keeper`]). VideoToolbox's and Vulkan's pools grow as
+/// they need. Vulkan's are kept once decoded ([`vulkan::keep`]).
 pub(crate) enum Keeper {
     /// `None` where CUDA has no stream-ordered allocator: kept as FFmpeg
     /// gives them.
     Nvdec(Option<crate::cuda::keep::Keeper>),
+    /// `None` where the driver has no `vaCopy`: kept as they come, from
+    /// the pool the decoders share.
+    #[cfg(target_os = "linux")]
+    Vaapi(Option<vaapi::Keeper>),
     #[cfg(windows)]
     D3d11(d3d11::Keeper),
 }
@@ -921,7 +990,32 @@ impl Keeper {
                 props(&mut kept, f)?;
                 Ok(kept)
             }
-            Some(Kind::Vaapi | Kind::VideoToolbox) => crate::export::video::frame_ref(f),
+            #[cfg(target_os = "linux")]
+            Some(Kind::Vaapi) => {
+                let_unused_frames_go();
+                let made = matches!(keeper, Some(Keeper::Vaapi(k))
+                    if k.as_ref().is_none_or(|k| k.is_for(f)));
+                if !made {
+                    *keeper = Some(Keeper::Vaapi(vaapi::Keeper::new(f)?));
+                }
+                let Some(Keeper::Vaapi(Some(k))) = keeper else {
+                    return crate::export::video::frame_ref(f);
+                };
+                match k.copy(f)? {
+                    Some(mut kept) => {
+                        props(&mut kept, f)?;
+                        Ok(kept)
+                    }
+                    None => {
+                        *keeper = Some(Keeper::Vaapi(None));
+                        crate::export::video::frame_ref(f)
+                    }
+                }
+            }
+            // VA-API is Linux's.
+            #[cfg(not(target_os = "linux"))]
+            Some(Kind::Vaapi) => crate::export::video::frame_ref(f),
+            Some(Kind::VideoToolbox) => crate::export::video::frame_ref(f),
             Some(Kind::Vulkan) => vulkan::keep(f),
             #[cfg(windows)]
             Some(Kind::D3d11va) => {
@@ -963,74 +1057,6 @@ fn same_picture(to: &mut frame::Video, from: &frame::Video) {
     }
 }
 
-/// A filter graph of frames in GPU memory, freed downstream first: each
-/// filter once the filters it feeds are gone. FFmpeg's Vulkan filters keep
-/// the frames they last read until they are freed (vulkan.c
-/// `ff_vk_exec_add_dep_frame`), but not their frames context, which the
-/// source or the filter before them holds. FFmpeg frees a graph's filters
-/// in the order they were made, sources first. Such a frame would then go
-/// back to a freed frames context, and FFmpeg would free it through that
-/// freed memory (`vulkan_frame_free`): a crash where another thread has
-/// taken the memory (gotchas.md).
-pub(crate) struct GpuGraph(ffmpeg::filter::Graph);
-
-impl GpuGraph {
-    /// A stream's graph ([`crate::pool::graph`]).
-    pub(crate) fn new() -> Self {
-        Self::for_reading(crate::decode::Reading::Stream)
-    }
-
-    pub(crate) fn for_reading(reading: crate::decode::Reading) -> Self {
-        Self(crate::pool::graph(reading))
-    }
-
-    /// The filter to free next: one that feeds no other, the last made of
-    /// those.
-    fn downstream_end(&mut self) -> Option<*mut ffi::AVFilterContext> {
-        // SAFETY: the graph's own list of filters, and each filter's list
-        // of its outputs, where FFmpeg clears the link to a freed filter.
-        unsafe {
-            let graph = self.0.as_mut_ptr();
-            let count = (*graph).nb_filters as usize;
-            if count == 0 {
-                return None;
-            }
-            let filters = std::slice::from_raw_parts((*graph).filters, count);
-            let feeds_none = |f: &*mut ffi::AVFilterContext| {
-                let outputs = (**f).nb_outputs as usize;
-                outputs == 0
-                    || std::slice::from_raw_parts((**f).outputs, outputs)
-                        .iter()
-                        .all(|o| o.is_null())
-            };
-            Some(filters[filters.iter().rposition(feeds_none).unwrap_or(count - 1)])
-        }
-    }
-}
-
-impl std::ops::Deref for GpuGraph {
-    type Target = ffmpeg::filter::Graph;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl std::ops::DerefMut for GpuGraph {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-impl Drop for GpuGraph {
-    fn drop(&mut self) {
-        while let Some(filter) = self.downstream_end() {
-            // SAFETY: a filter of the graph, which leaves the graph's list.
-            unsafe { ffi::avfilter_free(filter) };
-        }
-    }
-}
-
 /// A filter graph of GPU frames like `f` (format `pixel`, from `frames`)
 /// through `spec`.
 fn gpu_graph(
@@ -1056,7 +1082,7 @@ fn gpu_graph(
     graph
         .add(&sink, "out", "")
         .map_err(failed("creating a GPU filter's sink".into()))?;
-    crate::parts::parse_filters(&mut graph, spec)?;
+    graph.parse_filters(spec)?;
     graph
         .validate()
         .map_err(failed(format!("configuring {spec}")))?;
@@ -1064,11 +1090,7 @@ fn gpu_graph(
 }
 
 /// `f` through `graph`'s one filter: the frame it gives.
-fn run_graph(
-    graph: &mut ffmpeg::filter::Graph,
-    f: &frame::Video,
-    doing: &str,
-) -> Result<frame::Video> {
+fn run_graph(graph: &mut GpuGraph, f: &frame::Video, doing: &str) -> Result<frame::Video> {
     // The source takes the frame it is given: another reference.
     let mut given = frame::Video::empty();
     // SAFETY: both frames are valid.
@@ -1516,26 +1538,6 @@ mod tests {
             into: false,
         };
         assert!(can_fit(Place::Vulkan, &ops));
-    }
-
-    #[test]
-    fn a_gpu_graph_frees_its_filters_from_the_sink_back() {
-        let mut graph = GpuGraph::new();
-        let find = |name| ffmpeg::filter::find(name).unwrap();
-        let args = "video_size=64x64:pix_fmt=0:time_base=1/30:pixel_aspect=1/1";
-        graph.add(&find("buffer"), "in", args).unwrap();
-        graph.add(&find("buffersink"), "out", "").unwrap();
-        crate::parts::parse_filters(&mut graph, "null").unwrap();
-        let mut freed = Vec::new();
-        while let Some(filter) = graph.downstream_end() {
-            // SAFETY: a filter of the graph, freed once its kind is read.
-            unsafe {
-                let kind = std::ffi::CStr::from_ptr((*(*filter).filter).name);
-                freed.push(kind.to_string_lossy().into_owned());
-                ffi::avfilter_free(filter);
-            }
-        }
-        assert_eq!(freed, ["buffersink", "null", "buffer"]);
     }
 
     #[test]

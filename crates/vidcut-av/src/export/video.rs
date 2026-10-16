@@ -171,7 +171,7 @@ impl Source {
         // stream's work is done (`share::wait_for`).
         let nvdec = gpu.filter(|_| video);
         let nvdec = nvdec.and_then(|g| g.device.with_own_stream().ok());
-        let nvdec = nvdec.map(crate::hw::GpuDecoder::nvdec);
+        let nvdec = nvdec.map(crate::hw::GpuDecoder::nvdec).transpose()?;
         let reader =
             VideoReader::open_as(input, nvdec.as_ref().or(decoder).filter(|_| video), reading)?;
         let fitting = match gpu {
@@ -1066,6 +1066,10 @@ impl VideoFrames {
             }
         }
         self.open = kept;
+        if moved.contains(&None) {
+            // Files closed: their decoders' memory goes back.
+            crate::buffers::give_back();
+        }
         self.reading = reading
             .into_iter()
             .map(|r| r.and_then(|s| moved[s]))
