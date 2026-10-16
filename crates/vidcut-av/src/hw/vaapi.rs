@@ -349,7 +349,10 @@ unsafe impl Send for Keeper {}
 #[cfg(target_os = "linux")]
 impl Drop for Keeper {
     fn drop(&mut self) {
-        self.settle();
+        if self.settle().is_err() {
+            // A copy that may still run: its surfaces never go back.
+            std::mem::forget(self.pending.take());
+        }
         // SAFETY: its own reference.
         unsafe { ffi::av_buffer_unref(&mut self.device) };
     }
@@ -478,19 +481,30 @@ impl Keeper {
         like_of(f).is_ok_and(|(_, _, like)| like == self.like)
     }
 
-    /// Waits for the copy before, and lets go of the frame it read.
-    fn settle(&mut self) {
-        if let Some((_, copy)) = self.pending.take() {
-            // SAFETY: the copy's surface, held until now.
-            unsafe { (self.va.sync_surface)(self.display, surface(&copy)) };
+    /// Waits for the copy before, and lets go of the frame it read. Where
+    /// the wait fails, the copy may still read that frame's surface and
+    /// write its own: both stay held, and the keeper copies nothing more
+    /// until a wait succeeds.
+    fn settle(&mut self) -> Result<()> {
+        let Some((_, copy)) = &self.pending else {
+            return Ok(());
+        };
+        // SAFETY: the copy's surface, held until now.
+        let status = unsafe { (self.va.sync_surface)(self.display, surface(copy)) };
+        if status != 0 {
+            return Err(Error::Invalid(format!(
+                "VA-API: waiting for a kept frame's copy failed (status {status})"
+            )));
         }
+        self.pending = None;
+        Ok(())
     }
 
     /// `f`'s picture in a surface of its own, copied by the driver while
     /// the next frame decodes; `None` where the driver has no `vaCopy`.
     /// Its properties are the caller's to copy.
     pub(crate) fn copy(&mut self, f: &frame::Video) -> Result<Option<frame::Video>> {
-        self.settle();
+        self.settle()?;
         let mut out = frame::Video::empty();
         // SAFETY: frames of one surface on the decoder's device, in its
         // frames' layout and size; the frame taken from them holds the only

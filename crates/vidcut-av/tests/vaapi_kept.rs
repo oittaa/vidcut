@@ -5,8 +5,9 @@
 //! the same decoder's frame gives copied down without being kept. Runs on
 //! the GPU decoder in use when it is VA-API (`VIDCUT_HWDEC=vaapi:...` picks
 //! one) and skips otherwise; the surface of its own is checked where the
-//! GPU in use is Intel's. A prepared picture, held whatever the budget,
-//! holds no pool its decoders share: it is a copy of its own, or in memory.
+//! driver is Intel's (iHD), however the device was picked. A prepared
+//! picture, held whatever the budget, holds no pool its decoders share: it
+//! is a copy of its own, or in memory.
 
 mod player_support;
 
@@ -46,6 +47,34 @@ fn picture(kept: Vec<Kind>) -> Arc<Picture> {
     player.seek(5);
     assert!(player.wait_ready(5, Duration::from_secs(20)));
     player.present(Instant::now()).unwrap().picture
+}
+
+/// Whether `p`, a VA-API picture, is on a display of Intel's driver (iHD),
+/// by the vendor string libva gives the display.
+#[cfg(target_os = "linux")]
+fn on_intels_driver(p: &Picture) -> bool {
+    use std::ffi::{CStr, c_char, c_void};
+    type Query = unsafe extern "C" fn(*mut c_void) -> *const c_char;
+    // SAFETY: libva's function, loaded with FFmpeg, as `va.h` declares it;
+    // a VA-API frame's frames context holds its device's, whose context
+    // starts with its display.
+    unsafe {
+        let query = libc::dlsym(libc::RTLD_DEFAULT, c"vaQueryVendorString".as_ptr());
+        if query.is_null() {
+            return false;
+        }
+        let query = std::mem::transmute::<*mut c_void, Query>(query);
+        let frames = (*p.frame().as_ptr()).hw_frames_ctx;
+        let device = (*((*frames).data as *const ffi::AVHWFramesContext)).device_ctx;
+        let vendor = query(*((*device).hwctx as *const *mut c_void));
+        !vendor.is_null() && CStr::from_ptr(vendor).to_bytes().starts_with(b"Intel iHD")
+    }
+}
+
+/// VA-API is Linux's.
+#[cfg(not(target_os = "linux"))]
+fn on_intels_driver(_: &Picture) -> bool {
+    false
 }
 
 /// The samples of `p`'s frame in memory, rows packed.
@@ -89,14 +118,15 @@ fn a_picture_kept_on_va_api_is_the_frame_as_decoded() {
 
 #[test]
 fn a_picture_intels_driver_keeps_is_in_a_surface_of_its_own() {
-    let Some(gpu) = vaapi() else {
-        return;
-    };
-    if gpu.gpu().is_none_or(|g| g.vendor != "Intel") {
-        eprintln!("skipping: the GPU in use isn't Intel's");
+    if vaapi().is_none() {
         return;
     }
     let kept = picture(vec![Kind::Vaapi]);
+    assert_eq!(kept.gpu(), Some(Kind::Vaapi));
+    if !on_intels_driver(&kept) {
+        eprintln!("skipping: the VA-API driver isn't Intel's");
+        return;
+    }
     // SAFETY: a VA-API frame's frames context.
     let pool = unsafe {
         let frames = (*kept.frame().as_ptr()).hw_frames_ctx;
@@ -148,5 +178,5 @@ fn a_picture_kept_on_va_api_counts_at_least_its_samples() {
     let kept = picture(vec![Kind::Vaapi]);
     // P010: two bytes a sample, chroma half of luma.
     let samples = (W * H * 3) as usize;
-    assert!(kept.bytes() > samples, "{} bytes", kept.bytes());
+    assert!(kept.bytes() >= samples, "{} bytes", kept.bytes());
 }
