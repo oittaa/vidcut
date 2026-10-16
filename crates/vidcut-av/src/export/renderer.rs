@@ -68,14 +68,15 @@ impl FrameReader {
 const RGBA: format::Pixel = format::Pixel::RGBA;
 
 /// Frames as `pixel` pictures of `width`×`height` at `fps`, decoding on
-/// `decoder` where it decodes a stream.
+/// `decoder` where it decodes a stream: single frames, each read alone
+/// ([`crate::decode::Reading::Frames`]).
 pub(crate) fn frames(
     fps: Rational,
     (width, height): (u32, u32),
     pixel: format::Pixel,
     decoder: Option<&crate::hw::GpuDecoder>,
 ) -> VideoFrames {
-    let frames = VideoFrames::new(&[], fps, width, height, pixel, None);
+    let frames = VideoFrames::new(&[], fps, width, height, pixel, None).single_frames();
     match decoder {
         Some(d) => frames.decode_on(d.clone()),
         None => frames,

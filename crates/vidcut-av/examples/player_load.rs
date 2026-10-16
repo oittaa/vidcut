@@ -6,7 +6,8 @@
 //! yield to players, as the app's jobs do (the idle class on Linux only).
 //!
 //! For each run: the presents that showed the picture before the clock's
-//! frame, the player's late presents and skipped frames, what the load got
+//! frame, the player's late presents and skipped frames and the pictures it
+//! kept, what the load got
 //! done, the process's threads at most (Linux) and its peak memory; and
 //! between them, the load alone for as long: its tiles and frames a second. A
 //! first run, not counted, reads what the others play into the system's
@@ -127,6 +128,9 @@ struct Played {
     behind: usize,
     late: u64,
     skipped: u64,
+    /// Pictures the player kept at the end, and their megabytes.
+    kept: usize,
+    kept_mb: usize,
     threads: usize,
     peak_mb: u64,
 }
@@ -136,12 +140,14 @@ impl std::fmt::Display for Played {
         write!(
             f,
             "{} presents, {} of them the picture before ({:.1} %); the player's late {}, \
-             skipped {}; threads at most {}, peak memory {} MB",
+             skipped {}; {} pictures kept ({} MB); threads at most {}, peak memory {} MB",
             self.presents,
             self.behind,
             100.0 * self.behind as f64 / self.presents.max(1) as f64,
             self.late,
             self.skipped,
+            self.kept,
+            self.kept_mb,
             self.threads,
             self.peak_mb
         )
@@ -181,6 +187,8 @@ fn play(project: &Project, gpu: bool, seconds: u64) -> Played {
         behind,
         late: stats.late,
         skipped: stats.skipped,
+        kept: stats.kept,
+        kept_mb: (stats.memory.0 + stats.video.0) >> 20,
         threads,
         peak_mb: peak_memory_mb(),
     }

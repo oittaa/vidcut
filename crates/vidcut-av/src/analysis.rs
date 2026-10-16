@@ -394,7 +394,7 @@ pub fn mix_loudness(
     crate::init();
     let channels = channels.max(1);
     let mut mix = AudioMix::new(lanes, rate, channels, declick_ms);
-    let mut graph = filter::Graph::new();
+    let mut graph = crate::pool::graph(crate::decode::Reading::Stream);
     let layout = match channels {
         1 => "mono",
         2 => "stereo",

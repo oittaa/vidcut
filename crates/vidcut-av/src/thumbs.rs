@@ -280,6 +280,8 @@ impl Fit {
                 th,
                 format::Pixel::RGBA,
                 None,
+                // A frame here and there: no slices on other threads.
+                crate::decode::Reading::Frames,
             )?),
         };
         Ok(packed(&n.run(decoded)?))

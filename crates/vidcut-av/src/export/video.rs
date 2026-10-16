@@ -14,7 +14,7 @@ use vidcut_core::time::Rational;
 
 use super::ahead::Ahead;
 use super::make::{Fitting, Maker, Output};
-use crate::decode::{Input, VideoReader};
+use crate::decode::{Input, Reading, VideoReader};
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, format, frame};
 use crate::route::{Place, Route};
@@ -150,7 +150,8 @@ impl Source {
     /// Seeking would reopen the file and decode it again; a still is never
     /// sought.
     ///
-    /// `measure`: frames without HDR10+ are measured as they are decoded.
+    /// `reading`: how the frames are asked for ([`Reading`]). `measure`:
+    /// frames without HDR10+ are measured as they are decoded.
     #[allow(clippy::too_many_arguments)]
     fn open(
         input: &Input,
@@ -160,6 +161,7 @@ impl Source {
         pictures: Pictures,
         gpu: Option<&GpuSide>,
         decoder: Option<&crate::hw::GpuDecoder>,
+        reading: Reading,
         measure: bool,
     ) -> Result<Source> {
         let video = pictures == Pictures::Video;
@@ -170,10 +172,8 @@ impl Source {
         let nvdec = gpu.filter(|_| video);
         let nvdec = nvdec.and_then(|g| g.device.with_own_stream().ok());
         let nvdec = nvdec.map(crate::hw::GpuDecoder::nvdec);
-        let reader = match nvdec.as_ref().or(decoder).filter(|_| video) {
-            Some(d) => VideoReader::open_gpu_or_cpu(input, d)?,
-            None => VideoReader::open_input(input)?,
-        };
+        let reader =
+            VideoReader::open_as(input, nvdec.as_ref().or(decoder).filter(|_| video), reading)?;
         let fitting = match gpu {
             Some(g) => Fitting::on_gpu(&reader, g.out, g.format, g.target, true, Place::Cuda),
             None => Fitting::none(),
@@ -217,18 +217,17 @@ impl Source {
     }
 
     /// Opens `input` without decoding anything yet: on the GPU (`decoder`)
-    /// when it decodes the stream. `measure` as for [`open`](Self::open).
+    /// when it decodes the stream. `reading` and `measure` as for
+    /// [`open`](Self::open).
     fn bare(
         input: &Input,
         origin: f64,
         pictures: Pictures,
         decoder: Option<&crate::hw::GpuDecoder>,
+        reading: Reading,
         measure: bool,
     ) -> Result<Source> {
-        let reader = match decoder {
-            Some(d) => VideoReader::open_gpu_or_cpu(input, d)?,
-            None => VideoReader::open_input(input)?,
-        };
+        let reader = VideoReader::open_as(input, decoder, reading)?;
         let decoder = reader.gpu();
         let tb = reader.time_base();
         Ok(Source {
@@ -488,7 +487,12 @@ impl VideoFrames {
             ahead: Ahead::new(),
             black: None,
             decoder: None,
-            maker: Maker::new((width, height, pixel), target, Output::Fitted),
+            maker: Maker::new(
+                (width, height, pixel),
+                target,
+                Output::Fitted,
+                Reading::Stream,
+            ),
             gpu_made: 0,
             rotation: 0,
             last_decoder: None,
@@ -522,7 +526,14 @@ impl VideoFrames {
         if matches!(output, Output::Decoded { .. }) {
             out.2 = format::Pixel::YUV420P;
         }
-        self.maker = Maker::new(out, self.maker.target(), output);
+        self.maker = Maker::new(out, self.maker.target(), output, self.maker.reading());
+        self
+    }
+
+    /// Reads single frames, each after a seek ([`Reading::Frames`]): its
+    /// readers and graphs start no thread.
+    pub fn single_frames(mut self) -> Self {
+        self.maker.read_as(Reading::Frames);
         self
     }
 
@@ -920,6 +931,7 @@ impl VideoFrames {
                     *origin,
                     Pictures::Video,
                     self.decoder.as_ref(),
+                    self.maker.reading(),
                     self.measures(&input),
                 )?;
                 self.open.push(bare);
@@ -1030,6 +1042,7 @@ impl VideoFrames {
                             pictures,
                             self.gpu_side().as_ref(),
                             self.decoder.as_ref(),
+                            self.maker.reading(),
                             self.measures(&input),
                         )?,
                     };
@@ -1108,6 +1121,7 @@ impl VideoFrames {
             let gpu = self.gpu_side();
             let decoder = self.decoder.clone();
             let measure = self.measures(&input);
+            let reading = self.maker.reading();
             let key = (input.clone(), origin.to_bits(), from);
             self.ahead.start(slot(j, i), key, move || {
                 Source::open(
@@ -1118,6 +1132,7 @@ impl VideoFrames {
                     pictures,
                     gpu.as_ref(),
                     decoder.as_ref(),
+                    reading,
                     measure,
                 )
             });

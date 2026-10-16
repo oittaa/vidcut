@@ -560,7 +560,7 @@ fn measure_with(
     f: &frame::Video,
     relayout: &mut crate::export::normalize::Relayout,
 ) -> Result<FrameLight> {
-    let f = relayout.run(f)?;
+    let f = relayout.run(f, crate::decode::Reading::Stream)?;
     let (s, r) = reading(&f)?;
     let maxscl = peak(&s, &r);
     // The average and the distribution, of at most half a million pixels
@@ -667,10 +667,13 @@ fn on_threads<T: Send, R: Send, S>(
     let (to_work, inbox) = std::sync::mpsc::sync_channel::<T>(threads);
     let inbox = Mutex::new(inbox);
     let failed = AtomicBool::new(false);
+    // They work for whom this thread works ([`crate::first::as_job`]).
+    let yields = crate::first::yields();
     std::thread::scope(|scope| {
         let working: Vec<_> = (0..threads)
             .map(|_| {
                 scope.spawn(|| -> Result<Vec<R>> {
+                    crate::first::set_yields(yields);
                     let mut own = state();
                     let mut made = Vec::new();
                     let mut error = None;
@@ -926,7 +929,9 @@ mod tests {
     fn a_4_2_2_picture_is_measured_in_p010() {
         let prores = frame::Video::new(format::Pixel::YUV422P10LE, 64, 64);
         let mut relayout = crate::export::normalize::Relayout::passing(readable);
-        let measured = relayout.run(&prores).unwrap();
+        let measured = relayout
+            .run(&prores, crate::decode::Reading::Stream)
+            .unwrap();
         assert_eq!(measured.format(), format::Pixel::P010LE);
     }
 }

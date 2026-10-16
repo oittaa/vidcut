@@ -975,8 +975,13 @@ fn same_picture(to: &mut frame::Video, from: &frame::Video) {
 pub(crate) struct GpuGraph(ffmpeg::filter::Graph);
 
 impl GpuGraph {
+    /// A stream's graph ([`crate::pool::graph`]).
     pub(crate) fn new() -> Self {
-        Self(ffmpeg::filter::Graph::new())
+        Self::for_reading(crate::decode::Reading::Stream)
+    }
+
+    pub(crate) fn for_reading(reading: crate::decode::Reading) -> Self {
+        Self(crate::pool::graph(reading))
     }
 
     /// The filter to free next: one that feeds no other, the last made of

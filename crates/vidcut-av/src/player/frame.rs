@@ -261,6 +261,7 @@ impl Picture {
             height,
             format::Pixel::RGBA,
             None,
+            crate::decode::Reading::Stream,
         )?;
         let out = normalizer.run(&self.frame)?;
         let stride = out.stride(0);

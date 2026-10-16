@@ -253,9 +253,27 @@ pub fn frames_decoded() -> u64 {
     DECODED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// How a reader's frames are asked for, which decides how its decoder and
+/// its pictures' filter graphs share the CPU (docs/decisions/threads.md §4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reading {
+    /// In order from where it starts: the player, exports, proxies,
+    /// analyses. FFmpeg's automatic count of frame threads, about one a
+    /// core, and graphs' slices on the shared pool ([`crate::pool`]).
+    Stream,
+    /// A frame here and there, each after a seek: filmstrip tiles,
+    /// storyboards, `frame render`. No frame threads: they hand a frame out
+    /// only once a frame for each of them has gone in, so a frame asked for
+    /// alone would decode those after it for nothing. Graphs run on the
+    /// reader's thread. The reader starts no thread.
+    Frames,
+}
+
 /// Decodes the primary video stream of a file in presentation order.
 pub struct VideoReader {
     source: Input,
+    /// How its frames are asked for (a rewind opens it again so).
+    reading: Reading,
     input: format::context::Input,
     stream: usize,
     time_base: ffmpeg::Rational,
@@ -362,12 +380,14 @@ pub(crate) fn deinterlacer(pixel: format::Pixel) -> &'static str {
 /// its [`deinterlacer`]: on the GPU the same options as `bwdif`'s, and so
 /// the same frames at the same times. Not always the same levels: the GPU's
 /// are trusted only where they give `bwdif`'s ([`crate::hw::deinterlace`]).
+/// `bwdif`'s slices go as `reading` has them ([`crate::pool::graph`]).
 pub(crate) fn deinterlacing(
     f: &frame::Video,
     time_base: ffmpeg::Rational,
+    reading: Reading,
 ) -> Result<crate::hw::GpuGraph> {
     let sar = f.aspect_ratio();
-    let mut graph = crate::hw::GpuGraph::new();
+    let mut graph = crate::hw::GpuGraph::for_reading(reading);
     let find =
         |name: &str| filter::find(name).ok_or_else(|| Error::Invalid(format!("no {name} filter")));
     if crate::hw::on_gpu(f) {
@@ -420,6 +440,7 @@ struct Deinterlacer {
     graph: Option<crate::hw::GpuGraph>,
     /// The stream's time base, and the parameters the graph was built for.
     time_base: ffmpeg::Rational,
+    reading: Reading,
     input: (u32, u32, format::Pixel),
     /// The GPU's deinterlacer wouldn't build: its frames come down for
     /// `bwdif`.
@@ -431,10 +452,11 @@ struct Deinterlacer {
 }
 
 impl Deinterlacer {
-    fn new(time_base: ffmpeg::Rational) -> Self {
+    fn new(time_base: ffmpeg::Rational, reading: Reading) -> Self {
         Self {
             graph: None,
             time_base,
+            reading,
             input: (0, 0, format::Pixel::None),
             gpu_failed: false,
             flushed: false,
@@ -458,7 +480,7 @@ impl Deinterlacer {
 
     /// The graph for frames like `f` ([`deinterlacing`]).
     fn build(&mut self, f: &frame::Video) -> Result<()> {
-        self.graph = Some(deinterlacing(f, self.time_base)?);
+        self.graph = Some(deinterlacing(f, self.time_base, self.reading)?);
         self.input = (f.width(), f.height(), f.format());
         Ok(())
     }
@@ -901,7 +923,20 @@ impl VideoReader {
     }
 
     pub fn open_input(source: &Input) -> Result<Self> {
-        let mut reader = Self::open_with(source, None)?;
+        Self::open_as(source, None, Reading::Stream)
+    }
+
+    /// Opened for `reading`, on `gpu` where it decodes the stream
+    /// ([`open_gpu_or_cpu`](Self::open_gpu_or_cpu)), on the CPU otherwise.
+    pub fn open_as(
+        source: &Input,
+        gpu: Option<&crate::hw::GpuDecoder>,
+        reading: Reading,
+    ) -> Result<Self> {
+        if let Some(gpu) = gpu {
+            return Self::open_gpu_or_cpu_as(source, gpu, reading);
+        }
+        let mut reader = Self::open_with(source, None, reading)?;
         reader.opened(None);
         Ok(reader)
     }
@@ -914,7 +949,11 @@ impl VideoReader {
     /// memory for the others, which come down for it. Fails when `gpu`
     /// can't decode the stream.
     pub fn open_on(source: &Input, gpu: &crate::hw::GpuDecoder) -> Result<Self> {
-        let mut reader = Self::open_with(source, Some(gpu))?;
+        Self::open_on_as(source, gpu, Reading::Stream)
+    }
+
+    fn open_on_as(source: &Input, gpu: &crate::hw::GpuDecoder, reading: Reading) -> Result<Self> {
+        let mut reader = Self::open_with(source, Some(gpu), reading)?;
         let pixel = reader.kind.map(crate::hw::Kind::pixel);
         match reader.pending.as_ref().map(|f| f.format()) {
             Some(p) if Some(p) == pixel => {
@@ -933,8 +972,16 @@ impl VideoReader {
     /// memory), on the CPU otherwise (frames in memory): ProRes, VP8, a
     /// profile the GPU lacks.
     pub fn open_gpu_or_cpu(source: &Input, gpu: &crate::hw::GpuDecoder) -> Result<Self> {
-        Self::open_on(source, gpu).or_else(|e| {
-            let mut reader = Self::open_with(source, None)?;
+        Self::open_gpu_or_cpu_as(source, gpu, Reading::Stream)
+    }
+
+    fn open_gpu_or_cpu_as(
+        source: &Input,
+        gpu: &crate::hw::GpuDecoder,
+        reading: Reading,
+    ) -> Result<Self> {
+        Self::open_on_as(source, gpu, reading).or_else(|e| {
+            let mut reader = Self::open_with(source, None, reading)?;
             reader.opened(Some(&format!("not on {gpu}: {e}")));
             Ok(reader)
         })
@@ -1018,8 +1065,12 @@ impl VideoReader {
         }
     }
 
-    fn open_with(source: &Input, device: Option<&crate::hw::GpuDecoder>) -> Result<Self> {
-        let mut reader = Self::open_raw(source, device)?;
+    fn open_with(
+        source: &Input,
+        device: Option<&crate::hw::GpuDecoder>,
+        reading: Reading,
+    ) -> Result<Self> {
+        let mut reader = Self::open_raw(source, device, reading)?;
         // Learn `o` up front; keep the frame as look-ahead so reading from the
         // start still returns it.
         reader.pending = reader.decode_one()?;
@@ -1044,12 +1095,16 @@ impl VideoReader {
             .is_some_and(|p| p.top_field_first.is_some());
         reader.interlaced = interlaced;
         if interlaced {
-            reader.deinterlacer = Some(Deinterlacer::new(reader.time_base));
+            reader.deinterlacer = Some(Deinterlacer::new(reader.time_base, reading));
         }
         Ok(reader)
     }
 
-    fn open_raw(source: &Input, device: Option<&crate::hw::GpuDecoder>) -> Result<Self> {
+    fn open_raw(
+        source: &Input,
+        device: Option<&crate::hw::GpuDecoder>,
+        reading: Reading,
+    ) -> Result<Self> {
         let path = source.path();
         let input = source.open()?;
         let stream = input
@@ -1085,7 +1140,10 @@ impl VideoReader {
             },
             None => ctx.set_threading(codec::threading::Config {
                 kind: codec::threading::Type::Frame,
-                count: 0, // let FFmpeg choose
+                count: match reading {
+                    Reading::Stream => 0, // FFmpeg's automatic count
+                    Reading::Frames => 1,
+                },
             }),
         }
         let decoder = match &on {
@@ -1096,6 +1154,7 @@ impl VideoReader {
         crate::export::audio::discard_others(&input, index);
         Ok(Self {
             source: source.clone(),
+            reading,
             input,
             stream: index,
             time_base,
@@ -1269,7 +1328,7 @@ impl VideoReader {
         // Frames around the new position are another stretch: the
         // deinterlacer starts over.
         if self.deinterlacer.is_some() {
-            self.deinterlacer = Some(Deinterlacer::new(self.time_base));
+            self.deinterlacer = Some(Deinterlacer::new(self.time_base, self.reading));
         }
         // What it held is from before: a seek cut short (cancelled) leaves
         // none of it to read on from, its position unknown.
@@ -1366,7 +1425,7 @@ impl VideoReader {
 
     /// Reopens the input at its very beginning.
     fn rewind(&mut self) -> Result<()> {
-        let fresh = Self::open_raw(&self.source, self.gpu.as_ref())?;
+        let fresh = Self::open_raw(&self.source, self.gpu.as_ref(), self.reading)?;
         self.input = fresh.input;
         self.decoder = fresh.decoder;
         self.draining = false;
