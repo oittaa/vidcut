@@ -50,8 +50,9 @@ Every video decoder in vidcut-av is a `VideoReader`'s (`decode.rs`): the player'
 
 - **Opened with it** (`VideoReader::open_raw`), **closed with it,** on the thread that drops the reader. Every reader counts while it is open (`decode::open_readers`), and under `VIDCUT_DEBUG` says its decoder's thread count as it opens, and how many readers are open as it opens or closes (tools.md).
 - **A rewind** (a seek to the start, which some files only manage by opening again) reopens the file for the decoder it has, flushed: a decoder made anew would start a pool of frames of its own while kept pictures hold this one's.
-- **Opening ahead** (`vidcut-open`, export.md §1): one file at a time, from a piece's second frame on. A source nobody wants closes on that thread.
-- **The player's reader** keeps open the files the current piece reads (`VideoFrames::start_layers`); a file left closes, and coming back to it opens it anew.
+- **Opening ahead** (`vidcut-open`, export.md §1): one file at a time, from a piece's second frame on. A source it opened that nobody wants closes on that thread.
+- **A file left waits** (`VideoFrames::start_layers`, which the player, exports and the filmstrip read pieces with): a file no piece reads stays open ten seconds, two such files at most and one of them a GPU's (§4.3), the oldest closing first. A playhead dragged back across a cut seeks it rather than opening it anew, and the piece after a cutaway has it sought ahead. Files left close on the thread that reads: as a piece starts, and while a player's decode or windows thread has nothing to do.
+- **A filmstrip worker's reader** closes ten seconds after its last tile, and the next tile opens one.
 
 ### 4.2 On the CPU: frame threads
 
@@ -74,7 +75,8 @@ FFmpeg's scale filter hands swscale its graph's thread count (§3), and swscale 
 
 ## 6. Tests
 
-- [`crates/vidcut-av/tests/threads.rs`](../../crates/vidcut-av/tests/threads.rs) (Linux, which lists a process's threads in `/proc`): a single-frame reader starts no thread; a job's stream decoder starts half the cores' frame threads; a graph's slices start none once the pool runs; a reader counts while it is open.
+- [`crates/vidcut-av/tests/threads.rs`](../../crates/vidcut-av/tests/threads.rs) (Linux, which lists a process's threads in `/proc`): a single-frame reader starts no thread; a job's stream decoder starts half the cores' frame threads; a graph's slices start none once the pool runs; a reader counts while it is open; a file left stays open for a later piece of it, dragged back to or played across a cutaway.
+- `export/video.rs`'s unit tests: a file left closes ten seconds after, past two the oldest, past one of a GPU's; `gui/tiles.rs`'s: a worker's reader closes ten seconds after its last tile.
 - `export/ahead.rs`'s unit tests: a source nobody wants closes on the helper thread; a start before the one before began replaces it; a running job nobody wants stops; a dropped reader leaves its source to the helper thread.
 - `player_load` ([tools.md](../tools.md)) plays a project with the real player beside filmstrip workers and a job, and seeks it around: the frames shown late, the threads at most and the peak memory.
 - `scripts/threads.sh` ([tools.md](../tools.md)) counts a running GUI's threads by name once a second.
