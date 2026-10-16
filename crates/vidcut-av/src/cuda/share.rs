@@ -617,20 +617,13 @@ impl SharedBuffer {
     /// Copies the planes of `frame`, a frame in CUDA memory, into the
     /// buffer as `planes` place them (`planes[i]` for the frame's plane
     /// `i`), and waits until the copy is done: the display may read them
-    /// from then on.
+    /// from then on. A plane that does not fit in the buffer, or a row
+    /// count past that plane's height, is rejected.
     pub fn copy_planes(&self, frame: &frame::Video, planes: &[PlaneCopy]) -> Result<()> {
         if frame.format() != format::Pixel::CUDA {
             return Err(Error::Invalid("the picture isn't in CUDA memory".into()));
         }
-        for p in planes {
-            let end = p.offset + p.pitch * p.rows.saturating_sub(1) + p.row_bytes;
-            if p.row_bytes > p.pitch || end > self.size {
-                return Err(Error::Invalid(format!(
-                    "a plane of {} rows of {} bytes doesn't fit the shared buffer",
-                    p.rows, p.row_bytes
-                )));
-            }
-        }
+        planes_fit(self.size, frame, planes)?;
         // SAFETY: a CUDA frame's planes are device pointers, `linesize`
         // bytes apart.
         let (data, linesize) = unsafe {
@@ -668,6 +661,46 @@ impl SharedBuffer {
     }
 }
 
+/// `planes` copied into `size` bytes of `frame`. Each plane's last byte
+/// stays inside the buffer, and its row count stays within that plane.
+/// A plane's height follows the picture's layout: planes 1 and 2 are the
+/// chroma planes, shortened by its vertical subsampling, and the rest are
+/// the picture's height.
+fn planes_fit(size: u64, frame: &frame::Video, planes: &[PlaneCopy]) -> Result<()> {
+    let layout = crate::hw::sw_format(frame);
+    let height = frame.height();
+    for (i, p) in planes.iter().enumerate() {
+        let end = p
+            .pitch
+            .checked_mul(p.rows.saturating_sub(1))
+            .and_then(|span| span.checked_add(p.row_bytes))
+            .and_then(|span| p.offset.checked_add(span));
+        if p.row_bytes > p.pitch || end.is_none_or(|end| end > size) {
+            return Err(Error::Invalid(format!(
+                "a plane of {} rows of {} bytes doesn't fit the shared buffer",
+                p.rows, p.row_bytes
+            )));
+        }
+        let rows = plane_rows(layout, height, i);
+        if p.rows > u64::from(rows) {
+            return Err(Error::Invalid(format!(
+                "a plane of {} rows is past the picture's plane of {rows}",
+                p.rows
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Rows of plane `index` in a `height`-line picture of `layout`.
+fn plane_rows(layout: format::Pixel, height: u32, index: usize) -> u32 {
+    if index != 1 && index != 2 {
+        return height;
+    }
+    let shift = layout.descriptor().map(|d| d.log2_chroma_h()).unwrap_or(0);
+    height.div_ceil(1u32 << shift)
+}
+
 impl Drop for SharedBuffer {
     fn drop(&mut self) {
         debug_status(in_context(self.cuda, self.ctx, || {
@@ -690,6 +723,167 @@ mod tests {
     use std::cell::Cell;
 
     use super::*;
+
+    /// A CUDA frame whose picture layout is `layout`, `height` lines tall.
+    fn picture(height: u32, layout: format::Pixel) -> frame::Video {
+        let mut frame = frame::Video::empty();
+        frame.set_format(format::Pixel::CUDA);
+        frame.set_width(16);
+        frame.set_height(height);
+        // SAFETY: a zeroed frames context this frame owns. The check reads
+        // its software format and nothing else.
+        unsafe {
+            let ctx = ffi::av_buffer_allocz(std::mem::size_of::<ffi::AVHWFramesContext>());
+            assert!(!ctx.is_null());
+            (*((*ctx).data as *mut ffi::AVHWFramesContext)).sw_format = layout.into();
+            (*frame.as_mut_ptr()).hw_frames_ctx = ctx;
+        }
+        frame
+    }
+
+    fn rejected(size: u64, height: u32, layout: format::Pixel, planes: &[PlaneCopy]) -> String {
+        planes_fit(size, &picture(height, layout), planes)
+            .unwrap_err()
+            .to_string()
+    }
+
+    #[test]
+    fn a_pitch_that_wraps_does_not_fit() {
+        let planes = [PlaneCopy {
+            offset: 0,
+            pitch: u64::MAX,
+            row_bytes: 1,
+            rows: 2,
+        }];
+        assert_eq!(
+            rejected(u64::MAX, 1080, format::Pixel::NV12, &planes),
+            "a plane of 2 rows of 1 bytes doesn't fit the shared buffer"
+        );
+    }
+
+    #[test]
+    fn an_offset_that_wraps_does_not_fit() {
+        let planes = [PlaneCopy {
+            offset: u64::MAX - 5,
+            pitch: 10,
+            row_bytes: 10,
+            rows: 1,
+        }];
+        assert_eq!(
+            rejected(u64::MAX, 1080, format::Pixel::NV12, &planes),
+            "a plane of 1 rows of 10 bytes doesn't fit the shared buffer"
+        );
+    }
+
+    #[test]
+    fn a_wider_row_than_the_pitch_does_not_fit() {
+        let planes = [PlaneCopy {
+            offset: 0,
+            pitch: 4,
+            row_bytes: 5,
+            rows: 1,
+        }];
+        assert_eq!(
+            rejected(100, 10, format::Pixel::NV12, &planes),
+            "a plane of 1 rows of 5 bytes doesn't fit the shared buffer"
+        );
+    }
+
+    #[test]
+    fn a_plane_one_byte_past_the_buffer_does_not_fit() {
+        let planes = [PlaneCopy {
+            offset: 10,
+            pitch: 20,
+            row_bytes: 8,
+            rows: 3,
+        }];
+        assert_eq!(
+            rejected(57, 3, format::Pixel::NV12, &planes),
+            "a plane of 3 rows of 8 bytes doesn't fit the shared buffer"
+        );
+    }
+
+    #[test]
+    fn a_plane_that_ends_on_the_last_byte_fits() {
+        let planes = [PlaneCopy {
+            offset: 10,
+            pitch: 20,
+            row_bytes: 8,
+            rows: 3,
+        }];
+        assert_eq!(
+            planes_fit(58, &picture(3, format::Pixel::NV12), &planes).map_err(|e| e.to_string()),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn a_chroma_plane_past_half_the_picture_is_rejected() {
+        let planes = [
+            PlaneCopy {
+                offset: 0,
+                pitch: 8,
+                row_bytes: 8,
+                rows: 1080,
+            },
+            PlaneCopy {
+                offset: 8640,
+                pitch: 8,
+                row_bytes: 8,
+                rows: 541,
+            },
+        ];
+        assert_eq!(
+            rejected(u64::MAX, 1080, format::Pixel::NV12, &planes),
+            "a plane of 541 rows is past the picture's plane of 540"
+        );
+    }
+
+    #[test]
+    fn an_odd_picture_s_chroma_rows_round_up() {
+        let planes = [
+            PlaneCopy {
+                offset: 0,
+                pitch: 8,
+                row_bytes: 8,
+                rows: 1081,
+            },
+            PlaneCopy {
+                offset: 8648,
+                pitch: 8,
+                row_bytes: 8,
+                rows: 541,
+            },
+        ];
+        assert_eq!(
+            planes_fit(u64::MAX, &picture(1081, format::Pixel::NV12), &planes)
+                .map_err(|e| e.to_string()),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn a_4_2_2_chroma_plane_is_as_tall_as_the_picture() {
+        let planes = [
+            PlaneCopy {
+                offset: 0,
+                pitch: 8,
+                row_bytes: 8,
+                rows: 720,
+            },
+            PlaneCopy {
+                offset: 5760,
+                pitch: 8,
+                row_bytes: 8,
+                rows: 720,
+            },
+        ];
+        assert_eq!(
+            planes_fit(u64::MAX, &picture(720, format::Pixel::P210LE), &planes)
+                .map_err(|e| e.to_string()),
+            Ok(())
+        );
+    }
 
     thread_local! {
         static POPS: Cell<u32> = const { Cell::new(0) };
