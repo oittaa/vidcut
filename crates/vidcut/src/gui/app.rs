@@ -322,9 +322,15 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self) {
+        let started = std::time::Instant::now();
         self.ws.live.shutdown();
         if let Some(t) = self.session.take() {
             let _ = t.join();
         }
+        vidcut_av::debug!(
+            "gui",
+            "the session ended in {:.0} ms",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
     }
 }
