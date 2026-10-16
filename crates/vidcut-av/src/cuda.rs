@@ -89,7 +89,7 @@ impl CudaDevice {
         let opened = if ret < 0 || device.is_null() {
             Err(format!("no CUDA device: {}", ffmpeg::Error::from(ret)))
         } else {
-            let cuda = Device(device);
+            let cuda = Device::from_raw(device);
             Ok(Self {
                 base: cuda.clone(),
                 cuda,
@@ -134,7 +134,7 @@ impl CudaDevice {
                 });
             }
             Ok(Self {
-                cuda: Device(device),
+                cuda: Device::from_raw(device),
                 base: self.base.clone(),
                 vulkan: self.vulkan.clone(),
             })
@@ -142,7 +142,7 @@ impl CudaDevice {
     }
 
     pub(crate) fn as_ptr(&self) -> *mut ffi::AVBufferRef {
-        self.cuda.0
+        self.cuda.as_ptr()
     }
 
     /// The Vulkan device, made if there is none: libplacebo's, and Vulkan's
@@ -156,7 +156,7 @@ impl CudaDevice {
                 ffi::av_hwdevice_ctx_create_derived(
                     &mut vulkan,
                     ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VULKAN,
-                    self.base.0,
+                    self.base.as_ptr(),
                     0,
                 )
             };
@@ -166,7 +166,7 @@ impl CudaDevice {
                     ffmpeg::Error::from(ret)
                 ))
             } else {
-                Ok(Device(vulkan))
+                Ok(Device::from_raw(vulkan))
             }
         })
         .clone()
@@ -181,7 +181,7 @@ impl CudaDevice {
         // SAFETY: references to device contexts, the same device when they
         // point to the same data.
         if let Some(Ok(d)) = slot.as_ref()
-            && unsafe { (*d.0).data == (*used.0).data }
+            && unsafe { (*d.as_ptr()).data == (*used.as_ptr()).data }
         {
             *slot = None;
         }
@@ -1024,7 +1024,7 @@ impl Placebo {
         };
         let vulkan = if vulkans {
             // SAFETY: the frames' own device, another reference to it.
-            Device(unsafe { ffi::av_buffer_ref(frames_device) })
+            Device::from_raw(unsafe { ffi::av_buffer_ref(frames_device) })
         } else {
             device.vulkan()?
         };
@@ -1059,7 +1059,7 @@ impl Placebo {
             _ => ("nv12", format::Pixel::NV12),
         };
         // Vulkan's frames go in as they are; CUDA's are copied into these.
-        let pool = HwFrames::new(vulkan.0, VULKAN, as_read(sw), width, height)?;
+        let pool = HwFrames::new(vulkan.as_ptr(), VULKAN, as_read(sw), width, height)?;
         let output = match on {
             Place::Vulkan => None,
             _ => Some(HwFrames::new(
@@ -1080,7 +1080,7 @@ impl Placebo {
                 ..
             } if fitted != (w, h) => {
                 let format = vulkan_out;
-                let frames = HwFrames::new(vulkan.0, VULKAN, format.into(), w, h)?;
+                let frames = HwFrames::new(vulkan.as_ptr(), VULKAN, format.into(), w, h)?;
                 let timing = (COUNTED, ffmpeg::Rational(1, 1));
                 let tags = Some((black_tags.matrix, black_tags.range));
                 add_source(&mut graph, c"bg", VULKAN, (w, h), timing, frames.0, tags)?;
@@ -1113,7 +1113,7 @@ impl Placebo {
             if ctx.is_null() {
                 return Err(Error::Invalid("no libplacebo filter".into()));
             }
-            (*ctx).hw_device_ctx = ffi::av_buffer_ref(vulkan.0);
+            (*ctx).hw_device_ctx = ffi::av_buffer_ref(vulkan.as_ptr());
             let mut dict = ffmpeg::Dictionary::new();
             for (k, v) in &options {
                 dict.set(k, v);

@@ -820,7 +820,7 @@ pub(crate) fn open_video(
     // SAFETY: the context isn't opened yet; it takes a reference of its own.
     unsafe {
         let raw = ctx.as_mut_ptr();
-        (*raw).hw_device_ctx = ffmpeg::ffi::av_buffer_ref(device.0);
+        (*raw).hw_device_ctx = ffmpeg::ffi::av_buffer_ref(device.as_ptr());
         (*raw).get_format = Some(gpu_format);
         // Frames held on their way to be measured.
         (*raw).extra_hw_frames = 8;
@@ -1077,7 +1077,7 @@ impl VideoReader {
             // The GPU decodes; frame threads would only add latency.
             Some((_, device, _)) => unsafe {
                 let raw = ctx.as_mut_ptr();
-                (*raw).hw_device_ctx = ffmpeg::ffi::av_buffer_ref(device.0);
+                (*raw).hw_device_ctx = ffmpeg::ffi::av_buffer_ref(device.as_ptr());
                 (*raw).get_format = Some(gpu_format);
                 // Frames a filter graph and the encoder hold on to.
                 (*raw).extra_hw_frames = 8;

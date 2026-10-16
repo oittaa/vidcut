@@ -918,7 +918,7 @@ impl Upload {
     pub(crate) fn is_on(&self, device: &crate::hw::Device) -> bool {
         // SAFETY: references to live device contexts, the same device when
         // they point to the same data.
-        unsafe { (*self.device).data == (*device.0).data }
+        unsafe { (*self.device).data == (*device.as_ptr()).data }
     }
 
     /// Vulkan's frames on the GPU `gpu` names (`gpus::Gpu::id`).
@@ -931,7 +931,7 @@ impl Upload {
         // SAFETY: frames FFmpeg allocates on the device, which they hold a
         // reference to; ours to free if they don't set up.
         unsafe {
-            let mut frames = ffi::av_hwframe_ctx_alloc(device.0);
+            let mut frames = ffi::av_hwframe_ctx_alloc(device.as_ptr());
             if frames.is_null() {
                 return Err(Error::Invalid("cannot allocate Vulkan frames".into()));
             }
@@ -949,7 +949,7 @@ impl Upload {
                 });
             }
             Ok(Self {
-                device: ffi::av_buffer_ref(device.0),
+                device: ffi::av_buffer_ref(device.as_ptr()),
                 frames,
             })
         }
@@ -1319,7 +1319,7 @@ pub(crate) fn on_device(
         _ => crate::hw::Device::of_type(ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_D3D11VA, on)?,
     };
     // SAFETY: the context takes a reference of its own.
-    let device = unsafe { ffi::av_buffer_ref(device.0) };
+    let device = unsafe { ffi::av_buffer_ref(device.as_ptr()) };
     if device.is_null() {
         return Err(Error::Invalid("no memory for a GPU device".into()));
     }
