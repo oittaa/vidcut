@@ -254,7 +254,8 @@ fn threads_now() -> usize {
     std::fs::read_dir("/proc/self/task").map_or(0, |d| d.count())
 }
 
-/// The process's peak resident memory so far.
+/// The process's peak resident memory so far (Unix; 0 elsewhere).
+#[cfg(unix)]
 fn peak_memory_mb() -> u64 {
     // SAFETY: getrusage fills the struct given.
     let usage = unsafe {
@@ -269,4 +270,9 @@ fn peak_memory_mb() -> u64 {
     } else {
         peak >> 10
     }
+}
+
+#[cfg(not(unix))]
+fn peak_memory_mb() -> u64 {
+    0
 }
