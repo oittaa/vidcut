@@ -51,6 +51,8 @@ pub struct Gpu {
     metal: bool,
     /// CUDA's device on this GPU, once a picture in CUDA memory came.
     cuda: OnceLock<Result<CudaDevice, String>>,
+    /// What its submissions wait for, off the UI thread ([`super::gate`]).
+    gate: Option<Arc<super::gate::Gate>>,
 }
 
 /// Shared buffers a screen keeps at most ([`Screen::copy_on_gpu`]).
@@ -194,6 +196,23 @@ impl Gpu {
             #[cfg(not(target_os = "macos"))]
             metal: false,
             cuda: OnceLock::new(),
+            gate: None,
+        }
+    }
+
+    /// Submits only through `gate`: for a thread other than the UI's.
+    pub(super) fn behind(mut self, gate: Arc<super::gate::Gate>) -> Self {
+        self.gate = Some(gate);
+        self
+    }
+
+    fn submit(
+        &self,
+        buffers: impl IntoIterator<Item = wgpu::CommandBuffer>,
+    ) -> wgpu::SubmissionIndex {
+        match &self.gate {
+            Some(gate) => gate.pass(|| self.queue.submit(buffers)),
+            None => self.queue.submit(buffers),
         }
     }
 
@@ -530,8 +549,7 @@ impl Screen {
             .iter_mut()
             .filter_map(|s| s.acquired.take())
             .collect();
-        gpu.queue
-            .submit(acquired.into_iter().chain([encoder.finish()]));
+        gpu.submit(acquired.into_iter().chain([encoder.finish()]));
         for slot in &mut self.slots[..layers.len()] {
             slot.submitted(gpu);
         }
@@ -1420,7 +1438,7 @@ impl Screen {
                 depth_or_array_layers: 1,
             },
         );
-        let submission = gpu.queue.submit([encoder.finish()]);
+        let submission = gpu.submit([encoder.finish()]);
         let slice = buffer.slice(..);
         let (tx, rx) = std::sync::mpsc::channel::<Result<(), wgpu::BufferAsyncError>>();
         slice.map_async(wgpu::MapMode::Read, move |r| {
