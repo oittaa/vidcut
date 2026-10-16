@@ -26,7 +26,7 @@ pub type Exported = std::os::fd::OwnedFd;
 pub type Exported = std::os::windows::io::OwnedHandle;
 
 type CuResult = i32;
-type CuDevicePtr = u64;
+pub(super) type CuDevicePtr = u64;
 pub(super) type CuContext = *mut c_void;
 pub(super) type CuStream = *mut c_void;
 type CuExternalMemory = *mut c_void;
@@ -92,9 +92,10 @@ pub(super) struct Cuda {
     device_get_pci_bus_id: unsafe extern "C" fn(*mut std::ffi::c_char, i32, i32) -> CuResult,
     ctx_push: unsafe extern "C" fn(CuContext) -> CuResult,
     ctx_pop: unsafe extern "C" fn(*mut CuContext) -> CuResult,
-    ctx_get_device: unsafe extern "C" fn(*mut i32) -> CuResult,
+    pub(super) ctx_get_device: unsafe extern "C" fn(*mut i32) -> CuResult,
     device_get_uuid: unsafe extern "C" fn(*mut [u8; 16], i32) -> CuResult,
     device_total_mem: unsafe extern "C" fn(*mut usize, i32) -> CuResult,
+    pub(super) device_get_attribute: unsafe extern "C" fn(*mut i32, i32, i32) -> CuResult,
     import: unsafe extern "C" fn(*mut CuExternalMemory, *const HandleDesc) -> CuResult,
     mapped_buffer:
         unsafe extern "C" fn(*mut CuDevicePtr, CuExternalMemory, *const BufferDesc) -> CuResult,
@@ -104,6 +105,10 @@ pub(super) struct Cuda {
     synchronize: unsafe extern "C" fn(CuStream) -> CuResult,
     stream_create: unsafe extern "C" fn(*mut CuStream, u32) -> CuResult,
     stream_destroy: unsafe extern "C" fn(CuStream) -> CuResult,
+    /// The stream-ordered allocator's (CUDA 11.2), where the driver has it.
+    pub(super) alloc_async:
+        Option<unsafe extern "C" fn(*mut CuDevicePtr, usize, CuStream) -> CuResult>,
+    pub(super) free_async: Option<unsafe extern "C" fn(CuDevicePtr, CuStream) -> CuResult>,
     pub(super) module_load_data: unsafe extern "C" fn(*mut *mut c_void, *const c_void) -> CuResult,
     pub(super) module_get_function:
         unsafe extern "C" fn(*mut *mut c_void, *mut c_void, *const std::ffi::c_char) -> CuResult,
@@ -159,6 +164,7 @@ impl Cuda {
                 ctx_get_device: call!("cuCtxGetDevice"),
                 device_get_uuid: call!("cuDeviceGetUuid_v2"),
                 device_total_mem: call!("cuDeviceTotalMem_v2"),
+                device_get_attribute: call!("cuDeviceGetAttribute"),
                 import: call!("cuImportExternalMemory"),
                 mapped_buffer: call!("cuExternalMemoryGetMappedBuffer"),
                 destroy: call!("cuDestroyExternalMemory"),
@@ -167,12 +173,50 @@ impl Cuda {
                 synchronize: call!("cuStreamSynchronize"),
                 stream_create: call!("cuStreamCreate"),
                 stream_destroy: call!("cuStreamDestroy_v2"),
+                alloc_async: lib.get(b"cuMemAllocAsync\0").ok().map(|f| *f),
+                free_async: lib.get(b"cuMemFreeAsync\0").ok().map(|f| *f),
                 module_load_data: call!("cuModuleLoadData"),
                 module_get_function: call!("cuModuleGetFunction"),
                 launch_kernel: call!("cuLaunchKernel"),
                 _lib: lib,
             })
         }
+    }
+}
+
+impl Cuda {
+    /// Queues a copy of `rows` rows of `row_bytes` bytes on `stream`, from
+    /// and to device memory `pitch` bytes a row apart.
+    ///
+    /// # Safety
+    /// The current context's memory, holding those rows, both of it.
+    pub(super) unsafe fn copy_rows(
+        &self,
+        (from, from_pitch): (CuDevicePtr, usize),
+        (to, to_pitch): (CuDevicePtr, usize),
+        (row_bytes, rows): (usize, usize),
+        stream: CuStream,
+    ) -> CuResult {
+        let copy = Memcpy2d {
+            src_x_in_bytes: 0,
+            src_y: 0,
+            src_memory_type: MEMORY_TYPE_DEVICE,
+            src_host: std::ptr::null(),
+            src_device: from,
+            src_array: std::ptr::null_mut(),
+            src_pitch: from_pitch,
+            dst_x_in_bytes: 0,
+            dst_y: 0,
+            dst_memory_type: MEMORY_TYPE_DEVICE,
+            dst_host: std::ptr::null_mut(),
+            dst_device: to,
+            dst_array: std::ptr::null_mut(),
+            dst_pitch: to_pitch,
+            width_in_bytes: row_bytes,
+            height: rows,
+        };
+        // SAFETY: as the caller says.
+        unsafe { (self.copy_2d)(&copy, stream) }
     }
 }
 
@@ -545,29 +589,16 @@ impl SharedBuffer {
                 if src.is_null() || pitch < 0 || (pitch as u64) < p.row_bytes {
                     return Err(Error::Invalid(format!("the picture has no plane {i}")));
                 }
-                let copy = Memcpy2d {
-                    src_x_in_bytes: 0,
-                    src_y: 0,
-                    src_memory_type: MEMORY_TYPE_DEVICE,
-                    src_host: std::ptr::null(),
-                    src_device: src as CuDevicePtr,
-                    src_array: std::ptr::null_mut(),
-                    src_pitch: pitch as usize,
-                    dst_x_in_bytes: 0,
-                    dst_y: 0,
-                    dst_memory_type: MEMORY_TYPE_DEVICE,
-                    dst_host: std::ptr::null_mut(),
-                    dst_device: self.ptr + p.offset,
-                    dst_array: std::ptr::null_mut(),
-                    dst_pitch: p.pitch as usize,
-                    width_in_bytes: p.row_bytes as usize,
-                    height: p.rows as usize,
-                };
                 // On FFmpeg's stream: after NVDEC's own copy into the frame.
-                // SAFETY: the context is current; `copy` is laid out as
-                // `CUDA_MEMCPY2D`, into the buffer as checked above.
+                // SAFETY: the context is current; the frame's plane, into the
+                // buffer as checked above.
                 check("copying a plane", unsafe {
-                    (self.cuda.copy_2d)(&copy, self.stream)
+                    self.cuda.copy_rows(
+                        (src as CuDevicePtr, pitch as usize),
+                        (self.ptr + p.offset, p.pitch as usize),
+                        (p.row_bytes as usize, p.rows as usize),
+                        self.stream,
+                    )
                 })?;
             }
             // SAFETY: the context is current; this buffer's stream.

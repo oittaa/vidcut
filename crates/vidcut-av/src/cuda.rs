@@ -10,6 +10,7 @@
 
 #![warn(clippy::undocumented_unsafe_blocks)]
 
+pub(crate) mod keep;
 pub(crate) mod mix;
 pub mod share;
 
