@@ -176,9 +176,11 @@ impl ProxyEncoder {
                     ),
                 ),
             ],
-            // The keyframe interval comes from the context's GOP.
+            // The keyframe interval comes from the context's GOP. Preset 8:
+            // faster ones leave blocks of the frame before in low delay
+            // (gotchas.md).
             "libsvtav1" => vec![
-                ("preset", "10".into()),
+                ("preset", "8".into()),
                 ("crf", "32".into()),
                 ("svtav1-params", "scd=0:pred-struct=1".into()),
             ],

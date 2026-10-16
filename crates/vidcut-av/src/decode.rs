@@ -281,8 +281,8 @@ pub struct VideoReader {
     deinterlacer: Option<Deinterlacer>,
     /// The stream's frames are interlaced.
     interlaced: bool,
-    /// The GPU decoding, when one does (a rewind opens it again), and the
-    /// kind of its decoders that decodes the stream: its own, or Vulkan's.
+    /// The GPU decoding, when one does, and the kind of its decoders that
+    /// decodes the stream: its own, or Vulkan's.
     gpu: Option<crate::hw::GpuDecoder>,
     kind: Option<crate::hw::Kind>,
     /// What the file holds and what decodes it ([`decoding`](Self::decoding)).
@@ -1283,8 +1283,8 @@ impl VideoReader {
         // Seek to a keyframe at or before the target. Demuxers without an index
         // (e.g. MPEG-TS) may land after it, so back off until the first decoded
         // frame is not past the target. Targets before the first frame, or
-        // back-offs beyond the start, reopen the file instead: that is the only
-        // rewind every demuxer gets right.
+        // back-offs beyond the start, reopen the file instead (for the same
+        // decoder, flushed): that is the only rewind every demuxer gets right.
         let one_second = (i64::from(self.time_base.denominator())
             / i64::from(self.time_base.numerator().max(1)))
         .max(1);
@@ -1369,11 +1369,14 @@ impl VideoReader {
         }
     }
 
-    /// Reopens the input at its very beginning.
+    /// Reopens the input at its very beginning, for the decoder it has,
+    /// flushed: a decoder made anew would start a pool of frames of its own
+    /// while the kept pictures of this one hold its pool (gotchas.md).
     fn rewind(&mut self) -> Result<()> {
-        let fresh = Self::open_raw(&self.source, self.gpu.as_ref())?;
-        self.input = fresh.input;
-        self.decoder = fresh.decoder;
+        let input = self.source.open()?;
+        crate::export::audio::discard_others(&input, self.stream);
+        self.input = input;
+        self.decoder.flush();
         self.draining = false;
         Ok(())
     }
