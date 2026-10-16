@@ -960,7 +960,7 @@ pub(crate) struct GpuGraph(ffmpeg::filter::Graph);
 
 impl GpuGraph {
     pub(crate) fn new() -> Self {
-        Self(crate::threads::graph())
+        Self(ffmpeg::filter::Graph::new())
     }
 
     /// The filter to free next: one that feeds no other, the last made of

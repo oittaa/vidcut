@@ -148,7 +148,7 @@ impl Normalizer {
                 .unwrap_or_default()
         };
         let color = crate::color::Source::of(src);
-        let mut graph = crate::threads::graph();
+        let mut graph = filter::Graph::new();
         let mut args = format!(
             "video_size={w}x{h}:pix_fmt={}:time_base=1/1000000:pixel_aspect={}/{}",
             ffmpeg::ffi::AVPixelFormat::from(fmt) as i32,
@@ -299,7 +299,7 @@ impl Normalizer {
 fn simple_graph(args: &str, spec: &str) -> Result<filter::Graph> {
     let find =
         |name: &str| filter::find(name).ok_or_else(|| Error::Invalid(format!("no {name} filter")));
-    let mut graph = crate::threads::graph();
+    let mut graph = filter::Graph::new();
     graph
         .add(&find("buffer")?, "in", args)
         .ctx(|| "creating video source".into())?;
@@ -425,7 +425,7 @@ impl Relayout {
         let find = |name: &str| {
             filter::find(name).ok_or_else(|| Error::Invalid(format!("no {name} filter")))
         };
-        let mut graph = crate::threads::graph();
+        let mut graph = filter::Graph::new();
         graph
             .add(&find("buffer")?, "in", &args)
             .ctx(|| "creating video source".into())?;

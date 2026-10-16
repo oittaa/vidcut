@@ -87,12 +87,6 @@ impl<T: Send + 'static, K: PartialEq> Ahead<T, K> {
         }
         let id = self.next;
         self.next += 1;
-        // Its decoders take the count of the thread it opens for.
-        let threads = crate::threads::current();
-        let open = move || {
-            crate::threads::set(threads);
-            open()
-        };
         if let Some(jobs) = &self.jobs
             && jobs.send((id, Box::new(open))).is_ok()
         {

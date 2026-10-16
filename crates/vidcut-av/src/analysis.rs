@@ -154,7 +154,7 @@ fn stats_on(
     unsafe { (*ctx.as_mut_ptr()).pkt_timebase = tb.into() };
     ctx.set_threading(codec::threading::Config {
         kind: codec::threading::Type::Frame,
-        count: crate::threads::current().count(),
+        count: 0,
     });
     let id = stream.parameters().id();
     let opened = crate::decode::open_video(ctx, id, gpu, || crate::decode::h264_open_gop(source));
@@ -394,7 +394,7 @@ pub fn mix_loudness(
     crate::init();
     let channels = channels.max(1);
     let mut mix = AudioMix::new(lanes, rate, channels, declick_ms);
-    let mut graph = crate::threads::graph();
+    let mut graph = filter::Graph::new();
     let layout = match channels {
         1 => "mono",
         2 => "stereo",

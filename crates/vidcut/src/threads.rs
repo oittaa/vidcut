@@ -14,9 +14,7 @@ pub enum Work {
     /// preview's helper files. The lowest priority (Linux's idle class,
     /// Windows's idle priority, macOS's utility class); on Linux the threads
     /// it starts, FFmpeg's decoders and encoders among them, inherit it.
-    /// Its decoding waits while a player comes first (`vidcut_av::first`),
-    /// and its decoders and filter graphs take a quarter of the cores
-    /// (`vidcut_av::threads`; an export takes FFmpeg's automatic count).
+    /// Its decoding waits while a player comes first (`vidcut_av::first`).
     Job,
     /// Work someone waits on now: the session itself, requests and their
     /// answers, file dialogs, a frame or a plan.
@@ -35,7 +33,6 @@ pub fn spawn<T: Send + 'static>(
             if work == Work::Job {
                 lowest_priority();
                 vidcut_av::first::yield_to_players();
-                vidcut_av::threads::set(vidcut_av::threads::Threads::Quarter);
             }
             f()
         })
