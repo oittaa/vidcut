@@ -8,20 +8,19 @@ use std::mem::ManuallyDrop;
 use ::windows::Win32::Foundation::RECT;
 use ::windows::Win32::Graphics::Direct3D11::{
     D3D11_BIND_DECODER, D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_BOX,
-    D3D11_QUERY_DESC, D3D11_QUERY_EVENT, D3D11_RESOURCE_MISC_SHARED,
-    D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_TEX2D_VPIV, D3D11_TEX2D_VPOV, D3D11_VIDEO_COLOR,
-    D3D11_VIDEO_COLOR_0, D3D11_VIDEO_COLOR_RGBA, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE,
-    D3D11_VIDEO_PROCESSOR_CAPS, D3D11_VIDEO_PROCESSOR_CONTENT_DESC,
-    D3D11_VIDEO_PROCESSOR_FEATURE_CAPS_ROTATION, D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT,
-    D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT, D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC,
-    D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC_0, D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC,
-    D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0, D3D11_VIDEO_PROCESSOR_ROTATION_90,
-    D3D11_VIDEO_PROCESSOR_ROTATION_180, D3D11_VIDEO_PROCESSOR_ROTATION_270,
-    D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY, D3D11_VIDEO_PROCESSOR_STREAM,
-    D3D11_VIDEO_USAGE_PLAYBACK_NORMAL, D3D11_VPIV_DIMENSION_TEXTURE2D,
-    D3D11_VPOV_DIMENSION_TEXTURE2D, ID3D11Device, ID3D11DeviceContext, ID3D11Query,
-    ID3D11Texture2D, ID3D11VideoContext1, ID3D11VideoDevice, ID3D11VideoProcessor,
-    ID3D11VideoProcessorEnumerator,
+    D3D11_RESOURCE_MISC_SHARED, D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_TEX2D_VPIV,
+    D3D11_TEX2D_VPOV, D3D11_VIDEO_COLOR, D3D11_VIDEO_COLOR_0, D3D11_VIDEO_COLOR_RGBA,
+    D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE, D3D11_VIDEO_PROCESSOR_CAPS,
+    D3D11_VIDEO_PROCESSOR_CONTENT_DESC, D3D11_VIDEO_PROCESSOR_FEATURE_CAPS_ROTATION,
+    D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT, D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT,
+    D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC, D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC_0,
+    D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC, D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0,
+    D3D11_VIDEO_PROCESSOR_ROTATION_90, D3D11_VIDEO_PROCESSOR_ROTATION_180,
+    D3D11_VIDEO_PROCESSOR_ROTATION_270, D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY,
+    D3D11_VIDEO_PROCESSOR_STREAM, D3D11_VIDEO_USAGE_PLAYBACK_NORMAL,
+    D3D11_VPIV_DIMENSION_TEXTURE2D, D3D11_VPOV_DIMENSION_TEXTURE2D, ID3D11Device,
+    ID3D11DeviceContext, ID3D11Texture2D, ID3D11VideoContext1, ID3D11VideoDevice,
+    ID3D11VideoProcessor, ID3D11VideoProcessorEnumerator,
 };
 use ::windows::Win32::Graphics::Dxgi::Common::{
     DXGI_COLOR_SPACE_TYPE, DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P601,
@@ -86,22 +85,103 @@ pub(crate) unsafe fn device_of(frames: *mut ffi::AVBufferRef) -> *const DeviceCo
     }
 }
 
-/// `work` on `dev`'s immediate context, under FFmpeg's lock for it, as
-/// its decoders use it.
-///
-/// # Safety
-/// `dev` is a live device context.
-unsafe fn locked<T>(dev: &DeviceContext, work: impl FnOnce() -> T) -> T {
-    // SAFETY: the device's own lock.
-    unsafe {
-        if let Some(lock) = dev.lock {
-            lock(dev.lock_ctx);
+/// The device's lock, and an event query that can be used only while that
+/// lock is held.
+mod query {
+    use ::windows::Win32::Graphics::Direct3D11::{
+        D3D11_QUERY_DESC, D3D11_QUERY_EVENT, ID3D11Device, ID3D11DeviceContext, ID3D11Query,
+    };
+
+    use super::DeviceContext;
+
+    /// Held for the device's lock. Only [`locked`] makes one, for the length
+    /// of its call, and dropping it unlocks. Nothing else can make one, so a
+    /// query that takes one can't be used outside the lock.
+    pub(super) struct DeviceLock<'a> {
+        dev: &'a DeviceContext,
+    }
+
+    impl Drop for DeviceLock<'_> {
+        fn drop(&mut self) {
+            // SAFETY: the device's own unlock, the pair of the lock `locked`
+            // took before making this guard.
+            unsafe {
+                if let Some(unlock) = self.dev.unlock {
+                    unlock(self.dev.lock_ctx);
+                }
+            }
         }
-        let done = work();
-        if let Some(unlock) = dev.unlock {
-            unlock(dev.lock_ctx);
+    }
+
+    /// `work` on `dev`'s immediate context, under FFmpeg's lock for it, as
+    /// its decoders use it. `work` is given the lock, and can't keep it:
+    /// the guard is dropped, and the lock unlocked, before this returns.
+    ///
+    /// # Safety
+    /// `dev` is a live device context.
+    pub(super) unsafe fn locked<T>(
+        dev: &DeviceContext,
+        work: impl FnOnce(&DeviceLock<'_>) -> T,
+    ) -> T {
+        // SAFETY: the device's own lock. The guard unlocks it.
+        unsafe {
+            if let Some(lock) = dev.lock {
+                lock(dev.lock_ctx);
+            }
+            work(&DeviceLock { dev })
         }
-        done
+    }
+
+    /// An event query. [`EventQuery::end`] and [`EventQuery::get_data`] take
+    /// a [`DeviceLock`], and the query itself stays in this module, so it
+    /// can't be used without the device's lock. Drop releases the COM
+    /// pointer and does not call `End` or `GetData`.
+    pub(super) struct EventQuery {
+        query: ID3D11Query,
+    }
+
+    impl EventQuery {
+        /// An event query on `device`, a live Direct3D 11 device.
+        pub(super) fn event(device: &ID3D11Device) -> Option<Self> {
+            let desc = D3D11_QUERY_DESC {
+                Query: D3D11_QUERY_EVENT,
+                MiscFlags: 0,
+            };
+            let mut query = None;
+            // SAFETY: an event query on a live device.
+            let created = unsafe { device.CreateQuery(&desc, Some(&mut query)) };
+            created.ok().and(query).map(|query| Self { query })
+        }
+
+        /// `End` on `context`. `lock` is the device's lock, which the caller
+        /// holds.
+        pub(super) fn end(&self, context: &ID3D11DeviceContext, lock: &DeviceLock<'_>) {
+            let _held = lock;
+            // SAFETY: the immediate context's `End` of this query, with the
+            // device's lock held.
+            unsafe { context.End(&self.query) }
+        }
+
+        /// `GetData` on `context`: the event's `BOOL`, into `done`. `lock`
+        /// is the device's lock, which the caller holds.
+        pub(super) fn get_data(
+            &self,
+            context: &ID3D11DeviceContext,
+            lock: &DeviceLock<'_>,
+            done: &mut ::windows::core::BOOL,
+        ) -> ::windows::core::Result<()> {
+            let _held = lock;
+            // SAFETY: the immediate context's `GetData` of this event query,
+            // with the device's lock held. An event query writes a `BOOL`.
+            unsafe {
+                context.GetData(
+                    &self.query,
+                    Some((&raw mut *done).cast()),
+                    size_of::<::windows::core::BOOL>() as u32,
+                    0,
+                )
+            }
+        }
     }
 }
 
@@ -218,13 +298,15 @@ pub(crate) struct Keeper {
     /// The decoder's frames it copies out of, held so that another
     /// context can't come at their address while it is made for them.
     source: *mut ffi::AVBufferRef,
-    /// Signalled once the copy before it is done.
-    done: ID3D11Query,
+    /// Signalled once the copy before it is done. Usable only while the
+    /// device's lock is held.
+    done: query::EventQuery,
     pub(super) like: super::KeptLike,
 }
 
 // SAFETY: the frames contexts are reference-counted and may be used on
-// any thread; the query is used under the device's lock.
+// any thread. The query is sent with them; `End` and `GetData` take the
+// device's lock, which only `query::locked` holds.
 unsafe impl Send for Keeper {}
 
 impl Drop for Keeper {
@@ -261,16 +343,9 @@ impl Keeper {
         // freed on failure.
         unsafe {
             let mut frames = own_frames(source, size, flags, "to keep")?;
-            let device = ID3D11Device::from_raw_borrowed(&(*device_of(frames)).device);
-            let query = device.and_then(|d| {
-                let desc = D3D11_QUERY_DESC {
-                    Query: D3D11_QUERY_EVENT,
-                    MiscFlags: 0,
-                };
-                let mut query = None;
-                d.CreateQuery(&desc, Some(&mut query)).ok().and(query)
-            });
-            let Some(done) = query else {
+            let done = ID3D11Device::from_raw_borrowed(&(*device_of(frames)).device)
+                .and_then(query::EventQuery::event);
+            let Some(done) = done else {
                 ffi::av_buffer_unref(&mut frames);
                 return Err(Error::Invalid("no Direct3D 11 query".into()));
             };
@@ -293,8 +368,8 @@ impl Keeper {
     /// Direct3D 11's work.
     pub(super) fn copy(&mut self, f: &frame::Video) -> Result<frame::Video> {
         // SAFETY: a frame from its own pool; the device's immediate
-        // context used under its lock; the textures are the frames'
-        // (array and index).
+        // context used under its lock, which the query takes for `End`
+        // and `GetData`; the textures are the frames' (array and index).
         unsafe {
             let mut out = pooled(self.frames)?;
             let dev = &*device_of(self.frames);
@@ -309,9 +384,9 @@ impl Keeper {
                 bottom: f.height().next_multiple_of(2),
                 back: 1,
             };
-            locked(dev, || {
+            query::locked(dev, |lock| {
                 context.CopySubresourceRegion(&dst, di, 0, 0, 0, &src, si, Some(&region));
-                context.End(&self.done);
+                self.done.end(context, lock);
                 context.Flush();
             });
             // The event's BOOL turns true once the copy is done; until
@@ -321,13 +396,8 @@ impl Keeper {
             loop {
                 let mut done = ::windows::core::BOOL(0);
                 let mut asked = Ok(());
-                locked(dev, || {
-                    asked = context.GetData(
-                        &self.done,
-                        Some((&raw mut done).cast()),
-                        size_of::<::windows::core::BOOL>() as u32,
-                        0,
-                    );
+                query::locked(dev, |lock| {
+                    asked = self.done.get_data(context, lock, &mut done);
                 });
                 if let Err(e) = asked {
                     return Err(Error::Invalid(format!(
@@ -740,7 +810,7 @@ impl Scaler {
             let out = pooled(self.frames)?;
             let ((src, index), (dst, _)) = (texture(f)?, texture(&out)?);
             let dev = &*device_of(self.frames);
-            locked(dev, || -> Result<()> {
+            query::locked(dev, |_| -> Result<()> {
                 let desc = D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC {
                     FourCC: 0,
                     ViewDimension: D3D11_VPIV_DIMENSION_TEXTURE2D,
