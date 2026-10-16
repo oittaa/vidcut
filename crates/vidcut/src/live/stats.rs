@@ -70,39 +70,10 @@ pub struct PictureStats {
 pub struct TwoUpStats {
     /// `None` while the viewer shows the player.
     pub shown: Option<TwoUpShown>,
-    /// Frames its cells were asked for and rendered, and those passed over
-    /// for a newer one before they rendered: too slow to keep their pace.
-    /// During a run, a cell is asked for every frame while it keeps up,
-    /// else for one in every so many (`run`'s `every`).
+    /// Frames its cells were asked for, and those they never showed:
+    /// another was asked for before the frame's picture was there.
     pub asked: u64,
-    pub rendered: u64,
     pub passed_over: u64,
-    /// The latest Dynamic Trim run, or the one going on; `None` before the
-    /// first.
-    pub run: Option<TwoUpRun>,
-}
-
-/// How a two-up's cells kept up with a run.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TwoUpRun {
-    /// Frames a second the run moves the cells: forward above 0.
-    pub rate: f64,
-    /// How long it went on, so far.
-    pub seconds: f64,
-    /// The left cell and the right.
-    pub cells: [TwoUpRunCell; 2],
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct TwoUpRunCell {
-    /// Frames it showed during the run.
-    pub shown: u64,
-    /// The longest it showed one picture, in milliseconds: from the run's
-    /// start on, and to its end.
-    pub longest_ms: f64,
-    /// Every how many of the run's frames it was asked for one, last: 1
-    /// while it keeps up.
-    pub every: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -118,7 +89,7 @@ pub struct TwoUpCell {
     /// The timeline frame it shows, and the source frame of its clip there.
     pub frame: i64,
     pub source_frame: i64,
-    /// The picture is that frame's: `false` while it renders, the cell
+    /// The picture is that frame's: `false` while it decodes, the cell
     /// showing the one before.
     pub exact: bool,
 }

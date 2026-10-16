@@ -122,7 +122,7 @@ pub(crate) struct GpuSide {
 
 /// How far past the current frame (seconds) a later piece of the same file
 /// may start for decoding on to it to beat a seek.
-pub(crate) const DECODE_AHEAD: f64 = 1.0;
+const DECODE_AHEAD: f64 = 1.0;
 
 /// Memory for the pictures of a piece walking its source backward made at
 /// once ([`VideoFrames::reversed_frame`]), at most `REVERSED_MOST` of them;
@@ -524,6 +524,17 @@ impl VideoFrames {
         }
         self.maker = Maker::new(out, self.maker.target(), output);
         self
+    }
+
+    /// Frames as decoded come down from the GPU shrunk to fit `size` from
+    /// now on (`None`: whole, or kept there).
+    pub(crate) fn shrink_to(&mut self, size: Option<(u32, u32)>) {
+        if self.maker.shrinks() != size {
+            self.maker.shrink_to(size);
+            for s in &mut self.open {
+                s.normalized = None;
+            }
+        }
     }
 
     /// Frames decode on `gpu` where it decodes the stream

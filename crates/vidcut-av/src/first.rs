@@ -3,8 +3,7 @@
 //! between frames on threads of work nobody watches frame by frame: those
 //! that [`yield_to_players`], and the threads vidcut-av starts for them.
 //! They share the GPU's decoder with the player, and no thread priority
-//! reaches that. Other pictures people watch, such as the GUI's two-up,
-//! come first the same way, by a [`Claim`].
+//! reaches that.
 
 use std::cell::Cell;
 use std::sync::{Condvar, Mutex, MutexGuard};
@@ -42,15 +41,9 @@ pub(crate) fn set_yields(on: bool) {
     YIELDS.with(|y| y.set(on));
 }
 
-/// Whether something comes first now: decoding on a thread that yields
-/// would wait.
-pub fn waits() -> bool {
-    *claims() > 0
-}
-
-/// On a thread that yields, waits while something comes first ([`Claim`]).
-/// A cancelled request stops waiting.
-pub fn wait() -> Result<()> {
+/// On a thread that yields, waits while a player comes first. A cancelled
+/// request stops waiting.
+pub(crate) fn wait() -> Result<()> {
     if !yields() {
         return Ok(());
     }
@@ -65,12 +58,12 @@ pub fn wait() -> Result<()> {
     Ok(())
 }
 
-/// A claim to come first, while it is set: a player's, or the two-up's.
+/// A player's claim to come first, while it is set.
 #[derive(Default)]
-pub struct Claim(bool);
+pub(crate) struct Claim(bool);
 
 impl Claim {
-    pub fn set(&mut self, on: bool) {
+    pub(crate) fn set(&mut self, on: bool) {
         if on == self.0 {
             return;
         }
@@ -105,13 +98,6 @@ mod tests {
         let mut claim = Claim::default();
         claim.set(true);
         assert!(wait().is_ok());
-    }
-
-    #[test]
-    fn a_claim_makes_threads_that_yield_wait() {
-        let mut claim = Claim::default();
-        claim.set(true);
-        assert!(waits());
     }
 
     #[test]

@@ -55,8 +55,7 @@ pub fn rgba(
     width: u32,
     height: u32,
 ) -> Result<crate::thumbs::Image> {
-    let img = super::renderer::StillRenderer::with_budget(0).rgba(piece, 0, fps, width, height)?;
-    Ok(std::sync::Arc::try_unwrap(img).unwrap_or_else(|img| (*img).clone()))
+    super::renderer::FrameReader::default().rgba(piece, fps, width, height)
 }
 
 /// Encodes a packed RGBA picture (rows top to bottom) as PNG.

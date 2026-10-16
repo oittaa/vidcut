@@ -116,27 +116,46 @@ impl Store {
         inner.evict(kind, None);
     }
 
-    /// The picture of `id`, counted as looked at.
+    /// The picture of `id`, as decoded or else shrunk, counted as looked
+    /// at.
     pub(crate) fn get(&self, id: &Id) -> Option<Arc<Picture>> {
         let mut inner = self.lock();
         inner.clock += 1;
         let now = inner.clock;
-        inner.pictures.get_mut(id).map(|(picture, used)| {
+        let key = inner.key(id)?;
+        inner.pictures.get_mut(&key).map(|(picture, used)| {
             *used = now;
             picture.clone()
         })
     }
 
+    /// Whether `id`'s picture is kept, as decoded or shrunk.
     pub(crate) fn contains(&self, id: &Id) -> bool {
-        self.lock().pictures.contains_key(id)
+        self.lock().key(id).is_some()
     }
 
     /// How many of `ids`, in order, are kept before the first that isn't.
     pub(crate) fn kept_run(&self, ids: impl IntoIterator<Item = Id>) -> usize {
         let inner = self.lock();
         ids.into_iter()
-            .take_while(|id| inner.pictures.contains_key(id))
+            .take_while(|id| inner.key(id).is_some())
             .count()
+    }
+
+    /// Forgets the shrunk pictures: they are shown at another size.
+    pub(crate) fn forget_small(&self) {
+        let mut inner = self.lock();
+        let small: Vec<Id> = inner
+            .pictures
+            .keys()
+            .filter(|id| id.is_small())
+            .cloned()
+            .collect();
+        for id in small {
+            if let Some((old, _)) = inner.pictures.remove(&id) {
+                inner.uncharge(&old);
+            }
+        }
     }
 
     /// Counts the pictures of `ids` as looked at now, in order, the last
@@ -146,7 +165,9 @@ impl Store {
         for id in ids {
             inner.clock += 1;
             let now = inner.clock;
-            if let Some((_, used)) = inner.pictures.get_mut(&id) {
+            if let Some(key) = inner.key(&id)
+                && let Some((_, used)) = inner.pictures.get_mut(&key)
+            {
                 *used = now;
             }
         }
@@ -184,7 +205,7 @@ impl Store {
     pub(crate) fn wait(&self, id: &Id, deadline: Instant) -> Option<Arc<Picture>> {
         let mut inner = self.lock();
         loop {
-            if let Some((picture, _)) = inner.pictures.get(id) {
+            if let Some((picture, _)) = inner.key(id).and_then(|k| inner.pictures.get(&k)) {
                 return Some(picture.clone());
             }
             let left = deadline.checked_duration_since(Instant::now())?;
@@ -221,6 +242,13 @@ impl Store {
 }
 
 impl Inner {
+    /// What `id`'s picture is kept as: as decoded, else shrunk.
+    fn key(&self, id: &Id) -> Option<Id> {
+        [id.clone(), id.small()]
+            .into_iter()
+            .find(|k| self.pictures.contains_key(k))
+    }
+
     /// Takes what `old` charged off the budgets.
     fn uncharge(&mut self, old: &Picture) {
         let charged = charges(old);

@@ -18,6 +18,8 @@ pub(crate) struct Id {
     /// A mix's pictures over the first: what each shows, where, and its
     /// weight.
     over: Option<Arc<[Layer]>>,
+    /// Shrunk for a viewer that shows it small (`Player::shrink_to`).
+    small: bool,
 }
 
 /// What a picture over another shows, where, and its weight.
@@ -31,7 +33,22 @@ impl Id {
             source: source.into(),
             pos,
             over: None,
+            small: false,
         }
+    }
+}
+
+impl Id {
+    /// The same picture, shrunk.
+    pub(crate) fn small(&self) -> Self {
+        Self {
+            small: true,
+            ..self.clone()
+        }
+    }
+
+    pub(crate) fn is_small(&self) -> bool {
+        self.small
     }
 }
 
@@ -111,6 +128,7 @@ impl Plan {
                 source: "".into(),
                 pos: 0,
                 over: None,
+                small: false,
             };
         };
         let pos = |l: &VideoPiece| match l {
@@ -131,6 +149,7 @@ impl Plan {
             source: keys[0].clone(),
             pos: pos(layers[0].0),
             over: (!over.is_empty()).then(|| over.into()),
+            small: false,
         }
     }
 

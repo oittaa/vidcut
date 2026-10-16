@@ -418,7 +418,8 @@ impl Drop for PacedOutput {
 }
 
 /// An output that pulls only when told to: a test moves the clock itself,
-/// buffer by buffer.
+/// buffer by buffer. Never told, it is no sound, for players that never
+/// play (the two-up's).
 #[derive(Clone, Default)]
 pub struct ManualOutput {
     source: Arc<Mutex<Option<AudioSource>>>,

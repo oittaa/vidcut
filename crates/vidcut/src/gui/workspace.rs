@@ -129,9 +129,10 @@ pub struct Workspace {
     pub(super) timeline: TimelineView,
     /// The edit the Trim Editor shows, if it is open.
     pub(super) trim_editor: Option<i64>,
-    /// Exact frames for the Trim Editor and Dynamic Trim (created on first
-    /// use).
-    pub(super) stills: Option<super::stills::Stills>,
+    /// The two-up's players (created on first use), and what draws their
+    /// pictures (none without a GPU: tests).
+    pub(super) cells: Option<super::cells::Cells>,
+    pub(super) screens: Option<super::cells::Screens>,
     /// What the two-up showed in the frame drawn last.
     pub(super) two_up: Option<TwoUp>,
     /// Quick Export, the Export dialog, jobs and timeline interchange.
@@ -271,7 +272,8 @@ impl Workspace {
                 ..TimelineView::default()
             },
             trim_editor: None,
-            stills: None,
+            cells: None,
+            screens: None,
             two_up: None,
             export: Default::default(),
             show_mixer: false,
@@ -433,9 +435,8 @@ impl Workspace {
 
     /// The two-up for `player.state`: what it shows, and its frames so far.
     pub fn two_up_stats(&self) -> crate::live::stats::TwoUpStats {
-        use crate::live::stats::{TwoUpCell, TwoUpRun, TwoUpRunCell, TwoUpShown, TwoUpStats};
-        let counts = self.stills.as_ref().map(|s| s.counts()).unwrap_or_default();
-        let run = self.stills.as_ref().and_then(|s| s.run());
+        use crate::live::stats::{TwoUpCell, TwoUpShown, TwoUpStats};
+        let counts = self.cells.as_ref().map(|s| s.counts()).unwrap_or_default();
         TwoUpStats {
             shown: self.two_up.as_ref().map(|t| TwoUpShown {
                 mode: t.mode.to_string(),
@@ -448,17 +449,7 @@ impl Workspace {
                 }),
             }),
             asked: counts.asked,
-            rendered: counts.rendered,
             passed_over: counts.passed_over,
-            run: run.map(|r| TwoUpRun {
-                rate: r.rate,
-                seconds: r.seconds,
-                cells: r.cells.map(|c| TwoUpRunCell {
-                    shown: c.shown,
-                    longest_ms: c.longest * 1000.0,
-                    every: c.every,
-                }),
-            }),
         }
     }
 

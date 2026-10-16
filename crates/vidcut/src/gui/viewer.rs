@@ -47,11 +47,11 @@ pub struct TwoUpCell {
     /// The timeline frame it shows, and the source frame of its clip there.
     pub frame: i64,
     pub source_frame: i64,
-    /// The picture is that frame's: `false` while it renders, the cell
+    /// The picture is that frame's: `false` while it decodes, the cell
     /// showing the one before.
     pub exact: bool,
-    /// The picture shown, as rendered.
-    pub picture: Option<std::sync::Arc<vidcut_av::thumbs::Image>>,
+    /// The picture shown, as decoded.
+    pub picture: Option<std::sync::Arc<vidcut_av::player::Picture>>,
 }
 
 /// In/Out handles on the source scroll bar.
@@ -213,18 +213,11 @@ impl Workspace {
         ];
         self.two_up = None;
         let dynamic = self.timeline.dynamic.is_some() && self.dynamic_target().is_some();
-        // The two-up's run: its frames a second, forward above 0.
-        let run = if dynamic {
-            let speed = self.timeline.dynamic.as_ref().map_or(0.0, |d| d.speed());
-            Some(speed * self.fps().as_f64())
-        } else {
-            self.trim_editor.is_some().then_some(0.0)
-        };
-        if run.is_some() || self.stills.is_some() {
-            let ctx = ui.ctx().clone();
-            self.stills
-                .get_or_insert_with(|| crate::gui::stills::Stills::new(ctx))
-                .begin(run);
+        if !dynamic
+            && self.trim_editor.is_none()
+            && let Some(cells) = &mut self.cells
+        {
+            cells.close();
         }
         if dynamic {
             self.dynamic_view(ui, area);
@@ -455,15 +448,17 @@ impl Workspace {
         let painter = ui.painter_at(area);
         painter.rect_filled(area, CornerRadius::ZERO, Color32::from_rgb(12, 12, 13));
         let half = area.width() / 2.0;
-        let fps = p.settings.fps;
-        let (w, h) = {
-            let width = (half - 8.0).clamp(64.0, 640.0);
-            ((width as u32) & !1, ((width / aspect) as u32).max(2) & !1)
+        let ppp = ui.ctx().pixels_per_point();
+        // The trim's run, × real time.
+        let speed = match mode {
+            TwoUpMode::DynamicTrim => self.timeline.dynamic.as_ref().map_or(0.0, |d| d.speed()),
+            TwoUpMode::TrimEditor => 0.0,
         };
+        let gpu_pictures = self.screens.as_ref().map(|s| s.gpu_pictures());
         let ctx = ui.ctx().clone();
-        let stills = self
-            .stills
-            .get_or_insert_with(|| crate::gui::stills::Stills::new(ctx));
+        let players = self
+            .cells
+            .get_or_insert_with(|| super::cells::Cells::new(ctx, gpu_pictures.unwrap_or_default()));
         let track = p.track(track);
         let mut shown = [None, None];
         for (i, (frame, label)) in cells.into_iter().enumerate() {
@@ -488,17 +483,15 @@ impl Workspace {
             // The clip it names, whatever covers it on the tracks above.
             let piece = vidcut_core::render::clip_frame(p, &c.id, frame).ok();
             if let Some(piece) = piece {
-                let still = crate::gui::stills::Still {
-                    piece,
-                    floor: 0,
-                    fps,
-                    width: w,
-                    height: h,
-                };
-                let got = stills.get(i, &still);
-                if let Some(got) = got {
+                let size = [picture.width(), picture.height()].map(|x| (x * ppp).round() as u32);
+                let got = players.show(i, p, &piece, size, speed);
+                let texture = got
+                    .as_ref()
+                    .zip(self.screens.as_mut())
+                    .and_then(|(g, s)| s.draw(i, &g.picture, size));
+                if let Some(texture) = texture {
                     painter.image(
-                        got.texture(),
+                        texture,
                         picture,
                         Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
                         Color32::WHITE,
@@ -507,8 +500,8 @@ impl Workspace {
                 shown[i] = Some(TwoUpCell {
                     frame,
                     source_frame: c.source_at(frame),
-                    exact: matches!(got, Some(crate::gui::stills::Shown::Exact(_))),
-                    picture: stills.picture(i),
+                    exact: got.as_ref().is_some_and(|g| g.exact),
+                    picture: got.map(|g| g.picture),
                 });
             }
             let name = c

@@ -4,12 +4,9 @@ with keyframes 2 s apart and noise around the barcode, as the GUI tests
 use. It opens a window of its own for each codec, plays the timeline
 forward and backward, jumps and plays, steps a frame at a time both ways,
 and runs and steps Dynamic Trim, each once. For each move it prints the
-frames the viewer showed late or skipped, the two-up's frames passed over
-before they rendered, and how long each step took; for each Dynamic Trim
-run, the frames a second each two-up cell showed, the longest it showed one
-picture, and every how many frames it was asked for one. It fails when any
-frame was late, skipped or passed over, or in a run at 1x a cell showed
-fewer than 30 frames a second or one picture for more than 100 ms.
+frames the viewer showed late or skipped, the two-up's frames asked for and
+never shown (passed over), and how long each step took. It fails when any frame was
+late, skipped or passed over.
 
     scripts/playback-check.py [--log DIR] [CODEC...]
 
@@ -125,39 +122,17 @@ def steps(gui, start, n, by):
     return times
 
 
-def dynamic_runs(gui):
-    """Each run's speed and how the two-up's cells kept up with it."""
+def dynamic_on(gui):
     gui.run("player", "seek", "78f")
     gui.run("gui", "dynamic-trim", "--on", "true")
     gui.wait(two_up_exact)
-    runs = []
-    for speed, secs in ((1, 1.0), (-1, 1.0), (2, 0.5), (-2, 0.5)):
-        gui.run("gui", "dynamic-trim", f"--run={speed}")
-        time.sleep(secs)
-        gui.run("gui", "dynamic-trim", "--run=0")
-        gui.wait(two_up_exact)
-        runs.append((speed, gui.state()["two_up"]["run"]))
-    return runs
 
 
-# A cell keeps up with a run at 1x when it shows at least this many frames
-# a second, none of them longer than this.
-KEEPS_UP_FPS = 30
-KEEPS_UP_MS = 100
-
-
-def pace(speed, run):
-    """A run's line: each cell's frames a second, longest picture and pace;
-    and whether, at 1x, both cells kept up."""
-    cells = run["cells"]
-    fps = [c["shown"] / run["seconds"] for c in cells]
-    line = (f"    {speed:+d}x: cells show {fps[0]:.0f} and {fps[1]:.0f} frames a second, "
-            f"longest {cells[0]['longest_ms']:.0f} and {cells[1]['longest_ms']:.0f} ms, "
-            f"every {cells[0]['every']} and {cells[1]['every']}")
-    ok = abs(speed) != 1 or all(
-        f >= KEEPS_UP_FPS and c["longest_ms"] <= KEEPS_UP_MS for f, c in zip(fps, cells)
-    )
-    return line, ok
+def dynamic_run(gui, speed, secs):
+    gui.run("gui", "dynamic-trim", f"--run={speed}")
+    time.sleep(secs)
+    gui.run("gui", "dynamic-trim", "--run=0")
+    gui.wait(two_up_exact)
 
 
 def dynamic_steps(gui, by):
@@ -176,7 +151,11 @@ MOVES = [
     ("jump and play", jumps),
     ("step forward", lambda g: steps(g, 60, 30, 1)),
     ("step backward", lambda g: steps(g, 110, 30, -1)),
-    ("Dynamic Trim runs", dynamic_runs),
+    ("Dynamic Trim on", dynamic_on),
+    ("Dynamic Trim run +1x", lambda g: dynamic_run(g, 1, 1.0)),
+    ("Dynamic Trim run -1x", lambda g: dynamic_run(g, -1, 1.0)),
+    ("Dynamic Trim run +2x", lambda g: dynamic_run(g, 2, 0.5)),
+    ("Dynamic Trim run -2x", lambda g: dynamic_run(g, -2, 0.5)),
     ("Dynamic Trim steps +1", lambda g: dynamic_steps(g, 1)),
     ("Dynamic Trim steps -1", lambda g: dynamic_steps(g, -1)),
 ]
@@ -216,22 +195,16 @@ def check(codec, work, logs):
 
     print(f"{codec}:")
     print(f"  {'move':24} {'late':>5} {'skipped':>8} {'passed over':>12}   steps (ms, with the request)")
-    dropped, slow = 0, False
-    for name, d, done in rows:
+    dropped = 0
+    for name, d, times in rows:
         dropped += d["late"] + d["skipped"] + d["passed_over"]
-        runs = [r for r in done if isinstance(r, tuple)]
-        times = [t for t in done if not isinstance(t, tuple)]
         timing = ""
         if times:
             timing = (f"median {statistics.median(times):.0f}, slowest {max(times):.0f}: "
                       + " ".join(f"{t:.0f}" for t in times))
         passed = f"{d['passed_over']} of {d['asked']}" if d["asked"] else "0"
         print(f"  {name:24} {d['late']:>5} {d['skipped']:>8} {passed:>12}   {timing}")
-        for speed, run in runs:
-            line, ok = pace(speed, run)
-            slow = slow or not ok
-            print(line + ("" if ok else "  <- too slow"))
-    return dropped == 0 and not slow
+    return dropped == 0
 
 
 def main():
@@ -247,7 +220,7 @@ def main():
             os.environ[var] = str(Path(work) / var)
         ok = [check(codec, work, logs) for codec in codecs]
     if not all(ok):
-        raise SystemExit("frames were late, skipped or passed over, or the two-up kept up too slowly")
+        raise SystemExit("frames were late, skipped or passed over")
 
 
 main()

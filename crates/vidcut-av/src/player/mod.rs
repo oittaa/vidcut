@@ -97,6 +97,26 @@ impl Budget {
         }
     }
 
+    /// A `parts`th of it, for each of `parts` players beside the one it is
+    /// for. An automatic video budget becomes that part of half the memory
+    /// of the GPU in use (1 GB where its driver doesn't say), but where it
+    /// is the memory budget ([`SHARED_MEMORY`]).
+    pub fn part(self, parts: usize) -> Self {
+        let gpu = || {
+            crate::gpus::in_use()
+                .and_then(|g| g.memory_mb)
+                .map_or(GB, |mb| (mb as usize) << 19)
+        };
+        let video = match self.video {
+            None if SHARED_MEMORY => None,
+            v => Some(v.unwrap_or_else(gpu) / parts.max(1)),
+        };
+        Self {
+            memory: self.memory / parts.max(1),
+            video,
+        }
+    }
+
     /// What a viewer keeps unless told otherwise: memory is there to be
     /// used, and the more pictures stay around the playhead the less it
     /// waits. The larger of 1 GB and half the computer's memory, and half
@@ -300,6 +320,13 @@ pub(crate) struct Control {
     pub scrub: Option<(i64, u64)>,
     /// Decode on NVDEC where it can.
     pub hardware: bool,
+    /// Paused, the speed the caller moves the position at, and whether it
+    /// moves it itself ([`Player::follow`]).
+    pub motion: f64,
+    pub followed: bool,
+    /// Pictures other than those of a paused frame and just ahead of it
+    /// come down shrunk to fit this size ([`Player::shrink_to`]).
+    pub small: Option<(u32, u32)>,
     /// The plan played next and the frame of it to keep ready.
     pub prepared: Option<(Arc<Plan>, i64)>,
     pub closed: bool,
@@ -400,6 +427,9 @@ pub(crate) struct Snap {
     pub heard: bool,
     /// Decode on NVDEC where it can.
     pub hardware: bool,
+    pub motion: f64,
+    pub followed: bool,
+    pub small: Option<(u32, u32)>,
     /// The plan played next and the frame of it to keep ready.
     pub prepared: Option<(Arc<Plan>, i64)>,
 }
@@ -556,15 +586,21 @@ impl Shared {
                 Mode::Paused { at } => at,
                 Mode::Playing { from, .. } => ctl.plan.frame_at_sample(from),
             };
-            let cancel = match *lock(&self.busy) {
-                Some((Busy::Ahead, _)) => true,
+            // A frame up to a second ahead is on the way of the decode ahead.
+            let on_its_way = (1..=ctl.plan.fps().as_f64().ceil() as i64).contains(&(target - pos));
+            let busy = *lock(&self.busy);
+            let cancel = match busy {
+                Some((Busy::Ahead, _)) => !on_its_way,
                 Some((Busy::Window { from, to, plan_gen }, _)) => {
                     playing || plan_gen != ctl.plan_gen || !(from..=to).contains(&target)
                 }
                 Some((Busy::Focus, since)) => sample.is_some() || since.elapsed() >= PATIENCE,
                 None => false,
             };
-            if cancel && !self.store.contains(&ctl.plan.id(target)) {
+            // A window stops once the viewer moves the position forward
+            // itself: it would hold the frames ahead up.
+            let stops = matches!(busy, Some((Busy::Window { .. }, _))) && ctl.motion > 0.0;
+            if stops || (cancel && !self.store.contains(&ctl.plan.id(target))) {
                 self.interrupt
                     .store(true, std::sync::atomic::Ordering::Relaxed);
             }
@@ -596,6 +632,9 @@ impl Shared {
             focus,
             heard,
             hardware: ctl.hardware,
+            motion: ctl.motion,
+            followed: ctl.followed,
+            small: ctl.small,
             prepared: ctl.prepared.clone(),
         })
     }
@@ -760,6 +799,9 @@ impl Player {
                 scrubbing: config.audio_scrubbing,
                 scrub: None,
                 hardware: config.hardware,
+                motion: 0.0,
+                followed: false,
+                small: None,
                 prepared: None,
                 closed: false,
                 error: None,
@@ -901,6 +943,43 @@ impl Player {
         self.seek_with(frame, false);
     }
 
+    /// Shows timeline frame `frame` without its sound, while the caller
+    /// moves the position itself at `speed` frames of timeline per frame of
+    /// time (negative backwards, 0 standing still): decoding goes ahead of
+    /// it as playing at that speed does, and the player comes first while
+    /// it moves. A trim's two-up follows a run so (preview.md §9).
+    pub fn follow(&self, frame: i64, speed: f64) {
+        self.shared.change(true, |ctl, _, _| {
+            move_to(ctl, frame, false);
+            ctl.motion = speed;
+            ctl.followed = true;
+        });
+    }
+
+    /// The pictures of a run and of windows behind come down from the GPU
+    /// shrunk to fit `size` (physical pixels), for a viewer that shows them
+    /// that small; a paused frame and those just ahead of it stay as
+    /// decoded. A size more than an eighth larger or smaller forgets the
+    /// shrunk ones; a nearer one changes nothing, so a size rounded now one
+    /// way, now the other doesn't. `None`, the default: every picture as
+    /// decoded.
+    pub fn shrink_to(&self, size: Option<(u32, u32)>) {
+        let near = |a: u32, b: u32| a.abs_diff(b) * 8 <= b;
+        let mut ctl = self.shared.control();
+        let same = match (ctl.small, size) {
+            (Some((w0, h0)), Some((w, h))) => near(w, w0) && near(h, h0),
+            (was, now) => was == now,
+        };
+        if same {
+            return;
+        }
+        ctl.small = size;
+        ctl.version += 1;
+        drop(ctl);
+        self.shared.store.forget_small();
+        self.shared.changed.notify_all();
+    }
+
     fn seek_with(&self, frame: i64, sound: bool) {
         self.shared
             .change(true, |ctl, _, _| move_to(ctl, frame, sound));
@@ -913,6 +992,8 @@ impl Player {
         self.shared.change(true, |ctl, pos, _| {
             let t = ctl.plan.clamp(pos.saturating_add(frames));
             ctl.scrub(t);
+            ctl.motion = 0.0;
+            ctl.followed = false;
             ctl.mode = Mode::Paused { at: t };
         });
     }
@@ -955,6 +1036,8 @@ impl Player {
             };
             ctl.epoch += 1;
             ctl.epoch_at = Instant::now();
+            ctl.motion = 0.0;
+            ctl.followed = false;
             ctl.mode = Mode::Playing {
                 from,
                 speed,
@@ -967,6 +1050,8 @@ impl Player {
     pub fn pause(&self) {
         self.shared.change(true, |ctl, pos, _| {
             ctl.mode = Mode::Paused { at: pos };
+            ctl.motion = 0.0;
+            ctl.followed = false;
         });
     }
 
@@ -1259,6 +1344,8 @@ fn replace_plan(ctl: &mut Control, plan: RenderPlan) {
 /// plays when `sound` and scrubbing; playing, play goes on from there.
 fn move_to(ctl: &mut Control, frame: i64, sound: bool) {
     let t = ctl.plan.clamp(frame);
+    ctl.motion = 0.0;
+    ctl.followed = false;
     ctl.mode = match ctl.mode {
         Mode::Paused { .. } => {
             if sound {

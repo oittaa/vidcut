@@ -5,6 +5,7 @@
 #[cfg(any(target_os = "linux", windows))]
 mod acquire;
 mod app;
+mod cells;
 pub mod export;
 mod file_manager;
 mod folders;
@@ -17,7 +18,6 @@ mod preferences;
 mod project;
 mod relink;
 mod shared;
-mod stills;
 mod theme;
 mod tiles;
 mod timeline;

@@ -11,10 +11,10 @@ The viewer plays through the player engine on wgpu ([preview.md](preview.md)).
 
 | Thread | Owns | Never does |
 |---|---|---|
-| **UI** (eframe on wgpu) | the egui context and its window; shows the viewer's targets as textures; what only the GUI keeps: the edit point selected, the target track, the Timeline Options, the windows open | draw a viewer picture, wait for the session |
+| **UI** (eframe on wgpu) | the egui context and its window; shows the viewer's targets as textures; the two-up's two players, whose pictures it draws (preview.md §9); what only the GUI keeps: the edit point selected, the target track, the Timeline Options, the windows open | draw the viewer's picture, wait for the session |
 | **Viewer** (`gui/video.rs`) | presents the player's engine: draws its picture, answers presents and viewer screenshots | wait for the UI |
 | **Session** (`live`) | the open project, the player's engine, viewer/selection/clipboard state, the command log | touch the GPU |
-| **Engine** (player.md §1) | decoding, the mix, the audio device | touch shared state |
+| **Engine** (player.md §1) | decoding, the mix, the audio device; the viewer's, and one for each cell of the two-up | touch shared state |
 | **IPC** | one listener plus one thread per connection | anything but forward requests and wait for answers |
 | **Workers** (2) | thumbnails and waveforms | touch shared state (they report back by message) |
 | **Tasks** | one thread per export job, frame render, screenshot encode or project-less request | touch the session's state |
@@ -134,7 +134,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 - **Swipes.** A sideways two-finger swipe moves the playhead as a ruler drag does (`gesture::swipe`), with Fixed Playhead off scrolling the lower view. Its seeks are scrubs. Once it rests for 0.3 s, its frame is sought once more for the command log.
 - **Clock.** Gesture timing (the 0.8 s hover, Safe Edit's 0.6 s) uses egui's clock, so tests drive it.
 
-**The Trim Editor** draws exact frames rendered by the export engine on a background thread (`gui/stills.rs`).
+**The Trim Editor** draws its two-up from two players (`gui/cells.rs`, preview.md §9).
 
 **Several tracks.**
 - **Rows:** both timelines draw every track: V*n*…V1, then A1…. The upper timeline grows a little per track, and the lower one shares its height among the rows (Track 1 gets the most).
@@ -189,7 +189,7 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 - **Dynamic Trim:**
   - J/K/L and Space are handled in `dynamic_keys`, W and Up/Down with the timeline's and the transport's keys. The transport keys don't play while it is on. `gui.dynamic_trim` does what the keys do (`dynamic_trim_request`), and `gui.trim_editor` what the Trim Editor's double-click and buttons do (`trim_editor_request`).
   - A run counts frames on egui's clock, so tests drive it. Each frame it tries the next count on a copy of the project, and stops where an edit would fail.
-  - The viewer shows the two-up from the Trim Editor (`draw_two_up`), rendered from that copy. It records what each cell shows (`Workspace::two_up`), which `player.state` reports as `two_up` with the stills' counts and the latest run's pace. Each frame, the viewer tells the stills what the two-up does (`Stills::begin`): shown or not, and the run's frames a second.
+  - The viewer shows the two-up from that copy (`draw_two_up`), each cell a player of its own. It records what each cell shows (`Workspace::two_up`), which `player.state` reports as `two_up` with the cells' counts.
 
 ## 11. Pool thumbnails and preferences
 
@@ -202,7 +202,6 @@ A seek, step, load or an edit's reload is a **motion** of its player, numbered. 
 - **Keys:** a tile asks for its media, source frame and height in pixels (rounded up to a multiple of 16). The first tile shows the clip's first frame. The others show the first multiple of a step at or after their left edge, where the step is the largest power of two frames no wider than a tile. Zooming in or out by two keeps half of the frames.
 - **Memory:** pictures are textures, kept up to 256 MB (about 12,000 tiles 56 px tall). A tile that goes comes back from the disk cache in a fraction of a millisecond. Above it, those shown least recently go, down to nine tenths, never one shown in the last frame.
 - **Making them:** four worker threads at the lowest CPU priority take the tiles painting asked for, in its order, and replace their queue with each frame's asks, so tiles scrolled away aren't made. A worker goes on along a file while the next tile is asked for within 4 s ahead (decoding on beats a seek), and a fresh pick avoids what another worker is near. Frames come from `vidcut_av::export::renderer::FrameReader`, the export's sampling at the tile's size, from a fresh proxy when there is one. While `gpu.acceleration` and `gpu.decoding` are on (read as each tile is decoded, so a change reaches them at once), the streams the GPU decodes decode on the GPU the viewer decodes on, on a stream or device of their own, and shrink there to the tile's size. Interlaced frames of VA-API, Direct3D 11 and VideoToolbox come down whole, for the CPU to deinterlace, and so do NVDEC's and Vulkan's where their filter fails the check (export.md §4).
-- **Waiting their turn:** while a player plays, or the two-up runs or renders (player.md §1), no tile decodes. A worker waits before decoding a tile, and drops it if painting no longer asks for it by then. Tiles from disk go on.
 - **Disk:** tiles go to the thumbnail cache in blocks of 64 source frames per file (`<origin>.t<height>-b<block>.thumbs`, holding the origin as a strip does), under the same limit and switch as the pool's pictures. Painting names a block from the origin kept for its media when the frame began, so it digests nothing. A JPEG tile takes 2–4 KB and decodes in 0.03 ms, against tens to hundreds of milliseconds for a far-apart tile from the video, so a reopened project fills its tiles from disk.
 - **Until a tile's picture comes:** the nearest kept picture of the same media within two steps, else the pool's picture nearest in time.
 - **The pool** asks for tiles too: the frame under the pointer while hovering a thumbnail or a filmstrip, and in the Filmstrip view the frame at each picture's middle. The hovered frame is on a grid of a power of two frames no wider than a point.
