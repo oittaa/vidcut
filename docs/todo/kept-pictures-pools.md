@@ -6,4 +6,4 @@ A picture the player keeps as decoded holds its decoder's whole frame pool, whic
 - **Vulkan** (ProRes on NVIDIA's GPU): a copy into images of vidcut's own needs a submission on FFmpeg's queues (`lock_queue`, deprecated), preview.md §3.
 - **The CPU**: pictures kept as decoded (layouts the display takes: yuv420p, NV12, P010…) are buffers of the decoder's pools. A `get_buffer2` of vidcut's own that allocates each frame on its own frees them with the picture, without a copy. Converted pictures (RGB images) are already their own.
 
-How much it costs shows where a decoder closes while its pictures are kept: proxies switched on and off, a seek to a file's first frame (`VideoReader::rewind`), each prepared picture's reader.
+How much it costs shows where a decoder closes while its pictures are kept: proxies switched on and off, a cut to another file and back, each prepared picture's reader.
