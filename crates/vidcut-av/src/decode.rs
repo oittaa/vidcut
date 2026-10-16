@@ -8,6 +8,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, codec, filter, format, frame, media, software::scaling};
@@ -305,6 +306,50 @@ pub struct VideoReader {
     kind: Option<crate::hw::Kind>,
     /// What the file holds and what decodes it ([`decoding`](Self::decoding)).
     decoding: Arc<Decoding>,
+    /// Its place among the readers open ([`open_readers`]). The last field:
+    /// it goes after the decoder, so the close it says is done.
+    open: Opened,
+}
+
+/// The readers open in the process: each counts from its decoder's open to
+/// its close.
+static OPEN: AtomicUsize = AtomicUsize::new(0);
+
+/// How many [`VideoReader`]s are open in the process, each with its
+/// decoder: what `VIDCUT_DEBUG`'s `[decoding]` lines count.
+pub fn open_readers() -> usize {
+    OPEN.load(Ordering::Relaxed)
+}
+
+/// A reader's place among those open, from its decoder's open to its close,
+/// which it says under `VIDCUT_DEBUG`.
+struct Opened(PathBuf);
+
+impl Opened {
+    fn new(path: PathBuf) -> Self {
+        OPEN.fetch_add(1, Ordering::Relaxed);
+        Self(path)
+    }
+}
+
+impl Drop for Opened {
+    fn drop(&mut self) {
+        let left = OPEN.fetch_sub(1, Ordering::Relaxed) - 1;
+        crate::debug!(
+            "decoding",
+            "closed on {}: {} ({left} readers open)",
+            thread_name(),
+            self.0.display()
+        );
+    }
+}
+
+/// The calling thread's name, for `VIDCUT_DEBUG`.
+fn thread_name() -> String {
+    std::thread::current()
+        .name()
+        .unwrap_or("a thread")
+        .to_string()
 }
 
 /// What a file holds and what decodes it, for people.
@@ -1020,12 +1065,27 @@ impl VideoReader {
         });
         crate::debug!(
             "decoding",
-            "{}, {}: {}; first frame {}",
-            std::thread::current().name().unwrap_or("a thread"),
+            "{}, {}: {}; first frame {}; {}",
+            thread_name(),
             self.path().display(),
             self.decoding,
-            self.first_frame()
+            self.first_frame(),
+            self.open_note()
         );
+    }
+
+    /// The decoder's thread count and the readers open, for `VIDCUT_DEBUG`.
+    fn open_note(&self) -> String {
+        // SAFETY: the opened decoder's context, read only.
+        let threads = unsafe { (*self.decoder.as_ptr()).thread_count };
+        let threads = match threads {
+            // A decoder with a pool of its own (libdav1d) keeps the count
+            // it was asked for, 0: FFmpeg's automatic one.
+            0 => "threads of its own".to_string(),
+            1 => "1 thread".to_string(),
+            n => format!("{n} threads"),
+        };
+        format!("{threads}, {} readers open", open_readers())
     }
 
     /// The first frame's size, layout, colors and memory, as FFmpeg names
@@ -1151,6 +1211,7 @@ impl VideoReader {
             None => ctx.decoder().video(),
         };
         let decoder = crate::parts::decoder_opened(decoder, codec_id, "video")?;
+        let open = Opened::new(path.to_path_buf());
         crate::export::audio::discard_others(&input, index);
         Ok(Self {
             source: source.clone(),
@@ -1172,6 +1233,7 @@ impl VideoReader {
             gpu: device.cloned(),
             kind: on.map(|(kind, ..)| kind),
             decoding: Arc::default(),
+            open,
         })
     }
 
@@ -1428,7 +1490,15 @@ impl VideoReader {
         let fresh = Self::open_raw(&self.source, self.gpu.as_ref(), self.reading)?;
         self.input = fresh.input;
         self.decoder = fresh.decoder;
+        self.open = fresh.open;
         self.draining = false;
+        crate::debug!(
+            "decoding",
+            "{}, {}: opened again at its start; {}",
+            thread_name(),
+            self.path().display(),
+            self.open_note()
+        );
         Ok(())
     }
 

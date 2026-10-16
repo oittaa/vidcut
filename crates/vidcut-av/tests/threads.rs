@@ -5,7 +5,7 @@
 
 use std::sync::Mutex;
 
-use vidcut_av::decode::Reading;
+use vidcut_av::decode::{Reading, VideoReader, open_readers};
 use vidcut_av::export::renderer::FrameReader;
 use vidcut_av::ffmpeg::{filter, format::Pixel, frame};
 use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
@@ -17,6 +17,18 @@ static ONE: Mutex<()> = Mutex::new(());
 
 fn threads() -> usize {
     std::fs::read_dir("/proc/self/task").unwrap().count()
+}
+
+#[test]
+fn a_reader_counts_while_it_is_open() {
+    let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
+    let spec = FixtureSpec::new(VideoCodec::H264, Container::Mp4, 1280, 720, (30, 1), 60);
+    let path = fixture::ensure(&spec).unwrap();
+    let before = open_readers();
+    let reader = VideoReader::open(&path).unwrap();
+    assert_eq!(open_readers(), before + 1);
+    drop(reader);
+    assert_eq!(open_readers(), before);
 }
 
 #[test]

@@ -14,6 +14,8 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 
 **Slow and dropped frames:** `scripts/playback-check.py [--log DIR] [CODEC…]` (`make playback`, release builds) opens a window on 4K60 `busy` AV1, 10-bit HEVC and VP9 clips with keyframes 2 s apart. It plays forward and backward, jumps and plays, steps both ways and runs and steps Dynamic Trim, each once. It prints, for each move, the frames the viewer showed late or skipped, the two-up's frames passed over, and each step's time. It fails when any frame was late, skipped or passed over. `--log` keeps each window's debug log (`VIDCUT_DEBUG`) as `DIR/CODEC.log`.
 
+**Threads:** `scripts/threads.sh [PID] [SECONDS]` (Linux) prints once a second the process's threads by name, with their total and the resident memory: `vidcut-play-vid=32` is the player's decode thread and the 31 FFmpeg started from it, which carry its name (Linux keeps 15 characters of a name). PID is the newest `vidcut` by default. `VIDCUT_DEBUG`'s `[decoding]` lines say each reader's thread count as it opens, and how many readers are open as one opens or closes.
+
 **GPU encoders:** `cargo run -p vidcut-av --example encoders` test-encodes every GPU encoder (NVENC, VAAPI, AMF, QSV) on every GPU, uncached.
 
 **Other FFmpeg versions:** `scripts/ffmpeg-check.sh [TARGET…]` (Docker) runs `scripts/check.sh full` against the checkout in a container per target, and prints a summary.
