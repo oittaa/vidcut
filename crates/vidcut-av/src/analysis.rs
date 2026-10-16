@@ -157,8 +157,21 @@ fn stats_on(
         count: 0,
     });
     let id = stream.parameters().id();
-    let opened = crate::decode::open_video(ctx, id, gpu, || crate::decode::h264_open_gop(source));
-    let mut decoder = crate::parts::decoder_opened(opened, id, "video")?;
+    let mut decoder =
+        match crate::decode::open_video(ctx, id, gpu, || crate::decode::h264_open_gop(source)) {
+            Ok(decoder) => decoder,
+            // A decoder this FFmpeg lacks, as `parts::decoder_opened` says.
+            Err(Error::Ffmpeg {
+                source: ffmpeg::Error::DecoderNotFound,
+                ..
+            }) => {
+                return Err(Error::Missing(format!(
+                    "this FFmpeg has no {} decoder",
+                    id.name()
+                )));
+            }
+            Err(e) => return Err(e),
+        };
     discard_others(&input, index);
     // A thread of its own measures each frame (copied down whole, scaled
     // and scored, in order) while the next ones decode.
