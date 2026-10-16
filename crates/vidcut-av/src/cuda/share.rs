@@ -26,7 +26,7 @@ pub type Exported = std::os::fd::OwnedFd;
 pub type Exported = std::os::windows::io::OwnedHandle;
 
 type CuResult = i32;
-type CuDevicePtr = u64;
+pub(super) type CuDevicePtr = u64;
 pub(super) type CuContext = *mut c_void;
 pub(super) type CuStream = *mut c_void;
 type CuExternalMemory = *mut c_void;
@@ -92,9 +92,10 @@ pub(super) struct Cuda {
     device_get_pci_bus_id: unsafe extern "C" fn(*mut std::ffi::c_char, i32, i32) -> CuResult,
     ctx_push: unsafe extern "C" fn(CuContext) -> CuResult,
     ctx_pop: unsafe extern "C" fn(*mut CuContext) -> CuResult,
-    ctx_get_device: unsafe extern "C" fn(*mut i32) -> CuResult,
+    pub(super) ctx_get_device: unsafe extern "C" fn(*mut i32) -> CuResult,
     device_get_uuid: unsafe extern "C" fn(*mut [u8; 16], i32) -> CuResult,
     device_total_mem: unsafe extern "C" fn(*mut usize, i32) -> CuResult,
+    pub(super) device_get_attribute: unsafe extern "C" fn(*mut i32, i32, i32) -> CuResult,
     import: unsafe extern "C" fn(*mut CuExternalMemory, *const HandleDesc) -> CuResult,
     mapped_buffer:
         unsafe extern "C" fn(*mut CuDevicePtr, CuExternalMemory, *const BufferDesc) -> CuResult,
@@ -104,6 +105,10 @@ pub(super) struct Cuda {
     synchronize: unsafe extern "C" fn(CuStream) -> CuResult,
     stream_create: unsafe extern "C" fn(*mut CuStream, u32) -> CuResult,
     stream_destroy: unsafe extern "C" fn(CuStream) -> CuResult,
+    /// The stream-ordered allocator's (CUDA 11.2), where the driver has it.
+    pub(super) alloc_async:
+        Option<unsafe extern "C" fn(*mut CuDevicePtr, usize, CuStream) -> CuResult>,
+    pub(super) free_async: Option<unsafe extern "C" fn(CuDevicePtr, CuStream) -> CuResult>,
     pub(super) module_load_data: unsafe extern "C" fn(*mut *mut c_void, *const c_void) -> CuResult,
     pub(super) module_get_function:
         unsafe extern "C" fn(*mut *mut c_void, *mut c_void, *const std::ffi::c_char) -> CuResult,
@@ -126,6 +131,7 @@ pub(super) struct Cuda {
 impl Cuda {
     pub(super) fn get() -> Result<&'static Cuda> {
         static CUDA: OnceLock<std::result::Result<Cuda, String>> = OnceLock::new();
+        // SAFETY: loaded once and kept for the process.
         CUDA.get_or_init(|| unsafe { Self::load() }.map_err(|e| format!("CUDA's driver: {e}")))
             .as_ref()
             .map_err(|e| Error::Invalid(e.clone()))
@@ -135,6 +141,8 @@ impl Cuda {
     /// Loads the driver library and takes its calls as `cuda.h` declares
     /// them.
     unsafe fn load() -> std::result::Result<Self, libloading::Error> {
+        // SAFETY: the driver's calls as `cuda.h` declares them; `_lib` keeps
+        // them loaded.
         unsafe {
             #[cfg(unix)]
             let lib = libloading::Library::new("libcuda.so.1")?;
@@ -156,6 +164,7 @@ impl Cuda {
                 ctx_get_device: call!("cuCtxGetDevice"),
                 device_get_uuid: call!("cuDeviceGetUuid_v2"),
                 device_total_mem: call!("cuDeviceTotalMem_v2"),
+                device_get_attribute: call!("cuDeviceGetAttribute"),
                 import: call!("cuImportExternalMemory"),
                 mapped_buffer: call!("cuExternalMemoryGetMappedBuffer"),
                 destroy: call!("cuDestroyExternalMemory"),
@@ -164,12 +173,50 @@ impl Cuda {
                 synchronize: call!("cuStreamSynchronize"),
                 stream_create: call!("cuStreamCreate"),
                 stream_destroy: call!("cuStreamDestroy_v2"),
+                alloc_async: lib.get(b"cuMemAllocAsync\0").ok().map(|f| *f),
+                free_async: lib.get(b"cuMemFreeAsync\0").ok().map(|f| *f),
                 module_load_data: call!("cuModuleLoadData"),
                 module_get_function: call!("cuModuleGetFunction"),
                 launch_kernel: call!("cuLaunchKernel"),
                 _lib: lib,
             })
         }
+    }
+}
+
+impl Cuda {
+    /// Queues a copy of `rows` rows of `row_bytes` bytes on `stream`, from
+    /// and to device memory `pitch` bytes a row apart.
+    ///
+    /// # Safety
+    /// The current context's memory, holding those rows, both of it.
+    pub(super) unsafe fn copy_rows(
+        &self,
+        (from, from_pitch): (CuDevicePtr, usize),
+        (to, to_pitch): (CuDevicePtr, usize),
+        (row_bytes, rows): (usize, usize),
+        stream: CuStream,
+    ) -> CuResult {
+        let copy = Memcpy2d {
+            src_x_in_bytes: 0,
+            src_y: 0,
+            src_memory_type: MEMORY_TYPE_DEVICE,
+            src_host: std::ptr::null(),
+            src_device: from,
+            src_array: std::ptr::null_mut(),
+            src_pitch: from_pitch,
+            dst_x_in_bytes: 0,
+            dst_y: 0,
+            dst_memory_type: MEMORY_TYPE_DEVICE,
+            dst_host: std::ptr::null_mut(),
+            dst_device: to,
+            dst_array: std::ptr::null_mut(),
+            dst_pitch: to_pitch,
+            width_in_bytes: row_bytes,
+            height: rows,
+        };
+        // SAFETY: as the caller says.
+        unsafe { (self.copy_2d)(&copy, stream) }
     }
 }
 
@@ -188,6 +235,8 @@ pub(super) fn check(what: &str, result: CuResult) -> Result<()> {
 /// # Safety
 /// `device` is a reference to a CUDA hardware device context.
 pub(super) unsafe fn cuda_context(device: *mut ffi::AVBufferRef) -> (CuContext, CuStream) {
+    // SAFETY: as the caller says. A CUDA device's `data` is an
+    // `AVHWDeviceContext` and its `hwctx` is an `AVCUDADeviceContext`.
     unsafe {
         let ctx = (*device).data as *const ffi::AVHWDeviceContext;
         let hw = (*ctx).hwctx as *const ffi::AVCUDADeviceContext;
@@ -201,11 +250,14 @@ pub(super) fn in_context<T>(
     ctx: CuContext,
     f: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
+    // SAFETY: every caller passes a live device's context.
     check("making the context current", unsafe {
         (cuda.ctx_push)(ctx)
     })?;
     let result = f();
     let mut popped = std::ptr::null_mut();
+    // SAFETY: pops the context pushed above. Its status goes unread: a
+    // failed pop can't be undone here.
     unsafe { (cuda.ctx_pop)(&mut popped) };
     result
 }
@@ -215,13 +267,16 @@ impl CudaDevice {
     /// on the same GPU can share memory with it.
     pub fn uuid(&self) -> Result<[u8; 16]> {
         let cuda = Cuda::get()?;
+        // SAFETY: a CUDA device, as `cuda_context` asks.
         let (ctx, _) = unsafe { cuda_context(self.as_ptr()) };
         in_context(cuda, ctx, || {
             let mut device = 0;
+            // SAFETY: the context is current; the ordinal goes into `device`.
             check("finding the device", unsafe {
                 (cuda.ctx_get_device)(&mut device)
             })?;
             let mut uuid = [0u8; 16];
+            // SAFETY: the ordinal just read; `uuid` is 16 bytes, as `CUuuid` is.
             check("reading the device's UUID", unsafe {
                 (cuda.device_get_uuid)(&mut uuid, device)
             })?;
@@ -232,13 +287,16 @@ impl CudaDevice {
     /// The GPU's memory in bytes.
     pub fn memory(&self) -> Result<usize> {
         let cuda = Cuda::get()?;
+        // SAFETY: a CUDA device, as `cuda_context` asks.
         let (ctx, _) = unsafe { cuda_context(self.as_ptr()) };
         in_context(cuda, ctx, || {
             let mut device = 0;
+            // SAFETY: the context is current; the ordinal goes into `device`.
             check("finding the device", unsafe {
                 (cuda.ctx_get_device)(&mut device)
             })?;
             let mut bytes = 0;
+            // SAFETY: the ordinal just read; the size goes into `bytes`.
             check("reading the device's memory", unsafe {
                 (cuda.device_total_mem)(&mut bytes, device)
             })?;
@@ -321,6 +379,8 @@ pub(crate) fn wait_for(frame: &frame::Video) -> Result<()> {
         cuda_context((*((*frames).data as *const ffi::AVHWFramesContext)).device_ref)
     };
     in_context(cuda, ctx, || {
+        // SAFETY: the context is current; `stream` is its device's (null:
+        // the default one).
         check("waiting for the GPU", unsafe { (cuda.synchronize)(stream) })
     })
 }
@@ -337,9 +397,11 @@ impl Stream {
     /// context's default stream.
     pub(crate) fn new(device: &CudaDevice) -> Result<Self> {
         let cuda = Cuda::get()?;
+        // SAFETY: a CUDA device, as `cuda_context` asks.
         let (ctx, _) = unsafe { cuda_context(device.as_ptr()) };
         let raw = in_context(cuda, ctx, || {
             let mut raw = std::ptr::null_mut();
+            // SAFETY: the context is current; the stream goes into `raw`.
             check("making a stream", unsafe {
                 (cuda.stream_create)(&mut raw, STREAM_NON_BLOCKING)
             })?;
@@ -363,6 +425,7 @@ impl Stream {
 impl Drop for Stream {
     fn drop(&mut self) {
         let _ = in_context(self.cuda, self.ctx, || {
+            // SAFETY: the context is current; the stream this value made.
             check("destroying a stream", unsafe {
                 (self.cuda.stream_destroy)(self.raw)
             })
@@ -386,6 +449,7 @@ pub(crate) unsafe extern "C" fn destroy_stream(device: *mut ffi::AVHWDeviceConte
         )
     };
     let _ = in_context(cuda, ctx, || {
+        // SAFETY: the context is current; the stream made for this device.
         check("destroying a stream", unsafe {
             (cuda.stream_destroy)(stream)
         })
@@ -429,6 +493,7 @@ impl SharedBuffer {
         dedicated: bool,
     ) -> Result<Self> {
         let cuda = Cuda::get()?;
+        // SAFETY: a CUDA device, as `cuda_context` asks.
         let (ctx, stream) = unsafe { cuda_context(device.as_ptr()) };
         in_context(cuda, ctx, || {
             #[cfg(unix)]
@@ -450,6 +515,8 @@ impl SharedBuffer {
             };
             let mut memory = std::ptr::null_mut();
             // Not taken, the descriptor is still ours to close: dropped.
+            // SAFETY: the context is current; `desc` is laid out as
+            // `CUDA_EXTERNAL_MEMORY_HANDLE_DESC`.
             check("importing shared memory", unsafe {
                 (cuda.import)(&mut memory, &desc)
             })?;
@@ -466,9 +533,12 @@ impl SharedBuffer {
                 reserved: [0; 16],
             };
             let mut ptr = 0;
+            // SAFETY: the context is current; `memory` is the import just made.
             if let Err(e) = check("mapping shared memory", unsafe {
                 (cuda.mapped_buffer)(&mut ptr, memory, &buffer)
             }) {
+                // SAFETY: the import just made, which nothing else holds. Its
+                // status goes unread: the mapping's error is returned.
                 unsafe { (cuda.destroy)(memory) };
                 return Err(e);
             }
@@ -512,29 +582,19 @@ impl SharedBuffer {
                 if src.is_null() || pitch < 0 || (pitch as u64) < p.row_bytes {
                     return Err(Error::Invalid(format!("the picture has no plane {i}")));
                 }
-                let copy = Memcpy2d {
-                    src_x_in_bytes: 0,
-                    src_y: 0,
-                    src_memory_type: MEMORY_TYPE_DEVICE,
-                    src_host: std::ptr::null(),
-                    src_device: src as CuDevicePtr,
-                    src_array: std::ptr::null_mut(),
-                    src_pitch: pitch as usize,
-                    dst_x_in_bytes: 0,
-                    dst_y: 0,
-                    dst_memory_type: MEMORY_TYPE_DEVICE,
-                    dst_host: std::ptr::null_mut(),
-                    dst_device: self.ptr + p.offset,
-                    dst_array: std::ptr::null_mut(),
-                    dst_pitch: p.pitch as usize,
-                    width_in_bytes: p.row_bytes as usize,
-                    height: p.rows as usize,
-                };
                 // On FFmpeg's stream: after NVDEC's own copy into the frame.
+                // SAFETY: the context is current; the frame's plane, into the
+                // buffer as checked above.
                 check("copying a plane", unsafe {
-                    (self.cuda.copy_2d)(&copy, self.stream)
+                    self.cuda.copy_rows(
+                        (src as CuDevicePtr, pitch as usize),
+                        (self.ptr + p.offset, p.pitch as usize),
+                        (p.row_bytes as usize, p.rows as usize),
+                        self.stream,
+                    )
                 })?;
             }
+            // SAFETY: the context is current; this buffer's stream.
             check("waiting for the copy", unsafe {
                 (self.cuda.synchronize)(self.stream)
             })
@@ -585,6 +645,8 @@ fn plane_rows(layout: format::Pixel, height: u32, index: usize) -> u32 {
 impl Drop for SharedBuffer {
     fn drop(&mut self) {
         let _ = in_context(self.cuda, self.ctx, || {
+            // SAFETY: the context is current; the mapping is freed before its
+            // import is destroyed, as CUDA asks.
             unsafe {
                 (self.cuda.free)(self.ptr);
                 (self.cuda.destroy)(self.memory);

@@ -126,10 +126,12 @@ fn kernel(cuda: &Cuda, ctx: CuContext) -> Result<*mut c_void> {
     let function = in_context(cuda, ctx, || {
         let ptx = std::ffi::CString::new(PTX).expect("no NUL");
         let mut module = std::ptr::null_mut();
+        // SAFETY: the context is current; `ptx` is NUL-terminated.
         check("loading the mixing kernel", unsafe {
             (cuda.module_load_data)(&mut module, ptx.as_ptr().cast())
         })?;
         let mut function = std::ptr::null_mut();
+        // SAFETY: the context is current; the module just loaded.
         check("finding the mixing kernel", unsafe {
             (cuda.module_get_function)(&mut function, module, c"vidcut_mix".as_ptr())
         })?;
@@ -224,6 +226,8 @@ pub(crate) fn mix(
                 (&raw mut shift).cast(),
                 (&raw mut weight).cast(),
             ];
+            // SAFETY: the context is current; `params` points to the
+            // kernel's 13 parameters, in its order, alive for the call.
             check("mixing pictures", unsafe {
                 (cuda.launch_kernel)(
                     function,
