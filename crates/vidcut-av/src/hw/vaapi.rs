@@ -548,6 +548,43 @@ impl Keeper {
     }
 }
 
+/// The bytes a VA-API surface like `f`'s takes, as its DRM export says (its
+/// objects' sizes): drivers pad and tile a surface past its samples (AMD's
+/// 960×540 P010 took two fifths more). Exported once for each kind of
+/// surface: device, layout and size. `None` where it won't export.
+#[cfg(target_os = "linux")]
+pub(super) fn surface_bytes(f: &frame::Video) -> Option<usize> {
+    type Kind = (usize, ffi::AVPixelFormat, i32, i32);
+    static SIZES: Mutex<Vec<(Kind, usize)>> = Mutex::new(Vec::new());
+    let (frames, _) = frames_of(f).ok()?;
+    // SAFETY: a live VA-API frames context.
+    let kind = unsafe {
+        let fc = (*frames).data as *const ffi::AVHWFramesContext;
+        (
+            (*(*fc).device_ref).data as usize,
+            (*fc).sw_format,
+            (*fc).width,
+            (*fc).height,
+        )
+    };
+    let mut sizes = SIZES.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, bytes)) = sizes.iter().find(|(k, _)| *k == kind) {
+        return Some(*bytes);
+    }
+    let exported = DrmFrame::export(f).ok()?;
+    // SAFETY: a DRM PRIME frame's first data pointer is its descriptor,
+    // which lives as long as the mapping.
+    let bytes = unsafe {
+        let d = &*((*exported.0.as_ptr()).data[0] as *const drm::Frame);
+        let objects = d.nb_objects.clamp(0, drm::MAX_PLANES as i32) as usize;
+        d.objects[..objects].iter().map(|o| o.size).sum::<usize>()
+    };
+    (bytes > 0).then(|| {
+        sizes.push((kind, bytes));
+        bytes
+    })
+}
+
 /// The filter that shrinks VA-API's frames to `w` by `h`.
 pub(super) fn shrink_spec((w, h): (u32, u32)) -> String {
     format!("scale_vaapi=w={w}:h={h}")

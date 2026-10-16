@@ -1053,6 +1053,10 @@ impl VideoFrames {
             }
         }
         self.open = kept;
+        if moved.contains(&None) {
+            // Files closed: their decoders' memory goes back.
+            crate::buffers::give_back();
+        }
         self.reading = reading
             .into_iter()
             .map(|r| r.and_then(|s| moved[s]))
