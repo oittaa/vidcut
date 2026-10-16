@@ -62,9 +62,18 @@ impl Cells {
         self.cells = [None, None];
     }
 
-    /// Cell `i` shows `piece`, a frame of a clip of `p` alone; `speed` is
-    /// the trim's run (× real time, 0 standing still). What it shows now.
-    pub fn show(&mut self, i: usize, p: &Project, piece: &VideoPiece, speed: f64) -> Option<Shown> {
+    /// Cell `i` shows `piece`, a frame of a clip of `p` alone, at `size`
+    /// (physical pixels); `speed` is the trim's run (× real time, 0
+    /// standing still). What it shows now. A run's frames are kept at the
+    /// cell's size, the frame it stands on as decoded.
+    pub fn show(
+        &mut self,
+        i: usize,
+        p: &Project,
+        piece: &VideoPiece,
+        size: [u32; 2],
+        speed: f64,
+    ) -> Option<Shown> {
         let (plan, frame) = plan(p, piece)?;
         let format = |plan: &RenderPlan| (plan.sample_rate, plan.channels);
         if self.cells[i]
@@ -81,7 +90,7 @@ impl Cells {
                 gpu_pictures: self.gpu_pictures.clone(),
             };
             let player = Player::new(plan.clone(), config, Box::new(ManualOutput::new())).ok()?;
-            player.seek_quietly(frame);
+            player.follow(frame, 0.0);
             self.counts.asked += 1;
             self.cells[i] = Some(Cell {
                 player,
@@ -115,6 +124,7 @@ impl Cells {
             c.asked = frame;
             c.speed = speed;
         }
+        c.player.shrink_to(Some((size[0], size[1])));
         let shown = c.player.present(Instant::now());
         c.shown |= shown.as_ref().is_some_and(|s| s.exact);
         shown

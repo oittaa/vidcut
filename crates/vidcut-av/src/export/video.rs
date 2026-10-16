@@ -526,6 +526,17 @@ impl VideoFrames {
         self
     }
 
+    /// Frames as decoded come down from the GPU shrunk to fit `size` from
+    /// now on (`None`: whole, or kept there).
+    pub(crate) fn shrink_to(&mut self, size: Option<(u32, u32)>) {
+        if self.maker.shrinks() != size {
+            self.maker.shrink_to(size);
+            for s in &mut self.open {
+                s.normalized = None;
+            }
+        }
+    }
+
     /// Frames decode on `gpu` where it decodes the stream
     /// ([`VideoReader::open_gpu_or_cpu`]): the same frames, with the same
     /// timestamps and colors. Frames as decoded ([`Output::Decoded`]) are

@@ -320,8 +320,13 @@ pub(crate) struct Control {
     pub scrub: Option<(i64, u64)>,
     /// Decode on NVDEC where it can.
     pub hardware: bool,
-    /// Paused, the speed the caller moves the position at ([`Player::follow`]).
+    /// Paused, the speed the caller moves the position at, and whether it
+    /// moves it itself ([`Player::follow`]).
     pub motion: f64,
+    pub followed: bool,
+    /// Pictures other than those of a paused frame and just ahead of it
+    /// come down shrunk to fit this size ([`Player::shrink_to`]).
+    pub small: Option<(u32, u32)>,
     /// The plan played next and the frame of it to keep ready.
     pub prepared: Option<(Arc<Plan>, i64)>,
     pub closed: bool,
@@ -423,6 +428,8 @@ pub(crate) struct Snap {
     /// Decode on NVDEC where it can.
     pub hardware: bool,
     pub motion: f64,
+    pub followed: bool,
+    pub small: Option<(u32, u32)>,
     /// The plan played next and the frame of it to keep ready.
     pub prepared: Option<(Arc<Plan>, i64)>,
 }
@@ -622,6 +629,8 @@ impl Shared {
             heard,
             hardware: ctl.hardware,
             motion: ctl.motion,
+            followed: ctl.followed,
+            small: ctl.small,
             prepared: ctl.prepared.clone(),
         })
     }
@@ -787,6 +796,8 @@ impl Player {
                 scrub: None,
                 hardware: config.hardware,
                 motion: 0.0,
+                followed: false,
+                small: None,
                 prepared: None,
                 closed: false,
                 error: None,
@@ -937,7 +948,25 @@ impl Player {
         self.shared.change(true, |ctl, _, _| {
             move_to(ctl, frame, false);
             ctl.motion = speed;
+            ctl.followed = true;
         });
+    }
+
+    /// The pictures of a run and of windows behind come down from the GPU
+    /// shrunk to fit `size` (physical pixels), for a viewer that shows them
+    /// that small; a paused frame and those just ahead of it stay as
+    /// decoded. Another size forgets the shrunk ones. `None`, the default:
+    /// every picture as decoded.
+    pub fn shrink_to(&self, size: Option<(u32, u32)>) {
+        let mut ctl = self.shared.control();
+        if ctl.small == size {
+            return;
+        }
+        ctl.small = size;
+        ctl.version += 1;
+        drop(ctl);
+        self.shared.store.forget_small();
+        self.shared.changed.notify_all();
     }
 
     fn seek_with(&self, frame: i64, sound: bool) {
@@ -953,6 +982,7 @@ impl Player {
             let t = ctl.plan.clamp(pos.saturating_add(frames));
             ctl.scrub(t);
             ctl.motion = 0.0;
+            ctl.followed = false;
             ctl.mode = Mode::Paused { at: t };
         });
     }
@@ -996,6 +1026,7 @@ impl Player {
             ctl.epoch += 1;
             ctl.epoch_at = Instant::now();
             ctl.motion = 0.0;
+            ctl.followed = false;
             ctl.mode = Mode::Playing {
                 from,
                 speed,
@@ -1009,6 +1040,7 @@ impl Player {
         self.shared.change(true, |ctl, pos, _| {
             ctl.mode = Mode::Paused { at: pos };
             ctl.motion = 0.0;
+            ctl.followed = false;
         });
     }
 
@@ -1302,6 +1334,7 @@ fn replace_plan(ctl: &mut Control, plan: RenderPlan) {
 fn move_to(ctl: &mut Control, frame: i64, sound: bool) {
     let t = ctl.plan.clamp(frame);
     ctl.motion = 0.0;
+    ctl.followed = false;
     ctl.mode = match ctl.mode {
         Mode::Paused { .. } => {
             if sound {

@@ -483,8 +483,8 @@ impl Workspace {
             // The clip it names, whatever covers it on the tracks above.
             let piece = vidcut_core::render::clip_frame(p, &c.id, frame).ok();
             if let Some(piece) = piece {
-                let got = players.show(i, p, &piece, speed);
                 let size = [picture.width(), picture.height()].map(|x| (x * ppp).round() as u32);
+                let got = players.show(i, p, &piece, size, speed);
                 let texture = got
                     .as_ref()
                     .zip(self.screens.as_mut())

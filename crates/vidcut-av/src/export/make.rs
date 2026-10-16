@@ -184,6 +184,9 @@ pub(crate) struct Maker {
     stages: Vec<Stage>,
     /// The pictures being made go into a dissolve's mix.
     mixing: bool,
+    /// Frames as decoded come down shrunk on the GPU to fit this size
+    /// ([`shrink_to`](Self::shrink_to)).
+    shrink: Option<(u32, u32)>,
 }
 
 /// What makes one layer's pictures, kept from frame to frame.
@@ -227,7 +230,19 @@ impl Maker {
             output,
             stages: Vec::new(),
             mixing: false,
+            shrink: None,
         }
+    }
+
+    /// Frames as decoded come down from the GPU shrunk to fit `size` from
+    /// now on, for a display that shows them that small (`None`: whole, or
+    /// kept there). The CPU's stay as decoded.
+    pub(crate) fn shrink_to(&mut self, size: Option<(u32, u32)>) {
+        self.shrink = size;
+    }
+
+    pub(crate) fn shrinks(&self) -> Option<(u32, u32)> {
+        self.shrink
     }
 
     /// The pictures made from now on go into a dissolve's mix, or don't.
@@ -260,7 +275,8 @@ impl Maker {
         match &self.output {
             Output::Fitted => Dest::Memory,
             Output::Decoded { keep } => Dest::Display {
-                keep: crate::hw::Kind::of_frame(frame).is_some_and(|k| keep.contains(&k)),
+                keep: self.shrink.is_none()
+                    && crate::hw::Kind::of_frame(frame).is_some_and(|k| keep.contains(&k)),
             },
             Output::FittedOnGpu { place, .. } => Dest::Encoder { place: *place },
             Output::Cuda { .. } => Dest::Encoder { place: Place::Cuda },
@@ -404,8 +420,12 @@ impl Maker {
                     }
                 }
                 Route::Shrunk | Route::Whole => Some(match self.output {
-                    // Frames as decoded come down at their own size.
-                    Output::Decoded { .. } => crate::hw::download(frame)?,
+                    // Frames as decoded come down at their own size, or
+                    // shrunk for a display that shows them small.
+                    Output::Decoded { .. } => match self.shrink {
+                        Some(size) => down(&mut stage.shrinker, frame, rotation, size)?,
+                        None => crate::hw::download(frame)?,
+                    },
                     _ => down(&mut stage.shrinker, frame, rotation, (out_w, out_h))?,
                 }),
                 Route::Cpu => None,

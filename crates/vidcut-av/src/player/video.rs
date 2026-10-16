@@ -31,8 +31,10 @@ use crate::export::renderer::{at, window};
 use crate::export::video::{Layer, VideoFrames};
 use crate::ffmpeg::format;
 
-/// Frames decoded ahead of a paused viewer, when decoding on is cheap.
+/// Frames decoded ahead of a paused viewer, when decoding on is cheap; of
+/// one whose viewer moves it itself, so a run starts from kept frames.
 const PAUSED_AHEAD: i64 = 3;
+const FOLLOWED_AHEAD: i64 = 8;
 
 /// Seconds of pictures decoded ahead of the clock while playing.
 const AHEAD_SECS: f64 = 0.25;
@@ -332,7 +334,15 @@ impl Decoder {
                     .map(|t| (t, Reach::Forward))
             }
             Direction::Back => return self.window_behind(snap),
-            Direction::Paused => (focus + 1..=plan.clamp(focus + PAUSED_AHEAD))
+            Direction::Paused => (focus + 1
+                ..=plan.clamp(
+                    focus
+                        + if snap.followed {
+                            FOLLOWED_AHEAD
+                        } else {
+                            PAUSED_AHEAD
+                        },
+                ))
                 .find(|&t| missing(t))
                 .filter(|&t| self.next == Some(t))
                 .map(|t| (t, Reach::Forward)),
@@ -632,7 +642,12 @@ impl Decoder {
             };
             let kept =
                 i == t || window || (i >= snap.focus && !self.shared.store.contains(&plan.id(i)));
+            // Shrunk, but for a paused frame and those just ahead of it.
+            let whole =
+                snap.motion == 0.0 && matches!(snap.mode, Mode::Paused { .. }) && i >= snap.focus;
+            let small = snap.small.filter(|_| !whole);
             let frames = self.reader();
+            frames.shrink_to(small);
             if kept {
                 let layers = frames
                     .next_layers()?
@@ -644,9 +659,14 @@ impl Decoder {
                 if keep == Keep::Seek && seek_keeps.is_none() {
                     seek_keeps = Some(t - self.chunk() + 1);
                 }
-                self.shared.store.put(plan.id(i), Arc::new(picture));
+                let id = if small.is_some() {
+                    plan.id(i).small()
+                } else {
+                    plan.id(i)
+                };
+                self.shared.store.put(id.clone(), Arc::new(picture));
                 if i == snap.focus {
-                    self.shared.landed(snap.plan_gen, plan.id(i));
+                    self.shared.landed(snap.plan_gen, id);
                 }
             } else {
                 frames.skip_frame()?;
