@@ -38,6 +38,8 @@ pub struct Port {
     two_up: Mutex<live::stats::TwoUpStats>,
     /// What only the GUI keeps, as the last frame or task left it.
     gui: Mutex<Option<live::GuiState>>,
+    /// Threads that end the players. Joined once the window has closed.
+    closes: Arc<super::close::CloseThreads>,
 }
 
 impl Port {
@@ -84,13 +86,20 @@ impl live::Renderer for Port {
         // A window that can't paint never gets to close: presenting it can
         // block the UI thread for as long as it is hidden (NVIDIA on
         // Wayland, which has no way to show a minimized window again).
-        // Then the session ends and the process with it anyway.
+        // Then the session ends and the process with it anyway. Once the
+        // window has closed, this thread must not `process::exit`: that
+        // skips `Drop`, and the players' close threads are still running
+        // (docs/decisions/gui.md §1).
         if let Some(session) = self.session.get().cloned() {
+            let closes = self.closes.clone();
             let _ = crate::threads::spawn(
                 "vidcut-quit",
                 crate::threads::Work::Interactive,
                 move || {
                     std::thread::sleep(QUIT_PATIENCE);
+                    if !closes.window_never_closed() {
+                        return;
+                    }
                     eprintln!("vidcut: the window didn't close; quitting without it");
                     session.shutdown_and_wait(Duration::from_secs(5));
                     std::process::exit(0);
@@ -157,7 +166,8 @@ impl App {
             .clone()
             .ok_or("vidcut needs eframe's wgpu renderer")?;
         let ctx = cc.egui_ctx.clone();
-        let viewer = Viewer::start(&render, move || ctx.request_repaint());
+        let closes = Arc::new(super::close::CloseThreads::new());
+        let viewer = Viewer::start(&render, closes.clone(), move || ctx.request_repaint());
         let port = Arc::new(Port {
             ctx: cc.egui_ctx.clone(),
             viewer: viewer.handle(),
@@ -165,6 +175,7 @@ impl App {
             session: std::sync::OnceLock::new(),
             two_up: Mutex::default(),
             gui: Mutex::default(),
+            closes: closes.clone(),
         });
         let socket = crate::ipc::registry::socket_path(std::process::id());
         let create = project.as_ref().is_some_and(|p| !p.exists());
@@ -205,6 +216,7 @@ impl App {
             );
         }
         let mut ws = Workspace::new(handle);
+        ws.closes = closes;
         ws.screens = Some(super::cells::Screens::new(&render));
         let info = render.adapter.get_info();
         ws.display = Some(format!("{} ({:?})", info.name, info.backend));
@@ -322,6 +334,12 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self) {
+        // Before the session join, so `vidcut-quit` does not `process::exit`
+        // while this runs or while `Drop` joins the players' close threads.
+        // Those threads are not started yet: eframe tears the display's
+        // device down after `on_exit`, and `Drop` joins `vidcut-viewer`
+        // before the players go (docs/decisions/gui.md §1).
+        self.port.closes.mark_window_closed();
         let started = std::time::Instant::now();
         self.ws.live.shutdown();
         if let Some(t) = self.session.take() {
@@ -332,5 +350,19 @@ impl eframe::App for App {
             "the session ended in {:.0} ms",
             started.elapsed().as_secs_f64() * 1000.0
         );
+    }
+}
+
+impl Drop for App {
+    /// The window has closed and eframe has dropped its display device.
+    /// `vidcut-viewer` is joined first, so its screen and copies go before
+    /// the viewer's pictures; the two-up's players go onto their own close
+    /// thread. Both close threads are then joined, and the process exits
+    /// on its own (docs/decisions/gui.md §1).
+    fn drop(&mut self) {
+        self.port.closes.mark_window_closed();
+        self.viewer.hand_off();
+        self.ws.hand_off_two_up();
+        self.port.closes.join();
     }
 }

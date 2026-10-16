@@ -11,13 +11,13 @@ The viewer plays through the player engine on wgpu ([preview.md](preview.md)).
 
 | Thread | Owns | Never does |
 |---|---|---|
-| **UI** (eframe on wgpu) | the egui context and its window; shows the viewer's targets as textures; the two-up's two players, whose pictures it draws (preview.md §9); what only the GUI keeps: the edit point selected, the target track, the Timeline Options, the windows open | draw the viewer's picture, wait for the session |
+| **UI** (eframe on wgpu) | the egui context and its window; shows the viewer's targets as textures; the two-up's two players, whose pictures it draws (preview.md §9); what only the GUI keeps: the edit point selected, the target track, the Timeline Options, the windows open | draw the viewer's picture, wait for the session, drop a player |
 | **Viewer** (`gui/video.rs`) | presents the player's engine: draws its picture, answers presents and viewer screenshots | wait for the UI |
 | **Session** (`live`) | the open project, the player's engine, viewer/selection/clipboard state, the command log | touch the GPU |
 | **Engine** (player.md §1) | decoding, the mix, the audio device; the viewer's, and one for each cell of the two-up | touch shared state |
 | **IPC** | one listener plus one thread per connection | anything but forward requests and wait for answers |
 | **Workers** (2) | thumbnails and waveforms | touch shared state (they report back by message) |
-| **Tasks** | one thread per export job, frame render, screenshot encode or project-less request, and one each that ends the two-up's players when it closes and the viewer's when the window does | touch the session's state |
+| **Tasks** | one thread per export job, frame render, screenshot encode or project-less request, and one each that ends the two-up's players when it closes (`vidcut-two-up-close`) and the viewer's when the window does (`vidcut-viewer-close`). The UI joins those two after the window has closed | touch the session's state |
 
 **How they talk:**
 - **One inbox.** Everyone talks to the session through one `mpsc` inbox (`Handle`).
@@ -25,6 +25,8 @@ The viewer plays through the player engine on wgpu ([preview.md](preview.md)).
 - **Answers after the snapshot.** The session sends a request's answer only once the snapshot shows its result, so a client that looks right after hearing back never sees the state from before.
 - **No blocking.** The UI never blocks on the session, and the session never blocks on the UI.
 - **Repaints.** The session calls `request_repaint` when it publishes or asks the UI for something (a capture of the window, a window change), and the viewer thread when a picture it drew changed. Nothing else wakes the UI. While playing, the session publishes as the clock moves to each frame.
+
+**Quitting.** `gui.quit` stops new work and closes the window, and starts `vidcut-quit`. That thread waits 5 s. If the window has not closed, it stops the session and `process::exit`s: a hidden window can block its own paint, and nothing else will close it. The watchdog means the window didn't close. Once the window has closed, `on_exit` marks it closed and joins the session thread. That join stays the session ending. The UI thread then joins `vidcut-viewer` only (`Viewer::hand_off`): the screen, the CUDA copy buffers and the Vulkan imports are that thread's, and they go before the viewer's pictures (player.md §3). It does not drop the player. The player's `Drop` runs on `vidcut-viewer-close`. The two-up's two players' `Drop` runs on `vidcut-two-up-close`, spawned from `Cells::close` on the next paint, not inside the request that turned the two-up off. With the window closed, the UI joins those two threads and the process exits on its own. `process::exit` skips `Drop`, so the watchdog does not call it after the window has closed, including while those joins run past the rest of the 5 s. Inside each player's `Drop`, on its close thread: the decode thread, the audio thread and a followed player's windows thread are joined, the windows thread before the kept pictures are cleared (player.md §1).
 
 ## 2. One request path
 

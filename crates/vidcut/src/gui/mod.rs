@@ -6,6 +6,7 @@
 mod acquire;
 mod app;
 mod cells;
+mod close;
 pub mod export;
 mod file_manager;
 mod folders;

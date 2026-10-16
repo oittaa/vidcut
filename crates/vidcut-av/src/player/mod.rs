@@ -1417,11 +1417,15 @@ fn start_sample(plan: &Plan, t: i64, speed: f64) -> i64 {
 }
 
 impl Drop for Player {
-    /// Ends it: the decode and audio threads are joined, the kept pictures
-    /// freed and the audio output stopped. Under `VIDCUT_DEBUG` it says
-    /// how long each took, and each thread says the same of its reader's
-    /// parts: freeing GPU memory waits its turn on the GPU behind other
-    /// players ending or decoding, and the lines say which part waited.
+    /// Ends it: the decode thread, the audio thread and a followed player's
+    /// windows thread are joined, the kept pictures freed and the audio
+    /// output stopped. The windows thread is joined before the pictures
+    /// are cleared, so one it puts as it leaves is freed with them
+    /// (docs/decisions/player.md §1). Under `VIDCUT_DEBUG` it says how long
+    /// each took, and each thread says the same of its reader's parts:
+    /// freeing GPU memory waits its turn on the GPU behind other players
+    /// ending or decoding, and the lines say which part waited. The
+    /// process's CUDA device is a separate reference and is not closed.
     fn drop(&mut self) {
         let started = Instant::now();
         {
@@ -1443,13 +1447,19 @@ impl Drop for Player {
                 *j = at.elapsed();
             }
         }
-        // The windows thread isn't waited for: it may be opening a file,
-        // which no cancel flag reaches, or waiting its turn behind another
-        // player's window. Its flag is raised; it holds the shared state
-        // itself and ends when it next looks.
-        drop(lock(&self.shared.windows).take());
-        // The kept pictures go now, not once the windows thread lets the
-        // shared state go.
+        // The windows thread before the pictures are cleared, so a put as
+        // it leaves is not missed. It may be opening a file, which no
+        // cancel flag reaches, or waiting its turn behind another player's
+        // window. That wait ends: the one-window mutex is released between
+        // windows, and `closed` makes the thread leave on its next look.
+        // The mutex here is released before the join.
+        let windows_joined = if let Some(t) = lock(&self.shared.windows).take() {
+            let at = Instant::now();
+            let _ = t.join();
+            at.elapsed()
+        } else {
+            Duration::ZERO
+        };
         let (pictures, bytes) = self.shared.store.usage();
         let at = Instant::now();
         self.shared.store.clear();
@@ -1459,12 +1469,13 @@ impl Drop for Player {
         crate::debug!(
             "player",
             "player {} ended in {:.0} ms: the decode thread joined in {:.0} ms, the audio thread \
-             in {:.0} ms, {pictures} kept pictures ({} MB) freed in {:.0} ms, the audio output \
-             stopped in {:.0} ms",
+             in {:.0} ms, the windows thread in {:.0} ms, {pictures} kept pictures ({} MB) freed \
+             in {:.0} ms, the audio output stopped in {:.0} ms",
             self.shared.id,
             ms(started.elapsed()),
             ms(joins[0]),
             ms(joins[1]),
+            ms(windows_joined),
             bytes >> 20,
             ms(freed),
             ms(at.elapsed())
@@ -1543,5 +1554,62 @@ mod tests {
         let mut p = Presenter::default();
         p.missed(false, 40);
         assert_eq!(p.late, 0);
+    }
+
+    #[test]
+    fn a_windows_put_after_close_is_cleared() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::time::Duration;
+
+        let player = Player::new(
+            RenderPlan {
+                fps: Rational::new(30, 1).unwrap(),
+                width: 64,
+                height: 36,
+                sample_rate: 48_000,
+                channels: 2,
+                frames: 1,
+                video: vec![VideoPiece::Black { frames: 1 }],
+                audio: Vec::new(),
+                range: (0, 1),
+                name: "windows".into(),
+            },
+            Config {
+                audio_scrubbing: false,
+                ..Config::default()
+            },
+            Box::new(ManualOutput::new()),
+        )
+        .unwrap();
+        let shared = player.shared.clone();
+        let thread_shared = shared.clone();
+        let put = Arc::new(AtomicBool::new(false));
+        let put_flag = put.clone();
+        let handle = std::thread::Builder::new()
+            .name("vidcut-play-windows".into())
+            .spawn(move || {
+                while !super::lock(&thread_shared.control).closed {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                // Long enough that a drop which clears and detaches this
+                // thread returns before the put.
+                std::thread::sleep(Duration::from_millis(100));
+                let picture = Arc::new(super::frame::Picture::new(
+                    frame::Video::new(Pixel::YUV420P, 16, 16),
+                    0,
+                    None,
+                    None,
+                ));
+                thread_shared
+                    .store
+                    .put(super::plan::Id::at("late", 1), picture);
+                put_flag.store(true, Ordering::SeqCst);
+            })
+            .unwrap();
+        *super::lock(&player.shared.windows) = Some(handle);
+        drop(player);
+        assert!(put.load(Ordering::SeqCst));
+        assert_eq!(shared.store.usage().0, 0);
     }
 }

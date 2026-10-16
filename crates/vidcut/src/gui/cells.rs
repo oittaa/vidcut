@@ -15,6 +15,7 @@ use vidcut_av::player::{Config, ManualOutput, Picture, Player, Shown};
 use vidcut_core::model::Project;
 use vidcut_core::render::{RenderPlan, VideoPiece};
 
+use super::close::CloseThreads;
 use super::picture::{Drawn, Gpu, Screen};
 
 /// Frames the cells were asked for since the GUI started, and those they
@@ -41,15 +42,18 @@ pub struct Cells {
     gpu_pictures: Vec<Kind>,
     cells: [Option<Cell>; 2],
     counts: Counts,
+    /// Joined once the window has closed (docs/decisions/gui.md §1).
+    closes: Arc<CloseThreads>,
 }
 
 impl Cells {
-    pub fn new(ctx: egui::Context, gpu_pictures: Vec<Kind>) -> Self {
+    pub fn new(ctx: egui::Context, gpu_pictures: Vec<Kind>, closes: Arc<CloseThreads>) -> Self {
         Self {
             ctx,
             gpu_pictures,
             cells: [None, None],
             counts: Counts::default(),
+            closes,
         }
     }
 
@@ -61,14 +65,17 @@ impl Cells {
     /// a thread of their own. A player ends once its decoding stops and
     /// its reader is torn down, with the GPU's decoder and, for a 10-bit
     /// source, the converter that shrinks its pictures, which takes its
-    /// turn behind the window the other cell is still decoding. The UI
-    /// doesn't wait for that.
+    /// turn behind the window the other cell is still decoding. This
+    /// returns without waiting. The thread is joined once the window has
+    /// closed (docs/decisions/gui.md §1).
     pub fn close(&mut self) {
         if self.cells.iter().all(Option::is_none) {
             return;
         }
         let cells = std::mem::take(&mut self.cells);
-        let _ = crate::threads::spawn(
+        // Spawn failing drops the players on this thread: a thread would
+        // not start. The usual path keeps the handle and joins it later.
+        if let Ok(handle) = crate::threads::spawn(
             "vidcut-two-up-close",
             crate::threads::Work::Interactive,
             move || {
@@ -80,7 +87,9 @@ impl Cells {
                     started.elapsed().as_secs_f64() * 1000.0
                 );
             },
-        );
+        ) {
+            self.closes.push(handle);
+        }
     }
 
     /// Cell `i` shows `piece`, a frame of a clip of `p` alone, at `size`

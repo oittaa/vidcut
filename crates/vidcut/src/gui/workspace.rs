@@ -132,6 +132,9 @@ pub struct Workspace {
     /// The two-up's players (created on first use), and what draws their
     /// pictures (none without a GPU: tests).
     pub(super) cells: Option<super::cells::Cells>,
+    /// Threads that end the viewer's player and the two-up's, joined once
+    /// the window has closed.
+    pub(super) closes: Arc<super::close::CloseThreads>,
     pub(super) screens: Option<super::cells::Screens>,
     /// What the two-up showed in the frame drawn last.
     pub(super) two_up: Option<TwoUp>,
@@ -273,6 +276,7 @@ impl Workspace {
             },
             trim_editor: None,
             cells: None,
+            closes: Arc::new(super::close::CloseThreads::new()),
             screens: None,
             two_up: None,
             export: Default::default(),
@@ -288,6 +292,14 @@ impl Workspace {
             tiles: Some(super::tiles::Tiles::new(
                 &crate::preferences::load().unwrap_or_default().thumbnails,
             )),
+        }
+    }
+
+    /// The two-up's players, if it is open, go onto `vidcut-two-up-close`.
+    /// Returns without waiting for them (docs/decisions/gui.md §1).
+    pub(super) fn hand_off_two_up(&mut self) {
+        if let Some(cells) = &mut self.cells {
+            cells.close();
         }
     }
 

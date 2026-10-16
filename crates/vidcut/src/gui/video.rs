@@ -20,6 +20,7 @@ use eframe::wgpu;
 use vidcut_av::player::Player;
 use vidcut_core::Error;
 
+use super::close::CloseThreads;
 use super::picture::{Drawn, Gpu, Screen};
 use crate::live::stats::{PlayerStats, ViewerStats};
 use crate::live::{Capture, Presented};
@@ -82,6 +83,10 @@ pub struct Viewer {
     thread: Option<JoinHandle<()>>,
     /// The egui texture of the target, and the target's generation.
     texture: Option<(u64, egui::TextureId)>,
+    /// Where the player's close thread is joined, after the window closes.
+    closes: Arc<CloseThreads>,
+    /// [`Self::hand_off`] has run (the UI thread, or `Drop`).
+    handed_off: bool,
 }
 
 /// Asks things of the viewer thread from anywhere (the session's side).
@@ -95,8 +100,13 @@ const IDLE: Duration = Duration::from_millis(100);
 
 impl Viewer {
     /// Starts the viewer thread on eframe's device; `repaint` asks the UI
-    /// to show a changed picture.
-    pub fn start(render: &RenderState, repaint: impl Fn() + Send + 'static) -> Self {
+    /// to show a changed picture. `closes` joins the thread that ends the
+    /// player, after the window has closed.
+    pub fn start(
+        render: &RenderState,
+        closes: Arc<CloseThreads>,
+        repaint: impl Fn() + Send + 'static,
+    ) -> Self {
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 want: [640, 360],
@@ -136,6 +146,8 @@ impl Viewer {
             gpu_pictures,
             thread,
             texture: None,
+            closes,
+            handed_off: false,
         }
     }
 
@@ -248,15 +260,17 @@ impl Viewer {
     }
 }
 
-impl Drop for Viewer {
-    /// The window closes: the viewer thread ends, and with it the screen,
-    /// whose buffers are the display's device's. The engine shown ends on
-    /// a thread of its own (`vidcut-viewer-close`), as the two-up's
-    /// players do: it holds nothing of the display's device, its pictures
-    /// being its decoder's frames, and freeing their GPU memory waits its
-    /// turn behind the two-up's players ending. The UI doesn't wait for
-    /// that.
-    fn drop(&mut self) {
+impl Viewer {
+    /// The window is closing. Joins `vidcut-viewer` only: that thread owns
+    /// the screen, the CUDA copy buffers and the Vulkan imports, and those
+    /// go before the engine's pictures (docs/decisions/player.md §3). The
+    /// engine is then dropped on `vidcut-viewer-close`, which is joined
+    /// after the window has closed, not here (docs/decisions/gui.md §1).
+    pub(super) fn hand_off(&mut self) {
+        if self.handed_off {
+            return;
+        }
+        self.handed_off = true;
         let started = Instant::now();
         let mut engine = None;
         self.shared.change(|s| {
@@ -271,21 +285,32 @@ impl Drop for Viewer {
             "stopped in {:.0} ms",
             started.elapsed().as_secs_f64() * 1000.0
         );
-        if let Some(engine) = engine {
-            let _ = crate::threads::spawn(
-                "vidcut-viewer-close",
-                crate::threads::Work::Interactive,
-                move || {
-                    let started = Instant::now();
-                    drop(engine);
-                    vidcut_av::debug!(
-                        "viewer",
-                        "the player ended in {:.0} ms",
-                        started.elapsed().as_secs_f64() * 1000.0
-                    );
-                },
-            );
+        let Some(engine) = engine else {
+            return;
+        };
+        // Spawn failing drops the engine on this thread: a thread would
+        // not start. The usual path keeps the handle and joins it later.
+        if let Ok(handle) = crate::threads::spawn(
+            "vidcut-viewer-close",
+            crate::threads::Work::Interactive,
+            move || {
+                let started = Instant::now();
+                drop(engine);
+                vidcut_av::debug!(
+                    "viewer",
+                    "the player ended in {:.0} ms",
+                    started.elapsed().as_secs_f64() * 1000.0
+                );
+            },
+        ) {
+            self.closes.push(handle);
         }
+    }
+}
+
+impl Drop for Viewer {
+    fn drop(&mut self) {
+        self.hand_off();
     }
 }
 
@@ -428,4 +453,96 @@ fn drew(shown: Option<&vidcut_av::player::Shown>, screen: &Screen) -> String {
         p.gpu().map_or("CPU", |k| k.label()),
         p.decoder().map_or("nothing (black)", |d| d.name()),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Condvar, Mutex};
+    use std::time::{Duration, Instant};
+
+    use vidcut_av::player::{Config, ManualOutput, Player};
+    use vidcut_core::render::{RenderPlan, VideoPiece};
+    use vidcut_core::time::Rational;
+
+    use super::{CloseThreads, Shared, State, Viewer};
+
+    /// One black frame, paused. No file and no GPU.
+    fn black() -> RenderPlan {
+        RenderPlan {
+            fps: Rational::new(30, 1).unwrap(),
+            width: 64,
+            height: 36,
+            sample_rate: 48_000,
+            channels: 2,
+            frames: 1,
+            video: vec![VideoPiece::Black { frames: 1 }],
+            audio: Vec::new(),
+            range: (0, 1),
+            name: "black".into(),
+        }
+    }
+
+    #[test]
+    fn dropping_the_viewer_returns_while_its_decode_thread_is_blocked() {
+        let entered = Arc::new(AtomicBool::new(false));
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
+        let (flag, gate) = (entered.clone(), release.clone());
+        let config = Config {
+            audio_scrubbing: false,
+            on_picture: Some(Arc::new(move || {
+                flag.store(true, Ordering::SeqCst);
+                let (lock, cv) = &*gate;
+                let mut go = lock.lock().unwrap_or_else(|e| e.into_inner());
+                let start = Instant::now();
+                while !*go && start.elapsed() < Duration::from_secs(2) {
+                    let (next, wait) = cv
+                        .wait_timeout(go, Duration::from_millis(50))
+                        .unwrap_or_else(|e| e.into_inner());
+                    go = next;
+                    if wait.timed_out() && start.elapsed() >= Duration::from_secs(2) {
+                        break;
+                    }
+                }
+            })),
+            ..Config::default()
+        };
+        let player = Player::new(black(), config, Box::new(ManualOutput::new())).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !entered.load(Ordering::SeqCst) {
+            assert!(Instant::now() < deadline, "the picture never landed");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let closes = Arc::new(CloseThreads::new());
+        let viewer = Viewer {
+            shared: Arc::new(Shared {
+                state: Mutex::new(State {
+                    engine: Some(Arc::new(player)),
+                    ..State::default()
+                }),
+                wake: Condvar::new(),
+            }),
+            gpu_pictures: Vec::new(),
+            thread: None,
+            texture: None,
+            closes: closes.clone(),
+            handed_off: false,
+        };
+        let started = Instant::now();
+        drop(viewer);
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "dropping the viewer took {elapsed:?}"
+        );
+        // The close thread is still held. Detaching it would leave none.
+        assert_eq!(closes.pending(), 1);
+        {
+            let mut go = release.0.lock().unwrap_or_else(|e| e.into_inner());
+            *go = true;
+            release.1.notify_all();
+        }
+        closes.join();
+        assert_eq!(closes.pending(), 0);
+    }
 }
