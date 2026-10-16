@@ -151,6 +151,7 @@ pub(crate) unsafe fn frames_on(
     (bind_flags, misc_flags): (i32, i32),
     what: &str,
 ) -> Result<*mut ffi::AVBufferRef> {
+    let (w, h) = crate::cuda::frame_sides(w, h)?;
     // SAFETY: frames made on the device, set up as FFmpeg's D3D11 frames
     // are before they start; freed on failure.
     unsafe {
@@ -161,8 +162,8 @@ pub(crate) unsafe fn frames_on(
         let fc = (*frames).data as *mut ffi::AVHWFramesContext;
         (*fc).format = ffi::AVPixelFormat::AV_PIX_FMT_D3D11;
         (*fc).sw_format = layout;
-        (*fc).width = w as i32;
-        (*fc).height = h as i32;
+        (*fc).width = w;
+        (*fc).height = h;
         (*fc).initial_pool_size = 0;
         let hw = (*fc).hwctx as *mut FramesContext;
         (*hw).bind_flags = bind_flags as u32;
@@ -212,9 +213,13 @@ unsafe fn pooled(frames: *mut ffi::AVBufferRef) -> Result<frame::Video> {
     Ok(out)
 }
 
+/// Copies Direct3D 11's frames into textures of their own, each in frames
+/// of its own that go with the picture: a pool frees nothing while any of
+/// its frames is kept (gotchas.md).
 pub(crate) struct Keeper {
-    /// Its own frames: single textures, shareable, a pool that grows.
-    frames: *mut ffi::AVBufferRef,
+    /// The textures' size and flags: shareable.
+    size: (u32, u32),
+    flags: (i32, i32),
     /// The decoder's frames it copies out of, held so that another
     /// context can't come at their address while it is made for them.
     source: *mut ffi::AVBufferRef,
@@ -229,11 +234,8 @@ unsafe impl Send for Keeper {}
 
 impl Drop for Keeper {
     fn drop(&mut self) {
-        // SAFETY: its own references.
-        unsafe {
-            ffi::av_buffer_unref(&mut self.frames);
-            ffi::av_buffer_unref(&mut self.source);
-        }
+        // SAFETY: its own reference.
+        unsafe { ffi::av_buffer_unref(&mut self.source) };
     }
 }
 
@@ -257,11 +259,9 @@ impl Keeper {
             D3D11_BIND_SHADER_RESOURCE.0,
             D3D11_RESOURCE_MISC_SHARED.0 | D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0,
         );
-        // SAFETY: the frame's own frames context; the frames made are
-        // freed on failure.
+        // SAFETY: the frame's own frames context, on its device.
         unsafe {
-            let mut frames = own_frames(source, size, flags, "to keep")?;
-            let device = ID3D11Device::from_raw_borrowed(&(*device_of(frames)).device);
+            let device = ID3D11Device::from_raw_borrowed(&(*device_of(source)).device);
             let query = device.and_then(|d| {
                 let desc = D3D11_QUERY_DESC {
                     Query: D3D11_QUERY_EVENT,
@@ -271,16 +271,15 @@ impl Keeper {
                 d.CreateQuery(&desc, Some(&mut query)).ok().and(query)
             });
             let Some(done) = query else {
-                ffi::av_buffer_unref(&mut frames);
                 return Err(Error::Invalid("no Direct3D 11 query".into()));
             };
             let source = ffi::av_buffer_ref(source);
             if source.is_null() {
-                ffi::av_buffer_unref(&mut frames);
                 return Err(Error::Invalid("no memory for frames".into()));
             }
             Ok(Self {
-                frames,
+                size,
+                flags,
                 source,
                 done,
                 like,
@@ -292,12 +291,16 @@ impl Keeper {
     /// returns: another device reads it next, which can't wait for
     /// Direct3D 11's work.
     pub(super) fn copy(&mut self, f: &frame::Video) -> Result<frame::Video> {
-        // SAFETY: a frame from its own pool; the device's immediate
-        // context used under its lock; the textures are the frames'
-        // (array and index).
+        // SAFETY: a frame of frames of its own, which it holds the only
+        // reference of, so its texture goes with it; the device's
+        // immediate context used under its lock; the textures are the
+        // frames' (array and index).
         unsafe {
-            let mut out = pooled(self.frames)?;
-            let dev = &*device_of(self.frames);
+            let mut frames = own_frames(self.source, self.size, self.flags, "to keep")?;
+            let out = pooled(frames);
+            ffi::av_buffer_unref(&mut frames);
+            let mut out = out?;
+            let dev = &*device_of(self.source);
             let context = ID3D11DeviceContext::from_raw_borrowed(&dev.device_context)
                 .ok_or_else(|| Error::Invalid("no Direct3D 11 context".into()))?;
             let ((dst, di), (src, si)) = (texture(&out)?, texture(f)?);
@@ -942,6 +945,22 @@ mod tests {
     #[test]
     fn frames_fit_into_the_encoders_frames() {
         assert!(can_fit(&into_frames()));
+    }
+
+    #[test]
+    fn frames_reject_a_side_past_i32() {
+        // SAFETY: the size is rejected before the device pointer is used.
+        let err = unsafe {
+            frames_on(
+                std::ptr::null_mut(),
+                ffi::AVPixelFormat::AV_PIX_FMT_NV12,
+                (2_147_483_648, 480),
+                (0, 0),
+                "test",
+            )
+        }
+        .unwrap_err();
+        assert_eq!(err.to_string(), "2147483648×480 doesn't fit a frame");
     }
 
     #[test]

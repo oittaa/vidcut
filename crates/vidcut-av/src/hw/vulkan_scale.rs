@@ -51,7 +51,7 @@ fn passes(from: (u32, u32), to: (u32, u32)) -> Vec<(u32, u32)> {
 /// it went in at ([`bands_kept`]). Too small to read at `size`, or in a
 /// layout the test picture doesn't come in, the scaler isn't trusted.
 fn keeps_levels(
-    graph: &mut ffmpeg::filter::Graph,
+    graph: &mut GpuGraph,
     f: &frame::Video,
     frames: *mut ffi::AVBufferRef,
     size: (u32, u32),
