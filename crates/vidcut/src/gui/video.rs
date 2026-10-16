@@ -8,7 +8,8 @@
 //! may block that thread for as long as it stays hidden (NVIDIA on
 //! Wayland), and a seek must still show its frame and the viewer be
 //! captured. The viewer thread's submissions to the same device go on
-//! meanwhile.
+//! meanwhile, kept out of the window's surface configures
+//! ([`super::gate`]).
 
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
@@ -20,6 +21,7 @@ use eframe::wgpu;
 use vidcut_av::player::Player;
 use vidcut_core::Error;
 
+use super::gate::Gate;
 use super::picture::{Drawn, Gpu, Screen};
 use crate::live::stats::{PlayerStats, ViewerStats};
 use crate::live::{Capture, Presented};
@@ -94,9 +96,13 @@ pub struct ViewerHandle {
 const IDLE: Duration = Duration::from_millis(100);
 
 impl Viewer {
-    /// Starts the viewer thread on eframe's device; `repaint` asks the UI
-    /// to show a changed picture.
-    pub fn start(render: &RenderState, repaint: impl Fn() + Send + 'static) -> Self {
+    /// Starts the viewer thread on eframe's device, submitting through
+    /// `gate`; `repaint` asks the UI to show a changed picture.
+    pub fn start(
+        render: &RenderState,
+        gate: Arc<Gate>,
+        repaint: impl Fn() + Send + 'static,
+    ) -> Self {
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 want: [640, 360],
@@ -104,7 +110,7 @@ impl Viewer {
             }),
             wake: Condvar::new(),
         });
-        let gpu = Gpu::new(&render.device, &render.queue);
+        let gpu = Gpu::new(&render.device, &render.queue).behind(gate);
         let gpu_pictures = gpu.gpu_pictures();
         let info = render.adapter.get_info();
         let renderer = format!(
