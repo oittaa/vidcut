@@ -12,10 +12,13 @@
 #[cfg(windows)]
 pub(crate) mod d3d11;
 pub(crate) mod deinterlace;
+mod gpu_graph;
 pub mod vaapi;
 pub(crate) mod vt;
 pub mod vulkan;
 mod vulkan_scale;
+
+pub(crate) use gpu_graph::GpuGraph;
 
 use std::ptr;
 use std::sync::{Arc, Mutex};
@@ -947,69 +950,6 @@ fn same_picture(to: &mut frame::Video, from: &frame::Video) {
     }
 }
 
-/// A filter graph of frames in GPU memory, freed downstream first: each
-/// filter once the filters it feeds are gone. FFmpeg's Vulkan filters keep
-/// the frames they last read until they are freed (vulkan.c
-/// `ff_vk_exec_add_dep_frame`), but not their frames context, which the
-/// source or the filter before them holds. FFmpeg frees a graph's filters
-/// in the order they were made, sources first. Such a frame would then go
-/// back to a freed frames context, and FFmpeg would free it through that
-/// freed memory (`vulkan_frame_free`): a crash where another thread has
-/// taken the memory (gotchas.md).
-pub(crate) struct GpuGraph(ffmpeg::filter::Graph);
-
-impl GpuGraph {
-    pub(crate) fn new() -> Self {
-        Self(ffmpeg::filter::Graph::new())
-    }
-
-    /// The filter to free next: one that feeds no other, the last made of
-    /// those.
-    fn downstream_end(&mut self) -> Option<*mut ffi::AVFilterContext> {
-        // SAFETY: the graph's own list of filters, and each filter's list
-        // of its outputs, where FFmpeg clears the link to a freed filter.
-        unsafe {
-            let graph = self.0.as_mut_ptr();
-            let count = (*graph).nb_filters as usize;
-            if count == 0 {
-                return None;
-            }
-            let filters = std::slice::from_raw_parts((*graph).filters, count);
-            let feeds_none = |f: &*mut ffi::AVFilterContext| {
-                let outputs = (**f).nb_outputs as usize;
-                outputs == 0
-                    || std::slice::from_raw_parts((**f).outputs, outputs)
-                        .iter()
-                        .all(|o| o.is_null())
-            };
-            Some(filters[filters.iter().rposition(feeds_none).unwrap_or(count - 1)])
-        }
-    }
-}
-
-impl std::ops::Deref for GpuGraph {
-    type Target = ffmpeg::filter::Graph;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl std::ops::DerefMut for GpuGraph {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-impl Drop for GpuGraph {
-    fn drop(&mut self) {
-        while let Some(filter) = self.downstream_end() {
-            // SAFETY: a filter of the graph, which leaves the graph's list.
-            unsafe { ffi::avfilter_free(filter) };
-        }
-    }
-}
-
 /// A filter graph of GPU frames like `f` (format `pixel`, from `frames`)
 /// through `spec`.
 fn gpu_graph(
@@ -1035,7 +975,7 @@ fn gpu_graph(
     graph
         .add(&sink, "out", "")
         .map_err(failed("creating a GPU filter's sink".into()))?;
-    crate::parts::parse_filters(&mut graph, spec)?;
+    graph.parse_filters(spec)?;
     graph
         .validate()
         .map_err(failed(format!("configuring {spec}")))?;
@@ -1043,11 +983,7 @@ fn gpu_graph(
 }
 
 /// `f` through `graph`'s one filter: the frame it gives.
-fn run_graph(
-    graph: &mut ffmpeg::filter::Graph,
-    f: &frame::Video,
-    doing: &str,
-) -> Result<frame::Video> {
+fn run_graph(graph: &mut GpuGraph, f: &frame::Video, doing: &str) -> Result<frame::Video> {
     // The source takes the frame it is given: another reference.
     let mut given = frame::Video::empty();
     // SAFETY: both frames are valid.
@@ -1495,26 +1431,6 @@ mod tests {
             into: false,
         };
         assert!(can_fit(Place::Vulkan, &ops));
-    }
-
-    #[test]
-    fn a_gpu_graph_frees_its_filters_from_the_sink_back() {
-        let mut graph = GpuGraph::new();
-        let find = |name| ffmpeg::filter::find(name).unwrap();
-        let args = "video_size=64x64:pix_fmt=0:time_base=1/30:pixel_aspect=1/1";
-        graph.add(&find("buffer"), "in", args).unwrap();
-        graph.add(&find("buffersink"), "out", "").unwrap();
-        crate::parts::parse_filters(&mut graph, "null").unwrap();
-        let mut freed = Vec::new();
-        while let Some(filter) = graph.downstream_end() {
-            // SAFETY: a filter of the graph, freed once its kind is read.
-            unsafe {
-                let kind = std::ffi::CStr::from_ptr((*(*filter).filter).name);
-                freed.push(kind.to_string_lossy().into_owned());
-                ffi::avfilter_free(filter);
-            }
-        }
-        assert_eq!(freed, ["buffersink", "null", "buffer"]);
     }
 
     #[test]

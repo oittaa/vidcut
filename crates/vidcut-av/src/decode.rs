@@ -407,7 +407,7 @@ pub(crate) fn deinterlacing(
         "{}=mode=send_frame:parity=auto:deint=interlaced",
         deinterlacer(f.format())
     );
-    crate::parts::parse_filters(&mut graph, &spec)?;
+    graph.parse_filters(&spec)?;
     graph.validate().ctx(|| format!("configuring {spec}"))?;
     Ok(graph)
 }

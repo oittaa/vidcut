@@ -690,7 +690,7 @@ fn placebo_options(
 /// aspect `sar`. It needs to know where they are before it starts, so it is
 /// made by hand.
 pub(crate) fn add_source(
-    graph: &mut filter::Graph,
+    graph: &mut GpuGraph,
     name: &std::ffi::CStr,
     pixel: ffi::AVPixelFormat,
     (width, height): (u32, u32),
@@ -743,7 +743,7 @@ pub(crate) fn add_source(
 }
 
 /// The buffer sink `out` of `graph`.
-fn add_sink(graph: &mut filter::Graph) -> Result<()> {
+fn add_sink(graph: &mut GpuGraph) -> Result<()> {
     let sink = filter::find("buffersink").ok_or_else(|| Error::Invalid("no buffersink".into()))?;
     graph
         .add(&sink, "out", "")
@@ -752,7 +752,7 @@ fn add_sink(graph: &mut filter::Graph) -> Result<()> {
 }
 
 /// The next frame out of `graph`'s sink, if one is ready.
-fn take(graph: &mut filter::Graph, what: &str) -> Result<Option<(frame::Video, ffmpeg::Rational)>> {
+fn take(graph: &mut GpuGraph, what: &str) -> Result<Option<(frame::Video, ffmpeg::Rational)>> {
     let mut sink = graph.get("out").expect("sink");
     let mut out = frame::Video::empty();
     match sink.sink().frame(&mut out) {
@@ -916,7 +916,7 @@ impl CudaPictures {
             None,
         )?;
         add_sink(&mut graph)?;
-        crate::parts::parse_filters(&mut graph, &spec)?;
+        graph.parse_filters(&spec)?;
         graph.validate().ctx(|| format!("configuring {spec}"))?;
         Ok(Self {
             takes,
