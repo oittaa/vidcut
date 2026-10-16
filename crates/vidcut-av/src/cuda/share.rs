@@ -217,7 +217,9 @@ pub(super) fn in_context<T>(
     let result = f();
     let mut popped = std::ptr::null_mut();
     // SAFETY: the push above succeeded, so this thread has a context to
-    // pop. `popped` receives it. The status is not read.
+    // pop, and `popped` receives it. `cuCtxPopCurrent`'s status is ignored,
+    // so a failed pop leaves `ctx` current on this thread. A panic in `f`
+    // never reaches this pop.
     unsafe { (cuda.ctx_pop)(&mut popped) };
     result
 }
@@ -508,7 +510,8 @@ impl SharedBuffer {
                 (cuda.mapped_buffer)(&mut ptr, memory, &buffer)
             }) {
                 // SAFETY: the context is current. `memory` is the import that
-                // was not mapped, and this releases it. The status is not read.
+                // was not mapped. `cuDestroyExternalMemory` releases it. Its
+                // status is ignored, so a failed destroy leaks the import.
                 unsafe { (cuda.destroy)(memory) };
                 return Err(e);
             }
@@ -597,8 +600,9 @@ impl Drop for SharedBuffer {
     fn drop(&mut self) {
         let _ = in_context(self.cuda, self.ctx, || {
             // SAFETY: the context is current. `ptr` is the mapped buffer and
-            // `memory` is the import; the mapping is freed and then the import
-            // is destroyed. Neither status is read.
+            // `memory` is the import. `cuMemFree` then `cuDestroyExternalMemory`
+            // is the order CUDA asks for. Both statuses are ignored, so a
+            // failed free still destroys the import.
             unsafe {
                 (self.cuda.free)(self.ptr);
                 (self.cuda.destroy)(self.memory);

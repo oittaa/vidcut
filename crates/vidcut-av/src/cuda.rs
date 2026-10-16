@@ -237,8 +237,10 @@ impl HwFrames {
 
     /// Another reference to the same frames.
     fn share(&self) -> Self {
-        // SAFETY: `self.0` is the frames context this value holds.
-        // `av_buffer_ref` returns another reference to it, or null.
+        // SAFETY: `self.0` is this value's frames-context reference.
+        // `av_buffer_ref` returns another reference, or null when it cannot.
+        // Null is stored. Drop releases it, and `av_buffer_unref` accepts
+        // null. A later `av_hwframe_get_buffer` on that pool fails.
         Self(unsafe { ffi::av_buffer_ref(self.0) })
     }
 
@@ -1136,11 +1138,12 @@ impl Placebo {
         // libplacebo needs the Vulkan device before it starts; given none,
         // FFmpeg would convert on the CPU in front of it.
         // SAFETY: `graph` is this converter's filter graph. libplacebo is
-        // allocated on it. `hw_device_ctx` is set from `av_buffer_ref` of
-        // the device `vulkan` holds; that call returns null when the new
-        // reference cannot be taken. The filter is initialized from the
-        // options and linked to this graph's sources and sink. The options
-        // dictionary is handed over and whatever remains of it is freed.
+        // allocated on it. `av_buffer_ref` of the device `vulkan` holds
+        // returns a new reference, or null when it cannot. That null is
+        // stored in `hw_device_ctx`, and `avfilter_init_dict` still runs:
+        // with no device, FFmpeg converts on the CPU. The filter is then
+        // linked to this graph's sources and sink. The options dictionary
+        // is handed over and whatever remains of it is freed.
         unsafe {
             let ctx = ffi::avfilter_graph_alloc_filter(
                 graph.as_mut_ptr(),
@@ -1262,9 +1265,11 @@ impl Placebo {
                 frame_ref(f)
             }
         };
-        // SAFETY: `v` and `f` are frames this function holds. Properties
-        // are copied onto `v` and the result is not read; `v`'s side data
-        // is then freed. An empty side-data list is accepted.
+        // SAFETY: `v` and `f` are frames this function holds.
+        // `av_frame_copy_props` copies `f`'s properties onto `v` and returns
+        // a negative error when it cannot. That result is ignored, so `v`
+        // may lack them. Its side data is then freed. An empty list is
+        // accepted.
         unsafe {
             ffi::av_frame_copy_props(v.as_mut_ptr(), f.as_ptr());
             // No side data: the CPU converts by the tags alone. libplacebo
@@ -1341,9 +1346,10 @@ impl Placebo {
             let mut c = match &self.output {
                 Some(output) => {
                     let mut c = output.copy(&out, "copying back from Vulkan")?;
-                    // SAFETY: `c` is the new frame and `out` is the converted
-                    // one. Properties are copied onto `c`; the result is not
-                    // read.
+                    // SAFETY: `c` is the new frame and `out` is the converted one.
+                    // `av_frame_copy_props` copies `out`'s properties onto `c`
+                    // and returns a negative error when it cannot. That result
+                    // is ignored, so `c` may lack them.
                     unsafe { ffi::av_frame_copy_props(c.as_mut_ptr(), out.as_ptr()) };
                     c
                 }
@@ -1421,7 +1427,8 @@ fn as_read(sw: ffi::AVPixelFormat) -> ffi::AVPixelFormat {
 fn frame_ref(f: &frame::Video) -> frame::Video {
     let mut r = frame::Video::empty();
     // SAFETY: `r` is a fresh frame and `f` is the caller's. `av_frame_ref`
-    // is asked to make `r` a reference to `f`. The result is not read.
+    // returns a negative error and leaves `r` empty when it cannot take the
+    // reference. That result is ignored, so this returns the empty frame.
     unsafe { ffi::av_frame_ref(r.as_mut_ptr(), f.as_ptr()) };
     r
 }
