@@ -14,7 +14,8 @@
 //! stands), and a window behind the playhead, so the first steps back wait
 //! for nothing.
 
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
 use vidcut_core::render::{RenderPlan, VideoPiece, WHOLE};
@@ -23,7 +24,7 @@ use vidcut_core::time::Rational;
 use super::frame::{Over, Picture};
 use super::plan::Plan;
 use super::store::Kind;
-use super::{Busy, Decoder as Decoding, Mode, Shared, Snap};
+use super::{Busy, Decoder as Decoding, Mode, Shared, Snap, lock};
 use crate::error::{Error, Result};
 use crate::export::is_cancelled;
 use crate::export::make::Output;
@@ -126,92 +127,65 @@ struct Decoder {
     /// The window found to decode next playing backwards, by its last
     /// frame, while it waits for room.
     next_window: Option<(i64, i64)>,
-    /// A followed player's windows decode on a reader of their own, so the
-    /// reader runs forward decode on from stays where it is
-    /// ([`on_windower`](Decoder::on_windower)): that reader, the frame it
-    /// gives next, and whether it was interrupted last.
-    windower: Option<((Rational, u32, u32, bool), VideoFrames)>,
-    windower_next: Option<i64>,
-    windower_lost: bool,
+    /// It decodes a followed player's windows, on their own thread
+    /// ([`run_windows`]).
+    windows: bool,
     /// Pictures other than a paused frame's come down shrunk.
     small: bool,
+}
+
+/// Followed players' windows decode one at a time across them all.
+static WINDOW: Mutex<()> = Mutex::new(());
+
+/// Followed players moving forward now: no window decodes meanwhile.
+static FORWARD: AtomicUsize = AtomicUsize::new(0);
+
+/// The windows threads' cancel flags: a followed player that starts
+/// forward stops the window decoding.
+static WINDOW_FLAGS: Mutex<Vec<Weak<AtomicBool>>> = Mutex::new(Vec::new());
+
+/// A followed player moving forward, counted in [`FORWARD`] while set.
+#[derive(Default)]
+struct Forward(bool);
+
+impl Forward {
+    fn set(&mut self, on: bool) {
+        if on == self.0 {
+            return;
+        }
+        self.0 = on;
+        if on {
+            FORWARD.fetch_add(1, Ordering::Relaxed);
+            for flag in lock(&WINDOW_FLAGS).iter().filter_map(Weak::upgrade) {
+                flag.store(true, Ordering::Relaxed);
+            }
+        } else {
+            FORWARD.fetch_sub(1, Ordering::Relaxed);
+        }
+    }
+}
+
+impl Drop for Forward {
+    fn drop(&mut self) {
+        self.set(false);
+    }
 }
 
 pub(crate) fn run(shared: Arc<Shared>) {
     let _cancel = crate::cancel::Guard::set(shared.interrupt.clone());
     let _counting = crate::copies::Guard::set(shared.copies.clone());
     let Some(first) = shared.snap() else { return };
-    let p = &first.plan.plan;
-    let mut d = Decoder {
-        shared: shared.clone(),
-        frames: None,
-        hardware: first.hardware,
-        gpu: None,
-        picture_bytes: (p.width as usize * p.height as usize * 3).div_ceil(2),
-        picture_kind: Kind::Memory,
-        next: None,
-        plan: first.plan.clone(),
-        plan_gen: None,
-        last_focus: None,
-        back: false,
-        failed: None,
-        seek_cost: Duration::ZERO,
-        caught_up: None,
-        prepared_failed: None,
-        back_windows: Vec::new(),
-        back_low: None,
-        next_window: None,
-        windower: None,
-        windower_next: None,
-        windower_lost: false,
-        small: false,
-    };
+    let mut d = Decoder::new(shared.clone(), &first, false);
     let mut claim = crate::first::Claim::default();
+    let mut forward = Forward::default();
     while let Some(snap) = shared.snap() {
-        d.small = snap.small.is_some();
-        if d.plan_gen != Some(snap.plan_gen) {
-            d.plan = snap.plan.clone();
-            d.plan_gen = Some(snap.plan_gen);
-            // The reader keeps its file open; where it stands in the new
-            // plan is found by reading pieces of it again.
-            d.next = None;
-            d.windower_next = None;
-            // Frames of another plan say nothing of which way the viewer
-            // goes in this one (a switch to the other thing a viewer
-            // shows): no window behind until it steps back here.
-            d.last_focus = None;
-            d.back = false;
-            d.forget_windows();
+        let dir = d.take(&snap);
+        // A followed player's windows decode on a thread of their own,
+        // made when it is first followed.
+        if snap.followed {
+            start_windows(&shared);
         }
-        if d.hardware != snap.hardware {
-            // Another decoder: its pictures, from the one shown on.
-            d.hardware = snap.hardware;
-            shared.store.clear();
-            d.failed = None;
-        }
-        let dir = match snap.mode {
-            // Followed, as if playing that way.
-            Mode::Paused { .. } if snap.motion > 0.0 => Direction::Forward(snap.motion),
-            Mode::Paused { .. } if snap.motion < 0.0 => Direction::Back,
-            Mode::Paused { .. } => Direction::Paused,
-            Mode::Playing { speed, .. } if speed > 0.0 => Direction::Forward(speed),
-            Mode::Playing { .. } => Direction::Back,
-        };
-        match dir {
-            Direction::Paused => {
-                if let Some(last) = d.last_focus
-                    && snap.focus != last
-                {
-                    d.back = snap.focus < last;
-                }
-            }
-            Direction::Forward(_) => d.back = false,
-            Direction::Back => d.back = true,
-        }
-        if dir != Direction::Back {
-            d.forget_windows();
-        }
-        d.last_focus = Some(snap.focus);
+        forward.set(snap.followed && matches!(dir, Direction::Forward(_)));
         // The player comes first while it plays, and while its viewer
         // waits for a picture.
         let waits = !shared.store.contains(&snap.plan.id(snap.focus))
@@ -244,7 +218,192 @@ pub(crate) fn run(shared: Arc<Shared>) {
     }
 }
 
+/// Starts `shared`'s windows thread, once.
+fn start_windows(shared: &Arc<Shared>) {
+    let mut thread = lock(&shared.windows);
+    if thread.is_none() {
+        let s = shared.clone();
+        *thread = std::thread::Builder::new()
+            .name("vidcut-play-windows".into())
+            .spawn(move || run_windows(s))
+            .ok();
+    }
+}
+
+/// A followed player's windows thread: every window, behind it at rest and
+/// while it follows back, on a reader of its own, with a cancel flag and a
+/// busy state of its own; one window at a time across all followed
+/// players, and none while any moves forward.
+fn run_windows(shared: Arc<Shared>) {
+    let _cancel = crate::cancel::Guard::set(shared.window_interrupt.clone());
+    let _counting = crate::copies::Guard::set(shared.copies.clone());
+    {
+        let mut flags = lock(&WINDOW_FLAGS);
+        flags.retain(|f| f.strong_count() > 0);
+        flags.push(Arc::downgrade(&shared.window_interrupt));
+    }
+    let Some(first) = shared.snap_windows() else {
+        return;
+    };
+    let mut d = Decoder::new(shared.clone(), &first, true);
+    while let Some(snap) = shared.snap_windows() {
+        let dir = d.take(&snap);
+        if FORWARD.load(Ordering::Relaxed) > 0 {
+            shared.wait_change(snap.version, Duration::from_millis(10));
+            continue;
+        }
+        let result = {
+            let _one = lock(&WINDOW);
+            // Something changed, or the player closed, while it waited its
+            // turn: look again first.
+            if shared.window_interrupt.load(Ordering::Relaxed) {
+                continue;
+            }
+            d.windows_work(&snap, dir)
+        };
+        shared.set_window_busy(None);
+        match result {
+            Ok(true) => {}
+            // Another player's run ends without a change here.
+            Ok(false) => shared.wait_change(snap.version, Duration::from_millis(100)),
+            Err(e) => {
+                if !is_cancelled(&e) {
+                    crate::debug!("player", "a window failed: {e}");
+                }
+                d.lost_position();
+                shared.wait_change(snap.version, Duration::from_millis(50));
+            }
+        }
+    }
+}
+
 impl Decoder {
+    fn new(shared: Arc<Shared>, first: &Snap, windows: bool) -> Self {
+        let p = &first.plan.plan;
+        Self {
+            shared,
+            frames: None,
+            hardware: first.hardware,
+            gpu: None,
+            picture_bytes: (p.width as usize * p.height as usize * 3).div_ceil(2),
+            picture_kind: Kind::Memory,
+            next: None,
+            plan: first.plan.clone(),
+            plan_gen: None,
+            last_focus: None,
+            back: false,
+            failed: None,
+            seek_cost: Duration::ZERO,
+            caught_up: None,
+            prepared_failed: None,
+            back_windows: Vec::new(),
+            back_low: None,
+            next_window: None,
+            windows,
+            small: false,
+        }
+    }
+
+    /// Takes in what is wanted now: another plan or decoder, which way the
+    /// viewer goes. The way it goes.
+    fn take(&mut self, snap: &Snap) -> Direction {
+        self.small = snap.small.is_some();
+        if self.plan_gen != Some(snap.plan_gen) {
+            self.plan = snap.plan.clone();
+            self.plan_gen = Some(snap.plan_gen);
+            // The reader keeps its file open; where it stands in the new
+            // plan is found by reading pieces of it again.
+            self.next = None;
+            // Frames of another plan say nothing of which way the viewer
+            // goes in this one (a switch to the other thing a viewer
+            // shows): no window behind until it steps back here.
+            self.last_focus = None;
+            self.back = false;
+            self.forget_windows();
+        }
+        if self.hardware != snap.hardware {
+            // Another decoder: its pictures, from the one shown on.
+            self.hardware = snap.hardware;
+            if !self.windows {
+                self.shared.store.clear();
+            }
+            self.failed = None;
+        }
+        let dir = match snap.mode {
+            // Followed, as if playing that way.
+            Mode::Paused { .. } if snap.motion > 0.0 => Direction::Forward(snap.motion),
+            Mode::Paused { .. } if snap.motion < 0.0 => Direction::Back,
+            Mode::Paused { .. } => Direction::Paused,
+            Mode::Playing { speed, .. } if speed > 0.0 => Direction::Forward(speed),
+            Mode::Playing { .. } => Direction::Back,
+        };
+        match dir {
+            Direction::Paused => {
+                if let Some(last) = self.last_focus
+                    && snap.focus != last
+                {
+                    self.back = snap.focus < last;
+                }
+            }
+            Direction::Forward(_) => self.back = false,
+            Direction::Back => self.back = true,
+        }
+        if dir != Direction::Back {
+            self.forget_windows();
+        }
+        self.last_focus = Some(snap.focus);
+        dir
+    }
+
+    /// What this decoder is busy with: the windows thread's busy state for
+    /// its own.
+    fn busy(&self, busy: Option<Busy>) {
+        if self.windows {
+            self.shared.set_window_busy(busy);
+        } else {
+            self.shared.set_busy(busy);
+        }
+    }
+
+    /// A followed player's windows: going back, the frame it is at from
+    /// its own keyframe, then those behind; at rest, the frame stepped back
+    /// to past what is kept, then two seconds up to it. Whether there was
+    /// one.
+    fn windows_work(&mut self, snap: &Snap, dir: Direction) -> Result<bool> {
+        let plan = self.plan.clone();
+        let shared = self.shared.clone();
+        let missing = |t: i64| !shared.store.contains(&plan.id(t));
+        let focus = snap.focus;
+        match dir {
+            // Not followed, its decode thread decodes its windows.
+            _ if !snap.followed => Ok(false),
+            Direction::Forward(_) => Ok(false),
+            Direction::Back if missing(focus) => {
+                let first = self.decode_behind(snap, focus, self.windows(2).1)?;
+                self.back_windows.push((first, focus));
+                Ok(true)
+            }
+            Direction::Back => self.window_behind(snap),
+            Direction::Paused if self.back && missing(focus) => {
+                self.decode_behind(snap, focus, self.chunk())?;
+                Ok(true)
+            }
+            Direction::Paused => {
+                let (min, max) = self.windows(2);
+                let behind = (plan.clamp(focus - min + 1)..focus)
+                    .rev()
+                    .find(|&t| missing(t));
+                match behind {
+                    Some(t) => {
+                        self.decode_behind(snap, t, self.chunk().min(max))?;
+                        Ok(true)
+                    }
+                    None => Ok(false),
+                }
+            }
+        }
+    }
+
     /// Not playing backwards (or another plan): its windows say nothing.
     fn forget_windows(&mut self) {
         self.back_windows.clear();
@@ -252,39 +411,12 @@ impl Decoder {
         self.next_window = None;
     }
 
-    /// The reader stands anywhere: interrupted, or after an error. The
-    /// windower's, when it was the one.
+    /// The reader stands anywhere: interrupted, or after an error.
     fn lost_position(&mut self) {
-        if std::mem::take(&mut self.windower_lost) {
-            return;
-        }
         if let Some((_, f)) = self.frames.as_mut() {
             f.forget_position();
         }
         self.next = None;
-    }
-
-    /// Runs `f`, a window's decoding, on the windower for a followed
-    /// player, else on the reader: its windows don't move the reader runs
-    /// forward decode on from. Interrupted or failed, only the windower
-    /// forgets where it stands.
-    fn on_windower<T>(&mut self, snap: &Snap, f: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
-        if !snap.followed {
-            return f(self);
-        }
-        self.swap_windower();
-        let r = f(self);
-        if r.is_err() {
-            self.lost_position();
-            self.windower_lost = true;
-        }
-        self.swap_windower();
-        r
-    }
-
-    fn swap_windower(&mut self) {
-        std::mem::swap(&mut self.frames, &mut self.windower);
-        std::mem::swap(&mut self.next, &mut self.windower_next);
     }
 
     /// Decodes the next picture wanted; whether there was one.
@@ -307,7 +439,7 @@ impl Decoder {
             if self.failed == Some((snap.version, focus)) {
                 return Ok(false);
             }
-            self.shared.set_busy(Some(Busy::Focus));
+            self.busy(Some(Busy::Focus));
             let started = Instant::now();
             let reads_on = self.reads_on(focus);
             let target = match dir {
@@ -350,12 +482,11 @@ impl Decoder {
                 },
                 _ => Reach::Forward,
             };
-            let first = match reach {
-                Reach::Window { .. } => {
-                    self.on_windower(snap, |d| d.decode(snap, target, reach))?
-                }
-                _ => self.decode(snap, target, reach)?,
-            };
+            // A followed player's windows are its windows thread's.
+            if snap.followed && matches!(reach, Reach::Window { .. }) {
+                return Ok(false);
+            }
+            let first = self.decode(snap, target, reach)?;
             if dir == Direction::Back {
                 self.back_windows.push((first, target));
             }
@@ -369,7 +500,7 @@ impl Decoder {
             }
             return Ok(true);
         }
-        self.shared.set_busy(Some(Busy::Ahead));
+        self.busy(Some(Busy::Ahead));
         let fps = plan.fps().as_f64();
         let wanted = match dir {
             Direction::Forward(speed) => {
@@ -380,7 +511,8 @@ impl Decoder {
                     .find(|&t| missing(t))
                     .map(|t| (t, Reach::Forward))
             }
-            Direction::Back => return self.on_windower(snap, |d| d.window_behind(snap)),
+            Direction::Back if snap.followed => return Ok(false),
+            Direction::Back => return self.window_behind(snap),
             Direction::Paused => (focus + 1
                 ..=plan.clamp(
                     focus
@@ -415,9 +547,8 @@ impl Decoder {
         if !self.back && self.prepare(snap)? {
             return Ok(true);
         }
-        if let Some(t) = behind {
-            let chunk = self.chunk().min(max);
-            self.on_windower(snap, |d| d.decode_behind(snap, t, chunk))?;
+        if let Some(t) = behind.filter(|_| !snap.followed) {
+            self.decode_behind(snap, t, self.chunk().min(max))?;
             return Ok(true);
         }
         if self.back {
@@ -482,6 +613,11 @@ impl Decoder {
             "window {first}..={next} behind, {behind} waiting there"
         );
         store.touch((low..=focus).map(|t| plan.id(t)));
+        self.busy(Some(Busy::Window {
+            from: first,
+            to: next,
+            plan_gen: snap.plan_gen,
+        }));
         self.decode_from(snap, Some(first), next, Keep::Window)?;
         self.back_windows.push((first, next));
         Ok(true)
@@ -489,20 +625,23 @@ impl Decoder {
 
     /// Decodes a window behind the playhead up to `t`: from `t`'s
     /// keyframe, at most `max` frames. The viewer stepping back into it
-    /// waits for it (`Busy::Window`) rather than start it again.
-    fn decode_behind(&mut self, snap: &Snap, t: i64, max: i64) -> Result<()> {
+    /// waits for it (`Busy::Window`) rather than start it again. Its first
+    /// frame.
+    fn decode_behind(&mut self, snap: &Snap, t: i64, max: i64) -> Result<i64> {
         self.reader();
         let from = if self.reads_on(t) {
             None
         } else {
             Some(self.window_start(t, 1, max)?)
         };
-        self.shared.set_busy(Some(Busy::Window {
-            from: from.or(self.next).unwrap_or(t),
+        let first = from.or(self.next).unwrap_or(t);
+        self.busy(Some(Busy::Window {
+            from: first,
             to: t,
             plan_gen: snap.plan_gen,
         }));
-        self.decode_from(snap, from, t, Keep::Window)
+        self.decode_from(snap, from, t, Keep::Window)?;
+        Ok(first)
     }
 
     /// Decodes the prepared frame of the plan played next, when it isn't
@@ -692,8 +831,11 @@ impl Decoder {
                 Keep::Window => true,
                 Keep::Seek => seek_keeps.is_none_or(|from| i >= from),
             };
-            let kept =
-                i == t || window || (i >= snap.focus && !self.shared.store.contains(&plan.id(i)));
+            // A followed player keeps every frame it decodes: catching up
+            // leaves no holes for a run back.
+            let kept = i == t
+                || window
+                || ((i >= snap.focus || snap.followed) && !self.shared.store.contains(&plan.id(i)));
             // Shrunk, but for a paused frame and those just ahead of it.
             let whole =
                 snap.motion == 0.0 && matches!(snap.mode, Mode::Paused { .. }) && i >= snap.focus;
