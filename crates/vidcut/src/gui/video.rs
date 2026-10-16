@@ -249,11 +249,19 @@ impl Viewer {
 }
 
 impl Drop for Viewer {
+    /// The window closes: the viewer thread ends, and with it the screen,
+    /// whose buffers are the display's device's. The engine shown ends on
+    /// a thread of its own (`vidcut-viewer-close`), as the two-up's
+    /// players do: it holds nothing of the display's device, its pictures
+    /// being its decoder's frames, and freeing their GPU memory waits its
+    /// turn behind the two-up's players ending. The UI doesn't wait for
+    /// that.
     fn drop(&mut self) {
         let started = Instant::now();
+        let mut engine = None;
         self.shared.change(|s| {
             s.stop = true;
-            s.engine = None;
+            engine = s.engine.take();
         });
         if let Some(t) = self.thread.take() {
             let _ = t.join();
@@ -263,6 +271,21 @@ impl Drop for Viewer {
             "stopped in {:.0} ms",
             started.elapsed().as_secs_f64() * 1000.0
         );
+        if let Some(engine) = engine {
+            let _ = crate::threads::spawn(
+                "vidcut-viewer-close",
+                crate::threads::Work::Interactive,
+                move || {
+                    let started = Instant::now();
+                    drop(engine);
+                    vidcut_av::debug!(
+                        "viewer",
+                        "the player ended in {:.0} ms",
+                        started.elapsed().as_secs_f64() * 1000.0
+                    );
+                },
+            );
+        }
     }
 }
 

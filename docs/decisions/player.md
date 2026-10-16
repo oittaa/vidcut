@@ -21,6 +21,8 @@ The GUI's viewer plays through it, one engine for the source and the timeline ([
 
 vidcut-av starts them as it starts its other threads (`std::thread::Builder`, named `vidcut-…`). Someone watches what they make, so they keep their priority: the app's own rule (`threads::spawn`, gui.md §9) gives interactive work no other.
 
+**Ending.** Dropping a player joins the decode and audio threads, frees the kept pictures and stops the output; a followed player's windows thread isn't waited for. Each thread's reader goes with it: the GPU's converters first, then the open files with their decoders, then the GPU's decoder. Freeing GPU memory waits its turn on the GPU behind other players ending or decoding, so under `VIDCUT_DEBUG` the player says how long each of these took.
+
 **The player comes first** (`vidcut_av::first`). While a player plays, or decodes the picture its viewer waits for, the app's jobs stop decoding between frames: exports, proxies, filmstrips, pool pictures and analyses. They go on when it stops (`tests/first.rs`). They share the GPU's decoder with the player, and no thread priority reaches that. The GUI's two-up is two players more (preview.md §9).
 
 ## 2. Requests: one wanted state, merged and cancelled

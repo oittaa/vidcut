@@ -245,6 +245,12 @@ impl Maker {
         self.shrink
     }
 
+    /// Lets the stages go, the GPU's shrinkers, keepers and fitters among
+    /// them. They are made anew as frames come.
+    pub(crate) fn clear_stages(&mut self) {
+        self.stages.clear();
+    }
+
     /// The pictures made from now on go into a dissolve's mix, or don't.
     pub(crate) fn set_mixing(&mut self, mixing: bool) {
         self.mixing = mixing;
