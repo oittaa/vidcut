@@ -193,6 +193,49 @@ unsafe fn intel_va(_: &frame::Video) -> Option<usize> {
     None
 }
 
+/// A pool VA-API's decoders share ([`share_frames`]): what it is for, and
+/// the frames.
+#[cfg(target_os = "linux")]
+struct Shared {
+    device: usize,
+    codec: ffi::AVCodecID,
+    layout: ffi::AVPixelFormat,
+    size: (i32, i32),
+    frames: *mut ffi::AVBufferRef,
+}
+// SAFETY: frames contexts are reference-counted and may be used on any
+// thread.
+#[cfg(target_os = "linux")]
+unsafe impl Send for Shared {}
+
+/// The pools VA-API's decoders share.
+#[cfg(target_os = "linux")]
+static SHARED: Mutex<Vec<Shared>> = Mutex::new(Vec::new());
+
+/// Lets the shared pools go that nothing else holds: no decoder takes from
+/// them, and no frame of theirs is left. Each frees all its surfaces.
+#[cfg(target_os = "linux")]
+fn let_unused_go(shared: &mut Vec<Shared>) {
+    shared.retain_mut(|s| {
+        // SAFETY: the pool's own reference.
+        unsafe {
+            let unused = ffi::av_buffer_get_ref_count(s.frames) == 1;
+            if unused {
+                ffi::av_buffer_unref(&mut s.frames);
+            }
+            !unused
+        }
+    });
+}
+
+/// Lets the shared pools go that nothing uses any more ([`let_unused_go`]),
+/// as pictures are kept: a pool goes soon after its last picture does, not
+/// when the next decoder opens.
+#[cfg(target_os = "linux")]
+pub(crate) fn let_unused_frames_go() {
+    let_unused_go(&mut SHARED.lock().unwrap_or_else(|e| e.into_inner()));
+}
+
 /// Gives a VA-API decoder, in its `get_format`, the frames every decoder on
 /// its device shares for its codec, layout and size. A decoder's frames come
 /// from a pool that frees nothing while any of its frames is kept
@@ -206,18 +249,6 @@ unsafe fn intel_va(_: &frame::Video) -> Option<usize> {
 /// `ctx` is a decoder on a VA-API device, in its `get_format`.
 #[cfg(target_os = "linux")]
 pub(crate) unsafe fn share_frames(ctx: *mut ffi::AVCodecContext) {
-    /// A shared pool: what it is for, and the frames.
-    struct Shared {
-        device: usize,
-        codec: ffi::AVCodecID,
-        layout: ffi::AVPixelFormat,
-        size: (i32, i32),
-        frames: *mut ffi::AVBufferRef,
-    }
-    // SAFETY: frames contexts are reference-counted and may be used on any
-    // thread.
-    unsafe impl Send for Shared {}
-    static SHARED: Mutex<Vec<Shared>> = Mutex::new(Vec::new());
     // SAFETY: the decoder's own device; the frames FFmpeg describes for it
     // are ours until set up or let go, and a shared one is given by a
     // reference of its own.
@@ -244,15 +275,7 @@ pub(crate) unsafe fn share_frames(ctx: *mut ffi::AVCodecContext) {
             ((*fc).width, (*fc).height),
         );
         let mut shared = SHARED.lock().unwrap_or_else(|e| e.into_inner());
-        // Pools nothing else holds go: no decoder takes from them, and no
-        // frame of theirs is left.
-        shared.retain_mut(|s| {
-            let unused = ffi::av_buffer_get_ref_count(s.frames) == 1;
-            if unused {
-                ffi::av_buffer_unref(&mut s.frames);
-            }
-            !unused
-        });
+        let_unused_go(&mut shared);
         let found = shared.iter().find(|s| {
             s.device == device && s.codec == codec && s.layout == layout && s.size == size
         });
@@ -278,6 +301,232 @@ pub(crate) unsafe fn share_frames(ctx: *mut ffi::AVCodecContext) {
         };
         ffi::av_buffer_unref(&mut (*ctx).hw_frames_ctx);
         (*ctx).hw_frames_ctx = ffi::av_buffer_ref(pool);
+    }
+}
+
+/// VA-API's kept frames copied into surfaces of their own by the driver's
+/// `vaCopy`, where it has one (Intel's: an exact copy): freed with the
+/// picture, where a shared pool keeps its peak while any of its frames is
+/// kept. Where the driver has none (Mesa's, gotchas.md), frames are kept
+/// as they come, from the shared pool ([`share_frames`]). Each copy runs
+/// while the next frame decodes: the frame it reads, and the copy, are held
+/// until the next is kept, and waited for then, so the decoder doesn't
+/// decode into a surface the copy still reads.
+#[cfg(target_os = "linux")]
+pub(crate) struct Keeper {
+    va: &'static Va,
+    display: *mut std::ffi::c_void,
+    /// The decoder's device.
+    device: *mut ffi::AVBufferRef,
+    like: Like,
+    /// The frame the last copy reads, and the copy.
+    pending: Option<(frame::Video, frame::Video)>,
+}
+
+// SAFETY: libva's display may be used from any thread, and the device and
+// frames are reference-counted.
+#[cfg(target_os = "linux")]
+unsafe impl Send for Keeper {}
+
+#[cfg(target_os = "linux")]
+impl Drop for Keeper {
+    fn drop(&mut self) {
+        self.settle();
+        // SAFETY: its own reference.
+        unsafe { ffi::av_buffer_unref(&mut self.device) };
+    }
+}
+
+/// What a keeper is made for: the decoder's device, and its frames' layout
+/// and size (their surfaces', which a copy's must be).
+#[cfg(target_os = "linux")]
+type Like = (usize, format::Pixel, i32, i32);
+
+/// `VACopyObject` for a surface.
+#[cfg(target_os = "linux")]
+#[repr(C)]
+struct CopyObject {
+    /// `VACopyObjectSurface`.
+    kind: u32,
+    surface: u32,
+    va_reserved: [u32; 8],
+}
+
+/// libva's calls the keeper makes, as `va.h` declares them: libva's, loaded
+/// with FFmpeg, looked up rather than linked, so a build of FFmpeg without
+/// VA-API needs no libva. `vaCopy` came with libva 2.12.
+#[cfg(target_os = "linux")]
+struct Va {
+    copy: CopyFn,
+    sync_surface: SyncFn,
+}
+
+#[cfg(target_os = "linux")]
+type CopyFn =
+    unsafe extern "C" fn(*mut std::ffi::c_void, *mut CopyObject, *mut CopyObject, u32) -> i32;
+#[cfg(target_os = "linux")]
+type SyncFn = unsafe extern "C" fn(*mut std::ffi::c_void, u32) -> i32;
+
+/// `VACopyOption` with `va_copy_sync` `VA_EXEC_ASYNC`: the call returns
+/// once the copy is queued.
+#[cfg(target_os = "linux")]
+const COPY_ASYNC: u32 = 1;
+
+/// `VA_STATUS_ERROR_UNIMPLEMENTED`: a driver without `vaCopy`.
+#[cfg(target_os = "linux")]
+const UNIMPLEMENTED: i32 = 0x14;
+
+/// The displays whose driver has no `vaCopy`.
+#[cfg(target_os = "linux")]
+static NO_COPY: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+
+#[cfg(target_os = "linux")]
+impl Va {
+    fn get() -> Option<&'static Va> {
+        static VA: std::sync::OnceLock<Option<Va>> = std::sync::OnceLock::new();
+        VA.get_or_init(|| {
+            // SAFETY: the process's symbols, libva's functions or nothing,
+            // taken as `va.h` declares them.
+            unsafe {
+                let copy = libc::dlsym(libc::RTLD_DEFAULT, c"vaCopy".as_ptr());
+                let sync = libc::dlsym(libc::RTLD_DEFAULT, c"vaSyncSurface".as_ptr());
+                (!copy.is_null() && !sync.is_null()).then(|| Va {
+                    copy: std::mem::transmute::<*mut std::ffi::c_void, CopyFn>(copy),
+                    sync_surface: std::mem::transmute::<*mut std::ffi::c_void, SyncFn>(sync),
+                })
+            }
+        })
+        .as_ref()
+    }
+}
+
+/// `f`'s VA-API surface.
+#[cfg(target_os = "linux")]
+fn surface(f: &frame::Video) -> u32 {
+    // SAFETY: a VA-API frame's surface is in its fourth data pointer.
+    unsafe { (*f.as_ptr()).data[3] as usize as u32 }
+}
+
+/// The device reference of `f`'s frames, its display, and what a keeper
+/// for it is made for.
+#[cfg(target_os = "linux")]
+fn like_of(f: &frame::Video) -> Result<(*mut ffi::AVBufferRef, *mut std::ffi::c_void, Like)> {
+    let (frames, _) = frames_of(f)?;
+    // SAFETY: a live VA-API frames context; its device's context is an
+    // AVVAAPIDeviceContext, its display first.
+    unsafe {
+        let fc = (*frames).data as *const ffi::AVHWFramesContext;
+        let device = (*fc).device_ref;
+        let display = *((*(*fc).device_ctx).hwctx as *const *mut std::ffi::c_void);
+        let like = (
+            (*device).data as usize,
+            format::Pixel::from((*fc).sw_format),
+            (*fc).width,
+            (*fc).height,
+        );
+        Ok((device, display, like))
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Keeper {
+    /// A keeper for frames like `f`, a VA-API frame; `None` where its
+    /// driver has no `vaCopy`, and its frames are kept as they come.
+    pub(crate) fn new(f: &frame::Video) -> Result<Option<Self>> {
+        let (device, display, like) = like_of(f)?;
+        let copies = !NO_COPY
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&(display as usize));
+        let Some(va) = Va::get().filter(|_| copies) else {
+            return Ok(None);
+        };
+        // SAFETY: a live device reference.
+        let device = unsafe { ffi::av_buffer_ref(device) };
+        if device.is_null() {
+            return Err(Error::Invalid("no memory for a device reference".into()));
+        }
+        Ok(Some(Self {
+            va,
+            display,
+            device,
+            like,
+            pending: None,
+        }))
+    }
+
+    /// Whether it keeps frames like `f`.
+    pub(crate) fn is_for(&self, f: &frame::Video) -> bool {
+        like_of(f).is_ok_and(|(_, _, like)| like == self.like)
+    }
+
+    /// Waits for the copy before, and lets go of the frame it read.
+    fn settle(&mut self) {
+        if let Some((_, copy)) = self.pending.take() {
+            // SAFETY: the copy's surface, held until now.
+            unsafe { (self.va.sync_surface)(self.display, surface(&copy)) };
+        }
+    }
+
+    /// `f`'s picture in a surface of its own, copied by the driver while
+    /// the next frame decodes; `None` where the driver has no `vaCopy`.
+    /// Its properties are the caller's to copy.
+    pub(crate) fn copy(&mut self, f: &frame::Video) -> Result<Option<frame::Video>> {
+        self.settle();
+        let mut out = frame::Video::empty();
+        // SAFETY: frames of one surface on the decoder's device, in its
+        // frames' layout and size; the frame taken from them holds the only
+        // reference left, so the surface goes with it.
+        unsafe {
+            let mut frames = ffi::av_hwframe_ctx_alloc(self.device);
+            if frames.is_null() {
+                return Err(Error::Invalid("no memory for frames".into()));
+            }
+            let fc = (*frames).data as *mut ffi::AVHWFramesContext;
+            (*fc).format = ffi::AVPixelFormat::AV_PIX_FMT_VAAPI;
+            (*fc).sw_format = self.like.1.into();
+            (*fc).width = self.like.2;
+            (*fc).height = self.like.3;
+            (*fc).initial_pool_size = 1;
+            let mut ret = ffi::av_hwframe_ctx_init(frames);
+            if ret >= 0 {
+                ret = ffi::av_hwframe_get_buffer(frames, out.as_mut_ptr(), 0);
+            }
+            ffi::av_buffer_unref(&mut frames);
+            if ret < 0 {
+                return Err(Error::Ffmpeg {
+                    context: "making a VA-API surface to keep".into(),
+                    source: ffmpeg::Error::from(ret),
+                });
+            }
+            (*out.as_mut_ptr()).width = f.width() as i32;
+            (*out.as_mut_ptr()).height = f.height() as i32;
+        }
+        let object = |f: &frame::Video| CopyObject {
+            kind: 0,
+            surface: surface(f),
+            va_reserved: [0; 8],
+        };
+        let (mut to, mut from) = (object(&out), object(f));
+        // SAFETY: two surfaces of the display, of one layout and size.
+        let status = unsafe { (self.va.copy)(self.display, &mut to, &mut from, COPY_ASYNC) };
+        if status == UNIMPLEMENTED {
+            NO_COPY
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(self.display as usize);
+            return Ok(None);
+        }
+        if status != 0 {
+            return Err(Error::Invalid(format!(
+                "VA-API: copying a kept frame failed (status {status})"
+            )));
+        }
+        self.pending = Some((
+            crate::export::video::frame_ref(f)?,
+            crate::export::video::frame_ref(&out)?,
+        ));
+        Ok(Some(out))
     }
 }
 
@@ -431,6 +680,12 @@ impl DrmFrame {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_copy_object_is_laid_out_as_va_h_has_it() {
+        assert_eq!(std::mem::size_of::<CopyObject>(), 40);
+    }
     use crate::route::Ops;
 
     /// An upright frame into NV12 pictures in its own colors.

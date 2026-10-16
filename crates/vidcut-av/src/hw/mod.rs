@@ -901,13 +901,18 @@ fn props(dst: &mut frame::Video, src: &frame::Video) -> Result<()> {
 /// surfaces: Direct3D 11's are copied into textures of their own that
 /// another device can open (Windows). NVDEC's, which FFmpeg copies out of
 /// its surfaces into the decoder's pool, are copied on into memory of
-/// their own, so kept pictures don't hold that pool (`cuda::keep`).
-/// VA-API's, VideoToolbox's and Vulkan's pools grow as they need. Vulkan's
-/// are kept once decoded ([`vulkan::keep`]).
+/// their own, so kept pictures don't hold that pool (`cuda::keep`), and
+/// VA-API's into surfaces of their own by the driver's `vaCopy` where it
+/// has one ([`vaapi::Keeper`]). VideoToolbox's and Vulkan's pools grow as
+/// they need. Vulkan's are kept once decoded ([`vulkan::keep`]).
 pub(crate) enum Keeper {
     /// `None` where CUDA has no stream-ordered allocator: kept as FFmpeg
     /// gives them.
     Nvdec(Option<crate::cuda::keep::Keeper>),
+    /// `None` where the driver has no `vaCopy`: kept as they come, from
+    /// the pool the decoders share.
+    #[cfg(target_os = "linux")]
+    Vaapi(Option<vaapi::Keeper>),
     #[cfg(windows)]
     D3d11(d3d11::Keeper),
 }
@@ -948,7 +953,32 @@ impl Keeper {
                 props(&mut kept, f)?;
                 Ok(kept)
             }
-            Some(Kind::Vaapi | Kind::VideoToolbox) => crate::export::video::frame_ref(f),
+            #[cfg(target_os = "linux")]
+            Some(Kind::Vaapi) => {
+                vaapi::let_unused_frames_go();
+                let made = matches!(keeper, Some(Keeper::Vaapi(k))
+                    if k.as_ref().is_none_or(|k| k.is_for(f)));
+                if !made {
+                    *keeper = Some(Keeper::Vaapi(vaapi::Keeper::new(f)?));
+                }
+                let Some(Keeper::Vaapi(Some(k))) = keeper else {
+                    return crate::export::video::frame_ref(f);
+                };
+                match k.copy(f)? {
+                    Some(mut kept) => {
+                        props(&mut kept, f)?;
+                        Ok(kept)
+                    }
+                    None => {
+                        *keeper = Some(Keeper::Vaapi(None));
+                        crate::export::video::frame_ref(f)
+                    }
+                }
+            }
+            // VA-API is Linux's.
+            #[cfg(not(target_os = "linux"))]
+            Some(Kind::Vaapi) => crate::export::video::frame_ref(f),
+            Some(Kind::VideoToolbox) => crate::export::video::frame_ref(f),
             Some(Kind::Vulkan) => vulkan::keep(f),
             #[cfg(windows)]
             Some(Kind::D3d11va) => {
