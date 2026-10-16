@@ -260,6 +260,32 @@ pub(super) unsafe fn cuda_context(device: *mut ffi::AVBufferRef) -> (CuContext, 
     }
 }
 
+/// The context [`in_context`] pushed onto this thread. Dropped, it pops
+/// that context, including when the work panics.
+struct PushedContext {
+    pop: unsafe extern "C" fn(*mut CuContext) -> CuResult,
+}
+
+impl PushedContext {
+    /// Pops the context, with CUDA's status.
+    fn leave(self) -> Result<()> {
+        let mut popped = std::ptr::null_mut();
+        // SAFETY: as in `drop`, which the guard then skips: it pops once.
+        let status = unsafe { (self.pop)(&mut popped) };
+        std::mem::forget(self);
+        check("leaving the context", status)
+    }
+}
+
+impl Drop for PushedContext {
+    fn drop(&mut self) {
+        let mut popped = std::ptr::null_mut();
+        // SAFETY: `pop` is `cuCtxPopCurrent_v2`, and this thread has that
+        // context pushed: `in_context` pushes before the guard exists.
+        unsafe { (self.pop)(&mut popped) };
+    }
+}
+
 /// Runs `f` with `ctx` current on this thread.
 pub(super) fn in_context<T>(
     cuda: &Cuda,
@@ -270,15 +296,9 @@ pub(super) fn in_context<T>(
     check("making the context current", unsafe {
         (cuda.ctx_push)(ctx)
     })?;
+    let current = PushedContext { pop: cuda.ctx_pop };
     let result = f();
-    let mut popped = std::ptr::null_mut();
-    both(
-        result,
-        // SAFETY: pops the context pushed above.
-        check("leaving the context", unsafe {
-            (cuda.ctx_pop)(&mut popped)
-        }),
-    )
+    both(result, current.leave())
 }
 
 impl CudaDevice {
@@ -477,6 +497,17 @@ pub(crate) unsafe extern "C" fn destroy_stream(device: *mut ffi::AVHWDeviceConte
     }));
 }
 
+/// `n` as a copy's length. A value `usize` can't hold is rejected.
+fn copy_len(n: u64) -> Result<usize> {
+    usize::try_from(n).map_err(|_| Error::Invalid(format!("{n} doesn't fit a copy")))
+}
+
+/// A source stride as a copy's length. A negative stride is rejected.
+fn source_pitch(pitch: i32) -> Result<usize> {
+    usize::try_from(pitch)
+        .map_err(|_| Error::Invalid(format!("a picture stride of {pitch} doesn't fit")))
+}
+
 /// Memory a display's Vulkan device exported, as CUDA sees it: pictures
 /// NVDEC decoded are copied into it on the GPU.
 pub struct SharedBuffer {
@@ -613,14 +644,18 @@ impl SharedBuffer {
                 if src.is_null() || pitch < 0 || (pitch as u64) < p.row_bytes {
                     return Err(Error::Invalid(format!("the picture has no plane {i}")));
                 }
+                let src_pitch = source_pitch(pitch)?;
+                let dst_pitch = copy_len(p.pitch)?;
+                let row_bytes = copy_len(p.row_bytes)?;
+                let rows = copy_len(p.rows)?;
                 // On FFmpeg's stream: after NVDEC's own copy into the frame.
                 // SAFETY: the context is current; the frame's plane, into the
                 // buffer as checked above.
                 check("copying a plane", unsafe {
                     self.cuda.copy_rows(
-                        (src as CuDevicePtr, pitch as usize),
-                        (self.ptr + p.offset, p.pitch as usize),
-                        (p.row_bytes as usize, p.rows as usize),
+                        (src as CuDevicePtr, src_pitch),
+                        (self.ptr + p.offset, dst_pitch),
+                        (row_bytes, rows),
                         self.stream,
                     )
                 })?;
@@ -652,7 +687,33 @@ impl Drop for SharedBuffer {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     use super::*;
+
+    thread_local! {
+        static POPS: Cell<u32> = const { Cell::new(0) };
+    }
+
+    unsafe extern "C" fn count_pop(_: *mut CuContext) -> CuResult {
+        POPS.with(|n| n.set(n.get() + 1));
+        0
+    }
+
+    #[test]
+    fn a_panic_pops_the_context() {
+        POPS.with(|n| n.set(0));
+        let caught = std::panic::catch_unwind(|| {
+            let _current = PushedContext { pop: count_pop };
+            panic!("while the context is current");
+        });
+        let message = caught.expect_err("the work panics");
+        assert_eq!(
+            message.downcast_ref::<&str>().copied(),
+            Some("while the context is current")
+        );
+        assert_eq!(POPS.with(Cell::get), 1);
+    }
 
     #[test]
     fn the_structs_are_laid_out_as_cuda_h_has_them() {
@@ -700,5 +761,29 @@ mod tests {
             both(work, next).unwrap_err().to_string(),
             "CUDA: mapping shared memory failed (error 2); CUDA: destroying shared memory failed (error 3)"
         );
+    }
+
+    #[test]
+    fn a_negative_source_pitch_doesnt_fit() {
+        let err = source_pitch(-1).unwrap_err();
+        assert_eq!(err.to_string(), "a picture stride of -1 doesn't fit");
+    }
+
+    #[test]
+    fn the_largest_source_pitch_fits() {
+        assert_eq!(source_pitch(i32::MAX).unwrap(), 2_147_483_647);
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn a_copy_length_holds_every_u64() {
+        assert_eq!(copy_len(u64::MAX).unwrap(), usize::MAX);
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    fn a_copy_length_past_usize_doesnt_fit() {
+        let err = copy_len(4_294_967_296).unwrap_err();
+        assert_eq!(err.to_string(), "4294967296 doesn't fit a copy");
     }
 }
