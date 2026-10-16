@@ -83,10 +83,12 @@ impl Keeper {
         let (ctx, _) = unsafe { cuda_context(device) };
         let pools = in_context(cuda, ctx, || {
             let mut ordinal = 0;
+            // SAFETY: the context is current; the ordinal goes into `ordinal`.
             check("finding the device", unsafe {
                 (cuda.ctx_get_device)(&mut ordinal)
             })?;
             let mut pools = 0;
+            // SAFETY: the ordinal just read; the answer goes into `pools`.
             check("asking for memory pools", unsafe {
                 (cuda.device_get_attribute)(&mut pools, MEMORY_POOLS_SUPPORTED, ordinal)
             })?;
@@ -166,9 +168,11 @@ impl Keeper {
         // SAFETY: its frames context's device, a CUDA device.
         let device =
             unsafe { (*((*self.frames).data as *const ffi::AVHWFramesContext)).device_ref };
+        // SAFETY: a CUDA device, as `cuda_context` asks.
         let (ctx, stream) = unsafe { cuda_context(device) };
         let ptr = in_context(cuda, ctx, || {
             let mut ptr: CuDevicePtr = 0;
+            // SAFETY: the context is current; the memory goes into `ptr`.
             check("allocating a kept picture", unsafe {
                 alloc(&mut ptr, bytes, stream)
             })?;
@@ -248,6 +252,7 @@ unsafe extern "C" fn release(opaque: *mut c_void, data: *mut u8) {
         // SAFETY: a CUDA device, and memory allocated on its stream.
         let (ctx, stream) = unsafe { cuda_context(device) };
         let _ = in_context(cuda, ctx, || {
+            // SAFETY: the context is current; memory allocated on `stream`.
             check("freeing a kept picture", unsafe {
                 free(data as CuDevicePtr, stream)
             })
