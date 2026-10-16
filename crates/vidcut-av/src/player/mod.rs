@@ -588,7 +588,8 @@ impl Shared {
             };
             // A frame up to a second ahead is on the way of the decode ahead.
             let on_its_way = (1..=ctl.plan.fps().as_f64().ceil() as i64).contains(&(target - pos));
-            let cancel = match *lock(&self.busy) {
+            let busy = *lock(&self.busy);
+            let cancel = match busy {
                 Some((Busy::Ahead, _)) => !on_its_way,
                 Some((Busy::Window { from, to, plan_gen }, _)) => {
                     playing || plan_gen != ctl.plan_gen || !(from..=to).contains(&target)
@@ -596,7 +597,10 @@ impl Shared {
                 Some((Busy::Focus, since)) => sample.is_some() || since.elapsed() >= PATIENCE,
                 None => false,
             };
-            if cancel && !self.store.contains(&ctl.plan.id(target)) {
+            // A window stops once the viewer moves the position forward
+            // itself: it would hold the frames ahead up.
+            let stops = matches!(busy, Some((Busy::Window { .. }, _))) && ctl.motion > 0.0;
+            if stops || (cancel && !self.store.contains(&ctl.plan.id(target))) {
                 self.interrupt
                     .store(true, std::sync::atomic::Ordering::Relaxed);
             }

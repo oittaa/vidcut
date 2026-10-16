@@ -133,6 +133,8 @@ struct Decoder {
     windower: Option<((Rational, u32, u32, bool), VideoFrames)>,
     windower_next: Option<i64>,
     windower_lost: bool,
+    /// Pictures other than a paused frame's come down shrunk.
+    small: bool,
 }
 
 pub(crate) fn run(shared: Arc<Shared>) {
@@ -162,9 +164,11 @@ pub(crate) fn run(shared: Arc<Shared>) {
         windower: None,
         windower_next: None,
         windower_lost: false,
+        small: false,
     };
     let mut claim = crate::first::Claim::default();
     while let Some(snap) = shared.snap() {
+        d.small = snap.small.is_some();
         if d.plan_gen != Some(snap.plan_gen) {
             d.plan = snap.plan.clone();
             d.plan_gen = Some(snap.plan_gen);
@@ -560,7 +564,10 @@ impl Decoder {
     /// whole GOP's.
     fn chunk(&self) -> i64 {
         match self.picture_kind {
+            // Shrunk pictures cost next to nothing: a window from its
+            // keyframe at once, not half a second at a time from it.
             Kind::Video => self.windows(2).1,
+            Kind::Memory if self.small => self.windows(2).1,
             Kind::Memory => self.memory_chunk(),
         }
     }
