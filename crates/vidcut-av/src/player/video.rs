@@ -196,6 +196,7 @@ pub(crate) fn run(shared: Arc<Shared>) {
         match result {
             Ok(true) => {}
             Ok(false) => {
+                d.close_left();
                 // Playing, the clock moves on by itself: look again soon.
                 let wait = match snap.mode {
                     Mode::Paused { .. } => Duration::from_secs(1),
@@ -269,7 +270,10 @@ fn run_windows(shared: Arc<Shared>) {
         match result {
             Ok(true) => {}
             // Another player's run ends without a change here.
-            Ok(false) => shared.wait_change(snap.version, Duration::from_millis(100)),
+            Ok(false) => {
+                d.close_left();
+                shared.wait_change(snap.version, Duration::from_millis(100));
+            }
             Err(e) => {
                 if !is_cancelled(&e) {
                     crate::debug!("player", "a window failed: {e}");
@@ -449,6 +453,14 @@ impl Decoder {
         self.back_windows.clear();
         self.back_low = None;
         self.next_window = None;
+    }
+
+    /// Nothing to decode: the files its reader left that wait no more
+    /// close, on this thread.
+    fn close_left(&mut self) {
+        if let Some((_, f)) = self.frames.as_mut() {
+            f.close_left();
+        }
     }
 
     /// The reader stands anywhere: interrupted, or after an error.

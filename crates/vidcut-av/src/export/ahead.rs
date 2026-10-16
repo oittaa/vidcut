@@ -178,7 +178,8 @@ impl<T, K> Drop for Ahead<T, K> {
             s.closed = true;
             s.wanted = None;
             shared.stop.store(true, Ordering::Relaxed);
-            // Not begun: it opened nothing.
+            // Not begun: it opened nothing. A file left handed to it
+            // closes here.
             s.queued.take()
         };
         drop(queued);
