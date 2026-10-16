@@ -8,6 +8,9 @@
 //! which takes them on that Vulkan device. Proxies (decision D41) and
 //! exports use it: the CPU only reads the file and writes the result.
 
+#![warn(clippy::undocumented_unsafe_blocks)]
+
+pub(crate) mod keep;
 pub(crate) mod mix;
 pub mod share;
 
@@ -172,6 +175,7 @@ impl CudaDevice {
         match slot.get_or_insert_with(|| {
             let _one = crate::hw::making_vulkan();
             let mut vulkan = ptr::null_mut();
+            // SAFETY: FFmpeg makes the device from this live one.
             let ret = unsafe {
                 ffi::av_hwdevice_ctx_create_derived(
                     &mut vulkan,
@@ -201,8 +205,9 @@ impl CudaDevice {
         let mut slot = self.vulkan.lock().unwrap_or_else(|e| e.into_inner());
         // SAFETY: references to device contexts, the same device when they
         // point to the same data.
+        let same = |d: &Device| unsafe { (*d.0).data == (*used.0).data };
         if let Some(Ok(d)) = slot.as_ref()
-            && unsafe { (*d.0).data == (*used.0).data }
+            && same(d)
         {
             *slot = None;
         }
@@ -219,14 +224,15 @@ impl HwFrames {
     /// `width`×`height` frames of `sw` laid out as `hw` (CUDA or Vulkan)
     /// on `device`.
     fn new(
-        device: *mut ffi::AVBufferRef,
+        device: &Device,
         hw: ffi::AVPixelFormat,
         sw: ffi::AVPixelFormat,
         width: u32,
         height: u32,
     ) -> Result<Self> {
+        // SAFETY: a frames context FFmpeg allocates on this live device.
         unsafe {
-            let mut frames = ffi::av_hwframe_ctx_alloc(device);
+            let mut frames = ffi::av_hwframe_ctx_alloc(device.0);
             if frames.is_null() {
                 return Err(Error::Invalid("no memory for GPU frames".into()));
             }
@@ -249,9 +255,10 @@ impl HwFrames {
 
     /// Another reference to the same frames.
     fn share(&self) -> Result<Self> {
+        // SAFETY: a reference to this live frames context.
         let frames = unsafe { ffi::av_buffer_ref(self.0) };
         if frames.is_null() {
-            return Err(Error::Invalid("no memory for frames".into()));
+            return Err(Error::Invalid("no memory for GPU frames".into()));
         }
         Ok(Self(frames))
     }
@@ -260,6 +267,7 @@ impl HwFrames {
     /// GPU memory of another kind), no other properties.
     fn copy(&self, src: &frame::Video, what: &str) -> Result<frame::Video> {
         let mut hw = frame::Video::empty();
+        // SAFETY: a fresh frame of this live pool, given `src`'s picture.
         unsafe {
             let ret = ffi::av_hwframe_get_buffer(self.0, hw.as_mut_ptr(), 0);
             if ret < 0 {
@@ -282,6 +290,7 @@ impl HwFrames {
 
 impl Drop for HwFrames {
     fn drop(&mut self) {
+        // SAFETY: this value's own reference.
         unsafe { ffi::av_buffer_unref(&mut self.0) };
     }
 }
@@ -294,7 +303,7 @@ impl CudaFrames {
     /// `width`×`height` frames of `sw` (NV12 or P010) on `device`.
     pub fn new(device: &CudaDevice, sw: format::Pixel, width: u32, height: u32) -> Result<Self> {
         HwFrames::new(
-            device.as_ptr(),
+            &device.cuda,
             ffi::AVPixelFormat::AV_PIX_FMT_CUDA,
             sw.into(),
             width,
@@ -668,27 +677,27 @@ fn placebo_options(
         if p.is_null() {
             String::new()
         } else {
+            // SAFETY: one of FFmpeg's static names, NUL-terminated.
             unsafe { std::ffi::CStr::from_ptr(p) }
                 .to_string_lossy()
                 .into_owned()
         }
     };
     let o = color.output;
+    // SAFETY: FFmpeg's static names of the tags, or null.
+    let (matrix, primaries, transfer) = unsafe {
+        (
+            ffi::av_color_space_name(o.matrix),
+            ffi::av_color_primaries_name(o.primaries),
+            ffi::av_color_transfer_name(o.transfer),
+        )
+    };
     options.extend([
         ("rotate", rotation.to_string()),
         ("format", out.into()),
-        (
-            "colorspace",
-            name(unsafe { ffi::av_color_space_name(o.matrix) }),
-        ),
-        (
-            "color_primaries",
-            name(unsafe { ffi::av_color_primaries_name(o.primaries) }),
-        ),
-        (
-            "color_trc",
-            name(unsafe { ffi::av_color_transfer_name(o.transfer) }),
-        ),
+        ("colorspace", name(matrix)),
+        ("color_primaries", name(primaries)),
+        ("color_trc", name(transfer)),
         ("range", "tv".into()),
         ("upscaler", "catmull_rom".into()),
         ("downscaler", "catmull_rom".into()),
@@ -723,6 +732,8 @@ pub(crate) fn add_source(
     frames: *mut ffi::AVBufferRef,
     color: Option<(ffi::AVColorSpace, ffi::AVColorRange)>,
 ) -> Result<()> {
+    // SAFETY: a buffer source FFmpeg allocates on this graph. `frames` is
+    // the frames context of a frame or a pool the caller holds.
     unsafe {
         let ctx = ffi::avfilter_graph_alloc_filter(
             graph.as_mut_ptr(),
@@ -873,6 +884,7 @@ impl CudaPictures {
             width,
             height,
         );
+        // SAFETY: reads the frame's own field.
         let decoded = unsafe { (*first.as_ptr()).hw_frames_ctx };
         if decoded.is_null() {
             return Err(Error::Invalid(
@@ -1017,6 +1029,7 @@ impl CudaPictures {
         let Some((mut out, _)) = take(graph, "scaling on the GPU")? else {
             return Ok(None);
         };
+        // SAFETY: a frame this function owns.
         unsafe {
             (*out.as_mut_ptr()).sample_aspect_ratio = ffi::AVRational { num: 1, den: 1 };
         }
@@ -1049,11 +1062,11 @@ impl Placebo {
         };
         let vulkan = if vulkans {
             // SAFETY: the frames' own device, another reference to it.
-            let vulkan = unsafe { ffi::av_buffer_ref(frames_device) };
-            if vulkan.is_null() {
-                return Err(Error::Invalid("no memory for a GPU device".into()));
+            let own = unsafe { ffi::av_buffer_ref(frames_device) };
+            if own.is_null() {
+                return Err(Error::Invalid("no memory for a Vulkan device".into()));
             }
-            Device(vulkan)
+            Device(own)
         } else {
             device.vulkan()?
         };
@@ -1061,6 +1074,7 @@ impl Placebo {
         // Upright at its own size in the source's depth, or placed.
         let (out_size, out_pixel, out_sar) = match layout {
             Layout::Upright => {
+                // SAFETY: FFmpeg's static description of the format.
                 let deep = format::Pixel::from(sw)
                     .descriptor()
                     .is_some_and(|d| unsafe { (*d.as_ptr()).comp[0].depth } > 8);
@@ -1088,11 +1102,11 @@ impl Placebo {
             _ => ("nv12", format::Pixel::NV12),
         };
         // Vulkan's frames go in as they are; CUDA's are copied into these.
-        let pool = HwFrames::new(vulkan.0, VULKAN, as_read(sw), width, height)?;
+        let pool = HwFrames::new(&vulkan, VULKAN, as_read(sw), width, height)?;
         let output = match on {
             Place::Vulkan => None,
             _ => Some(HwFrames::new(
-                device.as_ptr(),
+                &device.cuda,
                 CUDA,
                 out_pixel.into(),
                 out_size.0,
@@ -1109,7 +1123,7 @@ impl Placebo {
                 ..
             } if fitted != (w, h) => {
                 let format = vulkan_out;
-                let frames = HwFrames::new(vulkan.0, VULKAN, format.into(), w, h)?;
+                let frames = HwFrames::new(&vulkan, VULKAN, format.into(), w, h)?;
                 let timing = (COUNTED, ffmpeg::Rational(1, 1));
                 let tags = Some((black_tags.matrix, black_tags.range));
                 add_source(&mut graph, c"bg", VULKAN, (w, h), timing, frames.0, tags)?;
@@ -1131,8 +1145,8 @@ impl Placebo {
         )?;
         add_sink(&mut graph)?;
         let options = placebo_options((width, height), rotation, out, layout, color);
-        // libplacebo needs the Vulkan device before it starts; given none,
-        // FFmpeg would convert on the CPU in front of it.
+        // SAFETY: a filter FFmpeg allocates on this graph and links to its
+        // sources and sink, given a reference to the live Vulkan device.
         unsafe {
             let ctx = ffi::avfilter_graph_alloc_filter(
                 graph.as_mut_ptr(),
@@ -1142,11 +1156,12 @@ impl Placebo {
             if ctx.is_null() {
                 return Err(Error::Invalid("no libplacebo filter".into()));
             }
-            let hw = ffi::av_buffer_ref(vulkan.0);
-            if hw.is_null() {
-                return Err(Error::Invalid("no memory for a GPU device".into()));
+            // libplacebo needs the Vulkan device before it starts; given
+            // none, FFmpeg would convert on the CPU in front of it.
+            (*ctx).hw_device_ctx = ffi::av_buffer_ref(vulkan.0);
+            if (*ctx).hw_device_ctx.is_null() {
+                return Err(Error::Invalid("no memory for libplacebo's device".into()));
             }
-            (*ctx).hw_device_ctx = hw;
             let mut dict = ffmpeg::Dictionary::new();
             for (k, v) in &options {
                 dict.set(k, v);
@@ -1254,12 +1269,13 @@ impl Placebo {
             // its picture is done.
             None => {
                 wait_done(f, "decoding on Vulkan")?;
-                self.held.push_back(frame_ref(f));
-                frame_ref(f)
+                self.held.push_back(crate::export::video::frame_ref(f)?);
+                crate::export::video::frame_ref(f)?
             }
         };
+        copy_props(&mut v, f)?;
+        // SAFETY: a frame this function owns.
         unsafe {
-            ffi::av_frame_copy_props(v.as_mut_ptr(), f.as_ptr());
             // No side data: the CPU converts by the tags alone. libplacebo
             // would tone-map by HDR metadata, read an ICC profile, and turn
             // pictures by their display matrices: the filter copies each
@@ -1310,6 +1326,7 @@ impl Placebo {
 
     fn converted(&mut self) -> Result<Option<frame::Video>> {
         while let Some((out, tb)) = take(&mut self.graph, "converting on the GPU")? {
+            // SAFETY: arithmetic on values.
             let k = out
                 .pts()
                 .map_or(-1, |k| unsafe { ffi::av_rescale_q(k, tb.into(), COUNTED) });
@@ -1332,11 +1349,12 @@ impl Placebo {
             let mut c = match &self.output {
                 Some(output) => {
                     let mut c = output.copy(&out, "copying back from Vulkan")?;
-                    unsafe { ffi::av_frame_copy_props(c.as_mut_ptr(), out.as_ptr()) };
+                    copy_props(&mut c, &out)?;
                     c
                 }
                 None => out,
             };
+            // SAFETY: a frame this function owns.
             unsafe { (*c.as_mut_ptr()).sample_aspect_ratio = self.sar };
             c.set_pts(pts);
             return Ok(Some(c));
@@ -1386,7 +1404,7 @@ impl Blacks {
                 self.made.len() - 1
             }
         };
-        Ok(frame_ref(&self.made[i]))
+        crate::export::video::frame_ref(&self.made[i])
     }
 }
 
@@ -1403,15 +1421,22 @@ fn as_read(sw: ffi::AVPixelFormat) -> ffi::AVPixelFormat {
     }
 }
 
-/// A new reference to `f`'s picture and properties.
-fn frame_ref(f: &frame::Video) -> frame::Video {
-    let mut r = frame::Video::empty();
-    unsafe { ffi::av_frame_ref(r.as_mut_ptr(), f.as_ptr()) };
-    r
+/// `src`'s properties on `dst`.
+fn copy_props(dst: &mut frame::Video, src: &frame::Video) -> Result<()> {
+    // SAFETY: two live frames.
+    let ret = unsafe { ffi::av_frame_copy_props(dst.as_mut_ptr(), src.as_ptr()) };
+    if ret < 0 {
+        return Err(Error::Ffmpeg {
+            context: "copying a frame's properties".into(),
+            source: ffmpeg::Error::from(ret),
+        });
+    }
+    Ok(())
 }
 
 /// Tags a frame for libplacebo with `tags`, one count long.
 fn tag(f: &mut frame::Video, tags: Tags) {
+    // SAFETY: a frame the caller owns.
     unsafe {
         let f = &mut *f.as_mut_ptr();
         f.colorspace = tags.matrix;
