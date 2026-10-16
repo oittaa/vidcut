@@ -244,6 +244,21 @@ pub(super) unsafe fn cuda_context(device: *mut ffi::AVBufferRef) -> (CuContext, 
     }
 }
 
+/// The context [`in_context`] pushed onto this thread. Dropped, it pops
+/// that context, including when the work panics.
+struct PushedContext {
+    pop: unsafe extern "C" fn(*mut CuContext) -> CuResult,
+}
+
+impl Drop for PushedContext {
+    fn drop(&mut self) {
+        let mut popped = std::ptr::null_mut();
+        // SAFETY: `pop` is `cuCtxPopCurrent_v2`, and this thread has that
+        // context pushed: `in_context` pushes before the guard exists.
+        unsafe { (self.pop)(&mut popped) };
+    }
+}
+
 /// Runs `f` with `ctx` current on this thread.
 pub(super) fn in_context<T>(
     cuda: &Cuda,
@@ -254,12 +269,8 @@ pub(super) fn in_context<T>(
     check("making the context current", unsafe {
         (cuda.ctx_push)(ctx)
     })?;
-    let result = f();
-    let mut popped = std::ptr::null_mut();
-    // SAFETY: pops the context pushed above. Its status goes unread: a
-    // failed pop can't be undone here.
-    unsafe { (cuda.ctx_pop)(&mut popped) };
-    result
+    let _current = PushedContext { pop: cuda.ctx_pop };
+    f()
 }
 
 impl CudaDevice {
@@ -625,7 +636,33 @@ impl Drop for SharedBuffer {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     use super::*;
+
+    thread_local! {
+        static POPS: Cell<u32> = const { Cell::new(0) };
+    }
+
+    unsafe extern "C" fn count_pop(_: *mut CuContext) -> CuResult {
+        POPS.with(|n| n.set(n.get() + 1));
+        0
+    }
+
+    #[test]
+    fn a_panic_pops_the_context() {
+        POPS.with(|n| n.set(0));
+        let caught = std::panic::catch_unwind(|| {
+            let _current = PushedContext { pop: count_pop };
+            panic!("while the context is current");
+        });
+        let message = caught.expect_err("the work panics");
+        assert_eq!(
+            message.downcast_ref::<&str>().copied(),
+            Some("while the context is current")
+        );
+        assert_eq!(POPS.with(Cell::get), 1);
+    }
 
     #[test]
     fn the_structs_are_laid_out_as_cuda_h_has_them() {
