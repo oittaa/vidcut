@@ -121,6 +121,27 @@ unsafe fn texture(frame: &frame::Video) -> Result<(ID3D11Texture2D, u32)> {
     }
 }
 
+/// Width and height of `texture`.
+///
+/// # Safety
+/// `texture` is a live texture.
+unsafe fn texture_size(texture: &ID3D11Texture2D) -> (u32, u32) {
+    let mut desc = ::windows::Win32::Graphics::Direct3D11::D3D11_TEXTURE2D_DESC::default();
+    // SAFETY: fills the description it is given.
+    unsafe { texture.GetDesc(&mut desc) };
+    (desc.Width, desc.Height)
+}
+
+/// Width and height of a copy. Each side of `frame` is rounded up to
+/// even, then clamped to that side of the source texture and of the
+/// destination texture.
+fn copy_sides(frame: (u32, u32), source: (u32, u32), destination: (u32, u32)) -> (u32, u32) {
+    (
+        frame.0.next_multiple_of(2).min(source.0).min(destination.0),
+        frame.1.next_multiple_of(2).min(source.1).min(destination.1),
+    )
+}
+
 /// Frames on `source`'s device in its layout, at `size`: single
 /// textures bound and flagged so, in a pool that grows.
 ///
@@ -301,12 +322,17 @@ impl Keeper {
             let context = ID3D11DeviceContext::from_raw_borrowed(&dev.device_context)
                 .ok_or_else(|| Error::Invalid("no Direct3D 11 context".into()))?;
             let ((dst, di), (src, si)) = (texture(&out)?, texture(f)?);
+            let (right, bottom) = copy_sides(
+                (f.width(), f.height()),
+                texture_size(&src),
+                texture_size(&dst),
+            );
             let region = D3D11_BOX {
                 left: 0,
                 top: 0,
                 front: 0,
-                right: f.width().next_multiple_of(2),
-                bottom: f.height().next_multiple_of(2),
+                right,
+                bottom,
                 back: 1,
             };
             locked(dev, || {
@@ -924,6 +950,16 @@ fn full_range(space: DXGI_COLOR_SPACE_TYPE) -> bool {
 mod tests {
     use super::*;
     use crate::route::Ops;
+
+    #[test]
+    fn the_copy_box_is_rounded_even_then_clamped_to_both_textures() {
+        // 1919×1079 rounds to 1920×1080. The source is narrower and the
+        // destination shorter, so each side stops at that texture.
+        assert_eq!(
+            copy_sides((1919, 1079), (1918, 1088), (1922, 1077)),
+            (1918, 1077)
+        );
+    }
 
     /// An upright NV12 frame into the encoder's NV12 frames, in its own
     /// colors.
