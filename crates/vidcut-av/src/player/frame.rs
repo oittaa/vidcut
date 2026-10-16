@@ -75,6 +75,9 @@ pub struct Picture {
     frame: frame::Video,
     rotation: u16,
     bytes: usize,
+    /// The pool whose surface its frame is, where it shares one
+    /// (`hw::pooled`).
+    pooled: Option<usize>,
     decoder: Option<super::Decoder>,
     decoding: Option<Arc<Decoding>>,
     over: Vec<Over>,
@@ -106,10 +109,12 @@ impl Picture {
         decoding: Option<Arc<Decoding>>,
     ) -> Self {
         let bytes = bytes_of(&frame);
+        let pooled = crate::hw::pooled(&frame);
         Self {
             frame,
             rotation,
             bytes,
+            pooled,
             decoder,
             decoding,
             over: Vec::new(),
@@ -215,6 +220,27 @@ impl Picture {
             })
             .collect::<Result<Vec<_>>>()?;
         Ok(Self::new(frame, self.rotation, self.decoder, self.decoding.clone()).with_over(over))
+    }
+
+    /// The pool whose surface its frame is, where its memory is a pool's
+    /// that other frames share: letting it go frees nothing until all of
+    /// that pool's frames go (`hw::pooled`). `None` where letting it go
+    /// frees its memory.
+    pub(crate) fn pooled(&self) -> Option<usize> {
+        self.pooled
+    }
+
+    /// Whether its frame or one over it is a pool's that other frames share
+    /// ([`pooled`](Self::pooled)).
+    pub(crate) fn holds_a_pool(&self) -> bool {
+        self.pooled.is_some() || self.over.iter().any(|o| o.picture.holds_a_pool())
+    }
+
+    /// A picture whose frame is of `pool`, for tests.
+    #[cfg(test)]
+    pub(crate) fn in_pool(mut self, pool: usize) -> Self {
+        self.pooled = Some(pool);
+        self
     }
 
     /// The memory it takes, with the pictures over it.

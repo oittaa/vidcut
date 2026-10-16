@@ -830,6 +830,26 @@ fn decodes_all(gpu: &GpuDecoder, path: &std::path::Path) -> Result<()> {
     }
 }
 
+/// The pool whose surface `frame` is, where its memory is a pool's that
+/// other frames share (VA-API's decoders', [`vaapi::share_frames`]): letting
+/// it go frees nothing until all of that pool's frames go. `None` where
+/// letting a frame go frees its memory.
+pub(crate) fn pooled(frame: &frame::Video) -> Option<usize> {
+    #[cfg(target_os = "linux")]
+    if Kind::of_frame(frame) == Some(Kind::Vaapi) {
+        return vaapi::pooled(frame);
+    }
+    let _ = frame;
+    None
+}
+
+/// Lets the pools of frames go that decoders shared and nothing uses any
+/// more (VA-API's, [`vaapi::share_frames`]).
+pub(crate) fn let_unused_frames_go() {
+    #[cfg(target_os = "linux")]
+    vaapi::let_unused_frames_go();
+}
+
 /// Whether `frame` is in GPU memory: a hardware frame of any kind.
 pub fn on_gpu(frame: &frame::Video) -> bool {
     // SAFETY: reads the frame's own field.
@@ -955,7 +975,7 @@ impl Keeper {
             }
             #[cfg(target_os = "linux")]
             Some(Kind::Vaapi) => {
-                vaapi::let_unused_frames_go();
+                let_unused_frames_go();
                 let made = matches!(keeper, Some(Keeper::Vaapi(k))
                     if k.as_ref().is_none_or(|k| k.is_for(f)));
                 if !made {

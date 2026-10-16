@@ -705,7 +705,17 @@ impl Decoder {
         })();
         match picture {
             Ok(p) => {
+                // Held whatever the budget, a picture whose surface is a
+                // pool's would hold all of that pool after its reader:
+                // it comes down to memory.
+                let p = if p.holds_a_pool() {
+                    p.copied_down().unwrap_or(p)
+                } else {
+                    p
+                };
                 self.shared.store.put(id, Arc::new(p));
+                // Its reader is gone: so is the pool it alone decoded into.
+                crate::hw::let_unused_frames_go();
                 self.shared.prepared();
             }
             // Something new is wanted: the reader played with didn't move.
