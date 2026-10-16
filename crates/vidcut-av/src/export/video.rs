@@ -703,6 +703,11 @@ impl VideoFrames {
             if k == 0 && files {
                 self.start_layers(&piece)?;
             }
+            if k == 1 && files {
+                // The next file opens ahead once the piece plays on: a
+                // seek a frame (a dragged playhead) opens nothing ahead.
+                self.open_next();
+            }
             let mixed = layers.len() > 1;
             self.maker.set_mixing(mixed);
             let mut made = Vec::with_capacity(layers.len());
@@ -991,7 +996,7 @@ impl VideoFrames {
     /// Readies the files of the current piece's pictures: for each, an open
     /// file of it no other picture of the piece reads (the one that reads on
     /// to it, if one does), the one opened ahead for it, or a new one.
-    /// Files none of them reads close. Then starts opening the next file.
+    /// Files none of them reads close.
     fn start_layers(&mut self, piece: &VideoPiece) -> Result<()> {
         let mut taken = vec![false; self.open.len()];
         let mut reading = Vec::new();
@@ -1074,7 +1079,6 @@ impl VideoFrames {
             .into_iter()
             .map(|r| r.and_then(|s| moved[s]))
             .collect();
-        self.open_next();
         Ok(())
     }
 

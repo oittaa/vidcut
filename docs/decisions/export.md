@@ -21,7 +21,8 @@
 
 **Starting a piece** (`export/video.rs`, `export/audio.rs`, `export/ahead.rs`):
 - **Same file as the piece before:** the reader reads on. A piece that starts at most 1 s past where the decoder is decodes on to its first frame (or skips samples). Anything else seeks the open file. A frame repeated across the cut needs neither.
-- **Another file:** opening it, seeking and decoding up to its first frame happen on a helper thread while the piece before encodes. A failure there is the same error the piece would have hit.
+- **Another file:** opening it, seeking and decoding up to its first frame happen on a helper thread while the piece before encodes, from the piece's second frame on. A failure there is the same error the piece would have hit.
+- **One file ahead at a time** (`Ahead`): a newer piece asked for replaces one not begun, and a source nobody wants any more (the pieces were made anew by a seek, and the next file is another) stops opening and closes on the helper thread, never on the reader's. The same file asked for again is taken up. A seek a frame, such as a dragged playhead, opens nothing ahead.
 - **One opener thread per reader for the whole export.** glibc gives every new thread its own malloc arena, and decoder memory freed across many arenas stays resident.
 
 **Output:** goes to a hidden `.<name>.part` file, renamed into place on success. Errors and cancellation delete it.
