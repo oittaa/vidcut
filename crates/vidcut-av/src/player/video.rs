@@ -362,9 +362,13 @@ impl Decoder {
         // frames right behind come soonest. Stepping back, that first;
         // otherwise the frame the other plan shows (a switch) first.
         let (min, max) = self.windows(2);
+        // A followed player only once it went back: after a seek or a step
+        // forward, a window would take its reader from where a run forward
+        // decodes on.
         let behind = (plan.clamp(focus - min + 1)..focus)
             .rev()
-            .find(|&t| missing(t));
+            .find(|&t| missing(t))
+            .filter(|_| self.back || !snap.followed);
         if !self.back && self.prepare(snap)? {
             return Ok(true);
         }
