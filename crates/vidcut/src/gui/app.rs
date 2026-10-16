@@ -10,6 +10,7 @@ use std::time::Duration;
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
+use super::gate::Gate;
 use super::theme;
 use super::video::{Viewer, ViewerHandle};
 use super::workspace::{Picture, Workspace};
@@ -130,6 +131,9 @@ pub struct App {
     port: Arc<Port>,
     render: RenderState,
     viewer: Viewer,
+    /// Open while `logic` and `ui` run, for the viewer thread's
+    /// submissions.
+    gate: Arc<Gate>,
     session: Option<std::thread::JoinHandle<()>>,
     window_captures: HashMap<u64, Capture>,
     next_capture: u64,
@@ -157,7 +161,9 @@ impl App {
             .clone()
             .ok_or("vidcut needs eframe's wgpu renderer")?;
         let ctx = cc.egui_ctx.clone();
-        let viewer = Viewer::start(&render, move || ctx.request_repaint());
+        let gate = Arc::new(Gate::new(move || ctx.request_repaint()));
+        let ctx = cc.egui_ctx.clone();
+        let viewer = Viewer::start(&render, gate.clone(), move || ctx.request_repaint());
         let port = Arc::new(Port {
             ctx: cc.egui_ctx.clone(),
             viewer: viewer.handle(),
@@ -213,6 +219,7 @@ impl App {
             port,
             render,
             viewer,
+            gate,
             session: Some(session),
             window_captures: HashMap::new(),
             next_capture: 1,
@@ -259,6 +266,8 @@ impl App {
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let gate = self.gate.clone();
+        let _open = gate.opened();
         for task in self.port.take() {
             match task {
                 UiTask::CaptureWindow(done) => {
@@ -301,6 +310,8 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let gate = self.gate.clone();
+        let _open = gate.opened();
         let (texture, has_frame) = self.viewer.sync(&self.render, self.ws.want);
         self.ws.picture = Picture { texture, has_frame };
         self.ws.levels = self.viewer.levels();
@@ -322,6 +333,7 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self) {
+        self.gate.open();
         let started = std::time::Instant::now();
         self.ws.live.shutdown();
         if let Some(t) = self.session.take() {
