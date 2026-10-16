@@ -143,6 +143,23 @@ fn kernel(cuda: &Cuda, ctx: CuContext) -> Result<*mut c_void> {
     Ok(function)
 }
 
+/// A frame's sides as the mix's kernel takes them. A negative side is
+/// rejected.
+fn frame_u32(width: i32, height: i32) -> Result<(u32, u32)> {
+    match (u32::try_from(width), u32::try_from(height)) {
+        (Ok(width), Ok(height)) => Ok((width, height)),
+        _ => Err(Error::Invalid(format!(
+            "{width}×{height} doesn't fit a frame"
+        ))),
+    }
+}
+
+/// A plane's stride. A negative stride is rejected.
+fn stride_u64(linesize: i32) -> Result<u64> {
+    u64::try_from(linesize)
+        .map_err(|_| Error::Invalid(format!("a picture stride of {linesize} doesn't fit")))
+}
+
 /// `over` at `weight` over `under` (`None`: black), frames of `frames`'
 /// size and layout in CUDA memory, into a frame of `frames`. The work goes
 /// on `frames`' device's stream, behind what is queued there; the inputs'
@@ -183,7 +200,7 @@ pub(crate) fn mix(
         });
     }
     let function = kernel(cuda, ctx)?;
-    let (w, h) = (fc.width as u32, fc.height as u32);
+    let (w, h) = frame_u32(fc.width, fc.height)?;
     let deep = samples.bytes == 2;
     // 4:2:0 in two planes (NV12, P010): luma, then chroma half as tall.
     let planes = [
@@ -193,16 +210,16 @@ pub(crate) fn mix(
     let rows = samples.row_bytes(w);
     in_context(cuda, ctx, || {
         for (p, rows_down, black) in planes {
-            let plane = |f: Option<&frame::Video>| -> (u64, u64) {
+            let plane = |f: Option<&frame::Video>| -> Result<(u64, u64)> {
                 // SAFETY: a CUDA frame's planes are device pointers.
-                f.map_or((0, 0), |f| unsafe {
+                f.map_or(Ok((0, 0)), |f| unsafe {
                     let f = &*f.as_ptr();
-                    (f.data[p] as u64, f.linesize[p] as u64)
+                    Ok((f.data[p] as u64, stride_u64(f.linesize[p])?))
                 })
             };
-            let (mut o, mut o_pitch) = plane(Some(&out));
-            let (mut u, mut u_pitch) = plane(under);
-            let (mut v, mut v_pitch) = plane(over);
+            let (mut o, mut o_pitch) = plane(Some(&out))?;
+            let (mut u, mut u_pitch) = plane(under)?;
+            let (mut v, mut v_pitch) = plane(over)?;
             let (mut u_black, mut v_black) = (black, black);
             let mut width = (rows[p] / samples.bytes) as u32;
             let mut height = rows_down;
@@ -243,4 +260,37 @@ pub(crate) fn mix(
         Ok(())
     })?;
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{frame_u32, stride_u64};
+
+    #[test]
+    fn a_negative_frame_width_doesnt_fit_the_mix() {
+        let err = frame_u32(-1, 1080).unwrap_err();
+        assert_eq!(err.to_string(), "-1×1080 doesn't fit a frame");
+    }
+
+    #[test]
+    fn a_negative_frame_height_doesnt_fit_the_mix() {
+        let err = frame_u32(1920, -8).unwrap_err();
+        assert_eq!(err.to_string(), "1920×-8 doesn't fit a frame");
+    }
+
+    #[test]
+    fn the_largest_frame_side_fits_the_mix() {
+        assert_eq!(frame_u32(i32::MAX, 0).unwrap(), (2_147_483_647, 0));
+    }
+
+    #[test]
+    fn a_negative_stride_doesnt_fit_the_mix() {
+        let err = stride_u64(-1).unwrap_err();
+        assert_eq!(err.to_string(), "a picture stride of -1 doesn't fit");
+    }
+
+    #[test]
+    fn the_largest_stride_fits_the_mix() {
+        assert_eq!(stride_u64(i32::MAX).unwrap(), 2_147_483_647);
+    }
 }

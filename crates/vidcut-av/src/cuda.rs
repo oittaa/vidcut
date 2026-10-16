@@ -188,6 +188,17 @@ impl CudaDevice {
     }
 }
 
+/// `width`×`height` as FFmpeg stores a frame's sides. A side past `i32`
+/// would become negative, so it is rejected.
+pub(crate) fn frame_sides(width: u32, height: u32) -> Result<(i32, i32)> {
+    match (i32::try_from(width), i32::try_from(height)) {
+        (Ok(width), Ok(height)) => Ok((width, height)),
+        _ => Err(Error::Invalid(format!(
+            "{width}×{height} doesn't fit a frame"
+        ))),
+    }
+}
+
 /// Frames in GPU memory of one size and format.
 struct HwFrames(*mut ffi::AVBufferRef);
 
@@ -204,6 +215,7 @@ impl HwFrames {
         width: u32,
         height: u32,
     ) -> Result<Self> {
+        let (width, height) = frame_sides(width, height)?;
         unsafe {
             let mut frames = ffi::av_hwframe_ctx_alloc(device);
             if frames.is_null() {
@@ -212,8 +224,8 @@ impl HwFrames {
             let fc = &mut *((*frames).data as *mut ffi::AVHWFramesContext);
             fc.format = hw;
             fc.sw_format = sw;
-            fc.width = width as i32;
-            fc.height = height as i32;
+            fc.width = width;
+            fc.height = height;
             let ret = ffi::av_hwframe_ctx_init(frames);
             if ret < 0 {
                 ffi::av_buffer_unref(&mut frames);
@@ -698,6 +710,7 @@ pub(crate) fn add_source(
     frames: *mut ffi::AVBufferRef,
     color: Option<(ffi::AVColorSpace, ffi::AVColorRange)>,
 ) -> Result<()> {
+    let (width, height) = frame_sides(width, height)?;
     unsafe {
         let ctx = ffi::avfilter_graph_alloc_filter(
             graph.as_mut_ptr(),
@@ -712,8 +725,8 @@ pub(crate) fn add_source(
             return Err(Error::Invalid("no memory for the GPU source".into()));
         }
         (*par).format = pixel as i32;
-        (*par).width = width as i32;
-        (*par).height = height as i32;
+        (*par).width = width;
+        (*par).height = height;
         (*par).time_base = time_base;
         (*par).sample_aspect_ratio = ffi::AVRational {
             num: sar.numerator().max(1),
@@ -1393,7 +1406,7 @@ fn tag(f: &mut frame::Video, tags: Tags) {
 mod tests {
     use super::{Layout, can_fit, filters, placebo_options};
     use crate::color::{GpuColor, gpu_color};
-    use crate::ffmpeg::{format::Pixel, frame};
+    use crate::ffmpeg::{self, ffi, filter, format::Pixel, frame};
     use crate::route::Ops;
 
     /// Untagged SD: BT.601, into SDR.
@@ -1502,6 +1515,61 @@ mod tests {
         let options = placebo_options((1920, 1080), 180, "nv12", Layout::Upright, &sd());
         let get = |k| option(&options, k);
         assert_eq!((get("w"), get("h")), (Some("1920"), Some("1080")));
+    }
+
+    #[test]
+    fn a_frame_wider_than_i32_doesnt_fit() {
+        let err = super::frame_sides(2_147_483_648, 1080).unwrap_err();
+        assert_eq!(err.to_string(), "2147483648×1080 doesn't fit a frame");
+    }
+
+    #[test]
+    fn a_frame_taller_than_i32_doesnt_fit() {
+        let err = super::frame_sides(1920, 2_147_483_648).unwrap_err();
+        assert_eq!(err.to_string(), "1920×2147483648 doesn't fit a frame");
+    }
+
+    #[test]
+    fn the_largest_i32_frame_fits() {
+        assert_eq!(
+            super::frame_sides(2_147_483_647, 2_147_483_647).unwrap(),
+            (2_147_483_647, 2_147_483_647)
+        );
+    }
+
+    #[test]
+    fn gpu_frames_reject_a_side_past_i32() {
+        let err = match super::HwFrames::new(
+            std::ptr::null_mut(),
+            ffi::AVPixelFormat::AV_PIX_FMT_NONE,
+            ffi::AVPixelFormat::AV_PIX_FMT_NV12,
+            2_147_483_648,
+            1,
+        ) {
+            Err(err) => err,
+            Ok(_) => panic!("a side past i32 was accepted"),
+        };
+        assert_eq!(err.to_string(), "2147483648×1 doesn't fit a frame");
+    }
+
+    #[test]
+    fn a_gpu_source_rejects_a_side_past_i32() {
+        crate::init();
+        let mut graph = filter::Graph::new();
+        let err = super::add_source(
+            &mut graph,
+            c"in",
+            ffi::AVPixelFormat::AV_PIX_FMT_CUDA,
+            (1920, 2_147_483_648),
+            (
+                ffi::AVRational { num: 1, den: 1 },
+                ffmpeg::Rational::new(1, 1),
+            ),
+            std::ptr::null_mut(),
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(err.to_string(), "1920×2147483648 doesn't fit a frame");
     }
 
     #[test]
