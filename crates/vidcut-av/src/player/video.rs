@@ -126,6 +126,13 @@ struct Decoder {
     /// The window found to decode next playing backwards, by its last
     /// frame, while it waits for room.
     next_window: Option<(i64, i64)>,
+    /// A followed player's windows decode on a reader of their own, so the
+    /// reader runs forward decode on from stays where it is
+    /// ([`on_windower`](Decoder::on_windower)): that reader, the frame it
+    /// gives next, and whether it was interrupted last.
+    windower: Option<((Rational, u32, u32, bool), VideoFrames)>,
+    windower_next: Option<i64>,
+    windower_lost: bool,
 }
 
 pub(crate) fn run(shared: Arc<Shared>) {
@@ -152,6 +159,9 @@ pub(crate) fn run(shared: Arc<Shared>) {
         back_windows: Vec::new(),
         back_low: None,
         next_window: None,
+        windower: None,
+        windower_next: None,
+        windower_lost: false,
     };
     let mut claim = crate::first::Claim::default();
     while let Some(snap) = shared.snap() {
@@ -161,6 +171,7 @@ pub(crate) fn run(shared: Arc<Shared>) {
             // The reader keeps its file open; where it stands in the new
             // plan is found by reading pieces of it again.
             d.next = None;
+            d.windower_next = None;
             // Frames of another plan say nothing of which way the viewer
             // goes in this one (a switch to the other thing a viewer
             // shows): no window behind until it steps back here.
@@ -237,12 +248,39 @@ impl Decoder {
         self.next_window = None;
     }
 
-    /// The reader stands anywhere: interrupted, or after an error.
+    /// The reader stands anywhere: interrupted, or after an error. The
+    /// windower's, when it was the one.
     fn lost_position(&mut self) {
+        if std::mem::take(&mut self.windower_lost) {
+            return;
+        }
         if let Some((_, f)) = self.frames.as_mut() {
             f.forget_position();
         }
         self.next = None;
+    }
+
+    /// Runs `f`, a window's decoding, on the windower for a followed
+    /// player, else on the reader: its windows don't move the reader runs
+    /// forward decode on from. Interrupted or failed, only the windower
+    /// forgets where it stands.
+    fn on_windower<T>(&mut self, snap: &Snap, f: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        if !snap.followed {
+            return f(self);
+        }
+        self.swap_windower();
+        let r = f(self);
+        if r.is_err() {
+            self.lost_position();
+            self.windower_lost = true;
+        }
+        self.swap_windower();
+        r
+    }
+
+    fn swap_windower(&mut self) {
+        std::mem::swap(&mut self.frames, &mut self.windower);
+        std::mem::swap(&mut self.next, &mut self.windower_next);
     }
 
     /// Decodes the next picture wanted; whether there was one.
@@ -308,7 +346,12 @@ impl Decoder {
                 },
                 _ => Reach::Forward,
             };
-            let first = self.decode(snap, target, reach)?;
+            let first = match reach {
+                Reach::Window { .. } => {
+                    self.on_windower(snap, |d| d.decode(snap, target, reach))?
+                }
+                _ => self.decode(snap, target, reach)?,
+            };
             if dir == Direction::Back {
                 self.back_windows.push((first, target));
             }
@@ -333,7 +376,7 @@ impl Decoder {
                     .find(|&t| missing(t))
                     .map(|t| (t, Reach::Forward))
             }
-            Direction::Back => return self.window_behind(snap),
+            Direction::Back => return self.on_windower(snap, |d| d.window_behind(snap)),
             Direction::Paused => (focus + 1
                 ..=plan.clamp(
                     focus
@@ -369,21 +412,8 @@ impl Decoder {
             return Ok(true);
         }
         if let Some(t) = behind {
-            self.decode_behind(snap, t, self.chunk().min(max))?;
-            return Ok(true);
-        }
-        // A followed player's reader comes back to the playhead once the
-        // windows behind are done: from its keyframe on through the kept
-        // frames, to stand after those ahead, so a run either way starts
-        // from kept frames.
-        if snap.followed && self.next.is_none_or(|n| n <= focus) {
-            self.reader();
-            self.decode_from(
-                snap,
-                Some(focus),
-                plan.clamp(focus + FOLLOWED_AHEAD),
-                Keep::Ahead,
-            )?;
+            let chunk = self.chunk().min(max);
+            self.on_windower(snap, |d| d.decode_behind(snap, t, chunk))?;
             return Ok(true);
         }
         if self.back {
