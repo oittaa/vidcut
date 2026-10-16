@@ -9,6 +9,7 @@ mod cells;
 pub mod export;
 mod file_manager;
 mod folders;
+mod gate;
 mod help;
 mod import;
 mod mixer;
