@@ -259,8 +259,8 @@ pub fn frames_decoded() -> u64 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reading {
     /// In order from where it starts: the player, exports, proxies,
-    /// analyses. FFmpeg's automatic count of frame threads, about one a
-    /// core, and graphs' slices on the shared pool ([`crate::pool`]).
+    /// analyses. Frame threads, as many as [`crate::pool::threads_for`]
+    /// gives, and graphs' slices on the shared pool ([`crate::pool`]).
     Stream,
     /// A frame here and there, each after a seek: filmstrip tiles,
     /// storyboards, `frame render`. No frame threads: they hand a frame out
@@ -1094,9 +1094,6 @@ impl VideoReader {
         // SAFETY: the opened decoder's context, read only.
         let threads = unsafe { (*self.decoder.as_ptr()).thread_count };
         let threads = match threads {
-            // A decoder with a pool of its own (libdav1d) keeps the count
-            // it was asked for, 0: FFmpeg's automatic one.
-            0 => "threads of its own".to_string(),
             1 => "1 thread".to_string(),
             n => format!("{n} threads"),
         };
@@ -1221,10 +1218,7 @@ impl VideoReader {
             },
             None => ctx.set_threading(codec::threading::Config {
                 kind: codec::threading::Type::Frame,
-                count: match reading {
-                    Reading::Stream => 0, // FFmpeg's automatic count
-                    Reading::Frames => 1,
-                },
+                count: crate::pool::threads_for(reading),
             }),
         }
         let decoder = match &on {

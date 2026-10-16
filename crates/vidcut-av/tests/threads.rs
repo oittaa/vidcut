@@ -1,6 +1,7 @@
 //! The threads FFmpeg's readers and graphs start (docs/decisions/threads.md):
-//! a single-frame reader none, a graph none once the shared pool runs.
-//! Linux only, which lists a process's threads in `/proc`.
+//! a single-frame reader none, a job's stream decoder half the cores', a
+//! graph none once the shared pool runs. Linux only, which lists a
+//! process's threads in `/proc`.
 #![cfg(target_os = "linux")]
 
 use std::sync::Mutex;
@@ -17,6 +18,16 @@ static ONE: Mutex<()> = Mutex::new(());
 
 fn threads() -> usize {
     std::fs::read_dir("/proc/self/task").unwrap().count()
+}
+
+/// The names of the process's threads FFmpeg named (`av:h264:df0`).
+fn ffmpegs_threads() -> Vec<String> {
+    std::fs::read_dir("/proc/self/task")
+        .unwrap()
+        .filter_map(|t| std::fs::read_to_string(t.ok()?.path().join("comm")).ok())
+        .map(|name| name.trim_end().to_string())
+        .filter(|name| name.starts_with("av:"))
+        .collect()
 }
 
 #[test]
@@ -59,6 +70,32 @@ fn a_single_frame_reader_starts_no_thread() {
         threads() <= before,
         "{} threads, {before} before",
         threads()
+    );
+}
+
+#[test]
+fn a_jobs_stream_decoder_takes_half_the_cores() {
+    let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
+    let spec = FixtureSpec::new(VideoCodec::H264, Container::Mp4, 1280, 720, (30, 1), 60);
+    let path = fixture::ensure(&spec).unwrap();
+    let cores = std::thread::available_parallelism().unwrap().get();
+    // At most 16, FFmpeg's automatic most; one thread starts none.
+    let expected = match (cores / 2).clamp(1, 16) {
+        1 => 0,
+        n => n,
+    };
+    let (before, after) = std::thread::spawn(move || {
+        vidcut_av::first::yield_to_players();
+        let before = ffmpegs_threads();
+        let _reader = VideoReader::open(&path).unwrap();
+        (before, ffmpegs_threads())
+    })
+    .join()
+    .unwrap();
+    assert_eq!(
+        after.len() - before.len(),
+        expected,
+        "{cores} cores: {after:?}, {before:?} before"
     );
 }
 
