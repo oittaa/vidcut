@@ -183,6 +183,22 @@ pub(super) fn check(what: &str, result: CuResult) -> Result<()> {
     }
 }
 
+/// `work`, then `next`: either failure, or both joined.
+fn both<T>(work: Result<T>, next: Result<()>) -> Result<T> {
+    match (work, next) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Ok(_), Err(error)) | (Err(error), Ok(())) => Err(error),
+        (Err(work), Err(next)) => Err(Error::Invalid(format!("{work}; {next}"))),
+    }
+}
+
+/// Says `result` when debugging, where the caller cannot return it.
+fn debug_status(result: Result<()>) {
+    if let Err(error) = result {
+        crate::debug!("decoding", "{error}");
+    }
+}
+
 /// FFmpeg's CUDA device context behind a hardware device reference.
 ///
 /// # Safety
@@ -206,8 +222,12 @@ pub(super) fn in_context<T>(
     })?;
     let result = f();
     let mut popped = std::ptr::null_mut();
-    unsafe { (cuda.ctx_pop)(&mut popped) };
-    result
+    both(
+        result,
+        check("leaving the context", unsafe {
+            (cuda.ctx_pop)(&mut popped)
+        }),
+    )
 }
 
 impl CudaDevice {
@@ -284,7 +304,9 @@ pub(crate) fn listed() -> Vec<Listed> {
                     return None;
                 }
                 let mut name = [0 as std::ffi::c_char; 256];
-                (cuda.device_get_name)(name.as_mut_ptr(), 255, device);
+                if (cuda.device_get_name)(name.as_mut_ptr(), 255, device) != 0 {
+                    return None;
+                }
                 let mut bus = [0 as std::ffi::c_char; 64];
                 let slot = ((cuda.device_get_pci_bus_id)(bus.as_mut_ptr(), 63, device) == 0)
                     .then(|| crate::gpus::parse_slot(&text(&bus)))
@@ -362,11 +384,11 @@ impl Stream {
 
 impl Drop for Stream {
     fn drop(&mut self) {
-        let _ = in_context(self.cuda, self.ctx, || {
+        debug_status(in_context(self.cuda, self.ctx, || {
             check("destroying a stream", unsafe {
                 (self.cuda.stream_destroy)(self.raw)
             })
-        });
+        }));
     }
 }
 
@@ -385,11 +407,11 @@ pub(crate) unsafe extern "C" fn destroy_stream(device: *mut ffi::AVHWDeviceConte
             (*device).user_opaque as CuStream,
         )
     };
-    let _ = in_context(cuda, ctx, || {
+    debug_status(in_context(cuda, ctx, || {
         check("destroying a stream", unsafe {
             (cuda.stream_destroy)(stream)
         })
-    });
+    }));
 }
 
 /// Memory a display's Vulkan device exported, as CUDA sees it: pictures
@@ -469,8 +491,12 @@ impl SharedBuffer {
             if let Err(e) = check("mapping shared memory", unsafe {
                 (cuda.mapped_buffer)(&mut ptr, memory, &buffer)
             }) {
-                unsafe { (cuda.destroy)(memory) };
-                return Err(e);
+                return both(
+                    Err(e),
+                    check("destroying shared memory", unsafe {
+                        (cuda.destroy)(memory)
+                    }),
+                );
             }
             Ok(Self {
                 cuda,
@@ -551,13 +577,16 @@ impl SharedBuffer {
 
 impl Drop for SharedBuffer {
     fn drop(&mut self) {
-        let _ = in_context(self.cuda, self.ctx, || {
-            unsafe {
-                (self.cuda.free)(self.ptr);
-                (self.cuda.destroy)(self.memory);
-            }
-            Ok(())
-        });
+        debug_status(in_context(self.cuda, self.ctx, || {
+            both(
+                check("freeing shared memory", unsafe {
+                    (self.cuda.free)(self.ptr)
+                }),
+                check("destroying shared memory", unsafe {
+                    (self.cuda.destroy)(self.memory)
+                }),
+            )
+        }));
     }
 }
 
@@ -575,5 +604,41 @@ mod tests {
         assert_eq!(std::mem::size_of::<Memcpy2d>(), 128);
         assert_eq!(std::mem::offset_of!(Memcpy2d, src_device), 32);
         assert_eq!(std::mem::offset_of!(Memcpy2d, dst_device), 88);
+    }
+
+    #[test]
+    fn a_later_failure_is_the_error() {
+        let next = Err(Error::Invalid(
+            "CUDA: leaving the context failed (error 1)".into(),
+        ));
+        assert_eq!(
+            both(Ok(1), next).unwrap_err().to_string(),
+            "CUDA: leaving the context failed (error 1)"
+        );
+    }
+
+    #[test]
+    fn an_earlier_failure_is_the_error() {
+        let work: Result<u8> = Err(Error::Invalid(
+            "CUDA: copying a plane failed (error 2)".into(),
+        ));
+        assert_eq!(
+            both(work, Ok(())).unwrap_err().to_string(),
+            "CUDA: copying a plane failed (error 2)"
+        );
+    }
+
+    #[test]
+    fn two_failures_are_both_the_error() {
+        let work: Result<u8> = Err(Error::Invalid(
+            "CUDA: mapping shared memory failed (error 2)".into(),
+        ));
+        let next = Err(Error::Invalid(
+            "CUDA: destroying shared memory failed (error 3)".into(),
+        ));
+        assert_eq!(
+            both(work, next).unwrap_err().to_string(),
+            "CUDA: mapping shared memory failed (error 2); CUDA: destroying shared memory failed (error 3)"
+        );
     }
 }
