@@ -237,7 +237,11 @@ fn start_windows(shared: &Arc<Shared>) {
 fn run_windows(shared: Arc<Shared>) {
     let _cancel = crate::cancel::Guard::set(shared.window_interrupt.clone());
     let _counting = crate::copies::Guard::set(shared.copies.clone());
-    lock(&WINDOW_FLAGS).push(Arc::downgrade(&shared.window_interrupt));
+    {
+        let mut flags = lock(&WINDOW_FLAGS);
+        flags.retain(|f| f.strong_count() > 0);
+        flags.push(Arc::downgrade(&shared.window_interrupt));
+    }
     let Some(first) = shared.snap_windows() else {
         return;
     };
@@ -250,6 +254,11 @@ fn run_windows(shared: Arc<Shared>) {
         }
         let result = {
             let _one = lock(&WINDOW);
+            // Something changed, or the player closed, while it waited its
+            // turn: look again first.
+            if shared.window_interrupt.load(Ordering::Relaxed) {
+                continue;
+            }
             d.windows_work(&snap, dir)
         };
         shared.set_window_busy(None);

@@ -1421,9 +1421,11 @@ impl Drop for Player {
         for t in self.threads.drain(..) {
             let _ = t.join();
         }
-        if let Some(t) = lock(&self.shared.windows).take() {
-            let _ = t.join();
-        }
+        // The windows thread isn't waited for: it may be opening a file,
+        // which no cancel flag reaches, or waiting its turn behind another
+        // player's window. Its flag is raised; it holds the shared state
+        // itself and ends when it next looks.
+        drop(lock(&self.shared.windows).take());
         lock(&self.output).take();
     }
 }
