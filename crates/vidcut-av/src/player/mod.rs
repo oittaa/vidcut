@@ -955,11 +955,18 @@ impl Player {
     /// The pictures of a run and of windows behind come down from the GPU
     /// shrunk to fit `size` (physical pixels), for a viewer that shows them
     /// that small; a paused frame and those just ahead of it stay as
-    /// decoded. Another size forgets the shrunk ones. `None`, the default:
-    /// every picture as decoded.
+    /// decoded. A size more than an eighth larger or smaller forgets the
+    /// shrunk ones; a nearer one changes nothing, so a size rounded now one
+    /// way, now the other doesn't. `None`, the default: every picture as
+    /// decoded.
     pub fn shrink_to(&self, size: Option<(u32, u32)>) {
+        let near = |a: u32, b: u32| a.abs_diff(b) * 8 <= b;
         let mut ctl = self.shared.control();
-        if ctl.small == size {
+        let same = match (ctl.small, size) {
+            (Some((w0, h0)), Some((w, h))) => near(w, w0) && near(h, h0),
+            (was, now) => was == now,
+        };
+        if same {
             return;
         }
         ctl.small = size;
