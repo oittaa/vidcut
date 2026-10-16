@@ -230,6 +230,22 @@ pub(super) fn check(what: &str, result: CuResult) -> Result<()> {
     }
 }
 
+/// `work`, then `next`: either failure, or both joined.
+fn both<T>(work: Result<T>, next: Result<()>) -> Result<T> {
+    match (work, next) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Ok(_), Err(error)) | (Err(error), Ok(())) => Err(error),
+        (Err(work), Err(next)) => Err(Error::Invalid(format!("{work}; {next}"))),
+    }
+}
+
+/// Says `result` when debugging, where the caller cannot return it.
+fn debug_status(result: Result<()>) {
+    if let Err(error) = result {
+        crate::debug!("decoding", "{error}");
+    }
+}
+
 /// FFmpeg's CUDA device context behind a hardware device reference.
 ///
 /// # Safety
@@ -248,6 +264,17 @@ pub(super) unsafe fn cuda_context(device: *mut ffi::AVBufferRef) -> (CuContext, 
 /// that context, including when the work panics.
 struct PushedContext {
     pop: unsafe extern "C" fn(*mut CuContext) -> CuResult,
+}
+
+impl PushedContext {
+    /// Pops the context, with CUDA's status.
+    fn leave(self) -> Result<()> {
+        let mut popped = std::ptr::null_mut();
+        // SAFETY: as in `drop`, which the guard then skips: it pops once.
+        let status = unsafe { (self.pop)(&mut popped) };
+        std::mem::forget(self);
+        check("leaving the context", status)
+    }
 }
 
 impl Drop for PushedContext {
@@ -269,8 +296,9 @@ pub(super) fn in_context<T>(
     check("making the context current", unsafe {
         (cuda.ctx_push)(ctx)
     })?;
-    let _current = PushedContext { pop: cuda.ctx_pop };
-    f()
+    let current = PushedContext { pop: cuda.ctx_pop };
+    let result = f();
+    both(result, current.leave())
 }
 
 impl CudaDevice {
@@ -353,7 +381,9 @@ pub(crate) fn listed() -> Vec<Listed> {
                     return None;
                 }
                 let mut name = [0 as std::ffi::c_char; 256];
-                (cuda.device_get_name)(name.as_mut_ptr(), 255, device);
+                if (cuda.device_get_name)(name.as_mut_ptr(), 255, device) != 0 {
+                    return None;
+                }
                 let mut bus = [0 as std::ffi::c_char; 64];
                 let slot = ((cuda.device_get_pci_bus_id)(bus.as_mut_ptr(), 63, device) == 0)
                     .then(|| crate::gpus::parse_slot(&text(&bus)))
@@ -435,12 +465,12 @@ impl Stream {
 
 impl Drop for Stream {
     fn drop(&mut self) {
-        let _ = in_context(self.cuda, self.ctx, || {
+        debug_status(in_context(self.cuda, self.ctx, || {
             // SAFETY: the context is current; the stream this value made.
             check("destroying a stream", unsafe {
                 (self.cuda.stream_destroy)(self.raw)
             })
-        });
+        }));
     }
 }
 
@@ -459,12 +489,12 @@ pub(crate) unsafe extern "C" fn destroy_stream(device: *mut ffi::AVHWDeviceConte
             (*device).user_opaque as CuStream,
         )
     };
-    let _ = in_context(cuda, ctx, || {
+    debug_status(in_context(cuda, ctx, || {
         // SAFETY: the context is current; the stream made for this device.
         check("destroying a stream", unsafe {
             (cuda.stream_destroy)(stream)
         })
-    });
+    }));
 }
 
 /// `n` as a copy's length. A value `usize` can't hold is rejected.
@@ -559,10 +589,13 @@ impl SharedBuffer {
             if let Err(e) = check("mapping shared memory", unsafe {
                 (cuda.mapped_buffer)(&mut ptr, memory, &buffer)
             }) {
-                // SAFETY: the import just made, which nothing else holds. Its
-                // status goes unread: the mapping's error is returned.
-                unsafe { (cuda.destroy)(memory) };
-                return Err(e);
+                return both(
+                    Err(e),
+                    // SAFETY: the import just made, which nothing else holds.
+                    check("destroying shared memory", unsafe {
+                        (cuda.destroy)(memory)
+                    }),
+                );
             }
             Ok(Self {
                 cuda,
@@ -637,15 +670,18 @@ impl SharedBuffer {
 
 impl Drop for SharedBuffer {
     fn drop(&mut self) {
-        let _ = in_context(self.cuda, self.ctx, || {
-            // SAFETY: the context is current; the mapping is freed before its
-            // import is destroyed, as CUDA asks.
-            unsafe {
-                (self.cuda.free)(self.ptr);
-                (self.cuda.destroy)(self.memory);
-            }
-            Ok(())
-        });
+        debug_status(in_context(self.cuda, self.ctx, || {
+            both(
+                // SAFETY: the context is current; the mapped buffer.
+                check("freeing shared memory", unsafe {
+                    (self.cuda.free)(self.ptr)
+                }),
+                // SAFETY: the import, once its mapping is freed, as CUDA asks.
+                check("destroying shared memory", unsafe {
+                    (self.cuda.destroy)(self.memory)
+                }),
+            )
+        }));
     }
 }
 
@@ -689,6 +725,42 @@ mod tests {
         assert_eq!(std::mem::size_of::<Memcpy2d>(), 128);
         assert_eq!(std::mem::offset_of!(Memcpy2d, src_device), 32);
         assert_eq!(std::mem::offset_of!(Memcpy2d, dst_device), 88);
+    }
+
+    #[test]
+    fn a_later_failure_is_the_error() {
+        let next = Err(Error::Invalid(
+            "CUDA: leaving the context failed (error 1)".into(),
+        ));
+        assert_eq!(
+            both(Ok(1), next).unwrap_err().to_string(),
+            "CUDA: leaving the context failed (error 1)"
+        );
+    }
+
+    #[test]
+    fn an_earlier_failure_is_the_error() {
+        let work: Result<u8> = Err(Error::Invalid(
+            "CUDA: copying a plane failed (error 2)".into(),
+        ));
+        assert_eq!(
+            both(work, Ok(())).unwrap_err().to_string(),
+            "CUDA: copying a plane failed (error 2)"
+        );
+    }
+
+    #[test]
+    fn two_failures_are_both_the_error() {
+        let work: Result<u8> = Err(Error::Invalid(
+            "CUDA: mapping shared memory failed (error 2)".into(),
+        ));
+        let next = Err(Error::Invalid(
+            "CUDA: destroying shared memory failed (error 3)".into(),
+        ));
+        assert_eq!(
+            both(work, next).unwrap_err().to_string(),
+            "CUDA: mapping shared memory failed (error 2); CUDA: destroying shared memory failed (error 3)"
+        );
     }
 
     #[test]
