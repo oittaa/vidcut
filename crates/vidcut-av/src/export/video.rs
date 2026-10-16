@@ -169,7 +169,7 @@ impl Source {
         // stream's work is done (`share::wait_for`).
         let nvdec = gpu.filter(|_| video);
         let nvdec = nvdec.and_then(|g| g.device.with_own_stream().ok());
-        let nvdec = nvdec.map(crate::hw::GpuDecoder::nvdec);
+        let nvdec = nvdec.map(crate::hw::GpuDecoder::nvdec).transpose()?;
         let reader = match nvdec.as_ref().or(decoder).filter(|_| video) {
             Some(d) => VideoReader::open_gpu_or_cpu(input, d)?,
             None => VideoReader::open_input(input)?,

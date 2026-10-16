@@ -115,8 +115,7 @@ fn strip_on(
     }
     // On the GPU where it decodes the stream (it deblocks all the same).
     let mut decoder =
-        crate::decode::open_video(ctx, codec_id, gpu, || crate::decode::h264_open_gop(source))
-            .ctx(|| "opening video decoder".into())?;
+        crate::decode::open_video(ctx, codec_id, gpu, || crate::decode::h264_open_gop(source))?;
     crate::export::audio::discard_others(&input, index);
 
     let rotation =

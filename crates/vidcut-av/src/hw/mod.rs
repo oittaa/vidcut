@@ -150,12 +150,6 @@ pub(crate) struct Device(pub(crate) *mut ffi::AVBufferRef);
 unsafe impl Send for Device {}
 unsafe impl Sync for Device {}
 
-impl Clone for Device {
-    fn clone(&self) -> Self {
-        Self(unsafe { ffi::av_buffer_ref(self.0) })
-    }
-}
-
 impl Drop for Device {
     fn drop(&mut self) {
         unsafe { ffi::av_buffer_unref(&mut self.0) };
@@ -163,6 +157,15 @@ impl Drop for Device {
 }
 
 impl Device {
+    /// Another reference to this device.
+    pub(crate) fn clone(&self) -> Result<Self> {
+        let buf = unsafe { ffi::av_buffer_ref(self.0) };
+        if buf.is_null() {
+            return Err(Error::Invalid("no memory for a GPU device".into()));
+        }
+        Ok(Self(buf))
+    }
+
     /// FFmpeg's device of `kind` on `on`: a render node, an adapter's
     /// index; the default one when empty.
     fn open(kind: Kind, on: &str) -> Result<Self> {
@@ -406,15 +409,19 @@ pub struct GpuDecoder {
 
 impl GpuDecoder {
     /// NVDEC, on `cuda`.
-    pub fn nvdec(cuda: CudaDevice) -> Self {
-        Self {
+    pub fn nvdec(cuda: CudaDevice) -> Result<Self> {
+        let device = unsafe { ffi::av_buffer_ref(cuda.as_ptr()) };
+        if device.is_null() {
+            return Err(Error::Invalid("no memory for a GPU device".into()));
+        }
+        Ok(Self {
             kind: Kind::Nvdec,
-            device: Arc::new(Device(unsafe { ffi::av_buffer_ref(cuda.as_ptr()) })),
+            device: Arc::new(Device(device)),
             on: String::new(),
             cuda: Some(cuda),
             vendor: Some(crate::gpus::NVIDIA),
             gpu: None,
-        }
+        })
     }
 
     /// `kind` on `on` (a render node for VA-API, an adapter's index for
@@ -422,7 +429,7 @@ impl GpuDecoder {
     /// Vulkan comes with NVDEC, never alone.
     pub fn open(kind: Kind, on: &str) -> Result<Self> {
         if kind == Kind::Nvdec {
-            return CudaDevice::on(on.parse().unwrap_or(0)).map(Self::nvdec);
+            return CudaDevice::on(on.parse().unwrap_or(0)).and_then(Self::nvdec);
         }
         if kind == Kind::Vulkan {
             return Err(Error::Invalid(
@@ -456,7 +463,7 @@ impl GpuDecoder {
     /// user's work in turn, and a Direct3D 11 device's context is one lock.
     pub fn own(&self) -> Result<Self> {
         match &self.cuda {
-            Some(cuda) => Ok(Self::nvdec(cuda.with_own_stream()?)),
+            Some(cuda) => Self::nvdec(cuda.with_own_stream()?),
             None => Self::open(self.kind, &self.on),
         }
     }
@@ -496,7 +503,7 @@ impl GpuDecoder {
     /// a converter failed isn't used again.
     pub(crate) fn device_for(&self, kind: Kind) -> Result<Device> {
         match (kind, &self.cuda) {
-            _ if kind == self.kind => Ok(Device::clone(&self.device)),
+            _ if kind == self.kind => self.device.as_ref().clone(),
             (Kind::Vulkan, Some(cuda)) => cuda.vulkan(),
             _ => Err(Error::Invalid(format!(
                 "{self} has no {} device",
@@ -588,7 +595,7 @@ impl GpuDecoder {
             ..d
         };
         if let Some(index) = gpu.cuda {
-            return CudaDevice::on(index).map(Self::nvdec).map(named);
+            return CudaDevice::on(index).and_then(Self::nvdec).map(named);
         }
         #[cfg(windows)]
         if let Some(adapter) = gpu.adapter {

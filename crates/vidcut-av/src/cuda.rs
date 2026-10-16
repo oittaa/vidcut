@@ -39,7 +39,6 @@ use crate::hw::{Device, GpuGraph};
 use crate::route::Place;
 
 /// A CUDA device: NVDEC, the CUDA filters and NVENC share it.
-#[derive(Clone)]
 pub struct CudaDevice {
     cuda: Device,
     /// The process's one device ([`CudaDevice::open`]): this one, or the
@@ -51,6 +50,12 @@ pub struct CudaDevice {
     /// takes a quarter of a second), then shared by every clone, until a
     /// converter on it fails ([`CudaDevice::forget_vulkan`]).
     vulkan: Arc<Mutex<Option<std::result::Result<Device, String>>>>,
+}
+
+impl Clone for CudaDevice {
+    fn clone(&self) -> Self {
+        self.try_clone().unwrap_or_else(|e| panic!("{e}"))
+    }
 }
 
 impl CudaDevice {
@@ -71,7 +76,10 @@ impl CudaDevice {
             Mutex::new(Vec::new());
         let mut shared = SHARED.lock().unwrap_or_else(|e| e.into_inner());
         if let Some((_, opened)) = shared.iter().find(|(i, _)| *i == index) {
-            return opened.clone().map_err(Error::Invalid);
+            return match opened {
+                Ok(device) => device.try_clone(),
+                Err(e) => Err(Error::Invalid(e.clone())),
+            };
         }
         crate::init();
         let mut device = ptr::null_mut();
@@ -86,18 +94,30 @@ impl CudaDevice {
                 0,
             )
         };
-        let opened = if ret < 0 || device.is_null() {
-            Err(format!("no CUDA device: {}", ffmpeg::Error::from(ret)))
-        } else {
-            let cuda = Device(device);
-            Ok(Self {
-                base: cuda.clone(),
-                cuda,
-                vulkan: Arc::default(),
-            })
+        if ret < 0 || device.is_null() {
+            let err = format!("no CUDA device: {}", ffmpeg::Error::from(ret));
+            shared.push((index, Err(err.clone())));
+            return Err(Error::Invalid(err));
+        }
+        let cuda = Device(device);
+        let base = cuda.clone()?;
+        let opened = Self {
+            base,
+            cuda,
+            vulkan: Arc::default(),
         };
-        shared.push((index, opened.clone()));
-        opened.map_err(Error::Invalid)
+        let stored = opened.try_clone()?;
+        shared.push((index, Ok(stored)));
+        Ok(opened)
+    }
+
+    /// Another of this device, its own references to the same contexts.
+    pub(crate) fn try_clone(&self) -> Result<Self> {
+        Ok(Self {
+            cuda: self.cuda.clone()?,
+            base: self.base.clone()?,
+            vulkan: Arc::clone(&self.vulkan),
+        })
     }
 
     /// A device of its own on the same context: its work goes on a stream of
@@ -135,8 +155,8 @@ impl CudaDevice {
             }
             Ok(Self {
                 cuda: Device(device),
-                base: self.base.clone(),
-                vulkan: self.vulkan.clone(),
+                base: self.base.clone()?,
+                vulkan: Arc::clone(&self.vulkan),
             })
         }
     }
@@ -149,7 +169,7 @@ impl CudaDevice {
     /// encoders' on this GPU.
     pub(crate) fn vulkan(&self) -> Result<Device> {
         let mut slot = self.vulkan.lock().unwrap_or_else(|e| e.into_inner());
-        slot.get_or_insert_with(|| {
+        match slot.get_or_insert_with(|| {
             let _one = crate::hw::making_vulkan();
             let mut vulkan = ptr::null_mut();
             let ret = unsafe {
@@ -168,9 +188,10 @@ impl CudaDevice {
             } else {
                 Ok(Device(vulkan))
             }
-        })
-        .clone()
-        .map_err(Error::Invalid)
+        }) {
+            Ok(device) => device.clone(),
+            Err(e) => Err(Error::Invalid(e.clone())),
+        }
     }
 
     /// Drops `used`, the Vulkan device a converter failed on, if it is
@@ -227,8 +248,12 @@ impl HwFrames {
     }
 
     /// Another reference to the same frames.
-    fn share(&self) -> Self {
-        Self(unsafe { ffi::av_buffer_ref(self.0) })
+    fn share(&self) -> Result<Self> {
+        let frames = unsafe { ffi::av_buffer_ref(self.0) };
+        if frames.is_null() {
+            return Err(Error::Invalid("no memory for frames".into()));
+        }
+        Ok(Self(frames))
     }
 
     /// A frame of this pool holding the picture of `src` (in memory, or in
@@ -1024,7 +1049,11 @@ impl Placebo {
         };
         let vulkan = if vulkans {
             // SAFETY: the frames' own device, another reference to it.
-            Device(unsafe { ffi::av_buffer_ref(frames_device) })
+            let vulkan = unsafe { ffi::av_buffer_ref(frames_device) };
+            if vulkan.is_null() {
+                return Err(Error::Invalid("no memory for a GPU device".into()));
+            }
+            Device(vulkan)
         } else {
             device.vulkan()?
         };
@@ -1113,7 +1142,11 @@ impl Placebo {
             if ctx.is_null() {
                 return Err(Error::Invalid("no libplacebo filter".into()));
             }
-            (*ctx).hw_device_ctx = ffi::av_buffer_ref(vulkan.0);
+            let hw = ffi::av_buffer_ref(vulkan.0);
+            if hw.is_null() {
+                return Err(Error::Invalid("no memory for a GPU device".into()));
+            }
+            (*ctx).hw_device_ctx = hw;
             let mut dict = ffmpeg::Dictionary::new();
             for (k, v) in &options {
                 dict.set(k, v);
@@ -1155,7 +1188,7 @@ impl Placebo {
             // Any picture will do: a black one.
             let size = (width, height);
             Some(Blacks::new(
-                pool.share(),
+                pool.share()?,
                 as_read(sw).into(),
                 size,
                 color.input,
@@ -1176,7 +1209,7 @@ impl Placebo {
                 num: out_sar.0,
                 den: out_sar.1,
             },
-            device: device.clone(),
+            device: device.try_clone()?,
             vulkan,
             held: VecDeque::new(),
         })

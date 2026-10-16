@@ -813,21 +813,28 @@ pub(crate) fn open_video(
     id: codec::Id,
     gpu: Option<&crate::hw::GpuDecoder>,
     open_gop: impl FnOnce() -> bool,
-) -> std::result::Result<ffmpeg::decoder::Video, ffmpeg::Error> {
+) -> Result<ffmpeg::decoder::Video> {
     let Some((_, device, codec)) = gpu.and_then(|g| on_gpu(id, g, open_gop).ok()) else {
-        return ctx.decoder().video();
+        return ctx.decoder().video().ctx(|| "opening video decoder".into());
     };
     // SAFETY: the context isn't opened yet; it takes a reference of its own.
     unsafe {
         let raw = ctx.as_mut_ptr();
-        (*raw).hw_device_ctx = ffmpeg::ffi::av_buffer_ref(device.0);
+        let hw = ffmpeg::ffi::av_buffer_ref(device.0);
+        if hw.is_null() {
+            return Err(Error::Invalid("no memory for a GPU device".into()));
+        }
+        (*raw).hw_device_ctx = hw;
         (*raw).get_format = Some(gpu_format);
         // Frames held on their way to be measured.
         (*raw).extra_hw_frames = 8;
         // The GPU decodes; frame threads would only add latency.
         (*raw).thread_count = 1;
     }
-    ctx.decoder().open_as(codec).and_then(|d| d.video())
+    ctx.decoder()
+        .open_as(codec)
+        .and_then(|d| d.video())
+        .ctx(|| "opening video decoder".into())
 }
 
 /// `f` in memory: copied down when it is in GPU memory.
@@ -1077,7 +1084,11 @@ impl VideoReader {
             // The GPU decodes; frame threads would only add latency.
             Some((_, device, _)) => unsafe {
                 let raw = ctx.as_mut_ptr();
-                (*raw).hw_device_ctx = ffmpeg::ffi::av_buffer_ref(device.0);
+                let hw = ffmpeg::ffi::av_buffer_ref(device.0);
+                if hw.is_null() {
+                    return Err(Error::Invalid("no memory for a GPU device".into()));
+                }
+                (*raw).hw_device_ctx = hw;
                 (*raw).get_format = Some(gpu_format);
                 // Frames a filter graph and the encoder hold on to.
                 (*raw).extra_hw_frames = 8;
