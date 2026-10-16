@@ -102,7 +102,8 @@ impl CudaDevice {
             shared.push((index, Err(err.clone())));
             return Err(Error::Invalid(err));
         }
-        let cuda = Device::from_raw(device);
+        // SAFETY: the device FFmpeg just made, ours alone.
+        let cuda = unsafe { Device::from_raw(device) };
         let base = cuda.clone()?;
         let opened = Self {
             base,
@@ -134,7 +135,8 @@ impl CudaDevice {
         let stream = share::Stream::new(self)?;
         // SAFETY: a CUDA device context FFmpeg allocates, given this
         // device's context (which the base keeps) and the new stream, which
-        // its `free` destroys once FFmpeg is done with it.
+        // its `free` destroys once FFmpeg is done with it. The new device
+        // owns it.
         unsafe {
             let mut device = ffi::av_hwdevice_ctx_alloc(ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA);
             if device.is_null() {
@@ -190,7 +192,8 @@ impl CudaDevice {
                     ffmpeg::Error::from(ret)
                 ))
             } else {
-                Ok(Device::from_raw(vulkan))
+                // SAFETY: the device FFmpeg just derived, ours alone.
+                Ok(unsafe { Device::from_raw(vulkan) })
             }
         }) {
             Ok(device) => device.clone(),
@@ -1079,7 +1082,8 @@ impl Placebo {
             if own.is_null() {
                 return Err(Error::Invalid("no memory for a Vulkan device".into()));
             }
-            Device::from_raw(own)
+            // SAFETY: the reference just taken, ours alone.
+            unsafe { Device::from_raw(own) }
         } else {
             device.vulkan()?
         };
@@ -1597,8 +1601,11 @@ mod tests {
 
     #[test]
     fn gpu_frames_reject_a_side_past_i32() {
+        // SAFETY: null, and only dropped: the side is rejected before the
+        // device is read.
+        let none = unsafe { super::Device::from_raw(std::ptr::null_mut()) };
         let err = match super::HwFrames::new(
-            &super::Device::from_raw(std::ptr::null_mut()),
+            &none,
             ffi::AVPixelFormat::AV_PIX_FMT_NONE,
             ffi::AVPixelFormat::AV_PIX_FMT_NV12,
             2_147_483_648,

@@ -5,6 +5,7 @@ pub use ffmpeg_next as ffmpeg;
 pub mod analysis;
 pub mod barcode;
 pub mod beep;
+pub(crate) mod buffers;
 pub mod cancel;
 pub mod color;
 pub mod copies;

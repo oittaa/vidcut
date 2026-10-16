@@ -162,8 +162,13 @@ impl Drop for Device {
 }
 
 impl Device {
-    /// The device that owns `ptr`.
-    pub(crate) fn from_raw(ptr: *mut ffi::AVBufferRef) -> Self {
+    /// The device that owns `ptr`, and releases it when dropped.
+    ///
+    /// # Safety
+    /// `ptr` is a reference to a hardware device context that the caller
+    /// hands over, which nothing else releases; or null, for a device that
+    /// is only dropped.
+    pub(crate) unsafe fn from_raw(ptr: *mut ffi::AVBufferRef) -> Self {
         Self(ptr)
     }
 

@@ -230,6 +230,22 @@ pub(super) fn check(what: &str, result: CuResult) -> Result<()> {
     }
 }
 
+/// `work`, then `next`: either failure, or both joined.
+fn both<T>(work: Result<T>, next: Result<()>) -> Result<T> {
+    match (work, next) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Ok(_), Err(error)) | (Err(error), Ok(())) => Err(error),
+        (Err(work), Err(next)) => Err(Error::Invalid(format!("{work}; {next}"))),
+    }
+}
+
+/// Says `result` when debugging, where the caller cannot return it.
+fn debug_status(result: Result<()>) {
+    if let Err(error) = result {
+        crate::debug!("decoding", "{error}");
+    }
+}
+
 /// FFmpeg's CUDA device context behind a hardware device reference.
 ///
 /// # Safety
@@ -248,6 +264,17 @@ pub(super) unsafe fn cuda_context(device: *mut ffi::AVBufferRef) -> (CuContext, 
 /// that context, including when the work panics.
 struct PushedContext {
     pop: unsafe extern "C" fn(*mut CuContext) -> CuResult,
+}
+
+impl PushedContext {
+    /// Pops the context, with CUDA's status.
+    fn leave(self) -> Result<()> {
+        let mut popped = std::ptr::null_mut();
+        // SAFETY: as in `drop`, which the guard then skips: it pops once.
+        let status = unsafe { (self.pop)(&mut popped) };
+        std::mem::forget(self);
+        check("leaving the context", status)
+    }
 }
 
 impl Drop for PushedContext {
@@ -269,8 +296,9 @@ pub(super) fn in_context<T>(
     check("making the context current", unsafe {
         (cuda.ctx_push)(ctx)
     })?;
-    let _current = PushedContext { pop: cuda.ctx_pop };
-    f()
+    let current = PushedContext { pop: cuda.ctx_pop };
+    let result = f();
+    both(result, current.leave())
 }
 
 impl CudaDevice {
@@ -353,7 +381,9 @@ pub(crate) fn listed() -> Vec<Listed> {
                     return None;
                 }
                 let mut name = [0 as std::ffi::c_char; 256];
-                (cuda.device_get_name)(name.as_mut_ptr(), 255, device);
+                if (cuda.device_get_name)(name.as_mut_ptr(), 255, device) != 0 {
+                    return None;
+                }
                 let mut bus = [0 as std::ffi::c_char; 64];
                 let slot = ((cuda.device_get_pci_bus_id)(bus.as_mut_ptr(), 63, device) == 0)
                     .then(|| crate::gpus::parse_slot(&text(&bus)))
@@ -435,12 +465,12 @@ impl Stream {
 
 impl Drop for Stream {
     fn drop(&mut self) {
-        let _ = in_context(self.cuda, self.ctx, || {
+        debug_status(in_context(self.cuda, self.ctx, || {
             // SAFETY: the context is current; the stream this value made.
             check("destroying a stream", unsafe {
                 (self.cuda.stream_destroy)(self.raw)
             })
-        });
+        }));
     }
 }
 
@@ -459,12 +489,12 @@ pub(crate) unsafe extern "C" fn destroy_stream(device: *mut ffi::AVHWDeviceConte
             (*device).user_opaque as CuStream,
         )
     };
-    let _ = in_context(cuda, ctx, || {
+    debug_status(in_context(cuda, ctx, || {
         // SAFETY: the context is current; the stream made for this device.
         check("destroying a stream", unsafe {
             (cuda.stream_destroy)(stream)
         })
-    });
+    }));
 }
 
 /// `n` as a copy's length. A value `usize` can't hold is rejected.
@@ -559,10 +589,13 @@ impl SharedBuffer {
             if let Err(e) = check("mapping shared memory", unsafe {
                 (cuda.mapped_buffer)(&mut ptr, memory, &buffer)
             }) {
-                // SAFETY: the import just made, which nothing else holds. Its
-                // status goes unread: the mapping's error is returned.
-                unsafe { (cuda.destroy)(memory) };
-                return Err(e);
+                return both(
+                    Err(e),
+                    // SAFETY: the import just made, which nothing else holds.
+                    check("destroying shared memory", unsafe {
+                        (cuda.destroy)(memory)
+                    }),
+                );
             }
             Ok(Self {
                 cuda,
@@ -584,20 +617,13 @@ impl SharedBuffer {
     /// Copies the planes of `frame`, a frame in CUDA memory, into the
     /// buffer as `planes` place them (`planes[i]` for the frame's plane
     /// `i`), and waits until the copy is done: the display may read them
-    /// from then on.
+    /// from then on. A plane that does not fit in the buffer, or a row
+    /// count past that plane's height, is rejected.
     pub fn copy_planes(&self, frame: &frame::Video, planes: &[PlaneCopy]) -> Result<()> {
         if frame.format() != format::Pixel::CUDA {
             return Err(Error::Invalid("the picture isn't in CUDA memory".into()));
         }
-        for p in planes {
-            let end = p.offset + p.pitch * p.rows.saturating_sub(1) + p.row_bytes;
-            if p.row_bytes > p.pitch || end > self.size {
-                return Err(Error::Invalid(format!(
-                    "a plane of {} rows of {} bytes doesn't fit the shared buffer",
-                    p.rows, p.row_bytes
-                )));
-            }
-        }
+        planes_fit(self.size, frame, planes)?;
         // SAFETY: a CUDA frame's planes are device pointers, `linesize`
         // bytes apart.
         let (data, linesize) = unsafe {
@@ -635,17 +661,60 @@ impl SharedBuffer {
     }
 }
 
+/// `planes` copied into `size` bytes of `frame`. Each plane's last byte
+/// stays inside the buffer, and its row count stays within that plane.
+/// A plane's height follows the picture's layout: planes 1 and 2 are the
+/// chroma planes, shortened by its vertical subsampling, and the rest are
+/// the picture's height.
+fn planes_fit(size: u64, frame: &frame::Video, planes: &[PlaneCopy]) -> Result<()> {
+    let layout = crate::hw::sw_format(frame);
+    let height = frame.height();
+    for (i, p) in planes.iter().enumerate() {
+        let end = p
+            .pitch
+            .checked_mul(p.rows.saturating_sub(1))
+            .and_then(|span| span.checked_add(p.row_bytes))
+            .and_then(|span| p.offset.checked_add(span));
+        if p.row_bytes > p.pitch || end.is_none_or(|end| end > size) {
+            return Err(Error::Invalid(format!(
+                "a plane of {} rows of {} bytes doesn't fit the shared buffer",
+                p.rows, p.row_bytes
+            )));
+        }
+        let rows = plane_rows(layout, height, i);
+        if p.rows > u64::from(rows) {
+            return Err(Error::Invalid(format!(
+                "a plane of {} rows is past the picture's plane of {rows}",
+                p.rows
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Rows of plane `index` in a `height`-line picture of `layout`.
+fn plane_rows(layout: format::Pixel, height: u32, index: usize) -> u32 {
+    if index != 1 && index != 2 {
+        return height;
+    }
+    let shift = layout.descriptor().map(|d| d.log2_chroma_h()).unwrap_or(0);
+    height.div_ceil(1u32 << shift)
+}
+
 impl Drop for SharedBuffer {
     fn drop(&mut self) {
-        let _ = in_context(self.cuda, self.ctx, || {
-            // SAFETY: the context is current; the mapping is freed before its
-            // import is destroyed, as CUDA asks.
-            unsafe {
-                (self.cuda.free)(self.ptr);
-                (self.cuda.destroy)(self.memory);
-            }
-            Ok(())
-        });
+        debug_status(in_context(self.cuda, self.ctx, || {
+            both(
+                // SAFETY: the context is current; the mapped buffer.
+                check("freeing shared memory", unsafe {
+                    (self.cuda.free)(self.ptr)
+                }),
+                // SAFETY: the import, once its mapping is freed, as CUDA asks.
+                check("destroying shared memory", unsafe {
+                    (self.cuda.destroy)(self.memory)
+                }),
+            )
+        }));
     }
 }
 
@@ -654,6 +723,167 @@ mod tests {
     use std::cell::Cell;
 
     use super::*;
+
+    /// A CUDA frame whose picture layout is `layout`, `height` lines tall.
+    fn picture(height: u32, layout: format::Pixel) -> frame::Video {
+        let mut frame = frame::Video::empty();
+        frame.set_format(format::Pixel::CUDA);
+        frame.set_width(16);
+        frame.set_height(height);
+        // SAFETY: a zeroed frames context this frame owns. The check reads
+        // its software format and nothing else.
+        unsafe {
+            let ctx = ffi::av_buffer_allocz(std::mem::size_of::<ffi::AVHWFramesContext>());
+            assert!(!ctx.is_null());
+            (*((*ctx).data as *mut ffi::AVHWFramesContext)).sw_format = layout.into();
+            (*frame.as_mut_ptr()).hw_frames_ctx = ctx;
+        }
+        frame
+    }
+
+    fn rejected(size: u64, height: u32, layout: format::Pixel, planes: &[PlaneCopy]) -> String {
+        planes_fit(size, &picture(height, layout), planes)
+            .unwrap_err()
+            .to_string()
+    }
+
+    #[test]
+    fn a_pitch_that_wraps_does_not_fit() {
+        let planes = [PlaneCopy {
+            offset: 0,
+            pitch: u64::MAX,
+            row_bytes: 1,
+            rows: 2,
+        }];
+        assert_eq!(
+            rejected(u64::MAX, 1080, format::Pixel::NV12, &planes),
+            "a plane of 2 rows of 1 bytes doesn't fit the shared buffer"
+        );
+    }
+
+    #[test]
+    fn an_offset_that_wraps_does_not_fit() {
+        let planes = [PlaneCopy {
+            offset: u64::MAX - 5,
+            pitch: 10,
+            row_bytes: 10,
+            rows: 1,
+        }];
+        assert_eq!(
+            rejected(u64::MAX, 1080, format::Pixel::NV12, &planes),
+            "a plane of 1 rows of 10 bytes doesn't fit the shared buffer"
+        );
+    }
+
+    #[test]
+    fn a_wider_row_than_the_pitch_does_not_fit() {
+        let planes = [PlaneCopy {
+            offset: 0,
+            pitch: 4,
+            row_bytes: 5,
+            rows: 1,
+        }];
+        assert_eq!(
+            rejected(100, 10, format::Pixel::NV12, &planes),
+            "a plane of 1 rows of 5 bytes doesn't fit the shared buffer"
+        );
+    }
+
+    #[test]
+    fn a_plane_one_byte_past_the_buffer_does_not_fit() {
+        let planes = [PlaneCopy {
+            offset: 10,
+            pitch: 20,
+            row_bytes: 8,
+            rows: 3,
+        }];
+        assert_eq!(
+            rejected(57, 3, format::Pixel::NV12, &planes),
+            "a plane of 3 rows of 8 bytes doesn't fit the shared buffer"
+        );
+    }
+
+    #[test]
+    fn a_plane_that_ends_on_the_last_byte_fits() {
+        let planes = [PlaneCopy {
+            offset: 10,
+            pitch: 20,
+            row_bytes: 8,
+            rows: 3,
+        }];
+        assert_eq!(
+            planes_fit(58, &picture(3, format::Pixel::NV12), &planes).map_err(|e| e.to_string()),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn a_chroma_plane_past_half_the_picture_is_rejected() {
+        let planes = [
+            PlaneCopy {
+                offset: 0,
+                pitch: 8,
+                row_bytes: 8,
+                rows: 1080,
+            },
+            PlaneCopy {
+                offset: 8640,
+                pitch: 8,
+                row_bytes: 8,
+                rows: 541,
+            },
+        ];
+        assert_eq!(
+            rejected(u64::MAX, 1080, format::Pixel::NV12, &planes),
+            "a plane of 541 rows is past the picture's plane of 540"
+        );
+    }
+
+    #[test]
+    fn an_odd_picture_s_chroma_rows_round_up() {
+        let planes = [
+            PlaneCopy {
+                offset: 0,
+                pitch: 8,
+                row_bytes: 8,
+                rows: 1081,
+            },
+            PlaneCopy {
+                offset: 8648,
+                pitch: 8,
+                row_bytes: 8,
+                rows: 541,
+            },
+        ];
+        assert_eq!(
+            planes_fit(u64::MAX, &picture(1081, format::Pixel::NV12), &planes)
+                .map_err(|e| e.to_string()),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn a_4_2_2_chroma_plane_is_as_tall_as_the_picture() {
+        let planes = [
+            PlaneCopy {
+                offset: 0,
+                pitch: 8,
+                row_bytes: 8,
+                rows: 720,
+            },
+            PlaneCopy {
+                offset: 5760,
+                pitch: 8,
+                row_bytes: 8,
+                rows: 720,
+            },
+        ];
+        assert_eq!(
+            planes_fit(u64::MAX, &picture(720, format::Pixel::P210LE), &planes)
+                .map_err(|e| e.to_string()),
+            Ok(())
+        );
+    }
 
     thread_local! {
         static POPS: Cell<u32> = const { Cell::new(0) };
@@ -689,6 +919,42 @@ mod tests {
         assert_eq!(std::mem::size_of::<Memcpy2d>(), 128);
         assert_eq!(std::mem::offset_of!(Memcpy2d, src_device), 32);
         assert_eq!(std::mem::offset_of!(Memcpy2d, dst_device), 88);
+    }
+
+    #[test]
+    fn a_later_failure_is_the_error() {
+        let next = Err(Error::Invalid(
+            "CUDA: leaving the context failed (error 1)".into(),
+        ));
+        assert_eq!(
+            both(Ok(1), next).unwrap_err().to_string(),
+            "CUDA: leaving the context failed (error 1)"
+        );
+    }
+
+    #[test]
+    fn an_earlier_failure_is_the_error() {
+        let work: Result<u8> = Err(Error::Invalid(
+            "CUDA: copying a plane failed (error 2)".into(),
+        ));
+        assert_eq!(
+            both(work, Ok(())).unwrap_err().to_string(),
+            "CUDA: copying a plane failed (error 2)"
+        );
+    }
+
+    #[test]
+    fn two_failures_are_both_the_error() {
+        let work: Result<u8> = Err(Error::Invalid(
+            "CUDA: mapping shared memory failed (error 2)".into(),
+        ));
+        let next = Err(Error::Invalid(
+            "CUDA: destroying shared memory failed (error 3)".into(),
+        ));
+        assert_eq!(
+            both(work, next).unwrap_err().to_string(),
+            "CUDA: mapping shared memory failed (error 2); CUDA: destroying shared memory failed (error 3)"
+        );
     }
 
     #[test]
