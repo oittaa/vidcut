@@ -228,6 +228,24 @@ fn let_unused_go(shared: &mut Vec<Shared>) {
     });
 }
 
+/// The shared pool whose surface `f` is, where it is one's: its memory goes
+/// only when all of the pool's frames do.
+#[cfg(target_os = "linux")]
+pub(super) fn pooled(f: &frame::Video) -> Option<usize> {
+    // SAFETY: reads the frame's own field.
+    let frames = unsafe { (*f.as_ptr()).hw_frames_ctx };
+    if frames.is_null() {
+        return None;
+    }
+    let shared = SHARED.lock().unwrap_or_else(|e| e.into_inner());
+    // SAFETY: live buffer references, compared by their frames contexts.
+    let found = shared
+        .iter()
+        .any(|s| unsafe { (*s.frames).data == (*frames).data });
+    // SAFETY: as above.
+    found.then(|| unsafe { (*frames).data as usize })
+}
+
 /// Lets the shared pools go that nothing uses any more ([`let_unused_go`]),
 /// as pictures are kept: a pool goes soon after its last picture does, not
 /// when the next decoder opens.

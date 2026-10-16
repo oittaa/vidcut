@@ -281,9 +281,14 @@ impl Inner {
 
     /// Lets the pictures counted in `kind`'s budget, those kept or looked
     /// at least recently, go while it is over; never `keep` nor the one
-    /// held.
+    /// held. One whose memory is a pool's other than `keep`'s
+    /// (`Picture::pooled`) goes with all of that pool's pictures: letting
+    /// one go would free none of it.
     fn evict(&mut self, kind: Kind, keep: Option<&Id>) {
         let pool = self.pool(kind);
+        let room_for = keep
+            .and_then(|k| self.pictures.get(k))
+            .and_then(|(p, _)| p.pooled());
         while self.counted(pool) > self.budget[pool.index()] {
             let held = self.held.as_ref();
             let oldest = self
@@ -293,11 +298,44 @@ impl Inner {
                     self.charges_in(p, pool) && Some(*k) != keep && Some(*k) != held
                 })
                 .min_by_key(|(_, (_, used))| *used)
-                .map(|(k, _)| k.clone());
-            let Some(oldest) = oldest else { break };
-            if let Some((old, _)) = self.pictures.remove(&oldest) {
-                self.uncharge(&old);
+                .map(|(k, (p, _))| (k.clone(), p.pooled()));
+            let Some((oldest, pooled)) = oldest else {
+                break;
+            };
+            match pooled {
+                Some(other) if pooled != room_for => self.let_pool_go(other, keep),
+                _ => {
+                    if let Some((old, _)) = self.pictures.remove(&oldest) {
+                        self.uncharge(&old);
+                    }
+                }
             }
+        }
+    }
+
+    /// Lets all the pictures of `pooled` go but `keep`: the pool's memory
+    /// goes with the last of them. The one held comes down to memory
+    /// instead, where it can, or stays as it is.
+    fn let_pool_go(&mut self, pooled: usize, keep: Option<&Id>) {
+        let ids: Vec<Id> = self
+            .pictures
+            .iter()
+            .filter(|(k, (p, _))| p.pooled() == Some(pooled) && Some(*k) != keep)
+            .map(|(k, _)| k.clone())
+            .collect();
+        for id in ids {
+            let Some((old, used)) = self.pictures.remove(&id) else {
+                continue;
+            };
+            self.uncharge(&old);
+            if self.held.as_ref() != Some(&id) {
+                continue;
+            }
+            let picture = old.copied_down().map(Arc::new).unwrap_or(old);
+            for (bytes, c) in self.bytes.iter_mut().zip(charges(&picture)) {
+                *bytes += c;
+            }
+            self.pictures.insert(id, (picture, used));
         }
     }
 }
@@ -311,18 +349,64 @@ mod tests {
     use crate::player::frame::Picture;
     use crate::player::plan::Id;
 
+    /// A 2×2 picture on a GPU, 6 bytes.
+    fn on_gpu() -> Picture {
+        let mut f = frame::Video::empty();
+        f.set_format(crate::hw::Kind::VideoToolbox.pixel());
+        f.set_width(2);
+        f.set_height(2);
+        Picture::new(f, 0, None, None)
+    }
+
     /// A 2×2 picture, 6 bytes: in memory, or on a GPU.
     fn picture(gpu: bool) -> Arc<Picture> {
-        let frame = if gpu {
-            let mut f = frame::Video::empty();
-            f.set_format(crate::hw::Kind::VideoToolbox.pixel());
-            f.set_width(2);
-            f.set_height(2);
-            f
-        } else {
-            frame::Video::new(Pixel::YUV420P, 2, 2)
-        };
-        Arc::new(Picture::new(frame, 0, None, None))
+        if gpu {
+            return Arc::new(on_gpu());
+        }
+        Arc::new(Picture::new(
+            frame::Video::new(Pixel::YUV420P, 2, 2),
+            0,
+            None,
+            None,
+        ))
+    }
+
+    /// A 2×2 picture on a GPU whose memory is `pool`'s, 6 bytes.
+    fn of_pool(pool: usize) -> Arc<Picture> {
+        Arc::new(on_gpu().in_pool(pool))
+    }
+
+    /// Which of the clip's pictures at `0..4` are kept.
+    fn kept(store: &Store) -> [bool; 4] {
+        [0, 1, 2, 3].map(|pos| store.contains(&Id::at("clip", pos)))
+    }
+
+    #[test]
+    fn a_picture_of_another_pool_makes_room_by_letting_a_pool_go_whole() {
+        let store = Store::new(0, 18);
+        for (pos, pool) in [(0, 1), (1, 1), (2, 1), (3, 2)] {
+            store.put(Id::at("clip", pos), of_pool(pool));
+        }
+        assert_eq!(kept(&store), [false, false, false, true]);
+    }
+
+    #[test]
+    fn a_picture_of_the_same_pool_lets_only_the_oldest_go() {
+        let store = Store::new(0, 18);
+        for pos in 0..4 {
+            store.put(Id::at("clip", pos), of_pool(1));
+        }
+        assert_eq!(kept(&store), [false, true, true, true]);
+    }
+
+    #[test]
+    fn the_picture_held_stays_when_its_pool_goes() {
+        let store = Store::new(0, 18);
+        store.hold(Some(Id::at("clip", 0)));
+        for (pos, pool) in [(0, 1), (1, 1), (2, 1), (3, 2)] {
+            store.put(Id::at("clip", pos), of_pool(pool));
+        }
+        assert_eq!(kept(&store), [true, false, false, true]);
     }
 
     #[test]
