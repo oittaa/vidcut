@@ -102,7 +102,8 @@ impl CudaDevice {
             shared.push((index, Err(err.clone())));
             return Err(Error::Invalid(err));
         }
-        let cuda = Device(device);
+        // SAFETY: the device FFmpeg just made, ours alone.
+        let cuda = unsafe { Device::from_raw(device) };
         let base = cuda.clone()?;
         let opened = Self {
             base,
@@ -134,7 +135,8 @@ impl CudaDevice {
         let stream = share::Stream::new(self)?;
         // SAFETY: a CUDA device context FFmpeg allocates, given this
         // device's context (which the base keeps) and the new stream, which
-        // its `free` destroys once FFmpeg is done with it.
+        // its `free` destroys once FFmpeg is done with it. The new device
+        // owns it.
         unsafe {
             let mut device = ffi::av_hwdevice_ctx_alloc(ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA);
             if device.is_null() {
@@ -157,7 +159,7 @@ impl CudaDevice {
                 });
             }
             Ok(Self {
-                cuda: Device(device),
+                cuda: Device::from_raw(device),
                 base: self.base.clone()?,
                 vulkan: Arc::clone(&self.vulkan),
             })
@@ -165,7 +167,7 @@ impl CudaDevice {
     }
 
     pub(crate) fn as_ptr(&self) -> *mut ffi::AVBufferRef {
-        self.cuda.0
+        self.cuda.as_ptr()
     }
 
     /// The Vulkan device, made if there is none: libplacebo's, and Vulkan's
@@ -180,7 +182,7 @@ impl CudaDevice {
                 ffi::av_hwdevice_ctx_create_derived(
                     &mut vulkan,
                     ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VULKAN,
-                    self.base.0,
+                    self.base.as_ptr(),
                     0,
                 )
             };
@@ -190,7 +192,8 @@ impl CudaDevice {
                     ffmpeg::Error::from(ret)
                 ))
             } else {
-                Ok(Device(vulkan))
+                // SAFETY: the device FFmpeg just derived, ours alone.
+                Ok(unsafe { Device::from_raw(vulkan) })
             }
         }) {
             Ok(device) => device.clone(),
@@ -205,7 +208,7 @@ impl CudaDevice {
         let mut slot = self.vulkan.lock().unwrap_or_else(|e| e.into_inner());
         // SAFETY: references to device contexts, the same device when they
         // point to the same data.
-        let same = |d: &Device| unsafe { (*d.0).data == (*used.0).data };
+        let same = |d: &Device| unsafe { (*d.as_ptr()).data == (*used.as_ptr()).data };
         if let Some(Ok(d)) = slot.as_ref()
             && same(d)
         {
@@ -244,7 +247,7 @@ impl HwFrames {
         let (width, height) = frame_sides(width, height)?;
         // SAFETY: a frames context FFmpeg allocates on this live device.
         unsafe {
-            let mut frames = ffi::av_hwframe_ctx_alloc(device.0);
+            let mut frames = ffi::av_hwframe_ctx_alloc(device.as_ptr());
             if frames.is_null() {
                 return Err(Error::Invalid("no memory for GPU frames".into()));
             }
@@ -1079,7 +1082,8 @@ impl Placebo {
             if own.is_null() {
                 return Err(Error::Invalid("no memory for a Vulkan device".into()));
             }
-            Device(own)
+            // SAFETY: the reference just taken, ours alone.
+            unsafe { Device::from_raw(own) }
         } else {
             device.vulkan()?
         };
@@ -1171,7 +1175,7 @@ impl Placebo {
             }
             // libplacebo needs the Vulkan device before it starts; given
             // none, FFmpeg would convert on the CPU in front of it.
-            (*ctx).hw_device_ctx = ffi::av_buffer_ref(vulkan.0);
+            (*ctx).hw_device_ctx = ffi::av_buffer_ref(vulkan.as_ptr());
             if (*ctx).hw_device_ctx.is_null() {
                 return Err(Error::Invalid("no memory for libplacebo's device".into()));
             }
@@ -1597,8 +1601,11 @@ mod tests {
 
     #[test]
     fn gpu_frames_reject_a_side_past_i32() {
+        // SAFETY: null, and only dropped: the side is rejected before the
+        // device is read.
+        let none = unsafe { super::Device::from_raw(std::ptr::null_mut()) };
         let err = match super::HwFrames::new(
-            &super::Device(std::ptr::null_mut()),
+            &none,
             ffi::AVPixelFormat::AV_PIX_FMT_NONE,
             ffi::AVPixelFormat::AV_PIX_FMT_NV12,
             2_147_483_648,

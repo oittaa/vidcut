@@ -146,10 +146,12 @@ impl Kind {
 const ON_VULKAN: [ffmpeg::codec::Id; 1] = [ffmpeg::codec::Id::PRORES];
 
 /// A reference to one of FFmpeg's hardware device contexts.
-pub(crate) struct Device(pub(crate) *mut ffi::AVBufferRef);
+pub(crate) struct Device(*mut ffi::AVBufferRef);
 
-// SAFETY: a reference to a hardware device context may be used, and
-// dropped, on any thread.
+// SAFETY: FFmpeg counts these references. This owner may move to any
+// thread and be dropped there, and a shared reference may be cloned and
+// used on any thread. `as_ptr` lends the same pointer while this device
+// keeps the reference.
 unsafe impl Send for Device {}
 unsafe impl Sync for Device {}
 
@@ -160,6 +162,21 @@ impl Drop for Device {
 }
 
 impl Device {
+    /// The device that owns `ptr`, and releases it when dropped.
+    ///
+    /// # Safety
+    /// `ptr` is a reference to a hardware device context that the caller
+    /// hands over, which nothing else releases; or null, for a device that
+    /// is only dropped.
+    pub(crate) unsafe fn from_raw(ptr: *mut ffi::AVBufferRef) -> Self {
+        Self(ptr)
+    }
+
+    /// This device's buffer reference, valid while the device is.
+    pub(crate) fn as_ptr(&self) -> *mut ffi::AVBufferRef {
+        self.0
+    }
+
     /// Another reference to this device.
     pub(crate) fn clone(&self) -> Result<Self> {
         let buf = unsafe { ffi::av_buffer_ref(self.0) };

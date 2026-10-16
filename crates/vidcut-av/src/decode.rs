@@ -827,7 +827,7 @@ pub(crate) fn open_video(
     // SAFETY: the context isn't opened yet; it takes a reference of its own.
     unsafe {
         let raw = ctx.as_mut_ptr();
-        let hw = ffmpeg::ffi::av_buffer_ref(device.0);
+        let hw = ffmpeg::ffi::av_buffer_ref(device.as_ptr());
         if hw.is_null() {
             return Err(Error::Invalid("no memory for a GPU device".into()));
         }
@@ -1093,7 +1093,7 @@ impl VideoReader {
             // The GPU decodes; frame threads would only add latency.
             Some((_, device, _)) => unsafe {
                 let raw = ctx.as_mut_ptr();
-                let hw = ffmpeg::ffi::av_buffer_ref(device.0);
+                let hw = ffmpeg::ffi::av_buffer_ref(device.as_ptr());
                 if hw.is_null() {
                     return Err(Error::Invalid("no memory for a GPU device".into()));
                 }
