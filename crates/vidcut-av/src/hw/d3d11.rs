@@ -151,6 +151,7 @@ pub(crate) unsafe fn frames_on(
     (bind_flags, misc_flags): (i32, i32),
     what: &str,
 ) -> Result<*mut ffi::AVBufferRef> {
+    let (w, h) = crate::cuda::frame_sides(w, h)?;
     // SAFETY: frames made on the device, set up as FFmpeg's D3D11 frames
     // are before they start; freed on failure.
     unsafe {
@@ -161,8 +162,8 @@ pub(crate) unsafe fn frames_on(
         let fc = (*frames).data as *mut ffi::AVHWFramesContext;
         (*fc).format = ffi::AVPixelFormat::AV_PIX_FMT_D3D11;
         (*fc).sw_format = layout;
-        (*fc).width = w as i32;
-        (*fc).height = h as i32;
+        (*fc).width = w;
+        (*fc).height = h;
         (*fc).initial_pool_size = 0;
         let hw = (*fc).hwctx as *mut FramesContext;
         (*hw).bind_flags = bind_flags as u32;
@@ -944,6 +945,22 @@ mod tests {
     #[test]
     fn frames_fit_into_the_encoders_frames() {
         assert!(can_fit(&into_frames()));
+    }
+
+    #[test]
+    fn frames_reject_a_side_past_i32() {
+        // SAFETY: the size is rejected before the device pointer is used.
+        let err = unsafe {
+            frames_on(
+                std::ptr::null_mut(),
+                ffi::AVPixelFormat::AV_PIX_FMT_NV12,
+                (2_147_483_648, 480),
+                (0, 0),
+                "test",
+            )
+        }
+        .unwrap_err();
+        assert_eq!(err.to_string(), "2147483648×480 doesn't fit a frame");
     }
 
     #[test]

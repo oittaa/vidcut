@@ -467,6 +467,17 @@ pub(crate) unsafe extern "C" fn destroy_stream(device: *mut ffi::AVHWDeviceConte
     });
 }
 
+/// `n` as a copy's length. A value `usize` can't hold is rejected.
+fn copy_len(n: u64) -> Result<usize> {
+    usize::try_from(n).map_err(|_| Error::Invalid(format!("{n} doesn't fit a copy")))
+}
+
+/// A source stride as a copy's length. A negative stride is rejected.
+fn source_pitch(pitch: i32) -> Result<usize> {
+    usize::try_from(pitch)
+        .map_err(|_| Error::Invalid(format!("a picture stride of {pitch} doesn't fit")))
+}
+
 /// Memory a display's Vulkan device exported, as CUDA sees it: pictures
 /// NVDEC decoded are copied into it on the GPU.
 pub struct SharedBuffer {
@@ -600,14 +611,18 @@ impl SharedBuffer {
                 if src.is_null() || pitch < 0 || (pitch as u64) < p.row_bytes {
                     return Err(Error::Invalid(format!("the picture has no plane {i}")));
                 }
+                let src_pitch = source_pitch(pitch)?;
+                let dst_pitch = copy_len(p.pitch)?;
+                let row_bytes = copy_len(p.row_bytes)?;
+                let rows = copy_len(p.rows)?;
                 // On FFmpeg's stream: after NVDEC's own copy into the frame.
                 // SAFETY: the context is current; the frame's plane, into the
                 // buffer as checked above.
                 check("copying a plane", unsafe {
                     self.cuda.copy_rows(
-                        (src as CuDevicePtr, pitch as usize),
-                        (self.ptr + p.offset, p.pitch as usize),
-                        (p.row_bytes as usize, p.rows as usize),
+                        (src as CuDevicePtr, src_pitch),
+                        (self.ptr + p.offset, dst_pitch),
+                        (row_bytes, rows),
                         self.stream,
                     )
                 })?;
@@ -674,5 +689,29 @@ mod tests {
         assert_eq!(std::mem::size_of::<Memcpy2d>(), 128);
         assert_eq!(std::mem::offset_of!(Memcpy2d, src_device), 32);
         assert_eq!(std::mem::offset_of!(Memcpy2d, dst_device), 88);
+    }
+
+    #[test]
+    fn a_negative_source_pitch_doesnt_fit() {
+        let err = source_pitch(-1).unwrap_err();
+        assert_eq!(err.to_string(), "a picture stride of -1 doesn't fit");
+    }
+
+    #[test]
+    fn the_largest_source_pitch_fits() {
+        assert_eq!(source_pitch(i32::MAX).unwrap(), 2_147_483_647);
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn a_copy_length_holds_every_u64() {
+        assert_eq!(copy_len(u64::MAX).unwrap(), usize::MAX);
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    fn a_copy_length_past_usize_doesnt_fit() {
+        let err = copy_len(4_294_967_296).unwrap_err();
+        assert_eq!(err.to_string(), "4294967296 doesn't fit a copy");
     }
 }
