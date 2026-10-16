@@ -42,6 +42,24 @@ pub(crate) fn keep(f: &frame::Video) -> Result<frame::Video> {
     crate::export::video::frame_ref(f)
 }
 
+/// The bytes the memory of `f`'s images takes, as FFmpeg allocated it
+/// (`AVVkFrame::size`): past its samples, by the driver's alignment.
+pub(crate) fn image_bytes(f: &frame::Video) -> Option<usize> {
+    // SAFETY: a Vulkan frame's own AVVkFrame, alive as long as it.
+    unsafe {
+        let (_, _, vkf) = parts(f).ok()?;
+        let vkf = &*vkf;
+        let bytes: usize = vkf
+            .mem
+            .iter()
+            .zip(vkf.size)
+            .filter(|(m, _)| **m != 0)
+            .map(|(_, size)| size)
+            .sum();
+        (bytes > 0).then_some(bytes)
+    }
+}
+
 /// The Vulkan device, the frames context and the `AVVkFrame` of `f`. The
 /// last two are FFmpeg's to change, so they stay pointers.
 ///

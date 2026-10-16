@@ -8,8 +8,10 @@
 //! at a smaller size gets each frame shrunk there before it comes down. A
 //! player keeps each decoder's pictures in GPU memory only where its
 //! display shows that decoder's, and counts each picture it brings down:
-//! none where its display shows Vulkan's. Skips where the GPU in use
-//! doesn't decode ProRes on Vulkan.
+//! none where its display shows Vulkan's. A picture kept on Vulkan counts
+//! the memory of its images, and the picture prepared for the plan played
+//! next comes down to memory: held, it would hold its decoder's whole pool.
+//! Skips where the GPU in use doesn't decode ProRes on Vulkan.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -18,7 +20,7 @@ use std::time::{Duration, Instant};
 use vidcut_av::copies::{Copies, Guard};
 use vidcut_av::decode::{Input, VideoReader, read_barcode};
 use vidcut_av::ffmpeg::codec::Id;
-use vidcut_av::ffmpeg::frame;
+use vidcut_av::ffmpeg::{ffi, frame};
 use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
 use vidcut_av::hw::{GpuDecoder, Kind};
 use vidcut_av::player::{Config, Decoder, ManualOutput, Player};
@@ -290,6 +292,63 @@ fn a_player_whose_display_takes_vulkans_pictures_copies_none_of_them() {
     };
     let player = played_through(vec![gpu.kind(), Kind::Vulkan]);
     assert_eq!(player.stats().copies, Copied::default());
+}
+
+#[test]
+fn a_picture_kept_on_vulkan_counts_the_memory_of_its_images() {
+    let Some(gpu) = on_vulkan().filter(|g| g.kind() == Kind::Nvdec) else {
+        return;
+    };
+    let player = played_through(vec![gpu.kind(), Kind::Vulkan]);
+    let kept = player.present(Instant::now()).unwrap().picture;
+    assert_eq!(kept.gpu(), Some(Kind::Vulkan));
+    // SAFETY: a Vulkan frame's AVVkFrame, alive as long as it.
+    let images: usize = unsafe {
+        let vkf = &*((*kept.frame().as_ptr()).data[0] as *const ffi::AVVkFrame);
+        vkf.mem
+            .iter()
+            .zip(vkf.size)
+            .filter(|(m, _)| **m != 0)
+            .map(|(_, s)| s)
+            .sum()
+    };
+    assert_eq!(kept.bytes(), images);
+}
+
+#[test]
+fn a_prepared_prores_picture_comes_down_to_memory() {
+    let Some(gpu) = on_vulkan().filter(|g| g.kind() == Kind::Nvdec) else {
+        return;
+    };
+    let plan = RenderPlan {
+        fps: Rational::new(30, 1).unwrap(),
+        width: 640,
+        height: 360,
+        sample_rate: 48_000,
+        channels: 2,
+        frames: 10,
+        video: vec![piece(clip(VideoCodec::ProRes422Hq, Container::Mov, 10), 10)],
+        audio: Vec::new(),
+        range: (0, 10),
+        name: "prepared".into(),
+    };
+    let config = Config {
+        audio_scrubbing: false,
+        hardware: true,
+        gpu_pictures: vec![gpu.kind(), Kind::Vulkan],
+        ..Config::default()
+    };
+    let player = Player::new(plan.clone(), config, Box::new(ManualOutput::new())).unwrap();
+    player.prepare(Some((plan.clone(), 7)));
+    let started = Instant::now();
+    while !player.status().prepared {
+        assert!(started.elapsed() < Duration::from_secs(20), "not prepared");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    player.set_plan_at(plan, 7).unwrap();
+    let prepared = player.present(Instant::now()).unwrap().picture;
+    assert_eq!(prepared.decoder(), Some(Decoder::Gpu(Kind::Vulkan)));
+    assert_eq!(prepared.gpu(), None);
 }
 
 /// `encoder`'s H.264 at a quality that keeps barcodes, in Matroska, no

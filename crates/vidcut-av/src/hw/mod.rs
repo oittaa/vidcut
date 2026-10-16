@@ -831,27 +831,33 @@ fn decodes_all(gpu: &GpuDecoder, path: &std::path::Path) -> Result<()> {
 }
 
 /// The pool whose surface `frame` is, where its memory is a pool's that
-/// other frames share (VA-API's decoders', [`vaapi::share_frames`]): letting
-/// it go frees nothing until all of that pool's frames go. `None` where
-/// letting a frame go frees its memory.
+/// other frames share: VA-API's decoders' ([`vaapi::share_frames`]), and
+/// each Vulkan decoder's own, from which its frames are the images
+/// themselves. Letting such a frame go frees nothing until all of that
+/// pool's frames go. `None` where letting a frame go frees its memory.
 pub(crate) fn pooled(frame: &frame::Video) -> Option<usize> {
-    #[cfg(target_os = "linux")]
-    if Kind::of_frame(frame) == Some(Kind::Vaapi) {
-        return vaapi::pooled(frame);
+    match Kind::of_frame(frame) {
+        #[cfg(target_os = "linux")]
+        Some(Kind::Vaapi) => vaapi::pooled(frame),
+        // SAFETY: reads the frame's own field, a live buffer reference.
+        Some(Kind::Vulkan) => unsafe {
+            let frames = (*frame.as_ptr()).hw_frames_ctx;
+            (!frames.is_null()).then(|| (*frames).data as usize)
+        },
+        _ => None,
     }
-    let _ = frame;
-    None
 }
 
-/// The bytes `frame`'s surface takes where its driver says (VA-API's, by
-/// its DRM export: [`vaapi::surface_bytes`]); `None` otherwise.
+/// The bytes `frame`'s surface takes where its driver says: VA-API's by its
+/// DRM export ([`vaapi::surface_bytes`]), Vulkan's by FFmpeg's allocation
+/// of its images ([`vulkan::image_bytes`]); `None` otherwise.
 pub(crate) fn surface_bytes(frame: &frame::Video) -> Option<usize> {
-    #[cfg(target_os = "linux")]
-    if Kind::of_frame(frame) == Some(Kind::Vaapi) {
-        return vaapi::surface_bytes(frame);
+    match Kind::of_frame(frame) {
+        #[cfg(target_os = "linux")]
+        Some(Kind::Vaapi) => vaapi::surface_bytes(frame),
+        Some(Kind::Vulkan) => vulkan::image_bytes(frame),
+        _ => None,
     }
-    let _ = frame;
-    None
 }
 
 /// Lets the pools of frames go that decoders shared and nothing uses any
