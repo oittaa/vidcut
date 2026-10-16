@@ -1443,7 +1443,7 @@ fn tag(f: &mut frame::Video, tags: Tags) {
 mod tests {
     use super::{Layout, can_fit, filters, placebo_options};
     use crate::color::{GpuColor, gpu_color};
-    use crate::ffmpeg::{self, ffi, filter, format::Pixel, frame};
+    use crate::ffmpeg::{self, ffi, format::Pixel, frame};
     use crate::route::Ops;
 
     /// Untagged SD: BT.601, into SDR.
@@ -1592,7 +1592,7 @@ mod tests {
     #[test]
     fn a_gpu_source_rejects_a_side_past_i32() {
         crate::init();
-        let mut graph = filter::Graph::new();
+        let mut graph = super::GpuGraph::new();
         let err = super::add_source(
             &mut graph,
             c"in",
