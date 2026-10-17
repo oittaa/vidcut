@@ -278,7 +278,7 @@ impl Drop for Viewer {
             started.elapsed().as_secs_f64() * 1000.0
         );
         if let Some(engine) = engine {
-            let _ = crate::threads::spawn(
+            let _ = crate::threads::closing(
                 "vidcut-viewer-close",
                 crate::threads::Work::Interactive,
                 move || {

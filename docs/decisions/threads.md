@@ -31,7 +31,7 @@ The GUI with a project open on Linux (an NVIDIA GPU, an AMD iGPU beside it):
 | FFmpeg | frame threads for each stream decoder on the CPU whose frames lean on each other (`av:…:dfN`): one a core, half that for a job's, at most 16 | the readers' decoders | §4.2 |
 | | swscale's, one fewer than `pool::threads_for` gives a stream, for each stream converted on the CPU | a stream's conversion | §5 |
 
-Threads that come and go: one for each IPC connection (`vidcut-ipc-conn`) and each task (gui.md §1); a player's `vidcut-play-windows` while it follows another, `vidcut-scrub` while a viewer scrubs without one; the opener of a reader that reads pieces (`vidcut-open`) and an export's `vidcut-encode` (with its encoder's own threads); measured light's measuring threads.
+Threads that come and go: one for each IPC connection (`vidcut-ipc-conn`) and each task (gui.md §1); a player's `vidcut-play-windows` while it follows another, `vidcut-scrub` while a viewer scrubs without one; the opener of a reader that reads pieces (`vidcut-open`) and an export's `vidcut-encode` (with its encoder's own threads); measured light's measuring threads; the threads that end a player, the two-up's players or Vulkan imports. Those, and the filmstrip's workers with their readers, are joined before the process ends (`threads::closing`, `join_closing`; gotchas.md).
 
 So the threads a project holds are its readers': each reader's decoder closes with it, and one file at a time opens ahead (export.md §1). Playing a 4K PNG sequence holds the rows above and swscale's for its conversion to YUV (§5): its frames decode on the pool (§4.2). The filmstrip's four workers read single frames, one thread each.
 

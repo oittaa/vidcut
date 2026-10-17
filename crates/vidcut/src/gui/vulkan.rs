@@ -67,9 +67,11 @@ impl Imports {
             return;
         }
         // Freed here when no thread starts.
-        let _ = std::thread::Builder::new()
-            .name("vidcut frees imports".into())
-            .spawn(move || drop(old));
+        let _ = crate::threads::closing(
+            "vidcut-frees-imports",
+            crate::threads::Work::Interactive,
+            move || drop(old),
+        );
     }
 }
 

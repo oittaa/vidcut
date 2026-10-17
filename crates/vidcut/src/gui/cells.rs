@@ -68,7 +68,7 @@ impl Cells {
             return;
         }
         let cells = std::mem::take(&mut self.cells);
-        let _ = crate::threads::spawn(
+        let _ = crate::threads::closing(
             "vidcut-two-up-close",
             crate::threads::Work::Interactive,
             move || {
