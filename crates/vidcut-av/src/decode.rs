@@ -266,10 +266,11 @@ pub enum Reading {
     /// [`crate::pool::threads_for`] gives; graphs' slices run on the pool.
     Stream,
     /// A frame here and there, each after a seek: filmstrip tiles,
-    /// storyboards, `frame render`. No frame threads: they hand a frame out
-    /// only once a frame for each of them has gone in, so a frame asked for
-    /// alone would decode those after it for nothing. Graphs run on the
-    /// reader's thread. The reader starts no thread.
+    /// storyboards, `frame render`; and a still's one picture, in a stream
+    /// too. No frame threads: they hand a frame out only once a frame for
+    /// each of them has gone in, so a frame asked for alone would decode
+    /// those after it for nothing. Graphs run on the reader's thread. The
+    /// reader starts no thread.
     Frames,
 }
 

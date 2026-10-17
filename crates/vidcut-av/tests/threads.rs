@@ -1,8 +1,8 @@
 //! The threads FFmpeg's readers and graphs start (docs/decisions/threads.md):
 //! a single-frame reader none, a job's stream decoder half the cores', a
 //! graph none once the shared pool runs, nor a stream of frames that stand
-//! alone; and the readers open, a file left lately among them. Linux only,
-//! which lists a process's threads in `/proc`.
+//! alone, nor a still in a plan; and the readers open, a file left lately
+//! among them. Linux only, which lists a process's threads in `/proc`.
 #![cfg(target_os = "linux")]
 
 use std::path::Path;
@@ -13,7 +13,7 @@ use vidcut_av::export::renderer::FrameReader;
 use vidcut_av::export::video::VideoFrames;
 use vidcut_av::ffmpeg::{filter, format::Pixel, frame};
 use vidcut_av::fixture::{self, Container, FixtureSpec, ImageSpec, VideoCodec};
-use vidcut_core::render::VideoPiece;
+use vidcut_core::render::{Image, VideoPiece};
 use vidcut_core::time::Rational;
 
 /// The tests count the process's threads: one at a time.
@@ -205,6 +205,36 @@ fn a_stream_of_an_intra_only_codec_starts_no_thread() {
     );
     let path = fixture::ensure(&spec).unwrap();
     assert_eq!(threads_reading(&Input::File(path)), (0, 30));
+}
+
+#[test]
+fn a_still_in_a_plan_starts_no_thread() {
+    let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
+    let still = fixture::ensure_images(&ImageSpec::still(7, 320, 180, "png")).unwrap();
+    let piece = VideoPiece::Source {
+        pace: Default::default(),
+        media: "s".into(),
+        path: still[0].clone(),
+        origin: 0.0,
+        source_frame: 0,
+        frames: 3,
+        image: Some(Image::Still),
+    };
+    let fps = Rational::new(30, 1).unwrap();
+    vidcut_av::init();
+    vidcut_av::pool::run(2, &|_| {});
+    let before = threads();
+    let mut frames = VideoFrames::new(&[piece], fps, 320, 180, Pixel::YUV420P, None);
+    let first = frames.next_frame().unwrap().unwrap();
+    assert_eq!(read_barcode(&first).unwrap(), Some(7));
+    // The reader stays open with its decoder and graphs for the piece's
+    // other frames.
+    assert!(
+        threads() <= before,
+        "{} threads, {before} before: {:?}",
+        threads(),
+        ffmpegs_threads()
+    );
 }
 
 #[test]
