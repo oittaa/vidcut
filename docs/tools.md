@@ -41,7 +41,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `passes FILE START_S SECONDS CODEC ENCODER MBPS [key=value…]` (release build): exports a stretch at a bitrate (`qN`: constant quality) with `video.*` settings (`passes=2`), and prints the bitrate reached, the time and the luma PSNR.
 
 **Debugging:**
-- `VIDCUT_DEBUG=1` prints to stderr what vidcut decodes and draws, and why.
+- `VIDCUT_DEBUG=1` prints to stderr what vidcut decodes and draws, and why. A GUI still ending 10 s after its window closed says the stage and every thread's wait state, then aborts under `VIDCUT_DEBUG` (exits with 1 otherwise): `VIDCUT_DEBUG=1 gdb -q -batch -ex run -ex "thread apply all bt 15" --args target/debug/vidcut -p PROJECT` shows every thread's stack at the hang.
 - `VIDCUT_AV_LOG=error` (or `warning`, `verbose`, `debug`) shows FFmpeg's own messages.
 - `VIDCUT_HWDEC` picks the player's GPU decoder: `nvdec[:CUDA index]`, `vaapi[:render node]`, `d3d11va[:adapter index]`, `videotoolbox` or `none`.
 - `WGPU_BACKEND` (`vulkan`, `metal`, `dx12`) and `WGPU_POWER_PREF` (`low`, `high`) pick wgpu's backend and adapter. `WGPU_VALIDATION=0` turns off the validation layers in debug builds.

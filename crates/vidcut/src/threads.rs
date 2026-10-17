@@ -96,6 +96,11 @@ pub fn end_within(patience: std::time::Duration) {
         for (name, waits_in) in threads_waiting() {
             eprintln!("  {name:<16} {waits_in}");
         }
+        // Under VIDCUT_DEBUG it aborts instead: a debugger it runs under
+        // (`gdb -ex run`) then shows every thread's stack at the hang.
+        if vidcut_av::debug() {
+            std::process::abort();
+        }
         #[cfg(unix)]
         // SAFETY: ends the process at once, without the exit handlers a
         // hang may be in.
