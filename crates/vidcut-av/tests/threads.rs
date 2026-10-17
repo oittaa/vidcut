@@ -258,6 +258,27 @@ fn a_seek_into_a_file_the_opener_holds_takes_it_back() {
 }
 
 #[test]
+fn a_cutaway_back_to_the_next_frames_reads_on_to_them() {
+    let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
+    let (first, second) = (file_of(60), file_of(90));
+    let fps = Rational::new(30, 1).unwrap();
+    // Back within a second of where the first file stands: it reads on,
+    // sought ahead, and shows the frames there, not the picture it made
+    // last.
+    let pieces = [
+        piece(&first, 10, 3),
+        piece(&second, 20, 3),
+        piece(&first, 14, 3),
+    ];
+    let mut frames = VideoFrames::new(&pieces, fps, 320, 180, Pixel::YUV420P, None);
+    let mut codes = Vec::new();
+    while let Some(f) = frames.next_frame().unwrap() {
+        codes.push(read_barcode(&f).unwrap());
+    }
+    assert_eq!(codes, [10, 11, 12, 20, 21, 22, 14, 15, 16].map(Some));
+}
+
+#[test]
 fn playing_across_a_cutaway_opens_each_file_once() {
     let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
     let (first, second) = (file_of(60), file_of(90));

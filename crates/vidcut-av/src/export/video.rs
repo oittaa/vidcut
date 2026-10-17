@@ -426,7 +426,10 @@ impl Source {
     fn resume(&mut self, origin: f64, source_frame: i64, target: f64) -> Result<()> {
         self.left = None;
         self.reposition(origin, source_frame, target)?;
-        self.advance(target)?;
+        // The picture made of the frame before goes with that frame.
+        if self.advance(target)? {
+            self.normalized = None;
+        }
         Ok(())
     }
 }
