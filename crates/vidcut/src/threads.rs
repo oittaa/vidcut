@@ -4,6 +4,7 @@
 //! still takes every core they leave idle. This is the one way the app
 //! starts threads; a test below fails on any other.
 
+use std::sync::Mutex;
 use std::thread::JoinHandle;
 
 /// What a thread's work is.
@@ -35,4 +36,54 @@ pub fn spawn<T: Send + 'static>(
             }
             f()
         })
+}
+
+/// Threads that close something and end: a player when the window closes,
+/// the two-up's players, Vulkan imports. Joined before the process ends
+/// ([`join_closing`]): CUDA and the GPU drivers tear down as it exits, and
+/// a close after that crashes (gotchas.md).
+static CLOSING: Mutex<Vec<JoinHandle<()>>> = Mutex::new(Vec::new());
+
+/// Starts `f` on a thread named `name` that closes something and ends,
+/// which [`join_closing`] waits for.
+pub fn closing(
+    name: impl Into<String>,
+    work: Work,
+    f: impl FnOnce() + Send + 'static,
+) -> std::io::Result<()> {
+    let handle = spawn(name, work, f)?;
+    let mut closing = CLOSING.lock().unwrap_or_else(|e| e.into_inner());
+    closing.retain(|h| !h.is_finished());
+    closing.push(handle);
+    Ok(())
+}
+
+/// Waits for every closing thread still running: before the process ends.
+pub fn join_closing() {
+    let handles = std::mem::take(&mut *CLOSING.lock().unwrap_or_else(|e| e.into_inner()));
+    for handle in handles {
+        let _ = handle.join();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn join_closing_waits_for_a_closing_thread() {
+        let done = Arc::new(AtomicBool::new(false));
+        let flag = done.clone();
+        closing("vidcut-test-close", Work::Interactive, move || {
+            std::thread::sleep(Duration::from_millis(50));
+            flag.store(true, Ordering::SeqCst);
+        })
+        .unwrap();
+        join_closing();
+        assert!(done.load(Ordering::SeqCst));
+    }
 }

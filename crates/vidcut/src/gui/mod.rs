@@ -77,7 +77,7 @@ pub fn run(project: Option<PathBuf>) -> Result<()> {
             .with_min_inner_size([960.0, 600.0]),
         ..Default::default()
     };
-    eframe::run_native(
+    let ran = eframe::run_native(
         "vidcut",
         options,
         Box::new(move |cc| {
@@ -85,8 +85,11 @@ pub fn run(project: Option<PathBuf>) -> Result<()> {
                 .map(|a| Box::new(a) as Box<dyn eframe::App>)
                 .map_err(Into::into)
         }),
-    )
-    .map_err(|e| {
+    );
+    // What the window's close left closing ends before the process does:
+    // CUDA and the GPU drivers tear down as it exits (gotchas.md).
+    crate::threads::join_closing();
+    ran.map_err(|e| {
         #[cfg(all(unix, not(target_os = "macos")))]
         let hint = " (is a Wayland or X11 display available?)";
         #[cfg(any(windows, target_os = "macos"))]

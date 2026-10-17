@@ -138,6 +138,9 @@ pub struct Tiles {
     results: Receiver<(TileKey, Image)>,
     sender: Sender<(TileKey, Image)>,
     started: bool,
+    /// The workers, joined when the tiles drop: their readers close with
+    /// them, before the process ends (gotchas.md).
+    workers: Vec<std::thread::JoinHandle<()>>,
 }
 
 impl Tiles {
@@ -160,6 +163,7 @@ impl Tiles {
             results,
             sender,
             started: false,
+            workers: Vec::new(),
         };
         tiles.set_prefs(prefs);
         tiles
@@ -179,11 +183,12 @@ impl Tiles {
             self.started = true;
             for n in 0..WORKERS {
                 let (queue, done, ctx) = (self.queue.clone(), self.sender.clone(), ctx.clone());
-                let _ = crate::threads::spawn(
+                let worker = crate::threads::spawn(
                     format!("vidcut-tiles-{n}"),
                     crate::threads::Work::Job,
                     move || work(n, &queue, &done, &ctx),
                 );
+                self.workers.extend(worker);
             }
         }
         if let Some(p) = p {
@@ -404,10 +409,16 @@ impl Tiles {
 
 impl Drop for Tiles {
     fn drop(&mut self) {
-        let mut w = self.queue.waiting.lock().unwrap_or_else(|e| e.into_inner());
-        w.stop = true;
-        w.jobs.clear();
-        self.queue.ready.notify_all();
+        {
+            let mut w = self.queue.waiting.lock().unwrap_or_else(|e| e.into_inner());
+            w.stop = true;
+            w.jobs.clear();
+            self.queue.ready.notify_all();
+        }
+        // Each closes its reader as it ends: before the process does.
+        for worker in self.workers.drain(..) {
+            let _ = worker.join();
+        }
     }
 }
 

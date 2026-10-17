@@ -19,7 +19,7 @@ The app's own threads. Every thread of the process, and how they share the CPU, 
 | **Engine** (player.md §1) | decoding, the mix, the audio device; the viewer's, and one for each cell of the two-up | touch shared state |
 | **IPC** | one listener plus one thread per connection | anything but forward requests and wait for answers |
 | **Workers** (2) | thumbnails and waveforms | touch shared state (they report back by message) |
-| **Tasks** | one thread per export job, frame render, screenshot encode or project-less request, and one each that ends the two-up's players when it closes and the viewer's when the window does | touch the session's state |
+| **Tasks** | one thread per export job, frame render, screenshot encode or project-less request, and one each that ends the two-up's players when it closes and the viewer's when the window does, joined before the process ends (`threads::closing`) | touch the session's state |
 
 **How they talk:**
 - **One inbox.** Everyone talks to the session through one `mpsc` inbox (`Handle`).
