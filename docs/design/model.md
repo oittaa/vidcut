@@ -84,7 +84,7 @@ classDiagram
 
 Every timeline position and length is a whole frame at the project's rate, `Settings::fps`, an exact `Rational` (30000/1001, not 29.97). A clip's `source_in` counts project frames from its media's first frame too.
 
-Requests take times as strings that parse into a `TimeSpec`: frames ("450f", or a JSON integer), seconds ("15s", "1m30s", "250ms"), timecode ("HH:MM:SS:FF", with ";" for drop-frame), a keyword (start, end, in, out, playhead) or an offset ("+5s"). A `RangeSpec` is half-open: "A..B" or "A..+D". The editor resolves them with a `TimeContext` from the project: "15s" is the nearest frame (`Rational::secs_to_frames`), 375 at 25 fps; timecode counts from `start_tc`; playhead exists only in a GUI. A clip reference is an id or "V1@15s", the clip under that frame on V1 (`resolve_clip`). Timecode rules: [spec §4.3](../cut-page-spec.md#43-timecode-pp-640-688-713714).
+Requests take times as strings that parse into a `TimeSpec`: frames ("450f", or a JSON integer), seconds ("15s", "1m30s", "250ms"), timecode ("HH:MM:SS:FF", with ";" for drop-frame), a keyword (start, end, in, out, playhead) or an offset ("+5s"). A `RangeSpec` is half-open: "A..B" or "A..+D". The editor resolves them with a `TimeContext` from the project: "15s" is the nearest frame (`Rational::secs_to_frames`), 375 at 25 fps; timecode counts from `start_tc`; the playhead keyword resolves only when the caller passes a frame, which the live core does from the timeline, so a command the GUI runs can use it and a headless one cannot. A clip reference is an id or "V1@15s", the clip under that frame on V1 (`resolve_clip`). Timecode rules: [spec §4.3](../cut-page-spec.md#43-timecode-pp-640-688-713714).
 
 ## Ids
 
@@ -96,17 +96,17 @@ Requests take times as strings that parse into a `TimeSpec`: frames ("450f", or 
 | carried transition | t1, t2 … | `Project::alloc_transition_id` |
 | track | V1 … then A1 …, by place | `ops::tracks`; removing one renumbers the rest |
 
-The counters live in `NextIds` and only grow, so an id names one thing for the project's life, in the undo history too. `ops::MAIN`, V1, always exists.
+The counters live in `NextIds`. Each alloc call adds one, and undo restores `next_id` with the project, so an id from an undone edit can be used again. `ops::MAIN`, V1, always exists.
 
 ## The `.vidcut` file
 
-`Store` reads and writes the `Project` as pretty JSON (serde). Media and proxy paths in or under the project's folder are stored relative to it, others absolute; in memory they are always absolute. A save writes a temporary file and renames it over the project, so readers see the old file or the new one, never part of one. Writers hold the project's lock file (`Store::lock`). Loading runs `validate::violations` and refuses an inconsistent file. The undo history is kept apart, in the state dir ([requests](requests.md#undo-history)).
+`Store` reads and writes the `Project` as pretty JSON (serde). Media and proxy paths in or under the project's folder are stored relative to it, others absolute; in memory they are always absolute. A save writes a temporary file and renames it over the project, so readers see the old file or the new one, never part of one. `Store::transact`, `Store::compact` and `OpenProject::apply` hold the project's lock file (`Store::lock`); `Store::create` and `Store::replace` write a new file without it. Loading runs `validate::violations` and refuses an inconsistent file. The undo history is kept apart, in the state dir ([requests](requests.md#undo-history)).
 
 **Why** relative paths: a project folder moved or copied, to another computer too, keeps its media ([deviation X1](../deviations.md#x1-projects-are-always-saved-standalone-json-files)).
 
 ## Fingerprints and relinking
 
-Two stamps identify a media file. `Media::size` and `Media::mtime_ns`, read when it was probed, make its `Origin` (`fingerprint::origin`). The origin names and stamps every cache file made from the media ([analysis](analysis.md)), and a proxy made from another size or time is stale (`Media::fresh_proxy`). `Media::fingerprint` is a SHA-256 of the content (`fingerprint::file`): the whole of a small file, samples from the start, middle and end of a big one, three pictures of an image sequence.
+Two stamps identify a media file. `Media::size` and `Media::mtime_ns`, read when it was probed, make its `Origin` (`fingerprint::origin`). The origin names and stamps every cache file made from the media ([analysis](analysis.md)), and a proxy made from another size or time is stale (`Media::fresh_proxy`). `Media::fingerprint` is a SHA-256 of the content (`fingerprint::file`): the whole of a file no larger than `WHOLE`, otherwise one `PIECE` from the start, the middle and the end; an image sequence is three pictures (`fingerprint::pictures`).
 
 A file is missing when `Env::present` says so; a path absolute only on the other kind of system counts as missing. `media.relink` looks for missing files by name in `search` folders and relinks a candidate only if its size, streams, duration, timecode and fingerprint match. A file given as `path` is used either way.
 
@@ -142,7 +142,7 @@ flowchart LR
 | `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`) |
 | `Resolve_OTIO`, which other editors read | `Link Group ID`, `Channels`, a clip volume effect, and `Media In` on reversed clips; `Locked`, `SoloOn` and `Audio Type` on tracks; `Note` on markers |
 
-`otio::import` also takes `Clip.1`, float rates, snapped (`rational`), and media named by URLs, plain, Windows or relative paths, or an offline `MissingReference`'s `Media Url`. Video tracks become V1, V2, …; an audio clip lining up with a video clip of the same media (and link group) becomes its sound, others go on A1, A2, … Names other than the defaults (`default_track_name`) name tracks; markers on clips, tracks and the stack become timeline markers. Nested tracks, unknown items, clips without media and overlapping clips are left out with a warning. Media are looked for at the path, by its last parts beside the file (`MediaRef::paths`), then by name in `search` and the bundle's folder (`find_media`).
+`otio::import` also takes `Clip.1`, float rates, snapped (`rational`), and media named by a `file` URL, a plain, Windows or relative path, or an offline `MissingReference`'s `Media Url` (`locate` returns no path for any other scheme). Video tracks become V1, V2, …; an audio clip lining up with a video clip of the same media (and link group) becomes its sound, others go on A1, A2, … Names other than the defaults (`default_track_name`) name tracks; markers on clips, tracks and the stack become timeline markers. Nested tracks, unknown items, clips without media and overlapping clips are left out with a warning. Media are looked for at the path, by its last parts beside the file (`MediaRef::paths`), then by name in `search` and the bundle's folder (`find_media`).
 
 `ImportMode` is `append`, `replace`, `compound` (`otio::as_compound`) or `media`; `flatten` decomposes compound clips. An empty timeline takes the file's rate, start timecode and track settings. A file vidcut wrote brings its pool items (`join_pool`) into a bin named after it, with new ids, without proxies.
 
@@ -150,7 +150,7 @@ flowchart LR
 
 | OTIO | Kept as |
 |---|---|
-| clip effects in use (`effects::read`) | `Effects` on the picture or `ClipAudio`: keyframes stay on their source frames (`Effects::from`) and fades at the clip's ends through splits; the clip volume's level is the gain |
+| clip effects in use (`effects::read`) | `Effects` on the picture or `ClipAudio`: keyframes stay on their source frames (the `from` field of `Effects`, set by `carry`) and fades at the clip's ends through splits; the clip volume's level is the gain |
 | `Transition` (`in_offset`, `out_offset`) | `Transition` (`before`, `after`), dropped by `transitions::prune` once it no longer fits; dissolves and cross fades play ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
 | `GeneratorReference` | `Generator`, a block that plays as a gap |
 | nested `Stack` | `Compound`, a block that plays its clips; `edit.decompose` breaks it up |

@@ -1,6 +1,6 @@
 # Threads
 
-vidcut uses std threads, channels, mutexes, condvars and atomics, and no async runtime or pool crate. Each thread does one thing and has a name that starts with "vidcut-". The app starts its threads through `threads::spawn` and `threads::scoped`, which set their priority. How the GUI's threads talk is in [live](live.md).
+vidcut uses std threads, channels, mutexes, condvars and atomics, and no async runtime or pool crate. Each thread does one thing and has a name that starts with "vidcut-". The `vidcut` crate starts its threads through `threads::spawn` and `threads::scoped`, which set their priority; vidcut-av starts its own with `std::thread::Builder`. How the GUI's threads talk is in [live](live.md).
 
 ```mermaid
 flowchart LR
@@ -40,6 +40,8 @@ Priority: **interactive** and **job** are the `Work` kinds; **inherited** sets n
 | `vidcut-light-N`, `vidcut-scenes` | `light::analysis`, `analysis::picture_stats` | HDR light; frame scores | starter's |
 | `vidcut-cpu-N`, `vidcut-cpu-job-N` | the first `pool::run` or `pool::give` | the two CPU pools | inherited; lowest class |
 | `vidcut-give-back` | `buffers::give_back` | `malloc_trim` (Linux, glibc) | inherited |
+
+On Windows `look::watch` starts two `vidcut-look` threads; Linux and macOS start one.
 
 Libraries start their own (FFmpeg, GPU drivers, CUDA, cpal, PipeWire, `notify`, zbus, ctrlc).
 

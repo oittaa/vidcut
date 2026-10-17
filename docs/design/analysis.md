@@ -21,7 +21,7 @@ vidcut-core reaches media only through the `Env` trait. `AvEnv` implements it on
 | Request | Measurement (`Env`) | Decision (`analysis`) |
 |---|---|---|
 | `edit.ripple_delete_silence`, `analyze.silence` | `Env::audio_levels`: peaks of one audio stream | `analysis::silent_parts`; the edit then calls `ops::remove_parts` |
-| `edit.detect_scene_cuts`, `analyze.scenes` | `Env::picture_stats`: each frame's difference from the last | `analysis::scene_cuts`; the edit then calls `ops::split_clip` |
+| `edit.detect_scene_cuts`, `analyze.scenes` | `Env::picture_stats`: the smaller of each frame's difference from the last and the change in that difference; the first frame scores 0 | `analysis::scene_cuts`; the edit then calls `ops::split_clip` |
 | `analyze.black` | `Env::picture_stats`: each frame's black share | `analysis::black_parts` |
 | `analyze.loudness` | `Env::loudness` of the flattened timeline | none |
 | `timeline.boring` | none: clip lengths | `analysis::boring` |
@@ -48,11 +48,11 @@ An `Origin` is a file's path, size and modification time (`fingerprint::origin`)
 | clips for decoder tests | `decoder-tests` | none |
 | compiled libplacebo shaders | `shaders` (`cuda::keep_shaders_in`) | libplacebo's |
 
-Only `thumbs` has a size limit (`thumbcache::evict`, least recently used first), set in the preferences. Levels, picture stats and light are memoized in the process too.
+On disk only `thumbs` has a size limit (`thumbcache::evict`, least recently used first), set in the preferences. `Tiles::evict` also drops kept pictures past the tile cache's own budget. Levels, picture stats and light are memoized in the process too.
 
 ## Storyboards
 
-`storyboard::render` flattens the timeline or a range and takes one picture per shot, from the middle of each source piece, or one every `every` frames. It decodes them with `FrameReader` and writes one PNG, each picture labeled with its timecode and clip.
+`storyboard::render` flattens the timeline or a range and takes one picture per shot, from the middle of each source piece, or one every `every` frames. It decodes them with `FrameReader` and writes one PNG, each picture labeled with its timecode and clip, plus the track when the clip is not on V1.
 
 ## Code
 

@@ -26,7 +26,7 @@ flowchart TD
 
 `Request` has one variant per method, serialized as `method` and `params`. Its JSON schema (`session::schema`) generates the CLI commands (`cli::command`) and the MCP tools (`mcp::tools`), so every door names things alike.
 
-An `Envelope` adds the two options every request takes: `if_rev` (fail with `CONFLICT` unless the project is at that revision) and `dry_run`. `Envelope::from_json` takes them out of the params. Every answer is a `Response`: the revision after it, the ids created, modified and deleted (`Changes`), the result, and where it ran (`via`).
+An `Envelope` adds the two options every request takes: `if_rev` (fail with `CONFLICT` unless the project is at that revision) and `dry_run`. `Envelope::from_json` takes them off the request object first, and out of `params` only when they are not there. Every answer is a `Response`: the revision after it, the ids created, modified and deleted (`Changes`), the result, `dry_run`, `warnings`, and where it ran (`via`).
 
 Three questions drive the routing:
 
@@ -34,7 +34,7 @@ Three questions drive the routing:
 |---|---|
 | `Request::is_projectless` | needs no project: `schema`, `doctor`, `probe`, `project.create`, presets, encoders, decoders, preferences, keys |
 | `Request::is_live` | needs a running GUI: `project.open`, the viewer, player, mixer preview, pool view, selection, `gui.*` and `jobs.*` |
-| `Request::is_mutation` | changes the project and makes an undo step |
+| `Request::is_mutation` | anything that is not live and not a read, render, export, analysis, preset, preference, `project.create`, `probe` or `edit.copy`. The match in `Request::is_mutation` is the list. Undo and redo count, and call `step_history` |
 
 ## Front doors
 
@@ -99,7 +99,7 @@ sequenceDiagram
 `Editor::apply` checks `if_rev`, then:
 
 - A query goes to `query`.
-- `history.undo` and `history.redo` step through the history.
+- `history.undo` and `history.redo` call `step_history`.
 - A mutation runs `mutate` on a clone of the project: it resolves times and clip references and calls the edit operations in `ops` (`ops::split` for `edit.split`). Carried transitions that no longer fit go (`otio::transitions::prune`); `validate::violations` checks the result, and a violation fails the edit as a vidcut bug.
 - A dry run stops here and reports the `Changes`.
 - An edit that changes nothing makes no revision and no undo step.

@@ -54,7 +54,7 @@ flowchart LR
 
   S -->|"set_plan, seek, play"| engine
   PV -->|"on_picture: Msg::Picture"| S
-  PV -.->|"on_picture: ViewerHandle::wake"| V
+  PV -.->|"on_picture calls notify, then ViewerHandle::wake"| V
   S -->|"Renderer::attach, present, capture_viewer (Condvar)"| V
   V -->|"Msg::Presented, Msg::Captured"| S
   V -->|"Player::present(now)"| engine
@@ -112,7 +112,7 @@ All but an untimed `jobs.wait` have a deadline.
 
 ## Jobs
 
-`export.start` to a media file and `proxy.generate` are jobs: a `JobInfo` in the snapshot, a cancel flag and a thread (vidcut-j1, vidcut-j2, …). `jobs::Turns` lets one job encode at a time, exports ahead of waiting proxies. A job waits at its gate channel for its turn: an export once its files are planned (`Msg::JobPlanned`), a proxy job before it starts. `jobs.cancel` sets the flag and closes a queued job's gate, so it wakes, cancelled; a client that disconnects cancels its foreground job. A `background` request, as the GUI's are, is answered once the files are planned, others when the job ends. Automatic proxies are the core's own `proxy.generate` (`Origin::Session`).
+`export.start` to a media file and `proxy.generate` are jobs: a `JobInfo` in the snapshot, a cancel flag and a thread (vidcut-j1, vidcut-j2, …). `jobs::Turns` lets one job encode at a time, exports ahead of waiting proxies. A job waits at its gate channel for its turn: an export once its files are planned (`Msg::JobPlanned`), a proxy job before it starts. `jobs.cancel` sets the flag and closes a queued job's gate, so it wakes, cancelled. A client that disconnects sets that flag on its foreground job and does not close the gate, so a queued job waits its turn and then stops. A `background` request, as the GUI's are, is answered once the files are planned, others when the job ends. Automatic proxies are the core's own `proxy.generate` (`Origin::Session`).
 
 While a job runs, the engine says what it is doing: the job thread installs a `vidcut_av::progress::Noting` that turns each note (the encoder that opened, those that didn't, the audio encoder, the color choice, each source file and its decoder) into a `Msg::JobNote`, and its progress carries the frames made and decoded on the GPU and the copies between GPU and memory. `JobDetails` collects them in the `JobInfo`, so `jobs.get` and the Jobs window show the same. The window never opens by itself: the Jobs button in the top bar counts the running jobs, glows a moment when one starts or ends, and stays in the error color after a failure until Jobs is opened. A job's details copy as text or as the `vidcut` command that runs it again; a finished one opens, and a failed or cancelled one runs again as the same request.
 
