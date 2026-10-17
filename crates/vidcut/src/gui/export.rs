@@ -1191,6 +1191,7 @@ impl Workspace {
         self.export.jobs_failed_unseen = false;
         let jobs = self.snap.jobs.clone();
         let rate = self.project().map(|p| p.settings.fps.as_f64());
+        let project = self.snap.project.as_ref().map(|p| p.path.clone());
         let mut open = true;
         egui::Window::new("Jobs")
             .default_width(460.0)
@@ -1219,7 +1220,7 @@ impl Workspace {
                                 job_view(ui, j, |method, params| self.send(method, params));
                                 egui::CollapsingHeader::new("Details")
                                     .id_salt(("job-details", &j.id))
-                                    .show(ui, |ui| job_details(ui, j, rate));
+                                    .show(ui, |ui| job_details(ui, j, rate, project.as_deref()));
                             });
                         }
                     });
@@ -1557,6 +1558,9 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, send: impl Fn(&str, Value)) {
             ui.horizontal(|ui| {
                 if let Some(path) = job_paths(j) {
                     ui.label(dim(path.display().to_string()));
+                    if ui.small_button("Open").clicked() {
+                        super::file_manager::open(path);
+                    }
                     if ui.small_button("Show in Folder").clicked() {
                         super::file_manager::show(path);
                     }
@@ -1569,11 +1573,24 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, send: impl Fn(&str, Value)) {
             } else {
                 "Cancelled; nothing was written"
             }));
+            run_again(ui, j, &send);
         }
         JobState::Failed => {
             let e = j.error.as_ref().map_or("", |e| e.message.as_str());
             ui.label(RichText::new(format!("Failed: {e}")).color(theme::colors().error));
+            run_again(ui, j, &send);
         }
+    }
+}
+
+fn run_again(ui: &mut egui::Ui, j: &JobInfo, send: &impl Fn(&str, Value)) {
+    if let Some(method) = job_method(j)
+        && ui
+            .small_button("Run Again")
+            .on_hover_text("Start the same job again")
+            .clicked()
+    {
+        send(method, j.params.clone());
     }
 }
 
@@ -1614,125 +1631,186 @@ fn job_chips(ui: &mut egui::Ui, j: &JobInfo) {
     });
 }
 
-fn job_details(ui: &mut egui::Ui, j: &JobInfo, rate: Option<f64>) {
-    let d = &j.details;
-    if d.video.is_none() && d.audio.is_none() && d.sources.is_empty() && j.outputs.is_empty() {
+fn job_details(ui: &mut egui::Ui, j: &JobInfo, rate: Option<f64>, project: Option<&Path>) {
+    ui.horizontal(|ui| {
+        if ui
+            .small_button("Copy Details")
+            .on_hover_text("These details as text, for a bug report")
+            .clicked()
+        {
+            ui.ctx().copy_text(details_text(j, rate));
+        }
+        if let Some(method) = job_method(j)
+            && ui
+                .small_button("Copy as Command")
+                .on_hover_text("A vidcut command that runs this job again from a terminal")
+                .clicked()
+        {
+            ui.ctx().copy_text(super::workspace::vidcut_command(
+                project,
+                method,
+                &command_params(&j.params),
+            ));
+        }
+    });
+    let rows = detail_rows(j, rate);
+    if rows.is_empty() {
         ui.label(dim("Known once the job starts"));
         return;
     }
-    let row = |ui: &mut egui::Ui, name: &str, text: String| {
-        ui.label(dim(name));
-        ui.label(text);
-        ui.end_row();
-    };
-    let note = |ui: &mut egui::Ui, text: &str| {
-        ui.label("");
-        ui.label(dim(text));
-        ui.end_row();
-    };
     egui::Grid::new(("job-details-grid", &j.id))
         .num_columns(2)
         .spacing([12.0, 3.0])
         .show(ui, |ui| {
-            for o in &j.outputs {
-                row(ui, "Writes", o.path.display().to_string());
-            }
-            if let Some(v) = &d.video {
-                let mut text = format!("{} · {}", v.encoder, v.pixel);
-                if let Some(device) = &v.device {
-                    text += &format!(" on {device}");
-                }
-                if v.passes > 1 {
-                    text += &format!(" · {} passes", v.passes);
-                }
-                text += match v.gpu_frames_in {
-                    true => " · takes frames on the GPU",
-                    false => " · takes frames from memory",
+            for (name, text) in rows {
+                ui.label(dim(name));
+                match name {
+                    "" => ui.label(dim(text)),
+                    _ => ui.label(text),
                 };
-                row(ui, "Video", text);
-            }
-            for t in &d.tried {
-                let text = match &t.encoder {
-                    Some(e) => format!("{e}: {}", t.error),
-                    None => t.error.clone(),
-                };
-                row(ui, "Didn't open", text);
-            }
-            if let Some(a) = &d.audio {
-                let mut text = format!("{} · {} Hz · {} ch", a.encoder, a.rate, a.channels);
-                if let Some(b) = a.bitrate {
-                    text += &format!(" · {} kb/s", b / 1000);
-                }
-                row(ui, "Audio", text);
-                if let Some(l) = &a.loudness {
-                    let mut text = format!("gain {:+.1} dB", l.gain_db);
-                    if let Some(m) = l.measured {
-                        text = format!("measured {m:.1} LUFS, {text}");
-                    }
-                    if let Some(to) = l.loudness {
-                        text += &format!(", now {to:.1} LUFS");
-                    }
-                    row(ui, "Loudness", text);
-                }
-            }
-            if let Some(c) = &d.color {
-                row(
-                    ui,
-                    "Color",
-                    format!("{}, {}-bit", hdr_name(c.hdr), c.bit_depth),
-                );
-                for why in &c.why {
-                    note(ui, why);
-                }
-            }
-            if let Some(m) = &d.metadata {
-                row(ui, "HDR metadata", metadata_name(m.mode).into());
-                for why in &m.why {
-                    note(ui, why);
-                }
-            }
-            if let Some(decode) = decoded_on(&d.sources) {
-                let files = match d.sources.len() {
-                    1 => "1 file".to_string(),
-                    n => format!("{n} files"),
-                };
-                row(ui, "Decoding", format!("{files}: {decode}"));
-                for s in &d.sources {
-                    let name = s.path.file_name().map_or_else(
-                        || s.path.display().to_string(),
-                        |n| n.to_string_lossy().into(),
-                    );
-                    note(ui, &format!("{name}: {}", s.decoding));
-                }
-            }
-            if d.gpu_frames > 0 || d.gpu_decoded > 0 {
-                row(
-                    ui,
-                    "On the GPU",
-                    format!("{} frames decoded, {} made", d.gpu_decoded, d.gpu_frames),
-                );
-            }
-            if d.copied.down > 0 || d.copied.up > 0 {
-                row(
-                    ui,
-                    "Copied",
-                    format!(
-                        "{} frames down ({}), {} up ({})",
-                        d.copied.down,
-                        mib(d.copied.down_bytes),
-                        d.copied.up,
-                        mib(d.copied.up_bytes)
-                    ),
-                );
-            }
-            if let Some(fps) = d.fps {
-                let text = match rate {
-                    Some(r) if r > 0.0 => format!("{fps:.1} fps · {:.2}× real time", fps / r),
-                    _ => format!("{fps:.1} fps"),
-                };
-                row(ui, "Speed", text);
+                ui.end_row();
             }
         });
+}
+
+fn job_method(j: &JobInfo) -> Option<&'static str> {
+    match j.kind {
+        "export" => Some("export.start"),
+        "proxy" => Some("proxy.generate"),
+        _ => None,
+    }
+}
+
+fn command_params(params: &Value) -> Value {
+    let mut params = params.clone();
+    if let Some(p) = params.as_object_mut() {
+        p.remove("background");
+    }
+    params
+}
+
+fn details_text(j: &JobInfo, rate: Option<f64>) -> String {
+    let state = match j.state {
+        JobState::Queued => "queued",
+        JobState::Running => "running",
+        JobState::Done => "done",
+        JobState::Failed => "failed",
+        JobState::Cancelled => "cancelled",
+    };
+    let mut lines = vec![
+        format!("{} ({}, {state})", j.title, j.id),
+        format!(
+            "vidcut {}, FFmpeg {}",
+            env!("CARGO_PKG_VERSION"),
+            vidcut_av::ffmpeg_version()
+        ),
+    ];
+    if let Some(e) = &j.error {
+        lines.push(format!("Error: {}", e.message));
+    }
+    for (name, text) in detail_rows(j, rate) {
+        lines.push(match name {
+            "" => format!("  {text}"),
+            _ => format!("{name}: {text}"),
+        });
+    }
+    lines.join("\n")
+}
+
+fn detail_rows(j: &JobInfo, rate: Option<f64>) -> Vec<(&'static str, String)> {
+    let d = &j.details;
+    let mut rows = Vec::new();
+    for o in &j.outputs {
+        rows.push(("Writes", o.path.display().to_string()));
+    }
+    if let Some(v) = &d.video {
+        let mut text = format!("{} · {}", v.encoder, v.pixel);
+        if let Some(device) = &v.device {
+            text += &format!(" on {device}");
+        }
+        if v.passes > 1 {
+            text += &format!(" · {} passes", v.passes);
+        }
+        text += match v.gpu_frames_in {
+            true => " · takes frames on the GPU",
+            false => " · takes frames from memory",
+        };
+        rows.push(("Video", text));
+    }
+    for t in &d.tried {
+        let text = match &t.encoder {
+            Some(e) => format!("{e}: {}", t.error),
+            None => t.error.clone(),
+        };
+        rows.push(("Didn't open", text));
+    }
+    if let Some(a) = &d.audio {
+        let mut text = format!("{} · {} Hz · {} ch", a.encoder, a.rate, a.channels);
+        if let Some(b) = a.bitrate {
+            text += &format!(" · {} kb/s", b / 1000);
+        }
+        rows.push(("Audio", text));
+        if let Some(l) = &a.loudness {
+            let mut text = format!("gain {:+.1} dB", l.gain_db);
+            if let Some(m) = l.measured {
+                text = format!("measured {m:.1} LUFS, {text}");
+            }
+            if let Some(to) = l.loudness {
+                text += &format!(", now {to:.1} LUFS");
+            }
+            rows.push(("Loudness", text));
+        }
+    }
+    if let Some(c) = &d.color {
+        rows.push(("Color", format!("{}, {}-bit", hdr_name(c.hdr), c.bit_depth)));
+        rows.extend(c.why.iter().map(|why| ("", why.clone())));
+    }
+    if let Some(m) = &d.metadata {
+        rows.push(("HDR metadata", metadata_name(m.mode).into()));
+        rows.extend(m.why.iter().map(|why| ("", why.clone())));
+    }
+    if let Some(decode) = decoded_on(&d.sources) {
+        let files = match d.sources.len() {
+            1 => "1 file".to_string(),
+            n => format!("{n} files"),
+        };
+        rows.push(("Decoding", format!("{files}: {decode}")));
+        for s in &d.sources {
+            let name = s.path.file_name().map_or_else(
+                || s.path.display().to_string(),
+                |n| n.to_string_lossy().into(),
+            );
+            rows.push(("", format!("{name}: {}", s.decoding)));
+        }
+    }
+    if d.gpu_frames > 0 || d.gpu_decoded > 0 {
+        rows.push((
+            "On the GPU",
+            format!("{} frames decoded, {} made", d.gpu_decoded, d.gpu_frames),
+        ));
+    }
+    if d.copied.down > 0 || d.copied.up > 0 {
+        rows.push((
+            "Copied",
+            format!(
+                "{} frames down ({}), {} up ({})",
+                d.copied.down,
+                mib(d.copied.down_bytes),
+                d.copied.up,
+                mib(d.copied.up_bytes)
+            ),
+        ));
+    }
+    if let Some(fps) = d.fps {
+        rows.push((
+            "Speed",
+            match rate {
+                Some(r) if r > 0.0 => format!("{fps:.1} fps · {:.2}× real time", fps / r),
+                _ => format!("{fps:.1} fps"),
+            },
+        ));
+    }
+    rows
 }
 
 fn decoded_on(sources: &[vidcut_av::export::SourceNote]) -> Option<&'static str> {
@@ -2420,7 +2498,41 @@ fn settings_form(
 mod tests {
     use serde_json::json;
 
-    use super::{decoded_on, metadata_line};
+    use super::{command_params, decoded_on, detail_rows, details_text, metadata_line};
+    use crate::live::JobInfo;
+
+    fn job() -> JobInfo {
+        JobInfo::new("j1".into(), "gui", json!({ "output": "out.mp4" }))
+    }
+
+    #[test]
+    fn a_job_whose_encoder_fell_back_says_why() {
+        let mut j = job();
+        j.details.tried.push(vidcut_av::export::Tried {
+            encoder: Some("h264_nvenc".into()),
+            error: "no free session".into(),
+        });
+        assert_eq!(
+            detail_rows(&j, None),
+            [("Didn't open", "h264_nvenc: no free session".to_string())]
+        );
+    }
+
+    #[test]
+    fn copied_details_start_with_the_job() {
+        assert_eq!(
+            details_text(&job(), None).lines().next(),
+            Some("out.mp4 (j1, running)")
+        );
+    }
+
+    #[test]
+    fn a_copied_command_waits_for_its_export() {
+        assert_eq!(
+            command_params(&json!({ "output": "a.mp4", "background": true })),
+            json!({ "output": "a.mp4" })
+        );
+    }
 
     #[test]
     fn files_decoded_on_both_say_so() {

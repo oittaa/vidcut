@@ -9,6 +9,47 @@ pub fn show(path: &Path) {
     );
 }
 
+pub fn open(path: &Path) {
+    let path = path.to_path_buf();
+    let _ = crate::threads::spawn(
+        "vidcut-open-file",
+        crate::threads::Work::Interactive,
+        move || open_now(&path),
+    );
+}
+
+#[cfg(windows)]
+fn open_now(path: &Path) {
+    use std::os::windows::ffi::OsStrExt;
+    use std::ptr::{null, null_mut};
+
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    // SAFETY: a NUL-terminated path and verb; the other arguments may be null.
+    unsafe {
+        ShellExecuteW(
+            null_mut(),
+            windows_sys::w!("open"),
+            wide.as_ptr(),
+            null(),
+            null(),
+            SW_SHOWNORMAL,
+        );
+    }
+}
+
+#[cfg(not(windows))]
+fn open_now(path: &Path) {
+    #[cfg(target_os = "macos")]
+    let opener = "open";
+    #[cfg(not(target_os = "macos"))]
+    let opener = "xdg-open";
+    let _ = std::process::Command::new(opener).arg(path).status();
+}
+
 #[cfg(windows)]
 fn show_now(path: &Path) {
     use std::os::windows::ffi::OsStrExt;
