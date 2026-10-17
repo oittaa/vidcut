@@ -976,20 +976,11 @@ impl Workspace {
                         }
                     };
                     if r.clicked() {
-                        let cli = match &project {
-                            Some(p) => format!(
-                                "vidcut -p {} rpc {} {}",
-                                shell_quote(&p.display().to_string()),
-                                e.method,
-                                shell_quote(&e.params.to_string())
-                            ),
-                            None => format!(
-                                "vidcut rpc {} {}",
-                                e.method,
-                                shell_quote(&e.params.to_string())
-                            ),
-                        };
-                        ui.ctx().copy_text(cli);
+                        ui.ctx().copy_text(vidcut_command(
+                            project.as_deref(),
+                            &e.method,
+                            &e.params,
+                        ));
                     }
                 }
             });
@@ -1662,6 +1653,21 @@ fn recent_projects() -> Vec<PathBuf> {
         .collect()
 }
 
+pub(super) fn vidcut_command(
+    project: Option<&std::path::Path>,
+    method: &str,
+    params: &Value,
+) -> String {
+    let params = shell_quote(&params.to_string());
+    match project {
+        Some(p) => format!(
+            "vidcut -p {} rpc {method} {params}",
+            shell_quote(&p.display().to_string())
+        ),
+        None => format!("vidcut rpc {method} {params}"),
+    }
+}
+
 fn shell_quote(s: &str) -> String {
     if s.chars()
         .all(|c| c.is_ascii_alphanumeric() || "-_./:@%+=,".contains(c))
@@ -1694,7 +1700,19 @@ pub(super) fn escape_cancels<T>(ctx: &egui::Context, modal: &egui::ModalResponse
 
 #[cfg(test)]
 mod tests {
-    use super::decoding;
+    use super::{decoding, vidcut_command};
+
+    #[test]
+    fn a_command_for_a_project_with_a_space_quotes_both() {
+        assert_eq!(
+            vidcut_command(
+                Some(std::path::Path::new("my talk.vidcut")),
+                "proxy.generate",
+                &serde_json::json!({ "media": "m1" })
+            ),
+            r#"vidcut -p 'my talk.vidcut' rpc proxy.generate '{"media":"m1"}'"#
+        );
+    }
 
     #[test]
     fn the_status_bar_says_where_the_viewer_decodes() {
